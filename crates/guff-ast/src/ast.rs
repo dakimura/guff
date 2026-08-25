@@ -1259,6 +1259,33 @@ pub struct File {
 }
 
 impl File {
+    /// Rebuild [`File::imports`] from the import declarations.
+    ///
+    /// The parser fills `imports` with clones taken *during* the parse, before
+    /// node ids are stamped, so those copies carry id `0` and cannot be used to
+    /// key `types::Info` — `Info.Implicits` records a name-less import's
+    /// `PkgName` under the `ImportSpec` id that the *declaration's* copy got.
+    /// Go has no such split (`File.Imports` holds the same pointers as the
+    /// decls), and code that ports an upstream `file.Imports` loop is entitled
+    /// to assume it does not either.
+    ///
+    /// Also called after the import decls are rewritten, where the point is
+    /// order rather than ids.
+    pub fn rebuild_imports(&mut self) {
+        self.imports.clear();
+        for decl in &self.decls {
+            let Decl::GenDecl(g) = decl else { continue };
+            if g.tok != Some(crate::token::Token::IMPORT) {
+                continue;
+            }
+            for s in &g.specs {
+                if let Spec::ImportSpec(is) = s {
+                    self.imports.push(is.clone());
+                }
+            }
+        }
+    }
+
     pub fn pos(&self) -> Pos {
         self.package
     }

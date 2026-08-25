@@ -11162,3 +11162,136 @@ golden が 3 ファイルで読む case を fix が 2 ファイルで lint す�
    `modernize-atomictypes` 41 対 41）は、
    **数だけ見ると一致に見える**ので先に見る価値がある。
 4. `compat/results/` の tier 別分割（続き 28/29/30/33/35）。
+
+---
+
+### 2026-08-25（続き 39）— `AddImport` は 10 checker が使う 1 つの関数で、`File.imports` は**別人だった**
+
+続き 38 の「次にやること 1」。`modernize` の checker が
+`"slices."` と直書きしていた prefix を、上流と同じ
+`refactor.AddImport`（`golang.org/x/tools/internal/refactor`）に通した。
+
+#### なぜ prefix が「その package の名前」で済まないか
+
+上流が 10 個の checker から同じ関数を呼ぶのは、答えが 3 通りあるからだ:
+
+| ファイルの状態 | 上流が返す prefix | import edit |
+|---|---|---|
+| import していない | `slices.` | 追加する |
+| `myatomic "sync/atomic"` で入っている | `myatomic.` | 無し |
+| fix 地点で名前が隠れている | `slices0.` | `slices0 "slices"` を追加 |
+| dot import | 空文字 | 無し |
+
+直書きは 4 行とも間違える。**うち 2 つが実際に出た**（下記）。
+
+#### `File.imports` は decls の写しだが、**id が違う**
+
+移植して最初に走らせたら、`atomictypes` がまだ `myatomic.Int32` と書いた。
+上流の `for _, spec := range file.Imports` をそのまま写したのに、である。
+
+原因は parser。`parse_import_spec` は `self.imports.push(spec.clone())` を
+**パース中に**やっていて、`stamp_node_ids` はその後に走る。
+つまり `File.imports` の全要素は **id が 0** のまま残る。
+`Info.Implicits` は「名前無し import の `PkgName`」を
+**decls 側の写しの id** で持っているので、
+`file.imports` 経由では**絶対に引けない**。
+
+**alias 付きだけは引けてしまう**、というのが厄介なところだった。
+`Info.PkgNameOf` は 2 通りに分岐する:
+
+| import の形 | 引くキー | parse 時に確定しているか |
+|---|---|---|
+| `myatomic "sync/atomic"` | `Info.Defs[spec.name.id]` | **する**（`parse_ident` が `next_node_id()` を直に振る、`parser.rs:495`） |
+| `"sync/atomic"` | `Info.Implicits[spec.id]` | **しない**（`id: 0` で作られ、`stamp_spec` が後から振る） |
+
+だから `file.imports` を回すと、**alias 付きの spec だけが見つかる**。
+fixture は `sync/atomic` を素と `myatomic` の 2 回 import していて、
+素のほうが見えないので `myatomic.` が返る——
+「alias を宣言側にコピーする」という直そうとしていた欠陥そのものを、
+移植後のコードが**別の理由で**再現していた。
+
+Go では `File.Imports` は decls と**同じポインタ**を持つ。
+だから上流のコードはこの区別を意識しない。
+`File::rebuild_imports()` を足して `stamp_node_ids` の末尾で呼ぶことにした
+（`import.rs` の sort 後の再構築と同じ処理なので、そちらも寄せた）。
+**「上流の `file.Imports` ループを移植した人は、それが decls と同じだと
+仮定してよい」**——その不変条件を guff 側で満たす、という直し方。
+
+#### コメントは AST に無い
+
+2 度目に走らせたら、`stringsbuilder.go` の `import "strings"` が
+**doc コメントの下**に入った。上流は上に入れる。
+
+`AddImportEdits` は `decl0.Doc.Pos()` を見る。
+ところが lint パイプラインの `parse_mode` は `PARSE_COMMENTS` を**立てない**
+（`typecheck.rs:530`）。`Decl.doc` は常に `None` で、
+「doc が無いので `func` の直前に入れる」が正解になってしまう。
+
+`check_importcomment` のようにファイルを読み直して再パースする手はあるが、
+fix 1 件ごとに I/O を払う。代わりに**ソース文字列を走査**した:
+package 節と最初の decl の間には**コメントと空白しか置けない**（文法上）ので、
+**その区間の最後の空行の次**が doc コメントの先頭になる。
+空行はコメントを下の宣言から切り離す——`go/ast` の付与規則そのもので、
+`// 無関係\n\nfunc f()` で import をコメントの上に押し上げないための規則でもある。
+
+単体テストは**コメント有りパースと無しパースの両方で同じ答えになること**を
+毎回 assert する。片方だけ通るなら、
+「テストでは正しく、linter では違う場所に書く」が起きる。
+
+#### 測った
+
+| | 前 | 後 |
+|---|---:|---:|
+| `--fix` が上流とバイト一致 | 144 | **145** |
+| pending | 49 | 48 |
+| うち動いた（改善して再記録） | — | 1（`modernize`） |
+| ビルドが通らない木 | 7 | **8** |
+| うち上流とバイト一致 | 3 | **4** |
+
+golden tier は **193/193 変化なし**。
+`add_import` が `None` を返して finding を落とした case は 1 つも無い
+（返り値を `Option` にしてあるので、落ちるなら golden が赤くなる）。
+
+**`modernize-atomictypes` は上流と完全一致になり、pending ファイルを消した。**
+同時に「ビルドが通らない木」に**入った**。
+fixture は `sync/atomic` を 2 回 import していて（片方が `myatomic`）、
+`myatomic` を使う唯一の箇所が `x.Add(1)` に書き換わるので、
+`"sync/atomic" imported as myatomic and not used` になる。
+**上流も同じバイトを書く。** `dotimport` / `perfsprint` / `err113` と同じ枠だ。
+——**この数字は「直したから増えた」**。ゲートにしていない理由がここにある。
+
+`modernize` は上流が入れる import 4 本
+（`maps` / `slices` ×2 / `strings`）が全部バイト一致で入るようになった。
+残る差は `AddImport` とは無関係の 4 件で、**分離できたことが成果**:
+
+1. `rangeint` が**使われなくなった index を消さない**（`for i := range 2` 対 `for range 2`、8 箇所）
+2. `reflecttypefor` が不要になった `var zero MyStruct` を消さない
+3. `slicescontains` が `found = ` と書く（上流は `found := `）
+4. `waitgroupgo` が `}()` を残す——**これが `modernize` の木が通らない理由**
+
+続き 38 は「`modernize` / `rangeint` / `staticcheck-qf` の
+コンパイルが通らない 3 件は `AddImport` が本体」と書いたが、
+**それが当たっていたのは `atomictypes` だけだった。**
+`modernize` は waitgroupgo、`rangeint` は index 削除、
+`staticcheck-qf` はまた別で、いずれも import の話ではない。
+
+#### 寄せなかったもの
+
+`guff-fmt` の `goimports` にも `ImportFixType::AddImport` がある。
+名前は同じだが**別物**——formatter が AST を直接いじる経路で、
+analysis の `SuggestedFix` は通らない。続き 34/35 と同じ判断で、寄せていない。
+
+`perfsprint` の `fiximports` も足していない。
+**上流で既定 off** なので、実装すると `perfsprint` の case が
+バイト一致から外れる——「直す」と「合わせる」が逆を向く 1 件。
+
+#### 次にやること
+
+1. **`rangeint` の index 削除**。`modernize` の差 8 箇所と
+   `rangeint` case（88 対 88、件数だけ一致）の両方がこれ。
+   上流は `!used && init.Tok == token.DEFINE` で `i := ` を消す。
+2. `slicescontains` の `:=` / `=`、`reflecttypefor` の未使用 var 削除。
+3. `waitgroupgo` の `}()` 残し。`modernize` の木が通らない唯一の理由。
+4. `refactor::fresh_name` は移植したが、**まだ import 名にしか使っていない**。
+   上流は `stringscutprefix` の `after` / `ok` にも通す。
+5. pending 48 件。`DEFERRED: SuggestedFix` が 15 linter。

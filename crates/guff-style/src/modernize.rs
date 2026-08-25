@@ -20,7 +20,7 @@
 //! - `slicesbackward` — reverse index loop → `slices.Backward` (Go 1.23+; simplified)
 //! - `reflecttypefor` — `reflect.TypeOf` → `TypeFor` (Go 1.22+; `(*T)(nil).Elem` + simple vars)
 //! - `reflecttypeassert` — `v.Interface().(T)` (comma-ok) → `reflect.TypeAssert[T](v)`
-//!   (Go 1.25+; renamed-import AddImport DEFERRED)
+//!   (Go 1.25+)
 //! - `testingcontext` — `WithCancel(Background/TODO)`+`defer cancel` → `t.Context` (Go 1.24+)
 //! - `unsafefuncs` — `unsafe.Pointer(uintptr(ptr)+…)` → `unsafe.Add` (Go 1.17+)
 //! - `importcomment` — obsolete `package p // import "path"` comments
@@ -32,7 +32,7 @@
 //! - `errorsastype` — `var e T; if errors.As(err, &e)` → `errors.AsType[T]`
 //!   (Go 1.26+; if-stmt only; off by default — not in Suite v0.44)
 //! - `stringsbuilder` — `s += x` in a loop → `strings.Builder` (local string vars;
-//!   `_test.go` skipped; AddImport DEFERRED)
+//!   `_test.go` skipped)
 //! - `slicesdelete` — `append(s[:i], s[j:]...)` → `slices.Delete` (Go 1.21+;
 //!   off by default — commented out upstream as not nil-preserving)
 //! - `bloop` — `for … b.N …` → `for b.Loop()` (Go 1.24+; off by default —
@@ -42,20 +42,20 @@
 //!   (Go 1.24+/1.26+; both C-style and `for i := range x.Len()` forms;
 //!   elem-name collision → candidate skipped, DEFERRED fresh-name)
 //! - `atomictypes` — `var x int32` + `atomic.AddInt32(&x, …)` → `atomic.Int32`
-//!   (Go 1.19+; And/Or need Go 1.23+; Pointer variants / multi-file AddImport
-//!   / IgnoredFiles gating DEFERRED)
+//!   (Go 1.19+; And/Or need Go 1.23+; Pointer variants / IgnoredFiles gating
+//!   DEFERRED)
 //!
 //! DEFERRED (recognized in `disable` / documented): embedlit,
 //! appendclipped (unsafe-by-default upstream),
-//! atomictypes Pointer variants / multi-file import shift / IgnoredFiles,
+//! atomictypes Pointer variants / IgnoredFiles,
 //! stditerators fresh-name generation on elem collisions / Seq2 dual-component
 //! patterns, stringscut Index/Contains
 //! patterns, unsafefuncs Slice/String helpers, importcomment Module==nil
 //! (GOPATH) skip, mapsloop Insert/Collect (iter.Seq2) / Clone (nil-preserving),
 //! slicescontains nested free break/continue analysis full parity,
-//! waitgroupgo trailing-Done /
-//! SuggestedFix import edits (stringsbuilder / slicesdelete / reflecttypeassert
-//! AddImport),
+//! waitgroupgo trailing-Done,
+//! stringscutprefix dot-import spelling and `refactor.FreshName` for the
+//! `after` / `ok` variables,
 //! slicesdelete `int()` conversion / int-shadowing skip, reflecttypefor
 //! complicated/unnamed types & unused-var deletion, slicesbackward
 //! mutation/non-`s[i]` use analysis full parity, testingcontext sole-use via
@@ -79,6 +79,11 @@ use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::code;
 use guff_analysis::passes::inspect;
+// Every checker whose replacement text names a package goes through
+// `refactor::add_import` for the prefix *and* the import edits: the file may
+// not import the package at all, may import it under an alias, or may shadow
+// the name at the fix site. A hard-coded `"slices."` is wrong in all three.
+use guff_analysis::refactor;
 use guff_analysis::{
     AnalysisResult, Analyzer, Diagnostic, Fact, FactTypeId, Pass, RunError, RunFn, SuggestedFix,
     TextEdit,
@@ -1490,7 +1495,12 @@ fn is_natural_less(pass: &Pass<'_>, lit: &FuncLit, slice: &Expr) -> bool {
         && ident_name(&iy.index) == Some("j")
 }
 
-fn check_slicessort(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagnostic>) {
+fn check_slicessort(
+    pass: &Pass<'_>,
+    file: &File,
+    call: &CallExpr,
+    pending: &mut Vec<Diagnostic>,
+) {
     if !code::is_call_to(pass, call, "sort.Slice") || call.args.len() != 2 {
         return;
     }
@@ -1508,6 +1518,13 @@ fn check_slicessort(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagnost
         return;
     };
     let end = call.end().0 as u32;
+    // Upstream keys the import on the whole call, not on `sort.Slice`; the two
+    // are in the same scope, so this only matters for staying literal.
+    let Some((prefix, import_edits)) =
+        refactor::add_import(pass, file, "slices", "slices", "Sort", call.pos().0 as u32)
+    else {
+        return;
+    };
     pending.push(Diagnostic {
         pos,
         end: call.fun.end().0 as u32,
@@ -1515,11 +1532,14 @@ fn check_slicessort(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagnost
         message: "sort.Slice can be modernized using slices.Sort".into(),
         suggested_fixes: vec![SuggestedFix {
             message: "Replace sort.Slice call by slices.Sort".into(),
-            text_edits: vec![TextEdit {
-                pos,
-                end,
-                new_text: format!("slices.Sort({slice_text})"),
-            }],
+            text_edits: with_imports(
+                &import_edits,
+                vec![TextEdit {
+                    pos,
+                    end,
+                    new_text: format!("{prefix}Sort({slice_text})"),
+                }],
+            ),
         }],
         related: Vec::new(),
         url: String::new(),
@@ -1555,7 +1575,12 @@ fn increasing_slice_indices(pass: &Pass<'_>, a: &Expr, b: &Expr) -> bool {
 }
 
 /// Port of modernize `slicesdelete`: `append(s[:a], s[b:]...)` → `slices.Delete`.
-fn check_slicesdelete(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagnostic>) {
+fn check_slicesdelete(
+    pass: &Pass<'_>,
+    file: &File,
+    call: &CallExpr,
+    pending: &mut Vec<Diagnostic>,
+) {
     let path = pass.pkg().pkg_path.as_str();
     if path == "slices"
         || path.starts_with("slices/")
@@ -1606,8 +1631,14 @@ fn check_slicesdelete(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagno
     let Some(low_text) = expr_text(low) else {
         return;
     };
-    // DEFERRED: AddImport + int() wrap when indices are non-int / int shadowed.
+    // DEFERRED: `int()` wrap when the indices are non-int, and the int-shadowed
+    // skip.
     let end = call.end().0 as u32;
+    let Some((prefix, import_edits)) =
+        refactor::add_import(pass, file, "slices", "slices", "Delete", call.pos().0 as u32)
+    else {
+        return;
+    };
     pending.push(Diagnostic {
         pos,
         end,
@@ -1615,11 +1646,14 @@ fn check_slicesdelete(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagno
         message: "Replace append with slices.Delete".into(),
         suggested_fixes: vec![SuggestedFix {
             message: "Replace append with slices.Delete".into(),
-            text_edits: vec![TextEdit {
-                pos,
-                end,
-                new_text: format!("slices.Delete({x_text}, {high_text}, {low_text})"),
-            }],
+            text_edits: with_imports(
+                &import_edits,
+                vec![TextEdit {
+                    pos,
+                    end,
+                    new_text: format!("{prefix}Delete({x_text}, {high_text}, {low_text})"),
+                }],
+            ),
         }],
         related: Vec::new(),
         url: String::new(),
@@ -1678,7 +1712,12 @@ fn trim_kind(pass: &Pass<'_>, call: &CallExpr) -> Option<(&'static str, &'static
     }
 }
 
-fn check_stringscutprefix(pass: &Pass<'_>, if_stmt: &IfStmt, pending: &mut Vec<Diagnostic>) {
+fn check_stringscutprefix(
+    pass: &Pass<'_>,
+    file: &File,
+    if_stmt: &IfStmt,
+    pending: &mut Vec<Diagnostic>,
+) {
     // Pattern 1: if pkg.HasPrefix(s, affix) { use(pkg.TrimPrefix(s, affix)) }
     if if_stmt.init.is_none() && !if_stmt.body.list.is_empty() {
         if let Expr::CallExpr(has_call) = &if_stmt.cond {
@@ -1713,6 +1752,11 @@ fn check_stringscutprefix(pass: &Pass<'_>, if_stmt: &IfStmt, pending: &mut Vec<D
                                     )
                                 };
                                 let end = has_call.end().0 as u32;
+                                let Some((prefix, import_edits)) = refactor::add_import(
+                                    pass, file, pkg, pkg, cut_name, pos,
+                                ) else {
+                                    return;
+                                };
                                 pending.push(Diagnostic {
                                     pos,
                                     end,
@@ -1720,20 +1764,23 @@ fn check_stringscutprefix(pass: &Pass<'_>, if_stmt: &IfStmt, pending: &mut Vec<D
                                     message: message.into(),
                                     suggested_fixes: vec![SuggestedFix {
                                         message: fix_message.into(),
-                                        text_edits: vec![
-                                            TextEdit {
-                                                pos,
-                                                end,
-                                                new_text: format!(
-                                                    "{var_name}, ok := {pkg}.{cut_name}({s_text}, {affix_text}); ok"
-                                                ),
-                                            },
-                                            TextEdit {
-                                                pos: trim_call.pos().0 as u32,
-                                                end: trim_call.end().0 as u32,
-                                                new_text: var_name.into(),
-                                            },
-                                        ],
+                                        text_edits: with_imports(
+                                            &import_edits,
+                                            vec![
+                                                TextEdit {
+                                                    pos,
+                                                    end,
+                                                    new_text: format!(
+                                                        "{var_name}, ok := {prefix}{cut_name}({s_text}, {affix_text}); ok"
+                                                    ),
+                                                },
+                                                TextEdit {
+                                                    pos: trim_call.pos().0 as u32,
+                                                    end: trim_call.end().0 as u32,
+                                                    new_text: var_name.into(),
+                                                },
+                                            ],
+                                        ),
                                     }],
                                     related: Vec::new(),
                                     url: String::new(),
@@ -1759,7 +1806,7 @@ fn check_stringscutprefix(pass: &Pass<'_>, if_stmt: &IfStmt, pending: &mut Vec<D
     let Expr::CallExpr(trim_call) = &init.rhs[0] else {
         return;
     };
-    let Some((_pkg, cut_name, is_prefix)) = trim_kind(pass, trim_call) else {
+    let Some((pkg, cut_name, is_prefix)) = trim_kind(pass, trim_call) else {
         return;
     };
     if trim_call.args.len() != 2 {
@@ -1784,8 +1831,17 @@ fn check_stringscutprefix(pass: &Pass<'_>, if_stmt: &IfStmt, pending: &mut Vec<D
     if !go_at_least(pass, pos, "go1.20") {
         return;
     }
-    let Expr::SelectorExpr(sel) = trim_call.fun.as_ref() else {
-        return; // e.g. dot-import
+    // DEFERRED: upstream handles the dot-import spelling here, using AddImport
+    // purely to compute the (empty) prefix.
+    let Expr::SelectorExpr(_) = trim_call.fun.as_ref() else {
+        return;
+    };
+    // The existing import already satisfies this call, so AddImport adds
+    // nothing — it is here for the local name, which need not be `strings`.
+    let Some((prefix, import_edits)) =
+        refactor::add_import(pass, file, pkg, pkg, cut_name, trim_call.pos().0 as u32)
+    else {
+        return;
     };
     let (message, fix_message) = if is_prefix {
         (
@@ -1806,23 +1862,29 @@ fn check_stringscutprefix(pass: &Pass<'_>, if_stmt: &IfStmt, pending: &mut Vec<D
         message: message.into(),
         suggested_fixes: vec![SuggestedFix {
             message: fix_message.into(),
-            text_edits: vec![
-                TextEdit {
-                    pos: init.lhs[0].end().0 as u32,
-                    end: init.lhs[0].end().0 as u32,
-                    new_text: ", ok".into(),
-                },
-                TextEdit {
-                    pos: sel.sel.pos().0 as u32,
-                    end: sel.sel.end().0 as u32,
-                    new_text: cut_name.into(),
-                },
-                TextEdit {
-                    pos: if_stmt.cond.pos().0 as u32,
-                    end: if_stmt.cond.end().0 as u32,
-                    new_text: "ok".into(),
-                },
-            ],
+            text_edits: with_imports(
+                &import_edits,
+                vec![
+                    TextEdit {
+                        pos: init.lhs[0].end().0 as u32,
+                        end: init.lhs[0].end().0 as u32,
+                        new_text: ", ok".into(),
+                    },
+                    // Upstream replaces the whole `pkg.TrimPrefix` selector,
+                    // not just the `TrimPrefix` half, so the prefix it computed
+                    // is the one that lands.
+                    TextEdit {
+                        pos: trim_call.fun.pos().0 as u32,
+                        end: trim_call.fun.end().0 as u32,
+                        new_text: format!("{prefix}{cut_name}"),
+                    },
+                    TextEdit {
+                        pos: if_stmt.cond.pos().0 as u32,
+                        end: if_stmt.cond.end().0 as u32,
+                        new_text: "ok".into(),
+                    },
+                ],
+            ),
         }],
         related: Vec::new(),
         url: String::new(),
@@ -2022,7 +2084,33 @@ fn body_has_free_branch(stmts: &[Stmt], skip_last: bool) -> bool {
     false
 }
 
-fn check_slicescontains(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<Diagnostic>) {
+/// Upstream builds each fix as `append(importEdits, ...)`; the import edits
+/// come first and every fix in the file carries the same copy. golangci's
+/// fixer deduplicates equivalent edits, so the import is inserted once.
+/// The file whose extent covers `pos`.
+///
+/// Equivalent to `astutil.EnclosingFile`, which upstream reaches for whenever a
+/// fix is computed from an object rather than from a syntax walk — the
+/// declaration and the use that triggered the finding can be in different
+/// files.
+fn enclosing_file<'p>(pass: &'p Pass<'_>, pos: u32) -> Option<&'p File> {
+    pass.files()
+        .iter()
+        .find(|f| f.file_start.0 as u32 <= pos && pos < f.file_end.0 as u32)
+}
+
+fn with_imports(import_edits: &[TextEdit], rest: Vec<TextEdit>) -> Vec<TextEdit> {
+    let mut edits = import_edits.to_vec();
+    edits.extend(rest);
+    edits
+}
+
+fn check_slicescontains(
+    pass: &Pass<'_>,
+    file: &File,
+    block: &BlockStmt,
+    pending: &mut Vec<Diagnostic>,
+) {
     if pass.pkg().pkg_path == "slices" || pass.pkg().pkg_path.starts_with("slices/") {
         return;
     }
@@ -2070,7 +2158,12 @@ fn check_slicescontains(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<Di
         let Some(slice_text) = expr_text(&rng.x) else {
             continue;
         };
-        let contains = format!("slices.{func_name}({slice_text}, {arg2_text})");
+        let Some((prefix, import_edits)) =
+            refactor::add_import(pass, file, "slices", "slices", func_name, pos)
+        else {
+            continue;
+        };
+        let contains = format!("{prefix}{func_name}({slice_text}, {arg2_text})");
         let last = body.last().unwrap();
         let msg = format!("Loop can be simplified using slices.{func_name}");
 
@@ -2103,11 +2196,14 @@ fn check_slicescontains(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<Di
                                 message: msg.clone(),
                                 suggested_fixes: vec![SuggestedFix {
                                     message: format!("Replace loop by call to slices.{func_name}"),
-                                    text_edits: vec![TextEdit {
-                                        pos,
-                                        end,
-                                        new_text: format!("return {neg}{contains}"),
-                                    }],
+                                    text_edits: with_imports(
+                                        &import_edits,
+                                        vec![TextEdit {
+                                            pos,
+                                            end,
+                                            new_text: format!("return {neg}{contains}"),
+                                        }],
+                                    ),
                                 }],
                                 related: Vec::new(),
                                 url: String::new(),
@@ -2128,18 +2224,21 @@ fn check_slicescontains(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<Di
                 message: msg,
                 suggested_fixes: vec![SuggestedFix {
                     message: format!("Replace loop by call to slices.{func_name}"),
-                    text_edits: vec![
-                        TextEdit {
-                            pos,
-                            end: if_stmt.body.pos().0 as u32,
-                            new_text: format!("if {contains} "),
-                        },
-                        TextEdit {
-                            pos: if_stmt.body.end().0 as u32,
-                            end,
-                            new_text: String::new(),
-                        },
-                    ],
+                    text_edits: with_imports(
+                        &import_edits,
+                        vec![
+                            TextEdit {
+                                pos,
+                                end: if_stmt.body.pos().0 as u32,
+                                new_text: format!("if {contains} "),
+                            },
+                            TextEdit {
+                                pos: if_stmt.body.end().0 as u32,
+                                end,
+                                new_text: String::new(),
+                            },
+                        ],
+                    ),
                 }],
                 related: Vec::new(),
                 url: String::new(),
@@ -2195,13 +2294,16 @@ fn check_slicescontains(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<Di
                                                     message: format!(
                                                         "Replace loop by call to slices.{func_name}"
                                                     ),
-                                                    text_edits: vec![TextEdit {
-                                                        pos: prev_pos,
-                                                        end,
-                                                        new_text: format!(
-                                                            "{lhs_text} = {neg}{contains}"
-                                                        ),
-                                                    }],
+                                                    text_edits: with_imports(
+                                                        &import_edits,
+                                                        vec![TextEdit {
+                                                            pos: prev_pos,
+                                                            end,
+                                                            new_text: format!(
+                                                                "{lhs_text} = {neg}{contains}"
+                                                            ),
+                                                        }],
+                                                    ),
                                                 }],
                                                 related: Vec::new(),
                                                 url: String::new(),
@@ -2229,23 +2331,26 @@ fn check_slicescontains(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<Di
             message: msg,
             suggested_fixes: vec![SuggestedFix {
                 message: format!("Replace loop by call to slices.{func_name}"),
-                text_edits: vec![
-                    TextEdit {
-                        pos,
-                        end: if_stmt.body.pos().0 as u32,
-                        new_text: format!("if {contains} "),
-                    },
-                    TextEdit {
-                        pos: before_break_end,
-                        end: last.end().0 as u32,
-                        new_text: String::new(),
-                    },
-                    TextEdit {
-                        pos: if_stmt.body.end().0 as u32,
-                        end,
-                        new_text: String::new(),
-                    },
-                ],
+                text_edits: with_imports(
+                    &import_edits,
+                    vec![
+                        TextEdit {
+                            pos,
+                            end: if_stmt.body.pos().0 as u32,
+                            new_text: format!("if {contains} "),
+                        },
+                        TextEdit {
+                            pos: before_break_end,
+                            end: last.end().0 as u32,
+                            new_text: String::new(),
+                        },
+                        TextEdit {
+                            pos: if_stmt.body.end().0 as u32,
+                            end,
+                            new_text: String::new(),
+                        },
+                    ],
+                ),
             }],
             related: Vec::new(),
             url: String::new(),
@@ -2255,7 +2360,12 @@ fn check_slicescontains(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<Di
     }
 }
 
-fn check_mapsloop(pass: &Pass<'_>, range_stmt: &RangeStmt, pending: &mut Vec<Diagnostic>) {
+fn check_mapsloop(
+    pass: &Pass<'_>,
+    file: &File,
+    range_stmt: &RangeStmt,
+    pending: &mut Vec<Diagnostic>,
+) {
     // Skip stdlib packages where a maps import would cycle (maps itself).
     if pass.pkg().pkg_path == "maps" || pass.pkg().pkg_path.starts_with("maps/") {
         return;
@@ -2341,6 +2451,15 @@ fn check_mapsloop(pass: &Pass<'_>, range_stmt: &RangeStmt, pending: &mut Vec<Dia
     let end = range_stmt.body.end().0 as u32;
     let report_pos = assign.lhs[0].pos().0 as u32;
     let report_end = assign.lhs[0].end().0 as u32;
+    let Some((prefix, mut text_edits)) = refactor::add_import(pass, file, "maps", "maps", "Copy", pos)
+    else {
+        return;
+    };
+    text_edits.push(TextEdit {
+        pos,
+        end,
+        new_text: format!("{prefix}Copy({m_text}, {x_text})"),
+    });
     pending.push(Diagnostic {
         pos: report_pos,
         end: report_end,
@@ -2348,11 +2467,7 @@ fn check_mapsloop(pass: &Pass<'_>, range_stmt: &RangeStmt, pending: &mut Vec<Dia
         message: "Replace m[k]=v loop with maps.Copy".into(),
         suggested_fixes: vec![SuggestedFix {
             message: "Replace m[k]=v loop with maps.Copy".into(),
-            text_edits: vec![TextEdit {
-                pos,
-                end,
-                new_text: format!("maps.Copy({m_text}, {x_text})"),
-            }],
+            text_edits,
         }],
         related: Vec::new(),
         url: String::new(),
@@ -2733,7 +2848,12 @@ fn index_mutated_in_body(pass: &Pass<'_>, body: &BlockStmt, index_obj: ObjectId)
     mutated
 }
 
-fn check_slicesbackward(pass: &Pass<'_>, for_stmt: &ForStmt, pending: &mut Vec<Diagnostic>) {
+fn check_slicesbackward(
+    pass: &Pass<'_>,
+    file: &File,
+    for_stmt: &ForStmt,
+    pending: &mut Vec<Diagnostic>,
+) {
     if pass.pkg().pkg_path == "slices" || pass.pkg().pkg_path.starts_with("slices/") {
         return;
     }
@@ -2839,16 +2959,21 @@ fn check_slicesbackward(pass: &Pass<'_>, for_stmt: &ForStmt, pending: &mut Vec<D
         .unwrap_or(pos);
     let header_pos = init.lhs[0].pos().0 as u32;
     let elem_name = "v";
-    let header = if other_uses == 0 && !slice_indexes.is_empty() {
-        format!("_, {elem_name} := range slices.Backward({slice_text})")
-    } else {
-        format!("{index_name}, {elem_name} := range slices.Backward({slice_text})")
+    let Some((prefix, mut text_edits)) =
+        refactor::add_import(pass, file, "slices", "slices", "Backward", pos)
+    else {
+        return;
     };
-    let mut text_edits = vec![TextEdit {
+    let header = if other_uses == 0 && !slice_indexes.is_empty() {
+        format!("_, {elem_name} := range {prefix}Backward({slice_text})")
+    } else {
+        format!("{index_name}, {elem_name} := range {prefix}Backward({slice_text})")
+    };
+    text_edits.push(TextEdit {
         pos: header_pos,
         end,
         new_text: header,
-    }];
+    });
     if other_uses == 0 {
         for (ipos, iend) in &slice_indexes {
             text_edits.push(TextEdit {
@@ -2864,6 +2989,9 @@ fn check_slicesbackward(pass: &Pass<'_>, for_stmt: &ForStmt, pending: &mut Vec<D
         category: "slicesbackward".into(),
         message: "backward loop over slice can be modernized using slices.Backward".into(),
         suggested_fixes: vec![SuggestedFix {
+            // Upstream names the package here literally, not through the
+            // prefix: the fix message says slices.Backward even when the edit
+            // writes an alias.
             message: format!("Replace with range slices.Backward({slice_text})"),
             text_edits,
         }],
@@ -2980,6 +3108,7 @@ fn is_exact_named_pkg_type(pass: &Pass<'_>, typ: TypeId, pkg: &str, name: &str) 
 /// `x, ok := v.Interface().(T)` → `reflect.TypeAssert[T](v)` (Go 1.25+).
 fn check_reflecttypeassert(
     pass: &Pass<'_>,
+    file: &File,
     assign: &AssignStmt,
     pending: &mut Vec<Diagnostic>,
 ) {
@@ -3019,6 +3148,11 @@ fn check_reflecttypeassert(
         return;
     };
     let end = (assert.rparen.0 + 1) as u32;
+    let Some((prefix, import_edits)) =
+        refactor::add_import(pass, file, "reflect", "reflect", "TypeAssert", pos)
+    else {
+        return;
+    };
     pending.push(Diagnostic {
         pos,
         end,
@@ -3030,19 +3164,21 @@ fn check_reflecttypeassert(
             message: format!(
                 "Replace Interface().({tstr}) by reflect.TypeAssert[{tstr}]"
             ),
-            text_edits: vec![
-                TextEdit {
-                    pos,
-                    end: sel.x.pos().0 as u32,
-                    // DEFERRED: AddImport / renamed-import prefix
-                    new_text: format!("reflect.TypeAssert[{tstr}]("),
-                },
-                TextEdit {
-                    pos: sel.x.end().0 as u32,
-                    end,
-                    new_text: ")".into(),
-                },
-            ],
+            text_edits: with_imports(
+                &import_edits,
+                vec![
+                    TextEdit {
+                        pos,
+                        end: sel.x.pos().0 as u32,
+                        new_text: format!("{prefix}TypeAssert[{tstr}]("),
+                    },
+                    TextEdit {
+                        pos: sel.x.end().0 as u32,
+                        end,
+                        new_text: ")".into(),
+                    },
+                ],
+            ),
         }],
         related: Vec::new(),
         url: String::new(),
@@ -3677,7 +3813,12 @@ fn as_type_conversion<'a>(pass: &Pass<'_>, expr: &'a Expr) -> Option<(TypeId, &'
 }
 
 /// `unsafe.Pointer(uintptr(ptr) + offset)` → `unsafe.Add(ptr, offset)` (Go 1.17+).
-fn check_unsafefuncs(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagnostic>) {
+fn check_unsafefuncs(
+    pass: &Pass<'_>,
+    file: &File,
+    call: &CallExpr,
+    pending: &mut Vec<Diagnostic>,
+) {
     if call.args.len() != 1 {
         return;
     }
@@ -3745,6 +3886,12 @@ fn check_unsafefuncs(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagnos
     };
     let pos = sum.x.pos().0 as u32;
     let end = sum.y.end().0 as u32;
+    let Some((unsafedot, import_edits)) =
+        // `sum.Pos()`: a BinaryExpr starts at its left operand.
+        refactor::add_import(pass, file, "unsafe", "unsafe", "Add", pos)
+    else {
+        return;
+    };
     pending.push(Diagnostic {
         pos,
         end,
@@ -3752,11 +3899,14 @@ fn check_unsafefuncs(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagnos
         message: "pointer + integer can be simplified using unsafe.Add".into(),
         suggested_fixes: vec![SuggestedFix {
             message: "Simplify pointer addition using unsafe.Add".into(),
-            text_edits: vec![TextEdit {
-                pos: call.pos().0 as u32,
-                end: call.end().0 as u32,
-                new_text: format!("unsafe.Add({ptr_text}, {offset_text})"),
-            }],
+            text_edits: with_imports(
+                &import_edits,
+                vec![TextEdit {
+                    pos: call.pos().0 as u32,
+                    end: call.end().0 as u32,
+                    new_text: format!("{unsafedot}Add({ptr_text}, {offset_text})"),
+                }],
+            ),
         }],
         related: Vec::new(),
         url: String::new(),
@@ -5035,13 +5185,23 @@ fn walk_stmt_for_var_uses(
     }
 }
 
+/// The declaration edits, with the `strings` import edits ahead of them.
+///
+/// Upstream computes the prefix at the same two points it appends the import
+/// edits, so an aliased or shadowed `strings` reaches both the type name and
+/// the import spec. Returns `None` when the import cannot be resolved — the
+/// replacement names a package, so a fix without it would not compile.
 fn build_stringsbuilder_decl_edits(
     pass: &Pass<'_>,
+    file: &File,
     decl: &StringsBuilderDecl<'_>,
     var_name: &str,
-) -> Vec<TextEdit> {
-    let prefix = "strings.";
-    match decl {
+    var_pos: u32,
+) -> Option<Vec<TextEdit>> {
+    let (prefix, import_edits) =
+        refactor::add_import(pass, file, "strings", "strings", "Builder", var_pos)?;
+    let prefix = prefix.as_str();
+    let out = match decl {
         StringsBuilderDecl::Short { assign, empty_init } => {
             let assign_pos = assign.lhs[0].pos().0 as u32;
             let assign_end = assign
@@ -5122,7 +5282,8 @@ fn build_stringsbuilder_decl_edits(
             }
             edits
         }
-    }
+    };
+    Some(with_imports(&import_edits, out))
 }
 
 fn check_stringsbuilder(pass: &Pass<'_>, file: &File, pending: &mut Vec<Diagnostic>) {
@@ -5222,7 +5383,11 @@ fn check_stringsbuilder(pass: &Pass<'_>, file: &File, pending: &mut Vec<Diagnost
             continue;
         }
 
-        let mut edits = build_stringsbuilder_decl_edits(pass, &decl, &var_name);
+        let Some(mut edits) =
+            build_stringsbuilder_decl_edits(pass, file, &decl, &var_name, var_pos)
+        else {
+            continue;
+        };
         edits.append(&mut uses.edits);
         edits.append(&mut uses.post_edits);
 
@@ -5788,16 +5953,6 @@ fn sync_atomic_func_name(pass: &Pass<'_>, call: &CallExpr) -> Option<String> {
     }
 }
 
-fn atomic_import_prefix(call: &CallExpr) -> String {
-    match call.fun.as_ref() {
-        Expr::SelectorExpr(sel) => match sel.x.as_ref() {
-            Expr::Ident(id) => format!("{}.", id.name),
-            _ => "atomic.".into(),
-        },
-        _ => "atomic.".into(),
-    }
-}
-
 /// Resolve `atomic.F(&v)` / `atomic.F(&recv.field)` to the addressed var and
 /// the l-value expression (`v` or `recv.field`).
 fn var_from_atomic_addr<'a>(
@@ -5864,7 +6019,6 @@ fn atomictypes_is_local(pass: &Pass<'_>, obj: ObjectId) -> bool {
 
 struct AtomicCand<'a> {
     func_name: String,
-    import_prefix: String,
     sites: Vec<(&'a CallExpr, &'a Expr)>,
 }
 
@@ -6076,10 +6230,8 @@ fn check_atomictypes(pass: &Pass<'_>, pending: &mut Vec<Diagnostic>) {
             if atomictypes_skip_kind(pass, obj) {
                 return true;
             }
-            let prefix = atomic_import_prefix(call);
             let entry = cands.entry(obj).or_insert_with(|| AtomicCand {
                 func_name: func_name.clone(),
-                import_prefix: prefix,
                 sites: Vec::new(),
             });
             entry.sites.push((call, vexpr));
@@ -6134,10 +6286,24 @@ fn check_atomictypes(pass: &Pass<'_>, pending: &mut Vec<Diagnostic>) {
             continue;
         }
 
+        // The prefix comes from the *declaration's* file, not from the alias
+        // the call site happened to use: a file that spells the package
+        // `myatomic` still gets `var x atomic.Int32` when the declaring file
+        // imports it plainly. The import edits matter for the same reason —
+        // after the fix the need for `sync/atomic` moves from the use to the
+        // declaration, which may be in a file that did not import it.
+        let Some(decl_file) = enclosing_file(pass, pos) else {
+            continue;
+        };
+        let Some((prefix, import_edits)) =
+            refactor::add_import(pass, decl_file, "atomic", "sync/atomic", "", pos)
+        else {
+            continue;
+        };
         let mut edits = vec![TextEdit {
             pos: ty_expr.pos().0 as u32,
             end: ty_expr.end().0 as u32,
-            new_text: format!("{}{new_type}", cand.import_prefix),
+            new_text: format!("{prefix}{new_type}"),
         }];
 
         for (call, vexpr) in &cand.sites {
@@ -6168,6 +6334,7 @@ fn check_atomictypes(pass: &Pass<'_>, pending: &mut Vec<Diagnostic>) {
         if edits.len() <= 1 {
             continue;
         }
+        let edits = with_imports(&import_edits, edits);
 
         let var_name = name_ident.name.as_str();
         pending.push(Diagnostic {
@@ -6261,7 +6428,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&options, "mapsloop") {
                         let _before = pending.len();
-                        check_mapsloop(pass, s, &mut pending);
+                        check_mapsloop(pass, file, s, &mut pending);
                         stamp_category(&mut pending, _before, "mapsloop");
                     }
                     if enabled(&options, "stditerators") {
@@ -6278,7 +6445,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&options, "slicesbackward") {
                         let _before = pending.len();
-                        check_slicesbackward(pass, s, &mut pending);
+                        check_slicesbackward(pass, file, s, &mut pending);
                         stamp_category(&mut pending, _before, "slicesbackward");
                     }
                     if enabled(&options, "stditerators") {
@@ -6295,7 +6462,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&options, "stringscutprefix") {
                         let _before = pending.len();
-                        check_stringscutprefix(pass, s, &mut pending);
+                        check_stringscutprefix(pass, file, s, &mut pending);
                         stamp_category(&mut pending, _before, "stringscutprefix");
                     }
                     if enabled(&options, "errorsastype") {
@@ -6317,7 +6484,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&options, "slicescontains") {
                         let _before = pending.len();
-                        check_slicescontains(pass, b, &mut pending);
+                        check_slicescontains(pass, file, b, &mut pending);
                         stamp_category(&mut pending, _before, "slicescontains");
                     }
                     if enabled(&options, "waitgroupgo") {
@@ -6334,7 +6501,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&options, "reflecttypeassert") {
                         let _before = pending.len();
-                        check_reflecttypeassert(pass, a, &mut pending);
+                        check_reflecttypeassert(pass, file, a, &mut pending);
                         stamp_category(&mut pending, _before, "reflecttypeassert");
                     }
                 }
@@ -6346,12 +6513,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&options, "slicessort") {
                         let _before = pending.len();
-                        check_slicessort(pass, c, &mut pending);
+                        check_slicessort(pass, file, c, &mut pending);
                         stamp_category(&mut pending, _before, "slicessort");
                     }
                     if enabled(&options, "slicesdelete") {
                         let _before = pending.len();
-                        check_slicesdelete(pass, c, &mut pending);
+                        check_slicesdelete(pass, file, c, &mut pending);
                         stamp_category(&mut pending, _before, "slicesdelete");
                     }
                     if enabled(&options, "reflecttypefor") {
@@ -6364,7 +6531,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&options, "unsafefuncs") {
                         let _before = pending.len();
-                        check_unsafefuncs(pass, c, &mut pending);
+                        check_unsafefuncs(pass, file, c, &mut pending);
                         stamp_category(&mut pending, _before, "unsafefuncs");
                     }
                     if enabled(&options, "newexpr") {

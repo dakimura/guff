@@ -16,6 +16,7 @@ mod facts;
 mod pass;
 mod pattern_match;
 pub mod passes;
+pub mod refactor;
 mod settings;
 mod ssa_util;
 mod validate;

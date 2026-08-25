@@ -253,3 +253,74 @@ pub fn insert_no_reparent(
         .insert(name.to_string(), obj);
     None
 }
+
+/// Reports whether `pos` lies inside the scope's extent.
+///
+/// Equivalent to `types2.Scope.Contains`. A scope with no extent (`pos`/`end`
+/// both `nopos`, as package scopes have — they may be discontiguous across
+/// files) contains nothing, which is what makes [`innermost`] iterate a package
+/// scope's children instead of testing it directly.
+pub fn contains(arena: &ScopeArena, scope: ScopeId, pos: u32) -> bool {
+    let s = arena.get(scope);
+    s.pos <= pos && pos < s.end
+}
+
+/// The innermost scope containing `pos`, or `None` if `pos` is outside `scope`.
+///
+/// Equivalent to `types2.Scope.Innermost`, including its special case for the
+/// package scope: package scopes have no extent, so when `scope` is one (its
+/// parent is the universe) the search descends into the file scopes instead.
+pub fn innermost(arena: &ScopeArena, scope: ScopeId, pos: u32) -> Option<ScopeId> {
+    // Go tests `s.parent == Universe`; the universe is the one scope with no
+    // parent, so a scope whose parent has no parent is a package scope.
+    let is_package_scope = arena
+        .get(scope)
+        .parent
+        .is_some_and(|p| arena.get(p).parent.is_none());
+    if is_package_scope {
+        for i in 0..arena.get(scope).children.len() {
+            let child = arena.get(scope).children[i];
+            if let Some(inner) = innermost(arena, child, pos) {
+                return Some(inner);
+            }
+        }
+    }
+
+    if contains(arena, scope, pos) {
+        for i in 0..arena.get(scope).children.len() {
+            let child = arena.get(scope).children[i];
+            if contains(arena, child, pos) {
+                return innermost(arena, child, pos);
+            }
+        }
+        return Some(scope);
+    }
+    None
+}
+
+/// Walk from `scope` toward the universe for the first scope declaring `name`
+/// at a point visible from `pos`, returning that scope and the object.
+///
+/// Equivalent to `types2.Scope.LookupParent`. Unlike [`lookup_chain`] this
+/// honours the object's `scope_pos`: inside `x := x`, the `x` on the right is
+/// the outer one, because the new `x` is not in scope until after the
+/// statement. Pass `pos == 0` (`nopos`) to skip that test, as Go does for an
+/// invalid position.
+pub fn lookup_parent(
+    scope_arena: &ScopeArena,
+    object_arena: &ObjectArena,
+    scope: ScopeId,
+    name: &str,
+    pos: u32,
+) -> Option<(ScopeId, ObjectId)> {
+    let mut s = Some(scope);
+    while let Some(cur) = s {
+        if let Some(obj) = scope_arena.get(cur).lookup_local(name) {
+            if pos == 0 || obj.scope_pos(object_arena) <= pos {
+                return Some((cur, obj));
+            }
+        }
+        s = scope_arena.get(cur).parent;
+    }
+    None
+}

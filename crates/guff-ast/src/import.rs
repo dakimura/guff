@@ -74,18 +74,7 @@ pub fn sort_imports(fset: &Arc<FileSet>, f: &mut File) {
     }
 
     // Rebuild File.imports to match the sorted decls.
-    f.imports.clear();
-    for decl in &f.decls {
-        if let Decl::GenDecl(g) = decl {
-            if g.tok == Some(Token::IMPORT) {
-                for s in &g.specs {
-                    if let Spec::ImportSpec(is) = s {
-                        f.imports.push(is.clone());
-                    }
-                }
-            }
-        }
-    }
+    f.rebuild_imports();
 }
 
 fn line_at(fset: &Arc<FileSet>, pos: Pos) -> i64 {
