@@ -15,7 +15,9 @@ use std::sync::OnceLock;
 
 use guff::ast::CommentGroup;
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_analysis::{
+    AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
 use regex::Regex;
 
 use crate::options::GodotOptions;
@@ -200,6 +202,39 @@ fn check_period(text: &str) -> Option<usize> {
 // cobra. Only the line survives, so only the line is computed here. `godox`
 // carries the same note for the same reason, one function up.
 
+/// The edit that inserts godot's missing period, and the line it rewrites.
+///
+/// godot builds `Issue.Replacement` as the whole *raw* line with a `.` spliced
+/// in at the column it computed, and golangci replaces from the issue position
+/// to the end of that line with it. The column matters: for `/* text */` the
+/// period belongs after `text`, not after the closing marker, so appending to
+/// the trimmed line would write `/* text */.`.
+///
+/// The column is recovered the way godot recovers it — by finding the comment's
+/// own text inside the raw line (`strings.Index`) and stepping past its trimmed
+/// end. A line that an `exclude` pattern replaced with godot's sentinel is not
+/// findable that way, and gets no fix rather than a guessed one.
+fn period_edit(raw_line: &str, text_line: &str) -> Option<String> {
+    let trimmed = text_line.trim_end();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let at = raw_line.find(trimmed)? + trimmed.len();
+    Some(format!("{}.{}", &raw_line[..at], &raw_line[at..]))
+}
+
+/// The text of source line `line` (1-based), without its newline.
+fn raw_source_line(src: &[u8], line: i64) -> Option<&str> {
+    if line < 1 {
+        return None;
+    }
+    std::str::from_utf8(src)
+        .ok()?
+        .split('\n')
+        .nth((line - 1) as usize)
+        .map(|l| l.strip_suffix('\r').unwrap_or(l))
+}
+
 /// Returns true if any sentence after the first should start with a capital
 /// and currently starts with lowercase (declaration docs skip the first word).
 fn check_capital(text: &str, is_decl: bool) -> bool {
@@ -267,7 +302,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let excludes = compile_excludes(&options.exclude);
     let is_decl_scope = options.scope != "all";
 
-    let mut pending = Vec::new();
+    let mut pending: Vec<(u32, String, Option<TextEdit>)> = Vec::new();
     let paths: Vec<_> = pass.pkg().compiled_go_files.clone();
     let fset = pass.fset().clone();
     let n = pass.files().len();
@@ -302,19 +337,49 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             if let Some(idx) = period_at {
                 let line = start_line + idx as i64 - 1;
                 if let Some(pos) = line_pos(&fset, file.pos(), line) {
-                    pending.push((pos, NO_PERIOD.to_string()));
+                    // The replacement is the whole line, so the edit spans the
+                    // whole line — up to but not including its newline, since
+                    // godot's `Replacement` does not carry one.
+                    let edit = pass
+                        .pkg()
+                        .source_bytes(i)
+                        .and_then(|src| raw_source_line(src, line))
+                        .zip(text.lines().nth(idx - 1))
+                        .and_then(|(raw, text_line)| {
+                            let replacement = period_edit(raw, text_line)?;
+                            Some(TextEdit {
+                                pos,
+                                end: pos + raw.len() as u32,
+                                new_text: replacement,
+                            })
+                        });
+                    pending.push((pos, NO_PERIOD.to_string(), edit));
                 }
             }
             if capital {
                 if let Some(pos) = line_pos(&fset, file.pos(), start_line) {
-                    pending.push((pos, NO_CAPITAL.to_string()));
+                    // DEFERRED: `capital` is off by default and its position is
+                    // already approximated (see above), so no fix is offered.
+                    pending.push((pos, NO_CAPITAL.to_string(), None));
                 }
             }
         }
     }
 
-    for (pos, message) in pending {
-        pass.reportf(pos, message);
+    for (pos, message, edit) in pending {
+        let Some(edit) = edit else {
+            pass.reportf(pos, message);
+            continue;
+        };
+        pass.report(Diagnostic {
+            pos,
+            message: message.clone(),
+            suggested_fixes: vec![SuggestedFix {
+                message,
+                text_edits: vec![edit],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }
