@@ -90,7 +90,9 @@ use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::code;
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_analysis::{
+    AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
 use guff_constant::{int64_val, make_from_literal};
 use guff_types::alias::unalias_readonly;
 use guff_types::api_predicates::{api_identical, api_implements};
@@ -584,11 +586,63 @@ fn is_exported(name: &str) -> bool {
     name.chars().next().is_some_and(|c| c.is_ascii_uppercase())
 }
 
+/// Remap a re-parse-relative edit into the analysis `FileSet`.
+///
+/// The comment checkers read a `PARSE_COMMENTS` re-parse with its own
+/// `FileSet`, and only the message position was being carried across. An edit
+/// left in the other space points at an arbitrary offset in this one: here it
+/// fell outside the file and was dropped, which is why `commentFormatting`
+/// reported and rewrote nothing. On a longer file it would have written to the
+/// wrong place instead. `compat/fix` is what surfaced it.
+fn remap_edit(
+    pass: &Pass<'_>,
+    file_pos: Pos,
+    re_fset: &FileSet,
+    edit: Option<TextEdit>,
+) -> Option<TextEdit> {
+    let e = edit?;
+    let pos = code::remap_reparsed_pos(pass.fset(), file_pos, re_fset, Pos(e.pos as i64))?;
+    let end = code::remap_reparsed_pos(pass.fset(), file_pos, re_fset, Pos(e.end as i64))?;
+    Some(TextEdit {
+        pos: pos.0 as u32,
+        end: end.0 as u32,
+        new_text: e.new_text,
+    })
+}
+
+/// A pending finding: position, message, and the fix when the checker has one.
+///
+/// go-critic carries a suggestion on the warning itself (`warn.Suggestion`,
+/// a `From`/`To`/`Replacement` triple) and golangci maps it straight to a
+/// `TextEdit`, so the fix travels with the message here for the same reason.
+type Pending = Vec<(u32, String, Option<TextEdit>)>;
+
 /// Emit a finding. golangci-lint's gocritic wrapper renders every warning as
 /// `fmt.Sprintf("%s: %s", checkerName, warning)`, so the checker name is part
 /// of the message the user — and any `exclusions.rules` regex — sees.
-fn report(pending: &mut Vec<(u32, String)>, pos: u32, checker: &str, msg: impl Into<String>) {
-    pending.push((pos, format!("{checker}: {}", msg.into())));
+fn report(pending: &mut Pending, pos: u32, checker: &str, msg: impl Into<String>) {
+    pending.push((pos, format!("{checker}: {}", msg.into()), None));
+}
+
+/// [`report`], with the replacement go-critic attaches as `warn.Suggestion`.
+fn report_fix(
+    pending: &mut Pending,
+    pos: u32,
+    checker: &str,
+    msg: impl Into<String>,
+    from: u32,
+    to: u32,
+    replacement: impl Into<String>,
+) {
+    pending.push((
+        pos,
+        format!("{checker}: {}", msg.into()),
+        Some(TextEdit {
+            pos: from,
+            end: to,
+            new_text: replacement.into(),
+        }),
+    ));
 }
 
 /// The checker name [`report`] prefixed onto a pending message.
@@ -612,7 +666,7 @@ fn assign_pos(assign: &AssignStmt) -> u32 {
         .0 as u32
 }
 
-fn check_elseif(stmt: &IfStmt, pending: &mut Vec<(u32, String)>) {
+fn check_elseif(stmt: &IfStmt, pending: &mut Pending) {
     let Some(Stmt::BlockStmt(else_body)) = stmt.else_.as_deref() else {
         return;
     };
@@ -677,7 +731,7 @@ fn case_has_break(body: &[Stmt]) -> bool {
     walk(body, false)
 }
 
-fn check_single_case_switch_body(pos: u32, body: &BlockStmt, pending: &mut Vec<(u32, String)>) {
+fn check_single_case_switch_body(pos: u32, body: &BlockStmt, pending: &mut Pending) {
     if body.list.len() != 1 {
         return;
     }
@@ -704,15 +758,15 @@ fn check_single_case_switch_body(pos: u32, body: &BlockStmt, pending: &mut Vec<(
     }
 }
 
-fn check_single_case_switch(stmt: &SwitchStmt, pending: &mut Vec<(u32, String)>) {
+fn check_single_case_switch(stmt: &SwitchStmt, pending: &mut Pending) {
     check_single_case_switch_body(stmt.switch.0 as u32, &stmt.body, pending);
 }
 
-fn check_single_case_type_switch(stmt: &TypeSwitchStmt, pending: &mut Vec<(u32, String)>) {
+fn check_single_case_type_switch(stmt: &TypeSwitchStmt, pending: &mut Pending) {
     check_single_case_switch_body(stmt.switch.0 as u32, &stmt.body, pending);
 }
 
-fn check_default_case_order(stmt: &SwitchStmt, pending: &mut Vec<(u32, String)>) {
+fn check_default_case_order(stmt: &SwitchStmt, pending: &mut Pending) {
     let n = stmt.body.list.len();
     for (i, s) in stmt.body.list.iter().enumerate() {
         let Stmt::CaseClause(cc) = s else {
@@ -729,7 +783,7 @@ fn check_default_case_order(stmt: &SwitchStmt, pending: &mut Vec<(u32, String)>)
     }
 }
 
-fn check_switch_true(stmt: &SwitchStmt, pending: &mut Vec<(u32, String)>) {
+fn check_switch_true(stmt: &SwitchStmt, pending: &mut Pending) {
     let Some(tag) = &stmt.tag else {
         return;
     };
@@ -753,7 +807,7 @@ fn check_switch_true(stmt: &SwitchStmt, pending: &mut Vec<(u32, String)>) {
     }
 }
 
-fn check_sloppy_len(bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
+fn check_sloppy_len(bin: &BinaryExpr, pending: &mut Pending) {
     let Expr::CallExpr(call) = bin.x.as_ref() else {
         return;
     };
@@ -820,7 +874,7 @@ fn is_int_lit(expr: &Expr, want: i64) -> bool {
     }
 }
 
-fn check_unslice(pass: &Pass<'_>, slice: &SliceExpr, pending: &mut Vec<(u32, String)>) {
+fn check_unslice(pass: &Pass<'_>, slice: &SliceExpr, pending: &mut Pending) {
     if slice.low.is_some() || slice.high.is_some() || slice.max.is_some() || slice.slice3 {
         return;
     }
@@ -839,15 +893,20 @@ fn check_unslice(pass: &Pass<'_>, slice: &SliceExpr, pending: &mut Vec<(u32, Str
     let Some(x) = expr_text(&slice.x) else {
         return;
     };
-    report(
+    // The ruleguard rule is `m.Match("$s[:]").Suggest("$s")`, so the whole
+    // slice expression goes and the sliced operand's own text replaces it.
+    report_fix(
         pending,
         slice.x.pos().0 as u32,
         "unslice",
         format!("could simplify {x}[:] to {x}"),
+        slice.x.pos().0 as u32,
+        (slice.rbrack.0 + 1) as u32,
+        x.clone(),
     );
 }
 
-fn check_new_deref(pass: &Pass<'_>, star: &StarExpr, pending: &mut Vec<(u32, String)>) {
+fn check_new_deref(pass: &Pass<'_>, star: &StarExpr, pending: &mut Pending) {
     let Expr::CallExpr(call) = star.x.as_ref() else {
         return;
     };
@@ -976,7 +1035,7 @@ fn is_default_literal_type(pass: &Pass<'_>, typ: TypeId) -> bool {
     )
 }
 
-fn check_append_assign(assign: &AssignStmt, pending: &mut Vec<(u32, String)>) {
+fn check_append_assign(assign: &AssignStmt, pending: &mut Pending) {
     if assign.tok != Some(Token::ASSIGN) && assign.tok != Some(Token::DEFINE) {
         return;
     }
@@ -1044,7 +1103,7 @@ fn check_append_assign(assign: &AssignStmt, pending: &mut Vec<(u32, String)>) {
     }
 }
 
-fn check_dup_case_switch(stmt: &SwitchStmt, pending: &mut Vec<(u32, String)>) {
+fn check_dup_case_switch(stmt: &SwitchStmt, pending: &mut Pending) {
     let mut seen = HashSet::new();
     for s in &stmt.body.list {
         let Stmt::CaseClause(cc) = s else {
@@ -1066,7 +1125,7 @@ fn check_dup_case_switch(stmt: &SwitchStmt, pending: &mut Vec<(u32, String)>) {
     }
 }
 
-fn check_capt_local_fields(fields: &Option<FieldList>, pending: &mut Vec<(u32, String)>) {
+fn check_capt_local_fields(fields: &Option<FieldList>, pending: &mut Pending) {
     let Some(fl) = fields else {
         return;
     };
@@ -1084,7 +1143,7 @@ fn check_capt_local_fields(fields: &Option<FieldList>, pending: &mut Vec<(u32, S
     }
 }
 
-fn check_capt_local(func: &FuncDecl, pending: &mut Vec<(u32, String)>) {
+fn check_capt_local(func: &FuncDecl, pending: &mut Pending) {
     // paramsOnly=true (golangci default)
     check_capt_local_fields(&func.ty.params, pending);
     check_capt_local_fields(&func.ty.results, pending);
@@ -1094,7 +1153,7 @@ fn call_qualified_name(call: &CallExpr) -> Option<String> {
     expr_text(&call.fun)
 }
 
-fn check_exit_after_defer(pass: &Pass<'_>, func: &FuncDecl, pending: &mut Vec<(u32, String)>) {
+fn check_exit_after_defer(pass: &Pass<'_>, func: &FuncDecl, pending: &mut Pending) {
     let Some(body) = &func.body else {
         return;
     };
@@ -1118,7 +1177,7 @@ fn check_exit_after_defer(pass: &Pass<'_>, func: &FuncDecl, pending: &mut Vec<(u
         stmts: &[Stmt],
         defer_pos: &mut Option<(u32, String)>,
         found: &mut bool,
-        pending: &mut Vec<(u32, String)>,
+        pending: &mut Pending,
         in_else: bool,
     ) {
         if *found {
@@ -1192,7 +1251,7 @@ fn check_exit_after_defer(pass: &Pass<'_>, func: &FuncDecl, pending: &mut Vec<(u
         call: &CallExpr,
         defer_pos: &mut Option<(u32, String)>,
         found: &mut bool,
-        pending: &mut Vec<(u32, String)>,
+        pending: &mut Pending,
     ) {
         let Some(name) = call_qualified_name(call) else {
             return;
@@ -1244,7 +1303,7 @@ fn check_if_else_chain(
     stmt: &IfStmt,
     min_threshold: usize,
     visited: &mut HashSet<u32>,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     if !visited.insert(stmt.id) && stmt.id != 0 {
         return;
@@ -1268,7 +1327,7 @@ fn check_if_else_chain(
     }
 }
 
-fn check_val_swap(stmts: &[Stmt], pending: &mut Vec<(u32, String)>) {
+fn check_val_swap(stmts: &[Stmt], pending: &mut Pending) {
     // tmp := y; y = x; x = tmp
     for window in stmts.windows(3) {
         let (Stmt::AssignStmt(a), Stmt::AssignStmt(b), Stmt::AssignStmt(c)) =
@@ -1315,7 +1374,7 @@ fn check_val_swap(stmts: &[Stmt], pending: &mut Vec<(u32, String)>) {
     }
 }
 
-fn check_flag_deref(pass: &Pass<'_>, star: &StarExpr, pending: &mut Vec<(u32, String)>) {
+fn check_flag_deref(pass: &Pass<'_>, star: &StarExpr, pending: &mut Pending) {
     let Expr::CallExpr(call) = star.x.as_ref() else {
         return;
     };
@@ -1344,7 +1403,7 @@ fn check_flag_deref(pass: &Pass<'_>, star: &StarExpr, pending: &mut Vec<(u32, St
     );
 }
 
-fn check_bad_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+fn check_bad_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
     // Builtin `append` only — go-critic's `append($_)` does not match methods
     // named `append` (e.g. `cmd.append(app)`).
     if matches!(call.fun.as_ref(), Expr::Ident(id) if id.name == "append")
@@ -1403,7 +1462,7 @@ fn check_bad_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, Stri
     }
 }
 
-fn check_assign_op(pass: &Pass<'_>, assign: &AssignStmt, pending: &mut Vec<(u32, String)>) {
+fn check_assign_op(pass: &Pass<'_>, assign: &AssignStmt, pending: &mut Pending) {
     if assign.tok != Some(Token::ASSIGN) || assign.lhs.len() != 1 || assign.rhs.len() != 1 {
         return;
     }
@@ -1462,7 +1521,7 @@ fn check_assign_op(pass: &Pass<'_>, assign: &AssignStmt, pending: &mut Vec<(u32,
     report(pending, assign_pos(assign), "assignOp", msg);
 }
 
-fn check_dup_arg(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+fn check_dup_arg(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
     if call.args.len() < 2 {
         return;
     }
@@ -1569,7 +1628,7 @@ fn block_text(body: &BlockStmt) -> Option<String> {
     Some(format!("{{{}}}", parts?.join("")))
 }
 
-fn check_dup_branch_body(stmt: &IfStmt, pending: &mut Vec<(u32, String)>) {
+fn check_dup_branch_body(stmt: &IfStmt, pending: &mut Pending) {
     let Some(Stmt::BlockStmt(else_body)) = stmt.else_.as_deref() else {
         return;
     };
@@ -1589,7 +1648,7 @@ fn check_dup_branch_body(stmt: &IfStmt, pending: &mut Vec<(u32, String)>) {
     }
 }
 
-fn check_dup_sub_expr(bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
+fn check_dup_sub_expr(bin: &BinaryExpr, pending: &mut Pending) {
     let watch = matches!(
         bin.op,
         Token::LOR
@@ -1632,7 +1691,7 @@ fn unquote_basic_string(value: &str) -> Option<String> {
     }
 }
 
-fn check_flag_name(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+fn check_flag_name(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
     let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
         return;
     };
@@ -1720,7 +1779,7 @@ fn is_string_keyed_map(pass: &Pass<'_>, lit: &CompositeLit) -> bool {
     )
 }
 
-fn check_map_key(pass: &Pass<'_>, lit: &CompositeLit, pending: &mut Vec<(u32, String)>) {
+fn check_map_key(pass: &Pass<'_>, lit: &CompositeLit, pending: &mut Pending) {
     if lit.elts.len() < 2 {
         return;
     }
@@ -1733,7 +1792,7 @@ fn check_map_key(pass: &Pass<'_>, lit: &CompositeLit, pending: &mut Vec<(u32, St
     check_map_key_duplicates(pass, lit, pending);
 }
 
-fn check_map_key_whitespace(lit: &CompositeLit, pending: &mut Vec<(u32, String)>) {
+fn check_map_key_whitespace(lit: &CompositeLit, pending: &mut Pending) {
     let mut whitespace_key: Option<(u32, String)> = None;
     for elt in &lit.elts {
         let Expr::KeyValueExpr(kv) = elt else {
@@ -1774,7 +1833,7 @@ fn check_map_key_whitespace(lit: &CompositeLit, pending: &mut Vec<(u32, String)>
 fn check_map_key_duplicates(
     pass: &Pass<'_>,
     lit: &CompositeLit,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     let mut seen_non_basic = HashSet::new();
     for elt in &lit.elts {
@@ -1801,7 +1860,7 @@ fn check_map_key_duplicates(
     }
 }
 
-fn check_off_by1(index: &IndexExpr, pending: &mut Vec<(u32, String)>) {
+fn check_off_by1(index: &IndexExpr, pending: &mut Pending) {
     let Expr::CallExpr(call) = index.index.as_ref() else {
         return;
     };
@@ -1818,11 +1877,15 @@ fn check_off_by1(index: &IndexExpr, pending: &mut Vec<(u32, String)>) {
     let Some(x) = expr_text(&index.x) else {
         return;
     };
-    report(
+    // `m.Match("$x[len($x)]").Suggest("$x[len($x)-1]")`.
+    report_fix(
         pending,
         index.x.pos().0 as u32,
         "offBy1",
         format!("index expr always panics; maybe you wanted {x}[len({x})-1]?"),
+        index.x.pos().0 as u32,
+        (index.rbrack.0 + 1) as u32,
+        format!("{x}[len({x})-1]"),
     );
 }
 
@@ -1846,7 +1909,7 @@ fn find_matching_assert(stmt: &Stmt, want_x: &Expr, want_ty: &Expr) -> bool {
     found
 }
 
-fn check_type_switch_var(stmt: &TypeSwitchStmt, pending: &mut Vec<(u32, String)>) {
+fn check_type_switch_var(stmt: &TypeSwitchStmt, pending: &mut Pending) {
     // Already has `v := x.(type)` form.
     if matches!(stmt.assign.as_ref(), Stmt::AssignStmt(_)) {
         return;
@@ -1895,7 +1958,7 @@ fn unparen(expr: &Expr) -> &Expr {
     }
 }
 
-fn check_bad_cond_expr(bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
+fn check_bad_cond_expr(bin: &BinaryExpr, pending: &mut Pending) {
     if bin.op != Token::LAND {
         return;
     }
@@ -1944,7 +2007,7 @@ fn int_lit_value(expr: &Expr) -> Option<i64> {
     }
 }
 
-fn check_bad_cond_for(stmt: &guff::ast::ForStmt, pending: &mut Vec<(u32, String)>) {
+fn check_bad_cond_for(stmt: &guff::ast::ForStmt, pending: &mut Pending) {
     let Some(Stmt::AssignStmt(init)) = stmt.init.as_deref() else {
         return;
     };
@@ -1997,7 +2060,7 @@ fn check_bad_cond_for(stmt: &guff::ast::ForStmt, pending: &mut Vec<(u32, String)
     );
 }
 
-fn check_unlambda(pass: &Pass<'_>, fl: &FuncLit, pending: &mut Vec<(u32, String)>) {
+fn check_unlambda(pass: &Pass<'_>, fl: &FuncLit, pending: &mut Pending) {
     if fl.body.list.len() != 1 {
         return;
     }
@@ -2127,7 +2190,7 @@ fn unparen_expr(e: &Expr) -> &Expr {
 }
 
 /// go-critic underef with default `skipRecvDeref: true`.
-fn check_underef(pass: &Pass<'_>, sel: &SelectorExpr, pending: &mut Vec<(u32, String)>) {
+fn check_underef(pass: &Pass<'_>, sel: &SelectorExpr, pending: &mut Pending) {
     if is_ptr_recv_method_call(pass, sel) {
         return;
     }
@@ -2253,7 +2316,7 @@ fn unlambda_fun_has_disallowed_vars(pass: &Pass<'_>, fun: &Expr) -> bool {
     found
 }
 
-fn check_regexp_must(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+fn check_regexp_must(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
     let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
         return;
     };
@@ -2297,7 +2360,7 @@ fn is_bytes_splitn_literal_form(call: &CallExpr) -> bool {
     matches!(inner, Expr::BasicLit(lit) if lit.value == "\".\"")
 }
 
-fn check_wrapper_func(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+fn check_wrapper_func(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
     let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
         return;
     };
@@ -2405,7 +2468,7 @@ fn call_qualified_name_of_expr(expr: &Expr) -> Option<String> {
     }
 }
 
-fn check_arg_order(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+fn check_arg_order(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
     if call.args.len() < 2 {
         return;
     }
@@ -2535,7 +2598,7 @@ fn type_is_interface(pass: &Pass<'_>, typ: TypeId) -> bool {
     is_interface(&artifacts.types, typ)
 }
 
-fn check_case_order(pass: &Pass<'_>, stmt: &TypeSwitchStmt, pending: &mut Vec<(u32, String)>) {
+fn check_case_order(pass: &Pass<'_>, stmt: &TypeSwitchStmt, pending: &mut Pending) {
     // DEFERRED: expression-switch overlapping ranges (upstream TODO).
     struct IfaceSeen {
         node_text: String,
@@ -2585,7 +2648,7 @@ fn check_case_order(pass: &Pass<'_>, stmt: &TypeSwitchStmt, pending: &mut Vec<(u
 fn check_sloppy_type_assert(
     pass: &Pass<'_>,
     assert: &TypeAssertExpr,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     if assert.ty.is_none() {
         return;
@@ -2697,7 +2760,7 @@ fn split_comment_groups(cg: &CommentGroup) -> Vec<CommentGroup> {
     out
 }
 
-fn check_comment_formatting(cg: &CommentGroup, pending: &mut Vec<(u32, String)>) {
+fn check_comment_formatting(cg: &CommentGroup, pending: &mut Pending) {
     if cg.list.first().is_some_and(|c| c.text.starts_with("/*")) {
         return;
     }
@@ -2728,11 +2791,17 @@ fn check_comment_formatting(cg: &CommentGroup, pending: &mut Vec<(u32, String)>)
         if matches!(r, '+' | '-' | '#' | '!') || r.is_whitespace() {
             continue;
         }
-        report(
+        // `strings.Replace(comment.Text, "//", "// ", 1)` over the whole
+        // comment: the first `//` only, so `//go:build`-shaped text that got
+        // this far keeps its later slashes.
+        report_fix(
             pending,
             comment.slash.0 as u32,
             "commentFormatting",
             "put a space between `//` and comment text",
+            comment.slash.0 as u32,
+            comment.end().0 as u32,
+            text.replacen("//", "// ", 1),
         );
         return;
     }
@@ -2771,7 +2840,7 @@ fn deprecated_common_typos() -> &'static [&'static str] {
     ]
 }
 
-fn check_deprecated_comment(doc: &CommentGroup, pending: &mut Vec<(u32, String)>) {
+fn check_deprecated_comment(doc: &CommentGroup, pending: &mut Pending) {
     let mut prev = String::new();
     for comment in &doc.list {
         if comment.text.starts_with("/*") {
@@ -2838,7 +2907,7 @@ fn check_deprecated_comment(doc: &CommentGroup, pending: &mut Vec<(u32, String)>
     }
 }
 
-fn check_codegen_comment(doc: &CommentGroup, pending: &mut Vec<(u32, String)>) {
+fn check_codegen_comment(doc: &CommentGroup, pending: &mut Pending) {
     let re = codegen_bad_comment_re();
     for comment in &doc.list {
         if re.is_match(&comment.text) {
@@ -2894,7 +2963,7 @@ fn declaration_docs(file: &File) -> Vec<&CommentGroup> {
     out
 }
 
-fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<(u32, String)>) {
+fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Pending) {
     let need_codegen = enabled(set, "codegenComment");
     let need_fmt = enabled(set, "commentFormatting");
     let need_depr = enabled(set, "deprecatedComment");
@@ -2931,11 +3000,12 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
             if let Some(doc) = &parsed.doc {
                 let mut local = Vec::new();
                 check_codegen_comment(doc, &mut local);
-                for (pos, msg) in local {
+                for (pos, msg, edit) in local {
                     // pos is from reparse fset; remap via line.
                     if let Some(mapped) = code::remap_reparsed_pos(pass.fset(), file.pos(), &re_fset, Pos(pos as i64))
                         .map(|p| p.0 as u32) {
-                        pending.push((mapped, msg));
+                        let edit = remap_edit(pass, file.pos(), &re_fset, edit);
+                        pending.push((mapped, msg, edit));
                     }
                 }
             }
@@ -2946,7 +3016,7 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
                 for cg in &split_comment_groups(raw) {
                     let mut local = Vec::new();
                     check_comment_formatting(cg, &mut local);
-                    for (pos, msg) in local {
+                    for (pos, msg, edit) in local {
                         if let Some(mapped) = code::remap_reparsed_pos(
                             pass.fset(),
                             file.pos(),
@@ -2955,7 +3025,8 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
                         )
                         .map(|p| p.0 as u32)
                         {
-                            pending.push((mapped, msg));
+                            let edit = remap_edit(pass, file.pos(), &re_fset, edit);
+                            pending.push((mapped, msg, edit));
                         }
                     }
                 }
@@ -2967,10 +3038,11 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
             for doc in docs {
                 let mut local = Vec::new();
                 check_deprecated_comment(doc, &mut local);
-                for (pos, msg) in local {
+                for (pos, msg, edit) in local {
                     if let Some(mapped) = code::remap_reparsed_pos(pass.fset(), file.pos(), &re_fset, Pos(pos as i64))
                         .map(|p| p.0 as u32) {
-                        pending.push((mapped, msg));
+                        let edit = remap_edit(pass, file.pos(), &re_fset, edit);
+                        pending.push((mapped, msg, edit));
                     }
                 }
             }
@@ -2979,10 +3051,11 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
         if need_commented_code {
             let mut local = Vec::new();
             check_commented_out_code(&parsed, &mut local);
-            for (pos, msg) in local {
+            for (pos, msg, edit) in local {
                 if let Some(mapped) = code::remap_reparsed_pos(pass.fset(), file.pos(), &re_fset, Pos(pos as i64))
                         .map(|p| p.0 as u32) {
-                    pending.push((mapped, msg));
+                    let edit = remap_edit(pass, file.pos(), &re_fset, edit);
+                    pending.push((mapped, msg, edit));
                 }
             }
         }
@@ -2990,10 +3063,11 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
         if need_commented_import {
             let mut local = Vec::new();
             check_commented_out_import(&parsed, &mut local);
-            for (pos, msg) in local {
+            for (pos, msg, edit) in local {
                 if let Some(mapped) = code::remap_reparsed_pos(pass.fset(), file.pos(), &re_fset, Pos(pos as i64))
                         .map(|p| p.0 as u32) {
-                    pending.push((mapped, msg));
+                    let edit = remap_edit(pass, file.pos(), &re_fset, edit);
+                    pending.push((mapped, msg, edit));
                 }
             }
         }
@@ -3003,7 +3077,7 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
                 for cg in &split_comment_groups(raw) {
                     let mut local = Vec::new();
                     check_todo_comment_without_detail(cg, &mut local);
-                    for (pos, msg) in local {
+                    for (pos, msg, edit) in local {
                         if let Some(mapped) = code::remap_reparsed_pos(
                             pass.fset(),
                             file.pos(),
@@ -3012,7 +3086,8 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
                         )
                         .map(|p| p.0 as u32)
                         {
-                            pending.push((mapped, msg));
+                            let edit = remap_edit(pass, file.pos(), &re_fset, edit);
+                            pending.push((mapped, msg, edit));
                         }
                     }
                 }
@@ -3022,10 +3097,11 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
         if need_doc_stub {
             let mut local = Vec::new();
             check_doc_stub(&parsed, &mut local);
-            for (pos, msg) in local {
+            for (pos, msg, edit) in local {
                 if let Some(mapped) = code::remap_reparsed_pos(pass.fset(), file.pos(), &re_fset, Pos(pos as i64))
                         .map(|p| p.0 as u32) {
-                    pending.push((mapped, msg));
+                    let edit = remap_edit(pass, file.pos(), &re_fset, edit);
+                    pending.push((mapped, msg, edit));
                 }
             }
         }
@@ -3035,7 +3111,7 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
                 for cg in &split_comment_groups(raw) {
                     let mut local = Vec::new();
                     check_why_no_lint(cg, &mut local);
-                    for (pos, msg) in local {
+                    for (pos, msg, edit) in local {
                         if let Some(mapped) = code::remap_reparsed_pos(
                             pass.fset(),
                             file.pos(),
@@ -3044,7 +3120,8 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
                         )
                         .map(|p| p.0 as u32)
                         {
-                            pending.push((mapped, msg));
+                            let edit = remap_edit(pass, file.pos(), &re_fset, edit);
+                            pending.push((mapped, msg, edit));
                         }
                     }
                 }
@@ -3053,7 +3130,7 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
     }
 }
 
-fn check_commented_out_import(file: &File, pending: &mut Vec<(u32, String)>) {
+fn check_commented_out_import(file: &File, pending: &mut Pending) {
     static RE: OnceLock<Regex> = OnceLock::new();
     let re = RE.get_or_init(|| {
         Regex::new(r#"(?m)^(?://|/\*)?\s*"([a-zA-Z0-9_/]+)"\s*(?:\*/)?$"#).unwrap()
@@ -3144,7 +3221,7 @@ fn parsed_commented_out_code_stmts(text: &str) -> Option<Vec<Stmt>> {
         .filter(|stmts| !stmts.is_empty())
 }
 
-fn check_commented_out_code(file: &File, pending: &mut Vec<(u32, String)>) {
+fn check_commented_out_code(file: &File, pending: &mut Pending) {
     static NOT_QUITE_FUNC_CALL_RE: OnceLock<Regex> = OnceLock::new();
     let not_quite_func_call = NOT_QUITE_FUNC_CALL_RE
         .get_or_init(|| Regex::new(r"\w+\s+\([^)]*\)\s*$").expect("commentedOutCode call RE"));
@@ -3216,7 +3293,7 @@ fn len_arg(expr: &Expr) -> Option<&Expr> {
     Some(&call.args[0])
 }
 
-fn check_empty_string_test(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
+fn check_empty_string_test(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Pending) {
     let Some(arg) = len_arg(&bin.x) else {
         return;
     };
@@ -3246,7 +3323,7 @@ fn check_empty_string_test(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec<
     );
 }
 
-fn check_empty_fallthrough(stmt: &SwitchStmt, pending: &mut Vec<(u32, String)>) {
+fn check_empty_fallthrough(stmt: &SwitchStmt, pending: &mut Pending) {
     let mut prev_case_default = false;
     for s in stmt.body.list.iter().rev() {
         let Stmt::CaseClause(cc) = s else {
@@ -3281,7 +3358,7 @@ fn check_empty_fallthrough(stmt: &SwitchStmt, pending: &mut Vec<(u32, String)>) 
     }
 }
 
-fn check_empty_decl(g: &guff::ast::GenDecl, pending: &mut Vec<(u32, String)>) {
+fn check_empty_decl(g: &guff::ast::GenDecl, pending: &mut Pending) {
     if !g.lparen.is_valid() || !g.specs.is_empty() {
         return;
     }
@@ -3294,7 +3371,7 @@ fn check_empty_decl(g: &guff::ast::GenDecl, pending: &mut Vec<(u32, String)>) {
     report(pending, g.tok_pos.0 as u32, "emptyDecl", msg);
 }
 
-fn check_octal_literal(lit: &BasicLit, pending: &mut Vec<(u32, String)>) {
+fn check_octal_literal(lit: &BasicLit, pending: &mut Pending) {
     if lit.kind != Some(Token::INT) {
         return;
     }
@@ -3315,7 +3392,7 @@ fn check_octal_literal(lit: &BasicLit, pending: &mut Vec<(u32, String)>) {
     );
 }
 
-fn check_nil_val_return(pass: &Pass<'_>, stmt: &IfStmt, pending: &mut Vec<(u32, String)>) {
+fn check_nil_val_return(pass: &Pass<'_>, stmt: &IfStmt, pending: &mut Pending) {
     if stmt.body.list.len() != 1 {
         return;
     }
@@ -3347,7 +3424,7 @@ fn check_nil_val_return(pass: &Pass<'_>, stmt: &IfStmt, pending: &mut Vec<(u32, 
     }
 }
 
-fn check_yoda_style(bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
+fn check_yoda_style(bin: &BinaryExpr, pending: &mut Pending) {
     if bin.op != Token::EQL && bin.op != Token::NEQ {
         return;
     }
@@ -3409,7 +3486,7 @@ fn is_pkg_name(pass: &Pass<'_>, id: &Ident) -> bool {
     matches!(artifacts.objects.get(obj), ObjectData::PkgName(_))
 }
 
-fn check_defer_unlambda(pass: &Pass<'_>, d: &DeferStmt, pending: &mut Vec<(u32, String)>) {
+fn check_defer_unlambda(pass: &Pass<'_>, d: &DeferStmt, pending: &mut Pending) {
     let call = &d.call;
     if !call.args.is_empty() {
         return;
@@ -3467,7 +3544,7 @@ fn check_defer_unlambda(pass: &Pass<'_>, d: &DeferStmt, pending: &mut Vec<(u32, 
     );
 }
 
-fn check_init_clause(name: &str, init: Option<&Stmt>, pos: u32, pending: &mut Vec<(u32, String)>) {
+fn check_init_clause(name: &str, init: Option<&Stmt>, pos: u32, pending: &mut Pending) {
     let Some(init) = init else {
         return;
     };
@@ -3536,7 +3613,7 @@ fn is_builtin_name(name: &str) -> bool {
     )
 }
 
-fn warn_builtin_shadow(ident: &Ident, checker: &str, pending: &mut Vec<(u32, String)>) {
+fn warn_builtin_shadow(ident: &Ident, checker: &str, pending: &mut Pending) {
     if is_builtin_name(&ident.name) {
         report(
             pending,
@@ -3547,7 +3624,7 @@ fn warn_builtin_shadow(ident: &Ident, checker: &str, pending: &mut Vec<(u32, Str
     }
 }
 
-fn check_builtin_shadow_fields(fields: Option<&FieldList>, pending: &mut Vec<(u32, String)>) {
+fn check_builtin_shadow_fields(fields: Option<&FieldList>, pending: &mut Pending) {
     let Some(fl) = fields else {
         return;
     };
@@ -3566,7 +3643,7 @@ fn is_def_ident(pass: &Pass<'_>, id: &Ident) -> bool {
     info.defs.get(&id.id).copied().flatten().is_some()
 }
 
-fn check_builtin_shadow_assign(pass: &Pass<'_>, a: &AssignStmt, pending: &mut Vec<(u32, String)>) {
+fn check_builtin_shadow_assign(pass: &Pass<'_>, a: &AssignStmt, pending: &mut Pending) {
     if a.tok != Some(Token::DEFINE) {
         return;
     }
@@ -3580,13 +3657,13 @@ fn check_builtin_shadow_assign(pass: &Pass<'_>, a: &AssignStmt, pending: &mut Ve
     }
 }
 
-fn check_builtin_shadow_value_spec(spec: &ValueSpec, pending: &mut Vec<(u32, String)>) {
+fn check_builtin_shadow_value_spec(spec: &ValueSpec, pending: &mut Pending) {
     for name in &spec.names {
         warn_builtin_shadow(name, "builtinShadow", pending);
     }
 }
 
-fn check_builtin_shadow_func(pass: &Pass<'_>, f: &FuncDecl, pending: &mut Vec<(u32, String)>) {
+fn check_builtin_shadow_func(pass: &Pass<'_>, f: &FuncDecl, pending: &mut Pending) {
     check_builtin_shadow_fields(f.recv.as_ref(), pending);
     check_builtin_shadow_fields(f.ty.params.as_ref(), pending);
     check_builtin_shadow_fields(f.ty.results.as_ref(), pending);
@@ -3612,7 +3689,7 @@ fn check_builtin_shadow_func(pass: &Pass<'_>, f: &FuncDecl, pending: &mut Vec<(u
     });
 }
 
-fn check_builtin_shadow_decl(decl: &Decl, pending: &mut Vec<(u32, String)>) {
+fn check_builtin_shadow_decl(decl: &Decl, pending: &mut Pending) {
     match decl {
         Decl::FuncDecl(f) if f.recv.is_none() => {
             warn_builtin_shadow(&f.name, "builtinShadowDecl", pending);
@@ -3636,7 +3713,7 @@ fn check_builtin_shadow_decl(decl: &Decl, pending: &mut Vec<(u32, String)>) {
     }
 }
 
-fn check_dup_import(pass: &Pass<'_>, file: &File, pending: &mut Vec<(u32, String)>) {
+fn check_dup_import(pass: &Pass<'_>, file: &File, pending: &mut Pending) {
     let mut by_path: HashMap<String, Vec<&guff::ast::ImportSpec>> = HashMap::new();
     for imp in &file.imports {
         by_path.entry(imp.path.value.clone()).or_default().push(imp);
@@ -3679,7 +3756,7 @@ fn check_dup_import(pass: &Pass<'_>, file: &File, pending: &mut Vec<(u32, String
     }
 }
 
-fn check_filepath_join(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+fn check_filepath_join(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
     let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
         return;
     };
@@ -3826,7 +3903,7 @@ fn params_are_multi_line(pass: &Pass<'_>, params: &FieldList) -> bool {
     start != end
 }
 
-fn check_param_type_combine(pass: &Pass<'_>, f: &FuncDecl, pending: &mut Vec<(u32, String)>) {
+fn check_param_type_combine(pass: &Pass<'_>, f: &FuncDecl, pending: &mut Pending) {
     let opt_params = f.ty.params.as_ref().and_then(|p| {
         if params_are_multi_line(pass, p) {
             None
@@ -3869,7 +3946,7 @@ fn is_slice_literal(expr: &Expr) -> bool {
     matches!(expr, Expr::CompositeLit(_))
 }
 
-fn check_range_append_all(pass: &Pass<'_>, rs: &RangeStmt, pending: &mut Vec<(u32, String)>) {
+fn check_range_append_all(pass: &Pass<'_>, rs: &RangeStmt, pending: &mut Pending) {
     if rs.body.list.is_empty() {
         return;
     }
@@ -3949,7 +4026,7 @@ fn contains_index_of(tree: &Expr, x: &Expr) -> bool {
     }
 }
 
-fn check_weak_cond(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
+fn check_weak_cond(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Pending) {
     let lhs = unparen(&bin.x);
     let rhs = unparen(&bin.y);
     let Expr::BinaryExpr(lhs_bin) = lhs else {
@@ -4006,7 +4083,7 @@ fn is_option_func_type(pass: &Pass<'_>, typ: TypeId) -> bool {
     tuple_len(&artifacts.types, s.params()) > 0
 }
 
-fn check_dup_option(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+fn check_dup_option(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
     if call.args.is_empty() || call.ellipsis != NO_POS {
         return;
     }
@@ -4069,7 +4146,7 @@ fn is_type_expr(pass: &Pass<'_>, expr: &Expr) -> bool {
         .is_some_and(|tv| tv.mode == OperandMode::TypeExpr)
 }
 
-fn check_method_expr_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+fn check_method_expr_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
     let Expr::SelectorExpr(sel) = call.fun.as_ref() else {
         return;
     };
@@ -4107,7 +4184,7 @@ fn check_method_expr_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u
 
 const RANGE_EXPR_COPY_SIZE_THRESHOLD: i64 = 512;
 
-fn check_range_expr_copy(pass: &Pass<'_>, rs: &RangeStmt, pending: &mut Vec<(u32, String)>) {
+fn check_range_expr_copy(pass: &Pass<'_>, rs: &RangeStmt, pending: &mut Pending) {
     if rs.key.is_none() || rs.value.is_none() {
         return;
     }
@@ -4155,7 +4232,7 @@ fn domain_pattern_re() -> &'static Regex {
     })
 }
 
-fn check_regexp_pattern(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+fn check_regexp_pattern(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
     let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
         return;
     };
@@ -4189,7 +4266,7 @@ fn check_regexp_pattern(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32
     }
 }
 
-fn check_bad_regexp(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+fn check_bad_regexp(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
     let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
         return;
     };
@@ -4214,7 +4291,7 @@ fn check_bad_regexp(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, St
     }
 }
 
-fn check_regexp_simplify(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+fn check_regexp_simplify(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
     let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
         return;
     };
@@ -4371,7 +4448,7 @@ fn sort_less_params(ty: &FuncType) -> Option<(&Ident, &Ident)> {
     }
 }
 
-fn check_sort_slice(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+fn check_sort_slice(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
     if call.args.len() != 2 {
         return;
     }
@@ -4573,7 +4650,7 @@ fn query_call_is_rows_query(pass: &Pass<'_>, call: &CallExpr) -> bool {
     type_is_rows_like(pass, first_ty)
 }
 
-fn check_sql_query(pass: &Pass<'_>, assign: &AssignStmt, pending: &mut Vec<(u32, String)>) {
+fn check_sql_query(pass: &Pass<'_>, assign: &AssignStmt, pending: &mut Pending) {
     if assign.lhs.len() != 2 || assign.rhs.len() != 1 {
         return;
     }
@@ -4668,7 +4745,7 @@ fn count_type_assert_chain(stmt: &IfStmt, assertion: &TypeAssertExpr) -> usize {
 fn check_type_assert_chain(
     stmt: &IfStmt,
     visited: &mut HashSet<usize>,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     let key = stmt as *const _ as usize;
     if !visited.insert(key) {
@@ -4693,7 +4770,7 @@ fn check_type_assert_chain(
     }
 }
 
-fn walk_block_for_val_swap(body: &BlockStmt, pending: &mut Vec<(u32, String)>) {
+fn walk_block_for_val_swap(body: &BlockStmt, pending: &mut Pending) {
     check_val_swap(&body.list, pending);
     for s in &body.list {
         match s {
@@ -4737,7 +4814,7 @@ fn trunc_cast_name(expr: &Expr) -> Option<&str> {
     }
 }
 
-fn check_truncate_cmp(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
+fn check_truncate_cmp(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Pending) {
     match bin.op {
         Token::LSS | Token::GTR | Token::LEQ | Token::GEQ | Token::EQL | Token::NEQ => {}
         _ => return,
@@ -4758,7 +4835,7 @@ fn check_truncate_cmp_side(
     pass: &Pass<'_>,
     cast_expr: &Expr,
     other: &Expr,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     let Expr::CallExpr(xcast) = cast_expr else {
         return;
@@ -4837,7 +4914,7 @@ fn receiver_type_name(expr: &Expr) -> Option<&str> {
     }
 }
 
-fn check_type_def_first(file: &File, pending: &mut Vec<(u32, String)>) {
+fn check_type_def_first(file: &File, pending: &mut Pending) {
     let mut tracked: HashSet<String> = HashSet::new();
     for decl in &file.decls {
         match decl {
@@ -4878,14 +4955,14 @@ fn check_type_def_first(file: &File, pending: &mut Vec<(u32, String)>) {
     }
 }
 
-fn check_defer_in_loop_func(f: &FuncDecl, pending: &mut Vec<(u32, String)>) {
+fn check_defer_in_loop_func(f: &FuncDecl, pending: &mut Pending) {
     let Some(body) = &f.body else {
         return;
     };
     walk_defer_in_loop_stmts(&body.list, false, pending);
 }
 
-fn walk_defer_in_loop_stmts(stmts: &[Stmt], in_for: bool, pending: &mut Vec<(u32, String)>) {
+fn walk_defer_in_loop_stmts(stmts: &[Stmt], in_for: bool, pending: &mut Pending) {
     for stmt in stmts {
         match stmt {
             Stmt::DeferStmt(d) if in_for => {
@@ -4941,7 +5018,7 @@ fn walk_defer_in_loop_stmts(stmts: &[Stmt], in_for: bool, pending: &mut Vec<(u32
     }
 }
 
-fn check_hex_literal(lit: &BasicLit, pending: &mut Vec<(u32, String)>) {
+fn check_hex_literal(lit: &BasicLit, pending: &mut Pending) {
     if lit.kind != Some(Token::INT) || lit.value.len() < 3 {
         return;
     }
@@ -4971,7 +5048,7 @@ fn check_hex_literal(lit: &BasicLit, pending: &mut Vec<(u32, String)>) {
     }
 }
 
-fn check_nesting_reduce_for(body: &BlockStmt, pending: &mut Vec<(u32, String)>) {
+fn check_nesting_reduce_for(body: &BlockStmt, pending: &mut Pending) {
     if body.list.len() != 1 {
         return;
     }
@@ -4991,7 +5068,7 @@ fn check_nesting_reduce_for(body: &BlockStmt, pending: &mut Vec<(u32, String)>) 
     }
 }
 
-fn check_todo_comment_without_detail(cg: &CommentGroup, pending: &mut Vec<(u32, String)>) {
+fn check_todo_comment_without_detail(cg: &CommentGroup, pending: &mut Pending) {
     static RE: OnceLock<Regex> = OnceLock::new();
     let re = RE.get_or_init(|| {
         Regex::new(r"^(?://|/\*)?\s*(TODO|FIX|FIXME|BUG)\s*(?:\*/)?$").expect("todo regex")
@@ -5009,7 +5086,7 @@ fn check_todo_comment_without_detail(cg: &CommentGroup, pending: &mut Vec<(u32, 
     }
 }
 
-fn check_doc_stub(file: &File, pending: &mut Vec<(u32, String)>) {
+fn check_doc_stub(file: &File, pending: &mut Pending) {
     static RE: OnceLock<Regex> = OnceLock::new();
     let re = RE.get_or_init(|| {
         Regex::new(r"(?i)^\.\.\.$|^\.$|^xxx\.?$|^whatever\.?$").expect("doc stub regex")
@@ -5067,7 +5144,7 @@ fn visit_doc_stub(
     doc: Option<&CommentGroup>,
     article: bool,
     re: &Regex,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     if !is_exported(sym) {
         return;
@@ -5121,7 +5198,7 @@ fn block_has_definitions(block: &BlockStmt) -> bool {
     false
 }
 
-fn check_unnecessary_block_in_list(stmts: &[Stmt], pending: &mut Vec<(u32, String)>) {
+fn check_unnecessary_block_in_list(stmts: &[Stmt], pending: &mut Pending) {
     for stmt in stmts {
         if let Stmt::BlockStmt(b) = stmt {
             if !block_has_definitions(b) {
@@ -5136,7 +5213,7 @@ fn check_unnecessary_block_in_list(stmts: &[Stmt], pending: &mut Vec<(u32, Strin
     }
 }
 
-fn check_unnecessary_block_case(body: &[Stmt], pending: &mut Vec<(u32, String)>) {
+fn check_unnecessary_block_case(body: &[Stmt], pending: &mut Pending) {
     if body.len() == 1 {
         if let Stmt::BlockStmt(b) = &body[0] {
             report(
@@ -5151,7 +5228,7 @@ fn check_unnecessary_block_case(body: &[Stmt], pending: &mut Vec<(u32, String)>)
     check_unnecessary_block_in_list(body, pending);
 }
 
-fn check_sloppy_reassign(ifs: &IfStmt, pending: &mut Vec<(u32, String)>) {
+fn check_sloppy_reassign(ifs: &IfStmt, pending: &mut Pending) {
     let Some(init) = &ifs.init else {
         return;
     };
@@ -5326,7 +5403,7 @@ fn is_stdlib_regexp_recv(pass: &Pass<'_>, expr: &Expr) -> bool {
     rendered == "*regexp.Regexp"
 }
 
-fn check_http_no_body(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+fn check_http_no_body(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
     let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
         return;
     };
@@ -5349,7 +5426,7 @@ fn check_http_no_body(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, 
     );
 }
 
-fn check_prefer_decode_rune(pass: &Pass<'_>, ix: &IndexExpr, pending: &mut Vec<(u32, String)>) {
+fn check_prefer_decode_rune(pass: &Pass<'_>, ix: &IndexExpr, pending: &mut Pending) {
     if !is_int_lit(&ix.index, 0) {
         return;
     }
@@ -5376,7 +5453,7 @@ fn check_prefer_decode_rune(pass: &Pass<'_>, ix: &IndexExpr, pending: &mut Vec<(
     );
 }
 
-fn check_prefer_write_byte(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+fn check_prefer_write_byte(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
     let Expr::SelectorExpr(sel) = call.fun.as_ref() else {
         return;
     };
@@ -5457,7 +5534,7 @@ fn check_prefer_write_byte(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(
     );
 }
 
-fn check_index_alloc(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+fn check_index_alloc(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
     let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
         return;
     };
@@ -5488,7 +5565,7 @@ fn check_index_alloc(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, S
     );
 }
 
-fn check_string_xbytes(pass: &Pass<'_>, n: NodeRef<'_>, pending: &mut Vec<(u32, String)>) {
+fn check_string_xbytes(pass: &Pass<'_>, n: NodeRef<'_>, pending: &mut Pending) {
     match n {
         NodeRef::CallExpr(call) => {
             // copy(_, []byte(s))
@@ -5614,7 +5691,7 @@ fn is_string_lit_empty(expr: &Expr) -> bool {
     )
 }
 
-fn check_prefer_filepath_join(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
+fn check_prefer_filepath_join(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Pending) {
     if bin.op != Token::ADD {
         return;
     }
@@ -5661,7 +5738,7 @@ fn check_prefer_filepath_join(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut V
     );
 }
 
-fn check_strings_compare(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
+fn check_strings_compare(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Pending) {
     let call = match bin.x.as_ref() {
         Expr::CallExpr(c) => c,
         _ => return,
@@ -5713,7 +5790,7 @@ fn is_zero_byte_composite(expr: &Expr) -> bool {
     ty_ok && is_int_lit(&lit.elts[0], 0)
 }
 
-fn check_zero_byte_repeat(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+fn check_zero_byte_repeat(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
     let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
         return;
     };
@@ -5737,7 +5814,7 @@ fn check_zero_byte_repeat(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u
     );
 }
 
-fn check_bad_sorting(pass: &Pass<'_>, assign: &AssignStmt, pending: &mut Vec<(u32, String)>) {
+fn check_bad_sorting(pass: &Pass<'_>, assign: &AssignStmt, pending: &mut Pending) {
     if assign.tok != Some(Token::ASSIGN) {
         return;
     }
@@ -5770,7 +5847,7 @@ fn check_bad_sorting(pass: &Pass<'_>, assign: &AssignStmt, pending: &mut Vec<(u3
     );
 }
 
-fn check_slice_clear(fs: &ForStmt, pending: &mut Vec<(u32, String)>) {
+fn check_slice_clear(fs: &ForStmt, pending: &mut Pending) {
     // for i := 0; i < len(xs); i++ { xs[i] = 0 }
     let Some(init) = fs.init.as_deref() else {
         return;
@@ -5908,7 +5985,7 @@ fn fprint_args(pass: &Pass<'_>, args: &[Expr]) -> String {
         .join(", ")
 }
 
-fn check_prefer_fprint(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+fn check_prefer_fprint(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
     // $w.Write([]byte(fmt.Sprint*(...)))
     if let Expr::SelectorExpr(sel) = call.fun.as_ref() {
         if sel.sel.name == "Write"
@@ -5987,7 +6064,7 @@ fn check_prefer_fprint(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32,
 /// `issues.uniq-by-line` keeping the first finding on the line — and only when
 /// that option is on. Suppressing here instead would drop the finding outright
 /// under `uniq-by-line: false`.
-fn check_prefer_string_writer(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+fn check_prefer_string_writer(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
     // $w.Write([]byte($s)) where $w implements StringWriter
     if let Expr::SelectorExpr(sel) = call.fun.as_ref() {
         if sel.sel.name == "Write"
@@ -6111,7 +6188,7 @@ fn is_sync_map_method_call<'a>(
 fn check_sync_map_load_and_delete(
     pass: &Pass<'_>,
     stmts: &[Stmt],
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     for window in stmts.windows(2) {
         let (Stmt::AssignStmt(asgn), Stmt::IfStmt(ifs)) = (&window[0], &window[1]) else {
@@ -6160,7 +6237,7 @@ fn check_sync_map_load_and_delete(
     }
 }
 
-fn check_dynamic_fmt_string(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+fn check_dynamic_fmt_string(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
     let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
         return;
     };
@@ -6216,7 +6293,7 @@ fn is_string_slice_composite(expr: &Expr) -> Option<&[Expr]> {
 fn check_string_concat_simplify(
     pass: &Pass<'_>,
     call: &CallExpr,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
         return;
@@ -6278,7 +6355,7 @@ fn is_sync_once_func_call(pass: &Pass<'_>, call: &CallExpr) -> bool {
 fn check_bad_sync_once_func_call(
     pass: &Pass<'_>,
     call: &CallExpr,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     // sync.OnceFunc($x)()
     let Expr::CallExpr(inner) = call.fun.as_ref() else {
@@ -6301,7 +6378,7 @@ fn check_bad_sync_once_func_call(
 fn check_bad_sync_once_func_stmts(
     pass: &Pass<'_>,
     stmts: &[Stmt],
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     for s in stmts {
         let Stmt::ExprStmt(e) = s else {
@@ -6339,7 +6416,7 @@ fn case_fold_call_arg<'a>(pass: &Pass<'_>, expr: &'a Expr, want: &str) -> Option
     }
 }
 
-fn check_equal_fold_strings(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
+fn check_equal_fold_strings(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Pending) {
     if bin.op != Token::EQL && bin.op != Token::NEQ {
         return;
     }
@@ -6394,7 +6471,7 @@ fn check_equal_fold_strings(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec
     );
 }
 
-fn check_equal_fold_bytes(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+fn check_equal_fold_bytes(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
     let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
         return;
     };
@@ -6445,7 +6522,7 @@ fn check_equal_fold_bytes(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u
     );
 }
 
-fn check_sprintf_quoted_string(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+fn check_sprintf_quoted_string(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
     let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
         return;
     };
@@ -6544,7 +6621,7 @@ fn gocritic_go_version(pass: &Pass<'_>) -> String {
         .unwrap_or_else(|| code::module_go_version(pass))
 }
 
-fn check_time_expr_simplify(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
+fn check_time_expr_simplify(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Pending) {
     if code::version_compare(&gocritic_go_version(pass), "go1.17") < 0 {
         return;
     }
@@ -6608,7 +6685,7 @@ fn match_append_assign<'a>(stmt: &'a Stmt, slice: Option<&Expr>) -> Option<&'a C
     Some(call)
 }
 
-fn check_append_combine(stmts: &[Stmt], pending: &mut Vec<(u32, String)>) {
+fn check_append_combine(stmts: &[Stmt], pending: &mut Pending) {
     let mut cause_pos: Option<u32> = None;
     let mut slice: Option<&Expr> = None;
     let mut chain = 0usize;
@@ -6616,7 +6693,7 @@ fn check_append_combine(stmts: &[Stmt], pending: &mut Vec<(u32, String)>) {
     let flush = |cause_pos: &mut Option<u32>,
                  slice: &mut Option<&Expr>,
                  chain: &mut usize,
-                 pending: &mut Vec<(u32, String)>| {
+                 pending: &mut Pending| {
         if *chain > 1 {
             if let Some(pos) = *cause_pos {
                 report(
@@ -6669,7 +6746,7 @@ fn check_defer_before_return(
     pass: &Pass<'_>,
     body: &BlockStmt,
     is_func: bool,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     let mut explicit_return = false;
     let mut ret_index = body.list.len();
@@ -6701,7 +6778,7 @@ fn check_defer_before_return(
     }
 }
 
-fn walk_unnecessary_defer_stmt(pass: &Pass<'_>, stmt: &Stmt, pending: &mut Vec<(u32, String)>) {
+fn walk_unnecessary_defer_stmt(pass: &Pass<'_>, stmt: &Stmt, pending: &mut Pending) {
     match stmt {
         Stmt::BlockStmt(b) => check_unnecessary_defer_block(pass, b, false, pending),
         Stmt::IfStmt(i) => {
@@ -6799,7 +6876,7 @@ fn check_unnecessary_defer_block(
     pass: &Pass<'_>,
     body: &BlockStmt,
     is_func: bool,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     check_defer_before_return(pass, body, is_func, pending);
     for stmt in &body.list {
@@ -6807,7 +6884,7 @@ fn check_unnecessary_defer_block(
     }
 }
 
-fn check_unnecessary_defer_func(pass: &Pass<'_>, f: &FuncDecl, pending: &mut Vec<(u32, String)>) {
+fn check_unnecessary_defer_func(pass: &Pass<'_>, f: &FuncDecl, pending: &mut Pending) {
     if let Some(body) = &f.body {
         check_unnecessary_defer_block(pass, body, true, pending);
     }
@@ -6838,7 +6915,7 @@ fn type_is_reflect_value(pass: &Pass<'_>, expr: &Expr) -> bool {
     s == "reflect.Value" || s.ends_with("/reflect.Value")
 }
 
-fn check_redundant_sprint(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+fn check_redundant_sprint(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
     let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
         return;
     };
@@ -6924,7 +7001,7 @@ fn collect_import_names(file: &File) -> HashMap<String, String> {
 fn warn_import_shadow(
     id: &Ident,
     imports: &HashMap<String, String>,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     if id.name == "_" {
         return;
@@ -6952,7 +7029,7 @@ fn warn_import_shadow(
 fn check_import_shadow_fields(
     fields: Option<&FieldList>,
     imports: &HashMap<String, String>,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     let Some(fl) = fields else {
         return;
@@ -6968,7 +7045,7 @@ fn check_import_shadow_func(
     pass: &Pass<'_>,
     f: &FuncDecl,
     imports: &HashMap<String, String>,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     // `astwalk.walkSignature` order: params, results, then the receiver.
     // Results were missing entirely, so a named result shadowing an import
@@ -7191,7 +7268,7 @@ fn field_list_type_text_stripped(fl: Option<&FieldList>) -> Option<String> {
     Some(parts.join(", "))
 }
 
-fn check_type_unparen_compare(e: &Expr, pending: &mut Vec<(u32, String)>) {
+fn check_type_unparen_compare(e: &Expr, pending: &mut Pending) {
     let (Some(before), Some(after)) = (type_expr_text(e), type_expr_text_stripped(e)) else {
         return;
     };
@@ -7205,7 +7282,7 @@ fn check_type_unparen_compare(e: &Expr, pending: &mut Vec<(u32, String)>) {
     }
 }
 
-fn check_type_unparen_root(e: &Expr, pending: &mut Vec<(u32, String)>) {
+fn check_type_unparen_root(e: &Expr, pending: &mut Pending) {
     match e {
         Expr::ParenExpr(p) => match p.x.as_ref() {
             Expr::StructType(_) => {
@@ -7244,7 +7321,7 @@ fn check_type_unparen_root(e: &Expr, pending: &mut Vec<(u32, String)>) {
     }
 }
 
-fn check_type_unparen_file(file: &File, pending: &mut Vec<(u32, String)>) {
+fn check_type_unparen_file(file: &File, pending: &mut Pending) {
     for decl in &file.decls {
         match decl {
             Decl::GenDecl(g) => {
@@ -7290,7 +7367,7 @@ fn check_type_unparen_file(file: &File, pending: &mut Vec<(u32, String)>) {
     }
 }
 
-fn check_import_shadow_fields_types(ty: &FuncType, pending: &mut Vec<(u32, String)>) {
+fn check_import_shadow_fields_types(ty: &FuncType, pending: &mut Pending) {
     for fl in [&ty.type_params, &ty.params, &ty.results] {
         if let Some(list) = fl {
             for field in &list.list {
@@ -7344,7 +7421,7 @@ fn result_num_fields(results: &FieldList) -> usize {
     n
 }
 
-fn check_unnamed_result(f: &FuncDecl, check_exported: bool, pending: &mut Vec<(u32, String)>) {
+fn check_unnamed_result(f: &FuncDecl, check_exported: bool, pending: &mut Pending) {
     // Upstream: `if c.checkExported && !ast.IsExported(name) { return }` — the
     // param *narrows* the check to exported funcs rather than adding them.
     if check_exported && !is_exported(&f.name.name) {
@@ -7414,7 +7491,7 @@ fn check_unnamed_result(f: &FuncDecl, check_exported: bool, pending: &mut Vec<(u
     }
 }
 
-fn check_why_no_lint(cg: &CommentGroup, pending: &mut Vec<(u32, String)>) {
+fn check_why_no_lint(cg: &CommentGroup, pending: &mut Pending) {
     static RE: OnceLock<Regex> = OnceLock::new();
     let re =
         RE.get_or_init(|| Regex::new(r"^// *nolint(?::[^ ]+)? *(.*)$").expect("whyNoLint regex"));
@@ -7506,7 +7583,7 @@ fn is_stringer_method(decl: &FuncDecl) -> bool {
 fn check_huge_param_fields(
     pass: &Pass<'_>,
     fields: Option<&FieldList>,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     let Some(fl) = fields else {
         return;
@@ -7554,7 +7631,7 @@ fn check_huge_param_fields(
     }
 }
 
-fn check_huge_param(pass: &Pass<'_>, f: &FuncDecl, pending: &mut Vec<(u32, String)>) {
+fn check_huge_param(pass: &Pass<'_>, f: &FuncDecl, pending: &mut Pending) {
     if is_stringer_method(f) {
         return;
     }
@@ -7562,7 +7639,7 @@ fn check_huge_param(pass: &Pass<'_>, f: &FuncDecl, pending: &mut Vec<(u32, Strin
     check_huge_param_fields(pass, f.ty.params.as_ref(), pending);
 }
 
-fn check_range_val_copy(pass: &Pass<'_>, rs: &RangeStmt, pending: &mut Vec<(u32, String)>) {
+fn check_range_val_copy(pass: &Pass<'_>, rs: &RangeStmt, pending: &mut Pending) {
     let Some(value) = &rs.value else {
         return;
     };
@@ -7632,7 +7709,7 @@ fn is_ref_type(pass: &Pass<'_>, typ: TypeId) -> bool {
 fn check_ptr_to_ref_param_fields(
     pass: &Pass<'_>,
     fields: Option<&FieldList>,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     let Some(fl) = fields else {
         return;
@@ -7675,12 +7752,12 @@ fn check_ptr_to_ref_param_fields(
     }
 }
 
-fn check_ptr_to_ref_param(pass: &Pass<'_>, f: &FuncDecl, pending: &mut Vec<(u32, String)>) {
+fn check_ptr_to_ref_param(pass: &Pass<'_>, f: &FuncDecl, pending: &mut Pending) {
     check_ptr_to_ref_param_fields(pass, f.ty.params.as_ref(), pending);
     check_ptr_to_ref_param_fields(pass, f.ty.results.as_ref(), pending);
 }
 
-fn check_too_many_results(f: &FuncDecl, max_results: usize, pending: &mut Vec<(u32, String)>) {
+fn check_too_many_results(f: &FuncDecl, max_results: usize, pending: &mut Pending) {
     let Some(results) = &f.ty.results else {
         return;
     };
@@ -7754,7 +7831,7 @@ fn has_ptr_recv(pass: &Pass<'_>, sel: &guff::ast::SelectorExpr) -> bool {
     matches!(artifacts.types.get(typ), TypeData::Pointer(_))
 }
 
-fn check_eval_order(pass: &Pass<'_>, ret: &ReturnStmt, pending: &mut Vec<(u32, String)>) {
+fn check_eval_order(pass: &Pass<'_>, ret: &ReturnStmt, pending: &mut Pending) {
     if ret.results.len() < 2 {
         return;
     }
@@ -7889,7 +7966,7 @@ fn find_labeled_continue(body: &BlockStmt, label: &str) -> Option<u32> {
     found
 }
 
-fn check_unlabel_stmt(labeled: &LabeledStmt, pending: &mut Vec<(u32, String)>) {
+fn check_unlabel_stmt(labeled: &LabeledStmt, pending: &mut Pending) {
     if !can_break_from_stmt(&labeled.stmt) {
         return;
     }
@@ -7931,7 +8008,7 @@ fn check_unlabel_stmt(labeled: &LabeledStmt, pending: &mut Vec<(u32, String)>) {
     }
 }
 
-fn check_unlabel_stmt_func(f: &FuncDecl, pending: &mut Vec<(u32, String)>) {
+fn check_unlabel_stmt_func(f: &FuncDecl, pending: &mut Pending) {
     let Some(body) = &f.body else {
         return;
     };
@@ -7946,7 +8023,7 @@ fn check_unlabel_stmt_func(f: &FuncDecl, pending: &mut Vec<(u32, String)>) {
     });
 }
 
-fn check_return_after_http_error(pass: &Pass<'_>, stmt: &IfStmt, pending: &mut Vec<(u32, String)>) {
+fn check_return_after_http_error(pass: &Pass<'_>, stmt: &IfStmt, pending: &mut Pending) {
     let last = stmt.body.list.last();
     let Some(Stmt::ExprStmt(es)) = last else {
         return;
@@ -7993,7 +8070,7 @@ fn sync_mutex_embed_text(ty: &Expr) -> Option<String> {
     }
 }
 
-fn check_exposed_sync_mutex(file: &File, pending: &mut Vec<(u32, String)>) {
+fn check_exposed_sync_mutex(file: &File, pending: &mut Pending) {
     for decl in &file.decls {
         let Decl::GenDecl(g) = decl else {
             continue;
@@ -8064,7 +8141,7 @@ fn stmt_mutex_call(stmt: &Stmt) -> Option<(&Expr, &str, bool /* deferred */, u32
     }
 }
 
-fn check_bad_lock(stmts: &[Stmt], pending: &mut Vec<(u32, String)>) {
+fn check_bad_lock(stmts: &[Stmt], pending: &mut Pending) {
     for window in stmts.windows(2) {
         let Some((mu1, m1, deferred1, _)) = stmt_mutex_call(&window[0]) else {
             continue;
@@ -8185,7 +8262,7 @@ fn implements_error(pass: &Pass<'_>, typ: TypeId) -> bool {
 fn check_external_error_reassign(
     pass: &Pass<'_>,
     assign: &AssignStmt,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     if assign.tok != Some(Token::ASSIGN) || assign.lhs.len() != 1 || assign.rhs.len() != 1 {
         return;
@@ -8229,7 +8306,7 @@ fn ident_type(pass: &Pass<'_>, id: &Ident) -> Option<TypeId> {
     info.types.get(&id.id).map(|tav| tav.typ)
 }
 
-fn check_unchecked_inline_err(pass: &Pass<'_>, ifs: &IfStmt, pending: &mut Vec<(u32, String)>) {
+fn check_unchecked_inline_err(pass: &Pass<'_>, ifs: &IfStmt, pending: &mut Pending) {
     let Some(Stmt::AssignStmt(init)) = ifs.init.as_deref() else {
         return;
     };
@@ -8622,7 +8699,7 @@ fn check_bool_expr_simplify(
     pass: &Pass<'_>,
     expr: &Expr,
     reported_end: &mut u32,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     if !matches!(expr, Expr::UnaryExpr(_) | Expr::BinaryExpr(_)) {
         return;
@@ -9232,8 +9309,20 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             .then_with(|| checker_of(&a.1).cmp(checker_of(&b.1)))
     });
 
-    for (pos, message) in pending {
-        pass.reportf(pos, message);
+    for (pos, message, edit) in pending {
+        let Some(edit) = edit else {
+            pass.reportf(pos, message);
+            continue;
+        };
+        pass.report(Diagnostic {
+            pos,
+            message: message.clone(),
+            suggested_fixes: vec![SuggestedFix {
+                message,
+                text_edits: vec![edit],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }

@@ -12162,3 +12162,76 @@ golden **193/193**。
 2. ソースが手元にあるもの（`gocritic`＝go-critic、`testifylint`＝Antonboom、
    `ginkgolinter`＝nunnatsa、`staticcheck`＝dominikh）を優先する。
 3. `nlreturn` / `protogetter` などは**上流を取得できてから**。
+
+---
+
+### 2026-08-26（続き 51）— gocritic に fix 3 つ。**edit の座標が別の FileSet のままだった**
+
+`whitespace` の次に上流がローカルにある `gocritic`（76 行）へ。
+
+#### `unslice` / `offBy1` は Go のコードではなく **ruleguard ルール**
+
+`checkers/` に `unslice_checker.go` は無い。
+`checkers/rules/rules.go` の `dsl.Matcher` として書かれていて、
+`ruleguard` checker が実行する:
+
+```go
+m.Match(`$s[:]`).Suggest(`$s`)
+m.Match(`$x[len($x)]`).Suggest(`$x[len($x)-1]`)
+```
+
+guff はこの 2 つをネイティブ checker として実装しているので、
+`Suggest` の中身だけを移植した（マッチした式全体を置換）。
+**`WarnFixable` を grep しても出てこない**ので、
+「fix を持つ checker はこれだけ」と早合点しかけた。
+
+#### 見つけた移植漏れ: **edit だけ remap されていなかった**
+
+コメント系の checker は `PARSE_COMMENTS` の**再パース**を読む。
+再パースは独自の `FileSet` を持つので、
+guff は `remap_reparsed_pos` で位置を解析側に写している ——
+**メッセージ位置だけを**。
+
+`commentFormatting` に fix を足したら、
+edit の `pos`/`end` が**再パース座標のまま** `pending` に入った。
+今回はファイル外に落ちて捨てられたが、
+**長いファイルなら別の場所に書き込んでいた**。
+
+診断は正しく出るので finding 比較のゲートは 1 つも赤くならない。
+バイト差分の tier だけが拾える形で、これも続き 38 の狙い通り。
+
+#### 自分で入れたバグ: **`remap_edit` は冪等ではない**
+
+`pending.push` のインデント違いを 3 パターン置換したら、
+**同じ 1 箇所に 3 回**適用された。
+`remap_edit` を 3 連続で呼ぶと、
+2 回目以降は**解析側の座標を再パース座標として再変換**するので位置が壊れる。
+症状は「報告はされるのに書き換わらない」で、
+最初の移植漏れと見分けが付かなかった。
+
+**機械的な一括置換は、部分文字列が重なると多重適用される。**
+正規表現で畳み直して 1 回にした。
+
+#### 残り: 上流は**`//nolint` で抑制した所見の fix を適用している**
+
+`extras.go` の `//nolint` が `// nolint` に書き換わる。
+ところが golden の commentFormatting 所見は **1 件だけ**（`bad.go:14`）で、
+guff も 1 件 —— つまり**両ツールともこの行を報告していない**のに、
+上流だけが書き換える。
+
+golangci は fix を issue の filter より前に当てているらしい。
+guff は filter 後の issue に当てるので再現しない。
+**「lint するな」と書かれた行を書き換える**挙動なので、
+少なく書く側に留めて台帳に記録した。
+
+#### 測った
+
+| | 続き 50 後 | 今回 |
+|---|---:|---:|
+| `--fix` が上流とバイト一致 | 162 | 162 |
+| pending | 30 | 30 |
+| `gocritic` ケースが書く行数 | 0 / 76 | **29 / 76** |
+
+golden **193/193**。
+`0X12` → `0x12` と関数末尾の列揃えは gocritic の fix ではなく、
+ファイルが書き換わった結果 formatter が正規化したもの。

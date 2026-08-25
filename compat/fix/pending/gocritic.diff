@@ -7,3 +7,32 @@
 # ledger cannot quietly outlive the defect it records.
 #
 # Re-record with: ./compat/fix/regen.sh --pending gocritic
+--- a/bad.go
++++ b/bad.go
+@@ -11,7 +11,7 @@
+ 	"sync"
+ )
+ 
+-//BadCommentFormatting has no space after //.
++// BadCommentFormatting has no space after //.
+ var _ = 0
+ 
+ // deprecated: use newer.
+@@ -80,7 +80,7 @@
+ }
+ 
+ func unslice(s []int) {
+-	_ = s[:]
++	_ = s
+ }
+ 
+ func newDeref() {
+@@ -201,7 +201,7 @@
+ }
+ 
+ func offBy1(xs []int) {
+-	_ = xs[len(xs)]
++	_ = xs[len(xs)-1]
+ }
+ 
+ func typeSwitchVar(v interface{}) int {
