@@ -384,9 +384,9 @@
 -	buf.WriteString(fmt.Sprint("abc", "de"))
 -	buf.WriteString(fmt.Sprintf("%T", 0))
 -	buf.WriteString(fmt.Sprintln("abc", "de"))
-+	fmt.Fprint(buf, "abc", "de")
-+	fmt.Fprintf(buf, "%T", 0)
-+	fmt.Fprintln(buf, "abc", "de")
++	fmt.Fprint(&buf, "abc", "de")
++	fmt.Fprintf(&buf, "%T", 0)
++	fmt.Fprintln(&buf, "abc", "de")
  }
  
  type Buffer struct{}

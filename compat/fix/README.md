@@ -94,6 +94,9 @@ After importas (2026-08-25): **147 matching, 46 pending**. `importas` is the
 first case to *leave* the un-buildable list by being fixed rather than join it —
 it renamed the import and not its uses.
 
+After QF1012 (2026-08-25): 147 matching, 46 pending, and `staticcheck-qf` off
+the un-buildable list too. `modernize` is the only guff-side tree left there.
+
 ## Does it still build?
 
 A `--fix` that rewrites `fmt.Sprint(i)` to `strconv.Itoa(i)` and does not add
@@ -106,7 +109,7 @@ It asks the pristine tree first: several fixtures are deliberately un-buildable
 that was already broken.
 
 The count is printed, not enforced, and the reason is the measurement itself.
-Seven cases leave an un-buildable tree, and **five of them are byte-identical
+Six cases leave an un-buildable tree, and **five of them are byte-identical
 to what golangci-lint wrote**:
 
 | case | why the fixed tree does not build |
@@ -118,8 +121,30 @@ to what golangci-lint wrote**:
 | `rangeint` | `for i = 0` whose body never reads `i` becomes `for i = range n`, leaving `var i int` unread |
 
 Upstream's `--fix` breaks the build on all five, guff reproduces it exactly, and
-a hard gate would be demanding that guff be *incompatible*. The other two are
-guff's own: `modernize` and `staticcheck-qf`.
+a hard gate would be demanding that guff be *incompatible*. The only remaining
+guff-side one is `modernize`.
+
+## One difference is deliberate, and it is not in `pending/`'s sense
+
+`pending/staticcheck-qf.diff` holds three hunks. Two are gaps. The third is a
+place where **guff is right and upstream is not**, and closing it would be a
+regression:
+
+```go
+import ( s "strings" )
+func renamed() { s.Replace("", "", "", -1) }
+```
+
+golangci-lint's QF1004 rewrites that to `strings.ReplaceAll("", "", "")` and
+adds no import, so it names a package that is not bound in the file. guff writes
+`s.ReplaceAll(...)`, which compiles. That single hunk is why `staticcheck-qf`
+builds after guff's `--fix` and would not after upstream's.
+
+The ledger has no slot for "ahead", only for "behind", so it is recorded there
+with the two real gaps. If someone later makes this hunk match, the gate goes
+red — read this section before deleting the entry, because matching here means
+`--fix` starts breaking user builds. Same call as the `revive` ratchet: a defect
+upstream ships is not a specification.
 
 Two of the five joined that list by being *fixed*. `modernize-atomictypes` used
 to write a prefix guff invented, which happened to keep the alias used;
