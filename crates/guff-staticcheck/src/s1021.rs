@@ -8,9 +8,13 @@ use guff::ast::{AssignStmt, BlockStmt, DeclStmt, Expr, GenDecl, Stmt, ValueSpec}
 use guff::node_mask;
 use guff::token::Token;
 use guff::walk::{inspect as walk_inspect, NodeRef};
-use guff_analysis::code::{object_of, refers_to};
+use guff_analysis::code::{self, object_of, refers_to};
+
+use crate::render::render_node;
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::{
+    AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
 
 /// Upstream `hasMultipleAssignments`: a full `ast.Inspect` over the block,
 /// counting every `AssignStmt` whose LHS mentions `obj`. A hand-rolled
@@ -46,7 +50,7 @@ fn has_multiple_assignments(
     num >= 2
 }
 
-fn check_block(pass: &Pass<'_>, block: &BlockStmt) -> Vec<(u32, String)> {
+fn check_block(pass: &Pass<'_>, block: &BlockStmt) -> Vec<(u32, String, Option<TextEdit>)> {
     let mut out = Vec::new();
     if block.list.len() < 2 {
         return out;
@@ -93,9 +97,31 @@ fn check_block(pass: &Pass<'_>, block: &BlockStmt) -> Vec<(u32, String)> {
             continue;
         }
         // Upstream reports on `decl`, i.e. the `var` keyword — not the name.
+        //
+        // The fix replaces `[decl.Pos(), assign.End())` with a rebuilt
+        // `GenDecl` carrying the same names and type plus the assignment's
+        // right-hand side, so the two statements become `var x T = v`. The
+        // parts are printed through `format.Node`, as upstream's edit path is.
+        let edit = ty
+            .as_ref()
+            .and_then(|t| render_node(pass, t))
+            .zip(render_node(pass, &rhs[0]))
+            .map(|(ty_text, rhs_text)| {
+                let names_text = names
+                    .iter()
+                    .map(|n| n.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                TextEdit {
+                    pos: tok_pos.0 as u32,
+                    end: block.list[i + 1].end().0 as u32,
+                    new_text: format!("var {names_text} {ty_text} = {rhs_text}"),
+                }
+            });
         out.push((
             tok_pos.0 as u32,
             "should merge variable declaration with assignment on next line".into(),
+            edit,
         ));
     }
     out
@@ -107,15 +133,30 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "S1021 requires inspect analyzer".to_string())?
         .clone();
 
-    let mut pending: Vec<(u32, String)> = Vec::new();
+    let mut pending: Vec<(u32, String, Option<TextEdit>)> = Vec::new();
     inspect.preorder_typed(node_mask!(BlockStmt), pass.files(), |n| {
         let NodeRef::BlockStmt(block) = n else {
             return;
         };
         pending.extend(check_block(pass, block));
     });
-    for (pos, message) in pending {
-        pass.report_unless_generated(pos, message);
+    for (pos, message, edit) in pending {
+        let Some(edit) = edit else {
+            pass.report_unless_generated(pos, message);
+            continue;
+        };
+        if code::is_generated_at(pass, pos) {
+            continue;
+        }
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: "Merge declaration with assignment".into(),
+                text_edits: vec![edit],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }

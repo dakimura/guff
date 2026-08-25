@@ -363,6 +363,18 @@
  	_, _, _, _, _, _, _, _, _, _ = c01, c02, c03, c04, c05, c06, c07, c08, c09, c10
  	_, _, _, _, _, _, _, _, _, _ = c11, c12, c13, c14, c15, c16, c17, c18, c19, c20
  	_, _, _, _, _, _, _, _, _, _ = c21, c22, c23, c24, c25, c26, c27, c28, c29, c30
+--- a/qf1011/ok/ok.go
++++ b/qf1011/ok/ok.go
+@@ -4,8 +4,7 @@
+ 
+ func fn() {
+ 	var a = gen1()
+-	var b int
+-	b = gen1()
++	var b int = gen1()
+ 	// Explicit int64 is required: bare `-1` defaults to int, not int64.
+ 	var originalQuota int64 = -1
+ 	var alsoNeeded int64 = +1
 --- a/qf1012/bad/bad.go
 +++ b/qf1012/bad/bad.go
 @@ -14,18 +14,18 @@
