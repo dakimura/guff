@@ -11369,6 +11369,19 @@ testingcontext/testingcontext.go:6:2: "context" imported and not used
 **パースが通らない木は、その後ろの型エラーを何個でも隠す。**
 「非ビルド 1 件」は「欠陥 1 件」ではない。
 
+そして**出てきた 2 つは別の種類だった**。
+`testingcontext` のほうは guff の欠陥では**ない** ——
+この case の diff-of-diffs に `testingcontext` は現れない、
+つまり**上流とバイト一致**している。
+上流の `--fix` も `ctx, cancel := context.WithCancel(…)` を
+`ctx := t.Context()` に replace するだけで `"context"` の import を消さない。
+guff はそれを正確に再現している。
+`reflecttypefor` だけが guff 側の穴。
+
+**「新しく見えた失敗」を「新しく見つけた欠陥」と読まないこと。**
+隠れていたものが出たとき、最初に訊くのは
+「これは上流も同じことを書くか」であって「どう直すか」ではない。
+
 #### `reflecttypefor` は**上流 HEAD を読んでも直せない**
 
 残った `var zero MyStruct` の削除漏れは、手元の x/tools を読んで移植——
@@ -11405,6 +11418,7 @@ golden と fix の expected を両方 regen（上流 2 回一致を確認して�
 1. **`refactor.DeleteStmt`**。`waitgroupgo` の空白行が本体だが、
    コメント位置が要るので続き 39 のソース走査を一般化する必要がある。
 2. `reflecttypefor` の未使用 var 削除。**pin 版の x/tools を取ってから**。
-3. `testingcontext` の `"context"` 未使用 import。今回初めて見えた。
+3. ~~`testingcontext` の未使用 import~~ —— **上流とバイト一致なので直さない**。
+   直すと `perfsprint` の `fiximports` と同じで、パリティから外れる。
 4. `refactor::fresh_name` を `stringscutprefix` の `after` / `ok` にも通す。
 5. pending 47 件。`DEFERRED: SuggestedFix` が 15 linter。
