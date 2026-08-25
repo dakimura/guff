@@ -60,6 +60,17 @@
 +	case 2:
 +	}
  }
+--- a/sa4023/bad/bad.go
++++ b/sa4023/bad/bad.go
+@@ -2,7 +2,6 @@
+ 
+ func main() {
+ 	var p *int
+-	var i any
+-	i = p
++	var i any = p
+ 	_ = i == nil
+ }
 --- a/sa4032/ok/ok.go
 +++ b/sa4032/ok/ok.go
 @@ -1,12 +1,13 @@

@@ -124,6 +124,10 @@ After staticcheck's S1002 / S1004 / S1012 (2026-08-26): **163 matching, 29
 pending**. Three checks closed a *fourth* case, `staticcheck-checks-glob`, which
 enables a narrower set that those three happen to cover.
 
+After S1003 / S1021 (2026-08-26): **164 matching, 28 pending**, and
+`staticcheck-st` closed the same way. Five checks, two cases — and
+`staticcheck-s` itself is still at 63 of 271.
+
 ## Does it still build?
 
 A `--fix` that rewrites `fmt.Sprint(i)` to `strconv.Itoa(i)` and does not add

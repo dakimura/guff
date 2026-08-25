@@ -12301,3 +12301,61 @@ golden **193/193**。
    `S1003`（`Index` → `Contains`）/ `S1021`（`var x T; x = v` → `var x T = v`）
    あたりから。
 2. pending 29 件。`goheader` 110 / `testifylint-mock` 97 / `protogetter` 42。
+
+---
+
+### 2026-08-26（続き 53）— S1003 / S1021。**閉じるのは、作業しているケースではない**
+
+続き 52 の続き。`staticcheck-s` は 271 対 32 だった。
+
+#### 2 つとも「メッセージに答えが書いてある」
+
+| check | 上流の edit | 置換テキスト |
+|---|---|---|
+| S1003 | `edit.ReplaceWithNode(fset, node, r)` | `should use {r} instead` の `r` |
+| S1021 | `edit.ReplaceWithNode(fset, Range{decl.Pos(), assign.End()}, r)` | 組み直した `GenDecl` |
+
+S1003 は guff が既に合成 AST（`replacement_expr`）を作っていたので、
+それを `render_node` に通すだけ。
+**メッセージ側は `render_expr` のまま残した** —— 変えると golden が動く。
+
+S1021 は**2 文にまたがる**置換。guff には合成 `Decl` を印字する経路が無いので、
+名前・型・右辺をそれぞれ `render_node` で印字して
+`var {names} {ty} = {rhs}` を組み立てた。
+
+#### 閉じたのは `staticcheck-st` だった
+
+S チェックを 5 つ実装して、バイト一致になったケースは
+`staticcheck-checks-glob`（続き 52）と `staticcheck-st`（今回）。
+**どちらも作業対象の `staticcheck-s` ではない。**
+
+`staticcheck-s` 自身は 63 / 271 でまだ 1/4。
+`checks` 設定で絞ったケースのほうが先に完成する。
+
+**ケース単位の数字だけ見ていると「1 つも閉じていない」期間が続く。**
+チェック単位で積むのが正解で、台帳の行数がその進捗を持っている。
+
+#### `staticcheck-qf` が上流と**同数**になった
+
+383 → 395 行。上流も 395 行。**中身は違う。**
+
+「guff-only と gcl-only が同数なら位置か文言の差」の署名そのもの。
+しかもこのケースには続き 42 の QF1004 の意図的乖離
+（`import s "strings"` のファイルで `s.ReplaceAll` を保つ）が入っているので、
+**構造的に一致しない**。行数だけ見て「あと一歩」と読むと外す。
+
+#### 測った
+
+| | 続き 52 後 | 今回 |
+|---|---:|---:|
+| `--fix` が上流とバイト一致 | 163 | **164** |
+| pending | 29 | **28** |
+| `staticcheck-s` が書く行数 | 32 / 271 | **63 / 271** |
+
+golden **193/193**。
+`staticcheck-qf` / `-sa` も動いたので再記録した。
+
+#### 次にやること
+
+1. `staticcheck-s` の残り 17 チェック。
+2. pending 28 件。`goheader` 110 / `testifylint-mock` 97 / `protogetter` 42。
