@@ -7,9 +7,13 @@ use std::sync::OnceLock;
 use guff::ast::{CallExpr, Expr, SelectorExpr};
 use guff::node_mask;
 use guff::walk::NodeRef;
-use guff_analysis::code::{is_call_to, type_func_name};
+use guff_analysis::code::{self, is_call_to, type_func_name};
+
+use crate::render::render_node;
 use guff_analysis::passes::inspect;
-use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::{
+    match_pos, AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
 
 fn is_now_sub(pass: &Pass<'_>, call: &CallExpr) -> bool {
     let Expr::SelectorExpr(SelectorExpr { x, sel, .. }) = &*call.fun else {
@@ -39,20 +43,54 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "S1012 requires inspect analyzer".to_string())?
         .clone();
 
-    let mut pending: Vec<(u32, String)> = Vec::new();
+    let mut pending: Vec<(u32, String, Option<TextEdit>)> = Vec::new();
     inspect.preorder_typed(node_mask!(CallExpr), pass.files(), |node| {
         let NodeRef::CallExpr(call) = node else {
             return;
         };
         if is_now_sub(pass, call) {
+            // `code.EditMatch` replaces the matched node with the replacement
+            // pattern re-printed, so the whole `time.Now().Sub(x)` call goes and
+            // `time.Since(x)` takes its place, with `x` printed from the AST.
+            // `render_node`, not the message renderer: upstream's `EditMatch`
+            // prints through `format.Node`, and a hand-rolled walker spaces
+            // binary operators differently. That is invisible in a message and
+            // is a byte difference on disk.
+            let edit = call
+                .args
+                .first()
+                .and_then(|arg| render_node(pass, arg))
+                .map(|arg| TextEdit {
+                    pos: call.pos().0 as u32,
+                    end: call.end().0 as u32,
+                    new_text: format!("time.Since({arg})"),
+                });
             pending.push((
                 match_pos(node),
                 "should use time.Since instead of time.Now().Sub".into(),
+                edit,
             ));
         }
     });
-    for (pos, message) in pending {
-        pass.report_unless_generated(pos, message);
+    for (pos, message, edit) in pending {
+        let Some(edit) = edit else {
+            pass.report_unless_generated(pos, message);
+            continue;
+        };
+        // `report.FilterGenerated()` upstream: same gate, but the fix has to
+        // ride along, so the diagnostic is built here rather than by `reportf`.
+        if code::is_generated_at(pass, pos) {
+            continue;
+        }
+        pass.report(Diagnostic {
+            pos,
+            message: message.clone(),
+            suggested_fixes: vec![SuggestedFix {
+                message: "Replace with call to time.Since".into(),
+                text_edits: vec![edit],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }
