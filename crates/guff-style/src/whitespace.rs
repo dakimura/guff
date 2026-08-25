@@ -21,14 +21,16 @@ use guff::scanner::{Scanner, SCAN_COMMENTS};
 use guff::token::Token;
 use guff::walk::{self, NodeRef, Visitor};
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_analysis::{
+    AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
 
 use crate::options::WhitespaceOptions;
 
 struct WhitespaceVisitor<'a> {
     fset: &'a FileSet,
     comments: &'a [CommentGroup],
-    pending: &'a mut Vec<(u32, String)>,
+    pending: &'a mut Vec<(u32, String, TextEdit)>,
     want_newline: HashMap<i64, bool>,
     multi_if: bool,
     multi_func: bool,
@@ -110,17 +112,40 @@ fn first_and_last(
     (opening_pos, Some(first), Some(last))
 }
 
-fn check_start(fset: &FileSet, start: Pos, first: (Pos, Pos)) -> Option<(u32, String)> {
+/// A blank-line fix: everything between the brace and the code collapses to a
+/// single newline.
+///
+/// The edit swallows the statement's indentation along with the blank lines —
+/// upstream's spans start one past `{` and run to the statement itself — and
+/// the formatter that runs after the fixes puts it back. Trying to preserve the
+/// indent here would mean guessing at it; upstream does not.
+fn newline_edit(pos: Pos, end: Pos) -> TextEdit {
+    TextEdit {
+        pos: pos.0 as u32,
+        end: end.0 as u32,
+        new_text: "\n".into(),
+    }
+}
+
+fn check_start(fset: &FileSet, start: Pos, first: (Pos, Pos)) -> Option<(u32, String, TextEdit)> {
     if pos_line(fset, start) + 1 < pos_line(fset, first.0) {
-        Some((start.0 as u32, "unnecessary leading newline".into()))
+        Some((
+            start.0 as u32,
+            "unnecessary leading newline".into(),
+            newline_edit(start, first.0),
+        ))
     } else {
         None
     }
 }
 
-fn check_end(fset: &FileSet, end: Pos, last: (Pos, Pos)) -> Option<(u32, String)> {
+fn check_end(fset: &FileSet, end: Pos, last: (Pos, Pos)) -> Option<(u32, String, TextEdit)> {
     if pos_line(fset, end) - 1 > pos_line(fset, last.1) {
-        Some((end.0 as u32, "unnecessary trailing newline".into()))
+        Some((
+            end.0 as u32,
+            "unnecessary trailing newline".into(),
+            newline_edit(last.1, end),
+        ))
     } else {
         None
     }
@@ -138,9 +163,17 @@ fn check_block(v: &mut WhitespaceVisitor<'_>, stmt: &BlockStmt) {
     if let Some(first) = first {
         let start_msg = check_start(v.fset, opening, first);
         if want_newline && start_msg.is_none() && !stmt.list.is_empty() {
+            // The opposite direction: a multi-line header wants a blank line
+            // after it, so this one *inserts* rather than collapsing.
+            let at = stmt.list[0].pos();
             v.pending.push((
                 opening.0 as u32,
                 "multi-line statement should be followed by a newline".into(),
+                TextEdit {
+                    pos: at.0 as u32,
+                    end: at.0 as u32,
+                    new_text: "\n".into(),
+                },
             ));
         } else if !want_newline {
             if let Some(msg) = start_msg {
@@ -185,7 +218,7 @@ fn run_func(
     decl: &FuncDecl,
     multi_if: bool,
     multi_func: bool,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<(u32, String, TextEdit)>,
 ) {
     if decl.body.is_none() {
         return;
@@ -207,7 +240,7 @@ fn run_file_decls(
     comments: &[CommentGroup],
     multi_if: bool,
     multi_func: bool,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<(u32, String, TextEdit)>,
 ) {
     for decl in decls {
         let Decl::FuncDecl(f) = decl else {
@@ -341,8 +374,16 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         );
     }
 
-    for (pos, message) in pending {
-        pass.reportf(pos, message);
+    for (pos, message, edit) in pending {
+        pass.report(Diagnostic {
+            pos,
+            message: message.clone(),
+            suggested_fixes: vec![SuggestedFix {
+                message,
+                text_edits: vec![edit],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }
