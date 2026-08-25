@@ -529,6 +529,45 @@ fn limit_is_safe(pass: &Pass<'_>, limit: &Expr) -> bool {
     }
 }
 
+/// Whether the loop index is *read* anywhere in the loop body.
+///
+/// Upstream `rangeint` deletes `i := ` from the fix when it is not
+/// (`rangeint.go`, `if !used && init.Tok == token.DEFINE`): `for i := 0; i < n;
+/// i++` with no use of `i` has to become `for range n`, because a range clause
+/// that binds `i` and never reads it is `declared and not used` — the rewrite
+/// would not compile.
+///
+/// Resolution is by object, not by name, so an inner `i` shadowing the loop's
+/// does not count as a use. An unresolvable index answers `true`: keeping the
+/// variable is the conservative half of this decision.
+fn index_used_in_body(pass: &Pass<'_>, body: &guff::ast::BlockStmt, index: &Expr) -> bool {
+    let Expr::Ident(index_id) = index else {
+        return true;
+    };
+    let Some(index_obj) = ident_obj(pass, index_id) else {
+        return true;
+    };
+    let Some(info) = pass.types_info() else {
+        return true;
+    };
+    let mut used = false;
+    walk::inspect(NodeRef::BlockStmt(body), |n| {
+        if used {
+            return false;
+        }
+        let Some(NodeRef::Ident(id)) = n else {
+            return true;
+        };
+        // Upstream tests `info.Uses[id] == v`: a *use*, not the definition.
+        if info.uses.get(&id.id).copied() == Some(index_obj) {
+            used = true;
+            return false;
+        }
+        true
+    });
+    used
+}
+
 fn index_is_scalar_lvalue_in(body: &guff::ast::BlockStmt, index_name: &str) -> bool {
     let mut found = false;
     walk::inspect(NodeRef::BlockStmt(body), |n| {
@@ -799,8 +838,14 @@ fn check_rangeint(pass: &Pass<'_>, for_stmt: &ForStmt, pending: &mut Vec<Diagnos
         .unwrap_or(for_stmt.for_.0 as u32);
 
     let new_text = if init.tok == Some(Token::DEFINE) {
-        format!("for {index_name} := range {range_expr}")
+        if index_used_in_body(pass, &for_stmt.body, &init.lhs[0]) {
+            format!("for {index_name} := range {range_expr}")
+        } else {
+            format!("for range {range_expr}")
+        }
     } else {
+        // `for i = 0; …` reuses a variable declared elsewhere, so there is no
+        // declaration to drop.
         format!("for {index_name} = range {range_expr}")
     };
 
@@ -2276,11 +2321,18 @@ fn check_slicescontains(
                                     if let Some(prev_bool) = is_true_or_false_lit(&prev.rhs[0]) {
                                         if assign_bool != prev_bool {
                                             let neg = if assign_bool { "" } else { "!" };
-                                            let Some(lhs_text) = expr_text(&assign.lhs[0]) else {
-                                                continue;
-                                            };
                                             let end = rng.body.end().0 as u32;
-                                            let prev_pos = prev.lhs[0].pos().0 as u32;
+                                            // Upstream replaces the previous
+                                            // assignment's *right-hand side*
+                                            // only, so whichever token the
+                                            // source used survives. Rewriting
+                                            // from the lhs and spelling `=`
+                                            // turned `found := false` into
+                                            // `found = slices.Contains(…)` —
+                                            // `undefined: found`, a fix that
+                                            // does not compile.
+                                            let rhs_pos = prev.rhs[0].pos().0 as u32;
+                                            let rhs_end = prev.rhs[0].end().0 as u32;
                                             pending.push(Diagnostic {
                                                 // `Pos: rng.Pos()` for every
                                                 // spelling. The fix starts at
@@ -2296,13 +2348,23 @@ fn check_slicescontains(
                                                     ),
                                                     text_edits: with_imports(
                                                         &import_edits,
-                                                        vec![TextEdit {
-                                                            pos: prev_pos,
-                                                            end,
-                                                            new_text: format!(
-                                                                "{lhs_text} = {neg}{contains}"
-                                                            ),
-                                                        }],
+                                                        vec![
+                                                            TextEdit {
+                                                                pos: rhs_pos,
+                                                                end: rhs_end,
+                                                                new_text: format!(
+                                                                    "{neg}{contains}"
+                                                                ),
+                                                            },
+                                                            // Delete the loop
+                                                            // and the space
+                                                            // before it.
+                                                            TextEdit {
+                                                                pos: rhs_end,
+                                                                end,
+                                                                new_text: String::new(),
+                                                            },
+                                                        ],
                                                     ),
                                                 }],
                                                 related: Vec::new(),
@@ -2779,6 +2841,21 @@ fn check_waitgroupgo(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<Diagn
                     TextEdit {
                         pos: defer_stmt.defer_.0 as u32,
                         end: defer_stmt.call.end().0 as u32,
+                        new_text: String::new(),
+                    },
+                    // ... }()
+                    //      -
+                    // ... } )
+                    //
+                    // Without this the call the goroutine used to make is left
+                    // behind inside the one being built: `wg.Go(func() {…}()`,
+                    // which does not parse. A missing edit is invisible to
+                    // every finding-set gate — the diagnostic is identical
+                    // either way — and shows up only as a tree that stops
+                    // compiling (COMPAT-HARDENING, `compat/fix/`).
+                    TextEdit {
+                        pos: go_call.lparen.0 as u32,
+                        end: go_call.rparen.0 as u32,
                         new_text: String::new(),
                     },
                 ],

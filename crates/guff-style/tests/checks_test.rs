@@ -5886,10 +5886,13 @@ fn modernize_rangeint_skips_mutated_limits() {
     // param/const/local/len, plus the two `for i = 0` loops whose index is not
     // read after the loop. `nopeIndexReadAfterLoop` returns its index, so a
     // range loop — which would leave it holding limit-1 — is not offered.
+    // Then three whose *body* never reads the index: two `:=` (the fix drops
+    // the declaration) and one `=` (it does not). Whether the index survives is
+    // a property of the fix, not of the finding — all nine report identically.
     assert_eq!(
         hits.len(),
-        6,
-        "expected 6 rangeint hits, got {} {messages:?}",
+        9,
+        "expected 9 rangeint hits, got {} {messages:?}",
         hits.len()
     );
     for bad in ["k", "incLimit", "addrLimit", "chks", "outer"] {
@@ -6106,6 +6109,118 @@ fn modernize_atomictypes_drops_non_locals_when_the_package_has_ignored_files() {
         "only the local var survives an ignored file: {kept:?}"
     );
     assert!(kept[0].contains("var n uint32"), "{kept:?}");
+}
+
+/// The goroutine's own call has to go, or the fix does not parse.
+///
+/// `go func() {...}()` becomes `wg.Go(func() {...})`: the `(` of the trailing
+/// `()` is deleted so the `)` closes `wg.Go(`. guff was leaving it, writing
+/// `wg.Go(func() {...}()` — a syntax error. Both spellings report the same
+/// diagnostic, so only the edits can tell them apart.
+#[test]
+fn modernize_waitgroupgo_fix_removes_the_goroutine_call_parens() {
+    let pkg = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/waitgroupgo",
+        "waitgroupgo.go",
+    );
+    let mut checked = 0;
+    for d in support::run_analyzer_diagnostics(modernize(), &pkg) {
+        if !d.message.contains("WaitGroup.Go") {
+            continue;
+        }
+        let edits = &d.suggested_fixes[0].text_edits;
+        assert!(
+            edits.iter().any(|e| e.new_text.ends_with(".Go(")),
+            "{edits:?}"
+        );
+        // A one-byte deletion spanning `(`: lparen..rparen of the go call.
+        assert!(
+            edits
+                .iter()
+                .any(|e| e.new_text.is_empty() && e.end == e.pos + 1),
+            "the trailing `()` must lose its `(`: {edits:?}"
+        );
+        checked += 1;
+    }
+    assert_eq!(checked, 1, "one goroutine in the fixture");
+}
+
+/// An index the body never reads must not survive into the range clause.
+///
+/// `for i := 0; i < n; i++` with no use of `i` becomes `for range n` upstream,
+/// not `for i := range n` — the latter is `declared and not used` and does not
+/// compile. Nothing in the finding says which one guff writes, so only the edit
+/// text can pin it (COMPAT-HARDENING, `compat/fix/`).
+#[test]
+fn modernize_rangeint_drops_an_index_the_body_never_reads() {
+    let pkg =
+        support::typecheck_fixture("modernize", "example.com/modernize/rangeint", "rangeint.go");
+    let mut headers: Vec<String> = Vec::new();
+    for d in support::run_analyzer_diagnostics(modernize(), &pkg) {
+        if !d.message.contains("range over int") {
+            continue;
+        }
+        // The loop header is the last edit; any import edits come first.
+        let edit = d.suggested_fixes[0]
+            .text_edits
+            .last()
+            .expect("the fix rewrites the loop header");
+        headers.push(edit.new_text.clone());
+    }
+
+    // `indexUnused` and `indexShadowedInBody`. The second is why resolution is
+    // by object: the inner `i := "inner"` would read as a use by name.
+    assert_eq!(
+        headers.iter().filter(|h| *h == "for range n").count(),
+        2,
+        "{headers:?}"
+    );
+    // `for i = 0` has no declaration to drop, so `assignIndexUnusedInBody`
+    // keeps its index even though the body never reads it.
+    assert!(
+        headers.iter().any(|h| h == "for i = range n"),
+        "{headers:?}"
+    );
+    assert!(
+        headers.iter().any(|h| h == "for i := range n"),
+        "a read index still binds: {headers:?}"
+    );
+}
+
+/// The `found := false` / `found = true` shape must keep the source's own
+/// assignment token.
+///
+/// Upstream replaces only the previous assignment's right-hand side, so `:=`
+/// survives. guff rewrote from the left-hand side and spelled `=`, turning
+/// `found := false` into `found = slices.Contains(...)` — `undefined: found`,
+/// a `--fix` that does not compile.
+#[test]
+fn modernize_slicescontains_keeps_the_assignment_token() {
+    let pkg = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/slicescontains",
+        "slicescontains.go",
+    );
+    let mut found = 0;
+    for d in support::run_analyzer_diagnostics(modernize(), &pkg) {
+        if !d.message.contains("Loop can be simplified using slices.") {
+            continue;
+        }
+        let edits = &d.suggested_fixes[0].text_edits;
+        // The bool-accumulator shape is the one that rewrites an rhs to a bare
+        // `slices.Contains(...)` with no assignment token of its own.
+        if let Some(e) = edits.iter().find(|e| {
+            e.new_text.starts_with("slices.Contains(") || e.new_text.starts_with("!slices.Contains(")
+        }) {
+            assert!(
+                !e.new_text.contains('='),
+                "the fix must not spell the assignment itself: {e:?}"
+            );
+            found += 1;
+        }
+    }
+    assert!(found > 0, "the fixture has the bool-accumulator shape");
 }
 
 /// A fix that names a package has to add the import, and has to name the

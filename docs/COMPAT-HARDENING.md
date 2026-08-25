@@ -11295,3 +11295,116 @@ analysis の `SuggestedFix` は通らない。続き 34/35 と同じ判断で、
 4. `refactor::fresh_name` は移植したが、**まだ import 名にしか使っていない**。
    上流は `stringscutprefix` の `after` / `ok` にも通す。
 5. pending 48 件。`DEFERRED: SuggestedFix` が 15 linter。
+
+---
+
+### 2026-08-25（続き 40）— 構文エラーを 1 つ直したら、その下に隠れていた型エラーが 2 つ出た
+
+続き 39 の「次にやること 1〜3」。`modernize` の残差 4 件のうち 3 件を潰した。
+
+#### `rangeint`: 使われない index を消す
+
+`for i := 0; i < n; i++` の body が `i` を読まないなら、
+上流は fix から `i := ` を**丸ごと落として** `for range n` にする
+（`rangeint.go`、`if !used && init.Tok == token.DEFINE`）。
+落とさないと `for i := range n` になり、
+**`declared and not used: i` でコンパイルが通らない**。
+
+判定は**オブジェクト単位**（上流の `info.Uses[id] == v`）。
+名前で見ると body 内の `i := "inner"` を「使用」と読んでしまう。
+fixture に 3 つ足して、上流の `--fix` に答え合わせをさせた:
+
+| fixture | 上流が書くもの |
+|---|---|
+| body が `i` を読まない（`:=`） | `for range n` |
+| body に内側の `i := "inner"` がある | `for range n`（＝内側は別物） |
+| `for i = 0`（`=`） | `for i = range n`（消す宣言が無い） |
+
+3 つとも予想と一致した。**3 つ目は自分で非ビルドを作る fixture**でもある——
+`var i int` が読まれないまま残るので `declared and not used`。
+上流も同じバイトを書くので、`rangeint` は
+「guff 固有の非ビルド」から「上流と同一の非ビルド」へ**枠が移った**。
+
+#### `slicescontains`: `:=` を `=` に書き換えていた
+
+これは体裁ではなく**壊れた fix** だった。
+
+```
+found := false
+for _, v := range s { if v == needle { found = true; break } }
+```
+
+上流は**直前の代入の右辺だけ**（`prevAssign.Rhs[0]`）を差し替えるので、
+ソースが `:=` ならそのまま残る。
+guff は左辺から書き換えて `=` を**自分で綴っていた**ので、
+`found := false` が `found = slices.Contains(…)` になり
+**`undefined: found`**。span を上流に合わせて 2 edit にした。
+
+#### `waitgroupgo`: `}()` の `(` を消し忘れていた
+
+```
+go func() { … }()      →      wg.Go(func() { … })
+                                             ^ この ) が wg.Go( を閉じる
+```
+
+上流の edit は 4 つ。guff には**4 つ目**——
+`goStmt.Call.Lparen .. Rparen` の削除——**が無かった**。
+結果は `wg.Go(func() { … }()`。**括弧が閉じない。**
+
+診断は両方まったく同じ文字列を出す。
+finding の集合を比べる gate は 1 つも赤くならない。
+出るのは「木がコンパイルできない」だけで、続き 38 でこの数え上げを
+足していなければ**気付く経路が無かった**。
+
+#### **直した結果、下に隠れていたものが出た**
+
+`modernize` の木が通らない理由は、これまで waitgroupgo の**構文エラー**だった。
+構文で落ちる木は、`go build` がそこで止まる。閉じたら 2 つ出てきた:
+
+```
+reflecttypefor/reflecttypefor.go:12:6: declared and not used: zero
+testingcontext/testingcontext.go:6:2: "context" imported and not used
+```
+
+**パースが通らない木は、その後ろの型エラーを何個でも隠す。**
+「非ビルド 1 件」は「欠陥 1 件」ではない。
+
+#### `reflecttypefor` は**上流 HEAD を読んでも直せない**
+
+残った `var zero MyStruct` の削除漏れは、手元の x/tools を読んで移植——
+ができなかった。HEAD の `reflect.go` には `usesNonTypeSymbol` があり、
+`TypeOf(zero)`（var＝非型シンボル）には **fix を出さない**。
+ところが golangci-lint 2.12.2 は削除する。
+**pin されている x/tools が HEAD と違う。**
+
+「上流のリンタはローカルに checkout してある、差分から推測せず関数を読む」は
+正しいが、**読む版を間違えると逆に外す**。ここは pin 版を取ってからにする。
+
+#### 測った
+
+| | 続き 39 後 | 今回 |
+|---|---:|---:|
+| `--fix` が上流とバイト一致 | 145 | **146** |
+| pending | 48 | 47 |
+| ビルドが通らない木 | 8 | 8 |
+| うち上流とバイト一致 | 4 | **5** |
+| guff 固有の非ビルド | 4 | **3**（`importas` / `modernize` / `staticcheck-qf`） |
+
+golden は **193/193**。`rangeint` の fixture を 3 つ増やしたので
+golden と fix の expected を両方 regen（上流 2 回一致を確認して記録）。
+`rangeint` は pending 削除、`modernize` は 440→441 行で再記録。
+
+`modernize` の残差は **2 件**だけになった:
+`reflecttypefor` の未使用 var 削除（pin 版待ち）と、
+`waitgroupgo` の空白行——上流は `refactor.DeleteStmt` で
+**文と行ごと**消すが、あれはコメントを AST に要求する 150 行で、
+続き 39 の「コメントは AST に無い」がそのまま効く。別件にした。
+
+#### 次にやること
+
+1. **`refactor.DeleteStmt`**。`waitgroupgo` の空白行が本体だが、
+   コメント位置が要るので続き 39 のソース走査を一般化する必要がある。
+2. `reflecttypefor` の未使用 var 削除。**pin 版の x/tools を取ってから**。
+3. `testingcontext` の `"context"` 未使用 import。今回初めて見えた。
+4. `refactor::fresh_name` を `stringscutprefix` の `after` / `ok` にも通す。
+5. pending 47 件。`DEFERRED: SuggestedFix` が 15 linter。
