@@ -39,3 +39,8 @@ modernize/rangeint.go:85:2:intrange::for loop can be changed to use an integer r
 modernize/rangeint.go:85:6:modernize::rangeint: for loop can be modernized using range over int
 modernize/rangeint.go:93:2:intrange::for loop can be changed to use an integer range (Go 1.22+)\nBecause the key is not part of the loop's scope, take care to consider side effects.
 modernize/rangeint.go:93:6:modernize::rangeint: for loop can be modernized using range over int
+modernize/rangeint.go:106:2:intrange::for loop can be changed to use an integer range (Go 1.22+)
+modernize/rangeint.go:106:6:modernize::rangeint: for loop can be modernized using range over int
+modernize/rangeint.go:114:6:modernize::rangeint: for loop can be modernized using range over int
+modernize/rangeint.go:124:2:intrange::for loop can be changed to use an integer range (Go 1.22+)\nBecause the key is not part of the loop's scope, take care to consider side effects.
+modernize/rangeint.go:124:6:modernize::rangeint: for loop can be modernized using range over int

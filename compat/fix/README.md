@@ -86,6 +86,10 @@ After the `refactor.AddImport` port (2026-08-25): **145 matching, 48 pending**
 deleted; `modernize` moved and was re-recorded, gaining the four import
 insertions it had been leaving out.
 
+After rangeint / slicescontains / waitgroupgo (2026-08-25): **146 matching,
+47 pending** — 34 that write nothing, 13 partial. `rangeint` reached upstream's
+bytes and its ledger file was deleted.
+
 ## Does it still build?
 
 A `--fix` that rewrites `fmt.Sprint(i)` to `strconv.Itoa(i)` and does not add
@@ -98,20 +102,35 @@ It asks the pristine tree first: several fixtures are deliberately un-buildable
 that was already broken.
 
 The count is printed, not enforced, and the reason is the measurement itself.
-Eight cases leave an un-buildable tree, and **four of them are byte-identical
-to what golangci-lint wrote** — `dotimport` (rewrites a dot-import usage without
-adding `errors`), `perfsprint` (`strconv` — upstream's own `fiximports` option
-is off by default), `err113`, and `modernize-atomictypes` (rewrites the only use
-of an aliased second import of `sync/atomic`, leaving `myatomic` imported and
-unused). Upstream's `--fix` breaks the build on those fixtures, guff reproduces
-it exactly, and a hard gate would be demanding that guff be *incompatible*.
-The other four are guff's own: `importas`, `modernize`, `rangeint`,
-`staticcheck-qf`.
+Eight cases leave an un-buildable tree, and **five of them are byte-identical
+to what golangci-lint wrote**:
 
-`modernize-atomictypes` joined that list by being *fixed*: it used to write a
-prefix guff invented, which happened to keep the alias used. Matching upstream
-made the tree stop building. The count going up is not always the direction it
-looks like, which is exactly why it is printed rather than gated.
+| case | why the fixed tree does not build |
+|------|-----------------------------------|
+| `dotimport` | rewrites a dot-import usage without adding `errors` |
+| `perfsprint` | `strconv.Itoa` without the import — upstream's own `fiximports` is off by default |
+| `err113` | the rewritten call is short an argument |
+| `modernize-atomictypes` | rewrites the only use of an aliased second import of `sync/atomic`, leaving `myatomic` unused |
+| `rangeint` | `for i = 0` whose body never reads `i` becomes `for i = range n`, leaving `var i int` unread |
+
+Upstream's `--fix` breaks the build on all five, guff reproduces it exactly, and
+a hard gate would be demanding that guff be *incompatible*. The other three are
+guff's own: `importas`, `modernize`, `staticcheck-qf`.
+
+Two of the five joined that list by being *fixed*. `modernize-atomictypes` used
+to write a prefix guff invented, which happened to keep the alias used;
+`rangeint` used to leave an unused `i` bound in the range clause, and the
+fixture that pins the `=` spelling exposes the same defect one level up.
+Matching upstream made both trees stop building. **The count going up is not
+always the direction it looks like**, which is exactly why it is printed rather
+than gated.
+
+Fixing a parse error can also *reveal* one. `modernize` used to fail at
+`waitgroupgo`, which left `wg.Go(func() {…}()` — syntax, so `go build` stopped
+there. With that closed, the case reports two real failures underneath it:
+`reflecttypefor` not deleting a now-unused `var zero`, and `testingcontext`
+leaving `"context"` imported and unused. A tree that does not parse hides
+however many type errors follow it.
 
 ## Two traps worth knowing
 

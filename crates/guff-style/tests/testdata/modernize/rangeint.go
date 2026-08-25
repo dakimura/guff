@@ -98,3 +98,30 @@ func assignIndexReadInsideLoop(n int) int {
 	}
 	return -1
 }
+
+// The index is not read in the body, so the fix has to drop `i :=` entirely.
+// `for i := range n` that never reads `i` is `declared and not used` — the
+// rewrite would not compile.
+func indexUnused(n int) {
+	for i := 0; i < n; i++ { // want
+		println("x")
+	}
+}
+
+// An inner `i` is a different object, so it is not a use of the loop index.
+// Name-based matching would call this used and leave `i :=` in place.
+func indexShadowedInBody(n int) {
+	for i := 0; i < n; i++ { // want
+		i := "inner"
+		_ = i
+	}
+}
+
+// `for i = 0` reuses a variable declared elsewhere: there is no declaration to
+// drop, so the index survives even when the body never reads it.
+func assignIndexUnusedInBody(n int) {
+	var i int
+	for i = 0; i < n; i++ { // want
+		println("x")
+	}
+}

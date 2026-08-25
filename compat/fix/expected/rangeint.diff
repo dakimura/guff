@@ -96,3 +96,30 @@
  		if found > 0 {
  			return i
  		}
+@@ -103,7 +103,7 @@
+ // `for i := range n` that never reads `i` is `declared and not used` — the
+ // rewrite would not compile.
+ func indexUnused(n int) {
+-	for i := 0; i < n; i++ { // want
++	for range n { // want
+ 		println("x")
+ 	}
+ }
+@@ -111,7 +111,7 @@
+ // An inner `i` is a different object, so it is not a use of the loop index.
+ // Name-based matching would call this used and leave `i :=` in place.
+ func indexShadowedInBody(n int) {
+-	for i := 0; i < n; i++ { // want
++	for range n { // want
+ 		i := "inner"
+ 		_ = i
+ 	}
+@@ -121,7 +121,7 @@
+ // drop, so the index survives even when the body never reads it.
+ func assignIndexUnusedInBody(n int) {
+ 	var i int
+-	for i = 0; i < n; i++ { // want
++	for i = range n { // want
+ 		println("x")
+ 	}
+ }
