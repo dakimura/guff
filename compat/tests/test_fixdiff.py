@@ -178,6 +178,80 @@ class CliTest(unittest.TestCase):
             self.assertIn("REFUSING to hold", r.stderr)
             self.assertFalse((Path(tmp) / "pending" / "x.diff").exists())
 
+    def test_divergent_holds_only_with_a_written_reason(self):
+        """A deliberate divergence nobody explained is an allowlist entry."""
+        body = "--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n-a\n+b\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            actual = Path(tmp) / "actual.diff"
+            actual.write_text(body, encoding="utf-8")
+            div = Path(tmp) / "x.diff"
+
+            # No `# why:` — refused, even though the bytes match.
+            div.write_text("# just because\n" + body, encoding="utf-8")
+            r = self.run_cli(
+                "check", "--case", "x",
+                "--actual", str(actual),
+                "--expected", str(Path(tmp) / "absent.diff"),
+                "--divergent", str(div),
+            )
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("no `# why:`", r.stderr)
+
+            # With a reason, it holds — and prints the reason on every run.
+            div.write_text("# why: upstream is wrong, see notes\n" + body, encoding="utf-8")
+            ok = self.run_cli(
+                "check", "--case", "x",
+                "--actual", str(actual),
+                "--expected", str(Path(tmp) / "absent.diff"),
+                "--divergent", str(div),
+            )
+            self.assertEqual(ok.returncode, 0, ok.stderr)
+            self.assertIn("deliberate divergence", ok.stdout)
+            self.assertIn("upstream is wrong", ok.stdout)
+
+    def test_divergent_fails_when_guff_moves(self):
+        """It is a record of one decision, not a licence to write anything."""
+        with tempfile.TemporaryDirectory() as tmp:
+            actual = Path(tmp) / "actual.diff"
+            actual.write_text(
+                "--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n-a\n+DIFFERENT\n", encoding="utf-8"
+            )
+            div = Path(tmp) / "x.diff"
+            div.write_text(
+                "# why: upstream is wrong\n"
+                "--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n-a\n+b\n",
+                encoding="utf-8",
+            )
+            r = self.run_cli(
+                "check", "--case", "x",
+                "--actual", str(actual),
+                "--expected", str(Path(tmp) / "absent.diff"),
+                "--divergent", str(div),
+            )
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("DIVERGENCE MOVED", r.stderr)
+
+    def test_divergent_fails_once_upstream_starts_fixing(self):
+        """The reason rests on upstream writing nothing. If it does, decide again."""
+        body = "--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n-a\n+b\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            actual = Path(tmp) / "actual.diff"
+            actual.write_text(body, encoding="utf-8")
+            expected = Path(tmp) / "expected.diff"
+            expected.write_text(
+                "--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n-a\n+upstream\n", encoding="utf-8"
+            )
+            div = Path(tmp) / "x.diff"
+            div.write_text("# why: upstream is wrong\n" + body, encoding="utf-8")
+            r = self.run_cli(
+                "check", "--case", "x",
+                "--actual", str(actual),
+                "--expected", str(expected),
+                "--divergent", str(div),
+            )
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("no longer describes reality", r.stderr)
+
     def test_pending_holds_a_case_where_upstream_fixes_and_guff_does_not(self):
         with tempfile.TemporaryDirectory() as tmp:
             actual = Path(tmp) / "actual.diff"

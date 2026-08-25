@@ -201,6 +201,58 @@ def check_pending(case: str, path: Path, expected: str, actual: str) -> int:
     return 0
 
 
+def check_divergent(case: str, path: Path, expected: str, actual: str) -> int:
+    """Hold a case where guff deliberately writes what golangci-lint does not.
+
+    The refusal in `pending` is the rule: writing bytes into a file upstream
+    leaves alone is how `omitempty` became `omitzero` under a green harness, and
+    a ledger that could absorb it would absorb that too. This is the one door
+    out, and it is deliberately narrow.
+
+    Unlike `expected/` and `pending/`, a file here is **hand-written**. Nothing
+    in `regen.sh` creates one, because the whole point is that a human decided,
+    in writing, that upstream is wrong. It must carry a `# why:` line, its body
+    must be exactly what guff writes today, and it fails if either side moves —
+    including if upstream starts writing here, which would mean the premise the
+    divergence rests on is gone.
+    """
+    if not path.exists():
+        return 1
+    text = path.read_text(encoding="utf-8")
+    why = [
+        line[len("# why:") :].strip()
+        for line in text.splitlines()
+        if line.startswith("# why:")
+    ]
+    if not why:
+        print(
+            f"  {case}: {path} has no `# why:` line. A deliberate divergence"
+            f" that nobody explained is an allowlist entry.",
+            file=sys.stderr,
+        )
+        return 1
+    if expected.strip():
+        print(
+            f"  {case}: golangci-lint now writes {len(expected.splitlines())}"
+            f" diff line(s) here, so the divergence recorded in {path} no longer"
+            f" describes reality. Re-read it and decide again.",
+            file=sys.stderr,
+        )
+        return 1
+    if parse_expected(path) != actual:
+        print(
+            f"  {case}: DIVERGENCE MOVED — guff no longer writes what {path}"
+            f" records. Re-read the `# why:` before re-recording it.",
+            file=sys.stderr,
+        )
+        return 1
+    print(
+        f"  {case}: deliberate divergence — upstream writes nothing, guff writes"
+        f" {len(actual.splitlines())} diff line(s): {why[0]}"
+    )
+    return 0
+
+
 def diff_of_diffs(case: str, expected: str, actual: str) -> str:
     """Show where guff's edits and upstream's stop agreeing."""
     lines = [
@@ -264,6 +316,11 @@ def main(argv: list[str] | None = None) -> int:
     p_check.add_argument(
         "--pending",
         help="pending/<case>.diff: a case whose --fix parity is known-missing",
+    )
+    p_check.add_argument(
+        "--divergent",
+        help="divergent/<case>.diff: a case where guff deliberately writes what"
+        " upstream does not (hand-written, must carry `# why:`)",
     )
 
     args = ap.parse_args(argv)
@@ -341,6 +398,15 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 return 1
             return 0
+        # The refused direction — upstream writes nothing, guff writes
+        # something — has its own slot, because `pending` must never hold it.
+        divergent_path = Path(args.divergent) if args.divergent else None
+        # Routing on the file's existence, not on which side wrote: if upstream
+        # has started writing here, `check_divergent` is the one that can say
+        # the recorded reason no longer holds. A plain mismatch would report the
+        # bytes and lose that.
+        if divergent_path is not None and divergent_path.exists() and actual.strip():
+            return check_divergent(args.case, divergent_path, expected, actual)
         print(diff_of_diffs(args.case, expected, actual), file=sys.stderr)
         if pending_path is None:
             return 1

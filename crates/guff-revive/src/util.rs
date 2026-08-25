@@ -548,3 +548,41 @@ pub fn import_spec_pos(imp: &guff::ast::ImportSpec) -> u32 {
         .map(|n| n.name_pos.0)
         .unwrap_or(imp.path.pos().0) as u32
 }
+
+/// The text of the line holding `pos`, without its newline.
+///
+/// Port of revive's `srcLine`. Rules that build a `Failure::replacement_line`
+/// work on the line as written rather than on the AST — upstream reassembles it
+/// with a regex — so this has to be the bytes on disk, not a re-render.
+pub fn src_line_at(pass: &Pass<'_>, pos: u32) -> Option<String> {
+    let idx = pass
+        .files()
+        .iter()
+        .position(|f| f.file_start.0 as u32 <= pos && pos < f.file_end.0 as u32)?;
+    // `source_bytes` then the file on disk, the same fallback the other
+    // source-reading rules here use: a package loaded without retained bytes
+    // still has its paths, and a rule that answered `None` there would report
+    // without a fix for reasons that have nothing to do with the code.
+    let pkg = pass.pkg();
+    let owned;
+    let src: &[u8] = match pkg.source_bytes(idx) {
+        Some(b) => b,
+        None => {
+            owned = fs::read(pkg.compiled_go_files.get(idx)?).ok()?;
+            &owned
+        }
+    };
+    let off = usize::try_from(i64::from(pos) - pass.files()[idx].file_start.0).ok()?;
+    if off > src.len() {
+        return None;
+    }
+    let start = src[..off]
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map_or(0, |i| i + 1);
+    let end = src[off..]
+        .iter()
+        .position(|&b| b == b'\n')
+        .map_or(src.len(), |i| off + i);
+    String::from_utf8(src[start..end].to_vec()).ok()
+}

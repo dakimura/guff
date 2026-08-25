@@ -102,6 +102,11 @@ pending**, and `modernize` reached upstream's bytes. **Every tree that no longer
 builds is now byte-identical to what golangci-lint wrote** — the guff-side
 column is empty for the first time.
 
+After revive's `ReplacementLine` (2026-08-25): **156 matching, 36 pending, 1
+deliberately divergent**. Nine `revive-*` cases are one linter under nine
+configs, so a single mechanism closed all nine — and turned up the divergence
+below.
+
 ## Does it still build?
 
 A `--fix` that rewrites `fmt.Sprint(i)` to `strconv.Itoa(i)` and does not add
@@ -171,6 +176,38 @@ there. With that closed, the case reports two real failures underneath it:
 `reflecttypefor` not deleting a now-unused `var zero`, and `testingcontext`
 leaving `"context"` imported and unused. A tree that does not parse hides
 however many type errors follow it.
+
+## `divergent/` — the one door out of the refusal above
+
+`pending` refuses, always, to hold a case where guff writes and upstream does
+not. That refusal is the whole reason `omitempty` -> `omitzero` cannot happen
+twice quietly, and relaxing it in general would give back exactly what it
+bought.
+
+`divergent/<case>.diff` is the narrow exception, and it is built to be hard to
+use:
+
+* **Hand-written.** Nothing in `regen.sh` produces one. The recorder still
+  refuses. The only way a file appears here is a person writing it.
+* **`# why:` is mandatory.** Without one the gate fails — a deliberate
+  divergence nobody explained is an allowlist entry with better manners.
+* **It fails if guff's bytes move**, like `pending`. It records one decision,
+  not permission to write anything.
+* **It fails if upstream starts writing there.** The reason is always of the
+  form "upstream writes nothing, and here is why that is wrong"; if upstream
+  starts writing, the premise is gone and somebody has to decide again.
+* The reason is printed on every run, next to the case.
+
+One entry today, `revive`. golangci-lint's revive `--fix` is inert in almost
+every real repository, and by accident: its wrapper looks the file up with
+`Fset.File(token.Pos(failure.Position.Start.Offset))` — a byte offset handed to
+a lookup that wants a FileSet-wide position — then drops the fix unless the file
+it found is the failure's own. Measured with 2.12.2: one package with `a.go` and
+`b.go` fixes `a.go` and leaves `b.go`; two packages fix nothing. Which findings
+keep their fix depends on FileSet layout neither tool guarantees, so it cannot
+be reproduced — running the same computation against guff's FileSet suppressed
+the nine `revive-*` cases that *do* match, because guff loads dependency files
+first. The full argument is in the file's own header.
 
 ## Two traps worth knowing
 

@@ -35,6 +35,40 @@ fn revive_flags_default_rule_violations() {
     }
 }
 
+/// `errorf` rewrites the whole line, not the call.
+///
+/// golangci-lint turns revive's `ReplacementLine` into one edit spanning the
+/// failure's lines, so the fix has to carry the indentation and the `return`
+/// around the call as well. Nothing in the finding says whether guff writes
+/// anything at all here (COMPAT-HARDENING, `compat/fix/`).
+#[test]
+fn revive_errorf_fix_replaces_the_whole_line() {
+    let pkg = support::typecheck_fixture("revive", "example.com/revive", "bad.go");
+    let mut fixes = 0;
+    for d in support::run_analyzer_diagnostics(revive(), &pkg) {
+        if !d.message.contains("errorf:") {
+            continue;
+        }
+        let edits = &d.suggested_fixes[0].text_edits;
+        assert_eq!(edits.len(), 1, "one whole-line edit: {edits:?}");
+        // The replacement is a line: it ends with the newline golangci adds,
+        // and it carries whatever preceded the call on that line.
+        assert!(edits[0].new_text.ends_with('\n'), "{edits:?}");
+        assert!(
+            edits[0].new_text.contains("fmt.Errorf("),
+            "{:?}",
+            edits[0].new_text
+        );
+        assert!(
+            !edits[0].new_text.contains("errors.New("),
+            "{:?}",
+            edits[0].new_text
+        );
+        fixes += 1;
+    }
+    assert!(fixes > 0, "the fixture has an errorf violation");
+}
+
 #[test]
 fn revive_allows_clean_code() {
     let pkg = support::typecheck_fixture("revive", "example.com/revive/ok", "ok.go");

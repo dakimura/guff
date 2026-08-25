@@ -25,6 +25,7 @@ GOLDEN_DIR="$ROOT/compat/golden"
 CASES_DIR="$GOLDEN_DIR/cases"
 EXPECTED_DIR="$FIX_DIR/expected"
 PENDING_DIR="$FIX_DIR/pending"
+DIVERGENT_DIR="$FIX_DIR/divergent"
 FIXDIFF="$FIX_DIR/fixdiff.py"
 HEALTH="$ROOT/compat/health.py"
 WORK_ROOT="$FIX_DIR/.work"
@@ -126,6 +127,7 @@ for case_dir in "$CASES_DIR"/*/; do
   read_case_env "$name" "$case_dir"
   expected="$EXPECTED_DIR/$name.diff"
   pending="$PENDING_DIR/$name.diff"
+  divergent="$DIVERGENT_DIR/$name.diff"
 
   if [[ "$REGEN" -eq 1 ]]; then
     gcl_args=()
@@ -246,7 +248,8 @@ for case_dir in "$CASES_DIR"/*/; do
     --case "$name" \
     --actual "$guff_diff" \
     --expected "$expected" \
-    --pending "$pending" || FAILED=$((FAILED + 1))
+    --pending "$pending" \
+    --divergent "$divergent" || FAILED=$((FAILED + 1))
 done
 
 if [[ -n "$CASE_FILTER" && "$SELECTED" -eq 0 ]]; then
@@ -276,8 +279,10 @@ if [[ "$FAILED" -gt 0 ]]; then
   exit 1
 fi
 PENDING_N="$(find "$PENDING_DIR" -name '*.diff' 2>/dev/null | wc -l | tr -d ' ')"
-# $BROKEN counts rewritten trees, not pending cases: three of them are
+DIVERGENT_N="$(find "$DIVERGENT_DIR" -name '*.diff' 2>/dev/null | wc -l | tr -d ' ')"
+# $BROKEN counts rewritten trees, not pending cases: all of them are
 # byte-identical to golangci-lint's own output (compat/fix/README.md).
 echo "OK: $SELECTED case(s) checked, $CHANGED rewrote a file" \
      "($BROKEN of those trees no longer build)," \
-     "$PENDING_N held at a pending baseline"
+     "$PENDING_N held at a pending baseline," \
+     "$DIVERGENT_N deliberately divergent"

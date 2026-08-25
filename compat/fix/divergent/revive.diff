@@ -1,0 +1,39 @@
+# A case where guff deliberately writes what golangci-lint does not.
+#
+# Hand-written. Nothing in regen.sh creates a file here: the `pending` recorder
+# refuses this direction outright, because writing bytes into a file upstream
+# leaves alone is how `omitempty` became `omitzero` under a green harness
+# (COMPAT-HARDENING 続き 38). The only way past that refusal is for a person to
+# write down why, which is what this file is.
+#
+# why: golangci-lint's revive `--fix` is inert in almost every real repository,
+# and by accident rather than by design. pkg/golinters/revive/revive.go looks the
+# file up with `Fset.File(token.Pos(failure.Position.Start.Offset))` — a byte
+# offset handed to a lookup that wants a FileSet-wide position — and then drops
+# the fix unless the file it found is the failure's own. The comment there says
+# the guard skips cgo files; what it does is drop every fix outside whichever
+# file happens to sit at the start of the FileSet. Measured with golangci-lint
+# 2.12.2: one package with a.go and b.go fixes a.go and leaves b.go alone, and a
+# module with two packages fixes nothing at all. Which findings keep their fix
+# therefore depends on FileSet layout that neither tool guarantees, so it cannot
+# be reproduced — the same computation on guff's FileSet suppressed the nine
+# revive cases that do match, because guff loads dependency files first.
+#
+# guff writes the fix revive itself prescribes. It compiles, the findings are
+# identical either way (golden is 193/193), and the only cost of the divergence
+# is that `guff --fix` improves code `golangci-lint --fix` silently skips.
+#
+# Fails if guff's bytes move, and fails if upstream ever starts writing here —
+# at which point the reason above stops describing reality and someone has to
+# decide again.
+--- a/bad/revivetest/bad.go
++++ b/bad/revivetest/bad.go
+@@ -73,7 +73,7 @@
+ var zeroVar int = 0
+ 
+ func badErrorsNew() error {
+-	return errors.New(fmt.Sprintf("x %d", 1))
++	return fmt.Errorf("x %d", 1)
+ }
+ 
+ type unexported struct{}
