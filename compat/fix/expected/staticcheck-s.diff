@@ -10,7 +10,7 @@
 
 --- a/s1001/bad/bad.go
 +++ b/s1001/bad/bad.go
-@@ -1,7 +1,5 @@
+@@ -1,9 +1,7 @@
  package main
  
  func f(dst, src []int) {
@@ -18,6 +18,52 @@
 -		dst[i] = v
 -	}
 +	copy(dst, src)
+ }
+ 
+ // Until 2026-08-27 this fixture held only the slice-to-slice range above, so
+@@ -12,37 +10,25 @@
+ // by nothing.
+ 
+ func indexForm(dst, src []int) {
+-	for i := range src {
+-		dst[i] = src[i]
+-	}
++	copy(dst, src)
+ }
+ 
+ func threeClause(dst, src []int) {
+-	for i := 0; i < len(src); i++ {
+-		dst[i] = src[i]
+-	}
++	copy(dst, src)
+ }
+ 
+ func arrayToArray(dst, src [4]int) {
+-	for i, v := range src {
+-		dst[i] = v
+-	}
++	dst = src
+ }
+ 
+ func arrayToSlice(dst []int, src [4]int) {
+-	for i, v := range src {
+-		dst[i] = v
+-	}
++	copy(dst, src[:])
+ }
+ 
+ func sliceToArray(dst [4]int, src []int) {
+-	for i, v := range src {
+-		dst[i] = v
+-	}
++	copy(dst[:], src)
+ }
+ 
+ func pointerToArray(dst, src *[4]int) {
+-	for i, v := range src {
+-		dst[i] = v
+-	}
++	*dst = *src
  }
 --- a/s1002/bad/bad.go
 +++ b/s1002/bad/bad.go
