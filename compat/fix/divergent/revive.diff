@@ -23,6 +23,8 @@
 # identical either way (golden is 193/193), and the only cost of the divergence
 # is that `guff --fix` improves code `golangci-lint --fix` silently skips.
 #
+# upstream-writes: nothing
+#
 # Fails if guff's bytes move, and fails if upstream ever starts writing here —
 # at which point the reason above stops describing reality and someone has to
 # decide again.

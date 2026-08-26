@@ -28,6 +28,8 @@ from __future__ import annotations
 import argparse
 import collections
 import difflib
+import hashlib
+import re
 import sys
 from pathlib import Path
 
@@ -152,6 +154,118 @@ def parse_expected(path: Path | str) -> str:
     return ""
 
 
+HUNK_HEADER = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+
+
+class FileEdit:
+    """What one file's section of a tree diff removes, adds, and does to it."""
+
+    def __init__(self, created: bool = False, deleted: bool = False) -> None:
+        self.removed: collections.Counter[str] = collections.Counter()
+        self.added: collections.Counter[str] = collections.Counter()
+        self.created = created
+        self.deleted = deleted
+
+
+def parse_tree_diff(body: str) -> dict[str, FileEdit]:
+    """Split a tree diff into per-file edits, counting hunk lengths.
+
+    The hunk header is read rather than trusted to prefixes, because a removed
+    Go line whose own text starts with `--` renders as `--- foo` and is
+    indistinguishable from a file header to anything that only looks at the
+    first three characters. `@@ -a,b +c,d @@` says exactly how many old and new
+    lines the hunk has, so the walk stops where the hunk does.
+    """
+    out: dict[str, FileEdit] = {}
+    lines = body.splitlines()
+    i = 0
+    rel: str | None = None
+    while i < len(lines):
+        line = lines[i]
+        has_pair = i + 1 < len(lines) and lines[i + 1].startswith("+++ ")
+        if line.startswith("--- ") and has_pair:
+            left, right = line[4:], lines[i + 1][4:]
+            rel = right[2:] if right != "/dev/null" else left[2:]
+            out.setdefault(
+                rel, FileEdit(created=left == "/dev/null", deleted=right == "/dev/null")
+            )
+            i += 2
+            continue
+        if line.startswith("Binary files "):
+            rel = line.split(" and b/", 1)[-1].rsplit(" differ", 1)[0]
+            out.setdefault(rel, FileEdit())
+            i += 1
+            continue
+        m = HUNK_HEADER.match(line)
+        if not m or rel is None:
+            i += 1
+            continue
+        n_old = int(m.group(2)) if m.group(2) is not None else 1
+        n_new = int(m.group(4)) if m.group(4) is not None else 1
+        i += 1
+        seen_old = seen_new = 0
+        edit = out[rel]
+        while i < len(lines) and (seen_old < n_old or seen_new < n_new):
+            body_line = lines[i]
+            if body_line == NO_NEWLINE:
+                i += 1
+                continue
+            prefix, rest = (body_line[:1] or " "), body_line[1:]
+            if prefix == " ":
+                seen_old += 1
+                seen_new += 1
+            elif prefix == "-":
+                edit.removed[rest] += 1
+                seen_old += 1
+            elif prefix == "+":
+                edit.added[rest] += 1
+                seen_new += 1
+            else:
+                break
+            i += 1
+    return out
+
+
+def over_written(
+    kept: str, written: str, actor: str = "guff", other: str = "golangci-lint --fix"
+) -> list[str]:
+    """Pristine bytes `written` rewrites that `kept` leaves alone.
+
+    Both arguments are tree diffs. Called one way round it answers "what does
+    guff write that upstream does not"; called the other way, "what does
+    upstream write that guff does not". `actor`/`other` only name the two sides
+    in the returned sentences.
+
+    The whole-case form of this — upstream writes nothing anywhere and guff
+    writes something — has always been refused. This is the same question asked
+    one level down, and `parens` is why it is asked at all: upstream wrote seven
+    hunks there, guff wrote those seven plus an eighth, and a refusal keyed on
+    the case as a whole saw a case upstream *does* write to and held the extra
+    hunk in `pending` from the day the slot for it was built.
+
+    Only *removals* count, plus files touched on one side only. A line guff adds
+    where upstream adds a different one is the same finding fixed differently —
+    a real gap, but a gap, and `staticcheck-qf`'s four are exactly that. A line
+    guff removes that upstream keeps is guff editing somebody's source on its
+    own authority, which is the `omitzero` failure and can never be held.
+    """
+    base, mine = parse_tree_diff(kept), parse_tree_diff(written)
+    out = []
+    for rel in sorted(mine):
+        edit = mine[rel]
+        if rel not in base:
+            what = (
+                "creates" if edit.created else "deletes" if edit.deleted else "rewrites"
+            )
+            out.append(f"{rel}: {actor} {what} a file {other} leaves alone")
+            continue
+        for line in sorted((edit.removed - base[rel].removed).elements()):
+            out.append(
+                f"{rel}: {actor} removes a line {other} keeps: {line.strip()}"
+            )
+    return out
+
+
 def confirm(runs: list[str], confirmations: int) -> str | None:
     """Return the diff seen at least `confirmations` times, else None.
 
@@ -201,6 +315,20 @@ def check_pending(case: str, path: Path, expected: str, actual: str) -> int:
     return 0
 
 
+def upstream_writes(expected: str) -> str:
+    """How `# upstream-writes:` spells golangci-lint --fix's own output.
+
+    A digest rather than a copy: the point is only to fail when upstream moves,
+    and a second copy of the expected diff inside the divergent file would rot
+    into a thing nobody re-reads. `nothing` is spelled out because it is the
+    common case and `0 line(s), sha256:e3b0c442...` reads like a bug.
+    """
+    if not expected.strip():
+        return "nothing"
+    digest = hashlib.sha256(expected.encode("utf-8")).hexdigest()
+    return f"{len(expected.splitlines())} line(s), sha256:{digest[:16]}"
+
+
 def check_divergent(case: str, path: Path, expected: str, actual: str) -> int:
     """Hold a case where guff deliberately writes what golangci-lint does not.
 
@@ -212,9 +340,20 @@ def check_divergent(case: str, path: Path, expected: str, actual: str) -> int:
     Unlike `expected/` and `pending/`, a file here is **hand-written**. Nothing
     in `regen.sh` creates one, because the whole point is that a human decided,
     in writing, that upstream is wrong. It must carry a `# why:` line, its body
-    must be exactly what guff writes today, and it fails if either side moves —
-    including if upstream starts writing here, which would mean the premise the
-    divergence rests on is gone.
+    must be exactly what guff writes today, and it fails if either side moves.
+
+    "Upstream writes nothing here" used to be the whole test for the other side.
+    It was too narrow: `parens` is a case where upstream writes seven hunks and
+    guff writes those seven plus one more, and there was nowhere to say so. So
+    the file declares what upstream writes *today* on a `# upstream-writes:`
+    line — `nothing`, or a line count and a digest — and the moment upstream's
+    own output moves, the declaration stops matching and someone has to re-read
+    the reason and decide again. That is what the old check bought with `if
+    expected.strip()`, kept, and made to work when upstream writes something.
+
+    A divergence must also be a *superset*: every line upstream removes, guff
+    removes too. Otherwise this slot would hold a case that is over-writing in
+    one place and under-fixing in another, and only the first would be read.
     """
     if not path.exists():
         return 1
@@ -231,11 +370,27 @@ def check_divergent(case: str, path: Path, expected: str, actual: str) -> int:
             file=sys.stderr,
         )
         return 1
-    if expected.strip():
+    declared = [
+        line[len("# upstream-writes:") :].strip()
+        for line in text.splitlines()
+        if line.startswith("# upstream-writes:")
+    ]
+    current = upstream_writes(expected)
+    if not declared:
         print(
-            f"  {case}: golangci-lint now writes {len(expected.splitlines())}"
-            f" diff line(s) here, so the divergence recorded in {path} no longer"
-            f" describes reality. Re-read it and decide again.",
+            f"  {case}: {path} has no `# upstream-writes:` line. A divergence is"
+            f" a claim about what upstream does *not* write, so the file has to"
+            f" say what it does. Add:\n      # upstream-writes: {current}",
+            file=sys.stderr,
+        )
+        return 1
+    if declared[0] != current:
+        print(
+            f"  {case}: golangci-lint --fix no longer writes what {path}"
+            f" declares, so the divergence recorded there no longer describes"
+            f" reality. Re-read the `# why:` and decide again.\n"
+            f"      declared: {declared[0]}\n"
+            f"      today:    {current}",
             file=sys.stderr,
         )
         return 1
@@ -246,9 +401,24 @@ def check_divergent(case: str, path: Path, expected: str, actual: str) -> int:
             file=sys.stderr,
         )
         return 1
+    missing = over_written(
+        actual, expected, actor="golangci-lint --fix", other="guff"
+    )
+    if missing:
+        print(
+            f"  {case}: this is not only a divergence — guff misses"
+            f" {len(missing)} edit(s) upstream makes, which belongs in"
+            f" pending/{case}.diff and cannot be read out of a `# why:`.",
+            file=sys.stderr,
+        )
+        for line in missing[:10]:
+            print(f"      {line}", file=sys.stderr)
+        return 1
+    extra = over_written(expected, actual)
     print(
-        f"  {case}: deliberate divergence — upstream writes nothing, guff writes"
-        f" {len(actual.splitlines())} diff line(s): {why[0]}"
+        f"  {case}: deliberate divergence — upstream writes {current}, guff"
+        f" writes {len(actual.splitlines())} diff line(s) and rewrites"
+        f" {len(extra)} thing(s) upstream leaves alone: {why[0]}"
     )
     return 0
 
@@ -374,6 +544,27 @@ def main(argv: list[str] | None = None) -> int:
                 f" {len(body.splitlines())} diff line(s). Fix guff.",
                 file=sys.stderr,
             )
+            return 1
+        expected_body = (
+            parse_expected(expected_path) if expected_path.exists() else ""
+        )
+        offences = over_written(expected_body, body)
+        if offences:
+            # Same refusal, asked per file and per line rather than per case.
+            # The check above only fires when upstream writes *nothing at all*,
+            # so a case where upstream writes seven hunks and guff writes eight
+            # walked straight past it.
+            print(
+                f"  {args.case}: REFUSING to hold — guff rewrites"
+                f" {len(offences)} thing(s) golangci-lint --fix leaves alone."
+                f" Fix guff, or write the reason down in"
+                f" divergent/{args.case}.diff.",
+                file=sys.stderr,
+            )
+            for offence in offences[:10]:
+                print(f"      {offence}", file=sys.stderr)
+            if len(offences) > 10:
+                print(f"      ... and {len(offences) - 10} more", file=sys.stderr)
             return 1
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(PENDING_HEADER.format(case=args.case) + body, encoding="utf-8")

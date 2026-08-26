@@ -228,6 +228,14 @@ for case_dir in "$CASES_DIR"/*/; do
   fi
 
   if [[ "$RECORD_PENDING" -eq 1 ]]; then
+    # A recorded divergence is a decision a person wrote down; the recorder has
+    # no way to re-derive it and its refusal would fail the whole sweep. Skip
+    # the case and say so, rather than making --record-pending unusable for the
+    # other 192 the moment somebody files a divergence.
+    if [[ -f "$divergent" ]]; then
+      echo "  $name: skipped — deliberate divergence, see $divergent"
+      continue
+    fi
     # Recording is driven by the *check*, not by a separate opinion about which
     # cases are broken: a case that now matches upstream has its pending file
     # deleted here rather than left to rot into a stale expectation.

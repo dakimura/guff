@@ -42,6 +42,7 @@ cargo build --release -p guff-lint
 | `fixdiff.py` | Tree → normalized unified diff, record, compare |
 | `expected/<case>.diff` | What `golangci-lint --fix` writes. Generated — do not hand-edit |
 | `pending/<case>.diff` | What guff writes *today*, for a case whose parity is missing |
+| `divergent/<case>.diff` | What guff writes *on purpose* where upstream does not. Hand-written |
 | `.work/<case>/` | Materialized module, one copy per tool (gitignored) |
 
 The corpus is [`../golden/cases`](../golden/cases) — the same 193 cases the
@@ -207,6 +208,15 @@ After SA4029 / SA1008 / SA9004 (2026-08-26): **174 matching, 18 pending** —
 four entries; the last three were the ones that rebuild a node rather than
 replace a string.
 
+After re-reading `parens` (2026-08-27): 174 matching, **17 pending, 2
+deliberately divergent**, and no guff code changed. `parens` was the one pending
+case where guff wrote *more* than upstream, and the extra hunk turned out to be
+the `revive` divergence below arriving in a case upstream also writes to. The
+refusal that exists to stop exactly that asked its question once per case rather
+than once per line, so it never fired — and `git log` says the hunk arrived in
+the very commit that built `divergent/` and wrote the defect down. Every
+remaining pending case is now behind upstream, not ahead of it.
+
 ## Does it still build?
 
 A `--fix` that rewrites `fmt.Sprint(i)` to `strconv.Itoa(i)` and does not add
@@ -256,8 +266,9 @@ adds no import, so it names a package that is not bound in the file. guff writes
 `s.ReplaceAll(...)`, which compiles. That single hunk is why `staticcheck-qf`
 builds after guff's `--fix` and would not after upstream's.
 
-The ledger has no slot for "ahead", only for "behind", so it is recorded there
-with the two real gaps. If someone later makes this hunk match, the gate goes
+`divergent/` can hold "ahead" now, but only for a case that is ahead and nothing
+else, and `staticcheck-qf` is two real gaps as well — so it is recorded in
+`pending/` with them. If someone later makes this hunk match, the gate goes
 red — read this section before deleting the entry, because matching here means
 `--fix` starts breaking user builds. Same call as the `revive` ratchet: a defect
 upstream ships is not a specification.
@@ -293,9 +304,15 @@ use:
   divergence nobody explained is an allowlist entry with better manners.
 * **It fails if guff's bytes move**, like `pending`. It records one decision,
   not permission to write anything.
-* **It fails if upstream starts writing there.** The reason is always of the
-  form "upstream writes nothing, and here is why that is wrong"; if upstream
-  starts writing, the premise is gone and somebody has to decide again.
+* **`# upstream-writes:` is mandatory too**, and must match what upstream writes
+  today: `nothing`, or a line count and a digest. The moment upstream's own
+  output moves, the declaration stops matching and somebody has to re-read the
+  reason and decide again. This started life as "fails if upstream starts
+  writing there", which only worked while the answer was *nothing* — see
+  `parens` below.
+* **A divergence must be a superset.** Every line upstream removes, guff removes
+  too. Otherwise one `# why:` could cover a case that is ahead in one hunk and
+  behind in another, and only the first half would ever be read.
 * The reason is printed on every run, next to the case.
 
 One entry today, `revive`. golangci-lint's revive `--fix` is inert in almost
@@ -308,6 +325,22 @@ keep their fix depends on FileSet layout neither tool guarantees, so it cannot
 be reproduced — running the same computation against guff's FileSet suppressed
 the nine `revive-*` cases that *do* match, because guff loads dependency files
 first. The full argument is in the file's own header.
+
+`parens` is the second entry, the same defect, and the reason the slot had to
+grow. It is one package holding one 6,241-byte file — the shape the sentence above
+says gets fixed — and it is, if `revive` is the only linter enabled. Turn on
+`govet`, or `staticcheck`, or `errorlint` alongside it and the same fix
+disappears: the extra linter widens the `go/packages` load mode, dependency
+sources enter the shared FileSet ahead of the fixture, and byte offset 4,693
+stops landing in a file that used to start at base 1. The nine `revive-*` cases
+keep their fix only because each of them enables `revive` and nothing else. So
+`parens` and `revive-settings` ask for opposite things about the same rule on
+the same code, and guff cannot serve both.
+
+Upstream writes seven hunks in `parens` and guff writes those seven plus this
+one. That is not the shape `divergent/` was built for — "upstream writes
+nothing" was the whole test — and it is why it now declares what upstream
+writes instead of assuming.
 
 ## Two traps worth knowing
 
