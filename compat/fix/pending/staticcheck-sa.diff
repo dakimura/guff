@@ -7,6 +7,15 @@
 # ledger cannot quietly outlive the defect it records.
 #
 # Re-record with: ./compat/fix/regen.sh --pending staticcheck-sa
+--- a/sa1013/bad/bad.go
++++ b/sa1013/bad/bad.go
+@@ -4,5 +4,5 @@
+ 
+ func main() {
+ 	var s io.Seeker
+-	s.Seek(io.SeekStart, 0)
++	s.Seek(0, io.SeekStart)
+ }
 --- a/sa1018/ok/ok.go
 +++ b/sa1018/ok/ok.go
 @@ -3,6 +3,6 @@
@@ -76,6 +85,13 @@
 +	var i any = p
  	_ = i == nil
  }
+--- a/sa4026/bad/bad.go
++++ b/sa4026/bad/bad.go
+@@ -1,2 +1,3 @@
+ package main
+-func main() { _ = -0.0 }
++
++func main() { _ = math.Copysign(0, -1) }
 --- a/sa4032/ok/ok.go
 +++ b/sa4032/ok/ok.go
 @@ -1,12 +1,13 @@

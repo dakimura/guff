@@ -13431,3 +13431,55 @@ golden **193/193**、269 スイート / **3,275** テスト。
 `staticcheck-sa` の残り 7 ファイル。
 `sa4026`（`ReplaceWithString`）と `sa1013`（`EditMatch` で引数を入れ替え）が近い。
 `sa9004` は定数グループの各 spec を書き換えるので一番重い。
+
+---
+
+### 2026-08-27（続き 68）— SA4026 と SA1013。**壊れる書き換えも、そのまま書く**
+
+続き 67 の続き。`staticcheck-sa` は 16 ファイル中 9 一致。
+
+#### `sa4026` —— import しないまま `math` を呼ぶ
+
+```go
+edit.ReplaceWithString(node, `math.Copysign(0, -1)`)
+```
+
+`-0.0` を `math.Copysign(0, -1)` に置き換えるが、
+**`math` の import は足さない**。
+fixture の `bad.go` は `math` を import していないので、
+書き換えたあとの木は**コンパイルが通らない**。
+
+続き 58 の `goheader` と同じ性質のもので、
+再現できるようになったことが前進。
+
+#### `sa1013` —— 引数を入れ替える
+
+```go
+checkSeekerQ = (CallExpr fun@… [arg1@… arg2])
+checkSeekerR = (CallExpr fun [arg2 arg1])
+```
+
+`code.EditMatch` が差分を取って edit にする。
+guff は 2 つの edit（それぞれの引数の span に相手のテキスト）で同じバイトを書く。
+span は **unparen 後**のノード —— パターンが束縛したのがそれだから。
+
+#### 測った
+
+| | 続き 67 後 | 今回 |
+|---|---:|---:|
+| `--fix` が上流とバイト一致 | 170 | 170 |
+| pending | 22 | 22 |
+| `staticcheck-sa` の上流一致ファイル | 9 / 16 | **11 / 16** |
+| `staticcheck-sa` が書く行数 | 108 / 180 | **124 / 180** |
+
+不一致・書き過ぎともに **0**。
+golden **193/193**、269 スイート / **3,275** テスト。
+
+#### 次にやること
+
+残り 5 ファイル。
+`sa1006`（`ReplaceWithString` で `Printf` を `Print` に）、
+`sa1008`（`http.CanonicalHeaderKey` で包む）、
+`sa4029`（`sort.Xxx` の呼び出しに置き換え）、
+`sa6005`（`strings.EqualFold` に置き換え）、
+`sa9004`（定数グループの各 spec に型を足す —— 一番重い）。
