@@ -182,6 +182,13 @@ After ginkgolinter (2026-08-26): **170 matching, 22 pending**. Its suggestion
 *is* its fix — the message already carries the rewritten assertion — so the port
 was two struct fields and a helper.
 
+After SA1004 / SA5004 / SA9002 (2026-08-26): 170 matching, 22 pending, and
+`staticcheck-sa` at 8 of 16 files with **nothing over-written**. SA1004 was the
+only case in the corpus where guff wrote a file upstream leaves alone: upstream
+offers two competing fixes there, they conflict, and the conflict drops every
+staticcheck edit for the file. Matching upstream meant emitting *more* so that
+*less* is written.
+
 ## Does it still build?
 
 A `--fix` that rewrites `fmt.Sprint(i)` to `strconv.Itoa(i)` and does not add

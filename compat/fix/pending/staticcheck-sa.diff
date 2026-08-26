@@ -7,17 +7,6 @@
 # ledger cannot quietly outlive the defect it records.
 #
 # Re-record with: ./compat/fix/regen.sh --pending staticcheck-sa
---- a/sa1004/bad/bad.go
-+++ b/sa1004/bad/bad.go
-@@ -3,6 +3,6 @@
- import "time"
- 
- func main() {
--	time.Sleep(1)
--	time.Sleep(42)
-+	time.Sleep(1 * time.Nanosecond)
-+	time.Sleep(42 * time.Nanosecond)
- }
 --- a/sa1018/ok/ok.go
 +++ b/sa1018/ok/ok.go
 @@ -3,6 +3,6 @@
@@ -100,3 +89,23 @@
 +	_ = runtime.GOOS == "plan9"
 +	_ = runtime.GOOS == plan9
  }
+--- a/sa5004/bad/bad.go
++++ b/sa5004/bad/bad.go
+@@ -6,7 +6,7 @@
+ 		select {
+ 		case i := <-ch:
+ 			_ = i
+-		default:
++
+ 		}
+ 	}
+ }
+--- a/sa9002/bad/bad.go
++++ b/sa9002/bad/bad.go
+@@ -1,3 +1,5 @@
+ package main
++
+ import "os"
+-func f() { os.Chmod("x", 644) }
++
++func f() { os.Chmod("x", 0644) }

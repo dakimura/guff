@@ -9,9 +9,10 @@ use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_analysis::code::is_of_type_with_name;
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::code;
+use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass, Diagnostic, SuggestedFix, TextEdit};
 
-fn check_lit(pass: &Pass<'_>, lit: &BasicLit) -> Option<(u32, String)> {
+fn check_lit(pass: &Pass<'_>, lit: &BasicLit) -> Option<(u32, u32, String, String)> {
     if !is_of_type_with_name(pass, &Expr::BasicLit(lit.clone()), "os.FileMode")
         && !is_of_type_with_name(pass, &Expr::BasicLit(lit.clone()), "io/fs.FileMode")
     {
@@ -31,7 +32,11 @@ fn check_lit(pass: &Pass<'_>, lit: &BasicLit) -> Option<(u32, String)> {
     let n: i64 = v.parse().ok()?;
     Some((
         lit.value_pos.0 as u32,
+        lit.end().0 as u32,
         format!("file mode '{v}' evaluates to 0{n:o}; did you mean '0{v}'?"),
+        // `edit.ReplaceWithString(arg, "0"+lit.Value)`: the literal gains the
+        // leading zero it was meant to have.
+        format!("0{v}"),
     ))
 }
 
@@ -50,13 +55,28 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             let Expr::BasicLit(lit) = arg else {
                 continue;
             };
-            if let Some((pos, msg)) = check_lit(pass, lit) {
-                pending.push((pos, msg));
+            if let Some(found) = check_lit(pass, lit) {
+                pending.push(found);
             }
         }
     });
-    for (pos, msg) in pending {
-        pass.report_unless_generated(pos, msg);
+    for (pos, end, message, replacement) in pending {
+        if code::is_generated_at(pass, pos) {
+            continue;
+        }
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: "Fix octal literal".into(),
+                text_edits: vec![TextEdit {
+                    pos,
+                    end,
+                    new_text: replacement,
+                }],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }

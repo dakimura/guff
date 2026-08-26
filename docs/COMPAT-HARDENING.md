@@ -13298,3 +13298,81 @@ edit は `victim.go` を指す）で、**ガードを外すと実際に victim �
 **別の `FileSet` の `Pos` は、型が同じだけの別物。**
 `remap_reparsed_pos` があるのはそのため。
 今回のガードは、それを忘れても**他人のファイルには届かない**ようにする。
+
+---
+
+### 2026-08-27（続き 66）— SA1004。**多く出すことで、少なく書く**
+
+続き 65 の続き。pending 22 件の最大 `staticcheck-sa`（180 対 93）。
+
+ファイル単位で見たら、**guff だけが書いているファイルが 1 つ**あった:
+
+```
+guff-only: ['sa1004/bad/bad.go']
+```
+
+書き足りないより**書き過ぎのほうが深刻**なので、そこから見た。
+
+#### 上流は fix を 2 つ出す
+
+```go
+report.Fixes(
+    edit.Fix("Explicitly use nanoseconds", edit.ReplaceWithPattern(..., Rns, ...)),
+    edit.Fix("Use seconds",                edit.ReplaceWithPattern(..., Rs,  ...)))
+```
+
+同じ span に対する 2 つ。そして golangci の fixer は
+
+```go
+for _, sf := range issue.SuggestedFixes {
+    for _, edit := range sf.TextEdits { ... }
+}
+```
+
+と、**すべての SuggestedFix の edit を 1 本のリストに集める**。
+だから 2 つは衝突し、続き 38 の規則で
+**staticcheck の edit がそのファイルで全部落ちる**。
+上流が `sa1004/bad/bad.go` を触らないのはそのため。
+
+guff は fix を **1 つ**しか出していなかった（`"Use an explicit duration"`）。
+衝突が起きないので、書いてしまっていた。
+
+**上流に合わせるには、多く出す必要があった。多く出すと、書かれなくなる。**
+
+#### テストが逆を pin していた
+
+`apply_fixes_sa1004_rewrites_sleep_literal` と
+`cli_fix_flag_applies_and_clears_output` が、
+**書き換わること**を期待していた。どちらも SA1004 を
+「fix 経路を動かすための材料」として使っていただけ。
+
+- 前者は `sa1004_offers_two_conflicting_fixes_so_nothing_is_written` に改名し、
+  **古い期待値をコメントに残した**（続き 37 と同じ扱い）。
+- 後者は材料を **S1002** に替えた（fix が 1 つなので実際に適用される）。
+  fixture を `testdata/fix/s1002/` に追加。
+
+#### ついでに 2 つ
+
+`sa9002` は `edit.ReplaceWithString(arg, "0"+lit.Value)`、
+`sa5004` は `edit.Delete(comm)` —— 空の `default` 節を消すだけ。
+上流のコメントが自分で
+「これは空行を残すし default 節のコメントも残る、どちらも直せない」
+と書いている通りの結果になる。
+
+#### 測った
+
+| | 続き 65 後 | 今回 |
+|---|---:|---:|
+| `--fix` が上流とバイト一致 | 170 | 170 |
+| pending | 22 | 22 |
+| `staticcheck-sa` の上流一致ファイル | 6 / 16 | **8 / 16** |
+| `staticcheck-sa` の**書き過ぎ** | 1 ファイル | **0** |
+
+golden **193/193**、269 スイート / **3,275** テスト。
+
+#### 次にやること
+
+`staticcheck-sa` の残り 8 ファイル
+（`sa1006` / `sa1008` / `sa1013` / `sa4013` / `sa4026` /
+`sa4029` / `sa6005` / `sa9004`）。
+どれも上流に fix がある。
