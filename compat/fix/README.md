@@ -133,6 +133,13 @@ moved this time, and `staticcheck-s` went 63 -> 113 of 271. Three checks
 sometimes close a case and sometimes close none; the ledger line count is the
 one that always moves.
 
+After S1010 / S1033 / S1035 / S1037 / S1039 (2026-08-26): 164 matching, 28
+pending, and `staticcheck-s` at 167 of 271. Two of the files that moved belong
+to checks nobody touched: adding S1039 made `s1028` and `s1038` match, because
+`--fix` output is a property of the whole *file*, not of one check. Every file
+guff writes in that case is now byte-identical to upstream; it is silent on the
+eight remaining ones.
+
 ## Does it still build?
 
 A `--fix` that rewrites `fmt.Sprint(i)` to `strconv.Itoa(i)` and does not add

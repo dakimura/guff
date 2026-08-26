@@ -14,9 +14,13 @@ use std::sync::OnceLock;
 use guff::ast::{BasicLit, Expr};
 use guff::node_mask;
 use guff::walk::NodeRef;
-use guff_analysis::code::{expr_to_string, unparen};
+use guff_analysis::code::{self, expr_to_string, unparen};
 use guff_analysis::passes::inspect;
-use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::{
+    match_pos, AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
+
+use crate::render::render_node;
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let inspect = pass
@@ -24,7 +28,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "S1039 requires inspect analyzer".to_string())?
         .clone();
 
-    let mut pending: Vec<(u32, String)> = Vec::new();
+    let mut pending: Vec<(u32, String, Option<TextEdit>)> = Vec::new();
     inspect.preorder_typed(node_mask!(CallExpr), pass.files(), |node| {
         let NodeRef::CallExpr(call) = node else {
             return;
@@ -51,13 +55,39 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         if short == "Sprintf" && val.contains('%') {
             return;
         }
+        // `edit.ReplaceWithNode(fset, node, lit)`: the whole call goes and the
+        // literal takes its place. `lit` is the pattern's binding, which is
+        // made *after* parens are stripped — so `fmt.Sprint(("x"))` becomes
+        // `"x"`, not `("x")`. `arg` is already unparenthesized for the same
+        // reason.
+        let edit = render_node(pass, arg).map(|text| TextEdit {
+            pos: call.pos().0 as u32,
+            end: call.end().0 as u32,
+            new_text: text,
+        });
         pending.push((
             match_pos(node),
             format!("unnecessary use of fmt.{short}"),
+            edit,
         ));
     });
-    for (pos, message) in pending {
-        pass.report_unless_generated(pos, message);
+    for (pos, message, edit) in pending {
+        let Some(edit) = edit else {
+            pass.report_unless_generated(pos, message);
+            continue;
+        };
+        if code::is_generated_at(pass, pos) {
+            continue;
+        }
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: "Replace with string literal".into(),
+                text_edits: vec![edit],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }

@@ -14,9 +14,13 @@ use std::sync::OnceLock;
 use guff::ast::{CallExpr, Expr, SelectorExpr};
 use guff::node_mask;
 use guff::walk::NodeRef;
-use guff_analysis::code::unparen;
+use guff_analysis::code::{self, unparen};
 use guff_analysis::passes::inspect;
-use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::{
+    match_pos, AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
+
+use crate::render::render_node;
 
 const HEADER_METHODS: &[&str] = &["Add", "Del", "Get", "Set"];
 
@@ -46,7 +50,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "S1035 requires inspect analyzer".to_string())?
         .clone();
 
-    let mut pending: Vec<(u32, String)> = Vec::new();
+    let mut pending: Vec<(u32, String, Option<TextEdit>)> = Vec::new();
     inspect.preorder_typed(node_mask!(CallExpr), pass.files(), |node| {
         let NodeRef::CallExpr(call) = node else {
             return;
@@ -71,19 +75,52 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let Some(recv) = recv_type_string(pass, x) else {
             return;
         };
+        // `edit.ReplaceWithNode(fset, arg, arg.Args[0])`: the canonicalizing
+        // call goes and its own argument takes its place, over the same
+        // unparenthesized span the report uses. Upstream's pattern spells the
+        // argument list `[_]`, so it only ever matches a one-argument call;
+        // anything else is reported without a fix rather than rewritten to
+        // something that would not compile.
+        let inner = unparen(arg);
+        let edit = match inner {
+            Expr::CallExpr(CallExpr { args, .. }) if args.len() == 1 => {
+                render_node(pass, &args[0]).map(|text| TextEdit {
+                    pos: inner.pos().0 as u32,
+                    end: inner.end().0 as u32,
+                    new_text: text,
+                })
+            }
+            _ => None,
+        };
         pending.push((
             // The pattern binds the *unparenthesized* node, so upstream's
             // report starts inside the parens: `h.Set((canon(k)), v)` is
             // reported at `canon`, one column in from `(`.
-            unparen(arg).pos().0 as u32,
+            inner.pos().0 as u32,
             format!(
                 "calling net/http.CanonicalHeaderKey on the 'key' argument of ({recv}).{} is redundant",
                 sel.name
             ),
+            edit,
         ));
     });
-    for (pos, message) in pending {
-        pass.report_unless_generated(pos, message);
+    for (pos, message, edit) in pending {
+        let Some(edit) = edit else {
+            pass.report_unless_generated(pos, message);
+            continue;
+        };
+        if code::is_generated_at(pass, pos) {
+            continue;
+        }
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: "Remove call to CanonicalHeaderKey".into(),
+                text_edits: vec![edit],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }

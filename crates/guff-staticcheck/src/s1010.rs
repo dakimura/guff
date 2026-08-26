@@ -5,8 +5,12 @@
 use std::sync::OnceLock;
 
 use guff_pattern::{must_parse, Pattern};
+use guff_analysis::code;
 use guff_analysis::passes::inspect;
-use guff_analysis::{entry_mask, match_pattern, match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::{
+    entry_mask, match_pattern, match_pos, AnalysisResult, Analyzer, Diagnostic, Pass, RunError,
+    RunFn, SuggestedFix, TextEdit,
+};
 
 static PAT: OnceLock<Pattern> = OnceLock::new();
 
@@ -20,24 +24,50 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "S1010 requires inspect analyzer".to_string())?
         .clone();
 
-    let mut pending: Vec<(u32, String)> = Vec::new();
+    let mut pending: Vec<(u32, String, Option<TextEdit>)> = Vec::new();
     inspect.preorder_typed(entry_mask(pat()), pass.files(), |node| {
         if match_pattern(pass, pat(), node).is_some() {
             // Upstream reports the redundant high expression (`len(s)`), not
             // the slice expression it sits in.
-            let pos = match node {
-                guff::walk::NodeRef::SliceExpr(s) => s
-                    .high
-                    .as_ref()
-                    .map(|h| h.pos().0 as u32)
-                    .unwrap_or_else(|| match_pos(node)),
-                _ => match_pos(node),
+            let high = match node {
+                guff::walk::NodeRef::SliceExpr(s) => s.high.as_ref(),
+                _ => None,
             };
-            pending.push((pos, "should omit second index in slice, s[a:len(s)] is identical to s[a:]".into()));
+            let pos = high
+                .map(|h| h.pos().0 as u32)
+                .unwrap_or_else(|| match_pos(node));
+            // `edit.Delete(expr.High)`: the fix needs no rendering at all — the
+            // redundant `len(s)` is cut out and the surrounding `s[a:` / `]`
+            // already spell the simplified form.
+            let edit = high.map(|h| TextEdit {
+                pos: h.pos().0 as u32,
+                end: h.end().0 as u32,
+                new_text: String::new(),
+            });
+            pending.push((
+                pos,
+                "should omit second index in slice, s[a:len(s)] is identical to s[a:]".into(),
+                edit,
+            ));
         }
     });
-    for (pos, message) in pending {
-        pass.report_unless_generated(pos, message);
+    for (pos, message, edit) in pending {
+        let Some(edit) = edit else {
+            pass.report_unless_generated(pos, message);
+            continue;
+        };
+        if code::is_generated_at(pass, pos) {
+            continue;
+        }
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: "Simplify slice expression".into(),
+                text_edits: vec![edit],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }

@@ -12418,3 +12418,94 @@ golden **193/193**。S チェックは計 8 つ。
    `s1033`–`s1039` / `s1001`）。
    機構は出揃っていて、`ReplaceWithNode` か `EditMatch` のどちらか。
 2. pending 28 件。`goheader` 110 / `testifylint-mock` 97 / `protogetter` 42。
+
+---
+
+### 2026-08-27（続き 55）— S1010 / S1033 / S1035 / S1037 / S1039、そして**全部落ちても書き直す** fixer
+
+続き 54 の続き。`staticcheck-s` は 271 対 113 だった。
+
+#### 5 つ足したら 6 ファイル動いた
+
+| check | 上流 | 置き換え先 |
+|---|---|---|
+| `s1010` | `edit.Delete` | （無い。`len(s)` を切るだけ） |
+| `s1033` | `ReplaceWithNode` | 守られていた `delete(m, k)` |
+| `s1035` | `ReplaceWithNode` | `CanonicalHeaderKey` の引数 |
+| `s1039` | `ReplaceWithNode` | `fmt.Sprint` の中の文字列リテラル |
+| `s1037` | `ReplaceWithPattern` | `time.Sleep(arg)` |
+
+`s1010` はこのシリーズで**唯一、描画を必要としない** fix になった。
+消すだけなら、周りのソースがすでに答えを綴っている。
+
+`s1037` の置換パターンは呼び先を `(SelectorExpr (Ident "time") (Ident "Sleep"))`
+—— **リテラルの `time`** と綴る。ファイルが別名 import していると
+上流は**そのファイルに名前が無い `time.Sleep`** を書く。
+バイト一致とは、同じものを書くこと。
+
+#### **触っていない S1028 / S1038 が一致に変わった**
+
+`s1028/bad/bad.go` は `errors.New(fmt.Sprintf("x"))`。
+S1028（外側を `fmt.Errorf` に）と S1039（内側を `"x"` に）が
+**同じ領域**を書き換えたがる。
+
+golangci の `fixer.go` は衝突を**linter 単位**で解く。
+同じ `staticcheck` の 2 チェックが衝突すると、
+**その linter の edit がそのファイルで全部落ちる**。
+続き 54 の guff は S1039 を持っていなかったので衝突が起きず、
+**上流が書かない `fmt.Errorf("x")` を書いていた**。
+
+**チェックを 1 つ足すことが、別のチェックを黙らせることがある。**
+`--fix` の出力はチェックの性質ではなく、**ファイルの性質**。
+
+#### そこで出た fixer 本体の欠陥
+
+上流は edit が**全滅しても**ファイルを書き直す:
+
+```go
+editsByPath[path], _ = validateEdits(edits)   // nil でもキーは残る
+...
+out, _ := diff.ApplyBytes(contents, edits)    // nil → 素通り
+out = p.formatter.Format(path, out)           // ← gofmt は掛かる
+os.WriteFile(path, out, filePerm)
+```
+
+`editsByPath` のキーは「**fix を持つ issue があったか**」で決まり、
+「**生き残った edit があるか**」では決まらない。
+だから `import ("errors"; "fmt")` は整形されて書き戻る ——
+それが上流の全 diff だった。
+
+guff は `kept.is_empty()` で早期 continue して**何も書かなかった**。
+外した。unit test 1 本で pin してある
+（戻すと落ちることを確認済み）。
+
+#### なぜ続き 37 の probe が見逃したか
+
+当時も同じ経路を probe している。ただし
+**probe の入力がすでに gofmt 済みだった**ので、
+書き戻しても **0 行差**で、「書かない」と区別が付かなかった。
+
+続き 51 の「空の fixture は欠陥を隠す」の、もう一つの形:
+**整形済みの入力は、整形する処理を隠す。**
+
+#### 測った
+
+| | 続き 54 後 | 今回 |
+|---|---:|---:|
+| `--fix` が上流とバイト一致 | 164 | 164 |
+| pending | 28 | 28 |
+| `staticcheck-s` が書く行数 | 113 / 271 | **167 / 271** |
+| うち上流とバイト一致のファイル | — | **14 / 22（不一致 0）** |
+
+guff が書くファイルは**1 つ残らず上流と同一**で、
+残り 8 ファイルは guff が黙っているだけ ——
+**書き過ぎがゼロ**という形は、このケースでは初めて。
+
+golden **193/193**、269 スイート / **3,270** テスト。
+
+#### 次にやること
+
+1. `staticcheck-s` の残り 8 チェック
+   （`s1001` / `s1005` / `s1011` / `s1018` / `s1024` / `s1025` /
+   `s1034` / `s1036`）。これで case が閉じる。
+2. pending 28 件。`goheader` 110 / `testifylint-mock` 97 / `protogetter` 42。
