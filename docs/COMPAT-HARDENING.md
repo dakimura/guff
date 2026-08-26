@@ -13376,3 +13376,58 @@ golden **193/193**、269 スイート / **3,275** テスト。
 （`sa1006` / `sa1008` / `sa1013` / `sa4013` / `sa4026` /
 `sa4029` / `sa6005` / `sa9004`）。
 どれも上流に fix がある。
+
+---
+
+### 2026-08-27（続き 67）— SA4013。**2 つの規則が 1 つの hunk で出会う**
+
+続き 66 の続き。`staticcheck-sa` は 16 ファイル中 8 一致。
+
+`sa4013/bad/bad.go` に対する上流の答えはこれだけ:
+
+```diff
+ package main
++
+ func main() { _ = !!true }
+```
+
+**コードは無変更で、gofmt の空行が 1 行入るだけ。**
+
+理由が 2 つ重なっている:
+
+1. 続き 66 —— SA4013 も fix を 2 つ出す
+   （`Turn into single negation` と `Remove double negation`）。
+   同じ span なので衝突し、staticcheck の edit が全部落ちる。
+2. 続き 55 —— それでも**ファイルは書かれる**。
+   `editsByPath` のキーは「fix を持つ issue があったか」で決まるので、
+   読み直して gofmt して書き戻す。
+   `package main` の直後に空行が入るのはそれ。
+
+guff は fix を 0 個出していたので、**キーすら立たず**何も書かなかった。
+2 つ出したら一致した。
+
+#### また `as_expr()` に嵌まった
+
+`single@(UnaryExpr "!" x)` の束縛は `MatchValue::Node` で入る。
+`as_expr()` は `MatchValue::Expr` しか見ないので **黙って空を返す**。
+続き 60 の testifylint `recv@` と同じ形。2 度目。
+
+`as_ident()` は `Node(NodeRef::Ident(_))` も見ているのに、
+`as_expr()` は見ていない —— **アクセサごとに親切さが違う**。
+
+#### 測った
+
+| | 続き 66 後 | 今回 |
+|---|---:|---:|
+| `--fix` が上流とバイト一致 | 170 | 170 |
+| pending | 22 | 22 |
+| `staticcheck-sa` の上流一致ファイル | 8 / 16 | **9 / 16** |
+| `staticcheck-sa` が書く行数 | 102 / 180 | **108 / 180** |
+
+golden **193/193**、269 スイート / **3,275** テスト。
+
+#### 次にやること
+
+`staticcheck-sa` の残り 7 ファイル。
+`sa4026`（`ReplaceWithString`）と `sa1013`（`EditMatch` で引数を入れ替え）が近い。
+`sa9004` は定数グループの各 spec を書き換えるので一番重い。
