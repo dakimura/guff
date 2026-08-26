@@ -9,7 +9,12 @@ use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_analysis::code::{is_io_seek_whence, is_method_val, unparen};
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::code;
+use guff_analysis::{
+    AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
+
+use crate::render::render_node;
 
 const MSG: &str =
     "the first argument of io.Seeker is the offset, but an io.Seek* constant is being used instead";
@@ -39,17 +44,52 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "SA1013 requires inspect analyzer".to_string())?
         .clone();
 
-    let mut pending: Vec<u32> = Vec::new();
+    let mut pending: Vec<(u32, Vec<TextEdit>)> = Vec::new();
     inspect.preorder_typed(node_mask!(CallExpr), pass.files(), |n| {
         let NodeRef::CallExpr(call) = n else {
             return;
         };
-        if let Some(pos) = check_seek_call(pass, call) {
-            pending.push(pos);
-        }
+        let Some(pos) = check_seek_call(pass, call) else {
+            return;
+        };
+        // `code.EditMatch` against `(CallExpr fun [arg2 arg1])`: the two
+        // arguments trade places. The spans are the *unparenthesized* nodes,
+        // because that is what the pattern bound.
+        let (a, b) = (unparen(&call.args[0]), unparen(&call.args[1]));
+        let edits = match (render_node(pass, a), render_node(pass, b)) {
+            (Some(at), Some(bt)) => vec![
+                TextEdit {
+                    pos: a.pos().0 as u32,
+                    end: a.end().0 as u32,
+                    new_text: bt,
+                },
+                TextEdit {
+                    pos: b.pos().0 as u32,
+                    end: b.end().0 as u32,
+                    new_text: at,
+                },
+            ],
+            _ => Vec::new(),
+        };
+        pending.push((pos, edits));
     });
-    for pos in pending {
-        pass.report_unless_generated(pos, MSG);
+    for (pos, edits) in pending {
+        if edits.is_empty() {
+            pass.report_unless_generated(pos, MSG);
+            continue;
+        }
+        if code::is_generated_at(pass, pos) {
+            continue;
+        }
+        pass.report(Diagnostic {
+            pos,
+            message: MSG.to_string(),
+            suggested_fixes: vec![SuggestedFix {
+                message: "Swap arguments".into(),
+                text_edits: edits,
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }

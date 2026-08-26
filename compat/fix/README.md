@@ -193,6 +193,10 @@ After SA4013 (2026-08-26): 9 of 16. Its expected diff is a gofmt blank line and
 nothing else — two competing fixes drop all of staticcheck's edits, and the file
 is still written. Two rules from earlier entries meeting in one hunk.
 
+After SA4026 / SA1013 (2026-08-26): **11 of 16**, nothing differing. SA4026's
+replacement names `math` without importing it, so the tree stops compiling —
+upstream's own choice, reproduced.
+
 ## Does it still build?
 
 A `--fix` that rewrites `fmt.Sprint(i)` to `strconv.Itoa(i)` and does not add
