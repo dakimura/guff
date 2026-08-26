@@ -3,7 +3,9 @@
 //!
 //! Default matches golangci-lint / upstream: `block-size=1`.
 //!
-//! DEFERRED: SuggestedFix.
+//! The fix is a pure insertion of a newline at the statement's position — the
+//! gofmt pass that follows a `--fix` turns it into the blank line the message
+//! asks for.
 
 use std::sync::OnceLock;
 
@@ -12,7 +14,9 @@ use guff::position::FileSet;
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_analysis::{
+    AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
 
 use crate::options::NlreturnOptions;
 
@@ -40,6 +44,8 @@ fn inspect_block(
     block_size: i64,
     pending: &mut Vec<(u32, String)>,
 ) {
+    // Upstream's edit is `{Pos: stmt.Pos(), End: stmt.Pos(), NewText: "\n"}` at
+    // every report site, so it is built from `pos` alone below.
     for (i, stmt) in block.iter().enumerate() {
         if !matches!(stmt, Stmt::BranchStmt(_) | Stmt::ReturnStmt(_)) {
             continue;
@@ -87,7 +93,19 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     }
 
     for (pos, message) in pending {
-        pass.reportf(pos, message);
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: String::new(),
+                text_edits: vec![TextEdit {
+                    pos,
+                    end: pos,
+                    new_text: "\n".to_string(),
+                }],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }

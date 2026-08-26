@@ -12985,3 +12985,92 @@ golden **193/193**、269 スイート / **3,274** テスト。
    続き 47 で**上流ソースが手元に無い**と記録してあるが、
    今回 `go mod download` でピン版を取れることが分かった ——
    **同じ手が使えるはず**。
+
+---
+
+### 2026-08-27（続き 62）— `nlreturn` と `protogetter`。**「入手不能」は 1 コマンドで嘘になった**
+
+続き 61 の続き。pending 23 件… の前に、
+続き 47 が保留した 2 件を片付ける。
+
+#### 保留の理由が間違っていた
+
+続き 47 は `nlreturn` と `protogetter` を
+**「上流ソースが手元に無い」**として見送っていた。
+`~/projects/src/github.com/` にも module cache にも無かったのは本当。
+
+無かっただけだった:
+
+```
+go mod download github.com/ssgreg/nlreturn/v2@v2.2.1
+go mod download github.com/ghostiam/protogetter@v0.3.20
+```
+
+続き 61 で `dupword` のピン版を取りに行った手が、そのまま使えた。
+**「入手不能」と書く前に 1 コマンド試すこと。**
+
+（`protogetter` も展開済みは v0.3.21、ピンは v0.3.20 —— 続き 47 の罠がまた。）
+
+#### 読んだら、両方とも数行だった
+
+`nlreturn`:
+
+```go
+TextEdits: []analysis.TextEdit{{
+    Pos: stmt.Pos(), End: stmt.Pos(), NewText: []byte("\n"),
+}},
+```
+
+**幅 0 の挿入だけ**。あとは `--fix` のあとに走る gofmt が
+メッセージの言う空行にしてくれる。
+
+`protogetter`:
+
+```go
+TextEdits: []analysis.TextEdit{{
+    Pos: r.node.Pos(), End: r.node.End(), NewText: []byte(r.result.To),
+}},
+```
+
+`result.To` は**メッセージがすでに持っている文字列**
+（`"avoid direct access to proto field %s, use %s instead"` の 2 つ目）。
+guff は両方すでに計算していたので、繋ぐだけだった。
+
+どちらも**一発で上流とバイト一致**。
+
+#### ついでに分かったこと: golangci は Pos をオフセットに変換している
+
+`nolintlint` は `token.Pos(pos.Offset)` という
+**生のオフセットを Pos にキャスト**して渡す。
+staticcheck 系は本物の `token.Pos` を渡す。矛盾しないのは、
+`goanalysis/runners.go` が analyzer の diagnostic を Issue に載せる時点で
+
+```go
+Pos: token.Pos(diag.File.Offset(edit.Pos)),
+```
+
+と**オフセットへ変換している**から。
+`nolintlint` は `result.Issue` を直接組むのでその経路を通らず、
+自分でオフセットを渡している。
+
+guff の `resolve_edit` は Pos → offset を自分で行うので
+goanalysis 経路と同じ。**nolintlint を移植するときはここが要**。
+
+#### 測った
+
+| | 続き 61 後 | 今回 |
+|---|---:|---:|
+| `--fix` が上流とバイト一致 | 167 | **169** |
+| pending | 25 | **23** |
+| `nlreturn` | 0 / 34 行 | **一致**（台帳を削除） |
+| `protogetter` | 0 / 42 行 | **一致**（台帳を削除） |
+
+golden **193/193**、269 スイート / **3,274** テスト。
+
+#### 次にやること
+
+pending 23 件。差の大きい順に
+`staticcheck-sa` 88 / `nolint`・`nolint-strict` 各 70 / `gocritic` 48 /
+`ginkgolinter` 30 / `wsl-v5` 27。
+`nolint` 系は nolintlint（不要 directive の削除、`// nolint` の空白詰め）と
+misspell の 2 つが要る。

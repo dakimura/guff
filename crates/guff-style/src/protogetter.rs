@@ -33,7 +33,7 @@ use guff::position::FileSet;
 use guff::token::Token;
 use guff::walk::{preorder, NodeRef};
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn, Diagnostic, SuggestedFix, TextEdit};
 use guff_types::alias::unalias_readonly;
 use guff_types::arena::{TypeData, TypeId};
 use guff_types::named::{named_method, named_num_methods};
@@ -369,7 +369,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     let mut filtered: HashSet<i64> = HashSet::new();
     let mut replaced: Vec<(i64, i64)> = Vec::new();
-    let mut pending: Vec<(u32, String)> = Vec::new();
+    let mut pending: Vec<(u32, String, TextEdit)> = Vec::new();
 
     for (i, file) in pass.files().iter().enumerate() {
         let path = pass
@@ -506,12 +506,20 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         return true;
                     }
                     replaced.push((node_pos, node_end));
+                    // The fix is the message's own second half: upstream
+                    // replaces the node with `result.To`, the same string it
+                    // formats into "use %s instead".
                     pending.push((
                         node_pos as u32,
                         format!(
                             "avoid direct access to proto field {}, use {} instead",
                             rw.from, rw.to
                         ),
+                        TextEdit {
+                            pos: node_pos as u32,
+                            end: node_end as u32,
+                            new_text: rw.to.clone(),
+                        },
                     ));
                 }
                 NodeRef::StarExpr(st) => {
@@ -540,12 +548,20 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         return true;
                     }
                     replaced.push((node_pos, node_end));
+                    // The fix is the message's own second half: upstream
+                    // replaces the node with `result.To`, the same string it
+                    // formats into "use %s instead".
                     pending.push((
                         node_pos as u32,
                         format!(
                             "avoid direct access to proto field {}, use {} instead",
                             rw.from, rw.to
                         ),
+                        TextEdit {
+                            pos: node_pos as u32,
+                            end: node_end as u32,
+                            new_text: rw.to.clone(),
+                        },
                     ));
                 }
                 _ => {}
@@ -554,8 +570,16 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         });
     }
 
-    for (pos, msg) in pending {
-        pass.reportf(pos, &msg);
+    for (pos, message, edit) in pending {
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: String::new(),
+                text_edits: vec![edit],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }
