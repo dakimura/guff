@@ -17,7 +17,7 @@ use guff::walk::NodeRef;
 use guff_analysis::code::{self, unparen};
 use guff_analysis::passes::inspect;
 use guff_analysis::{
-    match_pos, AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+    AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
 };
 
 use crate::render::render_node;

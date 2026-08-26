@@ -28,6 +28,16 @@
 +	strings.ReplaceAll("abc", "a", "b")
  	strings.Replace("abc", "a", "b", 1)
  }
+--- a/sa1025/bad/bad.go
++++ b/sa1025/bad/bad.go
+@@ -5,6 +5,6 @@
+ func fn() {
+ 	t := time.NewTimer(time.Second)
+ 	if t.Reset(time.Second) {
+-		_ = <-t.C
++		<-t.C
+ 	}
+ }
 --- a/sa4014/bad/bad.go
 +++ b/sa4014/bad/bad.go
 @@ -1,7 +1,9 @@

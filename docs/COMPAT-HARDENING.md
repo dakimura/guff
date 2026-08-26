@@ -12509,3 +12509,103 @@ golden **193/193**、269 スイート / **3,270** テスト。
    （`s1001` / `s1005` / `s1011` / `s1018` / `s1024` / `s1025` /
    `s1034` / `s1036`）。これで case が閉じる。
 2. pending 28 件。`goheader` 110 / `testifylint-mock` 97 / `protogetter` 42。
+
+---
+
+### 2026-08-27（続き 56）— 7 チェックと、**1 形しか通していない fixture** が隠していた欠陥
+
+続き 55 の続き。`staticcheck-s` は 22 ファイル中 14 が上流一致だった。
+
+#### 7 つ
+
+| check | 上流 | 置き換え先 |
+|---|---|---|
+| `s1018` | `EditMatch` | `copy(s[:limit], s[offset:])` |
+| `s1024` | `ReplaceWithNode` | `time.Until(recv)` |
+| `s1036` | `ReplaceWithNode` | then 節の 1 文 |
+| `s1011` | `ReplaceWithNode` | `lhs = append(lhs, x...)` |
+| `s1025` | `ReplaceWithNode` | `x.String()` / `x` / `string(x)` |
+| `s1034` | `ReplaceWithPattern` + N 個 | `ident := <guard>` と各 assertion |
+| `s1005` | `ReplaceWithNode` / `Delete` | 4 形（後述） |
+
+`render_stmt` を追加した。`ReplaceWithNode` は `ast.Node` を取るので、
+**文を文で置き換える**チェック（`s1005` / `s1036`）には
+式用の `render_node` では足りない。
+
+`s1011` は message が `render_expr`、fix が `render_node`。
+続き 52 の「レンダラが 2 つあるのは質問が 2 つあるから」をそのまま適用して、
+`check_append_loop` は**文字列ではなくノードを返す**ようにした。
+
+#### `s1005` の fixture は 4 形のうち 1 形しか通していなかった
+
+fixture は `_ = <-ch` だけ。range の 3 形
+（`for _ =` / `for _, _ =` / `for x, _ :=`）は
+**guff の報告も、これから足す fix も、何にも測られていなかった**。
+
+3 形を足して golden を regen したら、**上流は 3 件とも報告**し、
+**guff は 3 件目を落としていた**。
+
+原因は `is_blank`:
+
+```rust
+ident.name == "_" && object_of(pass, ident).is_none()   // ← 余分な条件
+```
+
+上流の `astutil.IsBlank` は**純粋に構文的**（名前が `_` か、それだけ）。
+`:=` の `_` は**宣言**なのでオブジェクトを持つ。
+だから `for i, _ := range xs` だけが静かに落ちていた。
+
+**4 形あるチェックを 1 形だけ通す fixture は、その 1 形について「一致」と言う。**
+続き 51「空の fixture は欠陥を隠す」/ 続き 55「整形済みの入力は整形を隠す」に続く 3 つ目の形:
+**部分的な fixture は、通っていない枝を隠す。**
+
+unit test も `any(contains(...))` から**件数の assert** に直した。
+
+#### `TokPos + 1` は危なく見えて安全
+
+上流の range 削除は `edit.Range{rs.Key.Pos(), rs.TokPos + 1}`。
+`+1` は 1 バイトのトークンを前提していて、2 バイトの `:=` なら
+`=` が残る —— ように見える。
+
+だが**左辺が blank だけの range は `:=` を使えない**。
+コンパイラが `no new variables on left side of :=` で弾く（実測）。
+残る 1 形（`for x, _ :=`）はトークンに触らない削除なので、
+`+1` が `:=` に当たる経路は**存在しない**。
+
+golangci-lint 2.12.2 に直接聞いて確認した:
+`for _, _ = range xs` と `for _ = range xs` は `for range xs` に、
+`for i, _ := range xs` は `for i := range xs` になる。
+
+#### 波及: `staticcheck-sa` も動いた
+
+`is_blank` を直したことで、`staticcheck-sa` の `sa1025/bad/bad.go` にある
+`_ = <-t.C` も guff が書くようになった。
+上流の expected と**バイト一致**で、golden にも元から
+`sa1025/bad/bad.go:8:3 … S1005` があった ——
+**報告できていたのに書けていなかった** 1 件。
+
+#### 測った
+
+| | 続き 55 後 | 今回 |
+|---|---:|---:|
+| `--fix` が上流とバイト一致 | 164 | 164 |
+| pending | 28 | 28 |
+| `staticcheck-s` の上流一致ファイル | 14 / 22 | **21 / 22** |
+| `staticcheck-s` が書く行数 | 167 / 271 | **285 / 296** |
+
+分母が動いていることに注意 —— fixture を足したので
+上流の答え自体が 271 行から 296 行に増えた。
+**ファイル数のほうが読める指標**。
+
+golden **193/193**（`staticcheck-s` の expected に 3 件追加）、
+269 スイート / **3,270** テスト。
+
+#### 次にやること
+
+1. **`s1001` だけ**。これで `staticcheck-s` が閉じて 165 case 一致になる。
+   ただし fixture は `[]int` の 1 形しかなく、上流の
+   `elType` が持つ**配列・配列ポインタ**の枝は通っていない
+   （guff の `elem_kind` にポインタ判定が無いのもそこ）。
+   message も `copy(to, from)` 固定で、上流の `to[:]` / `from[:]` を出さない。
+   **fixture を先に足すこと。**
+2. pending 28 件。`goheader` 110 / `testifylint-mock` 97 / `protogetter` 42。

@@ -10,8 +10,11 @@ use guff::token::Token;
 use guff::walk::NodeRef;
 use guff_analysis::code::{is_call_to, object_of, refers_to};
 use guff_analysis::passes::inspect;
-use crate::render::render_expr;
-use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use crate::render::{render_expr, render_node};
+use guff_analysis::code;
+use guff_analysis::{
+    match_pos, AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
 use guff_types::TypeId;
 
 fn expr_type(pass: &Pass<'_>, expr: &Expr) -> Option<TypeId> {
@@ -47,7 +50,7 @@ fn is_append_to_lhs(pass: &Pass<'_>, call: &CallExpr, lhs: &Expr) -> bool {
     is_call_to(pass, call, "append") && call.args.len() == 2 && same_expr(pass, &call.args[0], lhs)
 }
 
-fn check_append_loop(pass: &Pass<'_>, rs: &RangeStmt) -> Option<(String, String)> {
+fn check_append_loop<'a>(pass: &Pass<'_>, rs: &'a RangeStmt) -> Option<(&'a Expr, &'a Expr)> {
     let key = rs.key.as_ref().and_then(|e| match e {
         Expr::Ident(id) => Some(id),
         _ => None,
@@ -170,9 +173,10 @@ fn check_append_loop(pass: &Pass<'_>, rs: &RangeStmt) -> Option<(String, String)
     if render_type(pass, src) != render_type(pass, dst) {
         return None;
     }
-    // Upstream renders the rewritten statement, so the message carries the
-    // real identifiers: `x = append(x, y...)`, not a placeholder.
-    Some((render_expr(lhs), render_expr(x)))
+    // The two nodes, not their text: the message and the fix ask different
+    // questions of them (COMPAT-HARDENING 続き 52). `render_expr` is the
+    // message's approximate renderer; the fix has to go through go/printer.
+    Some((lhs, x))
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -181,20 +185,50 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "S1011 requires inspect analyzer".to_string())?
         .clone();
 
-    let mut pending: Vec<(u32, String)> = Vec::new();
+    let mut pending: Vec<(u32, String, Option<TextEdit>)> = Vec::new();
     inspect.preorder_typed(node_mask!(RangeStmt), pass.files(), |node| {
         let NodeRef::RangeStmt(rs) = node else {
             return;
         };
-        if let Some((dst, src)) = check_append_loop(pass, rs) {
-            pending.push((
-                match_pos(node),
-                format!("should replace loop with {dst} = append({dst}, {src}...)"),
-            ));
-        }
+        let Some((dst, src)) = check_append_loop(pass, rs) else {
+            return;
+        };
+        // `edit.ReplaceWithNode(fset, node, r)` where `r` is the AssignStmt
+        // `lhs = append(lhs, x...)`. The whole range statement goes.
+        let edit = render_node(pass, dst)
+            .zip(render_node(pass, src))
+            .map(|(d, s)| TextEdit {
+                pos: rs.for_.0 as u32,
+                end: rs.body.end().0 as u32,
+                new_text: format!("{d} = append({d}, {s}...)"),
+            });
+        pending.push((
+            match_pos(node),
+            format!(
+                "should replace loop with {dst} = append({dst}, {src}...)",
+                dst = render_expr(dst),
+                src = render_expr(src),
+            ),
+            edit,
+        ));
     });
-    for (pos, message) in pending {
-        pass.report_unless_generated(pos, message);
+    for (pos, message, edit) in pending {
+        let Some(edit) = edit else {
+            pass.report_unless_generated(pos, message);
+            continue;
+        };
+        if code::is_generated_at(pass, pos) {
+            continue;
+        }
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: "Replace loop with call to append".into(),
+                text_edits: vec![edit],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }

@@ -11,7 +11,7 @@
 
 use std::sync::OnceLock;
 
-use guff::ast::{AssignStmt, CallExpr, Expr, Ident, IfStmt, IndexExpr, Stmt};
+use guff::ast::{AssignStmt, Expr, IfStmt, IndexExpr, Stmt};
 use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;

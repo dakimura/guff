@@ -51,6 +51,17 @@ pub fn render_node(pass: &Pass<'_>, expr: &Expr) -> Option<String> {
     Some(String::from_utf8_lossy(&buf).into_owned())
 }
 
+/// [`render_node`] for a statement.
+///
+/// `edit.ReplaceWithNode` takes an `ast.Node`, and a few checks replace one
+/// statement with another — S1036 collapses an `if`/`else` to the assignment in
+/// its then-branch — so the same go/printer path has to accept a `Stmt`.
+pub fn render_stmt(pass: &Pass<'_>, stmt: &guff::ast::Stmt) -> Option<String> {
+    let mut buf = Vec::new();
+    format::node(&mut buf, pass.fset(), PrintNode::Stmt(stmt)).ok()?;
+    Some(String::from_utf8_lossy(&buf).into_owned())
+}
+
 /// Render an expression for use in diagnostic messages.
 pub fn render_expr(expr: &Expr) -> String {
     match expr {
