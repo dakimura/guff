@@ -192,10 +192,14 @@ pub fn apply_fixes(
             }
         }
         let (kept, _) = validate_edits(kept);
-        if kept.is_empty() {
-            continue;
-        }
 
+        // No early-out when `kept` is empty. Upstream keys `editsByPath` off
+        // the file having had *any* fixable text edit, not off any surviving
+        // one, so a file whose every edit lost the conflict pass is still read,
+        // run through the formatter and written back. That write is not a
+        // no-op: gofmt-ing a file nobody edited is a visible change, and it is
+        // the whole diff upstream produces for a file where two checks of the
+        // same linter want the same region.
         let path = Path::new(&filename);
         let mut content = fs::read_to_string(path).map_err(FixError::Io)?;
         // `kept` is sorted ascending and non-overlapping, so applying from the
@@ -439,6 +443,51 @@ mod tests {
         assert_eq!(fs::read_to_string(&path).unwrap(), "aaaabbbbcccc");
         assert_eq!(n, 0, "no edit from a self-conflicting linter may be applied");
         assert_eq!(remaining.len(), 3, "guff keeps reporting what it did not fix");
+    }
+
+    /// A gofmt-only `MetaFormatter`, which is what golangci builds when the
+    /// user has configured no formatter linters.
+    fn meta_gofmt() -> guff_fmt::MetaFormatter {
+        guff_fmt::MetaFormatter::new(
+            &["gofmt".into()],
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_file_whose_every_edit_is_dropped_is_still_formatted_and_written() {
+        // Upstream keys `editsByPath` off the file having had a fixable text
+        // edit, not off one surviving the conflict pass, so it reads, formats
+        // and writes the file even with nothing left to apply. That is the
+        // entire diff golangci-lint produces when two checks of one linter want
+        // the same region: the code is untouched and the file is gofmt'd.
+        let src = "package main\n\nimport (\"errors\"; \"fmt\")\n\nvar _ = errors.New(fmt.Sprintf(\"x\"))\n";
+        let (_d, path, fset, base) = scratch(src);
+        let p = path.to_str().unwrap();
+        // Two staticcheck edits over the same expression, as S1028 and S1039
+        // produce for `errors.New(fmt.Sprintf("x"))`.
+        let outer = src.find("errors.New").unwrap();
+        let inner = src.find("fmt.Sprintf").unwrap();
+        let issues = vec![
+            issue_from(p, "staticcheck", vec![vec![edit(base, outer, src.len() - 1, "fmt.Errorf(\"x\")")]]),
+            issue_from(p, "staticcheck", vec![vec![edit(base, inner, src.len() - 2, "\"x\"")]]),
+        ];
+        let (_remaining, n) = apply_fixes(&fset, &issues, Some(&meta_gofmt())).unwrap();
+        assert_eq!(n, 0, "conflicting edits from one linter all lose");
+        let after = fs::read_to_string(&path).unwrap();
+        assert!(
+            after.contains("errors.New(fmt.Sprintf(\"x\"))"),
+            "the code itself must be untouched, got:\n{after}"
+        );
+        assert!(
+            after.contains("\t\"errors\"\n\t\"fmt\"\n"),
+            "the file must still have been gofmt'd, got:\n{after}"
+        );
     }
 
     #[test]

@@ -15,9 +15,13 @@ use guff::ast::{AssignStmt, CallExpr, Expr, Ident, IfStmt, IndexExpr, Stmt};
 use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
-use guff_analysis::code::{is_call_to, object_of, unparen};
+use guff_analysis::code::{self, is_call_to, object_of, unparen};
 use guff_analysis::passes::inspect;
-use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::{
+    match_pos, AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
+
+use crate::render::render_node;
 
 fn same_expr(pass: &Pass<'_>, a: &Expr, b: &Expr) -> bool {
     match (unparen(a), unparen(b)) {
@@ -47,26 +51,30 @@ fn map_index_init(init: &Stmt) -> Option<(&Expr, &Expr)> {
     Some((m, key))
 }
 
-fn check_if(pass: &Pass<'_>, ifs: &IfStmt) -> bool {
-    let Some((m, key)) = ifs.init.as_deref().and_then(map_index_init) else {
-        return false;
-    };
+/// The guarded `delete(m, key)` call, when `ifs` is the shape upstream matches.
+///
+/// Returns the call itself rather than a bool: it is both the thing that makes
+/// the guard unnecessary and, unparenthesized, the text that replaces it.
+fn check_if<'a>(pass: &Pass<'_>, ifs: &'a IfStmt) -> Option<&'a Expr> {
+    let (m, key) = ifs.init.as_deref().and_then(map_index_init)?;
     let Expr::Ident(ok) = unparen(&ifs.cond) else {
-        return false;
+        return None;
     };
     if ok.name == "_" || ifs.else_.is_some() || ifs.body.list.len() != 1 {
-        return false;
+        return None;
     }
     let Stmt::ExprStmt(es) = &ifs.body.list[0] else {
-        return false;
+        return None;
     };
-    let Expr::CallExpr(call) = unparen(&es.x) else {
-        return false;
+    let inner = unparen(&es.x);
+    let Expr::CallExpr(call) = inner else {
+        return None;
     };
-    call.args.len() == 2
+    let ok = call.args.len() == 2
         && same_expr(pass, &call.args[0], m)
         && same_expr(pass, &call.args[1], key)
-        && is_call_to(pass, call, "delete")
+        && is_call_to(pass, call, "delete");
+    ok.then_some(inner)
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -75,17 +83,48 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "S1033 requires inspect analyzer".to_string())?
         .clone();
 
-    let mut pending: Vec<(u32, String)> = Vec::new();
+    let mut pending: Vec<(u32, String, Option<TextEdit>)> = Vec::new();
     inspect.preorder_typed(node_mask!(IfStmt), pass.files(), |node| {
         let NodeRef::IfStmt(ifs) = node else {
             return;
         };
-        if check_if(pass, ifs) {
-            pending.push((match_pos(node), "unnecessary guard around call to delete".into()));
-        }
+        let Some(call) = check_if(pass, ifs) else {
+            return;
+        };
+        // `edit.ReplaceWithNode(fset, node, call)`: the whole `if` — init,
+        // condition, braces and all — collapses to the call it was guarding.
+        // `report.ShortRange()` narrows where the diagnostic is *reported*, not
+        // what the fix rewrites, so the edit spans the statement.
+        let edit = render_node(pass, call).map(|text| TextEdit {
+            pos: ifs.if_.0 as u32,
+            // `check_if` has already established there is no `else`, so the
+            // statement ends at the closing brace of the body.
+            end: ifs.body.end().0 as u32,
+            new_text: text,
+        });
+        pending.push((
+            match_pos(node),
+            "unnecessary guard around call to delete".into(),
+            edit,
+        ));
     });
-    for (pos, message) in pending {
-        pass.report_unless_generated(pos, message);
+    for (pos, message, edit) in pending {
+        let Some(edit) = edit else {
+            pass.report_unless_generated(pos, message);
+            continue;
+        };
+        if code::is_generated_at(pass, pos) {
+            continue;
+        }
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: "Remove guard".into(),
+                text_edits: vec![edit],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }

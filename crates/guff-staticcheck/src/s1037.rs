@@ -8,9 +8,13 @@ use guff::ast::{Expr, Stmt, UnaryExpr};
 use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
-use guff_analysis::code::is_call_to;
+use guff_analysis::code::{self, is_call_to};
 use guff_analysis::passes::inspect;
-use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::{
+    match_pos, AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
+
+use crate::render::render_node;
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let inspect = pass
@@ -18,7 +22,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "S1037 requires inspect analyzer".to_string())?
         .clone();
 
-    let mut pending: Vec<(u32, String)> = Vec::new();
+    let mut pending: Vec<(u32, String, Option<TextEdit>)> = Vec::new();
     inspect.preorder_typed(node_mask!(SelectStmt), pass.files(), |node| {
         let NodeRef::SelectStmt(sel) = node else {
             return;
@@ -61,13 +65,47 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         if !is_call_to(pass, call, "time.After") {
             return;
         }
+        // Upstream fixes only the empty-bodied clause; with a body it reports
+        // and leaves a TODO, because moving the body out of the `select` could
+        // capture or shadow identifiers.
+        //
+        // The replacement comes from a pattern that spells the callee
+        // `(SelectorExpr (Ident "time") (Ident "Sleep"))` — the literal name
+        // `time`, not the object the file's import resolves to. Under an
+        // aliased import upstream therefore writes a `time.Sleep` the file has
+        // no name for; matching it byte for byte means writing the same thing.
+        let edit = if clauses[0].body.is_empty() && call.args.len() == 1 {
+            render_node(pass, &call.args[0]).map(|arg| TextEdit {
+                pos: sel.select_.0 as u32,
+                end: sel.body.end().0 as u32,
+                new_text: format!("time.Sleep({arg})"),
+            })
+        } else {
+            None
+        };
         pending.push((
             match_pos(node),
             "should use time.Sleep instead of elaborate way of sleeping".into(),
+            edit,
         ));
     });
-    for (pos, message) in pending {
-        pass.report_unless_generated(pos, message);
+    for (pos, message, edit) in pending {
+        let Some(edit) = edit else {
+            pass.report_unless_generated(pos, message);
+            continue;
+        };
+        if code::is_generated_at(pass, pos) {
+            continue;
+        }
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: "Use time.Sleep".into(),
+                text_edits: vec![edit],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }

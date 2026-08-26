@@ -50,6 +50,13 @@
 -	return bytes.Compare(a, b) == 0
 +	return bytes.Equal(a, b)
  }
+--- a/s1010/bad/bad.go
++++ b/s1010/bad/bad.go
+@@ -1,3 +1,3 @@
+ package main
+ 
+-func f(s []int) []int { return s[1:len(s)] }
++func f(s []int) []int { return s[1:] }
 --- a/s1012/bad/bad.go
 +++ b/s1012/bad/bad.go
 @@ -2,4 +2,4 @@
@@ -101,8 +108,7 @@
 +	"fmt"
 +)
  
--func f() error { return errors.New(fmt.Sprintf("x")) }
-+func f() error { return fmt.Errorf("x") }
+ func f() error { return errors.New(fmt.Sprintf("x")) }
 --- a/s1030/bad/bad.go
 +++ b/s1030/bad/bad.go
 @@ -2,10 +2,10 @@
@@ -120,3 +126,51 @@
  
 -func sel(w struct{ B bytes.Buffer }) string { return string(w.B.Bytes()) }
 +func sel(w struct{ B bytes.Buffer }) string { return w.B.String() }
+--- a/s1033/bad/bad.go
++++ b/s1033/bad/bad.go
+@@ -1,7 +1,5 @@
+ package main
+ 
+ func f(m map[string]int, k string) {
+-	if _, ok := m[k]; ok {
+-		delete(m, k)
+-	}
++	delete(m, k)
+ }
+--- a/s1035/bad/bad.go
++++ b/s1035/bad/bad.go
+@@ -2,4 +2,4 @@
+ 
+ import "net/http"
+ 
+-func f(h http.Header) { h.Set(http.CanonicalHeaderKey("X"), "v") }
++func f(h http.Header) { h.Set("X", "v") }
+--- a/s1037/bad/bad.go
++++ b/s1037/bad/bad.go
+@@ -7,9 +7,7 @@
+ // clause. The body may be empty or not — upstream only uses that to decide
+ // whether it can offer a fix.
+ func f() {
+-	select {
+-	case <-time.After(time.Second):
+-	}
++	time.Sleep(time.Second)
+ }
+ 
+ func g() {
+--- a/s1038/bad/bad.go
++++ b/s1038/bad/bad.go
+@@ -2,4 +2,4 @@
+ 
+ import "fmt"
+ 
+-func f() { fmt.Print(fmt.Sprintf("hi")) }
++func f() { fmt.Print("hi") }
+--- a/s1039/bad/bad.go
++++ b/s1039/bad/bad.go
+@@ -2,4 +2,4 @@
+ 
+ import "fmt"
+ 
+-func f() { _ = fmt.Sprint("hi") }
++func f() { _ = "hi" }
