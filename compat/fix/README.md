@@ -165,6 +165,10 @@ which is deliberate — a rename without its argument edit writes
 `assert.Empty(t, 0, len(arr))`, and the ledger would record a case that does not
 compile.
 
+After the other nine (2026-08-26): **167 matching, 25 pending** —
+`testifylint-mock` closed, ledger deleted. Sixteen checkers carry fixes; the
+seven that do not are the seven upstream leaves unfixed too.
+
 ## Does it still build?
 
 A `--fix` that rewrites `fmt.Sprint(i)` to `strconv.Itoa(i)` and does not add

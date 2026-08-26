@@ -12845,3 +12845,73 @@ golden **193/193**、269 スイート / **3,274** テスト。
 `expected-actual` / `compares`、そして suite 系
 （`suite-dont-use-pkg` / `suite-extra-assert-call` /
 `suite-broken-parallel` / `suite-thelper`）。
+
+---
+
+### 2026-08-27（続き 60）— testifylint の残り 9 チェッカー。ケースが閉じた
+
+続き 59 の続き。`testifylint-mock` は 97 行中 45 行だった。
+
+#### 3 つの形
+
+| 形 | 上流 | 例 |
+|---|---|---|
+| 削除 | `newRemoveFnDiagnostic` | `regexp.MustCompile(\`hi\`)` → `\`hi\`` |
+| 名前だけ | `newSuggestedFuncReplacement` 単独 | `Error(t, err, target)` → `ErrorIs(...)` |
+| 挿入・削除 | 生の `TextEdit` | suite 系 |
+
+続き 59 で「名前だけ直すとコンパイルが通らない」と書いたが、
+**そうでない場合もある**。`assert.Error(t, err, errSentinel)` は
+すでに `assert.ErrorIs` が欲しい引数を渡しているので、
+上流も rename だけを出す。
+`report_msg_rename` を足したのはそのため ——
+**規則は「引数も直せ」ではなく「上流と同じ編集集合を出せ」。**
+
+#### `encoded-compare` の 2 つの編集
+
+`JSONEq` / `YAMLEq` は文字列を取るので、
+`[]byte` の辺は `string(...)` で包む。ただし
+`buf.Bytes()` は `string(buf.Bytes())` ではなく **`buf.String()`**。
+
+上流の型判定は自分でも hack と書いてある:
+`bytes` パッケージが import されていないことがあるので、
+**印字した型名から `*` を削って `"bytes.Buffer"` と文字列比較**する。
+合わせるとは、同じ文字列比較をすること。
+
+#### `suite-extra-assert-call` の `+ 1`
+
+```go
+Pos: se.Sel.Pos(),
+End: x.End() + 1,   // +1 for dot
+```
+
+`s.Assert().True(b)` から `Assert().` を消す。
+`+1` は閉じ括弧の次のドット。
+
+#### `suite-broken-parallel` は行ごと消す
+
+`ce.Pos()` から**次の行頭**まで。
+改行とインデントが一緒に消えるので、空行が残らない。
+
+#### 測った
+
+| | 続き 59 後 | 今回 |
+|---|---:|---:|
+| `--fix` が上流とバイト一致 | 166 | **167** |
+| pending | 26 | **25** |
+| `testifylint-mock` | 45 / 97 行 | **一致**（台帳を削除） |
+
+fix を持つチェッカーは 16。持たない 7 つ
+（`blank-import` / `float-compare` / `go-require` / `require-error` /
+`suite-method-signature` / `suite-subtest-run` / `useless-assert`）は
+**上流も持っていない**ことを確認済み。
+
+golden **193/193**、269 スイート / **3,274** テスト。
+
+#### 次にやること
+
+pending 25 件。`protogetter` 42 / `dupword` 36 / `nlreturn` 34。
+ただし `nlreturn` と `protogetter` は続き 47 で
+**上流ソースが手元に無い**と記録してある ——
+記録された diff から形を推測して書くのは、
+このドキュメントが繰り返し禁じていること。

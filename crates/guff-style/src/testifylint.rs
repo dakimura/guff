@@ -13,14 +13,22 @@
 //! (`zero` is implemented but omitted from enable-all: golangci 2.12 vendors
 //! testifylint v1.6.4 which does not include that checker.)
 //!
-//! DEFERRED: SuggestedFix / TextEdit,
-//! formatter full printf CheckPrintf / require-f-funcs object lookup parity,
-//! bool-compare custom-type casting in messages, compares time.Time helpers,
-//! encoded-compare autofix text edits, error-is-as CollectT special-case /
-//! full ErrorAs pointer diagnostics edge cases, require-error HTTP-handler /
-//! WaitGroup.Go context detection when `net/http` / `sync.WaitGroup.Go` are
-//! unavailable in the type graph (go-require covers these when stubs/types
-//! are present).
+//! **Suggested fixes.** Sixteen checkers carry them, and `compat/fix`'s
+//! `testifylint-mock` case matches golangci-lint byte for byte. A checker's
+//! edits are opt-in — see [`Finding`] — because testifylint rewrites the
+//! assertion's name and its arguments together, and half of that does not
+//! compile. The ones still reporting without a fix are `blank-import`,
+//! `float-compare`, `go-require`, `require-error`, `suite-method-signature`,
+//! `suite-subtest-run` and `useless-assert`, which upstream
+//! also leaves unfixed. (`time-compare`, like `zero`, has no counterpart in
+//! v1.6.4 at all and is not in enable-all.)
+//!
+//! DEFERRED: formatter full printf CheckPrintf / require-f-funcs object lookup
+//! parity, bool-compare custom-type casting in messages, compares time.Time
+//! helpers, error-is-as CollectT special-case / full ErrorAs pointer
+//! diagnostics edge cases, require-error HTTP-handler / WaitGroup.Go context
+//! detection when `net/http` / `sync.WaitGroup.Go` are unavailable in the type
+//! graph (go-require covers these when stubs/types are present).
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -1357,6 +1365,25 @@ fn report_use(checker: &str, call: &CallMeta<'_>, proposed: &str, pending: &mut 
     pending.push(Finding::new(call.call.pos().0 as u32, msg));
 }
 
+/// `newDiagnostic(..., newSuggestedFuncReplacement(call, proposed))`: a message
+/// the checker words itself, and a fix that is only the rename.
+///
+/// Not every testifylint fix touches the arguments. `assert.Error(t, err, target)`
+/// already passes what `assert.ErrorIs` wants, so renaming is the whole edit.
+fn report_msg_rename(
+    checker: &str,
+    call: &CallMeta<'_>,
+    body: &str,
+    proposed: &str,
+    pending: &mut Vec<Finding>,
+) {
+    pending.push(Finding::with_edits(
+        call.call.pos().0 as u32,
+        format!("{checker}: {body}"),
+        vec![rename_edit(call, proposed)],
+    ));
+}
+
 fn report_msg(checker: &str, call: &CallMeta<'_>, body: &str, pending: &mut Vec<Finding>) {
     pending.push(Finding::new(call.call.pos().0 as u32,
         format!("{checker}: {body}"),
@@ -1564,6 +1591,26 @@ fn check_bool_compare(
         }
         _ => {}
     }
+}
+
+/// `newRemoveSprintfDiagnostic`: the `fmt.Sprintf(...)` wrapper goes and its own
+/// arguments take its place — `fmt.Sprintf("msg")` becomes `"msg"`, and a call
+/// with format arguments becomes `"fmt", a, b`, which the assertion's own
+/// msgAndArgs then formats.
+fn report_remove_sprintf(
+    pass: &Pass<'_>,
+    call: &CallMeta<'_>,
+    msg: &Expr,
+    args: &[Expr],
+    pending: &mut Vec<Finding>,
+) {
+    let refs: Vec<&Expr> = args.iter().collect();
+    let edit = arg_edit(pass, msg.pos().0, msg.end().0, &refs);
+    pending.push(Finding::with_edits(
+        call.call.pos().0 as u32,
+        "formatter: remove unnecessary fmt.Sprintf".to_string(),
+        vec![edit],
+    ));
 }
 
 /// `newRemoveLenDiagnostic`: no rename, just `len(x)` collapsing to `x`.
@@ -1897,7 +1944,10 @@ fn check_compares(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Findin
             _ => {}
         }
     }
-    report_use("compares", call, &proposed, pending);
+    // The comparison collapses into the assertion's two arguments, in source
+    // order.
+    let edit = arg_edit(pass, be.x.pos().0, be.y.end().0, &[&be.x, &be.y]);
+    report_use_fix("compares", call, &proposed, vec![edit], pending);
 }
 
 fn check_contains(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
@@ -1942,7 +1992,16 @@ fn check_contains_string(
         }
         _ => return false,
     };
-    report_use("contains", call, proposed, pending);
+    // `strings.Contains(s, substr)` becomes the assertion's own two arguments.
+    // The span is the *outer* argument — `call.Args[0]` — so a leading `!` goes
+    // with it; the negation is already accounted for in `proposed`.
+    let edit = arg_edit(
+        pass,
+        call.args[0].pos().0,
+        call.args[0].end().0,
+        &[&ce.args[0], &ce.args[1]],
+    );
+    report_use_fix("contains", call, proposed, vec![edit], pending);
     true
 }
 
@@ -2031,12 +2090,20 @@ fn check_regexp(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>
         return;
     };
     if ce.args.len() == 1 && is_regexp_must_compile_call(pass, ce) {
-        report_msg(
-            "regexp",
-            call,
-            "remove unnecessary regexp.MustCompile",
-            pending,
+        // `newRemoveMustCompileDiagnostic`: no rename, the call collapses to
+        // its own pattern argument. The span is the `regexp.MustCompile(...)`
+        // node, which the pattern binding has already unparenthesized.
+        let edit = arg_edit(
+            pass,
+            Expr::CallExpr(ce.clone()).pos().0,
+            Expr::CallExpr(ce.clone()).end().0,
+            &[&ce.args[0]],
         );
+        pending.push(Finding::with_edits(
+            call.call.pos().0 as u32,
+            "regexp: remove unnecessary regexp.MustCompile".to_string(),
+            vec![edit],
+        ));
     }
 }
 
@@ -2045,26 +2112,28 @@ fn check_error_is_as(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Fin
         "Error" => {
             if call.args.len() >= 2 && is_error(pass, &call.args[1]) {
                 // DEFERRED: skip when selector is *assert.CollectT.
-                report_msg(
+                report_msg_rename(
                     "error-is-as",
                     call,
                     &format!(
                         "invalid usage of {}.Error, use {}.ErrorIs instead",
                         call.selector_x, call.selector_x
                     ),
+                    "ErrorIs",
                     pending,
                 );
             }
         }
         "NoError" => {
             if call.args.len() >= 2 && is_error(pass, &call.args[1]) {
-                report_msg(
+                report_msg_rename(
                     "error-is-as",
                     call,
                     &format!(
                         "invalid usage of {}.NoError, use {}.NotErrorIs instead",
                         call.selector_x, call.selector_x
                     ),
+                    "NotErrorIs",
                     pending,
                 );
             }
@@ -2116,7 +2185,13 @@ fn check_error_is_as(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Fin
             } else {
                 return;
             };
-            report_use("error-is-as", call, proposed, pending);
+            let edit = arg_edit(
+                pass,
+                Expr::CallExpr(ce.clone()).pos().0,
+                Expr::CallExpr(ce.clone()).end().0,
+                &[&ce.args[0], &ce.args[1]],
+            );
+            report_use_fix("error-is-as", call, proposed, vec![edit], pending);
         }
         "False" => {
             if call.args.is_empty() {
@@ -2135,11 +2210,51 @@ fn check_error_is_as(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Fin
             } else {
                 return;
             };
-            report_use("error-is-as", call, proposed, pending);
+            let edit = arg_edit(
+                pass,
+                Expr::CallExpr(ce.clone()).pos().0,
+                Expr::CallExpr(ce.clone()).end().0,
+                &[&ce.args[0], &ce.args[1]],
+            );
+            report_use_fix("error-is-as", call, proposed, vec![edit], pending);
         }
         "ErrorAs" | "NotErrorAs" => check_error_as_target(pass, call, pending),
         _ => {}
     }
+}
+
+/// `isBufferBytesCall`: the receiver of a `.Bytes()` call on a `bytes.Buffer`.
+///
+/// Upstream calls its own type test a hack — it compares the printed type
+/// against `"bytes.Buffer"` with any leading `*` trimmed, because the `bytes`
+/// package need not be imported where the assertion lives. Matching it means
+/// comparing the same string.
+fn buffer_bytes_receiver<'a>(pass: &Pass<'_>, e: &'a Expr) -> Option<&'a Expr> {
+    let Expr::CallExpr(ce) = e else {
+        return None;
+    };
+    let Expr::SelectorExpr(se) = &*ce.fun else {
+        return None;
+    };
+    if se.sel.name != "Bytes" {
+        return None;
+    }
+    let typ = type_of(pass, &se.x)?;
+    let printed = type_string(pass, typ)?;
+    (printed.trim_start_matches('*') == "bytes.Buffer").then_some(&se.x)
+}
+
+/// `formatWithStringCastForBytes`: a `[]byte` argument has to become a string
+/// for `JSONEq` / `YAMLEq`, and a `buf.Bytes()` becomes `buf.String()` rather
+/// than `string(buf.Bytes())`.
+fn format_with_string_cast_for_bytes(pass: &Pass<'_>, e: &Expr) -> String {
+    if !has_bytes_type(pass, e) {
+        return expr_string(pass, e);
+    }
+    if let Some(recv) = buffer_bytes_receiver(pass, e) {
+        return format!("{}.String()", expr_string(pass, recv));
+    }
+    format!("string({})", expr_string(pass, e))
 }
 
 fn check_encoded_compare(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
@@ -2166,7 +2281,24 @@ fn check_encoded_compare(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec
     } else {
         return;
     };
-    report_use("encoded-compare", call, proposed, pending);
+    // Two edits, one per argument: each side is cast to a string where it is
+    // `[]byte`, and otherwise left exactly as written. The spans are the
+    // *original* arguments, not the unwrapped ones — `unwrap` sees through
+    // conversions that the fix deliberately deletes.
+    let (lhs, rhs) = (&call.args[0], &call.args[1]);
+    let edits = vec![
+        TextEdit {
+            pos: lhs.pos().0 as u32,
+            end: lhs.end().0 as u32,
+            new_text: format_with_string_cast_for_bytes(pass, a),
+        },
+        TextEdit {
+            pos: rhs.pos().0 as u32,
+            end: rhs.end().0 as u32,
+            new_text: format_with_string_cast_for_bytes(pass, b),
+        },
+    ];
+    report_use_fix("encoded-compare", call, proposed, edits, pending);
 }
 
 fn check_expected_actual(
@@ -2205,12 +2337,13 @@ fn check_expected_actual(
     let left = is_expected_value_candidate(pass, first, &pattern);
     let right = is_expected_value_candidate(pass, second, &pattern);
     if right && !left {
-        report_msg(
-            "expected-actual",
-            call,
-            "need to reverse actual and expected values",
-            pending,
-        );
+        // The two arguments swap in place; the assertion keeps its name.
+        let edit = arg_edit(pass, first.pos().0, second.end().0, &[second, first]);
+        pending.push(Finding::with_edits(
+            call.call.pos().0 as u32,
+            "expected-actual: need to reverse actual and expected values".to_string(),
+            vec![edit],
+        ));
     }
 }
 
@@ -2752,13 +2885,8 @@ fn check_formatter_not_fmt(
                 &format!("use {}.{}f", call.selector_x, call.fn_name),
                 pending,
             );
-        } else {
-            report_msg(
-                "formatter",
-                call,
-                "remove unnecessary fmt.Sprintf",
-                pending,
-            );
+        } else if let Some(args) = is_fmt_sprintf_call(pass, msg_and_args) {
+            report_remove_sprintf(pass, call, msg_and_args, &args, pending);
         }
         return;
     }
@@ -2809,13 +2937,8 @@ fn check_formatter_fmt(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<F
     let no_format_args = format_pos == last_arg_pos;
 
     if no_format_args {
-        if is_fmt_sprintf_call(pass, msg).is_some() {
-            report_msg(
-                "formatter",
-                call,
-                "remove unnecessary fmt.Sprintf",
-                pending,
-            );
+        if let Some(args) = is_fmt_sprintf_call(pass, msg) {
+            report_remove_sprintf(pass, call, msg, &args, pending);
             return;
         }
     }
@@ -2961,12 +3084,26 @@ fn check_suite_dont_use_pkg(
     if !call.is_assert {
         new_selector.push_str(".Require()");
     }
-    report_msg(
-        "suite-dont-use-pkg",
-        call,
-        &format!("use {new_selector}.{}", call.fn_name),
-        pending,
-    );
+    // Two edits: the package name becomes the receiver, and the `s.T(), `
+    // argument disappears. The deletion runs to the *next* argument's start so
+    // that the comma and the space go with it.
+    let edits = vec![
+        TextEdit {
+            pos: call.selector.x.pos().0 as u32,
+            end: call.selector.x.end().0 as u32,
+            new_text: new_selector.clone(),
+        },
+        TextEdit {
+            pos: t.pos().0 as u32,
+            end: call.call.args[1].pos().0 as u32,
+            new_text: String::new(),
+        },
+    ];
+    pending.push(Finding::with_edits(
+        call.call.pos().0 as u32,
+        format!("suite-dont-use-pkg: use {new_selector}.{}", call.fn_name),
+        edits,
+    ));
 }
 
 fn check_suite_extra_assert_call(
@@ -2986,12 +3123,20 @@ fn check_suite_extra_assert_call(
             if !implements_testify_suite(pass, &call.selector.x) {
                 return;
             }
-            report_msg(
-                "suite-extra-assert-call",
-                call,
-                &format!("use an explicit {}.Assert().{}", x.name, call.fn_name),
-                pending,
-            );
+            // Pure insertion: `s.True` becomes `s.Assert().True`.
+            let at = call.selector.x.end().0 as u32;
+            pending.push(Finding::with_edits(
+                call.call.pos().0 as u32,
+                format!(
+                    "suite-extra-assert-call: use an explicit {}.Assert().{}",
+                    x.name, call.fn_name
+                ),
+                vec![TextEdit {
+                    pos: at,
+                    end: at,
+                    new_text: ".Assert()".to_string(),
+                }],
+            ));
         }
         SuiteExtraAssertCallMode::Remove => {
             let Expr::CallExpr(x) = &*call.selector.x else {
@@ -3006,16 +3151,22 @@ fn check_suite_extra_assert_call(
             if se.sel.name != "Assert" {
                 return;
             }
-            report_msg(
-                "suite-extra-assert-call",
-                call,
-                &format!(
-                    "need to simplify the assertion to {}.{}",
+            // `Assert().` goes: from the `Assert` identifier to one past the
+            // closing paren, the `+ 1` being the dot that follows it.
+            let edit = TextEdit {
+                pos: se.sel.name_pos.0 as u32,
+                end: (call.selector.x.end().0 + 1) as u32,
+                new_text: String::new(),
+            };
+            pending.push(Finding::with_edits(
+                call.call.pos().0 as u32,
+                format!(
+                    "suite-extra-assert-call: need to simplify the assertion to {}.{}",
                     expr_string(pass, &se.x),
                     call.fn_name
                 ),
-                pending,
-            );
+                vec![edit],
+            ));
         }
     }
 }
@@ -3155,6 +3306,20 @@ fn check_suite_broken_parallel(
     stack: &[walk::NodeRef<'_>],
     pending: &mut Vec<Finding>,
 ) {
+    // The whole `s.T().Parallel()` line goes, up to the start of the next one,
+    // so the newline and the indentation leave with it.
+    let line_delete = |pass: &Pass<'_>| -> Option<TextEdit> {
+        let ft = pass.fset().file(call.pos())?;
+        let line = pass.fset().position(call.pos()).line as usize;
+        if line + 1 > ft.line_count() {
+            return None;
+        }
+        Some(TextEdit {
+            pos: call.pos().0 as u32,
+            end: ft.line_start(line + 1).0 as u32,
+            new_text: String::new(),
+        })
+    };
     let Expr::SelectorExpr(se) = &*call.fun else {
         return;
     };
@@ -3167,10 +3332,15 @@ fn check_suite_broken_parallel(
     for node in stack.iter().rev() {
         if let walk::NodeRef::FuncDecl(fd) = node {
             if is_suite_method(pass, fd) {
-                pending.push(Finding::new(call.pos().0 as u32,
-                    "suite-broken-parallel: testify v1 does not support suite's parallel tests and subtests"
-                        .into(),
-                ));
+                let msg = "suite-broken-parallel: testify v1 does not support suite's parallel tests and subtests".to_string();
+                match line_delete(pass) {
+                    Some(edit) => pending.push(Finding::with_edits(
+                        call.pos().0 as u32,
+                        msg,
+                        vec![edit],
+                    )),
+                    None => pending.push(Finding::new(call.pos().0 as u32, msg)),
+                }
                 return;
             }
         }
@@ -3253,8 +3423,18 @@ fn check_suite_thelper(pass: &Pass<'_>, fd: &FuncDecl, pending: &mut Vec<Finding
     if is_helper_call_stmt(&body.list[0], rcv_name) {
         return;
     }
-    pending.push(Finding::new(fd.ty.func.0 as u32,
+    // Pure insertion before the first statement, with the blank line upstream
+    // writes. The `\n\n` is not indented: the gofmt pass that follows a fix
+    // puts the new statement on the body's indentation.
+    let at = body.list[0].pos().0 as u32;
+    pending.push(Finding::with_edits(
+        fd.ty.func.0 as u32,
         format!("suite-thelper: suite helper method must start with {helper_call}"),
+        vec![TextEdit {
+            pos: at,
+            end: at,
+            new_text: format!("{helper_call}\n\n"),
+        }],
     ));
 }
 
