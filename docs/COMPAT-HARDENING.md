@@ -13074,3 +13074,76 @@ pending 23 件。差の大きい順に
 `ginkgolinter` 30 / `wsl-v5` 27。
 `nolint` 系は nolintlint（不要 directive の削除、`// nolint` の空白詰め）と
 misspell の 2 つが要る。
+
+---
+
+### 2026-08-27（続き 63）— `nolint` に着手して戻した。**Pos かオフセットか、という設計判断**
+
+続き 62 の続き。pending 23 件の次点が `nolint` / `nolint-strict`（各 70 行）。
+上流側は読み終えていて、必要な fix は 2 つだけだった:
+
+```go
+// 先頭空白を詰める: `// nolint:x` -> `//nolint:x`
+{Pos: pos.Offset, End: pos.Offset + len("//") + len(leadingSpace), NewText: "//"}
+// 使われていない directive を消す（linter 名が 1 つ以下のときだけ）
+{Pos: pos.Offset, End: end.Offset, NewText: nil}
+```
+
+guff 側にも情報は揃っていた。`Directive` に span を足し、
+`messages()` に fix を持たせ、`unused_issue` に削除を付けた。
+**コンパイルも通り、報告も変わらなかった。何も書かれなかった。**
+
+#### 止めた理由
+
+`nolint` フィルタは `nolint.rs:180` で
+**その場で作った使い捨ての `FileSet`** にパースしている:
+
+```rust
+let fset = FileSet::new();
+let file = parse_file(&fset, &path_str, &src, COMMENTS_ONLY)?;
+```
+
+そこから取った `Pos` は共有 FileSet では意味を持たない。
+`apply_fixes` の `fset.file(pos)` は
+**無関係な別ファイルに解決されうる** ——
+実測で何も書かれなかったのは、
+`edit.end > content.len()` のガードに助けられただけ。
+**静かに他人のファイルを壊す形**なので、出さずに戻した。
+
+続き 55 で goheader の `comment_line` を
+**行番号**で取ったのと同じ罠。あちらは避けられた。
+
+#### 本当の問題は変換点
+
+| | Issue が運ぶもの | 変換する場所 |
+|---|---|---|
+| golangci | **オフセット** | `goanalysis/runners.go`（Issue を組む時） |
+| guff | **Pos** | `fix.rs` の `resolve_edit`（適用する時） |
+
+golangci では、analyzer の `token.Pos` は Issue に載る前にオフセットへ変換され、
+`nolintlint` は `result.Issue` を直接組むので**最初からオフセットを渡す**。
+fixer に届く時点で**両者はオフセットで揃っている**。
+
+guff は Pos のまま運んで適用時に変換するので、
+**Pos を作れない生産者**——Pass を持たない `nolint` フィルタ——が
+そもそも表現できない。
+
+これは移植の抜けではなく、**guff の Issue が何を運ぶかの設計判断**。
+半端に混ぜると、上のような静かな破壊が入る。
+
+#### 次にやること
+
+`nolint` に手を付ける前に、どちらかを決めること:
+
+1. `Issue.diagnostic.suggested_fixes` を**オフセットに揃える**
+   （golangci と同じ形。`resolve_edit` の変換を
+   analyzer から Issue を作る側へ移す）。
+2. `nolint` フィルタに**共有 FileSet を渡す**
+   （`add_file` の引数を増やす。使い捨てパースは残るので、
+   オフセット → 共有 Pos の変換をどこかで書くことになる）。
+
+1 のほうが上流と同じ形で、`remap_reparsed_pos` を要る場面も減る。
+
+それまでの pending 23 件は、差の大きい順に
+`staticcheck-sa` 88 / `gocritic` 48 / `ginkgolinter` 30 / `wsl-v5` 27 /
+`issues-uniq-by-line-order` 26。
