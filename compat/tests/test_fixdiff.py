@@ -129,6 +129,42 @@ class ConfirmTest(unittest.TestCase):
         self.assertEqual(fixdiff.confirm(["a", "b"], 1), "a")
 
 
+class ParseTreeDiffTest(unittest.TestCase):
+    """The over-write guard reads this, so it has to read a diff, not a prefix."""
+
+    def test_a_removed_line_starting_with_dashes_is_not_a_file_header(self):
+        """`--- x` in a hunk is the Go line `-- x`, deleted.
+
+        Splitting on the first three characters would read it as the start of a
+        new file called `x`, and every removal after it would be attributed to
+        that file — so a guard built on the split would stop seeing the real
+        file's over-writes exactly when the fixture contains a comment banner.
+        """
+        body = (
+            "--- a/x.go\n+++ b/x.go\n@@ -1,2 +1,1 @@\n"
+            "--- a banner comment\n"
+            " package p\n"
+        )
+        edits = fixdiff.parse_tree_diff(body)
+        self.assertEqual(list(edits), ["x.go"])
+        self.assertEqual(list(edits["x.go"].removed), ["-- a banner comment"])
+
+    def test_hunk_counts_bound_the_walk(self):
+        body = (
+            "--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n-a\n+b\n"
+            "--- a/y.go\n+++ b/y.go\n@@ -1 +1 @@\n-c\n+d\n"
+        )
+        edits = fixdiff.parse_tree_diff(body)
+        self.assertEqual(sorted(edits), ["x.go", "y.go"])
+        self.assertEqual(list(edits["y.go"].removed), ["c"])
+
+    def test_a_missing_newline_marker_is_not_a_diff_line(self):
+        body = "--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n-a\n" + fixdiff.NO_NEWLINE + "\n+b\n"
+        edits = fixdiff.parse_tree_diff(body)
+        self.assertEqual(list(edits["x.go"].removed), ["a"])
+        self.assertEqual(list(edits["x.go"].added), ["b"])
+
+
 class CliTest(unittest.TestCase):
     def run_cli(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(
@@ -187,7 +223,9 @@ class CliTest(unittest.TestCase):
             div = Path(tmp) / "x.diff"
 
             # No `# why:` — refused, even though the bytes match.
-            div.write_text("# just because\n" + body, encoding="utf-8")
+            div.write_text(
+                "# just because\n# upstream-writes: nothing\n" + body, encoding="utf-8"
+            )
             r = self.run_cli(
                 "check", "--case", "x",
                 "--actual", str(actual),
@@ -198,7 +236,11 @@ class CliTest(unittest.TestCase):
             self.assertIn("no `# why:`", r.stderr)
 
             # With a reason, it holds — and prints the reason on every run.
-            div.write_text("# why: upstream is wrong, see notes\n" + body, encoding="utf-8")
+            div.write_text(
+                "# why: upstream is wrong, see notes\n"
+                "# upstream-writes: nothing\n" + body,
+                encoding="utf-8",
+            )
             ok = self.run_cli(
                 "check", "--case", "x",
                 "--actual", str(actual),
@@ -219,6 +261,7 @@ class CliTest(unittest.TestCase):
             div = Path(tmp) / "x.diff"
             div.write_text(
                 "# why: upstream is wrong\n"
+                "# upstream-writes: nothing\n"
                 "--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n-a\n+b\n",
                 encoding="utf-8",
             )
@@ -242,7 +285,10 @@ class CliTest(unittest.TestCase):
                 "--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n-a\n+upstream\n", encoding="utf-8"
             )
             div = Path(tmp) / "x.diff"
-            div.write_text("# why: upstream is wrong\n" + body, encoding="utf-8")
+            div.write_text(
+                "# why: upstream is wrong\n# upstream-writes: nothing\n" + body,
+                encoding="utf-8",
+            )
             r = self.run_cli(
                 "check", "--case", "x",
                 "--actual", str(actual),
@@ -251,6 +297,161 @@ class CliTest(unittest.TestCase):
             )
             self.assertEqual(r.returncode, 1)
             self.assertIn("no longer describes reality", r.stderr)
+
+    def test_pending_refuses_an_over_write_inside_a_case_upstream_does_touch(self):
+        """The shape `parens` hid in.
+
+        The older refusal asked one question about the whole case — does
+        upstream write anything at all here — and upstream wrote seven hunks in
+        `parens`, so guff's eighth was held as a deferral. A gap is guff not
+        acting on a finding; this is guff rewriting a line upstream reads and
+        leaves, which is the `omitzero` failure with more context around it.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            expected = Path(tmp) / "expected.diff"
+            expected.write_text(
+                "--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n-a\n+A\n", encoding="utf-8"
+            )
+            actual = Path(tmp) / "actual.diff"
+            actual.write_text(
+                "--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n-a\n+A\n"
+                "@@ -9 +9 @@\n-untouched\n+guff had an opinion\n",
+                encoding="utf-8",
+            )
+            r = self.run_cli(
+                "pending", "--case", "x",
+                "--actual", str(actual),
+                "--expected", str(expected),
+                "-o", str(Path(tmp) / "pending" / "x.diff"),
+            )
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("REFUSING to hold", r.stderr)
+            self.assertIn(
+                "guff removes a line golangci-lint --fix keeps: untouched", r.stderr
+            )
+            self.assertFalse((Path(tmp) / "pending" / "x.diff").exists())
+
+    def test_pending_still_holds_a_different_answer_to_the_same_finding(self):
+        """Not every disagreement is an over-write.
+
+        `staticcheck-qf` removes exactly the lines upstream removes and puts
+        four different lines back. That is one finding fixed two ways — a real
+        gap, and the thing `pending` exists for. A refusal that keyed on added
+        lines as well would have thrown it out with the over-writes.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            expected = Path(tmp) / "expected.diff"
+            expected.write_text(
+                "--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n-a\n+upstream\n",
+                encoding="utf-8",
+            )
+            actual = Path(tmp) / "actual.diff"
+            actual.write_text(
+                "--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n-a\n+guff\n", encoding="utf-8"
+            )
+            out = Path(tmp) / "pending" / "x.diff"
+            r = self.run_cli(
+                "pending", "--case", "x",
+                "--actual", str(actual),
+                "--expected", str(expected),
+                "-o", str(out),
+            )
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertTrue(out.exists())
+
+    def test_pending_refuses_a_file_upstream_never_opens(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            expected = Path(tmp) / "expected.diff"
+            expected.write_text(
+                "--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n-a\n+A\n", encoding="utf-8"
+            )
+            actual = Path(tmp) / "actual.diff"
+            actual.write_text(
+                "--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n-a\n+A\n"
+                "--- /dev/null\n+++ b/y.go\n@@ -0,0 +1 @@\n+package p\n",
+                encoding="utf-8",
+            )
+            r = self.run_cli(
+                "pending", "--case", "x",
+                "--actual", str(actual),
+                "--expected", str(expected),
+                "-o", str(Path(tmp) / "pending" / "x.diff"),
+            )
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("y.go: guff creates a file", r.stderr)
+
+    def test_divergent_holds_a_case_upstream_also_writes_to(self):
+        """`parens`: upstream writes one hunk, guff writes that one and a second."""
+        upstream = "--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n-a\n+A\n"
+        mine = upstream + "@@ -9 +9 @@\n-b\n+B\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            expected = Path(tmp) / "expected.diff"
+            expected.write_text(upstream, encoding="utf-8")
+            actual = Path(tmp) / "actual.diff"
+            actual.write_text(mine, encoding="utf-8")
+            div = Path(tmp) / "x.diff"
+            declared = fixdiff.upstream_writes(upstream)
+            div.write_text(
+                f"# why: upstream drops this fix by accident\n"
+                f"# upstream-writes: {declared}\n" + mine,
+                encoding="utf-8",
+            )
+            ok = self.run_cli(
+                "check", "--case", "x",
+                "--actual", str(actual),
+                "--expected", str(expected),
+                "--divergent", str(div),
+            )
+            self.assertEqual(ok.returncode, 0, ok.stderr)
+            self.assertIn("deliberate divergence", ok.stdout)
+            self.assertIn("rewrites 1 thing(s) upstream leaves alone", ok.stdout)
+
+            # Upstream's own output moves — the digest stops matching and the
+            # reason has to be read again. This is what `if expected.strip()`
+            # used to do, and it only worked while upstream wrote nothing.
+            expected.write_text(
+                "--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n-a\n+MOVED\n", encoding="utf-8"
+            )
+            moved = self.run_cli(
+                "check", "--case", "x",
+                "--actual", str(actual),
+                "--expected", str(expected),
+                "--divergent", str(div),
+            )
+            self.assertEqual(moved.returncode, 1)
+            self.assertIn("no longer describes reality", moved.stderr)
+
+    def test_divergent_refuses_a_case_that_is_also_a_gap(self):
+        """One `# why:` cannot stand in for an edit guff simply does not make."""
+        upstream = (
+            "--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n-a\n+A\n"
+            "@@ -20 +20 @@\n-missed\n+FIXED\n"
+        )
+        mine = "--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n-a\n+A\n@@ -9 +9 @@\n-b\n+B\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            expected = Path(tmp) / "expected.diff"
+            expected.write_text(upstream, encoding="utf-8")
+            actual = Path(tmp) / "actual.diff"
+            actual.write_text(mine, encoding="utf-8")
+            div = Path(tmp) / "x.diff"
+            div.write_text(
+                f"# why: upstream drops this fix by accident\n"
+                f"# upstream-writes: {fixdiff.upstream_writes(upstream)}\n" + mine,
+                encoding="utf-8",
+            )
+            r = self.run_cli(
+                "check", "--case", "x",
+                "--actual", str(actual),
+                "--expected", str(expected),
+                "--divergent", str(div),
+            )
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("not only a divergence", r.stderr)
+            # Named from upstream's side, not guff's: the same helper answers
+            # both directions and the sentence has to say which one it ran.
+            self.assertIn(
+                "golangci-lint --fix removes a line guff keeps: missed", r.stderr
+            )
 
     def test_pending_holds_a_case_where_upstream_fixes_and_guff_does_not(self):
         with tempfile.TemporaryDirectory() as tmp:

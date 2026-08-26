@@ -13681,3 +13681,129 @@ processor の順序も `NolintFilter` → `Diff` → `Fixer` で、
 
 見えている成果は「gofmt だけ」だが、そこに至る道は 13 checker ぶんある。
 pending 18 件では `staticcheck-qf` 395 行のほうが素直。
+
+---
+
+### 2026-08-27（続き 72）— `parens` の -8 行は**バグではなく続き 44 の乖離**。台帳の拒否が 1 段浅かった
+
+続き 71 の続き。pending 18 件のうち、**guff が上流より多く書いている唯一のケース**が
+`parens`（上流 64 行 / guff 73 行）。書き足りないのは deferral だが、
+書き過ぎは続き 38 の omitzero と同じ形なので先に見た。
+
+#### 差分は 1 hunk。revive の `errorf`
+
+```diff
+ func ErrorfPlain(name string) error {
+-	return errors.New(fmt.Sprintf("bad %s", name))
++	return fmt.Errorf("bad %s", name)
+ }
+```
+
+**続き 44 で書いた上流の事故**そのものだった。
+`pkg/golinters/revive/revive.go` は
+`Fset.File(token.Pos(failure.Position.Start.Offset))` ——
+バイトオフセットを FileSet 全体の位置として渡してファイルを引き、
+名前が一致しなければ fix を捨てる。
+
+#### 続き 44 の表を 1 行訂正する
+
+あのとき「1 パッケージ 1 ファイル → 修正する」と書いた。**条件が抜けていた。**
+`parens` は 1 パッケージ 1 ファイル（`parens/parens.go`、6241 バイト、202 行）で、
+それでも上流は書かない。同じ fixture で config だけ変えて測った
+（golangci-lint 2.12.2）:
+
+| 有効な linter | 151 行目の `errorf` fix |
+|---|---|
+| `revive` だけ | **書かれる** |
+| `revive` + `govet` | 書かれない |
+| `revive` + `staticcheck` | 書かれない |
+| `revive` + `errorlint` | 書かれない |
+| `revive` + 上記 3 つ（`parens` の実際の config） | 書かれない |
+
+**linter が 1 つ増えるだけで反転する。**
+2 つ目の linter が go/packages の load mode を広げ、
+依存ファイルが共有 FileSet に `parens.go` より先に入り、
+オフセット 4693 が「base 1 から始まる 6241 バイトのファイル」に
+落ちなくなる。expected にある revive-* 9 ケースが fix を保っているのは、
+**9 つとも revive 単独で有効にしているから**だった。
+
+つまり `parens` と `revive-settings` は
+**同じ rule の同じコードについて逆のことを要求している**。
+guff はどちらにも従えない。続き 44 の判断（revive が指示する fix を書く）を
+そのまま適用する ——
+findings は同一（golden 193/193）、木はコンパイルを通り、
+乖離の代価は `guff --fix` が上流の取りこぼした 1 行を直してしまうことだけ。
+
+#### 本題: なぜ `pending` にいられたのか
+
+`fixdiff.py` の拒否はこう書いてあった:
+
+```python
+if body.strip() and not (expected_path.exists() and parse_expected(expected_path).strip()):
+    # REFUSING to hold
+```
+
+**ケース全体に対して 1 回だけ**「上流は何か書くか」を訊いている。
+`parens` で上流は 7 hunk 書く。だから 8 個目は
+**まっすぐ自分を狙っていたガードの横を通り抜けた**。
+
+続き 44 で `divergent/` を作ったとき、理由は必ず
+「上流は何も書かない、そしてそれは誤りだ」の形だと想定していた。
+`parens` はその形ではない ——
+**上流は書く、guff はそれに 1 hunk 足す**。台帳に置く場所が無かった。
+
+そして `git log` を引いたら、この hunk が `pending/parens.diff` に入ったのは
+**#124 —— `divergent/` を作り、この上流の欠陥を文章に書いたその commit** だった
+（#118 の時点では revive の fix がまだ無いので hunk も無い）。
+**同じ日に、同じ欠陥を、片方は 27 ファイルのケースで捕まえて枠を作り、
+片方は 1 hunk なので気付かれずに `pending` へ落ちた。**
+違いは欠陥の種類ではなく、**ケース全体が空かどうか**だけだった。
+
+#### 直したこと 3 つ
+
+**1. 拒否をファイル単位・行単位にした。**
+`parse_tree_diff()` を足して、上流が残す行を guff が消していれば拒否する。
+
+**足す行では判定しない。** `staticcheck-qf` は上流と**同じ行を消して
+違う 4 行を書く**（395 行対 395 行、差 4）。それは同じ finding の
+別解＝ deferral であって、他人のソースを勝手に書き換えることではない。
+足す行も見るルールにしていたら、これを一緒に捨てていた ——
+**実装する前に 18 ケース全部で両方のルールを測ったから分かった。**
+
+hunk ヘッダの `@@ -a,b +c,d @@` を読んで行数を数える。
+prefix 3 文字で切ると、`-- foo` を消した行が `--- foo` になって
+**ファイルヘッダと区別が付かない**（fixture のコメント区切りがまさにその形）。
+
+**2. `divergent/` が「上流も書く」ケースを持てるようにした。**
+`# upstream-writes:` 行を必須にして、`nothing`、または行数と digest を書かせる。
+上流の出力が動いた瞬間に宣言が合わなくなって落ちる ——
+`if expected.strip()` が買っていたものと同じで、上流が書く場合にも効く。
+あわせて **guff が上流の edit を取りこぼしていないこと**も要求する
+（片側で書き過ぎ・片側で書き足りないケースが 1 つの `# why:` に隠れないように）。
+
+**3. `--record-pending` が divergent ケースを飛ばすようにした。**
+続き 44 以来、`revive` があるだけで
+**`--record-pending` は全体が FAILED を返していた**（recorder が拒否するので）。
+divergent は人が書いた判断で recorder には再導出できない。
+
+#### 測定
+
+| | 続き 71 後 | 今回 |
+|---|---|---|
+| fix tier 一致 | 174 | 174 |
+| pending | 18 | **17** |
+| divergent | 1 | **2** |
+| guff が上流より多く書く pending | **1** | **0** |
+| `compat/tests` | 189 | **197** |
+
+**guff のコードは 1 行も変えていない**（Rust の差分はゼロ）ので、
+golden 193/193 と workspace 269 スイート / 3,275 テストは
+**続き 71 の測定をそのまま引き継いでいる。今回測り直してはいない。**
+変わったのは台帳のほうで、
+`parens` は「いつか閉じる穴」ではなく「理由を書いた乖離」になった。
+
+#### 残り
+
+`pending` 17 件は**全部が書き足りない方向**になった。
+台帳が「guff が余計に書く」を持てない状態に戻ったので、
+続き 38 の omitzero がもう一度通る道は塞がっている。
