@@ -68,7 +68,9 @@ use guff::ast::{Comment, CommentGroup, File};
 use guff::parser::{parse_file, PARSE_COMMENTS};
 use guff::position::FileSet;
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_analysis::{
+    AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
 use regex::Regex;
 
 use crate::options::GoheaderOptions;
@@ -625,6 +627,134 @@ fn extract_header(cg: Option<&CommentGroup>) -> String {
     cg.text()
 }
 
+/// Upstream `Fix`: the lines the header currently occupies, and the lines it
+/// should occupy.
+///
+/// Only the lengths of `actual` matter to the caller — golangci turns them into
+/// the end of the span to replace — but they are kept as lines because that is
+/// what upstream builds and what makes the arithmetic below readable.
+struct HeaderFix {
+    actual: Vec<String>,
+    expected: Vec<String>,
+}
+
+/// Upstream `Analyzer.generateFix`, called with the *trimmed* header: the
+/// deferred closure in `Analyze` reads the variable after `TrimSpace` has
+/// reassigned it.
+///
+/// Returns `None` where upstream returns `(Fix{}, false)` — a template naming a
+/// value that does not exist, or one of its two "should be impossible"
+/// branches. golangci then reports the finding with no suggested fix.
+fn generate_fix(
+    template: &str,
+    values: &HashMap<String, Value>,
+    cg: Option<&CommentGroup>,
+    header: &str,
+) -> Option<HeaderFix> {
+    // Expand the template: every `{{ name }}` becomes the value's calculated
+    // form. `per_target_values` has already run `calculate_all`, which is what
+    // upstream's `f.Calculate(a.values)` does here.
+    // Bytes, not chars: `Reader` is byte-oriented (as upstream's is once it
+    // compares against a template), and pushing a byte >= 0x80 as a `char`
+    // would re-encode it and corrupt a non-ASCII template.
+    let mut expect: Vec<u8> = Vec::new();
+    let mut t = Reader::new(template.as_bytes());
+    while !t.done() {
+        if t.peek() == Some(b'{') {
+            let name = Matcher::read_field(&mut t);
+            let value = values.get(&name)?;
+            expect.extend_from_slice(value.get().as_bytes());
+            continue;
+        }
+        expect.push(t.next()?);
+    }
+    let expect = String::from_utf8_lossy(&expect).into_owned();
+
+    let mut expected: Vec<String> = expect.split('\n').map(str::to_string).collect();
+
+    let commented = |lines: &mut Vec<String>| {
+        for line in lines.iter_mut() {
+            *line = format!("// {line}");
+        }
+    };
+
+    // No leading comment at all: the whole header is an insertion, and `actual`
+    // stays empty — which is what makes golangci's span a zero-width one.
+    let Some(cg) = cg else {
+        commented(&mut expected);
+        return Some(HeaderFix {
+            actual: Vec::new(),
+            expected,
+        });
+    };
+
+    let actual_text = cg.list.first()?.text.clone();
+    if !actual_text.starts_with("/*") {
+        commented(&mut expected);
+        return Some(HeaderFix {
+            actual: cg.list.iter().map(|c| c.text.clone()).collect(),
+            expected,
+        });
+    }
+
+    // Block comment. Upstream locates the header text inside the raw `/* … */`
+    // so that whatever surrounds it — the `/*`, a prefix on each line, the
+    // trailing `*/` — survives the rewrite.
+    let mut actual = actual_text;
+    let mut fix_actual: Vec<String> = Vec::new();
+    let first_line = match header.find('\n') {
+        Some(i) => &header[..i],
+        None => header,
+    };
+    let mut start = actual.find(first_line)?;
+    let nl = actual[..start].rfind('\n');
+    if let Some(nl) = nl {
+        fix_actual = actual[..nl].split('\n').map(str::to_string).collect();
+        let mut merged = fix_actual.clone();
+        merged.extend(expected);
+        expected = merged;
+        actual = actual[nl + 1..].to_string();
+        // Upstream subtracts rather than searching again: re-finding could land
+        // on an earlier occurrence inside the prefix that was just cut away.
+        start -= nl + 1;
+    }
+
+    let prefix = actual[..start].to_string();
+    match nl {
+        None => expected[0] = format!("{prefix}{}", expected[0]),
+        Some(_) => {
+            let n = fix_actual.len();
+            for line in expected[n..].iter_mut() {
+                *line = format!("{prefix}{line}");
+            }
+        }
+    }
+
+    let last_line = match header.rfind('\n') {
+        Some(i) => &header[i + 1..],
+        None => header,
+    };
+    let end = actual.find(last_line)?;
+    let trailing = actual[end + last_line.len()..].to_string();
+    match trailing.find('\n') {
+        None => {
+            let last = expected.len() - 1;
+            expected[last].push_str(&trailing);
+        }
+        Some(i) => {
+            let last = expected.len() - 1;
+            expected[last].push_str(&trailing[..i]);
+            expected.extend(trailing[i + 1..].split('\n').map(str::to_string));
+        }
+    }
+
+    fix_actual.extend(actual.split('\n').map(str::to_string));
+    Some(HeaderFix {
+        actual: fix_actual,
+        expected,
+    })
+}
+
 fn reparse(path: &std::path::Path) -> Option<(Arc<FileSet>, File)> {
     let src = fs::read(path).ok()?;
     let name = path.file_name()?.to_str()?;
@@ -669,7 +799,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     }
     let base_values = build_values(&opts);
 
-    let mut pending: Vec<(u32, String)> = Vec::new();
+    let mut pending: Vec<(u32, String, Option<TextEdit>)> = Vec::new();
     let paths = pass.pkg().compiled_go_files.clone();
     let n = pass.files().len();
 
@@ -680,7 +810,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         if path.extension().and_then(|s| s.to_str()) != Some("go") {
             continue;
         }
-        let Some((_re_fset, parsed)) = reparse(path) else {
+        let Some((re_fset, parsed)) = reparse(path) else {
             continue;
         };
 
@@ -702,10 +832,14 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         // upstream surfaces it as a per-file finding carrying the error text
         // (`&issue{msg: err.Error()}`), not as an analyzer failure — so it is
         // subject to the same `< 0` drop as any other location-less issue.
-        let issue = match per_target_values(&base_values, path) {
-            Ok(values) => Matcher::new(&values).analyze(header, &template, reader_offset)?,
-            Err(e) => Some(Issue::bare(e)),
+        let per_target = per_target_values(&base_values, path);
+        let issue = match &per_target {
+            Ok(values) => Matcher::new(values).analyze(header, &template, reader_offset)?,
+            Err(e) => Some(Issue::bare(e.clone())),
         };
+        // `generateFix` needs the same resolved values the match used; when
+        // they could not be resolved there is no fix, only the finding.
+        let values_for_fix = per_target.ok();
         let Some(issue) = issue else {
             continue;
         };
@@ -730,11 +864,64 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         // The mixed coordinate spaces can walk the offset past the end of the
         // file; upstream produces a bogus position, we clamp to stay in-bounds.
         let offset = offset.clamp(ft.base(), ft.end().0);
-        pending.push((offset as u32, issue.message));
+
+        // The wrapper's own span arithmetic. `commentLine` is where the header
+        // starts — line 1 when there is no leading comment, so an insertion
+        // lands above `package`.
+        // Line numbers, not positions: `parsed` came from its own `FileSet`,
+        // and mixing the two position spaces is the mistake `remap_reparsed_pos`
+        // exists to prevent. The two parses see the same bytes, so the line
+        // number transfers directly.
+        let comment_line = match cg {
+            Some(cg) => re_fset.position(cg.pos()).line as i64,
+            None => 1,
+        };
+        let edit = values_for_fix
+            .as_ref()
+            .and_then(|values| generate_fix(&template, values, cg, header))
+            .and_then(|fix| {
+                // `current` counts one newline per actual line plus every
+                // line's bytes: the length of the header as it sits in the file.
+                let current: i64 = fix.actual.len() as i64
+                    + fix.actual.iter().map(|l| l.len() as i64).sum::<i64>();
+                if comment_line < 1 || comment_line as usize > ft.line_count() {
+                    return None;
+                }
+                let start = ft.line_start(comment_line as usize).0;
+                let end = start + current;
+                let mut text = fix.expected.join("\n");
+                text.push('\n');
+                // Upstream adds a blank line when the replacement would run
+                // right into the `package` clause.
+                if end == pass.files()[i].package.0 {
+                    text.push('\n');
+                }
+                if end > ft.end().0 || start > end {
+                    return None;
+                }
+                Some(TextEdit {
+                    pos: start as u32,
+                    end: end as u32,
+                    new_text: text,
+                })
+            });
+        pending.push((offset as u32, issue.message, edit));
     }
 
-    for (pos, msg) in pending {
-        pass.reportf(pos, &msg);
+    for (pos, message, edit) in pending {
+        let Some(edit) = edit else {
+            pass.reportf(pos, &message);
+            continue;
+        };
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: String::new(),
+                text_edits: vec![edit],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }
@@ -768,6 +955,62 @@ mod tests {
         }
         calculate_all(&mut m).expect("calculate");
         m
+    }
+
+    /// Parse `src` and hand `generate_fix` the same three things `Analyze`'s
+    /// deferred closure hands it: the template, the values, the first comment
+    /// group, and the *trimmed* header.
+    fn fix_of(src: &str, template: &str, vals: &HashMap<String, Value>) -> Option<HeaderFix> {
+        let fset = FileSet::new();
+        let file = parse_file(&fset, "f.go", src.as_bytes(), PARSE_COMMENTS).expect("parse");
+        let cg = header_group(&file);
+        let header = extract_header(cg);
+        generate_fix(template, vals, cg, header.trim())
+    }
+
+    #[test]
+    fn a_file_with_no_header_gets_one_commented_insertion() {
+        let vals = values(&[]);
+        let fix = fix_of("package p\n", "Copyright Example\nSPDX: MIT", &vals).expect("fix");
+        // Nothing to replace: `actual` empty is what makes golangci's span
+        // zero-width, so the header is inserted rather than overwriting code.
+        assert!(fix.actual.is_empty(), "{:?}", fix.actual);
+        assert_eq!(fix.expected, vec!["// Copyright Example", "// SPDX: MIT"]);
+    }
+
+    #[test]
+    fn a_slash_header_reports_every_line_of_the_group_as_actual() {
+        let vals = values(&[]);
+        let src = "// Copyright Wrong\n// SPDX: GPL\n\npackage p\n";
+        let fix = fix_of(src, "Copyright Example\nSPDX: MIT", &vals).expect("fix");
+        assert_eq!(fix.actual, vec!["// Copyright Wrong", "// SPDX: GPL"]);
+        assert_eq!(fix.expected, vec!["// Copyright Example", "// SPDX: MIT"]);
+    }
+
+    #[test]
+    fn a_block_header_keeps_its_delimiters_and_trailing_text() {
+        let vals = values(&[]);
+        let src = "/*\nCopyright Wrong\nSPDX: GPL\n*/\n\npackage p\n";
+        let fix = fix_of(src, "Copyright Example\nSPDX: MIT", &vals).expect("fix");
+        // The `/*` line is `actual`'s first line and is carried into `expected`
+        // unchanged; the `*/` arrives as trailing text on the last line.
+        assert_eq!(fix.expected.first().map(String::as_str), Some("/*"));
+        assert!(
+            fix.expected.iter().any(|l| l.contains("*/")),
+            "{:?}",
+            fix.expected
+        );
+        assert!(
+            fix.expected.iter().any(|l| l == "Copyright Example"),
+            "{:?}",
+            fix.expected
+        );
+    }
+
+    #[test]
+    fn a_template_naming_an_unknown_value_yields_no_fix() {
+        let vals = values(&[]);
+        assert!(fix_of("package p\n", "{{ nope }}", &vals).is_none());
     }
 
     fn check(header: &str, template: &str, offset: i64, vals: &HashMap<String, Value>) -> Option<(String, i64, i64)> {
