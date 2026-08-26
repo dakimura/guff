@@ -7,14 +7,16 @@ use std::sync::OnceLock;
 use guff::ast::{CallExpr, Expr, SelectorExpr};
 use guff::node_mask;
 use guff::walk::NodeRef;
-use guff_analysis::code::type_func_name;
+use guff_analysis::code::{self, type_func_name};
 use guff_analysis::passes::inspect;
-use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::{
+    match_pos, AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
 use guff_types::arena::TypeData;
 use guff_types::basic::BasicKind;
 use guff_types::TypeId;
 
-use crate::render::render_expr;
+use crate::render::{render_expr, render_node};
 
 fn expr_type(pass: &Pass<'_>, expr: &Expr) -> Option<TypeId> {
     pass.types_info()?.types.get(&expr.id()).map(|tv| tv.typ)
@@ -66,7 +68,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     // Candidates as `(conversion node id, pos, message)`, before the
     // `m[string(buf.Bytes())]` exemption below.
-    let mut pending: Vec<(u32, u32, String)> = Vec::new();
+    let mut pending: Vec<(u32, u32, String, Option<TextEdit>)> = Vec::new();
     // Node ids of the `string(...)` conversions among them, for that exemption.
     let mut needs_parent: Vec<u32> = Vec::new();
     inspect.preorder_typed(node_mask!(CallExpr), pass.files(), |node| {
@@ -108,6 +110,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         if method == "String" {
             needs_parent.push(call.id);
         }
+        // `edit.ReplaceWithPattern`: the outer conversion goes and the
+        // receiver's own `String()` / `Bytes()` call takes its place.
+        let edit = render_node(pass, recv).map(|recv_text| TextEdit {
+            pos: call.pos().0 as u32,
+            end: call.end().0 as u32,
+            new_text: format!("{recv_text}.{method}()"),
+        });
         pending.push((
             call.id,
             match_pos(node),
@@ -117,6 +126,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 method,
                 render_expr(&Expr::CallExpr(call.clone()))
             ),
+            edit,
         ));
     });
 
@@ -140,11 +150,26 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         });
     }
 
-    for (id, pos, message) in pending {
+    for (id, pos, message, edit) in pending {
         if exempt.contains(&id) {
             continue;
         }
-        pass.report_unless_generated(pos, message);
+        let Some(edit) = edit else {
+            pass.report_unless_generated(pos, message);
+            continue;
+        };
+        if code::is_generated_at(pass, pos) {
+            continue;
+        }
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: "Simplify conversion".into(),
+                text_edits: vec![edit],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }

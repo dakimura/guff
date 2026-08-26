@@ -128,6 +128,11 @@ After S1003 / S1021 (2026-08-26): **164 matching, 28 pending**, and
 `staticcheck-st` closed the same way. Five checks, two cases — and
 `staticcheck-s` itself is still at 63 of 271.
 
+After S1016 / S1028 / S1030 (2026-08-26): 164 matching, 28 pending — no case
+moved this time, and `staticcheck-s` went 63 -> 113 of 271. Three checks
+sometimes close a case and sometimes close none; the ledger line count is the
+one that always moves.
+
 ## Does it still build?
 
 A `--fix` that rewrites `fmt.Sprint(i)` to `strconv.Itoa(i)` and does not add

@@ -12359,3 +12359,62 @@ golden **193/193**。
 
 1. `staticcheck-s` の残り 17 チェック。
 2. pending 28 件。`goheader` 110 / `testifylint-mock` 97 / `protogetter` 42。
+
+---
+
+### 2026-08-27（続き 54）— S1016 / S1028 / S1030。**同じ型を指す 2 つの名前**
+
+続き 53 の続き。`staticcheck-s` は 271 対 63 だった。
+
+#### 3 つとも「AST を組み直して印字」
+
+| check | 上流 | 組み立てるもの |
+|---|---|---|
+| `s1028` | `code.EditMatch` | `fmt.Errorf(<内側 Sprintf の引数>)` |
+| `s1030` | `edit.ReplaceWithPattern` | `<recv>.String()` / `.Bytes()` |
+| `s1016` | `edit.ReplaceWithNode` | `<リテラルの型式>(<ident>)` |
+
+#### `s1016`: メッセージと fix で**型の綴りが違う**
+
+上流のメッセージは `types.TypeString(typ, RelativeTo(pkg))`、
+fix は `lit.Type` —— **ソースに書かれている型式そのもの**。
+
+別名 import されたパッケージだと、この 2 つは食い違う:
+
+```go
+import p "example.com/pkg"
+_ = p.T{x.A}      // メッセージ: "to pkg.T" / fix: "p.T(x)"
+```
+
+`types.TypeString` を fix に流用すると、**そのファイルに存在しない名前**を書く。
+上流が fix 側で AST を印字しているのはそのため。
+
+続き 52 の「レンダラが 2 つあるのは質問が 2 つあるから」が、
+今度は**同じ型を指す 2 つの名前**として出た。
+**メッセージは「何であるか」を、fix は「どう書けるか」を答える。**
+
+#### 今回はどのケースも閉じなかった
+
+続き 52/53 では 3 チェック・2 チェックでケースが 1 つずつ閉じたが、
+今回の 3 つは `staticcheck-checks-*` / `staticcheck-st` に含まれていなかった。
+
+**同じ 3 チェックぶんの作業でも、波及するときとしないときがある。**
+台帳の行数（63 → 113 / 271）だけが毎回動く。
+
+#### 測った
+
+| | 続き 53 後 | 今回 |
+|---|---:|---:|
+| `--fix` が上流とバイト一致 | 164 | 164 |
+| pending | 28 | 28 |
+| `staticcheck-s` が書く行数 | 63 / 271 | **113 / 271** |
+
+golden **193/193**。S チェックは計 8 つ。
+
+#### 次にやること
+
+1. `staticcheck-s` の残り 14 チェック
+   （`s1005` / `s1010` / `s1011` / `s1018` / `s1024` / `s1025` /
+   `s1033`–`s1039` / `s1001`）。
+   機構は出揃っていて、`ReplaceWithNode` か `EditMatch` のどちらか。
+2. pending 28 件。`goheader` 110 / `testifylint-mock` 97 / `protogetter` 42。
