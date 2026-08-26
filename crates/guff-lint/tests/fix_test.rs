@@ -15,13 +15,14 @@ use guff_staticcheck::sa1004;
 use guff_types::{Checker, Config as TypeConfig};
 use tempfile::TempDir;
 
-fn fixture_dir() -> PathBuf {
+fn fixture_dir(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/testdata/fix/sa1004")
+        .join("tests/testdata/fix")
+        .join(name)
 }
 
-fn copy_fixture(dir: &Path) -> std::io::Result<()> {
-    for entry in fs::read_dir(fixture_dir())? {
+fn copy_fixture_named(dir: &Path, name: &str) -> std::io::Result<()> {
+    for entry in fs::read_dir(fixture_dir(name))? {
         let entry = entry?;
         let path = entry.path();
         let dest = dir.join(entry.file_name());
@@ -188,9 +189,16 @@ fn typecheck_sa1004_fixture(dir: &Path) -> Arc<Package> {
 }
 
 #[test]
-fn apply_fixes_sa1004_rewrites_sleep_literal() {
+fn sa1004_offers_two_conflicting_fixes_so_nothing_is_written() {
+    // This test used to assert the opposite — that `--fix` rewrites the literal
+    // to `1 * time.Nanosecond`. That was guff emitting one suggested fix where
+    // upstream emits two, "Explicitly use nanoseconds" and "Use seconds", over
+    // the same span. golangci gathers every suggested fix's edits into one list
+    // per linter, so the two overlap and the conflict pass drops all of
+    // staticcheck's edits for the file. golangci-lint 2.12.2 leaves this file
+    // untouched, and now so does guff.
     let dir = TempDir::new().unwrap();
-    copy_fixture(dir.path()).unwrap();
+    copy_fixture_named(dir.path(), "sa1004").unwrap();
 
     let pkg = typecheck_sa1004_fixture(dir.path());
     assert!(!pkg.ill_typed, "{:?}", pkg.errors);
@@ -223,19 +231,29 @@ fn apply_fixes_sa1004_rewrites_sleep_literal() {
     assert_eq!(issues.len(), 2, "{issues:?}");
 
     let bad = dir.path().join("bad.go");
+    let before = fs::read_to_string(&bad).unwrap();
     let (remaining, n) = apply_fixes(fset, &issues, None).unwrap();
-    assert_eq!(n, 2);
-    assert!(remaining.is_empty());
+    assert_eq!(n, 0, "both fixes lose the conflict");
+    assert_eq!(
+        remaining.len(),
+        2,
+        "guff keeps reporting what it did not fix (COMPAT-HARDENING 続き 37)"
+    );
 
-    let content = fs::read_to_string(&bad).unwrap();
-    assert!(content.contains("1 * time.Nanosecond"));
-    assert!(content.contains("42 * time.Nanosecond"));
+    assert_eq!(
+        fs::read_to_string(&bad).unwrap(),
+        before,
+        "the file must be untouched, as upstream leaves it"
+    );
 }
 
 #[test]
 fn cli_fix_flag_applies_and_clears_output() {
+    // S1002, not SA1004: SA1004's two competing fixes conflict and nothing is
+    // written, which is right but makes it useless for exercising the applied
+    // path. S1002 offers one fix per finding.
     let dir = TempDir::new().unwrap();
-    copy_fixture(dir.path()).unwrap();
+    copy_fixture_named(dir.path(), "s1002").unwrap();
 
     let guff = env!("CARGO_BIN_EXE_guff");
     let out = Command::new(guff)
@@ -279,8 +297,8 @@ fn cli_fix_flag_applies_and_clears_output() {
     );
 
     let content = fs::read_to_string(dir.path().join("bad.go")).unwrap();
-    assert!(content.contains("1 * time.Nanosecond"));
-    assert!(content.contains("42 * time.Nanosecond"));
+    assert!(content.contains("if b {"), "{content}");
+    assert!(content.contains("if b {\n\t\t_ = b\n\t}\n\tif b {"), "{content}");
 }
 
 #[test]

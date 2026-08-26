@@ -22,6 +22,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .clone();
 
     let mut pending: Vec<(u32, u32, String, String)> = Vec::new();
+    // The literal's own text is what both replacements are built from —
+    // upstream binds `duration` to `lit` itself in either pattern.
     {
         let files = pass.files();
         inspect.preorder_typed(node_mask!(CallExpr), files, |n| {
@@ -55,23 +57,33 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 lit.value_pos.0 as u32,
                 lit.end().0 as u32,
                 format!("sleeping for {n} nanoseconds is probably a bug; be explicit if it isn't"),
-                format!("{n} * time.Nanosecond"),
+                lit.value.clone(),
             ));
         });
     }
-    for (pos, end, message, replacement) in pending {
+    for (pos, end, message, duration) in pending {
+        // Upstream offers *two* fixes over the same span — nanoseconds and
+        // seconds — and that is load-bearing, not cosmetic. golangci's fixer
+        // gathers the edits of every `SuggestedFix` on an issue into one list
+        // per linter, so two fixes for one literal overlap, and the conflict
+        // pass drops every staticcheck edit for that file. Emitting only one of
+        // them made guff rewrite a file upstream leaves alone.
+        let unit_fix = |unit: &str, label: &str| SuggestedFix {
+            message: label.to_string(),
+            text_edits: vec![TextEdit {
+                pos,
+                end,
+                new_text: format!("{duration} * time.{unit}"),
+            }],
+        };
         pass.report(Diagnostic {
             pos,
             end,
             message,
-            suggested_fixes: vec![SuggestedFix {
-                message: "Use an explicit duration".to_string(),
-                text_edits: vec![TextEdit {
-                    pos,
-                    end,
-                    new_text: replacement,
-                }],
-            }],
+            suggested_fixes: vec![
+                unit_fix("Nanosecond", "Explicitly use nanoseconds"),
+                unit_fix("Second", "Use seconds"),
+            ],
             ..Diagnostic::default()
         });
     }

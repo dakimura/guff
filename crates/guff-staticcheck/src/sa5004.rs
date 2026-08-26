@@ -8,9 +8,10 @@ use guff::ast::{CommClause, ForStmt, Stmt};
 use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::code;
+use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass, Diagnostic, SuggestedFix, TextEdit};
 
-fn check_for_select(pass: &Pass<'_>, fs: &ForStmt, pending: &mut Vec<(u32, String)>) {
+fn check_for_select(pass: &Pass<'_>, fs: &ForStmt, pending: &mut Vec<(u32, u32, String)>) {
     if fs.init.is_some() || fs.cond.is_some() || fs.post.is_some() || fs.body.list.len() != 1 {
         return;
     }
@@ -18,14 +19,17 @@ fn check_for_select(pass: &Pass<'_>, fs: &ForStmt, pending: &mut Vec<(u32, Strin
         return;
     };
     for clause in &sel.body.list {
-        let Stmt::CommClause(CommClause { case, comm, body, .. }) = clause else {
+        let Stmt::CommClause(CommClause { case, comm, body, colon, .. }) = clause else {
             continue;
         };
         if comm.is_none() && body.is_empty() {
             // Upstream reports the empty `default` clause itself, not the
-            // enclosing `select`.
+            // enclosing `select`, and `edit.Delete(comm)` removes that same
+            // node. With no body the clause ends one past its colon —
+            // upstream's own FIXME notes this leaves the line behind blank.
             pending.push((
                 case.0 as u32,
+                (colon.0 + 1) as u32,
                 "should not have an empty default case in a for+select loop; the loop will spin"
                     .into(),
             ));
@@ -47,8 +51,23 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         };
         check_for_select(pass, fs, &mut pending);
     });
-    for (pos, msg) in pending {
-        pass.report_unless_generated(pos, msg);
+    for (pos, end, message) in pending {
+        if code::is_generated_at(pass, pos) {
+            continue;
+        }
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: "Remove empty default branch".into(),
+                text_edits: vec![TextEdit {
+                    pos,
+                    end,
+                    new_text: String::new(),
+                }],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }
