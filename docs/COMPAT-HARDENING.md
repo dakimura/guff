@@ -12609,3 +12609,78 @@ golden **193/193**（`staticcheck-s` の expected に 3 件追加）、
    message も `copy(to, from)` 固定で、上流の `to[:]` / `from[:]` を出さない。
    **fixture を先に足すこと。**
 2. pending 28 件。`goheader` 110 / `testifylint-mock` 97 / `protogetter` 42。
+
+---
+
+### 2026-08-27（続き 57）— `s1001`。**fixture を先に足したら 3 件出た**、そして `staticcheck-s` が閉じた
+
+続き 56 の続き。残りは `s1001` 1 つだった。
+
+#### 先に fixture
+
+続き 56 の教訓どおり、実装より先に fixture を広げた。
+元は `[]int` → `[]int` の range 1 形だけ。7 形にした:
+
+range（value あり／index 形）、3 節 `for`、配列→配列、
+配列→スライス、スライス→配列、配列ポインタ→配列ポインタ。
+
+golden を regen したら**上流は 7 件すべて報告**し、
+**guff は 3 件外していた**:
+
+| | 上流 | guff |
+|---|---|---|
+| 3 節 `for` | `copy(to, from)` | **報告なし** |
+| 配列→スライス | `copy(to, from[:])` | `copy(to, from)` |
+| スライス→配列 | `copy(to[:], from)` | `copy(to, from)` |
+
+#### 欠陥 1: `dst[i]` を渡していた
+
+上流のパターンは `(AssignStmt (IndexExpr dst key) "=" …)` で、
+`dst` は**コンテナ**に束縛される。
+`isInvariant(k, v, dst)` はコンテナを見る。
+
+guff は `lhs[0]` —— **`dst[i]` 全体**を渡していた。
+`dst[i]` はループ変数を含むので不変になりようがない。
+
+なぜ range 形だけ通っていたか: range の key ident は
+`object_of` が `None` を返すので、
+`is_invariant` の中の「key と同じオブジェクトか」判定が**素通り**していた。
+3 節 `for` の key は object を持つので、そこで初めて落ちた。
+
+**通っていたのは正しかったからではなく、判定が効いていなかったから。**
+
+#### 欠陥 2: message が `[:]` を出さない
+
+上流の `to` / `from` はリテラルの語だが、
+**その辺が配列なら `[:]` が付く**（fix が書く `[:]` と同じもの）。
+guff は `copy(to, from)` 固定だった。
+
+#### 欠陥 3: ポインタを捨てていた
+
+上流の `elType` は `(elem, isArray, isArrayPointer, ok)` を返す。
+guff の `elem_kind` はポインタを**透過的に剥がして捨てて**いた。
+
+そのフラグが `dst = src` と **`*dst = *src`** を分ける。
+`copy` 側では星は要らない —— `p[:]` は `*[N]T` に対して合法だからで、
+`[:]` がポインタも面倒を見る。
+
+#### 測った
+
+| | 続き 56 後 | 今回 |
+|---|---:|---:|
+| `--fix` が上流とバイト一致 | 164 | **165** |
+| pending | 28 | **27** |
+| `staticcheck-s` | 21 / 22 ファイル | **閉じた**（台帳を削除） |
+
+golden **193/193**、269 スイート / **3,270** テスト。
+
+`s1001` の unit test も `any(contains("copy(to, from)"))` から
+**3 種類のメッセージを個別に数える** assert に直した ——
+その `any` は、全部の配列形が `copy(to, from)` と言っていて
+3 節 `for` が何も言っていない状態でも通っていた。
+
+#### 次にやること
+
+pending 27 件。`goheader` 110 / `testifylint-mock` 97 / `protogetter` 42 /
+`dupword` 36 / `nlreturn` 34。
+続き 56・57 のやり方（**fixture を先に、上流に直接聞く**）をそのまま使う。

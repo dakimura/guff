@@ -147,6 +147,11 @@ held grew the case from 271 expected diff lines to 296, and immediately showed a
 finding guff was not reporting at all. A fixture that exercises one shape of a
 four-shape check reports "matches" about the one shape.
 
+After S1001 (2026-08-26): **165 matching, 27 pending** — `staticcheck-s` closed,
+and its ledger is gone. Extending that fixture first was again the whole job:
+the seven loops it now holds found three defects at once, one of which was an
+entire loop form guff never reported.
+
 ## Does it still build?
 
 A `--fix` that rewrites `fmt.Sprint(i)` to `strconv.Itoa(i)` and does not add

@@ -8,9 +8,13 @@ use guff::ast::{AssignStmt, BinaryExpr, CallExpr, Expr, ForStmt, Ident, IncDecSt
 use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
-use guff_analysis::code::{expr_to_int, is_call_to, object_of};
+use guff_analysis::code::{self, expr_to_int, is_call_to, object_of};
 use guff_analysis::passes::inspect;
-use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::{
+    match_pos, AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
+
+use crate::render::render_node;
 use guff_types::{TypeData, TypeId};
 
 fn expr_type(pass: &Pass<'_>, expr: &Expr) -> Option<TypeId> {
@@ -60,13 +64,31 @@ fn is_invariant(pass: &Pass<'_>, key: Option<guff_types::ObjectId>, val: Option<
     walk(pass, key, val, expr)
 }
 
-fn elem_kind(pass: &Pass<'_>, typ: TypeId) -> Option<(TypeId, bool)> {
+/// Upstream's `elType`: the element type, whether the value is an array, and
+/// whether it was reached through a pointer.
+///
+/// The pointer flag is what decides between `dst = src` and `*dst = *src` in
+/// the assignment branch. It used to be dropped here.
+fn elem_kind(pass: &Pass<'_>, typ: TypeId) -> Option<(TypeId, bool, bool)> {
     let types = &pass.pkg().type_artifacts.as_ref()?.types;
     let u = typ.underlying(types);
     match types.get(u) {
-        TypeData::Slice(s) => Some((s.elem(), false)),
-        TypeData::Array(a) => Some((a.elem(), true)),
-        TypeData::Pointer(p) => elem_kind(pass, p.elem()),
+        TypeData::Slice(s) => Some((s.elem(), false, false)),
+        TypeData::Array(a) => Some((a.elem(), true, false)),
+        TypeData::Pointer(p) => {
+            let (elem, is_array, _) = elem_kind(pass, p.elem())?;
+            Some((elem, is_array, true))
+        }
+        _ => None,
+    }
+}
+
+/// `T.Underlying().(*types.Pointer).Elem()` — what upstream compares once it
+/// knows a side was reached through a pointer.
+fn pointee(pass: &Pass<'_>, typ: TypeId) -> Option<TypeId> {
+    let types = &pass.pkg().type_artifacts.as_ref()?.types;
+    match types.get(typ.underlying(types)) {
+        TypeData::Pointer(p) => Some(p.elem()),
         _ => None,
     }
 }
@@ -94,13 +116,27 @@ fn is_index_copy(pass: &Pass<'_>, dst: &Expr, src_expr: &Expr, key: &Ident) -> b
     same_key(pass, dst_key_id, key) && same_key(pass, src_key_id, key)
 }
 
-fn check_copy_loop(
+/// What the loop copies, and how upstream would rewrite it.
+struct CopyLoop<'a> {
+    message: String,
+    /// The *container* being written to — `dst`, not `dst[i]`.
+    dst: &'a Expr,
+    src: &'a Expr,
+    dst_arr: bool,
+    src_arr: bool,
+    dst_ptr: bool,
+    src_ptr: bool,
+    /// Both sides are arrays of the same type: a plain assignment, not `copy`.
+    assign: bool,
+}
+
+fn check_copy_loop<'a>(
     pass: &Pass<'_>,
     key: &Ident,
     value: Option<&Ident>,
-    src: &Expr,
-    body: &[Stmt],
-) -> Option<&'static str> {
+    src: &'a Expr,
+    body: &'a [Stmt],
+) -> Option<CopyLoop<'a>> {
     if body.len() != 1 {
         return None;
     }
@@ -115,10 +151,15 @@ fn check_copy_loop(
 
     let dst = &lhs[0];
     let src_expr = &rhs[0];
+    // Upstream's pattern binds `dst` inside `(IndexExpr dst key)`, so the
+    // container is what gets checked and rewritten — never `dst[i]`, which
+    // contains the loop variable and can never be invariant. Passing the whole
+    // index expression made `isInvariant` answer a question nobody asked, and
+    // the three-clause `for` form went unreported because of it.
+    let Expr::IndexExpr(IndexExpr { x: dst_x, index: dst_key, .. }) = dst else {
+        return None;
+    };
     let matched = if let Some(val) = value {
-        let Expr::IndexExpr(IndexExpr { x: dst_x, index: dst_key, .. }) = dst else {
-            return None;
-        };
         let Expr::Ident(dst_key_id) = &**dst_key else {
             return None;
         };
@@ -134,7 +175,7 @@ fn check_copy_loop(
         is_invariant(pass, key_obj, val_obj, dst_x) && is_invariant(pass, key_obj, val_obj, src)
     } else {
         is_index_copy(pass, dst, src_expr, key)
-            && is_invariant(pass, key_obj, val_obj, dst)
+            && is_invariant(pass, key_obj, val_obj, dst_x)
             && is_invariant(pass, key_obj, val_obj, src)
     };
     if !matched {
@@ -142,24 +183,42 @@ fn check_copy_loop(
     }
 
     let tsrc = expr_type(pass, src)?;
-    let Expr::IndexExpr(IndexExpr { x: dst_x, .. }) = dst else {
-        return None;
-    };
     let tdst = expr_type(pass, dst_x)?;
-    let (src_elem, src_arr) = elem_kind(pass, tsrc)?;
-    let (dst_elem, dst_arr) = elem_kind(pass, tdst)?;
+    let (src_elem, src_arr, src_ptr) = elem_kind(pass, tsrc)?;
+    let (dst_elem, dst_arr, dst_ptr) = elem_kind(pass, tdst)?;
     if render_type(pass, src_elem) != render_type(pass, dst_elem) {
         return None;
     }
+    // Upstream compares the *pointees* when a side came through a pointer, so
+    // `*[4]int` and `*[4]int` are two identical `[4]int`.
+    let tsrc_cmp = if src_ptr { pointee(pass, tsrc)? } else { tsrc };
+    let tdst_cmp = if dst_ptr { pointee(pass, tdst)? } else { tdst };
 
-    if src_arr && dst_arr && render_type(pass, tsrc) == render_type(pass, tdst) {
-        Some("should copy arrays using assignment instead of using a loop")
+    let assign = src_arr && dst_arr && render_type(pass, tsrc_cmp) == render_type(pass, tdst_cmp);
+    let message = if assign {
+        "should copy arrays using assignment instead of using a loop".to_string()
     } else {
-        Some("should use copy(to, from) instead of a loop")
-    }
+        // `to` and `from` are literal words in upstream's message, but each
+        // grows a `[:]` when that side is an array — the same `[:]` the fix
+        // writes. Hardcoding `copy(to, from)` said the wrong thing for every
+        // array shape.
+        let to = if dst_arr { "to[:]" } else { "to" };
+        let from = if src_arr { "from[:]" } else { "from" };
+        format!("should use copy({to}, {from}) instead of a loop")
+    };
+    Some(CopyLoop {
+        message,
+        dst: dst_x,
+        src,
+        dst_arr,
+        src_arr,
+        dst_ptr,
+        src_ptr,
+        assign,
+    })
 }
 
-fn check_range(pass: &Pass<'_>, rs: &RangeStmt) -> Option<&'static str> {
+fn check_range<'a>(pass: &Pass<'_>, rs: &'a RangeStmt) -> Option<CopyLoop<'a>> {
     if !matches!(rs.tok, Some(Token::DEFINE)) {
         return None;
     }
@@ -174,7 +233,7 @@ fn check_range(pass: &Pass<'_>, rs: &RangeStmt) -> Option<&'static str> {
     check_copy_loop(pass, key, value, &rs.x, &rs.body.list)
 }
 
-fn check_for(pass: &Pass<'_>, fs: &ForStmt) -> Option<&'static str> {
+fn check_for<'a>(pass: &Pass<'_>, fs: &'a ForStmt) -> Option<CopyLoop<'a>> {
     let init = fs.init.as_deref()?;
     let Stmt::AssignStmt(init) = init else {
         return None;
@@ -228,21 +287,91 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "S1001 requires inspect analyzer".to_string())?
         .clone();
 
-    let mut pending: Vec<(u32, String)> = Vec::new();
+    let mut pending: Vec<(u32, String, Option<TextEdit>)> = Vec::new();
     inspect.preorder_typed(node_mask!(ForStmt, RangeStmt), pass.files(), |node| {
-        let msg = match node {
-            NodeRef::RangeStmt(rs) => check_range(pass, rs),
-            NodeRef::ForStmt(fs) => check_for(pass, fs),
-            _ => None,
+        let (found, span) = match node {
+            NodeRef::RangeStmt(rs) => (
+                check_range(pass, rs),
+                (rs.for_.0 as u32, rs.body.end().0 as u32),
+            ),
+            NodeRef::ForStmt(fs) => (
+                check_for(pass, fs),
+                (fs.for_.0 as u32, fs.body.end().0 as u32),
+            ),
+            _ => (None, (0, 0)),
         };
-        if let Some(msg) = msg {
-            pending.push((match_pos(node), msg.into()));
-        }
+        let Some(found) = found else {
+            return;
+        };
+        let edit = replacement(pass, &found).map(|new_text| TextEdit {
+            pos: span.0,
+            end: span.1,
+            new_text,
+        });
+        pending.push((match_pos(node), found.message, edit));
     });
-    for (pos, message) in pending {
-        pass.report_unless_generated(pos, message);
+    for (pos, message, edit) in pending {
+        let Some(edit) = edit else {
+            pass.report_unless_generated(pos, message);
+            continue;
+        };
+        if code::is_generated_at(pass, pos) {
+            continue;
+        }
+        let fix_message = if edit.new_text.starts_with("copy(") {
+            "Replace loop with call to copy()"
+        } else {
+            "Replace loop with assignment"
+        };
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: fix_message.into(),
+                text_edits: vec![edit],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
+}
+
+/// The statement upstream puts in the loop's place.
+///
+/// Two shapes. Both sides arrays of one type gives an assignment, with a `*` on
+/// whichever side was reached through a pointer. Anything else gives
+/// `copy(dst, src)`, where an array side is sliced instead of starred —
+/// `p[:]` is legal on a `*[N]T`, so the pointer needs no separate treatment
+/// there.
+fn replacement(pass: &Pass<'_>, c: &CopyLoop<'_>) -> Option<String> {
+    let dst = render_node(pass, c.dst)?;
+    let src = render_node(pass, c.src)?;
+    if c.assign {
+        let star = |ptr: bool, text: &str| {
+            if ptr {
+                format!("*{text}")
+            } else {
+                text.to_string()
+            }
+        };
+        return Some(format!(
+            "{} = {}",
+            star(c.dst_ptr, &dst),
+            star(c.src_ptr, &src)
+        ));
+    }
+    let slice = |arr: bool, text: &str| {
+        if arr {
+            format!("{text}[:]")
+        } else {
+            text.to_string()
+        }
+    };
+    Some(format!(
+        "copy({}, {})",
+        slice(c.dst_arr, &dst),
+        slice(c.src_arr, &src)
+    ))
 }
 
 fn s1001_analyzer_impl() -> Analyzer {
