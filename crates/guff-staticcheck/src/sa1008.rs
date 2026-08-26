@@ -10,7 +10,8 @@ use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_analysis::code::{expr_to_string, is_of_type_with_name};
 use guff_analysis::passes::inspect;
-use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::code;
+use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass, Diagnostic, SuggestedFix, TextEdit};
 
 /// Port of Go's `net/textproto.CanonicalMIMEHeaderKey`.
 fn canonical_header_key(s: &str) -> String {
@@ -66,7 +67,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
     });
 
-    let mut pending: Vec<(u32, String)> = Vec::new();
+    let mut pending: Vec<(u32, String, Option<TextEdit>)> = Vec::new();
     inspect.preorder_typed(node_mask!(IndexExpr), pass.files(), |node| {
         let NodeRef::IndexExpr(ix) = node else {
             return;
@@ -81,16 +82,50 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         if key == canonical {
             return;
         }
+        // Two shapes, two fixes. A literal key is rewritten to the canonical
+        // spelling — quoted the way Go quotes it, which is why this reaches for
+        // `gostd::strconv` rather than formatting the string itself. A named
+        // key cannot be rewritten, so it is wrapped instead. Anything else (an
+        // arbitrary expression) is reported without a fix, as upstream does.
+        let edit = match ix.index.as_ref() {
+            Expr::BasicLit(_) => Some(TextEdit {
+                pos: ix.index.pos().0 as u32,
+                end: ix.index.end().0 as u32,
+                new_text: crate::gostd::strconv::quote(&canonical),
+            }),
+            Expr::Ident(id) => Some(TextEdit {
+                pos: ix.index.pos().0 as u32,
+                end: ix.index.end().0 as u32,
+                new_text: format!("http.CanonicalHeaderKey({})", id.name),
+            }),
+            _ => None,
+        };
         pending.push((
             match_pos(node),
             format!(
                 "keys in http.Header are canonicalized, {key:?} is not canonical; fix the constant or use http.CanonicalHeaderKey"
             ),
+            edit,
         ));
     });
 
-    for (pos, message) in pending {
-        pass.report_unless_generated(pos, message);
+    for (pos, message, edit) in pending {
+        let Some(edit) = edit else {
+            pass.report_unless_generated(pos, message);
+            continue;
+        };
+        if code::is_generated_at(pass, pos) {
+            continue;
+        }
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: "Canonicalize header key".into(),
+                text_edits: vec![edit],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }

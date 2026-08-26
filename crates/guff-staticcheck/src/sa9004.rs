@@ -9,7 +9,10 @@ use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::code;
+use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass, Diagnostic, SuggestedFix, TextEdit};
+
+use crate::render::render_node;
 use guff_types::api_predicates::api_convertible_to;
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -18,20 +21,38 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "SA9004 requires inspect analyzer".to_string())?
         .clone();
 
-    let mut pending = Vec::new();
+    let mut pending: Vec<(u32, Vec<TextEdit>)> = Vec::new();
     inspect.preorder_typed(node_mask!(GenDecl), pass.files(), |n| {
         let NodeRef::GenDecl(decl) = n else {
             return;
         };
         check_const_decl(pass, decl, &mut pending);
     });
-    for pos in pending {
-        pass.report_unless_generated(pos, "only the first constant in this group has an explicit type");
+    for (pos, edits) in pending {
+        if edits.is_empty() {
+            pass.report_unless_generated(
+                pos,
+                "only the first constant in this group has an explicit type",
+            );
+            continue;
+        }
+        if code::is_generated_at(pass, pos) {
+            continue;
+        }
+        pass.report(Diagnostic {
+            pos,
+            message: "only the first constant in this group has an explicit type".to_string(),
+            suggested_fixes: vec![SuggestedFix {
+                message: "Add type to all constants in group".into(),
+                text_edits: edits,
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }
 
-fn check_const_decl(pass: &Pass<'_>, decl: &GenDecl, pending: &mut Vec<u32>) {
+fn check_const_decl(pass: &Pass<'_>, decl: &GenDecl, pending: &mut Vec<(u32, Vec<TextEdit>)>) {
     if decl.tok != Some(Token::CONST) || !decl.lparen.is_valid() {
         return;
     }
@@ -89,16 +110,46 @@ fn check_const_decl(pass: &Pass<'_>, decl: &GenDecl, pending: &mut Vec<u32>) {
             }
         }
         if ok_group {
+            // One edit per spec after the first: upstream copies the spec,
+            // gives it the group's type and prints it. The loop above has
+            // already established each has exactly one name and one value, so
+            // the printed form is `name type = value` and nothing else.
+            //
+            // The span stops where the spec does, which is before any trailing
+            // line comment — that is why upstream clears `Comment` on its copy
+            // rather than reprinting it.
+            let ty = first.ty.as_ref().and_then(|t| render_node(pass, t));
+            let edits: Vec<TextEdit> = match ty {
+                Some(ty) => group
+                    .iter()
+                    .skip(1)
+                    .filter_map(|spec| {
+                        let name = spec.names.first()?;
+                        let value = spec.values.first()?;
+                        Some(TextEdit {
+                            pos: name.name_pos.0 as u32,
+                            end: value.end().0 as u32,
+                            new_text: format!(
+                                "{} {ty} = {}",
+                                name.name,
+                                render_node(pass, value)?
+                            ),
+                        })
+                    })
+                    .collect(),
+                None => Vec::new(),
+            };
             // Upstream hands `report.Report` the group's first `*ast.ValueSpec`,
             // whose `Pos()` is its first *name* — not the type that follows it.
             // `const ( A E = 1; B = 2 )` reports at `A`, column 2.
-            pending.push(
+            pending.push((
                 first
                     .names
                     .first()
                     .map(|n| n.name_pos.0 as u32)
                     .unwrap_or(decl.lparen.0 as u32),
-            );
+                edits,
+            ));
         }
     }
 }

@@ -13550,3 +13550,64 @@ golden **193/193**、269 スイート / **3,275** テスト。
 `sa1008`（`http.CanonicalHeaderKey` で包む）、
 `sa4029`（`sort.Xxx` 呼び出しに置き換え）、
 `sa9004`（定数グループの各 spec に型を足す）。
+
+---
+
+### 2026-08-27（続き 70）— `staticcheck-sa` が閉じた
+
+続き 69 の続き。残り 3 ファイル。
+
+#### `sa4029` —— 代入ごと消える
+
+```go
+r := &ast.CallExpr{Fun: sort.<Alt>, Args: []ast.Expr{target}}
+edit.ReplaceWithNode(pass.Fset, node, r)
+```
+
+`node` は **AssignStmt** なので、`x = sort.StringSlice(x)` は
+`sort.Strings(x)` になる —— **代入そのものが消える**。
+span は AssignStmt（lhs の先頭 〜 rhs の末尾）。
+
+#### `sa1008` —— 形で fix が変わる
+
+| index の形 | fix |
+|---|---|
+| `BasicLit` | 正規化した綴りに置き換え（`strconv.Quote` で引用） |
+| `Ident` | `http.CanonicalHeaderKey(x)` で包む |
+| それ以外 | fix 無しで報告 |
+
+リテラルは書き換えられるが、名前付きのキーは中身が分からないので包むしかない。
+引用は Go と同じでなければならないので、
+`gostd::strconv::quote` を使う —— 続き 61 で
+`dupword` の文字列リテラル側を止めた理由と同じ判断で、
+こちらは**同じクレートにあるので使える**。
+
+#### `sa9004` —— 1 つの fix に N 個の edit
+
+グループの 2 番目以降の spec それぞれに 1 つずつ edit。
+上流は spec をコピーして型を入れて印字するが、
+その前段のチェックが「名前 1 つ・値 1 つ」を保証しているので、
+印字結果は `name type = value` にしかならない。
+
+span が spec の終わりで止まる（行コメントの手前）ことが、
+上流が copy の `Comment` を nil にする理由 ——
+**コメントはファイルに残るので、印字し直すと二重になる**。
+
+#### 測った
+
+| | 続き 69 後 | 今回 |
+|---|---:|---:|
+| `--fix` が上流とバイト一致 | 173 | **174** |
+| pending | 19 | **18** |
+| `staticcheck-sa` | 13 / 16 ファイル | **閉じた**（台帳を削除） |
+
+golden **193/193**、269 スイート / **3,275** テスト。
+
+SA チェックは 4 エントリで計 11 個に fix が付いた
+（`sa1004` / `sa1006` / `sa1008` / `sa1013` / `sa4013` / `sa4026` /
+`sa4029` / `sa5004` / `sa6005` / `sa9002` / `sa9004`）。
+
+#### 次にやること
+
+pending 18 件。`staticcheck-qf` 395 行が最大、次いで `gocritic` 48 行。
+`nolint` 系は続き 63 の設計判断が先。
