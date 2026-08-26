@@ -9,7 +9,10 @@ use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_analysis::code::{is_call_to, is_call_to_any};
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::code;
+use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass, Diagnostic, SuggestedFix, TextEdit};
+
+use crate::render::render_node;
 use guff_types::arena::TypeData;
 
 const PRINTF_ONE_ARG: &[&str] = &[
@@ -74,7 +77,11 @@ fn is_splatted_tuple(pass: &Pass<'_>, expr: &Expr) -> bool {
     )
 }
 
-fn check_printf_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+fn check_printf_call(
+    pass: &Pass<'_>,
+    call: &CallExpr,
+    pending: &mut Vec<(u32, String, Option<TextEdit>)>,
+) {
     let format = if is_call_to(pass, call, "fmt.Fprintf") {
         if call.args.len() != 2 {
             return;
@@ -93,10 +100,28 @@ fn check_printf_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, S
     if !is_dynamic_format_arg(format) || is_splatted_tuple(pass, format) {
         return;
     }
+    // `edit.ReplaceWithString(call.Fun, alt)`. For everything but `fmt.Errorf`,
+    // `alt` is the rendered callee with its final byte removed — upstream's
+    // comment notes the callee can be an arbitrary selector like
+    // `foo.bar[0].Printf`, and dropping the trailing `f` works for all of them.
+    let alt = if is_call_to(pass, call, "fmt.Errorf") {
+        Some("errors.New".to_string())
+    } else {
+        render_node(pass, &call.fun).and_then(|mut t| {
+            t.pop()?;
+            Some(t)
+        })
+    };
+    let edit = alt.map(|new_text| TextEdit {
+        pos: call.fun.pos().0 as u32,
+        end: call.fun.end().0 as u32,
+        new_text,
+    });
     pending.push((
         call.fun.pos().0 as u32,
         "printf-style function with dynamic format string and no further arguments should use print-style function instead"
             .into(),
+        edit,
     ));
 }
 
@@ -106,7 +131,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "SA1006 requires inspect analyzer".to_string())?
         .clone();
 
-    let mut pending: Vec<(u32, String)> = Vec::new();
+    let mut pending: Vec<(u32, String, Option<TextEdit>)> = Vec::new();
     inspect.preorder_typed(node_mask!(CallExpr), pass.files(), |node| {
         let NodeRef::CallExpr(call) = node else {
             return;
@@ -114,8 +139,23 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         check_printf_call(pass, call, &mut pending);
     });
 
-    for (pos, message) in pending {
-        pass.report_unless_generated(pos, message);
+    for (pos, message, edit) in pending {
+        let Some(edit) = edit else {
+            pass.report_unless_generated(pos, message);
+            continue;
+        };
+        if code::is_generated_at(pass, pos) {
+            continue;
+        }
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: "Use print-style function".into(),
+                text_edits: vec![edit],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }

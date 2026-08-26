@@ -161,13 +161,19 @@
  }
 --- a/sa6005/bad/bad.go
 +++ b/sa6005/bad/bad.go
-@@ -1,3 +1,5 @@
- package main
-+
+@@ -2,10 +2,10 @@
+ 
  import "strings"
+ 
 -func f(a, b string) bool { return strings.ToLower(a) == strings.ToLower(b) }
-+
 +func f(a, b string) bool { return strings.EqualFold(a, b) }
+ 
+ // The `!=` spelling. Until 2026-08-27 the fixture held only `==`, so guff's
+ // message for this one — and the negation its fix has to add — went unmeasured.
+ // `ToLower`, not `ToUpper`: the unit-test harness stubs `strings` with the
+ // functions the fixtures use, and only the operator matters here.
+-func g(a, b string) bool { return strings.ToLower(a) != strings.ToLower(b) }
++func g(a, b string) bool { return !strings.EqualFold(a, b) }
 --- a/sa9002/bad/bad.go
 +++ b/sa9002/bad/bad.go
 @@ -1,3 +1,5 @@
