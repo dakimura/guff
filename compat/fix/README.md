@@ -189,6 +189,10 @@ offers two competing fixes there, they conflict, and the conflict drops every
 staticcheck edit for the file. Matching upstream meant emitting *more* so that
 *less* is written.
 
+After SA4013 (2026-08-26): 9 of 16. Its expected diff is a gofmt blank line and
+nothing else — two competing fixes drop all of staticcheck's edits, and the file
+is still written. Two rules from earlier entries meeting in one hunk.
+
 ## Does it still build?
 
 A `--fix` that rewrites `fmt.Sprint(i)` to `strconv.Itoa(i)` and does not add

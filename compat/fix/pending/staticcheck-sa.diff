@@ -27,6 +27,12 @@
 +		<-t.C
  	}
  }
+--- a/sa4013/bad/bad.go
++++ b/sa4013/bad/bad.go
+@@ -1,2 +1,3 @@
+ package main
++
+ func main() { _ = !!true }
 --- a/sa4014/bad/bad.go
 +++ b/sa4014/bad/bad.go
 @@ -1,7 +1,9 @@
