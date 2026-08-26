@@ -202,6 +202,11 @@ closed at once (`staticcheck-checks-all`, `-default`, `-not-s`), none of them
 touched directly. They run the same checks under different `checks:` settings,
 so a check gained anywhere lands in all of them.
 
+After SA4029 / SA1008 / SA9004 (2026-08-26): **174 matching, 18 pending** —
+`staticcheck-sa` closed, ledger deleted. Eleven SA checks gained fixes across
+four entries; the last three were the ones that rebuild a node rather than
+replace a string.
+
 ## Does it still build?
 
 A `--fix` that rewrites `fmt.Sprint(i)` to `strconv.Itoa(i)` and does not add
