@@ -7,8 +7,12 @@ use std::sync::OnceLock;
 use guff::ast::{CompositeLit, Expr, SelectorExpr};
 use guff::token::Token;
 use guff::walk::{preorder_stack, NodeRef};
-use guff_analysis::code::object_of;
-use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::code::{self, object_of};
+
+use crate::render::render_node;
+use guff_analysis::{
+    AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
 use guff_types::alias::unalias_readonly;
 use guff_types::arena::ObjectData;
 use guff_types::named::named_obj;
@@ -64,7 +68,10 @@ fn get_sel_source(pass: &Pass<'_>, sel: &SelectorExpr) -> Option<(TypeId, guff_t
     Some((typ, obj))
 }
 
-fn check_composite_lit(pass: &Pass<'_>, lit: &CompositeLit) -> Option<String> {
+fn check_composite_lit(
+    pass: &Pass<'_>,
+    lit: &CompositeLit,
+) -> Option<(String, Option<TextEdit>)> {
     let ty_expr = lit.ty.as_ref()?;
     let dst_typ_raw = pass.types_info()?.types.get(&ty_expr.id()).map(|tv| tv.typ)?;
     let dst_named = as_named(pass, dst_typ_raw)?;
@@ -137,10 +144,23 @@ fn check_composite_lit(pass: &Pass<'_>, lit: &CompositeLit) -> Option<String> {
 
     let artifacts = pass.pkg().type_artifacts.as_ref()?;
     let ident_name = src_obj.name(&artifacts.objects).to_string();
-    Some(format!(
-        "should convert {ident_name} (type {}) to {} instead of using struct literal",
-        crate::render::type_string_rel(pass, src_named)?,
-        crate::render::type_string_rel(pass, dst_named)?
+    // `edit.ReplaceWithNode(fset, node, &ast.CallExpr{Fun: lit.Type, Args: [ident]})`:
+    // the literal becomes a conversion. The type comes from the literal's own
+    // type expression, not from `types.TypeString` — the message uses the
+    // latter and they can differ (an aliased import spells the type one way in
+    // the source and another in a package-qualified name).
+    let edit = render_node(pass, ty_expr).map(|ty_text| TextEdit {
+        pos: ty_expr.pos().0 as u32,
+        end: (lit.rbrace.0 + 1) as u32,
+        new_text: format!("{ty_text}({ident_name})"),
+    });
+    Some((
+        format!(
+            "should convert {ident_name} (type {}) to {} instead of using struct literal",
+            crate::render::type_string_rel(pass, src_named)?,
+            crate::render::type_string_rel(pass, dst_named)?
+        ),
+        edit,
     ))
 }
 
@@ -180,7 +200,7 @@ fn structs_convertible(pass: &Pass<'_>, dst: TypeId, src: TypeId) -> bool {
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
-    let mut pending: Vec<(u32, String)> = Vec::new();
+    let mut pending: Vec<(u32, String, Option<TextEdit>)> = Vec::new();
     for file in pass.files() {
         let mut stack = Vec::new();
         preorder_stack(NodeRef::File(file), &mut stack, |n, stk| {
@@ -195,7 +215,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             ) {
                 return true;
             }
-            if let Some(msg) = check_composite_lit(pass, lit) {
+            if let Some((msg, edit)) = check_composite_lit(pass, lit) {
                 // Upstream reports the composite literal node, whose position
                 // is the start of its type — not the `{`.
                 let pos = lit
@@ -203,14 +223,29 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     .as_ref()
                     .map(|t| t.pos().0 as u32)
                     .unwrap_or(lit.lbrace.0 as u32);
-                pending.push((pos, msg));
+                pending.push((pos, msg, edit));
             }
             true
         });
     }
 
-    for (pos, message) in pending {
-        pass.report_unless_generated(pos, message);
+    for (pos, message, edit) in pending {
+        let Some(edit) = edit else {
+            pass.report_unless_generated(pos, message);
+            continue;
+        };
+        if code::is_generated_at(pass, pos) {
+            continue;
+        }
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: "Use type conversion".into(),
+                text_edits: vec![edit],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }

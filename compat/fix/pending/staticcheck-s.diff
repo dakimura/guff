@@ -58,6 +58,26 @@
  
 -func f(t time.Time) time.Duration { return time.Now().Sub(t) }
 +func f(t time.Time) time.Duration { return time.Since(t) }
+--- a/s1016/bad/bad.go
++++ b/s1016/bad/bad.go
+@@ -1,8 +1,14 @@
+ package main
+ 
+-type T1 struct{ A int; B string }
+-type T2 struct{ A int; B string }
++type T1 struct {
++	A int
++	B string
++}
++type T2 struct {
++	A int
++	B string
++}
+ 
+ func f(x T1) T2 {
+-	return T2{A: x.A, B: x.B}
++	return T2(x)
+ }
 --- a/s1021/bad/bad.go
 +++ b/s1021/bad/bad.go
 @@ -1,8 +1,7 @@
@@ -70,3 +90,33 @@
  	_ = x
  
  	var y int
+--- a/s1028/bad/bad.go
++++ b/s1028/bad/bad.go
+@@ -1,5 +1,8 @@
+ package main
+ 
+-import ("errors"; "fmt")
++import (
++	"errors"
++	"fmt"
++)
+ 
+-func f() error { return errors.New(fmt.Sprintf("x")) }
++func f() error { return fmt.Errorf("x") }
+--- a/s1030/bad/bad.go
++++ b/s1030/bad/bad.go
+@@ -2,10 +2,10 @@
+ 
+ import "bytes"
+ 
+-func f(buf bytes.Buffer) string { return string(buf.Bytes()) }
++func f(buf bytes.Buffer) string { return buf.String() }
+ 
+-func g(buf *bytes.Buffer) []byte { return []byte(buf.String()) }
++func g(buf *bytes.Buffer) []byte { return buf.Bytes() }
+ 
+-func h(buf bytes.Buffer) []byte { return []byte(buf.String()) }
++func h(buf bytes.Buffer) []byte { return buf.Bytes() }
+ 
+-func sel(w struct{ B bytes.Buffer }) string { return string(w.B.Bytes()) }
++func sel(w struct{ B bytes.Buffer }) string { return w.B.String() }
