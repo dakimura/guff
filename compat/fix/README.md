@@ -158,6 +158,13 @@ missing port (`generateFix`) plus the wrapper's span arithmetic. It is also the
 eighth case whose rewritten tree no longer builds: upstream writes the raw
 template, regex metacharacters and all, into every file.
 
+After testifylint's argument-rewriting checkers (2026-08-26): 166 matching, 26
+pending, and `testifylint-mock` at 45 of 97 lines. Seven of its checkers rewrite
+the assertion's *name and arguments together*; the other nine are still silent,
+which is deliberate — a rename without its argument edit writes
+`assert.Empty(t, 0, len(arr))`, and the ledger would record a case that does not
+compile.
+
 ## Does it still build?
 
 A `--fix` that rewrites `fmt.Sprint(i)` to `strconv.Itoa(i)` and does not add
