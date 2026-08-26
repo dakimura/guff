@@ -7,9 +7,13 @@ use std::sync::OnceLock;
 use guff::ast::Expr;
 use guff::node_mask;
 use guff::walk::NodeRef;
-use guff_analysis::code::{expr_to_string, is_call_to, type_with_name};
+use guff_analysis::code::{self, expr_to_string, is_call_to, type_with_name};
 use guff_analysis::passes::inspect;
-use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::{
+    match_pos, AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
+
+use crate::render::render_node;
 use guff_types::basic::BasicKind;
 use guff_types::{Basic, TypeData, TypeId};
 
@@ -41,7 +45,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "S1025 requires inspect analyzer".to_string())?
         .clone();
 
-    let mut pending: Vec<(u32, String)> = Vec::new();
+    let mut pending: Vec<(u32, String, &'static str, Option<TextEdit>)> = Vec::new();
     inspect.preorder_typed(node_mask!(CallExpr), pass.files(), |node| {
         let NodeRef::CallExpr(call) = node else {
             return;
@@ -62,19 +66,56 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             return;
         }
 
-        let msg = if type_with_name(pass, typ, "fmt.Stringer") {
-            "should use String() instead of fmt.Sprintf"
-        } else if is_string_type(pass, typ) {
-            "the argument is already a string, there's no need to use fmt.Sprintf"
-        } else if underlying_is_string(pass, typ) {
-            "the argument's underlying type is a string, should use a simple conversion instead of fmt.Sprintf"
-        } else {
-            return;
-        };
-        pending.push((match_pos(node), msg.into()));
+        // Each branch replaces the whole `fmt.Sprintf` call, and each builds a
+        // different node from the same argument: `x.String()`, `x` itself, or
+        // `string(x)`.
+        let arg = &call.args[1];
+        let (msg, fix_msg, replacement): (&str, &str, fn(&str) -> String) =
+            if type_with_name(pass, typ, "fmt.Stringer") {
+                (
+                    "should use String() instead of fmt.Sprintf",
+                    "Replace with call to String method",
+                    |a| format!("{a}.String()"),
+                )
+            } else if is_string_type(pass, typ) {
+                (
+                    "the argument is already a string, there's no need to use fmt.Sprintf",
+                    "Remove unnecessary call to fmt.Sprintf",
+                    |a| a.to_string(),
+                )
+            } else if underlying_is_string(pass, typ) {
+                (
+                    "the argument's underlying type is a string, should use a simple conversion instead of fmt.Sprintf",
+                    "Replace with conversion to string",
+                    |a| format!("string({a})"),
+                )
+            } else {
+                return;
+            };
+        let edit = render_node(pass, arg).map(|a| TextEdit {
+            pos: call.pos().0 as u32,
+            end: call.end().0 as u32,
+            new_text: replacement(&a),
+        });
+        pending.push((match_pos(node), msg.into(), fix_msg, edit));
     });
-    for (pos, message) in pending {
-        pass.report_unless_generated(pos, message);
+    for (pos, message, fix_msg, edit) in pending {
+        let Some(edit) = edit else {
+            pass.report_unless_generated(pos, message);
+            continue;
+        };
+        if code::is_generated_at(pass, pos) {
+            continue;
+        }
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: fix_msg.into(),
+                text_edits: vec![edit],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }

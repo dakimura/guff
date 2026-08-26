@@ -1178,8 +1178,12 @@ fn s1005_flags_bad_patterns() {
     let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/s1005");
     support::assert_well_typed(&pkg);
     let messages = support::run_analyzer(s1005::analyzer(), &pkg);
-    assert!(!messages.is_empty(), "{messages:?}");
-    assert!(messages.iter().any(|m| m.contains("blank identifier")));
+    // One channel receive plus the three range shapes. Asserting the count, not
+    // just "any": the fixture used to hold the receive alone, and `for i, _ :=
+    // range` went unreported because `is_blank` demanded an identifier with no
+    // object — which a `:=` blank has.
+    assert_eq!(messages.len(), 4, "{messages:?}");
+    assert!(messages.iter().all(|m| m.contains("blank identifier")));
 }
 
 #[test]

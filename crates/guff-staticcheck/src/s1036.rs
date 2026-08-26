@@ -15,9 +15,13 @@ use guff::ast::{AssignStmt, CallExpr, CompositeLit, Expr, Ident, IfStmt, IncDecS
 use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
-use guff_analysis::code::{expr_to_int, is_call_to, object_of, unparen};
+use guff_analysis::code::{self, expr_to_int, is_call_to, object_of, unparen};
 use guff_analysis::passes::inspect;
-use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::{
+    match_pos, AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
+
+use crate::render::render_stmt;
 
 fn same_expr(pass: &Pass<'_>, a: &Expr, b: &Expr) -> bool {
     match (unparen(a), unparen(b)) {
@@ -157,17 +161,53 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "S1036 requires inspect analyzer".to_string())?
         .clone();
 
-    let mut pending: Vec<(u32, String)> = Vec::new();
+    let mut pending: Vec<(u32, String, Option<TextEdit>)> = Vec::new();
     inspect.preorder_typed(node_mask!(IfStmt), pass.files(), |node| {
         let NodeRef::IfStmt(ifs) = node else {
             return;
         };
-        if check_if(pass, ifs) {
-            pending.push((match_pos(node), "unnecessary guard around map access".into()));
+        if !check_if(pass, ifs) {
+            return;
         }
+        // `edit.ReplaceWithNode(fset, node, set)`: the whole `if`/`else`
+        // collapses to the then-branch statement, which is what all three
+        // shapes call `set`. `check_if` has already established the body holds
+        // exactly one statement, and every shape requires an `else`, so the
+        // statement ends at the end of that else.
+        let set = &ifs.body.list[0];
+        let end = ifs
+            .else_
+            .as_ref()
+            .map(|e| e.end())
+            .unwrap_or_else(|| ifs.body.end());
+        let edit = render_stmt(pass, set).map(|text| TextEdit {
+            pos: ifs.if_.0 as u32,
+            end: end.0 as u32,
+            new_text: text,
+        });
+        pending.push((
+            match_pos(node),
+            "unnecessary guard around map access".into(),
+            edit,
+        ));
     });
-    for (pos, message) in pending {
-        pass.report_unless_generated(pos, message);
+    for (pos, message, edit) in pending {
+        let Some(edit) = edit else {
+            pass.report_unless_generated(pos, message);
+            continue;
+        };
+        if code::is_generated_at(pass, pos) {
+            continue;
+        }
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: "Simplify map access".into(),
+                text_edits: vec![edit],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }

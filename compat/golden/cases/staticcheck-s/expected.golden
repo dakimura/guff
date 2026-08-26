@@ -23,6 +23,9 @@ s1003/ok/ok.go:6:2:staticcheck::SA9003: empty branch
 s1003/ok/ok.go:8:2:staticcheck::SA9003: empty branch
 s1004/bad/bad.go:6:9:staticcheck::S1004: should use bytes.Equal(a, b) instead
 s1005/bad/bad.go:4:2:staticcheck::S1005: unnecessary assignment to the blank identifier
+s1005/bad/bad.go:15:6:staticcheck::S1005: unnecessary assignment to the blank identifier
+s1005/bad/bad.go:21:6:staticcheck::S1005: unnecessary assignment to the blank identifier
+s1005/bad/bad.go:27:9:staticcheck::S1005: unnecessary assignment to the blank identifier
 s1006/bad/bad.go:4:2:staticcheck::S1006: should use for {} instead of for true {}
 s1006/bad/bad.go:4:2:staticcheck::SA5002: loop condition never changes or has a race condition
 s1006/bad/bad.go:4:2:staticcheck::SA5002: this loop will spin, using 100% CPU

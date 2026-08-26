@@ -7,7 +7,11 @@ use std::sync::OnceLock;
 use guff_pattern::{must_parse, Pattern};
 use guff_analysis::callcheck::is_slice_type;
 use guff_analysis::passes::inspect;
-use guff_analysis::{entry_mask, match_pattern, match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::code;
+use guff_analysis::{
+    entry_mask, match_pattern, match_pos, AnalysisResult, Analyzer, Diagnostic, Pass, RunError,
+    RunFn, SuggestedFix, TextEdit,
+};
 
 static PAT: OnceLock<Pattern> = OnceLock::new();
 
@@ -25,7 +29,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "S1018 requires inspect analyzer".to_string())?
         .clone();
 
-    let mut pending: Vec<(u32, String)> = Vec::new();
+    let mut pending: Vec<(u32, String, Option<TextEdit>)> = Vec::new();
     inspect.preorder_typed(entry_mask(pat()), pass.files(), |node| {
         let Some(m) = match_pattern(pass, pat(), node) else {
             return;
@@ -45,13 +49,50 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         if !is_slice_type(&artifacts.types, typ) {
             return;
         }
+        // `code.EditMatch` with `(CallExpr (Ident "copy") [(SliceExpr slice nil
+        // limit nil) (SliceExpr slice offset nil nil)])`. Every binding the
+        // replacement uses is an `Ident` — the pattern says so — so the text is
+        // three names and nothing needs the printer.
+        let edit = (|| {
+            let limit = m.state.get("limit")?.as_ident()?;
+            let offset = m.state.get("offset")?.as_ident()?;
+            let guff::walk::NodeRef::ForStmt(fs) = node else {
+                return None;
+            };
+            Some(TextEdit {
+                pos: fs.for_.0 as u32,
+                end: fs.body.end().0 as u32,
+                new_text: format!(
+                    "copy({slice}[:{limit}], {slice}[{offset}:])",
+                    slice = slice.name,
+                    limit = limit.name,
+                    offset = offset.name,
+                ),
+            })
+        })();
         pending.push((
             match_pos(node),
             "should use copy() instead of loop for sliding slice elements".into(),
+            edit,
         ));
     });
-    for (pos, message) in pending {
-        pass.report_unless_generated(pos, message);
+    for (pos, message, edit) in pending {
+        let Some(edit) = edit else {
+            pass.report_unless_generated(pos, message);
+            continue;
+        };
+        if code::is_generated_at(pass, pos) {
+            continue;
+        }
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: "Use copy() instead of loop".into(),
+                text_edits: vec![edit],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }

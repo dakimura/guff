@@ -64,12 +64,37 @@
  }
 --- a/s1005/bad/bad.go
 +++ b/s1005/bad/bad.go
-@@ -1,5 +1,5 @@
+@@ -1,7 +1,7 @@
  package main
  
  func f(ch chan int) {
 -	_ = <-ch
 +	<-ch
+ }
+ 
+ // The three range shapes. Until 2026-08-27 this fixture held only the channel
+@@ -12,19 +12,19 @@
+ // `for _ := range` and `for _, _ := range` with "no new variables on left side
+ // of :=". That is why upstream's `rs.TokPos + 1` deletion is safe.
+ func rangeBlankKey(xs []int) {
+-	for _ = range xs {
++	for range xs {
+ 		_ = 1
+ 	}
+ }
+ 
+ func rangeBlankBoth(xs []int) {
+-	for _, _ = range xs {
++	for range xs {
+ 		_ = 1
+ 	}
+ }
+ 
+ func rangeBlankValue(xs []int) {
+-	for i, _ := range xs {
++	for i := range xs {
+ 		_ = i
+ 	}
  }
 --- a/s1010/bad/bad.go
 +++ b/s1010/bad/bad.go

@@ -140,6 +140,13 @@ to checks nobody touched: adding S1039 made `s1028` and `s1038` match, because
 guff writes in that case is now byte-identical to upstream; it is silent on the
 eight remaining ones.
 
+After seven more S checks (2026-08-26): 164 matching, 28 pending, and 21 of
+`staticcheck-s`'s 22 files byte-identical — only `s1001` is left. The denominator
+moved too: extending the S1005 fixture with the three range shapes it had never
+held grew the case from 271 expected diff lines to 296, and immediately showed a
+finding guff was not reporting at all. A fixture that exercises one shape of a
+four-shape check reports "matches" about the one shape.
+
 ## Does it still build?
 
 A `--fix` that rewrites `fmt.Sprint(i)` to `strconv.Itoa(i)` and does not add

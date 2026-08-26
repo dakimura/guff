@@ -4,9 +4,17 @@
 
 use std::sync::OnceLock;
 
+use guff::ast::{Expr, SelectorExpr};
+use guff::walk::NodeRef;
 use guff_pattern::{must_parse, Pattern};
+use guff_analysis::code;
 use guff_analysis::passes::{inspect, typeindex};
-use guff_analysis::{match_pos, matches, AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::{
+    match_pos, matches, AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix,
+    TextEdit,
+};
+
+use crate::render::render_node;
 
 static PAT: OnceLock<Pattern> = OnceLock::new();
 
@@ -23,13 +31,53 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .result_of::<typeindex::Index>(typeindex::analyzer())
         .ok_or_else(|| "S1024 requires typeindex analyzer".to_string())?;
 
-    let mut pending: Vec<(u32, String)> = Vec::new();
+    let mut pending: Vec<(u32, String, Option<TextEdit>)> = Vec::new();
     matches(pass, &inspect, pat(), |node, _| {
-        pending.push((match_pos(node), "should use time.Until instead of t.Sub(time.Now())".into()));
+        // `pattern.NodeToAST` builds `time.Until(sel.X)` from the *receiver* of
+        // the `.Sub` selector — so `deadline.Sub(time.Now())` becomes
+        // `time.Until(deadline)`. A callee that is not a selector cannot supply
+        // that receiver, and upstream reports it without a fix.
+        //
+        // As in S1037, the replacement spells the package `(Ident "time")`
+        // literally rather than resolving the import, so an aliased `time`
+        // makes upstream write a name the file does not have.
+        let edit = match node {
+            NodeRef::CallExpr(call) => match &*call.fun {
+                Expr::SelectorExpr(SelectorExpr { x, .. }) => {
+                    render_node(pass, x).map(|recv| TextEdit {
+                        pos: call.pos().0 as u32,
+                        end: call.end().0 as u32,
+                        new_text: format!("time.Until({recv})"),
+                    })
+                }
+                _ => None,
+            },
+            _ => None,
+        };
+        pending.push((
+            match_pos(node),
+            "should use time.Until instead of t.Sub(time.Now())".into(),
+            edit,
+        ));
         true
     });
-    for (pos, message) in pending {
-        pass.report_unless_generated(pos, message);
+    for (pos, message, edit) in pending {
+        let Some(edit) = edit else {
+            pass.report_unless_generated(pos, message);
+            continue;
+        };
+        if code::is_generated_at(pass, pos) {
+            continue;
+        }
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: "Replace with call to time.Until".into(),
+                text_edits: vec![edit],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }
