@@ -12684,3 +12684,92 @@ golden **193/193**、269 スイート / **3,270** テスト。
 pending 27 件。`goheader` 110 / `testifylint-mock` 97 / `protogetter` 42 /
 `dupword` 36 / `nlreturn` 34。
 続き 56・57 のやり方（**fixture を先に、上流に直接聞く**）をそのまま使う。
+
+---
+
+### 2026-08-27（続き 58）— pending 最大の `goheader` 110 行が、一発で閉じた
+
+続き 57 の続き。pending 26 件の最大が `goheader`（110 行、guff は **0 行**）。
+
+#### 欠けていたのは 2 つだけ
+
+guff の `goheader` は matcher を丸ごと移植済みで、
+報告位置の癖まで合っていた。無かったのは:
+
+1. go-header の `Analyzer.generateFix`
+2. golangci ラッパーの**スパン計算**
+
+`generateFix` は「テンプレートを展開して行に割る」だけではない。
+`/* */` ヘッダでは、**元の飾りを残す**:
+
+```
+start := strings.Index(actual, <header の 1 行目>)
+nl    := strings.LastIndexByte(actual[:start], '\n')   // "/*" 行
+prefix := actual[:start]                                // 各行の前置き
+trailing := actual[end+len(last):]                      // "*/" など
+```
+
+`/*` 行は `Actual` の 1 行目として `Expected` の先頭に**そのまま積まれ**、
+`*/` は最終行の**末尾に足される**。
+
+移植で 1 箇所だけ意図的に上流の書き方に寄せた:
+
+```go
+start -= nl + 1     // ← 探し直さない
+```
+
+切り落とした prefix の中に 1 行目と同じ文字列があると、
+探し直すと**手前にヒットする**。上流は引き算していて、そちらが正しい。
+
+#### ラッパー側のスパン
+
+```go
+current := len(fix.Actual)
+for _, s := range fix.Actual { current += len(s) }
+start := f.LineStart(commentLine)
+end   := start + token.Pos(current)
+```
+
+`len(fix.Actual)` の初期値は**改行の本数**。
+ヘッダが無いファイルでは `Actual` が空なので `end == start` ——
+**幅 0 のスパン＝挿入**になる。
+そして `end == file.Package` なら空行が 1 つ足される。
+だから `bad.go` はコードを潰さずに header が上に入る。
+
+#### 位置空間を混ぜない
+
+`comment_line` は**行番号**で取る。
+`parsed` は `reparse` が作った別の `FileSet` のもので、
+`pass.fset()` の Pos と混ぜてはいけない
+（`remap_reparsed_pos` がある理由）。
+同じバイト列を 2 回読んでいるので、**行番号はそのまま移せる**。
+
+#### 上流は壊れた木を書く
+
+`empty_block.go`（`/* */` だけのファイル）に対して上流が書くのは:
+
+```go
+Copyright 2020 Example Corp
+SPDX-License-Identifier: (Apache-2\.0|MIT)/* */
+```
+
+コメントの外に地の文が出て、正規表現のメタ文字がそのまま入る。
+**コンパイルが通らない**。guff もバイト単位で同じものを書く ——
+`--fix` を比べる tier で「壊れた木を書くケース」が 7 → **8** に増えた。
+これは劣化ではなく、**上流を再現できるようになった**という意味。
+
+#### 測った
+
+| | 続き 57 後 | 今回 |
+|---|---:|---:|
+| `--fix` が上流とバイト一致 | 165 | **166** |
+| pending | 27 | **26** |
+| `goheader` | 0 / 110 行 | **一致**（台帳を削除） |
+
+golden **193/193**、269 スイート / **3,270** テスト
+（`generate_fix` の unit test を 4 本追加）。
+
+#### 次にやること
+
+pending 26 件。`testifylint-mock` 97 / `protogetter` 42 /
+`dupword` 36 / `nlreturn` 34。

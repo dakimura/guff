@@ -152,6 +152,12 @@ and its ledger is gone. Extending that fixture first was again the whole job:
 the seven loops it now holds found three defects at once, one of which was an
 entire loop form guff never reported.
 
+After goheader (2026-08-26): **166 matching, 26 pending**. The largest gap in the
+ledger, 110 lines, closed on the first measurement — the whole of it was one
+missing port (`generateFix`) plus the wrapper's span arithmetic. It is also the
+eighth case whose rewritten tree no longer builds: upstream writes the raw
+template, regex metacharacters and all, into every file.
+
 ## Does it still build?
 
 A `--fix` that rewrites `fmt.Sprint(i)` to `strconv.Itoa(i)` and does not add
