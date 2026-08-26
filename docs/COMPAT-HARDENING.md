@@ -13147,3 +13147,78 @@ guff は Pos のまま運んで適用時に変換するので、
 それまでの pending 23 件は、差の大きい順に
 `staticcheck-sa` 88 / `gocritic` 48 / `ginkgolinter` 30 / `wsl-v5` 27 /
 `issues-uniq-by-line-order` 26。
+
+---
+
+### 2026-08-27（続き 64）— `ginkgolinter`。メッセージが fix を持っていた
+
+続き 63 の続き。設計判断が要る `nolint` を避けて、
+`ginkgolinter`（30 行、guff **0 行**）。
+
+上流の fix は 1 つだけ:
+
+```go
+TextEdits: []analysis.TextEdit{{
+    Pos: b.pos, End: b.end, NewText: []byte(b.fixOffer),
+}},
+```
+
+`b.pos` / `b.end` は `NewBuilder(oldExpr, …)` が受け取った
+**assertion 式そのもの**の span。
+`b.fixOffer` は書き換え後の式を `GoFmtFormatter` で印字したもの。
+
+そして guff のメッセージはすでにそれを持っていた:
+
+```
+ginkgo-linter: wrong length assertion.
+  Consider using `Expect(s).Should(HaveLen(1))` instead
+```
+
+**`Consider using` の中身が fixOffer。** 移植は
+`ParsedAssertion` に `end` と `old_expr` を足して、
+11 箇所の `with_suggestion` を `push_suggestion` に置き換えるだけだった。
+
+1 つだけ条件がある。上流は
+
+```go
+if offer := b.formatter.Format(fixOffer); offer != b.oldExpr {
+```
+
+と、**書き換えが元と同じなら fix を出さない**。
+`old_expr` を持たせたのはそのため。
+
+一発で上流とバイト一致。
+
+#### 測った
+
+| | 続き 62 後 | 今回 |
+|---|---:|---:|
+| `--fix` が上流とバイト一致 | 169 | **170** |
+| pending | 23 | **22** |
+| `ginkgolinter` | 0 / 30 行 | **一致**（台帳を削除） |
+
+golden **193/193**、269 スイート / **3,274** テスト。
+
+#### この回で GOROOT を壊した
+
+続き 63 の nolintlint 変更を**入れたまま** `compat/fix/run.sh --case nolint`
+を走らせていた。使い捨て FileSet の `Pos` が共有 FileSet で
+**GOROOT の `internal/goarch/goarch.go` に解決され**、
+`--fix` がそこに gocritic の fixture 文字列を書き込んだ。
+
+続き 63 に「無関係な別ファイルに解決されうる」と書いた**その事故が、
+書く前にすでに起きていた**。「実測で何も書かれなかった」も誤りで、
+1 ファイル書かれていたのを見ていなかった。
+
+- 被害は GOROOT 配下で**その 1 ファイルのみ**（`find -newermt` で確認）。
+- Homebrew キャッシュの go 1.26.5 ボトルから当該ファイルだけ抽出して復元、
+  **バイト一致**を確認。
+- 壊れた状態で取った計測は無効だった:
+  workspace が exit **101** / 2,645 テスト（`test result:` 行は
+  `failed=0` と言っていた —— 終了コードを見る話）、
+  fix tier の「ビルドが通らない木」が **8 → 4** と減って見えていた。
+  健全な状態で取り直した数値が上の表。
+
+**次にやること: fixer にパス境界ガードを入れる。**
+`apply_fixes` が解析対象ツリーの外にあるファイルへの書き込みを拒否すれば、
+`Pos` が誤解決しても GOROOT や他リポジトリには届かない。

@@ -178,6 +178,10 @@ cases closed on the first measurement. They had been deferred since 2026-08-19
 on the grounds that their sources were not obtainable; `go mod download
 <module>@<pinned>` fetches either of them in a second.
 
+After ginkgolinter (2026-08-26): **170 matching, 22 pending**. Its suggestion
+*is* its fix — the message already carries the rewritten assertion — so the port
+was two struct fields and a helper.
+
 ## Does it still build?
 
 A `--fix` that rewrites `fmt.Sprint(i)` to `strconv.Itoa(i)` and does not add

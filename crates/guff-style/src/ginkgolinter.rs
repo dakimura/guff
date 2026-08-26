@@ -24,7 +24,7 @@ use guff::token::Token;
 use guff::walk::{preorder, NodeRef};
 use guff_analysis::code;
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn, Diagnostic, SuggestedFix, TextEdit};
 
 use crate::options::GinkgolinterOptions;
 
@@ -37,6 +37,26 @@ const MSG_FOCUS: &str =
 fn with_suggestion(base: &str, suggestion: &str) -> String {
     format!("{base}. Consider using `{suggestion}` instead")
 }
+
+/// A finding whose suggestion is also its fix: upstream replaces the whole
+/// assertion with the rewritten text, and withholds the fix when the rewrite
+/// comes out identical to what is already written.
+fn push_suggestion(
+    assertion: &ParsedAssertion<'_>,
+    base: &str,
+    sug: &str,
+    pending: &mut Vec<Finding>,
+) {
+    let edit = (sug != assertion.old_expr).then(|| TextEdit {
+        pos: assertion.pos,
+        end: assertion.end,
+        new_text: sug.to_string(),
+    });
+    pending.push((assertion.pos, with_suggestion(base, sug), edit));
+}
+
+/// A reported position, its message, and the edit when there is one.
+type Finding = (u32, String, Option<TextEdit>);
 
 fn missing_assertion_msg(actual_func: &str) -> String {
     // Upstream wording (nunnatsa/ginkgolinter) — lists To/ToNot/NotTo even when
@@ -250,10 +270,16 @@ struct ParsedAssertion<'a> {
     assert_method: Option<&'a str>,
     matcher: Option<&'a Expr>,
     pos: u32,
+    /// The whole assertion's span and its current text — upstream's
+    /// `NewBuilder(oldExpr, …)` keeps `oldExpr.Pos()`, `oldExpr.End()` and the
+    /// formatted original, and offers a fix only when the rewrite differs from
+    /// that original.
+    end: u32,
+    old_expr: String,
 }
 
 /// Peel `Expect(...).WithOffset(1).Should(Equal(...))` into parts.
-fn parse_assertion<'a>(call: &'a CallExpr) -> Option<ParsedAssertion<'a>> {
+fn parse_assertion<'a>(pass: &Pass<'_>, call: &'a CallExpr) -> Option<ParsedAssertion<'a>> {
     let mut assert_method = None;
     let mut matcher = None;
     let mut node: &CallExpr = call;
@@ -307,10 +333,12 @@ fn parse_assertion<'a>(call: &'a CallExpr) -> Option<ParsedAssertion<'a>> {
         assert_method,
         matcher,
         pos: call.pos().0 as u32,
+        end: call.end().0 as u32,
+        old_expr: expr_string(pass, &Expr::CallExpr(call.clone())),
     })
 }
 
-fn check_focus(call: &CallExpr, imports: ImportInfo<'_>, pending: &mut Vec<(u32, String)>) {
+fn check_focus(call: &CallExpr, imports: ImportInfo<'_>, pending: &mut Vec<Finding>) {
     let Some(name) = call_func_name(call.fun.as_ref()) else {
         return;
     };
@@ -318,7 +346,7 @@ fn check_focus(call: &CallExpr, imports: ImportInfo<'_>, pending: &mut Vec<(u32,
         return;
     }
     if matches_imported(call.fun.as_ref(), imports.ginkgo, name) {
-        pending.push((call.pos().0 as u32, MSG_FOCUS.to_string()));
+        pending.push((call.pos().0 as u32, MSG_FOCUS.to_string(), None));
     }
 }
 
@@ -328,7 +356,7 @@ fn check_len_rule(
     actual: &Expr,
     matcher: &Expr,
     opts: &GinkgolinterOptions,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<Finding>,
 ) -> bool {
     if opts.suppress_len_assertion {
         return false;
@@ -341,9 +369,9 @@ fn check_len_rule(
     // Expect(len(x)).To(Equal(...)) / BeZero() / BeNumerically(...)
     if let Some(inner) = len_inner(actual) {
         let subject = expr_string(pass, inner);
-        let push_len = |pending: &mut Vec<(u32, String)>, matcher_sug: &str| {
+        let push_len = |pending: &mut Vec<Finding>, matcher_sug: &str| {
             let sug = suggest_assert(assertion.actual_func, &subject, assert_method, matcher_sug);
-            pending.push((assertion.pos, with_suggestion(MSG_LEN, &sug)));
+            push_suggestion(assertion, MSG_LEN, &sug, pending);
         };
         match mname {
             "Equal" => {
@@ -357,7 +385,7 @@ fn check_len_rule(
                         return true;
                     }
                 }
-                pending.push((assertion.pos, MSG_LEN.to_string()));
+                pending.push((assertion.pos, MSG_LEN.to_string(), None));
                 return true;
             }
             "BeZero" => {
@@ -389,7 +417,7 @@ fn check_len_rule(
                                 method,
                                 "BeEmpty()",
                             );
-                            pending.push((assertion.pos, with_suggestion(MSG_LEN, &sug)));
+                            push_suggestion(assertion, MSG_LEN, &sug, pending);
                             return true;
                         }
                         if op == "!=" && rhs_zero {
@@ -404,7 +432,7 @@ fn check_len_rule(
                                 method,
                                 "BeEmpty()",
                             );
-                            pending.push((assertion.pos, with_suggestion(MSG_LEN, &sug)));
+                            push_suggestion(assertion, MSG_LEN, &sug, pending);
                             return true;
                         }
                         if matches!(op, "==" | "!=") {
@@ -423,7 +451,7 @@ fn check_len_rule(
                                         method,
                                         &format!("HaveLen({n})"),
                                     );
-                                    pending.push((assertion.pos, with_suggestion(MSG_LEN, &sug)));
+                                    push_suggestion(assertion, MSG_LEN, &sug, pending);
                                 }
                                 return true;
                             }
@@ -443,7 +471,7 @@ fn check_len_rule(
                                         method,
                                         "BeEmpty()",
                                     );
-                                    pending.push((assertion.pos, with_suggestion(MSG_LEN, &sug)));
+                                    push_suggestion(assertion, MSG_LEN, &sug, pending);
                                     return true;
                                 }
                             }
@@ -490,10 +518,10 @@ fn check_len_rule(
                     assert_method
                 };
                 let sug = suggest_assert(assertion.actual_func, &subject, method, &matcher_sug);
-                pending.push((assertion.pos, with_suggestion(MSG_LEN, &sug)));
+                push_suggestion(assertion, MSG_LEN, &sug, pending);
                 return true;
             }
-            pending.push((assertion.pos, MSG_LEN.to_string()));
+            pending.push((assertion.pos, MSG_LEN.to_string(), None));
             return true;
         }
     }
@@ -506,7 +534,7 @@ fn check_havelen0(
     assertion: &ParsedAssertion<'_>,
     matcher: &Expr,
     opts: &GinkgolinterOptions,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<Finding>,
 ) -> bool {
     if opts.allow_havelen_zero {
         return false;
@@ -525,7 +553,7 @@ fn check_havelen0(
             .map(|e| expr_string(pass, e))
             .unwrap_or_else(|| "<expr>".into());
         let sug = suggest_assert(assertion.actual_func, &subject, assert_method, "BeEmpty()");
-        pending.push((assertion.pos, with_suggestion(MSG_LEN, &sug)));
+        push_suggestion(assertion, MSG_LEN, &sug, pending);
         return true;
     }
     false
@@ -536,7 +564,7 @@ fn check_equal_nil(
     assertion: &ParsedAssertion<'_>,
     matcher: &Expr,
     opts: &GinkgolinterOptions,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<Finding>,
 ) -> bool {
     if opts.suppress_nil_assertion {
         return false;
@@ -555,7 +583,7 @@ fn check_equal_nil(
             .map(|e| expr_string(pass, e))
             .unwrap_or_else(|| "<expr>".into());
         let sug = suggest_assert(assertion.actual_func, &subject, assert_method, "BeNil()");
-        pending.push((assertion.pos, with_suggestion(MSG_NIL, &sug)));
+        push_suggestion(assertion, MSG_NIL, &sug, pending);
         return true;
     }
     false
@@ -565,7 +593,7 @@ fn check_equal_bool(
     pass: &Pass<'_>,
     assertion: &ParsedAssertion<'_>,
     matcher: &Expr,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<Finding>,
 ) -> bool {
     let assert_method = assertion.assert_method.unwrap_or("Should");
     let matcher = unwrap_not(matcher);
@@ -590,7 +618,7 @@ fn check_equal_bool(
         .map(|e| expr_string(pass, e))
         .unwrap_or_else(|| "<expr>".into());
     let sug = suggest_assert(assertion.actual_func, &subject, assert_method, bool_matcher);
-    pending.push((assertion.pos, with_suggestion(MSG_BOOL, &sug)));
+    push_suggestion(assertion, MSG_BOOL, &sug, pending);
     true
 }
 
@@ -600,7 +628,7 @@ fn check_nil_compare(
     actual: &Expr,
     matcher: &Expr,
     opts: &GinkgolinterOptions,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<Finding>,
 ) -> bool {
     if opts.suppress_nil_assertion {
         return false;
@@ -647,7 +675,7 @@ fn check_nil_compare(
         assert_method
     };
     let sug = suggest_assert(assertion.actual_func, &subject, method, "BeNil()");
-    pending.push((assertion.pos, with_suggestion(MSG_NIL, &sug)));
+    push_suggestion(assertion, MSG_NIL, &sug, pending);
     true
 }
 
@@ -655,11 +683,11 @@ fn check_assertion(
     pass: &Pass<'_>,
     assertion: &ParsedAssertion<'_>,
     opts: &GinkgolinterOptions,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<Finding>,
 ) {
     // Missing assertion: Expect(x) as a statement.
     if assertion.assert_method.is_none() {
-        pending.push((assertion.pos, missing_assertion_msg(assertion.actual_func)));
+        pending.push((assertion.pos, missing_assertion_msg(assertion.actual_func), None));
         return;
     }
 
@@ -674,6 +702,7 @@ fn check_assertion(
                 assertion.actual_func,
                 assertion.assert_method.unwrap_or("")
             ),
+            None,
         ));
         // Upstream continues applying other rules after this one.
     }
@@ -711,7 +740,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .cloned()
         .unwrap_or_default();
 
-    let mut pending: Vec<(u32, String)> = Vec::new();
+    let mut pending: Vec<Finding> = Vec::new();
 
     for file in pass.files() {
         let imports = file_imports(file);
@@ -733,7 +762,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     let Expr::CallExpr(call) = &stmt.x else {
                         return true;
                     };
-                    let Some(assertion) = parse_assertion(call) else {
+                    let Some(assertion) = parse_assertion(pass, call) else {
                         return true;
                     };
                     if !matches_imported(assertion.actual_fun, imports.gomega, assertion.actual_func)
@@ -748,8 +777,20 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         });
     }
 
-    for (pos, msg) in pending {
-        pass.reportf(pos, &msg);
+    for (pos, message, edit) in pending {
+        let Some(edit) = edit else {
+            pass.reportf(pos, &message);
+            continue;
+        };
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: String::new(),
+                text_edits: vec![edit],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }
