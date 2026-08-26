@@ -13611,3 +13611,73 @@ SA チェックは 4 エントリで計 11 個に fix が付いた
 
 pending 18 件。`staticcheck-qf` 395 行が最大、次いで `gocritic` 48 行。
 `nolint` 系は続き 63 の設計判断が先。
+
+---
+
+### 2026-08-27（続き 71）— `gocritic` の `extras.go`。**48 行の答えは、全部 gofmt だった**
+
+続き 70 の続き。pending 18 件、`gocritic` は 2 ファイル中 1 一致。
+`extras.go` に対する上流の diff（抜粋）:
+
+```diff
+-	_ = 0X12
++	_ = 0x12
+-func (*byteWriterExtra) WriteByte(b byte) error         { return nil }
++func (*byteWriterExtra) WriteByte(b byte) error        { return nil }
+-//nolint
++// nolint
+```
+
+**3 種類とも linter の fix ではない。**
+
+| 変化 | 出どころ |
+|---|---|
+| `0X12` → `0x12` | gofmt（数値リテラルの接頭辞を小文字化） |
+| 列の詰め直し | gofmt |
+| `//nolint` → `// nolint` | gofmt（`//` の後ろに空白） |
+
+`hexLiteral` は `ctx.Warn` で fix を持たない（上流ソースを確認）。
+`gofmt -w` に同じ入力を食わせて 3 種類とも再現することも確認した。
+
+#### では、なぜファイルが書かれるのか
+
+JSON 出力で数えたら、`extras.go` には
+**fix を持つ gocritic issue が 34 件**あった
+（`httpNoBody` / `stringXbytes` / `preferFilepathJoin` / `stringsCompare` /
+`zeroByteRepeat` / `badSorting` / `preferFprint` / `preferStringWriter` /
+`dynamicFmtString` / `stringConcatSimplify` / `equalFold` /
+`redundantSprint` / `timeExprSimplify`）。
+
+そのうち複数が**同じ行で重なっている**
+（325 行に `preferFprint` と `preferStringWriter` の両方、326・327 も同様）。
+
+続き 66 の規則 —— **1 つの issue だけでなく、同じ linter の全 issue の
+edit が 1 本のリストに集まる** —— で全部衝突し、
+gocritic の edit がファイルごと落ちる。
+そして続き 55 の規則で**それでもファイルは書かれ、gofmt される**。
+
+**48 行の diff の中に、linter が書いたバイトは 1 つも無い。**
+
+#### 前の判断を訂正する
+
+続き 47 で `gocritic` の残りを見送ったとき、理由を
+**「`//nolint` の fix が filter より前に当たる上流の挙動」**と書いた。
+**そんな挙動は無い。** 実測:
+
+- `--fix` 無し → `//nolint` 行の `commentFormatting` は**抑止される**
+- `--fix` 有りで**その行だけ**のファイル → **何も書かれない**
+- 他に fix を持つ issue があるファイル → gofmt の結果として空白が入る
+
+processor の順序も `NolintFilter` → `Diff` → `Fixer` で、
+抑止された issue は fixer に届かない（`pkg/lint/runner.go:105,110`）。
+**推測を挙動として書いていた。**
+
+#### 次にやること
+
+`extras.go` を一致させるには、gocritic の 13 checker に fix を足して
+**guff 側でも衝突させる**必要がある。
+1 つだけ足すと衝突せずに適用され、
+**上流が書かないコード変更を書く**（続き 66 の SA1004 と同じ形）。
+
+見えている成果は「gofmt だけ」だが、そこに至る道は 13 checker ぶんある。
+pending 18 件では `staticcheck-qf` 395 行のほうが素直。
