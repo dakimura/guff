@@ -13483,3 +13483,70 @@ golden **193/193**、269 スイート / **3,275** テスト。
 `sa4029`（`sort.Xxx` の呼び出しに置き換え）、
 `sa6005`（`strings.EqualFold` に置き換え）、
 `sa9004`（定数グループの各 spec に型を足す —— 一番重い）。
+
+---
+
+### 2026-08-27（続き 69）— SA1006 と SA6005。**触っていない 3 ケースが同時に閉じた**
+
+続き 68 の続き。`staticcheck-sa` は 16 ファイル中 11 一致。
+
+#### `sa1006` —— 末尾の `f` を落とすだけ
+
+```go
+alt = report.Render(pass, call.Fun)
+alt = alt[:len(alt)-1]
+```
+
+上流のコメントが理由を書いている ——
+呼び先は `log.Printf` のこともあれば
+`foo.bar[0].Printf` のような任意のセレクタのこともあるので、
+**印字して最後の 1 バイトを削る**のが全部に効く。
+`fmt.Errorf` だけ例外で `errors.New`。
+
+#### `sa6005` —— fixture に `!=` が無かった
+
+guff のメッセージは `!=` のとき
+`should use !strings.EqualFold instead` になっていた。
+上流は **常に定数** `should use strings.EqualFold instead`。
+
+fixture は `==` の 1 形しか持っておらず、**測られていなかった**。
+続き 56（S1005）・続き 57（S1001）と同じ形で、3 度目。
+
+`!=` を足して golden を regen したら上流は同じ定数を返し、guff の欠陥が出た。
+**否定は message ではなく fix に入る**:
+上流は組み直した `strings.EqualFold(a, b)` を `!` で包む。
+
+fixture では `ToLower` を使った ——
+unit test の harness は fixture が使う関数だけ `strings` に stub しており、
+`ToUpper` は入っていない。演算子だけが要るので `ToLower` で足りる。
+
+#### 触っていない 3 ケースが閉じた
+
+```
+staticcheck-checks-all: guff now matches upstream
+staticcheck-checks-default: guff now matches upstream
+staticcheck-checks-not-s: guff now matches upstream
+```
+
+同じチェック群を `checks:` 設定違いで走らせるケースなので、
+**どこかでチェックが 1 つ増えると 3 つ同時に届く**。
+続き 54 の逆 —— あのときは 3 チェック足してケースが 1 つも閉じなかった。
+
+**ケース単位の進みは、作業量に比例しない。**
+
+#### 測った
+
+| | 続き 68 後 | 今回 |
+|---|---:|---:|
+| `--fix` が上流とバイト一致 | 170 | **173** |
+| pending | 22 | **19** |
+| `staticcheck-sa` の上流一致ファイル | 11 / 16 | **13 / 16** |
+
+golden **193/193**、269 スイート / **3,275** テスト。
+
+#### 次にやること
+
+`staticcheck-sa` の残り 3 ファイル ——
+`sa1008`（`http.CanonicalHeaderKey` で包む）、
+`sa4029`（`sort.Xxx` 呼び出しに置き換え）、
+`sa9004`（定数グループの各 spec に型を足す）。

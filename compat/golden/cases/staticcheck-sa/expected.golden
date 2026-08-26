@@ -275,7 +275,8 @@ sa6001/bad/bad.go:12:7:staticcheck::SA6001: m[string(key)] would be more efficie
 sa6002/bad/bad.go:3:39:staticcheck::SA6002: argument should be pointer-like to avoid allocations
 sa6003/bad/bad.go:2:20:staticcheck::S1029: should range over string, not []rune(string)
 sa6003/bad/bad.go:2:20:staticcheck::SA6003: should range over string, not []rune(string)
-sa6005/bad/bad.go:3:35:staticcheck::SA6005: should use strings.EqualFold instead
+sa6005/bad/bad.go:5:35:staticcheck::SA6005: should use strings.EqualFold instead
+sa6005/bad/bad.go:11:35:staticcheck::SA6005: should use strings.EqualFold instead
 sa6006/bad/bad.go:3:33:staticcheck::SA6006: use io.Writer.Write instead of converting from []byte to string to use io.WriteString
 sa9001/bad/bad.go:2:38:staticcheck::SA9001: defers in this range loop won't run unless the channel gets closed
 sa9002/bad/bad.go:3:26:staticcheck::SA9002: file mode '644' evaluates to 01204; did you mean '0644'?

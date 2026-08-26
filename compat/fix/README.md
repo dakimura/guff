@@ -197,6 +197,11 @@ After SA4026 / SA1013 (2026-08-26): **11 of 16**, nothing differing. SA4026's
 replacement names `math` without importing it, so the tree stops compiling —
 upstream's own choice, reproduced.
 
+After SA1006 / SA6005 (2026-08-26): **173 matching, 19 pending** — three cases
+closed at once (`staticcheck-checks-all`, `-default`, `-not-s`), none of them
+touched directly. They run the same checks under different `checks:` settings,
+so a check gained anywhere lands in all of them.
+
 ## Does it still build?
 
 A `--fix` that rewrites `fmt.Sprint(i)` to `strconv.Itoa(i)` and does not add

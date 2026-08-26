@@ -10,7 +10,10 @@ use guff::token::Token;
 use guff::walk::NodeRef;
 use guff_analysis::code::is_call_to_any;
 use guff_analysis::passes::inspect;
-use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::code;
+use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass, Diagnostic, SuggestedFix, TextEdit};
+
+use crate::render::render_node;
 
 fn is_to_lower_or_upper(pass: &Pass<'_>, call: &CallExpr) -> bool {
     is_call_to_any(pass, call, &["strings.ToLower", "strings.ToUpper"])
@@ -46,18 +49,45 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         if !same_to_lower_or_upper(pass, left, right) {
             return;
         }
-        let method = if expr.op == Token::NEQ {
-            "!strings.EqualFold"
-        } else {
-            "strings.EqualFold"
-        };
+        // The message is a constant upstream — `!=` does not make it
+        // `!strings.EqualFold`. guff said that until 2026-08-27, and the
+        // fixture held only the `==` spelling, so nothing measured it.
+        //
+        // The *fix* is where the negation goes: upstream wraps the rebuilt
+        // `strings.EqualFold(a, b)` in a `!` when the operator was `!=`.
+        let edit = (|| {
+            let (a, b) = (left.args.first()?, right.args.first()?);
+            let (at, bt) = (render_node(pass, a)?, render_node(pass, b)?);
+            let bang = if expr.op == Token::NEQ { "!" } else { "" };
+            Some(TextEdit {
+                pos: expr.x.pos().0 as u32,
+                end: expr.y.end().0 as u32,
+                new_text: format!("{bang}strings.EqualFold({at}, {bt})"),
+            })
+        })();
         pending.push((
             match_pos(node),
-            format!("should use {method} instead"),
+            "should use strings.EqualFold instead".to_string(),
+            edit,
         ));
     });
-    for (pos, msg) in pending {
-        pass.report_unless_generated(pos, msg);
+    for (pos, message, edit) in pending {
+        let Some(edit) = edit else {
+            pass.report_unless_generated(pos, message);
+            continue;
+        };
+        if code::is_generated_at(pass, pos) {
+            continue;
+        }
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: "Replace with strings.EqualFold".into(),
+                text_edits: vec![edit],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }
