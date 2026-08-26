@@ -169,6 +169,10 @@ After the other nine (2026-08-26): **167 matching, 25 pending** —
 `testifylint-mock` closed, ledger deleted. Sixteen checkers carry fixes; the
 seven that do not are the seven upstream leaves unfixed too.
 
+After dupword's comments (2026-08-26): 167 matching, 25 pending, and `dupword`
+at 33 of 36 lines. The three left are string literals, which need a Go-exact
+`strconv.Quote` that currently lives in another crate.
+
 ## Does it still build?
 
 A `--fix` that rewrites `fmt.Sprint(i)` to `strconv.Itoa(i)` and does not add

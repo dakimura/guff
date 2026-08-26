@@ -7,3 +7,36 @@
 # ledger cannot quietly outlive the defect it records.
 #
 # Re-record with: ./compat/fix/regen.sh --pending dupword
+--- a/bad.go
++++ b/bad.go
+@@ -1,7 +1,7 @@
+ package p
+ 
+ func process() {
+-	// This is is a duplicate
++	// This is a duplicate
+ 	line := "the the word"
+ 	_ = line
+ }
+@@ -9,8 +9,8 @@
+ // dupword names the word it saw twice, so each duplicated word is a different
+ // sentence. It reads comments, strings and the raw source alike.
+ func more() {
+-	// and and again
++	// and again
+ 	s := "a a b"
+ 	_ = s
+-	/* block block comment */
++	/* block comment */
+ }
+--- a/bad/bad.go
++++ b/bad/bad.go
+@@ -1,7 +1,7 @@
+ package example
+ 
+ func process() {
+-	// This is is a comment with duplicate words
++	// This is a comment with duplicate words
+ 	line := "the the duplicate"
+ 	_ = line
+ }
