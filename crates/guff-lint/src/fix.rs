@@ -145,7 +145,9 @@ pub fn apply_fixes(
         }
         for fix in fixes {
             for edit in &fix.text_edits {
-                if let Some(r) = resolve_edit(fset, edit, issue_idx, &issue.from_linter) {
+                if let Some(r) =
+                    resolve_edit(fset, edit, issue_idx, &issue.from_linter, &issue.filename)
+                {
                     by_file
                         .entry(r.filename.clone())
                         .or_default()
@@ -240,11 +242,34 @@ pub fn apply_fixes(
     Ok((remaining, applied_issues.len()))
 }
 
+/// Two paths naming the same file, allowing for `./` prefixes and for one side
+/// being relative to the other's directory.
+///
+/// The issue's filename and the one the `FileSet` resolves are produced by
+/// different parts of the run, so they can differ in shape while meaning the
+/// same file. They cannot differ in *which* file — see [`resolve_edit`].
+fn same_file(a: &str, b: &str) -> bool {
+    let norm = |p: &str| {
+        let p = p.replace('\\', "/");
+        let mut r = p.as_str();
+        while let Some(t) = r.strip_prefix("./") {
+            r = t;
+        }
+        r.to_string()
+    };
+    let (a, b) = (norm(a), norm(b));
+    if a == b {
+        return true;
+    }
+    a.ends_with(&format!("/{b}")) || b.ends_with(&format!("/{a}"))
+}
+
 fn resolve_edit(
     fset: &FileSet,
     edit: &TextEdit,
     issue_idx: usize,
     linter: &str,
+    issue_filename: &str,
 ) -> Option<ResolvedEdit> {
     if edit.pos == 0 {
         return None;
@@ -257,6 +282,20 @@ fn resolve_edit(
     };
     let filename = fset.position(start_pos).filename;
     if filename.is_empty() {
+        return None;
+    }
+    // The edit must land in the file its issue is about. Upstream never asks
+    // this question because it cannot arise there: golangci groups edits by
+    // `issue.FilePath()` and computes their offsets against that same file.
+    //
+    // guff resolves an edit through the `FileSet`, which spans every file the
+    // run parsed — including GOROOT. A position built against some *other*
+    // `FileSet` is still a number, and `fset.file()` will happily find whatever
+    // file occupies that range. On 2026-08-27 that wrote a linter's fixture
+    // text into `internal/goarch/goarch.go` in the Go installation. Nothing
+    // downstream could have caught it: the offsets were in range, the file was
+    // writable, and the bytes were a valid edit of the wrong file.
+    if !issue_filename.is_empty() && !same_file(&filename, issue_filename) {
         return None;
     }
     let file = fset.file(start_pos)?;
@@ -457,6 +496,43 @@ mod tests {
             Default::default(),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn an_edit_that_resolves_to_another_file_is_dropped() {
+        // The 2026-08-27 accident, reduced. `victim.go` stands in for a file
+        // the run parsed but the issue is not about — a GOROOT source, in the
+        // real one. `offender.go`'s issue carries a position that lands inside
+        // `victim.go`, which is what a position built against a different
+        // `FileSet` looks like from here.
+        let dir = TempDir::new().unwrap();
+        let victim = dir.path().join("victim.go");
+        let offender = dir.path().join("offender.go");
+        fs::write(&victim, "package victim\n").unwrap();
+        fs::write(&offender, "package offender\n").unwrap();
+
+        let mut fset = FileSet::new();
+        let vfile = fset.add_file(victim.to_str().unwrap(), -1, 15);
+        let _ofile = fset.add_file(offender.to_str().unwrap(), -1, 17);
+
+        // The issue is about offender.go; the edit points into victim.go.
+        let stray = TextEdit {
+            pos: (vfile.base() + 8) as u32,
+            end: (vfile.base() + 14) as u32,
+            new_text: "WRECKED".into(),
+        };
+        let issues = vec![issue_with_edits(
+            offender.to_str().unwrap(),
+            vec![stray],
+        )];
+
+        let (_remaining, n) = apply_fixes(&fset, &issues, None).unwrap();
+        assert_eq!(n, 0, "an edit outside its issue's file must not apply");
+        assert_eq!(
+            fs::read_to_string(&victim).unwrap(),
+            "package victim\n",
+            "the unrelated file must be untouched"
+        );
     }
 
     #[test]
