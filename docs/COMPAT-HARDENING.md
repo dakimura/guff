@@ -12773,3 +12773,75 @@ golden **193/193**、269 スイート / **3,270** テスト
 
 pending 26 件。`testifylint-mock` 97 / `protogetter` 42 /
 `dupword` 36 / `nlreturn` 34。
+
+---
+
+### 2026-08-27（続き 59）— testifylint。**名前だけ直すと、コンパイルが通らないものを書く**
+
+続き 58 の続き。pending 26 件の最大が `testifylint-mock`（97 行、guff は 0 行）。
+
+このセッションの前半で testifylint を一度**見送っている**。
+理由は「関数名だけ書き換える fix はコンパイルが通らないものを書くから」。
+正しい対処は見送りではなく、**上流と同じく引数も一緒に書き換えること**だった。
+
+#### 既定は「fix 無し」
+
+`pending: Vec<(u32, String)>` を `Vec<Finding>` にして、
+`edits` を**既定で空**にした:
+
+```rust
+/// `edits` is empty by default on purpose. testifylint's fixes change the
+/// function name *and* the argument list together; attaching only the rename
+/// would turn `assert.Equal(t, 0, len(arr))` into `assert.Empty(t, 0, len(arr))`,
+/// which does not compile. A checker earns its edits by porting both halves.
+```
+
+`report_use`（fix 無し）と `report_use_fix`（rename + 引数編集）を分けた。
+**部分的な移植が壊れたものを書けない形**にしてある。
+
+#### 今回入れた 7 つ
+
+`bool-compare` / `empty` / `equal-values` / `error-nil` /
+`len` / `negative-positive` / `nil-compare`。
+どれも `newUseFunctionDiagnostic` + 引数 1 箇所の編集。
+
+#### 読みどころ 3 つ
+
+**1. `newBoolCast`。**
+生き残る引数が `bool` でないとき、上流は `bool(...)` で包む。
+包まないと `assert.True(t, x)` が型エラーになる。
+
+**2. `len` の `inverted`。**
+`True` は比較の左右を逆に渡すが、
+**置き換えるテキストはソース上を左から右に走る**ので、
+スパンの端だけ入れ替わる（`b.Pos() .. a.End()`）。
+また `Len` は「コンテナ, 長さ」の順で、
+置き換える `Equal` とは**引数の順が逆**。
+
+**3. `empty` の `Zero` / `NotZero` は 2 枝。**
+guff は `has_string_type(a) || is_builtin_len_call(a)` と
+**1 つの条件にまとめて**いた。
+報告するだけなら等価だが、**生き残る式が違う**:
+文字列なら `a` 自身、`len(x)` なら `x`。
+
+続き 52 の「メッセージと fix は違う質問に答える」が、
+今度は**条件の側**に出た形:
+**メッセージにとって正しい条件が、fix にとって正しいとは限らない。**
+
+#### 測った
+
+| | 続き 58 後 | 今回 |
+|---|---:|---:|
+| `--fix` が上流とバイト一致 | 166 | 166 |
+| pending | 26 | 26 |
+| `testifylint-mock` | 0 / 97 行 | **45 / 97 行** |
+
+golden **193/193**、269 スイート / **3,274** テスト。
+
+#### 次にやること
+
+`testifylint` の残り: 削除系（`contains` / `regexp` / `formatter` の
+`newRemoveFnDiagnostic`）、`error-is-as` / `encoded-compare` /
+`expected-actual` / `compares`、そして suite 系
+（`suite-dont-use-pkg` / `suite-extra-assert-call` /
+`suite-broken-parallel` / `suite-thelper`）。

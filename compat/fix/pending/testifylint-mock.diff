@@ -7,3 +7,48 @@
 # ledger cannot quietly outlive the defect it records.
 #
 # Re-record with: ./compat/fix/regen.sh --pending testifylint-mock
+--- a/bad/bad_test.go
++++ b/bad/bad_test.go
+@@ -34,30 +34,30 @@
+ 	conf := "k: v"
+ 	expected := 42
+ 
+-	assert.Equal(t, false, result)
+-	assert.Equal(t, true, result)
+-	assert.True(t, result == true)
++	assert.False(t, result)
++	assert.True(t, result)
++	assert.True(t, result)
+ 	assert.True(t, a == b)
+-	assert.Equal(t, 0, len(arr))
+-	assert.Equal(t, "", str)
+-	assert.Nil(t, err)
+-	assert.Equal(t, nil, err)
+-	assert.Equal(t, nil, ptr)
+-	assert.Equal(t, 3, len(arr))
++	assert.Empty(t, arr)
++	assert.Empty(t, str)
++	assert.NoError(t, err)
++	assert.NoError(t, err)
++	assert.Nil(t, ptr)
++	assert.Len(t, arr, 3)
+ 	assert.Equal(t, 1.5, f)
+ 
+ 	assert.Equal(t, time.Time{}, ts)
+ 	assert.True(t, ts.IsZero())
+ 	assert.Equal(t, t1, t2)
+-	assert.Less(t, signed, 0)
+-	assert.Greater(t, pos, 0)
++	assert.Negative(t, signed)
++	assert.Positive(t, pos)
+ 	assert.Equal(t, signed, signed)
+ 	assert.Zero(t, 42)
+ 	assert.True(t, true)
+ 
+ 	assert.True(t, strings.Contains(str, "hi"))
+ 	assert.Contains(t, arr, 1, 2)
+-	assert.EqualValues(t, 42, pos)
++	assert.Equal(t, 42, pos)
+ 	assert.Regexp(t, regexp.MustCompile(`hi`), str)
+ 
+ 	assert.Error(t, err, errSentinel)

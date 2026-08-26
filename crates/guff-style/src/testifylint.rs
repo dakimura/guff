@@ -35,7 +35,9 @@ use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::code;
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_analysis::{
+    AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
 use guff_types::alias::unalias_readonly;
 use guff_types::api_predicates::{api_assignable_to, api_implements};
 use guff_types::arena::{ObjectArena, ObjectData, ObjectId, PackageArena, TypeArena, TypeData};
@@ -170,6 +172,37 @@ fn enabled_checkers(opts: &TestifylintOptions) -> HashSet<String> {
         set.remove(name);
     }
     set
+}
+
+/// One reported problem, and — when the whole rewrite has been ported — the
+/// edits that fix it.
+///
+/// `edits` is empty by default on purpose. testifylint's fixes change the
+/// function name *and* the argument list together; attaching only the rename
+/// would turn `assert.Equal(t, 0, len(arr))` into `assert.Empty(t, 0, len(arr))`,
+/// which does not compile. A checker earns its edits by porting both halves.
+struct Finding {
+    pos: u32,
+    message: String,
+    edits: Vec<TextEdit>,
+}
+
+impl Finding {
+    fn new(pos: u32, message: String) -> Self {
+        Self {
+            pos,
+            message,
+            edits: Vec::new(),
+        }
+    }
+
+    fn with_edits(pos: u32, message: String, edits: Vec<TextEdit>) -> Self {
+        Self {
+            pos,
+            message,
+            edits,
+        }
+    }
 }
 
 struct CallMeta<'a> {
@@ -866,7 +899,7 @@ fn is_interface_type(pass: &Pass<'_>, typ: TypeId) -> bool {
     matches!(artifacts.types.get(under), TypeData::Interface(_))
 }
 
-fn check_error_as_target(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
+fn check_error_as_target(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
     if call.args.len() < 2 {
         return;
     }
@@ -1261,18 +1294,71 @@ fn proposed_fn_name(call: &CallMeta<'_>, base: &str) -> String {
     }
 }
 
-fn report_use(checker: &str, call: &CallMeta<'_>, proposed: &str, pending: &mut Vec<(u32, String)>) {
+/// `newReplaceFnTextEdit`: only the selector's `Sel` is rewritten, so
+/// `assert.` — or `s.Assert().` — survives untouched.
+fn rename_edit(call: &CallMeta<'_>, proposed: &str) -> TextEdit {
+    let sel = &call.selector.sel;
+    TextEdit {
+        pos: sel.name_pos.0 as u32,
+        end: (sel.name_pos.0 + sel.name.len() as i64) as u32,
+        new_text: proposed_fn_name(call, proposed),
+    }
+}
+
+/// `formatAsCallArgs`: the nodes printed by go/printer and joined with `", "`.
+/// `analysisutil.NodeBytes` is the same renderer for a single node, so both
+/// spellings upstream uses come through here.
+fn format_as_call_args(pass: &Pass<'_>, args: &[&Expr]) -> String {
+    args.iter()
+        .map(|a| expr_string(pass, a))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// One argument-list edit: the span from `start` to `end` becomes `with`,
+/// rendered the way `analysisutil.NodeBytes` / `formatAsCallArgs` render it.
+fn arg_edit(pass: &Pass<'_>, start: i64, end: i64, with: &[&Expr]) -> TextEdit {
+    TextEdit {
+        pos: start as u32,
+        end: end as u32,
+        new_text: format_as_call_args(pass, with),
+    }
+}
+
+/// `newUseFunctionDiagnostic` with its `newSuggestedFuncReplacement`: the rename
+/// first, then whatever the checker does to the arguments.
+fn report_use_fix(
+    checker: &str,
+    call: &CallMeta<'_>,
+    proposed: &str,
+    extra: Vec<TextEdit>,
+    pending: &mut Vec<Finding>,
+) {
     let msg = format!(
         "{checker}: use {}.{}",
         call.selector_x,
         proposed_fn_name(call, proposed)
     );
-    pending.push((call.call.pos().0 as u32, msg));
+    let mut edits = vec![rename_edit(call, proposed)];
+    edits.extend(extra);
+    pending.push(Finding::with_edits(
+        call.call.pos().0 as u32,
+        msg,
+        edits,
+    ));
 }
 
-fn report_msg(checker: &str, call: &CallMeta<'_>, body: &str, pending: &mut Vec<(u32, String)>) {
-    pending.push((
-        call.call.pos().0 as u32,
+fn report_use(checker: &str, call: &CallMeta<'_>, proposed: &str, pending: &mut Vec<Finding>) {
+    let msg = format!(
+        "{checker}: use {}.{}",
+        call.selector_x,
+        proposed_fn_name(call, proposed)
+    );
+    pending.push(Finding::new(call.call.pos().0 as u32, msg));
+}
+
+fn report_msg(checker: &str, call: &CallMeta<'_>, body: &str, pending: &mut Vec<Finding>) {
+    pending.push(Finding::new(call.call.pos().0 as u32,
         format!("{checker}: {body}"),
     ));
 }
@@ -1323,7 +1409,7 @@ fn check_bool_compare(
     pass: &Pass<'_>,
     call: &CallMeta<'_>,
     opts: &TestifylintOptions,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<Finding>,
 ) {
     let ignore_custom = opts.bool_compare_ignore_custom_types;
     let allow = |surviving: &Expr| -> bool {
@@ -1331,6 +1417,26 @@ fn check_bool_compare(
             return true;
         }
         !ignore_custom
+    };
+    // `newBoolCast`: a surviving argument that is not `bool` keeps its own type
+    // in `assert.True(t, x)`, which would not compile, so upstream wraps it.
+    let surviving_text = |surviving: &Expr| -> String {
+        let text = expr_string(pass, surviving);
+        if has_bool_type(pass, surviving) {
+            text
+        } else {
+            format!("bool({text})")
+        }
+    };
+    let two_arg_edit = |a: &Expr, b: &Expr, surviving: &Expr| TextEdit {
+        pos: a.pos().0 as u32,
+        end: b.end().0 as u32,
+        new_text: surviving_text(surviving),
+    };
+    let one_arg_edit = |expr: &Expr, surviving: &Expr| TextEdit {
+        pos: expr.pos().0 as u32,
+        end: expr.end().0 as u32,
+        new_text: surviving_text(surviving),
     };
 
     match call.fn_name_trimmed.as_str() {
@@ -1355,7 +1461,8 @@ fn check_bool_compare(
                     return;
                 }
                 if allow(surviving) {
-                    report_use("bool-compare", call, "True", pending);
+                    let edit = two_arg_edit(a, b, surviving);
+                    report_use_fix("bool-compare", call, "True", vec![edit], pending);
                 }
             } else if f1 != f2 {
                 let surviving = if f1 { b } else { a };
@@ -1363,7 +1470,8 @@ fn check_bool_compare(
                     return;
                 }
                 if allow(surviving) {
-                    report_use("bool-compare", call, "False", pending);
+                    let edit = two_arg_edit(a, b, surviving);
+                    report_use_fix("bool-compare", call, "False", vec![edit], pending);
                 }
             }
         }
@@ -1385,12 +1493,14 @@ fn check_bool_compare(
             if t1 != t2 {
                 let surviving = if t1 { b } else { a };
                 if allow(surviving) {
-                    report_use("bool-compare", call, "False", pending);
+                    let edit = two_arg_edit(a, b, surviving);
+                    report_use_fix("bool-compare", call, "False", vec![edit], pending);
                 }
             } else if f1 != f2 {
                 let surviving = if f1 { b } else { a };
                 if allow(surviving) {
-                    report_use("bool-compare", call, "True", pending);
+                    let edit = two_arg_edit(a, b, surviving);
+                    report_use_fix("bool-compare", call, "True", vec![edit], pending);
                 }
             }
         }
@@ -1403,12 +1513,13 @@ fn check_bool_compare(
                 .or_else(|| is_comparison_with(pass, expr, is_untyped_false, Token::NEQ))
             {
                 if !is_empty_interface(pass, surviving) && allow(surviving) {
-                    report_msg(
-                        "bool-compare",
-                        call,
-                        "need to simplify the assertion",
-                        pending,
-                    );
+                    // `newNeedSimplifyDiagnostic`: the assertion keeps its name
+                    // and only loses the comparison.
+                    pending.push(Finding::with_edits(
+                        call.call.pos().0 as u32,
+                        "bool-compare: need to simplify the assertion".to_string(),
+                        vec![one_arg_edit(expr, surviving)],
+                    ));
                     return;
                 }
             }
@@ -1417,7 +1528,8 @@ fn check_bool_compare(
                 .or_else(|| is_negation(expr))
             {
                 if !is_empty_interface(pass, surviving) && allow(surviving) {
-                    report_use("bool-compare", call, "False", pending);
+                    let edit = one_arg_edit(expr, surviving);
+                    report_use_fix("bool-compare", call, "False", vec![edit], pending);
                 }
             }
         }
@@ -1430,12 +1542,13 @@ fn check_bool_compare(
                 .or_else(|| is_comparison_with(pass, expr, is_untyped_false, Token::NEQ))
             {
                 if !is_empty_interface(pass, surviving) && allow(surviving) {
-                    report_msg(
-                        "bool-compare",
-                        call,
-                        "need to simplify the assertion",
-                        pending,
-                    );
+                    // `newNeedSimplifyDiagnostic`: the assertion keeps its name
+                    // and only loses the comparison.
+                    pending.push(Finding::with_edits(
+                        call.call.pos().0 as u32,
+                        "bool-compare: need to simplify the assertion".to_string(),
+                        vec![one_arg_edit(expr, surviving)],
+                    ));
                     return;
                 }
             }
@@ -1444,7 +1557,8 @@ fn check_bool_compare(
                 .or_else(|| is_negation(expr))
             {
                 if !is_empty_interface(pass, surviving) && allow(surviving) {
-                    report_use("bool-compare", call, "True", pending);
+                    let edit = one_arg_edit(expr, surviving);
+                    report_use_fix("bool-compare", call, "True", vec![edit], pending);
                 }
             }
         }
@@ -1452,40 +1566,73 @@ fn check_bool_compare(
     }
 }
 
-fn check_empty(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
+/// `newRemoveLenDiagnostic`: no rename, just `len(x)` collapsing to `x`.
+fn report_remove_len(
+    pass: &Pass<'_>,
+    checker: &str,
+    call: &CallMeta<'_>,
+    at: &Expr,
+    len_arg: &Expr,
+    pending: &mut Vec<Finding>,
+) {
+    let edit = arg_edit(pass, at.pos().0, at.end().0, &[len_arg]);
+    pending.push(Finding::with_edits(
+        call.call.pos().0 as u32,
+        format!("{checker}: remove unnecessary len"),
+        vec![edit],
+    ));
+}
+
+fn check_empty(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
     if call.args.is_empty() {
         return;
     }
     let a = &call.args[0];
 
+    // The one-argument shapes. `Zero`/`NotZero` have two branches that differ in
+    // what survives — the string itself, or the argument of `len` — so they
+    // cannot share a condition.
     match call.fn_name_trimmed.as_str() {
         "Zero" => {
-            if has_string_type(pass, a) || is_builtin_len_call(pass, a).is_some() {
-                report_use("empty", call, "Empty", pending);
+            if has_string_type(pass, a) {
+                let edit = arg_edit(pass, a.pos().0, a.end().0, &[a]);
+                report_use_fix("empty", call, "Empty", vec![edit], pending);
+                return;
+            }
+            if let Some(len_arg) = is_builtin_len_call(pass, a) {
+                let edit = arg_edit(pass, a.pos().0, a.end().0, &[len_arg]);
+                report_use_fix("empty", call, "Empty", vec![edit], pending);
                 return;
             }
         }
         "Empty" => {
-            if is_builtin_len_call(pass, a).is_some() {
-                report_msg("empty", call, "remove unnecessary len", pending);
+            if let Some(len_arg) = is_builtin_len_call(pass, a) {
+                report_remove_len(pass, "empty", call, a, len_arg, pending);
                 return;
             }
         }
         "Positive" => {
-            if is_builtin_len_call(pass, a).is_some() {
-                report_use("empty", call, "NotEmpty", pending);
+            if let Some(len_arg) = is_builtin_len_call(pass, a) {
+                let edit = arg_edit(pass, a.pos().0, a.end().0, &[len_arg]);
+                report_use_fix("empty", call, "NotEmpty", vec![edit], pending);
                 return;
             }
         }
         "NotZero" => {
-            if has_string_type(pass, a) || is_builtin_len_call(pass, a).is_some() {
-                report_use("empty", call, "NotEmpty", pending);
+            if has_string_type(pass, a) {
+                let edit = arg_edit(pass, a.pos().0, a.end().0, &[a]);
+                report_use_fix("empty", call, "NotEmpty", vec![edit], pending);
+                return;
+            }
+            if let Some(len_arg) = is_builtin_len_call(pass, a) {
+                let edit = arg_edit(pass, a.pos().0, a.end().0, &[len_arg]);
+                report_use_fix("empty", call, "NotEmpty", vec![edit], pending);
                 return;
             }
         }
         "NotEmpty" => {
-            if is_builtin_len_call(pass, a).is_some() {
-                report_msg("empty", call, "remove unnecessary len", pending);
+            if let Some(len_arg) = is_builtin_len_call(pass, a) {
+                report_remove_len(pass, "empty", call, a, len_arg, pending);
                 return;
             }
         }
@@ -1496,124 +1643,177 @@ fn check_empty(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, Str
         return;
     }
     let b = &call.args[1];
-
-    match call.fn_name_trimmed.as_str() {
-        "Len" if is_zero(b) => report_use("empty", call, "Empty", pending),
-        "Equal" | "EqualValues" | "Exactly" => {
-            if is_empty_string_lit(a) {
-                report_use("empty", call, "Empty", pending);
-            } else if is_len_call_and_zero(pass, a, b).is_some()
-                || is_len_call_and_zero(pass, b, a).is_some()
-            {
-                report_use("empty", call, "Empty", pending);
-            }
-        }
-        "LessOrEqual" => {
-            if is_builtin_len_call(pass, a).is_some() && is_zero(b) {
-                report_use("empty", call, "Empty", pending);
-            }
-        }
-        "GreaterOrEqual" => {
-            if is_builtin_len_call(pass, b).is_some() && is_zero(a) {
-                report_use("empty", call, "Empty", pending);
-            }
-        }
-        "Less" => {
-            if is_builtin_len_call(pass, a).is_some() && (is_one(b) || is_zero(b)) {
-                report_use("empty", call, "Empty", pending);
-            } else if is_builtin_len_call(pass, b).is_some() && is_zero(a) {
-                report_use("empty", call, "NotEmpty", pending);
-            }
-        }
-        "Greater" => {
-            if is_builtin_len_call(pass, b).is_some() && (is_one(a) || is_zero(a)) {
-                report_use("empty", call, "Empty", pending);
-            } else if is_builtin_len_call(pass, a).is_some() && is_zero(b) {
-                report_use("empty", call, "NotEmpty", pending);
-            }
-        }
-        "NotEqual" | "NotEqualValues" => {
-            if is_empty_string_lit(a) {
-                report_use("empty", call, "NotEmpty", pending);
-            } else if is_len_call_and_zero(pass, a, b).is_some()
-                || is_len_call_and_zero(pass, b, a).is_some()
-            {
-                report_use("empty", call, "NotEmpty", pending);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn check_error_nil(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
-    match call.fn_name_trimmed.as_str() {
-        "Nil" | "Empty" | "Zero" => {
-            if !call.args.is_empty() && is_error(pass, &call.args[0]) {
-                report_use("error-nil", call, "NoError", pending);
-            }
-        }
-        "NotNil" | "NotEmpty" | "NotZero" => {
-            if !call.args.is_empty() && is_error(pass, &call.args[0]) {
-                report_use("error-nil", call, "Error", pending);
-            }
-        }
-        "Equal" | "EqualValues" | "Exactly" | "ErrorIs" | "IsType" => {
-            if call.args.len() < 2 {
-                return;
-            }
-            let (a, b) = (&call.args[0], &call.args[1]);
-            if (is_error(pass, a) && is_nil(pass, b)) || (is_nil(pass, a) && is_error(pass, b)) {
-                report_use("error-nil", call, "NoError", pending);
-            }
-        }
-        "NotEqual" | "NotEqualValues" | "NotErrorIs" | "IsNotType" => {
-            if call.args.len() < 2 {
-                return;
-            }
-            let (a, b) = (&call.args[0], &call.args[1]);
-            if (is_error(pass, a) && is_nil(pass, b)) || (is_nil(pass, a) && is_error(pass, b)) {
-                report_use("error-nil", call, "Error", pending);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn check_nil_compare(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
-    if call.args.len() < 2 {
-        return;
-    }
-    if xor_nil(pass, &call.args[0], &call.args[1]).is_none() {
-        return;
-    }
-    match call.fn_name_trimmed.as_str() {
-        "Equal" | "EqualValues" | "Exactly" => {
-            report_use("nil-compare", call, "Nil", pending);
-        }
-        "NotEqual" | "NotEqualValues" => {
-            report_use("nil-compare", call, "NotNil", pending);
-        }
-        _ => {}
-    }
-}
-
-fn check_len(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
-    let check_args = |a: &Expr, b: &Expr| -> bool {
-        let first = is_builtin_len_call(pass, a);
-        let second = is_builtin_len_call(pass, b);
-        match (first, second) {
-            (Some(_), Some(_)) => true,
-            (Some(_), None) => is_int_basic_lit(b).is_some(),
-            (None, Some(_)) => true,
-            (None, None) => false,
-        }
+    // Every two-argument shape replaces the same span — both arguments — and
+    // differs only in which expression survives.
+    let use_fix = |surviving: &Expr, proposed: &str, pending: &mut Vec<Finding>| {
+        let edit = arg_edit(pass, a.pos().0, b.end().0, &[surviving]);
+        report_use_fix("empty", call, proposed, vec![edit], pending);
     };
 
     match call.fn_name_trimmed.as_str() {
+        "Len" if is_zero(b) => use_fix(a, "Empty", pending),
         "Equal" | "EqualValues" | "Exactly" => {
-            if call.args.len() >= 2 && check_args(&call.args[0], &call.args[1]) {
+            if is_empty_string_lit(a) {
+                use_fix(b, "Empty", pending);
+            } else if let Some(len_arg) = is_len_call_and_zero(pass, a, b)
+                .or_else(|| is_len_call_and_zero(pass, b, a))
+            {
+                use_fix(len_arg, "Empty", pending);
+            }
+        }
+        "LessOrEqual" => {
+            if let Some(len_arg) = is_builtin_len_call(pass, a) {
+                if is_zero(b) {
+                    use_fix(len_arg, "Empty", pending);
+                }
+            }
+        }
+        "GreaterOrEqual" => {
+            if let Some(len_arg) = is_builtin_len_call(pass, b) {
+                if is_zero(a) {
+                    use_fix(len_arg, "Empty", pending);
+                }
+            }
+        }
+        "Less" => {
+            if let Some(len_arg) = is_builtin_len_call(pass, a) {
+                if is_one(b) || is_zero(b) {
+                    use_fix(len_arg, "Empty", pending);
+                    return;
+                }
+            }
+            if let Some(len_arg) = is_builtin_len_call(pass, b) {
+                if is_zero(a) {
+                    use_fix(len_arg, "NotEmpty", pending);
+                }
+            }
+        }
+        "Greater" => {
+            if let Some(len_arg) = is_builtin_len_call(pass, b) {
+                if is_one(a) || is_zero(a) {
+                    use_fix(len_arg, "Empty", pending);
+                    return;
+                }
+            }
+            if let Some(len_arg) = is_builtin_len_call(pass, a) {
+                if is_zero(b) {
+                    use_fix(len_arg, "NotEmpty", pending);
+                }
+            }
+        }
+        "NotEqual" | "NotEqualValues" => {
+            if is_empty_string_lit(a) {
+                use_fix(b, "NotEmpty", pending);
+            } else if let Some(len_arg) = is_len_call_and_zero(pass, a, b)
+                .or_else(|| is_len_call_and_zero(pass, b, a))
+            {
+                use_fix(len_arg, "NotEmpty", pending);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn check_error_nil(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
+    // The span always starts at the first argument; only its end and the
+    // surviving argument depend on the shape. `NoError(t, err)` keeps `err`
+    // whichever side the `nil` was on.
+    let (proposed, surviving, end): (&str, &Expr, i64) = match call.fn_name_trimmed.as_str() {
+        "Nil" | "Empty" | "Zero" if !call.args.is_empty() && is_error(pass, &call.args[0]) => {
+            ("NoError", &call.args[0], call.args[0].end().0)
+        }
+        "NotNil" | "NotEmpty" | "NotZero"
+            if !call.args.is_empty() && is_error(pass, &call.args[0]) =>
+        {
+            ("Error", &call.args[0], call.args[0].end().0)
+        }
+        "Equal" | "EqualValues" | "Exactly" | "ErrorIs" | "IsType" | "NotEqual"
+        | "NotEqualValues" | "NotErrorIs" | "IsNotType" => {
+            if call.args.len() < 2 {
+                return;
+            }
+            let (a, b) = (&call.args[0], &call.args[1]);
+            let negated = matches!(
+                call.fn_name_trimmed.as_str(),
+                "NotEqual" | "NotEqualValues" | "NotErrorIs" | "IsNotType"
+            );
+            let proposed = if negated { "Error" } else { "NoError" };
+            if is_error(pass, a) && is_nil(pass, b) {
+                (proposed, a, b.end().0)
+            } else if is_nil(pass, a) && is_error(pass, b) {
+                (proposed, b, b.end().0)
+            } else {
+                return;
+            }
+        }
+        _ => return,
+    };
+    let edit = arg_edit(pass, call.args[0].pos().0, end, &[surviving]);
+    report_use_fix("error-nil", call, proposed, vec![edit], pending);
+}
+
+fn check_nil_compare(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
+    if call.args.len() < 2 {
+        return;
+    }
+    let Some(surviving) = xor_nil(pass, &call.args[0], &call.args[1]) else {
+        return;
+    };
+    let proposed = match call.fn_name_trimmed.as_str() {
+        "Equal" | "EqualValues" | "Exactly" => "Nil",
+        "NotEqual" | "NotEqualValues" => "NotNil",
+        _ => return,
+    };
+    let edit = arg_edit(
+        pass,
+        call.args[0].pos().0,
+        call.args[1].end().0,
+        &[surviving],
+    );
+    report_use_fix("nil-compare", call, proposed, vec![edit], pending);
+}
+
+fn check_len(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
+    // Upstream's `checkArgs`. `inverted` swaps which argument bounds the span:
+    // `True` passes the comparison's operands the other way round, but the text
+    // being replaced still runs left to right through the source.
+    fn check_args(
+        pass: &Pass<'_>,
+        call: &CallMeta<'_>,
+        a: &Expr,
+        b: &Expr,
+        inverted: bool,
+        pending: &mut Vec<Finding>,
+    ) {
+        let first = is_builtin_len_call(pass, a);
+        let second = is_builtin_len_call(pass, b);
+        let (len_arg, expected_len): (&Expr, &Expr) = match (first, second) {
+            (Some(_), Some(arg2)) => (arg2, a),
+            (Some(arg1), None) => {
+                if is_int_basic_lit(b).is_none() {
+                    return;
+                }
+                (arg1, b)
+            }
+            (None, Some(arg2)) => (arg2, a),
+            (None, None) => return,
+        };
+        let (start, end) = if inverted {
+            (b.pos().0, a.end().0)
+        } else {
+            (a.pos().0, b.end().0)
+        };
+        // `Len` takes the container first and the length second, which is the
+        // opposite order from the `Equal` it replaces.
+        let edit = arg_edit(pass, start, end, &[len_arg, expected_len]);
+        report_use_fix("len", call, "Len", vec![edit], pending);
+    }
+
+    match call.fn_name_trimmed.as_str() {
+        "Equal" | "EqualValues" | "Exactly" => {
+            if call.args.len() >= 2 {
                 // Prefer empty when comparing to 0 (empty runs earlier in registry).
-                report_use("len", call, "Len", pending);
+                check_args(pass, call, &call.args[0], &call.args[1], false, pending);
             }
         }
         "True" => {
@@ -1627,15 +1827,13 @@ fn check_len(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, Strin
                 return;
             };
             // In True, actual is usually first → check y,x like upstream.
-            if check_args(y, x) {
-                report_use("len", call, "Len", pending);
-            }
+            check_args(pass, call, y, x, true, pending);
         }
         _ => {}
     }
 }
 
-fn check_float_compare(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
+fn check_float_compare(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
     let invalid = match call.fn_name_trimmed.as_str() {
         "Equal" | "EqualValues" | "Exactly" => {
             call.args.len() > 1
@@ -1663,7 +1861,7 @@ fn check_float_compare(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(
     }
 }
 
-fn check_compares(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
+fn check_compares(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
     if call.args.is_empty() {
         return;
     }
@@ -1702,7 +1900,7 @@ fn check_compares(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, 
     report_use("compares", call, &proposed, pending);
 }
 
-fn check_contains(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
+fn check_contains(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
     // Upstream v1.6.4 (golangci 2.12) only rewrites True/False+strings.Contains;
     // the multi-arg Contains→Subset heuristic is not in that release.
     let _ = check_contains_string(pass, call, pending);
@@ -1711,7 +1909,7 @@ fn check_contains(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, 
 fn check_contains_string(
     pass: &Pass<'_>,
     call: &CallMeta<'_>,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<Finding>,
 ) -> bool {
     if call.args.is_empty() {
         return false;
@@ -1748,7 +1946,7 @@ fn check_contains_string(
     true
 }
 
-fn check_contains_subset(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
+fn check_contains_subset(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
     if call.call.ellipsis.is_valid() {
         return;
     }
@@ -1789,7 +1987,7 @@ fn check_contains_subset(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec
     );
 }
 
-fn check_equal_values(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
+fn check_equal_values(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
     let proposed = match call.fn_name_trimmed.as_str() {
         "EqualValues" => "Equal",
         "NotEqualValues" => "NotEqual",
@@ -1816,10 +2014,12 @@ fn check_equal_values(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u
         // Equal would compare dynamic types and fail; EqualValues is fine.
         return;
     }
-    report_use("equal-values", call, proposed, pending);
+    // The only checker in this family whose fix is the rename alone: `Equal`
+    // and `EqualValues` take the same arguments.
+    report_use_fix("equal-values", call, proposed, Vec::new(), pending);
 }
 
-fn check_regexp(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
+fn check_regexp(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
     match call.fn_name_trimmed.as_str() {
         "Regexp" | "NotRegexp" => {}
         _ => return,
@@ -1840,7 +2040,7 @@ fn check_regexp(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, St
     }
 }
 
-fn check_error_is_as(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
+fn check_error_is_as(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
     match call.fn_name_trimmed.as_str() {
         "Error" => {
             if call.args.len() >= 2 && is_error(pass, &call.args[1]) {
@@ -1942,7 +2142,7 @@ fn check_error_is_as(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u3
     }
 }
 
-fn check_encoded_compare(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
+fn check_encoded_compare(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
     match call.fn_name_trimmed.as_str() {
         "Equal" | "EqualValues" | "Exactly" => {}
         _ => return,
@@ -1973,7 +2173,7 @@ fn check_expected_actual(
     pass: &Pass<'_>,
     call: &CallMeta<'_>,
     opts: &TestifylintOptions,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<Finding>,
 ) {
     match call.fn_name_trimmed.as_str() {
         "Equal"
@@ -2014,7 +2214,7 @@ fn check_expected_actual(
     }
 }
 
-fn check_zero(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
+fn check_zero(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
     match call.fn_name_trimmed.as_str() {
         "Equal" | "EqualValues" | "Exactly" => {
             if call.args.len() < 2 {
@@ -2062,14 +2262,14 @@ fn check_zero(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, Stri
     }
 }
 
-fn check_negative_positive(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
+fn check_negative_positive(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
     if check_negative(pass, call, pending) {
         return;
     }
     check_positive(pass, call, pending);
 }
 
-fn check_negative(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) -> bool {
+fn check_negative(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) -> bool {
     match call.fn_name_trimmed.as_str() {
         "Less" => {
             if call.args.len() < 2 {
@@ -2077,7 +2277,9 @@ fn check_negative(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, 
             }
             let (a, b) = (&call.args[0], &call.args[1]);
             if can_be_negative(pass, a) && is_zero_or_signed_zero(b) {
-                report_use("negative-positive", call, "Negative", pending);
+                // Both arguments go; the one that could be negative comes back.
+                let edit = arg_edit(pass, a.pos().0, b.end().0, &[a]);
+                report_use_fix("negative-positive", call, "Negative", vec![edit], pending);
                 return true;
             }
         }
@@ -2087,7 +2289,8 @@ fn check_negative(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, 
             }
             let (a, b) = (&call.args[0], &call.args[1]);
             if is_zero_or_signed_zero(a) && can_be_negative(pass, b) {
-                report_use("negative-positive", call, "Negative", pending);
+                let edit = arg_edit(pass, a.pos().0, b.end().0, &[b]);
+                report_use_fix("negative-positive", call, "Negative", vec![edit], pending);
                 return true;
             }
         }
@@ -2114,8 +2317,10 @@ fn check_negative(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, 
                 )
                 .map(|(_, b)| b)
             });
-            if surviving.is_some() {
-                report_use("negative-positive", call, "Negative", pending);
+            if let Some(surviving) = surviving {
+                // The whole comparison collapses to its non-zero side.
+                let edit = arg_edit(pass, expr.pos().0, expr.end().0, &[surviving]);
+                report_use_fix("negative-positive", call, "Negative", vec![edit], pending);
                 return true;
             }
         }
@@ -2124,24 +2329,29 @@ fn check_negative(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, 
                 return false;
             }
             let expr = &call.args[0];
-            let has = is_strict_comparison_with(
+            // The surviving argument, not just whether one exists: the fix
+            // replaces the comparison with it.
+            let surviving = is_strict_comparison_with(
                 pass,
                 expr,
                 |p, e| can_be_negative(p, e),
                 Token::GEQ,
                 |_, e| is_zero_or_signed_zero(e),
             )
-            .is_some()
-                || is_strict_comparison_with(
+            .map(|(a, _)| a)
+            .or_else(|| {
+                is_strict_comparison_with(
                     pass,
                     expr,
                     |_, e| is_zero_or_signed_zero(e),
                     Token::LEQ,
                     |p, e| can_be_negative(p, e),
                 )
-                .is_some();
-            if has {
-                report_use("negative-positive", call, "Negative", pending);
+                .map(|(_, b)| b)
+            });
+            if let Some(surviving) = surviving {
+                let edit = arg_edit(pass, expr.pos().0, expr.end().0, &[surviving]);
+                report_use_fix("negative-positive", call, "Negative", vec![edit], pending);
                 return true;
             }
         }
@@ -2150,7 +2360,7 @@ fn check_negative(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, 
     false
 }
 
-fn check_positive(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
+fn check_positive(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
     match call.fn_name_trimmed.as_str() {
         "Greater" => {
             if call.args.len() < 2 {
@@ -2158,7 +2368,8 @@ fn check_positive(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, 
             }
             let (a, b) = (&call.args[0], &call.args[1]);
             if is_not_any_zero(a) && is_any_zero(b) {
-                report_use("negative-positive", call, "Positive", pending);
+                let edit = arg_edit(pass, a.pos().0, b.end().0, &[a]);
+                report_use_fix("negative-positive", call, "Positive", vec![edit], pending);
             }
         }
         "Less" => {
@@ -2167,7 +2378,8 @@ fn check_positive(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, 
             }
             let (a, b) = (&call.args[0], &call.args[1]);
             if is_any_zero(a) && is_not_any_zero(b) {
-                report_use("negative-positive", call, "Positive", pending);
+                let edit = arg_edit(pass, a.pos().0, b.end().0, &[b]);
+                report_use_fix("negative-positive", call, "Positive", vec![edit], pending);
             }
         }
         "True" => {
@@ -2175,24 +2387,27 @@ fn check_positive(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, 
                 return;
             }
             let expr = &call.args[0];
-            let has = is_strict_comparison_with(
+            let surviving = is_strict_comparison_with(
                 pass,
                 expr,
                 |_, e| is_not_any_zero(e),
                 Token::GTR,
                 |_, e| is_any_zero(e),
             )
-            .is_some()
-                || is_strict_comparison_with(
+            .map(|(a, _)| a)
+            .or_else(|| {
+                is_strict_comparison_with(
                     pass,
                     expr,
                     |_, e| is_any_zero(e),
                     Token::LSS,
                     |_, e| is_not_any_zero(e),
                 )
-                .is_some();
-            if has {
-                report_use("negative-positive", call, "Positive", pending);
+                .map(|(_, b)| b)
+            });
+            if let Some(surviving) = surviving {
+                let edit = arg_edit(pass, expr.pos().0, expr.end().0, &[surviving]);
+                report_use_fix("negative-positive", call, "Positive", vec![edit], pending);
             }
         }
         "False" => {
@@ -2200,31 +2415,34 @@ fn check_positive(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, 
                 return;
             }
             let expr = &call.args[0];
-            let has = is_strict_comparison_with(
+            let surviving = is_strict_comparison_with(
                 pass,
                 expr,
                 |_, e| is_not_any_zero(e),
                 Token::LEQ,
                 |_, e| is_any_zero(e),
             )
-            .is_some()
-                || is_strict_comparison_with(
+            .map(|(a, _)| a)
+            .or_else(|| {
+                is_strict_comparison_with(
                     pass,
                     expr,
                     |_, e| is_any_zero(e),
                     Token::GEQ,
                     |_, e| is_not_any_zero(e),
                 )
-                .is_some();
-            if has {
-                report_use("negative-positive", call, "Positive", pending);
+                .map(|(_, b)| b)
+            });
+            if let Some(surviving) = surviving {
+                let edit = arg_edit(pass, expr.pos().0, expr.end().0, &[surviving]);
+                report_use_fix("negative-positive", call, "Positive", vec![edit], pending);
             }
         }
         _ => {}
     }
 }
 
-fn check_useless_assert_same_vars(call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) -> bool {
+fn check_useless_assert_same_vars(call: &CallMeta<'_>, pending: &mut Vec<Finding>) -> bool {
     let (first, second) = match call.fn_name_trimmed.as_str() {
         "Contains"
         | "ElementsMatch"
@@ -2289,7 +2507,7 @@ fn check_useless_assert_same_vars(call: &CallMeta<'_>, pending: &mut Vec<(u32, S
     }
 }
 
-fn check_useless_assert(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
+fn check_useless_assert(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
     if check_useless_assert_same_vars(call, pending) {
         return;
     }
@@ -2351,7 +2569,7 @@ fn check_time_compare(
     pass: &Pass<'_>,
     call: &CallMeta<'_>,
     opts: &TestifylintOptions,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<Finding>,
 ) {
     match call.fn_name_trimmed.as_str() {
         "Equal" | "EqualValues" | "Exactly" | "NotEqual" | "NotEqualValues" => {}
@@ -2490,7 +2708,7 @@ fn check_formatter(
     pass: &Pass<'_>,
     call: &CallMeta<'_>,
     opts: &TestifylintOptions,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<Finding>,
 ) {
     if call.is_fmt {
         check_formatter_fmt(pass, call, pending);
@@ -2503,7 +2721,7 @@ fn check_formatter_not_fmt(
     pass: &Pass<'_>,
     call: &CallMeta<'_>,
     opts: &TestifylintOptions,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<Finding>,
 ) {
     let Some(msg_and_args_pos) = is_printf_like_call(pass, call) else {
         return;
@@ -2579,7 +2797,7 @@ fn check_formatter_not_fmt(
     }
 }
 
-fn check_formatter_fmt(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
+fn check_formatter_fmt(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
     let Some(format_pos) = get_msg_position(pass, call) else {
         return;
     };
@@ -2713,7 +2931,7 @@ fn implements_testing_t(pass: &Pass<'_>, expr: &Expr) -> bool {
 fn check_suite_dont_use_pkg(
     pass: &Pass<'_>,
     call: &CallMeta<'_>,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<Finding>,
 ) {
     if !call.is_pkg {
         return;
@@ -2755,7 +2973,7 @@ fn check_suite_extra_assert_call(
     pass: &Pass<'_>,
     call: &CallMeta<'_>,
     opts: &TestifylintOptions,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<Finding>,
 ) {
     if call.is_pkg {
         return;
@@ -2802,7 +3020,7 @@ fn check_suite_extra_assert_call(
     }
 }
 
-fn check_suite_subtest_run(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+fn check_suite_subtest_run(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Finding>) {
     let Expr::SelectorExpr(se) = &*call.fun else {
         return;
     };
@@ -2819,8 +3037,7 @@ fn check_suite_subtest_run(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(
         return;
     }
     if implements_testify_suite(pass, &t_sel.x) && implements_testing_t(pass, &se.x) {
-        pending.push((
-            call.pos().0 as u32,
+        pending.push(Finding::new(call.pos().0 as u32,
             format!(
                 "suite-subtest-run: use {}.Run to run subtest",
                 expr_string(pass, &t_sel.x)
@@ -2882,7 +3099,7 @@ fn suite_method_iface(name: &str) -> Option<&'static str> {
 fn check_suite_method_signature(
     pass: &Pass<'_>,
     fd: &FuncDecl,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<Finding>,
 ) {
     if !is_suite_method(pass, fd) {
         return;
@@ -2903,8 +3120,7 @@ fn check_suite_method_signature(
 
     if is_suite_test_method(method_name) {
         if n_params > 0 || n_results > 0 {
-            pending.push((
-                // Upstream reports the *ast.FuncDecl, whose Pos() is the `func`
+            pending.push(Finding::new(// Upstream reports the *ast.FuncDecl, whose Pos() is the `func`
                 // keyword — not the method name.
                 fd.ty.func.0 as u32,
                 "suite-method-signature: test method should not have any arguments or returning values"
@@ -2927,8 +3143,7 @@ fn check_suite_method_signature(
         return;
     };
     if !implements_iface(pass, typ, iface) {
-        pending.push((
-            fd.ty.func.0 as u32,
+        pending.push(Finding::new(fd.ty.func.0 as u32,
             format!("suite-method-signature: method conflicts with suite.{iface_name} interface"),
         ));
     }
@@ -2938,7 +3153,7 @@ fn check_suite_broken_parallel(
     pass: &Pass<'_>,
     call: &CallExpr,
     stack: &[walk::NodeRef<'_>],
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<Finding>,
 ) {
     let Expr::SelectorExpr(se) = &*call.fun else {
         return;
@@ -2952,8 +3167,7 @@ fn check_suite_broken_parallel(
     for node in stack.iter().rev() {
         if let walk::NodeRef::FuncDecl(fd) = node {
             if is_suite_method(pass, fd) {
-                pending.push((
-                    call.pos().0 as u32,
+                pending.push(Finding::new(call.pos().0 as u32,
                     "suite-broken-parallel: testify v1 does not support suite's parallel tests and subtests"
                         .into(),
                 ));
@@ -3011,7 +3225,7 @@ fn fn_contains_assertions(pass: &Pass<'_>, fd: &FuncDecl) -> bool {
     body.list.iter().any(|s| is_assertion_stmt(pass, s))
 }
 
-fn check_suite_thelper(pass: &Pass<'_>, fd: &FuncDecl, pending: &mut Vec<(u32, String)>) {
+fn check_suite_thelper(pass: &Pass<'_>, fd: &FuncDecl, pending: &mut Vec<Finding>) {
     if !is_suite_method(pass, fd) {
         return;
     }
@@ -3039,8 +3253,7 @@ fn check_suite_thelper(pass: &Pass<'_>, fd: &FuncDecl, pending: &mut Vec<(u32, S
     if is_helper_call_stmt(&body.list[0], rcv_name) {
         return;
     }
-    pending.push((
-        fd.ty.func.0 as u32,
+    pending.push(Finding::new(fd.ty.func.0 as u32,
         format!("suite-thelper: suite helper method must start with {helper_call}"),
     ));
 }
@@ -3274,7 +3487,7 @@ fn check_require_error(
     pass: &Pass<'_>,
     file: &File,
     opts: &TestifylintOptions,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<Finding>,
 ) {
     let fn_pat = opts
         .require_error_fn_pattern
@@ -3372,8 +3585,7 @@ fn check_require_error(
                     continue;
                 }
             }
-            pending.push((
-                c.call.pos().0 as u32,
+            pending.push(Finding::new(c.call.pos().0 as u32,
                 "require-error: for error assertions use require".into(),
             ));
         }
@@ -3697,7 +3909,7 @@ fn check_go_require_func(
 fn report_go_require_call(
     call: &CallMeta<'_>,
     http_handler: bool,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<Finding>,
 ) {
     match go_require_verdict(call) {
         GoRequireVerdict::Require => {
@@ -3706,7 +3918,7 @@ fn report_go_require_call(
             } else {
                 "go-require: require must only be used in the goroutine running the test function"
             };
-            pending.push((call.call.pos().0 as u32, msg.into()));
+            pending.push(Finding::new(call.call.pos().0 as u32, msg.into()));
         }
         GoRequireVerdict::AssertFailNow => {
             let target = call_fn_string(call);
@@ -3717,7 +3929,7 @@ fn report_go_require_call(
                     "go-require: {target} must only be used in the goroutine running the test function"
                 )
             };
-            pending.push((call.call.pos().0 as u32, msg));
+            pending.push(Finding::new(call.call.pos().0 as u32, msg));
         }
         GoRequireVerdict::NoExit => {}
     }
@@ -3727,7 +3939,7 @@ fn check_go_require(
     pass: &Pass<'_>,
     file: &File,
     opts: &TestifylintOptions,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<Finding>,
 ) {
     let tests = collect_test_decls(pass, file);
     let mut processed: HashMap<ObjectId, GoRequireVerdict> = HashMap::new();
@@ -3750,8 +3962,7 @@ fn check_go_require(
                         != GoRequireVerdict::NoExit
                     {
                         let caller = expr_string(pass, &ce.fun);
-                        pending.push((
-                            ce.pos().0 as u32,
+                        pending.push(Finding::new(ce.pos().0 as u32,
                             format!(
                                 "go-require: {caller} contains assertions that must only be used in the goroutine running the test function"
                             ),
@@ -3947,7 +4158,7 @@ fn call_args_match(pass: &Pass<'_>, sig: TypeId, args: &[Expr], ellipsis_call: b
 fn check_mock_expect(
     pass: &Pass<'_>,
     call: &CallExpr,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<Finding>,
 ) {
     if !is_testify_mock_method(pass, call, "On", "Mock") {
         return;
@@ -3999,13 +4210,12 @@ fn check_mock_expect(
         return;
     }
     let receiver = expr_pretty(&sel.x);
-    pending.push((
-        call.pos().0 as u32,
+    pending.push(Finding::new(call.pos().0 as u32,
         format!("mock-expect: use {receiver}.EXPECT().{method_name}(...)"),
     ));
 }
 
-fn check_blank_import(file: &File, pending: &mut Vec<(u32, String)>) {
+fn check_blank_import(file: &File, pending: &mut Vec<Finding>) {
     const BAD: &[&str] = &[
         TESTIFY_ROOT,
         ASSERT_PKG,
@@ -4023,8 +4233,7 @@ fn check_blank_import(file: &File, pending: &mut Vec<(u32, String)>) {
         }
         let pkg = unquote_import(&path.value);
         if BAD.contains(&pkg) {
-            pending.push((
-                path.value_pos.0 as u32,
+            pending.push(Finding::new(path.value_pos.0 as u32,
                 format!("blank-import: avoid blank import of {pkg} as it does nothing"),
             ));
         }
@@ -4036,7 +4245,7 @@ fn check_call(
     call: &CallMeta<'_>,
     enabled: &HashSet<String>,
     opts: &TestifylintOptions,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<Finding>,
 ) {
     // Priority mirrors upstream registry order among implemented checkers.
     let before = pending.len();
@@ -4216,8 +4425,25 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
     }
 
-    for (pos, msg) in pending {
-        pass.reportf(pos, &msg);
+    for finding in pending {
+        let Finding {
+            pos,
+            message,
+            edits,
+        } = finding;
+        if edits.is_empty() {
+            pass.reportf(pos, &message);
+            continue;
+        }
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: String::new(),
+                text_edits: edits,
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }
