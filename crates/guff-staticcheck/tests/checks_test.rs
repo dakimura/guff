@@ -3083,7 +3083,11 @@ fn qf1005_flags_expandable_pow() {
     );
     support::assert_well_typed(&pkg);
     let messages = support::run_analyzer(qf1005::analyzer(), &pkg);
-    assert_eq!(messages.len(), 6, "{messages:?}");
+    // 33 shapes: the six this fixture held until 2026-08-27, plus the
+    // conversion and parenthesization branches it never exercised. Every one
+    // of them is a call upstream reports; the ones it does *not* report — a
+    // base that may have side effects, at any exponent — are in ok.go.
+    assert_eq!(messages.len(), 33, "{messages:?}");
     assert!(messages.iter().all(|m| m.contains("math.Pow")));
 }
 

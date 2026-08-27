@@ -46,12 +46,39 @@ qf1004/renamed/renamed.go:9:2:staticcheck::QF1004: could use strings.ReplaceAll 
 qf1004/renamed/renamed.go:9:2:staticcheck::SA4017: Replace doesn't have side effects and its return value is ignored
 qf1004/renamed/renamed.go:10:2:staticcheck::QF1004: could use bytes.ReplaceAll instead
 qf1005/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
-qf1005/bad/bad.go:7:6:staticcheck::QF1005: could expand call to math.Pow
-qf1005/bad/bad.go:8:6:staticcheck::QF1005: could expand call to math.Pow
-qf1005/bad/bad.go:9:6:staticcheck::QF1005: could expand call to math.Pow
-qf1005/bad/bad.go:10:6:staticcheck::QF1005: could expand call to math.Pow
-qf1005/bad/bad.go:11:6:staticcheck::QF1005: could expand call to math.Pow
-qf1005/bad/bad.go:12:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:17:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:18:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:19:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:20:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:21:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:22:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:32:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:33:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:34:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:36:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:37:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:38:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:41:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:42:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:45:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:46:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:47:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:48:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:49:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:50:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:54:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:58:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:59:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:68:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:70:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:72:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:74:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:75:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:82:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:83:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:84:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:85:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:86:6:staticcheck::QF1005: could expand call to math.Pow
 qf1005/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
 qf1006/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
 qf1006/bad/bad.go:10:3:staticcheck::QF1006: could lift into loop condition
