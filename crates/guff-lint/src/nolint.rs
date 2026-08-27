@@ -14,7 +14,7 @@ use guff::commentmap::{node_end, node_pos};
 use guff::parser::{parse_file, COMMENTS_ONLY};
 use guff::position::FileSet;
 use guff::walk::{preorder, NodeRef};
-use guff_analysis::Diagnostic;
+use guff_analysis::{Diagnostic, SuggestedFix, TextEdit};
 use guff_packages::Package;
 use memchr::memmem::Finder;
 use regex::Regex;
@@ -71,7 +71,7 @@ impl IgnoredRange {
 }
 
 /// Per-file nolint index built from source (re-parsed with comments).
-#[derive(Debug, Default, Clone)]
+#[derive(Default, Clone)]
 pub struct NolintIndex {
     /// Keys: absolute path, and basename, both normalized with `/`.
     files: HashMap<String, Vec<IgnoredRange>>,
@@ -91,6 +91,13 @@ pub struct NolintIndex {
     /// is absent (golangci `nolint_filter` skips disabled linters).
     /// Empty = do not apply this filter (tests / callers that omit the set).
     enabled_linters: HashSet<String>,
+    /// The run's shared `FileSet` — the one `fix::apply_fixes` resolves edits
+    /// through. `add_file` parses with a throwaway `FileSet` on purpose (there
+    /// is a SIMD prefilter above it because that parse is most of this pass's
+    /// time on large trees), so a directive's position is a byte offset and
+    /// nothing more. Converting it to a FileSet-wide `Pos` needs the file's
+    /// entry in *this* set, looked up by name.
+    fset: Option<Arc<FileSet>>,
     /// Absolute paths belonging to packages guff marked `ill_typed`. Analyzers
     /// with `run_despite_errors: false` are skipped there, so their `//nolint`
     /// directives cannot be consumed — do not report them as unused.
@@ -129,6 +136,10 @@ impl NolintIndex {
     ) -> Self {
         let mut index = Self::default();
         index.style = style.cloned();
+        // Every analyzer parsed into this one, so any file with a directive is
+        // already in it. A file that is not — excluded by build tags, say —
+        // produced no issue to fix either, so emitting nothing there is right.
+        index.fset = packages.iter().find_map(|p| p.fset.clone());
         for pkg in packages {
             for path in &pkg.compiled_go_files {
                 if let Some(needed) = only {
@@ -296,6 +307,36 @@ impl NolintIndex {
         kept
     }
 
+    /// Turn a file-local byte range into a `TextEdit` the applier can resolve.
+    ///
+    /// `fix::resolve_edit` reads `TextEdit.pos` as a position in the run's
+    /// shared `FileSet`, looks the filename up from it, and refuses the edit
+    /// unless that filename is the issue's own — the guard added after an edit
+    /// once landed in `internal/goarch/goarch.go`. So the offsets recorded here
+    /// have to be rebased onto that set, and the file is found **by name**:
+    /// `add_file` normalizes `\` to `/` while the type checker registers
+    /// `path.to_str()` verbatim, which agrees on POSIX and does not on Windows.
+    /// `same_file` in `fix` already owns that comparison, basename fallback
+    /// included, so this reuses it rather than comparing strings.
+    ///
+    /// `None` when the file is not in the shared set. That is not a failure:
+    /// nothing parsed it, so nothing reported an issue in it either.
+    fn edit(&self, filename: &str, start: i64, end: i64, new_text: &str) -> Option<TextEdit> {
+        let fset = self.fset.as_ref()?;
+        let file = fset
+            .files()
+            .into_iter()
+            .find(|f| crate::fix::same_file(f.name(), filename))?;
+        if start < 0 || end < start || end > file.size() {
+            return None;
+        }
+        Some(TextEdit {
+            pos: file.pos(start).0 as u32,
+            end: file.pos(end).0 as u32,
+            new_text: new_text.to_string(),
+        })
+    }
+
     /// golangci `shouldPassIssue`: the **first** matching range wins and gets
     /// the credit; the rest are not consulted.
     fn suppress(&mut self, issue: &Issue) -> bool {
@@ -373,8 +414,11 @@ impl NolintIndex {
         let mut out = Vec::new();
         for (filename, directives) in &self.directives {
             for d in directives {
-                for text in nolintlint::messages(d, style) {
-                    out.push(nolintlint_issue(filename, d.line, d.col, text));
+                for msg in nolintlint::messages(d, style) {
+                    let fix = msg.strip_to.and_then(|n| {
+                        self.edit(filename, d.offset, d.offset + n as i64, "//")
+                    });
+                    out.push(nolintlint_issue(filename, d.line, d.col, msg.text, fix));
                 }
             }
         }
@@ -402,9 +446,28 @@ impl NolintIndex {
                 if d.malformed {
                     continue;
                 }
+                // Upstream builds `removeNolintCompletely` — delete the whole
+                // comment — but attaches it only when the directive names no
+                // linter or exactly one. Its reason, verbatim: "because of
+                // issues around commas and the possibility of all linters being
+                // removed". Two or more names and the finding is reported with
+                // no fix at all; attaching one anyway deletes a directive
+                // upstream leaves alone.
+                let remove = (d.linters.len() <= 1)
+                    .then(|| {
+                        self.edit(filename, d.offset, d.offset + d.text.len() as i64, "")
+                    })
+                    .flatten();
                 if d.linters.is_empty() {
                     if !self.unused_is_cancelled(filename, d.line, None) {
-                        out.push(unused_issue(filename, d.line, d.col, &d.text, None));
+                        out.push(unused_issue(
+                            filename,
+                            d.line,
+                            d.col,
+                            &d.text,
+                            None,
+                            remove,
+                        ));
                     }
                     continue;
                 }
@@ -436,7 +499,14 @@ impl NolintIndex {
                     {
                         continue;
                     }
-                    out.push(unused_issue(filename, d.line, d.col, &d.text, Some(lint)));
+                    out.push(unused_issue(
+                        filename,
+                        d.line,
+                        d.col,
+                        &d.text,
+                        Some(lint),
+                        remove.clone(),
+                    ));
                 }
             }
         }
@@ -514,15 +584,30 @@ fn unused_issue(
     column: i64,
     comment: &str,
     specific: Option<&str>,
+    fix: Option<TextEdit>,
 ) -> Issue {
     let text = match specific {
         Some(l) => format!("directive `{comment}` is unused for linter {l:?}"),
         None => format!("directive `{comment}` is unused"),
     };
-    nolintlint_issue(filename, line, column, text)
+    nolintlint_issue(filename, line, column, text, fix)
 }
 
-fn nolintlint_issue(filename: &str, line: i64, column: i64, text: String) -> Issue {
+fn nolintlint_issue(
+    filename: &str,
+    line: i64,
+    column: i64,
+    text: String,
+    fix: Option<TextEdit>,
+) -> Issue {
+    let suggested_fixes = fix
+        .map(|edit| {
+            vec![SuggestedFix {
+                message: String::new(),
+                text_edits: vec![edit],
+            }]
+        })
+        .unwrap_or_default();
     Issue {
         from_linter: NOLINTLINT_NAME.into(),
         analyzer: NOLINTLINT_NAME.into(),
@@ -534,6 +619,7 @@ fn nolintlint_issue(filename: &str, line: i64, column: i64, text: String) -> Iss
         source_line: None,
         diagnostic: Diagnostic {
             message: text,
+            suggested_fixes,
             ..Diagnostic::default()
         },
     }
@@ -570,7 +656,7 @@ fn extract_directives(fset: &FileSet, comments: &[guff::ast::CommentGroup]) -> V
     for g in comments {
         for c in &g.list {
             let pos = fset.position(c.pos());
-            if let Some(d) = nolintlint::parse(&c.text, pos.line, pos.column) {
+            if let Some(d) = nolintlint::parse(&c.text, pos.line, pos.column, pos.offset) {
                 out.push(d);
             }
         }

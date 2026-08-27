@@ -14033,3 +14033,115 @@ pending 15 件。うち `nolint` / `nolint-strict`（各差 70）は #142 が
 （`typecheck.rs:535` は `path.to_str()` を、`nolint.rs` は `\` を `/` に正規化した
 名前を登録するので、POSIX では同一・Windows では違う。
 文字列比較ではなく `fix.rs` の `same_file`（basename フォールバック付き）を使う。）
+
+---
+
+### 2026-08-27（続き 75）— `nolint` 3 ケースが一度に閉じた。**#142 の二択はどちらも要らなかった**
+
+続き 74 の続き。残る大物は `nolint` / `nolint-strict`（各 79 行）と
+`nolint-allow-unused`（21 行）で、**guff はどれも同じ misspell の 10 行しか書いていない**
+—— nolintlint の fix が 1 つも無い。
+
+#### #142 が置いた二択
+
+guff は Issue に `Pos` を載せて適用時に変換し、golangci は Issue を作る時点で
+オフセットに変換する。`nolint` フィルタは**ファイルごとに使い捨ての FileSet**で
+`COMMENTS_ONLY` パースをする（上に SIMD の prefilter があり、
+このパースが大きな木では `issues+filter` 時間の大半）ので `Pos` を作れない。
+そこで (a) suggested_fixes をオフセットに揃える か
+(b) 共有 FileSet を渡す か、と書いてあった。
+
+**どちらも要らなかった。**
+フィルタが共有 FileSet を必要とするのは**パース時ではなく fix を出す時だけ**で、
+必要な部品は全部あった:
+`Position.offset` / `File::pos(offset)` / `File::name()`。
+そして `NolintIndex::build` は**すでに `packages` を受け取っている** ——
+共有 FileSet は `p.fset` としてそこにある。
+
+実際に変わったのは:
+
+- `Directive` に **フィールド 1 つ**（`offset`）。
+  `extract_directives` は `fset.position(c.pos())` を既に計算していて、
+  `.offset` を捨てていただけ。
+- `NolintIndex` が `packages` から共有 FileSet を保持。
+- オフセット → 大域 `Pos` に直すヘルパ 1 つ。
+  パスの綴りは型検査側が `path.to_str()`、`add_file` が `\` を `/` に正規化した名前で、
+  POSIX では同じ・Windows では違う。だから文字列比較ではなく
+  `fix::same_file`（basename フォールバック付き）を使う。
+- `messages()` が `Vec<String>` から `Vec<Message>` へ
+  （どの finding が fix を持つかを言えるように）。
+
+**使い捨てパースも `TextEdit` の表現も触っていない。**
+
+#### 上流は同じ間違いを、ここでは踏み台にしている
+
+`pkg/golinters/nolintlint/internal/nolintlint.go`:
+
+```go
+Pos:     token.Pos(pos.Offset),
+End:     token.Pos(pos.Offset + len(commentMark) + len(leadingSpace)),
+```
+
+**バイトオフセットを `token.Pos` に入れている** ——
+続き 44 で revive の `--fix` をほぼ全リポジトリで無効にしているのと**同じ取り違え**。
+ここで動くのは golangci の applier（`fixer.go:104`）が
+`token.Pos` を `int` にキャストして `Fset.Position` を通さずそのまま使うから。
+guff の applier は通す。だから
+**オフセット → `Pos` の変換は回避策ではなく、移植そのもの**だった。
+同じバグが、片方では致命的で、片方では前提になっている。
+
+#### 5 つの finding のうち fix を持つのは 2 つだけ
+
+| finding | fix |
+|---|---|
+| leading space（machine-readable でない / 余分な空白） | **あり** —— `//`＋空白を `//` に |
+| malformed（parse error） | 無し |
+| not specific | 無し |
+| no explanation | 無し |
+| unused candidate | **あり** —— コメント全体を削除、**ただし条件付き** |
+
+削除の fix は `len(linters) <= 1` **のときだけ**付く。
+上流のコメント曰く「カンマ周りの問題と、全 linter が消えてしまう可能性があるから」。
+無条件に付けると**上流が触らない directive を消す** ——
+続き 72 で per-line にした拒否がちょうど捕まえる形だが、
+読むほうが踏むより安い。
+
+#### 1 コメントの edit が 2 行消す理由
+
+`gap/gap.go` の hunk は directive **と次の空行**を消すが、
+TextEdit はコメントの範囲しか指していない。
+空行が消えるのは**適用後に gofmt が走る**から（続き 55）。
+span を改行まで広げると、gofmt が畳まないファイルで**2 行ぶん消す**。
+
+#### 設定が仕事を 2 段に割ってくれた
+
+`nolint-allow-unused` は `allow-unused: true` なので unused の報告が止まり、
+**削除の fix は発火しない**。だから先に leading space の fix だけ実装して
+このケースが単独で緑になることを確認した ——
+**gating を 1 行も書く前に、オフセット → `Pos` の変換が
+edit 1 個のケースで通ることが分かる**。そのあと削除の fix で残り 2 つ。
+3 ケースとも**一発で上流とバイト一致**（21 / 79 / 79 行）。
+
+golden は 3 ケースとも動かなかった（24 / 39 / 16 件、いずれも一致）。
+バイトは変わるが findings は変わらない、という事前の予想どおり ——
+続き 73 で「動かないはず」を確認する側に回ったのが効いている。
+
+#### 測定
+
+このブランチは #152 を base にしている（他セッションの未コミット作業があり
+rebase できなかった）。#154 を含む main に載ると `dupword` のぶんが加わる。
+
+| | このブランチ | main（#154 込み） |
+|---|---|---|
+| fix tier 一致 | 174 → **177** | 175 → **178** |
+| pending | 16 → **13** | 15 → **12** |
+| divergent | 3 | 3 |
+
+golden 193/193、269 スイート / 3,276 テスト、
+ゲート前後で release バイナリの md5 同一。
+
+#### 残り
+
+pending 12 件。最大は `gocritic` の 48 行で、続き 71 の通り
+**13 checker に fix を足して guff 側でも衝突させる**必要があり、
+1 つだけ足すと逆に上流が書かないコード変更を書く。
