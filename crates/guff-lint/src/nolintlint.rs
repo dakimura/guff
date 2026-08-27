@@ -47,6 +47,17 @@ pub struct Directive {
     pub text: String,
     pub line: i64,
     pub col: i64,
+    /// Byte offset of the comment's first character in its file.
+    ///
+    /// Upstream's fixes are spelled in offsets — it writes
+    /// `Pos: token.Pos(pos.Offset)` and relies on golangci's applier casting
+    /// `token.Pos` straight back to an `int` without consulting the `FileSet`.
+    /// guff's applier does consult it (`fix::resolve_edit`), so the offset is
+    /// carried here and converted to a FileSet-wide `Pos` when the fix is
+    /// built. That conversion is the port, not a workaround: the same
+    /// offset-as-`Pos` conflation is what silently disables revive's `--fix`
+    /// upstream (COMPAT-HARDENING 続き 44).
+    pub offset: i64,
     /// Linter names exactly as written — not lowercased, not resolved through
     /// the registry. Empty for a bare `//nolint` and for anything starting
     /// with `all`.
@@ -120,7 +131,7 @@ fn leading_space(text: &str) -> String {
 }
 
 /// Parse one comment, or `None` when it is not a directive.
-pub fn parse(text: &str, line: i64, col: i64) -> Option<Directive> {
+pub fn parse(text: &str, line: i64, col: i64, offset: i64) -> Option<Directive> {
     if !is_directive(text) {
         return None;
     }
@@ -129,6 +140,7 @@ pub fn parse(text: &str, line: i64, col: i64) -> Option<Directive> {
             text: text.to_string(),
             line,
             col,
+            offset,
             linters: Vec::new(),
             malformed: true,
         });
@@ -147,14 +159,37 @@ pub fn parse(text: &str, line: i64, col: i64) -> Option<Directive> {
         text: text.to_string(),
         line,
         col,
+        offset,
         linters,
         malformed: false,
     })
 }
 
+/// One nolintlint finding, and whether upstream attaches a fix to it.
+#[derive(Debug, Clone)]
+pub struct Message {
+    pub text: String,
+    /// `Some(n)`: replace the comment's first `n` bytes with `//`.
+    ///
+    /// Upstream builds this fix once (`removeWhitespace`) and attaches it to
+    /// the leading-space finding **and to nothing else** — the malformed,
+    /// not-specific and no-explanation findings all carry `Pos` alone. `n` is
+    /// upstream's `len(commentMark) + len(leadingSpace)`.
+    pub strip_to: Option<usize>,
+}
+
+impl Message {
+    fn plain(text: String) -> Self {
+        Self {
+            text,
+            strip_to: None,
+        }
+    }
+}
+
 /// The messages nolintlint produces for a directive on its own, in upstream's
 /// order. The unused candidates are not here — see [`crate::nolint`].
-pub fn messages(directive: &Directive, style: &NolintlintStyle) -> Vec<String> {
+pub fn messages(directive: &Directive, style: &NolintlintStyle) -> Vec<Message> {
     let mut out = Vec::new();
     let space = leading_space(&directive.text);
     let prefix = directive_with_optional_leading_space(&directive.text, &space);
@@ -166,25 +201,29 @@ pub fn messages(directive: &Directive, style: &NolintlintStyle) -> Vec<String> {
             "//{}",
             directive.text[2..].trim_start_matches([' ', '\t', '\n', '\x0C', '\r'])
         );
-        out.push(format!(
-            "directive `{}` should be written without leading space as `{expected}`",
-            directive.text
-        ));
+        out.push(Message {
+            text: format!(
+                "directive `{}` should be written without leading space as `{expected}`",
+                directive.text
+            ),
+            // `len("//") + len(leadingSpace)`.
+            strip_to: Some(2 + space.len()),
+        });
     }
 
     if directive.malformed {
-        out.push(format!(
+        out.push(Message::plain(format!(
             "directive `{}` should match `{prefix}[:<comma-separated-linters>] [// <explanation>]`",
             directive.text
-        ));
+        )));
         return out;
     }
 
     if style.require_specific && directive.linters.is_empty() {
-        out.push(format!(
+        out.push(Message::plain(format!(
             "directive `{}` should mention specific linter such as `{prefix}:my-linter`",
             directive.text
-        ));
+        )));
     }
 
     if style.require_explanation && !has_explanation(&directive.text) {
@@ -195,10 +234,10 @@ pub fn messages(directive: &Directive, style: &NolintlintStyle) -> Vec<String> {
                 .any(|l| !style.allow_no_explanation.iter().any(|e| e == l));
         if needs {
             let without = trailing_blank_explanation().replace_all(&directive.text, "");
-            out.push(format!(
+            out.push(Message::plain(format!(
                 "directive `{}` should provide explanation such as `{without} // this is why`",
                 directive.text
-            ));
+            )));
         }
     }
 
@@ -221,13 +260,19 @@ fn has_explanation(text: &str) -> bool {
 mod tests {
     use super::*;
 
+    /// The message texts alone: most of these tests predate `Message` and are
+    /// about wording, not about which finding carries a fix.
+    fn texts(d: &Directive, style: &NolintlintStyle) -> Vec<String> {
+        messages(d, style).into_iter().map(|m| m.text).collect()
+    }
+
     fn style() -> NolintlintStyle {
         NolintlintStyle::default()
     }
 
     #[test]
     fn plain_directive_is_clean() {
-        let d = parse("//nolint:errcheck", 1, 1).expect("directive");
+        let d = parse("//nolint:errcheck", 1, 1, 0).expect("directive");
         assert!(!d.malformed);
         assert_eq!(d.linters, vec!["errcheck".to_string()]);
         assert!(messages(&d, &style()).is_empty());
@@ -235,14 +280,14 @@ mod tests {
 
     #[test]
     fn nolintfoo_is_not_a_directive() {
-        assert!(parse("//nolintfoo", 1, 1).is_none());
+        assert!(parse("//nolintfoo", 1, 1, 0).is_none());
     }
 
     #[test]
     fn leading_space_is_reported_by_default() {
-        let d = parse("// nolint:errcheck", 1, 1).expect("directive");
+        let d = parse("// nolint:errcheck", 1, 1, 0).expect("directive");
         assert_eq!(
-            messages(&d, &style()),
+            texts(&d, &style()),
             vec![
                 "directive `// nolint:errcheck` should be written without leading space as `//nolint:errcheck`"
                     .to_string()
@@ -252,10 +297,10 @@ mod tests {
 
     #[test]
     fn space_before_colon_is_malformed() {
-        let d = parse("//nolint :errcheck", 1, 1).expect("directive");
+        let d = parse("//nolint :errcheck", 1, 1, 0).expect("directive");
         assert!(d.malformed);
         assert_eq!(
-            messages(&d, &style()),
+            texts(&d, &style()),
             vec![
                 "directive `//nolint :errcheck` should match `//nolint[:<comma-separated-linters>] [// <explanation>]`"
                     .to_string()
@@ -266,11 +311,11 @@ mod tests {
     #[test]
     fn linter_names_keep_their_case_and_all_is_dropped() {
         assert_eq!(
-            parse("//nolint:ErrCheck", 1, 1).expect("d").linters,
+            parse("//nolint:ErrCheck", 1, 1, 0).expect("d").linters,
             vec!["ErrCheck".to_string()]
         );
-        assert!(parse("//nolint:all", 1, 1).expect("d").linters.is_empty());
-        assert!(parse("//nolint", 1, 1).expect("d").linters.is_empty());
+        assert!(parse("//nolint:all", 1, 1, 0).expect("d").linters.is_empty());
+        assert!(parse("//nolint", 1, 1, 0).expect("d").linters.is_empty());
     }
 
     #[test]
@@ -280,9 +325,9 @@ mod tests {
             require_specific: true,
             ..NolintlintStyle::default()
         };
-        let d = parse("//nolint", 1, 1).expect("d");
+        let d = parse("//nolint", 1, 1, 0).expect("d");
         assert_eq!(
-            messages(&d, &s),
+            texts(&d, &s),
             vec![
                 "directive `//nolint` should mention specific linter such as `//nolint:my-linter`"
                     .to_string(),
@@ -291,7 +336,7 @@ mod tests {
             ]
         );
 
-        let d = parse("//nolint:errcheck // because", 1, 1).expect("d");
+        let d = parse("//nolint:errcheck // because", 1, 1, 0).expect("d");
         assert!(messages(&d, &s).is_empty());
     }
 
@@ -302,9 +347,9 @@ mod tests {
             allow_no_explanation: vec!["errcheck".into()],
             ..NolintlintStyle::default()
         };
-        assert!(messages(&parse("//nolint:errcheck", 1, 1).expect("d"), &s).is_empty());
+        assert!(messages(&parse("//nolint:errcheck", 1, 1, 0).expect("d"), &s).is_empty());
         assert_eq!(
-            messages(&parse("//nolint:errcheck,govet", 1, 1).expect("d"), &s).len(),
+            messages(&parse("//nolint:errcheck,govet", 1, 1, 0).expect("d"), &s).len(),
             1
         );
     }

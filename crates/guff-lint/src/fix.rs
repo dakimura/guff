@@ -248,7 +248,7 @@ pub fn apply_fixes(
 /// The issue's filename and the one the `FileSet` resolves are produced by
 /// different parts of the run, so they can differ in shape while meaning the
 /// same file. They cannot differ in *which* file — see [`resolve_edit`].
-fn same_file(a: &str, b: &str) -> bool {
+pub(crate) fn same_file(a: &str, b: &str) -> bool {
     let norm = |p: &str| {
         let p = p.replace('\\', "/");
         let mut r = p.as_str();
