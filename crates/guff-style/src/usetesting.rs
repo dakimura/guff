@@ -13,7 +13,9 @@ use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::code;
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_analysis::{
+    AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
 
 use crate::options::UsetestingOptions;
 
@@ -94,16 +96,52 @@ fn go_ge_124(pass: &Pass<'_>) -> bool {
     code::version_compare(&code::module_go_version(pass), "go1.24") >= 0
 }
 
+/// Source-ish text for the pieces `os.CreateTemp`'s fix reassembles.
+///
+/// Upstream prints the rebuilt call with `printer.Fprint(buf,
+/// token.NewFileSet(), g)` — a *fresh* FileSet, so the output is structural
+/// rather than a slice of the original source. Only the shapes that actually
+/// reach this fix are handled; anything else yields `None` and the finding is
+/// reported without a fix, which under-fixes rather than writing a guess.
+///
+/// Deliberately local. `expr_text` exists in four other files in this crate
+/// with four different jobs, and folding them together would replace a faithful
+/// port with an approximation of a different one.
+fn expr_text(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Ident(id) => Some(id.name.clone()),
+        Expr::BasicLit(lit) => Some(lit.value.clone()),
+        Expr::SelectorExpr(sel) => Some(format!("{}.{}", expr_text(&sel.x)?, sel.sel.name)),
+        _ => None,
+    }
+}
+
 fn check_call(
     call: &CallExpr,
     fn_info: &FuncInfo,
     ge_go124: bool,
     options: &UsetestingOptions,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<(u32, String, Option<(u32, u32, String)>)>,
 ) {
     // os.CreateTemp("", …) → t.TempDir()
     if let Some(("os", "CreateTemp")) = sel_pkg_and_name(&call.fun) {
         if options.os_create_temp && call.args.len() == 2 && is_empty_string_lit(&call.args[0]) {
+            // `diagnosticOSCreateTemp` rebuilds the call with the temp dir as
+            // its first argument and replaces the whole `CallExpr`
+            // (usetesting v0.5.0 `report.go:60`). The fix is skipped when the
+            // test function's parameter is unnamed: `arg_name` is then the
+            // placeholder `<t/b>`, and `<t/b>.TempDir()` is not Go.
+            let fix = (!fn_info.arg_name.contains('<'))
+                .then(|| {
+                    let fun = expr_text(&call.fun)?;
+                    let rest = expr_text(&call.args[1])?;
+                    Some((
+                        call.pos().0 as u32,
+                        call.end().0 as u32,
+                        format!("{fun}({}.TempDir(), {rest})", fn_info.arg_name),
+                    ))
+                })
+                .flatten();
             pending.push((
                 call.pos().0 as u32,
                 format!(
@@ -115,6 +153,7 @@ fn check_call(
                     "os.CreateTemp(\"\", ...) could be replaced by os.CreateTemp({}.TempDir(), ...) in {}",
                     fn_info.arg_name, fn_info.name
                 ),
+                fix,
             ));
         }
         return;
@@ -135,12 +174,26 @@ fn check_call(
     };
 
     if let Some(expect) = replacement {
+        // `report` attaches a fix only for `context.*` (report.go:159). Its
+        // comment says the reason is matching return arity, which does not
+        // hold — `os.TempDir()` and `t.TempDir()` have the same arity — but the
+        // code is the specification, and rewriting the `os.*` arms would edit
+        // calls upstream leaves alone.
+        let fix = (pkg == "context" && !fn_info.arg_name.contains('<'))
+            .then(|| {
+                (
+                    call.fun.pos().0 as u32,
+                    call.fun.end().0 as u32,
+                    format!("{}.{expect}", fn_info.arg_name),
+                )
+            });
         pending.push((
             call.fun.pos().0 as u32,
             format!(
                 "{pkg}.{name}() could be replaced by {}.{expect}() in {}",
                 fn_info.arg_name, fn_info.name
             ),
+            fix,
         ));
     }
 }
@@ -150,7 +203,7 @@ fn check_func_body(
     fn_info: &FuncInfo,
     ge_go124: bool,
     options: &UsetestingOptions,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<(u32, String, Option<(u32, u32, String)>)>,
 ) {
     // Upstream's `checkFunc` inspects the whole block, closures included, and
     // keeps the *enclosing* function's name and test-argument name in the
@@ -235,8 +288,24 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         });
     }
 
-    for (pos, message) in pending {
-        pass.reportf(pos, message);
+    for (pos, message, fix) in pending {
+        let Some((from, to, new_text)) = fix else {
+            pass.reportf(pos, message);
+            continue;
+        };
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: String::new(),
+                text_edits: vec![TextEdit {
+                    pos: from,
+                    end: to,
+                    new_text,
+                }],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }

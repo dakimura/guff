@@ -46,3 +46,10 @@ func TestCreateTemp(t *testing.T) {
 func BenchmarkCreateTemp(b *testing.B) {
 	_, _ = os.CreateTemp("", "x")
 }
+
+// An *unnamed* test parameter: upstream's `arg_name` is then the placeholder
+// `<t/b>`, and it withholds the fix rather than writing `<t/b>.TempDir()`,
+// which is not Go. Reported, never rewritten (COMPAT-HARDENING 続き 80).
+func TestUnnamedParam(*testing.T) {
+	_, _ = os.CreateTemp("", "x")
+}
