@@ -852,13 +852,27 @@ impl LintResult {
     }
 
     /// Apply the configured post-processing filter and path display mode.
-    pub fn filter_issues(&self, mut issues: Vec<Issue>) -> Vec<Issue> {
-        issues = self.filter.apply(issues, &self.packages);
+    pub fn filter_issues(&self, issues: Vec<Issue>) -> Vec<Issue> {
+        self.filter_issues_fixing(issues, None).0
+    }
+
+    /// [`filter_issues`], writing `--fix` at golangci's Fixer position.
+    ///
+    /// The fixer belongs *inside* the pipeline, between `Diff` and
+    /// `UniqByLine`, not after it — see `IssueFilter::apply_with_fixer`.
+    /// Running it afterwards left every issue that dedup or a cap dropped
+    /// unfixed, which is the whole of `issues-uniq-by-line-order`.
+    pub fn filter_issues_fixing(
+        &self,
+        issues: Vec<Issue>,
+        fixer: Option<crate::exclude::FixerCtx<'_>>,
+    ) -> (Vec<Issue>, usize) {
+        let (mut issues, fixed) = self.filter.apply_with_fixer(issues, &self.packages, fixer);
         let prefix = self.path_prefix.as_deref();
         for issue in &mut issues {
             issue.filename = format_issue_path(&issue.filename, self.path_mode, prefix);
         }
-        issues
+        (issues, fixed)
     }
 
     /// Issues after applying the configured post-processing filter.
@@ -1090,31 +1104,32 @@ fn run_and_write_inner(
         issues.extend(fmt_result?);
     }
     let (issues, fixes_applied) = {
-        let filtered = result.filter_issues(issues);
-        if opts.fix {
-            if let Some(fset) = result.packages.iter().find_map(|p| p.fset.as_ref()) {
-                {
-                    // Same formatters the `formatters:` config selects, so a
-                    // repo configured for gofumpt gets gofumpt after a fix —
-                    // matching golangci's `NewMetaFormatter(cfg.Formatters)`.
-                    let fmt_cfg = opts.formatters.as_ref();
-                    let meta = guff_fmt::MetaFormatter::new(
-                        fmt_cfg.map(|c| c.enable.as_slice()).unwrap_or(&[]),
-                        fmt_cfg.map(|c| c.gofmt.clone()).unwrap_or_default(),
-                        fmt_cfg.map(|c| c.gofumpt.clone()).unwrap_or_default(),
-                        fmt_cfg.map(|c| c.goimports.clone()).unwrap_or_default(),
-                        fmt_cfg.map(|c| c.gci.clone()).unwrap_or_default(),
-                        fmt_cfg.map(|c| c.golines.clone()).unwrap_or_default(),
-                    )
-                    .ok();
-                    apply_fixes(fset, &filtered, meta.as_ref())?
-                }
-            } else {
-                (filtered, 0)
-            }
+        // Same formatters the `formatters:` config selects, so a repo
+        // configured for gofumpt gets gofumpt after a fix — matching
+        // golangci's `NewMetaFormatter(cfg.Formatters)`.
+        let meta = if opts.fix {
+            let fmt_cfg = opts.formatters.as_ref();
+            guff_fmt::MetaFormatter::new(
+                fmt_cfg.map(|c| c.enable.as_slice()).unwrap_or(&[]),
+                fmt_cfg.map(|c| c.gofmt.clone()).unwrap_or_default(),
+                fmt_cfg.map(|c| c.gofumpt.clone()).unwrap_or_default(),
+                fmt_cfg.map(|c| c.goimports.clone()).unwrap_or_default(),
+                fmt_cfg.map(|c| c.gci.clone()).unwrap_or_default(),
+                fmt_cfg.map(|c| c.golines.clone()).unwrap_or_default(),
+            )
+            .ok()
         } else {
-            (filtered, 0)
-        }
+            None
+        };
+        let fset = result.packages.iter().find_map(|p| p.fset.as_ref());
+        let fixer = match (opts.fix, fset) {
+            (true, Some(fset)) => Some(crate::exclude::FixerCtx {
+                fset,
+                formatter: meta.as_ref(),
+            }),
+            _ => None,
+        };
+        result.filter_issues_fixing(issues, fixer)
     };
     if timing {
         eprintln!("guff: phase issues+filter {:.2}s", tf.elapsed().as_secs_f64());
