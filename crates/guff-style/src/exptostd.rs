@@ -3,8 +3,16 @@
 //! Detects `golang.org/x/exp/{maps,slices,constraints}` usages that can be
 //! replaced by the Go standard library (`maps`, `slices`, `cmp`).
 //!
-//! DEFERRED: SuggestedFix for `maps.Keys` / `maps.Values` (needs type-aware
-//! `slices.AppendSeq` rewrite; upstream uses a `FIXME` placeholder).
+//! `maps.Keys` / `maps.Values` rewrite to `slices.AppendSeq(make([]FIXME, 0,
+//! len(m)), maps.Keys(m))`. The `FIXME` is upstream's own — it carries
+//! `// TODO(ldez) improve the type detection.` beside it (exptostd.go:376) —
+//! so the rewritten tree does not compile. That is upstream's output, and the
+//! fix tier records such trees rather than refusing them
+//! (`compat/fix/README.md`); reproducing it is what compatibility means here.
+//!
+//! Note the message and the fix differ for these two, which is unusual: the
+//! message keeps upstream's documentation placeholders (`[]T`, `data`) while
+//! the fix uses `FIXME` and the call's real argument.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -43,6 +51,9 @@ struct CallReplacement {
 enum CallFixKind {
     None,
     Clear,
+    /// `slices.AppendSeq(make([]FIXME, 0, len($arg)), <original call>)`
+    /// — `suggestedFixForKeysOrValues` (exptostd.go:364).
+    AppendSeq,
 }
 
 #[derive(Clone, Copy)]
@@ -60,7 +71,7 @@ fn maps_replacements() -> &'static HashMap<&'static str, CallReplacement> {
                 CallReplacement {
                     min_go: GO123,
                     text: "slices.AppendSeq(make([]T, 0, len(data)), maps.Keys(data))",
-                    kind: CallFixKind::None,
+                    kind: CallFixKind::AppendSeq,
                 },
             ),
             (
@@ -68,7 +79,7 @@ fn maps_replacements() -> &'static HashMap<&'static str, CallReplacement> {
                 CallReplacement {
                     min_go: GO123,
                     text: "slices.AppendSeq(make([]T, 0, len(data)), maps.Values(data))",
-                    kind: CallFixKind::None,
+                    kind: CallFixKind::AppendSeq,
                 },
             ),
             (
@@ -234,6 +245,37 @@ fn is_exp_pkg(pass: &Pass<'_>, ident: &guff::ast::Ident, import_path: &str) -> b
     pkg_path_of_ident(pass, ident).as_deref() == Some(import_path)
 }
 
+/// Structural text for the pieces the `AppendSeq` fix reassembles.
+///
+/// Upstream prints its rebuilt call with `printer.Fprint(buf,
+/// token.NewFileSet(), s)` — a *fresh* FileSet — so the output is structural
+/// rather than a slice of the original source. Only the shapes that reach this
+/// fix are handled; anything else yields `None`, and the finding is reported
+/// without a fix rather than with a guess.
+///
+/// Local on purpose: `expr_text` exists elsewhere in this crate with different
+/// jobs, and folding them together swaps a faithful port for an approximation
+/// of a different one (続き 62).
+fn expr_text(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Ident(id) => Some(id.name.clone()),
+        Expr::BasicLit(lit) => Some(lit.value.clone()),
+        Expr::SelectorExpr(sel) => Some(format!("{}.{}", expr_text(&sel.x)?, sel.sel.name)),
+        _ => None,
+    }
+}
+
+/// The call's arguments, comma-joined — what upstream feeds to `len(...)`.
+fn call_args_text(call: &CallExpr) -> Option<String> {
+    let parts: Option<Vec<String>> = call.args.iter().map(expr_text).collect();
+    Some(parts?.join(", "))
+}
+
+/// The whole call, as `slices.AppendSeq`'s second argument.
+fn call_text(call: &CallExpr) -> Option<String> {
+    Some(format!("{}({})", expr_text(&call.fun)?, call_args_text(call)?))
+}
+
 fn call_diagnostic(
     call: &CallExpr,
     import_path: &str,
@@ -241,6 +283,24 @@ fn call_diagnostic(
     rp: &CallReplacement,
 ) -> Pending {
     let mut fixes = Vec::new();
+    if rp.kind == CallFixKind::AppendSeq {
+        // Upstream rebuilds the call and prints it with a fresh FileSet
+        // (exptostd.go:364), so the shape is structural: `len()` takes the
+        // original call's arguments, and the whole call becomes the second
+        // argument of `slices.AppendSeq`.
+        if let (Some(args), Some(whole)) = (call_args_text(call), call_text(call)) {
+            fixes.push(SuggestedFix {
+                message: String::new(),
+                text_edits: vec![TextEdit {
+                    pos: call.pos().0 as u32,
+                    end: call.end().0 as u32,
+                    new_text: format!(
+                        "slices.AppendSeq(make([]FIXME, 0, len({args})), {whole})"
+                    ),
+                }],
+            });
+        }
+    }
     if rp.kind == CallFixKind::Clear {
         fixes.push(SuggestedFix {
             message: "Replace with clear(...)".into(),
