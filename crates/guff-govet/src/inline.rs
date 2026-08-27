@@ -17,7 +17,12 @@
 //! Package load uses `Mode::NONE`, which drops lead comments after the package
 //! clause, so local `//go:fix` discovery re-parses with `PARSE_COMMENTS`.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+
+/// A finding, and the edit that inlines it when there is one. The two
+/// `cannot inline` arms below carry `None`: upstream reports those without a
+/// fix because type-parameter inference is not implemented.
+type Pending = Vec<(u32, String, Option<(u32, u32, String)>)>;
 use std::fs;
 use std::sync::OnceLock;
 
@@ -32,15 +37,29 @@ use guff_analysis::code::{
     call_name, effective_file_go_version, object_pkg_path, toolchain_go_version, version_compare,
 };
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_analysis::{
+    AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
 use guff_types::arena::{ObjectData, ObjectId};
 use guff_types::scope::lookup as scope_lookup;
 
 use crate::expreq::unparen;
 
 /// Stdlib consts with `//go:fix inline` that we cannot discover from export data.
-fn is_known_stdlib_inlinable(pkg_path: &str, name: &str) -> bool {
-    matches!((pkg_path, name), ("reflect", "Ptr"))
+/// Stdlib consts carrying `//go:fix inline`, and what they inline to.
+///
+/// Upstream reads both the set *and* the target from the declaration. guff
+/// cannot: `reflect`'s source is not in export data, so the pair is written
+/// down here — which is what the predicate this replaces already did for the
+/// set half. The exposure is unchanged and pre-existing: `compat/drift.py`
+/// watches finding sets, the linter inventory and config acceptance, not
+/// x/tools' inlinable set, so a constant added upstream is invisible until some
+/// corpus file uses it.
+fn known_stdlib_inline_target(pkg_path: &str, name: &str) -> Option<&'static str> {
+    match (pkg_path, name) {
+        ("reflect", "Ptr") => Some("reflect.Pointer"),
+        _ => None,
+    }
 }
 
 /// Generic `//go:fix inline` funcs in `golang.org/x/exp/{maps,slices}`.
@@ -106,12 +125,28 @@ fn rhs_is_named_const(val: &Expr) -> bool {
     matches!(unparen(val), Expr::Ident(_) | Expr::SelectorExpr(_))
 }
 
+/// The inline target, as upstream's `incon.RHSName` spells it.
+///
+/// x/tools reads it from the `//go:fix inline` declaration rather than any
+/// table (`passes/inline/inline.go:559`), which is why the local arm needs no
+/// new data: `rhs_is_named_const` above already looks at this expression.
+fn rhs_target(val: &Expr) -> Option<String> {
+    match unparen(val) {
+        Expr::Ident(id) => Some(id.name.clone()),
+        Expr::SelectorExpr(sel) => match unparen(&sel.x) {
+            Expr::Ident(pkg) => Some(format!("{}.{}", pkg.name, sel.sel.name)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 fn rhs_is_iota(val: &Expr) -> bool {
     matches!(unparen(val), Expr::Ident(id) if id.name == "iota")
 }
 
 /// Collect LHS names of consts marked `//go:fix inline` in a reparsed file.
-fn go_fix_const_names(file: &guff::ast::File) -> Vec<String> {
+fn go_fix_const_names(file: &guff::ast::File) -> Vec<(String, String)> {
     let mut names = Vec::new();
     for decl in &file.decls {
         let Decl::GenDecl(GenDecl {
@@ -144,15 +179,18 @@ fn go_fix_const_names(file: &guff::ast::File) -> Vec<String> {
                 if rhs_is_iota(&values[i]) || !rhs_is_named_const(&values[i]) {
                     continue;
                 }
-                names.push(name.name.clone());
+                let Some(target) = rhs_target(&values[i]) else {
+                    continue;
+                };
+                names.push((name.name.clone(), target));
             }
         }
     }
     names
 }
 
-fn collect_inlinable_consts(pass: &Pass<'_>) -> HashSet<ObjectId> {
-    let mut out = HashSet::new();
+fn collect_inlinable_consts(pass: &Pass<'_>) -> HashMap<ObjectId, String> {
+    let mut out = HashMap::new();
     let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
         return out;
     };
@@ -196,12 +234,12 @@ fn collect_inlinable_consts(pass: &Pass<'_>) -> HashSet<ObjectId> {
         let Ok(parsed) = parse_file(&re_fset, name, src, PARSE_COMMENTS) else {
             continue;
         };
-        for const_name in go_fix_const_names(&parsed) {
+        for (const_name, target) in go_fix_const_names(&parsed) {
             let Some(obj) = scope_lookup(&artifacts.scopes, scope, &const_name) else {
                 continue;
             };
             if matches!(artifacts.objects.get(obj), ObjectData::Const(_)) {
-                out.insert(obj);
+                out.insert(obj, target);
             }
         }
     }
@@ -243,41 +281,36 @@ fn package_has_go_fix_inline(pass: &Pass<'_>) -> bool {
     false
 }
 
-fn is_inlinable_const(
+/// The text `obj` inlines to, or `None` when it is not inlinable.
+fn inline_target(
     pass: &Pass<'_>,
     obj: ObjectId,
-    local: &mut Option<HashSet<ObjectId>>,
-) -> bool {
-    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
-        return false;
-    };
+    local: &mut Option<HashMap<ObjectId, String>>,
+) -> Option<String> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
     if !matches!(artifacts.objects.get(obj), ObjectData::Const(_)) {
-        return false;
+        return None;
     }
     let name = obj.name(&artifacts.objects);
     if let Some(pkg_path) = object_pkg_path(pass, obj) {
-        if is_known_stdlib_inlinable(&pkg_path, name) {
-            return true;
+        if let Some(target) = known_stdlib_inline_target(&pkg_path, name) {
+            return Some(target.to_string());
         }
     }
     // Local `//go:fix inline` — same PackageId as the package under analysis
     // (path strings are often empty for the current package).
-    let Some(obj_pkg) = obj.pkg(&artifacts.objects) else {
-        return false; // universe / unpackaged
-    };
-    let Some(type_pkg) = pass.type_pkg() else {
-        return false;
-    };
+    let obj_pkg = obj.pkg(&artifacts.objects)?; // universe / unpackaged
+    let type_pkg = pass.type_pkg()?;
     if obj_pkg != type_pkg {
-        return false;
+        return None;
     }
     let set = local.get_or_insert_with(|| {
         if !package_has_go_fix_inline(pass) {
-            return HashSet::new();
+            return HashMap::new();
         }
         collect_inlinable_consts(pass)
     });
-    set.contains(&obj)
+    set.get(&obj).cloned()
 }
 
 fn format_expr_name(expr: &Expr) -> String {
@@ -312,7 +345,7 @@ fn is_known_ioutil_gofix_inline(name: &str) -> bool {
     )
 }
 
-fn check_exp_gofix_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+fn check_exp_gofix_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
     let Some(name) = call_name(pass, &call.fun) else {
         return;
     };
@@ -325,6 +358,7 @@ fn check_exp_gofix_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32
         pending.push((
             call.lparen.0 as u32,
             "cannot inline: type parameter inference is not yet supported".into(),
+            None,
         ));
     }
 }
@@ -339,7 +373,7 @@ fn check_ioutil_go_version(
     pass: &Pass<'_>,
     call: &CallExpr,
     stmt_calls: &HashSet<i64>,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     if stmt_calls.contains(&call.lparen.0) {
         return;
@@ -381,6 +415,7 @@ fn check_ioutil_go_version(
     pending.push((
         pos,
         format!("cannot inline call to {display} (declared using {callee}) into a file using {caller}"),
+        None,
     ));
 }
 
@@ -400,8 +435,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     // Local `//go:fix inline` discovery re-reads sources; defer until a
     // non-stdlib candidate appears (prometheus typically only hits reflect.Ptr).
-    let mut local: Option<HashSet<ObjectId>> = None;
-    let mut pending = Vec::new();
+    let mut local: Option<HashMap<ObjectId, String>> = None;
+    let mut pending: Pending = Vec::new();
     // Only visit CallExpr when a known call-site diagnostic can fire.
     let visit_exp = package_imports_exp_gofix(pass);
     let visit_ioutil = package_imports_ioutil(pass);
@@ -442,13 +477,17 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 let Some(obj) = info.uses.get(&sel.sel.id).copied() else {
                     return;
                 };
-                if !is_inlinable_const(pass, obj, &mut local) {
+                let Some(target) = inline_target(pass, obj, &mut local) else {
                     return;
-                }
+                };
                 let name = format_expr_name(&Expr::SelectorExpr(sel.clone()));
+                // `reportInline` spans the *selector* when the name is
+                // qualified — `cur.ParentEdgeKind() == edge.SelectorExpr_Sel`
+                // upstream (inline.go:554) — not just the `Sel` ident.
                 pending.push((
                     sel.x.pos().0 as u32,
                     format!("Constant {name} should be inlined"),
+                    Some((sel.x.pos().0 as u32, sel.sel.end().0 as u32, target)),
                 ));
             }
             NodeRef::Ident(id) => {
@@ -463,20 +502,37 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 let Some(obj) = info.uses.get(&id.id).copied() else {
                     return;
                 };
-                if !is_inlinable_const(pass, obj, &mut local) {
+                let Some(target) = inline_target(pass, obj, &mut local) else {
                     return;
-                }
+                };
                 pending.push((
                     id.pos().0 as u32,
                     format!("Constant {} should be inlined", id.name),
+                    Some((id.pos().0 as u32, id.end().0 as u32, target)),
                 ));
             }
             _ => {}
         }
     });
 
-    for (pos, message) in pending {
-        pass.reportf(pos, message);
+    for (pos, message, fix) in pending {
+        let Some((from, to, new_text)) = fix else {
+            pass.reportf(pos, message);
+            continue;
+        };
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: String::new(),
+                text_edits: vec![TextEdit {
+                    pos: from,
+                    end: to,
+                    new_text,
+                }],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }
