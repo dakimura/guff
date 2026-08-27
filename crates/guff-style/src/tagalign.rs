@@ -4,15 +4,28 @@
 //! Defaults match golangci-lint: `align=true`, `sort=true`, `strict=false`, empty `order`
 //! (alphabetical tag keys).
 //!
-//! DEFERRED: SuggestedFix; StrictStyle missing-key column padding.
+//! The fix replaces the whole tag literal with the aligned form. Upstream
+//! builds it as `fmt.Sprintf("`%s`", unquoteTag)` and puts the same
+//! `unquoteTag` in the message (`tagalign.go:298`), so the replacement is the
+//! message's tail in backticks — a string golden already validates.
+//!
+//! DEFERRED: StrictStyle missing-key column padding; the no-op fix upstream
+//! emits on a malformed tag (`replaceStr` is `field.Tag.Value`, the tag
+//! replaced by itself, which still makes upstream rewrite and gofmt the file —
+//! the `extras.go` mechanism of 続き 71). No fixture reaches it.
 
 use std::sync::OnceLock;
+
+/// A finding, and the tag literal's replacement when there is one.
+type Pending = Vec<(u32, String, Option<(u32, String)>)>;
 
 use guff::ast::{Field, StructType};
 use guff::position::FileSet;
 use guff::walk::{self, NodeRef};
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_analysis::{
+    AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
 
 use crate::options::TagalignOptions;
 
@@ -152,7 +165,7 @@ fn find_consecutive_groups<'a>(
     (single, groups)
 }
 
-fn process_group(fields: &[&Field], options: &TagalignOptions, pending: &mut Vec<(u32, String)>) {
+fn process_group(fields: &[&Field], options: &TagalignOptions, pending: &mut Pending) {
     let mut tags_group: Vec<Vec<Tag>> = Vec::new();
     let mut not_sorted_group: Vec<Vec<Tag>> = Vec::new();
     let mut kept: Vec<&Field> = Vec::new();
@@ -163,6 +176,7 @@ fn process_group(fields: &[&Field], options: &TagalignOptions, pending: &mut Vec
             pending.push((
                 tag_lit.pos().0 as u32,
                 "bad syntax for struct tag value".into(),
+                None,
             ));
             continue;
         };
@@ -176,7 +190,7 @@ fn process_group(fields: &[&Field], options: &TagalignOptions, pending: &mut Vec
                 kept.push(field);
             }
             Err(e) => {
-                pending.push((tag_lit.pos().0 as u32, e));
+                pending.push((tag_lit.pos().0 as u32, e, None));
             }
         }
     }
@@ -219,16 +233,18 @@ fn process_group(fields: &[&Field], options: &TagalignOptions, pending: &mut Vec
         pending.push((
             tag_lit.pos().0 as u32,
             format!("tag is not aligned, should be: {new_tag}"),
+            Some((tag_lit.end().0 as u32, new_value)),
         ));
     }
 }
 
-fn process_single(field: &Field, options: &TagalignOptions, pending: &mut Vec<(u32, String)>) {
+fn process_single(field: &Field, options: &TagalignOptions, pending: &mut Pending) {
     let tag_lit = field.tag.as_ref().unwrap();
     let Some(content) = unquote_tag_lit(&tag_lit.value) else {
         pending.push((
             tag_lit.pos().0 as u32,
             "bad syntax for struct tag value".into(),
+            None,
         ));
         return;
     };
@@ -236,6 +252,7 @@ fn process_single(field: &Field, options: &TagalignOptions, pending: &mut Vec<(u
         pending.push((
             tag_lit.pos().0 as u32,
             "bad syntax for struct tag value".into(),
+            None,
         ));
         return;
     };
@@ -259,7 +276,10 @@ fn process_single(field: &Field, options: &TagalignOptions, pending: &mut Vec<(u
     }
     pending.push((
         tag_lit.pos().0 as u32,
+        // The space before the comma is upstream's, not a slip here
+        // (`tagalign.go:336`), and golden pins both spellings.
         format!("tag is not aligned , should be: {joined}"),
+        Some((tag_lit.end().0 as u32, new_value)),
     ));
 }
 
@@ -267,7 +287,7 @@ fn check_struct(
     fset: &FileSet,
     st: &StructType,
     options: &TagalignOptions,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     if st.fields.list.is_empty() {
         return;
@@ -295,7 +315,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         return Ok(None);
     }
 
-    let mut pending = Vec::new();
+    let mut pending: Pending = Vec::new();
     let fset = pass.fset().clone();
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
@@ -309,8 +329,26 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         });
     }
 
-    for (pos, message) in pending {
-        pass.reportf(pos, message);
+    for (pos, message, replacement) in pending {
+        // `field.Tag.Pos()..field.Tag.End()` — the whole literal, backticks
+        // included, which is why the replacement carries its own.
+        let Some((end, new_value)) = replacement else {
+            pass.reportf(pos, message);
+            continue;
+        };
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: String::new(),
+                text_edits: vec![TextEdit {
+                    pos,
+                    end,
+                    new_text: new_value,
+                }],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }
