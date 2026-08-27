@@ -89,3 +89,19 @@ func ErrWithBlankLine(v string) error {
 }
 
 func parse(string) (int, error) { return 0, nil }
+
+// Block leading/trailing whitespace: unmeasured until 2026-08-27. These are the
+// two v5 sites whose fix is a *removal* with an empty replacement rather than an
+// inserted newline, and nothing in this fixture exercised them
+// (COMPAT-HARDENING 続き 77).
+func BlockLeadingWSV5() {
+
+	x := 1
+	_ = x
+}
+
+func BlockTrailingWSV5() {
+	x := 1
+	_ = x
+
+}

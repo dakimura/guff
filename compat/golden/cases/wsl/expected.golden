@@ -9,3 +9,7 @@
 bad.go:7:2:wsl::only one cuddle assignment allowed before if statement
 bad.go:10:3:wsl::return statements should not be cuddled if block has more than two lines
 bad.go:12:2:wsl::assignments should only be cuddled with other assignments
+bad.go:20:24:wsl::block should not start with a whitespace
+bad.go:30:1:wsl::block should not end with a whitespace (or comment)
+bad.go:32:21:wsl::block should not start with a whitespace
+bad.go:37:1:wsl::block should not end with a whitespace (or comment)

@@ -26,3 +26,24 @@
  	four := 4
  	_ = four
  }
+@@ -18,7 +21,6 @@
+ // report sites whose fix range is *not* their report position were never
+ // exercised (COMPAT-HARDENING 続き 77).
+ func BlockLeadingWS() {
+-
+ 	x := 1
+ 	_ = x
+ }
+@@ -26,12 +28,9 @@
+ func BlockTrailingWS() {
+ 	x := 1
+ 	_ = x
+-
+ }
+ 
+ func BlockBothWS() {
+-
+ 	x := 1
+ 	_ = x
+-
+ }
