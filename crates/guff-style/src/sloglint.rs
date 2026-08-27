@@ -8,10 +8,21 @@
 //! Defaults match golangci-lint `linters.settings.sloglint`
 //! (`no-mixed-args: true`; other checks off).
 //!
-//! DEFERRED: SuggestedFix for `context: scope`, discard-handler, and
-//! key-naming-case; Go 1.24 version gate for discard-handler.
+//! Fixes: `key-naming-case` re-quotes the re-cased key with a Go-exact
+//! `strconv.Quote`, and `context: scope` rewrites `Info(` into
+//! `InfoContext(ctx, `. `context: all` reports **without** a fix — upstream
+//! says why in one line: "we don't know whether there is a context in the
+//! scope" (`function_checks.go:62`).
+//!
+//! DEFERRED: SuggestedFix for discard-handler, together with its Go 1.24
+//! version gate. `slog.DiscardHandler` landed in Go 1.24 and this case's module
+//! is `go 1.22`, so the arm is unreachable from the fixture — shipping the fix
+//! would be shipping code no gate measures.
 
 use std::sync::OnceLock;
+
+/// A finding, and the edit that fixes it when there is one.
+type Pending = Vec<(u32, String, Option<(u32, u32, String)>)>;
 
 use guff::ast::{BasicLit, CallExpr, CompositeLit, Expr, FieldList, FuncType, Ident};
 use guff::scope::{ObjDecl, ObjKind};
@@ -19,7 +30,9 @@ use guff::token::Token;
 use guff::walk::{self, NodeRef, Visitor};
 use guff_analysis::code;
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_analysis::{
+    AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
 use guff_types::alias::unalias_readonly;
 use guff_types::arena::{ObjectData, TypeData};
 use guff_types::basic::BasicKind;
@@ -311,7 +324,12 @@ fn find_func<'a>(funcs: &'a [Func], name: &str) -> Option<(usize, &'a Func)> {
 }
 
 struct CtxParam {
-    name: String,
+    /// The text to pass as the context argument: the parameter's own name, or
+    /// `<name>.Context()` when it is an `*http.Request`. Upstream builds the
+    /// same string as `ctxArg` (`function_checks.go:88`), and
+    /// `collect_ctx_params` below already tells the two apart — it just kept
+    /// the name.
+    arg: String,
 }
 
 fn collect_ctx_params(pass: &Pass<'_>, params: &FieldList) -> Vec<CtxParam> {
@@ -333,9 +351,13 @@ fn collect_ctx_params(pass: &Pass<'_>, params: &FieldList) -> Vec<CtxParam> {
             || name == "*net/http.Request"
             || (name.starts_with('*') && name.ends_with("/http.Request"));
         if ok {
-            out.push(CtxParam {
-                name: field.names[0].name.clone(),
-            });
+            let param = field.names[0].name.clone();
+            let arg = if name == "context.Context" {
+                param
+            } else {
+                format!("{param}.Context()")
+            };
+            out.push(CtxParam { arg });
         }
     }
     out
@@ -352,13 +374,14 @@ fn analyze_key(
     pass: &Pass<'_>,
     opts: &SloglintOptions,
     key: &Expr,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     if opts.no_raw_keys && !is_const_key(pass, key) {
         let name = key_name(pass, key).unwrap_or_else(|| "…".into());
         pending.push((
             key.pos().0 as u32,
             format!("the {name:?} key should be a constant"),
+            None,
         ));
     }
     if let Some(case_name) = opts.key_naming_case.as_deref() {
@@ -372,6 +395,15 @@ fn analyze_key(
                     // `PascalCase`. Printing the raw setting plus " case"
                     // agrees with none of them.
                     format!("keys should be written in {}", cf(&format!("{case_name} case"))),
+                    // `strconv.AppendQuote(nil, caseFn(name))` — the re-cased
+                    // key, re-quoted the way Go spells a string literal. The
+                    // Go-exact quoter is in `guff-gostd` because `dupword`
+                    // needed it (続き 74); this is the second caller.
+                    Some((
+                        key.pos().0 as u32,
+                        key.end().0 as u32,
+                        guff_gostd::strconv::quote(&cf(&name)),
+                    )),
                 ));
             }
         }
@@ -382,6 +414,7 @@ fn analyze_key(
                 pending.push((
                     key.pos().0 as u32,
                     format!("the {name:?} key is not allowed and should not be used"),
+                    None,
                 ));
             }
         }
@@ -392,6 +425,7 @@ fn analyze_key(
                 pending.push((
                     key.pos().0 as u32,
                     format!("the {name:?} key is forbidden and should not be used"),
+                    None,
                 ));
             }
         }
@@ -402,7 +436,7 @@ fn analyze_attr_key_from_lit(
     pass: &Pass<'_>,
     opts: &SloglintOptions,
     lit: &CompositeLit,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     match lit.elts.len() {
         1 => {
@@ -465,12 +499,13 @@ fn analyze_message(
     pass: &Pass<'_>,
     opts: &SloglintOptions,
     msg: &Expr,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     if opts.static_msg && !is_static_msg(pass, msg) {
         pending.push((
             msg.pos().0 as u32,
             "message should be a string literal or a constant".into(),
+            None,
         ));
     }
     let Some(style) = opts.msg_style.as_deref() else {
@@ -496,7 +531,7 @@ fn analyze_message(
         _ => false,
     };
     if bad {
-        pending.push((msg.pos().0 as u32, format!("message should be {style}")));
+        pending.push((msg.pos().0 as u32, format!("message should be {style}"), None));
     }
 }
 
@@ -505,7 +540,7 @@ fn analyze_arguments(
     opts: &SloglintOptions,
     call: &CallExpr,
     args: &[Expr],
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     let mut keys = Vec::new();
     let mut attrs = Vec::new();
@@ -542,6 +577,7 @@ fn analyze_arguments(
             pending.push((
                 attr.pos().0 as u32,
                 "key-value pairs and attributes should not be mixed".into(),
+                None,
             ));
             break;
         }
@@ -559,13 +595,14 @@ fn analyze_arguments(
             pending.push((
                 call.pos().0 as u32,
                 format!("use {r} with key-value pairs instead"),
+                None,
             ));
         } else {
             for attr in &attrs {
                 if is_group_call(pass, attr) {
                     continue;
                 }
-                pending.push((attr.pos().0 as u32, "attributes should not be used".into()));
+                pending.push((attr.pos().0 as u32, "attributes should not be used".into(), None));
                 break;
             }
         }
@@ -583,11 +620,13 @@ fn analyze_arguments(
             pending.push((
                 call.pos().0 as u32,
                 format!("use {r} with attributes instead"),
+                None,
             ));
         } else if let Some(key) = keys.first() {
             pending.push((
                 key.pos().0 as u32,
                 "key-value pairs should not be used".into(),
+                None,
             ));
         }
     }
@@ -605,6 +644,7 @@ fn analyze_arguments(
                         pending.push((
                             arg.pos().0 as u32,
                             "arguments should be put on separate lines".into(),
+                            None,
                         ));
                         break;
                     }
@@ -625,7 +665,7 @@ fn analyze_function(
     call: &CallExpr,
     name: &str,
     ctx_stack: &[Vec<CtxParam>],
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     if let Some(mode) = opts.no_global.as_deref() {
         let base = method_base_name(name);
@@ -648,6 +688,7 @@ fn analyze_function(
                         pending.push((
                             id.pos().0 as u32,
                             "default logger should not be used".into(),
+                            None,
                         ));
                     } else if mode == "all" {
                         if let (Some(info), Some(artifacts)) =
@@ -660,6 +701,7 @@ fn analyze_function(
                                         pending.push((
                                             id.pos().0 as u32,
                                             "global logger should not be used".into(),
+                                            None,
                                         ));
                                     }
                                 }
@@ -679,15 +721,23 @@ fn analyze_function(
                     pending.push((
                         sel.sel.pos().0 as u32,
                         format!("{base}Context should be used instead"),
+                        None,
                     ));
                 } else if mode == "scope" {
                     for params in ctx_stack.iter().rev() {
                         if !params.is_empty() {
-                            // DEFERRED: SuggestedFix inserting ctx arg
-                            let _ = &params[0].name;
+                            // The span runs from the method name to *past the
+                            // opening paren* and the replacement carries its own
+                            // `(`, so `Info(` becomes `InfoContext(ctx, ` in one
+                            // edit (`function_checks.go:96`).
                             pending.push((
                                 sel.sel.pos().0 as u32,
                                 format!("{base}Context should be used instead"),
+                                Some((
+                                    sel.sel.pos().0 as u32,
+                                    call.lparen.0 as u32 + 1,
+                                    format!("{base}Context({}, ", params[0].arg),
+                                )),
                             ));
                             break;
                         }
@@ -718,6 +768,7 @@ fn analyze_function(
                         pending.push((
                             call.pos().0 as u32,
                             "use slog.DiscardHandler instead".into(),
+                            None,
                         ));
                     }
                 }
@@ -732,7 +783,7 @@ fn check_call(
     funcs: &[Func],
     call: &CallExpr,
     ctx_stack: &[Vec<CtxParam>],
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     let Some(name) = callee_name(pass, call) else {
         return;
@@ -788,7 +839,7 @@ struct SlogVisitor<'a, 'p> {
     opts: &'a SloglintOptions,
     funcs: &'a [Func],
     ctx_stack: Vec<Vec<CtxParam>>,
-    pending: &'a mut Vec<(u32, String)>,
+    pending: &'a mut Pending,
 }
 
 impl<'a, 'p> Visitor<'a> for SlogVisitor<'a, 'p> {
@@ -849,7 +900,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     }
 
     let funcs = all_funcs(&options);
-    let mut pending = Vec::new();
+    let mut pending: Pending = Vec::new();
 
     for file in pass.files() {
         let mut visitor = SlogVisitor {
@@ -862,8 +913,24 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         walk::walk(&mut visitor, NodeRef::File(file));
     }
 
-    for (pos, msg) in pending {
-        pass.reportf(pos, &msg);
+    for (pos, msg, fix) in pending {
+        let Some((from, to, new_text)) = fix else {
+            pass.reportf(pos, &msg);
+            continue;
+        };
+        pass.report(Diagnostic {
+            pos,
+            message: msg,
+            suggested_fixes: vec![SuggestedFix {
+                message: String::new(),
+                text_edits: vec![TextEdit {
+                    pos: from,
+                    end: to,
+                    new_text,
+                }],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }
