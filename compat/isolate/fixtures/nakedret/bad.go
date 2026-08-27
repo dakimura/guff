@@ -13,3 +13,13 @@ func AlsoBad() (s string, err error) {
 
 	return
 }
+
+// Grouped result names are one AST field with two Names, and upstream's fix
+// loops over `Results.List` *and then* `result.Names`. A field-only loop
+// renders `return a` and silently drops `b` (COMPAT-HARDENING 続き 79).
+func GroupedNames() (a, b int) {
+	a = 1
+	b = 2
+
+	return
+}

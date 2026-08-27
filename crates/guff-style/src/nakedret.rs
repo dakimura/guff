@@ -3,7 +3,8 @@
 //!
 //! Default matches golangci-lint: `max-func-lines=30`.
 //!
-//! DEFERRED: SuggestedFix for explicit named returns.
+//! The fix replaces the naked `return` with the function's result names,
+//! rendered in declaration order (`nakedret.go:227 nakedReturnFix`).
 
 use std::sync::OnceLock;
 
@@ -11,7 +12,9 @@ use guff::ast::{FuncType, ReturnStmt};
 use guff::position::FileSet;
 use guff::walk::{self, NodeRef, Visitor};
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_analysis::{
+    AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
 
 use crate::options::NakedretOptions;
 
@@ -19,6 +22,27 @@ struct FuncInfo {
     name: String,
     func_length: usize,
     report_naked: bool,
+    /// Every result name, flattened in declaration order.
+    ///
+    /// Upstream loops `Results.List` **and then** `result.Names`
+    /// (`nakedret.go:229`), so a grouped `(a, b int)` — one field, two names —
+    /// contributes both. Iterating fields alone renders `return a` and drops
+    /// `b` silently, which is why the fixture gained a grouped case
+    /// (COMPAT-HARDENING 続き 79).
+    result_names: Vec<String>,
+}
+
+/// `nakedReturnFix`: the result names, in order. Only `nil` idents are skipped
+/// upstream, so a blank `_` result name is carried through as written.
+fn result_names(func_type: &FuncType) -> Vec<String> {
+    let Some(results) = &func_type.results else {
+        return Vec::new();
+    };
+    results
+        .list
+        .iter()
+        .flat_map(|field| field.names.iter().map(|n| n.name.clone()))
+        .collect()
 }
 
 struct ReturnsVisitor<'a> {
@@ -27,7 +51,7 @@ struct ReturnsVisitor<'a> {
     skip_test_files: bool,
     current_file: String,
     functions: Vec<FuncInfo>,
-    pending: &'a mut Vec<(u32, String)>,
+    pending: &'a mut Vec<(u32, String, Option<(u32, u32, String)>)>,
 }
 
 fn has_named_returns(func_type: &FuncType) -> bool {
@@ -66,6 +90,7 @@ fn push_func(
         name,
         func_length: length,
         report_naked: length > max_func_lines && has_named_returns(func_type),
+        result_names: result_names(func_type),
     });
 }
 
@@ -129,11 +154,21 @@ fn check_return(v: &mut ReturnsVisitor<'_>, ret: &ReturnStmt) {
     if !fun.report_naked || !ret.results.is_empty() {
         return;
     }
+    let names = fun.result_names.join(", ");
     let fun_name = nested_func_name(&v.functions);
     let length = fun.func_length;
+    // `Pos: s.Pos(), End: s.End()` — the whole `return`, replaced by the
+    // explicit form. go/ast's `ReturnStmt.End()` is `Return + len("return")`
+    // when there are no results, and the guard above is exactly that case.
+    let end = ret.return_.0 as u32 + "return".len() as u32;
     v.pending.push((
         ret.return_.0 as u32,
         format!("naked return in func `{fun_name}` with {length} lines of code"),
+        Some((
+            ret.return_.0 as u32,
+            end,
+            format!("return {names}"),
+        )),
     ));
 }
 
@@ -172,8 +207,24 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         walk::walk(&mut visitor, NodeRef::File(file));
     }
 
-    for (pos, message) in pending {
-        pass.reportf(pos, message);
+    for (pos, message, fix) in pending {
+        let Some((from, to, new_text)) = fix else {
+            pass.reportf(pos, message);
+            continue;
+        };
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: "explicit return statement".into(),
+                text_edits: vec![TextEdit {
+                    pos: from,
+                    end: to,
+                    new_text,
+                }],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }

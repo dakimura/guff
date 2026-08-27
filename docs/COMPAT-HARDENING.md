@@ -14476,3 +14476,101 @@ nolintlint の fix（続き 75）は、まさに編集する対象のファイ�
 代わりに `git worktree` で main の別チェックアウトを作り、
 `CARGO_TARGET_DIR` を分けた（共有すると別コミットのオブジェクトが混ざり、
 `check` は通って `build` だけ落ちる）。
+
+---
+
+### 2026-08-27（続き 79）— `nakedret` と `embeddedstructfieldcheck`。**両方とも判断材料は既に計算済みで、fix に配線されていなかっただけ**
+
+続き 78 の続き。pending 9 件のうち 7 件は 1 行も書いていない
+（各 linter の `DEFERRED: SuggestedFix`）。小さい 2 つを片付ける。
+
+#### 上流の fix はどちらも 5 行程度
+
+`embeddedstructfieldcheck` v0.4.0 `internal/diag.go:16`:
+
+```go
+suggestedPos := firstRegularField.Pos()
+if firstRegularField.Doc != nil {
+    suggestedPos = firstRegularField.Doc.Pos()      // ← 2 本目の枝
+}
+TextEdits: []analysis.TextEdit{{ Pos: suggestedPos, NewText: []byte("\n\n") }}
+```
+
+`nakedret` v2.0.6 `nakedret.go:227`:
+
+```go
+for _, result := range funcType.Results.List {
+    for _, ident := range result.Names { … }        // ← 二重ループ
+}
+TextEdits: []analysis.TextEdit{{ Pos: s.Pos(), End: s.End(), NewText: printed }}
+```
+
+#### fixture が通していなかった枝を先に足した
+
+| linter | fixture が持っていた形 | 足りなかった枝 |
+|---|---|---|
+| embeddedstructfieldcheck | doc コメント無しの最初の通常フィールド | **`Doc.Pos()`** |
+| nakedret | `(n int)` と `(s string, err error)` | **`(a, b int)`（1 field 2 names）** |
+
+上流に訊いた結果:
+
+```
+type DocumentedFirst struct {
+ 	A
+ 	B
++
+ 	// V is documented, …
+ 	V int
+```
+
+**空行はコメントの「上」に入る** —— コメントとフィールドの間ではない。
+
+```
+func GroupedNames() (a, b int) {
+-	return
++	return a, b
+```
+
+**`return a, b`。** field だけを回す実装なら `return a` を書いて `b` を黙って落とす。
+golden は動かない（finding は同じ）ので、**既存のどのゲートも気付かない**。
+
+#### そして両方とも、判断材料は既にあった
+
+- `embeddedstructfieldcheck` は**検出**のために
+  `next_line` を `doc.pos()` か `first_reg.pos()` かで既に分けていた。
+  fix はその同じ式を使うだけ。
+- `nakedret` の `has_named_returns` は
+  `results.list → field.names` を歩いて**名前を捨てて** bool だけ返していた。
+  `FuncInfo` にフィールドを 1 つ足して同じループの結果を持たせるだけ。
+
+**今セッションの 8 本中ほぼ全部がこの形**だった ——
+`needs_float64_wrap` は呼び出し位置は正しく述語だけが違い、
+nolintlint の `Directive` はオフセットを計算して捨てており、
+wsl は `both` / `assigned_above` / `first_in_block` を fix 位置に使っておらず、
+gocritic の message は置換後テキストそのものを組み立てていた。
+**新しく計算するものはほとんど無く、既にあるものを配線し直す作業だった。**
+
+#### 細部 1 つ
+
+`ReturnStmt` に `end()` が無い。推測せず go/ast の定義を使った ——
+結果が無いとき `End()` は `Return + len("return")` で、
+naked return を選んだガードがまさにその条件。
+
+#### 測定
+
+| | 続き 78 後 | 今回 |
+|---|---|---|
+| fix tier 一致 | 181 | **183** |
+| pending | 9 | **7** |
+| `nakedret` | 0 / 18 | **27 / 27**（fixture 拡張後） |
+| `embeddedstructfieldcheck` | 0 / 9 | **18 / 18**（同上） |
+| ファイルを書き換えるケース | 55 | **57** |
+
+golden 193/193、271 スイート / 3,281 テスト、ゲート前後で md5 同一。
+
+#### 残り
+
+pending 7 件・96 行。1 行も書いていないのは
+`sloglint` 18 / `usetesting` 14 / `tagalign` 13 / `noinlineerr` 12。
+部分的なのは `govet` 18 / `exptostd` 12 / `gocritic` 9
+（最後のは `go/doc/comment` 移植待ち、続き 76）。

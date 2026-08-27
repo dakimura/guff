@@ -10,10 +10,19 @@
 
 --- a/bad.go
 +++ b/bad.go
-@@ -19,5 +19,6 @@
+@@ -19,6 +19,7 @@
  type Ok struct {
  	A
  	B
 +
+ 	V int
+ }
+ 
+@@ -28,6 +29,7 @@
+ type DocumentedFirst struct {
+ 	A
+ 	B
++
+ 	// V is documented, so the blank line belongs above this comment.
  	V int
  }

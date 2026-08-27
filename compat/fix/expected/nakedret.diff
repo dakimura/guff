@@ -19,10 +19,19 @@
  }
  
  // nakedret names the function and the line count, so two functions over the
-@@ -11,5 +11,5 @@
+@@ -11,7 +11,7 @@
  	s = "x"
  	err = nil
  
 -	return
 +	return s, err
+ }
+ 
+ // Grouped result names are one AST field with two Names, and upstream's fix
+@@ -21,5 +21,5 @@
+ 	a = 1
+ 	b = 2
+ 
+-	return
++	return a, b
  }
