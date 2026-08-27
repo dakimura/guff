@@ -1,12 +1,36 @@
-# What guff's `--fix` writes TODAY for staticcheck-qf — generated, do not hand-edit.
+# A case where guff writes different bytes than golangci-lint into the same
+# lines, on purpose.
 #
-# A pending baseline, not an allowlist: the case's real expectation is
-# expected/staticcheck-qf.diff, and it is printed in full on every run. This file only
-# keeps CI green while the gap is worked down, and it fails the gate if guff's
-# output moves in *either* direction — including once guff gets it right, so the
-# ledger cannot quietly outlive the defect it records.
+# Hand-written. Nothing in regen.sh creates a file here. Unlike the other two
+# entries, guff does not touch a single line upstream leaves alone: it removes
+# exactly what upstream removes and puts something else back. One hunk of the
+# 481, everything else is byte-identical.
 #
-# Re-record with: ./compat/fix/regen.sh --pending staticcheck-qf
+# upstream-writes: 481 line(s), sha256:0779aa226bf2604c
+#
+# why: golangci-lint's QF1004 rewrites a renamed import's call to the package's
+# real name and adds no import, so the replacement names a package that is not
+# bound in the file:
+#
+#     import ( s "strings" )
+#     func renamed() { s.Replace("", "", "", -1) }
+#
+# upstream writes `strings.ReplaceAll("", "", "")` there, which does not
+# compile. guff writes `s.ReplaceAll("", "", "")`, which does. That single hunk
+# is why `staticcheck-qf` still builds after `guff --fix` and would not after
+# upstream's, and it is the reason compat/fix/README.md has said since
+# 2026-08-25 that closing it would be a regression: matching upstream here
+# means `--fix` starts breaking user builds. A defect upstream ships is not a
+# specification — the same call as the `revive` entry.
+#
+# It sat in pending/ until 2026-08-27 because the case had two real gaps
+# alongside it and pending was the only slot that could hold all three. QF1005
+# closed those (COMPAT-HARDENING 続き 73), so what is left is this one decision
+# and it belongs where decisions are written down.
+#
+# Fails if guff's bytes move, and fails if upstream's own output moves — if
+# QF1004 ever learns to add the import, the digest above stops matching and
+# this file has to be read again rather than quietly kept.
 --- a/qf1002/bad/bad.go
 +++ b/qf1002/bad/bad.go
 @@ -4,18 +4,18 @@
@@ -107,10 +131,10 @@
  }
 --- a/qf1005/bad/bad.go
 +++ b/qf1005/bad/bad.go
-@@ -4,12 +4,12 @@
- 
- func fn() {
- 	var x float64
+@@ -14,12 +14,12 @@
+ 	// one untyped-int literal. Everything below them was unmeasured, and six of
+ 	// QF1005's seven defects were hiding there. The seventh is in ok.go, which
+ 	// held no base that may have side effects (COMPAT-HARDENING 続き 73).
 -	_ = math.Pow(x, 0)
 -	_ = math.Pow(x, 1)
 -	_ = math.Pow(x, 2)
@@ -121,11 +145,97 @@
 +	_ = x
 +	_ = x * x
 +	_ = x * x * x
-+	_ = 2 * 2
-+	_ = 2 * 2 * 2
- 	_ = math.Pow(x, 6)
- 	_ = math.Pow(x, x)
- 	_ = math.Pow(x, -1)
++	_ = float64(2 * 2)
++	_ = float64(2 * 2 * 2)
+ 
+ 	// --- does the base need a float64 conversion? ---------------------------
+ 	//
+@@ -29,34 +29,34 @@
+ 	// conversion" every time.
+ 
+ 	// Untyped int, in all the spellings that reach the same answer.
+-	_ = math.Pow(untypedInt, 2)
+-	_ = math.Pow(1+1, 2)
+-	_ = math.Pow(4/2, 2)
++	_ = float64(untypedInt * untypedInt)
++	_ = float64((1 + 1) * (1 + 1))
++	_ = float64(4 / 2 * (4 / 2))
+ 	// A shift takes the kind of its *left* operand, so this is untyped int.
+-	_ = math.Pow(1<<3, 2)
+-	_ = math.Pow(-2, 2)
+-	_ = math.Pow((2), 2)
++	_ = float64(1 << 3 * (1 << 3))
++	_ = float64(-2 * -2)
++	_ = float64(2 * 2)
+ 
+ 	// Untyped rune is an integer kind too, so it is wrapped.
+-	_ = math.Pow(untypedRune, 2)
+-	_ = math.Pow('a', 2)
++	_ = float64(untypedRune * untypedRune)
++	_ = float64('a' * 'a')
+ 
+ 	// Untyped float and typed float64 are not.
+-	_ = math.Pow(untypedFloat, 2)
+-	_ = math.Pow(2.0, 2)
+-	_ = math.Pow(-2.5, 2)
+-	_ = math.Pow(5.0/2, 2)
+-	_ = math.Pow(math.Pi, 2)
+-	_ = math.Pow(typedFloat, 2)
++	_ = untypedFloat * untypedFloat
++	_ = 2.0 * 2.0
++	_ = -2.5 * -2.5
++	_ = 5.0 / 2 * (5.0 / 2)
++	_ = math.Pi * math.Pi
++	_ = typedFloat * typedFloat
+ 
+ 	// A mixed operation takes the wider of the two kinds, so one untyped-float
+ 	// operand is enough to keep the whole expression out of the wrap.
+-	_ = math.Pow(2.0*2, 2)
++	_ = 2.0 * 2 * 2.0 * 2
+ 
+ 	// The conversion rides on n == 1 as well, and never on n == 0 — `1.0` is
+ 	// already an untyped float.
+-	_ = math.Pow(2, 1)
+-	_ = math.Pow(2, 0)
++	_ = float64(2)
++	_ = 1.0
+ 
+ 	// --- how the product is printed ----------------------------------------
+ 	//
+@@ -65,23 +65,23 @@
+ 	// only below `*`'s precedence, the right operand keeps them at or below.
+ 
+ 	// Same precedence as `*`: left bare, right parenthesized.
+-	_ = math.Pow(x/2, 2)
++	_ = x / 2 * (x / 2)
+ 	// Lower precedence: both parenthesized.
+-	_ = math.Pow(x+1, 2)
++	_ = (x + 1) * (x + 1)
+ 	// Unary binds tighter than `*`: no parens at all.
+-	_ = math.Pow(-x, 2)
++	_ = -x * -x
+ 	// Three factors, so the chain nests on the left.
+-	_ = math.Pow(2+3, 3)
+-	_ = math.Pow(x+1, 3)
++	_ = float64((2 + 3) * (2 + 3) * (2 + 3))
++	_ = (x + 1) * (x + 1) * (x + 1)
+ 
+ 	// A base that is itself a `*` is the one shape where no parenthesis
+ 	// survives on either side, at any n. `SimplifyParentheses` rotates
+ 	// `a * (b * c)` into `(a * b) * c` when the operators match, and repeats,
+ 	// so the whole product flattens. A base at the same precedence but a
+ 	// different operator does not rotate and keeps its parentheses.
+-	_ = math.Pow(x*2, 2)
+-	_ = math.Pow(x*2, 3)
+-	_ = math.Pow(2.0*2, 3)
+-	_ = math.Pow(x/2, 3)
+-	_ = math.Pow(x*2+1, 2)
++	_ = x * 2 * x * 2
++	_ = x * 2 * x * 2 * x * 2
++	_ = 2.0 * 2 * 2.0 * 2 * 2.0 * 2
++	_ = x / 2 * (x / 2) * (x / 2)
++	_ = (x*2 + 1) * (x*2 + 1)
+ }
 --- a/qf1006/bad/bad.go
 +++ b/qf1006/bad/bad.go
 @@ -6,34 +6,24 @@

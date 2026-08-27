@@ -414,11 +414,20 @@ def check_divergent(case: str, path: Path, expected: str, actual: str) -> int:
         for line in missing[:10]:
             print(f"      {line}", file=sys.stderr)
         return 1
+    # Two shapes reach this slot and they are not the same claim. `revive` and
+    # `parens` rewrite source upstream reads and leaves; `staticcheck-qf`
+    # rewrites exactly the lines upstream rewrites and puts different bytes
+    # back. Printing "rewrites 0 things upstream leaves alone" for the second
+    # reads as a bug in the gate rather than as the point of the entry.
     extra = over_written(expected, actual)
+    what = (
+        f"rewrites {len(extra)} thing(s) upstream leaves alone"
+        if extra
+        else "rewrites upstream's own lines with different bytes"
+    )
     print(
         f"  {case}: deliberate divergence — upstream writes {current}, guff"
-        f" writes {len(actual.splitlines())} diff line(s) and rewrites"
-        f" {len(extra)} thing(s) upstream leaves alone: {why[0]}"
+        f" writes {len(actual.splitlines())} diff line(s) and {what}: {why[0]}"
     )
     return 0
 

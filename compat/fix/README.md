@@ -208,6 +208,14 @@ After SA4029 / SA1008 / SA9004 (2026-08-26): **174 matching, 18 pending** —
 four entries; the last three were the ones that rebuild a node rather than
 replace a string.
 
+After QF1005 (2026-08-27): 174 matching, **16 pending, 3 deliberately
+divergent**. `staticcheck-qf`'s four differing lines were seven defects in one
+check, found by running a 24-shape probe past both tools before touching the
+fixture — including one that rewrote `math.Pow(g(), 0)` to `1.0` and deleted the
+call, which upstream does not even report. With QF1005 byte-exact the case has
+one difference left, the deliberate QF1004 one above, so it moved to
+`divergent/`.
+
 After re-reading `parens` (2026-08-27): 174 matching, **17 pending, 2
 deliberately divergent**, and no guff code changed. `parens` was the one pending
 case where guff wrote *more* than upstream, and the extra hunk turned out to be
@@ -252,8 +260,8 @@ nothing happening.
 
 ## One difference is deliberate, and it is not in `pending/`'s sense
 
-`pending/staticcheck-qf.diff` holds three hunks. Two are gaps. The third is a
-place where **guff is right and upstream is not**, and closing it would be a
+`divergent/staticcheck-qf.diff` holds one hunk out of 481 lines, and it is a
+place where **guff is right and upstream is not**, so closing it would be a
 regression:
 
 ```go
@@ -266,12 +274,12 @@ adds no import, so it names a package that is not bound in the file. guff writes
 `s.ReplaceAll(...)`, which compiles. That single hunk is why `staticcheck-qf`
 builds after guff's `--fix` and would not after upstream's.
 
-`divergent/` can hold "ahead" now, but only for a case that is ahead and nothing
-else, and `staticcheck-qf` is two real gaps as well — so it is recorded in
-`pending/` with them. If someone later makes this hunk match, the gate goes
-red — read this section before deleting the entry, because matching here means
-`--fix` starts breaking user builds. Same call as the `revive` ratchet: a defect
-upstream ships is not a specification.
+It lived in `pending/` until 2026-08-27, alongside the two real gaps the case
+also had, because that was the only slot that could hold all three. QF1005
+closed the gaps, so what was left was one decision, and `pending/` is the wrong
+place for a decision: that ledger goes red the moment guff matches upstream, and
+matching here means `--fix` starts breaking user builds. Same call as the
+`revive` ratchet — a defect upstream ships is not a specification.
 
 Two of the five joined that list by being *fixed*. `modernize-atomictypes` used
 to write a prefix guff invented, which happened to keep the alias used;
@@ -341,6 +349,13 @@ Upstream writes seven hunks in `parens` and guff writes those seven plus this
 one. That is not the shape `divergent/` was built for — "upstream writes
 nothing" was the whole test — and it is why it now declares what upstream
 writes instead of assuming.
+
+`staticcheck-qf` is the third entry and a third shape again. It touches no line
+upstream leaves alone: it removes exactly what upstream removes and puts
+different bytes back, in one hunk of 481 lines, for the QF1004 reason above. The
+run line says so rather than reporting "rewrites 0 things upstream leaves
+alone", which would read as a bug in the gate instead of the point of the
+entry.
 
 ## Two traps worth knowing
 
