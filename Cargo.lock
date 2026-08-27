@@ -776,6 +776,7 @@ dependencies = [
  "guff-analysis",
  "guff-ast",
  "guff-constant",
+ "guff-gostd",
  "guff-packages",
  "guff-runner",
  "guff-ssa",

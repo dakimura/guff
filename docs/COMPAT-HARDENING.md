@@ -14663,3 +14663,93 @@ pending 6 件・82 行。1 行も書いていないのは
 部分的なのは `govet` 18 / `exptostd` 12 / `gocritic` 9。
 `tagalign` はタグの**並べ替えと桁揃え**なので、
 ノード置換ではなくタグ列全体の書き直しになる。
+
+---
+
+### 2026-08-27（続き 81）— `sloglint`。**`guff-gostd` に 2 人目の利用者が来た**
+
+続き 80 の続き。pending 6 件。`sloglint` は 18 行で 1 行も書いていない。
+
+#### 上流の fix は 3 か所、fixture が通すのは 2 か所
+
+| 位置 | fix |
+|---|---|
+| `key_checks.go:64` | key の綴りを直して**再クォート** |
+| `function_checks.go:96` | `Info(` → `InfoContext(ctx, ` |
+| `function_checks.go:136` | `io.Discard` の handler → `slog.DiscardHandler` |
+
+#### key の再クォートに Go 厳密な `strconv.Quote` が要る
+
+```go
+NewText: strconv.AppendQuote(nil, caseFn(name))
+```
+
+**続き 74 で `dupword` のために `guff-gostd` へ出した当のもの。**
+あのとき憲章にこう書いた ——
+**「2 つ目のクレートが必要になったら移す。必要になるかもしれない、では移さない。」**
+今回 `guff-style` が 2 つ目になった。投機的な抽出ではなかったことになる。
+
+case 変換 (`to_snake` / `to_kebab` / `to_camel` / `to_pascal` と `case_fn`) は
+**検出のために既に全部あった**。fix はその出力を quote するだけ。
+
+#### `context: all` は報告するが直さない —— 上流が理由を書いている
+
+```go
+if !scopeOnly {
+    // Don't suggest fixes here, we don't know whether there is a context in the scope.
+    pass.ReportRangef(sel.Sel, "%sContext should be used instead", fn.Name())
+    return
+}
+```
+
+**7 つ目の「意図的に fix を出さない条件」**（続き 76 の gocritic の
+`len(linters) <= 1`、続き 75 の nolintlint の 3 findings、
+続き 80 の usetesting の `context` 限定と `<t/b>`、
+noinlineerr の複数 LHS と shadowing に続く）。
+
+guff の分岐は既に `mode == "all"` / `"scope"` に分かれていて、
+`scope` 側に `// DEFERRED: SuggestedFix inserting ctx arg` と
+**`let _ = &params[0].name;`** が置いてあった ——
+引数名を引いて、明示的に捨てていた。
+
+`CtxParam` も同じで、`collect_ctx_params` は
+`context.Context` と `*http.Request` を**区別してから名前だけ残していた**。
+上流の `ctxArg` は後者を `name.Context()` にするので、
+区別を捨てずに持たせるだけで足りた。
+
+#### span が括弧を食う
+
+```go
+Pos:     sel.Sel.Pos(),
+End:     call.Lparen + 1,
+NewText: fmt.Appendf(nil, "%sContext(%s, ", fn.Name(), ctxArg),
+```
+
+メソッド名から**開き括弧の次まで**を、自前の `(` を含む文字列で置き換える。
+`Info(` が 1 回の edit で `InfoContext(ctx, ` になる。
+
+#### discard-handler は据え置き、ただし理由を書き直した
+
+`slog.DiscardHandler` は **Go 1.24** で入った API で、
+このケースの module は **`go 1.22`**。fixture から到達できない。
+実装すれば**どのゲートも測らないコードを出荷する**ことになる。
+
+元の note は「DEFERRED: … discard-handler …」と列挙するだけだったので、
+**何が塞いでいるのか**を書いた。
+
+#### 測定
+
+| | 続き 80 後 | 今回 |
+|---|---|---|
+| fix tier 一致 | 184 | **185** |
+| pending | 6 | **5** |
+| `sloglint` | 0 / 18 | **18 / 18** |
+| ファイルを書き換えるケース | 58 | **59** |
+
+golden 193/193、271 スイート / 3,281 テスト、ゲート前後で md5 同一。
+
+#### 残り
+
+pending 5 件・64 行。`tagalign` 13（タグの並べ替えと桁揃え）、
+`noinlineerr` 12（**判断待ち**、続き 80 の脚注参照）、
+`govet` 18 / `exptostd` 12 / `gocritic` 9 は部分的。
