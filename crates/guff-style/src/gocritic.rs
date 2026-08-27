@@ -5418,12 +5418,41 @@ fn check_http_no_body(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
     if !is_nil_ident(&call.args[nil_idx]) && !code::is_nil(pass, &call.args[nil_idx]) {
         return;
     }
-    report(
-        pending,
-        call.fun.pos().0 as u32,
-        "httpNoBody",
-        "http.NoBody should be preferred to the nil request body",
-    );
+    // `Suggest("http.NewRequest($method, $url, http.NoBody)")` — the whole call
+    // is replaced, not just the nil argument. A narrower span would produce the
+    // same bytes here and a different conflict set elsewhere.
+    let rendered: Option<Vec<String>> = call
+        .args
+        .iter()
+        .enumerate()
+        .map(|(i, a)| {
+            if i == nil_idx {
+                Some("http.NoBody".to_string())
+            } else {
+                node_text(pass, a)
+            }
+        })
+        .collect();
+    let Some(fun_t) = node_text(pass, &call.fun) else {
+        return;
+    };
+    match rendered {
+        Some(args) => report_fix(
+            pending,
+            call.fun.pos().0 as u32,
+            "httpNoBody",
+            "http.NoBody should be preferred to the nil request body",
+            call.pos().0 as u32,
+            call.end().0 as u32,
+            format!("{fun_t}({})", args.join(", ")),
+        ),
+        None => report(
+            pending,
+            call.fun.pos().0 as u32,
+            "httpNoBody",
+            "http.NoBody should be preferred to the nil request body",
+        ),
+    }
 }
 
 fn check_prefer_decode_rune(pass: &Pass<'_>, ix: &IndexExpr, pending: &mut Pending) {
@@ -5595,11 +5624,14 @@ fn check_string_xbytes(pass: &Pass<'_>, n: NodeRef<'_>, pending: &mut Pending) {
                         // Suggest(`len($b)`), no Report — golangci renders a
                         // suggestion-only rule as `suggestion: <replacement>`.
                         if let Some(b_t) = node_text(pass, b) {
-                            report(
+                            report_fix(
                                 pending,
                                 call.fun.pos().0 as u32,
                                 "stringXbytes",
                                 format!("suggestion: len({b_t})"),
+                                call.pos().0 as u32,
+                                call.end().0 as u32,
+                                format!("len({b_t})"),
                             );
                         }
                     }
@@ -5631,11 +5663,14 @@ fn check_string_xbytes(pass: &Pass<'_>, n: NodeRef<'_>, pending: &mut Pending) {
                             {
                                 let mut args = vec![s_t];
                                 args.extend(rest);
-                                report(
+                                report_fix(
                                     pending,
                                     call.args[0].pos().0 as u32,
                                     "stringXbytes",
                                     format!("suggestion: {re_t}.{method}({})", args.join(", ")),
+                                    call.pos().0 as u32,
+                                    call.end().0 as u32,
+                                    format!("{re_t}.{method}({})", args.join(", ")),
                                 );
                             }
                         }
@@ -5651,11 +5686,14 @@ fn check_string_xbytes(pass: &Pass<'_>, n: NodeRef<'_>, pending: &mut Pending) {
                         let op = if bin.op == Token::EQL { "==" } else { "!=" };
                         // Suggest(`len($b) == 0`) / Suggest(`len($b) != 0`).
                         if let Some(b_t) = node_text(pass, b) {
-                            report(
+                            report_fix(
                                 pending,
                                 bin.x.pos().0 as u32,
                                 "stringXbytes",
                                 format!("suggestion: len({b_t}) {op} 0"),
+                                bin.x.pos().0 as u32,
+                                bin.y.end().0 as u32,
+                                format!("len({b_t}) {op} 0"),
                             );
                         }
                     }
@@ -5668,11 +5706,14 @@ fn check_string_xbytes(pass: &Pass<'_>, n: NodeRef<'_>, pending: &mut Pending) {
                         // Suggest(`bytes.Equal($x, $y)`) / `!bytes.Equal(...)`.
                         let bang = if bin.op == Token::EQL { "" } else { "!" };
                         if let (Some(x_t), Some(y_t)) = (node_text(pass, x), node_text(pass, y)) {
-                            report(
+                            report_fix(
                                 pending,
                                 bin.x.pos().0 as u32,
                                 "stringXbytes",
                                 format!("suggestion: {bang}bytes.Equal({x_t}, {y_t})"),
+                                bin.x.pos().0 as u32,
+                                bin.y.end().0 as u32,
+                                format!("{bang}bytes.Equal({x_t}, {y_t})"),
                             );
                         }
                     }
@@ -5730,11 +5771,14 @@ fn check_prefer_filepath_join(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut P
     let Some(whole) = node_text(pass, &Expr::BinaryExpr(bin.clone())) else {
         return;
     };
-    report(
+    report_fix(
         pending,
         bin.x.pos().0 as u32,
         "preferFilepathJoin",
         format!("filepath.Join({x_t}, {y_t}) should be preferred to the {whole}"),
+        bin.x.pos().0 as u32,
+        bin.y.end().0 as u32,
+        format!("filepath.Join({x_t}, {y_t})"),
     );
 }
 
@@ -5766,12 +5810,19 @@ fn check_strings_compare(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Pendin
         Token::GTR if is_int_lit(&bin.y, 0) => format!("{s1} > {s2}"),
         _ => return,
     };
-    // Every arm is `Suggest`-only upstream.
-    report(
+    // Every arm is `Suggest`-only upstream. The span is the whole comparison,
+    // not the `strings.Compare` call: ruleguard fixes run from the matched
+    // node's `Pos()` to its `End()` (runner.go:357), and a narrower span would
+    // stop overlapping its neighbours — which is what decides whether
+    // gocritic's edits conflict and drop (COMPAT-HARDENING 続き 76).
+    report_fix(
         pending,
         bin.x.pos().0 as u32,
         "stringsCompare",
         format!("suggestion: {suggest}"),
+        bin.x.pos().0 as u32,
+        bin.y.end().0 as u32,
+        suggest,
     );
 }
 
@@ -5806,11 +5857,14 @@ fn check_zero_byte_repeat(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pendin
     let Some(n) = expr_text(&call.args[1]) else {
         return;
     };
-    report(
+    report_fix(
         pending,
         call.fun.pos().0 as u32,
         "zeroByteRepeat",
         format!("avoid bytes.Repeat([]byte{{0}}, {n}); consider using make([]byte, {n}) instead"),
+        call.pos().0 as u32,
+        call.end().0 as u32,
+        format!("make([]byte, {n})"),
     );
 }
 
@@ -5839,11 +5893,18 @@ fn check_bad_sorting(pass: &Pass<'_>, assign: &AssignStmt, pending: &mut Pending
     } else {
         return;
     };
-    report(
+    // The matched node is the whole `$x = sort.StringSlice($x)`, so the
+    // replacement swallows the assignment: `sort.Strings($x)` on its own. Same
+    // shape as SA4029 (続き 70), and the span runs lhs start .. rhs end.
+    let arg = node_text(pass, &call.args[0]).unwrap_or_default();
+    report_fix(
         pending,
         assign_pos(assign),
         "badSorting",
         format!("suspicious {needle} usage, maybe {suggest} was intended?"),
+        assign_pos(assign),
+        assign.rhs[0].end().0 as u32,
+        format!("{suggest}({arg})"),
     );
 }
 
@@ -5999,11 +6060,14 @@ fn check_prefer_fprint(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) 
                         let w = expr_text(&sel.x).unwrap_or_else(|| "w".into());
                         let args = fprint_args(pass, args);
                         let whole = call_text(pass, call).unwrap_or_default();
-                        report(
+                        report_fix(
                             pending,
                             call.fun.pos().0 as u32,
                             "preferFprint",
                             format!("fmt.{fprint}({w}, {args}) should be preferred to the {whole}"),
+                            call.pos().0 as u32,
+                            call.end().0 as u32,
+                            format!("fmt.{fprint}({w}, {args})"),
                         );
                         return;
                     }
@@ -6022,11 +6086,14 @@ fn check_prefer_fprint(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) 
                     // Suggest-only rule: `suggestion: fmt.Fprint*($w, $args)`.
                     let w = expr_text(&sel.x).unwrap_or_else(|| "w".into());
                     let args = fprint_args(pass, args);
-                    report(
+                    report_fix(
                         pending,
                         call.fun.pos().0 as u32,
                         "preferFprint",
                         format!("suggestion: fmt.{fprint}({w}, {args})"),
+                        call.pos().0 as u32,
+                        call.end().0 as u32,
+                        format!("fmt.{fprint}({w}, {args})"),
                     );
                     return;
                 }
@@ -6076,11 +6143,14 @@ fn check_prefer_string_writer(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pe
                     let w = expr_text(&sel.x).unwrap_or_else(|| "w".into());
                     let s_t = node_text(pass, s).unwrap_or_else(|| "s".into());
                     let whole = call_text(pass, call).unwrap_or_default();
-                    report(
+                    report_fix(
                         pending,
                         call.fun.pos().0 as u32,
                         "preferStringWriter",
                         format!("{w}.WriteString({s_t}) should be preferred to the {whole}"),
+                        call.pos().0 as u32,
+                        call.end().0 as u32,
+                        format!("{w}.WriteString({s_t})"),
                     );
                     return;
                 }
@@ -6104,11 +6174,14 @@ fn check_prefer_string_writer(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pe
     let w = expr_text(&call.args[0]).unwrap_or_else(|| "w".into());
     let s = node_text(pass, &call.args[1]).unwrap_or_else(|| "s".into());
     let whole = call_text(pass, call).unwrap_or_default();
-    report(
+    report_fix(
         pending,
         call.fun.pos().0 as u32,
         "preferStringWriter",
         format!("{w}.WriteString({s}) should be preferred to the {whole}"),
+        call.pos().0 as u32,
+        call.end().0 as u32,
+        format!("{w}.WriteString({s})"),
     );
 }
 
@@ -6253,11 +6326,15 @@ fn check_dynamic_fmt_string(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pend
         // Report(`use errors.New($f($*args)) or fmt.Errorf("%s", $f($*args)) instead`)
         // — `$f($*args)` is the whole inner call, argument list included.
         let inner_t = call_text(pass, inner).unwrap_or_else(|| "f()".into());
-        report(
+        report_fix(
             pending,
             call.fun.pos().0 as u32,
             "dynamicFmtString",
             format!("use errors.New({inner_t}) or fmt.Errorf(\"%s\", {inner_t}) instead"),
+            call.pos().0 as u32,
+            call.end().0 as u32,
+            // The message offers two ways out; `Suggest` names only the first.
+            format!("errors.New({inner_t})"),
         );
         return;
     }
@@ -6266,11 +6343,14 @@ fn check_dynamic_fmt_string(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pend
         return;
     }
     let f_t = node_text(pass, arg).unwrap_or_else(|| "f".into());
-    report(
+    report_fix(
         pending,
         call.fun.pos().0 as u32,
         "dynamicFmtString",
         format!("use errors.New({f_t}) or fmt.Errorf(\"%s\", {f_t}) instead"),
+        call.pos().0 as u32,
+        call.end().0 as u32,
+        format!("errors.New({f_t})"),
     );
 }
 
@@ -6336,12 +6416,15 @@ fn check_string_concat_simplify(
         }
         _ => return,
     };
-    report(
+    report_fix(
         pending,
         call.fun.pos().0 as u32,
         "stringConcatSimplify",
         // Every arm is `Suggest`-only upstream.
         format!("suggestion: {suggest}"),
+        call.pos().0 as u32,
+        call.end().0 as u32,
+        suggest,
     );
 }
 
@@ -6463,11 +6546,14 @@ fn check_equal_fold_strings(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Pen
     } else {
         format!("strings.EqualFold({xt}, {yt})")
     };
-    report(
+    report_fix(
         pending,
         bin.x.pos().0 as u32,
         "equalFold",
         format!("consider replacing with {suggest}"),
+        bin.x.pos().0 as u32,
+        bin.y.end().0 as u32,
+        suggest,
     );
 }
 
@@ -6514,11 +6600,14 @@ fn check_equal_fold_bytes(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pendin
     if xt == yt {
         return;
     }
-    report(
+    report_fix(
         pending,
         call.fun.pos().0 as u32,
         "equalFold",
         format!("consider replacing with bytes.EqualFold({xt}, {yt})"),
+        call.pos().0 as u32,
+        call.end().0 as u32,
+        format!("bytes.EqualFold({xt}, {yt})"),
     );
 }
 
@@ -6635,11 +6724,14 @@ fn check_time_expr_simplify(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Pen
         if let Some(recv) = method_recv_named(pass, &bin.x, "Unix") {
             if type_is_time(pass, recv) {
                 let t = expr_text(recv).unwrap_or_else(|| "t".into());
-                report(
+                report_fix(
                     pending,
                     bin.x.pos().0 as u32,
                     "timeExprSimplify",
                     format!("use {t}.UnixMilli() instead of {whole}"),
+                    bin.x.pos().0 as u32,
+                    bin.y.end().0 as u32,
+                    format!("{t}.UnixMilli()"),
                 );
             }
         }
@@ -6647,11 +6739,14 @@ fn check_time_expr_simplify(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Pen
         if let Some(recv) = method_recv_named(pass, &bin.x, "UnixNano") {
             if type_is_time(pass, recv) {
                 let t = expr_text(recv).unwrap_or_else(|| "t".into());
-                report(
+                report_fix(
                     pending,
                     bin.x.pos().0 as u32,
                     "timeExprSimplify",
                     format!("use {t}.UnixMicro() instead of {whole}"),
+                    bin.x.pos().0 as u32,
+                    bin.y.end().0 as u32,
+                    format!("{t}.UnixMicro()"),
                 );
             }
         }
@@ -6946,20 +7041,26 @@ fn check_redundant_sprint(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pendin
         return;
     };
     if is_string_typed(pass, arg) {
-        report(
+        report_fix(
             pending,
             call.fun.pos().0 as u32,
             "redundantSprint",
             format!("{arg_t} is already string"),
+            call.pos().0 as u32,
+            call.end().0 as u32,
+            arg_t.clone(),
         );
         return;
     }
     if has_string_method(pass, arg) {
-        report(
+        report_fix(
             pending,
             call.fun.pos().0 as u32,
             "redundantSprint",
             format!("use {arg_t}.String() instead"),
+            call.pos().0 as u32,
+            call.end().0 as u32,
+            format!("{arg_t}.String()"),
         );
     }
 }
