@@ -6,15 +6,15 @@
 //! string literals).
 //!
 //! Settings: `linters.settings.dupword` (`keywords` / `ignore` / `comments-only`).
-//! **Suggested fixes.** Comments carry them; string literals do not yet.
-//! Upstream rewrites a literal by `strconv.Unquote` → rewrite →
-//! `strconv.Quote`, and guff's Go-exact pair lives in `guff-staticcheck`'s
-//! `gostd`, one crate layer away from here. An approximate quoter would put an
-//! approximation into somebody's source file, so the literal half waits for
-//! that module to move somewhere shared.
+//! **Suggested fixes.** Comments and string literals both carry them. The
+//! literal half waited on `strconv`: upstream rewrites a literal by
+//! `strconv.Unquote` → rewrite → `strconv.Quote`, guff's Go-exact pair lived in
+//! `guff-staticcheck`, and an approximate quoter would have put approximate
+//! bytes into somebody's source file. Moving that module to `guff-gostd` is the
+//! whole of what unblocked it (COMPAT-HARDENING 続き 74).
 //!
-//! DEFERRED: string-literal SuggestedFix (see above); cross-line duplicate
-//! detection spanning adjacent `//` lines; `skip-raw-strings`.
+//! DEFERRED: cross-line duplicate detection spanning adjacent `//` lines;
+//! `skip-raw-strings`.
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -26,6 +26,7 @@ use guff_analysis::passes::inspect;
 use guff_analysis::{
     AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
 };
+use guff_gostd::strconv;
 
 use crate::options::DupwordOptions;
 use crate::util::{reparse_with_comments, reparsed_pos};
@@ -188,19 +189,6 @@ fn is_example_output(comment: &str) -> bool {
         || comment.starts_with("// unordered output:")
 }
 
-fn unquote_string(value: &str) -> String {
-    if value.len() >= 2 {
-        let bytes = value.as_bytes();
-        if (bytes[0] == b'"' && bytes[value.len() - 1] == b'"')
-            || (bytes[0] == b'`' && bytes[value.len() - 1] == b'`')
-            || (bytes[0] == b'\'' && bytes[value.len() - 1] == b'\'')
-        {
-            return value[1..value.len() - 1].to_string();
-        }
-    }
-    value.to_string()
-}
-
 fn check_string_lit(
     lit: &BasicLit,
     keywords: &[String],
@@ -210,19 +198,38 @@ fn check_string_lit(
     if lit.kind != Some(Token::STRING) {
         return;
     }
-    let value = unquote_string(&lit.value);
-    // Reported without a fix. Upstream re-quotes the rewritten text with
-    // `strconv.Quote` after `strconv.Unquote`, and guff's Go-exact pair lives
-    // in `guff-staticcheck`'s `gostd`, one layer up from here; `unquote_string`
-    // below only strips the delimiters. Writing an approximate quoter would put
-    // an approximation into somebody's source file.
-    if let Some((_update, words)) = find_duplicates(&value, keywords, ignore) {
-        pending.push((
-            lit.value_pos.0 as u32,
-            format!("Duplicate words ({words}) found"),
-            None,
-        ));
-    }
+    // Upstream (`fixDuplicateWordInString`, dupword.go:185) unquotes first and
+    // checks the *unquoted* text, so an escape is compared as the byte it
+    // stands for. On failure it falls back to the raw literal — delimiters and
+    // all — and then writes the rewrite back **unquoted**, because its `quote`
+    // flag is `value != lit.Value` rather than `err == nil`. Both halves matter:
+    // checking the raw text finds different duplicates, and re-quoting a
+    // fallback would add a second layer of quotes to a malformed literal.
+    let value = match strconv::unquote(&lit.value) {
+        Ok(v) => v,
+        Err(_) => lit.value.clone(),
+    };
+    let quote = value != lit.value;
+    let Some((update, words)) = find_duplicates(&value, keywords, ignore) else {
+        return;
+    };
+    let update = if quote {
+        strconv::quote(&update)
+    } else {
+        update
+    };
+    // `lit.Pos()` to `lit.End()`: the whole literal, delimiters included.
+    let pos = lit.value_pos.0 as u32;
+    let end = pos + lit.value.len() as u32;
+    pending.push((
+        pos,
+        format!("Duplicate words ({words}) found"),
+        Some(TextEdit {
+            pos,
+            end,
+            new_text: update,
+        }),
+    ));
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {

@@ -144,6 +144,16 @@ fn dupword_flags_duplicates_in_comments_and_strings() {
             .any(|m| m.contains("Duplicate words") && m.contains("the")),
         "{messages:?}"
     );
+    // Pinned, because the interesting half of this fixture is what stays
+    // *silent*: `"the\\the word"` is one word once unquoted, the duplicate in
+    // `"say \"the the\" now"` sits inside an escaped quote, and a raw string's
+    // `\t` is two characters so `` `the\tthe word` `` has no pair. A count that
+    // drifts up means the unquote step regressed to stripping delimiters.
+    assert_eq!(messages.len(), 7, "{messages:?}");
+    assert!(
+        messages.iter().any(|m| m.contains("(é)")),
+        "non-ASCII duplicate is reported: {messages:?}"
+    );
 }
 
 #[test]

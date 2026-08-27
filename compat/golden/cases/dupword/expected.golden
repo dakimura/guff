@@ -13,3 +13,8 @@ bad.go:13:7:dupword::Duplicate words (a) found
 bad.go:15:2:dupword::Duplicate words (block) found
 bad/bad.go:4:2:dupword::Duplicate words (is) found
 bad/bad.go:5:10:dupword::Duplicate words (the) found
+bad/bad.go:16:12:dupword::Duplicate words (the) found
+bad/bad.go:17:13:dupword::Duplicate words (a) found
+bad/bad.go:29:9:dupword::Duplicate words (the) found
+bad/bad.go:36:9:dupword::Duplicate words (é) found
+bad/bad.go:39:11:dupword::Duplicate words (the) found

@@ -9,14 +9,18 @@
 //! different message. The only way to match is to port the Go parser, so that
 //! is what lives here.
 
-mod isprint_table;
 mod regexp_table;
 mod unicode_table;
+
+// `strconv` moved to `guff-gostd` so `dupword` in guff-comment can reach the
+// Go-exact quote/unquote pair it needs to write a fix (COMPAT-HARDENING 続き
+// 74). Re-exported under its old path: every `gostd::strconv::…` call site in
+// this crate reads the same as before.
+pub use guff_gostd::strconv;
 
 pub mod fmt;
 pub mod netip;
 pub mod regexp;
-pub mod strconv;
 pub mod template;
 pub mod time;
 pub mod unicode;

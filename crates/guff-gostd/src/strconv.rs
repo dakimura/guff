@@ -6,7 +6,7 @@
 //! ` `, and it prints `\'` for a single quote inside a double-quoted
 //! string.
 
-use super::isprint_table::PRINT_RANGES;
+use crate::isprint_table::PRINT_RANGES;
 
 const LOWERHEX: &[u8; 16] = b"0123456789abcdef";
 
@@ -685,5 +685,58 @@ pub fn unquote(s: &str) -> Result<String, NumError> {
             Ok(out)
         }
         _ => Err(NumError::Syntax),
+    }
+}
+
+#[cfg(test)]
+mod dupword_contract_tests {
+    //! The `quote`/`unquote` pair as `dupword` uses it.
+    //!
+    //! `gostd_url.rs` in guff-staticcheck differential-tests `quote_bytes` and
+    //! `is_print` against Go itself and still does, through the re-export. What
+    //! it never covered is the round trip this crate was split out for: unquote
+    //! a literal, rewrite the text, quote it back. These are the exact shapes
+    //! `compat/golden/cases/dupword` exercises end-to-end, pinned here too so a
+    //! failure names the function rather than the linter.
+
+    use super::{quote, unquote};
+
+    #[test]
+    fn escapes_unquote_to_the_byte_they_stand_for() {
+        assert_eq!(unquote(r#""the\tthe word""#).unwrap(), "the\tthe word");
+        assert_eq!(unquote(r#""a\na b""#).unwrap(), "a\na b");
+        // `\\` is one backslash, so `the\the` is a single word to a scan that
+        // splits on whitespace — this is why dupword stays silent on it.
+        assert_eq!(unquote(r#""the\\the word""#).unwrap(), r"the\the word");
+    }
+
+    #[test]
+    fn raw_strings_unquote_without_escape_processing() {
+        assert_eq!(unquote("`the the word`").unwrap(), "the the word");
+        // Two characters, not a tab.
+        assert_eq!(unquote(r"`the\tthe word`").unwrap(), r"the\tthe word");
+    }
+
+    #[test]
+    fn quote_has_no_way_to_spell_a_raw_string() {
+        // The consequence dupword inherits: a raw string that gets rewritten
+        // comes back as an interpreted one, and upstream does the same.
+        assert_eq!(quote("the word"), r#""the word""#);
+        assert_eq!(quote("the\tword"), r#""the\tword""#);
+    }
+
+    #[test]
+    fn non_ascii_survives_the_round_trip() {
+        let s = unquote(r#""é é x""#).unwrap();
+        assert_eq!(s, "é é x");
+        assert_eq!(quote(&s), r#""é é x""#);
+    }
+
+    #[test]
+    fn a_malformed_literal_is_an_error_not_a_panic() {
+        // dupword falls back to the raw literal here, delimiters included, and
+        // then does *not* re-quote. It only needs `unquote` to say no.
+        assert!(unquote(r#""the the \x""#).is_err());
+        assert!(unquote(r#""unterminated"#).is_err());
     }
 }
