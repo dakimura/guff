@@ -14373,3 +14373,106 @@ pending 10 件、合計 148 行。うち **7 件は 1 行も書いていない**
 `embeddedstructfieldcheck` 9）。
 部分的に書いているのは `gocritic` 9（＝`go/doc/comment` 待ち）、
 `govet` 18、`exptostd` 12。
+
+---
+
+### 2026-08-27（続き 78）— 残り最大のケースは linter の穴ではなく、**Fixer をパイプラインの外に置いていた**
+
+続き 77 の続き。pending 10 件・148 行のうち最大は
+`issues-uniq-by-line-order` の 25 行。**これは linter の fix 不足ではなかった。**
+
+#### 25 行の正体は nolintlint の fix ―― 続き 75 で実装済みのもの
+
+```diff
+-func Exported() {} //nolint:errcheck
++func Exported() {}
+```
+
+上流が消しているのは**未使用 `//nolint` ディレクティブ**で、
+その fix は続き 75 で入れた。なのに guff は 0 行で、
+続き 75 のゲートも「baseline moved」と言わなかった。
+
+#### golden に nolintlint の finding が 1 件も無い
+
+```
+order/order.go:26:1:revive:warning:exported: …
+order/order.go:32:6:unused::func unusedFn is unused
+order/order.go:40:1:revive:warning:exported: …
+order/order.go:41:11:errcheck::Error return value of `os.Setenv` …
+```
+
+nolintlint も同じ行を報告しているが、`uniq-by-line` が 1 行 1 件に絞り、
+revive / unused / errcheck が勝つ。
+**nolintlint の issue は報告から消え、しかし上流はその fix を適用している。**
+
+#### 上流の processor 順（`pkg/lint/runner.go:82`）
+
+```
+105: NewNolintFilter
+107: NewDiff
+110: NewFixer            ← ここで fix を適用
+113: NewUniqByLine       ← 重複排除はその後
+115: NewMaxSameIssues
+116: NewMaxFromLinter
+```
+
+**Fixer は重複排除より前、全ての上限より前。**
+`Fixer.Process` が返すのは `notFixableIssues` ―― 直せた issue は流れから抜ける。
+だから issue は**報告の席を失っても、ファイルは書き換えている**。
+
+guff のパイプライン（`exclude.rs:3`）は
+`… → nolint → generated → diff → uniq-by-line → max-per-linter → max-same → severity`
+で、**そこに Fixer が無い**。`lib.rs` が全部終わった後の生き残りに対して
+`apply_fixes` を呼んでいた。
+
+つまり **`uniq-by-line` / `max-issues-per-linter` / `max-same-issues` が落とした
+fix 可能な issue は、linter を問わず全部だまって直らない**。
+
+#### 直したのは 1 段の位置だけ
+
+`IssueFilter::apply` に `apply_with_fixer` を足し、
+**`diff` と `uniq-by-line` の間**で `apply_fixes` を呼ぶ。
+戻り値は `(remaining, fixed)` で、上流の `notFixableIssues` と同じ契約なので
+**移動であって書き換えではない**。
+`apply` / `filter_issues` は `None` を渡して委譲するだけにしたので、
+**既存の unit test 10 本は 1 行も触っていない**。
+呼び出し側はむしろ短くなった（入れ子の `if opts.fix { if let Some(fset) …`
+が `filter_issues_fixing(issues, fixer)` 1 行に）。
+
+#### 予言を先に書いてから測った
+
+`--fix` が無ければ上流の Fixer は no-op（`if !p.cfg.Issues.NeedFix`）。
+golden は `--fix` 無しで走る。だから:
+
+> **golden は 1 件も動かないはず。動いたら、上限の副作用ではなく移動が間違っている。**
+
+結果は golden **193/193 で不動**、そのあと fix tier が
+`issues-uniq-by-line-order` を **0 → 25** にして他は 1 件も動かなかった。
+
+fix tier だけ回していたら「欲しかった数字」は見えても、
+報告経路を壊していないかは何も分からなかった ――
+続き 77 で fix のバイトが正しいまま報告位置が間違っていたのと同じ罠。
+
+#### 測定
+
+| | 続き 77 後 | 今回 |
+|---|---|---|
+| fix tier 一致 | 180 | **181** |
+| pending | 10 | **9** |
+| `issues-uniq-by-line-order` | 0 / 25 | **25 / 25** |
+| ファイルを書き換えるケース | 54 | **55** |
+
+golden 193/193、271 スイート / 3,281 テスト。
+
+#### 作業環境について
+
+他セッションの未コミット作業（`README.md` 他 3 ファイル）が 4 PR にわたって
+tree を main に上げられなくしており、`commit-tree` で回避してきた。
+今回は**回避が測定を汚す**ところまで来た ―― この変更が必要とする
+nolintlint の fix（続き 75）は、まさに編集する対象のファイルの中にある。
+
+**彼らのファイルは触らないと決めた**。`README.md` は #153 より前の版に
+基づいており、main に上書きすると**マージ済みの Hindi README を黙って消す**。
+代わりに `git worktree` で main の別チェックアウトを作り、
+`CARGO_TARGET_DIR` を分けた（共有すると別コミットのオブジェクトが混ざり、
+`check` は通って `build` だけ落ちる）。

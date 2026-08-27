@@ -186,6 +186,14 @@ struct CompiledRule {
     source: Option<Regex>,
 }
 
+/// What `apply_with_fixer` needs to write a fix: the run's shared `FileSet`
+/// (edits are resolved through it) and the meta formatter golangci runs over
+/// every file it touched.
+pub struct FixerCtx<'a> {
+    pub fset: &'a FileSet,
+    pub formatter: Option<&'a guff_fmt::MetaFormatter>,
+}
+
 impl IssueFilter {
     /// Build a filter from config. Invalid regexes are skipped (logged to stderr).
     pub fn from_config(issues: &IssuesConfig, severity: &SeverityConfig) -> Self {
@@ -343,7 +351,35 @@ impl IssueFilter {
     /// with severity assigned).
     ///
     /// `packages` supplies source paths for `//nolint` indexing.
-    pub fn apply(&self, mut issues: Vec<Issue>, packages: &[Arc<Package>]) -> Vec<Issue> {
+    /// Where `--fix` writes, when it is on.
+    ///
+    /// golangci runs the Fixer as a *processor*, between `Diff` and
+    /// `UniqByLine` (`pkg/lint/runner.go:110`). That placement is observable:
+    /// `Fixer.Process` returns `notFixableIssues`, so an issue it fixed leaves
+    /// the stream before dedup and before every cap — it can lose its place in
+    /// the report and still have edited the file.
+    ///
+    /// guff used to apply fixes *after* the whole pipeline, on the survivors,
+    /// which silently left unfixed anything `uniq-by-line`,
+    /// `max-issues-per-linter` or `max-same-issues` dropped. The
+    /// `issues-uniq-by-line-order` case is built to make dedup decide
+    /// something, and it is where that showed: three `//nolint` directives
+    /// upstream deletes, whose nolintlint findings all lose their line to
+    /// revive, `unused` and errcheck (COMPAT-HARDENING 続き 78).
+    pub fn apply(&self, issues: Vec<Issue>, packages: &[Arc<Package>]) -> Vec<Issue> {
+        self.apply_with_fixer(issues, packages, None).0
+    }
+
+    /// [`apply`], with `--fix` applied at golangci's Fixer position.
+    ///
+    /// Returns the issues that remain — the ones no fix consumed — and how many
+    /// were fixed, which is the same contract as upstream's `notFixableIssues`.
+    pub fn apply_with_fixer(
+        &self,
+        mut issues: Vec<Issue>,
+        packages: &[Arc<Package>],
+        fixer: Option<FixerCtx<'_>>,
+    ) -> (Vec<Issue>, usize) {
         // golangci attributes findings to the enabled alias name when the
         // deprecated parent is not also enabled (e.g. enable: [gomodguard_v2]).
         remap_enabled_alias_from_linters(&mut issues, &self.enabled_linters);
@@ -469,6 +505,21 @@ impl IssueFilter {
             }
         }
 
+        // The Fixer sits here, between `Diff` and `UniqByLine`
+        // (golangci `pkg/lint/runner.go:107..113`). Everything below this line
+        // therefore sees only what no fix consumed — dedup and the caps count
+        // the *unfixed* remainder, as upstream's do.
+        let mut fixes_applied = 0;
+        if let Some(ctx) = fixer {
+            match crate::fix::apply_fixes(ctx.fset, &issues, ctx.formatter) {
+                Ok((remaining, n)) => {
+                    issues = remaining;
+                    fixes_applied = n;
+                }
+                Err(e) => eprintln!("guff: --fix failed: {e}"),
+            }
+        }
+
         if self.uniq_by_line {
             // golangci's `UniqByLine` counts per (file, line) only — not per
             // linter, and not per column. One line yields at most one issue in
@@ -517,7 +568,7 @@ impl IssueFilter {
             }
         }
 
-        issues
+        (issues, fixes_applied)
     }
 
     fn is_excluded_by_path(&self, issue: &Issue) -> bool {
