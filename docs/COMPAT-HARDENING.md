@@ -14824,3 +14824,92 @@ golden 193/193、271 スイート / 3,281 テスト、ゲート前後で md5 同
 | `exptostd` | 12 | 部分。上流の置換に **`FIXME`** が入る（上流に `// TODO(ldez) improve the type detection.` とある）ので、実装すると木がコンパイルを通らなくなる —— 既存 8 件と同じ扱い |
 | `gocritic` | 9 | 部分。`go/doc/comment` 移植待ち（続き 76） |
 | `noinlineerr` | 12 | **判断待ち**（続き 80 の脚注） |
+
+---
+
+### 2026-08-27（続き 83）— `exptostd`。**deferral の理由が、上流の TODO と矛盾していた**
+
+続き 82 の続き。pending 4 件。`exptostd` は 22 行中 10 行しか書いていない。
+残り 12 行は `maps.Keys` / `maps.Values` の 2 腕。
+
+#### 据え置きの理由が成り立っていなかった
+
+guff の note:
+
+> DEFERRED: SuggestedFix for `maps.Keys` / `maps.Values`
+> (**needs type-aware `slices.AppendSeq` rewrite**; upstream uses a `FIXME` placeholder)
+
+**この 2 つの節は互いに矛盾している。**
+上流は型を見ていない —— `exptostd.go:376` に本人のコメントがある:
+
+```go
+Elt: &ast.Ident{Name: "FIXME"}, // TODO(ldez) improve the type detection.
+```
+
+型解析は要らなかった。要ったのは**上流の placeholder をそのまま出す気**だけ。
+
+**理由が読んだら成り立たなかった deferral はこれで 3 つ目**:
+続き 76 の gocritic「13 checker」（実際は ruleguard のルール）、
+続き 75 の #142 の二択（どちらも要らなかった）、そして今回。
+
+#### メッセージと fix が違う（連続記録が途切れた）
+
+golden のメッセージ:
+
+```
+golang.org/x/exp/maps.Keys() can be replaced by
+slices.AppendSeq(make([]T, 0, len(data)), maps.Keys(data))
+```
+
+`[]T` と `data` は**ドキュメント用の placeholder**。fix のほうは:
+
+```go
+_ = slices.AppendSeq(make([]FIXME, 0, len(m)), maps.Keys(m))
+```
+
+**`FIXME` と実引数。** 続き 76〜82 で 6 回続けて
+「メッセージが置換テキストを持っている」だったので、
+そろそろ規則として扱いかけていた ——
+**これは規則ではなくパターンだと言っている 1 件**。
+
+#### 木はコンパイルを通らなくなる。それでよい
+
+`FIXME` は型ではないので、直した木はビルドできない。
+`compat/fix/README.md` が既にこの方針を書いている ——
+**「a hard gate would be demanding that guff be *incompatible*」**。
+既存 8 件（`dotimport` / `perfsprint` / `err113` / `modernize-atomictypes` /
+`rangeint` / `modernize` / `goheader` / SA4026）に **9 件目**として並ぶ。
+
+README の一文がそのまま当てはまる:
+**「その数が増えるのは、見た目どおりの方向とは限らない。だから gate せず表示する。」**
+
+#### `noinlineerr` との違い
+
+どちらも「上流の fix がユーザに嬉しくない」形だが、扱いが違う理由:
+
+| | 上流の出力 | guff の状態 |
+|---|---|---|
+| `exptostd` | **目に見える** `FIXME` を書く（直せと分かる） | 記録された判断が無い → 既定（再現）が適用される |
+| `noinlineerr` | **黙って**ビルドを壊す | 前セッションが公開 issue を引いて**据え置きを記録済み** |
+
+**判断が記録されているかどうか**が違い。記録があるものは、
+私が一人で覆すのではなく判断し直してもらう（続き 80 の脚注）。
+
+#### 測定
+
+| | 続き 82 後 | 今回 |
+|---|---|---|
+| fix tier 一致 | 186 | **187** |
+| pending | 4 | **3** |
+| `exptostd` | 10 / 22 | **22 / 22** |
+| ビルドが通らない木 | 8 | **9**（意図どおり） |
+
+golden 193/193、271 スイート / 3,281 テスト。
+
+#### 残り
+
+| ケース | 行 | 状態 |
+|---|---|---|
+| `govet` | 18 | `inline` アナライザの 2 腕。通常作業 |
+| `gocritic` | 9 | `go/doc/comment` 移植待ち（続き 76） |
+| `noinlineerr` | 12 | **判断待ち**（続き 80） |
