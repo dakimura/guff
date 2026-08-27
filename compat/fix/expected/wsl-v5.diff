@@ -34,3 +34,17 @@
  	if err != nil {
  		return err
  	}
+@@ -95,7 +97,6 @@
+ // inserted newline, and nothing in this fixture exercised them
+ // (COMPAT-HARDENING 続き 77).
+ func BlockLeadingWSV5() {
+-
+ 	x := 1
+ 	_ = x
+ }
+@@ -103,5 +104,4 @@
+ func BlockTrailingWSV5() {
+ 	x := 1
+ 	_ = x
+-
+ }

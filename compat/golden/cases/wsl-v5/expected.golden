@@ -10,3 +10,5 @@ bad/bad.go:6:2:wsl_v5::missing whitespace above this line (too many statements a
 bad/bad.go:10:3:wsl_v5::missing whitespace above this line (too many lines above return)
 bad/bad.go:12:2:wsl_v5::missing whitespace above this line (invalid statement above assign)
 bad/bad.go:83:1:wsl_v5::unnecessary whitespace (err)
+bad/bad.go:98:1:wsl_v5::unnecessary whitespace (leading-whitespace)
+bad/bad.go:106:1:wsl_v5::unnecessary whitespace (trailing-whitespace)

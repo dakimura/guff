@@ -19,7 +19,9 @@ use guff::walk::{preorder, stmt_ref, NodeRef};
 use guff::parser::{parse_file, COMMENTS_ONLY};
 use guff::position::{FileSet, Pos};
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_analysis::{
+    AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
 
 use guff_types::arena::{ObjectData, ObjectId};
 
@@ -29,6 +31,51 @@ const MSG_ABOVE: &str = "missing whitespace above this line";
 const MSG_REMOVE: &str = "unnecessary whitespace";
 const MSG_BLOCK_START: &str = "unnecessary whitespace (leading-whitespace)";
 const MSG_BLOCK_END: &str = "unnecessary whitespace (trailing-whitespace)";
+
+/// A pending finding: report position, message, and the edits the fix applies.
+///
+/// v5 differs from v4 here: `NewText` is **per range** (analyzer.go:122), not
+/// always a newline. `addErrorWithMessage` inserts `"\n"`, and
+/// `addErrorRemoveNewline` replaces a span with **nothing** (wsl.go:1516).
+type Pending = Vec<(u32, String, Vec<(u32, u32, &'static str)>)>;
+
+/// Upstream's `lineStartOf(pos)` (wsl.go:1434): the insert goes at **column 1**
+/// of the statement's line, not at the statement itself. Inserting after the
+/// indentation would leave a tab on the blank line — gofmt strips it afterwards,
+/// but the bytes before that pass would not be upstream's.
+fn insert_at(fset: &FileSet, pos: Pos) -> Vec<(u32, u32, &'static str)> {
+    let at = fset
+        .file(pos)
+        .map(|f| f.line_start(line(fset, pos) as usize))
+        .unwrap_or(pos)
+        .0 as u32;
+    vec![(at, at, "\n")]
+}
+
+/// `addErrorRemoveNewline(LineStart(from), LineStart(to))` (wsl.go:827): delete
+/// whole lines by spanning column 1 of the first to column 1 of the last, and
+/// replace with **nothing**. Anchoring on `near` only picks which file to ask.
+/// A removal reports at the range it deletes, not at the brace beside it:
+/// `addErrorRemoveNewline(start, end, …)` passes `start` as the report position
+/// (wsl.go:1516). Reporting at the brace put the leading-whitespace finding on
+/// the `{`'s own line and column instead of column 1 of the first blank line.
+fn report_at(edits: &[(u32, u32, &'static str)], fallback: u32) -> u32 {
+    edits.first().map(|(from, _, _)| *from).unwrap_or(fallback)
+}
+
+fn remove_lines(fset: &FileSet, near: Pos, from: i64, to: i64) -> Vec<(u32, u32, &'static str)> {
+    let Some(f) = fset.file(near) else {
+        return Vec::new();
+    };
+    if from >= to || from < 1 {
+        return Vec::new();
+    }
+    let (start, end) = (f.line_start(from as usize), f.line_start(to as usize));
+    if start.0 >= end.0 {
+        return Vec::new();
+    }
+    vec![(start.0 as u32, end.0 as u32, "")]
+}
 
 fn line(fset: &FileSet, pos: Pos) -> i64 {
     fset.position(pos).line
@@ -506,7 +553,7 @@ fn check_leading_trailing(
     comment_lines: &[(i64, i64)],
     block: &BlockStmt,
     options: &WslV5Options,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     if block.list.is_empty() {
         return;
@@ -545,7 +592,12 @@ fn check_leading_trailing(
             }
         }
         if first_content_line > start + 1 {
-            pending.push((block.lbrace.0 as u32 + 1, MSG_BLOCK_START.into()));
+            let edits = remove_lines(fset, block.lbrace, start + 1, first_content_line);
+            pending.push((
+                report_at(&edits, block.lbrace.0 as u32 + 1),
+                MSG_BLOCK_START.into(),
+                edits,
+            ));
         }
         // A blank line between the leading comments and the first statement is
         // its own diagnostic upstream.
@@ -553,14 +605,25 @@ fn check_leading_trailing(
             && last_comment_end_line > start
             && first_stmt_line > last_comment_end_line + 1
         {
-            pending.push((block.lbrace.0 as u32 + 1, MSG_BLOCK_START.into()));
+            let edits =
+                remove_lines(fset, block.lbrace, last_comment_end_line + 1, first_stmt_line);
+            pending.push((
+                report_at(&edits, block.lbrace.0 as u32 + 1),
+                MSG_BLOCK_START.into(),
+                edits,
+            ));
         }
     }
     let last = block.list.last().unwrap();
     if check_enabled(options, WslV5Check::TrailingWhitespace)
         && end > stmt_end(fset, last) + 1
     {
-        pending.push((block.rbrace.0 as u32, MSG_BLOCK_END.into()));
+        let edits = remove_lines(fset, block.rbrace, stmt_end(fset, last) + 1, end);
+        pending.push((
+            report_at(&edits, block.rbrace.0 as u32),
+            MSG_BLOCK_END.into(),
+            edits,
+        ));
     }
 }
 
@@ -570,7 +633,7 @@ fn check_err_cuddle(
     stmts: &[Stmt],
     i: usize,
     options: &WslV5Options,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     if !check_enabled(options, WslV5Check::Err) || i == 0 {
         return;
@@ -597,7 +660,11 @@ fn check_err_cuddle(
             .file(prev.pos())
             .map(|f| f.line_start(prev_end_line as usize + 1))
             .unwrap_or_else(|| prev.pos());
-        pending.push((pos.0 as u32, format!("{MSG_REMOVE} (err)")));
+        pending.push((
+            pos.0 as u32,
+            format!("{MSG_REMOVE} (err)"),
+            remove_lines(fset, prev.pos(), prev_end_line + 1, if_line),
+        ));
     }
 }
 
@@ -615,7 +682,7 @@ fn check_cuddle_blockish(
     check_name: &str,
     enforce_limit: bool,
     options: &WslV5Options,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     let stmt = &stmts[i];
     let prev = &stmts[i - 1];
@@ -627,7 +694,7 @@ fn check_cuddle_blockish(
     if !is_assign_decl_or_inc(prev)
         && !matches!(stmt, Stmt::DeferStmt(_) | Stmt::GoStmt(_))
     {
-        pending.push((stmt.pos().0 as u32, msg_invalid(check_name)));
+        pending.push((stmt.pos().0 as u32, msg_invalid(check_name), insert_at(fset, stmt.pos())));
         return;
     }
 
@@ -637,7 +704,7 @@ fn check_cuddle_blockish(
         && !lists_overlap(&find_rhs(prev), &target)
     {
         // Decl above may also contribute names via find_lhs.
-        pending.push((stmt.pos().0 as u32, msg_no_shared(check_name)));
+        pending.push((stmt.pos().0 as u32, msg_no_shared(check_name), insert_at(fset, stmt.pos())));
         return;
     }
 
@@ -651,7 +718,7 @@ fn check_cuddle_blockish(
             if assign_defines_err(prev, &err_name) {
                 if n_above > 1 {
                     if let Some(extra) = stmts.get(i.saturating_sub(2)) {
-                        pending.push((extra.pos().0 as u32, msg_too_many(check_name)));
+                        pending.push((extra.pos().0 as u32, msg_too_many(check_name), insert_at(fset, extra.pos())));
                     }
                 }
                 return;
@@ -661,12 +728,12 @@ fn check_cuddle_blockish(
 
     let max = options.cuddle_max_statements;
     if max == 0 {
-        pending.push((stmt.pos().0 as u32, msg_too_many(check_name)));
+        pending.push((stmt.pos().0 as u32, msg_too_many(check_name), insert_at(fset, stmt.pos())));
         return;
     }
     if n_above > max {
         let idx = i - max;
-        pending.push((stmts[idx].pos().0 as u32, msg_too_many(check_name)));
+        pending.push((stmts[idx].pos().0 as u32, msg_too_many(check_name), insert_at(fset, stmts[idx].pos())));
     }
 }
 
@@ -676,7 +743,7 @@ fn check_statements(
     comment_lines: &[(i64, i64)],
     stmts: &[Stmt],
     options: &WslV5Options,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     for (i, stmt) in stmts.iter().enumerate() {
         match stmt {
@@ -765,7 +832,7 @@ fn check_statements(
                 {
                     continue;
                 }
-                pending.push((stmt.pos().0 as u32, msg_too_many_lines("return")));
+                pending.push((stmt.pos().0 as u32, msg_too_many_lines("return"), insert_at(fset, stmt.pos())));
             }
             Stmt::BranchStmt(_) if check_enabled(options, WslV5Check::Branch) => {
                 let first = &stmts[0];
@@ -774,7 +841,7 @@ fn check_statements(
                 {
                     continue;
                 }
-                pending.push((stmt.pos().0 as u32, msg_too_many_lines("branch")));
+                pending.push((stmt.pos().0 as u32, msg_too_many_lines("branch"), insert_at(fset, stmt.pos())));
             }
             Stmt::AssignStmt(a) => {
                 let is_append = a.rhs.iter().any(|e| {
@@ -791,7 +858,7 @@ fn check_statements(
                     let mut above = assigned_above;
                     above.extend(called_above);
                     if !lists_overlap(&above, &rhs) {
-                        pending.push((stmt.pos().0 as u32, msg_no_shared("append")));
+                        pending.push((stmt.pos().0 as u32, msg_no_shared("append"), insert_at(fset, stmt.pos())));
                     }
                     continue;
                 }
@@ -814,7 +881,7 @@ fn check_statements(
                     {
                         continue;
                     }
-                    pending.push((stmt.pos().0 as u32, msg_invalid("assign")));
+                    pending.push((stmt.pos().0 as u32, msg_invalid("assign"), insert_at(fset, stmt.pos())));
                     continue;
                 }
                 if is_assign_decl_or_inc(prev) {
@@ -830,18 +897,18 @@ fn check_statements(
                         | Stmt::TypeSwitchStmt(_)
                         | Stmt::SelectStmt(_)
                 ) {
-                    pending.push((stmt.pos().0 as u32, msg_invalid("assign")));
+                    pending.push((stmt.pos().0 as u32, msg_invalid("assign"), insert_at(fset, stmt.pos())));
                 }
             }
             Stmt::IncDecStmt(_) if check_enabled(options, WslV5Check::IncDec) => {
                 if is_assign_or_inc(prev) {
                     continue;
                 }
-                pending.push((stmt.pos().0 as u32, msg_invalid("inc-dec")));
+                pending.push((stmt.pos().0 as u32, msg_invalid("inc-dec"), insert_at(fset, stmt.pos())));
             }
             Stmt::DeclStmt(_) if check_enabled(options, WslV5Check::Decl) => {
                 // Simplified: never cuddle decl (grouping DEFERRED).
-                pending.push((stmt.pos().0 as u32, msg_never("decl")));
+                pending.push((stmt.pos().0 as u32, msg_never("decl"), insert_at(fset, stmt.pos())));
             }
             Stmt::ExprStmt(_) if check_enabled(options, WslV5Check::Expr) => {
                 if matches!(prev, Stmt::ExprStmt(_)) {
@@ -893,7 +960,7 @@ fn check_statements(
                 check_cuddle_blockish(fset, stmts, i, "send", true, options, pending);
             }
             Stmt::LabeledStmt(_) if check_enabled(options, WslV5Check::Label) => {
-                pending.push((stmt.pos().0 as u32, msg_never("label")));
+                pending.push((stmt.pos().0 as u32, msg_never("label"), insert_at(fset, stmt.pos())));
             }
             _ => {}
         }
@@ -906,7 +973,7 @@ fn walk_else(
     comment_lines: &[(i64, i64)],
     else_: &Stmt,
     options: &WslV5Options,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     match else_ {
         Stmt::BlockStmt(b) => check_block(fset, skip, comment_lines, b, options, pending),
@@ -926,7 +993,7 @@ fn check_block(
     comment_lines: &[(i64, i64)],
     block: &BlockStmt,
     options: &WslV5Options,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     check_leading_trailing(fset, comment_lines, block, options, pending);
     check_statements(fset, skip, comment_lines, &block.list, options, pending);
@@ -942,7 +1009,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .cloned()
         .unwrap_or_default();
 
-    let mut pending = Vec::new();
+    let mut pending: Pending = Vec::new();
     let fset = pass.fset().clone();
     let skip = ident_skip_set(pass);
     let want_comments = check_enabled(&options, WslV5Check::LeadingWhitespace);
@@ -977,8 +1044,27 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         // FuncLit via Inspect; we cover nested FuncLits inside function bodies.
     }
 
-    for (pos, message) in pending {
-        pass.reportf(pos, message);
+    for (pos, message, edits) in pending {
+        if edits.is_empty() {
+            pass.reportf(pos, message);
+            continue;
+        }
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: String::new(),
+                text_edits: edits
+                    .into_iter()
+                    .map(|(from, to, text)| TextEdit {
+                        pos: from,
+                        end: to,
+                        new_text: text.into(),
+                    })
+                    .collect(),
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }

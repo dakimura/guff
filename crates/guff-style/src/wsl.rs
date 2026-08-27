@@ -15,7 +15,9 @@ use std::sync::OnceLock;
 use guff::ast::{BlockStmt, Decl, Expr, Spec, Stmt};
 use guff::position::{FileSet, Pos};
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_analysis::{
+    AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
 
 use crate::options::WslOptions;
 
@@ -230,7 +232,63 @@ fn is_allow_cuddle_rhs(names: &[String], options: &WslOptions) -> bool {
         .any(|n| options.allow_cuddle_with_rhs.iter().any(|c| c == n))
 }
 
-fn check_leading_trailing(fset: &FileSet, block: &BlockStmt, pending: &mut Vec<(u32, String)>) {
+/// A pending finding: where it is reported, its message, and the ranges the fix
+/// replaces with a single newline.
+///
+/// Upstream builds every edit as `TextEdit{Pos: fixRangeStart, End:
+/// fixRangeEnd, NewText: []byte("\n")}` (analyzer.go:106) — the text is always
+/// exactly one newline, so only the ranges vary. An *empty* range inserts a
+/// blank line before a statement; a spanning range collapses existing blank
+/// lines down to one.
+type Pending = Vec<(u32, String, Vec<(u32, u32)>)>;
+
+/// The common case: `addWhitespaceBeforeError(node)` upstream, which is
+/// `addErrorRange(node.Pos(), node.Pos(), node.Pos(), …)` — report and insert at
+/// the same position. Twenty-one of upstream's thirty-two call sites are this.
+fn before(pos: u32) -> Vec<(u32, u32)> {
+    vec![(pos, pos)]
+}
+
+/// `reportNewlineTwoLinesAbove` (wsl.go:445): report at the statement, but put
+/// the blank line **two lines above** when that keeps the useful cuddle intact.
+///
+/// The seven `only one cuddle assignment allowed before …` rules all go through
+/// it, and it is the one place where wsl's fix position is not its report
+/// position. Upstream: if the assignment on the line above is related to this
+/// statement, and the one *two* lines above is not, break above the line above
+/// — so `two := 2` is separated from `three := 3; if three == 3`, keeping the
+/// assignment the `if` actually uses next to it.
+///
+/// `identifiersUsedInBlock` upstream is the block's first statement here, which
+/// is what `first_in_block` already holds — the same value the reporting
+/// decisions above are made with.
+fn two_lines_above(
+    stmts: &[Stmt],
+    i: usize,
+    at: u32,
+    both: &[String],
+    assigned_above: &[String],
+    first_in_block: &[String],
+) -> Vec<(u32, u32)> {
+    if !(lists_overlap(both, assigned_above) || lists_overlap(assigned_above, first_in_block)) {
+        return before(at);
+    }
+    if i >= 2 {
+        let two_above = &stmts[i - 2];
+        let is_assign = matches!(two_above, Stmt::AssignStmt(_));
+        let assigned_two_above = find_lhs(two_above);
+        if is_assign
+            && (lists_overlap(both, &assigned_two_above)
+                || lists_overlap(&assigned_two_above, first_in_block))
+        {
+            return before(at);
+        }
+    }
+    // Break above the previous statement instead.
+    before(stmts[i - 1].pos().0 as u32)
+}
+
+fn check_leading_trailing(fset: &FileSet, block: &BlockStmt, pending: &mut Pending) {
     if block.list.is_empty() {
         return;
     }
@@ -239,13 +297,29 @@ fn check_leading_trailing(fset: &FileSet, block: &BlockStmt, pending: &mut Vec<(
     if start == end {
         return;
     }
+    // The two sites whose fix range is *not* derived from the report position.
+    // Upstream, with no comments in the way:
+    //   start: addErrorRange(openingNodePos, lastNodePos,      firstStatement.Pos())
+    //   end:   addErrorRange(blockEndPos,    lastNode.End(),   stmt.End()-1)
+    // so the start range happens to begin where it reports (just past `{`) and
+    // the end range does *not* — it begins at the last statement's end and runs
+    // to the `}`. Deriving both from the report position would delete the brace.
     let first = &block.list[0];
     if stmt_start(fset, first) > start + 1 {
-        pending.push((block.lbrace.0 as u32 + 1, REASON_BLOCK_START.into()));
+        let at = block.lbrace.0 as u32 + 1;
+        pending.push((
+            at,
+            REASON_BLOCK_START.into(),
+            vec![(at, first.pos().0 as u32)],
+        ));
     }
     let last = block.list.last().unwrap();
     if end > stmt_end(fset, last) + 1 {
-        pending.push((block.rbrace.0 as u32, REASON_BLOCK_END.into()));
+        pending.push((
+            block.rbrace.0 as u32,
+            REASON_BLOCK_END.into(),
+            vec![(last.end().0 as u32, block.rbrace.0 as u32)],
+        ));
     }
 }
 
@@ -274,7 +348,7 @@ fn check_statements(
     fset: &FileSet,
     stmts: &[Stmt],
     options: &WslOptions,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     for (i, stmt) in stmts.iter().enumerate() {
         // Recurse into nested blocks (if/for/range/switch/func lits).
@@ -406,11 +480,22 @@ fn check_statements(
         match stmt {
             Stmt::IfStmt(_) => {
                 if assigned_above.is_empty() {
-                    pending.push((stmt.pos().0 as u32, REASON_IF_ASSIGN.into()));
+                    pending.push((stmt.pos().0 as u32, REASON_IF_ASSIGN.into(), before(stmt.pos().0 as u32)));
                     continue;
                 }
                 if n_cuddled_before(fset, stmts, i, 2) {
-                    pending.push((stmt.pos().0 as u32, REASON_ONE_IF.into()));
+                    pending.push((
+                        stmt.pos().0 as u32,
+                        REASON_ONE_IF.into(),
+                        two_lines_above(
+                            stmts,
+                            i,
+                            stmt.pos().0 as u32,
+                            &both,
+                            &assigned_above,
+                            &first_in_block,
+                        ),
+                    ));
                     continue;
                 }
                 if lists_overlap(&both, &assigned_above)
@@ -418,19 +503,19 @@ fn check_statements(
                 {
                     continue;
                 }
-                pending.push((stmt.pos().0 as u32, REASON_IF_USED.into()));
+                pending.push((stmt.pos().0 as u32, REASON_IF_USED.into(), before(stmt.pos().0 as u32)));
             }
             Stmt::ReturnStmt(_) => {
                 if short_two_line_return(fset, stmts, i) {
                     continue;
                 }
-                pending.push((stmt.pos().0 as u32, REASON_RETURN.into()));
+                pending.push((stmt.pos().0 as u32, REASON_RETURN.into(), before(stmt.pos().0 as u32)));
             }
             Stmt::BranchStmt(_) => {
                 if short_two_line_return(fset, stmts, i) {
                     continue;
                 }
-                pending.push((stmt.pos().0 as u32, REASON_BRANCH.into()));
+                pending.push((stmt.pos().0 as u32, REASON_BRANCH.into(), before(stmt.pos().0 as u32)));
             }
             Stmt::AssignStmt(a) => {
                 let is_append = a.rhs.iter().any(|e| {
@@ -441,7 +526,7 @@ fn check_statements(
                         continue;
                     }
                     if !lists_overlap(&called_or_assigned_above, &rhs) {
-                        pending.push((stmt.pos().0 as u32, REASON_APPEND.into()));
+                        pending.push((stmt.pos().0 as u32, REASON_APPEND.into(), before(stmt.pos().0 as u32)));
                     }
                     continue;
                 }
@@ -454,34 +539,34 @@ fn check_statements(
                 if lists_overlap(&called_or_assigned_above, &both) {
                     continue;
                 }
-                pending.push((stmt.pos().0 as u32, REASON_ASSIGNS.into()));
+                pending.push((stmt.pos().0 as u32, REASON_ASSIGNS.into(), before(stmt.pos().0 as u32)));
             }
             Stmt::IncDecStmt(_) => {
                 if is_assign_or_inc(prev) {
                     continue;
                 }
-                pending.push((stmt.pos().0 as u32, REASON_ASSIGNS.into()));
+                pending.push((stmt.pos().0 as u32, REASON_ASSIGNS.into(), before(stmt.pos().0 as u32)));
             }
             Stmt::DeclStmt(_) => {
-                pending.push((stmt.pos().0 as u32, REASON_DECL.into()));
+                pending.push((stmt.pos().0 as u32, REASON_DECL.into(), before(stmt.pos().0 as u32)));
             }
             Stmt::ExprStmt(_) => {
                 if matches!(prev, Stmt::DeclStmt(_) | Stmt::ReturnStmt(_)) {
-                    pending.push((stmt.pos().0 as u32, REASON_EXPR_DECL.into()));
+                    pending.push((stmt.pos().0 as u32, REASON_EXPR_DECL.into(), before(stmt.pos().0 as u32)));
                     continue;
                 }
                 if matches!(
                     prev,
                     Stmt::IfStmt(_) | Stmt::RangeStmt(_) | Stmt::SwitchStmt(_) | Stmt::ForStmt(_)
                 ) {
-                    pending.push((stmt.pos().0 as u32, REASON_EXPR_BLOCK.into()));
+                    pending.push((stmt.pos().0 as u32, REASON_EXPR_BLOCK.into(), before(stmt.pos().0 as u32)));
                     continue;
                 }
                 if lists_overlap(&called_or_assigned_above, &both) {
                     continue;
                 }
                 if !assigned_above.is_empty() && !lists_overlap(&both, &assigned_above) {
-                    pending.push((stmt.pos().0 as u32, REASON_EXPR_UNUSED.into()));
+                    pending.push((stmt.pos().0 as u32, REASON_EXPR_UNUSED.into(), before(stmt.pos().0 as u32)));
                 }
             }
             Stmt::DeferStmt(_) => {
@@ -489,7 +574,18 @@ fn check_statements(
                     continue;
                 }
                 if n_cuddled_before(fset, stmts, i, 2) {
-                    pending.push((stmt.pos().0 as u32, REASON_ONE_DEFER.into()));
+                    pending.push((
+                        stmt.pos().0 as u32,
+                        REASON_ONE_DEFER.into(),
+                        two_lines_above(
+                            stmts,
+                            i,
+                            stmt.pos().0 as u32,
+                            &both,
+                            &assigned_above,
+                            &first_in_block,
+                        ),
+                    ));
                     continue;
                 }
                 if lists_overlap(&rhs, &called_above)
@@ -498,11 +594,22 @@ fn check_statements(
                 {
                     continue;
                 }
-                pending.push((stmt.pos().0 as u32, REASON_DEFER.into()));
+                pending.push((stmt.pos().0 as u32, REASON_DEFER.into(), before(stmt.pos().0 as u32)));
             }
             Stmt::RangeStmt(_) => {
                 if n_cuddled_before(fset, stmts, i, 2) {
-                    pending.push((stmt.pos().0 as u32, REASON_ONE_RANGE.into()));
+                    pending.push((
+                        stmt.pos().0 as u32,
+                        REASON_ONE_RANGE.into(),
+                        two_lines_above(
+                            stmts,
+                            i,
+                            stmt.pos().0 as u32,
+                            &both,
+                            &assigned_above,
+                            &first_in_block,
+                        ),
+                    ));
                     continue;
                 }
                 if lists_overlap(&both, &assigned_above)
@@ -510,11 +617,22 @@ fn check_statements(
                 {
                     continue;
                 }
-                pending.push((stmt.pos().0 as u32, REASON_RANGE.into()));
+                pending.push((stmt.pos().0 as u32, REASON_RANGE.into(), before(stmt.pos().0 as u32)));
             }
             Stmt::ForStmt(_) => {
                 if n_cuddled_before(fset, stmts, i, 2) {
-                    pending.push((stmt.pos().0 as u32, REASON_ONE_FOR.into()));
+                    pending.push((
+                        stmt.pos().0 as u32,
+                        REASON_ONE_FOR.into(),
+                        two_lines_above(
+                            stmts,
+                            i,
+                            stmt.pos().0 as u32,
+                            &both,
+                            &assigned_above,
+                            &first_in_block,
+                        ),
+                    ));
                     continue;
                 }
                 if lists_overlap(&both, &assigned_above)
@@ -522,15 +640,15 @@ fn check_statements(
                 {
                     continue;
                 }
-                pending.push((stmt.pos().0 as u32, REASON_FOR.into()));
+                pending.push((stmt.pos().0 as u32, REASON_FOR.into(), before(stmt.pos().0 as u32)));
             }
             Stmt::SwitchStmt(s) => {
                 if s.tag.is_none() {
-                    pending.push((stmt.pos().0 as u32, REASON_ANON_SWITCH.into()));
+                    pending.push((stmt.pos().0 as u32, REASON_ANON_SWITCH.into(), before(stmt.pos().0 as u32)));
                     continue;
                 }
                 if !lists_overlap(&both, &assigned_above) {
-                    pending.push((stmt.pos().0 as u32, REASON_SWITCH.into()));
+                    pending.push((stmt.pos().0 as u32, REASON_SWITCH.into(), before(stmt.pos().0 as u32)));
                 }
             }
             _ => {}
@@ -542,7 +660,7 @@ fn check_block(
     fset: &FileSet,
     block: &BlockStmt,
     options: &WslOptions,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Pending,
 ) {
     check_leading_trailing(fset, block, pending);
     check_statements(fset, &block.list, options, pending);
@@ -558,7 +676,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .cloned()
         .unwrap_or_default();
 
-    let mut pending = Vec::new();
+    let mut pending: Pending = Vec::new();
     let fset = pass.fset().clone();
     for file in pass.files() {
         for decl in &file.decls {
@@ -570,8 +688,27 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
     }
 
-    for (pos, message) in pending {
-        pass.reportf(pos, message);
+    for (pos, message, ranges) in pending {
+        if ranges.is_empty() {
+            pass.reportf(pos, message);
+            continue;
+        }
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: String::new(),
+                text_edits: ranges
+                    .into_iter()
+                    .map(|(from, to)| TextEdit {
+                        pos: from,
+                        end: to,
+                        new_text: "\n".into(),
+                    })
+                    .collect(),
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }

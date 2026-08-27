@@ -14251,3 +14251,125 @@ Parser/Printer 移植が要る。既に gofmt 済みのコーパスでは大抵�
 ケースは 1 つも閉じていない。**最大の穴が 3 分の 1 になり、
 残りが別のサブシステムの既知の未移植だと分かった**のが今回の成果。
 golden 193/193、269 スイート / 3,276 テスト、ゲート前後で md5 同一。
+
+---
+
+### 2026-08-27（続き 77）— `wsl` / `wsl-v5` が閉じた。**薄い fixture が 2 つの欠陥を隠していて、片方は報告位置だった**
+
+続き 76 の続き。pending 12 件を測り直したら、
+**9 件は 1 行も書いていない**（`DEFERRED: SuggestedFix` の型）。
+残り 230 行のうち `wsl` + `wsl-v5` が **44 行・2 ケース・linter 1 系統**で
+最も割がいい。`go/doc/comment` の移植は gocritic の 9 行しか買わない。
+
+#### 上流の fix は「改行 1 つ」…… v4 では
+
+`v4@v4.7.0/analyzer.go:106`:
+
+```go
+textEdits = append(textEdits, analysis.TextEdit{
+    Pos: f.fixRangeStart, End: f.fixRangeEnd, NewText: []byte("\n"),
+})
+```
+
+**`NewText` は常にちょうど改行 1 つ**で、変わるのは範囲だけ。
+空範囲なら「前に空行を入れる」、幅のある範囲なら「空行を 1 本に潰す」。
+
+範囲は `wsl.go:1437`:
+
+```go
+func (p *processor) addWhitespaceBeforeError(node, reason) {
+    p.addErrorRange(node.Pos(), node.Pos(), node.Pos(), reason)
+}
+```
+
+**32 呼び出しのうち 21 がこれ** —— 報告位置と挿入位置が同じ。
+guff の `pending.push((stmt.pos(), REASON_X))` と一対一なので、
+**すでに持っている位置から fix が導出できる**。
+
+#### 導出できない場所が 2 種類あって、両方 fixture に無かった
+
+**(1) ブロックの先頭/末尾の空白。**
+`check_leading_trailing` の 2 サイトは**範囲が報告位置と違う**:
+
+```
+start: addErrorRange(openingNodePos, lastNodePos,    firstStatement.Pos())
+end:   addErrorRange(blockEndPos,    lastNode.End(), stmt.End()-1)
+```
+
+先頭は「報告位置＝範囲の始まり」だが、末尾は違う ——
+**最後の文の末尾から `}` まで**。報告位置から導出したら `}` を消す。
+
+fixture には**波括弧の直後に空行を置いた関数が 1 つも無かった**ので、
+この 2 サイトは一度も測られていなかった。3 形足したら上流は 4 件報告して 4 件とも直した。
+guff も 7/7 一致（**検出は完全で、fix だけが無かった**）。
+
+**(2) `reportNewlineTwoLinesAbove`（wsl.go:445）。**
+実装して最初の計測で**1 行ずれた**:
+
+```
+上流:  two := 2 / <空行> / three := 3 / if three == 3 {
+guff:  two := 2 / three := 3 / <空行> / if three == 3 {
+```
+
+`only one cuddle assignment allowed before …` の **7 rule** はこの関数を通り、
+**報告は文の位置、fix は「2 行上」になることがある** ——
+上の行の代入がこの文と関係し、2 行上の代入が関係しないなら、
+`three := 3` を `if` の隣に残すために `two := 2` の側で切る。
+
+guff は判定材料（`both` / `assigned_above` / `first_in_block`）を
+**すでに全部計算していた**。fix の位置に使っていなかっただけ。
+（上流の `identifiersUsedInBlock` は実質ブロックの先頭文で、
+guff の `first_in_block` と同じ値 —— 既存の報告判定がそれで一致している。）
+
+#### v5 は v4 の別名ではない
+
+`v5@v5.8.0/analyzer.go:122` は **`NewText: f.fix`** —— **範囲ごとにテキストが違う**:
+
+- 挿入 (`addErrorWithMessage`): `"\n"`、位置は **`lineStartOf(pos)`**。
+  文の位置ではない。インデントの後ろに入れると**空行にタブが残る**
+  （gofmt が消すが、その前のバイトは上流と違う）。
+- 削除 (`addErrorRemoveNewline`): **空バイト列**、範囲は
+  `LineStart(from) .. LineStart(to)` で行ごと消す。
+
+v4 の「常に改行 1 つ」をそのまま持ち込むと**両方とも外す**。
+
+#### そして v5 では**報告位置そのものが間違っていた**
+
+fixture に同じ 3 形を足したら golden が赤くなった:
+
+```
+上流  98:1   guff  97:26   (leading-whitespace)
+上流 106:1   guff 107:1    (trailing-whitespace)
+```
+
+`addErrorRemoveNewline(start, end, …)` は **`start` を報告位置に渡す** ——
+削除範囲の始まりであって、隣の波括弧ではない。
+guff は `lbrace + 1` を報告していた。
+
+**fix のバイトは既に正しかった**ので fix tier は「一致」と言っていた。
+見えるのは golden だけで、しかも fixture にその形があって初めて見える ——
+続き 73（QF1005）・続き 74（dupword）に続き、
+**正しく見える fix 出力の裏に報告の欠陥が隠れていた 3 度目**。
+
+#### 測定
+
+| | 続き 76 後 | 今回 |
+|---|---|---|
+| fix tier 一致 | 178 | **180** |
+| pending | 12 | **10** |
+| `wsl` | 0 / 18 | **39 / 39**（fixture 拡張後） |
+| `wsl-v5` | 0 / 26 | **40 / 40**（同上） |
+| golden `wsl` キー | 3 | **7** |
+| golden `wsl-v5` キー | 4 | **6** |
+| ファイルを書き換えるケース | 52 | **54** |
+
+golden 193/193、269 スイート / 3,276 テスト、ゲート前後で md5 同一。
+
+#### 残り
+
+pending 10 件、合計 148 行。うち **7 件は 1 行も書いていない**
+（`issues-uniq-by-line-order` 25 / `sloglint` 18 / `nakedret` 18 /
+`usetesting` 14 / `tagalign` 13 / `noinlineerr` 12 /
+`embeddedstructfieldcheck` 9）。
+部分的に書いているのは `gocritic` 9（＝`go/doc/comment` 待ち）、
+`govet` 18、`exptostd` 12。
