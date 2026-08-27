@@ -10,7 +10,9 @@
 //! empty-line check uses `Field.Doc.Pos()` when a doc comment precedes the first
 //! regular field (k8s CRDs, etc.).
 //!
-//! DEFERRED: SuggestedFix for missing blank line.
+//! The missing-blank-line finding carries a fix; the misplaced-field and
+//! forbidden-embed ones do not, which is upstream's split too — only
+//! `NewMissingSpaceDiag` builds a `SuggestedFix` (`internal/diag.go:16`).
 
 use std::fs;
 use std::sync::{Arc, OnceLock};
@@ -20,7 +22,9 @@ use guff::parser::{parse_file, PARSE_COMMENTS};
 use guff::position::{FileSet, Pos};
 use guff::walk::{preorder, NodeRef};
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_analysis::{
+    AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
 
 use crate::options::EmbeddedstructfieldcheckOptions;
 
@@ -58,7 +62,7 @@ fn analyze_struct(
     fset: &FileSet,
     st: &StructType,
     opts: &EmbeddedstructfieldcheckOptions,
-    pending: &mut Vec<(Pos, String)>,
+    pending: &mut Vec<(Pos, String, Option<Pos>)>,
 ) {
     let mut last_embedded: Option<&Field> = None;
     let mut first_regular: Option<&Field> = None;
@@ -76,7 +80,7 @@ fn analyze_struct(
                             Expr::SelectorExpr(se) => se.x.pos(),
                             _ => field.pos(),
                         };
-                        pending.push((pos, format!("{name} should not be embedded")));
+                        pending.push((pos, format!("{name} should not be embedded"), None));
                     }
                 }
             }
@@ -93,6 +97,7 @@ fn analyze_struct(
                     pending.push((
                         field.pos(),
                         "embedded fields should be listed before regular fields".into(),
+                        None,
                     ));
                     // Upstream returns early: skip empty-line for this struct.
                     return;
@@ -119,9 +124,18 @@ fn analyze_struct(
     };
 
     if next_line != line + 2 {
+        // The insertion point is the first regular field — or its doc comment
+        // when it has one. `next_line` above is already computed from exactly
+        // that choice; this reuses it rather than deciding twice.
+        let insert = first_reg
+            .doc
+            .as_ref()
+            .map(|doc| doc.pos())
+            .unwrap_or_else(|| first_reg.pos());
         pending.push((
             last_emb.pos(),
             "there must be an empty line separating embedded fields from regular fields".into(),
+            Some(insert),
         ));
     }
 }
@@ -156,7 +170,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .cloned()
         .unwrap_or_default();
 
-    let mut pending: Vec<(u32, String)> = Vec::new();
+    let mut pending: Vec<(u32, String, Option<u32>)> = Vec::new();
     let paths = pass.pkg().compiled_go_files.clone();
     let n = pass.files().len();
 
@@ -168,20 +182,44 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             continue;
         };
         let pass_file = &pass.files()[i];
-        let mut local: Vec<(Pos, String)> = Vec::new();
+        let mut local: Vec<(Pos, String, Option<Pos>)> = Vec::new();
         preorder(NodeRef::File(&parsed), |n| {
             if let NodeRef::StructType(st) = n {
                 analyze_struct(&re_fset, st, &opts, &mut local);
             }
             true
         });
-        for (re_pos, message) in local {
-            pending.push((map_pos(pass, pass_file, &re_fset, re_pos), message));
+        for (re_pos, message, re_insert) in local {
+            // The insertion point is mapped through the same re-parse bridge as
+            // the report position: both are positions in the comment-aware
+            // FileSet, and an unmapped one would land anywhere.
+            let insert = re_insert.map(|p| map_pos(pass, pass_file, &re_fset, p));
+            pending.push((map_pos(pass, pass_file, &re_fset, re_pos), message, insert));
         }
     }
 
-    for (pos, message) in pending {
-        pass.reportf(pos, message);
+    for (pos, message, insert) in pending {
+        let Some(at) = insert else {
+            pass.reportf(pos, message);
+            continue;
+        };
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: "adding extra line separating embedded fields from regular fields".into(),
+                // `NewText: []byte("\n\n")` with no `End` — an empty range, so
+                // this inserts rather than replaces. Landing after the field's
+                // indentation leaves a stray tab that the post-fix gofmt cleans,
+                // exactly as wsl's insert-at-statement-position does.
+                text_edits: vec![TextEdit {
+                    pos: at,
+                    end: at,
+                    new_text: "\n\n".into(),
+                }],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }
