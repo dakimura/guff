@@ -14145,3 +14145,109 @@ golden 193/193、269 スイート / 3,276 テスト、
 pending 12 件。最大は `gocritic` の 48 行で、続き 71 の通り
 **13 checker に fix を足して guff 側でも衝突させる**必要があり、
 1 つだけ足すと逆に上流が書かないコード変更を書く。
+
+---
+
+### 2026-08-27（続き 76）— `gocritic` の 48 行のうち 39 行が閉じた。**残りは gocritic ではなく `go/doc/comment` の未移植だった**
+
+続き 75 の続き。pending 12 件、最大は `gocritic`。
+`bad.go` は**すでにバイト一致**していて、差は全部 `extras.go` ——
+上流は 46 行書き、guff は 0 行。続き 71 の通り**その 46 行は全部 gofmt** で、
+guff が何も書かないのは `extras.go` に **fix を持つ gocritic issue が 1 つも無い**から。
+`editsByPath` にキーが立たず、ファイルが読み書きされない。
+
+#### 続き 71 の「13 checker」は checker ではなかった
+
+go-critic v0.14.3 で `linter.QuickFix` を作るものは **2 つだけ** ——
+`commentFormatting` と `ruleguard`。
+続き 71 が挙げた 13 個は全部 **ruleguard のルール**
+（`checkers/rules/rules.go`、`.Suggest(...)` が QuickFix になる）。
+
+そのファイルには 41 ルールがあり、**Suggest を持つのは 16**:
+
+    redundantSprint  httpNoBody      stringXbytes    wrapperFunc
+    preferFprint     preferFilepathJoin  preferStringWriter  offBy1
+    unslice          equalFold       stringConcatSimplify  timeExprSimplify
+    badSorting       dynamicFmtString  stringsCompare  zeroByteRepeat
+
+guff は `offBy1` / `unslice`（＋native の `commentFormatting`）を既に持つので
+**残り 14**。続き 71 の 13 に `wrapperFunc` が加わる —— `extras.go` で発火しないので
+あの数え方には出てこなかった。
+
+**なぜ fix が無いのか**もこれで分かる。guff の module doc は
+「`ruleguard` DSL ホスト」を DEFERRED にしている。
+ルール自体は**全部ネイティブに実装済み**（golden は緑、findings は一致）だが、
+ネイティブ移植は**検出を運んで Suggest 節を運ばない**。誰も取りに戻らなかった。
+
+#### span は「マッチしたノード全体」—— ここが罠
+
+ruleguard の fix は `runner.go:357`:
+
+```go
+suggestion = &Suggestion{From: node.Pos(), To: node.End(), Replacement: ...}
+```
+
+素直に移植すると**狭くなって間違える**。`httpNoBody` は引数 1 つしか変えないので
+`call.args[nil_idx]` を `http.NoBody` に差し替えるのが自然だが、
+**バイトは同じで衝突の集合が変わる**。
+上流の「ノード全体」span は同じ行で重なり合い、それが `extras.go` で
+gocritic の edit が全部落ちる理由そのもの。狭い span なら重ならず、
+**上流が落とす場所で guff が書く** —— `bad.go` からは見えない書き過ぎで、
+fixture を通って実リポジトリで壊れる形。
+
+#### 部分実装は「進捗」ではなく**危険な状態**
+
+続き 71 は「1 つだけ足すと逆効果」と書いた。これは任意の**部分集合**に一般化し、
+しかも**正しさの議論**であって整頓の話ではない:
+guff が fix F を X に適用する。上流も F を持つが、X 内の別の gocritic edit と
+重なったときだけ落とす。部分集合なら guff の edit は**少ない**＝**衝突も少ない** ——
+上流が全部落とすファイルで guff が自分のぶんを書く。
+だから fix tier を途中経過の物差しに使えない。unit test で駆動して、
+**14 本入ってから初めて** `--case gocritic` を回した。
+
+#### 実際は 1 本あたり 6 行
+
+メッセージが**すでに置換後のテキストを持っている**ものが多い ——
+`equalFold` は `consider replacing with bytes.EqualFold({xt}, {yt})` を組み立てているし、
+`stringsCompare` は `suggest` を計算済み。
+そして golden が緑ということは、**その文字列は既に上流とバイト一致で検証済み**。
+fix に使い回すとその検証をそのまま引き継げる。
+
+13 本入れた（`wrapperFunc` を除く。理由は下）。
+
+#### 残り 9 行は gocritic ではない
+
+```
+gofmt:    //nolint（doc comment） → // nolint    //inner（関数本体） → 不変
+guff fmt: //nolint               → 不変
+```
+
+`crates/guff-ast/src/printer/comment.rs` に書いてある:
+**「`format_doc_comment` は現在 no-op。完全な parity には `go/doc/comment` の
+Parser/Printer 移植が要る。既に gofmt 済みのコーパスでは大抵冪等」**。
+`extras.go` は**わざと未整形の fixture** なので、その「大抵」の反例になっている。
+
+**直さなかった。** gofmt に訊いたら規則は「空白を足す」ではなく往復変換だった:
+`//  two spaces` → `// two spaces`、`//\ttabbed` → `// tabbed`、
+そして**空の `//` doc comment は削除される**。
+部分実装は doc comment 内のインデント済みコードブロックを壊し、
+**今は 1 つしかない乖離を 2 つにする**。
+
+`wrapperFunc` も外した。Suggest を持つ腕は `strings.Index($s,$t) >= 0` 系で
+**BinaryExpr** パターンだが、guff の `check_wrapper_func` は `CallExpr` を取るので
+**そもそも見ていない**。これは module doc にある**検出**の deferral で、
+付ける先の finding が無い。閉じるには findings が動くので golden regen が要る別作業。
+
+#### 測定
+
+| | 続き 75 後 | 今回 |
+|---|---|---|
+| fix tier 一致 | 178 | 178 |
+| pending | 12 | 12 |
+| `gocritic` の書く行数 | 29 / 76 | **67 / 76** |
+| `gocritic` の `extras.go` | 0 / 46 | **37 / 46** |
+| fix を持つ gocritic checker | 3 | **16** |
+
+ケースは 1 つも閉じていない。**最大の穴が 3 分の 1 になり、
+残りが別のサブシステムの既知の未移植だと分かった**のが今回の成果。
+golden 193/193、269 スイート / 3,276 テスト、ゲート前後で md5 同一。
