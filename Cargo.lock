@@ -444,6 +444,7 @@ version = "0.6.0"
 dependencies = [
  "guff-analysis",
  "guff-ast",
+ "guff-gostd",
  "guff-packages",
  "guff-runner",
  "guff-types",
@@ -558,6 +559,10 @@ dependencies = [
  "guff-ssa",
  "guff-types",
 ]
+
+[[package]]
+name = "guff-gostd"
+version = "0.6.0"
 
 [[package]]
 name = "guff-gover"
@@ -753,6 +758,7 @@ dependencies = [
  "guff-analysis",
  "guff-ast",
  "guff-constant",
+ "guff-gostd",
  "guff-packages",
  "guff-pattern",
  "guff-runner",

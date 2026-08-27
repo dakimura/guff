@@ -34,7 +34,7 @@
  }
 --- a/bad/bad.go
 +++ b/bad/bad.go
-@@ -1,7 +1,7 @@
+@@ -1,8 +1,8 @@
  package example
  
  func process() {
@@ -43,4 +43,37 @@
 +	// This is a comment with duplicate words
 +	line := "the duplicate"
  	_ = line
+ }
+ 
+@@ -13,8 +13,8 @@
+ func literals() {
+ 	// The tab is a real tab by the time the scan runs, and `strconv.Quote`
+ 	// escapes it again on the way back.
+-	tabbed := "the\tthe word"
+-	newline := "a\na b"
++	tabbed := "the\tword"
++	newline := "a\n"
+ 
+ 	// `\\` unquotes to one backslash, so `the\the` is a single word and there
+ 	// is nothing to report.
+@@ -26,17 +26,17 @@
+ 	// A raw string is rewritten as an *interpreted* one: upstream re-quotes
+ 	// with `strconv.Quote`, which has no way to spell a backtick literal. The
+ 	// backticks are gone from the fixed file.
+-	raw := `the the word`
++	raw := "the word"
+ 
+ 	// ...but a raw string's `\t` is two characters, so `the\tthe` is one word
+ 	// and this one is silent — the pair above and below only differ by quoting.
+ 	rawEsc := `the\tthe word`
+ 
+ 	// Non-ASCII, to pin that the scan is not byte-indexed.
+-	uni := "é é x"
++	uni := "é "
+ 
+ 	// No trailing text after the duplicate.
+-	runes := "the the"
++	runes := "the"
+ 
+ 	_, _, _, _, _, _, _, _ = tabbed, newline, escaped, quoteInside, raw, rawEsc, uni, runes
  }

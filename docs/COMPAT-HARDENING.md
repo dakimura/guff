@@ -13935,3 +13935,101 @@ pending 16 件は全部が書き足りない方向のまま。`divergent/` は 3
 上流も書くが guff が 1 hunk 足す（`parens`）、
 上流と同じ行に違うバイトを書く（`staticcheck-qf`）。
 枠を作ったときに想定していたのは 1 番目だけだった。
+
+---
+
+### 2026-08-27（続き 74）— `dupword` が閉じた。**クレートの置き場所のせいで linter が仕事をしていなかった**
+
+続き 73 の続き。pending 16 件。`dupword` は 36 行中 33 行一致で、
+**残り 3 行は全部文字列リテラル**。コメント側の fix は前から上流と一致している。
+
+理由は #140 に書いてあった通り、**技術的な難しさではなく依存の向き**だった:
+上流は `strconv.Unquote` → 書き換え → `strconv.Quote` でリテラルを直すが、
+guff の Go 厳密な quote/unquote は `guff-staticcheck` の `gostd` にあり、
+`guff-comment` から届かない。近似の quoter を書けば
+**他人のソースに近似が入る**ので、リテラル側だけ fix 無しで報告していた。
+
+#### 動かしたのは 2 ファイルだけ
+
+`gostd/strconv.rs`（689 行）の依存は `gostd/isprint_table.rs`（720 行・生成物）
+**1 つだけ**。新クレート `guff-gostd` に移し、
+`gostd/mod.rs` に `pub use guff_gostd::strconv;` を置いたので、
+**`gostd::strconv::…` の呼び出しは 1 箇所も書き換えていない**
+（`gostd` 内の利用者は `fmt` / `netip` / `template`）。
+
+**`gostd` 全部は動かさない。** 17,000 行あり `regexp_table.rs` だけで 9,328 行。
+`guff-comment` が regexp / template の移植をビルドし直す理由が無い。
+新クレートの憲章もそう書いた ——
+**「2 つ目のクレートが必要になったら移す。必要になるかもしれない、では移さない。」**
+
+#### 上流の 3 つの細部
+
+```go
+value, err := strconv.Unquote(lit.Value)
+if err != nil { value = lit.Value }   // 生のリテラル（引用符ごと）に戻る
+quote := value != lit.Value           // err == nil ではない
+update, keyword, find := a.Check(value)
+if quote { update = strconv.Quote(update) }
+```
+
+1. **検査は unquote 後のテキストに対して走る。** `"a\tb"` は上流ではタブ 1 文字、
+   guff の旧 `unquote_string`（区切り文字を剥がすだけ）では `\` と `t` の 2 文字。
+   **つまりこの差し替えは fix だけでなく findings も動かしうる。**
+2. **失敗時は引用符ごと**フォールバックし、`quote` が false なので**再引用しない**。
+   常に再引用する移植は壊れたリテラルでだけ二重引用になる。
+3. `quote` は `value != lit.Value`。well-formed なら同じだが、**書いてある方を書く**。
+
+#### fixture が訊いていなかったこと
+
+golden は差し替え後も 7 件のまま緑だった —— **fixture にエスケープが 1 つも無い**。
+続き 73 と同じなので、先に探索 fixture を両ツールに当てた。8 形、全て一致:
+
+| リテラル | 上流 = guff |
+|---|---|
+| `"the\tthe word"` | `"the\tword"`（タブは実体で比較し、書き戻しで再エスケープ） |
+| `"the\\the word"` | **無報告**（`\\` は 1 文字なので `the\the` は 1 単語） |
+| `"say \"the the\" now"` | **無報告** |
+| `` `the the word` `` | **`"the word"` —— raw string が interpreted string になる** |
+| `` `the\tthe word` `` | **無報告**（raw の `\t` は 2 文字） |
+| `"é é x"` | `"é "` |
+
+**4 行目が一番効く**: `strconv.Quote` にバッククォート文字列を綴る手段は無いので、
+**上流は raw string を二重引用符に書き換える**。
+知らずに「引用形式は保つ」と実装したら静かに食い違っていた。
+8 形とも fixture に入れた（golden 7→12 件、fix 36→69 行）。
+
+unit test も件数を固定した ——
+**この fixture の面白い半分は「黙る」方**なので、
+件数が増えたら unquote が区切り剥がしに退行したということ。
+
+#### 測定
+
+| | 続き 73 後 | 今回 |
+|---|---|---|
+| fix tier 一致 | 174 | **175** |
+| pending | 16 | **15** |
+| divergent | 3 | 3 |
+| golden `dupword` キー | 7 | **12** |
+| fix `dupword` 行数 | 33 / 36 | **69 / 69** |
+| クレート数 | 33 | **34** |
+| workspace テスト | 3,276 | **3,281** |
+
+golden 193/193、271 スイート / 3,281 テスト。
+ゲートの前後で release バイナリの md5 が同一であることも確認した。
+
+#### 残り
+
+pending 15 件。うち `nolint` / `nolint-strict`（各差 70）は #142 が
+(a) suggested_fixes をオフセットに揃える か (b) 共有 FileSet を渡す かの
+二択にしていたが、**どちらも要らない可能性が高い**。
+`fix.rs:267 resolve_edit` は `TextEdit.pos` を FileSet 全体の `Pos` として解決し、
+`nolint.rs:180` は**ファイルごとに使い捨ての `FileSet::new()`** で
+`COMMENTS_ONLY` パースをしている（上に SIMD の prefilter があり、
+このパースが「大きな木では `issues+filter` の時間の大半」）。
+だが filter が共有 FileSet を必要とするのは**パース時ではなく fix を出す時だけ**で、
+`Position.offset` / `File::pos(offset)` / `File::name()` は全部ある。
+**ファイル名で引いてオフセットを Pos に変換すれば足りる** ——
+使い捨てパースも `TextEdit` の表現も触らずに済む。
+（`typecheck.rs:535` は `path.to_str()` を、`nolint.rs` は `\` を `/` に正規化した
+名前を登録するので、POSIX では同一・Windows では違う。
+文字列比較ではなく `fix.rs` の `same_file`（basename フォールバック付き）を使う。）

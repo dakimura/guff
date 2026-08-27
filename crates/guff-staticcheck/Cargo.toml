@@ -19,6 +19,7 @@ guff-pattern = { path = "../guff-pattern" }
 guff-constant = { path = "../guff-constant" }
 guff-types = { path = "../guff-types" }
 guff-ssa = { path = "../guff-ssa" }
+guff-gostd = { path = "../guff-gostd" }
 regex = "1"
 unicode-general-category = "1"
 

@@ -10,6 +10,7 @@ members = [
     "crates/guff-types",
     "crates/guff-types-errors",
     "crates/guff-exportdata",
+    "crates/guff-gostd",
     "crates/guff-pattern",
     "crates/guff-analysis",
     "crates/guff-runner",
