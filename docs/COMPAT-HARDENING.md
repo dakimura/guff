@@ -14753,3 +14753,74 @@ golden 193/193、271 スイート / 3,281 テスト、ゲート前後で md5 同
 pending 5 件・64 行。`tagalign` 13（タグの並べ替えと桁揃え）、
 `noinlineerr` 12（**判断待ち**、続き 80 の脚注参照）、
 `govet` 18 / `exptostd` 12 / `gocritic` 9 は部分的。
+
+---
+
+### 2026-08-27（続き 82）— `tagalign`。**一番難しそうだったものが、既に計算されていた**
+
+続き 81 の続き。pending 5 件。`tagalign` は 13 行で 1 行も書いていない。
+
+タグを**並べ替えて桁揃えする**ので、ノード置換ではなくタグ列全体の書き直しになる
+——と見積もっていた。実際には**新しい計算は 1 つも要らなかった**。
+
+#### 置換文字列はメッセージの尻尾に backtick を付けたもの
+
+`v1.4.3/tagalign.go:298`:
+
+```go
+unquoteTag  := strings.TrimRight(newTagStr, " ")
+newTagValue := fmt.Sprintf("`%s`", unquoteTag)
+msg         := "tag is not aligned, should be: " + unquoteTag
+w.report(pass, field, msg, newTagValue)
+```
+
+`report` は `field.Tag.Pos()..field.Tag.End()`（backtick 込みのリテラル全体）を
+`replaceStr` で置き換える。つまり **fix = メッセージの "should be: " 以降 + backtick**。
+
+guff 側は `new_value` を**等値判定のためだけに既に組み立てていた**:
+
+```rust
+let new_value = format!("`{new_tag}`");
+if tag_lit.value == new_value { continue; }
+```
+
+`Some(...)` を 1 つ足すだけだった。
+**置換テキストがメッセージ経由で既に検証済みだった 6 例目**
+（gocritic / equalFold / stringsCompare / sloglint の key case / これ）。
+
+#### 直さなかったもの 2 つ
+
+**メッセージのカンマ前の空白。** 揃えるほうは
+`"tag is not aligned, should be: "`、単独フィールドのほうは
+`"tag is not aligned , should be: "` —— **カンマの前に空白**がある。
+上流の打ち間違いで、golden が両方を固定している。
+fix を書きながら「直す」と、**コードを綺麗にするために互換性を壊す**ことになる。
+
+**壊れたタグに対する no-op fix。** `errTagValueSyntax` などの経路では
+`replaceStr` が `field.Tag.Value` —— **タグを自分自身で置き換える**。
+それでも `editsByPath` にキーが立つので、
+**上流はファイルを読み直して gofmt して書き戻す**（続き 71 の `extras.go` と同じ機構）。
+fixture のタグは 3 つとも正しいのでこの枝に到達しない。
+**測らないコードは出さない**ので、実装せず note に理由を書いた。
+
+#### 測定
+
+| | 続き 81 後 | 今回 |
+|---|---|---|
+| fix tier 一致 | 185 | **186** |
+| pending | 5 | **4** |
+| `tagalign` | 0 / 13 | **13 / 13** |
+| ファイルを書き換えるケース | 59 | **60** |
+
+golden 193/193、271 スイート / 3,281 テスト、ゲート前後で md5 同一。
+
+#### 残り
+
+**1 行も書いていないケースは無くなった。** pending 4 件はすべて部分実装か判断待ち:
+
+| ケース | 行 | 状態 |
+|---|---|---|
+| `govet` | 18 | 部分（70/88） |
+| `exptostd` | 12 | 部分。上流の置換に **`FIXME`** が入る（上流に `// TODO(ldez) improve the type detection.` とある）ので、実装すると木がコンパイルを通らなくなる —— 既存 8 件と同じ扱い |
+| `gocritic` | 9 | 部分。`go/doc/comment` 移植待ち（続き 76） |
+| `noinlineerr` | 12 | **判断待ち**（続き 80 の脚注） |
