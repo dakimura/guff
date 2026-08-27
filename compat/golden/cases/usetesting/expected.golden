@@ -12,3 +12,4 @@ bad_test.go:28:7:usetesting::os.TempDir() could be replaced by t.TempDir() in Te
 bad_test.go:35:6:usetesting::os.TempDir() could be replaced by t.TempDir() in anonymous function
 bad_test.go:43:9:usetesting::os.CreateTemp("", ...) could be replaced by os.CreateTemp(t.TempDir(), ...) in TestCreateTemp
 bad_test.go:47:9:usetesting::os.CreateTemp("", ...) could be replaced by os.CreateTemp(b.TempDir(), ...) in BenchmarkCreateTemp
+bad_test.go:54:9:usetesting::os.CreateTemp("", ...) could be replaced by os.CreateTemp(<t/b>.TempDir(), ...) in TestUnnamedParam

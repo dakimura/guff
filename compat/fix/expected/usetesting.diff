@@ -10,7 +10,7 @@
 
 --- a/bad_test.go
 +++ b/bad_test.go
-@@ -40,9 +40,9 @@
+@@ -40,11 +40,11 @@
  // has to happen, just with a directory. Every other arm reads
  // `pkg.Name() could be replaced by t.Name()`, and this fixture had only those.
  func TestCreateTemp(t *testing.T) {
@@ -22,3 +22,5 @@
 -	_, _ = os.CreateTemp("", "x")
 +	_, _ = os.CreateTemp(b.TempDir(), "x")
  }
+ 
+ // An *unnamed* test parameter: upstream's `arg_name` is then the placeholder

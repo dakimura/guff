@@ -14574,3 +14574,92 @@ pending 7 件・96 行。1 行も書いていないのは
 `sloglint` 18 / `usetesting` 14 / `tagalign` 13 / `noinlineerr` 12。
 部分的なのは `govet` 18 / `exptostd` 12 / `gocritic` 9
 （最後のは `go/doc/comment` 移植待ち、続き 76）。
+
+---
+
+### 2026-08-27（続き 80）— `usetesting`。**上流はコメントと違うことをしている。従うのはコード**
+
+続き 79 の続き。pending 7 件。`usetesting` は 14 行で 1 行も書いていない。
+
+#### fix の表面は思ったより狭い
+
+最初は「2 つの fix 形と 1 つの skip」と読んだ。`report.go:159` のガードを
+読んだら違った:
+
+```go
+// Skip `<t/b>` arg names.
+// Only applies on `context.XXX` because the nb of return parameters is the
+// same as the replacement.
+if !strings.Contains(fnInfo.ArgName, "<") && origPkgName == contextPkgName {
+```
+
+**汎用の `report` が fix を付けるのは元パッケージが `context` のときだけ。**
+つまり `usetesting` の fix は全部で 2 つ:
+
+1. `os.CreateTemp("", x)` → `os.CreateTemp(<arg>.TempDir(), x)`（専用関数、`report.go:60`）
+2. `context.Background()` / `context.TODO()` → `<arg>.Context()`
+
+`os.TempDir()` / `os.MkdirTemp` / `os.Setenv` / `os.Chdir` は
+**報告のみで fix 無し** —— fixture の期待もまさにそうなっている
+（`os.TempDir()` が 3 つ、`os.MkdirTemp` が 1 つ、どれも書き換わらない）。
+
+`report` の全 arm に fix を付ける実装なら、**上流が触らない 3 行を書き換える**。
+
+#### コメントは理由になっていない
+
+「返り値の数が同じだから context だけ」と書いてあるが、
+`os.TempDir()` も `t.TempDir()` も `string` 1 つで**同じ**。
+理由は成立していない。だが**コードは曖昧でない**ので、
+`origPkgName == contextPkgName` を移植してコメントは無視した。
+
+続き 44 の revive と同じ形 ——
+あちらもコメントは「cgo ファイルを飛ばす」と言いながら、
+実際にはほぼ全部の fix を落としていた。
+**上流の意図と挙動が食い違うとき、移植すべきは挙動。**
+
+#### 名前の無いテスト引数
+
+`arg_name` が `<t/b>` になるのは `func TestX(*testing.T)` のように
+**引数に名前が無い**とき。上流は fix を付けない ——
+`<t/b>.TempDir()` は Go ではない。
+
+fixture に無かったので足した。上流の答え:
+**メッセージには `<t/b>` がそのまま出て、fix は付かない**。
+
+```
+bad_test.go:54:9:usetesting::os.CreateTemp("", ...) could be replaced by
+os.CreateTemp(<t/b>.TempDir(), ...) in TestUnnamedParam
+```
+
+これで skip が**コメントではなく fixture で固定**された。
+
+#### `expr_text` は増やした
+
+この移植は `call.fun` と第 2 引数を組み直す。guff-style には既に
+`expr_text` が 4 つあり、**それぞれ仕事が違う**（続き 62 の教訓:
+「重複ヘルパは重複ではない」）。寄せずにローカルに書き、
+**扱えない形は `None` を返して fix を出さない** ——
+推測して書くより出さないほうが安全な方向。
+
+上流も `printer.Fprint(buf, token.NewFileSet(), g)` と
+**空の FileSet** で印字しており、元ソースの切り出しではなく構造的な再構成。
+
+#### 測定
+
+| | 続き 79 後 | 今回 |
+|---|---|---|
+| fix tier 一致 | 183 | **184** |
+| pending | 7 | **6** |
+| `usetesting` | 0 / 14 | **16 / 16**（fixture 拡張後） |
+| golden `usetesting` キー | 6 | **7** |
+| ファイルを書き換えるケース | 57 | **58** |
+
+golden 193/193、271 スイート / 3,281 テスト、ゲート前後で md5 同一。
+
+#### 残り
+
+pending 6 件・82 行。1 行も書いていないのは
+`sloglint` 18 / `tagalign` 13 / `noinlineerr` 12。
+部分的なのは `govet` 18 / `exptostd` 12 / `gocritic` 9。
+`tagalign` はタグの**並べ替えと桁揃え**なので、
+ノード置換ではなくタグ列全体の書き直しになる。
