@@ -14913,3 +14913,90 @@ golden 193/193、271 スイート / 3,281 テスト。
 | `govet` | 18 | `inline` アナライザの 2 腕。通常作業 |
 | `gocritic` | 9 | `go/doc/comment` 移植待ち（続き 76） |
 | `noinlineerr` | 12 | **判断待ち**（続き 80） |
+
+---
+
+### 2026-08-27（続き 84）— `govet` の `inline`。**「新しいデータが要る」という自分の見立てが半分外れていた**
+
+続き 83 の続き。pending 3 件。`govet` は 88 行中 70 行で、
+残り 18 行は `inline` アナライザの 2 腕:
+
+```
+inline/bad/bad.go        reflect.Ptr -> reflect.Pointer
+inline_local/bad/bad.go  Legacy      -> Preferred
+```
+
+#### 実装前に、自分の計画を疑って上流を読んだ
+
+計画にはこう書いていた ——
+**「今セッション初めて、配線ではなく新しいデータが要るケース」**。
+根拠は guff の
+
+```rust
+fn is_known_stdlib_inlinable(pkg_path: &str, name: &str) -> bool {
+    matches!((pkg_path, name), ("reflect", "Ptr"))
+}
+```
+
+が**述語であって対応表ではない**こと。`reflect.Ptr` が inline 可能だとは知っているが、
+行き先が `reflect.Pointer` だとは知らない。
+
+だが上流（x/tools v0.44.0 `passes/inline/inline.go:559`）は:
+
+```go
+a.reportInline("constant", "Constant", expr, edits, importPrefix+incon.RHSName)
+```
+
+**宣言から読んでいる。** `incon` は `//go:fix inline` の宣言由来で
+`RHSPkgPath` / `RHSPkgName` / `RHSName` を持つ。表は無い。
+
+続き 83 で「deferral の理由が読んだら成り立たなかった」と書いた直後に、
+**自分の書いた見立ても読んだら半分外れていた**。
+
+#### 正しい切り分け
+
+| 腕 | 実際に必要だったもの |
+|---|---|
+| ローカル定数 | **配線**。`go_fix_const_names` は `rhs_is_named_const` で RHS を見て、**名前だけ返して捨てていた** |
+| stdlib | **データ**。ただし guff が既に述語をハードコードしていたから —— `reflect` の宣言は export data に無い |
+
+`is_known_stdlib_inlinable` → `known_stdlib_inline_target` にして、
+`("reflect","Ptr") => "reflect.Pointer"` を返すようにした。
+
+#### drift の露出は新しくない、が書いておく
+
+`compat/drift.py` が見ているのは
+**finding set・linter inventory・config 受理**であって、
+x/tools の inline 可能集合ではない。
+上流に定数が 1 つ増えても、コーパスのどこかがそれを使うまで見えない。
+
+これは**この変更が作った露出ではなく、述語の時点で既にあったもの**。
+直せないので、doc コメントに書いた ——
+次に読む人が表を権威だと思わないように。
+
+#### 上流を読んで直った細部 2 つ
+
+- **span は修飾名なら selector 全体**（`cur.ParentEdgeKind() == edge.SelectorExpr_Sel`、
+  `inline.go:554`）。`Sel` の ident だけではない。
+- **fix は 2 つ目の edit を持ちうる** —— RHS が未 import のパッケージなら
+  `refactor.AddImport` が 1 つ足す（`inline.go:550`）。
+  guff にはその移植が既にある（fix README、2026-08-25）。
+
+#### 測定
+
+| | 続き 83 後 | 今回 |
+|---|---|---|
+| fix tier 一致 | 187 | **188** |
+| pending | 3 | **2** |
+| `govet` | 70 / 88 | **88 / 88** |
+
+golden 193/193、271 スイート / 3,281 テスト、ゲート前後で md5 同一。
+
+#### 残り 2 件 —— どちらもコードの問題ではない
+
+| ケース | 行 | 何が要るか |
+|---|---|---|
+| `gocritic` | 9 | `go/doc/comment` の Parser/Printer 移植（続き 76） |
+| `noinlineerr` | 12 | **判断**（続き 80）。台帳に「意図的に少なく書く」の枠が無い |
+
+**通常の移植作業として残っているものは、これで無い。**
