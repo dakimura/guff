@@ -79,9 +79,19 @@ pub struct DupwordOptions {
 /// Defaults match golangci-lint: `default=basic` (pkg-doc / single-pkg-doc /
 /// start-with-name / deprecated), empty enable/disable.
 ///
-/// DEFERRED: per-rule `options.*`; unimplemented rules (`require-doc`,
-/// `require-pkg-doc`, `max-len`, `no-unused-link`, `require-stdlib-doclink`)
-/// are accepted in enable/disable for config compat but currently no-op.
+/// The four `options.*` fields below are the only ones golangci-lint forwards.
+/// Their defaults are godoc-lint's own `config/default.yaml`, which the plain
+/// config from golangci-lint layers over field-by-field (`transferIfNotNil`) —
+/// so an unset option keeps the upstream default rather than the Rust zero
+/// value. `require-doc/ignore-unexported` is the one that differs: it defaults
+/// to **true**.
+///
+/// Every `*/include-tests` option is *pinned* by golangci-lint and a user value
+/// for it is discarded; those live as constants in [`crate::godoclint`] because
+/// they are not configuration here.
+///
+/// DEFERRED: `options.max-len.ignore-patterns` is pinned by golangci-lint too
+/// (`["^\\+kubebuilder:"]`) and belongs with the `max-len` rule.
 #[derive(Debug, Clone)]
 pub struct GodoclintOptions {
     /// `basic` (default), `all`, or `none`.
@@ -90,6 +100,15 @@ pub struct GodoclintOptions {
     pub enable: Vec<String>,
     /// Rules to disable.
     pub disable: Vec<String>,
+    /// `options.max-len.length` (upstream default 77).
+    pub max_len_length: u32,
+    /// `options.require-doc.ignore-exported` (upstream default false).
+    pub require_doc_ignore_exported: bool,
+    /// `options.require-doc.ignore-unexported` (upstream default **true** —
+    /// the one default.yaml entry that is not the zero value).
+    pub require_doc_ignore_unexported: bool,
+    /// `options.start-with-name.include-unexported` (upstream default false).
+    pub start_with_name_include_unexported: bool,
 }
 
 impl Default for GodoclintOptions {
@@ -98,6 +117,10 @@ impl Default for GodoclintOptions {
             default: "basic".into(),
             enable: Vec::new(),
             disable: Vec::new(),
+            max_len_length: 77,
+            require_doc_ignore_exported: false,
+            require_doc_ignore_unexported: true,
+            start_with_name_include_unexported: false,
         }
     }
 }

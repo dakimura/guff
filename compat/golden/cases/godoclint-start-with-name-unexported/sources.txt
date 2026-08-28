@@ -1,0 +1,4 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+unexported/a.go       crates/guff-comment/tests/testdata/godoclint/unexported/a.go
+unexported/b_test.go  crates/guff-comment/tests/testdata/godoclint/unexported/b_test.go

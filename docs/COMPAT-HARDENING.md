@@ -15947,3 +15947,91 @@ golden fixture に `_test.go` を足して **6 → 8 キー**。
 `require-doc`（`TrailingDoc` / `ParentDoc` を持つ symbol model）、
 `max-len`（golangci が 2 つ上書きする options）、
 `require-stdlib-doclink`（上流生成の stdlib symbol 索引）。
+
+### 2026-08-28（続き 94）— `godoclint.options` が丸ごと無かった。**opt-in ですらない側の劣化が 2 件**
+
+続き 92/93 は「未移植の**規則**」の話だった。今回は**規則はあるのに設定が届いていない**話。
+
+guff の `GodoclintSettings` には `default` / `enable` / `disable` しか無く、
+上流の `options` サブテーブルは**存在しなかった**。無いものは無言で無視されるので、
+書いても効かないことがユーザには見えない。
+
+#### 上流の既定値は「Rust のゼロ値」ではない
+
+golangci-lint は `PlainConfig` を godoc-lint に渡すが、godoc-lint 側は
+**自分の `config/default.yaml` に `transferIfNotNil` で重ねる**。
+つまり**書かれなかったキーは `false` ではなく上流の既定**で、
+1 つだけゼロ値と食い違う:
+
+| option | 上流既定 | Rust ゼロ値 |
+|---|---|---|
+| `max-len/length` | **77** | 0 |
+| `require-doc/ignore-exported` | false | false |
+| `require-doc/ignore-unexported` | **true** | false |
+| `start-with-name/include-unexported` | false | false |
+
+`ignore-unexported` をゼロ値で読むと `require-doc` が
+**ツリー中の全 unexported symbol を要求する**規則に化ける。移植前に固定した。
+
+#### `*/include-tests` は設定ではない
+
+golangci-lint はユーザ値を読んだ**後に 9 個すべてを上書きする**
+（`pkg/golinters/godoclint/godoclint.go` の `PlainConfig` リテラル）。
+なので guff では設定として受け取らず `include_tests` 定数にした ——
+受け取ると「書けば効く」ように見えてしまう。
+
+#### 見つかった劣化 2 件。**どちらも opt-in の外**
+
+**① `start-with-name` が `include-unexported` を持っていなかった。**
+上流の guard は `!isExported && !includePrivate → skip` だが、
+guff は `exported` で**無条件に弾いて**いた。`start-with-name` は
+**`basic` 既定に入っている**規則なので、これは「未移植の規則を有効にしたら黙っていた」
+ではなく**既定経路の隣**の欠陥。config を書いた側からは完全に無言だった。
+
+**② `single-pkg-doc` が `_test.go` を数えていなかった。**
+guff は package doc の処理を 1 つの `if !skip_tests` で包んでいたが、
+golangci-lint の pin は**この 3 規則で揃っていない**:
+
+| 規則 | `include-tests` |
+|---|---|
+| `pkg-doc` | false |
+| `deprecated` | false（call site で固定、option 自体が無い） |
+| `single-pkg-doc` | **true** |
+
+`_test.go` の package doc は「2 つ目の godoc」として**数え**、
+同時に接頭辞チェックからは**見えない**。同じ comment group に対して
+2 つの規則が逆の答えを出す。guard を規則ごとに分けた。
+
+続き 92 で `no-unused-link` に同じ軸で偽陰性を出しているので、
+**今回は先に pin の表を読んでから**書いた ——
+そして表を読んだからこそ ② が見つかった（テストが落ちて見つけたのではない）。
+
+#### golden ケース 2 本。**どちらも修正前の binary で落ちることを確かめた**
+
+`godoclint-start-with-name-unexported`（6 キー / 修正前 `missing=5`）は
+export 軸の両側に加えて、option を入れても**残る 3 つの免除**を固定する ——
+blank identifier、multi-name decl、そして `include-tests: false` が
+締め出す `_test.go`。**unexported receiver 上の exported method**
+（`func (h hidden) Method()`）も置いた: godoc が描画しないので上流は
+**unexported 扱い**にし、この option でしか到達しない。
+最初に書いた fixture では doc が偶然シンボル名で始まっていて
+**報告されないので何も測っていなかった** ので、文言を変えて 6 キー目にした。
+
+`godoclint-single-pkg-doc-tests`（2 キー / 修正前 `missing=2`）は
+`a.go` と `a_test.go` に 1 つずつ doc を置くだけ。既存の `godoclint` ケースは
+両方とも非テストファイルなので、この軸を**一度も踏んでいなかった**。
+
+#### 残り
+
+`default: all` の 9 規則のうち **6 つ**が動く。残り 3 つの「何が要るか」:
+
+- `require-doc` — `TrailingDoc`（`const X = 1 // doc`）を持ち、かつ
+  **doc の無い symbol も返す** symbol model。今の `collect_symbol_docs` は
+  3 か所の `continue` で**まさにその symbol を捨てている**。
+  `options.require-doc.*` は今回で揃った。
+- `max-len` — `go/doc/comment` の `Printer`（続き 87 で移植済み）と、
+  golangci-lint が上書きする `ignore-patterns: ["^\+kubebuilder:"]`。
+  `options.max-len.length` は今回で揃った。
+- `require-stdlib-doclink` — 上流の生成物 `stdlib.json`（221KB）。
+  **再生成せず vendor する** —— Go のバージョンが違えば symbol 集合が変わり、
+  同じ config で違う答えを返す。

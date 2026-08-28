@@ -1688,6 +1688,56 @@ fn parse_v2_godoclint_settings() {
     assert!(!rules.contains("start-with-name"));
 }
 
+/// `godoclint.options` is a three-key sub-table, and an *absent* key is not
+/// `false` — upstream layers the plain config over its own `default.yaml` with
+/// `transferIfNotNil`. This config sets `require-doc.ignore-exported` and
+/// leaves `ignore-unexported` alone, so the latter must come back as the
+/// upstream default `true` rather than the Rust zero value.
+#[test]
+fn parse_v2_godoclint_options() {
+    let contents = fs::read_to_string(testdata_config("v2_godoclint_options.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(settings.godoclint.options.max_len.length, Some(100));
+    assert_eq!(
+        settings.godoclint.options.require_doc.ignore_exported,
+        Some(true)
+    );
+    assert_eq!(settings.godoclint.options.require_doc.ignore_unexported, None);
+    assert_eq!(
+        settings.godoclint.options.start_with_name.include_unexported,
+        Some(true)
+    );
+
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_comment::GodoclintOptions>("godoclint")
+        .expect("godoclint options");
+    assert_eq!(opts.max_len_length, 100);
+    assert!(opts.require_doc_ignore_exported);
+    assert!(
+        opts.require_doc_ignore_unexported,
+        "an unset option keeps default.yaml's value, which is true here"
+    );
+    assert!(opts.start_with_name_include_unexported);
+}
+
+/// With no `options` block at all every field is the upstream default.
+#[test]
+fn godoclint_options_absent_keeps_upstream_defaults() {
+    let contents = fs::read_to_string(testdata_config("v2_godoclint_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_comment::GodoclintOptions>("godoclint")
+        .expect("godoclint options");
+    assert_eq!(opts.max_len_length, 77);
+    assert!(!opts.require_doc_ignore_exported);
+    assert!(opts.require_doc_ignore_unexported);
+    assert!(!opts.start_with_name_include_unexported);
+}
+
 #[test]
 fn parse_v2_unqueryvet_settings() {
     let contents = fs::read_to_string(testdata_config("v2_unqueryvet_settings.yml")).unwrap();

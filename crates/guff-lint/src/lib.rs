@@ -58,7 +58,9 @@ pub use fix::{apply_fixes, FixError};
 pub use settings::{
     BodycloseSettings, CustomLinterConfig, DepguardDenySetting, DepguardRuleSetting,
     DepguardSettings, DupwordSettings, ErrcheckSettings, ErrchkjsonSettings, FuncorderSettings,
-    GodoclintSettings, GodotSettings, GodoxSettings, GomoddirectivesSettings, GomodguardSettings,
+    GodoclintMaxLenOptions, GodoclintRequireDocOptions, GodoclintRuleOptions,
+    GodoclintSettings, GodoclintStartWithNameOptions, GodotSettings, GodoxSettings,
+    GomoddirectivesSettings, GomodguardSettings,
     GovetSettings, LinterSettings, ReviveRuleSetting, ReviveSettings, RowserrcheckSettings,
     StaticcheckSettings, VarnamelenSettings, WrapcheckSettings,
 };
