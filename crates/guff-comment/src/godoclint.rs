@@ -20,9 +20,6 @@
 //!
 //! DEFERRED, with the reason each is still deferred:
 //!
-//! - `max-len` — needs `go/doc/comment`'s printer and the pinned
-//!   `ignore-patterns: ["^\+kubebuilder:"]`. `options.max-len.length` is
-//!   already parsed.
 //! - `require-stdlib-doclink` — needs upstream's generated index of standard
 //!   library symbols (`stdlib_doclink/stdlib.json`).
 //!
@@ -56,12 +53,13 @@ fn is_test_path(path: &Path) -> bool {
 /// trap: `require-pkg-doc` is `false` while `require-doc` is `true`, so a
 /// `_test.go` file can be reported by one and invisible to the other. Read the
 /// row before reusing an adjacent rule's guard.
-/// One constant per implemented rule; the rest arrive with their rule
-/// (`max-len: true`, `require-stdlib-doclink: true`).
+/// One constant per implemented rule; `require-stdlib-doclink: true` arrives
+/// with its rule.
 mod include_tests {
     pub const PKG_DOC: bool = false;
     pub const SINGLE_PKG_DOC: bool = true;
     pub const REQUIRE_PKG_DOC: bool = false;
+    pub const MAX_LEN: bool = true;
     pub const REQUIRE_DOC: bool = true;
     pub const START_WITH_NAME: bool = false;
     pub const NO_UNUSED_LINK: bool = true;
@@ -367,6 +365,106 @@ fn collect_symbol_decls(file: &guff::ast::File) -> Vec<SymbolDecl<'_>> {
     out
 }
 
+/// Upstream's `docs` map — the package doc, plus every symbol's parent doc and
+/// own doc, with `ParentDoc` collected *before* the `Doc == nil` continue.
+///
+/// `no-unused-link`, `deprecated` and `max-len` all build exactly this set;
+/// only `deprecated` filters it, by `ast.IsExported(sd.Name)` and without the
+/// receiver adjustment. One function means the `ParentDoc`-before-`Doc`
+/// ordering — which has now produced false negatives in two separate rules —
+/// is written down once.
+fn doc_set<'a>(
+    file: &'a guff::ast::File,
+    symbols: &[SymbolDecl<'a>],
+    exported_only: bool,
+) -> Vec<&'a CommentGroup> {
+    let mut docs: Vec<&CommentGroup> = Vec::new();
+    if let Some(d) = &file.doc {
+        docs.push(d);
+    }
+    for sym in symbols {
+        if exported_only && !is_exported(sym.name) {
+            continue;
+        }
+        if let Some(p) = sym.parent_doc {
+            docs.push(p);
+        }
+        if let Some(d) = sym.doc {
+            docs.push(d);
+        }
+    }
+    docs
+}
+
+/// golangci-lint pins `max-len`'s ignore patterns to this one regexp,
+/// discarding whatever the user wrote — its stated reason being that the
+/// idiomatic way to drop such issues is a source-text exclusion.
+///
+/// It is matched against the *printed* line, not the source comment.
+fn max_len_ignore_patterns() -> &'static [Regex] {
+    static RE: OnceLock<Vec<Regex>> = OnceLock::new();
+    RE.get_or_init(|| vec![Regex::new(r"^\+kubebuilder:").unwrap()])
+}
+
+/// `max_len.checkMaxLen` for one comment group.
+///
+/// Returns `(index into group.list, rune length)` per over-long line; a `None`
+/// index means upstream fell back to reporting the whole group.
+///
+/// Two details the rule's name does not suggest:
+///
+/// - Code blocks are dropped and the *remainder is reprinted*, so the lines
+///   measured are `go/doc/comment`'s canonical rendering, not the source.
+/// - The `Doc` handed to the printer carries no links, so the link-definition
+///   block the printer would otherwise append is absent. Upstream builds a
+///   `linkDefsMap` a few lines earlier and never reads it; that dead map is
+///   the remnant of an older way of doing this, and porting it would filter
+///   lines that are already gone.
+fn max_len_violations(
+    group: &CommentGroup,
+    max_len: usize,
+    ignore: &[Regex],
+) -> Vec<(Option<usize>, usize)> {
+    use guff::doc::comment::{Block, Doc, Parser, Printer};
+
+    let parsed = Parser::default().parse(&group.text());
+    let stripped = Doc {
+        content: parsed
+            .content
+            .into_iter()
+            .filter(|b| !matches!(b, Block::Code(_)))
+            .collect(),
+        links: Vec::new(),
+    };
+    let text = Printer.comment(&stripped).replace('\r', "");
+
+    // A clone of the comment list, so a line repeated in the group matches a
+    // *different* `ast.Comment` each time instead of collapsing onto the first.
+    let mut remaining: Vec<usize> = (0..group.list.len()).collect();
+    let mut out = Vec::new();
+    for line in text.split('\n') {
+        let len = line.chars().count();
+        if len <= max_len {
+            continue;
+        }
+        if ignore.iter().any(|re| re.is_match(line)) {
+            continue;
+        }
+        // Only `//`-style comments can be located line by line: a `/*…*/`
+        // group is one `ast.Comment` whose position is the opening token, so
+        // upstream falls back to the group.
+        let want = format!("// {line}");
+        match remaining.iter().position(|&i| group.list[i].text == want) {
+            Some(k) => {
+                out.push((Some(remaining[k]), len));
+                remaining.remove(k);
+            }
+            None => out.push((None, len)),
+        }
+    }
+    out
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
@@ -392,6 +490,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let require_private = !options.require_doc_ignore_unexported;
     let check_require_doc =
         rules.contains("require-doc") && (require_public || require_private);
+    let check_max_len = rules.contains("max-len");
+    let max_len = options.max_len_length as usize;
 
     if !check_pkg_doc
         && !check_single
@@ -400,6 +500,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         && !check_unused_link
         && !check_require_pkg_doc
         && !check_require_doc
+        && !check_max_len
     {
         return Ok(None);
     }
@@ -415,6 +516,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     // distinct groups cannot start at the same offset.
     let mut unused_link_seen: std::collections::HashSet<u32> = std::collections::HashSet::new();
     let mut deprecated_seen: std::collections::HashSet<u32> = std::collections::HashSet::new();
+    let mut max_len_seen: std::collections::HashSet<u32> = std::collections::HashSet::new();
     // package name → list of (pos, has_nonempty_doc) for single-pkg-doc
     let mut pkg_docs: HashMap<String, Vec<(u32, bool)>> = HashMap::new();
     // package name → (position of the *first* file's package identifier, whether
@@ -501,19 +603,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         // package doc is in upstream's set while `pkg-doc` and
         // `start-with-name` (pinned `false`) skip the file entirely.
         if check_unused_link && !(is_test && !include_tests::NO_UNUSED_LINK) {
-            let mut docs: Vec<&CommentGroup> = Vec::new();
-            if let Some(d) = &parsed.doc {
-                docs.push(d);
-            }
-            for sym in &symbols {
-                if let Some(p) = sym.parent_doc {
-                    docs.push(p);
-                }
-                if let Some(d) = sym.doc {
-                    docs.push(d);
-                }
-            }
-            for d in docs {
+            for d in doc_set(&parsed, &symbols, false) {
                 let Some(dpos) = reparsed_pos(&fset, file.pos(), &re_fset, d.pos()) else {
                     continue;
                 };
@@ -544,22 +634,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         // and skipped by those two. Sharing one `exported` local across the
         // loop is what hid that.
         if check_deprecated && !(is_test && !include_tests::DEPRECATED) {
-            let mut docs: Vec<&CommentGroup> = Vec::new();
-            if let Some(d) = &parsed.doc {
-                docs.push(d);
-            }
-            for sym in &symbols {
-                if !is_exported(sym.name) {
-                    continue;
-                }
-                if let Some(p) = sym.parent_doc {
-                    docs.push(p);
-                }
-                if let Some(d) = sym.doc {
-                    docs.push(d);
-                }
-            }
-            for d in docs {
+            for d in doc_set(&parsed, &symbols, true) {
                 let Some(dpos) = reparsed_pos(&fset, file.pos(), &re_fset, d.pos()) else {
                     continue;
                 };
@@ -650,6 +725,31 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 pending.push((pos, format!("symbol should have a godoc (\"{}\")", sym.name)));
             }
         }
+
+        // --- max-len ---
+        //
+        // Pinned `include-tests: true`. Same doc set as `no-unused-link`, and
+        // the same `_test.go` answer.
+        if check_max_len && !(is_test && !include_tests::MAX_LEN) {
+            for d in doc_set(&parsed, &symbols, false) {
+                let Some(gpos) = reparsed_pos(&fset, file.pos(), &re_fset, d.pos()) else {
+                    continue;
+                };
+                if !max_len_seen.insert(gpos) {
+                    continue;
+                }
+                for (idx, len) in max_len_violations(d, max_len, max_len_ignore_patterns()) {
+                    let at = match idx {
+                        Some(i) => d.list[i].pos(),
+                        None => d.pos(),
+                    };
+                    let Some(pos) = reparsed_pos(&fset, file.pos(), &re_fset, at) else {
+                        continue;
+                    };
+                    pending.push((pos, format!("godoc line is too long ({len} > {max_len})")));
+                }
+            }
+        }
     }
 
     if check_single {
@@ -673,7 +773,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     }
 
     pending.sort_by_key(|(pos, _)| *pos);
-    // Dedup identical (pos, msg) from parent+child double checks.
+    // `max-len` is the rule that makes this load-bearing rather than defensive.
+    // A `/*…*/` group has no per-line position to report at, so every
+    // over-long line in one falls back to the group — and upstream emits one
+    // diagnostic per line, identical. golangci-lint collapses them before
+    // printing (measured: two identical over-long lines in one block comment
+    // produce **one** issue, with `uniq-by-line: false` and
+    // `max-same-issues: 0`), so guff has to collapse them too.
     pending.dedup();
 
     for (pos, message) in pending {
@@ -894,6 +1000,67 @@ mod tests {
         assert!(d.doc.is_none());
         assert!(d.trailing_doc.is_none());
         assert!(d.parent_doc.is_none());
+    }
+
+    fn group(src: &str) -> guff::ast::CommentGroup {
+        let (_fset, file) = parse(src);
+        collect_symbol_decls(&file)[0]
+            .doc
+            .expect("doc")
+            .clone()
+    }
+
+    /// The limit is in runes. 40 CJK characters are 120 bytes and fit under
+    /// 77; a byte count would report them at 120.
+    #[test]
+    fn max_len_counts_runes() {
+        let wide = "あ".repeat(40);
+        let g = group(&format!("package p\n\n// {wide}\nfunc F() {{}}\n"));
+        assert!(max_len_violations(&g, 77, &[]).is_empty());
+        assert_eq!(
+            max_len_violations(&g, 39, &[])
+                .iter()
+                .map(|(_, n)| *n)
+                .collect::<Vec<_>>(),
+            vec![40]
+        );
+    }
+
+    /// Code blocks are dropped *before* the remainder is reprinted, so an
+    /// indented over-long line is not a finding.
+    #[test]
+    fn max_len_ignores_code_blocks() {
+        let long = "x".repeat(90);
+        let g = group(&format!(
+            "package p\n\n// Doc.\n//\n//\t{long}\nfunc F() {{}}\n"
+        ));
+        assert!(max_len_violations(&g, 77, &[]).is_empty());
+    }
+
+    /// A line repeated in one group consumes a different `ast.Comment` each
+    /// time, so both are reported at their own position rather than the first
+    /// one twice.
+    #[test]
+    fn max_len_matches_each_repeat_to_its_own_line() {
+        let long = "x".repeat(90);
+        let g = group(&format!(
+            "package p\n\n// {long}\n//\n// {long}\nfunc F() {{}}\n"
+        ));
+        let v = max_len_violations(&g, 77, &[]);
+        assert_eq!(v.len(), 2);
+        assert_eq!(v[0].0, Some(0));
+        assert_eq!(v[1].0, Some(2), "the second match skips the consumed line");
+    }
+
+    /// golangci-lint discards the user's ignore patterns and pins this one.
+    #[test]
+    fn max_len_ignore_pattern_is_matched_against_the_printed_line() {
+        let long = "z".repeat(90);
+        let g = group(&format!(
+            "package p\n\n// +kubebuilder:validation:{long}\nfunc F() {{}}\n"
+        ));
+        assert!(!max_len_violations(&g, 77, &[]).is_empty());
+        assert!(max_len_violations(&g, 77, max_len_ignore_patterns()).is_empty());
     }
 
     #[test]

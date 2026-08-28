@@ -1,0 +1,30 @@
+# Golden case: godoclint's `max-len` with an explicit
+# `options.max-len.length`.
+#
+# Same fixture as the sibling at the default 77. Lowering the limit to 39 pulls
+# in the lines that were deliberately just under it — including the 40-rune
+# CJK line, which proves the count is runes and not bytes from the other side.
+# The number in the message moves too, so the two cases cannot both pass on a
+# hard-coded limit.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - godoclint
+  settings:
+    godoclint:
+      default: none
+      enable:
+        - max-len
+      options:
+        max-len:
+          length: 39
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

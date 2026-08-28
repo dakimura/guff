@@ -1,0 +1,16 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh godoclint-max-len
+# Produced by running golangci-lint on compat/golden/cases/godoclint-max-len/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+maxlen/a.go:4:1:godoclint::godoc line is too long (78 > 77)
+maxlen/a.go:13:1:godoclint::godoc line is too long (78 > 77)
+maxlen/a.go:28:1:godoclint::godoc line is too long (78 > 77)
+maxlen/a.go:30:1:godoclint::godoc line is too long (78 > 77)
+maxlen/a.go:33:1:godoclint::godoc line is too long (78 > 77)
+maxlen/a.go:38:1:godoclint::godoc line is too long (78 > 77)
+maxlen/a.go:43:1:godoclint::godoc line is too long (78 > 77)
+maxlen/a_test.go:4:1:godoclint::godoc line is too long (78 > 77)
