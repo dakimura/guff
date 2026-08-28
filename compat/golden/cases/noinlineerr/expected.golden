@@ -7,3 +7,6 @@
 # golangci-lint: 2.12.2
 
 bad.go:6:5:noinlineerr::avoid inline error handling using `if err := ...; err != nil`; use plain assignment `err := ...`
+bad.go:34:5:noinlineerr::avoid inline error handling using `if err := ...; err != nil`; use plain assignment `err := ...`
+bad.go:45:5:noinlineerr::avoid inline error handling using `if err := ...; err != nil`; use plain assignment `err := ...`
+elseif.go:13:12:noinlineerr::avoid inline error handling using `if err := ...; err != nil`; use plain assignment `err := ...`

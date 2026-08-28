@@ -453,6 +453,106 @@ class CliTest(unittest.TestCase):
                 "golangci-lint --fix removes a line guff keeps: missed", r.stderr
             )
 
+    def test_divergent_allows_a_subset_when_upstream_breaks_the_build(self):
+        """`noinlineerr`: upstream's own output does not parse, so guff writes less.
+
+        Everywhere else this is a gap and belongs in pending/. The difference is
+        that a gap is expected to close and this one is not: reproducing it means
+        shipping a --fix that breaks its user's build.
+        """
+        upstream = (
+            "--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n-a\n+A\n"
+            "--- a/y.go\n+++ b/y.go\n@@ -1 +1 @@\n-b\n+} else b := f()\n"
+        )
+        mine = "--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n-a\n+A\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            expected = Path(tmp) / "expected.diff"
+            expected.write_text(upstream, encoding="utf-8")
+            actual = Path(tmp) / "actual.diff"
+            actual.write_text(mine, encoding="utf-8")
+            div = Path(tmp) / "x.diff"
+            div.write_text(
+                f"# why: upstream inserts at the `if` keyword, which for an"
+                f" `else if` sits after `else`\n"
+                f"# upstream-writes: {fixdiff.upstream_writes(upstream)}\n"
+                f"# upstream-breaks-build: ./y.go:1:9: syntax error\n" + mine,
+                encoding="utf-8",
+            )
+            ok = self.run_cli(
+                "check", "--case", "x",
+                "--actual", str(actual),
+                "--expected", str(expected),
+                "--divergent", str(div),
+            )
+            self.assertEqual(ok.returncode, 0, ok.stderr)
+            self.assertIn("does not compile", ok.stdout)
+
+            # The escape hatch is still tied to upstream's output: when that
+            # moves, the digest stops matching here exactly as it does for the
+            # superset shape, and the reason gets re-read.
+            expected.write_text(upstream.replace("+A", "+MOVED"), encoding="utf-8")
+            moved = self.run_cli(
+                "check", "--case", "x",
+                "--actual", str(actual),
+                "--expected", str(expected),
+                "--divergent", str(div),
+            )
+            self.assertEqual(moved.returncode, 1)
+            self.assertIn("no longer describes reality", moved.stderr)
+
+    def test_breaking_the_build_does_not_license_an_over_write(self):
+        """Writing *less* is what the claim buys. Writing *more* is not."""
+        upstream = "--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n-a\n+A\n"
+        mine = upstream + "--- a/z.go\n+++ b/z.go\n@@ -1 +1 @@\n-untouched\n+MINE\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            expected = Path(tmp) / "expected.diff"
+            expected.write_text(upstream, encoding="utf-8")
+            actual = Path(tmp) / "actual.diff"
+            actual.write_text(mine, encoding="utf-8")
+            div = Path(tmp) / "x.diff"
+            div.write_text(
+                f"# why: upstream's fixer emits code that does not parse\n"
+                f"# upstream-writes: {fixdiff.upstream_writes(upstream)}\n"
+                f"# upstream-breaks-build: ./y.go:1:9: syntax error\n" + mine,
+                encoding="utf-8",
+            )
+            r = self.run_cli(
+                "check", "--case", "x",
+                "--actual", str(actual),
+                "--expected", str(expected),
+                "--divergent", str(div),
+            )
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("which it does not buy", r.stderr)
+
+    def test_breaks_build_claim_has_to_say_what_breaks(self):
+        """An empty claim is the deferral note that outlives its own reason."""
+        upstream = (
+            "--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n-a\n+A\n"
+            "--- a/y.go\n+++ b/y.go\n@@ -1 +1 @@\n-b\n+} else b := f()\n"
+        )
+        mine = "--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n-a\n+A\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            expected = Path(tmp) / "expected.diff"
+            expected.write_text(upstream, encoding="utf-8")
+            actual = Path(tmp) / "actual.diff"
+            actual.write_text(mine, encoding="utf-8")
+            div = Path(tmp) / "x.diff"
+            div.write_text(
+                f"# why: upstream's fixer emits code that does not parse\n"
+                f"# upstream-writes: {fixdiff.upstream_writes(upstream)}\n"
+                f"# upstream-breaks-build:\n" + mine,
+                encoding="utf-8",
+            )
+            r = self.run_cli(
+                "check", "--case", "x",
+                "--actual", str(actual),
+                "--expected", str(expected),
+                "--divergent", str(div),
+            )
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("Quote the compiler error", r.stderr)
+
     def test_pending_holds_a_case_where_upstream_fixes_and_guff_does_not(self):
         with tempfile.TemporaryDirectory() as tmp:
             actual = Path(tmp) / "actual.diff"

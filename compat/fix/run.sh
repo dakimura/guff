@@ -252,6 +252,33 @@ for case_dir in "$CASES_DIR"/*/; do
     continue
   fi
 
+  # A divergence that claims "upstream's output does not compile" is the one
+  # kind allowed to write *less* than upstream, so the claim has to be checked
+  # rather than believed: apply upstream's own recorded diff and see. The day
+  # upstream fixes its fixer, this fails and the entry gets re-decided instead
+  # of quietly licensing an under-fix forever.
+  if [[ -f "$divergent" ]] && grep -q '^# upstream-breaks-build:' "$divergent"; then
+    if ! tree_compiles "$pristine"; then
+      echo "  $name: cannot verify the upstream-breaks-build claim — the" \
+           "pristine tree already does not compile" >&2
+      FAILED=$((FAILED + 1))
+    else
+      up_work="$work/upstream"
+      rm -rf "$up_work"
+      cp -R "$pristine" "$up_work"
+      if ! (cd "$up_work" && git apply -p1 --unsafe-paths --directory=. "$expected" 2>/dev/null); then
+        echo "  $name: could not apply $expected to check the" \
+             "upstream-breaks-build claim" >&2
+        FAILED=$((FAILED + 1))
+      elif tree_compiles "$up_work"; then
+        echo "  $name: $divergent says golangci-lint --fix breaks the build," \
+             "but its recorded output compiles. The reason for writing less" \
+             "than upstream no longer holds — re-read the \`# why:\`." >&2
+        FAILED=$((FAILED + 1))
+      fi
+    fi
+  fi
+
   python3 "$FIXDIFF" check \
     --case "$name" \
     --actual "$guff_diff" \

@@ -20,3 +20,15 @@
  		panic(err)
  	}
  }
+--- a/elseif.go
++++ b/elseif.go
+@@ -10,7 +10,8 @@
+ func ElseIf(a bool) {
+ 	if a {
+ 		return
+-	} else if err := do(); err != nil {
++	} else err := do()
++if  err != nil {
+ 		panic(err)
+ 	}
+ }
