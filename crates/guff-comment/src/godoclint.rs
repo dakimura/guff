@@ -20,9 +20,9 @@
 //!
 //! DEFERRED, with the reason each is still deferred:
 //!
-//! - `require-doc` — needs a symbol model this file does not build:
-//!   `TrailingDoc` (`const X = 1 // doc`) and a symbol list that keeps the
-//!   symbols with *no* doc, which [`collect_symbol_docs`] drops.
+//! - `require-doc` — the symbol model is here now ([`collect_symbol_decls`],
+//!   `TrailingDoc` included); what is left is the rule itself and its
+//!   `ignore-exported` / `ignore-unexported` branch.
 //! - `max-len` — needs `go/doc/comment`'s printer and the pinned
 //!   `ignore-patterns: ["^\+kubebuilder:"]`. `options.max-len.length` is
 //!   already parsed.
@@ -212,24 +212,58 @@ fn receiver_base_type_name(ty: &Expr) -> Option<&str> {
     }
 }
 
-struct SymbolDoc<'a> {
+/// One entry of upstream's `FileInspection.SymbolDecl`.
+///
+/// This is the whole list, including symbols that carry no doc of their own.
+/// The collector this replaces dropped those at three `continue`s, which is
+/// exactly the set `deprecated`'s parent-doc branch — and, when it lands,
+/// `require-doc` — is made of.
+///
+/// Upstream's `Kind` / `Ident` / `TrailingDoc` / `MultiSpecDecl` /
+/// `MultiSpecIndex` / `MultiNameIndex` / `IsTypeAlias` are omitted: no
+/// implemented rule reads them.
+struct SymbolDecl<'a> {
     name: &'a str,
-    doc: &'a CommentGroup,
-    /// Parent GenDecl doc (for grouped const/var/type).
+    doc: Option<&'a CommentGroup>,
+    /// The enclosing `GenDecl`'s doc, and **only** for a parenthesized group:
+    /// upstream treats the comment above a single-line `const`/`var`/`type` as
+    /// the symbol's own `Doc` and leaves `ParentDoc` nil.
     parent_doc: Option<&'a CommentGroup>,
     multi_name: bool,
     is_method: bool,
     method_recv_base: Option<&'a str>,
 }
 
-fn collect_symbol_docs(file: &guff::ast::File) -> Vec<SymbolDoc<'_>> {
+impl SymbolDecl<'_> {
+    /// `ast.IsExported(Name)`, with the receiver adjustment upstream applies in
+    /// `require-doc` and `start-with-name`.
+    ///
+    /// `deprecated` deliberately does **not** apply it — see [`run`].
+    fn exported_for_godoc(&self) -> bool {
+        let mut exported = is_exported(self.name);
+        if self.is_method {
+            if let Some(base) = self.method_recv_base {
+                exported = exported && is_exported(base);
+            }
+        }
+        exported
+    }
+}
+
+/// Port of `inspect.Inspector`'s top-level symbol walk.
+///
+/// The branch that matters is `GenDecl.Lparen`: a single-line
+/// `// doc\nconst foo = 0` puts the comment in `Doc` with a nil `ParentDoc`,
+/// while `// doc\nconst ( foo = 0 )` puts it in `ParentDoc` with a nil `Doc`.
+/// guff's parser, unlike `go/parser`, copies a single-line `GenDecl`'s lead
+/// comment onto the spec as well, so reading `spec.doc` alone would make the
+/// two shapes indistinguishable. Branching on `lparen` the way upstream does
+/// keeps that quirk out of the answer.
+fn collect_symbol_decls(file: &guff::ast::File) -> Vec<SymbolDecl<'_>> {
     let mut out = Vec::new();
     for decl in &file.decls {
         match decl {
             Decl::FuncDecl(fd) => {
-                let Some(doc) = &fd.doc else {
-                    continue;
-                };
                 let (is_method, method_recv_base) = if let Some(recv) = &fd.recv {
                     let base = recv
                         .list
@@ -240,9 +274,9 @@ fn collect_symbol_docs(file: &guff::ast::File) -> Vec<SymbolDoc<'_>> {
                 } else {
                     (false, None)
                 };
-                out.push(SymbolDoc {
+                out.push(SymbolDecl {
                     name: fd.name.name.as_str(),
-                    doc,
+                    doc: fd.doc.as_ref(),
                     parent_doc: None,
                     multi_name: false,
                     is_method,
@@ -250,17 +284,25 @@ fn collect_symbol_docs(file: &guff::ast::File) -> Vec<SymbolDoc<'_>> {
                 });
             }
             Decl::GenDecl(gen) => {
-                let parent_doc = gen.doc.as_ref();
+                // `import (…)` declares no symbols; upstream's `switch dt.Tok`
+                // falls through to `continue` for anything but const/var/type.
+                if !matches!(
+                    gen.tok,
+                    Some(Token::CONST) | Some(Token::VAR) | Some(Token::TYPE)
+                ) {
+                    continue;
+                }
+                let grouped = gen.lparen != guff::NO_POS;
+                let parent_doc = if grouped { gen.doc.as_ref() } else { None };
                 for spec in &gen.specs {
                     match spec {
                         Spec::TypeSpec(ts) => {
-                            // Upstream: only the per-spec doc is a symbol Doc;
-                            // GenDecl parent docs live in ParentDoc and are
-                            // skipped by start-with-name when Doc is empty.
-                            let Some(doc) = ts.doc.as_ref() else {
-                                continue;
+                            let doc = if grouped {
+                                ts.doc.as_ref()
+                            } else {
+                                gen.doc.as_ref()
                             };
-                            out.push(SymbolDoc {
+                            out.push(SymbolDecl {
                                 name: ts.name.name.as_str(),
                                 doc,
                                 parent_doc,
@@ -270,12 +312,14 @@ fn collect_symbol_docs(file: &guff::ast::File) -> Vec<SymbolDoc<'_>> {
                             });
                         }
                         Spec::ValueSpec(vs) => {
-                            let multi_name = vs.names.len() > 1;
-                            let Some(doc) = vs.doc.as_ref() else {
-                                continue;
+                            let doc = if grouped {
+                                vs.doc.as_ref()
+                            } else {
+                                gen.doc.as_ref()
                             };
+                            let multi_name = vs.names.len() > 1;
                             for name in &vs.names {
-                                out.push(SymbolDoc {
+                                out.push(SymbolDecl {
                                     name: name.name.as_str(),
                                     doc,
                                     parent_doc,
@@ -289,6 +333,8 @@ fn collect_symbol_docs(file: &guff::ast::File) -> Vec<SymbolDoc<'_>> {
                     }
                 }
             }
+            // `SymbolDeclKindBad`. Upstream records it and every rule then
+            // skips it, so recording it here would change nothing.
             Decl::BadDecl(_) => {}
         }
     }
@@ -334,6 +380,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     // once rather than once per spec. Positions stand in for identity: two
     // distinct groups cannot start at the same offset.
     let mut unused_link_seen: std::collections::HashSet<u32> = std::collections::HashSet::new();
+    let mut deprecated_seen: std::collections::HashSet<u32> = std::collections::HashSet::new();
     // package name → list of (pos, has_nonempty_doc) for single-pkg-doc
     let mut pkg_docs: HashMap<String, Vec<(u32, bool)>> = HashMap::new();
     // package name → (position of the *first* file's package identifier, whether
@@ -374,11 +421,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
         // --- package docs ---
         //
-        // The three rules reading this comment group do *not* share a
-        // test-file guard: `single-pkg-doc` is pinned `include-tests: true`
-        // while `pkg-doc` and `deprecated` are `false`. A `_test.go` file's
-        // package doc therefore counts toward "more than one godoc" and is
-        // simultaneously invisible to the prefix and deprecation checks.
+        // The two rules reading this comment group do *not* share a test-file
+        // guard: `single-pkg-doc` is pinned `include-tests: true` while
+        // `pkg-doc` is `false`. A `_test.go` file's package doc therefore
+        // counts toward "more than one godoc" and is simultaneously invisible
+        // to the prefix check. (`deprecated` also reads it, from its own set
+        // below, with a third answer of the same shape.)
         if let Some(pkg_doc) = &parsed.doc {
             if let Some(text) = doc_text(pkg_doc) {
                 if let Some(pos) = reparsed_pos(&fset, file.pos(), &re_fset, pkg_doc.pos()) {
@@ -401,20 +449,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                             ));
                         }
                     }
-                    if check_deprecated
-                        && !(is_test && !include_tests::DEPRECATED)
-                        && check_deprecations(&text)
-                    {
-                        pending.push((
-                            pos,
-                            format!(
-                                "deprecation note should be formatted as \"{CORRECT_DEPRECATION_MARKER}\""
-                            ),
-                        ));
-                    }
                 }
             }
         }
+
+        let symbols = collect_symbol_decls(&parsed);
 
         // --- no-unused-link ---
         //
@@ -422,36 +461,22 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         // and its parent doc — then checks each once. Two consequences the
         // rules around it do not share: there is no `exported` filter, and a
         // parent doc must be reached even when *no* spec under it has a doc of
-        // its own, which is the common `const (…)` shape. `collect_symbol_docs`
-        // yields nothing for that case, so the decl docs are gathered here
-        // rather than through it.
+        // its own, which is the common `const (…)` shape.
+        //
+        // Pinned `NoUnusedLinkIncludeTests: true`, so a `_test.go` file's
+        // package doc is in upstream's set while `pkg-doc` and
+        // `start-with-name` (pinned `false`) skip the file entirely.
         if check_unused_link && !(is_test && !include_tests::NO_UNUSED_LINK) {
             let mut docs: Vec<&CommentGroup> = Vec::new();
-            // Pinned `NoUnusedLinkIncludeTests: true`, so a `_test.go` file's
-            // package doc is in upstream's set while `pkg-doc` and
-            // `start-with-name` (pinned `false`) skip the file entirely.
             if let Some(d) = &parsed.doc {
                 docs.push(d);
             }
-            for decl in &parsed.decls {
-                if let Decl::GenDecl(g) = decl {
-                    // Imports are not symbol declarations, so their doc is not
-                    // in upstream's set.
-                    let is_symbol_decl = matches!(
-                        g.tok,
-                        Some(Token::CONST) | Some(Token::VAR) | Some(Token::TYPE)
-                    );
-                    if is_symbol_decl && !g.specs.is_empty() {
-                        if let Some(d) = &g.doc {
-                            docs.push(d);
-                        }
-                    }
-                }
-            }
-            for sym in collect_symbol_docs(&parsed) {
-                docs.push(sym.doc);
+            for sym in &symbols {
                 if let Some(p) = sym.parent_doc {
                     docs.push(p);
+                }
+                if let Some(d) = sym.doc {
+                    docs.push(d);
                 }
             }
             for d in docs {
@@ -470,58 +495,87 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             }
         }
 
-        // --- symbol docs ---
-        for sym in collect_symbol_docs(&parsed) {
-            let Some(text) = doc_text(sym.doc) else {
-                continue;
-            };
-            let Some(pos) = reparsed_pos(&fset, file.pos(), &re_fset, sym.doc.pos()) else {
-                continue;
-            };
-
-            let mut exported = is_exported(sym.name);
-            if sym.is_method {
-                if let Some(base) = sym.method_recv_base {
-                    exported = exported && is_exported(base);
+        // --- deprecated ---
+        //
+        // Same set-of-groups shape as `no-unused-link`, and for the same
+        // reason: `sd.ParentDoc` is collected *before* the `sd.Doc == nil`
+        // continue, so a `// deprecated:` above a `const (…)` whose specs are
+        // all undocumented is upstream's to report. Threading it through the
+        // symbol's own doc — which is what this used to do — both missed that
+        // shape and reported the parent's defect at the *child's* position.
+        //
+        // The export filter here is `ast.IsExported(sd.Name)` with **no**
+        // receiver adjustment, unlike `require-doc` and `start-with-name`. An
+        // exported method on an unexported receiver is checked by this rule
+        // and skipped by those two. Sharing one `exported` local across the
+        // loop is what hid that.
+        if check_deprecated && !(is_test && !include_tests::DEPRECATED) {
+            let mut docs: Vec<&CommentGroup> = Vec::new();
+            if let Some(d) = &parsed.doc {
+                docs.push(d);
+            }
+            for sym in &symbols {
+                if !is_exported(sym.name) {
+                    continue;
+                }
+                if let Some(p) = sym.parent_doc {
+                    docs.push(p);
+                }
+                if let Some(d) = sym.doc {
+                    docs.push(d);
                 }
             }
-
-            // `start-with-name` reaches unexported symbols when
-            // `options.start-with-name.include-unexported` is set; upstream's
-            // guard is `!isExported && !includePrivate → skip`, not
-            // `isExported → check`. Reading it as the latter silently dropped
-            // every diagnostic the option exists to produce — and the rule is
-            // in the *basic* default set, so this was not opt-in territory.
-            if check_start
-                && !(is_test && !include_tests::START_WITH_NAME)
-                && (exported || start_with_name_include_unexported)
-                && sym.name != "_"
-                && !sym.multi_name
-            {
-                if !has_deprecated_paragraph(&text) && !match_symbol_name(&text, sym.name) {
-                    pending.push((
-                        pos,
-                        format!("godoc should start with symbol name (\"{}\")", sym.name),
-                    ));
+            for d in docs {
+                let Some(dpos) = reparsed_pos(&fset, file.pos(), &re_fset, d.pos()) else {
+                    continue;
+                };
+                if !deprecated_seen.insert(dpos) {
+                    continue;
                 }
-            }
-
-            if check_deprecated && !(is_test && !include_tests::DEPRECATED) && exported {
-                // Upstream also checks parent docs for grouped decls.
-                let bad = check_deprecations(&text)
-                    || sym
-                        .parent_doc
-                        .filter(|p| !std::ptr::eq(*p as *const _, sym.doc as *const _))
-                        .and_then(doc_text)
-                        .is_some_and(|pt| check_deprecations(&pt));
-                if bad {
+                let Some(dtext) = doc_text(d) else {
+                    continue;
+                };
+                if check_deprecations(&dtext) {
                     pending.push((
-                        pos,
+                        dpos,
                         format!(
                             "deprecation note should be formatted as \"{CORRECT_DEPRECATION_MARKER}\""
                         ),
                     ));
                 }
+            }
+        }
+
+        // --- start-with-name ---
+        if check_start && !(is_test && !include_tests::START_WITH_NAME) {
+            for sym in &symbols {
+                // Upstream's guard is `!isExported && !includePrivate → skip`,
+                // not `isExported → check`. Reading it as the latter silently
+                // dropped every diagnostic `include-unexported` exists to
+                // produce — and the rule is in the *basic* default set, so
+                // this was not opt-in territory.
+                if !sym.exported_for_godoc() && !start_with_name_include_unexported {
+                    continue;
+                }
+                if sym.name == "_" || sym.multi_name {
+                    continue;
+                }
+                let Some(doc) = sym.doc else {
+                    continue;
+                };
+                let Some(text) = doc_text(doc) else {
+                    continue;
+                };
+                if has_deprecated_paragraph(&text) || match_symbol_name(&text, sym.name) {
+                    continue;
+                }
+                let Some(pos) = reparsed_pos(&fset, file.pos(), &re_fset, doc.pos()) else {
+                    continue;
+                };
+                pending.push((
+                    pos,
+                    format!("godoc should start with symbol name (\"{}\")", sym.name),
+                ));
             }
         }
     }
@@ -640,6 +694,98 @@ mod tests {
         assert!(!o.require_doc_ignore_exported);
         assert!(o.require_doc_ignore_unexported);
         assert!(!o.start_with_name_include_unexported);
+    }
+
+    fn parse(src: &str) -> (std::sync::Arc<guff::FileSet>, guff::ast::File) {
+        reparse_with_comments(Path::new("t.go"), Some(src.as_bytes())).expect("parse")
+    }
+
+    fn decls(src: &str) -> Vec<(String, Option<String>, Option<String>)> {
+        let (_fset, file) = parse(src);
+        collect_symbol_decls(&file)
+            .iter()
+            .map(|d| {
+                (
+                    d.name.to_string(),
+                    d.doc.and_then(doc_text),
+                    d.parent_doc.and_then(doc_text),
+                )
+            })
+            .collect()
+    }
+
+    /// The `Lparen` branch is the whole point of porting the inspector rather
+    /// than reading `spec.doc`: guff's parser copies a single-line `GenDecl`'s
+    /// lead comment onto the spec as well (go/parser passes `nil`), so
+    /// `spec.doc` alone cannot tell `// d\nconst a = 1` from
+    /// `// d\nconst ( a = 1 )`. Upstream calls the first one `Doc` and the
+    /// second one `ParentDoc`, and `deprecated` reports at different lines for
+    /// the two.
+    #[test]
+    fn single_line_decl_doc_is_doc_not_parent_doc() {
+        assert_eq!(
+            decls("package p\n\n// d\nconst a = 1\n"),
+            vec![("a".into(), Some("d".into()), None)]
+        );
+        assert_eq!(
+            decls("package p\n\n// d\nconst (\n\ta = 1\n)\n"),
+            vec![("a".into(), None, Some("d".into()))]
+        );
+        assert_eq!(
+            decls("package p\n\n// d\ntype a int\n"),
+            vec![("a".into(), Some("d".into()), None)]
+        );
+        assert_eq!(
+            decls("package p\n\n// d\ntype (\n\ta int\n)\n"),
+            vec![("a".into(), None, Some("d".into()))]
+        );
+    }
+
+    /// Symbols with no doc at all are in the list. That is the difference from
+    /// the collector this replaced, and the reason `deprecated` could not see
+    /// a parent doc above a group of undocumented specs.
+    #[test]
+    fn undocumented_symbols_are_kept() {
+        assert_eq!(
+            decls("package p\n\n// d\nconst (\n\ta = 1\n\tb = 2\n)\n"),
+            vec![
+                ("a".into(), None, Some("d".into())),
+                ("b".into(), None, Some("d".into())),
+            ]
+        );
+        assert_eq!(
+            decls("package p\n\nfunc f() {}\n"),
+            vec![("f".into(), None, None)]
+        );
+    }
+
+    /// One entry per name, sharing the spec's doc — and `import (…)` declares
+    /// no symbols, so its doc is in no rule's set.
+    #[test]
+    fn multi_name_specs_and_imports() {
+        assert_eq!(
+            decls("package p\n\n// d\nvar a, b = 1, 2\n"),
+            vec![
+                ("a".into(), Some("d".into()), None),
+                ("b".into(), Some("d".into()), None),
+            ]
+        );
+        assert!(decls("package p\n\n// d\nimport \"fmt\"\n").is_empty());
+    }
+
+    /// `deprecated` uses the bare name; `require-doc` and `start-with-name`
+    /// fold in the receiver's base type. An exported method on an unexported
+    /// receiver is where the two answers part.
+    #[test]
+    fn receiver_base_type_only_narrows_the_godoc_export_rule() {
+        let (_fset, file) = parse("package p\n\ntype hidden int\n\nfunc (h hidden) M() {}\n");
+        let all = collect_symbol_decls(&file);
+        let m = all.iter().find(|d| d.name == "M").expect("method");
+        assert!(is_exported(m.name), "deprecated's filter sees it as exported");
+        assert!(
+            !m.exported_for_godoc(),
+            "require-doc / start-with-name fold in the unexported receiver"
+        );
     }
 
     #[test]
