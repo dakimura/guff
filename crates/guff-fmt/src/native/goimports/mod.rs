@@ -247,6 +247,7 @@ fn format_inner_impl(src: &[u8], opts: &NativeOptions) -> Result<FormatOutcome, 
     // matching system goimports when the import set is already correct.
     if fixes.is_empty()
         && !import_runs_need_sort(&imps, &local)
+        && !import_runs_need_group_blanks(&imps, &local)
         && !needs_import_decl_merge(&file)
     {
         return Ok(FormatOutcome::Formatted(src.to_vec()));
@@ -277,6 +278,28 @@ fn import_runs_need_sort(imps: &[Imp], local: &str) -> bool {
         }
     }
     false
+}
+
+/// True when a run contains an import-group boundary, which `addImportSpaces`
+/// would separate with a blank line.
+///
+/// A run is by definition a maximal span with no blank line in it, so a group
+/// boundary inside one is always missing its separator. Without this the
+/// "nothing to do" exit above fires on a block that is correctly *sorted* but
+/// not correctly *spaced* — `"fmt"`, `"os"`, `"github.com/x/y"` in one block
+/// came back unchanged, where goimports blanks before the third.
+///
+/// There is no converse to check: a blank line between two imports of the same
+/// group is a run boundary the user wrote, and goimports preserves it rather
+/// than closing it up — verified against the real binary, and already guarded
+/// by `preserves_user_blank_line_within_group`. Writing this predicate
+/// symmetrically would break that test.
+fn import_runs_need_group_blanks(imps: &[Imp], local: &str) -> bool {
+    detect_runs(imps).iter().any(|&(s, e)| {
+        imps[s..e]
+            .windows(2)
+            .any(|w| import_group(local, &w[0].path) != import_group(local, &w[1].path))
+    })
 }
 
 /// goimports folds every non-C `import` decl into one parenthesized block.
@@ -926,8 +949,17 @@ fn imp_bytes(src: &[u8], imp: &Imp) -> Vec<u8> {
         let end = end.min(src.len()).max(start);
         // import_range end often lands past the trailing newline; strip so the
         // caller can emit a single `\n` without creating blank lines.
+        //
+        // The tab matters as much as the newline. A spec that is not the last
+        // one in its block records a range ending `"fmt"\n\t` — the newline
+        // plus the *next* line's indentation. Stopping at `\n`/`\r` alone left
+        // the loop looking at the tab on its first step, so it never removed
+        // the newline either, and the caller's own `\n` then closed a line
+        // holding one tab. go/printer trims that to empty, which is why the
+        // symptom was a blank line appearing between two imports of the same
+        // group (compat/fmt goimports cases).
         let mut slice = &src[start..end];
-        while slice.last() == Some(&b'\n') || slice.last() == Some(&b'\r') {
+        while matches!(slice.last(), Some(b'\n' | b'\r' | b'\t' | b' ')) {
             slice = &slice[..slice.len() - 1];
         }
         return slice.to_vec();
@@ -981,6 +1013,121 @@ func f() {
         let bar_pos = s.find("\"github.com/foo/bar\"").unwrap();
         let pkg_pos = s.find("\"github.com/org/project/pkg\"").unwrap();
         assert!(fmt_pos < bar_pos && bar_pos < pkg_pos, "got:\n{s}");
+    }
+
+    /// Helper: the import block of the formatted output, with tabs kept so a
+    /// stray blank line is visible.
+    fn import_block(src: &[u8], local: &str) -> String {
+        let out = format(src, &opts(local, "p.go")).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        let start = s.find("import (").expect("paren import block");
+        let end = s[start..].find("\n)").expect("block close") + start + 2;
+        s[start..end].to_string()
+    }
+
+    /// `addImportSpaces`: goimports always separates import groups, even when
+    /// the specs are already in sort order. guff used to short-circuit on
+    /// "already sorted" and skip the rewrite, leaving no blank line at all.
+    #[test]
+    fn group_blank_is_added_to_an_already_sorted_block() {
+        let src = br#"package p
+
+import (
+	"fmt"
+	"os"
+	"github.com/x/y"
+)
+
+func f() { fmt.Println(os.Args, y.Z) }
+"#;
+        assert_eq!(
+            import_block(src, ""),
+            "import (\n\t\"fmt\"\n\t\"os\"\n\n\t\"github.com/x/y\"\n)"
+        );
+    }
+
+    /// The same, with only two specs — the smallest shape that needs a
+    /// separator but no reordering.
+    #[test]
+    fn group_blank_is_added_between_two_sorted_specs() {
+        let src = br#"package p
+
+import (
+	"fmt"
+	"github.com/x/y"
+)
+
+func f() { fmt.Println(y.Z) }
+"#;
+        assert_eq!(
+            import_block(src, ""),
+            "import (\n\t\"fmt\"\n\n\t\"github.com/x/y\"\n)"
+        );
+    }
+
+    /// Three standard-library imports, one block, out of order. Every one of
+    /// them is `import_group` 0, so no separator belongs anywhere — the blank
+    /// line guff used to emit here came from a spec's recorded range carrying
+    /// its own `\n\t`, not from the group logic.
+    #[test]
+    fn sorting_three_same_group_specs_adds_no_blank() {
+        let src = br#"package p
+
+import (
+	"fmt"
+	"os"
+	"bytes"
+)
+
+func f() { fmt.Println(os.Args, bytes.MinRead) }
+"#;
+        assert_eq!(
+            import_block(src, ""),
+            "import (\n\t\"bytes\"\n\t\"fmt\"\n\t\"os\"\n)"
+        );
+    }
+
+    /// The same defect with a reorder that also crosses a group boundary: one
+    /// separator, before the third-party import, and nothing between `fmt`
+    /// and `os`.
+    #[test]
+    fn sorting_across_a_group_boundary_adds_exactly_one_blank() {
+        let src = br#"package p
+
+import (
+	"fmt"
+	"github.com/x/y"
+	"os"
+)
+
+func f() { fmt.Println(os.Args, y.Z) }
+"#;
+        assert_eq!(
+            import_block(src, ""),
+            "import (\n\t\"fmt\"\n\t\"os\"\n\n\t\"github.com/x/y\"\n)"
+        );
+    }
+
+    /// Already correct: sorted and separated. This is the shape every corpus
+    /// on disk is in, which is why `regress/fmt_diff.py --formatter goimports`
+    /// was green through both defects above.
+    #[test]
+    fn an_already_grouped_block_is_left_alone() {
+        let src = br#"package p
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/x/y"
+)
+
+func f() { fmt.Println(os.Args, y.Z) }
+"#;
+        assert_eq!(
+            import_block(src, ""),
+            "import (\n\t\"fmt\"\n\t\"os\"\n\n\t\"github.com/x/y\"\n)"
+        );
     }
 
     #[test]

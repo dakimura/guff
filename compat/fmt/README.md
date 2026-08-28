@@ -35,7 +35,7 @@ That is not a narrow hole. `formatters.settings.gofmt.simplify` defaults to
 | `gofmt-default` | guff defaulted `simplify` to false, so it wrote `[]int{[]int{1}}` where upstream writes `{{1}}` — and exited 0 |
 | `generated-default` | `guff fmt --stdin` formatted a generated file that `guff fmt <dir>` correctly skipped |
 | `gofmt-rewrite` | `gofmt -r` is a single-valued flag, so passing N of them kept only the last; upstream applies all N in order |
-| `goimports-local` | guff regroups a single import block wrongly in both directions — see `pending/goimports-local.why` |
+| `goimports-local` | guff regroups a single import block wrongly in both directions (two separate defects; fixed after landing, see below) |
 
 ## How a case works
 
@@ -85,6 +85,26 @@ one shared constant would start simplifying there too and rewrite those 193
 expectations. This case is what stops that, which is why `GofmtOptions` has
 both `default()` and `plain()`.
 
+## The goimports pair
+
+`goimports-same-group` and `goimports-sorted-no-blank` pin the two halves of
+what started as one pending entry, and they pull in opposite directions:
+
+* three standard-library imports out of order — same group throughout, so the
+  right answer has **no** blank line anywhere;
+* three sorted imports spanning two groups with no separator — so the right
+  answer **adds** one.
+
+Neither defect could be fixed by breaking the other, which is the point of
+keeping both. The first also isolates the cause from the group logic entirely:
+with every import in group 0, a separator cannot come from a group change. It
+came from a spec's recorded source range ending `"fmt"\n\t`, where the trimming
+loop stopped at the tab and left the newline behind.
+
+`regress/fmt_diff.py --formatter goimports` was green through both, before and
+after, on the *same* 10 residual diffs out of 5,608 GOROOT files — every corpus
+on disk is already correctly grouped, so neither path is ever entered.
+
 ## `pending/` is a ledger, not an allowlist
 
 `pending/<case>.go` is what guff writes **today** for a case whose parity is
@@ -97,6 +117,10 @@ records.
 
 `pending/<case>.why` is **required**: `run.sh` refuses a baseline without one.
 A gap nobody has to justify is how a baseline turns into an allowlist.
+
+The directory is currently empty. Its one entry, `goimports-local`, was closed
+the way the mechanism intends: the run started failing with *"guff now matches
+upstream — delete this file"*.
 
 ## Not covered yet
 
