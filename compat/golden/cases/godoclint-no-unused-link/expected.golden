@@ -1,0 +1,14 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh godoclint-no-unused-link
+# Produced by running golangci-lint on compat/golden/cases/godoclint-no-unused-link/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+links.go:1:1:godoclint::godoc has unused link ("pkgunused")
+links.go:22:1:godoclint::godoc has unused link ("dangling")
+links.go:27:1:godoclint::godoc has unused link ("lower")
+links.go:32:1:godoclint::godoc has unused link ("grouped")
+links.go:42:1:godoclint::godoc has unused link ("parent")
+links.go:46:2:godoclint::godoc has unused link ("own")

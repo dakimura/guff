@@ -15767,3 +15767,94 @@ issues cache の salt は version 文字列なので **dev ビルドを区別し
 このうち `no-unused-link` と `require-stdlib-doclink` は
 **続き 87 で移植した `Doc.links` と `DocLink` をそのまま使える** ——
 理由が消えたかどうかは、着手前にもう一度読むこと。
+
+---
+
+### 2026-08-28（続き 92）— `godoclint` の `default: all` は**黙って 5 規則を捨てていた**。まず 1 つ返した
+
+続き 91 の末尾に「`no-unused-link` と `require-stdlib-doclink` は
+続き 87 の `Doc.links` / `DocLink` がそのまま使える。**着手前に理由をもう一度読むこと**」と書いた。
+読んだら、そのとおりだった。
+
+#### 設定は効いているのに、規則が無かった
+
+```yaml
+linters:
+  settings:
+    godoclint:
+      default: all
+```
+
+golangci-lint は 2 件報告し、**guff は 0 件**（警告も無し）。
+
+`options.rs` の `effective_rules()` は `default: all` を**正しく 9 規則に展開している**。
+`godoclint.rs` が実装しているのが 4 つだけで、**残りは名前が集合に入ったまま誰も見ない**。
+`basic` は `pkg-doc` / `single-pkg-doc` / `start-with-name` / `deprecated` の 4 つなので
+既定経路ではないが、**opt-in したユーザには無言の食い違い**になる。
+
+#### `no-unused-link` を返した —— 続き 87 が直接可能にしたもの
+
+`Doc.links` の `used` は、parser が `[text]` を解決するときに立てるフラグ。
+再走査ではなく**読むだけ**で済むのが、この規則が続き 87 まで据え置かれていた理由そのもの。
+
+**上流の 2 つの性質を、真似ではなく読んで合わせた**:
+
+1. **集合である。** `docs[sd.ParentDoc]` / `docs[sd.Doc]` を map に入れてから回すので、
+   `const (…)` 1 ブロックの親 doc は**spec の数だけ報告されない**。
+2. **export フィルタが無い。** すぐ隣の `deprecated` には `isExported` があるので、
+   同じループに書くと**うっかり継承する**。
+
+#### 最初の実装は偽陰性を 2 つ出した —— 探って見つけた
+
+```go
+// Group does things.
+//
+// [x]: https://example.com/x
+const (
+	A = 1
+	B = 2
+)
+```
+
+上流は報告、guff は**沈黙**。原因は上流のループの順番:
+
+```go
+if sd.ParentDoc != nil { docs[sd.ParentDoc] = struct{}{} }
+if sd.Doc == nil { continue }
+```
+
+—— **親 doc は「自分の doc が無い」判定より前**に集合へ入る。
+guff の `collect_symbol_docs` は**自分の doc を持たない symbol を最初から返さない**ので、
+grouped decl の spec が全部 doc 無しだと**親に到達する経路が無い**。
+collector を通さず、**宣言から直接**集合を組み直した。
+
+そのとき「doc 付きの `import (…)` は集合に入るか」が分からなかったので、
+**推測ではなく測った** —— 入らない（import は symbol declaration ではない）。
+`const` / `var` / `type` に絞って、`const ()`（spec 0）も入らないことを確認した。
+
+**12 形すべてで一致**（未使用 1 / 全部使用 / 未使用 2 / package doc / 非公開 symbol /
+親 doc 3 spec / 親 doc + 自 doc / 複数名 spec / type ブロック / import ブロック /
+非グループ const / 空 const ブロック）。
+
+#### golden ケースを 1 つ足した
+
+既存の `godoclint` ケースは `default` のままなので**この規則に到達しない**。
+`default: none` + `enable: [no-unused-link]` の**単独ケース**にした ——
+`default: all` にすると未移植の 4 規則の `missing` が混ざり、
+**1 つの修正では閉じられない gap を記録する**ことになる。
+
+golangci-lint が 6 キー記録し、guff は **6/6 一致**（**桁まで** —— 46 行目は
+`const (` 内の indent された spec doc で col 2）。
+**修正前の binary で回すと `guff=0 golden=6 missing=6`** で落ちる。
+
+#### 据え置きは規則ごとに理由を書いた
+
+| 規則 | まだ要るもの |
+|---|---|
+| `require-doc` | `TrailingDoc`（`const X = 1 // doc`）と `ParentDoc` fallback を持つ symbol model、`ignore-exported` / `ignore-unexported` |
+| `require-pkg-doc` | **doc が無いファイルも含めた**package 名の位置。今の `pkg_docs` は doc があるファイルしか記録しない |
+| `max-len` | `options.max-len.*`。golangci-lint が 2 つ上書きする（`include-tests: true`、`ignore-patterns: ["^\+kubebuilder:"]`） |
+| `require-stdlib-doclink` | 上流の生成物である標準ライブラリ symbol 索引（`stdlib_doclink/stdlib.json`） |
+
+**「あとで」ではなく「何が要るか」を書いた** —— 続き 83・86・91 で
+理由が腐って 6 回外れているので。

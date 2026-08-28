@@ -1,8 +1,9 @@
 //! Port of [`github.com/godoc-lint/godoc-lint`](https://github.com/godoc-lint/godoc-lint)
 //! (golangci-lint wrapper in `pkg/golinters/godoclint`).
 //!
-//! Implements the **basic** default rule set:
-//! `pkg-doc`, `single-pkg-doc`, `start-with-name`, `deprecated`.
+//! Implements the **basic** default rule set — `pkg-doc`, `single-pkg-doc`,
+//! `start-with-name`, `deprecated` — plus `no-unused-link`, which is not in it
+//! but which `default: all` and an explicit `enable:` both reach.
 //!
 //! Comments are re-parsed with [`PARSE_COMMENTS`] because production package
 //! load uses `Mode::NONE`, which drops lead comments after the package clause.
@@ -13,15 +14,26 @@
 //! upstream itself feeds every doc comment through, so "paragraph" here means
 //! what it means to godoc rather than "text between blank lines".
 //!
-//! DEFERRED: `require-doc` / `require-pkg-doc` / `max-len` / `no-unused-link` /
-//! `require-stdlib-doclink`; per-rule `options.*`; `//godoclint:disable`
-//! directives.
+//! DEFERRED, with the reason each is still deferred:
+//!
+//! - `require-doc` — needs a symbol model this file does not build:
+//!   `TrailingDoc` (`const X = 1 // doc`) and a `ParentDoc` fallback, plus the
+//!   `ignore-exported` / `ignore-unexported` options.
+//! - `require-pkg-doc` — needs every file's package-name position whether or
+//!   not it has a doc; `pkg_docs` below only records files that have one.
+//! - `max-len` — needs `options.max-len.*`, and golangci-lint overrides two of
+//!   them (`include-tests: true`, `ignore-patterns: ["^\+kubebuilder:"]`).
+//! - `require-stdlib-doclink` — needs upstream's generated index of standard
+//!   library symbols (`stdlib_doclink/stdlib.json`).
+//!
+//! Also deferred: per-rule `options.*` and `//godoclint:disable` directives.
 
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::OnceLock;
 
 use guff::ast::{CommentGroup, Decl, Expr, Spec};
+use guff::token::Token;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use regex::Regex;
@@ -125,6 +137,25 @@ fn probable_deprecation_re() -> &'static Regex {
 }
 
 const CORRECT_DEPRECATION_MARKER: &str = "Deprecated: ";
+
+/// `no_unused_link.checkNoUnusedLink`: every link definition the comment
+/// declares but never references.
+///
+/// `Doc.links` carries the `used` flag the parser sets while resolving `[text]`
+/// spans, so this reads it directly rather than re-scanning the text — which
+/// is also why the rule was deferred until `go/doc/comment` was ported.
+///
+/// Returns the link texts in declaration order; upstream reports one
+/// diagnostic per unused definition.
+fn unused_links(text: &str) -> Vec<String> {
+    guff::doc::comment::Parser::default()
+        .parse(text)
+        .links
+        .into_iter()
+        .filter(|d| !d.used)
+        .map(|d| d.text)
+        .collect()
+}
 
 /// `deprecated.checkDeprecations`.
 ///
@@ -256,8 +287,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let check_single = rules.contains("single-pkg-doc");
     let check_start = rules.contains("start-with-name");
     let check_deprecated = rules.contains("deprecated");
+    let check_unused_link = rules.contains("no-unused-link");
 
-    if !check_pkg_doc && !check_single && !check_start && !check_deprecated {
+    if !check_pkg_doc && !check_single && !check_start && !check_deprecated && !check_unused_link {
         return Ok(None);
     }
 
@@ -266,6 +298,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let n = pass.files().len();
 
     let mut pending: Vec<(u32, String)> = Vec::new();
+    // `no-unused-link` collects comment groups into a *set* upstream, so a
+    // parent doc shared by several specs of one `const (…)` block is checked
+    // once rather than once per spec. Positions stand in for identity: two
+    // distinct groups cannot start at the same offset.
+    let mut unused_link_seen: std::collections::HashSet<u32> = std::collections::HashSet::new();
     // package name → list of (pos, has_nonempty_doc) for single-pkg-doc
     let mut pkg_docs: HashMap<String, Vec<(u32, bool)>> = HashMap::new();
 
@@ -312,9 +349,65 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                 ),
                             ));
                         }
+                        if check_unused_link {
+                            for link in unused_links(&text) {
+                                pending.push((
+                                    pos,
+                                    format!("godoc has unused link (\"{link}\")"),
+                                ));
+                            }
+                        }
                     }
                 } else if check_single {
                     // empty package doc — not counted for single-pkg-doc
+                }
+            }
+        }
+
+        // --- no-unused-link ---
+        //
+        // Upstream collects a *set* of comment groups — every symbol's own doc
+        // and its parent doc — then checks each once. Two consequences the
+        // rules around it do not share: there is no `exported` filter, and a
+        // parent doc must be reached even when *no* spec under it has a doc of
+        // its own, which is the common `const (…)` shape. `collect_symbol_docs`
+        // yields nothing for that case, so the decl docs are gathered here
+        // rather than through it.
+        if check_unused_link {
+            let mut docs: Vec<&CommentGroup> = Vec::new();
+            for decl in &parsed.decls {
+                if let Decl::GenDecl(g) = decl {
+                    // Imports are not symbol declarations, so their doc is not
+                    // in upstream's set.
+                    let is_symbol_decl = matches!(
+                        g.tok,
+                        Some(Token::CONST) | Some(Token::VAR) | Some(Token::TYPE)
+                    );
+                    if is_symbol_decl && !g.specs.is_empty() {
+                        if let Some(d) = &g.doc {
+                            docs.push(d);
+                        }
+                    }
+                }
+            }
+            for sym in collect_symbol_docs(&parsed) {
+                docs.push(sym.doc);
+                if let Some(p) = sym.parent_doc {
+                    docs.push(p);
+                }
+            }
+            for d in docs {
+                let Some(dpos) = reparsed_pos(&fset, file.pos(), &re_fset, d.pos()) else {
+                    continue;
+                };
+                if !unused_link_seen.insert(dpos) {
+                    continue;
+                }
+                let Some(dtext) = doc_text(d) else {
+                    continue;
+                };
+                for link in unused_links(&dtext) {
+                    pending.push((dpos, format!("godoc has unused link (\"{link}\")")));
                 }
             }
         }
@@ -484,6 +577,27 @@ mod tests {
         assert!(!check_deprecations("Deprecated: do not use"));
         assert!(has_deprecated_paragraph("Foo is X.\n\nDeprecated: use Bar."));
         assert!(!has_deprecated_paragraph("Foo is X.\n\nNot deprecated."));
+    }
+
+    /// `no-unused-link` reads the `used` flag the doc-comment parser sets while
+    /// resolving `[text]` spans, so a definition referenced anywhere in the
+    /// comment counts as used.
+    #[test]
+    fn unused_links_are_the_ones_never_referenced() {
+        assert_eq!(
+            unused_links("Foo does a thing.\n\n[a]: https://example.com/a"),
+            vec!["a".to_string()]
+        );
+        assert!(unused_links("Foo, see [a].\n\n[a]: https://example.com/a").is_empty());
+        assert_eq!(
+            unused_links("Foo.\n\n[a]: https://example.com/a\n[b]: https://example.com/b"),
+            vec!["a".to_string(), "b".to_string()],
+            "reported in declaration order, one per definition"
+        );
+        // A reference anywhere in the comment counts, not just the paragraph
+        // holding the definition.
+        assert!(unused_links("See [a] below.\n\nMore prose.\n\n[a]: https://x").is_empty());
+        assert!(unused_links("Foo has no links at all.").is_empty());
     }
 
     /// Only a *paragraph* carries a deprecation marker. Every other block kind
