@@ -56,8 +56,11 @@ impl MetaFormatter {
         }
 
         if formatters.is_empty() {
-            // golangci: empty enable → go/format.Source; we use gofmt without -s.
-            formatters.push(Box::new(Gofmt::new(GofmtOptions::default())));
+            // golangci: empty enable → `go/format.Source`, which is plain
+            // gofmt. Explicitly `plain()`, not `default()`: the config default
+            // for the gofmt *formatter* is `simplify: true`, and upstream never
+            // routes this branch through the formatter at all.
+            formatters.push(Box::new(Gofmt::new(GofmtOptions::plain())));
         }
 
         Ok(Self { formatters })
@@ -71,7 +74,7 @@ impl MetaFormatter {
         // so a file fixed by `--fix` kept whatever indentation the replacement
         // text happened to carry.
         if self.formatters.is_empty() {
-            let gofmt = crate::Gofmt::new(crate::GofmtOptions::default());
+            let gofmt = crate::Gofmt::new(crate::GofmtOptions::plain());
             return match gofmt.format(filename, src) {
                 Ok(data) => Ok(data),
                 Err(e) => {

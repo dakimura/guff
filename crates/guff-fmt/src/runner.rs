@@ -156,6 +156,18 @@ impl Runner {
             io::stdin()
                 .read_to_end(&mut input)
                 .map_err(FormatError::Walk)?;
+            // `formatters.exclusions.generated` applies on stdin too. Upstream
+            // (`goformat.Runner.formatStdIn`) writes the input straight back on
+            // a match, with the comment "the input should be written to the
+            // stdout to avoid emptied the file" — a formatted generated file is
+            // still the wrong answer, and here it is the *only* answer the
+            // caller gets. Both file paths below already skip these; this one
+            // did not, so `guff fmt --stdin` reformatted files
+            // `guff fmt <dir>` correctly left alone.
+            if is_generated(&input, self.opts.generated) {
+                stdout.write_all(&input).map_err(FormatError::Walk)?;
+                return Ok(stats);
+            }
             let output = self.meta.format("<standard input>", &input)?;
             stdout.write_all(&output).map_err(FormatError::Walk)?;
             return Ok(stats);

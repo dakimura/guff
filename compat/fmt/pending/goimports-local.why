@@ -1,0 +1,41 @@
+guff's native goimports only separates import groups correctly when the input
+is *already* grouped. Given one block it has to regroup, it is wrong in both
+directions. Three inputs, same config, `fmt` + `os` (group 0) and
+`github.com/x/y` (group 1):
+
+  input order            golangci-lint / goimports   guff
+  fmt, os, github        fmt os / blank / github     no blank line at all
+  fmt, github, os        fmt os / blank / github     a blank after every import
+  fmt, os, blank, github fmt os / blank / github     correct
+
+So: when the specs are already in sort order and only the group blank is
+missing, guff changes nothing; when they also need reordering, it separates
+every spec — including `fmt` from `os`, which share a group. Only the input
+that already has the right blank line comes out right.
+
+Checked against the real `goimports -local example.com/mine` as well as
+`golangci-lint fmt`, so this is guff's defect, not a wrapper difference.
+
+Invisible to `regress/fmt_diff.py --formatter goimports`: every corpus on disk
+is already correctly grouped, which is the third row above — the regrouping
+path is never entered. Same shape as docs/COMPAT-HARDENING.md 続き 87, where a
+gofmt-clean corpus hid the go/doc/comment round trip.
+
+Row 1 is already localized. `crates/guff-fmt/src/native/goimports/mod.rs`
+short-circuits with
+
+    if fixes.is_empty()
+        && !import_runs_need_sort(&imps, &local)
+        && !needs_import_decl_merge(&file)
+
+and `import_runs_need_sort` only asks whether each run is out of *sort* order.
+Upstream goimports always runs `addImportSpaces`, so a run that is correctly
+sorted but missing a group separator still gets one — which this early exit
+skips. The missing third predicate is "a group boundary inside a run has no
+blank line in the source" (and its converse).
+
+Row 2 is in the rewrite path's run/blank logic and is not localized yet. One
+fact about that code, offered as a starting point and not as a diagnosis:
+`detect_runs` splits runs on `imps[j].pos_line > 1 + imps[j - 1].end_line`,
+which are *original source* line numbers, and it is called on a list `arrange`
+has already reordered. Whether that is the cause has not been checked.

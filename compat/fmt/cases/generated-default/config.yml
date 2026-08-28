@@ -1,0 +1,12 @@
+# `formatters.exclusions.generated` defaults to `lax`, so this input is skipped
+# and must come back byte-for-byte unchanged — deliberately un-gofmt'd, so a
+# tool that formats it cannot pass by accident.
+#
+# This is the `--stdin` route specifically. Upstream's `formatStdIn` writes the
+# input straight back on a match ("to avoid emptied the file"); a tool that
+# applies the exclusion when walking a directory but not on stdin gives two
+# different answers for the same bytes.
+version: "2"
+formatters:
+  enable:
+    - gofmt

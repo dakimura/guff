@@ -1,0 +1,10 @@
+# A marker `lax` recognizes and `strict` does not: `strict` requires a line
+# matching `^// Code generated .* DO NOT EDIT\.$` before the package clause,
+# while `lax` accepts looser wording anywhere in the leading comments.
+#
+# Under the default (`lax`) this file is skipped. See generated-strict for the
+# same bytes under `strict`, where it is formatted instead.
+version: "2"
+formatters:
+  enable:
+    - gofmt

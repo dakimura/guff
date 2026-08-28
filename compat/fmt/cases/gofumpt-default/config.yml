@@ -1,0 +1,5 @@
+# gofumpt with default settings (extra-rules off).
+version: "2"
+formatters:
+  enable:
+    - gofumpt

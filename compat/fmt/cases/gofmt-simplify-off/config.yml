@@ -1,0 +1,11 @@
+# The same fixture with simplify turned off explicitly.
+#
+# Paired with gofmt-default so the tier pins *both* branches: a tool that
+# ignored the setting entirely would pass one of them by accident.
+version: "2"
+formatters:
+  enable:
+    - gofmt
+  settings:
+    gofmt:
+      simplify: false

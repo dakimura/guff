@@ -15395,3 +15395,124 @@ golden 193/193、compat python 200、`compat/fix` 193 ケース。
 **`compat/fix` の pending は 0 になった。**
 台帳に残るのは `divergent/` の 4 件（すべて `# why:` と `# upstream-writes:`
 つき、うち 1 件は `# upstream-breaks-build:` で機械検証されている）。
+
+---
+
+### 2026-08-28（続き 88）— `fmt` にはそもそも tier が無かった。**初回実行で 4 件、うち 1 件は既定設定の無言の食い違い**
+
+続き 87 で「`guff fmt` を整形されていないコードに掛けるのはフォーマッタの存在理由そのもの」
+と書いた。その `fmt` を**上流の `fmt` と比べているものが 1 つも無かった**。
+
+#### 3 つの tier は全部 `run` を通る
+
+| tier | 訊いていること |
+|---|---|
+| `golden` | `run` が同じ finding を報告するか |
+| `fix` | `run --fix` が同じバイトを書くか |
+| `reject` | 同じ理由で config を拒むか |
+
+**どれも `golangci-lint fmt` を起動しない。** `regress/fmt_diff.py` も塞がない ——
+あれは guff を**下流のツール**（`gofmt` / `gofumpt` / `goimports` / `gci`）と比べるので、
+**golangci-lint の設定既定値も golangci-lint 層の除外も、原理的に見えない。**
+
+そして穴は狭くない: `formatters.settings.gofmt.simplify` の上流既定は **true** で、
+`enable: [gofmt]` と書いただけのユーザ全員に効く。
+
+#### `compat/fmt` を足したら、初回実行で 4 件出た
+
+両ツールを `fmt --stdin` で駆動する（どちらも対応している）。
+「同じ config ＋ 同じバイト → 同じバイト」だけを訊く形で、
+ディレクトリ走査もキャッシュも module も挟まらない。
+
+| ケース | 欠陥 |
+|---|---|
+| `gofmt-default` | **`simplify` の既定が false だった**（上流は true）。`[]int{[]int{1}}` をそのまま書いて **exit 0** —— 無言 |
+| `generated-default` | **`guff fmt --stdin` が generated 除外を適用していなかった**。`guff fmt <dir>` は正しく飛ばすので、**同じバイトに 2 つの答え**があった |
+| `gofmt-rewrite` | **`gofmt -r` は単数の string フラグ**。`-r A -r B` は B しか残らないのに N 個渡していた。上流の fork は AST に順番に当てるので全部効く |
+| `goimports-local` | 単一 import ブロックの**再グループ化が両方向に間違う** → `pending/`（下記） |
+
+#### 既定値を 1 つ書き換えると、`compat/fix` 193 ケースが書き換わるところだった
+
+`GofmtOptions` の `Default` は derive で、Rust の零値は `simplify: false`。
+上流の `defaultFormatterSettings` は `Simplify: true`。
+**が、共有の定数を 1 つ反転させると `--fix` が壊れる**:
+
+```go
+// golangci: MetaFormatter.Format
+if len(m.formatters) == 0 {
+    data, err := format.Source(src)   // 素の gofmt。gofmt フォーマッタは通らない
+```
+
+`formatters.enable` が空のとき上流は **`go/format.Source` を直接呼ぶ**ので、
+`simplify: true` の**設定既定はそこに届かない**。
+そして「formatter 未設定の `--fix`」は **`compat/fix` の 193 ケース全部**である。
+
+そこで `GofmtOptions::default()`（＝設定の既定、`-s` あり）と
+`GofmtOptions::plain()`（＝formatter 未設定時の素の gofmt）を**別の関数に分けた**。
+`no-formatters` ケースはその区別を固定するためだけに存在する ——
+共有定数を反転させる実装は、このケースで落ちる。
+実測でも `compat/fix` は **193 / pending 0 / divergent 4 のまま**動かなかった。
+
+#### 測定 —— `golangci-lint fmt --stdin` 対 `guff fmt --stdin`
+
+既定の `formatters: {enable: [gofmt]}` で GOROOT 5,608 ファイル:
+
+| | main (0e24254d) | 今回 |
+|---|---|---|
+| バイト一致 | 5,576 | **5,608** |
+| 乖離 | **32** | **0** |
+
+内訳は `gofmt -s` 由来が 30、generated 除外が 2。
+`compat/fmt` は 13 ケース中 **12 一致 / 1 pending**。
+
+#### `pending/` には `.why` を必須にした
+
+`compat/fix` の pending は生成物の diff なので `#` コメントが書けるが、
+`compat/fmt` の pending は**生の Go ソース**でコメントを足せない。
+そこで `pending/<case>.why` を**別ファイルで必須**にし、
+無ければ `run.sh` が落ちる。理由を誰も書かなくていい gap は、
+**そのまま allowlist になる**（続き 86 で `divergent/` に `# why:` を必須にしたのと同じ理由）。
+pending 中は毎回**上流との diff と `.why` の全文**を印字する。
+
+#### `goimports` の pending —— またしても「きれいなコーパスが隠していた」
+
+guff の native goimports は、**入力が既に正しくグループ分けされているときしか**
+グループ区切りを正しく置けない。1 ブロックを再グループ化させると両方向に外す:
+
+```
+入力                        golangci-lint / goimports   guff
+fmt, os, "github.com/…"     fmt+os / 空行 / github      空行を 1 つも置かない
+fmt, "github.com/…", os     fmt+os / 空行 / github      全 import の間に空行
+```
+
+本物の `goimports -local` とも突き合わせたので、
+これは golangci-lint の wrapper 差ではなく **guff の欠陥**。
+`regress/fmt_diff.py --formatter goimports` に見えないのは、
+**ディスク上のコーパスが全部すでに正しくグループ分けされているから**で、
+再グループ化の経路に一度も入らない —— **続き 87 とまったく同じ形**。
+
+#### 覆っていないもの
+
+`golines` と `swaggo` は native port が無く subprocess 専用なので、
+ケースを置くと**バイナリの無い環境で測定ではなく失敗になる**。
+port が入った日の最初のケースとして README に書いた。**黙った穴ではなく、書いた穴。**
+
+#### 測定（まとめ）
+
+| | main (0e24254d) | 今回 |
+|---|---|---|
+| `compat/fmt` | **tier が無い** | 13 ケース / 12 一致 / 1 pending |
+| GOROOT `fmt` 乖離（既定 config） | 32 / 5,608 | **0 / 5,608** |
+| `compat/fix` | 193 / pending 0 / divergent 4 | **同じ**（`plain()` が守った） |
+| `guff-fmt` テスト | 69 | **73** |
+
+golden 193/193、compat python 200、workspace 274 スイート / 3,298 → **3,302**。
+
+#### 副産物 —— 直したが、再現できなかったので直さなかったもの
+
+`gofmt -l` の prefilter（`guff run` の format check）も同じ単数フラグを N 個渡していた。
+**が、実際に `run` させると上流と一致した**ので「見つけた欠陥」としては書かない。
+`-l` はファイル名を印字するので `format` のような連鎖もできない。
+そこでルールが 2 つ以上あるときは **prefilter を辞退する**ようにした ——
+最適化を 1 つ失うだけで、呼び出し側は全ファイルを per-file 経路（全ルールを当てる）に通す。
+**再現できない欠陥に「修正」を書かない**代わりに、上流の事実から言える保証だけを足した。

@@ -144,6 +144,17 @@ jobs:
       - name: Fix gate (what --fix writes)
         run: ./compat/fix/run.sh
 
+      # What the two tools' *formatters* write. The three tiers above all go
+      # through `run`, so none of them ever invokes `golangci-lint fmt` — and
+      # `regress/fmt_diff.py` compares guff against the underlying gofmt /
+      # gofumpt / goimports binaries, which cannot see a golangci-lint settings
+      # default or exclusion at all. `formatters.settings.gofmt.simplify`
+      # defaults to *true* upstream, so that blind spot covered every user who
+      # merely enables gofmt. Runs guff only; expected/ holds upstream's answer
+      # (compat/fmt/README.md).
+      - name: Fmt gate (what the formatters write)
+        run: ./compat/fmt/run.sh
+
       # The other direction: configs golangci-lint validates and refuses to
       # start on. A finding-set tier cannot express "upstream exited before
       # linting", and a tool that runs such a config lints with an enable set

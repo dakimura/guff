@@ -1,0 +1,9 @@
+# goimports with a local prefix, so the third import group is exercised.
+version: "2"
+formatters:
+  enable:
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - example.com/mine
