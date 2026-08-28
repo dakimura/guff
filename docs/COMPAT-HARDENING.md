@@ -15685,3 +15685,85 @@ GOROOT も prometheus も**既に `-s` 済み**なので、5,608/5,608 が言う
 `-r`（rewrite rules）は subprocess のまま。上流 testdata の 27 本中 10 本がそれで、
 `gofmt -r` は**単数フラグ**なので続き 88 で 1 ルール 1 起動に直してある。
 native 化するなら `rewrite.go` の残り（ワイルドカード束縛と `subst`）が要る。
+
+---
+
+### 2026-08-28（続き 91）— `godoclint`。**据え置きの理由が、4 つ前の PR で消えていた**
+
+`crates/guff-comment/src/godoclint.rs` の `DEFERRED:` はこう書いていた ——
+「full `go/doc/comment` paragraph parsing（deprecated marker の検出は
+**空行区切りの段落で近似**している）」。
+
+**続き 87 でその parser を移植した。** 据え置きの理由は、そこで消えていた。
+
+#### 近似は誤検知を出していた
+
+```go
+// Foo does a thing.
+//
+//	deprecated: use Bar.
+func Foo() {}
+```
+
+**字下げされた行は `go/doc/comment` では Code block** であって Paragraph ではない。
+上流 `deprecated.checkDeprecations` は
+
+```go
+par, ok := block.(*comment.Paragraph)
+if !ok || len(par.Text) == 0 { continue }
+text, ok := (par.Text[0]).(comment.Plain)
+```
+
+で Paragraph 以外を捨てる。guff は `\n\n` で割って先頭行を `trim_start()` していたので、
+**字下げを剥がして段落として扱い、報告していた**。golangci-lint は報告しない。
+
+`Text[0]` が `Plain` であることも同様に落ちていた（リンクで始まる段落）。
+
+#### 8 つの形すべてで一致した
+
+| 形 | 上流 | guff（修正前 → 後） |
+|---|---|---|
+| 段落・綴り違い | 報告 | 報告 → 報告 |
+| 段落・正しい綴り | 黙る | 黙る → 黙る |
+| **字下げ＝Code block** | **黙る** | **報告** → 黙る |
+| 散文の後の Code block | 報告（後続段落） | 一致 |
+| 見出し | 黙る | 黙る → 黙る |
+| リスト項目 | 黙る | 黙る → 黙る |
+| 全大文字 | 報告 | 一致 |
+| **行頭だが段落頭でない** | **黙る**（上流が意図的に残した偽陰性） | 一致 |
+
+見出しとリストが修正前も「たまたま」合っていたのは、
+`^deprecated:` が `#` や `-` から始まる行に当たらないからで、
+**理由が違うのに答えが同じ**という形だった。
+
+#### golden は通っていた —— fixture にその形が無かった
+
+修正前の binary で golden 193/193 が緑だった。`godoclint` ケースの fixture に
+**字下げされた `deprecated:` が無かった**だけで、
+**「1 形しか通さない fixture」はこれで 5 回目**（続き 78 の 4 件に続く）。
+
+`ok.go` に 3 形（字下げ / 見出し / 行頭だが段落頭でない）を足して再録した。
+**期待値は 5 キーのまま変わらない** —— 3 つとも「報告してはいけない」形なので当然で、
+だからこそ**足さないと誰も測っていなかった**。
+
+修正前の binary で回すと golden は落ちる:
+
+```
+godoclint: guff=6 golden=5 match=5 missing=0 extra=1
+  +guff   ok/ok.go:15:1:godoclint::deprecation note should be formatted as "Deprecated: "
+```
+
+#### 踏んだ罠 —— issues cache
+
+直した直後に `guff run` を回したら**古い答えのまま**だった。
+issues cache の salt は version 文字列なので **dev ビルドを区別しない**。
+`--no-cache` で正しい答えが出た。自分のメモにあるとおりの形。
+
+#### 残り
+
+`DEFERRED:` から **paragraph parsing の行だけ消した**。
+残るのは `require-doc` / `require-pkg-doc` / `max-len` / `no-unused-link` /
+`require-stdlib-doclink`、per-rule `options.*`、`//godoclint:disable`。
+このうち `no-unused-link` と `require-stdlib-doclink` は
+**続き 87 で移植した `Doc.links` と `DocLink` をそのまま使える** ——
+理由が消えたかどうかは、着手前にもう一度読むこと。

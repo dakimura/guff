@@ -9,10 +9,13 @@
 //!
 //! Settings: `linters.settings.godoclint` (`default` / `enable` / `disable`).
 //!
+//! Block structure comes from [`guff::doc::comment`], the port of the parser
+//! upstream itself feeds every doc comment through, so "paragraph" here means
+//! what it means to godoc rather than "text between blank lines".
+//!
 //! DEFERRED: `require-doc` / `require-pkg-doc` / `max-len` / `no-unused-link` /
 //! `require-stdlib-doclink`; per-rule `options.*`; `//godoclint:disable`
-//! directives; full `go/doc/comment` paragraph parsing (deprecated marker
-//! detection uses blank-line paragraphs as an approximation).
+//! directives.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -44,16 +47,33 @@ fn doc_text(doc: &CommentGroup) -> Option<String> {
     }
 }
 
-/// Approximate `shared.HasDeprecatedParagraph`: any blank-line-separated
-/// paragraph whose first line starts with `Deprecated: `.
+/// `shared.HasDeprecatedParagraph`: a *paragraph* whose first text run is
+/// plain and starts with `Deprecated: `.
+///
+/// Both halves matter and neither survives a blank-line split. A `Deprecated:`
+/// line that is indented parses as a **code block**, not a paragraph, and a
+/// paragraph opening with a link or doc link has a first run that is not
+/// `Plain`. Upstream skips both.
 fn has_deprecated_paragraph(text: &str) -> bool {
-    for para in text.split("\n\n") {
-        let first = para.lines().next().unwrap_or("").trim_start();
-        if first.starts_with("Deprecated: ") {
-            return true;
-        }
-    }
-    false
+    first_plain_of_each_paragraph(text)
+        .any(|t| t.starts_with(CORRECT_DEPRECATION_MARKER))
+}
+
+/// The `Text[0]`-if-`Plain` of every `Paragraph` block, which is the only
+/// thing either deprecation check looks at.
+fn first_plain_of_each_paragraph(text: &str) -> impl Iterator<Item = String> {
+    use guff::doc::comment::{Block, Parser, Text};
+    Parser::default()
+        .parse(text)
+        .content
+        .into_iter()
+        .filter_map(|b| match b {
+            Block::Paragraph(p) => match p.text.into_iter().next() {
+                Some(Text::Plain(s)) => Some(s),
+                _ => None,
+            },
+            _ => None,
+        })
 }
 
 fn check_pkg_doc_prefix(text: &str, package_name: &str) -> Option<String> {
@@ -106,20 +126,17 @@ fn probable_deprecation_re() -> &'static Regex {
 
 const CORRECT_DEPRECATION_MARKER: &str = "Deprecated: ";
 
+/// `deprecated.checkDeprecations`.
+///
+/// The correct usage of a deprecation marker is at the beginning of a
+/// *paragraph* — not a heading, code block or list — with the exact spelling
+/// `Deprecated: `. Anything else the regexp matches is reported.
 fn check_deprecations(text: &str) -> bool {
-    for para in text.split("\n\n") {
-        let first = para.lines().next().unwrap_or("").trim_start();
-        if first.is_empty() {
-            continue;
-        }
-        if let Some(m) = probable_deprecation_re().find(first) {
-            let matched = m.as_str();
-            if matched != CORRECT_DEPRECATION_MARKER {
-                return true;
-            }
-        }
-    }
-    false
+    first_plain_of_each_paragraph(text).any(|t| {
+        probable_deprecation_re()
+            .find(&t)
+            .is_some_and(|m| m.as_str() != CORRECT_DEPRECATION_MARKER)
+    })
 }
 
 fn receiver_base_type_name(ty: &Expr) -> Option<&str> {
@@ -467,5 +484,52 @@ mod tests {
         assert!(!check_deprecations("Deprecated: do not use"));
         assert!(has_deprecated_paragraph("Foo is X.\n\nDeprecated: use Bar."));
         assert!(!has_deprecated_paragraph("Foo is X.\n\nNot deprecated."));
+    }
+
+    /// Only a *paragraph* carries a deprecation marker. Every other block kind
+    /// upstream's parser can produce is skipped, and a blank-line split cannot
+    /// tell them apart — an indented marker used to be reported here and is
+    /// not by `golangci-lint`.
+    ///
+    /// One case per block kind the parser emits, plus the false negative
+    /// upstream documents and deliberately keeps.
+    #[test]
+    fn only_paragraphs_carry_a_deprecation_marker() {
+        // Paragraph: both branches of the marker spelling.
+        assert!(check_deprecations("Foo does a thing.\n\ndeprecated: use Bar."));
+        assert!(!check_deprecations("Foo does a thing.\n\nDeprecated: use Bar."));
+
+        // Code block — indented, so not a paragraph.
+        assert!(!check_deprecations(
+            "Foo does a thing.\n\n\tdeprecated: use Bar."
+        ));
+        // Still a code block when it follows other prose and a blank line.
+        assert!(!check_deprecations(
+            "Foo does a thing:\n\n\tif x {\n\t}\n\n\tdeprecated: use Bar."
+        ));
+
+        // Heading.
+        assert!(!check_deprecations(
+            "Foo does a thing.\n\n# deprecated: nope\n\nmore text"
+        ));
+
+        // List item.
+        assert!(!check_deprecations(
+            "Foo does a thing.\n\n  - deprecated: nope"
+        ));
+
+        // Upstream's documented false negative: a marker that begins a *line*
+        // but not a paragraph is in the middle of the preceding one, and is
+        // left alone rather than risk flagging prose that merely ends in the
+        // word "deprecated:".
+        assert!(!check_deprecations(
+            "Foo is a symbol.\ndeprecated: use Bar."
+        ));
+
+        // `has_deprecated_paragraph` reads the same block structure.
+        assert!(!has_deprecated_paragraph(
+            "Foo is X.\n\n\tDeprecated: use Bar."
+        ));
+        assert!(has_deprecated_paragraph("Foo is X.\n\nDeprecated: use Bar."));
     }
 }
