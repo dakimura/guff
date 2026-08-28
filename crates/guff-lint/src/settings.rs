@@ -933,7 +933,6 @@ pub struct DupwordSettings {
 /// `linters.settings.godoclint` / `linters-settings.godoclint`.
 ///
 /// `default` is `basic` | `all` | `none` (golangci default: `basic`).
-/// Per-rule `options` are DEFERRED.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct GodoclintSettings {
     #[serde(default, rename = "default")]
@@ -942,6 +941,51 @@ pub struct GodoclintSettings {
     pub enable: Vec<String>,
     #[serde(default, deserialize_with = "string_or_seq")]
     pub disable: Vec<String>,
+    #[serde(default)]
+    pub options: GodoclintRuleOptions,
+}
+
+/// `godoclint.options` — the three sub-tables golangci-lint forwards.
+///
+/// Every field is an `Option` because upstream's merge is `transferIfNotNil`
+/// against godoc-lint's own `default.yaml`: an absent key is not "false", it is
+/// "keep the upstream default", and for `require-doc.ignore-unexported` that
+/// default is `true`.
+///
+/// The `*/include-tests` options are absent on purpose — golangci-lint
+/// overwrites them with fixed values after reading the user's config, so
+/// accepting them here would let a config appear to take effect when it cannot.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct GodoclintRuleOptions {
+    #[serde(default, rename = "max-len")]
+    pub max_len: GodoclintMaxLenOptions,
+    #[serde(default, rename = "require-doc")]
+    pub require_doc: GodoclintRequireDocOptions,
+    #[serde(default, rename = "start-with-name")]
+    pub start_with_name: GodoclintStartWithNameOptions,
+}
+
+/// `godoclint.options.max-len`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct GodoclintMaxLenOptions {
+    #[serde(default)]
+    pub length: Option<u32>,
+}
+
+/// `godoclint.options.require-doc`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct GodoclintRequireDocOptions {
+    #[serde(default, rename = "ignore-exported")]
+    pub ignore_exported: Option<bool>,
+    #[serde(default, rename = "ignore-unexported")]
+    pub ignore_unexported: Option<bool>,
+}
+
+/// `godoclint.options.start-with-name`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct GodoclintStartWithNameOptions {
+    #[serde(default, rename = "include-unexported")]
+    pub include_unexported: Option<bool>,
 }
 
 /// `linters.settings.modernize` / `linters-settings.modernize`.
@@ -3551,6 +3595,26 @@ impl GodoclintSettings {
                 .unwrap_or(defaults.default),
             enable: self.enable.clone(),
             disable: self.disable.clone(),
+            max_len_length: self
+                .options
+                .max_len
+                .length
+                .unwrap_or(defaults.max_len_length),
+            require_doc_ignore_exported: self
+                .options
+                .require_doc
+                .ignore_exported
+                .unwrap_or(defaults.require_doc_ignore_exported),
+            require_doc_ignore_unexported: self
+                .options
+                .require_doc
+                .ignore_unexported
+                .unwrap_or(defaults.require_doc_ignore_unexported),
+            start_with_name_include_unexported: self
+                .options
+                .start_with_name
+                .include_unexported
+                .unwrap_or(defaults.start_with_name_include_unexported),
         }
     }
 }

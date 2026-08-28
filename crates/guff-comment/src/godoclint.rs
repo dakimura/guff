@@ -9,7 +9,10 @@
 //! Comments are re-parsed with [`PARSE_COMMENTS`] because production package
 //! load uses `Mode::NONE`, which drops lead comments after the package clause.
 //!
-//! Settings: `linters.settings.godoclint` (`default` / `enable` / `disable`).
+//! Settings: `linters.settings.godoclint` (`default` / `enable` / `disable` /
+//! `options`). The `*/include-tests` half of upstream's options is *not*
+//! configuration: golangci-lint overwrites each one after reading the user's
+//! config, so they are the [`INCLUDE_TESTS`] constants below.
 //!
 //! Block structure comes from [`guff::doc::comment`], the port of the parser
 //! upstream itself feeds every doc comment through, so "paragraph" here means
@@ -18,14 +21,15 @@
 //! DEFERRED, with the reason each is still deferred:
 //!
 //! - `require-doc` — needs a symbol model this file does not build:
-//!   `TrailingDoc` (`const X = 1 // doc`) and a `ParentDoc` fallback, plus the
-//!   `ignore-exported` / `ignore-unexported` options.
-//! - `max-len` — needs `options.max-len.*`, and golangci-lint overrides two of
-//!   them (`include-tests: true`, `ignore-patterns: ["^\+kubebuilder:"]`).
+//!   `TrailingDoc` (`const X = 1 // doc`) and a symbol list that keeps the
+//!   symbols with *no* doc, which [`collect_symbol_docs`] drops.
+//! - `max-len` — needs `go/doc/comment`'s printer and the pinned
+//!   `ignore-patterns: ["^\+kubebuilder:"]`. `options.max-len.length` is
+//!   already parsed.
 //! - `require-stdlib-doclink` — needs upstream's generated index of standard
 //!   library symbols (`stdlib_doclink/stdlib.json`).
 //!
-//! Also deferred: per-rule `options.*` and `//godoclint:disable` directives.
+//! Also deferred: `//godoclint:disable` directives.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -46,6 +50,26 @@ fn is_exported(name: &str) -> bool {
 
 fn is_test_path(path: &Path) -> bool {
     path.to_string_lossy().ends_with("_test.go")
+}
+
+/// The `*/include-tests` values golangci-lint pins in its `PlainConfig`
+/// literal, overwriting whatever the user wrote.
+///
+/// They are not uniform, and the two neighbouring rules that disagree are the
+/// trap: `require-pkg-doc` is `false` while `require-doc` is `true`, so a
+/// `_test.go` file can be reported by one and invisible to the other. Read the
+/// row before reusing an adjacent rule's guard.
+/// One constant per implemented rule; the rest arrive with their rule
+/// (`max-len: true`, `require-doc: true`, `require-stdlib-doclink: true`).
+mod include_tests {
+    pub const PKG_DOC: bool = false;
+    pub const SINGLE_PKG_DOC: bool = true;
+    pub const REQUIRE_PKG_DOC: bool = false;
+    pub const START_WITH_NAME: bool = false;
+    pub const NO_UNUSED_LINK: bool = true;
+    /// `deprecated` takes no option: upstream hard-codes `false` at the call
+    /// site (`AnalysisApplicableFiles(actx, false, …)`).
+    pub const DEPRECATED: bool = false;
 }
 
 fn doc_text(doc: &CommentGroup) -> Option<String> {
@@ -288,6 +312,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let check_deprecated = rules.contains("deprecated");
     let check_unused_link = rules.contains("no-unused-link");
     let check_require_pkg_doc = rules.contains("require-pkg-doc");
+    let start_with_name_include_unexported = options.start_with_name_include_unexported;
 
     if !check_pkg_doc
         && !check_single
@@ -324,7 +349,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let Some(path) = paths.get(i) else {
             continue;
         };
-        let skip_tests = is_test_path(path);
+        let is_test = is_test_path(path);
         let Some((re_fset, parsed)) = reparse_with_comments(path, pass.pkg().source_bytes(i))
         else {
             continue;
@@ -335,7 +360,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         //
         // golangci-lint pins `RequirePkgDocIncludeTests: false`, so `_test.go`
         // files neither satisfy the requirement nor get reported.
-        if check_require_pkg_doc && !skip_tests {
+        if check_require_pkg_doc && !(is_test && !include_tests::REQUIRE_PKG_DOC) {
             if let Some(name_pos) = reparsed_pos(&fset, file.pos(), &re_fset, parsed.name.pos()) {
                 let has_doc = parsed.doc.as_ref().and_then(doc_text).is_some();
                 let e = pkg_any_doc
@@ -348,39 +373,45 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
 
         // --- package docs ---
-        if !skip_tests {
-            if let Some(pkg_doc) = &parsed.doc {
-                if let Some(text) = doc_text(pkg_doc) {
-                    if let Some(pos) = reparsed_pos(&fset, file.pos(), &re_fset, pkg_doc.pos()) {
-                        if check_single {
-                            pkg_docs
-                                .entry(pkg_name.to_string())
-                                .or_default()
-                                .push((pos, true));
-                        }
-                        if check_pkg_doc
-                            && pkg_name != "main"
-                            && pkg_name != "main_test"
-                            && !has_deprecated_paragraph(&text)
-                        {
-                            if let Some(expected) = check_pkg_doc_prefix(&text, pkg_name) {
-                                pending.push((
-                                    pos,
-                                    format!("package godoc should start with \"{expected} \""),
-                                ));
-                            }
-                        }
-                        if check_deprecated && check_deprecations(&text) {
+        //
+        // The three rules reading this comment group do *not* share a
+        // test-file guard: `single-pkg-doc` is pinned `include-tests: true`
+        // while `pkg-doc` and `deprecated` are `false`. A `_test.go` file's
+        // package doc therefore counts toward "more than one godoc" and is
+        // simultaneously invisible to the prefix and deprecation checks.
+        if let Some(pkg_doc) = &parsed.doc {
+            if let Some(text) = doc_text(pkg_doc) {
+                if let Some(pos) = reparsed_pos(&fset, file.pos(), &re_fset, pkg_doc.pos()) {
+                    if check_single && !(is_test && !include_tests::SINGLE_PKG_DOC) {
+                        pkg_docs
+                            .entry(pkg_name.to_string())
+                            .or_default()
+                            .push((pos, true));
+                    }
+                    if check_pkg_doc
+                        && !(is_test && !include_tests::PKG_DOC)
+                        && pkg_name != "main"
+                        && pkg_name != "main_test"
+                        && !has_deprecated_paragraph(&text)
+                    {
+                        if let Some(expected) = check_pkg_doc_prefix(&text, pkg_name) {
                             pending.push((
                                 pos,
-                                format!(
-                                    "deprecation note should be formatted as \"{CORRECT_DEPRECATION_MARKER}\""
-                                ),
+                                format!("package godoc should start with \"{expected} \""),
                             ));
                         }
                     }
-                } else if check_single {
-                    // empty package doc — not counted for single-pkg-doc
+                    if check_deprecated
+                        && !(is_test && !include_tests::DEPRECATED)
+                        && check_deprecations(&text)
+                    {
+                        pending.push((
+                            pos,
+                            format!(
+                                "deprecation note should be formatted as \"{CORRECT_DEPRECATION_MARKER}\""
+                            ),
+                        ));
+                    }
                 }
             }
         }
@@ -394,13 +425,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         // its own, which is the common `const (…)` shape. `collect_symbol_docs`
         // yields nothing for that case, so the decl docs are gathered here
         // rather than through it.
-        if check_unused_link {
+        if check_unused_link && !(is_test && !include_tests::NO_UNUSED_LINK) {
             let mut docs: Vec<&CommentGroup> = Vec::new();
-            // The package doc belongs here rather than in the `!skip_tests`
-            // block above: golangci-lint pins `NoUnusedLinkIncludeTests: true`,
-            // so a `_test.go` file's package doc is in upstream's set while
-            // `pkg-doc` and `start-with-name` (pinned `false`) skip the file
-            // entirely. Sharing that block's guard silently dropped it.
+            // Pinned `NoUnusedLinkIncludeTests: true`, so a `_test.go` file's
+            // package doc is in upstream's set while `pkg-doc` and
+            // `start-with-name` (pinned `false`) skip the file entirely.
             if let Some(d) = &parsed.doc {
                 docs.push(d);
             }
@@ -457,7 +486,18 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 }
             }
 
-            if check_start && !skip_tests && exported && sym.name != "_" && !sym.multi_name {
+            // `start-with-name` reaches unexported symbols when
+            // `options.start-with-name.include-unexported` is set; upstream's
+            // guard is `!isExported && !includePrivate → skip`, not
+            // `isExported → check`. Reading it as the latter silently dropped
+            // every diagnostic the option exists to produce — and the rule is
+            // in the *basic* default set, so this was not opt-in territory.
+            if check_start
+                && !(is_test && !include_tests::START_WITH_NAME)
+                && (exported || start_with_name_include_unexported)
+                && sym.name != "_"
+                && !sym.multi_name
+            {
                 if !has_deprecated_paragraph(&text) && !match_symbol_name(&text, sym.name) {
                     pending.push((
                         pos,
@@ -466,7 +506,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 }
             }
 
-            if check_deprecated && exported {
+            if check_deprecated && !(is_test && !include_tests::DEPRECATED) && exported {
                 // Upstream also checks parent docs for grouped decls.
                 let bad = check_deprecations(&text)
                     || sym
@@ -551,6 +591,7 @@ mod tests {
             default: "all".into(),
             enable: Vec::new(),
             disable: Vec::new(),
+            ..Default::default()
         };
         let rules = opts.effective_rules();
         assert!(rules.contains("pkg-doc"));
@@ -565,6 +606,7 @@ mod tests {
             default: "none".into(),
             enable: vec!["pkg-doc".into(), "deprecated".into()],
             disable: Vec::new(),
+            ..Default::default()
         };
         let rules = opts.effective_rules();
         assert_eq!(
@@ -579,10 +621,25 @@ mod tests {
             default: "basic".into(),
             enable: Vec::new(),
             disable: vec!["deprecated".into()],
+            ..Default::default()
         };
         let rules = opts.effective_rules();
         assert!(!rules.contains("deprecated"));
         assert!(rules.contains("pkg-doc"));
+    }
+
+    /// godoc-lint's `config/default.yaml` is the floor golangci-lint's plain
+    /// config is layered over, so an option the user did not write keeps the
+    /// upstream value — not the Rust zero value. `ignore-unexported` is the
+    /// entry where those two differ, and reading it as `false` would turn
+    /// `require-doc` into a check on every unexported symbol in the tree.
+    #[test]
+    fn option_defaults_come_from_upstream_default_yaml() {
+        let o = GodoclintOptions::default();
+        assert_eq!(o.max_len_length, 77);
+        assert!(!o.require_doc_ignore_exported);
+        assert!(o.require_doc_ignore_unexported);
+        assert!(!o.start_with_name_include_unexported);
     }
 
     #[test]

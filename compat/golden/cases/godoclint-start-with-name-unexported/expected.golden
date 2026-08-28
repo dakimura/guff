@@ -1,0 +1,14 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh godoclint-start-with-name-unexported
+# Produced by running golangci-lint on compat/golden/cases/godoclint-start-with-name-unexported/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+unexported/a.go:9:1:godoclint::godoc should start with symbol name ("AlsoExported")
+unexported/a.go:15:1:godoclint::godoc should start with symbol name ("other")
+unexported/a.go:21:1:godoclint::godoc should start with symbol name ("alsoHidden")
+unexported/a.go:24:1:godoclint::godoc should start with symbol name ("value")
+unexported/a.go:27:1:godoclint::godoc should start with symbol name ("mutable")
+unexported/a.go:30:1:godoclint::godoc should start with symbol name ("Method")

@@ -1,0 +1,34 @@
+# Golden case: godoclint's `start-with-name` with
+# `options.start-with-name.include-unexported: true`.
+#
+# guff had no `options` block at all, so every per-rule option was silently the
+# upstream default. `start-with-name` is in the *basic* default set, which
+# makes this the one place a missing option degraded a rule nobody opted into:
+# the check read upstream's `!isExported && !includePrivate → skip` as
+# `isExported → check`, and answered this config with silence.
+#
+# The fixture pins both halves of the export axis plus the three exemptions
+# that survive the option (blank identifier, multi-name decl, and the
+# `_test.go` file that `include-tests: false` keeps out).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - godoclint
+  settings:
+    godoclint:
+      default: none
+      enable:
+        - start-with-name
+      options:
+        start-with-name:
+          include-unexported: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

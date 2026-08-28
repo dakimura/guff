@@ -292,6 +292,7 @@ fn godoclint_respects_enable_disable_settings() {
             default: "none".into(),
             enable: vec!["pkg-doc".into()],
             disable: Vec::new(),
+            ..Default::default()
         },
     );
     let messages = support::run_analyzer_with_settings(
