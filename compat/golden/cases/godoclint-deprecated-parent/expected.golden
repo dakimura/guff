@@ -1,0 +1,12 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh godoclint-deprecated-parent
+# Produced by running golangci-lint on compat/golden/cases/godoclint-deprecated-parent/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+deprecated/a.go:6:1:godoclint::deprecation note should be formatted as "Deprecated: "
+deprecated/a.go:13:1:godoclint::deprecation note should be formatted as "Deprecated: "
+deprecated/a.go:27:1:godoclint::deprecation note should be formatted as "Deprecated: "
+deprecated/a.go:31:1:godoclint::deprecation note should be formatted as "Deprecated: "

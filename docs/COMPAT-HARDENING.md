@@ -16035,3 +16035,79 @@ blank identifier、multi-name decl、そして `include-tests: false` が
 - `require-stdlib-doclink` — 上流の生成物 `stdlib.json`（221KB）。
   **再生成せず vendor する** —— Go のバージョンが違えば symbol 集合が変わり、
   同じ config で違う答えを返す。
+
+### 2026-08-28（続き 95）— 上流の symbol model を丸ごと移した。**`deprecated` が 3 つ外していた**
+
+続き 94 の据え置き欄に「`require-doc` は **doc の無い symbol も返す** symbol model が要る。
+今の `collect_symbol_docs` は 3 か所の `continue` で**まさにその symbol を捨てている**」と書いた。
+移す前に、**同じ collector を使っている既存の規則を測った** —— `deprecated` が 3 つ外していた。
+
+#### `collect_symbol_docs` は「doc を持つ symbol」の一覧だった
+
+上流 `inspect.Inspector` が返すのは**全 symbol**（`Doc` が nil のものを含む）。
+規則側が `if sd.Doc == nil { continue }` を書く。**そして書く位置が規則ごとに違う**:
+
+```go
+for _, sd := range ir.SymbolDecl {
+    if !ast.IsExported(sd.Name) { continue }
+    if sd.ParentDoc != nil { docs[sd.ParentDoc] = struct{}{} }   // ← Doc の判定より前
+    if sd.Doc == nil { continue }
+    docs[sd.Doc] = struct{}{}
+}
+```
+
+`ParentDoc` の収集は **`Doc == nil` の continue より前**にある。
+続き 92 で `no-unused-link` に同じ形で偽陰性を 2 件出しているのに、
+**すぐ隣の `deprecated` は直していなかった**。
+
+#### `Lparen` を見ないと 2 つの形が区別できない
+
+上流 inspector の分岐は `GenDecl.Lparen`:
+
+| ソース | `Doc` | `ParentDoc` |
+|---|---|---|
+| `// d` ＋ `const a = 1` | **`GenDecl.Doc`** | nil |
+| `// d` ＋ `const ( a = 1 )` | `spec.Doc` | **`GenDecl.Doc`** |
+
+**guff の parser は go/parser と違う**: 単行 `GenDecl` の lead comment を
+**spec 側にも複製する**（`go/parser` は `f(nil, …)` を渡す）。
+なので `spec.doc` だけを読むと**上の 2 行が同じに見える**。
+`lparen` で分けると parser の癖が答えに出ない —— unit test で 4 形を固定した。
+
+#### `deprecated` の欠陥 3 件
+
+| # | 形 | 修正前 |
+|---|---|---|
+| ① | `// deprecated:` ＋ `const (…)`（spec に doc 無し） | **沈黙** |
+| ② | 同上・spec に doc 有り | **子 doc の位置**に報告（上流は親の行） |
+| ③ | unexported receiver 上の exported method | **沈黙** |
+
+③ は「隣の規則の条件を継承しない」の 3 度目。
+`deprecated` は **`ast.IsExported(sd.Name)` だけ**を見る ——
+`require-doc` と `start-with-name` が receiver の base 型を畳み込むのとは**逆**。
+1 つの `exported` ローカルをループで共有していたのが原因なので、
+`exported_for_godoc()` という**名前のあるメソッド**にして
+「どの規則がこれを使うか」を doc コメントに書いた。
+
+②は**偽陰性ではなく偽陽性**（行が違う）。修正前の binary は
+`guff=2 golden=4 match=1 missing=3 extra=1` —— 3 形すべてが 1 本の fixture に出る。
+
+#### 上流と同じ「集合」の形に直した
+
+`deprecated` も `no-unused-link` と同じく **comment group の集合**にして、
+group の**自分の位置**に 1 回だけ報告する。symbol の doc を経由する形だと
+②が構造的に避けられない。
+
+#### golden ケース
+
+`godoclint-deprecated-parent`（4 キー）。`default: none` + `enable: [deprecated]`。
+6 行目（親 doc・spec 全部 doc 無し）、13 行目（親 doc・spec に doc 有り = **位置**）、
+27 行目（unexported receiver の method）、31 行目（既に動いていた形）。
+19 行目の unexported group と 34 行目の unexported func が**報告されないこと**も
+同じ 4 キーが固定する。
+
+#### 残り
+
+`require-doc` は**規則本体だけ**になった（model は揃った）。
+`max-len` は `go/doc/comment` の `Printer`（続き 87）と pin された
+`ignore-patterns`。`require-stdlib-doclink` は上流の `stdlib.json` を vendor する。
