@@ -1,0 +1,16 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh godoclint-require-doc-unexported
+# Produced by running golangci-lint on compat/golden/cases/godoclint-require-doc-unexported/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+requiredoc/missing.go:33:16:godoclint::symbol should have a godoc ("tFooBarNG")
+requiredoc/missing.go:35:7:godoclint::symbol should have a godoc ("singleSingleFooNG")
+requiredoc/missing.go:38:2:godoclint::symbol should have a godoc ("multiSingleFooNG")
+requiredoc/missing.go:41:6:godoclint::symbol should have a godoc ("singleTFooNG")
+requiredoc/missing.go:43:6:godoclint::symbol should have a godoc ("funcFooNG")
+requiredoc/missing.go:45:6:godoclint::symbol should have a godoc ("tFooNG")
+requiredoc/missing.go:47:16:godoclint::symbol should have a godoc ("TFooBarNG")
+requiredoc/missing_test.go:10:7:godoclint::symbol should have a godoc ("fooTest")

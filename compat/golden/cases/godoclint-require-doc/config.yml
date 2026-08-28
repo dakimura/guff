@@ -1,0 +1,34 @@
+# Golden case: godoclint's `require-doc` with the option defaults.
+#
+# Those defaults are not the Rust zero values: godoc-lint's own default.yaml
+# says `ignore-exported: false` and `ignore-unexported: **true**`, so the rule
+# out of the box demands a godoc on exported symbols only. This case is the
+# exported half; the `-unexported` sibling inverts both options and is the
+# other half.
+#
+# `include-tests` is pinned **true** here — the opposite of `require-pkg-doc`,
+# in the same linter — so `missing_test.go` is reported.
+#
+# The trailing `//foo:bar` in the fixture is a *directive*, which
+# `ast.CommentGroup.Text()` drops: the trailing group exists but its text is
+# empty, so the symbol is still undocumented. Without it, an ordinary trailing
+# comment would satisfy the rule and the file would measure nothing.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - godoclint
+  settings:
+    godoclint:
+      default: none
+      enable:
+        - require-doc
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

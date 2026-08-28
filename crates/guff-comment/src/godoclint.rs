@@ -2,8 +2,8 @@
 //! (golangci-lint wrapper in `pkg/golinters/godoclint`).
 //!
 //! Implements the **basic** default rule set — `pkg-doc`, `single-pkg-doc`,
-//! `start-with-name`, `deprecated` — plus `no-unused-link` and
-//! `require-pkg-doc`, which are not in it but which `default: all` and an
+//! `start-with-name`, `deprecated` — plus `no-unused-link`, `require-pkg-doc`
+//! and `require-doc`, which are not in it but which `default: all` and an
 //! explicit `enable:` both reach.
 //!
 //! Comments are re-parsed with [`PARSE_COMMENTS`] because production package
@@ -20,9 +20,6 @@
 //!
 //! DEFERRED, with the reason each is still deferred:
 //!
-//! - `require-doc` — the symbol model is here now ([`collect_symbol_decls`],
-//!   `TrailingDoc` included); what is left is the rule itself and its
-//!   `ignore-exported` / `ignore-unexported` branch.
 //! - `max-len` — needs `go/doc/comment`'s printer and the pinned
 //!   `ignore-patterns: ["^\+kubebuilder:"]`. `options.max-len.length` is
 //!   already parsed.
@@ -60,11 +57,12 @@ fn is_test_path(path: &Path) -> bool {
 /// `_test.go` file can be reported by one and invisible to the other. Read the
 /// row before reusing an adjacent rule's guard.
 /// One constant per implemented rule; the rest arrive with their rule
-/// (`max-len: true`, `require-doc: true`, `require-stdlib-doclink: true`).
+/// (`max-len: true`, `require-stdlib-doclink: true`).
 mod include_tests {
     pub const PKG_DOC: bool = false;
     pub const SINGLE_PKG_DOC: bool = true;
     pub const REQUIRE_PKG_DOC: bool = false;
+    pub const REQUIRE_DOC: bool = true;
     pub const START_WITH_NAME: bool = false;
     pub const NO_UNUSED_LINK: bool = true;
     /// `deprecated` takes no option: upstream hard-codes `false` at the call
@@ -219,12 +217,20 @@ fn receiver_base_type_name(ty: &Expr) -> Option<&str> {
 /// exactly the set `deprecated`'s parent-doc branch — and, when it lands,
 /// `require-doc` — is made of.
 ///
-/// Upstream's `Kind` / `Ident` / `TrailingDoc` / `MultiSpecDecl` /
-/// `MultiSpecIndex` / `MultiNameIndex` / `IsTypeAlias` are omitted: no
-/// implemented rule reads them.
+/// Upstream's `MultiSpecDecl` / `MultiSpecIndex` / `MultiNameIndex` /
+/// `IsTypeAlias` are omitted: no implemented rule reads them.
 struct SymbolDecl<'a> {
+    kind: SymbolKind,
     name: &'a str,
+    /// The *identifier*, which is where `require-doc` reports. Every other
+    /// rule reports at a doc comment, so this is the one rule that has an
+    /// answer for a symbol with no comment anywhere near it.
+    ident: &'a guff::ast::Ident,
     doc: Option<&'a CommentGroup>,
+    /// `const X = 1 // doc`, from `spec.Comment`. Only `require-doc` reads it,
+    /// and only for const/var/type — a trailing comment on a `func` is not in
+    /// upstream's model at all.
+    trailing_doc: Option<&'a CommentGroup>,
     /// The enclosing `GenDecl`'s doc, and **only** for a parenthesized group:
     /// upstream treats the comment above a single-line `const`/`var`/`type` as
     /// the symbol's own `Doc` and leaves `ParentDoc` nil.
@@ -248,6 +254,17 @@ impl SymbolDecl<'_> {
         }
         exported
     }
+}
+
+/// `model.SymbolDeclKind`, collapsed.
+///
+/// Upstream keeps `Const` / `Var` / `Type` apart but no rule distinguishes
+/// them: `require-doc` branches only on `Func` vs everything else, because a
+/// `func` has neither a trailing comment nor a parent doc to fall back on.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SymbolKind {
+    Func,
+    Value,
 }
 
 /// Port of `inspect.Inspector`'s top-level symbol walk.
@@ -275,8 +292,11 @@ fn collect_symbol_decls(file: &guff::ast::File) -> Vec<SymbolDecl<'_>> {
                     (false, None)
                 };
                 out.push(SymbolDecl {
+                    kind: SymbolKind::Func,
                     name: fd.name.name.as_str(),
+                    ident: &fd.name,
                     doc: fd.doc.as_ref(),
+                    trailing_doc: None,
                     parent_doc: None,
                     multi_name: false,
                     is_method,
@@ -303,8 +323,11 @@ fn collect_symbol_decls(file: &guff::ast::File) -> Vec<SymbolDecl<'_>> {
                                 gen.doc.as_ref()
                             };
                             out.push(SymbolDecl {
+                                kind: SymbolKind::Value,
                                 name: ts.name.name.as_str(),
+                                ident: &ts.name,
                                 doc,
+                                trailing_doc: ts.comment.as_ref(),
                                 parent_doc,
                                 multi_name: false,
                                 is_method: false,
@@ -320,8 +343,11 @@ fn collect_symbol_decls(file: &guff::ast::File) -> Vec<SymbolDecl<'_>> {
                             let multi_name = vs.names.len() > 1;
                             for name in &vs.names {
                                 out.push(SymbolDecl {
+                                    kind: SymbolKind::Value,
                                     name: name.name.as_str(),
+                                    ident: name,
                                     doc,
+                                    trailing_doc: vs.comment.as_ref(),
                                     parent_doc,
                                     multi_name,
                                     is_method: false,
@@ -359,6 +385,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let check_unused_link = rules.contains("no-unused-link");
     let check_require_pkg_doc = rules.contains("require-pkg-doc");
     let start_with_name_include_unexported = options.start_with_name_include_unexported;
+    // Upstream returns before touching a single file when both halves are
+    // ignored, so a config that says "require nothing" is not a rule that
+    // reports nothing — it is a rule that never runs.
+    let require_public = !options.require_doc_ignore_exported;
+    let require_private = !options.require_doc_ignore_unexported;
+    let check_require_doc =
+        rules.contains("require-doc") && (require_public || require_private);
 
     if !check_pkg_doc
         && !check_single
@@ -366,6 +399,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         && !check_deprecated
         && !check_unused_link
         && !check_require_pkg_doc
+        && !check_require_doc
     {
         return Ok(None);
     }
@@ -578,6 +612,44 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 ));
             }
         }
+
+        // --- require-doc ---
+        //
+        // Pinned `include-tests: true`, the opposite of `require-pkg-doc`'s
+        // `false`. The two rules read the same tree and disagree about which
+        // files are in it.
+        //
+        // The const/var/type branch accepts a godoc from any of three places,
+        // in upstream's order: the symbol's own doc, a trailing comment on the
+        // spec, then the enclosing group's doc. A `func` has only the first —
+        // upstream's model gives it no `TrailingDoc` and no `ParentDoc`.
+        if check_require_doc && !(is_test && !include_tests::REQUIRE_DOC) {
+            for sym in &symbols {
+                let exported = sym.exported_for_godoc();
+                if (exported && !require_public) || (!exported && !require_private) {
+                    continue;
+                }
+                // `var _ = 0` names nothing to document.
+                if sym.name == "_" {
+                    continue;
+                }
+                let documented = match sym.kind {
+                    SymbolKind::Func => sym.doc.and_then(doc_text).is_some(),
+                    SymbolKind::Value => {
+                        sym.doc.and_then(doc_text).is_some()
+                            || sym.trailing_doc.and_then(doc_text).is_some()
+                            || sym.parent_doc.and_then(doc_text).is_some()
+                    }
+                };
+                if documented {
+                    continue;
+                }
+                let Some(pos) = reparsed_pos(&fset, file.pos(), &re_fset, sym.ident.pos()) else {
+                    continue;
+                };
+                pending.push((pos, format!("symbol should have a godoc (\"{}\")", sym.name)));
+            }
+        }
     }
 
     if check_single {
@@ -786,6 +858,42 @@ mod tests {
             !m.exported_for_godoc(),
             "require-doc / start-with-name fold in the unexported receiver"
         );
+    }
+
+    /// `require-doc`'s const/var/type branch accepts a godoc from three
+    /// places. The trailing one is the reason `spec.Comment` is in the model
+    /// at all, and it has a hole a fixture will not show: a *directive*
+    /// trailing comment (`//go:generate`, `//foo:bar`) is dropped by
+    /// `CommentGroup::text()`, so the group exists and documents nothing.
+    #[test]
+    fn trailing_directive_comment_documents_nothing() {
+        let (_fset, file) = parse("package p\n\nconst A = 0 // godoc\n");
+        let d = &collect_symbol_decls(&file)[0];
+        assert!(d.trailing_doc.and_then(doc_text).is_some());
+
+        let (_fset, file) = parse("package p\n\nconst A = 0 //foo:bar\n");
+        let d = &collect_symbol_decls(&file)[0];
+        assert!(
+            d.trailing_doc.is_some(),
+            "the group is there — go/parser attaches it"
+        );
+        assert!(
+            d.trailing_doc.and_then(doc_text).is_none(),
+            "but Text() drops directives, so the symbol is undocumented"
+        );
+    }
+
+    /// A `func` has no trailing comment and no parent doc in upstream's model,
+    /// so the three-way fallback must not apply to it.
+    #[test]
+    fn funcs_have_only_their_own_doc() {
+        let (_fset, file) = parse("package p\n\nfunc F() {} // not a godoc\n");
+        let d = &collect_symbol_decls(&file)[0];
+        assert_eq!(d.name, "F");
+        assert!(d.kind == SymbolKind::Func);
+        assert!(d.doc.is_none());
+        assert!(d.trailing_doc.is_none());
+        assert!(d.parent_doc.is_none());
     }
 
     #[test]

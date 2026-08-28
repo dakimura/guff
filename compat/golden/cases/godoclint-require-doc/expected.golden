@@ -1,0 +1,21 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh godoclint-require-doc
+# Produced by running golangci-lint on compat/golden/cases/godoclint-require-doc/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+requiredoc/missing.go:9:7:godoclint::symbol should have a godoc ("SingleSingleFooNG")
+requiredoc/missing.go:11:7:godoclint::symbol should have a godoc ("SingleMultiFooNG")
+requiredoc/missing.go:11:25:godoclint::symbol should have a godoc ("SingleMultiBarNG")
+requiredoc/missing.go:14:2:godoclint::symbol should have a godoc ("MultiSingleFooNG")
+requiredoc/missing.go:18:2:godoclint::symbol should have a godoc ("MultiMultiFooNG")
+requiredoc/missing.go:18:19:godoclint::symbol should have a godoc ("MultiMultiBarNG")
+requiredoc/missing.go:21:6:godoclint::symbol should have a godoc ("SingleTFooNG")
+requiredoc/missing.go:24:2:godoclint::symbol should have a godoc ("MultiTFooNG")
+requiredoc/missing.go:27:6:godoclint::symbol should have a godoc ("FooNG")
+requiredoc/missing.go:29:6:godoclint::symbol should have a godoc ("TFooNG")
+requiredoc/missing.go:31:16:godoclint::symbol should have a godoc ("TFooBarNG")
+requiredoc/missing_test.go:6:7:godoclint::symbol should have a godoc ("FooTest")
+requiredoc/missing_test.go:8:16:godoclint::symbol should have a godoc ("FooFooTest")
