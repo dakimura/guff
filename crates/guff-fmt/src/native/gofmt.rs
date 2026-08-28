@@ -4,18 +4,21 @@
 //! [`guff::format::source`] (`go/format` + `go/printer` + tabwriter).
 //! Byte-identical to system `gofmt` on prometheus + GOROOT (`regress/fmt_diff.py`).
 //!
-//! ## TODO
-//! - `opts.simplify` (`gofmt -s`) — falls back to subprocess in [`crate::gofmt`]
+//! `opts.simplify` (`gofmt -s`) goes through [`guff::simplify`].
 
 use guff::format::{self, FormatError as AstFormatError};
 
 use crate::native::NativeOptions;
 use crate::runner::FormatError;
 
-/// Format `src` like `gofmt` (without `-s`).
+/// Format `src` like `gofmt`, honouring `opts.simplify` (`-s`).
 pub fn format(src: &[u8], opts: &NativeOptions) -> Result<Vec<u8>, FormatError> {
-    let _ = opts.simplify; // simplify not ported; caller uses subprocess when needed
-    match format::source(src) {
+    let formatted = if opts.simplify {
+        format::source_simplified(src)
+    } else {
+        format::source(src)
+    };
+    match formatted {
         Ok(out) => Ok(out),
         Err(AstFormatError::Parse(e)) => Err(FormatError::Message {
             formatter: "native-gofmt".into(),

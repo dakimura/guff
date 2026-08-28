@@ -25,6 +25,7 @@ pub mod print;
 pub mod printer;
 pub mod resolve;
 pub mod scanner;
+pub mod simplify;
 pub mod scope;
 pub mod serialize;
 pub mod stamp;

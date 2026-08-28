@@ -81,6 +81,21 @@ pub fn node<W: Write>(dst: &mut W, fset: &Arc<FileSet>, node: PrintNode<'_>) -> 
 /// `src` is expected to be a syntactically correct Go source file, or a
 /// list of Go declarations or statements (partial source).
 pub fn source(src: &[u8]) -> Result<Vec<u8>, FormatError> {
+    source_opt(src, false)
+}
+
+/// Format `src` in canonical gofmt style, applying `gofmt -s` first.
+///
+/// The order is upstream's: parse, sort imports, *then* simplify, then print
+/// (`cmd/gofmt`'s `processFile`, and the `Source` entry point in the fork
+/// golangci-lint uses). `crate::simplify` never touches import declarations,
+/// so the two passes commute in practice; the order is kept anyway because it
+/// is the one that is specified.
+pub fn source_simplified(src: &[u8]) -> Result<Vec<u8>, FormatError> {
+    source_opt(src, true)
+}
+
+fn source_opt(src: &[u8], simplify_ast: bool) -> Result<Vec<u8>, FormatError> {
     let fset = Arc::new(FileSet::new());
     let (file, source_adj, indent_adj) = parse(&fset, "", src, true)?;
 
@@ -88,6 +103,9 @@ pub fn source(src: &[u8]) -> Result<Vec<u8>, FormatError> {
     if source_adj.is_none() {
         // Complete source file.
         sort_imports(&fset, &mut file);
+    }
+    if simplify_ast {
+        crate::simplify::simplify(&mut file);
     }
 
     format_buf(&fset, &file, source_adj.as_ref(), indent_adj, src, default_config())
