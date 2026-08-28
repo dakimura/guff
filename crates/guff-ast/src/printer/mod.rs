@@ -14,9 +14,10 @@
 //!   of `go/doc/comment`: **GOROOT 5,608/5,608 byte-identical with the doc
 //!   comments deliberately un-formatted first** (`fmt_diff.py --unformat
 //!   doc-comment-space`), where it used to diverge on 3,341 of them
+//! - `gofmt -s` via [`crate::simplify`]: GOROOT 5,608/5,608 and upstream's own
+//!   four `//gofmt -s` testdata pairs
 //!
 //! ## TODO / known gaps
-//! - `gofmt -s` simplify not implemented.
 //! - Parser `expr_eq_shallow` for param grouping is structural (not Go's
 //!   pointer identity after type distribution); extended for common type
 //!   shapes including `IndexListExpr` generics.

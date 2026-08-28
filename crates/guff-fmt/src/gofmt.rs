@@ -1,14 +1,11 @@
 //! `gofmt` formatter — native Rust port by default (PERF_TASKS Task 1b).
 //!
 //! Matches golangci-lint `pkg/goformatters/gofmt` settings:
-//! - `simplify` → `-s` (still subprocess / unimplemented natively)
+//! - `simplify` → `-s` (native, via `guff::simplify`)
 //! - `rewrite-rules` → repeated `-r 'pattern -> replacement'` (subprocess)
 //!
-//! Native path (no subprocess) is used when there are no rewrite rules and
-//! either simplify is off, or `GUFF_NATIVE_FMT=0` is not forcing subprocess.
+//! Native path (no subprocess) is used when there are no rewrite rules.
 //! Set `GUFF_NATIVE_FMT=0` to force the system `gofmt` binary for all cases.
-//! Set `GUFF_NATIVE_FMT=1` to prefer native even when simplify is on (simplify
-//! is then ignored until Task 1b `-s` lands).
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -106,10 +103,6 @@ impl Gofmt {
         // Rewrite rules have no native port yet.
         if !self.options.rewrite_rules.is_empty() {
             return false;
-        }
-        // simplify (-s) not ported yet — keep subprocess unless forced on.
-        if self.options.simplify {
-            return std::env::var_os("GUFF_NATIVE_FMT").is_some_and(|v| v == "1");
         }
         // Default: native (harness-proven on prometheus + GOROOT).
         true
@@ -309,7 +302,6 @@ mod tests {
 
     #[test]
     fn simplify_collapses_slice() {
-        // -s still uses the system binary (native simplify not ported).
         let fmt = Gofmt::new(GofmtOptions::default());
         // gofmt -s rewrites s[a:len(s)] → s[a:]
         let src = b"package p\n\nfunc f(s []int) []int {\n\treturn s[1:len(s)]\n}\n";
@@ -379,13 +371,21 @@ mod tests {
         assert!(two.list_unformatted(&[]).is_none());
     }
 
+    /// Both branches run native now that `-s` is ported, so the *config
+    /// default* needs no Go toolchain. Only rewrite rules still shell out.
     #[test]
-    fn native_is_the_default_when_simplify_is_off() {
+    fn native_covers_both_simplify_branches() {
         // Ensure GUFF_NATIVE_FMT=0 is not set for this assertion.
         std::env::remove_var("GUFF_NATIVE_FMT");
         assert!(Gofmt::new(GofmtOptions::plain()).use_native());
-        // With simplify on there is no native path yet, so the subprocess is
-        // used — the config default therefore does *not* run native today.
-        assert!(!Gofmt::new(GofmtOptions::default()).use_native());
+        assert!(Gofmt::new(GofmtOptions::default()).use_native());
+        assert!(!Gofmt::new(GofmtOptions {
+            simplify: false,
+            rewrite_rules: vec![RewriteRule {
+                pattern: "interface{}".into(),
+                replacement: "any".into(),
+            }],
+        })
+        .use_native());
     }
 }
