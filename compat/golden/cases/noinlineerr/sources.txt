@@ -1,2 +1,3 @@
 # The isolate fixture, so the two tiers cannot drift.
 bad.go  compat/isolate/fixtures/noinlineerr/bad.go
+elseif.go  compat/isolate/fixtures/noinlineerr/elseif.go

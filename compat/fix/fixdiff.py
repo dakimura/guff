@@ -354,6 +354,18 @@ def check_divergent(case: str, path: Path, expected: str, actual: str) -> int:
     A divergence must also be a *superset*: every line upstream removes, guff
     removes too. Otherwise this slot would hold a case that is over-writing in
     one place and under-fixing in another, and only the first would be read.
+
+    The one exception is a case that declares `# upstream-breaks-build:`, where
+    upstream's own `--fix` output does not parse. Reproducing that faithfully
+    would mean shipping a `--fix` that breaks its user's build, so guff writes a
+    strict *subset* and the direction of the check flips: guff may skip an edit
+    upstream makes, but it still may not remove a line upstream leaves alone.
+    The claim is not taken on trust — `run.sh` applies the recorded upstream
+    diff and fails the case if that tree still compiles, so the day upstream
+    fixes its fixer this entry stops being true and has to be re-decided. That
+    is the same trick `# upstream-writes:` plays, aimed at the reason rather
+    than the bytes: a deferral note nobody re-checks is how a stale reason
+    outlives the defect it describes.
     """
     if not path.exists():
         return 1
@@ -401,6 +413,39 @@ def check_divergent(case: str, path: Path, expected: str, actual: str) -> int:
             file=sys.stderr,
         )
         return 1
+    breaks_build = [
+        line[len("# upstream-breaks-build:") :].strip()
+        for line in text.splitlines()
+        if line.startswith("# upstream-breaks-build:")
+    ]
+    if breaks_build:
+        if not breaks_build[0]:
+            print(
+                f"  {case}: {path} has an empty `# upstream-breaks-build:`."
+                f" Quote the compiler error upstream's output produces.",
+                file=sys.stderr,
+            )
+            return 1
+        over = over_written(expected, actual)
+        if over:
+            print(
+                f"  {case}: declares upstream breaks the build, which buys the"
+                f" right to write *less* — but guff removes {len(over)} line(s)"
+                f" upstream leaves alone, which it does not buy.",
+                file=sys.stderr,
+            )
+            for line in over[:10]:
+                print(f"      {line}", file=sys.stderr)
+            return 1
+        skipped = over_written(
+            actual, expected, actor="golangci-lint --fix", other="guff"
+        )
+        print(
+            f"  {case}: deliberate divergence — upstream writes {current} and"
+            f" does not compile ({breaks_build[0]}); guff skips"
+            f" {len(skipped)} of its edit(s): {why[0]}"
+        )
+        return 0
     missing = over_written(
         actual, expected, actor="golangci-lint --fix", other="guff"
     )
@@ -605,6 +650,13 @@ def main(argv: list[str] | None = None) -> int:
         # has started writing here, `check_divergent` is the one that can say
         # the recorded reason no longer holds. A plain mismatch would report the
         # bytes and lose that.
+        #
+        # `actual.strip()` predates the `# upstream-breaks-build:` direction and
+        # still bounds it: a linter whose *only* fixable shape is one upstream
+        # gets wrong writes nothing at all, and lands in pending/ rather than
+        # here. `noinlineerr` does not hit this — it fixes the plain `if` and
+        # withholds only on `else if` — so the guard is left as it is rather
+        # than widened for a case that does not exist yet.
         if divergent_path is not None and divergent_path.exists() and actual.strip():
             return check_divergent(args.case, divergent_path, expected, actual)
         print(diff_of_diffs(args.case, expected, actual), file=sys.stderr)

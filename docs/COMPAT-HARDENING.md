@@ -15085,6 +15085,133 @@ fix tier のケースは**ケース単位のバイト一致**を訊くので広�
 | ケース | 行 | 要るもの |
 |---|---|---|
 | `gocritic` | 9 | `go/doc/comment` の Parser/Printer 移植。**見積もりは 9 行ではなく「整形されていない入力の 88%」** |
-| `noinlineerr` | 12 | 判断（続き 80）。台帳に「意図的に少なく書く」の枠が無い |
+| `noinlineerr` | 12 | 判断（続き 80）。台帳に「意図的に少なく書く」の枠が無い → **続き 86 で決着** |
 
 **通常の移植作業として残っているものは無い。**
+
+---
+
+### 2026-08-28（続き 86）— `noinlineerr`。**据え置きの事実は正しく、根拠は腐っていた**
+
+判断待ちだった 12 行に決着（続き 80 の脚注）。結論は
+**移植する。ただし上流がビルドを壊す 1 形だけ抑止する**で、
+台帳の `divergent/` に**部分集合**を許す契約を足した。
+
+#### 据え置きメモを検算したら、事実は当たり・根拠は外れだった
+
+`crates/guff-style/src/noinlineerr.rs` の `DEFERRED:` は
+「upstream's `--fix` is known to break compilation, see
+golangci/golangci-lint#5905」と書いていた。
+
+| | メモ | 実際 |
+|---|---|---|
+| ビルドを壊すか | 壊す | **正しい**（再現した） |
+| issue の状態 | （open として引かれていた） | **closed**（2025-06-30, won't fix） |
+
+維持者 ldez のコメント: 「The suggested fixes are not guaranteed to produce
+code that compiles. Also, golangci-lint cannot control those suggested fixes,
+only the linter can handle that.」——
+**上流はこれを仕様と考えており、直る見込みは無い**。
+「上流の動きを待つ」は選択肢として存在しなかった。
+**deferral の理由を読み直して外れたのは 5 回目**（続き 83 の 4 件に続く）。
+
+#### 壊れるのは 1 形だけで、それは fixture に無かった
+
+| 形 | 上流の `--fix` | 台帳の 12 行 |
+|---|---|---|
+| `if err := do(); err != nil` | **正しい。ビルドも通る** | **これ** |
+| `else if err := do(); …` | **ビルドを壊す** | fixture に無かった |
+| 複数 LHS / 同一スコープの shadowing | 上流が**自分で抑止** | 対象外 |
+
+`Pos: ifStmt.Pos()` は `else if` では `else` の**後ろ**に落ちるので、
+`} else err := do()` になる —— `else must be followed by if or statement block`。
+golangci-lint 2.12.2 は gofmt の失敗を warning に出し、
+**パースできないファイルをそのまま書き**、`0 issues.` と報告する
+（Fixer が「直した」issue を報告から外すため）。
+
+#### 上流は既に 2 つ抑止していて、guff は 3 つ目を足した
+
+```go
+if len(assignStmt.Lhs) != 1 || shadowVarsExists(ident.Name, pass.TypesInfo.Scopes[ifStmt]) {
+    pass.Reportf(ident.Pos(), errMessage)
+    return
+}
+```
+
+**8 つ目の「意図的に fix を出さない条件」**（続き 81 の sloglint の
+`context: all` に続く）。`shadowVarsExists` は
+**親スコープだけ**を見る（`types.Scope.Lookup` は祖先を辿らない）——
+そしてそれで正しい。巻き上げた `err :=` が着地するのがその親スコープで、
+`:=` の衝突は同一スコープ内でしか起きない。
+移植は `lookup_local` であって `lookup_chain` ではない。
+
+#### fixture を 2 ファイルに分けた —— 測って分かったこと
+
+`else if` を `bad.go` に同居させると、**パース失敗でファイル単位の gofmt が落ち**、
+同じファイルにある**正しい fix まで未整形で書かれる**:
+
+```go
+	err := do()
+if  err != nil {        // 桁 0、`if` の後ろに空白 2 つ
+```
+
+別ファイルにすると `bad.go` は正しく gofmt され、**上流と guff がバイト一致**する。
+乖離は `elseif.go` の有無だけになる。これは推測ではなく、両方の置き方で
+golangci-lint 2.12.2 を実際に走らせて確かめた。
+
+#### 報告の欠陥が 1 つ出てきた —— fixture にその形が無かったから
+
+上流のガードは報告してから **`return`** する（`continue` ではない）。
+複数 LHS に error 名が 2 つあると、**上流は最初の 1 件しか報告しない**。
+guff は両方報告していた。fixture に `if err1, err2 := two(); …` が無かったので、
+**golden 193/193 のまま隠れていた**。
+**「1 形しか通さない fixture」はこれで 4 回目**（続き 78 の S1005 / S1001 / SA6005）。
+ガードを移植したことで golden キーが 1→4 に増え、うち 1 つはこの修正。
+
+#### 契約は緩めたが、主張は機械検証にした
+
+`divergent/` は「guff は上流の**上位集合**」を要求していた。
+`# upstream-breaks-build:` を持つケースだけ向きを反転し、**部分集合**を許す
+（上流が触らない行を消すのは依然として禁止）。
+
+**理由を信用しない**のがこの緩和の肝。`run.sh` は
+**上流の記録済み diff を実際に当ててビルドを試し**、
+**通ってしまったら fail** する。上流が fixer を直した日にこの entry は
+自動的に成り立たなくなり、判断し直しになる ——
+`# upstream-writes:` がバイトに対してやっていることを、**理由に対して**やる。
+腐る据え置きメモ（続き 83・今回）への構造的な答え。
+
+**制限**: `actual.strip()` の routing ガードは残したので、
+**fix 可能な形が壊れる 1 つだけ**という linter は
+（何も書かないので）ここではなく pending/ に落ちる。
+`noinlineerr` は plain `if` を直すので該当しない。存在しないケースのために
+広げるより、コメントに書いた。
+
+#### 測定
+
+| | main (330b8571) | 今回 |
+|---|---|---|
+| fix tier 一致 | 188 | 188 |
+| pending | 2 | **1** |
+| deliberately divergent | 3 | **4** |
+| `noinlineerr` | 0/12（何も書かない） | **bad.go は上流とバイト一致・elseif.go は意図的に書かない** |
+| ファイルを書き換えるケース | 60 | **61** |
+| ビルドが通らない木 | 9 | **9**（guff の木は通る） |
+| golden キー（`noinlineerr`） | 1 | **4** |
+| compat python テスト | 197 | **200** |
+
+golden 193/193、271 スイート / 3,281 テスト、ゲート前後で md5 同一
+（`15fbcf98e5aa27e39d9423a883eea368`）。
+
+**一致数が動かないのは仕様**: divergent は「一致」ではない。
+動いたのは **pending 2→1**（もう閉じる予定のものは `gocritic` の 9 行だけ）と
+**divergent 3→4**。
+
+#### 残り
+
+| ケース | 行 | 要るもの |
+|---|---|---|
+| `gocritic` | 9 | `go/doc/comment` の Parser/Printer 移植。**見積もりは 9 行ではなく「整形されていない入力の 88%」**（続き 85） |
+
+**pending は 1 件になった。** 残る 1 件は linter の移植ではなく
+**subsystem の移植**なので、`--fix` 互換の作業としては別枠。
