@@ -1,0 +1,10 @@
+# gofmt with no settings block at all.
+#
+# The question: what does `formatters.settings.gofmt.simplify` default to?
+# golangci-lint's `defaultFormatterSettings` says true, so this config means
+# `gofmt -s`. A tool that defaults it to false formats the file, writes it,
+# and exits 0 — the divergence is silent.
+version: "2"
+formatters:
+  enable:
+    - gofmt

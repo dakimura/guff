@@ -1,0 +1,14 @@
+# `gofmt -r`. Two rules, applied in order, so a tier that dropped the second
+# (or applied them in reverse) would show it.
+version: "2"
+formatters:
+  enable:
+    - gofmt
+  settings:
+    gofmt:
+      simplify: false
+      rewrite-rules:
+        - pattern: 'interface{}'
+          replacement: 'any'
+        - pattern: 'a[b:len(a)]'
+          replacement: 'a[b:]'
