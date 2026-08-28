@@ -34,8 +34,15 @@ sorted but missing a group separator still gets one — which this early exit
 skips. The missing third predicate is "a group boundary inside a run has no
 blank line in the source" (and its converse).
 
-Row 2 is in the rewrite path's run/blank logic and is not localized yet. One
-fact about that code, offered as a starting point and not as a diagnosis:
-`detect_runs` splits runs on `imps[j].pos_line > 1 + imps[j - 1].end_line`,
-which are *original source* line numbers, and it is called on a list `arrange`
-has already reordered. Whether that is the cause has not been checked.
+Row 2 is in the rewrite path and is **not** localized. Two guesses were checked
+and both were wrong, so they are recorded here to save the next reader the trip:
+
+  * `detect_runs` keys on original source line numbers, but `arrange` only
+    applies add/delete fixes — it does not reorder — and `reconstruct` sorts
+    *within* each run, so the run indices stay valid. No mismatch there.
+  * The within-run separator fires on `import_group` changes, and for this
+    input `fmt` and `os` are both group 0, so that rule does not explain a
+    blank line between them either.
+
+Reading was not enough; the next attempt should instrument `reconstruct`
+rather than reason about it.
