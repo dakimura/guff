@@ -349,14 +349,6 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                 ),
                             ));
                         }
-                        if check_unused_link {
-                            for link in unused_links(&text) {
-                                pending.push((
-                                    pos,
-                                    format!("godoc has unused link (\"{link}\")"),
-                                ));
-                            }
-                        }
                     }
                 } else if check_single {
                     // empty package doc — not counted for single-pkg-doc
@@ -375,6 +367,14 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         // rather than through it.
         if check_unused_link {
             let mut docs: Vec<&CommentGroup> = Vec::new();
+            // The package doc belongs here rather than in the `!skip_tests`
+            // block above: golangci-lint pins `NoUnusedLinkIncludeTests: true`,
+            // so a `_test.go` file's package doc is in upstream's set while
+            // `pkg-doc` and `start-with-name` (pinned `false`) skip the file
+            // entirely. Sharing that block's guard silently dropped it.
+            if let Some(d) = &parsed.doc {
+                docs.push(d);
+            }
             for decl in &parsed.decls {
                 if let Decl::GenDecl(g) = decl {
                     // Imports are not symbol declarations, so their doc is not

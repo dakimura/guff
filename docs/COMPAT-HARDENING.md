@@ -15847,6 +15847,33 @@ golangci-lint が 6 キー記録し、guff は **6/6 一致**（**桁まで** �
 `const (` 内の indent された spec doc で col 2）。
 **修正前の binary で回すと `guff=0 golden=6 missing=6`** で落ちる。
 
+#### PR を出した後に、もう 1 つ偽陰性が出た —— 上流の option 表を読んで
+
+golangci-lint は godoclint の「テストファイルを含めるか」を**規則ごとに固定している**:
+
+```go
+PkgDocIncludeTests:        pointer(false),
+StartWithNameIncludeTests: pointer(false),
+NoUnusedLinkIncludeTests:  pointer(true),   // ← 含める
+RequirePkgDocIncludeTests: pointer(false),
+```
+
+guff の package doc の処理は既存の `if !skip_tests` の中にある。
+`pkg-doc` / `start-with-name` には正しいが、**`no-unused-link` には間違い** ——
+`_test.go` の package doc にある未使用リンクが**黙って落ちていた**
+（上流 `b_test.go:1:1`、guff は無し）。
+
+package doc を**宣言 doc と同じ up-front の集合に移した**。
+条件を足すのではなく、**あの guard との結合そのものを外した**。
+
+**見つけ方が要点**: テストが落ちたのではなく、**次の規則を調べるために上流の
+option 表を読んでいて気付いた**。確認済みの 12 形は全部**非テストファイル**だったので、
+自分が書いたどのテストでも捕まらない。**今セッション何度も出た「1 形しか通さない」の、
+軸違い**（形ではなくファイル種別）。
+
+golden fixture に `_test.go` を足して **6 → 8 キー**。
+最初の commit の binary で回すと **8 件全部 missing** で落ちる。
+
 #### 据え置きは規則ごとに理由を書いた
 
 | 規則 | まだ要るもの |
