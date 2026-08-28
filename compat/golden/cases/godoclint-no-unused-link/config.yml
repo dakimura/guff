@@ -1,0 +1,36 @@
+# Golden case: godoclint's `no-unused-link`, alone.
+#
+# The rule is not in godoclint's `basic` default set — that is `pkg-doc`,
+# `single-pkg-doc`, `start-with-name`, `deprecated` — so the sibling
+# `godoclint` case cannot reach it, and guff answered a `default: all` config
+# with *silence* rather than with findings.
+#
+# The fixture includes a `_test.go` file on purpose: golangci-lint pins
+# `no-unused-link` to `include-tests: true`, while `pkg-doc` and
+# `start-with-name` are pinned false. A package doc checked under those rules'
+# test guard loses the test file's finding, which is exactly the bug the second
+# commit here fixes.
+#
+# Enabled on its own rather than through `default: all` so the case measures
+# one rule. `require-doc`, `require-pkg-doc`, `max-len` and
+# `require-stdlib-doclink` are still unported; folding them in here would
+# record a mixed gap that no single fix could close.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - godoclint
+  settings:
+    godoclint:
+      default: none
+      enable:
+        - no-unused-link
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
