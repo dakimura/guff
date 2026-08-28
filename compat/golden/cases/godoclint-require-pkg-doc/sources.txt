@@ -1,0 +1,7 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+nodoc/a.go        crates/guff-comment/tests/testdata/godoclint/pkgdoc/nodoc/a.go
+nodoc/b.go        crates/guff-comment/tests/testdata/godoclint/pkgdoc/nodoc/b.go
+nodoc/c_test.go   crates/guff-comment/tests/testdata/godoclint/pkgdoc/nodoc/c_test.go
+hasdoc/a.go       crates/guff-comment/tests/testdata/godoclint/pkgdoc/hasdoc/a.go
+hasdoc/b.go       crates/guff-comment/tests/testdata/godoclint/pkgdoc/hasdoc/b.go

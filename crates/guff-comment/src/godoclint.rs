@@ -2,8 +2,9 @@
 //! (golangci-lint wrapper in `pkg/golinters/godoclint`).
 //!
 //! Implements the **basic** default rule set — `pkg-doc`, `single-pkg-doc`,
-//! `start-with-name`, `deprecated` — plus `no-unused-link`, which is not in it
-//! but which `default: all` and an explicit `enable:` both reach.
+//! `start-with-name`, `deprecated` — plus `no-unused-link` and
+//! `require-pkg-doc`, which are not in it but which `default: all` and an
+//! explicit `enable:` both reach.
 //!
 //! Comments are re-parsed with [`PARSE_COMMENTS`] because production package
 //! load uses `Mode::NONE`, which drops lead comments after the package clause.
@@ -19,8 +20,6 @@
 //! - `require-doc` — needs a symbol model this file does not build:
 //!   `TrailingDoc` (`const X = 1 // doc`) and a `ParentDoc` fallback, plus the
 //!   `ignore-exported` / `ignore-unexported` options.
-//! - `require-pkg-doc` — needs every file's package-name position whether or
-//!   not it has a doc; `pkg_docs` below only records files that have one.
 //! - `max-len` — needs `options.max-len.*`, and golangci-lint overrides two of
 //!   them (`include-tests: true`, `ignore-patterns: ["^\+kubebuilder:"]`).
 //! - `require-stdlib-doclink` — needs upstream's generated index of standard
@@ -288,8 +287,15 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let check_start = rules.contains("start-with-name");
     let check_deprecated = rules.contains("deprecated");
     let check_unused_link = rules.contains("no-unused-link");
+    let check_require_pkg_doc = rules.contains("require-pkg-doc");
 
-    if !check_pkg_doc && !check_single && !check_start && !check_deprecated && !check_unused_link {
+    if !check_pkg_doc
+        && !check_single
+        && !check_start
+        && !check_deprecated
+        && !check_unused_link
+        && !check_require_pkg_doc
+    {
         return Ok(None);
     }
 
@@ -305,6 +311,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let mut unused_link_seen: std::collections::HashSet<u32> = std::collections::HashSet::new();
     // package name → list of (pos, has_nonempty_doc) for single-pkg-doc
     let mut pkg_docs: HashMap<String, Vec<(u32, bool)>> = HashMap::new();
+    // package name → (position of the *first* file's package identifier, whether
+    // any file in the package has a non-empty doc) for require-pkg-doc.
+    //
+    // Separate from `pkg_docs`, which only records files that *have* a doc:
+    // this rule has to report at a file it found nothing in, so it needs the
+    // package clause of every applicable file, documented or not.
+    let mut pkg_any_doc: HashMap<String, (u32, bool)> = HashMap::new();
 
     for i in 0..n {
         let file = &pass.files()[i];
@@ -317,6 +330,22 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             continue;
         };
         let pkg_name = parsed.name.name.as_str();
+
+        // --- require-pkg-doc bookkeeping ---
+        //
+        // golangci-lint pins `RequirePkgDocIncludeTests: false`, so `_test.go`
+        // files neither satisfy the requirement nor get reported.
+        if check_require_pkg_doc && !skip_tests {
+            if let Some(name_pos) = reparsed_pos(&fset, file.pos(), &re_fset, parsed.name.pos()) {
+                let has_doc = parsed.doc.as_ref().and_then(doc_text).is_some();
+                let e = pkg_any_doc
+                    .entry(pkg_name.to_string())
+                    .or_insert((name_pos, false));
+                // `or_insert` keeps the first file's position, which is where
+                // upstream reports (`fs[0].Name.Pos()`).
+                e.1 |= has_doc;
+            }
+        }
 
         // --- package docs ---
         if !skip_tests {
@@ -465,6 +494,15 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             for (pos, _) in entries {
                 pending.push((pos, format!("package has more than one godoc (\"{pkg}\")")));
             }
+        }
+    }
+
+    if check_require_pkg_doc {
+        for (pkg, (first_pos, any_doc)) in pkg_any_doc {
+            if any_doc {
+                continue;
+            }
+            pending.push((first_pos, format!("package should have a godoc (\"{pkg}\")")));
         }
     }
 

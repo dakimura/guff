@@ -1,0 +1,9 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh godoclint-require-pkg-doc
+# Produced by running golangci-lint on compat/golden/cases/godoclint-require-pkg-doc/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+nodoc/a.go:1:9:godoclint::package should have a godoc ("nodoc")
