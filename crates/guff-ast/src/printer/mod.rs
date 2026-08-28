@@ -9,12 +9,14 @@
 //! - `gobuild.rs`: `//go:build` / `// +build` relocation
 //! - `format::source` wired; native `guff-fmt-native gofmt` path live
 //! - **prometheus corpus: 725/725 byte-identical** (`fmt_diff.py --formatter gofmt --corpus prometheus`)
+//! - **GOROOT corpus: 5,608/5,608 byte-identical** (`fmt_diff.py --corpus goroot`)
+//! - `format_doc_comment` (`comment.rs`) via the [`crate::doc::comment`] port
+//!   of `go/doc/comment`: **GOROOT 5,608/5,608 byte-identical with the doc
+//!   comments deliberately un-formatted first** (`fmt_diff.py --unformat
+//!   doc-comment-space`), where it used to diverge on 3,341 of them
 //!
 //! ## TODO / known gaps
-//! - `format_doc_comment` is a no-op (needs `go/doc/comment` Parser/Printer).
-//!   Idempotent on already-gofmt'd input; may diverge on messy package docs.
 //! - `gofmt -s` simplify not implemented.
-//! - GOROOT corpus not yet fully green-gated (run `fmt_diff.py --corpus goroot`).
 //! - Parser `expr_eq_shallow` for param grouping is structural (not Go's
 //!   pointer identity after type distribution); extended for common type
 //!   shapes including `IndexListExpr` generics.
