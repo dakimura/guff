@@ -15215,3 +15215,183 @@ golden 193/193、271 スイート / 3,281 テスト、ゲート前後で md5 同
 
 **pending は 1 件になった。** 残る 1 件は linter の移植ではなく
 **subsystem の移植**なので、`--fix` 互換の作業としては別枠。
+
+---
+
+### 2026-08-28（続き 87）— `go/doc/comment` を移植した。**9 行の正体は gocritic ではなく gofmt で、穴は GOROOT の 60%**
+
+pending 最後の 1 件（続き 85/86）。結論は **subsystem をまるごと移植する**。
+`parse.go` + `print.go` の `Comment` 側、`go/printer/comment.go` の
+`formatDocComment`、`unicode` の 4 述語、`std.go` の 40 パッケージ。
+
+#### まず、9 行は gocritic の欠陥ではなかった
+
+台帳の 9 行は `extras.go:453` の `//nolint` → `// nolint` 1 箇所。
+gocritic が報告し損ねているのだと思って上流の checker を読んだら、逆だった:
+
+```go
+// go-critic v0.14.4 checkers/commentFormatting_checker.go
+equalPatterns := []string{
+    "//nolint",
+}
+```
+
+**gocritic は `//nolint` を明示的に除外している。** golden にも
+`commentFormatting` は 1 件しか無い（`bad.go:14`、`//BadCommentFormatting`）。
+つまり **どの gocritic checker もこの edit を出さない** ——
+書いているのは、fix 適用後にファイルを読み直す **gofmt** のほうだった。
+
+`//nolint:gocritic // has explanation` が隣にあって**変わらない**のがその証拠で、
+これは `isDirective` の `//[a-z0-9]+:[a-z0-9]` に当たるから
+`formatDocComment` が素通しする。コロンの無い `//nolint` は当たらない。
+**リンタが「この形は正しい」と言っているコメントを、
+その後に走るフォーマッタが書き換える。** 9 行の帰属先は最初から fix tier ではなく
+formatter tier だった。
+
+#### 測り方を変えないと、この穴は永遠に見えない
+
+続き 85 は「整形されていない入力の 88%」と測ったが、その数字はゲートに乗っていなかった。
+理由は構造的で、**ディスク上のコーパスは全部 gofmt 済み**だから:
+
+> クリーンな入力に対する比較は「両方のツールが冪等か」しか訊いていない。
+> `go/doc/comment` の往復は、まさにその入力で**何もしない**コードパスなので、
+> **丸ごと欠けていてもコーパスは緑になる。**
+
+そこで `regress/fmt_diff.py` に `--unformat <mangler>` を足した。
+**同じ壊した入力を両方のツールに渡す**ので、比較の意味が
+「冪等か」から**「フォーマッタが何を復元するか」**に変わる。
+
+`doc-comment-space` mangler は `// X`（X は ASCII 英字）から空白を 1 つ落とす。
+2 種類だけ触らない:
+
+- 英字で始まらないもの —— `//go:build` / `// +build` を**作り出しも壊しもしない**ため
+- 落とすと**ディレクティブになる**もの。`go/printer` は doc comment 内の
+  ディレクティブを素通しするので、空白を戻さないのが正しい。
+  これは机上の話ではない: `testing.go` に `// line order:` という doc comment 行があり、
+  `//line order:` は line ディレクティブなので**ファイルごとパースできなくなる**
+  （最初の実行で `ref_error` が 1 件出て気付いた）
+
+#### 測定 —— GOROOT 5,608 ファイル
+
+| | main (cf80efcb) | 今回 |
+|---|---|---|
+| gofmt そのまま | 5,608 / 5,608 一致 | 5,608 / 5,608 一致 |
+| **doc comment を崩した入力** | **2,267 一致 / 3,341 乖離（60%）** | **5,608 / 5,608 一致・乖離 0** |
+| prometheus（崩した入力） | — | 725 / 725 一致 |
+| リポジトリ自身の `.go`（崩した入力・449 件） | 94 一致 / 355 乖離（79%） | **449 / 449 一致** |
+
+**「そのまま」の行が両方 5,608/5,608 なのが、この穴が見えなかった理由そのもの。**
+続き 85 の 88% は mangler がもっと広く（ディレクティブも崩す）
+対象ファイル集合も違うので、79% と直接は比べられない。同じ道具で測った
+before/after の対は上の表。
+
+`--unformat doc-comment-space` は **CI の smoke ジョブに入れた**（約 20 秒）。
+この穴を捕まえられる唯一のゲートなので、記録ではなくゲートに置く。
+
+#### 移植の範囲 —— 何を入れて、何を入れなかったか
+
+| 上流 | 行 | 移植 |
+|---|---|---|
+| `go/doc/comment/parse.go` | 1,260 | **した**（`crates/guff-ast/src/doc/comment/parse.rs`, 1,104 行） |
+| `go/doc/comment/print.go` の `Comment` | 288 のうち | **した**（`print.rs`, 167 行） |
+| `go/printer/comment.go` | 155 | **した**（`printer/comment.rs`, 137 行） |
+| `go/doc/comment/text.go`（`Printer.Text` と `wrap`） | 337 | **しない** |
+| `html.go` / `markdown.go` | 357 | **しない** |
+
+**入れなかった理由は判断ではなく構造**: `formatDocComment` が呼ぶのは
+`Printer.Comment` **だけ**で、`Text` と違って `Comment` は行を折り返さない
+（Hirschberg–Larmore が要らないのはそのため）。これは
+`go/printer/comment.go` を読めば決まる事実なので、
+腐る据え置きメモ（続き 83・86）ではなくモジュールの STATUS に書いた。
+
+#### Unicode は std との差分ではなく絶対表にした
+
+Go は `unicode.IsLetter` / `IsUpper` / `IsDigit` / `IsPunct`（カテゴリ
+L / Lu / Nd / P）を見る。Rust std が持っているのは**派生プロパティ**の
+`is_alphabetic` / `is_uppercase` / `is_numeric`（Alphabetic は Nl と
+Other_Alphabetic を含み **11,317 コードポイント**ずれる。Numeric は 1,244）で、
+カテゴリ P に至っては std に無い。
+
+差分表なら 597 レンジで済むが、**Rust が Unicode 版を上げた日に静かに壊れる**
+—— 腐る署名そのもの。絶対表（1,560 レンジ / 340 行）にして、
+Go から再生成できるようにした（`scripts/gen-doccomment-tables.go`）。
+生成器は**人間が書いた唯一の部分である ASCII 分岐を Go と突き合わせて検算**し、
+食い違ったら生成せずに落ちる。
+
+#### fixture —— 上流のコーパスをそのまま持ってきて、足りない分は Go に書かせた
+
+`$GOROOT/src/go/doc/comment/testdata` の txtar 53 本を
+`crates/guff-ast/tests/testdata/doc_comment/` に置き、
+上流の `TestTestdata` と**同じ Parser フック**（`Words` / `LookupPackage` /
+`LookupSym`）で `gofmt` セクションを突き合わせる。**35 本は初回から通った。**
+
+残り 18 本は上流が `html` / `markdown` / `text` しか持っていない。
+**そのまま置くと「0 件の golden」**（続き 30 の空振り合格と同じ形）になるので、
+`scripts/gen-doccomment-gofmt-sections.go` で **go1.26.5 の
+`comment.Printer.Comment` に書かせた**。消せば 18 本のパーサ入力を捨てることになり、
+放置すれば 18 本が何も主張しないファイルになる。テストは
+**「`gofmt` セクションが無い fixture があったら fail」**を明示的に主張する。
+
+#### 53 本の fixture では 1,100 行の再帰下降パーサは覆えない —— 差分テストを足した
+
+`crates/guff-ast/tests/doc_comment_differential.rs`（`#[ignore]`、CI の
+「`go` を要るテスト」ステップで走る）は、**本物の `go/doc/comment` と移植の両方に
+同じ入力を食わせてバイト比較**する:
+
+| 入力 | 件数 | 乖離 |
+|---|---|---|
+| GOROOT の doc コメント（重複除去、`formatDocComment` と同じ剥がし方） | **138,697** | **0** |
+| その変異（見出し / 2 種のリスト / リンク定義 / doc リンク / `` `` `` / URL / 非 ASCII を狙った断片を挿入・削除・置換） | **100,000**（seed 固定） | **0** |
+| 合成の soup（同じ断片をランダムに組んだだけの行） | 60,000（探索時のみ） | **0** |
+
+**合計 318,697 入力で乖離 0。** 上流の txtar 53 本は「上流が面白いと思った形」を止めるもので、
+この差分は**それ以外のすべて**（人間が書かない入力を含む）で一致することを止める。
+リスクの種類が違うので両方置く。
+
+#### 分岐を数えてから fixture を書いた
+
+`formatDocComment` はほぼ全部が分岐なので、「空白が戻った」1 本では
+残りが全部隠れる（**「1 形しか通さない fixture」続き 78/86 で 4 回**）。
+`crates/guff-ast/tests/format_doc_comment.rs` は **1 分岐 1 本で 15 本**:
+
+| 分岐 | 期待 |
+|---|---|
+| `//Foo` doc 位置 | `// Foo` |
+| `//  Foo` / `//\tFoo` | `// Foo`（往復変換なので**足すのではなく畳む**） |
+| 関数本体の `//bar` | **そのまま**（doc 位置ではない） |
+| `//nolint` / `//nolint:gocritic` | 前者だけ空白が入る |
+| doc 中の `//go:noinline` | 本文の**後ろ**へ移動、間に裸の `//` |
+| ディレクティブだけの doc | そのまま（text が空で早期 return） |
+| 裸の `//` だけの doc | **コメントごと消える** |
+| タブ字下げのコードブロック / 空行 | 保存される |
+| `//  - one` のリスト | `//   - one` に整う |
+| 複数行 `/* */` | 中身を `unindent` して書き直す |
+| 1 行 `/* */` / `allStars` の星付き | **そのまま**（早期 return 2 種） |
+| package doc | 整形される |
+| import ブロック内 | **そのまま**（`last_tok == IMPORT` で除外） |
+
+**15 本すべて gofmt(go1.26.5) に実際に食わせて期待値を取った。**
+「裸の `//` が消える」は、続き 76/85 が
+「部分規則は乖離を 1 つから 2 つに増やす」と書いた根拠の実物 ——
+空白を足すだけの実装では、この行は残ってしまう。
+
+#### 測定
+
+| | main (cf80efcb) | 今回 |
+|---|---|---|
+| fix tier 一致 | 188 | **189** |
+| **pending** | 1 | **0** |
+| deliberately divergent | 4 | 4 |
+| gofmt（崩した入力・GOROOT） | 3,341 乖離 | **0** |
+| guff-ast テスト | — | **3 スイート / 18 本**（上流 txtar 2 + 分岐 15 + 差分 1） |
+| `go/doc/comment` 差分（GOROOT + 変異） | — | **318,697 入力 / 乖離 0** |
+| フォーマッタの速度 | 41KB × 40 回 = 0.435s | 0.438s（**誤差**） |
+| workspace | 271 スイート / 3,281 | **274 スイート / 3,298** |
+
+golden 193/193、compat python 200、`compat/fix` 193 ケース。
+
+#### 残り
+
+**`compat/fix` の pending は 0 になった。**
+台帳に残るのは `divergent/` の 4 件（すべて `# why:` と `# upstream-writes:`
+つき、うち 1 件は `# upstream-breaks-build:` で機械検証されている）。

@@ -12,6 +12,7 @@ pub mod ast;
 pub mod commentmap;
 pub mod constraint;
 pub mod directive;
+pub mod doc;
 pub mod errors;
 pub mod filter;
 pub mod format;

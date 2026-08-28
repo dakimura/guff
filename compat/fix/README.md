@@ -225,6 +225,18 @@ than once per line, so it never fired — and `git log` says the hunk arrived in
 the very commit that built `divergent/` and wrote the defect down. Every
 remaining pending case is now behind upstream, not ahead of it.
 
+After `go/doc/comment` (2026-08-28): **189 matching, 0 pending, 4 deliberately
+divergent** — `pending/` is empty and the directory is gone. The last case,
+`gocritic`, was never a gocritic gap: go-critic's `commentFormatting` has
+`//nolint` in its `equalPatterns` exemption list, so no checker of upstream's
+ever emits that edit. The nine lines were written by the **gofmt pass that runs
+after the fixes are applied**, whose `formatDocComment` sends every doc comment
+through `go/doc/comment`'s parser and printer — a subsystem this repo had
+stubbed out as a no-op. Porting it closed the case and, more to the point,
+closed a formatter gap that no tier here could see: on GOROOT with the doc
+comments deliberately un-formatted first, guff diverged from gofmt on 3,341 of
+5,608 files while every gate stayed green (docs/COMPAT-HARDENING.md 続き 87).
+
 ## Does it still build?
 
 A `--fix` that rewrites `fmt.Sprint(i)` to `strconv.Itoa(i)` and does not add

@@ -16,6 +16,12 @@ Examples::
 
     # Native vs reference (FAIL / NOT_IMPLEMENTED until Task 1b+)
     ./regress/fmt_diff.py --formatter gofmt --corpus both
+
+    # Same corpus, but with the doc comments *un*-formatted first: a clean
+    # corpus only ever exercises a formatter's idempotence, and the
+    # go/doc/comment round trip is exactly the code path that has nothing to
+    # do on already-gofmt'd input (docs/COMPAT-HARDENING.md, 続き 85/87)
+    ./regress/fmt_diff.py --formatter gofmt --corpus goroot --unformat doc-comment-space
     ./regress/fmt_diff.py --formatter gofumpt --extra --corpus prometheus
     ./regress/fmt_diff.py --formatter goimports \\
         --local github.com/prometheus/prometheus --corpus prometheus --limit 100
@@ -171,6 +177,68 @@ def build_native_cmd(native_bin: Path, ref: RefArgs, path: Path) -> list[str]:
     return cmd
 
 
+# --------------------------------------------------------------------------
+# Input mangling
+#
+# Every corpus on disk is already gofmt-clean, so a straight comparison only
+# ever asks "are both tools idempotent here?". Whole subsystems — the
+# go/doc/comment round trip most of all — do nothing at all on such input, so
+# they can be entirely missing and the corpus still passes. A mangler perturbs
+# the source *before* handing the same bytes to both tools, which turns the
+# corpus into a test of what the formatter reconstructs.
+# --------------------------------------------------------------------------
+
+
+def _is_directive(c: str) -> bool:
+    """Go's ``go/ast.IsDirective``: is ``c`` (a ``//``-stripped body) a directive?"""
+    if c.startswith(("line ", "extern ", "export ")):
+        return True
+    colon = c.find(":")
+    if colon <= 0 or colon + 1 >= len(c):
+        return False
+    return all(
+        b.isascii() and (b.islower() or b.isdigit())
+        for i, b in enumerate(c[: colon + 2])
+        if i != colon
+    )
+
+
+def _mangle_doc_comment_space(src: bytes) -> bytes:
+    """Drop one space from ``// X`` line comments, where X is an ASCII letter.
+
+    That is the shape gofmt restores through go/doc/comment: a doc comment
+    comes back with the space, a comment inside a function body keeps it
+    removed.
+
+    Two classes are left alone, because for them the missing space does not
+    mean "unformatted", it means "different kind of comment", and mangling
+    them would measure the wrong thing:
+
+    * text not starting with an ASCII letter — so the mangler can neither
+      manufacture nor destroy a ``//go:build`` / ``// +build`` constraint;
+    * text that *becomes* a directive once the space is gone. `go/printer`
+      skips directives inside a doc comment, so it would rightly not restore
+      the space. This is not hypothetical: ``testing.go`` has a doc comment
+      line reading ``// line order:``, and ``//line order:`` is a line
+      directive, which makes the whole file stop parsing.
+    """
+    out = bytearray()
+    for line in src.split(b"\n"):
+        stripped = line.lstrip(b" \t")
+        if stripped.startswith(b"// ") and len(stripped) > 3:
+            body = stripped[3:].decode("utf-8", "replace")
+            if body[:1].isascii() and body[:1].isalpha() and not _is_directive(body):
+                lead = len(line) - len(stripped)
+                line = line[:lead] + b"//" + stripped[3:]
+        out += line + b"\n"
+    return bytes(out[:-1])
+
+
+MANGLERS = {
+    "doc-comment-space": _mangle_doc_comment_space,
+}
+
+
 @dataclass
 class FileResult:
     path: Path
@@ -195,11 +263,19 @@ def format_one(
     ref: RefArgs,
     native_bin: Path | None,
     self_check: bool,
+    mangle: str | None = None,
 ) -> FileResult:
     try:
         src = path.read_bytes()
     except OSError as e:
         return FileResult(path, "skip", f"read: {e}")
+    if mangle is not None:
+        mangled = MANGLERS[mangle](src)
+        if mangled == src:
+            # Nothing to reconstruct: counting these as "ok" would inflate the
+            # pass rate with files the mangler never touched.
+            return FileResult(path, "skip", "mangler made no change")
+        src = mangled
 
     # Reference
     staging: Path | None = None
@@ -342,6 +418,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="path to guff-fmt-native (default: target/release then target/debug)",
     )
     ap.add_argument(
+        "--unformat",
+        default=None,
+        choices=sorted(MANGLERS),
+        help="perturb each source before handing it to BOTH tools, so the "
+        "comparison tests reconstruction rather than idempotence",
+    )
+    ap.add_argument(
         "--fail-fast",
         action="store_true",
         help="stop after the first diff / native_error",
@@ -388,9 +471,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     mode = "self-check" if args.self_check else f"native={native_bin}"
+    unformat = f" unformat={args.unformat}" if args.unformat else ""
     print(
         f"fmt_diff: formatter={args.formatter} corpus={args.corpus} "
-        f"files={len(files)} jobs={args.jobs} {mode}",
+        f"files={len(files)} jobs={args.jobs} {mode}{unformat}",
         flush=True,
     )
 
@@ -407,7 +491,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     not_impl_sample: str | None = None
 
     def _work(p: Path) -> FileResult:
-        return format_one(p, ref=ref, native_bin=native_bin, self_check=args.self_check)
+        return format_one(
+            p,
+            ref=ref,
+            native_bin=native_bin,
+            self_check=args.self_check,
+            mangle=args.unformat,
+        )
 
     stop = False
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
