@@ -1,0 +1,18 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh godoclint-stdlib-doclink
+# Produced by running golangci-lint on compat/golden/cases/godoclint-stdlib-doclink/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+doclink/a.go:12:1:godoclint::text "encoding/json.Encoder" should be replaced with "[encoding/json.Encoder]" to link to stdlib type
+doclink/a.go:15:1:godoclint::text "encoding/json.Encoder" should be replaced with "[encoding/json.Encoder]" to link to stdlib type (2 instances)
+doclink/a.go:18:1:godoclint::text "encoding/json.Encoder" should be replaced with "[encoding/json.Encoder]" to link to stdlib type (2 instances)
+doclink/a.go:22:1:godoclint::text "io.PipeWriter.Close" should be replaced with "[io.PipeWriter.Close]" to link to stdlib method
+doclink/a.go:25:1:godoclint::text "bytes.Buffer" should be replaced with "[bytes.Buffer]" to link to stdlib type
+doclink/a.go:25:1:godoclint::text "encoding/json.Encoder" should be replaced with "[encoding/json.Encoder]" to link to stdlib type
+doclink/a_test.go:3:1:godoclint::text "bytes.Buffer" should be replaced with "[bytes.Buffer]" to link to stdlib type
+doclink/b.go:11:1:godoclint::text "blah.Encoder" should be replaced with "[blah.Encoder]" to link to stdlib type
+doclink/b.go:16:1:godoclint::text "os.Args" should be replaced with "[os.Args]" to link to stdlib variable
+doclink/c.go:15:1:godoclint::text "sort.Ints" should be replaced with "[sort.Ints]" to link to stdlib function

@@ -1,0 +1,59 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh godoclint-all
+# Produced by running golangci-lint on compat/golden/cases/godoclint-all/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+basic/bad.go:1:1:godoclint::package godoc should start with "Package example "
+basic/bad.go:7:1:godoclint::godoc should start with symbol name ("Foo")
+basic/bad.go:10:1:godoclint::deprecation note should be formatted as "Deprecated: "
+basic/bad.go:16:2:godoclint::symbol should have a godoc ("Alpha")
+basic/bad.go:17:2:godoclint::godoc should start with symbol name ("Beta")
+basic/bad.go:25:6:godoclint::symbol should have a godoc ("Wrapper")
+basic/bad.go:28:2:godoclint::godoc should start with symbol name ("Gamma")
+deprecated/a.go:6:1:godoclint::deprecation note should be formatted as "Deprecated: "
+deprecated/a.go:13:1:godoclint::deprecation note should be formatted as "Deprecated: "
+deprecated/a.go:27:1:godoclint::deprecation note should be formatted as "Deprecated: "
+deprecated/a.go:31:1:godoclint::deprecation note should be formatted as "Deprecated: "
+deprecated/a.go:31:1:godoclint::godoc should start with symbol name ("Exported")
+doclink/a.go:1:1:godoclint::godoc line is too long (82 > 77)
+doclink/a.go:12:1:godoclint::text "encoding/json.Encoder" should be replaced with "[encoding/json.Encoder]" to link to stdlib type
+doclink/a.go:15:1:godoclint::text "encoding/json.Encoder" should be replaced with "[encoding/json.Encoder]" to link to stdlib type (2 instances)
+doclink/a.go:18:1:godoclint::text "encoding/json.Encoder" should be replaced with "[encoding/json.Encoder]" to link to stdlib type (2 instances)
+doclink/a.go:22:1:godoclint::text "io.PipeWriter.Close" should be replaced with "[io.PipeWriter.Close]" to link to stdlib method
+doclink/a.go:25:1:godoclint::text "bytes.Buffer" should be replaced with "[bytes.Buffer]" to link to stdlib type
+doclink/a.go:25:1:godoclint::text "encoding/json.Encoder" should be replaced with "[encoding/json.Encoder]" to link to stdlib type
+doclink/a.go:49:1:godoclint::godoc should start with symbol name ("India")
+doclink/b.go:11:1:godoclint::text "blah.Encoder" should be replaced with "[blah.Encoder]" to link to stdlib type
+doclink/b.go:16:1:godoclint::text "os.Args" should be replaced with "[os.Args]" to link to stdlib variable
+links/links.go:1:1:godoclint::godoc has unused link ("pkgunused")
+links/links.go:22:1:godoclint::godoc has unused link ("dangling")
+links/links.go:27:1:godoclint::godoc has unused link ("lower")
+links/links.go:32:1:godoclint::godoc has unused link ("grouped")
+links/links.go:42:1:godoclint::godoc has unused link ("parent")
+links/links.go:46:2:godoclint::godoc has unused link ("own")
+maxlen/a.go:4:1:godoclint::godoc line is too long (78 > 77)
+maxlen/a.go:4:1:godoclint::godoc should start with symbol name ("OverLong")
+maxlen/a.go:7:1:godoclint::godoc should start with symbol name ("AtTheLimit")
+maxlen/a.go:10:1:godoclint::godoc should start with symbol name ("WideButShort")
+maxlen/a.go:13:1:godoclint::godoc line is too long (78 > 77)
+maxlen/a.go:13:1:godoclint::godoc should start with symbol name ("WideAndLong")
+maxlen/a.go:16:1:godoclint::godoc should start with symbol name ("Kubebuilder")
+maxlen/a.go:19:1:godoclint::godoc should start with symbol name ("InACodeBlock")
+maxlen/a.go:25:1:godoclint::godoc should start with symbol name ("TwiceOverLong")
+maxlen/a.go:28:1:godoclint::godoc line is too long (78 > 77)
+maxlen/a.go:30:1:godoclint::godoc line is too long (78 > 77)
+maxlen/a.go:33:1:godoclint::godoc line is too long (78 > 77)
+maxlen/a.go:33:1:godoclint::godoc should start with symbol name ("InABlockComment")
+maxlen/a.go:38:1:godoclint::godoc line is too long (78 > 77)
+maxlen/a.go:43:1:godoclint::godoc line is too long (78 > 77)
+maxlen/a.go:43:1:godoclint::godoc should start with symbol name ("TwiceInABlockComment")
+requiredoc/good.go:10:1:godoclint::godoc should start with symbol name ("SingleSingleFooGD")
+requiredoc/good.go:17:2:godoclint::godoc should start with symbol name ("MultiSingleFooGD")
+requiredoc/good.go:21:1:godoclint::godoc should start with symbol name ("SingleTFooGD")
+requiredoc/good.go:25:2:godoclint::godoc should start with symbol name ("MultiTFooGD")
+requiredoc/good.go:58:1:godoclint::godoc should start with symbol name ("FuncFoo")
+requiredoc/good.go:61:1:godoclint::godoc should start with symbol name ("TFoo")
+requiredoc/good.go:64:1:godoclint::godoc should start with symbol name ("TFooBar")

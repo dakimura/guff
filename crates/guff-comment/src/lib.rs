@@ -13,6 +13,7 @@
 
 mod dupword;
 mod godoclint;
+mod godoclint_stdlib;
 mod godot;
 mod godox;
 mod options;

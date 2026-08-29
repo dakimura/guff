@@ -20,8 +20,6 @@
 //!
 //! DEFERRED, with the reason each is still deferred:
 //!
-//! - `require-stdlib-doclink` — needs upstream's generated index of standard
-//!   library symbols (`stdlib_doclink/stdlib.json`).
 //!
 //! Also deferred: `//godoclint:disable` directives.
 
@@ -53,14 +51,13 @@ fn is_test_path(path: &Path) -> bool {
 /// trap: `require-pkg-doc` is `false` while `require-doc` is `true`, so a
 /// `_test.go` file can be reported by one and invisible to the other. Read the
 /// row before reusing an adjacent rule's guard.
-/// One constant per implemented rule; `require-stdlib-doclink: true` arrives
-/// with its rule.
 mod include_tests {
     pub const PKG_DOC: bool = false;
     pub const SINGLE_PKG_DOC: bool = true;
     pub const REQUIRE_PKG_DOC: bool = false;
     pub const MAX_LEN: bool = true;
     pub const REQUIRE_DOC: bool = true;
+    pub const REQUIRE_STDLIB_DOCLINK: bool = true;
     pub const START_WITH_NAME: bool = false;
     pub const NO_UNUSED_LINK: bool = true;
     /// `deprecated` takes no option: upstream hard-codes `false` at the call
@@ -365,6 +362,170 @@ fn collect_symbol_decls(file: &guff::ast::File) -> Vec<SymbolDecl<'_>> {
     out
 }
 
+/// `internal.SymbolKind`, which `kindTitle` turns into the last word of the
+/// diagnostic.
+///
+/// Distinct from [`SymbolKind`], which answers a different question about a
+/// *declaration in the file under analysis* rather than about a standard
+/// library entry.
+///
+/// Upstream also has a `SymbolKindNA` (`""`, titled "symbol"). No released
+/// `stdlib.json` has ever used it, so there is no variant for it here; the
+/// generator raises on an unknown kind instead, which turns a future upstream
+/// change into a regeneration failure rather than a wrong diagnostic.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum StdlibSymbolKind {
+    Const,
+    Var,
+    Func,
+    Method,
+    Type,
+}
+
+impl StdlibSymbolKind {
+    /// `kindTitle`.
+    fn title(self) -> &'static str {
+        match self {
+            Self::Type => "type",
+            Self::Func => "function",
+            Self::Var => "variable",
+            Self::Const => "constant",
+            Self::Method => "method",
+        }
+    }
+}
+
+type StdlibPackage = (
+    &'static str,
+    &'static str,
+    &'static [(&'static str, StdlibSymbolKind)],
+);
+
+fn stdlib_package(path: &str) -> Option<&'static StdlibPackage> {
+    let t = crate::godoclint_stdlib::STDLIB;
+    t.binary_search_by(|e| e.0.cmp(path)).ok().map(|i| &t[i])
+}
+
+fn stdlib_symbol(pkg: &'static StdlibPackage, name: &str) -> Option<StdlibSymbolKind> {
+    pkg.2.binary_search_by(|e| e.0.cmp(name)).ok().map(|i| pkg.2[i].1)
+}
+
+/// `packageImports`: which name each stdlib import is reachable by, across
+/// *every* file of the package.
+///
+/// It is package-wide because `go doc` resolves the `pkg` in `[pkg.Name]`
+/// package-wide. That also means a name bound to two different paths anywhere
+/// in the package is unusable in a doc link *everywhere* in it — upstream
+/// records those separately and skips them rather than guessing.
+#[derive(Default)]
+struct PackageImports {
+    import_as: HashMap<String, String>,
+    bad: std::collections::HashSet<String>,
+}
+
+impl PackageImports {
+    fn add(&mut self, file: &guff::ast::File) {
+        for imp in &file.imports {
+            let Some(path) = unquote_import_path(&imp.path.value) else {
+                continue;
+            };
+            let Some(pkg) = stdlib_package(&path) else {
+                continue;
+            };
+            let imported_as = match &imp.name {
+                // `.` and `_` bind no usable name, and upstream declines to
+                // support either.
+                Some(n) if n.name.is_empty() || n.name == "." || n.name == "_" => continue,
+                Some(n) => n.name.clone(),
+                None => pkg.1.to_string(),
+            };
+            if let Some(already) = self.import_as.get(&imported_as) {
+                if already != &path {
+                    self.bad.insert(imported_as);
+                    continue;
+                }
+            }
+            self.import_as.insert(imported_as, path);
+        }
+    }
+
+    /// `tryResolveImportPath`. `None` means "collides, skip"; an unimported
+    /// name resolves to itself, which is how a bare `bytes.Buffer` in a file
+    /// that never imports `bytes` is still found.
+    fn resolve<'a>(&'a self, pkg: &'a str) -> Option<&'a str> {
+        match self.import_as.get(pkg) {
+            Some(_) if self.bad.contains(pkg) => None,
+            Some(path) => Some(path.as_str()),
+            None => Some(pkg),
+        }
+    }
+}
+
+fn unquote_import_path(lit: &str) -> Option<String> {
+    let b = lit.as_bytes();
+    if b.len() >= 2 && ((b[0] == b'"' && b[b.len() - 1] == b'"') || (b[0] == b'`' && b[b.len() - 1] == b'`'))
+    {
+        Some(lit[1..lit.len() - 1].to_string())
+    } else {
+        None
+    }
+}
+
+fn potential_doclink_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"(?m)(?:^|\s)(\*?)([a-zA-Z_][a-zA-Z0-9_]*(?:/[a-zA-Z_][a-zA-Z0-9_]*)*)\.([a-zA-Z0-9_]+)(?:\.([a-zA-Z0-9_]+))?\b",
+        )
+        .unwrap()
+    })
+}
+
+/// `findPotentialDoclinks`: the spellings in the text that name a standard
+/// library symbol but are not bracketed.
+///
+/// A real doc link never matches: the printer renders it as `[pkg.Name]`, and
+/// the pattern requires the package name to follow start-of-line or a space,
+/// which `[` is not.
+///
+/// The leading `*` is captured and discarded, so `*bytes.Buffer` and
+/// `bytes.Buffer` are two instances of one finding. Returned sorted by the
+/// text to replace, which is upstream's `slices.SortedFunc` order.
+fn potential_doclinks(pi: &PackageImports, text: &str) -> Vec<(String, usize, StdlibSymbolKind)> {
+    let mut found: std::collections::BTreeMap<String, (usize, StdlibSymbolKind)> =
+        std::collections::BTreeMap::new();
+    for caps in potential_doclink_re().captures_iter(text) {
+        let pkg = caps.get(2).map_or("", |m| m.as_str());
+        let name1 = caps.get(3).map_or("", |m| m.as_str());
+        let name2 = caps.get(4).map_or("", |m| m.as_str());
+        if pkg.is_empty() || name1.is_empty() {
+            continue;
+        }
+        let Some(path) = pi.resolve(pkg) else {
+            continue;
+        };
+        let Some(entry) = stdlib_package(path) else {
+            continue;
+        };
+        let (original, symbol) = if name2.is_empty() {
+            (format!("{pkg}.{name1}"), name1.to_string())
+        } else {
+            (
+                format!("{pkg}.{name1}.{name2}"),
+                format!("{name1}.{name2}"),
+            )
+        };
+        let Some(kind) = stdlib_symbol(entry, &symbol) else {
+            continue;
+        };
+        found.entry(original).or_insert((0, kind)).0 += 1;
+    }
+    found
+        .into_iter()
+        .map(|(k, (count, kind))| (k, count, kind))
+        .collect()
+}
+
 /// Upstream's `docs` map — the package doc, plus every symbol's parent doc and
 /// own doc, with `ParentDoc` collected *before* the `Doc == nil` continue.
 ///
@@ -409,22 +570,21 @@ fn max_len_ignore_patterns() -> &'static [Regex] {
 /// `max_len.checkMaxLen` for one comment group.
 ///
 /// Returns `(index into group.list, rune length)` per over-long line; a `None`
-/// index means upstream fell back to reporting the whole group.
+/// index means upstream fell back to reporting the whole group. The lines
+/// measured are the *printed* ones, so a block the parser re-indents is
+/// measured re-indented.
+/// The doc reprinted through `go/doc/comment`, with some block kinds dropped.
 ///
-/// Two details the rule's name does not suggest:
+/// `max-len` and `require-stdlib-doclink` both measure this rather than the
+/// source text, and both drop `Code`; only the doclink rule also drops
+/// `Heading`, because doc links are not picked up in headings.
 ///
-/// - Code blocks are dropped and the *remainder is reprinted*, so the lines
-///   measured are `go/doc/comment`'s canonical rendering, not the source.
-/// - The `Doc` handed to the printer carries no links, so the link-definition
-///   block the printer would otherwise append is absent. Upstream builds a
-///   `linkDefsMap` a few lines earlier and never reads it; that dead map is
-///   the remnant of an older way of doing this, and porting it would filter
-///   lines that are already gone.
-fn max_len_violations(
-    group: &CommentGroup,
-    max_len: usize,
-    ignore: &[Regex],
-) -> Vec<(Option<usize>, usize)> {
+/// The `Doc` handed to the printer carries no links, so the link-definition
+/// block the printer would otherwise append is absent. Upstream builds a
+/// `linkDefsMap` in `max-len` and never reads it; that dead map is the
+/// remnant of an older way of doing this, and porting it would filter lines
+/// that are already gone.
+fn printed_without_code(group: &CommentGroup, drop_headings: bool) -> String {
     use guff::doc::comment::{Block, Doc, Parser, Printer};
 
     let parsed = Parser::default().parse(&group.text());
@@ -432,11 +592,23 @@ fn max_len_violations(
         content: parsed
             .content
             .into_iter()
-            .filter(|b| !matches!(b, Block::Code(_)))
+            .filter(|b| match b {
+                Block::Code(_) => false,
+                Block::Heading(_) => !drop_headings,
+                _ => true,
+            })
             .collect(),
         links: Vec::new(),
     };
-    let text = Printer.comment(&stripped).replace('\r', "");
+    Printer.comment(&stripped).replace('\r', "")
+}
+
+fn max_len_violations(
+    group: &CommentGroup,
+    max_len: usize,
+    ignore: &[Regex],
+) -> Vec<(Option<usize>, usize)> {
+    let text = printed_without_code(group, false);
 
     // A clone of the comment list, so a line repeated in the group matches a
     // *different* `ast.Comment` each time instead of collapsing onto the first.
@@ -492,6 +664,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         rules.contains("require-doc") && (require_public || require_private);
     let check_max_len = rules.contains("max-len");
     let max_len = options.max_len_length as usize;
+    let check_stdlib_doclink = rules.contains("require-stdlib-doclink");
 
     if !check_pkg_doc
         && !check_single
@@ -501,6 +674,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         && !check_require_pkg_doc
         && !check_require_doc
         && !check_max_len
+        && !check_stdlib_doclink
     {
         return Ok(None);
     }
@@ -508,6 +682,17 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let paths: Vec<_> = pass.pkg().compiled_go_files.clone();
     let fset = pass.fset().clone();
     let n = pass.files().len();
+
+    // Built from *every* file of the package, including the ones the rule's
+    // own `include-tests` would exclude: upstream walks `actx.Pass.Files`
+    // directly here, not the applicable-file iterator. Imports do not need the
+    // comment re-parse, so the production ASTs serve.
+    let mut pkg_imports = PackageImports::default();
+    if check_stdlib_doclink {
+        for i in 0..n {
+            pkg_imports.add(&pass.files()[i]);
+        }
+    }
 
     let mut pending: Vec<(u32, String)> = Vec::new();
     // `no-unused-link` collects comment groups into a *set* upstream, so a
@@ -517,6 +702,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let mut unused_link_seen: std::collections::HashSet<u32> = std::collections::HashSet::new();
     let mut deprecated_seen: std::collections::HashSet<u32> = std::collections::HashSet::new();
     let mut max_len_seen: std::collections::HashSet<u32> = std::collections::HashSet::new();
+    let mut stdlib_doclink_seen: std::collections::HashSet<u32> =
+        std::collections::HashSet::new();
     // package name → list of (pos, has_nonempty_doc) for single-pkg-doc
     let mut pkg_docs: HashMap<String, Vec<(u32, bool)>> = HashMap::new();
     // package name → (position of the *first* file's package identifier, whether
@@ -747,6 +934,37 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         continue;
                     };
                     pending.push((pos, format!("godoc line is too long ({len} > {max_len})")));
+                }
+            }
+        }
+
+        // --- require-stdlib-doclink ---
+        //
+        // Pinned `include-tests: true`. Reports at the comment group, once per
+        // distinct spelling, in the order upstream sorts them.
+        if check_stdlib_doclink && !(is_test && !include_tests::REQUIRE_STDLIB_DOCLINK) {
+            for d in doc_set(&parsed, &symbols, false) {
+                let Some(dpos) = reparsed_pos(&fset, file.pos(), &re_fset, d.pos()) else {
+                    continue;
+                };
+                if !stdlib_doclink_seen.insert(dpos) {
+                    continue;
+                }
+                let text = printed_without_code(d, true);
+                for (original, count, kind) in potential_doclinks(&pkg_imports, &text) {
+                    let instances = if count > 1 {
+                        format!(" ({count} instances)")
+                    } else {
+                        String::new()
+                    };
+                    pending.push((
+                        dpos,
+                        format!(
+                            "text \"{original}\" should be replaced with \"[{original}]\" \
+                             to link to stdlib {}{instances}",
+                            kind.title()
+                        ),
+                    ));
                 }
             }
         }
@@ -1061,6 +1279,102 @@ mod tests {
         ));
         assert!(!max_len_violations(&g, 77, &[]).is_empty());
         assert!(max_len_violations(&g, 77, max_len_ignore_patterns()).is_empty());
+    }
+
+    /// The table is upstream's `stdlib.json`, transcribed. These four spot
+    /// checks are the shapes the lookup has to get right: a slashed path whose
+    /// package name is its last element, the one path where it is not
+    /// (`math/rand/v2` is `rand`), a method key, and a name that is not a
+    /// symbol.
+    #[test]
+    fn stdlib_table_lookups() {
+        let json = stdlib_package("encoding/json").expect("encoding/json");
+        assert_eq!(json.1, "json");
+        assert_eq!(stdlib_symbol(json, "Encoder"), Some(StdlibSymbolKind::Type));
+        assert_eq!(stdlib_symbol(json, "encoder"), None);
+        assert_eq!(stdlib_symbol(json, "Play"), None);
+
+        let io = stdlib_package("io").expect("io");
+        assert_eq!(
+            stdlib_symbol(io, "PipeWriter.Close"),
+            Some(StdlibSymbolKind::Method)
+        );
+        assert_eq!(stdlib_symbol(io, "PipeWriter.Closer"), None);
+
+        assert_eq!(stdlib_package("math/rand/v2").expect("rand/v2").1, "rand");
+        assert!(stdlib_package("example.com/nope").is_none());
+    }
+
+    fn imports_of(srcs: &[&str]) -> PackageImports {
+        let mut pi = PackageImports::default();
+        // The files have to stay alive while `add` reads them.
+        let parsed: Vec<_> = srcs.iter().map(|s| parse(s)).collect();
+        for (_fset, file) in &parsed {
+            pi.add(file);
+        }
+        pi
+    }
+
+    /// A name bound to two different paths *anywhere in the package* is
+    /// unusable in a doc link everywhere in it, because `go doc` resolves the
+    /// package part package-wide. Neither file can tell on its own, which is
+    /// why the map is built before any file is checked.
+    #[test]
+    fn colliding_alias_is_unusable_package_wide() {
+        let pi = imports_of(&[
+            "package p\n\nimport coll \"encoding/json\"\n",
+            "package p\n\nimport coll \"container/list\"\n",
+        ]);
+        assert_eq!(pi.resolve("coll"), None);
+        // An unimported name resolves to itself, which is how a bare
+        // `bytes.Buffer` is found in a file that imports nothing.
+        assert_eq!(pi.resolve("bytes"), Some("bytes"));
+    }
+
+    #[test]
+    fn alias_and_blank_imports() {
+        let pi = imports_of(&[
+            "package p\n\nimport (\n\tblah \"encoding/json\"\n\t_ \"sort\"\n\t. \"os\"\n)\n",
+        ]);
+        assert_eq!(pi.resolve("blah"), Some("encoding/json"));
+        // `_` and `.` bind no usable name, so neither is recorded — and `sort`
+        // still resolves, as itself.
+        assert_eq!(pi.resolve("sort"), Some("sort"));
+        assert_eq!(pi.resolve("os"), Some("os"));
+    }
+
+    /// A real doc link never matches: the printer renders it with its
+    /// brackets, and the pattern needs the package name to follow
+    /// start-of-line or a space.
+    #[test]
+    fn bracketed_doclinks_are_not_potential_doclinks() {
+        let pi = PackageImports::default();
+        assert!(potential_doclinks(&pi, "See [encoding/json.Encoder].").is_empty());
+        assert_eq!(
+            potential_doclinks(&pi, "See encoding/json.Encoder."),
+            vec![(
+                "encoding/json.Encoder".to_string(),
+                1,
+                StdlibSymbolKind::Type
+            )]
+        );
+    }
+
+    /// The leading `*` is captured and discarded, so the two spellings are two
+    /// instances of one finding — and findings come back sorted by the text
+    /// they replace, not by where they appear.
+    #[test]
+    fn star_collapses_and_results_are_sorted() {
+        let pi = PackageImports::default();
+        assert_eq!(
+            potential_doclinks(&pi, "one bytes.Buffer and *bytes.Buffer"),
+            vec![("bytes.Buffer".to_string(), 2, StdlibSymbolKind::Type)]
+        );
+        let both = potential_doclinks(&pi, "os.Args then bytes.Buffer");
+        assert_eq!(
+            both.iter().map(|(t, ..)| t.as_str()).collect::<Vec<_>>(),
+            vec!["bytes.Buffer", "os.Args"]
+        );
     }
 
     #[test]

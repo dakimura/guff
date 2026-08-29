@@ -1,0 +1,48 @@
+# Golden case: godoclint's `require-stdlib-doclink`, the last of the nine rules
+# `default: all` names.
+#
+# The rule looks for text that *would* be a doc link if it were bracketed, so
+# the fixture has to carry both spellings. A real `[encoding/json.Encoder]`
+# never matches: the printer renders it with its brackets, and the pattern
+# needs the package name to follow start-of-line or a space.
+#
+# What the fixture separates:
+#
+#  - `pkg.Name` vs `pkg.Recv.Name`, and the kind word each produces
+#    (type / function / variable / method);
+#  - `*bytes.Buffer` and `bytes.Buffer` are two instances of one finding, so
+#    the message gains " (2 instances)";
+#  - findings are sorted by the text they replace, not by where they appear;
+#  - names that look like doc links but are not symbols stay silent —
+#    `encoding/json.Play`, `fmt.PRINTLN`, `encoding/json.encoder`,
+#    `io.PipeWriter.Closer`;
+#  - code blocks *and headings* are dropped before the scan (headings are
+#    dropped only by this rule — `max-len` keeps them);
+#  - an import alias resolves to its path (`blah.Encoder` → encoding/json),
+#    while a name never imported resolves to itself, which is how a bare
+#    `bytes.Buffer` is found in a file that imports nothing;
+#  - a name bound to two different paths *anywhere in the package* is unusable
+#    in a doc link everywhere in it, so `coll.Encoder` is skipped — c.go and
+#    d.go alias `coll` differently and neither file can tell alone;
+#  - `_` imports contribute no name, but the bare path still resolves, so
+#    `sort.Ints` is reported;
+#  - `include-tests` is pinned **true**.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - godoclint
+  settings:
+    godoclint:
+      default: none
+      enable:
+        - require-stdlib-doclink
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

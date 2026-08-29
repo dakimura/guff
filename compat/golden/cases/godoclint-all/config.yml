@@ -1,0 +1,28 @@
+# Golden case: `godoclint.default: all` — every rule at once, on input that
+# trips several of them in the same file.
+#
+# The per-rule cases each disable everything else on purpose: a single-rule
+# fixture is the only way to be sure which rule answered. This one asks the
+# opposite question, and could not be written until the last rule landed —
+# with any rule missing it records a gap that no single change can close.
+#
+# What it adds over the sum of the per-rule cases is interaction: several
+# rules reporting at the *same* comment group, and the emitter's ordering and
+# collapsing of those.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - godoclint
+  settings:
+    godoclint:
+      default: all
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
