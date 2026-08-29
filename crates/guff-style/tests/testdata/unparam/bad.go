@@ -79,3 +79,26 @@ func useSectionByType(typ string) (string, secKind, error) {
 	}
 	return "", 0, nil
 }
+
+func runFn(f func()) {}
+
+// Upstream names a function literal after its enclosing function, the way
+// go/ssa does — `litIIFE$1`, and `$1$1` for one nested inside another. guff
+// printed the placeholder "<func literal>", which golangci-lint can never
+// emit, so every such finding was a guaranteed mismatch; nothing caught it
+// because this fixture had no literal in it at all.
+func litIIFE() {
+	_ = func(used int, unused string) int { return used + 1 }(1, "x")
+}
+
+// Silent in both: a literal passed as an argument has its signature fixed by
+// the callee.
+func litAsArg() {
+	runFn(func() {})
+}
+
+// Silent in both: `go` and `defer` fix the signature the same way.
+func litGoDefer() {
+	go func(unusedGo int) {}(1)
+	defer func(unusedDefer int) {}(2)
+}
