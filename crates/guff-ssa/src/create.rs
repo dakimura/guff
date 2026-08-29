@@ -174,24 +174,16 @@ fn ident_var(prog: &Program, id: &Ident) -> ObjectId {
         .expect("ident Var def should have object")
 }
 
-/// create_syntactic_params_from_decl populates parameters and named results
-/// using the names declared in `fd`'s syntax, binding each identifier to its
-/// type-checker `Var` object via [`ident_var`]. This matches go/ssa's
-/// `createSyntacticParams` and is required for generic instances, whose
-/// instantiated signature carries fresh `Var` objects that differ from the
-/// checker objects referenced by the origin syntax.
-pub fn create_syntactic_params_from_decl(
-    prog: &mut Program,
-    fid: FuncId,
-    entry: crate::ids::BlockId,
-    fd: &FuncDecl,
-) {
-    create_syntactic_params_from_functype(prog, fid, entry, fd.recv.as_ref(), &fd.ty);
-}
-
-/// create_syntactic_params_from_functype is the shared implementation for
-/// [`create_syntactic_params_from_decl`] and future `FuncLit` support.
-fn create_syntactic_params_from_functype(
+/// create_syntactic_params_from_functype binds parameters and results from the
+/// *syntax*, for both `FuncDecl`s and `FuncLit`s. (Go: `createSyntacticParams`.)
+///
+/// The results loop is the half that matters beyond naming: go/ssa declares a
+/// local for **every** result, `field.Names == nil` included, and
+/// `liftAlloc` then refuses to lift those locals in a function that defers.
+/// A result that never got a local cannot be held back that way, so its
+/// `return nil` stays an `*ssa.Const` and every consumer that tests for one —
+/// nilerr's `isReturnNil` among them — answers differently.
+pub(crate) fn create_syntactic_params_from_functype(
     prog: &mut Program,
     fid: FuncId,
     entry: crate::ids::BlockId,

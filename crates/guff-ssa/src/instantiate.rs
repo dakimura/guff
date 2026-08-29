@@ -294,7 +294,7 @@ impl Program {
             })
             .expect("FromSyntax instance requires origin syntax_decl");
 
-        crate::builder::build_syntactic_body(self, fid, Some(&fd), fd.body.as_ref());
+        crate::builder::build_syntactic_body(self, fid, Some((fd.recv.as_ref(), &fd.ty)), fd.body.as_ref());
         self.functions.get_mut(fid).subst = None;
     }
 }

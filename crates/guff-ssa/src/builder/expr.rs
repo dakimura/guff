@@ -253,7 +253,7 @@ impl<'a> Builder<'a> {
         // Build the anonymous function eagerly (re-borrows the program; the
         // parent Builder's current block is preserved in `self.block`). Its body
         // may capture enclosing variables, populating `anon.freevars`.
-        crate::builder::build_syntactic_body(self.prog, anon_fid, None, Some(&fl.body));
+        crate::builder::build_syntactic_body(self.prog, anon_fid, Some((None, &fl.ty)), Some(&fl.body));
 
         // No captures: the literal is just the function value.
         if self.prog.functions.get(anon_fid).freevars.is_empty() {

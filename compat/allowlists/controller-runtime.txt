@@ -71,7 +71,9 @@ controller-runtime guff-only pkg/webhook/server_test.go:215:nolintlint:directive
 # `var _ = Describe("…", func() { … })`: manager_test.go puts lines 61-2079 of
 # a 2,157-line file inside one such initializer.
 #
-# The nilerr entry below stays: it has a different root cause (guff's SSA gave
-# a FuncLit result locals only when *named*, so `return nil` stayed an
-# ssa.Const where go/ssa has a load) and is fixed separately.
-controller-runtime guff-only pkg/internal/controller/controller.go:395:nilerr:error is not nil (line 394) but it returns nil
+# The nilerr entry that stood here (pkg/internal/controller/controller.go:395)
+# is gone as of 2026-08-29. go/ssa declares a local for *every* result, named
+# or not, and `liftAlloc` refuses to lift result allocs in a function that
+# defers — so `return nil` there is a load, not an ssa.Const, and nilerr's
+# `isReturnNil` bails. guff gave a FuncLit result locals only when they were
+# named, so the closure kept a const and was reported.

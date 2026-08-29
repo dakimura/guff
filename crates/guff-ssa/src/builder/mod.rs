@@ -56,7 +56,7 @@ pub fn build_function(prog: &mut Program, fid: FuncId, fd: &FuncDecl) {
     }
     record_generic_params(prog, fid);
 
-    build_syntactic_body(prog, fid, Some(fd), fd.body.as_ref());
+    build_syntactic_body(prog, fid, Some((fd.recv.as_ref(), &fd.ty)), fd.body.as_ref());
 }
 
 /// Copies a function's receiver and type parameter lists from its signature onto
@@ -88,24 +88,26 @@ pub(crate) fn record_generic_params(prog: &mut Program, fid: FuncId) {
 /// can build the parameters). A `None` body (external/asm function) yields a
 /// parameterized function with no basic blocks.
 ///
-/// When `fd` is `Some`, parameters are bound from the declaration syntax via
-/// [`crate::create::create_syntactic_params_from_decl`] (go:
-/// `createSyntacticParams`); otherwise they come from the signature tuple
-/// ([`crate::create::create_syntactic_params`], used for `FuncLit`s).
+/// `syntax` is the function's `(receiver, FuncType)`, present for every
+/// function that has source: a `FuncDecl` passes its receiver list and type, a
+/// `FuncLit` passes `(None, &fl.ty)`. go/ssa calls `createSyntacticParams(recv,
+/// functype)` for both alike, and the *results* half of that is not optional —
+/// it declares a local for every result, named or not, which is what lets a
+/// function that defers keep its results addressable. Deriving results from the
+/// signature tuple instead cannot see an unnamed result's field, so a `FuncLit`
+/// built that way silently lost them.
 pub(crate) fn build_syntactic_body(
     prog: &mut Program,
     fid: FuncId,
-    fd: Option<&FuncDecl>,
+    syntax: Option<(Option<&guff::ast::FieldList>, &guff::ast::FuncType)>,
     body: Option<&guff::ast::BlockStmt>,
 ) {
     let body = match body {
         // External function (no body): create params by value, no entry block.
         None => {
-            if let Some(fd) = fd {
-                // Params-only external with syntax: still need param cells if we
-                // ever model asm bodies; for now fall through to signature path.
-                let _ = fd;
-            }
+            // Params-only external with syntax: still need param cells if we
+            // ever model asm bodies; for now fall through to signature path.
+            let _ = syntax;
             crate::create::create_params(prog, fid);
             return;
         }
@@ -120,8 +122,8 @@ pub(crate) fn build_syntactic_body(
         builder.set_block(Some(e));
         e
     };
-    if let Some(fd) = fd {
-        crate::create::create_syntactic_params_from_decl(prog, fid, entry, fd);
+    if let Some((recv, functype)) = syntax {
+        crate::create::create_syntactic_params_from_functype(prog, fid, entry, recv, functype);
     } else {
         crate::create::create_syntactic_params(prog, fid, entry);
     }
