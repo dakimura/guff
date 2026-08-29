@@ -16,6 +16,44 @@ use guff_types::TypeId;
 
 use crate::pass::Pass;
 
+/// The top-level declarations an SSA-based analyzer can actually reach.
+///
+/// `go/analysis/passes/buildssa` builds its `SrcFuncs` from a file's
+/// `*ast.FuncDecl`s and the function literals nested inside them — and from
+/// nothing else:
+///
+/// ```text
+/// for _, f := range pass.Files {
+///     for _, decl := range f.Decls {
+///         if fdecl, ok := decl.(*ast.FuncDecl); ok { … addAnons(fn) }
+/// ```
+///
+/// A literal in a package-level `var`/`const` initializer therefore belongs to
+/// the *synthesized* package `init`, which has no `FuncDecl` and never enters
+/// that list.
+///
+/// guff ports several `buildssa` linters as AST walks, and an AST walk rooted
+/// at the file sees those initializers — which is how `bodyclose`, `noctx`,
+/// `rowserrcheck` and `sqlclosecheck` each reported findings golangci-lint
+/// cannot produce. Ginkgo makes that the common case rather than a curiosity:
+/// a suite is written `var _ = Describe("…", func() { … })`, so an entire test
+/// file's bodies sit where those analyzers cannot look.
+///
+/// Root such a walk at each of these instead of at the file.
+///
+/// **This is not a property of SSA analysis in general — check the upstream
+/// before reaching for it.** A linter that builds its own `ssa.Program` and
+/// enumerates `ssautil.AllFunctions` sees the package initializer and every
+/// literal under it. `unparam` does exactly that
+/// (`mvdan.cc/unparam/check.check.go`), and reports on `init$1$1`; restricting
+/// its walk this way would delete true findings rather than false ones.
+pub fn src_func_decls(file: &guff::ast::File) -> impl Iterator<Item = &guff::ast::FuncDecl> {
+    file.decls.iter().filter_map(|d| match d {
+        guff::ast::Decl::FuncDecl(fd) => Some(fd),
+        _ => None,
+    })
+}
+
 /// Returns the fully-qualified name of a function or builtin call target,
 /// e.g. `"time.Sleep"` or `"len"`.
 ///

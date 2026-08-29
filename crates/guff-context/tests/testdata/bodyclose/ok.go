@@ -130,3 +130,48 @@ func closureClosesInNestedClosure(run func(func()), cleanup func(func())) {
 	})
 }
 
+
+// suite stands in for Ginkgo's Describe: a function taking a closure, called
+// from a package-level variable initializer.
+func suite(name string, body func()) bool { return true }
+
+// Everything below is unreachable for upstream bodyclose, which walks
+// go/analysis's `SrcFuncs` — built from a file's *ast.FuncDecl*s and their
+// nested literals, and from nothing else. A literal inside a package-level
+// `var` initializer belongs to the synthesized package `init`, which has no
+// FuncDecl, so no SSA-based analyzer ever reaches it.
+//
+// This is how a whole Ginkgo test file disappears: those are written as
+// `var _ = Describe("…", func() { … })`.
+var _ = suite("unclosed in a var initializer", func() {
+	resp, err := http.Get("https://example.com/varinit")
+	if err != nil {
+		return
+	}
+	_ = resp.StatusCode
+})
+
+var _ = suite("discarded in a var initializer", func() {
+	_, err := http.Get("https://example.com/varinit-blank")
+	_ = err
+})
+
+// The same through a nested literal, one level deeper.
+var _ = suite("nested", func() {
+	suite("inner", func() {
+		resp, err := http.Get("https://example.com/varinit-nested")
+		if err != nil {
+			return
+		}
+		_ = resp.StatusCode
+	})
+})
+
+// A `const` block cannot hold a closure, but a package-level var with an
+// explicit type can, and so can a grouped `var (...)`.
+var (
+	_ = suite("grouped", func() {
+		resp, _ := http.Get("https://example.com/varinit-grouped")
+		_ = resp
+	})
+)

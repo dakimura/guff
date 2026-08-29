@@ -448,7 +448,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     let mut pending: Vec<(u32, String)> = Vec::new();
     for file in pass.files() {
-        preorder(NodeRef::File(file), |n| {
+        // Rooted at each `FuncDecl`, not at the file: `buildssa` builds
+        // `SrcFuncs` from those alone, so a literal in a package-level `var`
+        // initializer — every Ginkgo suite — is invisible upstream.
+        // See [`code::src_func_decls`].
+        for top in guff_analysis::code::src_func_decls(file) {
+            preorder(NodeRef::FuncDecl(top), |n| {
             match n {
                 NodeRef::FuncDecl(fd) => {
                     if func_returns_target(&fd.ty) {
@@ -467,7 +472,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 _ => {}
             }
             true
-        });
+            });
+        }
     }
 
     for (pos, msg) in pending {

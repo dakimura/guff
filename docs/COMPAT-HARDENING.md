@@ -16285,3 +16285,90 @@ golden ケースの `c.go` / `d.go` は `coll` を `encoding/json` と
 
 `godoclint.default: all` の **9 規則すべて**が動く。
 `compat/golden` は godoclint だけで **11 ケース**。
+
+### 2026-08-29（続き 99）— **package 変数の初期化子は、SSA linter からは見えない**。4 つが同じ穴を踏んでいた
+
+`compat/allowlists/controller-runtime.txt` に「**まだ誰も診ていない**」と書かれた
+2 行から始めた。片方の `bodyclose` を追ったら、**4 つの linter に共通する 1 つの原因**だった。
+
+#### `buildssa.SrcFuncs` は `*ast.FuncDecl` からしか作られない
+
+```go
+for _, f := range pass.Files {
+    for _, decl := range f.Decls {
+        if fdecl, ok := decl.(*ast.FuncDecl); ok { … addAnons(fn) }
+```
+
+**それ以外は入らない。** package レベルの `var` 初期化子の中の関数リテラルは
+**合成された package `init`** に属し、`init` には `FuncDecl` が無いので
+`SrcFuncs` に入らない —— **`buildssa` を土台にする linter は原理的に到達できない**。
+
+guff はそれらを **AST 走査**で近似しており、走査の根が「ファイル」なので
+初期化子の中も見てしまう。
+
+#### なぜこれが珍しい話ではないか —— Ginkgo
+
+Ginkgo のスイートは **`var _ = Describe("…", func() { … })`** と書く。
+つまり**テストファイル 1 本の本体が丸ごと**、上流からは見えない場所に居る。
+controller-runtime の `pkg/manager/manager_test.go` は 2,157 行のうち
+61 行目から 2,079 行目までが 1 つの `var _ = Describe(...)` で、
+guff の `bodyclose` はそこから **8 件**報告していた —— golangci-lint は **0 件**。
+
+#### 4 つ全部で同じ
+
+`repro` 1 本で並べた（golangci **8 件** / guff **15 件**）:
+
+| linter | 初期化子の中の偽陽性 |
+|---|---|
+| `bodyclose` | 3 |
+| `noctx` | 3 |
+| `rowserrcheck` | 2 |
+| `sqlclosecheck` | 2 |
+
+**上流のバイナリを直接建てて確かめた**（`nilerr` / `bodyclose` を
+`singlechecker` で）—— golangci-lint のラッパの都合ではなく、
+analyzer 自身が報告しない。
+
+#### 直し方は 1 つ、置き場所も 1 つ
+
+`guff_analysis::code::src_func_decls(file)` を足し、4 つとも
+**走査の根をファイルから各 `FuncDecl` に**変えた。
+規則を 4 か所に書き写すと 4 か所で腐るので、doc コメントに上流のコードごと置いた。
+
+#### 測定
+
+| tier | 結果 |
+|---|---|
+| controller-runtime | guff **314 → 306** / P **95.5% → 98.0%** / R 100% / `[UNEXPECTED]` → **`[OK]`** |
+| OSS pr+nightly | **10/10 target `[OK]`** |
+| isolate | **116/116** |
+| golden | **204/204**（期待値は 1 バイトも動いていない） |
+
+**fixture は 4 つとも修正前の binary で落ちる**（`extra=` 4 / 3 / 1 / 1）。
+golden の期待値が動かないのが要点で、**「上流は元々報告していない」**を
+そのまま記録している。
+
+#### 台帳から 1 行消えた —— そして**この台帳は 8 件中 1 件しか載せていなかった**
+
+`controller-runtime guff-only …:1361:bodyclose:…` は直ったので**行ごと消した**
+（残す＝直った欠陥を許し続ける）。だが同じ形は**8 件**あり、台帳にあったのは
+**1 件だけ**だった —— 残り 7 件は「まだ誰も診ていない」とすら書かれていない。
+**台帳に載っている数は、欠陥の数ではない。**
+
+#### `unparam` は逆だった —— **SSA 一般の性質ではない**
+
+同じ形を試したら **golangci が報告して guff が黙る**（`init$1$1`）。
+`unparam` は `buildssa` を使わず**自前の `ssa.Program`** を建てて
+`ssautil.AllFunctions` を歩く（`mvdan.cc/unparam` `check/check.go:231`）ので、
+合成 `init` もその下のリテラルも**見える**。
+
+つまり今回の規則は「SSA を使う linter は初期化子が見えない」ではなく
+**「`buildssa` の `SrcFuncs` を土台にする linter が見えない」**。
+5 つ目に手を出す前に**上流がどの関数集合を歩くか読むこと** ——
+`unparam` に同じ制限を掛けたら**真の検出を消す**。
+helper の doc コメントにそう書いた。
+
+#### 残り
+
+`unparam` の逆向きの穴（初期化子の中を guff が見ていない）は**別件で未修正**。
+`nilerr` の `(unknown)` 文言と Phi 行の dedup も残っている。

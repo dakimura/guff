@@ -221,7 +221,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let msgs = ng_messages();
     let mut pending = Vec::new();
     for file in pass.files() {
-        walk::preorder(NodeRef::File(file), |n| {
+        // Rooted at each `FuncDecl`, not at the file: `buildssa` builds
+        // `SrcFuncs` from those alone, so a literal in a package-level `var`
+        // initializer — every Ginkgo suite — is invisible upstream.
+        // See [`code::src_func_decls`].
+        for top in code::src_func_decls(file) {
+            walk::preorder(NodeRef::FuncDecl(top), |n| {
             let NodeRef::CallExpr(call) = n else {
                 return true;
             };
@@ -232,7 +237,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 pending.push((call.lparen.0 as u32, format!("{name} {msg}")));
             }
             true
-        });
+            });
+        }
     }
     for (pos, message) in pending {
         pass.reportf(pos, message);

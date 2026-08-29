@@ -9,7 +9,7 @@
 | isolate-staticcheck | 11 | 11 | 11 | 100.0% | 100.0% | 0 |
 | isolate-misspell | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | isolate-dogsled | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
-| isolate-nakedret | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
+| isolate-nakedret | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-whitespace | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-gochecknoglobals | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | isolate-gochecknoinits | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
@@ -47,7 +47,7 @@
 | isolate-err113 | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
 | isolate-errorlint | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
 | isolate-predeclared | 9 | 9 | 9 | 100.0% | 100.0% | 0 |
-| isolate-noinlineerr | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
+| isolate-noinlineerr | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | isolate-bidichk | 9 | 9 | 9 | 100.0% | 100.0% | 0 |
 | isolate-containedctx | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-iotamixing | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
@@ -55,7 +55,7 @@
 | isolate-exhaustive | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-exhaustruct | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | isolate-funcorder | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
-| isolate-embeddedstructfieldcheck | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
+| isolate-embeddedstructfieldcheck | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | isolate-mnd | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-cyclop | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-gocyclo | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
@@ -80,7 +80,7 @@
 | isolate-rowserrcheck | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-sqlclosecheck | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-contextcheck | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
-| isolate-wsl | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
+| isolate-wsl | 7 | 7 | 7 | 100.0% | 100.0% | 0 |
 | isolate-gocritic | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
 | isolate-revive | 7 | 7 | 7 | 100.0% | 100.0% | 0 |
 | isolate-gosec | 8 | 8 | 8 | 100.0% | 100.0% | 0 |
@@ -93,7 +93,7 @@
 | isolate-testpackage | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-paralleltest | 5 | 5 | 5 | 100.0% | 100.0% | 0 |
 | isolate-tparallel | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
-| isolate-usetesting | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
+| isolate-usetesting | 7 | 7 | 7 | 100.0% | 100.0% | 0 |
 | isolate-gocheckcompilerdirectives | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-gochecksumtype | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-gosmopolitan | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
@@ -115,7 +115,7 @@
 | isolate-arangolint | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-nolintlint | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-gomodguard_v2 | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
-| isolate-wsl_v5 | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
+| isolate-wsl_v5 | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
 | isolate-golines | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-swaggo | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 
@@ -167,7 +167,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| nakedret | 2 | 2 | 2 | 100.0% | 100.0% |
+| nakedret | 3 | 3 | 3 | 100.0% | 100.0% |
 
 ## isolate-whitespace
 
@@ -395,7 +395,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| noinlineerr | 1 | 1 | 1 | 100.0% | 100.0% |
+| noinlineerr | 4 | 4 | 4 | 100.0% | 100.0% |
 
 ## isolate-bidichk
 
@@ -443,7 +443,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| embeddedstructfieldcheck | 3 | 3 | 3 | 100.0% | 100.0% |
+| embeddedstructfieldcheck | 4 | 4 | 4 | 100.0% | 100.0% |
 
 ## isolate-mnd
 
@@ -593,7 +593,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| wsl | 3 | 3 | 3 | 100.0% | 100.0% |
+| wsl | 7 | 7 | 7 | 100.0% | 100.0% |
 
 ## isolate-gocritic
 
@@ -671,7 +671,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| usetesting | 6 | 6 | 6 | 100.0% | 100.0% |
+| usetesting | 7 | 7 | 7 | 100.0% | 100.0% |
 
 ## isolate-gocheckcompilerdirectives
 
@@ -803,7 +803,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| wsl_v5 | 4 | 4 | 4 | 100.0% | 100.0% |
+| wsl_v5 | 6 | 6 | 6 | 100.0% | 100.0% |
 
 ## isolate-golines
 
