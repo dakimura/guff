@@ -16426,3 +16426,74 @@ guff の SSA は既に go/ssa と同じ規則で名前を作っている
 上流は SSA の call graph を見て**本当に脱出したときだけ**固定する。
 module header が DEFERRED と明記している `signRequiredBy` / `paramsRequiredBy` の
 移植が要る。**再現は `repro-unparam3` の L2 / L4**。
+
+### 2026-08-29（続き 102）— `nilerr` の行ヒント。**Go と Rust のスライス表記の差**、そして**直せると分かったのに出さなかった 1 件**
+
+続き 101 で残りに挙げた `nilerr` の `(unknown)` を測ったら **2 件**だった。
+**片方だけ出す。**
+
+| 形 | 上流 | guff |
+|---|---|---|
+| phi（2 分岐の合流） | `(lines [39 41])` | **`(lines [39, 41])`** |
+| closure が `err` を捕捉 | `(line 18)` | **`(unknown)`** |
+
+#### 出す方: スライスの表記そのもの
+
+上流は `[]int` に `fmt.Sprintf("lines %v", …)`。Go の `%v` は**空白区切り**で
+`[39 41]`、Rust の `{:?}` は `[39, 41]`。**カンマ 1 つで、
+複数行ヒントを持つ finding は全部外れる。**
+
+空集合の分岐も同じ `%v` を通るので `lines []`。guff は `"unknown"` という
+**上流に存在しない語**を出していた —— そこも直した。
+
+#### 出さない方: **原因は分かっている。SA5011 が道を塞いでいる**
+
+`emitLoad` は go/ssa でも位置を設定しない。なのに上流は `(line 18)` を出す。
+「load に位置は無いはず」で止めず、**上流の nilerr に print を入れて走らせた**:
+
+```
+TRACE v=*ssa.UnOp t0 pos=2621779 valid=true
+```
+
+出どころは `lvalue.go` の、`emitLoad` の**次の行**:
+
+```go
+load := emitLoad(fn, a.addr)
+load.pos = a.pos          // ← guff の Address::load はこれを捨てていた
+```
+
+honnef の IR も同じ（`emitLoad(fn, addr, source)`）。**両方が位置を付ける**ので
+guff の SSA が間違っている。直して測ったら **nilerr は 4 形すべて一致**した。
+
+**それでも出さない。** OSS tier が grafana で落ちた:
+
+```
+grafana: guff=2 golangci=0 both=0 P=0.0% [UNEXPECTED]
+  +guff pkg/storage/unified/testing/storage_backend.go:1777:staticcheck:possible nil pointer dereference
+  +guff pkg/tests/apis/provisioning/repository/repository_test.go:2798:staticcheck:possible nil pointer dereference
+```
+
+`sa5011.rs` に**位置の無い診断を落とす guard**がある:
+
+```rust
+// Hybrid SSA sometimes yields NoPos (0); never emit unlocated diagnostics.
+if pos == 0 { continue; }
+```
+
+load に位置が付くと**この抑制が外れ**、SA5011 が元から持っていた過剰報告が表に出る。
+isolate は 116/116 なので**影響はこの 1 check に限られる**。
+
+**間違った文字列 1 つを、間違った finding 2 つと交換することになるので出さない。**
+SA5011 の `lookup_maybe_nil` / `cannot_be_nil_source` を上流と突き合わせる作業が要り、
+nil 解析に急いだ変更を入れるのは偽陽性を出す近道。
+
+`bad.go` に closure の形は**入れていない** —— 入れると
+**この変更では閉じられない gap を golden に記録する**ことになる（続き 92 の教訓）。
+代わりに fixture のコメントに「なぜ無いか」と**塞いでいるものの名前**を書いた。
+
+#### 測定
+
+fixture は修正前の binary で `missing=1 extra=2`
+（1 件が両側に立つ＝文言だけの差の署名、もう 1 件は続き 100 の `ok.go`）、修正後 **6/6**。
+golden 204/204、OSS pr+nightly 10/10、compat python 200、
+workspace 275 スイート / 3,33x テスト。
