@@ -256,6 +256,34 @@ fn uses_error_value(func: &Function, bid: BlockId, err_val: Value) -> bool {
 /// Position of an SSA value for line hints (gostaticanalysis/nilerr
 /// `getValueLineNumbers`). Peels `Extract` to the defining call/tuple.
 fn value_pos(prog: &Program, func: &Function, v: Value) -> guff::Pos {
+    // Upstream is one step, not a walk:
+    //
+    //     value := v
+    //     if extract, ok := value.(*ssa.Extract); ok { value = extract.Tuple }
+    //     pos := value.Pos()
+    //
+    // So the value's *own* position wins whenever it has one. That matters for
+    // an `err` captured by a closure: go/ssa loads it through a FreeVar and
+    // puts the identifier's position on the load, while peeling the load down
+    // to the FreeVar — which carries no position — printed "unknown", a word
+    // upstream has no way to produce.
+    {
+        let mut cur = v;
+        if let Value::Instr(iid) = cur {
+            if let InstrData::Extract(ex) = func.instrs.get(iid) {
+                cur = ex.tuple;
+            }
+        }
+        if let Value::Instr(iid) = cur {
+            let pos = func.pos(iid);
+            if pos.is_valid() {
+                return pos;
+            }
+        }
+    }
+
+    // guff's SSA does not always carry a position where go/ssa does. Peeling
+    // the value chain is a fallback for those, not the rule.
     let mut cur = v;
     for _ in 0..8 {
         let Value::Instr(iid) = cur else {
@@ -343,9 +371,18 @@ fn err_line_hint(
     let mut seen = HashMap::new();
     collect_value_lines(fset, prog, func, err_val, &mut seen, &mut lines);
     match lines.as_slice() {
-        [] => "unknown".into(),
+        // Upstream builds this with `fmt.Sprintf("lines %v", errLines)` on a
+        // `[]int`, and Go renders a slice space-separated: `lines [39 41]`.
+        // Rust's `{:?}` puts commas in, which no golangci-lint output has, so
+        // every multi-line hint was a guaranteed mismatch.
+        //
+        // The empty case takes the same branch upstream — `%v` of a nil slice
+        // is `[]` — so it prints `lines []`, not a word of our own choosing.
         [one] => format!("line {one}"),
-        many => format!("lines {many:?}"),
+        many => {
+            let joined: Vec<String> = many.iter().map(|l| l.to_string()).collect();
+            format!("lines [{}]", joined.join(" "))
+        }
     }
 }
 
