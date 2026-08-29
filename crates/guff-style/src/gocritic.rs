@@ -1035,7 +1035,7 @@ fn is_default_literal_type(pass: &Pass<'_>, typ: TypeId) -> bool {
     )
 }
 
-fn check_append_assign(assign: &AssignStmt, pending: &mut Pending) {
+fn check_append_assign(pass: &Pass<'_>, assign: &AssignStmt, pending: &mut Pending) {
     if assign.tok != Some(Token::ASSIGN) && assign.tok != Some(Token::DEFINE) {
         return;
     }
@@ -1077,9 +1077,24 @@ fn check_append_assign(assign: &AssignStmt, pending: &mut Pending) {
         // Upstream go-critic only compares when the append base is an Ident,
         // SelectorExpr, IndexExpr, or SliceExpr — not CompositeLit / CallExpr
         // (e.g. `options := append([]string{""}, …)` is intentional).
+        // `matchSlices` compares against `ast.Unparen(y)`, so the parentheses
+        // in `*s = append((*s)[:i], (*s)[i+1:]...)` — the standard "delete
+        // element i" idiom, and how scaleway-cli writes it — do not make the
+        // two sides differ. guff compared the parenthesized form and reported.
         match &call.args[0] {
             Expr::SliceExpr(s) => {
-                if !exprs_equal(lhs, s.x.as_ref()) {
+                // "Arrays are frequently used as scratch storages": a slice
+                // *of an array* is never the same object as the destination,
+                // so comparing them can only ever produce a false positive.
+                // `var buf [8]byte; x := append(buf[:0], …)` is the shape, and
+                // it is written on purpose to keep the backing store on the
+                // stack — connect-go, fiber (twice) and Go's own standard
+                // library all do it. This exception is the whole reason
+                // upstream's checker needs type information at all.
+                if is_array_typed(pass, s.x.as_ref()) {
+                    continue;
+                }
+                if !exprs_equal(lhs, unparen(s.x.as_ref())) {
                     report(
                         pending,
                         call.fun.pos().0 as u32,
@@ -1089,7 +1104,7 @@ fn check_append_assign(assign: &AssignStmt, pending: &mut Pending) {
                 }
             }
             Expr::IndexExpr(_) | Expr::Ident(_) | Expr::SelectorExpr(_) => {
-                if !exprs_equal(lhs, &call.args[0]) {
+                if !exprs_equal(lhs, unparen(&call.args[0])) {
                     report(
                         pending,
                         call.fun.pos().0 as u32,
@@ -2521,6 +2536,22 @@ fn check_arg_order(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
         "argOrder",
         format!("{lit_t} and {s_t} arguments order looks reversed"),
     );
+}
+
+/// Is `expr`'s type an array (not a slice)?
+///
+/// `appendAssign`'s scratch-storage exception, which upstream spells
+/// `c.ctx.TypeOf(y.X).(*types.Array)`. Unaliased first, the way every other
+/// type test here is: a `type Buf = [8]byte` alias is still an array.
+fn is_array_typed(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    matches!(artifacts.types.get(typ), TypeData::Array(_))
 }
 
 fn type_of(pass: &Pass<'_>, expr: &Expr) -> Option<TypeId> {
@@ -9210,7 +9241,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 }
                 NodeRef::AssignStmt(a) => {
                     if scoped("appendAssign", a.tok_pos) {
-                        check_append_assign(a, &mut pending);
+                        check_append_assign(pass, a, &mut pending);
                     }
                     if enabled(&set, "assignOp") {
                         check_assign_op(pass, a, &mut pending);
