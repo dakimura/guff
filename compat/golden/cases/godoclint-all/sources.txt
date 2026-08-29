@@ -1,0 +1,10 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+# One directory per package clause: these fixtures do not compile together.
+basic/bad.go        crates/guff-comment/tests/testdata/godoclint/bad.go
+links/links.go      crates/guff-comment/tests/testdata/godoclint/links.go
+deprecated/a.go     crates/guff-comment/tests/testdata/godoclint/deprecated/a.go
+doclink/a.go        crates/guff-comment/tests/testdata/godoclint/doclink/a.go
+doclink/b.go        crates/guff-comment/tests/testdata/godoclint/doclink/b.go
+requiredoc/good.go  crates/guff-comment/tests/testdata/godoclint/requiredoc/good.go
+maxlen/a.go         crates/guff-comment/tests/testdata/godoclint/maxlen/a.go

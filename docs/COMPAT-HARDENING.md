@@ -16214,3 +16214,74 @@ link 定義ブロックは出ない。上流はこの数行手前で `linkDefsMa
 #### 残り
 
 `require-stdlib-doclink` の 1 つ。上流の `stdlib.json` を vendor する。
+
+### 2026-08-28（続き 98）— `require-stdlib-doclink`。**9 規則が閉じた。索引は再生成せず vendor した**
+
+`default: all` の最後の 1 つ。
+
+#### 上流の `stdlib.json` は「再生成できる」が「してはいけない」
+
+godoc-lint の `internal/gen` は**標準ライブラリのソースツリーに対して走らせる**
+analyzer で、結果の JSON を**リポジトリに checked in している**。
+この規則は「索引に載っている symbol」だけを報告するので、
+**手元の Go で再生成すると、上流が使ったのとは違う Go リリースで
+違う finding 集合になる**。
+
+なので `scripts/gen-godoclint-stdlib.py` は**転記しかしない** ——
+godoc-lint のモジュールパスを受け取って
+`crates/guff-comment/src/godoclint_stdlib.rs` を書くだけ（175 package /
+10,934 symbol / 305KB）。生成ファイルの見出しに
+「**Go が動いたときではなく godoc-lint が動いたときに上げる**」と書いた。
+
+`SymbolKindNA`（`""`・題は "symbol"）は**どの released JSON にも 1 件も無い**ので
+Rust の enum に変種を置かず、**生成器が未知の kind で落ちる**ようにした ——
+将来の上流変更が「静かに間違った診断」ではなく「再生成の失敗」になる。
+
+#### 「かっこを付ければ doc link になる文字列」を探す規則
+
+正規表現は `(?:^|\s)(\*?)(pkg)\.(name)(?:\.(name2))?\b`。
+**本物の doc link は決して当たらない** —— Printer が `[encoding/json.Encoder]`
+と角かっこ付きで印字し、パターンは package 名の前に行頭か空白を要求するので
+`[` では始まれない。移植で一番効いた性質がこれで、
+「かっこを剥がしてから比べる」実装は**全部の正しい doc link を報告する**。
+
+`Heading` も落とす —— **`max-len` は落とさない**。同じ「印字し直す」下ごしらえで、
+**落とすブロックが規則ごとに違う**。
+
+#### import 解決は**パッケージ全体**
+
+`go doc` は `[pkg.Name]` の `pkg` を**パッケージ横断**で解決するので、
+別々のファイルが同じ別名を別のパスに束ねていると
+**そのパッケージのどこでもその別名は doc link にならない**。
+上流はそれを別集合に記録して**推測せず飛ばす**。
+
+だから index はファイルループの**前に**全ファイルから組む。
+golden ケースの `c.go` / `d.go` は `coll` を `encoding/json` と
+`container/list` に束ねていて、**どちらのファイルも単独では判定できない**。
+
+`_` import は名前を出さないが**素のパスは解決する**ので `sort.Ints` は報告される
+（`tryResolveImportPath` は未知の名前を**そのまま返す**）——
+これが「`bytes` を import していないファイルの `bytes.Buffer`」が
+見つかる仕組みでもある。
+
+#### `default: all` の golden をようやく置けた
+
+規則ごとの単独ケースは「どの規則が答えたか」を確かめるために
+**他を全部切る**。今回はその逆を訊くケースを足した ——
+**最後の規則が入るまで置けなかった**（1 つでも欠けていると
+**1 つの修正では閉じられない gap を記録する**ことになる）。
+
+`godoclint-all`：7 ファイル・**51 キー・全一致**。
+規則ごとのケースの和にならないものを測っている ——
+**同じ comment group に複数の規則が報告する**ときの順序と畳み方。
+続き 95 の binary では `missing=18`、続き 94 の binary では
+`missing=21 / extra=1`。
+
+（fixture は package 節ごとにディレクトリを分けた。1 ディレクトリに入れると
+`found packages example and links` で**typecheck 1 件だけが記録される** ——
+「0 件の golden」の別形で、**51 キーのはずが 1 キー**になっていた。）
+
+#### 到達点
+
+`godoclint.default: all` の **9 規則すべて**が動く。
+`compat/golden` は godoclint だけで **11 ケース**。
