@@ -23,9 +23,10 @@ Fixture / synthetic targets still use `compat/standard.yml` /
 
 | Tier | When | Repos |
 |------|------|-------|
-| `pr` | PR CI (`compat` oss-pr) | gin, caddy, helm, k9s, cobra |
+| `pr` | PR CI (`compat` oss-pr) | gin, caddy, helm, k9s, cobra, go-client |
 | `nightly` | Nightly showcase | consul, grafana (`./pkg/... ./apps/advisor/...`), containerd (`./pkg/...`) |
-| `weekly` | Defined only (no CI yet) | vault (`./helper/...`), kubernetes (apimachinery + `hack/golangci.yaml`) |
+| `weekly` | Sunday CI (`compat-weekly` oss-weekly) | controller-runtime, vault (`./helper/...`), kubernetes (apimachinery + `hack/golangci.yaml`) |
+| `hunt` | Nothing — run by hand ([`hunt.json`](hunt.json), `compat/hunt.sh`) | 24 repos; a discovery tier that is *expected* to carry open diffs |
 
 moby/moby is excluded: public tree has no root `go.mod` (Docker-image builds only).
 
@@ -50,6 +51,7 @@ against each default branch.
 | istio/istio | **none** | Same — no config on the default branch; 296MB besides. |
 | cockroachdb/cockroach | **none** | Same — no config on the default branch; 2.6GB checkout. |
 | moby/moby | yes (370 lines) | Public tree has no root `go.mod` (Docker-image builds only). Unrelated to v2. |
+| pulumi/pulumi | yes (273 lines) | **Neither tool can run it.** The config declares two `linters.settings.custom` module plugins (`requiredfield`, `noosexit`), and a stock golangci-lint binary refuses to start: `build linters: plugin(requiredfield): plugin "requiredfield" not found`. Measuring compat needs a config both tools accept; this one needs a custom-built binary on each side first. It is what found the guff bug in `compat/reject/cases/custom-module-plugin-missing` (2026-08-29). |
 | gofiber/fiber | **yes** (307 lines) | **No longer a valid exclusion** — adopt or restate. See `candidates-100.md`. |
 | ethereum/go-ethereum | **yes** (96 lines) | **No longer a valid exclusion** on v2 grounds; 234MB and build tags are the remaining question. |
 
@@ -72,8 +74,11 @@ the decision (cgo needs a C toolchain in CI; golangci-lint emits nothing at all
 for `.s` files; non-ASCII identifiers exist in no mainstream Go repo and are
 covered by `compat/golden/cases/nonascii` instead).
 
-Only `pr` and `nightly` count as covering a shape: `weekly` is defined but no
-job runs it, and a gate nobody runs cannot notice a regression.
+`pr`, `nightly` and `weekly` count as covering a shape; `hunt` does not. The
+rule is that a gate nobody runs cannot notice a regression, so the list follows
+CI rather than the inventory: `weekly` joined it on 2026-08-30 when
+`.github/workflows/compat-weekly.yml` started running the tier, and `hunt`
+stays out because nothing gates it and its targets carry open diffs by design.
 
 The three most recent additions and what each one bought:
 
@@ -82,6 +87,7 @@ The three most recent additions and what each one bought:
 | k9s | A config that names a linter in **both** `enable` and `disable`, and `gocritic.enabled-tags` (the only corpus repo that sets it) | 4 bugs — see COMPAT-HARDENING §4 |
 | cobra | `go 1.15`, the oldest directive in the corpus (every other target is ≥ 1.24) | 1 bug (`%-36[1]s`) |
 | grafana `./apps/advisor/...` | One run spanning two modules of a `go.work` workspace | — |
+| go-client (qdrant) | Eight linter keys no other target enables — `cyclop`, `exhaustruct`, `gochecknoglobals`, `gocognit`, `inamedparam`, `nestif`, `nonamedreturns`, `testpackage` | — (0 diffs on the first run; promoted from `hunt` to `pr` the same day, 2026-08-30) |
 
 OSS inventory, tiers, and clone/warm live in [`../corpus/`](../corpus/).
 

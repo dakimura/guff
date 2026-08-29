@@ -129,5 +129,53 @@
     "build_tags": [
       "noassets"
     ]
+  },
+  {
+    "name": "cri-o",
+    "url": "https://github.com/cri-o/cri-o.git",
+    "ref": "v1.36.4",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
+  },
+  {
+    "name": "pipeline",
+    "url": "https://github.com/tektoncd/pipeline.git",
+    "ref": "v1.15.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
+  },
+  {
+    "name": "fiber",
+    "url": "https://github.com/gofiber/fiber.git",
+    "ref": "v3.5.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
+  },
+  {
+    "name": "scaleway-cli",
+    "url": "https://github.com/scaleway/scaleway-cli.git",
+    "ref": "v2.61.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
+  },
+  {
+    "name": "connect-go",
+    "url": "https://github.com/connectrpc/connect-go.git",
+    "ref": "v1.20.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "10m"
+  },
+  {
+    "name": "velero",
+    "url": "https://github.com/velero-io/velero.git",
+    "ref": "v1.18.2",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
   }
 ]

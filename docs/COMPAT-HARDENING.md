@@ -16497,3 +16497,163 @@ fixture は修正前の binary で `missing=1 extra=2`
 （1 件が両側に立つ＝文言だけの差の署名、もう 1 件は続き 100 の `ok.go`）、修正後 **6/6**。
 golden 204/204、OSS pr+nightly 10/10、compat python 200、
 workspace 275 スイート / 3,33x テスト。
+
+---
+
+### 2026-08-30（続き 103）— コーパスを 27 → 34 に。**最初の 7 本で、クラッシュ 1 件と「上流が起動しない config」1 件が出た**
+
+`corpus/candidates-100.md` の 73 本拡張リストのうち **Group A の 8 本**（linter キーの穴を全部埋める側）を
+`corpus/hunt.json` に入れて初めて回した。結果は**リストが約束していたもの（新しい linter キー）ではなく、
+Group B に期待されていたもの（他人が書いた新しいコードの形）**のほうが当たった。
+
+| target | guff | golangci | both | guff-only |
+|---|--:|--:|--:|---|
+| go-client (qdrant) | 2 | 2 | 2 | **0 —— 一発一致** |
+| scaleway-cli | 7 | 0 | 0 | 7 |
+| connect-go | 47 | 37 | 37 | 10 |
+| velero | 37 | 0 | 0 | 37 |
+| fiber | 42 | 0 | 0 | 42 |
+| pipeline (tektoncd) | — | — | — | **guff がクラッシュ** |
+| cri-o | 115 | 1 | 0 | darwin では測れない（下記） |
+| pulumi | — | — | — | **上流が起動を拒む config**（下記） |
+
+**golangci 側が 0 なのは異常ではない**: これらは自分の CI で自分の config を通しているリポジトリなので、
+**0 が正常**であり、**guff が出した分はそのまま偽陽性**である。この tier を足すまで、
+「上流が 0 と言う実コード」という形の入力はコーパスに 2 つ（caddy と grafana）しか無かった。
+
+#### 1. `pulumi` —— 上流が起動しない config を、guff は走らせていた
+
+`linters.settings.custom` に `type: module` のプラグインを 2 つ宣言している。stock の golangci-lint は
+**起動しない**（`build linters: plugin(requiredfield): plugin "requiredfield" not found`、exit 3）。
+guff は `guff linters` で**両方を「有効な linter」として並べ**、`run` は
+「unknown linters」という**別の理由**で拒んでいた。理由が違うと**ユーザーの次の一手が変わる**
+——「その名前を消せ」と「カスタムバイナリを建てろ」は別の作業である。
+
+上流を測って分かった細部が 2 つあり、どちらも推測では逆に書いていた:
+
+- **`enable` に無くても拒む**。宣言されたプラグインは全部 build されるので、
+  `custom` に書いて `enable` に書かない config でも上流は止まる。guff は**素通しで lint していた**
+  —— reject tier が存在する理由そのもの（「config が求めた linter を誰も持っていないのに、
+  終了コードは 0」）の 3 例目で、`unknown-linter` の修正では**塞がらなかった**。
+  名前が `settings.custom` にある以上、それは unknown ではなく**宣言済み**だからである。
+- **unknown-linter より先に出る**。存在しない linter 名と欠けたプラグインを同じ `enable` に入れると、
+  上流は**プラグインのほうを**言う。linter 名の妥当性はプラグインを build し終えるまで確定しないので、
+  guff でもこの検査は `run_cmd` の unknown 検査より前、共有ローダ（`load_run_config`）に置いた。
+
+上流は Go の map を回すので**2 つ欠けていると名前はどちらか**（pulumi で 6 回中 noosexit 4 / requiredfield 2）。
+guff は**ソート順で最初の 1 つ**を出す（メッセージが実行ごとに変わらないほうがよい）。
+`compat/reject/cases/custom-module-plugin-missing` は同じ理由で**プラグインを 1 つしか宣言していない**。
+
+**pulumi はターゲットから外した**。両ツールが受け付ける config が無ければ finding 集合の比較は成立しない。
+`candidates-100.md` の「新しいキー 4 つ」のうち `custom` は**キーではなく宣言ブロック**であり、
+`noosexit` / `requiredfield` はそのリポジトリ自身のプラグインだった —— 
+survey が `custom` をカバレッジとして数えていたのは誤りで、そこも訂正した。
+実キーとして残るのは `paralleltest` 1 つで、これはまだ未踏のままである。
+
+#### 2. `tektoncd/pipeline` —— スタックオーバーフロー。**深さではなく循環だった**
+
+`./...` で `thread has overflowed its stack` で abort。ユーザーから見えるのはこの 1 行だけで、
+finding は 1 件も出ない。切り分けると **`contextcheck` 単独**で再現し、しかも
+`./pkg/...`・`./cmd/...`・`./test/...`・`./internal/...` は**どれも単独では落ちず**、
+2 つ組でも落ちず、`./...` でだけ落ちた。
+
+macOS の crash report を symbolicate すると**スタックは 25 フレームしかなく**、
+`guff_runner::action::mk_action` が 10 段で `paths.sort()` の中で死んでいた。
+25 フレームで 8 MiB を使い切るのは変なので**フレームが巨大なのか、レポートが切れているのか**を
+決めるために**スタックを 128 MiB にして測り直したら、やはり落ちた** —— これで
+「深いグラフ」ではなく**循環**だと確定した。再帰の経路を出すと答えは 2 ノードだった:
+
+```
+contextcheck::.../pkg/pod [.../pkg/pod.test]
+contextcheck::.../test    [.../test.test]      ← 交互に無限
+```
+
+**この循環は本物の import グラフには無い**。go/packages はテストバイナリごとに変種を作るので
+`test [pkg/pod.test]` と `test [test.test]` は別ノードであり、go/analysis のアクショングラフが
+循環しないのはそのためである。guff は `filter_duplicate_packages` で
+**パスあたり 1 パッケージに畳んで**おり（畳んだ結果として残るのがテスト変種であることは
+`analyze_with_typed_imports` の冒頭コメントに既に書いてある）、その畳み込みが
+`pkg/pod [pkg/pod.test]` → `test [test.test]` → `pkg/pod [pkg/pod.test]` を閉じていた。
+`mk_action` のメモは**再帰から戻ってから**書くので、循環はヒットではなく無限再帰になる。
+
+**後ろ向き辺を落とす**ことで直した（`on_stack`）。循環のあるアクショングラフには**実行順序が存在しない**ので、
+「fact 依存を 1 本失う」の代案は「実行そのものを失う」しかない。しかも失う依存は
+**実グラフにも無い**もので、上流の `pkg/pod [pkg/pod.test]` が依存するのは
+`test [pkg/pod.test]` —— guff が一度も build しないパッケージである。
+
+**この tier を足すまで踏めなかった形**である: 循環には (a) 同一 module 内で相互に import する
+2 パッケージと (b) 両方に**テストファイルがある**ことの両方が要り、
+コーパスの他のどのターゲットの `./...` でも成立していなかった。
+
+#### 3. `cri-o` は darwin では測れない
+
+linux 専用のリポジトリで、darwin では**両ツールとも**大量の ill-typed に落ちる
+（上流は typecheck を 1 件出して黙り、guff は 115 件出す）。数字は環境の差であって
+互換の差ではないので、**このターゲットは linux（CI）でだけ測る**。
+`compat/baselines/health-hunt.json` に darwin の ill-typed 数を記録してはならない
+——「行が無い＝厳密に 0」の gate に、別 OS の値を焼き付けることになる。
+
+#### 4. 残り 96 件の guff-only は、大きく 3 つの形
+
+- **`nolintlint` の「unused directive」41 件**（fiber 24 / cri-o 8 / connect-go 6 / scaleway-cli 3）。
+  これは**それ自体がバグではなく、下にある取りこぼしの影**である: guff が
+  `//nolint:bodyclose` を「未使用」と言うのは、その行で**guff の bodyclose が撃っていない**からで、
+  上流は撃って抑止している。2026-08-17 の現場レポート（Issue F）が
+  「nolintlint の unused は analyzer の穴の逆向きの信号として使える」と書いていたとおりで、
+  **41 件は 6 つの linter の取りこぼしを指す索引**として使える（bodyclose / unparam / wrapcheck /
+  gocritic / govet / contextcheck）。
+- **1 つのバグが 3 リポジトリに立っている形**: `gocritic appendAssign`（fiber 2 / connect-go 1 /
+  scaleway-cli 1）と、velero の `revive var-declaration` **28 件**（`test/e2e/` の
+  `var X func() = func(){...}` という 1 つの形）。件数の大きさは損の大きさではない。
+
+  **velero の 28 件はまだ閉じていない。そして「1 つの形」ではなかった** —— 全部
+  `var X func() = TestFunc(&T{})`（`test/e2e/` 配下）で、上流は 0 件。**最小再現を書いたら
+  両ツールとも撃った**（`var A func() = retFunc()` で 1 対 1 一致）ので、
+  **形だけでは説明が付かない**: velero の config か、あの木の何かが上流側だけを黙らせている。
+  次の一手は velero の config を最小化して二分すること。**測り方の失敗も 1 つ記録しておく** ——
+  最初は「上流は revive を 1 件も出していない」と読んだが、それは
+  `grep -E '^a\.go'` が**上流の絶対パス出力に当たっていなかった**だけで、
+  同じ config で数え直すと 11 対 11 だった。`0` は合格でないのと同じく、**`0` は証拠でもない**。
+
+  **その最小再現がついでに 1 件出した**: `var N *int = nil` を上流は**ゼロ値の腕**
+  （`should drop = nil …`）で報告し、guff は**型推論の腕**（`should omit type *int …`）で報告する。
+  上流は `astutils.IsIdent(rhs, "nil")` を BasicLit の判定と**並べて** isZero にしている。
+  1 件だが**同じ行で違うことを言う**側の差なので、velero とは別に閉じる。
+
+  **`appendAssign` は直した**。上流の `checkAppend` にある**早期 return が 2 つとも移植されていなかった**:
+  (1) **`c.ctx.TypeOf(y.X).(*types.Array)`** —— 「配列はスクラッチとして使われる」。
+  `var scratch [8]byte; out := append(scratch[:0], …)` は**裏の配列をスタックに置くために
+  わざとそう書く**形で、配列のスライスは定義上 destination と同じオブジェクトではないから、
+  比較しても偽陽性しか出ない。**この除外規則が、上流の checker が型情報を要る唯一の理由**である。
+  (2) **`matchSlices` は `ast.Unparen(y)` と比べる** —— `*s = append((*s)[:i], (*s)[i+1:]...)` は
+  要素削除の定型で、`*s` を括る必要があるのは構文の都合にすぎない。guff は括弧付きのまま比較していた。
+  fixture が持っていたのは `xs = append(xs, 1)` の 1 形だけで、
+  **両辺が同じ綴りの同じ式**という、`matchSlices` の分岐を 1 本も踏まない形だった
+  （続き 31 以来くり返し出ている「1 形しか通さない fixture」）。2 形足して
+  **golangci-lint 側も黙ることを regen で確認**（golden はバイト同一）、
+  3 リポジトリとも **guff 0 / 上流 0** になった。
+- **上流が黙る側の staticcheck / revive / fatcontext / tagliatelle / contextcheck / bodyclose**。
+
+#### 5. CI —— `weekly` tier を初めてジョブに載せた
+
+`corpus/repos.json` は controller-runtime / vault / kubernetes を `tier: weekly` と書き、
+`corpus/README.md` は「定義のみ（CI 無し）」と書き、`corpus/shapes.py` は
+**「誰も回さない gate は退行に気付けない」という理由をソースに書いて** weekly を
+shape カバレッジから除外していた —— 3 つとも 3 年分の正しさで、**ジョブが無いこと**だけが問題だった。
+`.github/workflows/compat-weekly.yml`（日曜 04:23 UTC、`weekly-corpus` ラベルでも起動）を足し、
+`shapes.py` の `GATED_TIERS` に `weekly` を入れた。compat.yml に 5 つ目のジョブとして足さなかったのは、
+そこに `schedule:` を書くと**毎週日曜に smoke / unit / isolate / oss-pr も起動する**（oss-pr だけで 90 分）ため。
+
+ベンチマークの退行ゲートは**既にあった**（`benchmarks/run.sh` の `PERF_GATE`、
+speedup < 1.0 で失敗、showcase.yml が毎日回している）ので足していない。
+
+#### 6. 2026-08-17 の現場レポートを 0.6.0 で測り直した
+
+`guff-report-20260817.md`（社内モノレポでの 0.5.0 評価、7 件）は **A/B/C/D/F/G が全部閉じていた**:
+untracked ファイル + `new-from-merge-base` で 0 件になる件（A、最優先とされていたもの）、
+gosec G115（B）、SA1019（C）、`staticcheck.checks: ["all"]` の展開差（D）、
+forbidigo のメッセージ引用符（F）、unknown linter が warn 止まりだった件（G、exit 3 と文言まで一致）。
+**D の犯人は `checks: ["all"]` ではなかった**可能性が高い —— 単独では完全一致し、
+あのレポートの config が併用していた `linters.exclusions.presets` も今は一致するので、
+0.5.0 時点のどれかである。残る **E（protogetter 362 / misspell 19 / exhaustive 6）は実コードが要る形**で、
+cri-o が protogetter を持ち込むので linux での測定が次の一手になる。
