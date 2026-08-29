@@ -73,3 +73,40 @@ func okTailCallReturnsTheError(w writer, p []byte) (int, error) {
 	}
 	return 0, nil
 }
+
+func sink() {}
+
+// A `defer` makes go/ssa give the function a recover block, which forces its
+// results to stay addressable: `liftAlloc` refuses to lift a result alloc when
+// `fn.Recover != nil`, so `return nil` survives as a *load* rather than an
+// `*ssa.Const`. nilerr's `isReturnNil` tests for a const and bails, so neither
+// of these is reported — however plainly wrong they read.
+//
+// go/ssa declares a local for *every* result, named or not, and it does so for
+// function literals exactly as for declarations. guff gave a FuncLit result
+// locals only when they were *named*, so the literal below kept an ssa.Const
+// and was reported where upstream is silent.
+func deferredInDecl(e error) error {
+	defer sink()
+	if e != nil {
+		return nil
+	}
+	return e
+}
+
+// The literal has to sit inside a FuncDecl: one in a package-level `var`
+// initializer belongs to the synthesized package `init`, which buildssa never
+// puts in SrcFuncs — so nilerr would be silent there for an unrelated reason
+// and the case would measure nothing.
+func deferredInLit() func(error) error {
+	return func(e error) error {
+		defer sink()
+		if e != nil {
+			return nil
+		}
+		return e
+	}
+}
+
+// Without the defer both halves are reported, so the pair above is measuring
+// the recover block and not merely the shape — see bad.go.
