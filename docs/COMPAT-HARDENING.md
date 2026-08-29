@@ -16111,3 +16111,54 @@ group の**自分の位置**に 1 回だけ報告する。symbol の doc を経�
 `require-doc` は**規則本体だけ**になった（model は揃った）。
 `max-len` は `go/doc/comment` の `Printer`（続き 87）と pin された
 `ignore-patterns`。`require-stdlib-doclink` は上流の `stdlib.json` を vendor する。
+
+### 2026-08-28（続き 96）— `require-doc`。**規則本体は 30 行、要ったのは前の PR の model**
+
+続き 95 で symbol model を移したので、残っていたのは規則そのものだけ。
+
+#### const/var/type は doc を 3 か所から受け取る
+
+上流の順序どおり:
+
+| 順 | 出どころ | 形 |
+|---|---|---|
+| 1 | `Doc` | `// godoc` ＋ `const X = 1` |
+| 2 | `TrailingDoc` | `const X = 1 // godoc` |
+| 3 | `ParentDoc` | `// godoc` ＋ `const ( X = 1 )` |
+
+`func` は **1 だけ**。上流の model が func に `TrailingDoc` も `ParentDoc` も
+与えていないので、`func F() {} // godoc` は**doc ではない**。
+
+#### 報告位置は doc ではなく**シンボル名**
+
+他の全規則は「見つけた doc」の位置に報告する。`require-doc` は
+`ReportRangef(decl.Ident)` —— **コメントが 1 つも無い symbol に答える唯一の規則**
+なので、報告する場所が doc であってはならない。golden の桁がこれを固定する
+（`const A, B = 0, 0` の 2 件は同じ行の**別の桁**）。
+
+#### fixture の `//foo:bar` が測っているもの
+
+上流の testdata から借りた。末尾コメントを**ディレクティブ**にすると
+`ast.CommentGroup.Text()` がそれを落とすので、
+**group は在るがテキストは空** —— つまり symbol は未文書のまま。
+これが無いと、ただの末尾コメントが規則を満たしてしまい fixture は何も測らない。
+unit test で「group は在る」「Text は空」の両方を主張した。
+
+#### golden 2 本を**同じ fixture**に当てた
+
+`godoclint-require-doc`（13 キー・既定）と
+`godoclint-require-doc-unexported`（8 キー・`ignore-exported: true` ＋
+`ignore-unexported: false`）。**同じ 3 ファイルに 2 つの config を当てて
+finding 集合が交わらないこと**が、options が実際に配線されている証拠になる。
+どちらも修正前の binary では全件 missing。
+
+4 象限が全部入っている: `func (*TFooNG) TFooBarNG()` は exported 側、
+`func (*tFooNG) TFooBarNG()` は **unexported 側**（receiver の base 型を畳み込む）。
+
+`good.go` には unexported の鏡像も置いた —— 無いと `-unexported` ケースは
+**報告される側しか測らず**「文書済み」と「見ていない」を区別できない。
+
+#### 残り
+
+`default: all` の 9 規則のうち **7 つ**。`max-len` と
+`require-stdlib-doclink` が残り。

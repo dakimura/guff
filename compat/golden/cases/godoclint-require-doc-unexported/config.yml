@@ -1,0 +1,32 @@
+# Golden case: godoclint's `require-doc`, inverted.
+#
+# `ignore-exported: true` + `ignore-unexported: false` swaps which half of the
+# tree the rule demands a godoc from, over the same three fixture files as the
+# sibling case. Two cases over one fixture is the cheapest way to prove the
+# options are wired: the finding sets have to be disjoint.
+#
+# `guff` had no `options` block at all until the PR two before this one, so a
+# config like this one was silently the default.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - godoclint
+  settings:
+    godoclint:
+      default: none
+      enable:
+        - require-doc
+      options:
+        require-doc:
+          ignore-exported: true
+          ignore-unexported: false
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
