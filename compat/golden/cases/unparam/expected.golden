@@ -10,3 +10,4 @@ bad/bad.go:11:24:unparam::example - unused is unused
 bad/bad.go:33:42:unparam::sectionByType - result 1 (example.com/unparam/bad.secKind) is always 0
 bad/bad.go:45:29:unparam::saveBlob - result 0 (string) is never used
 bad/bad.go:63:18:unparam::xmlResponse - status always receives statusOK (200)
+bad/bad.go:91:21:unparam::litIIFE$1 - unused is unused

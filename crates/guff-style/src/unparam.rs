@@ -1415,6 +1415,11 @@ struct SsaFuncs<'a> {
     /// Rendered arguments of every call in the package, keyed by the position
     /// go/ssa gives the call — its `(`. (Go: `callByPos`.)
     call_by_pos: std::collections::HashMap<u32, Vec<String>>,
+    /// go/ssa's name for each function literal, keyed by the `func` keyword's
+    /// position. Upstream reports a literal by that name — `l1$1`, `l4$1$1`,
+    /// `init$1$1` for one in a package-level `var` initializer — because it
+    /// walks `ssa.Function`s and prints `fn.Name()`. See [`Self::lit_name`].
+    lit_names: std::collections::HashMap<u32, String>,
 }
 
 impl<'a> SsaFuncs<'a> {
@@ -1437,13 +1442,43 @@ impl<'a> SsaFuncs<'a> {
                 true
             });
         }
+        // Every anonymous function of this package, by the position of its
+        // `func` keyword — which is what the builder records as `decl_pos` and
+        // what the AST side has in `lit.ty.func`.
+        //
+        // Walking `prog.functions` rather than `src_funcs_with_methods()` is
+        // deliberate: that list starts from named functions, so it omits the
+        // synthesized package `init` and everything under it, and a literal in
+        // a package-level `var` initializer lives exactly there. Upstream
+        // reaches it (`ssautil.AllFunctions`) and names it `init$1`.
+        let mut lit_names = std::collections::HashMap::new();
+        for (_, f) in ir.prog.functions.iter() {
+            if f.pkg != Some(ir.pkg) || f.parent.is_none() {
+                continue;
+            }
+            if f.decl_pos != guff::NO_POS {
+                lit_names.insert(f.decl_pos.0 as u32, f.name.clone());
+            }
+        }
         SsaFuncs {
             prog: &ir.prog,
             by_object,
             sites: CallSites::build(ir),
             results_required: collect_results_required(ir),
             call_by_pos,
+            lit_names,
         }
+    }
+
+    /// go/ssa's name for the literal whose `func` keyword is at `pos`.
+    ///
+    /// Upstream prints `fn.Name()`, so a literal is reported as
+    /// `<enclosing>$<n>` — never as a placeholder. guff used the string
+    /// "<func literal>", which no golangci-lint output can contain, so every
+    /// such finding was a guaranteed mismatch. Nothing caught it because the
+    /// fixture had no literal in it.
+    fn lit_name(&self, pos: guff::Pos) -> Option<&str> {
+        self.lit_names.get(&(pos.0 as u32)).map(String::as_str)
     }
 
     fn func_for(
@@ -1528,7 +1563,12 @@ impl<'a> SsaFuncs<'a> {
     }
 }
 
-fn check_func_lit(lit: &FuncLit, value_lits: &HashSet<u32>, pending: &mut Vec<(u32, String)>) {
+fn check_func_lit(
+    lit: &FuncLit,
+    value_lits: &HashSet<u32>,
+    ssa: Option<&SsaFuncs<'_>>,
+    pending: &mut Vec<(u32, String)>,
+) {
     // Literals stored / passed / returned have a fixed signature.
     if value_lits.contains(&func_lit_key(lit)) {
         return;
@@ -1536,7 +1576,14 @@ fn check_func_lit(lit: &FuncLit, value_lits: &HashSet<u32>, pending: &mut Vec<(u
     let Some(params) = &lit.ty.params else {
         return;
     };
-    check_params("<func literal>", &params.list, &lit.body, &[], pending);
+    // Upstream names the literal after its enclosing function (`l1$1`). Without
+    // the SSA name there is nothing truthful to print, and a placeholder can
+    // only produce a finding golangci-lint never emits — so stay silent.
+    let Some(name) = ssa.and_then(|s| s.lit_name(lit.ty.func)) else {
+        return;
+    };
+    let name = name.to_string();
+    check_params(&name, &params.list, &lit.body, &[], pending);
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -1582,7 +1629,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             let Some(NodeRef::FuncLit(lit)) = n else {
                 return true;
             };
-            check_func_lit(lit, &value_lits, &mut pending);
+            check_func_lit(lit, &value_lits, ssa.as_ref(), &mut pending);
             true
         });
     }

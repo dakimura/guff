@@ -16372,3 +16372,57 @@ helper の doc コメントにそう書いた。
 
 `unparam` の逆向きの穴（初期化子の中を guff が見ていない）は**別件で未修正**。
 `nilerr` の `(unknown)` 文言と Phi 行の dedup も残っている。
+
+### 2026-08-29（続き 101）— `unparam` は関数リテラルを `<func literal>` と呼んでいた。**golangci-lint が絶対に出さない文字列**
+
+続き 99 で `unparam` を「逆向きの穴（初期化子の中を見ていない）」と書いた。
+**それは誤り**だった —— 切り分けたら初期化子は関係なく、別の 3 つが出てきた。
+
+#### 最初の見立ては間違っていた
+
+`var _ = Describe(...)` の中だけで差が出たので「初期化子の軸」と考えたが、
+**同じ形を `FuncDecl` の中に置いても差が出た**。軸は初期化子ではなかった。
+
+| 形 | golangci | guff |
+|---|---|---|
+| IIFE | `l1$1 - unused is unused` | **`<func literal> - …`** |
+| local 変数に束縛して呼ぶ | `l2$1 - …` | **沈黙** |
+| リテラルの中のリテラル | `l4$1$1 - …` | **沈黙** |
+| 引数として渡す | 沈黙 | 沈黙 |
+| `go` / `defer` | 沈黙 | 沈黙 |
+
+#### `<func literal>` は**構造的に一致しない**
+
+上流は `ssa.Function` を歩いて **`fn.Name()`** を印字するので、
+リテラルは常に `<親>$<n>`（入れ子なら `l4$1$1`、package 変数の初期化子の中なら
+`init$1$1`）。`<func literal>` という文字列は golangci-lint の出力に
+**存在し得ない**ので、guff がリテラルに出していた finding は**全部**外れていた。
+
+**誰も気付かなかったのは fixture にリテラルが 1 つも無かったから。**
+`unparam` の golden 4 キーは全部名前付き関数で、この経路は**一度も測られていない**。
+続き 78/86/87 の「1 形しか通さない fixture」の、**0 形しか通さない**版。
+
+guff の SSA は既に go/ssa と同じ規則で名前を作っている
+（`format!("{}${}", parent.name, 1 + parent.anon_funcs.len())`）ので、
+`decl_pos`（`func` キーワードの位置）で索引して引くだけで済んだ。
+
+索引は `src_funcs_with_methods()` ではなく **`prog.functions` を直接**歩く ——
+前者は名前付き関数から始まるので合成 `init` の下（＝package 変数の初期化子の中の
+リテラル）が落ちる。上流は `ssautil.AllFunctions` でそこも見て `init$1` と呼ぶ。
+
+**名前が引けないときは黙る**ようにした。placeholder を出すと
+**上流が出さない finding を作る**だけで、precision と recall の両方を落とす
+（黙れば recall だけ）。
+
+#### fixture が「両側に 1 件ずつ」で落ちる
+
+修正前の binary で `missing=1 extra=1` —— **同じ行に両側から 1 件ずつ**立つ、
+続き 30 以来の「**文言だけが違う**」署名そのもの。
+
+#### 残り（**測定済みの穴**であって推測ではない）
+
+`l2$1` / `l4$1$1` —— **local 変数に束縛したリテラル**を guff は
+`value_lits`（「格納/受け渡し/返却されたリテラルは署名が固定」）で一律に飛ばすが、
+上流は SSA の call graph を見て**本当に脱出したときだけ**固定する。
+module header が DEFERRED と明記している `signRequiredBy` / `paramsRequiredBy` の
+移植が要る。**再現は `repro-unparam3` の L2 / L4**。
