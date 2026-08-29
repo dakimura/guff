@@ -56,6 +56,22 @@ controller-runtime guff-only pkg/webhook/server_test.go:215:nolintlint:directive
 # unparam builds upstream's `typesImplementing` table from the IR and skips the
 # methods an interface requires. docs/COMPAT-HARDENING.md §4 (2026-08-14).
 
-# One each, still undiagnosed — nobody has read which upstream guard applies.
+# The bodyclose entry that stood here (pkg/manager/manager_test.go:1361) is gone
+# as of 2026-08-29, along with seven more bodyclose findings at the same shape
+# that were never recorded here at all — this file listed one of eight.
+#
+# None of them was a bodyclose bug. go/analysis's `buildssa` builds `SrcFuncs`
+# from a file's *ast.FuncDecl*s and their nested literals; a literal inside a
+# package-level `var` initializer belongs to the synthesized package `init`,
+# which has no FuncDecl, so no analyzer built on `buildssa` can reach it.
+# guff ported four of them (bodyclose, noctx, rowserrcheck, sqlclosecheck) as
+# AST walks rooted at the *file*, which sees what upstream cannot.
+#
+# controller-runtime is where that shows up because Ginkgo suites are written
+# `var _ = Describe("…", func() { … })`: manager_test.go puts lines 61-2079 of
+# a 2,157-line file inside one such initializer.
+#
+# The nilerr entry below stays: it has a different root cause (guff's SSA gave
+# a FuncLit result locals only when *named*, so `return nil` stayed an
+# ssa.Const where go/ssa has a load) and is fixed separately.
 controller-runtime guff-only pkg/internal/controller/controller.go:395:nilerr:error is not nil (line 394) but it returns nil
-controller-runtime guff-only pkg/manager/manager_test.go:1361:bodyclose:response body must be closed
