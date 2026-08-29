@@ -814,7 +814,11 @@ pub fn analyze_with_typed_imports(
 
     let mut actions: HashMap<(*const Analyzer, String), Arc<Action>> = HashMap::default();
     let mut all: Vec<Arc<Action>> = Vec::new();
+    // The keys currently being built, for the cycle guard inside `mk_action`.
+    let mut on_stack: HashSet<(*const Analyzer, String)> = HashSet::default();
 
+    /// `None` means "this edge closes a cycle" — see `on_stack`.
+    #[allow(clippy::too_many_arguments)]
     fn mk_action(
         analyzer: &'static Analyzer,
         package: Arc<Package>,
@@ -823,15 +827,45 @@ pub fn analyze_with_typed_imports(
         typed_by_id: Option<&std::collections::HashMap<String, Arc<Package>>>,
         actions: &mut HashMap<(*const Analyzer, String), Arc<Action>>,
         all: &mut Vec<Arc<Action>>,
-    ) -> Arc<Action> {
+        on_stack: &mut HashSet<(*const Analyzer, String)>,
+    ) -> Option<Arc<Action>> {
         let key = (analyzer as *const Analyzer, package.id.clone());
         if let Some(act) = actions.get(&key) {
-            return Arc::clone(act);
+            return Some(Arc::clone(act));
         }
+        // The memo above is written *after* the recursion returns, so a cycle
+        // in the graph this walks is an infinite recursion rather than a hit.
+        // go/analysis never needs this guard because the graph it walks cannot
+        // cycle: go/packages gives every test binary its own variant of every
+        // package on the path to the package under test, so
+        // `test [pkg/pod.test]` and `test [test.test]` are different nodes.
+        //
+        // guff collapses those variants — `filter_duplicate_packages` keeps one
+        // package per path, which is a test variant when both were loaded, and
+        // the block comment above this function explains why an importer's
+        // `Imports["P"]` then resolves to it. Collapsing is what closes the
+        // cycle: on `tektoncd/pipeline ./...`, `pkg/pod [pkg/pod.test]` imports
+        // `.../test`, which resolves to `test [test.test]`, which imports
+        // `.../pkg/pod`, which resolves straight back. guff recursed between
+        // those two until the worker thread's stack ran out — measured on
+        // 2026-08-29 as an abort with no message a user could act on ("has
+        // overflowed its stack"), and still an abort with the stack at 128 MiB,
+        // which is what showed this is a cycle and not a deep graph.
+        //
+        // Dropping the back edge is the only answer available here: an action
+        // graph with a cycle in it has no execution order at all, so the
+        // alternative to losing one fact dependency is losing the whole run.
+        // What is lost is a dependency the real graph does not have either —
+        // upstream's `pkg/pod [pkg/pod.test]` depends on `test [pkg/pod.test]`,
+        // a package guff never built.
+        if on_stack.contains(&key) {
+            return None;
+        }
+        on_stack.insert(key.clone());
 
         let mut deps = Vec::new();
         for req in &analyzer.requires {
-            deps.push(mk_action(
+            deps.extend(mk_action(
                 req,
                 Arc::clone(&package),
                 settings,
@@ -839,6 +873,7 @@ pub fn analyze_with_typed_imports(
                 typed_by_id,
                 actions,
                 all,
+                on_stack,
             ));
             if analyzer_schedules_import_facts(req, settings) {
                 let mut paths: Vec<String> = package.imports.keys().cloned().collect();
@@ -851,7 +886,7 @@ pub fn analyze_with_typed_imports(
                         if dep_pkg.type_artifacts.is_none() {
                             continue;
                         }
-                        deps.push(mk_action(
+                        deps.extend(mk_action(
                             req,
                             Arc::clone(dep_pkg),
                             settings,
@@ -859,6 +894,7 @@ pub fn analyze_with_typed_imports(
                             typed_by_id,
                             actions,
                             all,
+                            on_stack,
                         ));
                     }
                 }
@@ -874,7 +910,7 @@ pub fn analyze_with_typed_imports(
                     if dep_pkg.type_artifacts.is_none() {
                         continue;
                     }
-                    deps.push(mk_action(
+                    deps.extend(mk_action(
                         analyzer,
                         Arc::clone(dep_pkg),
                         settings,
@@ -882,6 +918,7 @@ pub fn analyze_with_typed_imports(
                         typed_by_id,
                         actions,
                         all,
+                        on_stack,
                     ));
                 }
             }
@@ -896,9 +933,10 @@ pub fn analyze_with_typed_imports(
             cache: cache.clone(),
             state: Mutex::new(ActionState::default()),
         });
+        on_stack.remove(&key);
         actions.insert(key, Arc::clone(&act));
         all.push(Arc::clone(&act));
-        act
+        Some(act)
     }
 
     let mut roots = Vec::new();
@@ -944,7 +982,9 @@ pub fn analyze_with_typed_imports(
             ) {
                 *gate_keep.entry(analyzer.name).or_default() += 1;
             }
-            let act = mk_action(
+            // `on_stack` is empty at every root, so this can only be `None`
+            // for a root that is its own ancestor, which is not a thing.
+            let Some(act) = mk_action(
                 analyzer,
                 Arc::clone(pkg),
                 &settings,
@@ -952,7 +992,10 @@ pub fn analyze_with_typed_imports(
                 typed_by_id.as_deref(),
                 &mut actions,
                 &mut all,
-            );
+                &mut on_stack,
+            ) else {
+                continue;
+            };
             act.is_root.store(true, Ordering::Relaxed);
             roots.push(act);
         }

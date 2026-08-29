@@ -33,9 +33,28 @@ moby/moby is excluded: public tree has no root `go.mod` (Docker-image builds onl
 
 - Checkout must have a **golangci-lint v2** config (`version: "2"`).
 - Upstream CI pin need not be exactly v2.12.2 — we always run v2.12.2.
-- Excluded for now: fiber, hugo, etcd, terraform (no confirmed v2 in corpus),
-  istio, cockroach, go-ethereum (size / build tags). prometheus stays in
-  [`regress/`](../regress/).
+- prometheus stays in [`regress/`](../regress/).
+
+### Excluded targets
+
+One reason per repository. The old shared "no confirmed v2" note covered
+repositories whose real reasons differ, and two of them have since adopted v2 —
+a grouped reason cannot expire, so it was never revisited. Re-checked 2026-08-27
+against each default branch.
+
+| Repo | v2 config | Excluded because |
+|---|---|---|
+| gohugoio/hugo | **none** | No `.golangci.yml` / `.golangci.yaml` on the default branch. Nothing to run against. |
+| etcd-io/etcd | **none** | Same — no config on the default branch. |
+| hashicorp/terraform | **none** | Same — no config on the default branch. |
+| istio/istio | **none** | Same — no config on the default branch; 296MB besides. |
+| cockroachdb/cockroach | **none** | Same — no config on the default branch; 2.6GB checkout. |
+| moby/moby | yes (370 lines) | Public tree has no root `go.mod` (Docker-image builds only). Unrelated to v2. |
+| gofiber/fiber | **yes** (307 lines) | **No longer a valid exclusion** — adopt or restate. See `candidates-100.md`. |
+| ethereum/go-ethereum | **yes** (96 lines) | **No longer a valid exclusion** on v2 grounds; 234MB and build tags are the remaining question. |
+
+`candidates-100.md` carries a 152-repository v2 survey and the 27 → 100 expansion
+list; re-check this table whenever that survey is refreshed.
 
 ## What a target is *for* (Phase 5)
 
