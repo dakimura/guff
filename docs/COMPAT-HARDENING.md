@@ -16657,3 +16657,59 @@ forbidigo のメッセージ引用符（F）、unknown linter が warn 止まり
 あのレポートの config が併用していた `linters.exclusions.presets` も今は一致するので、
 0.5.0 時点のどれかである。残る **E（protogetter 362 / misspell 19 / exhaustive 6）は実コードが要る形**で、
 cri-o が protogetter を持ち込むので linux での測定が次の一手になる。
+
+---
+
+### 2026-08-30（続き 104）— velero の 28 件は 1 つの述語だった。**「他パッケージに届く」を「修飾子がある」で近似していた**
+
+続き 103 が残した最大の塊。`var NodePortTest func() = TestFunc(&NodePort{})` が
+`test/e2e/` に 28 個あり、上流は 1 件も報告しない。
+
+**config ではなくコードの差だった**。まず velero の config を削って二分したが、
+`enable: [revive]` + `rules: [{name: var-declaration}]` まで落としても **0 対 12** のまま。
+つまり exclusions でも presets でも severity でもない。
+次に同じ形の**最小再現**を書いたら **両ツールとも撃った** —— 形だけでは説明が付かない。
+差は `nodeport.go` の import にあった: `. "github.com/vmware-tanzu/velero/test/e2e/test"`、
+**ドット import** である。
+
+**7 形を測って上流の線を引いた**（`revive` は `var-declaration` だけ有効、1 形 1 `var`）:
+
+| 右辺 | 修飾子 | 上流 | guff（修正前） |
+|---|---|---|---|
+| `helper.Str()` | あり | 黙る | 黙る |
+| `helper.Answer`（定数） | あり | 黙る | 黙る |
+| `helper.Case{…}`（型） | あり | 黙る | 黙る |
+| `TestFunc(&Case{…})` —— ドット import | **なし** | 黙る | **撃つ** |
+| `Answer` —— ドット import の定数 | **なし** | 黙る | **撃つ** |
+| `Case{…}` —— ドット import の型 | **なし** | 黙る | **撃つ** |
+| `localBox.Method()` —— 他パッケージの型のメソッド | **なし** | 黙る | **撃つ** |
+| `localBox.S` —— 他パッケージの型のフィールド | **なし** | 黙る | **撃つ** |
+| `localFunc()` —— 同一パッケージ | — | **撃つ** | 撃つ |
+
+`rhs_refers_to_other_package` は**「識別子の中に import 名（`PkgName` オブジェクト）があるか」**を
+訊いていた。これは `pkg.X` の**修飾子しか見えない**。上流の実際の線は
+（このコードのコメント自身が正しく書いていたとおり）**「右辺が他パッケージに届いているか」**で、
+届き方には**修飾子を持たない形が 3 種類ある** —— ドット import と、
+他パッケージの型のメソッド／フィールドである。
+
+**直し方は述語の置き換え 1 つ**: 識別子が解決するオブジェクトの**所有パッケージ**を見て、
+それが現在のパッケージでなければ「届いている」。universe スコープのオブジェクト
+（`nil` / `true` / `make`）は所有パッケージを持たないので自然に除かれる。
+`PkgName` の腕は残す —— **修飾子自身のオブジェクトは「読んでいる側」のパッケージに属する**ので、
+所有者テストだけでは見えない。これで 9 行すべてが上流と一致した。
+
+**近似は間違っていなかったが、狭かった**。コメントには測定結果（`sub.EscapingKey` /
+`sub.Func()` / `sub.Var` は全部黙る）が正しく書いてあり、述語の**名前**も
+`rhs_refers_to_other_package` と正しかった。**実装だけが 1 つの届き方しか見ていなかった**。
+「述語に名前を付ける」は続き 62 の教訓だが、**名前が正しくても中身が名前より狭いことがある**。
+
+**fixture は 7 形全部を持たせた**（続き 31 以来の「1 形しか通さない fixture」を避ける）。
+スタブパッケージ `vardeclother` を足し、ドット import と修飾 import の両方で同じパッケージを
+引いている（Go は同一パスの二重 import を許す）。golden を regen すると
+**同一パッケージの 1 行だけが `var-declaration` を持つ**ことが上流の答えとして記録される。
+
+**測定**: velero **37 → 9** guff-only（`var-declaration` 28 件が消えた）、
+`vardecl` の 7 形は両ツール一致、golden 204/204（revive ケースは ratchet 据え置き
+missing 1 / extra 4）、fix tier 204 / pending 0、reject 14、workspace テスト緑。
+velero に残る 9 件は gosec G101 ×3 / govet ×2 / staticcheck SA4003 ×2 /
+ineffassign ×1 / perfsprint ×1 —— **8 形が 5 linter に散った**ので、次はここから 1 つずつ。

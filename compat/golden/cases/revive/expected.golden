@@ -334,3 +334,15 @@ utiltest/extended_bad_test.go:1:1:revive:warning:file-header: the file doesn't h
 utiltest/extended_bad_test.go:4:2:revive:warning:imports-blocklist: should not use the following blocklisted import: "os"
 utiltest/extended_bad_test.go:9:2:revive:warning:redundant-test-main-exit: redundant call to os.Exit in TestMain function, the test runner will handle it automatically as of Go 1.15
 utiltest/extended_bad_test.go:12:22:revive:warning:unused-parameter: parameter 't' seems to be unused, consider removing or renaming it as _
+vardeclcross/vardeclotherpkg/var_decl_other_package.go:13:1:revive:warning:file-header: the file doesn't have an appropriate header
+vardeclcross/vardeclotherpkg/var_decl_other_package.go:16:2:revive:warning:dot-imports: should not use dot imports
+vardeclcross/vardeclotherpkg/var_decl_other_package.go:18:2:revive:warning:duplicated-imports: Package "example.com/revive/vardeclother" already imported
+vardeclcross/vardeclotherpkg/var_decl_other_package.go:42:15:revive:warning:var-declaration: should omit type string from declaration of var localCall; it will be inferred from the right-hand side
+vardeclother/vardeclother.go:4:1:revive:warning:file-header: the file doesn't have an appropriate header
+vardeclother/vardeclother.go:6:6:revive:warning:exported: exported type Case should have comment or be unexported
+vardeclother/vardeclother.go:8:6:revive:warning:exported: exported type Box should have comment or be unexported
+vardeclother/vardeclother.go:10:1:revive:warning:exported: exported method Box.Method should have comment or be unexported
+vardeclother/vardeclother.go:12:7:revive:warning:exported: exported const Answer should have comment or be unexported
+vardeclother/vardeclother.go:14:1:revive:warning:exported: exported function TestFunc should have comment or be unexported
+vardeclother/vardeclother.go:14:15:revive:warning:unused-parameter: parameter 'c' seems to be unused, consider removing or renaming it as _
+vardeclother/vardeclother.go:16:1:revive:warning:exported: exported function Str should have comment or be unexported
