@@ -18,10 +18,14 @@ guffのコーパスを「100ターゲットでguffとgolangci-lintのfinding集�
 
 1. `./corpus/status.py next` が次の1件を出す。それをやる。
 2. 終わったらブランチを切ってプルリクにする。
-3. **マージは私がやる。** `main` のルールセットに `require_extra_approval_for_unattributed_changes` が入っていて、AIが作った変更には人間の承認が要る。CIを見届けて、緑なら「マージしていいです」と言ってくれれば私が押す。赤なら直して。
-4. マージされたら `git checkout main && git pull` して `./corpus/status.py probe`、次のタスクへ。
+3. **CIが全部緑になったら自分でマージしていい。** 私の確認は要らない。ただし:
+   - **全部**というのは `unit` / `isolate` / `smoke` / `oss-pr` の 4 つ。`skipping` は数に入らない。
+   - マージ前に run の `headSha` がプルリクの head と一致していることを確かめる。force-push すると名前ベースの差分監視は cancelled な run の pass を引き継ぐ。
+   - 赤なら直す。落ちた理由が分からないまま再実行しない。
+   - `main` のルールセット（`require_extra_approval_for_unattributed_changes`）に弾かれたら、そこで止めて報告する。無理に通さない。
+4. マージしたら `git checkout main && git pull` して `./corpus/status.py probe`、次のタスクへ。
 
-私がすぐ見ていないこともある。その場合はマージを待たずに次のタスクの調査を始めていい —— ただし**前のプルリクのブランチの上で作業しないこと**。`main` に戻ってから新しいブランチを切る。台帳が古いままなので `next` が同じタスクを返すが、それは無視して次のものを取っていい。
+CIが長いあいだ、待たずに次のタスクの調査を始めていい —— ただし**前のプルリクのブランチの上で作業しないこと**。`main` に戻ってから新しいブランチを切る。台帳が古いままなので `next` が同じタスクを返すが、それは無視して次のものを取っていい。次の変更が同じ関数・同じgolden・同じdoc節に触るなら、先にマージしてから `main` を引き直したほうが早い。
 
 `compat/run.sh` と `compat/hunt.sh` は同時に走らせないこと（`compat/results/` を共有している）。
 
@@ -40,7 +44,8 @@ guffのコーパスを「100ターゲットでguffとgolangci-lintのfinding集�
 3. **上流の線を1形から推測せず、複数形で測る。** 1形1宣言で書いて両ツールに通す。直す根拠は「見た規則」であって「推測した規則」ではない。
 4. 上流のソースを読む。checkoutは `/Users/dakimura/projects/src/github.com/` の下にある（go-critic、mgechev/revive、timakin/bodyclose、honnef.co/go/tools …）。無いmoduleは `go mod download <mod>@<pin>` 一発。**上流はコメントよりコードを信じる。**
 5. guffを直したら、**測った形を全部**fixtureに入れる。壊れていた1形だけではなく。1形しか通さないfixtureは他の分岐を隠す —— これで何セッションも失っている。
-6. 影響したケースのgoldenを再生成して差分を確認する: `./compat/golden/run.sh --regen --case <case>`。上流も黙るなら差分は出ないはず。
+6. **そのfixtureをRustの単体テストからも数える。** `assert!(messages.iter().any(|m| m.contains(…)))` は他の形が全部壊れていても緑になる —— S1001 は 7 形のうち 3 形が黙ったまま `any(contains("copy(to, from)"))` を通していたし、unparam も同じ形で 12 形の欠落を隠していた。`assert_eq!(messages.len(), N)` と形ごとの件数で固定する。goldenは golangci-lint のインストールが要るが、`cargo test` はどこでも 3 分で回る。
+7. 影響したケースのgoldenを再生成して差分を確認する: `./compat/golden/run.sh --regen --case <case>`。上流も黙るなら差分は出ないはず。
 
 **`measure <target>`** — `./compat/hunt.sh --name <target>` を回す。`--name` を省くと全ターゲットで数時間かかるので必ず付ける。クリーンならそのイテレーションの成果は台帳だけ。
 
@@ -72,6 +77,7 @@ cargo build --release --locked -p guff-lint
 - リビルド後の測定は `--no-cache`。issues cacheのsaltはバージョン文字列なので開発ビルドを区別しない。古い結果は「直っていない」と全く同じ顔をする。
 - `cargo test` が始まらないように見えたら `./scripts/target-hygiene.sh --prune`。7日ルールで落ちなければ `rm -rf target/debug`（releaseツリーは残す）。
 - コミットとプルリクの文面は、**何が壊れていてどう分かったかを、測った数字と一緒に**書く。このリポジトリのログは1年後に読まれる前提で書かれている。既にあるものに合わせて。
+- **互換性の修正には単体テストも足す。** 新しい述語・新しいガードには、上流を知らなくても何を主張しているか読めるRustのテストを1つ以上（続き108の `ctrlflow` は制御構造12形を `#[test]` で固定した）。goldenだけに頼ると、golangci-lintが手元に無い環境では何も守られない。
 - guffの挙動が変わったなら `docs/COMPAT-HARDENING.md` の§4に続き番号でエントリ、`docs/SESSION-LOG.md` に1行。何も見つからなかった測定なら両方とも不要。
 
 ## 詰まったとき
