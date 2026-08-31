@@ -10225,6 +10225,7 @@ guff は 4 件を返した。**これを穴と呼ぶ前に**、同じソース�
 | ~~consul~~ | ~~1~~ | ~~`agent/consul/catalog_endpoint.go:280` SA5011~~ | **解消 2026-08-13（15 本目）**。σ の**もう一方の向き**（参照外しと nil 検査の**間**にある分岐が値を改名する）を `renamed_before_check` で入れた。同日に見つかった 2 件目（`agent/xds/listeners_ingress.go:227`）も同時に消えた | 2026-08-09 / 解消 2026-08-13 |
 | consul | 2 | `agent/event_endpoint_test.go:115` / `agent/http_test.go:1728` SA9008 | 上流の IR 検証（`ValueForExpr` + `irutil.Flatten`）未移植。パターン自体は一致済み。誤検出。§4 の 2026-08-09（2 本目）に最小再現。 | 2026-08-09 |
 | controller-runtime | 9 | `compat/allowlists/controller-runtime.txt` 参照 | ill-typed が 16 → 0 になった日（14 本目）に見えるようになった precision の穴。**17 件だったものが 15 本目で 9 件に**（SA9003 の 6 件は `irutil.IsExample`、SA1019 の 2 件は非推奨 fact の欠落）。残りは unparam 2（`MakeInterface` にオペランドが無い＝§7 と同根）、その症状としての nolintlint 5、nilerr 1、bodyclose 1 | 2026-08-13 |
+| gitea | 1 | `modules/setting/config_env.go:128` nolintlint（SA4006 の影） | 上流の `go/ir` が同じ値に**バイト同一の σ ノードを 2 つ**残し、`keyValue := envValue` の右辺が**深い枝の読みが辿らないほう**に束縛されるために出る SA4006。深い枝の綴りを `kv` に変えるだけで上流は黙り、ループの外に出すと `simplifyPhisAndSigmas` が 2 つを畳んで黙る —— **同じプログラムで答えが変わる**。guff の SSA に σ は無く 2 つの名前は 1 つの Value。gitea 自身が `// false positive` と書いている偽陽性。9 形の測定は §4 の 2026-08-31（続き 105）、全文は `compat/allowlists/gitea.txt` | 2026-08-31 |
 
 これ以外の allowlist ファイルは**すべてヘッダのみ（0 件）**。記録するのは
 `oss-nightly` / weekly を CI ゲートにするため — 恒久的に赤いゲートは次の劣化に
@@ -16713,3 +16714,115 @@ cri-o が protogetter を持ち込むので linux での測定が次の一手に
 missing 1 / extra 4）、fix tier 204 / pending 0、reject 14、workspace テスト緑。
 velero に残る 9 件は gosec G101 ×3 / govet ×2 / staticcheck SA4003 ×2 /
 ineffassign ×1 / perfsprint ×1 —— **8 形が 5 linter に散った**ので、次はここから 1 つずつ。
+
+---
+
+### 2026-08-31（続き 105）— gitea の 1 件は上流の σ ノードの重複だった。**そして測り直したら 3 件増えていた**
+
+台帳の gitea の行は 2026-08-23 の測定で「nolintlint 1 件」。
+`modules/setting/config_env.go:128` の
+
+```go
+keyValue := envValue //nolint:staticcheck // false positive
+```
+
+を guff は「未使用の directive」と言い、上流は言わない —— つまり**上流の staticcheck はここで撃っており、
+guff は撃っていない**（続き 103 の「nolintlint の unused は analyzer の穴の逆向きの信号」がまた 1 件）。
+directive を外して測ると **SA4006「this value of keyValue is never used」**だった。
+
+#### 1. 上流が撃つ理由は、同じ値に σ ノードが**2 つ**あることだった
+
+`scratch` module に写して**9 形**測った（`staticcheck` だけ有効、1 形 1 関数）。
+上流が撃つのは**そのうち 1 形だけ**である:
+
+| 形 | 上流 | guff |
+|---|---|---|
+| S1 `envValue := kv` → 分岐 → `keyValue := envValue` → 深い枝で `os.ReadFile(envValue)`（ループ内） | **撃つ** | 黙る |
+| S2 深い枝の綴りだけ `os.ReadFile(kv)` に変える | 黙る | 黙る |
+| S3 `envValue := kv + "x"`（別名ではなく新しい値） | 黙る | 黙る |
+| S4 別名を作らず `keyValue := kv` | 黙る | 黙る |
+| S5 間の分岐が `continue` しない | 黙る | 黙る |
+| T1 / U1 同じ形をループの外に出す | 黙る | 黙る |
+| W1 別名と代入の間に分岐が無い | 黙る | 黙る |
+| T4 後の読みが同じブロック（深い枝でない） | 黙る | 黙る |
+| （対照）`c := a; c = b; return c` | 撃つ | **撃つ** |
+
+**S1 と S2 は同じプログラムである**。違うのは「同じ値を持つ 2 つの名前のどちらを綴ったか」だけで、
+それで上流の答えが変わる。IR を出すと理由が見える（`honnef.co/go/tools@v0.7.0` の `go/ir` を
+`buildir` と同じ設定で直接叩いた）:
+
+```
+b5: ← b3
+    t57 = Sigma <string> [b3] t36   # kv
+    t58 = Sigma <string> [b3] t36   # envValue      ← t57 とバイト同一
+    ; var envValue string @ 36:15 is t57            ← 右辺は t57 に束縛される
+    ; var keyValue string @ 36:3  is t57
+b6: ← b5
+    t68 = Sigma <string> [b5] t58   # envValue      ← 深い枝の読みは t58 を辿る
+```
+
+`keyValue := envValue` は命令を 1 つも生まないので、SA4006 が訊くのは**右辺が束縛された σ**（t57）である。
+深い枝が `envValue` と綴られていると改名は t58 側を通るので、**t57 の参照は DebugRef だけ**になり
+「この値は使われない」になる。`kv` と綴れば t68 は t57 を辿るので生きる。
+ループの外に出すと `simplifyPhisAndSigmas`（`go/ir/lift.go:573`、
+コメント自身が *"these nodes exist when multiple allocs get replaced with the same dominating store"*
+と書いている）が 2 つを 1 つに畳むので σ は 1 個になり、上流は黙る。
+
+**guff の SSA に σ ノードは無い**。`kv` と `envValue` は 1 つの Value なので、
+「2 つある同一ノードのどちらか」という問いが存在しない。再現するということは、
+**改名パスがどちらを残したかで真偽が決まる診断**を出すことであり、しかもそれは
+gitea 自身が `// false positive` と書いている偽陽性である。
+`compat/allowlists/gitea.txt` に**測定の全文を添えて**記録した（§5 に行を足した）。
+consul の SA9008 ×2 と同じ類（上流の IR 検証が guff に無い）で、向きだけが逆である。
+
+#### 2. 測り直しで **wastedassign 3 件**が出た。`const` に go/ssa の `d.Tok == token.VAR` が無かった
+
+allowlist を足して `./compat/hunt.sh --name gitea` を回すと、**1 件ではなく 4 件**だった。
+台帳の行は 8 日前のもので、その間に guff の何かが露出させていた:
+
+```
++guff  models/migrations/v1_6/v70.go:27:wastedassign:assigned to v16UnitTypeCode, but never used afterwards
++guff  models/migrations/v1_8/v76.go:24:wastedassign:assigned to v16UnitTypeCode, but never used afterwards
++guff  tests/integration/repo_commits_test.go:80:wastedassign:assigned to authorTime, but never used afterwards
+```
+
+3 つとも**関数ローカルの `const` ブロック**である。最小再現は 8 行:
+
+```go
+func F() int {
+	const (
+		a = iota + 1 // guff: assigned to a, but never used afterwards
+		b
+		c
+	)
+	return b + c
+}
+```
+
+go/ssa の `builder.stmt` は `case *ast.DeclStmt: // Con, Var or Typ` で
+**`if d.Tok == token.VAR`** を見てから `localValueSpec` を呼ぶ。guff の `decl_stmt` は
+その 1 行を持っておらず、**あらゆる `GenDecl` の ValueSpec にセルと Store を作っていた**ので、
+読まれない定数の Store が wastedassign には「代入して使われない」に見えた。
+ローカル定数はコンパイル時の値で、読みは型情報から解決されるから**セルは要らない**。
+
+**この欠落は初回 import（2026-07-14）から在る**（`git log -L` で `decl_stmt` の履歴は 1 コミットだけ）。
+8-23 の測定で出ていなかった理由までは辿っていない —— config は 2 回の run でバイト同一、
+`hunt.sh` は両方とも `--no-cache` と使い捨ての cache dir で走っている。
+**「露出したのがいつか」は分からないが、欠陥そのものは上流と突き合わせて確定している。**
+
+fixture（`compat/isolate/fixtures/wastedassign/bad.go`、golden と共有）には
+**測った 6 形を全部**足した: iota ブロック / 単独 const / 型付き const /
+複数名 1 spec（片方だけ読む）/ `type` 宣言と並ぶ const / **`const` の隣の `var`**。
+最後の 1 つは早期 return が文全体を飛ばしていないことの対照で、
+**両ツールとも `bad.go:101:6` で撃つ**（golden の差分はこの 1 行だけ）。
+
+#### 3. ついでに測れた、閉じていない 1 つ
+
+同じ fixture を `unused` 込みで測ると、上流は `const x = 1` と `const s string = "x"`
+（**関数スコープの単独 const**）を `const x is unused` と報告し、**guff は黙る**。
+iota ブロックや複数名 1 spec は**両ツールとも黙る**（上流は spec 単位で束ねているらしい）。
+gitea のローカル定数は全部後者なのでこの差は出ておらず、**別の穴として残す**。
+`guff-unused` は SSA を要求しない（`requires: vec![generated::analyzer()]`）ので
+今回の変更とは無関係である。
+
+**測定**: gitea **4 → 0**（wastedassign 3 件が消え、nolintlint 1 件は allowlist）。
