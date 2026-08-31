@@ -2309,7 +2309,7 @@ fn is_safe_if_edge_result(
 pub(crate) fn collect_g115(
     prog: &Program,
     src_funcs: &[FuncId],
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<(u32, u32, String)>,
 ) {
     for &fid in src_funcs {
         let func = prog.functions.get(fid);
@@ -2359,7 +2359,7 @@ pub(crate) fn collect_g115(
                 );
                 let pos = func.pos(iid);
                 if pos.is_valid() {
-                    pending.push((pos.0 as u32, msg));
+                    pending.push((pos.0 as u32, pos.0 as u32, msg));
                 }
             }
         }

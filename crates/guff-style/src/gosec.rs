@@ -67,6 +67,7 @@ use guff::ast::{
     ValueSpec,
 };
 use guff::token::Token;
+use guff::commentmap::node_end;
 use guff::walk::{preorder, NodeRef};
 use guff_analysis::code;
 use guff_analysis::passes::inspect;
@@ -685,7 +686,7 @@ fn check_g122_walk_call(
     call: &CallExpr,
     pkg: &str,
     name: &str,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<(u32, u32, String)>,
 ) {
     let cb_idx = match (pkg, name) {
         ("path/filepath", "Walk" | "WalkDir") => 1usize,
@@ -775,7 +776,7 @@ fn check_g122_walk_call(
             NodeRef::CallExpr(inner) => {
                 for name in &tainted {
                     if let Some(pos) = g122_sink_pos(pass, inner, name) {
-                        pending.push((pos, format!("G122: {G122_WHAT}")));
+                        pending.push((pos, pos, format!("G122: {G122_WHAT}")));
                         break;
                     }
                 }
@@ -1034,7 +1035,7 @@ fn ident_pos_is(e: &Expr, pos: u32) -> bool {
 ///
 /// DEFERRED: the identifier branch, where the query is built up in a variable
 /// (`q := "SELECT …"; q += tainted`) before the call.
-fn check_g202_call(pass: &Pass<'_>, file: &File, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+fn check_g202_call(pass: &Pass<'_>, file: &File, call: &CallExpr, pending: &mut Vec<(u32, u32, String)>) {
     let Some(query) = g202_query_arg(pass, file, call) else {
         return;
     };
@@ -1054,7 +1055,7 @@ fn check_g202_call(pass: &Pass<'_>, file: &File, call: &CallExpr, pending: &mut 
     }
     for op in &operands[1..] {
         if !g202_try_resolve(pass, file, op) {
-            pending.push((query.pos().0 as u32, format!("G202: {G202_WHAT}")));
+            pending.push((query.pos().0 as u32, query.end().0 as u32, format!("G202: {G202_WHAT}")));
             return;
         }
     }
@@ -1337,29 +1338,35 @@ fn truncate_bytes(s: &str, n: usize) -> &str {
     &s[..end]
 }
 
-fn report_g101(pending: &mut Vec<(u32, String)>, pos: u32, pattern_name: Option<&str>) {
+fn report_g101(
+    pending: &mut Vec<(u32, u32, String)>,
+    pos: u32,
+    end: u32,
+    pattern_name: Option<&str>,
+) {
     let msg = match pattern_name {
         Some(p) => format!("G101: {G101_WHAT}: {p}"),
         None => format!("G101: {G101_WHAT}"),
     };
-    pending.push((pos, msg));
+    pending.push((pos, end, msg));
 }
 
 fn check_cred_value(
     rt: &G101Rt,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<(u32, u32, String)>,
     pos: u32,
+    end: u32,
     name_matched: bool,
     value: &str,
 ) -> bool {
     if name_matched {
         if rt.entropy_ok(value) {
-            report_g101(pending, pos, None);
+            report_g101(pending, pos, end, None);
             return true;
         }
     } else if rt.entropy_ok(value) {
         if let Some(pattern) = rt.is_secret_pattern(value) {
-            report_g101(pending, pos, Some(pattern));
+            report_g101(pending, pos, end, Some(pattern));
             return true;
         }
     }
@@ -1393,7 +1400,7 @@ fn import_spec_pos(imp: &ImportSpec) -> u32 {
 
 /// Upstream reports `assign` — `AssignStmt.Pos()`, i.e. the first LHS operand,
 /// not the `=`/`:=` token.
-fn check_g101_assign(rt: &G101Rt, assign: &AssignStmt, pending: &mut Vec<(u32, String)>) {
+fn check_g101_assign(rt: &G101Rt, assign: &AssignStmt, pending: &mut Vec<(u32, u32, String)>) {
     for lhs in &assign.lhs {
         let Expr::Ident(ident) = lhs else {
             continue;
@@ -1402,7 +1409,7 @@ fn check_g101_assign(rt: &G101Rt, assign: &AssignStmt, pending: &mut Vec<(u32, S
         if name_matched {
             for rhs in &assign.rhs {
                 if let Some(val) = string_lit_from_expr(rhs) {
-                    if check_cred_value(rt, pending, assign_pos(assign), true, &val) {
+                    if check_cred_value(rt, pending, assign_pos(assign), node_end(NodeRef::AssignStmt(assign)).0 as u32, true, &val) {
                         return;
                     }
                 }
@@ -1410,7 +1417,7 @@ fn check_g101_assign(rt: &G101Rt, assign: &AssignStmt, pending: &mut Vec<(u32, S
         }
         for rhs in &assign.rhs {
             if let Some(val) = string_lit_from_expr(rhs) {
-                if check_cred_value(rt, pending, assign_pos(assign), false, &val) {
+                if check_cred_value(rt, pending, assign_pos(assign), node_end(NodeRef::AssignStmt(assign)).0 as u32, false, &val) {
                     return;
                 }
             }
@@ -1418,8 +1425,9 @@ fn check_g101_assign(rt: &G101Rt, assign: &AssignStmt, pending: &mut Vec<(u32, S
     }
 }
 
-fn check_g101_value_spec(rt: &G101Rt, spec: &ValueSpec, pending: &mut Vec<(u32, String)>) {
+fn check_g101_value_spec(rt: &G101Rt, spec: &ValueSpec, pending: &mut Vec<(u32, u32, String)>) {
     let pos = spec.names.first().map(|n| n.pos().0 as u32).unwrap_or(0);
+    let end = node_end(NodeRef::ValueSpec(spec)).0 as u32;
     for (index, ident) in spec.names.iter().enumerate() {
         if !rt.cred_name_match(&ident.name) || spec.values.is_empty() {
             continue;
@@ -1430,25 +1438,28 @@ fn check_g101_value_spec(rt: &G101Rt, spec: &ValueSpec, pending: &mut Vec<(u32, 
             spec.values.len() - 1
         };
         if let Some(val) = string_lit_from_expr(&spec.values[idx]) {
-            if check_cred_value(rt, pending, pos, true, &val) {
+            if check_cred_value(rt, pending, pos, end, true, &val) {
                 return;
             }
         }
     }
     for value in &spec.values {
         if let Some(val) = string_lit_from_expr(value) {
-            if check_cred_value(rt, pending, pos, false, &val) {
+            if check_cred_value(rt, pending, pos, end, false, &val) {
                 return;
             }
         }
     }
 }
 
-fn check_g101_equality(rt: &G101Rt, bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
+fn check_g101_equality(rt: &G101Rt, bin: &BinaryExpr, pending: &mut Vec<(u32, u32, String)>) {
     if bin.op != Token::EQL && bin.op != Token::NEQ {
         return;
     }
-    let pos = bin.op_pos.0 as u32;
+    // `ctx.NewIssue(binaryExpr, …)`: a BinaryExpr's `Pos()` is `X.Pos()`, so
+    // `password == "…"` is reported on the `password`, not on the `==`.
+    let pos = bin.x.pos().0 as u32;
+    let end = bin.y.end().0 as u32;
 
     let (ident, value_node) = match (bin.x.as_ref(), bin.y.as_ref()) {
         (Expr::Ident(id), other) => (Some(id), other),
@@ -1458,7 +1469,7 @@ fn check_g101_equality(rt: &G101Rt, bin: &BinaryExpr, pending: &mut Vec<(u32, St
     if let Some(ident) = ident {
         if rt.cred_name_match(&ident.name) {
             if let Some(val) = string_lit_from_expr(value_node) {
-                if check_cred_value(rt, pending, pos, true, &val) {
+                if check_cred_value(rt, pending, pos, end, true, &val) {
                     return;
                 }
             }
@@ -1472,15 +1483,20 @@ fn check_g101_equality(rt: &G101Rt, bin: &BinaryExpr, pending: &mut Vec<(u32, St
     };
     if let Some(lit) = lit {
         if let Some(val) = unquote_string_lit(&lit.value) {
-            if check_cred_value(rt, pending, pos, false, &val) {
+            if check_cred_value(rt, pending, pos, end, false, &val) {
                 return;
             }
         }
     }
 }
 
-fn check_g101_composite(rt: &G101Rt, lit: &CompositeLit, pending: &mut Vec<(u32, String)>) {
-    let pos = lit.lbrace.0 as u32;
+fn check_g101_composite(rt: &G101Rt, lit: &CompositeLit, pending: &mut Vec<(u32, u32, String)>) {
+    // `ctx.NewIssue(lit, …)`, and `CompositeLit.Pos()` is `Type.Pos()` when the
+    // type is written — `&corev1api.SecretVolumeSource{…}` reports at the `S`,
+    // not at the `{` four columns further on. `composite_lit_pos` is the same
+    // helper G112 already uses.
+    let pos = composite_lit_pos(lit);
+    let end = lit.rbrace.0 as u32;
     for elt in &lit.elts {
         let Expr::KeyValueExpr(kv) = elt else {
             continue;
@@ -1498,13 +1514,13 @@ fn check_g101_composite(rt: &G101Rt, lit: &CompositeLit, pending: &mut Vec<(u32,
         }
         if matched_key {
             if let Some(val) = string_lit_from_expr(kv.value.as_ref()) {
-                if check_cred_value(rt, pending, pos, true, &val) {
+                if check_cred_value(rt, pending, pos, end, true, &val) {
                     return;
                 }
             }
         }
         if let Some(val) = string_lit_from_expr(kv.value.as_ref()) {
-            if check_cred_value(rt, pending, pos, false, &val) {
+            if check_cred_value(rt, pending, pos, end, false, &val) {
                 return;
             }
         }
@@ -1515,7 +1531,7 @@ fn check_g101(
     pass: &Pass<'_>,
     enabled: &HashSet<&'static str>,
     opts: &GosecOptions,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<(u32, u32, String)>,
 ) {
     if !enabled.contains("G101") {
         return;
@@ -1673,98 +1689,212 @@ fn is_pkg_sel_call(pass: &Pass<'_>, call: &CallExpr) -> bool {
 ///
 /// Uses in-memory [`Package::source_bytes`] — never re-reads the filesystem
 /// (cold-wall sensitive; production parses without `PARSE_COMMENTS`).
-fn nosec_suppresses(pass: &Pass<'_>, pos: u32, rule: &str) -> bool {
-    let position = pass.fset().position(guff::position::Pos(pos as i64));
-    let line = position.line;
-    if line == 0 {
-        return false;
-    }
-
-    // AST comments first (when PARSE_COMMENTS was used).
-    const PREV_LINES: i64 = 3;
-    for file in pass.files() {
-        for cg in &file.comments {
-            for c in &cg.list {
-                let cline = pass.fset().position(c.slash).line;
-                if cline > line || line - cline > PREV_LINES {
-                    continue;
-                }
-                if comment_suppresses_nosec(&c.text, rule) {
-                    return true;
-                }
-            }
-        }
-    }
-
-    // Fall back to retained source bytes (same buffers typecheck already read).
-    if position.filename.is_empty() {
-        return false;
-    }
-    let Some(src) = package_source_for_file(pass, &position.filename) else {
-        return false;
-    };
-    let text = String::from_utf8_lossy(src);
-    let lines: Vec<&str> = text.lines().collect();
-    if line < 1 || (line as usize) > lines.len() {
-        return false;
-    }
-    let idx = (line as usize) - 1;
-    if comment_suppresses_nosec(lines[idx], rule) {
-        return true;
-    }
-    let mut i = idx;
-    let mut walked = 0i64;
-    while i > 0 && walked < PREV_LINES {
-        i -= 1;
-        walked += 1;
-        let t = lines[i].trim();
-        if t.is_empty() {
-            continue;
-        }
-        if !(t.starts_with("//") || t.starts_with("/*") || t.starts_with('*')) {
-            break;
-        }
-        if comment_suppresses_nosec(lines[i], rule) {
-            return true;
-        }
-    }
-    false
+/// The line ranges a `#nosec` directive suppresses, per file.
+///
+/// Upstream builds an `ast.CommentMap` and asks it which node each comment
+/// belongs to, then records **that node's line range** as ignored
+/// (`analyzer.go`'s `ignores.add` / `ignores.get`). So a directive written
+/// *inside* a composite literal covers the whole literal, including the
+/// position the finding is reported at — which is the literal's own `Pos()`,
+/// several lines above the comment.
+///
+/// velero's `pkg/install/daemonset.go` is exactly that:
+///
+/// ```go
+/// Secret: &corev1api.SecretVolumeSource{        // ← G101 is reported here
+///     DefaultMode: ptr.To(int32(0444)),
+///     // #nosec G101 -- a Secret resource name, not a credential
+///     SecretName: "cloud-credentials",
+/// },
+/// ```
+///
+/// Looking only *backwards* from the reported line, as the fallback below
+/// does, never sees it.
+#[derive(Default)]
+struct NosecRanges {
+    /// (file, first line, last line, directive args)
+    ranges: Vec<(String, i64, i64, String)>,
 }
 
-/// Locate retained source for `filename` (FileSet path from typecheck).
-fn package_source_for_file<'a>(pass: &'a Pass<'_>, filename: &str) -> Option<&'a [u8]> {
-    let pkg = pass.pkg();
-    for (i, path) in pkg.compiled_go_files.iter().enumerate() {
-        if path.to_str() == Some(filename) {
-            return pkg.source_bytes(i);
+impl NosecRanges {
+    /// Reparse each file for comments — the shared load drops them — build the
+    /// comment map against that tree, and record the line range of every node a
+    /// `#nosec` attaches to. Line numbers are the same in both parses because
+    /// the bytes are.
+    fn build(pass: &Pass<'_>) -> Self {
+        use guff::commentmap::{new_comment_map, node_end, node_pos};
+        use guff::parser::{parse_file, PARSE_COMMENTS};
+        use guff::position::FileSet;
+
+        let mut out = NosecRanges::default();
+        for (index, path) in pass.pkg().compiled_go_files.iter().enumerate() {
+            let owned;
+            let src: &[u8] = match pass.pkg().source_bytes(index) {
+                Some(b) => b,
+                None => match std::fs::read(path) {
+                    Ok(b) => {
+                        owned = b;
+                        &owned
+                    }
+                    Err(_) => continue,
+                },
+            };
+            // Cheap filter: almost no file carries a directive, and the
+            // reparse below is the expensive part.
+            if !src.windows(5).any(|w| w == b"nosec") {
+                continue;
+            }
+            let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            let rfset = FileSet::new();
+            let Ok(rfile) = parse_file(&rfset, name, src, PARSE_COMMENTS) else {
+                continue;
+            };
+            let cmap = new_comment_map(&rfset, NodeRef::File(&rfile), &rfile.comments);
+            let mut ranges: Vec<(i64, i64, String)> = Vec::new();
+            preorder(NodeRef::File(&rfile), |n| {
+                let Some(groups) = cmap.get(n) else {
+                    return true;
+                };
+                for group in groups {
+                    let Some(first) = group.list.first() else {
+                        continue;
+                    };
+                    let Some(args) = find_nosec_directive(group) else {
+                        continue;
+                    };
+                    // `updateIgnoredRulesForNode`: the recorded range is the
+                    // union of the node's and the comment group's, so a
+                    // directive that trails the node it belongs to still
+                    // covers its own line.
+                    let mut start = node_pos(n);
+                    let mut end = node_end(n);
+                    if first.pos() < start {
+                        start = first.pos();
+                    }
+                    let group_end = group.list.last().map(|c| c.end()).unwrap_or(end);
+                    if group_end > end {
+                        end = group_end;
+                    }
+                    ranges.push((
+                        rfset.position(start).line,
+                        rfset.position(end).line,
+                        args,
+                    ));
+                }
+                true
+            });
+            for (start, end, text) in ranges {
+                out.ranges.push((name.to_string(), start, end, text));
+            }
         }
+        out
     }
-    // Basename fallback for synthetic / relative FileSet names in tests.
-    let want = std::path::Path::new(filename).file_name()?;
-    for (i, path) in pkg.compiled_go_files.iter().enumerate() {
-        if path.file_name() == Some(want) {
-            return pkg.source_bytes(i);
+
+    /// `ignores.get`: the recorded range and the issue's own range match when
+    /// either contains the other. The second half is what makes velero work —
+    /// the directive sits *inside* the composite literal the finding is
+    /// reported on, so the issue's range is the wider of the two.
+    fn suppresses(&self, file: &str, start: i64, end: i64, rule: &str) -> bool {
+        self.ranges.iter().any(|(f, ig_start, ig_end, text)| {
+            (f == file || same_basename(f, file))
+                && ((*ig_start <= start && *ig_end >= end)
+                    || (start <= *ig_start && end >= *ig_end))
+                && directive_suppresses(text, rule)
+        })
+    }
+}
+
+fn same_basename(a: &str, b: &str) -> bool {
+    std::path::Path::new(a).file_name() == std::path::Path::new(b).file_name()
+}
+
+/// `findNoSecTag`: the tag counts only at the very start of the group's text
+/// or at the start of one of its lines. A prose mention such as
+/// "a `#nosec` comment suppresses …" is not a directive — which is why this is
+/// a substring search with a position test rather than `contains`.
+fn find_nosec_tag<'a>(text: &'a str, tag: &str) -> Option<&'a str> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    if let Some(rest) = text.strip_prefix(tag) {
+        return Some(rest);
+    }
+    let idx = text.find(tag).filter(|i| *i > 0)?;
+    for (i, b) in text.as_bytes()[..idx].iter().enumerate().rev() {
+        let _ = i;
+        if *b == b'\n' {
+            return Some(&text[idx + tag.len()..]);
+        }
+        if *b != b' ' && *b != b'\t' {
+            break;
         }
     }
     None
 }
 
-fn comment_suppresses_nosec(text: &str, rule: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    let has_nosec =
-        lower.contains("#nosec") || lower.contains("//nosec") || lower.contains("gosec:disable");
-    if !has_nosec {
-        return false;
+/// `findNoSecDirective`: `#nosec` anywhere the tag rule allows, or a
+/// `//gosec:disable` comment. The latter is checked over the raw comments
+/// because `CommentGroup.Text()` drops directive-shaped lines.
+fn find_nosec_directive(group: &guff::ast::CommentGroup) -> Option<String> {
+    if let Some(args) = find_nosec_tag(&group.text(), NOSEC_TAG) {
+        return Some(args.to_string());
     }
-    // Bare `#nosec` / `#nosec G112` / `#nosec G112,G114`
-    !text.contains('G') || text.contains(rule)
+    for c in &group.list {
+        if let Some(after) = c.text.strip_prefix(GOSEC_DISABLE_PREFIX) {
+            if after.is_empty() || after.starts_with(' ') {
+                return Some(after.trim().to_string());
+            }
+        }
+    }
+    None
 }
+
+/// The rule-id half of `astVisitor.ignore`: strip the `-- justification`,
+/// then scan for `G` followed by exactly three digits. An empty directive —
+/// including one that is empty only because everything after it was a
+/// justification — suppresses *every* rule.
+fn directive_suppresses(args: &str, rule: &str) -> bool {
+    let mut args = args;
+    if let Some(idx) = args.find("--") {
+        args = &args[..idx];
+    }
+    let directive = args.trim();
+    if directive.is_empty() || directive == "block" {
+        return true;
+    }
+    let bytes = directive.as_bytes();
+    let mut found_any = false;
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'G' && i + 4 <= bytes.len() {
+            let id = &directive[i..i + 4];
+            if id.as_bytes()[1..4].iter().all(|b| b.is_ascii_digit()) {
+                found_any = true;
+                if id == rule {
+                    return true;
+                }
+                i += 4;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    // `#nosec somethingElse` names no rule at all, and upstream falls back to
+    // "all rules" (`if len(ignores) == 0`).
+    !found_any
+}
+
+const NOSEC_TAG: &str = "#nosec";
+const GOSEC_DISABLE_PREFIX: &str = "//gosec:disable";
 
 fn check_g402_tls_field(
     field: &str,
     value: &Expr,
     report_pos: u32,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<(u32, u32, String)>,
 ) {
     if field != "InsecureSkipVerify" {
         return;
@@ -1772,9 +1902,11 @@ fn check_g402_tls_field(
     match resolve_bool_const(value) {
         Some(true) => pending.push((
             report_pos,
+            report_pos,
             "G402: TLS InsecureSkipVerify set to true.".to_string(),
         )),
         None => pending.push((
+            report_pos,
             report_pos,
             "G402: TLS InsecureSkipVerify may be set to true.".to_string(),
         )),
@@ -1786,7 +1918,7 @@ fn check_g402_composite(
     pass: &Pass<'_>,
     lit: &CompositeLit,
     enabled: &HashSet<&'static str>,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<(u32, u32, String)>,
 ) {
     if !enabled.contains("G402") {
         return;
@@ -1848,7 +1980,7 @@ fn check_g402_assign(
     pass: &Pass<'_>,
     assign: &AssignStmt,
     enabled: &HashSet<&'static str>,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<(u32, u32, String)>,
 ) {
     if !enabled.contains("G402") || assign.lhs.is_empty() || assign.rhs.is_empty() {
         return;
@@ -1974,7 +2106,7 @@ fn check_g124_composite(
     pass: &Pass<'_>,
     lit: &CompositeLit,
     enabled: &HashSet<&'static str>,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<(u32, u32, String)>,
 ) {
     if !enabled.contains("G124") {
         return;
@@ -2001,7 +2133,7 @@ fn check_g124_composite(
     if sec.is_secure() {
         return;
     }
-    pending.push((lit.lbrace.0 as u32, format!("G124: {G124_WHAT}")));
+    pending.push((lit.lbrace.0 as u32, lit.rbrace.0 as u32, format!("G124: {G124_WHAT}")));
 }
 
 /// If `lit` is the RHS of `name := &http.Cookie{…}` / `name = &http.Cookie{…}`
@@ -2073,7 +2205,7 @@ fn enclosing_func_body<'a>(
 fn check_g124_cookie_params(
     pass: &Pass<'_>,
     enabled: &HashSet<&'static str>,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<(u32, u32, String)>,
 ) {
     if !enabled.contains("G124") {
         return;
@@ -2107,7 +2239,7 @@ fn check_g124_cookie_params(
                     let mut sec = CookieSecurity::default();
                     collect_cookie_param_stores(pass, body, &name.name, &mut sec);
                     if !sec.is_secure() {
-                        pending.push((name.name_pos.0 as u32, format!("G124: {G124_WHAT}")));
+                        pending.push((name.name_pos.0 as u32, name.end().0 as u32, format!("G124: {G124_WHAT}")));
                     }
                 }
             }
@@ -2144,7 +2276,7 @@ fn check_g112_composite(
     pass: &Pass<'_>,
     lit: &CompositeLit,
     enabled: &HashSet<&'static str>,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<(u32, u32, String)>,
 ) {
     if !enabled.contains("G112") {
         return;
@@ -2171,7 +2303,7 @@ fn check_g112_composite(
     if !composite_has_timeout_field(lit) {
         // `NewIssue(node, …)` on the CompositeLit: its Pos() is the type, not
         // the `{`.
-        pending.push((composite_lit_pos(lit), format!("G112: {G112_WHAT}")));
+        pending.push((composite_lit_pos(lit), lit.rbrace.0 as u32, format!("G112: {G112_WHAT}")));
     }
 }
 
@@ -2255,7 +2387,7 @@ fn check_g109_call(
     pass: &Pass<'_>,
     call: &CallExpr,
     atoi_vars: &HashSet<ObjectId>,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<(u32, u32, String)>,
 ) {
     // int16(x) / int32(x) conversions.
     let Expr::Ident(fun) = call.fun.as_ref() else {
@@ -2274,11 +2406,11 @@ fn check_g109_call(
         return;
     };
     if atoi_vars.contains(&obj) {
-        pending.push((call.pos().0 as u32, format!("G109: {G109_WHAT}")));
+        pending.push((call.pos().0 as u32, call.end().0 as u32, format!("G109: {G109_WHAT}")));
     }
 }
 
-fn check_g109(pass: &Pass<'_>, enabled: &HashSet<&'static str>, pending: &mut Vec<(u32, String)>) {
+fn check_g109(pass: &Pass<'_>, enabled: &HashSet<&'static str>, pending: &mut Vec<(u32, u32, String)>) {
     if !enabled.contains("G109") {
         return;
     }
@@ -2464,7 +2596,7 @@ fn resolve_ident(pass: &Pass<'_>, decls: &FileDecls<'_>, id: &Ident, depth: u32)
 ///
 /// A pass of its own because it needs [`FileDecls`]. Everything else in this
 /// file decides from the call alone.
-fn check_g204(pass: &Pass<'_>, enabled: &HashSet<&'static str>, pending: &mut Vec<(u32, String)>) {
+fn check_g204(pass: &Pass<'_>, enabled: &HashSet<&'static str>, pending: &mut Vec<(u32, u32, String)>) {
     if !enabled.contains("G204") {
         return;
     }
@@ -2483,7 +2615,7 @@ fn check_g204_call(
     pass: &Pass<'_>,
     decls: &FileDecls<'_>,
     call: &CallExpr,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<(u32, u32, String)>,
 ) {
     let Some((pkg, name)) = resolve_pkg_call(pass, call) else {
         return;
@@ -2532,6 +2664,7 @@ fn check_g204_call(
             if !try_resolve(pass, decls, arg, 0) {
                 pending.push((
                     call.pos().0 as u32,
+                    call.end().0 as u32,
                     "G204: Subprocess launched with variable".to_string(),
                 ));
                 return;
@@ -2539,6 +2672,7 @@ fn check_g204_call(
         } else if !try_resolve(pass, decls, arg, 0) {
             pending.push((
                 call.pos().0 as u32,
+                call.end().0 as u32,
                 "G204: Subprocess launched with a potential tainted input or cmd arguments"
                     .to_string(),
             ));
@@ -2569,7 +2703,7 @@ fn is_g110_reader_call(pass: &Pass<'_>, call: &CallExpr) -> bool {
     })
 }
 
-fn check_g110(pass: &Pass<'_>, enabled: &HashSet<&'static str>, pending: &mut Vec<(u32, String)>) {
+fn check_g110(pass: &Pass<'_>, enabled: &HashSet<&'static str>, pending: &mut Vec<(u32, u32, String)>) {
     if !enabled.contains("G110") {
         return;
     }
@@ -2609,6 +2743,7 @@ fn check_g110(pass: &Pass<'_>, enabled: &HashSet<&'static str>, pending: &mut Ve
                             {
                                 pending.push((
                                     call.pos().0 as u32,
+                                    call.end().0 as u32,
                                     format!("G110: {G110_WHAT}"),
                                 ));
                             }
@@ -2754,7 +2889,7 @@ fn check_g104_call(
     pass: &Pass<'_>,
     call: &CallExpr,
     enabled: &HashSet<&'static str>,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<(u32, u32, String)>,
 ) {
     if !enabled.contains("G104") || g104_whitelisted(pass, call) {
         return;
@@ -2762,7 +2897,7 @@ fn check_g104_call(
     if call_returns_error(pass, call) {
         // `NewIssue(n, …)` where n is the ExprStmt, whose Pos() is the call's,
         // which is the callee's — not the `(`.
-        pending.push((call.pos().0 as u32, "G104: Errors unhandled".to_string()));
+        pending.push((call.pos().0 as u32, call.end().0 as u32, "G104: Errors unhandled".to_string()));
     }
 }
 
@@ -2776,7 +2911,7 @@ fn check_call(
     pass: &Pass<'_>,
     call: &CallExpr,
     enabled: &HashSet<&'static str>,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<(u32, u32, String)>,
 ) {
     // Every rule reached from here is a `MatchCallByPackage` /
     // `ContainsPkgCallExpr` rule upstream, so the receiver has to be the
@@ -2796,6 +2931,7 @@ fn check_call(
             }
             pending.push((
                 call.pos().0 as u32,
+                call.end().0 as u32,
                 format!("{}: {}", rule.id, rule.call_what),
             ));
         }
@@ -2808,6 +2944,7 @@ fn check_call(
                 if bind_all_pattern().is_match(&addr) {
                     pending.push((
                         call.pos().0 as u32,
+                        call.end().0 as u32,
                         "G102: Binds to all network interfaces".to_string(),
                     ));
                 }
@@ -2826,6 +2963,7 @@ fn check_call(
                 if arg == "/" {
                     pending.push((
                         call.pos().0 as u32,
+                        call.end().0 as u32,
                         "G111: Potential directory traversal".to_string(),
                     ));
                 }
@@ -2844,6 +2982,7 @@ fn check_call(
             if bad {
                 pending.push((
                     call.pos().0 as u32,
+                    call.end().0 as u32,
                     format!(
                         "G301: Expect directory permissions to be {} or less",
                         format_octal_mode(G301_MODE)
@@ -2860,6 +2999,7 @@ fn check_call(
             if bad {
                 pending.push((
                     call.pos().0 as u32,
+                    call.end().0 as u32,
                     format!(
                         "G302: Expect file permissions to be {} or less",
                         format_octal_mode(G302_MODE)
@@ -2876,6 +3016,7 @@ fn check_call(
             if bad {
                 pending.push((
                     call.pos().0 as u32,
+                    call.end().0 as u32,
                     format!(
                         "G306: Expect WriteFile permissions to be {} or less",
                         format_octal_mode(G306_MODE)
@@ -2892,6 +3033,7 @@ fn check_call(
                 if bits < G403_MIN_BITS {
                     pending.push((
                         call.pos().0 as u32,
+                        call.end().0 as u32,
                         format!("G403: RSA keys should be at least {G403_MIN_BITS} bits"),
                     ));
                 }
@@ -2901,7 +3043,7 @@ fn check_call(
 
     if enabled.contains("G303") && G303_CALLS.iter().any(|(p, n)| *p == pkg && *n == name) {
         if !call.args.is_empty() && find_temp_dir_args(pass, &call.args[0]) {
-            pending.push((call.pos().0 as u32, format!("G303: {G303_WHAT}")));
+            pending.push((call.pos().0 as u32, call.end().0 as u32, format!("G303: {G303_WHAT}")));
         }
     }
 
@@ -2912,14 +3054,14 @@ fn check_call(
             && !call.args.is_empty()
             && g107_url_tainted(pass, &call.args[0])
         {
-            pending.push((call.pos().0 as u32, format!("G107: {G107_WHAT}")));
+            pending.push((call.pos().0 as u32, call.end().0 as u32, format!("G107: {G107_WHAT}")));
         }
     }
 
     if enabled.contains("G203") && G203_CALLS.iter().any(|(p, n)| *p == pkg && *n == name) {
         let has_non_lit = call.args.iter().any(|a| !matches!(a, Expr::BasicLit(_)));
         if has_non_lit {
-            pending.push((call.pos().0 as u32, format!("G203: {G203_WHAT}")));
+            pending.push((call.pos().0 as u32, call.end().0 as u32, format!("G203: {G203_WHAT}")));
         }
     }
 }
@@ -2927,7 +3069,7 @@ fn check_call(
 fn check_imports(
     pass: &Pass<'_>,
     enabled: &HashSet<&'static str>,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<(u32, u32, String)>,
 ) {
     for file in pass.files() {
         for decl in &file.decls {
@@ -2954,7 +3096,11 @@ fn check_imports(
                             // when there is one. `_ "net/http/pprof"` reports
                             // at the `_`, not at the path literal.
                             pending
-                                .push((import_spec_pos(imp), format!("{}: {}", rule.id, desc)));
+                                .push((
+                            import_spec_pos(imp),
+                            node_end(NodeRef::ImportSpec(imp)).0 as u32,
+                            format!("{}: {}", rule.id, desc),
+                        ));
                         }
                     }
                 }
@@ -2974,7 +3120,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .unwrap_or_default();
     let enabled = enabled_rules(&opts);
 
-    let mut pending: Vec<(u32, String)> = Vec::new();
+    let mut pending: Vec<(u32, u32, String)> = Vec::new();
     check_imports(pass, &enabled, &mut pending);
     check_g101(pass, &enabled, &opts, &mut pending);
     check_g109(pass, &enabled, &mut pending);
@@ -3023,9 +3169,15 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     let min_severity = threshold_score(&opts.severity);
     let min_confidence = threshold_score(&opts.confidence);
-    for (pos, msg) in pending {
+    let nosec_ranges = NosecRanges::build(pass);
+    for (pos, end, msg) in pending {
         let rule = msg.split(':').next().unwrap_or("");
-        if nosec_suppresses(pass, pos, rule) {
+        let start_pos = pass.fset().position(guff::position::Pos(pos as i64));
+        let end_line = pass
+            .fset()
+            .position(guff::position::Pos(end.max(pos) as i64))
+            .line;
+        if nosec_ranges.suppresses(&start_pos.filename, start_pos.line, end_line, rule) {
             continue;
         }
         let (severity, confidence) = issue_scores(rule, &msg);
