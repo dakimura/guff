@@ -20,14 +20,33 @@
 # Every iteration is a fresh `claude -p` with no memory of the last one.
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="${COMPAT_LOOP_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 cd "$ROOT" || exit 1
+
+# Re-exec from a copy outside the work tree.
+#
+# The loop's first act each iteration is `git checkout main`, which rewrites
+# every file this script needs — including this script. bash reads a script
+# incrementally, so a checkout mid-run can feed it the wrong bytes or, as
+# happened the first time this was run, delete the prompt out from under it and
+# leave the loop spinning on a file that is no longer there. Copying both out
+# of the tree first makes the loop independent of whatever branch is checked
+# out, which is the only way a thing that changes branches can be safe.
+if [[ -z "${COMPAT_LOOP_REEXEC:-}" ]]; then
+  _tmp="$(mktemp -d "${TMPDIR:-/tmp}/compat-loop.XXXXXX")"
+  cp "$ROOT/scripts/compat-loop.sh" "$_tmp/compat-loop.sh" 2>/dev/null \
+    || { echo "cannot copy self out of the work tree" >&2; exit 1; }
+  cp "$ROOT/scripts/compat-loop-prompt.md" "$_tmp/prompt.md" 2>/dev/null \
+    || { echo "missing scripts/compat-loop-prompt.md" >&2; exit 1; }
+  export COMPAT_LOOP_REEXEC=1 COMPAT_LOOP_ROOT="$ROOT" COMPAT_LOOP_PROMPT="$_tmp/prompt.md"
+  exec bash "$_tmp/compat-loop.sh" "$@"
+fi
 
 ITERATIONS="${1:-50}"
 DRY=0
 [[ "${2:-}" == "--dry" ]] && DRY=1
 
-PROMPT_FILE="$ROOT/scripts/compat-loop-prompt.md"
+PROMPT_FILE="${COMPAT_LOOP_PROMPT:-$ROOT/scripts/compat-loop-prompt.md}"
 LOG="$ROOT/compat-loop.log"
 MODEL="${COMPAT_LOOP_MODEL:-opus}"
 # How long to wait for a pull request's checks. oss-pr alone runs ~15 minutes
@@ -77,6 +96,7 @@ land_pr() {
   done
 }
 
+barren=0
 log "=== compat-loop start (max $ITERATIONS iterations, model=$MODEL) ==="
 
 for i in $(seq 1 "$ITERATIONS"); do
@@ -94,6 +114,13 @@ for i in $(seq 1 "$ITERATIONS"); do
   git checkout -q main || die "cannot check out main"
   git pull -q --ff-only || die "cannot fast-forward main"
 
+  # The loop runs from main, so its own tooling has to be *on* main. The first
+  # run of this script died here without saying so: status.py and the prompt
+  # existed only on the branch of the pull request that added them, so the
+  # checkout removed them and every iteration called claude with an empty task.
+  [[ -x "$ROOT/corpus/status.py" ]] \
+    || die "corpus/status.py is not on main — merge the pull request that adds it first"
+
   free="$(free_gb)"
   if [[ "$free" -lt "$MIN_FREE_GB" ]]; then
     die "only ${free}GB free, need ${MIN_FREE_GB}GB (the corpus grows on every adoption)"
@@ -104,7 +131,9 @@ for i in $(seq 1 "$ITERATIONS"); do
     log "GOAL REACHED: $(./corpus/status.py check)"
     exit 0
   fi
-  task="$(./corpus/status.py next)"
+  if ! task="$(./corpus/status.py next)" || [[ -z "$task" ]]; then
+    die "corpus/status.py next produced nothing — the queue is broken, not empty"
+  fi
   log "task: $task"
 
   if [[ "$DRY" -eq 1 ]]; then
@@ -125,12 +154,18 @@ for i in $(seq 1 "$ITERATIONS"); do
 
   pr="$(gh pr list --head "$branch" --json number --jq '.[0].number' 2>/dev/null)"
   if [[ -z "$pr" || "$pr" == "null" ]]; then
-    log "no pull request for $branch — nothing landed this iteration"
-    # Not fatal: an iteration that measured a target and found it clean has
-    # nothing to open a PR about except the ledger, and may have pushed that
-    # to a differently named branch. Carry on; `status.py` is the judge.
+    barren=$((barren + 1))
+    log "no pull request for $branch — nothing landed this iteration ($barren in a row)"
+    # One is survivable: an iteration that measured a target and found it clean
+    # may have had nothing to open a pull request about. Two in a row is not a
+    # quiet iteration, it is a loop that cannot produce anything — which is
+    # exactly what fifty four-second iterations looked like the first time.
+    if [[ $barren -ge 2 ]]; then
+      die "two iterations in a row produced no pull request — see $LOG"
+    fi
     continue
   fi
+  barren=0
 
   if ! land_pr "$pr"; then
     die "PR #$pr did not land — fix it, then re-run this script"
