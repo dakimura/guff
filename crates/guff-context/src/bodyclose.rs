@@ -15,6 +15,10 @@
 //!
 //! `return resp.Body` counts as closed — see [`mark_returned_body`].
 //!
+//! A package that does not **directly** import `net/http` is not checked at
+//! all — see [`imports_net_http`]. That is upstream's own first act, and it is
+//! not an optimisation: it decides findings.
+//!
 //! DEFERRED: full SSA referrer / Phi / closure-capture / FieldAddr /
 //! `io.Closer` ChangeInterface parity.
 
@@ -958,10 +962,47 @@ fn handle_value_spec(
     }
 }
 
+/// Whether the package being analysed lists `net/http` among its own imports.
+///
+/// Upstream's `run` begins with
+///
+/// ```go
+/// r.resObj = analysisutil.LookupFromImports(pass.Pkg.Imports(), "net/http", "Response")
+/// if r.resObj == nil {
+///     return nil, nil // skip checking
+/// }
+/// ```
+///
+/// and `LookupFromImports` (`gostaticanalysis/analysisutil`) walks
+/// `pass.Pkg.Imports()` — the package's **direct** imports, with no
+/// transitivity. So a package that only reaches `*http.Response` through a
+/// dependency is skipped whole, whatever its code looks like: scaleway-cli's
+/// `internal/gotty` dials with `gorilla/websocket`, never names `net/http`, and
+/// upstream reports nothing there. Ten call shapes agreed between the two tools
+/// before this gate went in; the divergence was never the shape.
+///
+/// A Go package's imports are the union of its files', which is what this
+/// walks. `pass.files()` includes the `_test.go` files for a test-augmented
+/// package, as `pass.Pkg.Imports()` does.
+fn imports_net_http(pass: &Pass<'_>) -> bool {
+    pass.files().iter().any(|file| {
+        file.imports.iter().any(|spec| {
+            let path = spec.path.value.trim_matches('"');
+            // `analysisutil.RemoveVendor`.
+            let path = path.rsplit_once("/vendor/").map_or(path, |(_, rest)| rest);
+            path == HTTP_PKG
+        })
+    })
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect_pass::InspectResult>(inspect_pass::analyzer())
         .ok_or_else(|| "bodyclose requires inspect analyzer".to_string())?;
+
+    if !imports_net_http(pass) {
+        return Ok(None);
+    }
 
     let options = pass
         .settings::<BodycloseOptions>("bodyclose")

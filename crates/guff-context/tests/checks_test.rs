@@ -57,19 +57,38 @@ fn bodyclose_flags_missing_close() {
     let dir = support::testdata("bodyclose");
     let pkg = support::typecheck_pkg("example.com/bodyclose", &dir.join("bad.go"));
     let messages = support::run_analyzer(bodyclose(), &pkg);
-    assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("response body must be closed")),
-        "{messages:?}"
-    );
-    assert!(
+    // An exact count, not `>= 5`: a floor passes while every shape but one
+    // stops reporting, which is how the `//nolint:unparam` sibling defect in
+    // unparam survived a green suite.
+    assert_eq!(
         messages
             .iter()
             .filter(|m| m.contains("response body must be closed"))
-            .count()
-            >= 5,
-        "expected ≥5 diagnostics (missing + discarded + reassign + two blanks): {messages:?}"
+            .count(),
+        BODYCLOSE_BAD_SHAPES,
+        "{messages:?}"
+    );
+}
+
+/// Every reporting shape in `testdata/bodyclose/bad.go` — the same ten keys
+/// `compat/golden/cases/bodyclose` pins against golangci-lint. Raise it when
+/// the fixture grows; a drop is a shape that stopped reporting.
+const BODYCLOSE_BAD_SHAPES: usize = 10;
+
+#[test]
+fn bodyclose_skips_packages_without_a_direct_net_http_import() {
+    // Upstream's first act is
+    // `analysisutil.LookupFromImports(pass.Pkg.Imports(), "net/http", "Response")`,
+    // and `Imports()` is the package's *direct* imports. A package that only
+    // reaches `*http.Response` through a dependency is not checked at all —
+    // scaleway-cli's `internal/gotty`, which dials with `gorilla/websocket`.
+    let dir = support::testdata("bodyclose");
+    let pkg = support::typecheck_pkg("example.com/bodyclose/nohttp", &dir.join("nohttp.go"));
+    assert!(!pkg.ill_typed, "{:?}", pkg.errors);
+    let messages = support::run_analyzer(bodyclose(), &pkg);
+    assert!(
+        messages.is_empty(),
+        "no direct net/http import: upstream checks nothing here: {messages:?}"
     );
 }
 

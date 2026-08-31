@@ -299,3 +299,117 @@ func afterSwitchAllDie(unused bool) {
 		println(1)
 	}
 }
+
+// --- What `dummyImpl` calls a stub, and what it does not -------------------
+//
+// Upstream has one answer and it is the IR's: the entry block is a stub when
+// every *operand* of every instruction is in a small whitelist (`Const`,
+// `Alloc`, `MakeMap`, `Global`, `Function`, `IndexAddr`, `Slice`, `UnOp`,
+// `Parameter`, `ChangeType`, `MakeInterface`) and the block reaches a `Return`
+// or `Panic`. Twenty `return <expr>` shapes were measured against
+// golangci-lint 2.12.2; these nine are the ones it reports, because the value
+// they return is not in that whitelist. Each needs four call sites for
+// `alwaysReceivedConst`, which `stubCallers` below supplies.
+
+type stubBox struct{ f int }
+
+var (
+	stubGlobal  stubBox
+	stubSlice   []int
+	stubMap     map[string]int
+	stubString  = "abc"
+	stubAny     any
+	stubPointer = &stubBox{}
+)
+
+func (b stubBox) method() error { return nil }
+
+func stubCompute() int { return 1 }
+
+// MakeClosure: a returned function literal — scaleway-cli's `deleteServer`,
+// `addSSHKey` and `fetchPoolMetadata` are all this shape, and all three carry a
+// `//nolint:unparam` that guff reported as unused.
+func retClosure(key string) func() error {
+	return func() error { println(key); return nil }
+}
+
+// The operand of the load is a `FieldAddr`, which the whitelist does not hold.
+func retField(key string) int {
+	return stubGlobal.f
+}
+
+// `Lookup`, not `IndexAddr`: a map index.
+func retMapIndex(key string) int {
+	return stubMap["x"]
+}
+
+// A string index is a `Lookup` too.
+func retStringIndex(key string) byte {
+	return stubString[0]
+}
+
+// A method *value* is a `MakeClosure` over a bound thunk.
+func retMethodValue(key string) func() error {
+	return stubGlobal.method
+}
+
+func retTypeAssert(key string) int {
+	return stubAny.(int)
+}
+
+// `&x.f` is the `FieldAddr` itself.
+func retFieldAddr(key string) *int {
+	return &stubGlobal.f
+}
+
+// A call is only allowed when its name matches upstream's harmless regexp.
+func retCall(key string) int {
+	return stubCompute()
+}
+
+func retConversion(key string) int64 {
+	return int64(len(stubSlice))
+}
+
+// Four call sites each, written out: `alwaysReceivedConst` counts call
+// *instructions*, so a loop around one call is one site, not four. Discarding
+// the results also makes each of these a `result 0 … is never used`, which is
+// upstream's answer too and gates that family alongside this one.
+func stubCallers() {
+	_ = retClosure("K")
+	_ = retClosure("K")
+	_ = retClosure("K")
+	_ = retClosure("K")
+	_ = retField("K")
+	_ = retField("K")
+	_ = retField("K")
+	_ = retField("K")
+	_ = retMapIndex("K")
+	_ = retMapIndex("K")
+	_ = retMapIndex("K")
+	_ = retMapIndex("K")
+	_ = retStringIndex("K")
+	_ = retStringIndex("K")
+	_ = retStringIndex("K")
+	_ = retStringIndex("K")
+	_ = retMethodValue("K")
+	_ = retMethodValue("K")
+	_ = retMethodValue("K")
+	_ = retMethodValue("K")
+	_ = retTypeAssert("K")
+	_ = retTypeAssert("K")
+	_ = retTypeAssert("K")
+	_ = retTypeAssert("K")
+	_ = retFieldAddr("K")
+	_ = retFieldAddr("K")
+	_ = retFieldAddr("K")
+	_ = retFieldAddr("K")
+	_ = retCall("K")
+	_ = retCall("K")
+	_ = retCall("K")
+	_ = retCall("K")
+	_ = retConversion("K")
+	_ = retConversion("K")
+	_ = retConversion("K")
+	_ = retConversion("K")
+}

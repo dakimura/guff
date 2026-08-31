@@ -103,8 +103,13 @@ fn dead_pos(dead: Option<&DeadView<'_>>, pos: guff::Pos) -> bool {
     dead.is_some_and(|d| d.is_dead(pos))
 }
 
-/// AST stand-in for upstream's `dummyImpl`: a function whose entry block
-/// "almost immediately panics, throws or returns constants only".
+/// AST stand-in for upstream's `dummyImpl`, used **only when there is no IR**
+/// (no `buildir` result for the package). With IR, [`dummy_impl`] is the
+/// answer and this must not be consulted as well: it is the looser of the two,
+/// and two gates in series means the looser one decides.
+///
+/// A function whose entry block "almost immediately panics, throws or returns
+/// constants only".
 ///
 /// Upstream walks the SSA entry block and stops at the first `Return`/`Panic`,
 /// so `func f(p *T) error { return nil }` is a stub and its parameters are
@@ -270,15 +275,19 @@ fn collect_used_idents(
     used
 }
 
+#[allow(clippy::too_many_arguments)]
 fn check_params(
     func_name: &str,
     params: &[guff::ast::Field],
     body: &guff::ast::BlockStmt,
     always_const: &[Option<String>],
     dead: Option<&DeadView<'_>>,
+    // `ir_decided_stub`: `dummy_impl` already answered for this function, so do
+    // not ask `is_stub_body` as well — see its doc.
+    ir_decided_stub: bool,
     pending: &mut Vec<(u32, String)>,
 ) {
-    if is_stub_body(body, dead) {
+    if !ir_decided_stub && is_stub_body(body, dead) {
         return;
     }
     let used = collect_used_idents(body, dead);
@@ -938,11 +947,13 @@ fn check_func_decl(
     // `return`, and the parameter and unused-result families read the call
     // sites.
     let mut always_const: Vec<Option<String>> = Vec::new();
+    let mut ir_decided_stub = false;
     if let Some(ssa) = ssa {
         if let Some((fid, func)) = ssa.func_for(pass, fd) {
-            if dummy_impl(ssa.prog, func) {
+            if dummy_impl(ssa.prog, func, dead.map(|d| d.flow)) {
                 return;
             }
+            ir_decided_stub = true;
             let fields = result_fields(&fd.ty);
             let types = ssa.result_types(func);
             // `return f(...)` in another function fixes f's results.
@@ -969,7 +980,15 @@ fn check_func_decl(
     let Some(params) = &fd.ty.params else {
         return;
     };
-    check_params(&func_name, &params.list, body, &always_const, dead, pending);
+    check_params(
+        &func_name,
+        &params.list,
+        body,
+        &always_const,
+        dead,
+        ir_decided_stub,
+        pending,
+    );
 }
 
 
@@ -1334,7 +1353,19 @@ fn call_extract(
 /// why `func f() (int, error) { return 0, nil }` is not "result 1 is always
 /// nil", and why a body whose only call is to `errors.New` is not checked
 /// either.
-fn dummy_impl(prog: &guff_ssa::program::Program, func: &guff_ssa::function::Function) -> bool {
+///
+/// This is the whole of upstream's answer, and it is the only one: upstream has
+/// no second, syntactic opinion about what a stub is. [`is_stub_body`] is the
+/// stand-in for when guff has no IR at all, and consulting both meant the
+/// looser of the two decided — `return func(…) error { … }` reads as "returns a
+/// constant" through an AST walk and as `MakeClosure`, which the operand
+/// whitelist above does not accept, through the IR. scaleway-cli's three
+/// `//nolint:unparam` directives were reported unused for exactly that reason.
+fn dummy_impl(
+    prog: &guff_ssa::program::Program,
+    func: &guff_ssa::function::Function,
+    flow: Option<&CtrlFlowResult>,
+) -> bool {
     use guff_ssa::instr::InstrData;
     use guff_ssa::value::Value;
 
@@ -1400,6 +1431,13 @@ fn dummy_impl(prog: &guff_ssa::program::Program, func: &guff_ssa::function::Func
             InstrData::Call(c) => {
                 let name = call_target_name(prog, func, &c.call);
                 if is_harmless_call_name(&name) {
+                    // Upstream's IR puts a `Panic` behind a call that cannot
+                    // return (`log.Fatal(…)`), and the next turn of this loop
+                    // reads it as "stub". guff's IR has no such instruction
+                    // (`guff_ssa::emit::emit_call`), so ask `ctrlflow` here.
+                    if callee_never_returns(prog, &c.call, flow) {
+                        return true;
+                    }
                     continue;
                 }
                 return name.rsplit('.').next() == Some("throw");
@@ -1432,6 +1470,28 @@ fn inserted_store(func: &guff_ssa::function::Function, iid: guff_ssa::ids::Instr
 }
 
 /// The printed callee of a call, for `rxHarmlessCall`.
+/// Whether a call's static callee is one `ctrlflow` proved cannot return.
+fn callee_never_returns(
+    prog: &guff_ssa::program::Program,
+    common: &guff_ssa::instr::CallCommon,
+    flow: Option<&CtrlFlowResult>,
+) -> bool {
+    use guff_ssa::value::Value;
+    let Some(flow) = flow else {
+        return false;
+    };
+    if common.method.is_some() {
+        return false; // interface call: no static callee, as upstream has none
+    }
+    let Value::Function(fid) = common.value else {
+        return false;
+    };
+    prog.functions
+        .get(fid)
+        .object
+        .is_some_and(|obj| flow.is_no_return(obj))
+}
+
 fn call_target_name(
     prog: &guff_ssa::program::Program,
     func: &guff_ssa::function::Function,
@@ -1500,6 +1560,9 @@ struct SsaFuncs<'a> {
     /// `init$1$1` for one in a package-level `var` initializer — because it
     /// walks `ssa.Function`s and prints `fn.Name()`. See [`Self::lit_name`].
     lit_names: std::collections::HashMap<u32, String>,
+    /// The same literals by `func` keyword position, as IR functions, so
+    /// `dummyImpl` can be asked about them too.
+    lit_funcs: std::collections::HashMap<u32, guff_ssa::ids::FuncId>,
 }
 
 impl<'a> SsaFuncs<'a> {
@@ -1536,12 +1599,14 @@ impl<'a> SsaFuncs<'a> {
         // a package-level `var` initializer lives exactly there. Upstream
         // reaches it (`ssautil.AllFunctions`) and names it `init$1`.
         let mut lit_names = std::collections::HashMap::new();
-        for (_, f) in ir.prog.functions.iter() {
+        let mut lit_funcs = std::collections::HashMap::new();
+        for (fid, f) in ir.prog.functions.iter() {
             if f.pkg != Some(ir.pkg) || f.parent.is_none() {
                 continue;
             }
             if f.decl_pos != guff::NO_POS {
                 lit_names.insert(f.decl_pos.0 as u32, f.name.clone());
+                lit_funcs.insert(f.decl_pos.0 as u32, fid);
             }
         }
         SsaFuncs {
@@ -1551,7 +1616,13 @@ impl<'a> SsaFuncs<'a> {
             results_required: collect_results_required(ir),
             call_by_pos,
             lit_names,
+            lit_funcs,
         }
+    }
+
+    /// The IR function for the literal whose `func` keyword is at `pos`.
+    fn lit_func(&self, pos: guff::Pos) -> Option<guff_ssa::ids::FuncId> {
+        self.lit_funcs.get(&(pos.0 as u32)).copied()
     }
 
     /// go/ssa's name for the literal whose `func` keyword is at `pos`.
@@ -1668,7 +1739,25 @@ fn check_func_lit(
         return;
     };
     let name = name.to_string();
-    check_params(&name, &params.list, &lit.body, &[], dead, pending);
+    // Upstream runs `checkFunc` — and so `dummyImpl` — over literals as well.
+    let mut ir_decided_stub = false;
+    if let Some(ssa) = ssa {
+        if let Some(fid) = ssa.lit_func(lit.ty.func) {
+            if dummy_impl(ssa.prog, ssa.prog.functions.get(fid), dead.map(|d| d.flow)) {
+                return;
+            }
+            ir_decided_stub = true;
+        }
+    }
+    check_params(
+        &name,
+        &params.list,
+        &lit.body,
+        &[],
+        dead,
+        ir_decided_stub,
+        pending,
+    );
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
