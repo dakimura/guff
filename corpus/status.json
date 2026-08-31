@@ -66,15 +66,14 @@
     "connect-go": {
       "tier": "hunt",
       "state": "open",
-      "at": "20260829T225233Z",
-      "open": 10,
-      "guff_only": 10,
+      "at": "20260831T173546Z",
+      "open": 9,
+      "guff_only": 9,
       "gcl_only": 0,
       "by_linter": {
         "nolintlint": 6,
         "fatcontext": 2,
-        "bodyclose": 1,
-        "gocritic": 1
+        "bodyclose": 1
       }
     },
     "consul": {
