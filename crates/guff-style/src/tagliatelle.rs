@@ -117,7 +117,13 @@ fn split_words(s: &str) -> Vec<String> {
                 // HTTPServer → HTTP + Server
                 i -= 1;
             }
-            while i < chars.len() && chars[i].is_ascii_lowercase() {
+            // A digit belongs to the word it follows and never starts one:
+            // `Name2` is one word, `Foo2Bar` is `Foo2` + `Bar`, `H2C` is
+            // `H2` + `C`, and `A2b` is a single `A2b`. Only a separator or an
+            // upper-case letter opens the next word. Ending the word at the
+            // digit instead put a `-` in front of every one of them, which is
+            // how fiber's `header:"Name2"` came to want `Name-2`.
+            while i < chars.len() && (chars[i].is_ascii_lowercase() || chars[i].is_ascii_digit()) {
                 i += 1;
             }
         } else if chars[i].is_ascii_lowercase() || chars[i].is_ascii_digit() {

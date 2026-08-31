@@ -794,6 +794,29 @@ fn tagliatelle_flags_non_camel_json_yaml() {
             .any(|m| m.contains("yaml(camel): got 'Value' want 'value'")),
         "{messages:?}"
     );
+    // A digit belongs to the word it follows and never opens one. Splitting at
+    // the digit produced `Name-2` / `foo_2_bar` / `h_2_c` — fiber's
+    // `header:"Name2"` and `header:"Class2"` are the first of those. `header`
+    // carries no rule in this fixture: golangci-lint's wrapper defaults it.
+    for want in [
+        "json(camel): got 'Name2' want 'name2'",
+        "json(camel): got 'Foo2Bar' want 'foo2Bar'",
+        "json(camel): got 'H2C' want 'h2C'",
+        "json(camel): got 'A1B2' want 'a1B2'",
+        "json(camel): got 'HTTP2Server' want 'http2Server'",
+        "header(header): got 'Foo2Bar' want 'Foo2-Bar'",
+        "header(header): got 'H2C' want 'H2-C'",
+    ] {
+        assert!(
+            messages.iter().any(|m| m.contains(want)),
+            "missing `{want}`: {messages:?}"
+        );
+    }
+    // `Name2` is already the header convention, so it is not a finding at all.
+    assert!(
+        messages.iter().all(|m| !m.contains("header(header): got 'Name2'")),
+        "`Name2` is already correct for the header case: {messages:?}"
+    );
 }
 
 #[test]

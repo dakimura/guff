@@ -17693,3 +17693,77 @@ SA1029 は **12 形測って乖離 1 形**で、`var key ctxKey = struct{}{}` �
 初期化子の匿名 `struct{}` に戻してしまうため。上流の対応物 `irutil.Flatten` は
 **`Sigma` と `Phi` しか剥がさない**。ただし `flatten_ssa_value` は 8 チェックが
 共有しているので、続き 111 と同じく**どのチェックがどちらを要るのか測ってから**にする。
+
+### 2026-09-01（続き 113）— tagliatelle は数字を**語の一部**として扱う。guff は語の切れ目として扱っていた
+
+fiber の残りから `tagliatelle` 2 件:
+
+```
++guff ctx_test.go:3052:tagliatelle:header(header): got 'Name2' want 'Name-2'
++guff ctx_test.go:3055:tagliatelle:header(header): got 'Class2' want 'Class-2'
+```
+
+fiber の config は `case.rules` に `json: snake` しか書いていない。それでも `header` が
+効くのは、golangci-lint の wrapper が**マージ前に既定値を入れる**からである:
+
+```go
+cfg := tagliatelle.Config{Base: tagliatelle.Base{Rules: map[string]string{
+    "json": "camel", "yaml": "camel", "header": "header",
+}}}
+maps.Copy(cfg.Rules, settings.Case.Rules)
+```
+
+`header` の変換は `toHeader(s) = strcase.ToCase(s, TitleCase, '-')`（`ettle/strcase`）。
+問題は変換ではなく**語の分け方**だった。
+
+#### 33 形で規則を確定させた
+
+`Name2` / `Foo2Bar` / `A1B2` / `H2C` / `HTTP2Server` / `IPv4` / `ABC2` / `A2b` /
+`Name22` / `X2` / `2Name` / `Foo_2_Bar` / `v2` ほかを header に通し、上流の `want` から
+語の切れ目を読んだ:
+
+| 入力 | 上流の語 |
+|---|---|
+| `Name2` | `Name2`（1 語。finding 自体が出ない） |
+| `Foo2Bar` | `Foo2` + `Bar` |
+| `A1B2` | `A1` + `B2` |
+| `H2C` | `H2` + `C` |
+| `HTTP2Server` | `HTTP2` + `Server` |
+| `ABC2` | `ABC2` |
+| `A2b` | `A2b`（1 語） |
+| `IPv4` | `I` + `Pv4` |
+| `2Name` | `2` + `Name` |
+| `Foo_2_Bar` | `Foo` + `2` + `Bar` |
+
+**数字は直前の語に付き、新しい語を始めない。** 語を開くのは区切りと大文字だけで、
+文字列の先頭と区切りの直後にだけ数字が語頭に立つ。`IPv4` が `I` + `Pv4` なのは
+`HTTPServer` → `HTTP` + `Server` の後戻り規則がそのまま効いているからで、そこは変わらない。
+
+guff の `split_words` は小文字の枝では数字を取り込んでいたが、**大文字の枝では取り込まず**
+そこで語を閉じていた。だから `Name2` → `Name` + `2`。
+
+#### camel は偶然一致していた
+
+同じ分割器を全 case が使う。しかし **camel だけは壊れていても答えが合う**:
+`Name2` は `[Name][2]` でも `name` + `2` = `name2`、`[Name2]` でも `name2` になる。
+区切り文字を挟む snake / kebab / header / upperSnake だけが `name_2` と `name2` に割れる。
+**camel の fixture をいくら足しても、この欠陥は見えなかった。**
+
+修正後、6 つの case（camel / snake / kebab / upperSnake / pascal / header）×
+数字の形で **53 件すべて一致**した。
+
+#### 測定
+
+- fiber **17 → 15**（`tagliatelle` 2 → 0）。台帳は 26/100 のまま。
+- golden 204/204。`tagliatelle` 4 → **31 キー**（`header` 既定ルールの分を含む）。
+  **キー集合の差分で消えたキーが無いことを確認**。
+- fix tier 204/204、reject 14、`cargo test --workspace` 緑、
+  OSS pr tier 8 target すべて P=R=100%。
+- 単体テストに数字 7 形の個別 assert と、「`Name2` は header 規約として正しいので
+  finding が出ない」ことの assert を追加した。
+
+#### 残り（fiber 15 件）
+
+`nolintlint` 9（`fieldalignment` 4 / wrapcheck 2 / unparam 2 / contextcheck 1）、
+`revive` 3、`staticcheck` 2（SA1029 —— 続き 112 の末尾。**原因は guff-ssa の代入で、
+匿名 `struct{}{}` を代入先の型へ変換していない**。14 形測定済み）、`gocritic` 1。
