@@ -450,6 +450,60 @@ func unnamedResultOkExtra() (float64, error) {
 	return 0, nil
 }
 
+// unnamedResult's `typeName` reads a *types.Type*, not the syntax: every
+// unnamed type — `bool`, `int`, `string`, `[]string`, `map`, `chan`, a func
+// type — answers the empty string, and two empty strings are "the same name".
+// Reading the name off the syntax made `bool` and `[]string` look different and
+// silenced the first four shapes below; fiber carries ten
+// `//nolint:gocritic // unnamedResult` directives on exactly them.
+//
+// Twenty shapes, measured one at a time against golangci-lint 2.12.2.
+
+type urFoo struct{}
+
+type urBar struct{}
+
+// Reported.
+func urBoolSlice() (bool, []string) { return false, nil }
+
+func urBytesBoolError() ([]byte, bool, error) { return nil, false, nil }
+
+func urIntString() (int, string) { return 0, "" }
+
+func urIntStringError() (int, string, error) { return 0, "", nil }
+
+func urIntInt() (int, int) { return 0, 0 }
+
+func urFooFoo() (urFoo, urFoo) { return urFoo{}, urFoo{} }
+
+func urSliceSlice() ([]string, []string) { return nil, nil }
+
+func urMapMap() (map[string]int, map[string]int) { return nil, nil }
+
+func urChanChan() (chan int, chan int) { return nil, nil }
+
+func urNamedSliceSlice() ([]urFoo, []urFoo) { return nil, nil }
+
+// Silent: the second name differs and is not empty, or the trailing result is
+// an `error` / `bool` the checker allows.
+func urIntError() (int, error) { return 0, nil }
+
+func urFooError() (urFoo, error) { return urFoo{}, nil }
+
+func urPtrFooError() (*urFoo, error) { return nil, nil }
+
+func urStringBool() (string, bool) { return "", false }
+
+func urFooBool() (urFoo, bool) { return urFoo{}, false }
+
+func urIntBool() (int, bool) { return 0, false }
+
+func urPtrFooPtrBar() (*urFoo, *urBar) { return nil, nil }
+
+func urFooBarError() (urFoo, urBar, error) { return urFoo{}, urBar{}, nil }
+
+func urNamedResults() (a, b int) { return 0, 0 }
+
 //nolint
 func whyNoLintExtra() {}
 

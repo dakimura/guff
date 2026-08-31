@@ -144,46 +144,56 @@ extras.go:408:2:gocritic::importShadow: shadow of imported package 'filepath'
 extras.go:415:38:gocritic::importShadow: shadow of imported package 'sort'
 extras.go:440:3:gocritic::importShadow: shadow of imported package 'sort'
 extras.go:445:1:gocritic::unnamedResult: consider giving a name to these results
-extras.go:459:21:gocritic::hugeParam: x is heavy (800 bytes); consider passing it by pointer
-extras.go:464:2:gocritic::rangeValCopy: each iteration copies 200 bytes (consider pointers or indexing)
-extras.go:469:25:gocritic::ptrToRefParam: consider `m' to be of non-pointer type
-extras.go:469:44:gocritic::ptrToRefParam: consider `ch' to be of non-pointer type
-extras.go:471:1:gocritic::tooManyResultsChecker: function has more than 5 results, consider to simplify the function
+extras.go:467:1:gocritic::unnamedResult: consider giving a name to these results
+extras.go:469:1:gocritic::unnamedResult: consider giving a name to these results
 extras.go:471:1:gocritic::unnamedResult: consider giving a name to these results
-extras.go:480:1:gocritic::unnamedResult: consider giving a name to these results
-extras.go:482:12:gocritic::evalOrder: may want to evaluate evalOrderMutate(&x) before the return statement
-extras.go:486:1:gocritic::unlabelStmt: label label1 is redundant
-extras.go:493:4:gocritic::unlabelStmt: change `continue outer` to `break`
-extras.go:500:14:gocritic::returnAfterHttpError: Possibly return is missed after the http.Error call
-extras.go:505:2:gocritic::commentedOutCode: may want to remove commented-out code
-extras.go:510:1:gocritic::exposedSyncMutex: don't embed sync.Mutex
-extras.go:515:1:gocritic::exposedSyncMutex: don't embed *sync.RWMutex
-extras.go:521:2:gocritic::badLock: defer is missing, mutex is unlocked immediately
-extras.go:525:2:gocritic::badLock: defer is missing, mutex is unlocked immediately
-extras.go:529:8:gocritic::badLock: suspicious unlock, maybe Unlock was intended?
-extras.go:533:8:gocritic::badLock: suspicious unlock, maybe RUnlock was intended?
-extras.go:537:8:gocritic::badLock: maybe defer rw.Unlock() was intended?
-extras.go:541:8:gocritic::badLock: maybe defer rw.RUnlock() was intended?
-extras.go:546:2:gocritic::externalErrorReassign: suspicious reassignment of error from another package
-extras.go:551:5:gocritic::uncheckedInlineErr: err error is unchecked, maybe intended to check it instead of err2
-extras.go:557:6:gocritic::boolExprSimplify: can simplify `!!x` to `x`
-extras.go:558:6:gocritic::boolExprSimplify: can simplify `!(a >= b)` to `a < b`
-extras.go:559:6:gocritic::boolExprSimplify: can simplify `!x == !y` to `x == y`
-extras.go:560:6:gocritic::boolExprSimplify: can simplify `a > b || a == b` to `a >= b`
-extras.go:562:6:gocritic::boolExprSimplify: can simplify `a < b+1` to `a <= b`
-extras.go:563:6:gocritic::boolExprSimplify: can simplify `a+1 > b` to `a >= b`
-extras.go:564:6:gocritic::boolExprSimplify: can simplify `a >= b+1` to `a > b`
-extras.go:565:6:gocritic::boolExprSimplify: can simplify `!(a >= b+1)` to `a <= b`
-extras.go:567:6:gocritic::boolExprSimplify: can simplify `a > 10 && a < 12` to `a == 11`
-extras.go:568:6:gocritic::boolExprSimplify: can simplify `a < 11 || a > 11` to `a != 11`
-extras.go:579:5:gocritic::boolExprSimplify: can simplify `a+1 > b && x` to `a >= b && x`
-extras.go:585:6:gocritic::unlambda: replace `func(s string) string { return strings.TrimSpace(s) }` with `strings.TrimSpace`
-extras.go:608:3:gocritic::mapKey: suspicious duplicate mapKeyNamedString(mapKeyIdent) key
-extras.go:614:4:gocritic::mapKey: suspicious duplicate mapKeyIdent key
-extras.go:628:3:gocritic::mapKey: suspicious duplicate mapKeyIdent key
-extras.go:653:6:gocritic::stringXbytes: suggestion: len(b)
-extras.go:654:6:gocritic::stringXbytes: suggestion: len(b) == 0
-extras.go:655:6:gocritic::stringXbytes: suggestion: bytes.Equal(b, c)
+extras.go:473:1:gocritic::unnamedResult: consider giving a name to these results
+extras.go:475:1:gocritic::unnamedResult: consider giving a name to these results
+extras.go:477:1:gocritic::unnamedResult: consider giving a name to these results
+extras.go:479:1:gocritic::unnamedResult: consider giving a name to these results
+extras.go:481:1:gocritic::unnamedResult: consider giving a name to these results
+extras.go:483:1:gocritic::unnamedResult: consider giving a name to these results
+extras.go:485:1:gocritic::unnamedResult: consider giving a name to these results
+extras.go:513:21:gocritic::hugeParam: x is heavy (800 bytes); consider passing it by pointer
+extras.go:518:2:gocritic::rangeValCopy: each iteration copies 200 bytes (consider pointers or indexing)
+extras.go:523:25:gocritic::ptrToRefParam: consider `m' to be of non-pointer type
+extras.go:523:44:gocritic::ptrToRefParam: consider `ch' to be of non-pointer type
+extras.go:525:1:gocritic::tooManyResultsChecker: function has more than 5 results, consider to simplify the function
+extras.go:525:1:gocritic::unnamedResult: consider giving a name to these results
+extras.go:534:1:gocritic::unnamedResult: consider giving a name to these results
+extras.go:536:12:gocritic::evalOrder: may want to evaluate evalOrderMutate(&x) before the return statement
+extras.go:540:1:gocritic::unlabelStmt: label label1 is redundant
+extras.go:547:4:gocritic::unlabelStmt: change `continue outer` to `break`
+extras.go:554:14:gocritic::returnAfterHttpError: Possibly return is missed after the http.Error call
+extras.go:559:2:gocritic::commentedOutCode: may want to remove commented-out code
+extras.go:564:1:gocritic::exposedSyncMutex: don't embed sync.Mutex
+extras.go:569:1:gocritic::exposedSyncMutex: don't embed *sync.RWMutex
+extras.go:575:2:gocritic::badLock: defer is missing, mutex is unlocked immediately
+extras.go:579:2:gocritic::badLock: defer is missing, mutex is unlocked immediately
+extras.go:583:8:gocritic::badLock: suspicious unlock, maybe Unlock was intended?
+extras.go:587:8:gocritic::badLock: suspicious unlock, maybe RUnlock was intended?
+extras.go:591:8:gocritic::badLock: maybe defer rw.Unlock() was intended?
+extras.go:595:8:gocritic::badLock: maybe defer rw.RUnlock() was intended?
+extras.go:600:2:gocritic::externalErrorReassign: suspicious reassignment of error from another package
+extras.go:605:5:gocritic::uncheckedInlineErr: err error is unchecked, maybe intended to check it instead of err2
+extras.go:611:6:gocritic::boolExprSimplify: can simplify `!!x` to `x`
+extras.go:612:6:gocritic::boolExprSimplify: can simplify `!(a >= b)` to `a < b`
+extras.go:613:6:gocritic::boolExprSimplify: can simplify `!x == !y` to `x == y`
+extras.go:614:6:gocritic::boolExprSimplify: can simplify `a > b || a == b` to `a >= b`
+extras.go:616:6:gocritic::boolExprSimplify: can simplify `a < b+1` to `a <= b`
+extras.go:617:6:gocritic::boolExprSimplify: can simplify `a+1 > b` to `a >= b`
+extras.go:618:6:gocritic::boolExprSimplify: can simplify `a >= b+1` to `a > b`
+extras.go:619:6:gocritic::boolExprSimplify: can simplify `!(a >= b+1)` to `a <= b`
+extras.go:621:6:gocritic::boolExprSimplify: can simplify `a > 10 && a < 12` to `a == 11`
+extras.go:622:6:gocritic::boolExprSimplify: can simplify `a < 11 || a > 11` to `a != 11`
+extras.go:633:5:gocritic::boolExprSimplify: can simplify `a+1 > b && x` to `a >= b && x`
+extras.go:639:6:gocritic::unlambda: replace `func(s string) string { return strings.TrimSpace(s) }` with `strings.TrimSpace`
+extras.go:662:3:gocritic::mapKey: suspicious duplicate mapKeyNamedString(mapKeyIdent) key
+extras.go:668:4:gocritic::mapKey: suspicious duplicate mapKeyIdent key
+extras.go:682:3:gocritic::mapKey: suspicious duplicate mapKeyIdent key
+extras.go:707:6:gocritic::stringXbytes: suggestion: len(b)
+extras.go:708:6:gocritic::stringXbytes: suggestion: len(b) == 0
+extras.go:709:6:gocritic::stringXbytes: suggestion: bytes.Equal(b, c)
 testfuncs.go:36:2:gocritic::rangeValCopy: each iteration copies 200 bytes (consider pointers or indexing)
 testfuncs.go:44:2:gocritic::rangeValCopy: each iteration copies 200 bytes (consider pointers or indexing)
 testfuncs.go:53:2:gocritic::rangeValCopy: each iteration copies 200 bytes (consider pointers or indexing)
