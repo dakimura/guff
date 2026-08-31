@@ -531,3 +531,67 @@ func badMixedNesting(xs [][]int, n int) int {
 	}
 	return total
 }
+
+// unnecessary-if compares the two assignment targets **as text** — upstream
+// renders both with `astutils.GoFmt` and bails when they differ. A renderer
+// that answers a placeholder for the shapes it does not know makes two
+// different targets compare equal: fiber's
+// `if colors { cfg.ForceColors = true } else { cfg.DisableColors = true }`
+// became a finding that way, and `if n > 1` reported `b = n > <expr>`.
+
+type unnecessaryIfCfg struct {
+	Force   bool
+	Disable bool
+}
+
+// Reported.
+func unnecessaryIfSameField(c bool, s *unnecessaryIfCfg) {
+	if c {
+		s.Force = true
+	} else {
+		s.Force = false
+	}
+}
+
+func unnecessaryIfRelational(n int) bool {
+	var b bool
+	if n > 1 {
+		b = true
+	} else {
+		b = false
+	}
+
+	return b
+}
+
+func unnecessaryIfNegatedRelational(n int) bool {
+	var b bool
+	if n > 1 {
+		b = false
+	} else {
+		b = true
+	}
+
+	return b
+}
+
+// Silent: the two branches assign to different fields.
+func unnecessaryIfDifferentFields(c bool, s *unnecessaryIfCfg) {
+	if c {
+		s.Force = true
+	} else {
+		s.Disable = true
+	}
+}
+
+// Silent: the right-hand sides are not boolean literals.
+func unnecessaryIfNonBool(c bool) int {
+	var x int
+	if c {
+		x = 1
+	} else {
+		x = 0
+	}
+
+	return x
+}

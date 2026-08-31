@@ -138,17 +138,17 @@ fn relational_opposite(op: Token) -> Option<Token> {
     }
 }
 
+/// Upstream renders every one of these with `astutils.GoFmt`, the same printer
+/// its other rules use — so this one does too, rather than keeping a smaller
+/// copy beside it.
+///
+/// The copy that used to live here knew `Ident`, `BinaryExpr`, `UnaryExpr` and
+/// `ParenExpr`, and answered `"<expr>"` for everything else. That reached the
+/// message (`b = n > <expr>` for `if n > 1`), and worse: the then/else
+/// left-hand sides are compared **as text**, so `s.Force` and `s.Disable` both
+/// rendered `"<expr>"`, compared equal, and fiber's
+/// `if colors { cfg.ForceColors = true } else { cfg.DisableColors = true }`
+/// became a finding upstream does not make.
 fn expr_fmt(expr: &Expr) -> String {
-    match unparen(expr) {
-        Expr::Ident(id) => id.name.clone(),
-        Expr::BinaryExpr(b) => format!(
-            "{} {} {}",
-            expr_fmt(&b.x),
-            b.op.as_str(),
-            expr_fmt(&b.y)
-        ),
-        Expr::UnaryExpr(u) => format!("{}{}", u.op.as_str(), expr_fmt(&u.x)),
-        Expr::ParenExpr(p) => format!("({})", expr_fmt(&p.x)),
-        _ => "<expr>".into(),
-    }
+    crate::astfmt::expr_fmt(unparen(expr))
 }

@@ -77,7 +77,7 @@ directives/sibling.go:7:6:revive:warning:exported: type name will be used as dir
 dot/dot.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
 dot/dot.go:1:1:revive:warning:package-comments: should have a package comment
 dot/dot.go:3:7:revive:warning:exported: exported const X should have comment or be unexported
-extended/util/extended_bad.go:2:1:revive:warning:comments-density: the file has a comment density of  8% (25 comment lines for 285 code lines) but expected a minimum of 10%
+extended/util/extended_bad.go:2:1:revive:warning:comments-density: the file has a comment density of 10% (34 comment lines for 311 code lines) but expected a minimum of 10%
 extended/util/extended_bad.go:2:1:revive:warning:file-header: the file doesn't have an appropriate header
 extended/util/extended_bad.go:2:9:revive:warning:package-naming: don't use "util" because it is a bad package name according to https://go.dev/blog/package-names#bad-package-names
 extended/util/extended_bad.go:14:8:revive:warning:imports-blocklist: should not use the following blocklisted import: "os"
@@ -240,7 +240,17 @@ extended/util/extended_bad.go:455:30:revive:warning:enforce-repeated-arg-type-st
 extended/util/extended_bad.go:493:1:revive:warning:cognitive-complexity: function okRangeIsNotNesting has cognitive complexity 28 (> max enabled 7)
 extended/util/extended_bad.go:515:1:revive:warning:cognitive-complexity: function badMixedNesting has cognitive complexity 28 (> max enabled 7)
 extended/util/extended_bad.go:523:8:revive:warning:max-control-nesting: control flow nesting exceeds 5
-extended/util/extended_bad.go:533:0:revive:warning:file-length-limit: file length is 533 lines, which exceeds the limit of 350
+extended/util/extended_bad.go:548:28:revive:warning:flag-parameter: parameter 'c' seems to be a control flag, avoid control coupling
+extended/util/extended_bad.go:549:2:revive:warning:unnecessary-if: replace this conditional by: s.Force = c
+extended/util/extended_bad.go:558:2:revive:warning:unnecessary-if: replace this conditional by: b = n > 1
+extended/util/extended_bad.go:558:9:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+extended/util/extended_bad.go:569:2:revive:warning:unnecessary-if: replace this conditional by: b = n <= 1
+extended/util/extended_bad.go:569:9:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+extended/util/extended_bad.go:579:34:revive:warning:flag-parameter: parameter 'c' seems to be a control flag, avoid control coupling
+extended/util/extended_bad.go:588:26:revive:warning:flag-parameter: parameter 'c' seems to be a control flag, avoid control coupling
+extended/util/extended_bad.go:591:7:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+extended/util/extended_bad.go:593:7:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+extended/util/extended_bad.go:597:0:revive:warning:file-length-limit: file length is 597 lines, which exceeds the limit of 350
 fixtures/var_naming_lists.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
 fixtures/var_naming_lists.go:1:1:revive:warning:package-comments: should have a package comment
 fixtures/var_naming_lists.go:5:2:revive:warning:var-naming: var customId should be customID
