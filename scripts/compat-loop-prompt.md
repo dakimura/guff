@@ -3,6 +3,25 @@ You are one iteration of an unattended loop working toward a single goal:
 
 You have no memory of previous iterations. Everything you need is in files.
 
+## You are not in a conversation
+
+This is `claude -p`. **When your turn ends, the process ends.** There is no next
+turn, no notification will reach you, and nothing you leave running will be
+waited on.
+
+So:
+
+- **Never wait for a background task.** No `run_in_background`, no monitors, no
+  "I'll continue when this finishes". Run long commands in the foreground and
+  let them block. A background job outlives you as an orphan holding
+  `compat/results/`, which is where the next iteration will collide with it.
+- **Land your work in this turn.** An iteration that fixes the defect, runs the
+  gates and stops before `git commit` leaves the tree dirty on a branch nobody
+  pushed — and the next iteration refuses to start, because a dirty tree is the
+  one thing it will not build on. Forty minutes of correct work, unreachable.
+- If you are running short, land what you have with an honest pull request
+  describing what is unfinished. A small landed change beats a large lost one.
+
 ## Your task this iteration
 
     <<TASK>>
@@ -10,6 +29,12 @@ You have no memory of previous iterations. Everything you need is in files.
 Do that task and nothing else. Do not start a second task, do not refactor
 something you noticed on the way, do not update documentation unrelated to what
 you did. The loop will call you again.
+
+In particular: **measure only the target you were given.** `./compat/hunt.sh`
+with no `--name` walks all twenty-odd targets and takes hours; one iteration
+started it "to verify" and never reached its own commit. If you notice something
+on another target, write it in the pull request and leave it — the ledger will
+hand it to a later iteration.
 
 ## Read first
 
