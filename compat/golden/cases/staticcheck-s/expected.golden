@@ -14,6 +14,8 @@ s1001/bad/bad.go:27:2:staticcheck::S1001: should copy arrays using assignment in
 s1001/bad/bad.go:33:2:staticcheck::S1001: should use copy(to, from[:]) instead of a loop
 s1001/bad/bad.go:39:2:staticcheck::S1001: should use copy(to[:], from) instead of a loop
 s1001/bad/bad.go:45:2:staticcheck::S1001: should copy arrays using assignment instead of using a loop
+s1001/bad/bad.go:59:2:staticcheck::S1001: should use copy(to, from) instead of a loop
+s1001/bad/bad.go:65:2:staticcheck::S1001: should use copy(to, from) instead of a loop
 s1002/bad/bad.go:4:5:staticcheck::S1002: should omit comparison to bool constant, can be simplified to x
 s1002/bad/bad.go:7:5:staticcheck::S1002: should omit comparison to bool constant, can be simplified to !x
 s1002/ok/ok.go:12:1:staticcheck::ST1021: comment on exported type TokenSource should be of the form "TokenSource ..." (with optional leading article)

@@ -1,5 +1,13 @@
 package unparam
 
+import (
+	"log"
+	"os"
+	"runtime"
+	"syscall"
+	"testing"
+)
+
 type secKind int
 
 const statusOK = 200
@@ -101,4 +109,193 @@ func litAsArg() {
 func litGoDefer() {
 	go func(unusedGo int) {}(1)
 	defer func(unusedDefer int) {}(2)
+}
+
+// --- Statements upstream's IR never reaches -------------------------------
+//
+// `buildssa` gives go/ssa the `ctrlflow` no-return predicate, so a static call
+// to a function that cannot return is followed by a `Panic` and the rest of the
+// block is dropped. A parameter used only down there is unused. Every shape
+// below was measured against golangci-lint 2.12.2, one terminator at a time;
+// `noop()` comes first so `dummyImpl` cannot call the body a stub.
+
+func noop() {}
+
+func afterOsExit(unused bool) {
+	noop()
+	os.Exit(1)
+	if unused {
+		println(1)
+	}
+}
+
+func afterSyscallExit(unused bool) {
+	noop()
+	syscall.Exit(1)
+	if unused {
+		println(1)
+	}
+}
+
+func afterGoexit(unused bool) {
+	noop()
+	runtime.Goexit()
+	if unused {
+		println(1)
+	}
+}
+
+func afterLogFatalf(unused bool) {
+	noop()
+	log.Fatalf("x")
+	if unused {
+		println(1)
+	}
+}
+
+func afterLogPanicln(unused bool) {
+	noop()
+	log.Panicln("x")
+	if unused {
+		println(1)
+	}
+}
+
+var logger = log.New(os.Stderr, "", 0)
+
+func afterLoggerFatal(unused bool) {
+	noop()
+	logger.Fatal("x")
+	if unused {
+		println(1)
+	}
+}
+
+func afterTestingFatal(t *testing.T, unused bool) {
+	noop()
+	t.Fatal("x")
+	if unused {
+		println(1)
+	}
+}
+
+func afterTestingSkip(t *testing.T, unused bool) {
+	noop()
+	t.Skip("x")
+	if unused {
+		println(1)
+	}
+}
+
+func afterTestingSkipNow(t *testing.T, unused bool) {
+	noop()
+	t.SkipNow()
+	if unused {
+		println(1)
+	}
+}
+
+// The terminator does not have to be the first statement.
+func afterNestedSkip(t *testing.T, unused bool) {
+	if t == nil {
+		println(0)
+	}
+	t.Skip("x")
+	if unused {
+		println(1)
+	}
+}
+
+// One hop of in-package induction: `dies` is no-return, so `afterDies` is too.
+func dies() {
+	noop()
+	os.Exit(1)
+}
+
+func afterDies(unused bool) {
+	dies()
+	if unused {
+		println(1)
+	}
+}
+
+// Two hops.
+func diesTwice() {
+	dies()
+}
+
+func afterDiesTwice(unused bool) {
+	diesTwice()
+	if unused {
+		println(1)
+	}
+}
+
+// Call sites in dead code are not call sites: `ssautil.AllFunctions` cannot
+// reach a block `deleteUnreachableBlocks` removed. Only the four `"sh"` calls
+// below survive, which is exactly upstream's threshold — thanos'
+// `examples/interactive` is this shape.
+func execCmd(cmd string, args ...string) {
+	println(cmd, len(args))
+}
+
+func execCmdSites() {
+	execCmd("sh", "-c", "a")
+	execCmd("sh", "-c", "b")
+	execCmd("sh", "-c", "c")
+	execCmd("sh", "-c", "d")
+}
+
+func execCmdSkipped(t *testing.T) {
+	t.Skip("interactive")
+	execCmd("cp", "-r", "x")
+	execCmd("cp", "-r", "y")
+}
+
+// Control flow that does end: an endless `for`, a `select` with no `default`,
+// and a `switch` whose every clause ends — each makes its caller's parameter
+// unreachable.
+func loopsForever() {
+	for {
+		println(1)
+	}
+}
+
+func afterLoopsForever(unused bool) {
+	loopsForever()
+	if unused {
+		println(1)
+	}
+}
+
+var ch chan int
+
+func selectDies() {
+	select {
+	case <-ch:
+		os.Exit(1)
+	}
+}
+
+func afterSelectDies(unused bool) {
+	selectDies()
+	if unused {
+		println(1)
+	}
+}
+
+func switchAllDie(n int) {
+	switch n {
+	case 1:
+		os.Exit(1)
+	default:
+		panic("x")
+	}
+}
+
+func afterSwitchAllDie(unused bool) {
+	switchAllDie(1)
+	if unused {
+		println(1)
+	}
 }

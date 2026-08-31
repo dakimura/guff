@@ -6,8 +6,24 @@
 
 # golangci-lint: 2.12.2
 
-bad/bad.go:11:24:unparam::example - unused is unused
-bad/bad.go:33:42:unparam::sectionByType - result 1 (example.com/unparam/bad.secKind) is always 0
-bad/bad.go:45:29:unparam::saveBlob - result 0 (string) is never used
-bad/bad.go:63:18:unparam::xmlResponse - status always receives statusOK (200)
-bad/bad.go:91:21:unparam::litIIFE$1 - unused is unused
+bad/bad.go:19:24:unparam::example - unused is unused
+bad/bad.go:41:42:unparam::sectionByType - result 1 (example.com/unparam/bad.secKind) is always 0
+bad/bad.go:53:29:unparam::saveBlob - result 0 (string) is never used
+bad/bad.go:71:18:unparam::xmlResponse - status always receives statusOK (200)
+bad/bad.go:99:21:unparam::litIIFE$1 - unused is unused
+bad/bad.go:124:18:unparam::afterOsExit - unused is unused
+bad/bad.go:132:23:unparam::afterSyscallExit - unused is unused
+bad/bad.go:140:18:unparam::afterGoexit - unused is unused
+bad/bad.go:148:21:unparam::afterLogFatalf - unused is unused
+bad/bad.go:156:22:unparam::afterLogPanicln - unused is unused
+bad/bad.go:166:23:unparam::afterLoggerFatal - unused is unused
+bad/bad.go:174:38:unparam::afterTestingFatal - unused is unused
+bad/bad.go:182:37:unparam::afterTestingSkip - unused is unused
+bad/bad.go:190:40:unparam::afterTestingSkipNow - unused is unused
+bad/bad.go:199:36:unparam::afterNestedSkip - unused is unused
+bad/bad.go:215:16:unparam::afterDies - unused is unused
+bad/bad.go:227:21:unparam::afterDiesTwice - unused is unused
+bad/bad.go:238:14:unparam::execCmd - cmd always receives "sh"
+bad/bad.go:264:24:unparam::afterLoopsForever - unused is unused
+bad/bad.go:280:22:unparam::afterSelectDies - unused is unused
+bad/bad.go:296:24:unparam::afterSwitchAllDie - unused is unused

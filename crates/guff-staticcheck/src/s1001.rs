@@ -14,7 +14,7 @@ use guff_analysis::{
     match_pos, AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
 };
 
-use crate::render::render_node;
+use crate::render::{render_expr, render_node};
 use guff_types::{TypeData, TypeId};
 
 fn expr_type(pass: &Pass<'_>, expr: &Expr) -> Option<TypeId> {
@@ -100,11 +100,22 @@ fn same_key(pass: &Pass<'_>, a: &Ident, b: &Ident) -> bool {
     }
 }
 
-fn is_index_copy(pass: &Pass<'_>, dst: &Expr, src_expr: &Expr, key: &Ident) -> bool {
+/// `(AssignStmt (IndexExpr dst key) "=" (IndexExpr src key))`, where `src` is
+/// the *same binding* the loop header bound — `range src`, or `len(src)` in the
+/// three-clause form.
+///
+/// A repeated binding in a `honnef.co/go/tools/pattern` query is not a wildcard:
+/// `Binding.Match` recalls the first value and compares it with `matchAST`,
+/// which walks the two trees field by field (positions, objects and comments
+/// skipped). So `for i := range dst { dst[i] = src[i] }` does not match — the
+/// header bound `src` to `dst`, and `src` is not `dst`. Without the comparison
+/// guff reported thanos' `pkg/compact/planner_test.go` three times over, a
+/// `metasByMinTime[i] = c.metas[i]` loop upstream is silent about.
+fn is_index_copy(pass: &Pass<'_>, dst: &Expr, src_expr: &Expr, src: &Expr, key: &Ident) -> bool {
     let Expr::IndexExpr(IndexExpr { index: dst_key, .. }) = dst else {
         return false;
     };
-    let Expr::IndexExpr(IndexExpr { index: src_key, .. }) = src_expr else {
+    let Expr::IndexExpr(IndexExpr { x: src_x, index: src_key, .. }) = src_expr else {
         return false;
     };
     let Expr::Ident(dst_key_id) = &**dst_key else {
@@ -113,7 +124,17 @@ fn is_index_copy(pass: &Pass<'_>, dst: &Expr, src_expr: &Expr, key: &Ident) -> b
     let Expr::Ident(src_key_id) = &**src_key else {
         return false;
     };
-    same_key(pass, dst_key_id, key) && same_key(pass, src_key_id, key)
+    same_key(pass, dst_key_id, key)
+        && same_key(pass, src_key_id, key)
+        && same_source(src_x, src)
+}
+
+/// `matchAST` over the expressions a recalled binding can hold: structural
+/// equality with positions left out, which is what rendering the two trees and
+/// comparing the text gives. Identifiers compare by name, as upstream's does
+/// (`matchAST` skips the `Obj` field).
+fn same_source(a: &Expr, b: &Expr) -> bool {
+    render_expr(a) == render_expr(b)
 }
 
 /// What the loop copies, and how upstream would rewrite it.
@@ -174,7 +195,7 @@ fn check_copy_loop<'a>(
         }
         is_invariant(pass, key_obj, val_obj, dst_x) && is_invariant(pass, key_obj, val_obj, src)
     } else {
-        is_index_copy(pass, dst, src_expr, key)
+        is_index_copy(pass, dst, src_expr, src, key)
             && is_invariant(pass, key_obj, val_obj, dst_x)
             && is_invariant(pass, key_obj, val_obj, src)
     };

@@ -10491,6 +10491,43 @@ guff は **root パッケージの関数本体しか IR 化しない**
 構築して analyzer を走らせる必要があり、prometheus 規模では peak RSS / 実行時間の
 桁が変わる。**やるなら Phase 5（コーパス多様化）とセットで性能を測ってからにすること。**
 
+### 依存パッケージを跨ぐ noreturn 推論（unparam / `ctrlflow`）`[記録 2026-08-31（続き 108）]`
+
+`purity` とまったく同じ形の穴。上流の `go/analysis/passes/ctrlflow` は解析するすべての
+パッケージで「この関数は正常に戻らない」を推論し、object fact で伝播する。`os.Exit` が
+noreturn なのは `knownIntrinsic` の表にあるからではなく、**`os` を解析したときに fact が
+書き出されたから**である（表にあるのは `syscall.Exit` のほう）。
+
+guff は**リントするパッケージしか型検査しない**。import は type artifacts を持たない
+メタデータのスタブになり、`guff_runner::action::mk_action` は fact producer をそこへ
+スケジュールしない（`dep_pkg.type_artifacts.is_none()` で skip）。同一モジュールへの
+拡張は存在するが、`guff_lint::analyzers_need_same_module_fact_packages` が
+**contextcheck のときだけ** true を返す —— `fact_types` が空でない全 analyzer に広げると
+prometheus で peak RSS が数百 MB 増え、findings は 1 件も変わらなかった、と既存の
+コメントが記録している。
+
+したがって `passes::facts::ctrlflow::known_intrinsic` は 2 つの表を引く:
+`KNOWN_INTRINSIC`（上流の `knownIntrinsic` をそのまま）と `STDLIB_NO_RETURN`
+（上流が `os` / `log` / `testing` を解析して推論する分を名前で書いたもの。19 行、
+1 行ずつ上流に対して測ってある）。パッケージの**内側**の帰納は上流と同じに回る。
+
+一致しないのは、**別パッケージのユーザ定義の終端関数**だけ:
+
+```go
+// package dep
+func Die() { os.Exit(1) }
+
+// package user
+func caller(p bool) {   // 上流: `p is unused`。guff: 黙る
+    dep.Die()
+    if p { println(1) }
+}
+```
+
+2 パッケージの scratch module で測定済み（両方リント対象にしても、fact が渡るのは
+contextcheck が有効なときだけ）。解消するには上の RSS のトレードオフを測り直すか、
+SA4017 の purity と同じタイミングでまとめてやること。**片方だけ入れる意味は無い。**
+
 ### SA5011 の σ（sigma）ノード — と、そこから波及する SrcFuncs のメソッド
 
 honnef の `go/ir` は **SSI 形式**で、条件分岐のたびに値を σ ノードで分割する。
@@ -17107,3 +17144,186 @@ deref のある腕の σ は必ず残り、join の φ は必ず非自明にな�
 ineffassign は 13 形、SA5011 は 8 形を fixture に入れた（`goto_funclit_ok.go` / `goto_funclit_bad.go`、
 `sa5011/ok.go` に 7 形＋`bad.go` に対照 1 形）。golden は ineffassign 9 件・staticcheck-sa 284 件で
 ratchet は据え置き（missing 3 / extra 1）。OSS pr tier 8 target すべて 100%。
+
+### 2026-08-31（続き 108）— thanos の 3 件は `t.Skip(…)` の**下**にあった。**上流の IR はそこを持っていない**
+
+台帳の thanos は 2026-08-23 から `unparam` 3 件（すべて golangci-only）で止まっていた。
+
+```
+examples/interactive/interactive_test.go:49:unparam:exec - cmd always receives "sh"
+test/e2e/compatibility_test.go:56:unparam:testPromQLCompliance - queryFrontend is unused
+test/e2e/compatibility_test.go:56:unparam:testPromQLCompliance - retrievalStrategy is unused
+```
+
+3 件とも**ソースを読むと明らかに使われている**。`queryFrontend` は `if queryFrontend {`、
+`retrievalStrategy` は `string(retrievalStrategy)`、`exec` の `cmd` は同じファイルの
+`exec("cp", …)` を 5 回受け取る。「上流のバグ」に見えるが、そうではなかった。
+
+#### 1. 上流のどこが違うのか —— ピンの `unparam` 単体は 3 件とも黙る
+
+まず**ピン先の `unparam` 単体バイナリ**（golangci-lint 2.12.2 が pin する
+`mvdan.cc/unparam v0.0.0-20251027182757-5beb8c8f8f15`）を thanos に当てた。**0 件**。
+同じチェッカを同じソースに当てて、golangci-lint 経由だと 3 件出る。
+
+差は `pkg/golinters/unparam` が `check.Checker` に渡す SSA にある。単体は
+`ssautil.Packages` + `prog.Build()`、golangci-lint は **`buildssa`**。そして
+`golang.org/x/tools` **v0.44.0** の `buildssa` はこう始まる:
+
+```go
+ssainternal.SetNoReturn(prog, func(fn *types.Func) bool {
+    return ctrlflowinternal.NoReturn(cfgs, fn)
+})
+```
+
+`go/ssa/emit.go` の `emitCall` はそれを見て、**戻らないと分かっている静的呼び出しの後ろに
+`Panic` を積み、`unreachable.noreturn` ブロックへ移る**。`deleteUnreachableBlocks` が
+その先を消すので、**`t.Skip(…)` より下は SSA に存在しない**。
+
+- `testPromQLCompliance` は `t.Skip(…)` で始まる → 引数は参照ゼロ → `is unused` 2 件。
+- `exec` の `"cp"` 側 5 箇所は `t.Skip(…)` で始まる `TestReadOnlyThanosSetup` の中 →
+  呼び出し site から消え、残るのは `createData` の `"sh"` 4 箇所ちょうど
+  （`alwaysReceivedConst` の下限が 4）→ `cmd always receives "sh"`。
+
+guff の SSA にこの切断は無い（`guff_ssa::emit::emit_call` の DEFERRED 注記がそれ）。
+
+#### 2. 何形あるのかを測る
+
+scratch module に**終端 22 形**を並べ、`func f(p bool) { noop(); <call>; if p { … } }` の
+`p` が報告されるかで両ツールを比べた（`noop()` は `dummyImpl` に「スタブ」と言わせないため）。
+
+| 群 | 形 | 上流 | guff（修正前） |
+|---|---|---|---|
+| 表に載っている | `runtime.Goexit` / `syscall.Exit` | 撃つ | 黙る |
+| 上流が推論する | `os.Exit`、`log.Fatal/Fatalf/Fatalln/Panic/Panicf/Panicln` | 撃つ | 黙る |
+| 同上（メソッド） | `(*log.Logger).Fatal…/Panic…` 6 本 | 撃つ | 黙る |
+| 同上（testing） | `(*testing.common).FailNow/Fatal/Fatalf/Skip/Skipf/SkipNow` | 撃つ | 黙る |
+| 対照 | 戻る呼び出し | 黙る | 黙る |
+
+**インターフェース越しは切らない**（`typeutil.StaticCallee` が nil を返す）: `testing.TB` の
+`t.Skip` は上流も黙る。`panic` と `log.Fatal` が**先頭**にある形も上流は黙るが、理由は別で
+`dummyImpl` が「入口ブロックが `Panic` で終わる = スタブ」と見るからである
+（`rxHarmlessCall` が `log` を許すので、`log.Fatal` の後ろの `Panic` に到達する）。
+
+制御構造も 12 形測った（`die()` が戻らないかで呼び出し側の `p` が報告されるか）:
+
+| 形 | 上流 | guff（修正前） |
+|---|---|---|
+| `for {}` / `select`（default 無し）/ `switch`（default 有り・全 clause 終端） | 撃つ | 黙る |
+| `for { break }` / `for range` / `switch`（default 無し）/ `defer` を含む / 到達する `return` | 黙る | 黙る |
+| `goto end; os.Exit(1); end: return` | 黙る | **撃つ**（下記） |
+
+`defer` が「戻る」側なのは `go/cfg` の判断そのままで、`defer func(){ recover() }` と
+同じに扱うため `b.current.returns = true` になる。
+
+#### 3. 入れたもの — `ctrlflow` の noreturn 半分
+
+`crates/guff-analysis/src/passes/facts/ctrlflow.rs`。上流と同じ**オブジェクト fact**
+（`NoReturn`）を書き出し、同じ帰納をパッケージ内で回す。違いは CFG を作らないこと:
+`Flow { returns, falls }` を持つ構造的な文の走査で、`cfg.New(body, callMayReturn).NoReturn()`
+＝「生きた `return`（`defer` 含む）が無く、末尾から落ちない」を計算する。上の 12 形は
+これで全部一致する。
+
+**帰納が止まる場所**は上流と違う。上流は依存パッケージも解析するので `os.Exit` の fact は
+`os` を読んで作ったものだが、guff は**リントするパッケージしか型検査しない**
+（import は type artifacts の無いスタブになり、`guff_runner::action` は fact producer を
+スケジュールしない。同一モジュールへの拡張は `guff_lint` が **contextcheck のときだけ**
+有効にする —— `fact_types` で一律に掛けると prometheus で peak RSS が数百 MB 増え、
+findings は 1 件も変わらなかった、と既存のコメントが言う）。したがって
+`ctrlflow.knownIntrinsic` の表に加えて、**上流が推論する stdlib の終端を表で名指しした**
+（`STDLIB_NO_RETURN`。`purity` が `pureStdlib` を呼び出し側でも引くのと同じ形）。
+表の 19 行は 1 行ずつ上流に対して測ったもので、読んで書いたものではない。
+
+残る差は**別パッケージのユーザ定義の終端関数**だけ。2 パッケージのモジュールで測って
+記録した（§7 に追記）。
+
+#### 4. `goto` —— 測ってから塞いだ
+
+`goto end; os.Exit(1); end: return` は、構造的走査だと `goto` の下が全部死んで
+「戻らない関数」に見える。上流は辺を辿るので `return` が生きている。**guff-only の
+報告として実際に出た**ので、`contains_goto` を持つ本体は**分類しない**ことにした
+（`body_no_return` も `DeadCode` も手を出さない）。失うのは「`goto` を含む本当に
+戻らない関数」の切断だけで、それは このパスが無かったときの挙動と同じである。
+
+#### 5. unparam 側 —— 訊く場所は 4 つあった
+
+guff の unparam は AST 近似（`collect_used_idents`）と SSA（`CallSites` / 結果の族）の
+ハイブリッドなので、死んだ領域を 4 箇所で外す必要があった。
+
+1. `collect_used_idents` —— 死んだ識別子は「使用」ではない。
+2. `CallSites::build` —— 死んだブロックの呼び出しは `ssautil.AllFunctions` に届かない。
+   死んだ領域に書かれた func literal も同じ（`MakeClosure` ごと消えるので誰も参照しない）。
+3. `check_constant_results` / `check_unused_results` —— 死んだ `return` は上流の IR に無い。
+4. `is_stub_body` —— 「無害な呼び出し」の後ろの `Panic` を `dummyImpl` は見る。
+
+3 番目は**測るまで気付かなかった guff-only の欠陥**で、`func f(t *testing.T) error
+{ t.Skip("x"); return nil }` に guff は `result 0 (error) is always nil` を撃っていた。
+上流は `return` が死んでいるので `numRets == 0`、報告なし。
+
+`_ = par` の意図的キープだけは**死んでいても効く**: 上流の `anyRealUse` は
+`par.Referrers()` が空のとき本体全体を `ast.Inspect` するので、到達性を見ていない。
+
+#### 6. 測り直したら別の 3 件が出た —— S1001、**#136 が入れたもの**
+
+unparam が 0 になった thanos を測ると、今度は guff-only の `staticcheck` が 3 件:
+
+```
++guff pkg/compact/planner_test.go:361,375,640:staticcheck:should use copy(to, from) instead of a loop
+```
+
+**自分の変更のせいかを先に確かめた**: `git stash` して `main` の release を建て直し、
+同じ config で `./pkg/compact/...` を測ると **3 件出る**。台帳の thanos が
+2026-08-23 で止まっていたので、S1001 を触った #136（2026-08-26）以降**一度も測られて
+いなかった**だけだった。
+
+形はこれ:
+
+```go
+metasByMinTime := make([]*metadata.Meta, len(c.metas))
+for i := range metasByMinTime {
+    metasByMinTime[i] = c.metas[i]
+}
+```
+
+上流のパターンは
+
+```
+(RangeStmt key@(Ident _) nil ":=" src [(AssignStmt (IndexExpr dst key) "=" (IndexExpr src key))])
+```
+
+で、**`src` が 2 回出てくる**。`honnef.co/go/tools/pattern` の `Binding.Match` は
+2 回目で束縛を**思い出して照合する**（`matchAST` が位置・`Obj`・コメントを除いて
+フィールドを比べる）ので、`range` した木と右辺の添字の基底が**同じ木でなければ
+マッチしない**。guff の `is_index_copy` は添字が両方ループ変数かしか見ていなかった。
+
+8 形測った（`for` の 3 節形は `len(src)` が同じ束縛を作るので同じ話）:
+
+| 形 | 上流 | guff（修正前） |
+|---|---|---|
+| `for i := range dst { dst[i] = src[i] }`（thanos） | 黙る | **撃つ** |
+| `for i := 0; i < len(dst); i++ { dst[i] = src[i] }` | 黙る | **撃つ** |
+| `for i := range c.metas { dst[i] = d.metas[i] }` | 黙る | **撃つ** |
+| `for i := range src { dst[i] = src[i] }` | 撃つ | 撃つ |
+| `for i, v := range src { dst[i] = v }` | 撃つ | 撃つ |
+| `for i := 0; i < len(src); i++ { dst[i] = src[i] }` | 撃つ | 撃つ |
+| `for i := range c.metas { dst[i] = c.metas[i] }` | 撃つ | 撃つ |
+| `for i, v := range dst { dst[i] = v }`（値形は `dst` を別に束縛する） | 撃つ | 撃つ |
+
+`same_source` は `render_expr` の文字列比較 —— 位置を持たない木の比較で、
+`matchAST` が識別子を `Name` で比べる（`Obj` を飛ばす）のとも一致する。
+
+#### 7. 測定
+
+- thanos **3 → 0**（guff=543 / golangci=543 / both=543、P=R=100%）。
+- golden 204/204。`unparam` は 5 → **21 キー**（終端 12 形＋制御構造 3 形＋
+  死んだ呼び出し site の `always receives` 1 形、`ok.go` 側に黙るべき 9 形）、
+  `staticcheck-s` は 101 → **103 キー**（S1001 の追加 2 形＋`ok.go` に 3 形）。
+- fix tier 204/204。`staticcheck-s` の期待 diff は fixture が伸びた分を録り直した
+  （上流の `--fix` が書く `copy(dst, c.metas)` / `copy(dst, dst)` と一致）。
+- reject 14/14、`cargo test --workspace` 緑、OSS pr tier 8 target すべて P=R=100%。
+
+#### 8. 直さなかったもの
+
+`guff_ssa::emit::emit_call` の切断そのもの。上流は**すべての SSA linter** がこれを見ており、
+入れれば SA5011 と `lostcancel` の名前ベースの abort 表（どちらも「切断が無いから」存在する）
+の前提が変わる。`ctrlflow` の答えはもう手元にあるので配線自体は短いが、**再測定の範囲が
+別物**なので、独立した測定つきの変更にする。

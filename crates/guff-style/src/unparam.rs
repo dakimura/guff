@@ -13,6 +13,14 @@
 //! - methods whose name and parameter/result types match a method declared by
 //!   an interface in this package ([`collect_interface_methods`])
 //!
+//! Statements upstream's IR never reaches are not read at all: `buildssa` hands
+//! go/ssa the `ctrlflow` no-return predicate, so a static call to a function
+//! that cannot return is followed by a `Panic` and the rest of the block is
+//! dropped before any linter sees it. guff's SSA still builds those
+//! instructions, so this pass asks
+//! [`guff_analysis::passes::facts::ctrlflow::DeadCode`] instead — for parameter
+//! uses, for call sites, and for `return`s.
+//!
 //! Upstream also checks unused / constant results and uses SSA for interface
 //! satisfaction, forwarded calls, and call-graph precision.
 //!
@@ -25,6 +33,7 @@ use std::sync::OnceLock;
 use guff::ast::{Decl, Expr, FuncDecl, FuncLit, Stmt};
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
+use guff_analysis::passes::facts::ctrlflow::{self, CtrlFlowResult, DeadCode};
 use guff_analysis::passes::{buildir, inspect};
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use crate::options::UnparamOptions;
@@ -63,6 +72,37 @@ fn func_display_name(fd: &FuncDecl) -> String {
     fd.name.name.clone()
 }
 
+/// Upstream's IR never reaches the statements after a call that cannot return:
+/// `buildssa` gives `go/ssa` the `ctrlflow` no-return predicate, `emitCall`
+/// emits a `Panic` behind such a call, and `deleteUnreachableBlocks` takes the
+/// rest of the block away. guff's SSA still builds those instructions
+/// (`guff_ssa::emit::emit_call`'s DEFERRED note), so unparam asks here instead
+/// — for identifier uses, for call sites, and for `return`s.
+///
+/// `None` where the pass has no type information (no `ctrlflow` answers), in
+/// which case nothing is dead and the checks behave as they did before.
+struct DeadView<'a> {
+    code: &'a DeadCode,
+    flow: &'a CtrlFlowResult,
+    info: &'a guff_types::Info,
+}
+
+impl DeadView<'_> {
+    fn is_dead(&self, pos: guff::Pos) -> bool {
+        self.code.contains(pos)
+    }
+
+    /// Whether a call written as a statement is the one `go/cfg` cuts after.
+    fn never_returns(&self, call: &guff::ast::CallExpr) -> bool {
+        self.flow.call_never_returns(self.info, call)
+    }
+}
+
+/// `pos` is inside code no live block covers.
+fn dead_pos(dead: Option<&DeadView<'_>>, pos: guff::Pos) -> bool {
+    dead.is_some_and(|d| d.is_dead(pos))
+}
+
 /// AST stand-in for upstream's `dummyImpl`: a function whose entry block
 /// "almost immediately panics, throws or returns constants only".
 ///
@@ -72,7 +112,7 @@ fn func_display_name(fd: &FuncDecl) -> String {
 /// Anything that would appear as a `BinOp` operand (`return used + 1`) or as a
 /// non-harmless `Call` instruction (`n := compute(s)`) disqualifies it, which is
 /// why `example - unused is unused` is still reported.
-fn is_stub_body(body: &guff::ast::BlockStmt) -> bool {
+fn is_stub_body(body: &guff::ast::BlockStmt, dead: Option<&DeadView<'_>>) -> bool {
     if body.list.is_empty() {
         return true;
     }
@@ -87,6 +127,17 @@ fn is_stub_body(body: &guff::ast::BlockStmt) -> bool {
                 }
                 if !harmless_expr(&e.x) {
                     return false;
+                }
+                // A harmless call that cannot return — `log.Fatal("…")` — is
+                // followed in upstream's IR by the `Panic` `emitCall` inserts,
+                // and `dummyImpl` stops there and says "stub". Without this,
+                // `func f(p bool) { log.Fatal("x"); if p {…} }` reads as a real
+                // body whose only use of `p` is in dead code, and every such
+                // parameter is reported where upstream reports none.
+                if let Expr::CallExpr(call) = &e.x {
+                    if dead.is_some_and(|d| d.never_returns(call)) {
+                        return true;
+                    }
                 }
             }
             Stmt::AssignStmt(asgn) => {
@@ -203,11 +254,16 @@ fn intentional_keep(body: &guff::ast::BlockStmt, param: &str) -> bool {
     kept
 }
 
-fn collect_used_idents(body: &guff::ast::BlockStmt) -> HashSet<String> {
+fn collect_used_idents(
+    body: &guff::ast::BlockStmt,
+    dead: Option<&DeadView<'_>>,
+) -> HashSet<String> {
     let mut used = HashSet::new();
     walk::inspect(NodeRef::BlockStmt(body), |n| {
         if let Some(NodeRef::Ident(id)) = n {
-            used.insert(id.name.clone());
+            if !dead_pos(dead, id.pos()) {
+                used.insert(id.name.clone());
+            }
         }
         true
     });
@@ -219,12 +275,13 @@ fn check_params(
     params: &[guff::ast::Field],
     body: &guff::ast::BlockStmt,
     always_const: &[Option<String>],
+    dead: Option<&DeadView<'_>>,
     pending: &mut Vec<(u32, String)>,
 ) {
-    if is_stub_body(body) {
+    if is_stub_body(body, dead) {
         return;
     }
-    let used = collect_used_idents(body);
+    let used = collect_used_idents(body, dead);
     let mut index = 0usize;
     for field in params {
         for name in &field.names {
@@ -743,12 +800,14 @@ fn const_of(
 
 /// `result N is always X` — every `return` in the function gives result `N` the
 /// same constant.
+#[allow(clippy::too_many_arguments)]
 fn check_constant_results(
     prog: &guff_ssa::program::Program,
     func: &guff_ssa::function::Function,
     fname: &str,
     fields: &[(u32, Option<String>)],
     result_types: &[guff_types::TypeId],
+    dead: Option<&DeadView<'_>>,
     pending: &mut Vec<(u32, String)>,
 ) {
     use guff_ssa::instr::InstrData;
@@ -767,6 +826,12 @@ fn check_constant_results(
         let InstrData::Return(ret) = func.instrs.get(last) else {
             continue;
         };
+        // A `return` behind a no-return call is not in upstream's IR, so it is
+        // not one of the returns `sameConsts` agrees over — and a function
+        // whose only `return` is there has no returns at all.
+        if dead_pos(dead, func.pos(last)) {
+            continue;
+        }
         if ret.results.len() != n {
             return;
         }
@@ -830,6 +895,7 @@ fn check_func_decl(
     types_implementing: &HashSet<String>,
     decl_counts: &std::collections::HashMap<String, usize>,
     ssa: Option<&SsaFuncs<'_>>,
+    dead: Option<&DeadView<'_>>,
     pending: &mut Vec<(u32, String)>,
 ) {
     if fd.name.name == "init" {
@@ -881,7 +947,9 @@ fn check_func_decl(
             let types = ssa.result_types(func);
             // `return f(...)` in another function fixes f's results.
             if fields.len() == types.len() && !ssa.results_required.contains(&fid) {
-                check_constant_results(ssa.prog, func, &func_name, &fields, &types, pending);
+                check_constant_results(
+                    ssa.prog, func, &func_name, &fields, &types, dead, pending,
+                );
                 check_unused_results(
                     ssa.prog,
                     &ssa.sites,
@@ -890,6 +958,7 @@ fn check_func_decl(
                     &func_name,
                     &fields,
                     &types,
+                    dead,
                     pending,
                 );
             }
@@ -900,7 +969,7 @@ fn check_func_decl(
     let Some(params) = &fd.ty.params else {
         return;
     };
-    check_params(&func_name, &params.list, body, &always_const, pending);
+    check_params(&func_name, &params.list, body, &always_const, dead, pending);
 }
 
 
@@ -916,7 +985,7 @@ struct CallSites {
 }
 
 impl CallSites {
-    fn build(ir: &buildir::BuildIrResult) -> Self {
+    fn build(ir: &buildir::BuildIrResult, dead: Option<&DeadView<'_>>) -> Self {
         use guff_ssa::instr::InstrData;
         use guff_ssa::value::Value;
 
@@ -937,6 +1006,13 @@ impl CallSites {
                     let Value::Function(callee) = common.value else {
                         continue;
                     };
+                    // Upstream reaches call sites through
+                    // `ssautil.AllFunctions`, which cannot see a call in a
+                    // block `deleteUnreachableBlocks` removed — nor a `func`
+                    // literal written there, since nothing makes its closure.
+                    if dead_pos(dead, func.pos(iid)) {
+                        continue;
+                    }
                     sites.entry(callee).or_default().push((caller, iid, has_value));
                 }
             }
@@ -963,6 +1039,7 @@ fn check_unused_results(
     fname: &str,
     fields: &[(u32, Option<String>)],
     result_types: &[guff_types::TypeId],
+    dead: Option<&DeadView<'_>>,
     pending: &mut Vec<(u32, String)>,
 ) {
     use guff_ssa::instr::InstrData;
@@ -983,6 +1060,9 @@ fn check_unused_results(
         let InstrData::Return(ret) = func.instrs.get(last) else {
             continue;
         };
+        if dead_pos(dead, func.pos(last)) {
+            continue;
+        }
         any_return = true;
         for &val in &ret.results {
             let is_extract = matches!(val, Value::Instr(iid) if matches!(func.instrs.get(iid), InstrData::Extract(_)));
@@ -1423,7 +1503,11 @@ struct SsaFuncs<'a> {
 }
 
 impl<'a> SsaFuncs<'a> {
-    fn build(ir: &'a buildir::BuildIrResult, files: &[guff::ast::File]) -> Self {
+    fn build(
+        ir: &'a buildir::BuildIrResult,
+        files: &[guff::ast::File],
+        dead: Option<&DeadView<'_>>,
+    ) -> Self {
         let mut by_object = std::collections::HashMap::new();
         for &fid in ir.src_funcs_with_methods() {
             if let Some(obj) = ir.prog.functions.get(fid).object {
@@ -1463,7 +1547,7 @@ impl<'a> SsaFuncs<'a> {
         SsaFuncs {
             prog: &ir.prog,
             by_object,
-            sites: CallSites::build(ir),
+            sites: CallSites::build(ir, dead),
             results_required: collect_results_required(ir),
             call_by_pos,
             lit_names,
@@ -1567,6 +1651,7 @@ fn check_func_lit(
     lit: &FuncLit,
     value_lits: &HashSet<u32>,
     ssa: Option<&SsaFuncs<'_>>,
+    dead: Option<&DeadView<'_>>,
     pending: &mut Vec<(u32, String)>,
 ) {
     // Literals stored / passed / returned have a fixed signature.
@@ -1583,7 +1668,7 @@ fn check_func_lit(
         return;
     };
     let name = name.to_string();
-    check_params(&name, &params.list, &lit.body, &[], pending);
+    check_params(&name, &params.list, &lit.body, &[], dead, pending);
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -1603,8 +1688,21 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let interface_methods = collect_interface_methods(files);
     let types_implementing = collect_types_implementing(pass);
     let decl_counts = decl_counts(pass);
+    // `ctrlflow` answers "does this callee ever return?"; `DeadCode` turns that
+    // into the source ranges upstream's IR drops. Both are absent only when the
+    // package has no type information, and then nothing is dead.
+    let flow = pass.result_of::<CtrlFlowResult>(ctrlflow::analyzer());
+    let dead_code = match (flow, pass.types_info()) {
+        (Some(flow), Some(info)) => Some((DeadCode::build(flow, info, files), flow, info)),
+        _ => None,
+    };
+    let dead = dead_code
+        .as_ref()
+        .map(|(code, flow, info)| DeadView { code, flow, info });
+    let dead = dead.as_ref();
+
     let ir = pass.result_of::<buildir::BuildIrResult>(buildir::analyzer());
-    let ssa = ir.as_ref().map(|ir| SsaFuncs::build(ir, files));
+    let ssa = ir.as_ref().map(|ir| SsaFuncs::build(ir, files, dead));
 
     let mut pending: Vec<(u32, String)> = Vec::new();
     for file in files {
@@ -1622,6 +1720,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 &types_implementing,
                 &decl_counts,
                 ssa.as_ref(),
+                dead,
                 &mut pending,
             );
         }
@@ -1629,7 +1728,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             let Some(NodeRef::FuncLit(lit)) = n else {
                 return true;
             };
-            check_func_lit(lit, &value_lits, ssa.as_ref(), &mut pending);
+            check_func_lit(lit, &value_lits, ssa.as_ref(), dead, &mut pending);
             true
         });
     }
@@ -1648,7 +1747,11 @@ pub fn analyzer() -> &'static Analyzer {
         url: "https://github.com/mvdan/unparam",
         run: run as RunFn,
         run_despite_errors: false,
-        requires: vec![inspect::analyzer(), buildir::analyzer()],
+        requires: vec![
+            inspect::analyzer(),
+            buildir::analyzer(),
+            ctrlflow::analyzer(),
+        ],
         fact_types: vec![],
     })
 }
