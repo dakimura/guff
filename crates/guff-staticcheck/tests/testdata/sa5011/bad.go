@@ -22,3 +22,24 @@ func sequentialFatal(t TB, statusResp *R) {
 	}
 	_ = statusResp.Complete // want
 }
+
+type cl struct{ servers []int }
+
+func newCl() *cl            { return nil }
+func useAny(...interface{}) {}
+
+// The control for ok.go's okDerefInThenArm: put the *deref* below the join too
+// and nothing renames it — the check compares the same value in the same block,
+// so upstream reports. Narrowing the branch rule must not reach this.
+func derefBelowJoinThenCheck(cond bool) {
+	c := newCl()
+	if cond {
+		useAny("y")
+	} else {
+		useAny("x")
+	}
+	useAny(c.servers) // want
+	if c != nil {
+		useAny(c)
+	}
+}

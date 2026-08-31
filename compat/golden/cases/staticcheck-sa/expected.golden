@@ -266,6 +266,7 @@ sa5009/bad/bad.go:3:23:staticcheck::SA5009: Printf format %s reads arg #1, but c
 sa5010/bad/bad.go:4:19:staticcheck::SA5010: impossible type assertion; A and B contradict each other:\n	wrong type for M method\n		have func()\n		want func() int
 sa5011/bad/bad.go:6:8:staticcheck::SA5011: possible nil pointer dereference
 sa5011/bad/bad.go:23:17:staticcheck::SA5011: possible nil pointer dereference
+sa5011/bad/bad.go:41:11:staticcheck::SA5011: possible nil pointer dereference
 sa5011/ok/ok.go:89:17:staticcheck::SA5011: possible nil pointer dereference
 sa5012/bad/bad.go:3:32:staticcheck::SA5012: variadic argument "oldnew" is expected to have even number of elements, but has 3 elements
 sa6000/bad/bad.go:7:3:staticcheck::SA6000: calling regexp.MatchString in a loop has poor performance, consider using regexp.Compile

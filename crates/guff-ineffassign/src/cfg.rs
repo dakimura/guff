@@ -211,8 +211,15 @@ impl CfgBuilder {
             .unwrap_or_default();
         self.results.push(result_names);
         self.defers.push(false);
-        // Labels are function-scoped; drop leftover goto edges from prior funcs.
-        self.gotos.clear();
+        // Labels are function-scoped, so a nested body must not see the
+        // enclosing one's labels — but it must not *destroy* them either.
+        // Upstream keys `gotos` on the label's `*ast.Object`, which is unique
+        // per label, so it never needs to reset the map at all; guff keys on
+        // the label *name*, so it has to hide the outer entries and put them
+        // back. Clearing instead loses the destination a `LabeledStmt` already
+        // recorded, and every `goto` walked after a func literal then adds a
+        // source with no edge (nats-server `processSnapshot`, 2026-08-31).
+        let saved_gotos = std::mem::take(&mut self.gotos);
 
         let saved = self.block;
         self.new_block();
@@ -229,6 +236,7 @@ impl CfgBuilder {
         self.walk_block(body);
 
         self.block = saved;
+        self.gotos = saved_gotos;
         self.results.pop();
         self.defers.pop();
         for v in self.vars.values_mut() {

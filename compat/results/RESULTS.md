@@ -10,9 +10,6 @@
 | k9s | 636 | 636 | 636 | 100.0% | 100.0% | 0 |
 | cobra | 157 | 157 | 157 | 100.0% | 100.0% | 0 |
 | go-client | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
-| consul | 257 | 255 | 255 | 99.2% | 100.0% | 0 |
-| grafana | 0 | 0 | 0 | 100.0% | 100.0% | 0 |
-| containerd | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 
 Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unexpected` counts diffs not covered by the allowlist (`compat/allowlists/`).
 
@@ -73,25 +70,3 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
 | goconst | 1 | 1 | 1 | 100.0% | 100.0% |
-
-## consul
-
-| Linter | guff | golangci | both | P | R |
-|--------|-----:|---------:|-----:|--:|--:|
-| govet | 18 | 18 | 18 | 100.0% | 100.0% |
-| staticcheck | 239 | 237 | 237 | 99.2% | 100.0% |
-
-### Allowed known diffs (2)
-- guff-only: `agent/event_endpoint_test.go:115:staticcheck:err refers to the result of a failed type assertion and is a zero value, not the value that was being type-asserted`
-- guff-only: `agent/http_test.go:1728:staticcheck:err refers to the result of a failed type assertion and is a zero value, not the value that was being type-asserted`
-
-## grafana
-
-| Linter | guff | golangci | both | P | R |
-|--------|-----:|---------:|-----:|--:|--:|
-
-## containerd
-
-| Linter | guff | golangci | both | P | R |
-|--------|-----:|---------:|-----:|--:|--:|
-| gosec | 1 | 1 | 1 | 100.0% | 100.0% |

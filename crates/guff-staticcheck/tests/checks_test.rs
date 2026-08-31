@@ -2118,7 +2118,8 @@ sa_check!(sa9004, sa9004_flags_mixed_const_types, sa9004_allows_uniform_const_ty
 sa_check!(sa9006, sa9006_flags_fixed_shift, sa9006_allows_variable_shift, "shift");
 sa_check!(sa9009, sa9009_flags_ineffectual_directive, sa9009_allows_valid_directive, "go:");
 
-/// `if a || b { … }` renames the pointer, in both directions.
+/// `if a || b { … }` renames the pointer, in both directions — and so does any
+/// other branch that separates the check from the deref.
 ///
 /// honnef's IR is SSI: the `err != nil` branch decides whether the `p == nil`
 /// check is reached at all, so the check's operand is a sigma and the block
@@ -2126,6 +2127,13 @@ sa_check!(sa9009, sa9009_flags_ineffectual_directive, sa9009_allows_valid_direct
 /// identity, so it cannot match across either — whatever the branch body does,
 /// and whichever side the deref is on. coredns writes fifteen of these in
 /// `test/wildcard_test.go` and they were the whole of its staticcheck diff.
+///
+/// The mirror — deref in one arm, check below the join — is the same argument
+/// with sigma and phi swapped, and it is what nats-server
+/// `jetstream_cluster_3_test.go:8707` writes. `ok.go` carries seven spellings
+/// of it (assigned before or inside the branch, parameter, switch, loop body,
+/// no else arm, sibling arms); `bad.go` keeps the control where the deref sits
+/// below the join too and nothing renames it.
 #[test]
 fn sa5011_or_guard_renames_the_pointer() {
     let pkg = typecheck_rule("sa5011", "ok.go");
@@ -2140,8 +2148,8 @@ fn sa5011_or_guard_renames_the_pointer() {
     let bad = typecheck_rule("sa5011", "bad.go");
     let bad_messages = support::run_analyzer(sa5011::analyzer(), &bad);
     assert!(
-        bad_messages.len() == 2,
-        "bad.go keeps both of its findings: {bad_messages:?}"
+        bad_messages.len() == 3,
+        "bad.go keeps all three of its findings: {bad_messages:?}"
     );
 }
 

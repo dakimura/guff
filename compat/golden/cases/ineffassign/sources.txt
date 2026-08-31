@@ -7,3 +7,5 @@ fallthrough/switch_bad.go          crates/guff-ineffassign/tests/testdata/basic/
 namedreturn/named_return_bad.go    crates/guff-ineffassign/tests/testdata/basic/named_return_bad.go
 gotook/goto_ok.go                  crates/guff-ineffassign/tests/testdata/basic/goto_ok.go
 zeroinit/zero_init_ok.go           crates/guff-ineffassign/tests/testdata/basic/zero_init_ok.go
+gotofunclit/goto_funclit_ok.go     crates/guff-ineffassign/tests/testdata/basic/goto_funclit_ok.go
+gotofunclitbad/goto_funclit_bad.go  crates/guff-ineffassign/tests/testdata/basic/goto_funclit_bad.go
