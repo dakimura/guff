@@ -1,6 +1,14 @@
 //! SA6002 — storing non-pointer values in `sync.Pool` allocates memory.
 //!
 //! Port of `honnef.co/go/tools/staticcheck/sa6002`.
+//!
+//! The whole check is `!typeutil.IsPointerLike(typ) || isSlice`, so the
+//! predicate is the check: a map, a channel, a func value and `unsafe.Pointer`
+//! are already one word and boxing them allocates nothing, while a slice is
+//! pointer-like and still reported because its header is three words.
+//! [`callcheck::is_pointer_like`] is that predicate;
+//! `is_pointer_or_interface_type`, which this used to call, is SA1014's
+//! narrower one.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -18,7 +26,7 @@ fn check_put(call: &mut Call<'_>, ctx: &CallContext<'_>) {
     let arena = &ctx.prog.type_arena;
     let u = typ.underlying(arena);
     let is_slice = matches!(arena.get(u), TypeData::Slice(_));
-    if !callcheck::is_pointer_or_interface_type(arena, typ) || is_slice {
+    if !callcheck::is_pointer_like(arena, typ) || is_slice {
         arg.invalid("argument should be pointer-like to avoid allocations");
     }
 }
