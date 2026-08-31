@@ -6017,7 +6017,14 @@ fn method_result_count(pass: &Pass<'_>, typ: TypeId, name: &str) -> Option<usize
         &artifacts.objects,
         &artifacts.packages,
         resolved,
-        true,
+        // `addressable = false`: the three callers all stand in for
+        // `m["x"].Type.Implements(…)`, and `types.Implements` asks for the
+        // method set of the type *as written*. A `WriteString` or a `String`
+        // with a pointer receiver is not in `bytes.Buffer`'s method set, only
+        // in `*bytes.Buffer`'s — so `var b bytes.Buffer; b.Write([]byte(s))`
+        // is not a `preferStringWriter` finding however addressable `b` is.
+        // fiber's `testConn` holds its buffers by value and drew one.
+        false,
         None,
         name,
     ) {

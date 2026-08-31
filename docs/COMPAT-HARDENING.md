@@ -17767,3 +17767,68 @@ guff の `split_words` は小文字の枝では数字を取り込んでいたが
 `nolintlint` 9（`fieldalignment` 4 / wrapcheck 2 / unparam 2 / contextcheck 1）、
 `revive` 3、`staticcheck` 2（SA1029 —— 続き 112 の末尾。**原因は guff-ssa の代入で、
 匿名 `struct{}{}` を代入先の型へ変換していない**。14 形測定済み）、`gocritic` 1。
+
+### 2026-09-01（続き 114）— `Type.Implements` は「書かれたとおりの型」のメソッドセットを訊く
+
+fiber の `gocritic` 1 件:
+
+```
++guff helpers_test.go:798:gocritic:preferStringWriter:
+      conn.r.WriteString("Request") should be preferred to the conn.r.Write([]byte("Request"))
+```
+
+`conn.r` は `testConn` の **値**フィールド `r bytes.Buffer`。`(*bytes.Buffer).WriteString` は
+ポインタレシーバなので、**`bytes.Buffer` は `io.StringWriter` を実装しない**（`*bytes.Buffer` は実装する）。
+go-critic の規則は
+
+```go
+m.Match(`$w.Write([]byte($s))`).Where(m["w"].Type.Implements("io.StringWriter"))
+```
+
+で、`Type.Implements` は `types.Implements` ——「書かれたとおりの型のメソッドセット」を訊く。
+`conn.r` がアドレス可能かどうかは関係ない。
+
+guff の `method_result_count` は `lookup_field_or_method(…, addressable = true, …)` を
+渡しており、Go の**アドレス可能なら昇格する**規則でポインタレシーバのメソッドを見えるようにしていた。
+
+#### 3 つの checker が同じヘルパを引いていた
+
+`method_result_count` の利用者は 3 つで、いずれも上流では `Type.Implements(…)` である:
+
+| checker | 訊く相手 |
+|---|---|
+| `preferStringWriter` | `io.StringWriter` |
+| `preferFprint` | `io.Writer` |
+| `redundantSprint` | `fmt.Stringer` |
+
+**3 つとも測ってから**フラグを 1 つ落とした。21 形（11 + 5 + 5）のうち guff が過剰報告して
+いたのは 9 形で、すべて「ポインタレシーバのメソッドを持つ型の**値**」である:
+
+| 形 | 上流 | guff（修正前） |
+|---|---|---|
+| `var b bytes.Buffer; b.Write([]byte(s))` | 黙る | **撃つ** |
+| `c.r.Write(…)`（`r bytes.Buffer` の値フィールド） | 黙る | **撃つ** |
+| `var sb strings.Builder; sb.Write(…)` | 黙る | **撃つ** |
+| `var p ptrStringer; fmt.Sprint(p)` | 黙る | **撃つ** |
+| `b := &bytes.Buffer{}` / `r *bytes.Buffer` / `os.Stdout` / `io.WriteString(&b, s)` | 撃つ | 撃つ |
+| `w io.Writer`（`WriteString` を持たない） | 黙る | 黙る |
+
+#### fixture は 1 種類しか置いていなかった
+
+`extras.go` の `preferWriterExtra` は**ポインタレシーバのメソッドを持つ型をポインタで渡す**
+形しか無く、値で渡す形が 1 つも無かった。guff が間違えていた 9 形はどれも fixture に
+存在しなかった。値・ポインタの両方を置いて、golden は `gocritic` 193 → **197 キー**。
+
+#### 測定
+
+- fiber **15 → 14**（`gocritic` 1 → 0）。台帳は 26/100 のまま。
+- golden 204/204（`gocritic` 193 → 197、**キー集合の差分で消失なしを確認**）。
+- fix tier 204/204（`gocritic` の期待 diff は hunk ヘッダ 1 行のみ）、reject 14、
+  `cargo test --workspace` 緑、OSS pr tier 8 target すべて P=R=100%。
+- 単体テストに 3 checker の件数（6 / 4 / 3）を固定した。
+
+#### 残り（fiber 14 件）
+
+`nolintlint` 9（`fieldalignment` 4 / wrapcheck 2 / unparam 2 / contextcheck 1）、
+`revive` 3（`datarace` 2 / `unnecessary-if` 1、未調査）、
+`staticcheck` 2（SA1029 —— guff-ssa の代入パス。14 形測定済み）。

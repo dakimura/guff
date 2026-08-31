@@ -6938,6 +6938,11 @@ fn gocritic_disabled_tags_style_skips_if_else_chain() {
 
 #[test]
 fn gocritic_enable_all_extras() {
+    // Counts over `extras.go` alone (the golden case also reads bad.go and
+    // testfuncs.go, so its numbers are larger).
+    const PSW: usize = 6;
+    const PFP: usize = 4;
+    const RSPRINT: usize = 3;
     use std::sync::Arc;
 
     use guff_analysis::SettingsBag;
@@ -7106,6 +7111,35 @@ fn gocritic_enable_all_extras() {
             .count(),
         13,
         "unnamedResult shapes: {messages:?}"
+    );
+    // `Type.Implements` is `types.Implements`: the method set of the type as
+    // written. A `WriteString` or `String` with a pointer receiver is not in
+    // the value type's method set, so only the pointer forms report. Counting
+    // is the whole test — the value forms are silent, and an `any(contains(…))`
+    // over these three messages was already true of the pointer forms.
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m.contains("should be preferred to the") && m.contains("WriteString"))
+            .count(),
+        PSW,
+        "preferStringWriter: {messages:?}"
+    );
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m.contains("preferFprint") || m.contains("fmt.Fprint"))
+            .count(),
+        PFP,
+        "preferFprint: {messages:?}"
+    );
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m.contains("instead") && m.contains(".String()"))
+            .count(),
+        RSPRINT,
+        "redundantSprint: {messages:?}"
     );
 }
 

@@ -118,82 +118,86 @@ extras.go:327:9:gocritic::preferFprint: suggestion: fmt.Fprintln(w, x)
 extras.go:327:9:gocritic::preferStringWriter: w.WriteString(fmt.Sprintln(x)) should be preferred to the io.WriteString(w, fmt.Sprintln(x))
 extras.go:331:9:gocritic::preferStringWriter: w.WriteString(s) should be preferred to the w.Write([]byte(s))
 extras.go:332:9:gocritic::preferStringWriter: w.WriteString(s) should be preferred to the io.WriteString(w, s)
-extras.go:336:2:gocritic::syncMapLoadAndDelete: use m.LoadAndDelete to perform load+delete operations atomically
-extras.go:343:6:gocritic::dynamicFmtString: use errors.New(msg) or fmt.Errorf("%s", msg) instead
-extras.go:344:6:gocritic::dynamicFmtString: use errors.New(f()) or fmt.Errorf("%s", f()) instead
-extras.go:350:6:gocritic::stringConcatSimplify: suggestion: x + y
-extras.go:351:6:gocritic::stringConcatSimplify: suggestion: x + y + z
-extras.go:352:6:gocritic::stringConcatSimplify: suggestion: x + glue + y
-extras.go:356:2:gocritic::badSyncOnceFunc: possible sync.OnceFunc misuse, sync.OnceFunc(f) result is not used
-extras.go:357:2:gocritic::badSyncOnceFunc: possible sync.OnceFunc misuse, consider to assign sync.OnceFunc(f) to a variable
-extras.go:363:6:gocritic::equalFold: consider replacing with strings.EqualFold(x, y)
-extras.go:364:6:gocritic::equalFold: consider replacing with !strings.EqualFold(x, y)
-extras.go:365:6:gocritic::equalFold: consider replacing with bytes.EqualFold(xb, yb)
-extras.go:369:6:gocritic::equalFold: consider replacing with strings.EqualFold(string(p), string(y))
-extras.go:373:6:gocritic::sprintfQuotedString: use %q instead of "%s" for quoted strings
-extras.go:375:6:gocritic::redundantSprint: s is already string
-extras.go:379:6:gocritic::timeExprSimplify: use t.UnixMilli() instead of t.Unix() / 1000
-extras.go:380:6:gocritic::timeExprSimplify: use tp.UnixMicro() instead of tp.UnixNano() * 1000
-extras.go:385:2:gocritic::appendCombine: can combine chain of 2 appends into one
-extras.go:391:2:gocritic::unnecessaryDefer: defer appendCombineExtra() is placed just before return
-extras.go:400:6:gocritic::redundantSprint: s is already string
-extras.go:401:6:gocritic::redundantSprint: use w.String() instead
-extras.go:402:6:gocritic::redundantSprint: use w.String() instead
-extras.go:405:23:gocritic::typeUnparen: could simplify [](func()) to []func()
-extras.go:408:2:gocritic::importShadow: shadow of imported package 'filepath'
-extras.go:415:38:gocritic::importShadow: shadow of imported package 'sort'
-extras.go:440:3:gocritic::importShadow: shadow of imported package 'sort'
-extras.go:445:1:gocritic::unnamedResult: consider giving a name to these results
-extras.go:467:1:gocritic::unnamedResult: consider giving a name to these results
-extras.go:469:1:gocritic::unnamedResult: consider giving a name to these results
-extras.go:471:1:gocritic::unnamedResult: consider giving a name to these results
-extras.go:473:1:gocritic::unnamedResult: consider giving a name to these results
-extras.go:475:1:gocritic::unnamedResult: consider giving a name to these results
-extras.go:477:1:gocritic::unnamedResult: consider giving a name to these results
-extras.go:479:1:gocritic::unnamedResult: consider giving a name to these results
-extras.go:481:1:gocritic::unnamedResult: consider giving a name to these results
-extras.go:483:1:gocritic::unnamedResult: consider giving a name to these results
-extras.go:485:1:gocritic::unnamedResult: consider giving a name to these results
-extras.go:513:21:gocritic::hugeParam: x is heavy (800 bytes); consider passing it by pointer
-extras.go:518:2:gocritic::rangeValCopy: each iteration copies 200 bytes (consider pointers or indexing)
-extras.go:523:25:gocritic::ptrToRefParam: consider `m' to be of non-pointer type
-extras.go:523:44:gocritic::ptrToRefParam: consider `ch' to be of non-pointer type
-extras.go:525:1:gocritic::tooManyResultsChecker: function has more than 5 results, consider to simplify the function
-extras.go:525:1:gocritic::unnamedResult: consider giving a name to these results
-extras.go:534:1:gocritic::unnamedResult: consider giving a name to these results
-extras.go:536:12:gocritic::evalOrder: may want to evaluate evalOrderMutate(&x) before the return statement
-extras.go:540:1:gocritic::unlabelStmt: label label1 is redundant
-extras.go:547:4:gocritic::unlabelStmt: change `continue outer` to `break`
-extras.go:554:14:gocritic::returnAfterHttpError: Possibly return is missed after the http.Error call
-extras.go:559:2:gocritic::commentedOutCode: may want to remove commented-out code
-extras.go:564:1:gocritic::exposedSyncMutex: don't embed sync.Mutex
-extras.go:569:1:gocritic::exposedSyncMutex: don't embed *sync.RWMutex
-extras.go:575:2:gocritic::badLock: defer is missing, mutex is unlocked immediately
-extras.go:579:2:gocritic::badLock: defer is missing, mutex is unlocked immediately
-extras.go:583:8:gocritic::badLock: suspicious unlock, maybe Unlock was intended?
-extras.go:587:8:gocritic::badLock: suspicious unlock, maybe RUnlock was intended?
-extras.go:591:8:gocritic::badLock: maybe defer rw.Unlock() was intended?
-extras.go:595:8:gocritic::badLock: maybe defer rw.RUnlock() was intended?
-extras.go:600:2:gocritic::externalErrorReassign: suspicious reassignment of error from another package
-extras.go:605:5:gocritic::uncheckedInlineErr: err error is unchecked, maybe intended to check it instead of err2
-extras.go:611:6:gocritic::boolExprSimplify: can simplify `!!x` to `x`
-extras.go:612:6:gocritic::boolExprSimplify: can simplify `!(a >= b)` to `a < b`
-extras.go:613:6:gocritic::boolExprSimplify: can simplify `!x == !y` to `x == y`
-extras.go:614:6:gocritic::boolExprSimplify: can simplify `a > b || a == b` to `a >= b`
-extras.go:616:6:gocritic::boolExprSimplify: can simplify `a < b+1` to `a <= b`
-extras.go:617:6:gocritic::boolExprSimplify: can simplify `a+1 > b` to `a >= b`
-extras.go:618:6:gocritic::boolExprSimplify: can simplify `a >= b+1` to `a > b`
-extras.go:619:6:gocritic::boolExprSimplify: can simplify `!(a >= b+1)` to `a <= b`
-extras.go:621:6:gocritic::boolExprSimplify: can simplify `a > 10 && a < 12` to `a == 11`
-extras.go:622:6:gocritic::boolExprSimplify: can simplify `a < 11 || a > 11` to `a != 11`
-extras.go:633:5:gocritic::boolExprSimplify: can simplify `a+1 > b && x` to `a >= b && x`
-extras.go:639:6:gocritic::unlambda: replace `func(s string) string { return strings.TrimSpace(s) }` with `strings.TrimSpace`
-extras.go:662:3:gocritic::mapKey: suspicious duplicate mapKeyNamedString(mapKeyIdent) key
-extras.go:668:4:gocritic::mapKey: suspicious duplicate mapKeyIdent key
-extras.go:682:3:gocritic::mapKey: suspicious duplicate mapKeyIdent key
-extras.go:707:6:gocritic::stringXbytes: suggestion: len(b)
-extras.go:708:6:gocritic::stringXbytes: suggestion: len(b) == 0
-extras.go:709:6:gocritic::stringXbytes: suggestion: bytes.Equal(b, c)
+extras.go:367:9:gocritic::preferStringWriter: v.WriteString("x") should be preferred to the v.Write([]byte("x"))
+extras.go:368:9:gocritic::preferFprint: fmt.Fprint(h.byPtr, 1) should be preferred to the h.byPtr.Write([]byte(fmt.Sprint(1)))
+extras.go:368:9:gocritic::preferStringWriter: h.byPtr.WriteString(fmt.Sprint(1)) should be preferred to the h.byPtr.Write([]byte(fmt.Sprint(1)))
+extras.go:369:6:gocritic::redundantSprint: use p.String() instead
+extras.go:373:2:gocritic::syncMapLoadAndDelete: use m.LoadAndDelete to perform load+delete operations atomically
+extras.go:380:6:gocritic::dynamicFmtString: use errors.New(msg) or fmt.Errorf("%s", msg) instead
+extras.go:381:6:gocritic::dynamicFmtString: use errors.New(f()) or fmt.Errorf("%s", f()) instead
+extras.go:387:6:gocritic::stringConcatSimplify: suggestion: x + y
+extras.go:388:6:gocritic::stringConcatSimplify: suggestion: x + y + z
+extras.go:389:6:gocritic::stringConcatSimplify: suggestion: x + glue + y
+extras.go:393:2:gocritic::badSyncOnceFunc: possible sync.OnceFunc misuse, sync.OnceFunc(f) result is not used
+extras.go:394:2:gocritic::badSyncOnceFunc: possible sync.OnceFunc misuse, consider to assign sync.OnceFunc(f) to a variable
+extras.go:400:6:gocritic::equalFold: consider replacing with strings.EqualFold(x, y)
+extras.go:401:6:gocritic::equalFold: consider replacing with !strings.EqualFold(x, y)
+extras.go:402:6:gocritic::equalFold: consider replacing with bytes.EqualFold(xb, yb)
+extras.go:406:6:gocritic::equalFold: consider replacing with strings.EqualFold(string(p), string(y))
+extras.go:410:6:gocritic::sprintfQuotedString: use %q instead of "%s" for quoted strings
+extras.go:412:6:gocritic::redundantSprint: s is already string
+extras.go:416:6:gocritic::timeExprSimplify: use t.UnixMilli() instead of t.Unix() / 1000
+extras.go:417:6:gocritic::timeExprSimplify: use tp.UnixMicro() instead of tp.UnixNano() * 1000
+extras.go:422:2:gocritic::appendCombine: can combine chain of 2 appends into one
+extras.go:428:2:gocritic::unnecessaryDefer: defer appendCombineExtra() is placed just before return
+extras.go:437:6:gocritic::redundantSprint: s is already string
+extras.go:438:6:gocritic::redundantSprint: use w.String() instead
+extras.go:439:6:gocritic::redundantSprint: use w.String() instead
+extras.go:442:23:gocritic::typeUnparen: could simplify [](func()) to []func()
+extras.go:445:2:gocritic::importShadow: shadow of imported package 'filepath'
+extras.go:452:38:gocritic::importShadow: shadow of imported package 'sort'
+extras.go:477:3:gocritic::importShadow: shadow of imported package 'sort'
+extras.go:482:1:gocritic::unnamedResult: consider giving a name to these results
+extras.go:504:1:gocritic::unnamedResult: consider giving a name to these results
+extras.go:506:1:gocritic::unnamedResult: consider giving a name to these results
+extras.go:508:1:gocritic::unnamedResult: consider giving a name to these results
+extras.go:510:1:gocritic::unnamedResult: consider giving a name to these results
+extras.go:512:1:gocritic::unnamedResult: consider giving a name to these results
+extras.go:514:1:gocritic::unnamedResult: consider giving a name to these results
+extras.go:516:1:gocritic::unnamedResult: consider giving a name to these results
+extras.go:518:1:gocritic::unnamedResult: consider giving a name to these results
+extras.go:520:1:gocritic::unnamedResult: consider giving a name to these results
+extras.go:522:1:gocritic::unnamedResult: consider giving a name to these results
+extras.go:550:21:gocritic::hugeParam: x is heavy (800 bytes); consider passing it by pointer
+extras.go:555:2:gocritic::rangeValCopy: each iteration copies 200 bytes (consider pointers or indexing)
+extras.go:560:25:gocritic::ptrToRefParam: consider `m' to be of non-pointer type
+extras.go:560:44:gocritic::ptrToRefParam: consider `ch' to be of non-pointer type
+extras.go:562:1:gocritic::tooManyResultsChecker: function has more than 5 results, consider to simplify the function
+extras.go:562:1:gocritic::unnamedResult: consider giving a name to these results
+extras.go:571:1:gocritic::unnamedResult: consider giving a name to these results
+extras.go:573:12:gocritic::evalOrder: may want to evaluate evalOrderMutate(&x) before the return statement
+extras.go:577:1:gocritic::unlabelStmt: label label1 is redundant
+extras.go:584:4:gocritic::unlabelStmt: change `continue outer` to `break`
+extras.go:591:14:gocritic::returnAfterHttpError: Possibly return is missed after the http.Error call
+extras.go:596:2:gocritic::commentedOutCode: may want to remove commented-out code
+extras.go:601:1:gocritic::exposedSyncMutex: don't embed sync.Mutex
+extras.go:606:1:gocritic::exposedSyncMutex: don't embed *sync.RWMutex
+extras.go:612:2:gocritic::badLock: defer is missing, mutex is unlocked immediately
+extras.go:616:2:gocritic::badLock: defer is missing, mutex is unlocked immediately
+extras.go:620:8:gocritic::badLock: suspicious unlock, maybe Unlock was intended?
+extras.go:624:8:gocritic::badLock: suspicious unlock, maybe RUnlock was intended?
+extras.go:628:8:gocritic::badLock: maybe defer rw.Unlock() was intended?
+extras.go:632:8:gocritic::badLock: maybe defer rw.RUnlock() was intended?
+extras.go:637:2:gocritic::externalErrorReassign: suspicious reassignment of error from another package
+extras.go:642:5:gocritic::uncheckedInlineErr: err error is unchecked, maybe intended to check it instead of err2
+extras.go:648:6:gocritic::boolExprSimplify: can simplify `!!x` to `x`
+extras.go:649:6:gocritic::boolExprSimplify: can simplify `!(a >= b)` to `a < b`
+extras.go:650:6:gocritic::boolExprSimplify: can simplify `!x == !y` to `x == y`
+extras.go:651:6:gocritic::boolExprSimplify: can simplify `a > b || a == b` to `a >= b`
+extras.go:653:6:gocritic::boolExprSimplify: can simplify `a < b+1` to `a <= b`
+extras.go:654:6:gocritic::boolExprSimplify: can simplify `a+1 > b` to `a >= b`
+extras.go:655:6:gocritic::boolExprSimplify: can simplify `a >= b+1` to `a > b`
+extras.go:656:6:gocritic::boolExprSimplify: can simplify `!(a >= b+1)` to `a <= b`
+extras.go:658:6:gocritic::boolExprSimplify: can simplify `a > 10 && a < 12` to `a == 11`
+extras.go:659:6:gocritic::boolExprSimplify: can simplify `a < 11 || a > 11` to `a != 11`
+extras.go:670:5:gocritic::boolExprSimplify: can simplify `a+1 > b && x` to `a >= b && x`
+extras.go:676:6:gocritic::unlambda: replace `func(s string) string { return strings.TrimSpace(s) }` with `strings.TrimSpace`
+extras.go:699:3:gocritic::mapKey: suspicious duplicate mapKeyNamedString(mapKeyIdent) key
+extras.go:705:4:gocritic::mapKey: suspicious duplicate mapKeyIdent key
+extras.go:719:3:gocritic::mapKey: suspicious duplicate mapKeyIdent key
+extras.go:744:6:gocritic::stringXbytes: suggestion: len(b)
+extras.go:745:6:gocritic::stringXbytes: suggestion: len(b) == 0
+extras.go:746:6:gocritic::stringXbytes: suggestion: bytes.Equal(b, c)
 testfuncs.go:36:2:gocritic::rangeValCopy: each iteration copies 200 bytes (consider pointers or indexing)
 testfuncs.go:44:2:gocritic::rangeValCopy: each iteration copies 200 bytes (consider pointers or indexing)
 testfuncs.go:53:2:gocritic::rangeValCopy: each iteration copies 200 bytes (consider pointers or indexing)
