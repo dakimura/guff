@@ -161,6 +161,73 @@ fn revive_var_declaration_does_not_descend_into_values() {
 }
 
 #[test]
+fn revive_unnecessary_if_compares_the_rendered_targets() {
+    use guff_analysis::SettingsBag;
+    use guff_revive::{RuleSetting, Settings};
+    use guff_runner::{run_on_packages, RunnerOptions};
+    use std::sync::Arc;
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "revive",
+        Settings {
+            severity: None,
+            rules: Some(vec![RuleSetting {
+                name: "unnecessary-if".into(),
+                arguments: Vec::new(),
+                disabled: false,
+                severity: None,
+            }]),
+            confidence: None,
+            ignore_generated_header: false,
+            enable_default_rules: false,
+            enable_all_rules: false,
+            go: None,
+        },
+    );
+    let bag = Arc::new(bag);
+
+    let pkg = support::typecheck_fixture("revive", "example.com/revive/util", "extended_bad.go");
+    let result = run_on_packages(
+        &[revive()],
+        std::slice::from_ref(&pkg),
+        &RunnerOptions {
+            sequential: true,
+            settings: bag,
+            ..RunnerOptions::default()
+        },
+    )
+    .expect("run revive");
+    let messages: Vec<String> = result
+        .diagnostics()
+        .into_iter()
+        .map(|(_, d)| d.message.clone())
+        .collect();
+
+    // Upstream renders both assignment targets with `astutils.GoFmt` and bails
+    // when they differ. Rendering a placeholder for the shapes the printer does
+    // not know made `s.Force` and `s.Disable` compare equal — fiber's
+    // `if colors { cfg.ForceColors = true } else { cfg.DisableColors = true }`.
+    // The messages are asserted whole because the rendering *is* the defect.
+    let mut found: Vec<&String> = messages
+        .iter()
+        .filter(|m| m.contains("unnecessary-if:"))
+        .collect();
+    found.sort();
+    let want = [
+        "unnecessary-if: replace this conditional by: b = n <= 1",
+        "unnecessary-if: replace this conditional by: b = n > 1",
+        "unnecessary-if: replace this conditional by: return flag",
+        "unnecessary-if: replace this conditional by: s.Force = c",
+    ];
+    assert_eq!(found.len(), want.len(), "{messages:?}");
+    for w in want {
+        assert!(found.iter().any(|m| m.contains(w)), "missing `{w}`: {found:?}");
+    }
+    // The different-target and non-boolean shapes are covered by the count.
+}
+
+#[test]
 fn revive_never_unwraps_parentheses() {
     use guff_analysis::SettingsBag;
     use guff_revive::{RuleSetting, Settings};

@@ -17832,3 +17832,74 @@ guff の `method_result_count` は `lookup_field_or_method(…, addressable = tr
 `nolintlint` 9（`fieldalignment` 4 / wrapcheck 2 / unparam 2 / contextcheck 1）、
 `revive` 3（`datarace` 2 / `unnecessary-if` 1、未調査）、
 `staticcheck` 2（SA1029 —— guff-ssa の代入パス。14 形測定済み）。
+
+### 2026-09-01（続き 115）— `<expr>` を返すレンダラは、**別々の式を等しく見せる**
+
+fiber の `revive` 3 件のうち 1 件:
+
+```
++guff middleware/logger/logger_test.go:1979:revive:unnecessary-if:
+      replace this conditional by: <expr> = colors
+```
+
+元のコードは
+
+```go
+if colors {
+    cfg.ForceColors = true
+} else {
+    cfg.DisableColors = true
+}
+```
+
+**代入先が違う。** 上流の `replacementForAssignmentStmt` は
+
+```go
+thenLHS := astutils.GoFmt(thenStmt.Lhs[0])
+elseLHS := astutils.GoFmt(elseStmt.Lhs[0])
+if thenLHS != elseLHS { return "", false }
+```
+
+で、両辺を**文字列にして**比べる。guff にもこの比較はあった —— しかし
+`unnecessary_if.rs` が持っていたローカルの `expr_fmt` は
+`Ident` / `BinaryExpr` / `UnaryExpr` / `ParenExpr` しか知らず、
+**それ以外を `"<expr>"` にしていた**。`s.Force` も `s.Disable` も `"<expr>"` になり、
+**等しいと判定されて**ガードを素通りする。
+
+メッセージに `<expr>` がそのまま出ていたのが同じ原因の表側で、
+`if n > 1` は `b = n > <expr>`（`1` が `BasicLit`）と出ていた。
+
+guff-revive には `astfmt::expr_fmt` があり、`BasicLit` / `SelectorExpr` /
+`IndexExpr` / `StarExpr` / `CallExpr` を扱う。上流も同じ `astutils.GoFmt` を
+すべての規則で使うので、ローカルの写しを消して委譲した。**これは「重複ヘルパは
+重複ではない」の逆側の例**である —— 上流が 1 つの printer を共有しているなら、
+移植も 1 つにする。
+
+#### 15 形
+
+| 形 | 上流 | guff（修正前） |
+|---|---|---|
+| `if c { s.Force = true } else { s.Disable = true }` | 黙る | **撃つ** |
+| `if n > 1 { b = true } else { b = false }` | `b = n > 1` | `b = n > <expr>` |
+| `if n > 1 { b = false } else { b = true }` | `b = n <= 1` | `b = n <= <expr>` |
+| `if c { s.Force = true } else { s.Force = false }` | `s.Force = c` | `<expr> = c` |
+| `x = true/false` / `return true/false` / 否定 | 一致 | 一致 |
+| else 無し / init 付き / else-if / 2 文 / 非 bool / 多重代入 | 黙る | 黙る |
+
+#### 測定
+
+- fiber **14 → 13**（`revive` 3 → 2）。台帳は 26/100 のまま。
+- golden 204/204。`revive` 353 → **363 キー**（`unnecessary-if` 1 → 4、
+  ほかは fixture が伸びたことによる `add-constant` / `flag-parameter` など）。
+  **キー集合の差分**では `comments-density` と `file-length-limit` の 2 行が
+  「消えて」いるが、これは同じ finding の数字が更新されたもの（8% → 10%、
+  533 行 → 597 行）で、失われた検査ではない。**差分を見て確かめること**の実例。
+- fix tier 204/204、reject 14、`cargo test --workspace` 緑、
+  OSS pr tier 8 target すべて P=R=100%。
+- `unnecessary-if` には単体テストが無かったので追加し、**メッセージを丸ごと**
+  4 本固定した（レンダリングそのものが欠陥だったため）。
+
+#### 残り（fiber 13 件）
+
+`nolintlint` 9（`fieldalignment` 4 / wrapcheck 2 / unparam 2 / contextcheck 1）、
+`staticcheck` 2（SA1029 —— guff-ssa の代入パス）、`revive` 2（`datarace`、未調査）。
