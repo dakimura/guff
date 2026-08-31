@@ -163,6 +163,7 @@ pub fn ensure_builtin_fact_decoders() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
         register_fact_decoder("StringFact", decode_string_fact);
+        crate::passes::facts::ctrlflow::register_ctrlflow_fact_decoder();
         crate::passes::facts::deprecated::register_deprecated_fact_decoder();
         crate::passes::facts::purity::register_purity_fact_decoder();
     });

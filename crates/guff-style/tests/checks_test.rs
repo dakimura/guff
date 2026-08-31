@@ -7480,6 +7480,37 @@ fn unparam_flags_unused_parameters() {
         !messages.iter().any(|m| m.contains("ExportedUnused")),
         "exported funcs skipped by default: {messages:?}"
     );
+    // Statements behind a call that cannot return are not in upstream's IR, so
+    // a parameter used only there is unused. One assertion per terminator
+    // family: the stdlib table, in-package induction, and the call sites that
+    // vanish with the block they were written in.
+    for func in [
+        "afterOsExit",
+        "afterSyscallExit",
+        "afterGoexit",
+        "afterLogFatalf",
+        "afterLogPanicln",
+        "afterLoggerFatal",
+        "afterTestingFatal",
+        "afterTestingSkip",
+        "afterTestingSkipNow",
+        "afterNestedSkip",
+        "afterDies",
+        "afterDiesTwice",
+    ] {
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains(&format!("{func} - unused is unused"))),
+            "{func}: expected a report behind the no-return call: {messages:?}"
+        );
+    }
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains(r#"execCmd - cmd always receives "sh""#)),
+        "call sites in dead code should not count: {messages:?}"
+    );
 }
 
 #[test]

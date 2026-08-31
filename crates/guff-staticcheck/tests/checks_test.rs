@@ -1132,12 +1132,12 @@ fn s1001_flags_bad_patterns() {
     let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/s1001");
     support::assert_well_typed(&pkg);
     let messages = support::run_analyzer(s1001::analyzer(), &pkg);
-    // Seven loops, three messages. `any(contains("copy(to, from)"))` passed
+    // Nine loops, three messages. `any(contains("copy(to, from)"))` passed
     // while every array shape said `copy(to, from)` too and the three-clause
     // `for` said nothing at all, so the shapes are counted individually here.
-    assert_eq!(messages.len(), 7, "{messages:?}");
+    assert_eq!(messages.len(), 9, "{messages:?}");
     let count = |needle: &str| messages.iter().filter(|m| m.contains(needle)).count();
-    assert_eq!(count("copy(to, from) instead"), 3, "{messages:?}");
+    assert_eq!(count("copy(to, from) instead"), 5, "{messages:?}");
     assert_eq!(count("copy(to, from[:])"), 1, "{messages:?}");
     assert_eq!(count("copy(to[:], from)"), 1, "{messages:?}");
     assert_eq!(count("arrays using assignment"), 2, "{messages:?}");

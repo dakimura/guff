@@ -21,7 +21,7 @@
  }
  
  // Until 2026-08-27 this fixture held only the slice-to-slice range above, so
-@@ -12,37 +10,25 @@
+@@ -12,39 +10,27 @@
  // by nothing.
  
  func indexForm(dst, src []int) {
@@ -64,6 +64,24 @@
 -		dst[i] = v
 -	}
 +	*dst = *src
+ }
+ 
+ // The same binding on both sides still matches when it is not a bare
+@@ -56,13 +42,9 @@
+ var c holder
+ 
+ func selectorSource(dst []int) {
+-	for i := range c.metas {
+-		dst[i] = c.metas[i]
+-	}
++	copy(dst, c.metas)
+ }
+ 
+ func valueFormOverDst(dst []int) {
+-	for i, v := range dst {
+-		dst[i] = v
+-	}
++	copy(dst, dst)
  }
 --- a/s1002/bad/bad.go
 +++ b/s1002/bad/bad.go
