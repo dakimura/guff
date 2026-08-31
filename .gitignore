@@ -54,3 +54,6 @@ __pycache__/
 
 # Claude Code session state: worktrees, local settings.
 .claude/
+
+# scripts/compat-loop.sh transcript
+/compat-loop.log
