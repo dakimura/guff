@@ -40,6 +40,14 @@
     "timeout": "10m"
   },
   {
+    "name": "go-client",
+    "url": "https://github.com/qdrant/go-client.git",
+    "ref": "v1.19.0",
+    "packages": "./...",
+    "tier": "pr",
+    "timeout": "10m"
+  },
+  {
     "name": "controller-runtime",
     "url": "https://github.com/kubernetes-sigs/controller-runtime.git",
     "ref": "v0.24.1",

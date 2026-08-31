@@ -77,11 +77,16 @@ LEDGER = CORPUS / "shapes.json"
 PROBE_ENV = {"GOOS": "linux", "GOARCH": "amd64", "CGO_ENABLED": "1"}
 
 # Tiers CI actually runs (`.github/workflows/compat.yml`: `--oss --tier pr` on
-# every PR, `--tier nightly` on main). `hunt` is a discovery tier and `weekly`
-# is defined but not wired to a job, so neither can keep a shape honest —
-# a shape only counts as covered when a failing gate would notice it going
-# wrong. Add "weekly" here the day a job runs it.
-GATED_TIERS = ("pr", "nightly")
+# every PR, `--tier nightly` on main, `--tier weekly` on the Sunday schedule).
+# A shape only counts as covered when a failing gate would notice it going
+# wrong, so a tier that nothing runs cannot keep one honest.
+#
+# `weekly` joined the list on 2026-08-30, the day `oss-weekly` was added to
+# compat.yml — until then the three targets it names (controller-runtime,
+# vault, kubernetes) were defined, allowlisted, and run by nothing. `hunt`
+# stays out: it is the discovery tier (corpus/hunt.json), it carries targets
+# with open diffs on purpose, and no job gates it.
+GATED_TIERS = ("pr", "nightly", "weekly")
 
 # One entry per shape COMPAT-HARDENING §2 Phase 5 lists as unexercised, plus
 # the two the first probe found we were also missing (multi-module, old `go`

@@ -590,6 +590,27 @@ struct LoadedRun {
     path_prefix: Option<String>,
 }
 
+/// The first module plugin `linters.settings.custom` declares that this binary
+/// was not built with, in sorted order.
+///
+/// `type` values other than `module` are left alone: upstream loads those
+/// through a different path (`goplugin`, a `.so`) whose failure message guff
+/// has no port of, and inventing one would reject configs on a reason
+/// golangci-lint does not give.
+fn missing_module_plugin(settings: &LinterSettings) -> Option<String> {
+    let mut names: Vec<&String> = settings
+        .custom
+        .iter()
+        .filter(|(_, cfg)| cfg.type_.is_empty() || cfg.type_ == "module")
+        .map(|(name, _)| name)
+        .collect();
+    names.sort();
+    names
+        .into_iter()
+        .find(|n| !guff_plugin::is_registered(n))
+        .cloned()
+}
+
 fn load_run_config(
     no_config: bool,
     config: Option<&PathBuf>,
@@ -682,6 +703,37 @@ fn load_run_config(
 
     let formatters = file.as_ref().map(|c| c.formatters()).unwrap_or_default();
     let go_version = run.go.clone();
+
+    // `build linters` constructs every module plugin declared under
+    // `linters.settings.custom` before any linter name is validated, and a
+    // plugin this binary was not built with ends the process:
+    //
+    //     build linters: plugin(requiredfield): plugin "requiredfield" not found
+    //
+    // Two things here were measured against upstream rather than assumed, both
+    // on pulumi's config (the corpus target that carries two such plugins):
+    //
+    //  - it fires for a *declared* plugin, not an enabled one. A config that
+    //    declares `requiredfield` under `custom` and never names it in `enable`
+    //    still refuses upstream; guff ran it and linted with everything else,
+    //    which is the failure the reject tier exists for — a run that looks
+    //    clean while the config asked for a linter nobody has.
+    //  - it beats the unknown-linter check. With a bogus name *and* a missing
+    //    plugin in the same `enable` list, upstream names the plugin, because
+    //    the set of valid linter names is not known until the plugins are
+    //    built. So this has to run before `run_cmd`'s unknown-name check, which
+    //    is why it lives here in the shared loader rather than there.
+    //
+    // Upstream ranges over a Go map, so with two missing plugins the name it
+    // prints is whichever came out of the map first — pulumi's two alternate
+    // across runs. guff reports the first in sorted order, so its message is a
+    // function of the config rather than of the run, and the reject case
+    // declares exactly one plugin for the same reason.
+    if let Some(name) = missing_module_plugin(&linter_settings) {
+        return Err(ConfigError::LinterSettings(format!(
+            "build linters: plugin({name}): plugin {name:?} not found"
+        )));
+    }
 
     // gocritic validates its own option combinations from the linter's context
     // setter, so upstream only rejects them when gocritic is enabled — a stale

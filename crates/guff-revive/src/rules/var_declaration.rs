@@ -141,9 +141,36 @@ fn check_value_spec(pass: &Pass<'_>, vs: &ValueSpec, failures: &mut Vec<Failure>
     ));
 }
 
-/// Reports whether any identifier in `expr` is an import name, i.e. whether the
-/// expression reaches into another package. See the call site for the measured
-/// upstream behaviour this stands in for.
+/// Reports whether any identifier in `expr` resolves to something declared in
+/// another package, i.e. whether the expression reaches into an import. See the
+/// call site for the measured upstream behaviour this stands in for.
+///
+/// This used to ask a narrower question — "is any identifier an import *name*"
+/// — which only ever sees the qualifier in `pkg.X`. Three ways of reaching into
+/// another package have no qualifier to see, and guff reported all of them
+/// while golangci-lint stayed silent (measured 2026-08-30, one `var` per shape,
+/// `revive` with only `var-declaration` enabled):
+///
+/// | right-hand side | qualifier? | upstream |
+/// |---|---|---|
+/// | `helper.Str()` | yes | silent |
+/// | `TestFunc(&Case{…})` — dot import | **no** | silent |
+/// | `Answer` — dot-imported const | **no** | silent |
+/// | `Case{Name: "n"}` — dot-imported type | **no** | silent |
+/// | `localBox.Method()` — method of an imported type | **no** | silent |
+/// | `localBox.S` — field of an imported type | **no** | silent |
+/// | `localFunc()` — same package | — | **reported** |
+///
+/// The dot-import row is velero's `test/e2e`, which writes
+/// `var NodePortTest func() = TestFunc(&NodePort{})` under
+/// `. ".../test/e2e/test"` 28 times; that block was the largest single body of
+/// guff-only findings the 2026-08-30 corpus expansion turned up.
+///
+/// Asking about the *owner* of each resolved object answers all seven rows with
+/// one rule. Objects from the universe scope (`nil`, `true`, `make`) have no
+/// package and are correctly not "another" one. The `PkgName` arm stays because
+/// a qualifier's own object belongs to the *importing* package, so the owner
+/// test alone cannot see it.
 fn rhs_refers_to_other_package(pass: &Pass<'_>, expr: &Expr) -> bool {
     let Some(info) = pass.types_info() else {
         return false;
@@ -151,17 +178,29 @@ fn rhs_refers_to_other_package(pass: &Pass<'_>, expr: &Expr) -> bool {
     let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
         return false;
     };
+    let here = pass.pkg().types;
     let mut found = false;
     walk::preorder(walk::expr_ref(expr), |n| {
         let NodeRef::Ident(ident) = n else {
             return true;
         };
-        let obj = info
+        let Some(obj) = info
             .defs
             .get(&ident.id)
             .and_then(|o| *o)
-            .or_else(|| info.uses.get(&ident.id).copied());
-        if obj.is_some_and(|o| matches!(artifacts.objects.get(o), ObjectData::PkgName(_))) {
+            .or_else(|| info.uses.get(&ident.id).copied())
+        else {
+            return true;
+        };
+        if matches!(artifacts.objects.get(obj), ObjectData::PkgName(_)) {
+            found = true;
+            return false;
+        }
+        // Compare package *identity*, not the import path string — the same
+        // reason `unhandled-error` gives: the Package metadata's path is not
+        // always the same spelling, and is empty under the unit-test harness.
+        let owner = obj.pkg(&artifacts.objects);
+        if owner.is_some() && owner != here {
             found = true;
             return false;
         }

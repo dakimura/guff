@@ -11,14 +11,15 @@
 
 | Target | config | guff cold | golangci cold | cold × | guff warm | golangci warm | warm × |
 |--------|--------|----------:|--------------:|-------:|----------:|--------------:|-------:|
-| gin | `.golangci.yml` | 0.385s | 3.946s | 10.26x | 0.024s | 0.368s | 15.29x |
-| caddy | `.golangci.yml` | 0.854s | 9.069s | 10.62x | 0.059s | 0.831s | 14.14x |
-| helm | `.golangci.yml` | 1.357s | 17.490s | 12.89x | 0.097s | 1.024s | 10.61x |
-| k9s | `.golangci.yml` | 2.168s | 14.611s | 6.74x | 0.184s | 2.385s | 12.96x |
-| cobra | `.golangci.yml` | 0.234s | 1.418s | 6.06x | 0.018s | 0.403s | 21.81x |
-| consul | `.golangci.yml` | 5.222s | 37.991s | 7.28x | 0.292s | 1.797s | 6.15x |
-| grafana | `.golangci.yml` | 19.806s | 279.799s | 14.13x | 1.470s | 5.822s | 3.96x |
-| containerd | `.golangci.yml` | 0.373s | 5.176s | 13.86x | 0.029s | 0.528s | 18.51x |
+| gin | `.golangci.yml` | 0.409s | 4.485s | 10.97x | 0.024s | 0.380s | 15.74x |
+| caddy | `.golangci.yml` | 0.968s | 10.336s | 10.67x | 0.060s | 0.911s | 15.15x |
+| helm | `.golangci.yml` | 1.381s | 20.436s | 14.80x | 0.099s | 1.158s | 11.67x |
+| k9s | `.golangci.yml` | 2.767s | 16.583s | 5.99x | 0.182s | 2.789s | 15.32x |
+| cobra | `.golangci.yml` | 0.234s | 1.398s | 5.97x | 0.018s | 0.404s | 22.20x |
+| go-client | `.golangci.yml` | 3.128s | 4.500s | 1.44x | 0.030s | 0.576s | 18.90x |
+| consul | `.golangci.yml` | 4.240s | 39.732s | 9.37x | 0.296s | 1.879s | 6.36x |
+| grafana | `.golangci.yml` | 22.333s | 271.036s | 12.14x | 1.491s | 5.925s | 3.97x |
+| containerd | `.golangci.yml` | 0.379s | 5.096s | 13.46x | 0.028s | 0.518s | 18.58x |
 
-Full run detail: `20260821T003601Z.md`
+Full run detail: `20260830T000524Z.md`
 

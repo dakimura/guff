@@ -86,6 +86,27 @@ func okAppend(xs []int) {
 	_ = xs
 }
 
+// The two arms upstream's appendAssign returns early on, neither of which the
+// fixture had: it only carried `xs = append(xs, 1)`, where the two sides are
+// the same expression written the same way, so the whole of `matchSlices` was
+// exercised by one shape. Both of these were reported by guff and by nobody
+// else on connect-go, fiber and scaleway-cli.
+func okAppendArrayScratch(ys []byte) []byte {
+	// "Arrays are frequently used as scratch storages" — a slice of an array is
+	// never the destination, so comparing them can only produce a false
+	// positive. Written on purpose to keep the backing store off the heap.
+	var scratch [8]byte
+	out := append(scratch[:0], ys...)
+	return out
+}
+
+func okAppendUnparen(s *[]int, i int) {
+	// `matchSlices` compares against `ast.Unparen(y)`: the parentheses the
+	// "delete element i" idiom needs around `*s` do not make the two sides
+	// differ.
+	*s = append((*s)[:i], (*s)[i+1:]...)
+}
+
 func okCapt(in int) (out int) {
 	return in
 }

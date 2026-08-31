@@ -20,6 +20,7 @@
 # carried over.
 dot/dot.go                                  crates/guff-revive/tests/testdata/revive/stub/example.com/revive/dot/dot.go
 badalias/badalias.go                        crates/guff-revive/tests/testdata/revive/stub/example.com/revive/badalias/badalias.go
+vardeclother/vardeclother.go                crates/guff-revive/tests/testdata/revive/stub/example.com/revive/vardeclother/vardeclother.go
 
 bad/revivetest/bad.go                       crates/guff-revive/tests/testdata/revive/bad.go
 ok/revivetest/ok.go                         crates/guff-revive/tests/testdata/revive/ok.go
@@ -71,3 +72,10 @@ istest/istest_test.go   crates/guff-revive/tests/testdata/revive/istest/istest_t
 # intervals are per file rather than per package.
 directives/directives.go   crates/guff-revive/tests/testdata/revive/directives/directives.go
 directives/sibling.go      crates/guff-revive/tests/testdata/revive/directives/sibling.go
+
+# var-declaration's cross-package gate. The stub above is the "another package"
+# half; this file reaches into it in every way that has no package qualifier —
+# dot import, and a method / field of an imported type through a local variable
+# — plus a qualified control and a same-package control. guff reported five of
+# the seven rows and golangci-lint none of them (2026-08-30).
+vardeclcross/vardeclotherpkg/var_decl_other_package.go   crates/guff-revive/tests/testdata/revive/var_decl_other_package.go

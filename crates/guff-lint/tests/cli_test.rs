@@ -790,6 +790,105 @@ fn cli_run_rejects_unknown_linter_name() {
     );
 }
 
+/// A module plugin the binary was not built with must stop the run, even when
+/// the linter is never enabled.
+///
+/// `linters.settings.custom` declares module plugins, and golangci-lint's
+/// `build linters` constructs every one of them before it validates a single
+/// linter name — so a config that declares `requiredfield` and never enables it
+/// still ends the process:
+///
+/// ```text
+/// build linters: plugin(requiredfield): plugin "requiredfield" not found
+/// ```
+///
+/// guff accepted it and linted on with everything else. That is the same shape
+/// as `cli_run_rejects_unknown_linter_name` above and it survived that fix: a
+/// name under `settings.custom` is *declared*, so nothing ever called it
+/// unknown. Found on pulumi's config while adding it to the corpus
+/// (2026-08-29); `compat/reject/cases/custom-module-plugin-missing` is the same
+/// rule measured against the real golangci-lint.
+///
+/// Note the linter is deliberately absent from `enable` — with it there, an
+/// unknown-name check would mask the rule this asserts.
+#[test]
+fn cli_run_rejects_declared_but_unbuilt_module_plugin() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    std::fs::write(tmp.path().join("go.mod"), "module example.com\n\ngo 1.24\n").unwrap();
+    std::fs::write(tmp.path().join("a.go"), "package a\n").unwrap();
+    std::fs::write(
+        tmp.path().join(".golangci.yml"),
+        r#"version: "2"
+linters:
+  default: none
+  enable: [errcheck]
+  settings:
+    custom:
+      requiredfield:
+        type: module
+"#,
+    )
+    .unwrap();
+
+    let out = Command::new(bin())
+        .args(["run", "./..."])
+        .current_dir(tmp.path())
+        .output()
+        .expect("spawn guff run with a missing module plugin");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_ne!(
+        out.status.code(),
+        Some(0),
+        "guff must refuse to start, like golangci-lint\nstdout={}\nstderr={stderr}",
+        String::from_utf8_lossy(&out.stdout),
+    );
+    assert!(
+        stderr.contains(r#"build linters: plugin(requiredfield): plugin "requiredfield" not found"#),
+        "the reason must be upstream's, not \"unknown linters\" — they tell the user \
+         to do different things; got:\n{stderr}"
+    );
+}
+
+/// `guff linters` must refuse the same config, for the same reason.
+///
+/// It is the command a user reaches for to find out what a config actually
+/// runs, and on pulumi's config it answered by listing the two plugins nobody
+/// has as *enabled*.
+#[test]
+fn cli_linters_rejects_declared_but_unbuilt_module_plugin() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    std::fs::write(
+        tmp.path().join(".golangci.yml"),
+        r#"version: "2"
+linters:
+  default: none
+  enable: [errcheck, requiredfield]
+  settings:
+    custom:
+      requiredfield:
+        type: module
+"#,
+    )
+    .unwrap();
+
+    let out = Command::new(bin())
+        .args(["linters"])
+        .current_dir(tmp.path())
+        .output()
+        .expect("spawn guff linters with a missing module plugin");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_ne!(out.status.code(), Some(0), "stdout={stdout}\nstderr={stderr}");
+    assert!(
+        !stdout.contains("requiredfield"),
+        "a plugin nobody has must not be listed as enabled; got:\n{stdout}"
+    );
+    assert!(
+        stderr.contains("plugin \"requiredfield\" not found"),
+        "got:\n{stderr}"
+    );
+}
+
 /// Same, from a config file rather than `-E` — `linters.enable` is where a
 /// stale name actually shows up in the wild.
 #[test]
