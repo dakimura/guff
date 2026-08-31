@@ -80,3 +80,4 @@ directives/sibling.go      crates/guff-revive/tests/testdata/revive/directives/s
 # the seven rows and golangci-lint none of them (2026-08-30).
 vardeclcross/vardeclotherpkg/var_decl_other_package.go   crates/guff-revive/tests/testdata/revive/var_decl_other_package.go
 vardeclconst/var_decl_untyped_const.go                   crates/guff-revive/tests/testdata/revive/var_decl_untyped_const.go
+commentsdensity/comments_density_edge.go                 crates/guff-revive/tests/testdata/revive/comments_density_edge.go
