@@ -46,6 +46,18 @@ CIが長いあいだ、待たずに次のタスクの調査を始めていい �
 5. guffを直したら、**測った形を全部**fixtureに入れる。壊れていた1形だけではなく。1形しか通さないfixtureは他の分岐を隠す —— これで何セッションも失っている。
 6. **そのfixtureをRustの単体テストからも数える。** `assert!(messages.iter().any(|m| m.contains(…)))` は他の形が全部壊れていても緑になる —— S1001 は 7 形のうち 3 形が黙ったまま `any(contains("copy(to, from)"))` を通していたし、unparam も同じ形で 12 形の欠落を隠していた。`assert_eq!(messages.len(), N)` と形ごとの件数で固定する。goldenは golangci-lint のインストールが要るが、`cargo test` はどこでも 3 分で回る。
 7. 影響したケースのgoldenを再生成して差分を確認する: `./compat/golden/run.sh --regen --case <case>`。上流も黙るなら差分は出ないはず。
+8. **regenの確認は行番号ではなくキー集合でやる。** fixtureに行を足すとgoldenの行番号が全部ずれて、`git diff`は`-`/`+`の海になる。その中の「1件消えた」は読めない:
+
+   ```bash
+   c=<case>
+   git show HEAD:compat/golden/cases/$c/expected.golden | grep -v '^#' | grep ':' \
+     | sed 's/^[^:]*:[0-9]*:[0-9]*://' | sort > /tmp/old.txt
+   grep -v '^#' compat/golden/cases/$c/expected.golden | grep ':' \
+     | sed 's/^[^:]*:[0-9]*:[0-9]*://' | sort > /tmp/new.txt
+   comm -23 /tmp/old.txt /tmp/new.txt   # 消えたキー。空であること
+   ```
+
+   **fixtureに`gofmt -w`をかけない。** gofmtは数値リテラルを正規化するので、`_ = 0X12`が`0x12`になって`hexLiteral`のゲートが消える —— 両ツールとも黙るのでgoldenは緑のまま通り、そのcheckerを測るのをやめただけになる（続き110で実際に踏んだ）。追加分だけ別ファイルでgofmtして確かめ、貼るのは手で。
 
 **`measure <target>`** — `./compat/hunt.sh --name <target>` を回す。`--name` を省くと全ターゲットで数時間かかるので必ず付ける。クリーンならそのイテレーションの成果は台帳だけ。
 
