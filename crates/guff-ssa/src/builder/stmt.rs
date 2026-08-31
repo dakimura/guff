@@ -1697,6 +1697,18 @@ impl<'a> Builder<'a> {
     fn decl_stmt(&mut self, s: &DeclStmt) {
         match &s.decl {
             Decl::GenDecl(g) => {
+                // `Con, Var or Typ` — only `var` declares storage. A local
+                // `const` is a compile-time value; go/ssa emits nothing for it
+                // and reads of it resolve through the type info like any other
+                // constant. Building a cell and a Store for one made
+                // wastedassign call an unread `const a = iota + 1` a wasted
+                // assignment — three times in gitea, where migrations declare a
+                // nine-name `const (…)` block inside the migration function and
+                // use only some of the names.
+                // (Go: `builder.stmt`'s `case *ast.DeclStmt`, `d.Tok == token.VAR`.)
+                if g.tok != Some(Token::VAR) {
+                    return;
+                }
                 for spec in &g.specs {
                     match spec {
                         guff::ast::Spec::ValueSpec(v) => self.value_spec(v),
