@@ -49,6 +49,17 @@ DRY=0
 PROMPT_FILE="${COMPAT_LOOP_PROMPT:-$ROOT/scripts/compat-loop-prompt.md}"
 LOG="$ROOT/compat-loop.log"
 MODEL="${COMPAT_LOOP_MODEL:-opus}"
+# Which Claude account the loop works as.
+#
+# This machine keeps more than one, selected by an alias rather than by the
+# environment (`alias claude-personal="CLAUDE_CONFIG_DIR=~/.claude-personal
+# claude …"`), so a script started from a plain terminal inherits nothing and
+# `claude` looks in the default `~/.claude`, which has no credentials. The
+# first run of this loop failed exactly there and reported it as "no pull
+# request" — a login problem wearing the costume of an empty iteration.
+#
+# Pin it here instead of hoping the caller exported it.
+export CLAUDE_CONFIG_DIR="${COMPAT_LOOP_CLAUDE_CONFIG_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude-personal}}"
 # How long to wait for a pull request's checks. oss-pr alone runs ~15 minutes
 # and the whole set has been ~25; 60 gives headroom without hanging forever.
 CI_WAIT_MINUTES="${COMPAT_LOOP_CI_WAIT:-60}"
@@ -95,6 +106,14 @@ land_pr() {
     return 0
   done
 }
+
+# One cheap call before the first iteration. Everything downstream of a failed
+# login looks like a task that produced nothing, and that is the one failure
+# this loop must not spend iterations discovering.
+probe="$(claude -p --model "$MODEL" 'reply with exactly: OK' 2>&1 | tr -d '\r\n')"
+if [[ "$probe" != *OK* ]]; then
+  die "claude is not usable as $CLAUDE_CONFIG_DIR — it said: ${probe:-<nothing>}"
+fi
 
 barren=0
 log "=== compat-loop start (max $ITERATIONS iterations, model=$MODEL) ==="
@@ -146,13 +165,19 @@ for i in $(seq 1 "$ITERATIONS"); do
   # sleeping laptop is the most common way this loop dies.
   caffeinate -ims claude -p \
     --model "$MODEL" \
-    --permission-mode bypassPermissions \
+    --dangerously-skip-permissions \
     "$(sed "s|<<TASK>>|$task|; s|<<BRANCH>>|$branch|" "$PROMPT_FILE")" \
     >>"$LOG" 2>&1
   rc=$?
   log "claude exited $rc"
 
   pr="$(gh pr list --head "$branch" --json number --jq '.[0].number' 2>/dev/null)"
+  if [[ $rc -ne 0 && ( -z "$pr" || "$pr" == "null" ) ]]; then
+    # claude itself failed and nothing was pushed. That is a broken tool, not a
+    # quiet iteration, and repeating it only produces the same error twice.
+    tail -n 5 "$LOG" >&2
+    die "claude exited $rc and landed nothing — see $LOG"
+  fi
   if [[ -z "$pr" || "$pr" == "null" ]]; then
     barren=$((barren + 1))
     log "no pull request for $branch — nothing landed this iteration ($barren in a row)"
