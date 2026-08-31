@@ -16995,3 +16995,115 @@ GOROOT を直しても黙る。`_ = f()` / `defer` / `go` / 引数位置の入�
 2. その判断材料として、**公式の linux バイナリ（`/usr/local/go` を持つ docker イメージ）**で
    同じ 13 形を測る。上流の盲目が「配布物の性質」なのか「この開発機の性質」なのかは、
    そこで初めて確定する（この開発機は Homebrew 版なので後者としか言えない）。
+
+### 2026-08-31（続き 107）— nats-server の 2 件は別々の欠陥で、どちらも「**関数の内側にもう 1 つ関数がある**」形だった
+
+台帳の nats-server は 2026-08-23 から `ineffassign` 1 件 / `staticcheck` 1 件で止まっていた。
+関係のない 2 つの linter だが、**最小化すると両方とも func literal が引き金**だった。
+
+なお計測の前に、`corpus/cache/nats-server/server/zzz_repro.go` が未追跡のまま残っていた
+（過去のセッションの最小化用コピー）。そのまま測ると **3 件目の ineffassign が増える**。
+`git status --porcelain` が空であることを測定の前に見ること。
+
+#### 1. `ineffassign` — func literal を歩くと、**外側の label の行き先が消えていた**
+
+```
++guff server/jetstream_cluster.go:10730:ineffassign:ineffectual assignment to sreq
+```
+
+`processSnapshot` の `sreq = nil` は `RETRY:`（10633）に戻る `goto` が 3 本あり、
+戻った先の `if sreq == nil`（10683）が読む。真陰性である。
+
+**13 形を測った**（scratch module、`ineffassign` 単体バイナリ・golangci-lint・guff の 3 者）。
+guff が誤って撃つのは 5 形で、共通するのは「label と `goto` の**あいだ**に func literal がある」ことだった。
+
+| 形 | 上流 | guff（修正前） |
+|---|---|---|
+| A `RETRY:` … `f := func(){}` … `p = nil` … `select { case: goto RETRY }` | 黙る | **撃つ** |
+| B A から func literal を抜いたもの | 黙る | 黙る |
+| C func literal が label より**前** | 黙る | 黙る |
+| D func literal が間、`goto` は素の `if` の中 | 黙る | **撃つ** |
+| E 同上、`goto` は素の `for` の中 | 黙る | **撃つ** |
+| H func literal が**同名の `RETRY` label と `goto` を自前で持つ** | 黙る | **撃つ** |
+| M 前方 `goto`、label の手前に即時実行の func literal | 黙る | **撃つ** |
+| L func literal が `goto` より**後** | 黙る | 黙る |
+| F/G/I/J（本当に死んでいる 4 形） | 撃つ | 撃つ |
+
+原因は `crates/guff-ineffassign/src/cfg.rs` の `walk_func` にあった `self.gotos.clear()`。
+上流 `gordonklaus/ineffassign` は `gotos` を**label の `*ast.Object`** で引く
+（`branchStack.get(lbl)` が `br.label == lbl.Obj` で探す）ので、label は本来ぶつからず、
+`fun()` は `gotos` に一切触らない。guff は `*ast.Object` を持たないため**名前**で引いており、
+関数をまたいだ同名衝突を避けるために毎回 clear していた —— が、`walk_func` は
+**FuncLit からも呼ばれる**（`Expr::FuncLit(fl) => self.walk_func(None, &fl.ty, &fl.body)`）。
+
+clear で失うものは 2 つある。
+`LabeledStmt` が記録済みの `dst` を失うと、**あとから歩く `goto` が親を持たない辺**になり（A/D/E/H）、
+前方 `goto` の場合は逆に**記録済みの `srcs` を失う**ので、あとから来る label が辺を張れない（M）。
+後者は「戻り先が無い」ではなく「**その `goto` の先が無い**」形で、`p = mk()` が死んで見える。
+
+修正は clear ではなく退避・復元（`std::mem::take` → 関数の末尾で戻す）。
+トップレベルの `FuncDecl` では戻す値が空なので clear と同値であり、
+**入れ子のときだけ**外側が生き残る。13 形すべてで `ineffassign` 単体と**位置まで一致**した。
+
+#### 2. `staticcheck` SA5011 — 「join の下の nil check」は φ を読む
+
+```
++guff server/jetstream_cluster_3_test.go:8707:staticcheck:possible nil pointer dereference
+```
+
+`for _, cs := range c.servers`(8707) を撃ち、`if c != nil`(8777) を related に挙げる。
+
+まず**ピン先で SA5011 が生きているか**を疑った。`dominikh/go-tools` の checkout（HEAD）では
+`run` の先頭が `panic("SA5011 is broken and should not be used")` になっている。
+しかし golangci-lint 2.12.2 が pin するのは **honnef.co/go/tools v0.7.0** で、
+そこにこの `panic` は無く、`staticcheck/analysis.go:183` に `sa5011.SCAnalyzer` が登録されている。
+**有効で、それでも黙っている**（「checkout は pin 版ではない」がまた 1 回）。
+
+honnef の `ir` を実際に **dump して**確かめた（`irutil.Packages` + `ir.WriteFunction` の 30 行）。
+最小形（`c` を `else` 側で代入して deref、join の下で nil check）はこうなる:
+
+```
+b3: ← b2 b5 # if.done
+	t23 = Phi <*cluster> 2:t14 5:t22 # c
+	t24 = BinOp <bool> {!=} t23 t6      ← maybeNil に入るのは φ の t23
+b4: ← b0 # if.else
+	t27 = Call <*cluster> newCluster
+	t29 = FieldAddr <*[]int> [0] (servers) t27   ← deref が読むのは t27
+```
+
+SA5011 は純粋な値同一性なので、**φ と、その手前の値は別物**である。
+guff の `separated_by_branch` は `(Some(_), None)`（**deref** が join の下）だけを見ており、
+その鏡像 `(None, Some(_))`（**check** が join の下）を落としていた。σ は「下の領域が使えば残る」ので、
+deref のある腕の σ は必ず残り、join の φ は必ず非自明になる —— 対称に成り立つ。
+
+**8 形を測った**（golangci-lint と guff）。
+
+| 形 | 上流 | guff（修正前） |
+|---|---|---|
+| 分岐の腕で代入＋deref、join の下で nil check（nats の形） | 黙る | **撃つ** |
+| 分岐の前で代入、then 側で deref、join の下で check | 黙る | **撃つ** |
+| 同上で `else` 無し（join が分岐の後継そのもの） | 黙る | 黙る |
+| ポインタが引数 | 黙る | **撃つ** |
+| `switch` の case で deref | 黙る | **撃つ** |
+| ループ本体で deref、ループの後で check | 黙る | 黙る |
+| then で deref / else で check（腕どうし） | 黙る | 黙る |
+| **join の下で deref**してから check（対照） | 撃つ | 撃つ |
+
+`(None, Some(_)) => true` を足して 8 形すべて一致。
+
+#### 3. 直せなかったもの（nats-server には現れない）
+
+同じ grid で、**guff が撃たず上流が撃つ** 3 形が見えた。今回の対象ではないので触っていない。
+
+- `if p == nil { … }` を**先に**書いて後で deref する形（SA5011 の doc の 2 番目の例）。
+- `for _, s := range c.servers` の**直後**に `if c != nil` を書く形。
+  `range` の被写体は**ループの前**に 1 回だけ評価されるので上流の IR では deref と check が
+  同じ値（`t6`）になるが、guff は `separated_by_branch` がループの分岐を見て抑制してしまう。
+  上流の IR を dump して確認済み（`b0` に `FieldAddr t6`、`b4` に `BinOp t6 t4`）。
+
+これは「抑制 guard が欠陥を隠す」形の在庫であり、SA5011 を次に触るときの入口になる。
+
+**測定**: nats-server **2 → 0**（guff=1 / golangci=1 / both=1、P=R=100%）。
+ineffassign は 13 形、SA5011 は 8 形を fixture に入れた（`goto_funclit_ok.go` / `goto_funclit_bad.go`、
+`sa5011/ok.go` に 7 形＋`bad.go` に対照 1 形）。golden は ineffassign 9 件・staticcheck-sa 284 件で
+ratchet は据え置き（missing 3 / extra 1）。OSS pr tier 8 target すべて 100%。

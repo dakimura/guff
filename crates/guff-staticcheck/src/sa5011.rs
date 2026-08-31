@@ -611,6 +611,18 @@ fn separated_by_branch(func: &Function, check_block: BlockId, deref_block: Block
         // `test/wildcard_test.go` writes fifteen of them, and they were the
         // whole of its staticcheck diff.
         (Some(_), None) => true,
+        // The mirror: the *check* sits below the join and the deref inside one
+        // arm. The arm dereferences the pointer, so its sigma has a use and
+        // survives pruning; the join therefore gets a phi merging that sigma
+        // with the other edge's value, and it is that phi the `BinOp` compares.
+        // Sigma ≠ phi, so upstream is silent here too.
+        //
+        // nats-server `TestJetStreamClusterAccountStoreLimits` is the shape:
+        // `c` is assigned and ranged over in the `else` arm and nil-checked
+        // after the join (`jetstream_cluster_3_test.go:8707`, 2026-08-31).
+        // Confirmed against honnef ir: the deref reads `Sigma c [b0]`, the
+        // check compares `Phi 2:t14 5:t22`.
+        (None, Some(_)) => true,
         _ => false,
     }
 }

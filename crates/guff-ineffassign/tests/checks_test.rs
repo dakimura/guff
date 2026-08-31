@@ -149,6 +149,31 @@ fn ineffassign_allows_assignment_used_after_goto() {
 }
 
 #[test]
+fn ineffassign_allows_goto_edges_across_a_func_literal() {
+    // A func literal walked between a label and a `goto` must not take the
+    // label's destination with it: all seven shapes are silent in
+    // gordonklaus/ineffassign. nats-server jetstream_cluster.go:10730.
+    let dir = support::testdata("basic");
+    let pkg = support::typecheck_pkg(
+        "example.com/ineffassign/gotofunclit",
+        &dir.join("goto_funclit_ok.go"),
+    );
+    let messages = support::run_analyzer(analyzer(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
+}
+
+#[test]
+fn ineffassign_still_flags_dead_stores_near_a_func_literal() {
+    let dir = support::testdata("basic");
+    let pkg = support::typecheck_pkg(
+        "example.com/ineffassign/gotofunclitbad",
+        &dir.join("goto_funclit_bad.go"),
+    );
+    let messages = support::run_analyzer(analyzer(), &pkg);
+    assert_eq!(messages.len(), 4, "{messages:?}");
+}
+
+#[test]
 fn ineffassign_skips_generated_files() {
     let dir = support::testdata("basic");
     let pkg = support::typecheck_pkg(
