@@ -18,10 +18,12 @@ guffのコーパスを「100ターゲットでguffとgolangci-lintのfinding集�
 
 1. `./corpus/status.py next` が次の1件を出す。それをやる。
 2. 終わったらブランチを切ってプルリクにする。
-3. CIが緑になったら自分でsquashマージする（`gh pr merge --squash --delete-branch`）。赤なら直す。
-4. `git checkout main && git pull` して `./corpus/status.py probe`、次のタスクへ。
+3. **マージは私がやる。** `main` のルールセットに `require_extra_approval_for_unattributed_changes` が入っていて、AIが作った変更には人間の承認が要る。CIを見届けて、緑なら「マージしていいです」と言ってくれれば私が押す。赤なら直して。
+4. マージされたら `git checkout main && git pull` して `./corpus/status.py probe`、次のタスクへ。
 
-CI待ちは20分前後かかるので、その間に次の調査を始めてもいい。ただし `compat/run.sh` と `compat/hunt.sh` は同時に走らせないこと（`compat/results/` を共有している）。
+私がすぐ見ていないこともある。その場合はマージを待たずに次のタスクの調査を始めていい —— ただし**前のプルリクのブランチの上で作業しないこと**。`main` に戻ってから新しいブランチを切る。台帳が古いままなので `next` が同じタスクを返すが、それは無視して次のものを取っていい。
+
+`compat/run.sh` と `compat/hunt.sh` は同時に走らせないこと（`compat/results/` を共有している）。
 
 ## 最初に読むもの
 
