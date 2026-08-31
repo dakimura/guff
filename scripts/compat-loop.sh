@@ -65,6 +65,10 @@ export CLAUDE_CONFIG_DIR="${COMPAT_LOOP_CLAUDE_CONFIG_DIR:-${CLAUDE_CONFIG_DIR:-
 CI_WAIT_MINUTES="${COMPAT_LOOP_CI_WAIT:-60}"
 # The corpus grows by a clone plus its module downloads on every adoption.
 MIN_FREE_GB="${COMPAT_LOOP_MIN_FREE_GB:-25}"
+# How often to say the iteration is still alive. `claude -p` buffers its answer
+# to the end, so the log standing still means nothing and the terminal is
+# otherwise silent for half an hour at a time.
+HEARTBEAT_SECONDS="${COMPAT_LOOP_HEARTBEAT:-300}"
 
 log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" | tee -a "$LOG"; }
 die() { log "STOP: $*"; exit 1; }
@@ -145,6 +149,22 @@ for i in $(seq 1 "$ITERATIONS"); do
     die "only ${free}GB free, need ${MIN_FREE_GB}GB (the corpus grows on every adoption)"
   fi
 
+  # cargo never garbage-collects `target/*/deps`, and every iteration runs the
+  # whole test suite, so a long unattended run walks straight into the failure
+  # `scripts/target-hygiene.sh` was written for: a build that never starts, no
+  # rustc running at all, and macOS's `syspolicyd` at the top of `ps`. Prune the
+  # stale entries; if everything is recent — which it will be, because this loop
+  # is what made it recent — the debug tree has earned its size and has to go.
+  # The release tree stays: it is small, it is warm, and the measurements use it.
+  if [[ -x scripts/target-hygiene.sh ]]; then
+    scripts/target-hygiene.sh --prune >>"$LOG" 2>&1 || true
+    deps="$(ls target/debug/deps 2>/dev/null | wc -l | tr -d ' ')"
+    if [[ "${deps:-0}" -gt "${TARGET_DEPS_LIMIT:-40000}" ]]; then
+      log "target/debug/deps still $deps after pruning — removing target/debug"
+      rm -rf target/debug
+    fi
+  fi
+
   ./corpus/status.py probe >>"$LOG" 2>&1
   if ./corpus/status.py check >>"$LOG" 2>&1; then
     log "GOAL REACHED: $(./corpus/status.py check)"
@@ -167,9 +187,23 @@ for i in $(seq 1 "$ITERATIONS"); do
     --model "$MODEL" \
     --dangerously-skip-permissions \
     "$(sed "s|<<TASK>>|$task|; s|<<BRANCH>>|$branch|" "$PROMPT_FILE")" \
-    >>"$LOG" 2>&1
+    >>"$LOG" 2>&1 &
+  cpid=$!
+  started=$SECONDS
+
+  # `claude -p` writes its answer when it is finished, so the log not growing is
+  # not a symptom and the process is the only honest liveness signal. Without
+  # this the terminal says nothing for twenty to thirty minutes, and the only
+  # way to tell a working iteration from a wedged one is `ps` — which is how
+  # this was found.
+  while kill -0 "$cpid" 2>/dev/null; do
+    sleep "$HEARTBEAT_SECONDS"
+    kill -0 "$cpid" 2>/dev/null || break
+    log "  … working on '$task' ($(( (SECONDS - started) / 60 ))m elapsed)"
+  done
+  wait "$cpid"
   rc=$?
-  log "claude exited $rc"
+  log "claude exited $rc after $(( (SECONDS - started) / 60 ))m"
 
   pr="$(gh pr list --head "$branch" --json number --jq '.[0].number' 2>/dev/null)"
   if [[ $rc -ne 0 && ( -z "$pr" || "$pr" == "null" ) ]]; then
