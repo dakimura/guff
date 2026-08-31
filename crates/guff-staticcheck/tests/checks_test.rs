@@ -2265,8 +2265,15 @@ fn sa6002_flags_non_pointer_pool_put() {
     let pkg = typecheck_rule("sa6002", "bad.go");
     support::assert_well_typed(&pkg);
     let messages = support::run_analyzer(sa6002::analyzer(), &pkg);
-    assert!(!messages.is_empty(), "{messages:?}");
-    assert!(messages[0].contains("pointer-like"), "{messages:?}");
+    // Six of the sixteen measured shapes: a slice and a named slice (both
+    // pointer-like, both reported anyway — the header is three words), a
+    // struct, an array, an int and a string. `!is_empty()` was true of the
+    // slice alone, which is what let the ten in ok.go go unmeasured.
+    assert_eq!(messages.len(), 6, "{messages:?}");
+    assert!(
+        messages.iter().all(|m| m.contains("pointer-like")),
+        "{messages:?}"
+    );
 }
 
 #[test]

@@ -17525,3 +17525,86 @@ regen の前後でキー集合を差分したからで、行番号の差分だ�
 `nolintlint` 9（govet fieldalignment 4 / wrapcheck 2 / unparam 2 / contextcheck 1）、
 `revive` 4、`tagliatelle` 2、`gocritic` 1（`preferStringWriter`）。
 `nolintlint` の 9 件は全部また別の linter の偽陰性の影である。
+
+### 2026-09-01（続き 111）— SA6002 は `IsPointerLike` を訊く。SA1014 の `Pointer` ではない
+
+続き 110 で fiber を 42 → 25 にしたあと、残る `staticcheck` 9 件のうち **6 件が同じ文言**だった:
+
+```
++guff binder/form.go:121   argument should be pointer-like to avoid allocations
++guff client/core.go:266   〃
++guff helpers.go:881       〃   （ほか 3 件）
+```
+
+すべて `sync.Pool.Put(m)` で、`m` は **map か chan**。上流の SA6002 はこれだけである:
+
+```go
+typ := arg.Value.Value.Type()
+_, isSlice := typ.Underlying().(*types.Slice)
+if !typeutil.IsPointerLike(typ) || isSlice { arg.Invalid(...) }
+```
+
+`typeutil.IsPointerLike` は「nillable な型すべてと `unsafe.Pointer`」:
+
+```go
+case *types.Interface: /* method set なら true、型集合なら項のどれかが pointer-like */
+case *types.Chan, *types.Map, *types.Signature, *types.Pointer, *types.Slice: return true
+case *types.Basic: return T.Kind() == types.UnsafePointer
+```
+
+guff は `callcheck::is_pointer_or_interface_type`（`Pointer | Interface` のみ）を引いていた。
+map・chan・func 値・`unsafe.Pointer` が全部「pointer-like でない」になり、過剰報告になる。
+
+#### 共有ヘルパは直していない
+
+`is_pointer_or_interface_type` は**間違った移植ではない**。上流の **SA1014 は自前の
+`Pointer`** を持っており、それがちょうど `Pointer | Interface` である:
+
+```go
+func Pointer(v callcheck.Value) bool {
+	switch v.Value.Type().Underlying().(type) {
+	case *types.Pointer, *types.Interface: return true
+	}
+	return false
+}
+```
+
+上流は 2 つを別々に持っている。訊いている質問が違うからで、SA6002 は
+「これを箱に入れると割り当てが起きるか」、SA1014 は「`Unmarshal` がこれ越しに書けるか」。
+map は前者には該当し後者には該当しない。**新しい述語 `callcheck::is_pointer_like` を足して
+SA6002 だけを繋ぎ替えた。**
+
+同じ `IsPointerLike` は上流の **SA5011** も引いている（`sa5011.go:153`）。そちらも
+測った —— `*T` / map / chan / func / slice / interface を「使ってから nil 検査する」6 形で、
+**map 以下の 5 形は両ツールとも黙って一致**する（nil map の添字は panic しないので
+そもそも deref が無い）。**SA5011 は触っていない。**
+
+#### 16 形
+
+| 引数の型 | 上流 | guff（修正前） |
+|---|---|---|
+| `map[string]int` / `namedMap` | 黙る | **撃つ** |
+| `chan int` / `namedChan` | 黙る | **撃つ** |
+| `func()` | 黙る | **撃つ** |
+| `unsafe.Pointer` | 黙る | **撃つ** |
+| `[]int` / `namedSlice`（pointer-like だが header が 3 語） | 撃つ | 撃つ |
+| `box`（構造体）/ `int` / `string` / `[4]int` | 撃つ | 撃つ |
+| `*box` / `*[]int` / `any` / `error` | 黙る | 黙る |
+
+DEFERRED: 型集合の腕（制約インターフェースの項を歩く）。`sync.Pool.Put` に
+型引数の値を渡す形でしか差が出ない。
+
+#### 測定
+
+- fiber **25 → 19**（`staticcheck` 9 → 3）。台帳は 26/100 のまま。
+- golden 204/204。`staticcheck-sa` 284 → **289 キー**（SA6002 が 1 → 6）、
+  ratchet は据え置き（missing 3 / extra 1）。**キー集合の差分で消えたキーが無いことを確認**。
+- fix tier 204/204、reject 14、`cargo test --workspace` 緑、OSS pr tier 8 target すべて P=R=100%。
+- fixture は 1 形（`Put(s)` の slice 1 つ）から **16 形**へ。単体テストは
+  `!messages.is_empty()` + `messages[0]` から**厳密な 6 件**へ。前者は slice 1 形だけで真になる。
+
+#### 残り（fiber 19 件）
+
+`nolintlint` 9（govet fieldalignment 4 / wrapcheck 2 / unparam 2 / contextcheck 1）、
+`revive` 4、`staticcheck` 3（SA1029 の「空の匿名構造体をキーにするな」2 件と ST1023 1 件）、
+`tagliatelle` 2、`gocritic` 1。

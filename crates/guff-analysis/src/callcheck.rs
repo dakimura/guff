@@ -670,6 +670,33 @@ pub fn is_pointer_or_interface_type(arena: &TypeArena, typ: TypeId) -> bool {
     )
 }
 
+/// `typeutil.IsPointerLike`: "true for all nillable types, `unsafe.Pointer`,
+/// and type sets where at least one term is pointer-like".
+///
+/// **Not** [`is_pointer_or_interface_type`], which is the port of SA1014's own
+/// two-case `Pointer` helper. Upstream keeps them separate and so does this:
+/// SA6002 asks "would boxing this allocate", where a map, a channel and a func
+/// value are all already a single word, and SA1014 asks "can `Unmarshal` write
+/// through this", where they cannot. Wiring SA6002 to the narrow one made it
+/// report every `pool.Put(someMap)` — six of fiber's nine staticcheck findings.
+///
+/// DEFERRED: the type-set arm. Upstream walks an interface's normal terms and
+/// answers true if any is pointer-like; here a non-method-set interface (a
+/// constraint) answers true, as an ordinary interface does. A `sync.Pool.Put`
+/// of a type-parameter value is the only place that could differ.
+pub fn is_pointer_like(arena: &TypeArena, typ: TypeId) -> bool {
+    match arena.get(typ.underlying(arena)) {
+        TypeData::Interface(_)
+        | TypeData::Chan(_)
+        | TypeData::Map(_)
+        | TypeData::Signature(_)
+        | TypeData::Pointer(_)
+        | TypeData::Slice(_) => true,
+        TypeData::Basic(b) => b.kind() == guff_types::BasicKind::UnsafePointer,
+        _ => false,
+    }
+}
+
 /// Reports whether `typ`'s underlying type is a slice.
 pub fn is_slice_type(arena: &TypeArena, typ: TypeId) -> bool {
     matches!(

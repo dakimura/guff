@@ -273,7 +273,12 @@ sa6000/bad/bad.go:7:3:staticcheck::SA6000: calling regexp.MatchString in a loop 
 sa6000/ok/ok.go:13:5:staticcheck::SA4006: this value of match is never used
 sa6001/bad/bad.go:4:7:staticcheck::SA6001: m[string(key)] would be more efficient than k := string(key); m[k]
 sa6001/bad/bad.go:12:7:staticcheck::SA6001: m[string(key)] would be more efficient than k := string(key); m[k]
-sa6002/bad/bad.go:3:39:staticcheck::SA6002: argument should be pointer-like to avoid allocations
+sa6002/bad/bad.go:18:39:staticcheck::SA6002: argument should be pointer-like to avoid allocations
+sa6002/bad/bad.go:20:56:staticcheck::SA6002: argument should be pointer-like to avoid allocations
+sa6002/bad/bad.go:22:45:staticcheck::SA6002: argument should be pointer-like to avoid allocations
+sa6002/bad/bad.go:24:47:staticcheck::SA6002: argument should be pointer-like to avoid allocations
+sa6002/bad/bad.go:26:42:staticcheck::SA6002: argument should be pointer-like to avoid allocations
+sa6002/bad/bad.go:28:48:staticcheck::SA6002: argument should be pointer-like to avoid allocations
 sa6003/bad/bad.go:2:20:staticcheck::S1029: should range over string, not []rune(string)
 sa6003/bad/bad.go:2:20:staticcheck::SA6003: should range over string, not []rune(string)
 sa6005/bad/bad.go:5:35:staticcheck::SA6005: should use strings.EqualFold instead
