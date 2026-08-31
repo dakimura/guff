@@ -7511,13 +7511,46 @@ fn check_import_shadow_fields_types(ty: &FuncType, pending: &mut Pending) {
     }
 }
 
-fn ast_type_name(ty: &Expr) -> String {
-    match ty {
-        Expr::Ident(id) => id.name.clone(),
-        Expr::SelectorExpr(sel) => sel.sel.name.clone(),
-        Expr::StarExpr(s) => ast_type_name(&s.x),
-        Expr::ArrayType(a) => ast_type_name(&a.elt),
-        Expr::ParenExpr(p) => ast_type_name(&p.x),
+/// `unnamedResultChecker.typeName`, which takes a **`types.Type`**, not a
+/// syntax node:
+///
+/// ```go
+/// case *types.Array, *types.Pointer, *types.Slice: return c.typeName(typ.Elem())
+/// case *types.Named:                               return typ.Obj().Name()
+/// default:                                         return ""
+/// ```
+///
+/// The `default` is the whole point of the checker: every *unnamed* type —
+/// `bool`, `int`, `string`, `[]string`, `map[k]v`, `chan T`, a func type —
+/// answers the empty string, so two of them are "the same name" and the
+/// results want naming. Reading the name off the syntax instead gave
+/// `bool` → `"bool"` and `[]string` → `"string"`, which are different, so
+/// `(bool, []string)` and `(int, string, error)` were never reported. fiber
+/// carries ten `//nolint:gocritic // unnamedResult` directives on exactly those
+/// shapes, and guff called every one of them unused.
+///
+/// Upstream does not call `Underlying()`, so a defined `type MySlice []int`
+/// answers `"MySlice"` and is not followed into its element.
+fn unnamed_result_type_name(pass: &Pass<'_>, ty: &Expr) -> String {
+    let Some(id) = type_of(pass, ty) else {
+        return String::new();
+    };
+    type_name_of(pass, id)
+}
+
+fn type_name_of(pass: &Pass<'_>, id: TypeId) -> String {
+    use guff_types::arena::TypeData;
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return String::new();
+    };
+    let arena = &artifacts.types;
+    match arena.get(id) {
+        TypeData::Array(a) => type_name_of(pass, a.elem()),
+        TypeData::Pointer(ptr) => type_name_of(pass, ptr.elem()),
+        TypeData::Slice(sl) => type_name_of(pass, sl.elem()),
+        TypeData::Named(_) => guff_types::named::named_obj(arena, id)
+            .name(&artifacts.objects)
+            .to_string(),
         _ => String::new(),
     }
 }
@@ -7553,7 +7586,12 @@ fn result_num_fields(results: &FieldList) -> usize {
     n
 }
 
-fn check_unnamed_result(f: &FuncDecl, check_exported: bool, pending: &mut Pending) {
+fn check_unnamed_result(
+    pass: &Pass<'_>,
+    f: &FuncDecl,
+    check_exported: bool,
+    pending: &mut Pending,
+) {
     // Upstream: `if c.checkExported && !ast.IsExported(name) { return }` — the
     // param *narrows* the check to exported funcs rather than adding them.
     if check_exported && !is_exported(&f.name.name) {
@@ -7588,8 +7626,8 @@ fn check_unnamed_result(f: &FuncDecl, check_exported: bool, pending: &mut Pendin
         }
         let typ1 = fields[0];
         let typ2 = fields[1];
-        let name1 = ast_type_name(typ1);
-        let name2 = ast_type_name(typ2);
+        let name1 = unnamed_result_type_name(pass, typ1);
+        let name2 = unnamed_result_type_name(pass, typ2);
         let cond = (name1 != name2 && !name2.is_empty())
             || (!is_error_type_expr(typ1) && is_error_type_expr(typ2))
             || (!is_bool_type_expr(typ1) && is_bool_type_expr(typ2));
@@ -7606,7 +7644,7 @@ fn check_unnamed_result(f: &FuncDecl, check_exported: bool, pending: &mut Pendin
 
     let mut seen: HashMap<String, bool> = HashMap::new();
     for (i, typ) in fields.iter().enumerate() {
-        let name = ast_type_name(typ);
+        let name = unnamed_result_type_name(pass, typ);
         let is_last = i + 1 == fields.len();
         let cond = !seen.get(&name).copied().unwrap_or(false)
             || (is_last && (is_error_type_expr(typ) || is_bool_type_expr(typ)));
@@ -9270,7 +9308,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         check_param_type_combine(pass, f, &mut pending);
                     }
                     if enabled(&set, "unnamedResult") {
-                        check_unnamed_result(f, params.unnamed_result_check_exported, &mut pending);
+                        check_unnamed_result(
+                            pass,
+                            f,
+                            params.unnamed_result_check_exported,
+                            &mut pending,
+                        );
                     }
                     if enabled(&set, "hugeParam") {
                         check_huge_param(pass, f, &mut pending);

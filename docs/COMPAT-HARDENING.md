@@ -17444,3 +17444,84 @@ hunt の health ゲートはこれで落ちる。findings とは別枠で、`cor
 - 単体テストを 2 つ締めた: `bodyclose_flags_missing_close` の `>= 5` を厳密な 10 に、
   `unparam_flags_unused_parameters` に 9 形の個別 assert と総数 39 を追加。
   **`>= N` と `any(contains(…))` は、1 形だけ生きていれば緑になる。**
+
+### 2026-09-01（続き 110）— `unnamedResult` は**型**の名前を訊く。構文の名前ではない
+
+`nolintlint` の「directive is unused」は、**抑制されている linter 側の偽陰性の影**である
+（続き 109 で scaleway-cli の 3 件がそうだった）。台帳で開いているターゲットの
+`nolintlint` を linter 別に数えると偏っていた:
+
+| target | 未使用と言われた directive | 件数 |
+|---|---|--:|
+| fiber | `//nolint:gocritic`（うち **unnamedResult が 10**） | 15 |
+| authelia | `//nolint:gosec` | 10 |
+| syncthing | `//nolint:errcheck` | 5 |
+| connect-go | `//nolint:bodyclose` | 5 |
+| fiber | `//nolint:govet`（fieldalignment） | 4 |
+
+いちばん大きい塊 —— fiber の `unnamedResult` 10 件 —— から取った。
+
+#### 上流は `types.Type` を見る
+
+```go
+func (c *unnamedResultChecker) typeName(typ types.Type) string {
+	switch typ := typ.(type) {
+	case *types.Array:   return c.typeName(typ.Elem())
+	case *types.Pointer: return c.typeName(typ.Elem())
+	case *types.Slice:   return c.typeName(typ.Elem())
+	case *types.Named:   return typ.Obj().Name()
+	default:             return ""
+	}
+}
+```
+
+`default` がこの checker の要点である。**名前を持たない型はすべて空文字**を返す ——
+`bool`、`int`、`string`、`[]string`、`map[k]v`、`chan T`、関数型。だから
+`(bool, []string)` は「同じ名前の結果が 2 つ」であり、名前を付ける価値がある、と判定される。
+
+guff の `ast_type_name` は**構文**から読んでいた: `bool` → `"bool"`、`[]string` → `"string"`。
+別名になるので「2 つ目の名前が違うなら黙る」の枝に落ちる。
+
+なお `isError` / `isBool` のほうは上流も**構文**（`qualifiedName`）なので、
+guff は 2 つのうち片方だけを間違えていた。
+
+#### 20 形測った
+
+| 戻り値 | 上流 | guff（修正前） |
+|---|---|---|
+| `(bool, []string)` ← fiber `domain.go` | 撃つ | **黙る** |
+| `([]byte, bool, error)` ← fiber `shared_state.go` ×6 | 撃つ | **黙る** |
+| `(int, string)` | 撃つ | **黙る** |
+| `(int, string, error)` | 撃つ | **黙る** |
+| `(int,int)` / `(float64,float64)` / `(foo,foo)` / `([]string,[]string)` / `(map,map)` / `(chan,chan)` / `([]foo,[]foo)` | 撃つ | 撃つ |
+| `(int,error)` / `(foo,error)` / `(*foo,error)` / `(string,bool)` / `(foo,bool)` / `(int,bool)` / `(*foo,*bar)` / `(foo,bar,error)` / 名前付き結果 | 黙る | 黙る |
+
+上流は `Underlying()` を呼ばないので、`type MySlice []int` は `"MySlice"` を返して
+要素までは辿らない。移植もそうしてある。
+
+#### fixture に `gofmt -w` をかけて、ゲートを 1 つ消しかけた
+
+`extras.go` に 20 形を足したあと `gofmt -w` をかけたら、**`_ = 0X12` が `0x12` に
+書き換わり**、`hexLiteral: prefer 0x over 0X` の golden キーが消えた。
+guff も上流も黙るので **golden は 192/192 で緑のまま通る** —— 気付いたのは
+regen の前後でキー集合を差分したからで、行番号の差分だけ見ていたら見逃していた。
+
+**linter の fixture に整形をかけてはいけない。** fixture の仕事は「そのツールが
+文句を言う形を持っていること」で、整形器はその一部を消す。追加分だけを
+`gofmt` で確かめて、ファイル全体には掛けないこと。
+
+#### 測定
+
+- fiber **42 → 25**（`nolintlint` 24 → 9、`gocritic` 3 → 1）。台帳は 26/100 のまま。
+- golden 204/204。`gocritic` 183 → **193 キー**（`unnamedResult` 3 → 13）。
+  **regen の前後でキー集合を比較して、消えたキーが無いことを確認した**。
+- fix tier 204/204（`gocritic` の期待 diff は fixture が伸びた分の hunk ヘッダのみ）。
+- reject 14、`cargo test --workspace` 緑、OSS pr tier 8 target すべて P=R=100%。
+- 単体テストは `gocritic_enable_all_extras` に `unnamedResult` の件数 13 を固定した。
+
+#### 残り（fiber 25 件）
+
+`staticcheck` 9（`argument should be pointer-like` 6 / `empty anonymous struct as key` 2 ほか）、
+`nolintlint` 9（govet fieldalignment 4 / wrapcheck 2 / unparam 2 / contextcheck 1）、
+`revive` 4、`tagliatelle` 2、`gocritic` 1（`preferStringWriter`）。
+`nolintlint` の 9 件は全部また別の linter の偽陰性の影である。

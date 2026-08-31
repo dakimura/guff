@@ -7065,6 +7065,25 @@ fn gocritic_enable_all_extras() {
         1,
         "{messages:?}"
     );
+    // `unnamedResult` reads its type names off `types.Type`, where every
+    // unnamed type answers the empty string — so `(bool, []string)` is two
+    // results with *the same* name and does want naming. Reading them off the
+    // syntax made those two look different, and four of the twenty measured
+    // shapes went unreported: `(bool, []string)`, `([]byte, bool, error)`,
+    // `(int, string)`, `(int, string, error)`. fiber carries ten
+    // `//nolint:gocritic // unnamedResult` directives on exactly that family.
+    //
+    // Thirteen: the ten shapes the fixture now says report, plus
+    // `unnamedResultExtra`, `tooManyResultsExtra` and `evalOrderExtra`, which
+    // are `(float64, float64)` and `(int, int)` shapes of their own.
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m.contains("consider giving a name to these results"))
+            .count(),
+        13,
+        "unnamedResult shapes: {messages:?}"
+    );
 }
 
 #[test]
