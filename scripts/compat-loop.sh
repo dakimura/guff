@@ -85,6 +85,12 @@ land_pr() {
   local pr="$1" waited=0
   while :; do
     local states
+    # Same silence as the claude phase, for the same reason: this polls every
+    # thirty seconds and said nothing, so `claude exited 0` was the last line
+    # for twenty minutes while CI ran. Report every heartbeat interval.
+    if [[ $waited -gt 0 && $((waited % (HEARTBEAT_SECONDS / 30))) -eq 0 ]]; then
+      log "  … waiting on PR #$pr checks ($((waited / 2))m)"
+    fi
     states="$(gh pr checks "$pr" --json state --jq '.[].state' 2>/dev/null)" || return 2
     if [[ -z "$states" ]]; then
       sleep 30
