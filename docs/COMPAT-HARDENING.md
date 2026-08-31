@@ -10226,6 +10226,7 @@ guff は 4 件を返した。**これを穴と呼ぶ前に**、同じソース�
 | consul | 2 | `agent/event_endpoint_test.go:115` / `agent/http_test.go:1728` SA9008 | 上流の IR 検証（`ValueForExpr` + `irutil.Flatten`）未移植。パターン自体は一致済み。誤検出。§4 の 2026-08-09（2 本目）に最小再現。 | 2026-08-09 |
 | controller-runtime | 9 | `compat/allowlists/controller-runtime.txt` 参照 | ill-typed が 16 → 0 になった日（14 本目）に見えるようになった precision の穴。**17 件だったものが 15 本目で 9 件に**（SA9003 の 6 件は `irutil.IsExample`、SA1019 の 2 件は非推奨 fact の欠落）。残りは unparam 2（`MakeInterface` にオペランドが無い＝§7 と同根）、その症状としての nolintlint 5、nilerr 1、bodyclose 1 | 2026-08-13 |
 | gitea | 1 | `modules/setting/config_env.go:128` nolintlint（SA4006 の影） | 上流の `go/ir` が同じ値に**バイト同一の σ ノードを 2 つ**残し、`keyValue := envValue` の右辺が**深い枝の読みが辿らないほう**に束縛されるために出る SA4006。深い枝の綴りを `kv` に変えるだけで上流は黙り、ループの外に出すと `simplifyPhisAndSigmas` が 2 つを畳んで黙る —— **同じプログラムで答えが変わる**。guff の SSA に σ は無く 2 つの名前は 1 つの Value。gitea 自身が `// false positive` と書いている偽陽性。9 形の測定は §4 の 2026-08-31（続き 105）、全文は `compat/allowlists/gitea.txt` | 2026-08-31 |
+| jaeger | 2 | `…/handlers/search_traces.go:141` revive time-naming / `…/tracestore/from_dbmodel_test.go:27` revive epoch-naming | §6 の「revive の importer 盲目には追従しない」そのもの。**上流の沈黙はホスト依存**で、golangci-lint の `Env.Discover` が値レシーバ（`pkg/goutil/env.go`）なので `build.Default.GOROOT` がバイナリのビルド時 GOROOT のまま残り、この開発機ではそれが消えた Homebrew の go1.26.2 を指している。`GOROOT` を export すると**上流はこの 2 件を撃つ**。guff / revive v1.15.0 単体 / GOROOT を入れた golangci-lint の3 者は 13 形すべてで一致。測定は §4 の 2026-08-31（続き 106）、全文は `compat/allowlists/jaeger.txt` | 2026-08-31 |
 
 これ以外の allowlist ファイルは**すべてヘッダのみ（0 件）**。記録するのは
 `oss-nightly` / weekly を CI ゲートにするため — 恒久的に赤いゲートは次の劣化に
@@ -10263,10 +10264,37 @@ guff は 4 件を返した。**これを穴と呼ぶ前に**、同じソース�
 
 **方針: 真陽性は捨てない。この 3 件は恒久的な差分として据え置く。**
 
-revive は `types.Config{Importer: importer.Default()}` で型検査する。
-`importer.Default()` は gc の export data importer で、いまの Go には `.a` が無いため
-**import が全部 invalid に落ちる**。したがって「別パッケージで宣言された型」を要する
-rule は上流では**常に黙る**。guff は全プログラムの型情報を持つので正しく答えてしまう。
+revive は `types.Config{Importer: importer.Default()}` で型検査する（`lint/package.go`
+の `TypeCheck`）。この import が上流では解決できないので「別パッケージで宣言された型」を
+要する rule は**黙る**。guff は全プログラムの型情報を持つので正しく答えてしまう。
+
+**理由の記述は 2026-08-31（続き 106）に測り直して差し替えた。** 元は
+「いまの Go には `.a` が無いため import が全部 invalid に落ちる」と書いてあったが、
+これは**誤り**である。Go 1.20 以降の `importer.Default()` は
+`$build.Default.GOROOT/bin/go list -export` を実行して stdlib の export data を
+ビルドキャッシュから引く（`internal/exportdata.lookupGorootExport`）ので、
+**GOROOT が正しければ stdlib は解決できる**。上流が盲目になっているのは別の理由で、
+しかも**ホスト依存**である:
+
+- golangci-lint は `build.Default.GOROOT` を実際のツールチェインに向け直すつもりでいる
+  （`pkg/lint/package.go` の `prepareBuildContext`）。
+- ところがその値を読む `func (e Env) Discover(...)`（`pkg/goutil/env.go`）が
+  **値レシーバ**で、`go env` から取った map を**自分のコピー**に代入する。
+  呼び出し側の `Env.vars` は空のままなので `Env.Get(GOROOT)` は `""` を返し、
+  `prepareBuildContext` は早期 return する。
+- したがって `build.Default.GOROOT` は**バイナリをビルドしたときに焼き込まれた GOROOT**
+  （`runtime.GOROOT()` の `defaultGOROOT`）のまま残る。この開発機の golangci-lint は
+  Homebrew ビルドで go1.26.2、GOROOT は `/opt/homebrew/Cellar/go/1.26.2/libexec` ——
+  Go が 1.26.4/1.26.5 に上がったときに Homebrew が消したディレクトリである。
+  存在しないので `go list` が起動できず、**すべての import が invalid** に落ちる。
+
+`GOROOT` を export すると（`Env.Get` は `os.Getenv` を先に見るので効く）
+**上流は guff と一致する**。13 形を測って 8 件が一致、黙る 5 形も一致した（続き 106）。
+つまりこの差分は「golangci-lint のソースの性質」ではなく
+**「そのバイナリがどこでビルドされたか対 測定ホストのどこに Go が居るか」**の性質である。
+なお `GOROOT` を直しても `importer.Default()` は**stdlib しか見えない**
+（module 内の他パッケージも第三者パッケージも `go/build` からは引けない）ので、
+上流の本当の線は「同一パッケージ **または** stdlib」であって「全部」ではない。
 
 | golden の差分 | 上流が黙る理由 |
 |---|---|
@@ -10283,8 +10311,29 @@ rule は上流では**常に黙る**。guff は全プログラムの型情報を
 `unhandled-error` だけは例外的に上流に合わせてある（`callee_is_local`、
 §4 の 2026-08-10 1 本目）。あちらは上流が 0 件・guff が 22 件で、
 **差が大きすぎて golden ケース全体のノイズになる**ためで、方針が違うわけではない。
+
+**その `callee_is_local` は「壊れたホスト」に較正されている `[記録 2026-08-31（続き 106）]`。**
+上の測定のとおり `GOROOT` が正しいホストでは上流の線は「同一パッケージ **または** stdlib」で、
+`GOROOT="$(go env GOROOT)" ./compat/hunt.sh --name jaeger` は
+**`unhandled-error` を 87 件**出す（`fmt.Println` / `io.Writer.Write` / `os.Process.Wait` ——
+全部 stdlib）。20 形で測った上流の線は下表のとおり:
+
+| 形 | GOROOT 正常な上流 |
+|---|---|
+| 同一パッケージの関数 / メソッド / func 値（`localErr()` / `l.Do()` / `fn()`） | **撃つ** |
+| stdlib（`fmt.Println` / `errors.New` / `io.Writer.Write` / `bytes.Buffer.WriteByte` / `os.File.Close`） | **撃つ** |
+| **module 内の別パッケージ**（`sub.Fail()` / `sub.Two()` / `box.Do()`） | 黙る（`go/build` から引けない） |
+| `_ = f()` / `defer f.Close()` / `go f()` / 引数位置の入れ子 | 黙る（外側の `ExprStmt` だけ撃つ） |
+| error を返さない / `type myErr = error` の別名 | 黙る（`*types.Alias` は `*types.Named` ではない） |
+
+**追従しないのが方針なら本来ここも 87 件出すべき**だが、ゴールデン・allowlist・baseline は
+すべて盲目の importer に較正されているので、切り替えるなら**一度に全部**である。
+別タスクとして残す（§4 続き 106 の「次にやること」）。
+
 上流が importer を直したら（`go/packages` へ移行するなど）この節ごと消えるので、
-revive のバージョンを上げるときに再確認すること。
+revive のバージョンを上げるときに再確認すること。**また、測定ホストの `GOROOT` が
+export されているかどうかで上流の答えが変わる**ので、hunt / OSS tier の数字を
+別のマシンと突き合わせるときは先にそれを確認すること。
 
 ---
 
@@ -16826,3 +16875,123 @@ gitea のローカル定数は全部後者なのでこの差は出ておらず�
 今回の変更とは無関係である。
 
 **測定**: gitea **4 → 0**（wastedassign 3 件が消え、nolintlint 1 件は allowlist）。
+
+---
+
+### 2026-08-31（続き 106）— jaeger の 2 件は guff が正しい。**上流の沈黙は「バイナリをどこでビルドしたか」だった**
+
+台帳の jaeger は 2026-08-23 から `revive` 2 件で止まっていた。
+
+```
++guff cmd/jaeger/…/handlers/search_traces.go:141:revive:time-naming: var durationMin is of type time.Duration; don't use unit-specific suffix "Min"
++guff internal/storage/v2/cassandra/tracestore/from_dbmodel_test.go:27:revive:epoch-naming: var testSpanEventTime should have one of these suffixes: Micro, Microsecond, Microseconds, Us
+```
+
+どちらもコードを読むかぎり真陽性である（`var durationMin, durationMax time.Duration` と
+`var testSpanEventTime = time.Date(…).UnixMicro()`）。まず**ピン先に rule が在るか**を疑ったが、
+`epoch_naming.go` / `time_naming.go` は revive **v1.15.0**（golangci-lint 2.12.2 の pin）に在り、
+golangci-lint 側の `allRules` にも `&rule.EpochNamingRule{}` / `&rule.TimeNamingRule{}` が在る。
+`GL_DEBUG=revive` は `Enabled by config rules (2): epoch-naming, time-naming.` と言う。
+**有効になっていて、それでも 0 件**だった。
+
+#### 1. 13 形を測ったら、guff と revive 単体は一致し、golangci-lint だけが黙っていた
+
+scratch module に 13 形を並べた（この 2 rule だけ有効、1 形 1 `var`）。
+
+| 形 | revive v1.15.0 単体 | guff | golangci-lint（そのまま） | golangci-lint（`GOROOT` 付き） |
+|---|---|---|---|---|
+| `var n1TimeoutSec time.Duration` | 撃つ | 撃つ | **黙る** | 撃つ |
+| `var n2WaitMs *time.Duration`（`flag.Duration` の形） | 撃つ | 撃つ | **黙る** | 撃つ |
+| `var durationMin, durationMax time.Duration`（jaeger の形） | 撃つ | 撃つ | **黙る** | 撃つ |
+| `var sleepSeconds time.Duration = 3` | 撃つ | 撃つ | **黙る** | 撃つ |
+| `.UnixMicro()` / `.Unix()` / `:=` の `.UnixMilli()` / `=` の `.UnixNano()` | 撃つ ×4 | 撃つ ×4 | **黙る** | 撃つ ×4 |
+| `type Dur = time.Duration; var n3AliasMin Dur` | 黙る | 黙る | 黙る | 黙る |
+| 同一パッケージの named type（`var n4OwnSec MyDur`） | 黙る | 黙る | 黙る | 黙る |
+| 単位接尾辞なし（`var n5Budget time.Duration`） | 黙る | 黙る | 黙る | 黙る |
+| `sleepSecs := time.Second`（`ValueSpec` ではない） | 黙る | 黙る | 黙る | 黙る |
+| 正しい接尾辞（`var e3StartSec`）/ epoch でないメソッド（`time.Now()`） | 黙る | 黙る | 黙る | 黙る |
+
+**guff は revive 単体とバイト一致**（位置も文言も）。黙る 5 形も一致する。
+`type Dur = time.Duration` が黙るのは Go 1.22 以降 `TypeOf` が `*types.Alias` を返し
+上流の `isNamedType` が `*types.Named` しか見ないため —— 上流の穴だが、guff も同じ穴を持っている。
+
+#### 2. 原因は revive でも guff でもなく、**golangci-lint が値レシーバで `go env` を捨てている**こと
+
+「上流の importer は盲目」は §6 に 2026-08-10 から書いてあったが、
+**理由の記述が間違っていた**（「いまの Go には `.a` が無いため」）。Go 1.20 以降の
+`importer.Default()` は `.a` を探すだけではなく、GOROOT のパッケージについて
+**`$build.Default.GOROOT/bin/go list -export` を実行して**ビルドキャッシュから
+export data を引く（`internal/exportdata.lookupGorootExport`、`go1.26.5` で確認）。
+手で叩けば普通に成功する:
+
+```
+$ (cd $(go env GOROOT) && go list -export -f '{{.Export}}' $(go env GOROOT)/src/time)
+/Users/…/Library/Caches/go-build/2d/2dc498…-d
+```
+
+盲目の実体はこうだった。
+
+1. golangci-lint は `build.Default.GOROOT` を本物のツールチェインに向け直すつもりでいる
+   （`pkg/lint/package.go` の `prepareBuildContext`。コメントも
+   *"Set GOROOT to have working cross-compilation … XXX: can't use runtime.GOROOT()"*）。
+2. その値を作る `func (e Env) Discover(ctx) error`（`pkg/goutil/env.go`）は**値レシーバ**で、
+   `goenv.Get(...)` の結果を `e.vars` に代入する —— **コピーの**フィールドに。
+   呼び出し側の `Env.vars` は `NewEnv` が作った空 map のまま残る。
+3. よって `Env.Get(GOROOT)` は `os.Getenv("GOROOT")`（普通は空）を返し、
+   `prepareBuildContext` は `if goroot == "" { return }` で早期 return する。
+4. `build.Default.GOROOT` は `runtime.GOROOT()` の `defaultGOROOT` ——
+   **バイナリをリンクしたときの GOROOT** —— のまま。この開発機の golangci-lint は
+   Homebrew ビルドの go1.26.2 製で、その GOROOT
+   `/opt/homebrew/Cellar/go/1.26.2/libexec` は Go が 1.26.4/1.26.5 に上がったときに消えている。
+
+つまり `go list` が起動できず、**あらゆる import が invalid** になる。
+`Env.Get` は `os.Getenv` を先に見るので、`GOROOT` を export すれば直る:
+
+```
+$ GOROOT="$(go env GOROOT)" ./compat/hunt.sh --name jaeger
+  jaeger: guff=2 golangci=89 both=2
+```
+
+**2 件は `both` になった。** つまりこの差分は golangci-lint のソースの性質ではなく、
+**「そのバイナリがどこでビルドされたか」対「測定ホストのどこに Go が居るか」**の性質である。
+ループの規則が禁じている「このホストでしか出せない測定」の、ちょうど裏返しにあたる。
+
+線の引き方の対照も測った。**同一パッケージの型は import が全滅していても生きる**ので、
+`var vdSame int64 = localFunc()` の `var-declaration` は盲目のままでも撃ち、
+`var vdDur time.Duration = time.Duration(0)` は撃たない。
+「型情報が無い」ではなく「**import が無い**」である。
+
+#### 3. `unhandled-error` の `callee_is_local` は壊れたホストに較正されている
+
+同じ run の 89 件のうち **87 件が `unhandled-error` の golangci-only** だった。
+guff は `callee_is_local`（続き 3、2026-08-10）で**呼び先が同一パッケージのときだけ**撃つ。
+その doc コメントは「上流の importer は何も見えない」と書いているが、
+GOROOT が正しいと上流は **stdlib も見える**。20 形で測った線は §6 の表のとおりで、
+`fmt.Println` / `errors.New` / `io.Writer.Write` / `bytes.Buffer.WriteByte` / `os.File.Close`
+は撃ち、**module 内の別パッケージ**（`sub.Fail()` / `box.Do()`）は `go/build` から引けないので
+GOROOT を直しても黙る。`_ = f()` / `defer` / `go` / 引数位置の入れ子はどちらでも黙る。
+
+#### 4. それでも harness には `GOROOT` を入れなかった
+
+入れれば jaeger の 2 件は消えるが、**ゴールデン・allowlist・baseline・corpus の全数字が
+盲目の importer に較正されている**。`compat/golden/cases/revive/expected.golden` の
+`unhandled-error` が `localError` の 1 件しか持っていないのがその証拠で、
+切り替えるなら 87 件級の再較正を**一度に全部**やることになる。今回の課題（jaeger を閉じる）
+の範囲ではないので、**§6 の決定（真陽性は捨てない）に沿って allowlist に落とし**、
+理由は測定の全文ごと `compat/allowlists/jaeger.txt` に書いた。
+なお、切り替えを検討する材料として重要なのは**ゲートは動かない**ことで、
+`GOROOT` を入れた `--oss --tier pr` は 8 target すべて P=R=100%（差分ゼロ）だった ——
+影響は revive を `enable-all-rules` で回している hunt tier に閉じている。
+
+**測定**: jaeger **2 → 0**（allowlist 2 件）。`GOROOT` 付きの参考値は guff=2 / gcl=89 / both=2。
+13 形は guff と revive 単体で完全一致。OSS pr tier 8 target すべて 100%（`GOROOT` の有無を問わず）。
+
+**次にやること**
+
+1. **`importer` 盲目の再較正を 1 タスクとして**。`GOROOT` を harness に入れ、
+   `unhandled-error` の線を「同一パッケージ **または** stdlib」に広げ、
+   revive の golden を regen する。87 件級。先に `--oss --tier pr,nightly` と
+   hunt 全体を `GOROOT` 付きで測って総量を出すこと。
+2. その判断材料として、**公式の linux バイナリ（`/usr/local/go` を持つ docker イメージ）**で
+   同じ 13 形を測る。上流の盲目が「配布物の性質」なのか「この開発機の性質」なのかは、
+   そこで初めて確定する（この開発機は Homebrew 版なので後者としか言えない）。
