@@ -161,6 +161,69 @@ fn revive_var_declaration_does_not_descend_into_values() {
 }
 
 #[test]
+fn revive_comments_density_reports_a_ratio_below_the_minimum() {
+    use guff_analysis::SettingsBag;
+    use guff_revive::{RuleArgument, RuleSetting, Settings};
+    use guff_runner::{run_on_packages, RunnerOptions};
+    use std::sync::Arc;
+
+    // The three other files exercising this rule are all at 0%, which cannot
+    // separate "the ratio is under the threshold" from "there are no comments".
+    // This one is at 8%, and it lives alone so that a comment added to some
+    // other fixture cannot tip it over — which is exactly what happened to the
+    // near-threshold case that used to sit in extended_bad.go.
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "revive",
+        Settings {
+            severity: None,
+            rules: Some(vec![RuleSetting {
+                name: "comments-density".into(),
+                arguments: vec![RuleArgument::Integer(10)],
+                disabled: false,
+                severity: None,
+            }]),
+            confidence: None,
+            ignore_generated_header: false,
+            enable_default_rules: false,
+            enable_all_rules: false,
+            go: None,
+        },
+    );
+    let bag = Arc::new(bag);
+
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/commentsdensity",
+        "comments_density_edge.go",
+    );
+    let result = run_on_packages(
+        &[revive()],
+        std::slice::from_ref(&pkg),
+        &RunnerOptions {
+            sequential: true,
+            settings: bag,
+            ..RunnerOptions::default()
+        },
+    )
+    .expect("run revive");
+    let messages: Vec<String> = result
+        .diagnostics()
+        .into_iter()
+        .map(|(_, d)| d.message.clone())
+        .collect();
+
+    assert_eq!(
+        messages,
+        vec![
+            "comments-density: the file has a comment density of  8% \
+             (5 comment lines for 56 code lines) but expected a minimum of 10%"
+        ],
+        "{messages:?}"
+    );
+}
+
+#[test]
 fn revive_unnecessary_if_compares_the_rendered_targets() {
     use guff_analysis::SettingsBag;
     use guff_revive::{RuleSetting, Settings};
@@ -511,7 +574,6 @@ fn revive_flags_extended_rule_violations() {
             "inefficient-map-lookup:",
             "comment-spacings:",
             "epoch-naming:",
-            "comments-density:",
             "datarace:",
             "enforce-map-style:",
             "enforce-slice-style:",

@@ -17903,3 +17903,83 @@ guff-revive には `astfmt::expr_fmt` があり、`BasicLit` / `SelectorExpr` /
 
 `nolintlint` 9（`fieldalignment` 4 / wrapcheck 2 / unparam 2 / contextcheck 1）、
 `staticcheck` 2（SA1029 —— guff-ssa の代入パス）、`revive` 2（`datarace`、未調査）。
+
+### 2026-09-01（続き 116）— `datarace` は**名前ではなくオブジェクト**で照合する。そして fixture を伸ばしたら別のゲートが消えた
+
+fiber の `revive` 2 件:
+
+```
++guff client/client_test.go:43:revive:datarace: potential datarace: return value addr is captured (by-reference) in goroutine
++guff client/client_test.go:44:  〃
+```
+
+囲む関数は
+
+```go
+func startTestServerWithPort(t *testing.T, …) (app *fiber.App, addr string) {
+	go func(server *fiber.App) {
+		err := server.Listen(":0", fiber.ListenConfig{
+			ListenerAddrFunc: func(addr net.Addr) {   // ← 別の addr
+				addrChan <- addr.String()
+			},
+		})
+	}(app)
+```
+
+内側のクロージャの**引数 `addr`** が、名前付き戻り値の `addr` を隠している。
+上流は `*ast.Object` —— パーサが宣言ごとに配る同一性 —— で照合するので、
+内側の宣言は別のキーになり一致しない:
+
+```go
+returnIDs[id.Obj] = struct{}{}
+…
+_, isReturnID := w.returnIDs[id.Obj]
+```
+
+guff は `*ast.Object` を持たないので**名前**で照合していた。同じ穴は
+続き 107 の `ineffassign`（`gotos` を名前で引いていた）と同型である。
+guff での同一性は型検査器のオブジェクトで、`code::object_of` が
+`Info.defs` → `Info.uses` の順で解決する。
+
+**9 形測って乖離 3 形・誤射 5 件**（同名は 1 つの形につき複数の識別子を撃つ）:
+
+| 形 | 上流 | guff（修正前） |
+|---|---|---|
+| 名前付き戻り値をそのまま捕捉 | 撃つ | 撃つ |
+| goroutine 自身の引数が同名 | 黙る | **撃つ** |
+| goroutine 内の `x := 1` が同名 | 黙る | **撃つ ×2** |
+| 入れ子クロージャの引数が同名（fiber） | 黙る | **撃つ ×2** |
+| 入れ子クロージャ、隠していない | 撃つ | 撃つ |
+| 無名戻り値 / `go f(x)`（FuncLit でない）/ `range` 値（go1.22+） | 黙る | 黙る |
+
+オブジェクトが引けない識別子（セレクタのフィールド名、パッケージ名、ラベル）は
+上流の `id.Obj` も nil なので、そのまま飛ばす。
+
+#### fixture を伸ばしたら `comments-density` が消えた
+
+`extended_bad.go` に 9 形とその説明コメントを足したら、**そのファイルのコメント密度が
+10% を超えて `comments-density` が発火しなくなった**。golden のキー集合の差分と、
+単体テストの `any(contains("comments-density:"))` の**両方**が落ちて分かった。
+
+このチェッカ自体は他の 3 ファイルで撃たれているので「ゲートが消えた」わけではない ——
+ただし残る 3 つは**全部 0%** で、「比率が閾値未満」と「コメントが 1 行も無い」を
+区別できない。境界の形だけが失われていた。
+
+fixture の内容の副作用で境界値が動くのは構造的に脆いので、**それ専用の小さなファイル**
+（`comments_density_edge.go`、8% = 5 コメント行 / 56 コード行）を足して復元した。
+単体テストもメッセージを丸ごと固定してある。**「fixture を伸ばす」変更が、
+測っていた別の何かを消すことがある。** キー集合の差分はそのためにある。
+
+#### 測定
+
+- fiber **13 → 11**（`revive` 2 → 0）。台帳は 26/100 のまま。
+- golden 204/204。`revive` 363 → **405 キー**（`datarace` 1 → 4、
+  境界ファイル 1 本、残りは fixture が伸びた分の `add-constant` / `bare-return` など）。
+- fix tier 204/204、reject 14、`cargo test --workspace` 緑、
+  OSS pr tier 8 target すべて P=R=100%。
+
+#### 残り（fiber 11 件）
+
+`nolintlint` 9（`fieldalignment` 4 / wrapcheck 2 / unparam 2 / contextcheck 1）、
+`staticcheck` 2（SA1029 —— guff-ssa の代入パス）。
+**どちらも土台（未実装の analyzer と SSA）に触る。**

@@ -63,6 +63,36 @@ blankgroupbad/blank_group_bad.go:6:2:revive:warning:imports-blocklist: should no
 blankgroupok/blank_group_ok.go:2:1:revive:warning:file-header: the file doesn't have an appropriate header
 blankgroupok/blank_group_ok.go:5:0:revive:warning:line-length-limit: line is 82 characters, out of limit 80
 blankgroupok/blank_group_ok.go:7:2:revive:warning:imports-blocklist: should not use the following blocklisted import: "os"
+commentsdensity/comments_density_edge.go:6:1:revive:warning:comments-density: the file has a comment density of  8% (5 comment lines for 56 code lines) but expected a minimum of 10%
+commentsdensity/comments_density_edge.go:6:1:revive:warning:file-header: the file doesn't have an appropriate header
+commentsdensity/comments_density_edge.go:8:29:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+commentsdensity/comments_density_edge.go:10:29:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+commentsdensity/comments_density_edge.go:12:29:revive:warning:add-constant: avoid magic numbers like '2', create a named constant for it
+commentsdensity/comments_density_edge.go:14:29:revive:warning:add-constant: avoid magic numbers like '3', create a named constant for it
+commentsdensity/comments_density_edge.go:16:29:revive:warning:add-constant: avoid magic numbers like '4', create a named constant for it
+commentsdensity/comments_density_edge.go:18:29:revive:warning:add-constant: avoid magic numbers like '5', create a named constant for it
+commentsdensity/comments_density_edge.go:20:29:revive:warning:add-constant: avoid magic numbers like '6', create a named constant for it
+commentsdensity/comments_density_edge.go:22:29:revive:warning:add-constant: avoid magic numbers like '7', create a named constant for it
+commentsdensity/comments_density_edge.go:24:29:revive:warning:add-constant: avoid magic numbers like '8', create a named constant for it
+commentsdensity/comments_density_edge.go:26:29:revive:warning:add-constant: avoid magic numbers like '9', create a named constant for it
+commentsdensity/comments_density_edge.go:28:29:revive:warning:add-constant: avoid magic numbers like '10', create a named constant for it
+commentsdensity/comments_density_edge.go:30:29:revive:warning:add-constant: avoid magic numbers like '11', create a named constant for it
+commentsdensity/comments_density_edge.go:32:29:revive:warning:add-constant: avoid magic numbers like '12', create a named constant for it
+commentsdensity/comments_density_edge.go:34:29:revive:warning:add-constant: avoid magic numbers like '13', create a named constant for it
+commentsdensity/comments_density_edge.go:36:29:revive:warning:add-constant: avoid magic numbers like '14', create a named constant for it
+commentsdensity/comments_density_edge.go:38:29:revive:warning:add-constant: avoid magic numbers like '15', create a named constant for it
+commentsdensity/comments_density_edge.go:40:29:revive:warning:add-constant: avoid magic numbers like '16', create a named constant for it
+commentsdensity/comments_density_edge.go:42:29:revive:warning:add-constant: avoid magic numbers like '17', create a named constant for it
+commentsdensity/comments_density_edge.go:44:29:revive:warning:add-constant: avoid magic numbers like '18', create a named constant for it
+commentsdensity/comments_density_edge.go:46:29:revive:warning:add-constant: avoid magic numbers like '19', create a named constant for it
+commentsdensity/comments_density_edge.go:48:29:revive:warning:add-constant: avoid magic numbers like '20', create a named constant for it
+commentsdensity/comments_density_edge.go:50:29:revive:warning:add-constant: avoid magic numbers like '21', create a named constant for it
+commentsdensity/comments_density_edge.go:52:29:revive:warning:add-constant: avoid magic numbers like '22', create a named constant for it
+commentsdensity/comments_density_edge.go:54:29:revive:warning:add-constant: avoid magic numbers like '23', create a named constant for it
+commentsdensity/comments_density_edge.go:56:29:revive:warning:add-constant: avoid magic numbers like '24', create a named constant for it
+commentsdensity/comments_density_edge.go:58:29:revive:warning:add-constant: avoid magic numbers like '25', create a named constant for it
+commentsdensity/comments_density_edge.go:60:29:revive:warning:add-constant: avoid magic numbers like '26', create a named constant for it
+commentsdensity/comments_density_edge.go:62:29:revive:warning:add-constant: avoid magic numbers like '27', create a named constant for it
 ctxallow/revivetest/context_allow.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
 ctxallow/revivetest/context_allow.go:1:1:revive:warning:package-comments: should have a package comment
 ctxallow/revivetest/context_allow.go:9:33:revive:warning:context-as-argument: context.Context should be the first parameter of a function
@@ -77,7 +107,6 @@ directives/sibling.go:7:6:revive:warning:exported: type name will be used as dir
 dot/dot.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
 dot/dot.go:1:1:revive:warning:package-comments: should have a package comment
 dot/dot.go:3:7:revive:warning:exported: exported const X should have comment or be unexported
-extended/util/extended_bad.go:2:1:revive:warning:comments-density: the file has a comment density of 10% (34 comment lines for 311 code lines) but expected a minimum of 10%
 extended/util/extended_bad.go:2:1:revive:warning:file-header: the file doesn't have an appropriate header
 extended/util/extended_bad.go:2:9:revive:warning:package-naming: don't use "util" because it is a bad package name according to https://go.dev/blog/package-names#bad-package-names
 extended/util/extended_bad.go:14:8:revive:warning:imports-blocklist: should not use the following blocklisted import: "os"
@@ -250,7 +279,20 @@ extended/util/extended_bad.go:579:34:revive:warning:flag-parameter: parameter 'c
 extended/util/extended_bad.go:588:26:revive:warning:flag-parameter: parameter 'c' seems to be a control flag, avoid control coupling
 extended/util/extended_bad.go:591:7:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
 extended/util/extended_bad.go:593:7:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
-extended/util/extended_bad.go:597:0:revive:warning:file-length-limit: file length is 597 lines, which exceeds the limit of 350
+extended/util/extended_bad.go:608:19:revive:warning:unused-parameter: parameter 'f' seems to be unused, consider removing or renaming it as _
+extended/util/extended_bad.go:612:27:revive:warning:datarace: potential datarace: return value x is captured (by-reference) in goroutine
+extended/util/extended_bad.go:614:2:revive:warning:bare-return: avoid using bare returns, please add return expressions
+extended/util/extended_bad.go:619:58:revive:warning:datarace: potential datarace: return value addr is captured (by-reference) in goroutine
+extended/util/extended_bad.go:621:2:revive:warning:bare-return: avoid using bare returns, please add return expressions
+extended/util/extended_bad.go:626:27:revive:warning:datarace: potential datarace: return value b is captured (by-reference) in goroutine
+extended/util/extended_bad.go:628:2:revive:warning:bare-return: avoid using bare returns, please add return expressions
+extended/util/extended_bad.go:633:37:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+extended/util/extended_bad.go:635:2:revive:warning:bare-return: avoid using bare returns, please add return expressions
+extended/util/extended_bad.go:645:2:revive:warning:bare-return: avoid using bare returns, please add return expressions
+extended/util/extended_bad.go:652:2:revive:warning:bare-return: avoid using bare returns, please add return expressions
+extended/util/extended_bad.go:657:7:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+extended/util/extended_bad.go:667:2:revive:warning:bare-return: avoid using bare returns, please add return expressions
+extended/util/extended_bad.go:668:0:revive:warning:file-length-limit: file length is 668 lines, which exceeds the limit of 350
 fixtures/var_naming_lists.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
 fixtures/var_naming_lists.go:1:1:revive:warning:package-comments: should have a package comment
 fixtures/var_naming_lists.go:5:2:revive:warning:var-naming: var customId should be customID

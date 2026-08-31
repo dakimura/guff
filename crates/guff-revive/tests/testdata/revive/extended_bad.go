@@ -595,3 +595,74 @@ func unnecessaryIfNonBool(c bool) int {
 
 	return x
 }
+
+// datarace keys on the *identity* of the declared name, not on the name.
+// Upstream compares `*ast.Object`s, so any inner declaration that reuses an
+// outer name is a different object and never matches. Comparing the text made
+// every shadowing declaration a capture — fiber's
+// `func(addr net.Addr) { addrChan <- addr.String() }`, two closures deep inside
+// a function whose named result is also `addr`, drew two findings.
+
+func dataraceSink(int)            {}
+func dataraceSinkS(string)        {}
+func dataraceTake(f func(string)) {}
+
+// Reported: the named result itself is captured.
+func dataraceNamedResult() (x int) {
+	go func() { dataraceSink(x) }()
+
+	return
+}
+
+// Reported: captured from inside a nested closure that does not shadow it.
+func dataraceNestedNoShadow() (addr string) {
+	go func() { dataraceTake(func(s string) { dataraceSinkS(addr + s) }) }()
+
+	return
+}
+
+// Reported: one of two named results.
+func dataraceSecondResult() (a, b int) {
+	go func() { dataraceSink(b) }()
+
+	return
+}
+
+// Silent: the goroutine's own parameter shadows the result.
+func dataraceParamShadows() (x int) {
+	go func(x int) { dataraceSink(x) }(1)
+
+	return
+}
+
+// Silent: a local declared inside the goroutine shadows it.
+func dataraceLocalShadows() (x int) {
+	go func() {
+		x := 1
+		dataraceSink(x)
+	}()
+
+	return
+}
+
+// Silent: a nested closure's parameter shadows it — fiber's shape.
+func dataraceNestedShadows() (addr string) {
+	go func() { dataraceTake(func(addr string) { dataraceSinkS(addr) }) }()
+
+	return
+}
+
+// Silent: the result is not named.
+func dataraceUnnamedResult() int {
+	x := 0
+	go func() { dataraceSink(x) }()
+
+	return x
+}
+
+// Silent: the goroutine is not a function literal.
+func dataraceNotAFuncLit() (x int) {
+	go dataraceSink(x)
+
+	return
+}
