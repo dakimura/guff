@@ -332,6 +332,43 @@ func preferStringWriterExtra(w *preferWriterExtra, s string) {
 	_, _ = io.WriteString(w, s)
 }
 
+// `m["w"].Type.Implements(…)` is `types.Implements`, which asks for the method
+// set of the type *as written*. `WriteString` and `String` here have pointer
+// receivers, so the value type does not implement the interface however
+// addressable the expression is — and none of `preferStringWriter`,
+// `preferFprint` or `redundantSprint` fires on the value forms below.
+// fiber's `testConn` holds `r bytes.Buffer` by value and drew one of each.
+
+type ptrWriterExtra struct{}
+
+func (*ptrWriterExtra) Write(p []byte) (int, error)       { return 0, nil }
+func (*ptrWriterExtra) WriteString(s string) (int, error) { return 0, nil }
+
+type ptrStringerExtra struct{}
+
+func (*ptrStringerExtra) String() string { return "" }
+
+type holdsWriterExtra struct {
+	byValue ptrWriterExtra
+	byPtr   *ptrWriterExtra
+}
+
+// Silent: the method set of the value type has neither method.
+func valueWriterExtra(v ptrWriterExtra, h *holdsWriterExtra, p ptrStringerExtra) {
+	_, _ = v.Write([]byte("x"))
+	_, _ = v.Write([]byte(fmt.Sprint(1)))
+	_, _ = h.byValue.Write([]byte("x"))
+	_, _ = h.byValue.Write([]byte(fmt.Sprint(1)))
+	_ = fmt.Sprint(p)
+}
+
+// Reported: the pointer's method set has them.
+func pointerWriterExtra(v *ptrWriterExtra, h *holdsWriterExtra, p *ptrStringerExtra) {
+	_, _ = v.Write([]byte("x"))
+	_, _ = h.byPtr.Write([]byte(fmt.Sprint(1)))
+	_ = fmt.Sprint(p)
+}
+
 func syncMapLoadAndDeleteExtra(m *sync.Map, k string) {
 	_, ok := m.Load(k)
 	if ok {

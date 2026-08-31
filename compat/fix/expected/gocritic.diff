@@ -75,7 +75,7 @@
  func (*preferWriterExtra) WriteString(s string) (int, error) { return 0, nil }
  
  func preferFprintExtra(w *preferWriterExtra, x int) {
-@@ -504,7 +504,7 @@
+@@ -541,7 +541,7 @@
  
  func urNamedResults() (a, b int) { return 0, 0 }
  
