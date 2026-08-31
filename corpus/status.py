@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """corpus/status.py — how far the corpus is from 100 compatible targets.
 
-Three questions an unattended loop has to answer without a human, and one
-place that answers all three:
+Three questions a session starting from nothing has to answer, and one place
+that answers all three:
 
     ./corpus/status.py check    exit 0 when the goal is reached
     ./corpus/status.py next     the single next task, one line
@@ -15,7 +15,8 @@ at zero", and every iteration of the loop commits it.
 
 The ledger is *generated*, never hand-written. A row nobody measured says
 `unmeasured`, not `0`: an absent measurement and a clean one are different
-answers, and the whole point of this file is that the loop can tell them apart
+answers, and the whole point of this file is that a fresh session can tell
+them apart
 (compat/README.md, and the `health.json` baselines for the same rule one level
 down).
 """
@@ -38,9 +39,9 @@ LEDGER = ROOT / "corpus" / "status.json"
 GOAL = 100
 
 # Targets that are surveyed and deliberately not adopted, with the reason.
-# `corpus/README.md` carries the same table in prose; this copy is the one the
-# loop reads, so a repo excluded there must be excluded here or the loop will
-# keep proposing it.
+# `corpus/README.md` carries the same table in prose; this copy is the one
+# `next` reads, so a repo excluded there must be excluded here or it will keep
+# being proposed.
 EXCLUDED = {
     "pulumi": "declares module plugins; a stock golangci-lint refuses to start "
     "(compat/reject/cases/custom-module-plugin-missing)",
@@ -181,8 +182,8 @@ def next_task(ledger: dict) -> tuple[str, str]:
 
 def next_candidate(taken: set[str]) -> dict | None:
     """Smallest unadopted candidate. Small first: a cheap target measured is
-    worth more than a large one queued, and the loop pays clone + module
-    download on every adoption."""
+    worth more than a large one queued, and every adoption pays a clone plus its
+    module downloads."""
     if not CANDIDATES.exists():
         return None
     rows = [
