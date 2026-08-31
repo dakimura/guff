@@ -265,6 +265,21 @@ fn revive_var_declaration_reports_untyped_constant_defaults() {
             "{skip}'s declared type is not the constant's default type: {decls:?}"
         );
     }
+    // `complex(2, 3)` and friends are untyped constants too, so the same
+    // default-type gate applies to them. Reading the call as typed skipped the
+    // gate and reported all three — fiber's `state_test.go:339` is `bnr1`.
+    for skip in ["var bnr1", "var bnr2", "var bnr3"] {
+        assert!(
+            decls.iter().all(|m| !m.contains(skip)),
+            "{skip}: the builtin's default type is not the declared one: {decls:?}"
+        );
+    }
+    for want in ["var br1", "var br2", "var br3", "var br4", "var br5", "var br6", "var br7"] {
+        assert!(
+            decls.iter().any(|m| m.contains(want)),
+            "{want} should be reported: {decls:?}"
+        );
+    }
 }
 
 #[test]

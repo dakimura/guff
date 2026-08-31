@@ -197,5 +197,14 @@ st1023/isolated/isolated.go:59:10:staticcheck::QF1011: could omit type int from 
 st1023/isolated/isolated.go:61:8:staticcheck::QF1011: could omit type int from declaration; it will be inferred from the right-hand side
 st1023/isolated/isolated.go:63:10:staticcheck::QF1011: could omit type int from declaration; it will be inferred from the right-hand side
 st1023/isolated/isolated.go:63:10:staticcheck::ST1023: should omit type int from declaration; it will be inferred from the right-hand side
+st1023/isolated/isolated.go:84:10:staticcheck::QF1011: could omit type complex128 from declaration; it will be inferred from the right-hand side
+st1023/isolated/isolated.go:85:10:staticcheck::QF1011: could omit type float64 from declaration; it will be inferred from the right-hand side
+st1023/isolated/isolated.go:87:10:staticcheck::QF1011: could omit type float64 from declaration; it will be inferred from the right-hand side
+st1023/isolated/isolated.go:88:10:staticcheck::QF1011: could omit type int from declaration; it will be inferred from the right-hand side
+st1023/isolated/isolated.go:90:10:staticcheck::QF1011: could omit type int from declaration; it will be inferred from the right-hand side
+st1023/isolated/isolated.go:91:10:staticcheck::QF1011: could omit type complex128 from declaration; it will be inferred from the right-hand side
+st1023/isolated/isolated.go:91:10:staticcheck::ST1023: should omit type complex128 from declaration; it will be inferred from the right-hand side
+st1023/isolated/isolated.go:92:10:staticcheck::QF1011: could omit type int from declaration; it will be inferred from the right-hand side
+st1023/isolated/isolated.go:92:10:staticcheck::ST1023: should omit type int from declaration; it will be inferred from the right-hand side
 st1023/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
 st1023/ok/ok.go:7:2:staticcheck::S1021: should merge variable declaration with assignment on next line
