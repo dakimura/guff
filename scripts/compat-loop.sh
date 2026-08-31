@@ -211,6 +211,15 @@ for i in $(seq 1 "$ITERATIONS"); do
   rc=$?
   log "claude exited $rc after $(( (SECONDS - started) / 60 ))m"
 
+  # An iteration that did the work and stopped before committing leaves the tree
+  # dirty on a branch nobody pushed. That is not a barren iteration — it is
+  # forty minutes of correct work one `git commit` away from being lost, and the
+  # next iteration would refuse to start on it anyway. Stop here, where the
+  # branch name is still on screen.
+  if ! git diff --quiet || ! git diff --cached --quiet; then
+    die "iteration left uncommitted work on $(git rev-parse --abbrev-ref HEAD) — review it, land or discard it, then re-run"
+  fi
+
   pr="$(gh pr list --head "$branch" --json number --jq '.[0].number' 2>/dev/null)"
   if [[ $rc -ne 0 && ( -z "$pr" || "$pr" == "null" ) ]]; then
     # claude itself failed and nothing was pushed. That is a broken tool, not a
