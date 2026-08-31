@@ -1,3 +1,5 @@
 # The fixtures the Rust tests use, so the two cannot drift.
 bad/bad.go     crates/guff-context/tests/testdata/bodyclose/bad.go
 ok/ok.go       crates/guff-context/tests/testdata/bodyclose/ok.go
+nohttp/nohttp.go   crates/guff-context/tests/testdata/bodyclose/nohttp.go
+dialer/dialer.go   crates/guff-context/tests/testdata/bodyclose/stub/example.com/bodyclose/dialer/dialer.go

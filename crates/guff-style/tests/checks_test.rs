@@ -7511,7 +7511,38 @@ fn unparam_flags_unused_parameters() {
             .any(|m| m.contains(r#"execCmd - cmd always receives "sh""#)),
         "call sites in dead code should not count: {messages:?}"
     );
+    // `dummyImpl` is the IR's answer and the only one. Nine `return <expr>`
+    // shapes whose value is outside upstream's operand whitelist, so the body
+    // is not a stub and the parameter is reported. `retClosure` is scaleway-cli's
+    // `deleteServer`; before this, an AST stand-in ran *after* `dummy_impl` and
+    // called every one of them a stub.
+    for func in [
+        "retClosure",
+        "retField",
+        "retMapIndex",
+        "retStringIndex",
+        "retMethodValue",
+        "retTypeAssert",
+        "retFieldAddr",
+        "retCall",
+        "retConversion",
+    ] {
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains(&format!(r#"{func} - key always receives "K""#))),
+            "{func}: not a stub, so its parameter is reported: {messages:?}"
+        );
+    }
+    // The whole set, not a floor: the eleven shapes in `ok.go` that *are* stubs
+    // are asserted by `unparam_allows_used_and_intentional_keep` being empty,
+    // and this pins that nothing else crept in.
+    assert_eq!(messages.len(), UNPARAM_BAD_KEYS, "{messages:?}");
 }
+
+/// Every diagnostic `testdata/unparam/bad.go` must produce — the same set
+/// `compat/golden/cases/unparam` pins against golangci-lint.
+const UNPARAM_BAD_KEYS: usize = 39;
 
 #[test]
 fn unparam_allows_used_and_intentional_keep() {

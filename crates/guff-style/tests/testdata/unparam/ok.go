@@ -220,3 +220,95 @@ func afterDeferThenExit(unused bool) {
 		println(1)
 	}
 }
+
+// --- The other eleven `dummyImpl` shapes, all of them stubs ----------------
+//
+// Same grid as `bad.go`'s: these are the returns whose value *is* in upstream's
+// operand whitelist, so the function is a stub and no parameter of it is ever
+// reported — not even one every call site passes the same constant to.
+
+type okBox struct{ f int }
+
+var (
+	okGlobal  okBox
+	okSlice   []int
+	okChan    chan int
+	okPointer = &okBox{}
+)
+
+func (b okBox) method() error { return nil }
+
+func retNil(key string) error { return nil }
+
+func retGlobalSlice(key string) []int { return okSlice }
+
+func retMapLit(key string) map[string]int { return map[string]int{} }
+
+func retStructLit(key string) okBox { return okBox{} }
+
+func retSliceLit(key string) []int { return []int{} }
+
+// `IndexAddr` + load, unlike the map and string indexes in bad.go.
+func retSliceIndex(key string) int { return okSlice[0] }
+
+// A method *expression* is a plain `Function`, unlike the method value.
+func retMethodExpr(key string) func(okBox) error { return okBox.method }
+
+func retRecv(key string) int { return <-okChan }
+
+func retDeref(key string) okBox { return *okPointer }
+
+func retAddrOfLit(key string) *okBox { return &okBox{} }
+
+func retQualified(key string) int { return okConst }
+
+const okConst = 7
+
+// Four call sites each, written out: `alwaysReceivedConst` counts call
+// *instructions*, so a loop around one call is one site, not four.
+func okCallers() {
+	_ = retNil("K")
+	_ = retNil("K")
+	_ = retNil("K")
+	_ = retNil("K")
+	_ = retGlobalSlice("K")
+	_ = retGlobalSlice("K")
+	_ = retGlobalSlice("K")
+	_ = retGlobalSlice("K")
+	_ = retMapLit("K")
+	_ = retMapLit("K")
+	_ = retMapLit("K")
+	_ = retMapLit("K")
+	_ = retStructLit("K")
+	_ = retStructLit("K")
+	_ = retStructLit("K")
+	_ = retStructLit("K")
+	_ = retSliceLit("K")
+	_ = retSliceLit("K")
+	_ = retSliceLit("K")
+	_ = retSliceLit("K")
+	_ = retSliceIndex("K")
+	_ = retSliceIndex("K")
+	_ = retSliceIndex("K")
+	_ = retSliceIndex("K")
+	_ = retMethodExpr("K")
+	_ = retMethodExpr("K")
+	_ = retMethodExpr("K")
+	_ = retMethodExpr("K")
+	_ = retRecv("K")
+	_ = retRecv("K")
+	_ = retRecv("K")
+	_ = retRecv("K")
+	_ = retDeref("K")
+	_ = retDeref("K")
+	_ = retDeref("K")
+	_ = retDeref("K")
+	_ = retAddrOfLit("K")
+	_ = retAddrOfLit("K")
+	_ = retAddrOfLit("K")
+	_ = retAddrOfLit("K")
+	_ = retQualified("K")
+	_ = retQualified("K")
+	_ = retQualified("K")
+	_ = retQualified("K")
+}

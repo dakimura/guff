@@ -17327,3 +17327,120 @@ for i := range metasByMinTime {
 入れれば SA5011 と `lostcancel` の名前ベースの abort 表（どちらも「切断が無いから」存在する）
 の前提が変わる。`ctrlflow` の答えはもう手元にあるので配線自体は短いが、**再測定の範囲が
 別物**なので、独立した測定つきの変更にする。
+
+### 2026-08-31（続き 109）— guff は `dummyImpl` を **2 回** 訊いていた。そして bodyclose は「形」ではなく **import** で黙る
+
+scaleway-cli は 2026-08-29 から 7 件（すべて guff-only）で止まっていた。測り直すと 6 件
+（`gocritic` の 1 件は #186〜#190 のどれかで解消済み）で、内訳は
+`nolintlint` 3 / `contextcheck` 2 / `bodyclose` 1。
+
+#### 1. `nolintlint` 3 件は unparam の偽陰性の影だった
+
+3 件とも `//nolint:unparam` が「未使用」という報告。**上流の unparam がそこで撃っていて
+guff が撃っていない**からこうなる。corpus の当該 3 ファイルから nolint 行を一時的に外して
+上流を測ると（測定後 `git checkout` で復元）、全部 `always receives` を撃つ:
+
+```
+addSSHKey - serverKey always receives "Server"
+deleteServer - metaKey always receives "Server"
+fetchPoolMetadata - clusterMetaKey always receives clusterMetaKey ("Cluster")  ほか 2 件
+```
+
+3 つとも本体は `return func(ctx …) error { … }`。**クロージャを返す関数**である。
+同じファイルの `createServer`（`return core.ExecStoreBeforeCmd(metaKey, …)`）は
+guff も撃っており、そこが分かれ目だった。
+
+原因は guff が `dummyImpl` を **2 回** 訊いていたこと。
+
+- `dummy_impl`（`crates/guff-style/src/unparam.rs`）は IR 上のオペランド・ホワイトリストの
+  忠実な移植で、`MakeClosure` は**入っていない** —— つまり「スタブではない」と正しく答える。
+- そのあと `check_params` が `is_stub_body`（AST 版の身代わり）を**もう一度**訊く。
+  こちらは `harmless_expr` の `_ => true` で `FuncLit` を通すので「スタブだ」と答える。
+
+**直列に並んだ 2 つのゲートは、緩いほうが決める。** 上流に AST 版は無い。
+修正は「IR が答えたなら AST 版は訊かない」で、`is_stub_body` は
+`buildir` の結果が無いときだけの身代わりに戻した。
+
+**`return <expr>` を 20 形測った。** 上流が撃つのは 9 形で、決めているのは
+**返す値が上流のオペランド・ホワイトリストに入っているか**である:
+
+| 返す式 | IR の値 | 上流 | guff（修正前） |
+|---|---|---|---|
+| `func() error {…}` | `MakeClosure` | 撃つ | **黙る** |
+| `g.f` | ロードのオペランドが `FieldAddr` | 撃つ | **黙る** |
+| `gm["x"]` / `gstr[0]` | `Lookup` | 撃つ | **黙る** |
+| `g.method`（メソッド**値**） | `MakeClosure` | 撃つ | **黙る** |
+| `gi.(int)` | `TypeAssert` | 撃つ | **黙る** |
+| `&g.f` | `FieldAddr` | 撃つ | **黙る** |
+| `compute()` / `int64(len(gs))` | 無害でない `Call` | 撃つ | 撃つ |
+| `nil` / `gs` / `map{}` / `box{}` / `[]int{}` / `gs[0]` / `box.method`（メソッド**式**）/ `<-ch` / `*p` / `&box{}` / `other.N` | `Const`/`UnOp`/`MakeMap`/`Alloc`/`Slice`/`IndexAddr`/`Function` | 黙る | 黙る |
+
+メソッド**式** `box.method` が `Function`（＝スタブのまま）で、メソッド**値**
+`g.method` が `MakeClosure`（＝スタブでない）に分かれるのは、測らなければ書けなかった。
+
+`log.Fatal(…)` 先頭の形（続き 108 で `is_stub_body` に入れた no-return の切断）は
+`dummy_impl` 側へ移した —— `ctrlflow` の答えを渡し、無害な呼び出しが戻らないなら
+上流の IR に入る `Panic` と同じく「スタブ」と答える。
+
+#### 2. `bodyclose` 1 件は**形ではなく import** だった
+
+`internal/gotty/client.go:58` の `conn, _, err := wsDialer.Dial(c.wsURL, nil)`。
+**10 形測って全形一致した**（3 戻り値・`_` で捨てる・ポインタ/値レシーバのメソッド・
+stdlib と非 stdlib・閉じている対照）。形のせいではないので import を見た。
+
+このファイルは `gorilla/websocket` を import しており、**`net/http` は import していない**。
+上流 `timakin/bodyclose` の `run` は先頭でこう書く:
+
+```go
+r.resObj = analysisutil.LookupFromImports(pass.Pkg.Imports(), "net/http", "Response")
+if r.resObj == nil {
+    return nil, nil // skip checking
+}
+```
+
+`LookupFromImports`（`gostaticanalysis/analysisutil@v0.7.1/pkg.go:21`）が歩くのは
+`pass.Pkg.Imports()` ＝ **直接 import だけ**で、推移は見ない。したがって
+`*http.Response` に依存経由でしか触らないパッケージは**丸ごと検査されない**。
+`net/http` を import しないパッケージを 1 つ足すと 2 行で再現した。
+
+同じ helper は `rowserrcheck` / `sqlclosecheck` / `noctx` も使っているので、同じゲートが
+効いているはず（未確認）。
+
+#### 3. `contextcheck` 2 件は再現しなかった
+
+`core/bootstrap.go:252` と `core/shell.go:230`。config の除外規則
+（`core/cobra_utils.go`）を外して測っても**上流は 0 件**なので、位置や文言の差ではない。
+5 形測って**全形一致**した:
+
+| 形 | 両ツール |
+|---|---|
+| ctx を持つ関数が `context.Background()` を作る関数を呼ぶ | 撃つ |
+| ctx を**持たない**関数が同じことをする（`shell.go` の形） | 黙る |
+| ctx を持つ関数が ctx を取る関数を呼ぶ | 黙る |
+| ctx を持たないメソッドが同パッケージのメソッド経由で作る | 黙る |
+| ctx を持つ関数が「クロージャを返す関数」経由で作る（`bootstrap.go` の形） | 黙る |
+
+`Completer` は ctx フィールドを持たず、`Complete` の引数にも ctx は無い。
+`internal/tasks` が guff だけ ill-typed（下記）である件とも無関係で、
+`go list -deps ./core/` に `internal/tasks` は現れない。**未解明のまま残す。**
+
+#### 4. ついでに測れたもの — `internal/tasks` が guff だけ ill-typed
+
+```
+tasks.go:72:17: cannot use func(ctx context.Context, t *Task, i any) (…) value
+                as TaskFunc[any, any] value in struct literal
+```
+
+2026-08-29 の hunt の stderr にも同じ行があるので**以前からの型検査器の欠陥**（ジェネリクス）。
+hunt の health ゲートはこれで落ちる。findings とは別枠で、`core` からは到達しない。
+
+#### 5. 測定
+
+- scaleway-cli **6 → 2**（`contextcheck` 2 のみ。`guff=2 golangci=0`）。台帳は 26/100 のまま。
+- golden 204/204。`unparam` 21 → **39 キー**（`bad.go` に 9 形＋その呼び出し site が生む
+  `result 0 … is never used` 9 件、`ok.go` に黙るべき 11 形）、`bodyclose` は
+  **10 キーのまま**で `nohttp/` パッケージが増えた —— ゲートが外れれば `extra=2` で落ちる負のケース。
+- fix tier 204/204、reject 14、`cargo test --workspace` 緑、OSS pr tier 8 target すべて P=R=100%。
+- 単体テストを 2 つ締めた: `bodyclose_flags_missing_close` の `>= 5` を厳密な 10 に、
+  `unparam_flags_unused_parameters` に 9 形の個別 assert と総数 39 を追加。
+  **`>= N` と `any(contains(…))` は、1 形だけ生きていれば緑になる。**

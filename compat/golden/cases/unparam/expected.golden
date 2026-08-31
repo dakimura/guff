@@ -27,3 +27,21 @@ bad/bad.go:238:14:unparam::execCmd - cmd always receives "sh"
 bad/bad.go:264:24:unparam::afterLoopsForever - unused is unused
 bad/bad.go:280:22:unparam::afterSelectDies - unused is unused
 bad/bad.go:296:24:unparam::afterSwitchAllDie - unused is unused
+bad/bad.go:332:17:unparam::retClosure - key always receives "K"
+bad/bad.go:332:29:unparam::retClosure - result 0 (func() error) is never used
+bad/bad.go:337:15:unparam::retField - key always receives "K"
+bad/bad.go:337:27:unparam::retField - result 0 (int) is never used
+bad/bad.go:342:18:unparam::retMapIndex - key always receives "K"
+bad/bad.go:342:30:unparam::retMapIndex - result 0 (int) is never used
+bad/bad.go:347:21:unparam::retStringIndex - key always receives "K"
+bad/bad.go:347:33:unparam::retStringIndex - result 0 (byte) is never used
+bad/bad.go:352:21:unparam::retMethodValue - key always receives "K"
+bad/bad.go:352:33:unparam::retMethodValue - result 0 (func() error) is never used
+bad/bad.go:356:20:unparam::retTypeAssert - key always receives "K"
+bad/bad.go:356:32:unparam::retTypeAssert - result 0 (int) is never used
+bad/bad.go:361:19:unparam::retFieldAddr - key always receives "K"
+bad/bad.go:361:31:unparam::retFieldAddr - result 0 (*int) is never used
+bad/bad.go:366:14:unparam::retCall - key always receives "K"
+bad/bad.go:366:26:unparam::retCall - result 0 (int) is never used
+bad/bad.go:370:20:unparam::retConversion - key always receives "K"
+bad/bad.go:370:32:unparam::retConversion - result 0 (int64) is never used
