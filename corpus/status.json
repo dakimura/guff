@@ -7,8 +7,8 @@
   ],
   "goal": 100,
   "defined": 34,
-  "clean": 23,
-  "open": 10,
+  "clean": 24,
+  "open": 9,
   "unmeasured": 1,
   "targets": {
     "argo-cd": {
@@ -42,7 +42,7 @@
     "caddy": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260831T015000Z",
+      "at": "20260831T042024Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -58,7 +58,7 @@
     "cobra": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260831T015000Z",
+      "at": "20260831T042024Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -157,7 +157,7 @@
     "gin": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260831T015000Z",
+      "at": "20260831T042024Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -173,7 +173,7 @@
     "go-client": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260831T015000Z",
+      "at": "20260831T042024Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -197,26 +197,23 @@
     "helm": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260831T015000Z",
+      "at": "20260831T042024Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
     },
     "jaeger": {
       "tier": "hunt",
-      "state": "open",
-      "at": "20260823T111314Z",
-      "open": 2,
-      "guff_only": 2,
-      "gcl_only": 0,
-      "by_linter": {
-        "revive": 2
-      }
+      "state": "clean",
+      "at": "20260831T040830Z",
+      "open": 0,
+      "guff_only": 0,
+      "gcl_only": 0
     },
     "k9s": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260831T015000Z",
+      "at": "20260831T042024Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
