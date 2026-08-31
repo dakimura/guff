@@ -257,6 +257,14 @@ fn untyped_const_default_name(pass: &Pass<'_>, expr: &Expr) -> Option<&'static s
             Some(max_default_name(l, r))
         }
         Expr::ParenExpr(p) => untyped_const_default_name(pass, &p.x),
+        // `complex(2, 3)` is an untyped complex constant, `real`/`imag` of one
+        // are untyped floats, and `min`/`max` of untyped constants are untyped
+        // — the spec says so and `go/types` agrees, but the `Types` fallback
+        // below cannot: assignment context has already retyped the call as the
+        // declared type. Without this, `var c complex64 = complex(2, 3)`
+        // compared `complex64` against nothing and the type read as redundant.
+        // fiber's `state_test.go:339` is that line.
+        Expr::CallExpr(call) => builtin_const_default_name(pass, call),
         // Not syntactically a constant: fall back to whatever the type checker
         // recorded, in case it is still untyped there.
         _ => {
@@ -371,6 +379,41 @@ fn const_ident_default(pass: &Pass<'_>, node_id: u32) -> Option<&'static str> {
         return None;
     };
     untyped_basic_default(&artifacts.types, c.typ())
+}
+
+/// The default type of a call to one of the constant builtins, when every
+/// argument is itself an untyped constant. `len`/`cap` are deliberately absent:
+/// the spec makes their result a *typed* `int`.
+fn builtin_const_default_name(
+    pass: &Pass<'_>,
+    call: &guff::ast::CallExpr,
+) -> Option<&'static str> {
+    let Expr::Ident(name) = unparen(&call.fun) else {
+        return None;
+    };
+    // A package-level `func complex(...)` of the user's own is not the builtin.
+    let info = pass.types_info()?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let &obj = info.uses.get(&name.id())?;
+    if !matches!(
+        artifacts.objects.get(obj),
+        guff_types::arena::ObjectData::Builtin(_)
+    ) {
+        return None;
+    }
+    let args: Vec<&'static str> = call
+        .args
+        .iter()
+        .map(|a| untyped_const_default_name(pass, a))
+        .collect::<Option<Vec<_>>>()?;
+    match name.name.as_str() {
+        "complex" if args.len() == 2 => Some("complex128"),
+        "real" | "imag" if args.len() == 1 => Some("float64"),
+        "min" | "max" if !args.is_empty() => {
+            Some(args.iter().copied().reduce(max_default_name).unwrap_or("int"))
+        }
+        _ => None,
+    }
 }
 
 fn max_default_name(a: &'static str, b: &'static str) -> &'static str {

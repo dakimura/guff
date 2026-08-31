@@ -4,9 +4,9 @@
 # Hand-written. Nothing in regen.sh creates a file here. Unlike the other two
 # entries, guff does not touch a single line upstream leaves alone: it removes
 # exactly what upstream removes and puts something else back. One hunk of the
-# 481, everything else is byte-identical.
+# 503, everything else is byte-identical.
 #
-# upstream-writes: 481 line(s), sha256:0779aa226bf2604c
+# upstream-writes: 503 line(s), sha256:be06e779bb532ba7
 #
 # why: golangci-lint's QF1004 rewrites a renamed import's call to the package's
 # real name and adds no import, so the replacement names a package that is not
@@ -473,6 +473,28 @@
  	_, _, _, _, _, _, _, _, _, _ = c01, c02, c03, c04, c05, c06, c07, c08, c09, c10
  	_, _, _, _, _, _, _, _, _, _ = c11, c12, c13, c14, c15, c16, c17, c18, c19, c20
  	_, _, _, _, _, _, _, _, _, _ = c21, c22, c23, c24, c25, c26, c27, c28, c29, c30
+@@ -81,14 +81,14 @@
+ 
+ func constBuiltins() {
+ 	var b01 complex64 = complex(2, 3)
+-	var b02 complex128 = complex(2, 3)
+-	var b03 float64 = real(complex(2, 3))
++	var b02 = complex(2, 3)
++	var b03 = real(complex(2, 3))
+ 	var b04 float32 = real(complex(2, 3))
+-	var b05 float64 = imag(complex(2, 3))
+-	var b06 int = min(1, 2)
++	var b05 = imag(complex(2, 3))
++	var b06 = min(1, 2)
+ 	var b07 int64 = min(1, 2)
+-	var b08 int = max(1, 2)
+-	var b09 complex128 = complex(floatVar, 0)
+-	var b10 int = len("abc")
++	var b08 = max(1, 2)
++	var b09 = complex(floatVar, 0)
++	var b10 = len("abc")
+ 	_, _, _, _, _, _, _, _, _, _ = b01, b02, b03, b04, b05, b06, b07, b08, b09, b10
+ }
 --- a/qf1011/ok/ok.go
 +++ b/qf1011/ok/ok.go
 @@ -4,8 +4,7 @@

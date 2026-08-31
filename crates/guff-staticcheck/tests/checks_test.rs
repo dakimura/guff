@@ -2782,13 +2782,19 @@ fn st1023_isolates_the_right_hand_side() {
     );
     support::assert_well_typed(&pkg);
     let messages = support::run_analyzer(st1023::analyzer(), &pkg);
-    assert_eq!(messages.len(), 17, "{messages:?}");
+    // 19: the seventeen the isolated-type shapes give, plus the two constant
+    // builtins whose result really is typed — `complex(floatVar, 0)` has a
+    // typed argument, and `len("abc")` is a typed `int` by the spec. The other
+    // eight builtin shapes are untyped, so the expression-kind gate skips them.
+    assert_eq!(messages.len(), 19, "{messages:?}");
     let count = |t: &str| {
         messages
             .iter()
             .filter(|m| m.contains(&format!("omit type {t} from")))
             .count()
     };
+    assert_eq!(count("complex64"), 0, "{messages:?}");
+    assert_eq!(count("float32"), 0, "{messages:?}");
     // A typed right-hand side is flagged whatever its shape: `5 * time.Second`
     // and `<-ch` are as redundant as a bare identifier.
     assert_eq!(count("time.Duration"), 2, "{messages:?}");
@@ -2797,7 +2803,8 @@ fn st1023_isolates_the_right_hand_side() {
     // typed-constant ones.
     assert_eq!(count("int32"), 2, "{messages:?}");
     assert_eq!(count("bool"), 2, "{messages:?}");
-    assert_eq!(count("int"), 6, "{messages:?}");
+    // Six from the isolated-type shapes, plus `var b10 int = len("abc")`.
+    assert_eq!(count("int"), 7, "{messages:?}");
 }
 
 #[test]
@@ -2813,13 +2820,19 @@ fn qf1011_isolates_the_right_hand_side() {
     );
     support::assert_well_typed(&pkg);
     let messages = support::run_analyzer(qf1011::analyzer(), &pkg);
-    assert_eq!(messages.len(), 27, "{messages:?}");
+    // 34: QF1011 flags helpful types, so the expression-kind gate does not
+    // apply and seven of the ten constant-builtin shapes join in — every one
+    // whose declared type is the untyped result's default. `complex64`,
+    // `float32` and `int64` are not, and stay out.
+    assert_eq!(messages.len(), 34, "{messages:?}");
     let count = |t: &str| {
         messages
             .iter()
             .filter(|m| m.contains(&format!("omit type {t} from")))
             .count()
     };
+    assert_eq!(count("complex64"), 0, "{messages:?}");
+    assert_eq!(count("float32"), 0, "{messages:?}");
     // Helpful types are flagged too, so untyped expressions and named
     // constants count here — but only where the default type still matches.
     assert_eq!(count("rune"), 3, "{messages:?}");

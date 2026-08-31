@@ -334,6 +334,19 @@ utiltest/extended_bad_test.go:1:1:revive:warning:file-header: the file doesn't h
 utiltest/extended_bad_test.go:4:2:revive:warning:imports-blocklist: should not use the following blocklisted import: "os"
 utiltest/extended_bad_test.go:9:2:revive:warning:redundant-test-main-exit: redundant call to os.Exit in TestMain function, the test runner will handle it automatically as of Go 1.15
 utiltest/extended_bad_test.go:12:22:revive:warning:unused-parameter: parameter 't' seems to be unused, consider removing or renaming it as _
+vardeclconst/var_decl_untyped_const.go:8:1:revive:warning:file-header: the file doesn't have an appropriate header
+vardeclconst/var_decl_untyped_const.go:11:8:revive:warning:var-declaration: should omit type string from declaration of var a; it will be inferred from the right-hand side
+vardeclconst/var_decl_untyped_const.go:12:8:revive:warning:var-declaration: should omit type int from declaration of var b; it will be inferred from the right-hand side
+vardeclconst/var_decl_untyped_const.go:13:8:revive:warning:var-declaration: should omit type float64 from declaration of var c; it will be inferred from the right-hand side
+vardeclconst/var_decl_untyped_const.go:14:8:revive:warning:var-declaration: should omit type bool from declaration of var d; it will be inferred from the right-hand side
+vardeclconst/var_decl_untyped_const.go:15:8:revive:warning:var-declaration: should omit type string from declaration of var g; it will be inferred from the right-hand side
+vardeclconst/var_decl_untyped_const.go:43:10:revive:warning:var-declaration: should omit type complex128 from declaration of var br1; it will be inferred from the right-hand side
+vardeclconst/var_decl_untyped_const.go:44:10:revive:warning:var-declaration: should omit type float64 from declaration of var br2; it will be inferred from the right-hand side
+vardeclconst/var_decl_untyped_const.go:45:10:revive:warning:var-declaration: should omit type int from declaration of var br3; it will be inferred from the right-hand side
+vardeclconst/var_decl_untyped_const.go:46:10:revive:warning:var-declaration: should omit type int from declaration of var br4; it will be inferred from the right-hand side
+vardeclconst/var_decl_untyped_const.go:47:10:revive:warning:var-declaration: should omit type float64 from declaration of var br5; it will be inferred from the right-hand side
+vardeclconst/var_decl_untyped_const.go:49:10:revive:warning:var-declaration: should omit type complex128 from declaration of var br6; it will be inferred from the right-hand side
+vardeclconst/var_decl_untyped_const.go:51:10:revive:warning:var-declaration: should omit type int from declaration of var br7; it will be inferred from the right-hand side
 vardeclcross/vardeclotherpkg/var_decl_other_package.go:13:1:revive:warning:file-header: the file doesn't have an appropriate header
 vardeclcross/vardeclotherpkg/var_decl_other_package.go:16:2:revive:warning:dot-imports: should not use dot imports
 vardeclcross/vardeclotherpkg/var_decl_other_package.go:18:2:revive:warning:duplicated-imports: Package "example.com/revive/vardeclother" already imported

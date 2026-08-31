@@ -17608,3 +17608,88 @@ DEFERRED: 型集合の腕（制約インターフェースの項を歩く）。`
 `nolintlint` 9（govet fieldalignment 4 / wrapcheck 2 / unparam 2 / contextcheck 1）、
 `revive` 4、`staticcheck` 3（SA1029 の「空の匿名構造体をキーにするな」2 件と ST1023 1 件）、
 `tagliatelle` 2、`gocritic` 1。
+
+### 2026-09-01（続き 112）— `complex(2, 3)` は**未型付き定数**である。3 つの移植がそれを知らなかった
+
+fiber の `state_test.go:339` は 1 行で 2 件出していた:
+
+```go
+var c complex64 = complex(2, 3)
+// +guff revive:var-declaration: should omit type complex64 …
+// +guff staticcheck:ST1023: omit type complex64 …
+```
+
+型を省くと **complex128 になる**ので上流は黙る。Go の仕様がそう言っている ——
+「`complex` の被演算子が未型付き定数なら結果は未型付き complex 定数」。
+`real`/`imag` は未型付き float、`min`/`max` は未型付きのうち最も広いもの。
+`len("abc")` だけは仕様が**型付き `int`** と定めているので別扱いである。
+
+上流はこれを `types.CheckExpr` で右辺を**文脈の外で**評価し直して手に入れる
+（`sharedcheck.RedundantTypeInDeclarationChecker`）。guff には単体の式チェッカが
+無いので、ST1023/QF1011 の `isolated_type` と revive の
+`untyped_const_default_name` が AST から同じ答えを組み立てている ——
+どちらも「変換と呼び出しは型付き」で打ち切っており、定数ビルトインを知らなかった。
+
+#### 23 形
+
+`var <name> <T> = <expr>` を 3 チェックに通した。
+
+| 右辺 | 宣言型 | RV | ST1023 | QF1011 |
+|---|---|---|---|---|
+| `complex(2,3)` | `complex64` | 黙る | 黙る | 黙る |
+| `complex(2,3)` | `complex128` | 撃つ | **黙る** | 撃つ |
+| `real(complex(2,3))` | `float64` | 撃つ | **黙る** | 撃つ |
+| `real(complex(2,3))` | `float32` | 黙る | 黙る | 黙る |
+| `min(1,2)` | `int` | 撃つ | **黙る** | 撃つ |
+| `min(1,2)` | `int64` | 黙る | 黙る | 黙る |
+| `complex(floatVar,0)`（引数が型付き） | `complex128` | 撃つ | 撃つ | 撃つ |
+| `len("abc")` | `int` | 撃つ | 撃つ | 撃つ |
+
+ST1023 が `complex128 = complex(2,3)` でも黙るのは既定型の話ではなく
+**式の種類のゲート**である: 上流は `flagHelpfulTypes = false` のとき
+`*ast.BasicLit` と予約済み識別子しか撃たず、`CallExpr` は `default:` で落とす。
+QF1011 は `flagHelpfulTypes = true` なので既定型が一致する限り撃つ。
+**同じ本体、違うパラメータで答えが分かれる**ので、両方測らないと片方を壊す。
+
+修正前の guff は RV で 3 形、ST1023 で 8 形、QF1011 で 3 形を過剰報告していた。
+`isolated_type` / `untyped_const_default_name` に定数ビルトインの腕を足して、
+23 形すべてが 3 チェックとも一致した。
+
+#### fixture が golden に入っていなかった
+
+`crates/guff-revive/tests/testdata/revive/var_decl_untyped_const.go` は
+**revive の golden ケースの `sources.txt` に無く**、Rust の単体テストだけが読んでいた。
+今回 `vardeclconst/` として足したので、revive の golden は 340 → **353 キー**になった
+（うち 12 が `var-declaration`、1 が新ファイルの `file-header`）。
+**fixture があることと、ゲートが見ていることは別**である。
+
+#### `divergent/staticcheck-qf.diff` を読み直した
+
+fixture が伸びた分だけ上流の `--fix` 出力も伸び、`# upstream-writes: 481 line(s)`
+の宣言が現実と合わなくなってゲートが落ちた —— これはこのファイルの設計どおりの動作で、
+「上流が動いたら理由を読み直せ」と書いてある。読み直した理由（QF1004 が別名 import の
+呼び出しを実名に書き換えてコンパイルを壊す）は**今回の変更と無関係**なので、
+宣言を 503 行に更新し、本体を今日の guff の出力に録り直した。
+
+#### 測定
+
+- fiber **19 → 17**（`revive` 4 → 3、`staticcheck` 3 → 2）。台帳は 26/100 のまま。
+- golden 204/204。`staticcheck-st` 195 → **202 キー**、`staticcheck-qf` 182 → **189**、
+  `revive` 340 → **353**。3 ケースとも**キー集合の差分で消えたキーが無いことを確認**。
+- fix tier 204/204（`staticcheck-st` / `staticcheck-qf` の期待 diff を録り直し、
+  `divergent/staticcheck-qf.diff` を上記のとおり更新）。
+- reject 14、`cargo test --workspace` 緑、OSS pr tier 8 target すべて P=R=100%。
+- 単体テストは総数を 17 → 19（ST1023）、27 → 34（QF1011）に更新し、
+  `complex64` / `float32` が 0 件であることと、revive 側の 3 形が黙り 7 形が撃つことを固定した。
+
+#### 残り（fiber 17 件）
+
+`nolintlint` 9（うち 4 は **`fieldalignment` が guff 未実装** —— govet の非デフォルト
+10 パスの 1 つ。残りは wrapcheck 2 / unparam 2 / contextcheck 1 の偽陰性）、
+`revive` 3、`staticcheck` 2（SA1029。下記）、`tagliatelle` 2、`gocritic` 1。
+
+SA1029 は **12 形測って乖離 1 形**で、`var key ctxKey = struct{}{}` のときだけ撃つ。
+`callcheck::flatten_ssa_value` が `ChangeType` を剥がして宣言型 `ctxKey` を捨て、
+初期化子の匿名 `struct{}` に戻してしまうため。上流の対応物 `irutil.Flatten` は
+**`Sigma` と `Phi` しか剥がさない**。ただし `flatten_ssa_value` は 8 チェックが
+共有しているので、続き 111 と同じく**どのチェックがどちらを要るのか測ってから**にする。

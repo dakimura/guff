@@ -66,3 +66,29 @@ func shapes(x, y int, ch chan int, b1, b2 bool) {
 	_, _, _, _, _, _, _, _, _, _ = c21, c22, c23, c24, c25, c26, c27, c28, c29, c30
 	_, _, _, _, _, _, _ = c31, c32, c33, c34, c35, c36, x
 }
+
+// The constant builtins. `complex(2, 3)` over untyped constants is an untyped
+// *complex* constant, `real`/`imag` of one are untyped floats, and `min`/`max`
+// over untyped constants are untyped — the spec says so and `types.CheckExpr`
+// knows it, so upstream gets it for free. Reading the right-hand side as typed
+// skipped the untyped branch entirely: both the default-type test and the
+// expression-kind gate went unrun, and every one of these was reported.
+// fiber's `state_test.go:339` is `var c complex64 = complex(2, 3)`.
+//
+// `len` is deliberately here as the control: the spec makes `len("abc")` a
+// *typed* `int` constant, so it stays on the typed path.
+var floatVar float64
+
+func constBuiltins() {
+	var b01 complex64 = complex(2, 3)
+	var b02 complex128 = complex(2, 3)
+	var b03 float64 = real(complex(2, 3))
+	var b04 float32 = real(complex(2, 3))
+	var b05 float64 = imag(complex(2, 3))
+	var b06 int = min(1, 2)
+	var b07 int64 = min(1, 2)
+	var b08 int = max(1, 2)
+	var b09 complex128 = complex(floatVar, 0)
+	var b10 int = len("abc")
+	_, _, _, _, _, _, _, _, _, _ = b01, b02, b03, b04, b05, b06, b07, b08, b09, b10
+}

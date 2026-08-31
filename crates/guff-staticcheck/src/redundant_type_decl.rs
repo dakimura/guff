@@ -127,10 +127,76 @@ fn isolated_type(pass: &Pass<'_>, e: &Expr) -> Isolated {
                 _ => Isolated::Typed,
             }
         }
-        // Conversions and calls are typed — including the constant ones, since
-        // `len("abc")` is a *typed* `int` constant.
+        // A call to one of the constant builtins over untyped constant
+        // arguments is itself an untyped constant. Everything else — a
+        // conversion, an ordinary call, and `len("abc")`, whose result the spec
+        // makes a *typed* `int` constant — is typed.
+        Expr::CallExpr(call) => isolated_builtin_call(pass, call),
         _ => Isolated::Typed,
     }
+}
+
+/// The three groups of builtins the spec keeps untyped:
+///
+/// - `complex(a, b)` — "if the operands are untyped constants, the result is an
+///   untyped complex constant";
+/// - `real(z)` / `imag(z)` — untyped constant argument, untyped float result;
+/// - `min` / `max` — all arguments untyped constants, result untyped of the
+///   widest kind.
+///
+/// Upstream reads this off `types.CheckExpr`, which knows the spec. guff has to
+/// name them. Without it `var c complex64 = complex(2, 3)` looked like a typed
+/// right-hand side, the untyped branch never ran, and both the default-type
+/// test and the expression-kind gate below were skipped — fiber's
+/// `state_test.go` carries exactly that line.
+fn isolated_builtin_call(pass: &Pass<'_>, call: &guff::ast::CallExpr) -> Isolated {
+    let Expr::Ident(name) = unparen_expr(&call.fun) else {
+        return Isolated::Typed;
+    };
+    if !is_builtin_object(pass, name) {
+        return Isolated::Typed;
+    }
+    let args: Vec<Isolated> = call.args.iter().map(|a| isolated_type(pass, a)).collect();
+    let all_untyped = |a: &[Isolated]| a.iter().all(|i| matches!(i, Isolated::Untyped(_)));
+    match name.name.as_str() {
+        "complex" if call.args.len() == 2 && all_untyped(&args) => {
+            Isolated::Untyped(Untyped::Complex)
+        }
+        "real" | "imag" if call.args.len() == 1 && all_untyped(&args) => {
+            Isolated::Untyped(Untyped::Float)
+        }
+        "min" | "max" if !call.args.is_empty() && all_untyped(&args) => {
+            let widest = args
+                .iter()
+                .filter_map(|i| match i {
+                    Isolated::Untyped(u) => Some(*u),
+                    Isolated::Typed => None,
+                })
+                .max()
+                .unwrap_or(Untyped::Int);
+            Isolated::Untyped(widest)
+        }
+        _ => Isolated::Typed,
+    }
+}
+
+fn unparen_expr(e: &Expr) -> &Expr {
+    match e {
+        Expr::ParenExpr(p) => unparen_expr(&p.x),
+        other => other,
+    }
+}
+
+/// The identifier denotes a predeclared builtin, not a function of the same
+/// name declared in this package.
+fn is_builtin_object(pass: &Pass<'_>, ident: &Ident) -> bool {
+    let Some(obj) = object_of(pass, ident) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    matches!(artifacts.objects.get(obj), ObjectData::Builtin(_))
 }
 
 fn isolated_ident(pass: &Pass<'_>, ident: &Ident) -> Isolated {
