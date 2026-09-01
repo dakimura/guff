@@ -19446,3 +19446,49 @@ golden 208/208（`unparam` 53 → 57 キー、キー集合の差分で消失な�
 fix tier 208/208、reject 14、workspace テスト緑（新規テストは 10 個の型に対する
 ゼロ定数の値を列で固定し、unparam 側は 5 関数に対する 4 件を固定する）、
 OSS pr tier 8 target すべて P=R=100%。
+
+### 2026-09-02（続き 140）— G102 は**宣言まで辿って**アドレスを読む。G402 は cipher の名前を表と突き合わせ、**最初の 1 件で止まる**
+
+syncthing の gosec 3 件。全部 `cmd/infra/strelaypoolsrv/main.go` にある。
+
+**G102（2 件）**: `tls.Listen(proto, listen, tlsCfg)` と `net.Listen(proto, listen)`。
+アドレスは**呼び出しに書かれていない** —— ファイル先頭の `listen = ":80"` である。
+上流の `GetIdentStringValues` は識別子の宣言（`ValueSpec` / `AssignStmt`）まで
+1 段辿って**文字列リテラルだけ**を読む。guff は「引数がリテラルなら」しか見ておらず、
+コードにも `DEFERRED: Ident const resolution (GetIdentStringValues)` と書いてあった。
+
+解決は型検査器ではなく**パーサのもの**（`ident.Obj.Decl`）で、同じファイルの宣言に
+しか届かない。guff の [`FileDecls`]（G204 / G304 が使っている）が同じ問いに同じ形で
+答えるので、それを再利用した。G102 も `check_call` の枝から自前のパスに出した。
+
+**測定**: 13 形。修正前は 4 形が乖離、修正後は全一致。黙る形が規則を決めている ——
+loopback のアドレス、初期化子の無い var、**呼び出しで初期化された var**
+（`GetString` はリテラルしか受けない）、パラメータ、そして `net.Dial`（リストに無い）。
+
+**G402（1 件）**: `CipherSuites: []uint16{…}` の中の
+`tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA`。guff の G402 は
+`InsecureSkipVerify` だけを見ていた（ヘッダに `MinVersion / CipherSuites DEFERRED`）。
+上流は**セレクタの名前**を `NewIntermediateTLSCheck` の `goodCiphers` 表と突き合わせ、
+外れた**最初の 1 つ**を報告する。何も解決しない —— セレクタでない要素（定数、変数、
+展開）は飛ばすだけで報告しない。
+
+**`Match` は composite literal から出た最初の issue を返して止まる。** guff は
+KeyValue を全部回して push していたので、`InsecureSkipVerify` と悪い cipher を
+両方持つ config で 2 件出ていたはずだった（`InsecureSkipVerify` しか実装が無かった
+ので今まで観測できなかっただけ）。`check_g402_tls_field` を `Option` にして
+最初の 1 件で break するようにした。fixture は**両方悪い config を 2 通りの順序**で
+持っていて、どちらも 1 件しか出ないことを固定する。
+
+**測定**: 8 形。修正前は 2 形が乖離、修正後は全一致。`*tls.Config` 越しの代入は
+**両ツールとも黙る**（`Match` の assign 枝はレシーバの型が `crypto/tls.Config`
+ちょうどであることを要求する）—— 既存の `is_tls_config_assign_type_name` の注記どおり。
+
+syncthing **9 → 6**（残りはすべて golangci-only: modernize 4 / nilnesserr 1 /
+unparam 1）。台帳は 29/100 のまま。
+golden 208/208（`gosec` 198 → 206 キー、キー集合の差分で消失なし）、
+fix tier 208/208、reject 14、workspace テスト緑（新規テストは 12 呼び出しに対する
+G102 5 件と、8 リテラルに対する G402 3 件をメッセージの列で固定する）、
+OSS pr tier 8 target すべて P=R=100%、authelia 1 / gitea clean は動かず。
+
+**測り直しの注意**: 続き 129 / 133 と同じく golangci が `canonicalheader` 2 件を
+落とす回があり、同じバイナリで 8 と 6 の両方が出た。
