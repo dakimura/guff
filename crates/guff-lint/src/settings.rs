@@ -1902,12 +1902,21 @@ impl GosecSettings {
                 g101.min_entropy_length = n;
             }
         }
+        let mut g117 = guff_style::G117Options::default();
+        if let Some(config) = &self.config {
+            if let Some(p) = gosec_config_key(config, "G117", "pattern").and_then(|v| v.as_str()) {
+                if !p.is_empty() {
+                    g117.pattern = p.to_string();
+                }
+            }
+        }
         guff_style::GosecOptions {
             includes: self.includes.clone(),
             excludes: self.excludes.clone(),
             severity: self.severity.clone(),
             confidence: self.confidence.clone(),
             g101,
+            g117,
         }
     }
 }

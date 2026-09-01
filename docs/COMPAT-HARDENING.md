@@ -19179,3 +19179,60 @@ golden 208/208（`gosec` 152 キーのまま、キー集合の差分で増減な
 （新規テストは `all_functions` の答えを 4 つの名前の**列**で固定する。
 thunk を落とす実装は `["Dispatch", "init"]` を返す）、
 OSS pr tier 8 target すべて P=R=100%、gitea も clean のまま。台帳は 29/100。
+
+### 2026-09-01（続き 135）— G117 を移植した。「シリアライズされる秘密っぽいフィールド」は**呼び出し**の規則で、黙る理由が 4 つある
+
+authelia の 11 件のうち **7 件**が 1 つの原因だった。差分は全部
+`nolintlint` の「directive is unused」という**間接シグナル**で、
+`internal/handlers/handler_sign_password_test.go` にこの形が 7 回出てくる:
+
+```go
+bodyBytes, err := json.Marshal(bodySecondFactorPasswordRequest{ //nolint:gosec
+	Password: "123456",
+})
+```
+
+最初は G101（hardcoded credentials）だと思って測ったが、`"123456"` は
+エントロピー閾値を超えないので**上流も G101 は出さない**。指示子を外した写しを
+別パッケージに置いて測ったら答えが出た:
+
+```
+G117: Marshaled struct field "Password" (JSON key "password") matches secret pattern
+```
+
+**G117 は guff に無かった。** securego/gosec v2.27.1 `rules/secret_serialization.go`
+（588 行）を移植した。規則自体は「エクスポートされた文字列フィールドの名前か
+シリアライズ後のキーが秘密っぽいか」だけで、残りは全部**そのフィールドが本当に
+出力に出るのか**を決める門である:
+
+1. 呼び出しが `MarshalJSON` などの**カスタム marshaler の中**にある
+2. マーシャルされる型が**その形式の marshaler メソッドを持つ**（埋め込みからの
+   昇格も含む —— 上流は `types.NewMethodSet(types.NewPointer(named))` を訊く）
+3. フィールドが非エクスポート／`_`／タグが `-`／文字列でもバイト列でもない
+4. コンポジットリテラルがそのフィールドに**関数呼び出しの結果**を入れている
+   （マスクしていると読む）
+
+**測定**: 24 形。上流 14 件、guff も 14 件で**キーもメッセージも一致**（初回一致）。
+形を書く前に測ったので、思い込みが 2 つ落ちた:
+
+- `Token []byte` は**黙る**。既定パターンの token 系は全部 `api`/`access` などの
+  接頭辞を要求するので、裸の `Token` は当たらない（`[]byte` は候補型として正しい）。
+- **入れ子や埋め込みの構造体フィールドには降りない**。`Inner creds` は
+  「秘密候補型」ではないのでそこで止まる。コンテナ（`*T` / `[]T` / `[N]T` /
+  `map[K]T`）だけが剥がされる。
+
+タグの読み方（`reflect.StructTag.Get` 相当、`,omitempty` の切り落とし、
+空の名前はフィールド名に戻る、`-` は除外）は Rust の `#[test]` で固定した。
+
+**golden case の追加が 2 つ要った**: `includes` に `G117` を足すこと（この case は
+guff が実装した規則を明示列挙している）と、YAML / TOML の sink が第三者
+パッケージなので `xcrypto` と同じやり方で stub モジュールを `replace` で入れること。
+`gopkg.in/yaml.v3` は `v0.0.0` では go が受け付けない（`should be v3`）。
+
+authelia **11 → 4**（残りは G120 が 1、`os.ReadFile` が 1、
+`m[key] = pairs[i+1]` が 1、`unparam` が 1）。台帳は 29/100 のまま。
+golden 208/208（`gosec` 152 → 166 キー、キー集合の差分で消失なし）、
+fix tier 208/208、reject 14、workspace テスト緑（新規テストは 24 の呼び出しに対する
+14 件を**メッセージの列**で固定する）、OSS pr tier 8 target すべて P=R=100%、
+gitea / prometheus / syncthing は動かず（新しい規則なので過剰報告が出ないことを
+測るのが要点）。

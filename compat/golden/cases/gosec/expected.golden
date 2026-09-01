@@ -82,6 +82,20 @@ g115/g115.go:163:44:gosec:high:G115: integer overflow conversion int -> int32
 g115/g115.go:165:43:gosec:high:G115: integer overflow conversion int -> uint8
 g115/g115.go:194:14:gosec:high:G115: integer overflow conversion int64 -> int32
 g115/g115.go:214:53:gosec:high:G115: integer overflow conversion int -> uint32
+g117/g117.go:25:29:gosec:medium:G117: Marshaled struct field "Password" (JSON key "password") matches secret pattern
+g117/g117.go:28:35:gosec:medium:G117: Marshaled struct field "Password" (JSON key "password") matches secret pattern
+g117/g117.go:31:40:gosec:medium:G117: Marshaled struct field "Password" (JSON key "password") matches secret pattern
+g117/g117.go:41:36:gosec:medium:G117: Marshaled struct field "Secret" (JSON key "harmless") matches secret pattern
+g117/g117.go:96:25:gosec:medium:G117: Marshaled struct field "Password" (JSON key "password") matches secret pattern
+g117/g117.go:99:25:gosec:medium:G117: Marshaled struct field "Password" (JSON key "password") matches secret pattern
+g117/g117.go:102:23:gosec:medium:G117: Marshaled struct field "Password" (JSON key "password") matches secret pattern
+g117/g117.go:157:28:gosec:medium:G117: Marshaled struct field "Password" (XML key "Password") matches secret pattern
+g117/g117.go:160:29:gosec:medium:G117: Marshaled struct field "Password" (YAML key "Password") matches secret pattern
+g117/g117.go:164:40:gosec:medium:G117: Marshaled struct field "Password" (TOML key "Password") matches secret pattern
+g117/g117.go:173:28:gosec:medium:G117: Marshaled struct field "Password" (JSON key "Password") matches secret pattern
+g117/g117.go:180:29:gosec:medium:G117: Marshaled struct field "Password" (JSON key "pass") matches secret pattern
+g117/g117.go:187:30:gosec:medium:G117: Marshaled struct field "Password" (JSON key "Password") matches secret pattern
+g117/g117.go:190:37:gosec:medium:G117: Marshaled struct field "Password" (JSON key "password") matches secret pattern
 g118/g118.go:22:33:gosec:medium:G118: context cancellation function returned by WithCancel/WithTimeout/WithDeadline is not called
 g118/g118.go:33:28:gosec:medium:G118: context cancellation function returned by WithCancel/WithTimeout/WithDeadline is not called
 g118/g118.go:38:34:gosec:medium:G118: context cancellation function returned by WithCancel/WithTimeout/WithDeadline is not called

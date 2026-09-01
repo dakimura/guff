@@ -1028,6 +1028,26 @@ pub struct GosecOptions {
     pub confidence: String,
     /// `config.G101` knobs.
     pub g101: G101Options,
+    /// `config.G117` knobs.
+    pub g117: G117Options,
+}
+
+/// `linters.settings.gosec.config.G117` — secret-serialization tuning.
+///
+/// Upstream `rules.NewSecretSerialization` reads exactly one key, `pattern`,
+/// and keeps the default when it is absent or empty.
+#[derive(Debug, Clone, PartialEq)]
+pub struct G117Options {
+    /// Field-name / serialized-key regex marking a secret.
+    pub pattern: String,
+}
+
+impl Default for G117Options {
+    fn default() -> Self {
+        Self {
+            pattern: crate::gosec_g117::G117_DEFAULT_PATTERN.to_string(),
+        }
+    }
 }
 
 /// `linters.settings.gosec.config.G101` — hardcoded-credentials tuning.

@@ -10,3 +10,14 @@ go 1.26
 require golang.org/x/crypto v0.0.0
 
 replace golang.org/x/crypto => ./xcrypto
+
+// G117's YAML and TOML sinks are third-party packages, stubbed the same way:
+// the rule matches on import path plus function name.
+require (
+	github.com/BurntSushi/toml v0.0.0
+	gopkg.in/yaml.v3 v3.0.0
+)
+
+replace gopkg.in/yaml.v3 => ./yamlv3
+
+replace github.com/BurntSushi/toml => ./bstoml

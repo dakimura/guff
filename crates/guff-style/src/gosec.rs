@@ -286,7 +286,7 @@ const RULES: &[RuleDef] = &[
 
 /// Synthetic rule ids handled outside [`RULES`] (arg-sensitive / AST-pattern).
 const EXTRA_RULE_IDS: &[&str] = &[
-    "G101", "G102", "G104", "G107", "G109", "G110", "G111", "G112", "G115", "G118", "G122", "G124",
+    "G101", "G102", "G104", "G107", "G109", "G110", "G111", "G112", "G115", "G117", "G118", "G122", "G124",
     "G123", "G202",
     "G203",
     "G204", "G301", "G302", "G303", "G306", "G402", "G403", "G602",
@@ -553,6 +553,7 @@ const RULE_SCORES: &[(&str, Score, Score)] = &[
     ("G112", Score::Medium, Score::Low),
     ("G114", Score::Medium, Score::High),
     ("G115", Score::High, Score::Medium),
+    ("G117", Score::Medium, Score::Medium),
     // G118 grades each of its three checks separately; see `issue_scores`.
     ("G118", Score::Medium, Score::High),
     ("G123", Score::High, Score::High),
@@ -638,7 +639,7 @@ fn unquote_import(lit: &str) -> &str {
     lit.trim().trim_matches('"').trim_matches('`')
 }
 
-fn unquote_string_lit(value: &str) -> Option<String> {
+pub(crate) fn unquote_string_lit(value: &str) -> Option<String> {
     let v = value.trim();
     if (v.starts_with('"') && v.ends_with('"')) || (v.starts_with('`') && v.ends_with('`')) {
         Some(v[1..v.len() - 1].to_string())
@@ -3123,6 +3124,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let mut pending: Vec<(u32, u32, String)> = Vec::new();
     check_imports(pass, &enabled, &mut pending);
     check_g101(pass, &enabled, &opts, &mut pending);
+    crate::gosec_g117::check_g117(pass, &enabled, &opts, &mut pending);
     check_g109(pass, &enabled, &mut pending);
     check_g110(pass, &enabled, &mut pending);
     check_g124_cookie_params(pass, &enabled, &mut pending);
