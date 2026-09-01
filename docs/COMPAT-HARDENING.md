@@ -19058,3 +19058,69 @@ syncthing **11 → 10**、そして **P=100.0%** —— guff 側の過剰報告�
 消失なし）、fix tier 208/208、reject 14、workspace テスト緑（新規テストは 7 メトリクスの
 fixture を 5 件のメッセージ列で `assert_eq!` 固定する）、OSS pr tier 8 target すべて
 P=R=100%。
+
+### 2026-09-01（続き 133）— **名前付き func 型**の変数越しの呼び出しは、CHA では「その定義シグネチャの全関数」になる
+
+authelia の `gosec` 3 件、すべて `G710: Open redirect via taint analysis`。
+対象は `internal/handlers/handler_oauth2_authorization_consent_core.go` の
+139 / 219 / 256 行で、どれも
+
+```go
+http.Redirect(rw, r, location.String(), http.StatusFound)
+```
+
+`location` は `handleOIDCAuthorizationConsentGetRedirectionURL(ctx, issuer, consent)`
+の返り値で、`issuer` は `ctx.IssuerURL()` から来る —— リクエストは通っていない。
+
+**どう突き止めたか**: 最小再現が 4 回外れた（直接 / ヘルパ経由 / エントリポイント /
+`r.Form` を隣で使う）。そこで `gosec_taint.rs` に一時的な `eprintln!` を入れて
+authelia を測った:
+
+```
+TAINT autotaint fn=handleOAuth2AuthorizationConsentNotAuthenticated param_idx=Some(1) entry=true external=false
+TAINT viacaller fn=handleOAuth2AuthorizationConsentGenerate idx=1 caller=handleOAuth2AuthorizationConsentModeExplicit
+```
+
+`entry=true` —— guff の呼び出しグラフでは**呼び出し元が 1 つも無い**。
+authelia は 9 つの consent ハンドラを
+
+```go
+type handlerAuthorizationConsent func(ctx *middlewares.AutheliaCtx, issuer *url.URL, …)
+
+var handler handlerAuthorizationConsent
+handler = handleOAuth2AuthorizationConsentNotAuthenticated
+…
+return handler(ctx, issuer, …)
+```
+
+と**名前付き func 型の変数**でディスパッチしている。CHA
+（x/tools `chautil.LazyCallees`）は func 値経由の呼び出しを
+`funcsBySig.At(call.Signature())` で解決し、`CallCommon.Signature()` は
+`CoreType(c.Value.Type())` —— つまり**基底のシグネチャ**。guff は値の型を
+そのまま `signature_key` に渡していたので、`Named` を見て `None` を返し、
+**その呼び出しには callee が 1 つも付かなかった**。すると
+「その変数越しにしか呼ばれない関数」は全部エントリポイントに見え、
+source 型（`*url.URL`）の引数が自動的に汚染される。
+
+直したのは 1 行 —— 値の型を `underlying` してから鍵にする。
+
+**測定**: 8 形。修正前は 3 形が乖離（名前付き型経由の 2 つと、
+**代入されていないのに同じシグネチャを持つ**関数 1 つ）、修正後は全一致。
+撃つ側の対照も測った —— 呼び出し側の引数がリクエスト由来なら**報告される**
+（自動汚染が消えただけで汚染は消えない）、無名 func 型は元から通っていた。
+authelia **14 → 11**（残り 11 はすべて `nolintlint` の間接シグナル）。
+
+**この grid が別の乖離を 1 つ見つけた（未修正）**: メソッド値
+（`var h namedType = b.redirect`）で、上流は黙り guff は撃つ。上流では
+`b.redirect` が bound thunk（レシーバを持たない合成関数）になり、それが
+`funcsBySig` に載ってディスパッチの callee になり、thunk の中の静的呼び出しが
+本体のメソッドに辺を与える。guff の `all_functions` はその thunk に届いておらず
+（ノード集合 181 個に `$bound` も当該メソッドも無い）、メソッドは
+`has_node=false` のままエントリポイントになる。fixture には**入れていない** ——
+golden は上流の答えなので、乖離する形を入れるとゲートが赤くなる。次のタスク。
+
+golden 208/208（`gosec` 151 → 152 キー、キー集合の差分で消失なし）、
+fix tier 208/208、reject 14、workspace テスト緑
+（`G710` の総数を 2 → 3 に締め、新規テストが「クリーンなディスパッチ 4 つは黙る」を
+`assert_eq!` で固定する）、OSS pr tier 8 target すべて P=R=100%、
+syncthing は 10 のまま。台帳は 29/100。

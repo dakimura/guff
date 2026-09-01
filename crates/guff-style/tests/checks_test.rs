@@ -191,9 +191,29 @@ fn gosec_taint_rules_report_only_reachable_sources() {
             count("G706"),
             count("G710")
         ),
-        (7, 5, 8, 5, 2),
+        (7, 5, 8, 5, 3),
         "{messages:?}"
     );
+}
+
+/// CHA resolves a call through a func-typed value to every address-taken bare
+/// function with an **identical signature**, and `CallCommon.Signature()` is
+/// the *core* type of the called value. Keyed by the named func type instead,
+/// the dispatch has no callees at all: every handler reached only through such
+/// a variable then looks like an entry point, and a source-typed parameter of
+/// an entry point is auto-tainted. authelia dispatches nine OAuth2 consent
+/// handlers through one `handlerAuthorizationConsent` variable and three of
+/// them reported a G710 upstream does not make.
+#[test]
+fn gosec_g710_resolves_a_dispatch_through_a_named_func_type() {
+    let pkg = support::typecheck_fixture("gosec", "example.com/gosec/g7xx", "g7xx.go");
+    let messages = support::run_analyzer(gosec(), &pkg);
+    let g710: Vec<&String> = messages.iter().filter(|m| m.starts_with("G710: ")).collect();
+    // Counted over the whole fixture: the four functions reached through a
+    // dispatch with a clean argument are silent, and only the one whose call
+    // site passes a request value is reported. Three G710 in total — the two
+    // that predate the dispatch shapes, plus `g710ViaNamedTainted`.
+    assert_eq!(g710.len(), 3, "{messages:?}");
 }
 
 /// G705's two shapes that no other taint rule has, stated as the thing that

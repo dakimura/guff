@@ -143,6 +143,7 @@ g7xx/g7xx.go:364:2:gosec:low:G104: Errors unhandled
 g7xx/g7xx.go:369:2:gosec:low:G104: Errors unhandled
 g7xx/g7xx.go:389:13:gosec:medium:G705: XSS via taint analysis
 g7xx/g7xx.go:400:9:gosec:medium:G203: The used method does not auto-escape HTML. This can potentially lead to 'Cross-site Scripting' vulnerabilities, in case the attacker controls the input.
+g7xx/g7xx.go:458:15:gosec:medium:G710: Open redirect via taint analysis
 nosec/nosec.go:27:7:gosec:high:G101: Potential hardcoded credentials
 nosec/nosec.go:31:5:gosec:high:G101: Potential hardcoded credentials
 nosec/nosec.go:36:7:gosec:high:G101: Potential hardcoded credentials

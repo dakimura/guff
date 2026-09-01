@@ -399,3 +399,69 @@ func G705ArgsSource(w http.ResponseWriter) {
 func g705TemplateHTML(r *http.Request) template.HTML {
 	return template.HTML(r.FormValue("q"))
 }
+
+// --- G710: dispatch through a func-typed variable ---------------------------
+//
+// CHA resolves a call through a func value to every address-taken bare
+// function with an *identical signature*, and `CallCommon.Signature()` is the
+// **core** type of the called value — so a variable of a named func type is
+// keyed by the signature the named type is defined as. Keyed by the named type
+// itself the call has no callees at all, and every function only ever reached
+// through such a variable looks like an entry point whose source-typed
+// parameters are auto-tainted. authelia dispatches nine OAuth2 consent
+// handlers through one `handlerAuthorizationConsent` variable.
+//
+// Each group below uses a signature of its own on purpose: the edges are per
+// *signature*, so one tainted dispatch would otherwise reach every handler in
+// the file.
+
+type g710Named func(issuer *url.URL, w http.ResponseWriter, r *http.Request)
+
+// silent — reached only through the dispatch below, whose argument is clean.
+func g710ViaNamed(issuer *url.URL, w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, issuer.String(), http.StatusFound)
+}
+
+// silent — the same, and the dispatch does not have to name it: CHA matches on
+// the signature, not on the assignment.
+func g710AlsoViaNamed(issuer *url.URL, w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, issuer.String(), http.StatusFound)
+}
+
+func G710Dispatch(w http.ResponseWriter, r *http.Request, which bool) {
+	var h g710Named
+
+	if which {
+		h = g710ViaNamed
+	} else {
+		h = g710AlsoViaNamed
+	}
+
+	h(&url.URL{Scheme: "https", Host: "example.com"}, w, r)
+}
+
+// silent — the unnamed-type control, which found its edge before the fix too.
+func g710ViaUnnamed(issuer *url.URL, w http.ResponseWriter, r *http.Request, _ int) {
+	http.Redirect(w, r, issuer.String(), http.StatusFound)
+}
+
+func G710DispatchUnnamed(w http.ResponseWriter, r *http.Request) {
+	var h func(*url.URL, http.ResponseWriter, *http.Request, int) = g710ViaUnnamed
+	h(&url.URL{Scheme: "https", Host: "example.com"}, w, r, 1)
+}
+
+type g710NamedTainted func(issuer *url.URL, w http.ResponseWriter, r *http.Request, _ string)
+
+// fires — the edge exists and the argument at the call site came from the
+// request. Resolving the dispatch removes the *auto*-taint, not the taint.
+func g710ViaNamedTainted(issuer *url.URL, w http.ResponseWriter, r *http.Request, _ string) {
+	http.Redirect(w, r, issuer.String(), http.StatusFound)
+}
+
+func G710DispatchTainted(w http.ResponseWriter, r *http.Request) {
+	var h g710NamedTainted = g710ViaNamedTainted
+
+	u, _ := url.Parse(r.FormValue("next"))
+
+	h(u, w, r, "x")
+}
