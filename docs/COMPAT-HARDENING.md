@@ -19492,3 +19492,45 @@ OSS pr tier 8 target すべて P=R=100%、authelia 1 / gitea clean は動かず�
 
 **測り直しの注意**: 続き 129 / 133 と同じく golangci が `canonicalheader` 2 件を
 落とす回があり、同じバイナリで 8 と 6 の両方が出た。
+
+### 2026-09-02（続き 141）— 直せない fix は finding を落とす。そして `stringsseq` の表は 4 つある
+
+syncthing の `modernize` 4 件のうち 3 件。
+
+**minmax（2 件）**: 形は pattern 2 そのもので guff も実装している ——
+`globIdx := slices.IndexFunc(es, func(e fileRow) bool { … })` の直後に
+`if globIdx < 0 { globIdx = 0 }`。**落ちていたのは診断ではなく fix の文面だった。**
+guff は置換テキストを構文木から手で組み立てていて（`expr_text`）、
+**引数が 2 つある呼び出しの枝が無い**。組み立てに失敗すると `continue` するので、
+診断ごと消えていた。関数リテラルを含む呼び出しなら手書きのプリンタでは永遠に届かない。
+
+上流は `Format`（go/printer）で必ず書ける。guff も**ソースのバイトを切り出す**
+`node_text` を足して、minmax の fix はそれを使うようにした。fix tier の記録を
+録り直すと、生成されるのは
+`globIdx := max(slicesIndexFunc(es, func(e int) bool { return e > 0 }), 0)` ——
+関数リテラルごとそのまま入る。
+
+**手書きプリンタの穴は「fix が少し悪くなる」ではなく「finding が消える」。**
+`expr_text` は modernize の中で 40 箇所から呼ばれていて、今回直したのは minmax の
+2 箇所だけである。残りは同じ落とし方をしうる。
+
+**stringsseq（1 件）**: `bytes.Split(data, []byte("\n"))` の range。
+上流が index で引くのは **4 つ** —— `strings.Split` / `strings.Fields` /
+**`bytes.Split` / `bytes.Fields`**（`bytes` も同じ版で `SplitSeq`/`FieldsSeq` を
+生やしていて、analyzer の doc コメントに並んでいる）。guff は strings の 2 つしか
+持っていなかった。
+
+**測定**: 13 形。修正前は 3 形が乖離（2 引数呼び出しの上にある minmax、
+`bytes.Split`、`bytes.Fields`）、修正後は全一致。黙る形の対照も測った ——
+`strings.SplitN` は 4 つに入らない、`:=` と `if` の間に文があると pattern 2 ではない。
+
+syncthing **6 → 3**（残りは `nilnesserr` 1 / `modernize` の `mapsloop` 1 /
+`unparam` 1、どれも golangci-only）。台帳は 29/100 のまま。
+golden 208/208（`modernize` 51 → 54 キー、キー集合の差分で消失なし）、
+fix tier 208/208（`modernize.diff` を録り直し、増えたのは新しい fixture 3 形ぶんだけ）、
+reject 14、workspace テスト緑（minmax は「if statement」6 件・全体 7 件、
+stringsseq は 4 件をメッセージの列で固定する）、OSS pr tier 8 target すべて P=R=100%。
+
+**測り直しの注意**: この 3 回の測定では **golangci が `canonicalheader` 2 件を
+落とす側**が 3 回中 2 回だった（`syncthing.golangci.json` の出現数が 3 と 1 で分かる）。
+台帳の 5 のうち 2 はそれで、guff は毎回同じ答えを出している。

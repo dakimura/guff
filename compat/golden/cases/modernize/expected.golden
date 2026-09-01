@@ -23,6 +23,7 @@ minmax/minmax.go:29:5:modernize::minmax: if statement can be modernized using mi
 minmax/minmax.go:71:5:modernize::minmax: if/else statement can be modernized using min
 minmax/minmax.go:85:5:modernize::minmax: if statement can be modernized using min
 minmax/minmax.go:96:5:modernize::minmax: if statement can be modernized using min
+minmax/minmax.go:110:5:modernize::minmax: if statement can be modernized using max
 plusbuild/plusbuild.go:6:1:modernize::plusbuild: +build line is no longer needed
 reflecttypefor/reflecttypefor.go:13:9:modernize::reflecttypefor: reflect.TypeOf call can be simplified using TypeFor
 reflecttypefor/reflecttypefor.go:17:9:modernize::reflecttypefor: reflect.TypeOf call can be simplified using TypeFor
@@ -50,8 +51,10 @@ stringscutprefix/stringscutprefix.go:9:5:modernize::stringscutprefix: TrimPrefix
 stringscutprefix/stringscutprefix.go:16:5:modernize::stringscutprefix: TrimSuffix can be simplified to CutSuffix
 stringscutprefix/stringscutprefix.go:23:5:modernize::stringscutprefix: HasPrefix + TrimPrefix can be simplified to CutPrefix
 stringscutprefix/stringscutprefix.go:30:5:modernize::stringscutprefix: HasSuffix + TrimSuffix can be simplified to CutSuffix
-stringsseq/stringsseq.go:8:23:modernize::stringsseq: Ranging over SplitSeq is more efficient
-stringsseq/stringsseq.go:14:23:modernize::stringsseq: Ranging over FieldsSeq is more efficient
+stringsseq/stringsseq.go:11:23:modernize::stringsseq: Ranging over SplitSeq is more efficient
+stringsseq/stringsseq.go:17:23:modernize::stringsseq: Ranging over FieldsSeq is more efficient
+stringsseq/stringsseq.go:27:23:modernize::stringsseq: Ranging over SplitSeq is more efficient
+stringsseq/stringsseq.go:33:20:modernize::stringsseq: Ranging over FieldsSeq is more efficient
 testingcontext/testingcontext.go:11:17:modernize::testingcontext: context.WithCancel can be modernized using t.Context
 unsafefuncs/unsafefuncs.go:6:24:modernize::unsafefuncs: pointer + integer can be simplified using unsafe.Add
 unsafefuncs/unsafefuncs.go:10:24:modernize::unsafefuncs: pointer + integer can be simplified using unsafe.Add

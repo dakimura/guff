@@ -106,6 +106,18 @@
  
  	return toWrite
  }
+@@ -106,10 +87,7 @@
+ // fix. syncthing `internal/db/sqlite/folderdb_update.go` writes this with a
+ // function literal inside the call, which no hand-written printer covers.
+ func clampIndexFromCall(es []int) int {
+-	globIdx := slicesIndexFunc(es, func(e int) bool { return e > 0 })
+-	if globIdx < 0 {
+-		globIdx = 0
+-	}
++	globIdx := max(slicesIndexFunc(es, func(e int) bool { return e > 0 }), 0)
+ 
+ 	return es[globIdx]
+ }
 --- a/plusbuild/plusbuild.go
 +++ b/plusbuild/plusbuild.go
 @@ -3,7 +3,6 @@
@@ -384,8 +396,8 @@
  }
 --- a/stringsseq/stringsseq.go
 +++ b/stringsseq/stringsseq.go
-@@ -5,13 +5,13 @@
- import "strings"
+@@ -8,13 +8,13 @@
+ )
  
  func rangeSplit(s string) {
 -	for _, part := range strings.Split(s, ",") {
@@ -398,6 +410,22 @@
 -	for _, part := range strings.Fields(s) {
 +	for part := range strings.FieldsSeq(s) {
  		_ = part
+ 	}
+ }
+@@ -24,13 +24,13 @@
+ // release, and the analyzer's doc comment lists them. syncthing
+ // `cmd/syncthing/crash_reporting.go` ranges over `bytes.Split(data, …)`.
+ func rangeBytesSplit(data []byte) {
+-	for _, line := range bytes.Split(data, []byte("\n")) {
++	for line := range bytes.SplitSeq(data, []byte("\n")) {
+ 		_ = line
+ 	}
+ }
+ 
+ func rangeBytesFields(data []byte) {
+-	for _, f := range bytes.Fields(data) {
++	for f := range bytes.FieldsSeq(data) {
+ 		_ = f
  	}
  }
 --- a/testingcontext/testingcontext.go
