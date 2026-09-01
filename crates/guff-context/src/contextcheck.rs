@@ -9,13 +9,17 @@
 //! cross-package analysis (import packages are typechecked when this analyzer
 //! is enabled). External modules without source in the fact closure are skipped.
 //!
-//! DEFERRED: `//@contextcheck(req_has_ctx)` / nolint directives; full HTTP
-//! handler `r.Context()` edge cases.
+//! `//nolint:…contextcheck` and `// @contextcheck(req_has_ctx)` **doc**
+//! comments are read by `doc_flag`, which is upstream's own directive handling
+//! and separate from golangci-lint's `//nolint` processor: a skipped function
+//! records no fact at all, so its *callers* fall silent too.
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::OnceLock;
 
+use guff::parser::{parse_file, COMMENTS_ONLY};
+use guff::position::FileSet;
 use guff_analysis::callcheck::{resolve_call_target, static_callee};
 use guff_analysis::code;
 use guff_analysis::passes::buildir::BuildIrResult;
@@ -132,6 +136,18 @@ fn types_identical(prog: &Program, x: TypeId, y: TypeId) -> bool {
     )
 }
 
+/// The two upstream doc-comment directives, keyed by the declared function's
+/// name position — the same key `getDocFromFunc` matches on (`fd.Name.Pos() ==
+/// f.Pos()`), so only top-level `FuncDecl`s can carry one.
+#[derive(Clone, Copy, Debug, Default)]
+struct DocFlags {
+    /// `// @contextcheck(req_has_ctx)`: treat any function taking an
+    /// `*http.Request` as an HTTP handler.
+    req_ctx: bool,
+    /// `//nolint:` … `contextcheck`: skip the function entirely.
+    skip: bool,
+}
+
 struct Runner<'a> {
     pass: &'a Pass<'a>,
     prog: &'a Program,
@@ -139,6 +155,7 @@ struct Runner<'a> {
     http_res_typs: Vec<TypeId>,
     http_req_typs: Vec<TypeId>,
     current_fact: CtxFact,
+    doc_flags: HashMap<i64, DocFlags>,
     pending: &'a mut Vec<(u32, String)>,
 }
 
@@ -150,11 +167,43 @@ impl<'a> Runner<'a> {
         self.pending.push((pos, msg.into()));
     }
 
+    /// Upstream `Reportf`: an instruction with no position of its own reports
+    /// at its **parent function**'s position, and only a parent without one
+    /// drops the diagnostic.
+    ///
+    /// A lifted `ctx = context.Background()` inside an `if` becomes a `Phi`,
+    /// and go/ssa gives a `Phi` no position — so the whole class of
+    /// conditionally-replaced contexts reports at the enclosing `func` token,
+    /// not at the assignment. Without the fallback guff dropped every one of
+    /// them.
     fn report_instr(&mut self, func: &Function, iid: InstrId, msg: impl Into<String>) {
-        let pos = func.pos(iid);
+        let mut pos = func.pos(iid);
+        if !pos.is_valid() {
+            pos = self.func_pos_of(func);
+        }
         if pos.is_valid() {
             self.report(pos.0 as u32, msg);
         }
+    }
+
+    /// The position `ssa.Function.Pos()` answers: the `func` token of a
+    /// literal, the declared identifier of a named function.
+    fn func_pos_of(&self, f: &Function) -> guff::Pos {
+        if f.decl_pos.is_valid() {
+            return f.decl_pos;
+        }
+        f.object
+            .map(|obj| guff::Pos(obj.pos(&self.prog.object_arena) as i64))
+            .unwrap_or(guff::NO_POS)
+    }
+
+    /// The doc-comment directives upstream reads off a declared function.
+    fn doc_flag(&self, f: &Function) -> DocFlags {
+        let pos = self.func_pos_of(f);
+        if !pos.is_valid() {
+            return DocFlags::default();
+        }
+        self.doc_flags.get(&pos.0).copied().unwrap_or_default()
     }
 
     fn is_ctx_type(&self, typ: TypeId) -> bool {
@@ -193,14 +242,31 @@ impl<'a> Runner<'a> {
         false
     }
 
+    /// Port of `ssa.Function.RelString`.
+    ///
+    /// A bound-method closure (`c.Complete` handed to a library) and a method
+    /// expression thunk are *separate* functions from the method they delegate
+    /// to, and go/ssa keeps their `$bound` / `$thunk` suffix in the name
+    /// `RelString` prints. contextcheck depends on that: the suffixed key never
+    /// has a fact, so a method value never inherits its method's verdict, and
+    /// `checkFuncWithoutCtx` skips the two suffixes by name. Building the key
+    /// from the *object* alone dropped the suffix, so `newPrompt(c.Complete)`
+    /// read as a direct call to `(*Completer).Complete` and reported its whole
+    /// chain (scaleway-cli `core/shell.go:230`).
     fn func_rel_string(&self, f: &Function) -> String {
         if let Some(obj) = f.object {
-            code::type_func_name(
+            let base = code::type_func_name(
                 &self.prog.type_arena,
                 &self.prog.object_arena,
                 &self.prog.package_arena,
                 obj,
-            )
+            );
+            for suffix in ["$bound", "$thunk"] {
+                if f.name.ends_with(suffix) {
+                    return format!("{base}{suffix}");
+                }
+            }
+            base
         } else {
             f.name.clone()
         }
@@ -299,7 +365,7 @@ impl<'a> Runner<'a> {
         (ctx_in, ctx_out)
     }
 
-    fn check_is_http_handler(&self, f: &Function) -> bool {
+    fn check_is_http_handler(&self, f: &Function, req_ctx: bool) -> bool {
         let Some(sig) = f.signature else {
             return false;
         };
@@ -319,6 +385,11 @@ impl<'a> Runner<'a> {
         }
         if !has_req {
             return false;
+        }
+        // `// @contextcheck(req_has_ctx)` promotes *any* function taking a
+        // request to a handler, without the two-parameter shape below.
+        if req_ctx {
+            return true;
         }
         let results = signature_results(&self.prog.type_arena, sig);
         let res_len = tuple_len(&self.prog.type_arena, results);
@@ -348,14 +419,22 @@ impl<'a> Runner<'a> {
         }
 
         let (ctx_in, ctx_out) = self.check_is_ctx_sig(f);
+        // Upstream reads the doc directives *after* the signature decides, so
+        // neither `skip` nor `req_has_ctx` can demote a function that already
+        // takes or returns a context.
         let ret = if ctx_out {
             EntryType::None
         } else if ctx_in {
             EntryType::WithCtx
-        } else if self.check_is_http_handler(f) {
-            EntryType::WithHttpHandler
         } else {
-            EntryType::Normal
+            let flags = self.doc_flag(f);
+            if self.check_is_http_handler(f, flags.req_ctx) {
+                EntryType::WithHttpHandler
+            } else if flags.skip {
+                EntryType::None
+            } else {
+                EntryType::Normal
+            }
         };
 
         let entry_code = match ret {
@@ -439,11 +518,6 @@ impl<'a> Runner<'a> {
             &self.prog.package_arena,
             obj,
         ))
-    }
-
-    fn is_background_or_todo(&self, func: &Function, iid: InstrId) -> bool {
-        self.callee_name(func, iid)
-            .is_some_and(|n| n == "context.Background" || n == "context.TODO")
     }
 
     /// Is this call a `Context()` **method** call (i.e. `r.Context()`)?
@@ -676,7 +750,19 @@ impl<'a> Runner<'a> {
         }
     }
 
-    fn collect_ctx_ref(&mut self, f: &Function, is_http_handler: bool) -> HashMap<InstrId, bool> {
+    /// Returns the call instructions that consume the inherited context, and
+    /// whether the function is *clean*.
+    ///
+    /// Upstream returns `ok = false` as soon as it reports a non-inherited
+    /// context, and `checkFuncWithCtx` then stops — a function that replaces
+    /// its own context is not asked anything further. Dropping that flag made
+    /// guff carry on and report the callee chains upstream never looks at.
+    fn collect_ctx_ref(
+        &mut self,
+        f: &Function,
+        is_http_handler: bool,
+    ) -> (HashMap<InstrId, bool>, bool) {
+        let mut ok = true;
         let mut ref_map = HashMap::new();
         let mut checked_vals = HashSet::new();
         let mut store_instrs = HashSet::new();
@@ -730,6 +816,7 @@ impl<'a> Runner<'a> {
             if let Some(k) = value_key(*val) {
                 if !checked_vals.contains(&k) {
                     self.report_instr(f, iid, MSG_NON_INHERITED);
+                    ok = false;
                 }
             }
         }
@@ -741,13 +828,14 @@ impl<'a> Runner<'a> {
                 if let Some(k) = value_key(*edge) {
                     if !checked_vals.contains(&k) {
                         self.report_instr(f, iid, MSG_NON_INHERITED);
+                        ok = false;
                         break;
                     }
                 }
             }
         }
 
-        ref_map
+        (ref_map, ok)
     }
 
     fn instr_ctx_flags(&self, func: &Function, iid: InstrId) -> i32 {
@@ -765,7 +853,10 @@ impl<'a> Runner<'a> {
 
     fn check_func_with_ctx(&mut self, f: &Function, tp: EntryType) {
         let is_http = tp == EntryType::WithHttpHandler;
-        let ref_map = self.collect_ctx_ref(f, is_http);
+        let (ref_map, ok) = self.collect_ctx_ref(f, is_http);
+        if !ok {
+            return;
+        }
 
         for (_, block) in f.live_blocks() {
             for &iid in &block.instrs {
@@ -811,7 +902,14 @@ impl<'a> Runner<'a> {
                         if f.pos(iid).is_valid() {
                             self.report_instr(f, iid, msg);
                         } else if let Some(callee) = self.callee_func(f, iid) {
-                            let pos = self.prog.func_pos(callee);
+                            let callee_fn = self.prog.functions.get(callee);
+                            let mut pos = self.func_pos_of(callee_fn);
+                            if !pos.is_valid() {
+                                pos = callee_fn
+                                    .parent
+                                    .map(|p| self.func_pos_of(self.prog.functions.get(p)))
+                                    .unwrap_or(guff::NO_POS);
+                            }
                             if pos.is_valid() {
                                 self.report(pos.0 as u32, msg);
                             }
@@ -841,10 +939,6 @@ impl<'a> Runner<'a> {
                     || matches!(f.instrs.get(iid), InstrData::MakeClosure(_));
                 if !is_call_like {
                     continue;
-                }
-
-                if self.is_background_or_todo(f, iid) {
-                    ret = false;
                 }
 
                 let tp_flags = self.instr_ctx_flags(f, iid);
@@ -966,9 +1060,108 @@ fn collect_http_types(prog: &Program) -> (Vec<TypeId>, Vec<TypeId>) {
     (res, req)
 }
 
+/// Upstream `nolintRe` is `^//\s?nolint:` — the slashes, **at most one**
+/// whitespace character, then `nolint:`.
+fn is_nolint_comment(text: &str) -> bool {
+    let Some(rest) = text.strip_prefix("//") else {
+        return false;
+    };
+    let rest = match rest.chars().next() {
+        Some(c) if c.is_whitespace() => &rest[c.len_utf8()..],
+        _ => rest,
+    };
+    rest.starts_with("nolint:")
+}
+
+/// Port of `docFlag`, keyed the way `getDocFromFunc` looks a function up: the
+/// declared name's position. Only top-level `FuncDecl`s are scanned, so a func
+/// literal can never carry a directive.
+///
+/// The analysis load parses with `Mode::NONE`, which drops every comment past
+/// the file header — `fd.doc` is `None` for all but the first declaration — so
+/// a file that can carry a directive is re-parsed with comments in a private
+/// `FileSet` and its positions mapped back. Both directives contain the
+/// substring `contextcheck`, which is the gate: a file without it is not
+/// re-parsed at all.
+fn collect_doc_flags(pass: &Pass<'_>) -> HashMap<i64, DocFlags> {
+    let mut out: HashMap<i64, DocFlags> = HashMap::new();
+    let pkg = pass.pkg();
+    for (i, file) in pass.files().iter().enumerate() {
+        let owned;
+        let src: &[u8] = match pkg.source_bytes(i) {
+            Some(b) => b,
+            None => match pkg
+                .compiled_go_files
+                .get(i)
+                .and_then(|path| std::fs::read(path).ok())
+            {
+                Some(b) => {
+                    owned = b;
+                    &owned
+                }
+                None => continue,
+            },
+        };
+        if !std::str::from_utf8(src).is_ok_and(|t| t.contains("contextcheck")) {
+            continue;
+        }
+        let name = pkg
+            .compiled_go_files
+            .get(i)
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .unwrap_or("file.go");
+        let reparsed_fset = FileSet::new();
+        let Ok(reparsed) = parse_file(&reparsed_fset, name, src, COMMENTS_ONLY) else {
+            continue;
+        };
+        for decl in &reparsed.decls {
+            let guff::ast::Decl::FuncDecl(fd) = decl else {
+                continue;
+            };
+            let Some(doc) = fd.doc.as_ref() else {
+                continue;
+            };
+            let mut flags = DocFlags::default();
+            for c in &doc.list {
+                if is_nolint_comment(&c.text) && c.text.contains("contextcheck") {
+                    flags.skip = true;
+                } else if c.text.starts_with("// @contextcheck(req_has_ctx)") {
+                    flags.req_ctx = true;
+                }
+            }
+            if !flags.skip && !flags.req_ctx {
+                continue;
+            }
+            if let Some(pos) = map_reparsed_pos(pass, file, &reparsed_fset, fd.name.pos().0) {
+                out.insert(pos as i64, flags);
+            }
+        }
+    }
+    out
+}
+
+/// Translate a position from the private reparse `FileSet` into the pass's.
+/// Both parses cover the same bytes, so the byte offset is the bridge.
+fn map_reparsed_pos(
+    pass: &Pass<'_>,
+    file: &guff::ast::File,
+    reparsed_fset: &FileSet,
+    pos: i64,
+) -> Option<u32> {
+    let from = reparsed_fset.file(guff::Pos(pos))?;
+    let to = pass.fset().file(file.pos())?;
+    let offset = from.offset(guff::Pos(pos));
+    if offset < 0 || offset > to.size() {
+        return None;
+    }
+    Some(to.pos(offset).0 as u32)
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     ensure_ctx_fact_decoder();
 
+    let doc_flags = collect_doc_flags(pass);
     let mut pending = Vec::new();
     let mut exported_fact = None;
 
@@ -994,6 +1187,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             http_res_typs: http_res,
             http_req_typs: http_req,
             current_fact: CtxFact::default(),
+            doc_flags,
             pending: &mut pending,
         };
 
@@ -1038,6 +1232,30 @@ pub fn analyzer() -> &'static Analyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nolint_doc_regexp_boundaries() {
+        // Upstream's `^//\s?nolint:`: the slashes, at most one whitespace
+        // character, then `nolint:`. `docFlag` additionally asks that the
+        // comment mention `contextcheck`, which is checked at the call site.
+        for yes in [
+            "//nolint:contextcheck",
+            "// nolint:contextcheck",
+            "//\tnolint:contextcheck",
+            "//nolint:gosec,contextcheck // why",
+        ] {
+            assert!(is_nolint_comment(yes), "{yes}");
+        }
+        for no in [
+            "//  nolint:contextcheck",
+            "// nolint : contextcheck",
+            "//nolint",
+            "/* nolint:contextcheck */",
+            "// see nolint:contextcheck below",
+        ] {
+            assert!(!is_nolint_comment(no), "{no}");
+        }
+    }
 
     #[test]
     fn ctx_fact_roundtrip_json() {

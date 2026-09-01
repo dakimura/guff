@@ -18223,3 +18223,115 @@ func ScrubControls[S ~string | ~[]byte](s S, idx int) []byte {
 
 型パラメータの core type が slice / string のとき `copy` は合法。baseline には
 書かずに残す（行を足せば 1 件の劣化を許し続ける）。
+
+### 2026-09-01（続き 120）— `collectCtxRef` の `ok` を捨てると、上流が**見るのをやめた関数**を測り続ける
+
+scaleway-cli の `contextcheck` 2 件。
+
+```
++guff core/bootstrap.go:252:contextcheck:Function `build->hydrateCobra->usageFuncBuilder->usageFuncBuilder$1` should pass the context parameter
++guff core/shell.go:230:contextcheck:Function `Complete->shellAutoComplete` should pass the context parameter
+```
+
+最小再現を 2 つ書いたら **1 件目は再現しなかった** —— 同じ形（ビルダが
+`func(*Cmd) error` を返し、その中で `command.Context()` を ctx 取りの関数に渡す）を
+両ツールに通すと**どちらも撃つ**。そこで報告側を疑い、`core` パッケージに
+`zzProbe(ctx, b)` を 4 本足して鎖の各段を直接呼ばせたところ、上流も
+`build` / `hydrateCobra` / `usageFuncBuilder` を**invalid と判定していた**。
+違うのは `Bootstrap` から報告しないことだけで、原因は 47 行上にあった:
+
+```go
+if ctx == nil {
+	ctx = context.Background() //nolint: contextcheck
+}
+```
+
+上流の `checkFuncWithCtx` は
+
+```go
+refMap, ok := r.collectCtxRef(f, isHttpHandler)
+if !ok { return }
+```
+
+で、`collectCtxRef` は **"Non-inherited new context" を 1 件でも出したら `ok=false`**
+を返す。自分の context を捨てた関数には、それ以上何も訊かない。
+その 1 件は `//nolint` が消すので golangci-lint の出力は空になり、
+**鎖の報告も一緒に消える**。guff の `collect_ctx_ref` は `HashMap` だけを返していて、
+`ok` に当たるものが無かった。
+
+2 件目は `RunShell` の `prompt.New(…, completer.Complete, …)`。
+go/ssa はメソッド値に `$bound` という**別の関数**を建て、`RelString` は
+`(*core.Completer).Complete$bound` を返す。contextcheck はそれに寄りかかっていて、
+接尾辞付きのキーには fact が無いので**メソッドの判定は呼び出し側に伝わらない**
+（`checkFuncWithoutCtx` が `$thunk` / `$bound` を名前で飛ばすのも同じ前提）。
+guff の `func_rel_string` は `f.object` からキーを組んでいたので**接尾辞が落ち**、
+`c.Complete` を渡すことが `(*Completer).Complete` の直接呼び出しに見えていた。
+飛ばす側のガードは書いてあったが、キーがそうならないので**死んだコード**だった。
+
+**そこから 4 つ出た。** 形を並べて測ったら、片付いていないものが芋づるで出てきた:
+
+3. **`Reportf` の親フォールバックが無い。** 上流は
+   `pos := instr.Pos(); if !pos.IsValid() && instr.Parent() != nil { pos = instr.Parent().Pos() }`。
+   guff は位置が無ければ**捨てて**いた。
+4. **その位置がそもそも無かった。** `if b { ctx = context.Background() }` は
+   lift で φ になり、go/ssa は `phi.pos = alloc.Pos()`、`emitLocalVar` は
+   `emitLocal(f, v.Type(), v.Pos(), v.Name())` —— つまり**spill された引数の cell は
+   その引数の識別子の位置を持つ**。guff は `emit_local_var` が `NO_POS` を渡し、
+   `lift` も φ に位置を付けていなかったので、条件付きで置き換えた変数は
+   **関数のどこにも位置を持たない**。上流が `30:18`（`ctx` 引数）と言うところで
+   guff は 3 と 4 を直して初めて同じ列を出す。
+5. **`context.Background` / `TODO` を名前で見て invalid にする guff 独自のガード。**
+   上流は返り値が context なので `CtxOut` として**その命令ごと飛ばす**。
+   作って誰にも渡さない context は finding ではない。
+6. **`docFlag` が未実装だった**（モジュール冒頭に DEFERRED と書いてあった）。
+   これは golangci-lint の `//nolint` プロセッサとは別物で、
+   `//nolint:` + `contextcheck` の**doc コメント**が付いた関数は
+   `EntryNone` になり **判定を 1 つも記録しない** —— だからその**呼び出し側**まで黙る。
+   プロセッサが届く範囲（宣言そのもの）の外の話。
+   `// @contextcheck(req_has_ctx)` は逆に、2 引数の形をしていない関数を
+   `*http.Request` を取るだけでハンドラに格上げする。
+   guff の解析ロードは `Mode::NONE` で**ファイル先頭より後のコメントを全部落とす**ので、
+   本文に `contextcheck` を含むファイルだけ `COMMENTS_ONLY` で私物 FileSet に再パースし、
+   バイトオフセット経由で位置を戻している。
+
+**測定**: scratch のグリッド（7 ファイル・上流 14 キー）と、fixture 5 本 20 形
+（`reassign` 6 / `boundmethod` 3 / `docflag` 5 / `reqctx` 4 / `background` 2）を
+両ツールに通して**全キー一致**。効いた形の内訳:
+
+| 形 | 上流 | 修正前の guff |
+|---|---|---|
+| `ctx = context.Background()`（無条件） | 呼び出しの非継承 + 鎖 | 一致 |
+| 同（`if` の中 → φ） | 引数の位置に非継承のみ | **何も出ない** + 鎖を誤射 |
+| 同（クロージャが捕まえる → Alloc のまま） | `=` の位置に非継承のみ | 非継承は一致・鎖を誤射 |
+| 同（ループの中） | 引数の位置に非継承のみ | **何も出ない** + 鎖を誤射 |
+| `ctx = context.WithValue(ctx, …)` | 鎖のみ | 一致 |
+| `install(c.Complete)` | 黙る | **鎖を誤射** |
+| `installExpr((*C).Complete)` | 黙る | 一致 |
+| `//nolint:contextcheck` の doc | 呼び出し側も黙る | **呼び出し側で誤射** |
+| `// nolint:contextcheck`（空白 1 つ） | 同上 | **誤射** |
+| `// @contextcheck(req_has_ctx)` | ハンドラとして非継承 | **黙る** |
+| `c := context.Background(); _ = c` | 黙る | **鎖を誤射** |
+
+scaleway-cli **2 → 0**、台帳 **26 → 27**。
+golden 205/205（`contextcheck` 10 → 25 キー、キー集合の差分で**消失なし**）、
+fix tier 205/205、reject 14、isolate `contextcheck` P=R=100%、smoke 1、
+workspace テスト緑、OSS pr tier 8 target すべて P=R=100%。
+`emit_local_var` の位置付けは **SSA 全体に効く変更**なので、
+ゲートは linter 修正のときと同じ全部を回した。
+
+**単体テスト**: 既存の `contextcheck_flags_non_inherited_and_missing_ctx` は
+`any(contains("Non-inherited"))` と `any(contains("should pass"))` の 2 本で、
+**3 つ目の関数 `badAssign`（何も出ないのが正解）を測っていなかった**ので
+`assert_eq!(len, 2)` と種類別の件数に変えた。新しい 5 本も全部件数で固定してある。
+`^//\s?nolint:` の境界（空白 0 / 1 / 2 個、コロン前の空白、ブロックコメント、行途中）は
+`is_nolint_comment` の `#[test]` が持つ。
+
+**踏んだ罠**: `//  nolint:contextcheck`（空白 2 つ = 一致しない形）を fixture に置いたら
+**gofmt が空白を 1 つに詰めて** skip される形に変わる。
+`// nolint : contextcheck`（コロンの前に空白）は gofmt が触っても一致しないままなので、
+Go 側はそちらに置き換え、空白 2 つは Rust の `#[test]` で持たせた。
+
+**残った health の赤**: scaleway-cli の `internal/tasks` が `ill_typed`。
+`TaskFunc[any, any]` の実引数が `func(ctx, *Task, any) (any, error)` と一致しないと言う
+**ジェネリクスの型検査器の穴**で、本件とは無関係（2026-08-31 の hunt でも
+同じ 3 エラーが同じ行に出ている）。baseline には書かずに残す。

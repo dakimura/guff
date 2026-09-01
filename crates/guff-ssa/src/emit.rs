@@ -116,7 +116,12 @@ pub fn emit_local(
 pub fn emit_local_var(prog: &mut Program, fid: FuncId, block: BlockId, obj: ObjectId) -> Value {
     let typ = obj.typ(&prog.object_arena).expect("local var has a type");
     let comment = obj.name(&prog.object_arena).to_string();
-    let v = emit_local(prog, fid, block, typ, NO_POS, comment);
+    // The cell carries the *variable's* position (Go: `emitLocal(f, v.Type(),
+    // v.Pos(), v.Name())`), which for a spilled parameter is that parameter's
+    // identifier. `lift` hands it on to the φ it builds, and that is the only
+    // position a conditionally reassigned variable ever has.
+    let pos = Pos(obj.pos(&prog.object_arena) as i64);
+    let v = emit_local(prog, fid, block, typ, pos, comment);
     prog.functions.get_mut(fid).objects.insert(obj, v);
     v
 }

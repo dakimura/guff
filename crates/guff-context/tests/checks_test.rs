@@ -186,16 +186,131 @@ fn contextcheck_flags_non_inherited_and_missing_ctx() {
     let dir = support::testdata("contextcheck");
     let pkg = support::typecheck_pkg("example.com/contextcheck", &dir.join("bad.go"));
     let messages = support::run_analyzer(contextcheck(), &pkg);
-    assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("Non-inherited new context")),
+    // `badAssign` builds a context and never passes it anywhere, which is not a
+    // finding — counting instead of `any(contains(..))` is what keeps that
+    // third function measured.
+    assert_eq!(messages.len(), 2, "{messages:?}");
+    assert_eq!(
+        messages.iter().filter(|m| m.contains("Non-inherited new context")).count(),
+        1,
         "{messages:?}"
     );
     assert!(
         messages
             .iter()
-            .any(|m| m.contains("should pass the context parameter")),
+            .any(|m| *m == "Function `inner` should pass the context parameter"),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn contextcheck_stops_at_a_replaced_context() {
+    // Upstream's `collectCtxRef` returns `ok = false` the moment it reports a
+    // non-inherited context, and `checkFuncWithCtx` then returns: a function
+    // that threw its own context away is asked nothing more, so the callee
+    // chains it would otherwise be told about stay silent. guff kept going and
+    // invented them (scaleway-cli `core/bootstrap.go:252`, where line 205 is
+    // `ctx = context.Background() //nolint: contextcheck`).
+    //
+    // Seven shapes, and which of the two diagnostics each one produces is the
+    // point: a *store* or a *phi* silences the chain, a bare call on a
+    // replaced register does not.
+    let dir = support::testdata("contextcheck_reassign");
+    let pkg = support::typecheck_pkg(
+        "example.com/contextcheck_reassign",
+        &dir.join("reassign.go"),
+    );
+    let messages = support::run_analyzer(contextcheck(), &pkg);
+    assert_eq!(messages.len(), 7, "{messages:?}");
+    let chain = "Function `helper` should pass the context parameter";
+    let fresh = "Non-inherited new context, use function like `context.WithXXX` instead";
+    // NoReassign, ReassignPlain, ReassignInherited.
+    assert_eq!(messages.iter().filter(|m| *m == chain).count(), 3, "{messages:?}");
+    // ReassignPlain's own call, then Phi / Captured / Loop.
+    assert_eq!(messages.iter().filter(|m| *m == fresh).count(), 4, "{messages:?}");
+}
+
+#[test]
+fn contextcheck_skips_bound_method_values() {
+    // `install(c.Complete)` builds go/ssa's `$bound` closure target, a function
+    // distinct from the method, and `RelString` keeps the suffix. contextcheck
+    // leans on that: the suffixed key has no verdict, so a method handed to a
+    // library never drags its own chain into the caller. guff built the fact
+    // key from the method *object* alone, dropped the suffix, and reported.
+    // The method expression (`$thunk`) is the same story; only the direct call
+    // is a finding.
+    let dir = support::testdata("contextcheck_boundmethod");
+    let pkg = support::typecheck_pkg(
+        "example.com/contextcheck_boundmethod",
+        &dir.join("bound.go"),
+    );
+    let messages = support::run_analyzer(contextcheck(), &pkg);
+    assert_eq!(
+        messages,
+        vec!["Function `Complete->autoComplete` should pass the context parameter"],
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn contextcheck_reads_its_own_nolint_doc_directive() {
+    // This is upstream's `docFlag`, not golangci-lint's `//nolint` processor:
+    // a skipped function records no verdict at all, so its *callers* fall
+    // silent too — somewhere the processor would never have reached. Five
+    // shapes pin the regexp `^//\s?nolint:` and the `contextcheck` substring:
+    // no space and one space skip, another linter's directive, a space before
+    // the colon, and a plain doc comment do not.
+    let dir = support::testdata("contextcheck_docflag");
+    let pkg = support::typecheck_pkg(
+        "example.com/contextcheck_docflag",
+        &dir.join("docflag.go"),
+    );
+    let messages = support::run_analyzer(contextcheck(), &pkg);
+    assert_eq!(messages.len(), 3, "{messages:?}");
+    for name in ["notSkippedOtherLinter", "notSkippedSpacedColon", "plainDoc"] {
+        let want = format!("Function `{name}` should pass the context parameter");
+        assert!(messages.iter().any(|m| *m == want), "{want}: {messages:?}");
+    }
+}
+
+#[test]
+fn contextcheck_req_has_ctx_directive_makes_an_entry() {
+    // `// @contextcheck(req_has_ctx)` promotes any function taking an
+    // `*http.Request` to a handler, without the canonical two-parameter shape.
+    // Without it the same function is an ordinary no-context callee, and the
+    // finding moves to its caller.
+    let dir = support::testdata("contextcheck_reqctx");
+    let pkg =
+        support::typecheck_pkg("example.com/contextcheck_reqctx", &dir.join("reqctx.go"));
+    let messages = support::run_analyzer(contextcheck(), &pkg);
+    assert_eq!(messages.len(), 3, "{messages:?}");
+    let handler = "Non-inherited new context, use function like `context.WithXXX` or `r.Context` instead";
+    // TaggedHandler (directive) and CanonicalHandler (shape).
+    assert_eq!(messages.iter().filter(|m| *m == handler).count(), 2, "{messages:?}");
+    assert!(
+        messages
+            .iter()
+            .any(|m| m == "Function `PlainRequest` should pass the context parameter"),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn contextcheck_ignores_a_fresh_context_that_goes_nowhere() {
+    // `context.Background()` returns a context, so upstream classifies the call
+    // as ctx-*out* and skips it outright — building one and dropping it is not
+    // a finding. guff carried an extra guard that matched the callee by name
+    // and condemned the function; only the closure that actually captures the
+    // context is reported.
+    let dir = support::testdata("contextcheck_background");
+    let pkg = support::typecheck_pkg(
+        "example.com/contextcheck_background",
+        &dir.join("background.go"),
+    );
+    let messages = support::run_analyzer(contextcheck(), &pkg);
+    assert_eq!(
+        messages,
+        vec!["Function `bgToClosure` should pass the context parameter"],
         "{messages:?}"
     );
 }
