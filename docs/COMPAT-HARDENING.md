@@ -19336,3 +19336,47 @@ G122 の sink も G703 の形も**定数でないパスを必要としている*
 測っているものが消える。単体テストは「G304 以外は 0 件、G304 はちょうど 3 件」に締めた。
 fix tier 208/208、reject 14、workspace テスト緑、OSS pr tier 8 target すべて
 P=R=100%、authelia は 3 のまま。台帳は 29/100。
+
+### 2026-09-01（続き 138）— `Walk` のコールバックは**名前で渡せる**。SSA では呼び出し先のリテラルと同じ値である
+
+続き 137 で特定した authelia の 1 件。`internal/suites/utils.go` は
+
+```go
+func fixCoveragePath(path string, file os.FileInfo, err error) error {
+	…
+	if data, err = os.ReadFile(path); err != nil { //nolint:gosec
+```
+
+を `filepath.Walk` に**名前で**渡している。guff の G122 は自分の doc に
+「Covers inline `FuncLit` callbacks (the common case). Named-function callbacks
+… remain DEFERRED」と書いてあり、そのとおり見ていなかった。
+
+上流はコールバック引数を SSA の値として解決する（`ResolveFuncs`）ので、
+**呼び出し位置に書いたリテラルと、名前で渡した関数と、その関数を入れたローカルは
+同じ `*ssa.Function`** になる。そして findings は**シンクの位置で重複排除**される
+（`issuesByPos`）—— 同じコールバックを 3 か所の `Walk` から渡しても 1 件。
+
+**測定**: 11 形。修正前は 2 形が乖離（名前で渡す／ローカル経由でしか渡さない）、
+修正後は全一致。**黙る側が 5 形あって、それぞれ理由が違う**のが今回の収穫:
+
+| 形 | 上流 | なぜ |
+|---|---|---|
+| メソッド値 `w.cb` | 黙る | thunk の引数 0 は**レシーバ**で、規則は「第 1 引数が string」しか見ない |
+| 関数の返り値 `pick()` | 黙る | `ResolveFuncs` に Call の枝が無い |
+| 構造体フィールド `h.fn` | 黙る | `UnOp(MUL)` の先が `FieldAddr` で枝が無い |
+| 呼び出し側のパラメータ | 黙る | 関数値が無い |
+| パスに触らないコールバック | 黙る | `pathDependsOn` が当たらない |
+
+`check_g122_walk_call` を `check_call` の枝から**自前のパス**に出した ——
+コールバックはパッケージのどのファイルで宣言されていてもよく、
+重複排除は 1 回の run 全体で効く必要がある。ローカルは
+「`cb := namedCallback` の別名」を 1 段だけ辿る（SSA のレジスタがそのまま関数である、
+に対応する最小の形）。
+
+authelia **3 → 2**（残りは `unparam` の指示子 1 つと、`templates/funcs.go:412` の
+まだ再現していない 1 つ）。台帳は 29/100 のまま。
+golden 208/208（`gosec` 187 → 198 キー、キー集合の差分で消失なし。新しい fixture の
+11 キーのうち 4 が G122 で、7 は同じ `os.ReadFile(path)` を G304 が見たもの）、
+fix tier 208/208、reject 14、workspace テスト緑（新規テストは 11 の walk に対する
+4 件を `assert_eq!` で固定する）、OSS pr tier 8 target すべて P=R=100%、
+syncthing 9 / gitea / prometheus は動かず。

@@ -164,6 +164,26 @@ fn gosec_g123_reports_verifypeer_without_a_resumption_guard() {
     );
 }
 
+/// G122 over a fixture that is about *which callbacks are found*.
+///
+/// The callback argument is resolved as an SSA value upstream, so a function
+/// named at the call site and a local holding one are the same thing, while a
+/// call result, a struct field and the caller's own parameter resolve to
+/// nothing. Findings are deduped by the sink's position, so the same callback
+/// reached from three walks is one finding. authelia passes `fixCoveragePath`
+/// to `filepath.Walk` by name, and a `FuncLit`-only rule sees none of it.
+#[test]
+fn gosec_g122_resolves_named_callbacks_and_dedupes_by_sink() {
+    let pkg = support::typecheck_fixture("gosec", "example.com/gosec/g122", "g122.go");
+    let messages = support::run_analyzer(gosec(), &pkg);
+    let g122 = messages.iter().filter(|m| m.starts_with("G122: ")).count();
+    // Counted: eleven walks, four findings. Two inline literals, one named
+    // callback (reached three times, deduped to one) and one reached only
+    // through a local. The other five callbacks are silent, and each is silent
+    // for its own reason — see the fixture.
+    assert_eq!(g122, 4, "{messages:?}");
+}
+
 /// G304 over one fixture whose every function is one file-reading call.
 ///
 /// "The argument is a variable" is one of five branches. The other four are the
