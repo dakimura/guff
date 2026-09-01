@@ -12,7 +12,7 @@ use guff::ast::{Decl, Expr, GenDecl, Spec};
 use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
-use guff_analysis::code::is_integer_literal;
+use guff_analysis::code::{is_integer_constant, is_integer_literal};
 use guff_types::arena::ObjectId;
 
 use guff_types::arena::TypeData;
@@ -31,25 +31,6 @@ fn is_integer(pass: &Pass<'_>, expr: &Expr) -> bool {
     };
     let u = tav.typ.underlying(&artifacts.types);
     matches!(artifacts.types.get(u), TypeData::Basic(b) if matches!(b.kind(), BasicKind::Int | BasicKind::Int8 | BasicKind::Int16 | BasicKind::Int32 | BasicKind::Int64 | BasicKind::Uint | BasicKind::Uint8 | BasicKind::Uint16 | BasicKind::Uint32 | BasicKind::Uint64 | BasicKind::Uintptr))
-}
-
-/// `pattern.IntegerLiteral`: "a constant expression made up of only integer
-/// basic literals and the `+` and `-` unary operators"
-/// (honnef `pattern/pattern.go:318`, matched by
-/// `(Or (BasicLit "INT" _) (UnaryExpr (Or "+" "-") (IntegerLiteral _)))`).
-///
-/// guff's `code::is_integer_literal` evaluates the *constant value* of any
-/// expression, which is a wider question — a named constant answers it. Upstream
-/// gives named constants their own branch below, with a different message and a
-/// much narrower condition, so this check has to ask for the shape as well.
-fn is_integer_literal_shape(expr: &Expr) -> bool {
-    match expr {
-        Expr::BasicLit(lit) => lit.kind == Some(Token::INT),
-        Expr::UnaryExpr(u) => {
-            matches!(u.op, Token::ADD | Token::SUB) && is_integer_literal_shape(&u.x)
-        }
-        _ => false,
-    }
 }
 
 /// Constants of this package declared as exactly `name = iota` — one name, one
@@ -102,8 +83,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let NodeRef::BinaryExpr(bin) = node else { return };
         if !matches!(bin.op, Token::AND | Token::OR | Token::XOR) { return; }
         if !is_integer(pass, &bin.x) { return; }
-        // The right operand must evaluate to zero either way.
-        if !is_integer_literal(pass, &bin.y, 0) { return; }
+        // The right operand must evaluate to zero either way — the folded
+        // constant, not a literal: upstream's two branches ask different
+        // questions of it. The ident branch takes `constant.Int64Val(obj.Val())`
+        // (so `flagA = iota` qualifies), and only the *else* branch asks
+        // `code.IsIntegerLiteral`. Sharing the literal test across both would
+        // drop the iota branch entirely.
+        if !is_integer_constant(pass, &bin.y, 0) { return; }
 
         let rendered = render_expr(&Expr::BinaryExpr(bin.clone()));
         let y_rendered = render_expr(&bin.y);
@@ -129,7 +115,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 ),
                 _ => return,
             }
-        } else if is_integer_literal_shape(&bin.y) {
+        } else if is_integer_literal(pass, &bin.y, 0) {
             match bin.op {
                 Token::AND => format!("{rendered} always equals 0"),
                 Token::OR | Token::XOR => {

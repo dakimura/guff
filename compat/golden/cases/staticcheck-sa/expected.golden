@@ -185,6 +185,14 @@ sa4001/bad/bad.go:8:6:staticcheck::SA4001: &*x will be simplified to x. It will 
 sa4001/bad/bad.go:9:6:staticcheck::SA4001: *&x will be simplified to x. It will not copy x.
 sa4003/bad/bad.go:4:9:staticcheck::SA4003: no value of type uint is less than 0
 sa4003/bad/bad.go:5:9:staticcheck::SA4003: no value of type uint is less than 0
+sa4003/literal/literal.go:27:6:staticcheck::SA4003: every value of type uint32 is >= 0
+sa4003/literal/literal.go:28:6:staticcheck::SA4003: every value of type uint32 is >= 0
+sa4003/literal/literal.go:29:6:staticcheck::SA4003: every value of type uint32 is >= 0
+sa4003/literal/literal.go:30:6:staticcheck::SA4003: every value of type uint32 is >= 0
+sa4003/literal/literal.go:31:6:staticcheck::SA4003: every value of type uint32 is >= 0
+sa4003/literal/literal.go:43:11:staticcheck::SA4000: identical expressions on the left and right side of the '-' operator
+sa4003/literal/literal.go:48:6:staticcheck::SA4024: builtin function len does not return negative values
+sa4003/literal/literal.go:54:6:staticcheck::SA4028: x % 1 is always zero
 sa4004/bad/bad.go:8:3:staticcheck::SA4004: the surrounding loop is unconditionally terminated
 sa4005/bad/bad.go:6:2:staticcheck::SA4005: ineffective assignment to field T.X
 sa4006/bad/bad.go:11:2:staticcheck::SA4006: this value of n is never used

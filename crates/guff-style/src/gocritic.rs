@@ -1463,7 +1463,7 @@ fn check_bad_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
         {
             let idx = if name.ends_with("SplitN") { 2 } else { 3 };
             if let Some(arg) = call.args.get(idx) {
-                if code::is_integer_literal(pass, arg, 0) || is_int_lit(arg, 0) {
+                if code::is_integer_constant(pass, arg, 0) || is_int_lit(arg, 0) {
                     report(
                         pending,
                         arg.pos().0 as u32,
@@ -2384,7 +2384,7 @@ fn check_wrapper_func(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
     if let Expr::SelectorExpr(sel) = call.fun.as_ref() {
         if sel.sel.name == "Add"
             && call.args.len() == 1
-            && (code::is_integer_literal(pass, &call.args[0], -1) || is_int_lit(&call.args[0], -1))
+            && (code::is_integer_constant(pass, &call.args[0], -1) || is_int_lit(&call.args[0], -1))
             && type_is_sync_wait_group(pass, &sel.x)
         {
             let whole = call_text(pass, call).unwrap_or_else(|| "Add(-1)".into());
@@ -2398,7 +2398,7 @@ fn check_wrapper_func(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
         }
         if sel.sel.name == "Truncate"
             && call.args.len() == 1
-            && (code::is_integer_literal(pass, &call.args[0], 0) || is_int_lit(&call.args[0], 0))
+            && (code::is_integer_constant(pass, &call.args[0], 0) || is_int_lit(&call.args[0], 0))
             && type_is_bytes_buffer(pass, &sel.x)
         {
             let whole = call_text(pass, call).unwrap_or_else(|| "Truncate(0)".into());
@@ -2417,7 +2417,7 @@ fn check_wrapper_func(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
         // identifiers, so it only ever fires on that exact spelling.
         "strings.SplitN" | "bytes.SplitN"
             if call.args.len() >= 3
-                && (code::is_integer_literal(pass, &call.args[2], -1)
+                && (code::is_integer_constant(pass, &call.args[2], -1)
                     || is_int_lit(&call.args[2], -1))
                 && (name == "strings.SplitN" || is_bytes_splitn_literal_form(call)) =>
         {
@@ -2436,7 +2436,7 @@ fn check_wrapper_func(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
         }
         "strings.Replace" | "bytes.Replace"
             if call.args.len() >= 4
-                && (code::is_integer_literal(pass, &call.args[3], -1)
+                && (code::is_integer_constant(pass, &call.args[3], -1)
                     || is_int_lit(&call.args[3], -1)) =>
         {
             let pkg = if name.starts_with("bytes") {

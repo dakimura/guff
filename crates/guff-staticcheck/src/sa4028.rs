@@ -26,9 +26,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let mut pending: Vec<(u32, String)> = Vec::new();
     matches(pass, &inspect, pat(), |node, _| {
         let NodeRef::BinaryExpr(bin) = node else { return true };
-        if expr_to_int(pass, &bin.y) != Some(1) && !is_integer_literal(pass, &bin.y, 1) {
-            return true;
-        }
+        // The pattern already asked `(IntegerLiteral "1")`, and upstream asks
+        // nothing further. The belt-and-braces `expr_to_int == Some(1)` here
+        // was an *or*, so it let a named constant back in after the pattern was
+        // tightened.
+        let _ = &bin.y;
         pending.push((match_pos(node), "x % 1 is always zero".into()));
         true
     });

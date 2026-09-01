@@ -18617,3 +18617,77 @@ hunt は gitea / thanos / prometheus / jaeger / argo-cd / nats-server すべて 
 `typecheck_with_deps` に載せ替え、12 形をメッセージごと固定した。
 `guff-ineffassign` のハーネスには依存を渡す口が無かったので追加した ——
 「別のパッケージに属するか」が問い全体なのに、1 ファイルには属する先が無い。
+
+### 2026-09-01（続き 125）— `IntegerLiteral` は**構文パターン**である。畳んだ定数で答えると、名前付き定数が全部当たる
+
+velero の残り 3 件のうち 2 件。
+
+```
++guff pkg/kopia/kopia_log.go:64:staticcheck:every value of type github.com/sirupsen/logrus.Level is >= 0
++guff pkg/kopia/kopia_log.go:66:〃
+```
+
+対象は `entry.Logger.GetLevel() >= logrus.PanicLevel`。`logrus.Level` は
+`uint32` で `PanicLevel` は 0 なので**内容は正しい**が、上流は黙る。
+
+**理由 1: 上流の `IntegerLiteral` は構文パターンである。**
+
+```go
+var integerLiteralQ = MustParse(`(Or (BasicLit "INT" _) (UnaryExpr (Or "+" "-") (IntegerLiteral _)))`)
+
+func (lit IntegerLiteral) Match(m *Matcher, node any) (any, bool) {
+	matched, ok := match(m, integerLiteralQ.Root, node)   // 形が先
+	…
+	tv, ok := m.TypesInfo.Types[matched.(ast.Expr)]       // 値はその後
+```
+
+SA4003 のコメントがその理由を書いている ——
+「math 定数と整数リテラルしか見ない。**ビルドタグで定数値が変わるときの誤検出を避けるため**」。
+guff は `code::is_integer_literal` も pattern エンジンの `match_integer_literal` も
+**畳んだ定数**で答えていたので、その値を持つ名前付き定数が全部当たっていた。
+
+同じ helper を使う staticcheck の 7 checker をグリッドで測ったら、
+**SA4003 / S1004 / SA4024 / SA4028 が同型で乖離**していた（`x % one`、
+`len(s) < zero`、`bytes.Compare(a,b) == zero`）。
+**S1009 は上流に「Ident なら定数値でよい」第 2 の枝がある**ので元から一致していて、
+そこを直してはいけない。
+
+**理由 2: メッセージが名前付き型を書いていた。** golangci-lint 2.12.2 が pin する
+honnef **v0.7.0** は `basic, ok := tx.Underlying().(*types.Basic)` を取って
+`basic` を書くので `every value of type uint32 is >= 0`。guff は `tav.typ` を
+書いていた（underlying は既に計算してあるのに使っていなかった）。
+**ローカルの `dominikh/go-tools` checkout は pin 版ではなく**、そちらは `tx` を書く
+新しい版なので、読み違えれば逆向きに直すところだった。
+
+**直したら SA4016 が 3 件落ちた。** guff は
+
+```rust
+// The right operand must evaluate to zero either way.
+if !is_integer_literal(pass, &bin.y, 0) { return; }
+```
+
+という**共有の前提**を置いてから iota 枝とリテラル枝に分かれていた。上流は分かれる前に
+共有の判定を持たない —— Ident 枝は `constant.Int64Val(obj.Val())` を、
+else 枝だけが `code.IsIntegerLiteral` を訊く。共有した guard を構文的にした瞬間、
+`x | flagA`（`flagA = iota`）が Ident なので落ちた。
+**隣の枝の guard を継承しない**の 5 回目。前提を `is_integer_constant` に戻して直した。
+
+述語は 2 つに割った: `code::is_integer_constant`（畳んだ定数。gocritic /
+modernize / intrange の 14 か所はこちらを指す —— 別の上流の移植なので）と
+`code::is_integer_literal`（上流と同じ構文パターン。staticcheck の 8 か所）。
+`sa4016.rs` は**自前の `is_integer_literal_shape` を持っていた**ので、
+上流が 1 つの helper を共有している以上こちらも 1 つにして消した。
+
+**測定**: 15 形（リテラルの綴り 5 種 —— 10進 / 16進 / 8進 / 符号付き / 括弧、
+名前付き定数 2 種、畳んだ式、`make(chan T, 0)` と `make(chan T, zero)`、
+`bytes.Compare == 0` の 4 形、`len(s) < 0` の 2 形、`x % 1` の 2 形）。
+括弧付きは**上流も撃つ** —— `match` が両辺の `ParenExpr` を剥がしてから
+dispatch するので、`(0)` はリテラルに届く。最初その腕を書き忘れて 1 形だけ乖離した。
+
+velero **3 → 1**（残りは `printf` 1 件で別件）。
+golden 206/206（`staticcheck-sa` 299 → 307 キー、`staticcheck-s` 103 → 107 キー、
+どちらもキー集合の差分で消失なし。**ratchet が一度 EXCEEDED になって
+SA4016 の 3 件を教えてくれた**）、fix tier 206/206（両 case を録り直し）、
+reject 14、isolate 116、smoke 1、workspace テスト緑、
+OSS pr tier 8 target すべて P=R=100%、hunt は thanos / prometheus / gitea /
+jaeger / argo-cd / nats-server / fiber すべて allowlist 内。

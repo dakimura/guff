@@ -90,6 +90,9 @@ sa4000/ok/ok.go                              crates/guff-staticcheck/tests/testd
 sa4001/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa4001/bad.go
 sa4001/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa4001/ok.go
 sa4003/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa4003/bad.go
+# `IntegerLiteral` is a syntactic pattern, not a folded constant: SA4003,
+# SA4024 and SA4028 all ask it.
+sa4003/literal/literal.go                    crates/guff-staticcheck/tests/testdata/sa4003/literal.go
 sa4003/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa4003/ok.go
 sa4004/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa4004/bad.go
 sa4004/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa4004/ok.go

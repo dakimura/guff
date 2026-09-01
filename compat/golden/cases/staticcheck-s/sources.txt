@@ -16,6 +16,8 @@ s1002/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1002/ok.go
 s1003/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1003/bad.go
 s1003/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1003/ok.go
 s1004/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1004/bad.go
+# The same question, from S1004 and S1019.
+s1004/literal/literal.go  crates/guff-staticcheck/tests/testdata/s1004/literal.go
 s1004/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1004/ok.go
 s1005/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1005/bad.go
 s1005/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1005/ok.go
