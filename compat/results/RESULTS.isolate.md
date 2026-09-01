@@ -63,7 +63,7 @@
 | isolate-intrange | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-mirror | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-nilerr | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
-| isolate-wrapcheck | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
+| isolate-wrapcheck | 9 | 9 | 9 | 100.0% | 100.0% | 0 |
 | isolate-fatcontext | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-noctx | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | isolate-musttag | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
@@ -491,7 +491,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| wrapcheck | 3 | 3 | 3 | 100.0% | 100.0% |
+| wrapcheck | 9 | 9 | 9 | 100.0% | 100.0% |
 
 ## isolate-fatcontext
 
