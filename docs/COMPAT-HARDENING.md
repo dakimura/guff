@@ -19617,3 +19617,50 @@ golden 208/208（`unparam` 57 → 58 キー、キー集合の差分で消失な�
 fix tier 208/208、reject 14、workspace テスト緑（新規テストは「ほぼ同じ 2 つの
 メソッドのうち、自分の型が実装を主張していない方だけが報告される」を
 メッセージの列で固定する）、OSS pr tier 8 target すべて P=R=100%。
+
+### 2026-09-02（続き 144）— `%v` に渡した error は `any` に広げられている。読み抜かないと、可変長の腕だけが黙る
+
+syncthing の最後の 1 件、`cmd/strelaysrv/pool.go:60`:
+
+```go
+if err := json.Unmarshal(bs, &x); err == nil {
+	…
+	continue
+}
+log.Printf("Joined pool %s, failed to deserialize response: %v", pool, err)
+```
+
+内側の `err :=` が外側を隠していて、`Printf` が名前を出すのは**外側の err**
+—— そこでは nil だと分かっている。上流は報告し、guff は黙っていた。
+
+**9 形測って割れ方がはっきりした**: `sink(err)`（非可変長）は**両ツールとも撃つ**。
+`log.Printf("… %v", err)` は上流だけが撃つ。可変長の腕だけが落ちている。
+
+原因は**インタフェースへの広げ方**だった。`...any` に渡す error は
+`ChangeInterface` で `any` になる。上流の `extractVariadicErrors` はそれを
+**読み抜いてから** `isErrType` を訊く。guff の `peel_iface_wrap` は
+`ChangeType` しか剥がしておらず（コメントに「guff-ssa の ChangeInterface は
+まだスタブ」と書いてあった）、`any` を見て「error ではない」と答えていた。
+`sink(err error)` は広げが起きないので、そちらだけが動いていた。
+
+guff は可変長引数を go/ssa のように配列へ詰めない（続き 137 で G602 が
+同じ理由で落ちていることを測った）ので、実引数は平らなまま来る。
+そこで**シグネチャで `...` の位置から後ろだと分かった引数だけ**を剥がすことにした
+—— 上流も剥がすのは varargs 配列から読み出す値だけで、固定引数のループでは
+何も剥がさない。
+
+**測定**: 9 形。修正前は 3 形が乖離（外側を隠す `err :=`、別々の 2 変数、
+`if` スコープの 2 つ目）、修正後は全一致。黙る対照も測った ——
+「名前を出す error が、まさにチェックした当人」なら両ツールとも黙る。
+
+**syncthing が clean になった。台帳は 29 → 30/100。**
+
+ただし **clean は上流が自分に一貫しているときの話**である。同じバイナリで 6 回
+測って、`guff=656` は 6 回とも同じ、`golangci` は 656 が 2 回・654 が 4 回だった
+（落ちるのは `canonicalheader` の 2 件で、続き 129 / 133 / 140 / 141 と同じ）。
+台帳の行は 656/656 の回で書いてある。
+
+golden 208/208（`nilnesserr` 2 → 5 キー、キー集合の差分で消失なし）、
+fix tier 208/208、reject 14、workspace テスト緑（可変長の findings を 2 件で固定
+—— `join(err)` は広げが無く、`logf("… %v", err)` は広げがある）、
+OSS pr tier 8 target すべて P=R=100%。

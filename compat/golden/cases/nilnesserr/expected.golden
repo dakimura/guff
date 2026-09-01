@@ -8,3 +8,6 @@
 
 bad.go:13:3:nilnesserr::return a nil value error after check error
 bad.go:28:3:nilnesserr::return a nil value error after check error
+bad.go:51:6:nilnesserr::call variadic function with a nil value error after check error
+bad.go:66:6:nilnesserr::call variadic function with a nil value error after check error
+bad.go:81:6:nilnesserr::call function with a nil value error after check error

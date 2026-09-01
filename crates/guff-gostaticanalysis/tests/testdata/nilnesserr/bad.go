@@ -66,3 +66,32 @@ func badMulti() (error, error) {
 	}
 	return nil, nil
 }
+
+// The variadic element type decides whether the value is widened. `join(errs
+// ...error)` above takes the error as it is; `logf(format string, args ...any)`
+// wraps it in a `ChangeInterface`, and a check that does not read through that
+// sees an `any`, decides it is not an error, and says nothing.
+func logf(format string, args ...any) {}
+
+func badWidened() {
+	err := do()
+	if err != nil {
+		return
+	}
+
+	if err := do2(); err == nil {
+		return
+	}
+
+	logf("failed: %v", err)
+}
+
+// silent — the error the message names is the one that was checked.
+func okWidened() {
+	err := do()
+	if err != nil {
+		return
+	}
+
+	logf("failed: %v", err)
+}

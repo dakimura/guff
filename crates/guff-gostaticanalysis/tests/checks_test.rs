@@ -184,9 +184,13 @@ fn nilnesserr_flags_nil_error_after_check() {
             .any(|m| m.contains("call function with a nil value error after check error")),
         "expected call finding, got {messages:?}"
     );
-    assert!(
-        messages.iter().any(|m| m.contains("variadic")),
-        "expected variadic finding, got {messages:?}"
+    // Two variadic findings: `join(err)` takes the error as it is, and
+    // `logf("… %v", err)` widens it to `any`. A check that does not read
+    // through the widening reports only the first.
+    assert_eq!(
+        messages.iter().filter(|m| m.contains("variadic")).count(),
+        2,
+        "expected both variadic findings, got {messages:?}"
     );
 }
 
