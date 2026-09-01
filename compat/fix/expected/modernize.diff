@@ -21,7 +21,7 @@
  	wg.Wait()
 --- a/mapsloop/mapsloop.go
 +++ b/mapsloop/mapsloop.go
-@@ -2,8 +2,8 @@
+@@ -2,10 +2,10 @@
  
  package modernize
  
@@ -32,6 +32,17 @@
 -		dst[k] = v
 -	}
 +	maps.Copy(dst, src)
+ }
+ 
+ // The destination is a *call result*, indexed. syncthing `lib/httpcache` writes
+@@ -18,7 +18,5 @@
+ type recorder struct{ header headers }
+ 
+ func (r *recorder) writeHeader(w interface{ Header() headers }) {
+-	for k, v := range r.header {
+-		w.Header()[k] = v
+-	}
++	maps.Copy(w.Header(), r.header)
  }
 --- a/minmax/minmax.go
 +++ b/minmax/minmax.go

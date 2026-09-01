@@ -6252,15 +6252,23 @@ fn modernize_flags_waitgroupgo() {
     );
 }
 
+/// The destination can be a call result — syncthing writes `w.Header()[k] = v`.
+/// That one went unreported not because the shape was rejected but because the
+/// fix text could not be built: rendering the tree by hand had no case for a
+/// call with no arguments, and a failure there drops the diagnostic.
 #[test]
 fn modernize_flags_mapsloop() {
     let pkg =
         support::typecheck_fixture("modernize", "example.com/modernize/mapsloop", "mapsloop.go");
     let messages = support::run_analyzer(modernize(), &pkg);
-    assert!(
+    // Counted: two loops, two findings — a plain map variable and a call
+    // result.
+    assert_eq!(
         messages
             .iter()
-            .any(|m| m.contains("Replace m[k]=v loop with maps.Copy")),
+            .filter(|m| m.contains("Replace m[k]=v loop with maps.Copy"))
+            .count(),
+        2,
         "{messages:?}"
     );
 }
@@ -6542,20 +6550,29 @@ fn modernize_slicescontains_keeps_the_assignment_token() {
 fn modernize_mapsloop_fix_adds_the_maps_import() {
     let pkg =
         support::typecheck_fixture("modernize", "example.com/modernize/mapsloop", "mapsloop.go");
-    let mut fixes = 0;
+    let mut replacements = Vec::new();
     for d in support::run_analyzer_diagnostics(modernize(), &pkg) {
         if !d.message.contains("maps.Copy") {
             continue;
         }
-        fixes += 1;
         let edits = &d.suggested_fixes[0].text_edits;
         assert_eq!(edits.len(), 2, "import edit + replacement: {edits:?}");
         // The import edit comes first and is an insertion.
         assert_eq!(edits[0].pos, edits[0].end);
         assert_eq!(edits[0].new_text, "import \"maps\"\n\n");
-        assert_eq!(edits[1].new_text, "maps.Copy(dst, src)");
+        replacements.push(edits[1].new_text.clone());
     }
-    assert_eq!(fixes, 1, "one loop in the fixture");
+    replacements.sort();
+    // The second one names a call, which is the shape the hand-written printer
+    // could not render — and a fix it cannot write is a finding it does not
+    // make.
+    assert_eq!(
+        replacements,
+        vec![
+            "maps.Copy(dst, src)".to_string(),
+            "maps.Copy(w.Header(), r.header)".to_string(),
+        ]
+    );
 }
 
 /// The prefix comes from the declaration's imports, not from the call site's

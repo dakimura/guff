@@ -865,7 +865,7 @@ fn check_rangeint(pass: &Pass<'_>, for_stmt: &ForStmt, pending: &mut Vec<Diagnos
     if init.tok == Some(Token::ASSIGN) && index_used_after_loop(pass, for_stmt, &init.lhs[0]) {
         return;
     }
-    let Some(limit_text) = expr_text(y) else {
+    let Some(limit_text) = expr_text_src(pass, y) else {
         return;
     };
     // Prefer `range slice` when limit is len(slice); otherwise range-over-int.
@@ -1611,7 +1611,7 @@ fn check_slicessort(
     if !is_natural_less(pass, lit, &call.args[0]) {
         return;
     }
-    let Some(slice_text) = expr_text(&call.args[0]) else {
+    let Some(slice_text) = expr_text_src(pass, &call.args[0]) else {
         return;
     };
     let end = call.end().0 as u32;
@@ -1719,13 +1719,13 @@ fn check_slicesdelete(
     if !increasing_slice_indices(pass, high, low) {
         return;
     }
-    let Some(x_text) = expr_text(&slice1.x) else {
+    let Some(x_text) = expr_text_src(pass, &slice1.x) else {
         return;
     };
-    let Some(high_text) = expr_text(high) else {
+    let Some(high_text) = expr_text_src(pass, high) else {
         return;
     };
-    let Some(low_text) = expr_text(low) else {
+    let Some(low_text) = expr_text_src(pass, low) else {
         return;
     };
     // DEFERRED: `int()` wrap when the indices are non-int, and the int-shadowed
@@ -2240,7 +2240,7 @@ fn check_slicescontains(
         if body_has_free_branch(body, true) {
             continue;
         }
-        let Some(slice_text) = expr_text(&rng.x) else {
+        let Some(slice_text) = expr_text_src(pass, &rng.x) else {
             continue;
         };
         let Some((prefix, import_edits)) =
@@ -2544,10 +2544,10 @@ fn check_mapsloop(
         return;
     }
 
-    let Some(m_text) = expr_text(&index.x) else {
+    let Some(m_text) = expr_text_src(pass, &index.x) else {
         return;
     };
-    let Some(x_text) = expr_text(&range_stmt.x) else {
+    let Some(x_text) = expr_text_src(pass, &range_stmt.x) else {
         return;
     };
     let end = range_stmt.body.end().0 as u32;
@@ -2614,7 +2614,7 @@ fn check_stringsseq(pass: &Pass<'_>, range_stmt: &RangeStmt, pending: &mut Vec<D
     let Some(seq_name) = split_or_fields_seq_name(pass, call) else {
         return;
     };
-    let Some(fun_text) = expr_text(&call.fun) else {
+    let Some(fun_text) = expr_text_src(pass, &call.fun) else {
         return;
     };
     // strings.Split → strings.SplitSeq (replace the selector leaf).
@@ -2733,7 +2733,7 @@ fn check_stringsseq_block(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<
         let Some(seq_name) = split_or_fields_seq_name(pass, call) else {
             continue;
         };
-        let Some(fun_text) = expr_text(&call.fun) else {
+        let Some(fun_text) = expr_text_src(pass, &call.fun) else {
             continue;
         };
         let old_fn_name = fun_text.rsplit_once('.').map_or(fun_text.as_str(), |p| p.1);
@@ -2871,7 +2871,7 @@ fn check_waitgroupgo(
         if !go_at_least(pass, pos, "go1.25") {
             continue;
         }
-        let Some(recv_text) = expr_text(add_recv) else {
+        let Some(recv_text) = expr_text_src(pass, add_recv) else {
             continue;
         };
         pending.push(Diagnostic {
@@ -3053,7 +3053,7 @@ fn check_slicesbackward(
     }
 
     let slice_expr = &len_call.args[0];
-    let Some(slice_text) = expr_text(slice_expr) else {
+    let Some(slice_text) = expr_text_src(pass, slice_expr) else {
         return;
     };
 
@@ -3283,7 +3283,7 @@ fn check_reflecttypeassert(
     if !go_at_least(pass, pos, "go1.25") {
         return;
     }
-    let Some(tstr) = expr_text(ty) else {
+    let Some(tstr) = expr_text_src(pass, ty) else {
         return;
     };
     let end = (assert.rparen.0 + 1) as u32;
@@ -3937,7 +3937,7 @@ fn check_bloop_for(
     let Some(b_recv) = benchmark_n_recv(pass, &cmp.y) else {
         return;
     };
-    let Some(b_text) = expr_text(b_recv) else {
+    let Some(b_text) = expr_text_src(pass, b_recv) else {
         return;
     };
 
@@ -3996,7 +3996,7 @@ fn check_bloop_range(
     let Some(b_recv) = benchmark_n_recv(pass, &range_stmt.x) else {
         return;
     };
-    let Some(b_text) = expr_text(b_recv) else {
+    let Some(b_text) = expr_text_src(pass, b_recv) else {
         return;
     };
 
@@ -4099,7 +4099,7 @@ fn check_unsafefuncs(
     if !is_basic_kind(pass, ptr_ty, BasicKind::UnsafePointer) {
         return;
     }
-    let Some(ptr_text) = expr_text(ptr_expr) else {
+    let Some(ptr_text) = expr_text_src(pass, ptr_expr) else {
         return;
     };
     // Drop uintptr(...) around the offset when the conversion target is uintptr.
@@ -4121,7 +4121,7 @@ fn check_unsafefuncs(
         }
         _ => sum.y.as_ref(),
     };
-    let Some(offset_text) = expr_text(offset_expr) else {
+    let Some(offset_text) = expr_text_src(pass, offset_expr) else {
         return;
     };
     let pos = sum.x.pos().0 as u32;
