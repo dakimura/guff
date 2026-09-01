@@ -519,9 +519,20 @@ impl CallGraph {
                     if matches!(common.value, Value::Builtin(_)) {
                         continue;
                     }
-                    let Some(key) =
-                        signature_key(prog, value_type_of(prog, f, common.value))
-                    else {
+                    // The *underlying* signature. `CallCommon.Signature()` is
+                    // `CoreType(c.Value.Type())`, so a call through a value of
+                    // a **named** func type (`type handler func(…)`) is keyed
+                    // by the same signature as the functions assigned to it.
+                    // Keyed by the named type instead, `signature_key` sees a
+                    // `Named` and answers `None`: the call gets no callees at
+                    // all, and every function only ever reached through such a
+                    // variable looks like an entry point. authelia dispatches
+                    // its nine OAuth2 consent handlers through one
+                    // `handlerAuthorizationConsent` variable, and three of them
+                    // then auto-tainted their `issuer *url.URL` parameter.
+                    let value_sig =
+                        value_type_of(prog, f, common.value).underlying(&prog.type_arena);
+                    let Some(key) = signature_key(prog, value_sig) else {
                         continue;
                     };
                     for &callee in by_signature.get(&key).into_iter().flatten() {
