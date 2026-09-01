@@ -19236,3 +19236,52 @@ fix tier 208/208、reject 14、workspace テスト緑（新規テストは 24 �
 14 件を**メッセージの列**で固定する）、OSS pr tier 8 target すべて P=R=100%、
 gitea / prometheus / syncthing は動かず（新しい規則なので過剰報告が出ないことを
 測るのが要点）。
+
+### 2026-09-01（続き 136）— G120 は既にある taint エンジンの**表が 1 つ**。`CheckArgs: [0]` はレシーバである
+
+authelia の残り 4 件のうち 1 件。`internal/handlers/handler_oauth2_authorization.go:201`:
+
+```go
+r.Body = http.MaxBytesReader(rw, r.Body, 10<<20)
+
+//nolint:gosec // G120 FALSE positive: bounded by MaxBytesReader on r.Body above.
+if err = r.ParseMultipartForm(5 << 20); err != nil && …
+```
+
+コメントが規則の名前を書いてくれている。上流の `analyzers/form_parsing_limits.go`
+は **52 行**で、中身は `taint.Config` が 1 つ —— guff には
+G702 / G703 / G705 / G706 / G710 で同じエンジンが既にあるので、足したのは表だけ:
+
+```rust
+static G120: TaintRule = TaintRule {
+    type_sources: &[TypeSource { pkg: "net/http", name: "Request" }],
+    sinks: &[Sink::ptr_method("net/http", "Request", "ParseMultipartForm", &[0])],
+    sanitizers: &[],
+};
+```
+
+`CheckArgs: [0]` は**引数ではなくレシーバ**（静的メソッド呼び出しでは go/ssa が
+レシーバを args[0] に置く）。つまりこの規則が訊くのは 1 つだけ ——
+「この `*http.Request` は外から来たか」。
+
+**sink が `ParseMultipartForm` **だけ**なのが規則の本体**である。上流のコメントが
+理由を書いている: `ParseForm` / `FormValue` / `PostFormValue` は標準ライブラリが
+本文を 10 MiB で止めるが、`ParseMultipartForm` の `maxMemory` 引数はメモリ上の
+部分しか縛らない。「フォームを解析する」を sink にした移植は 4 形とも撃つ。
+
+`Sink::method` は `pointer: false` 固定だったので `ptr_method` を足した
+（`(*http.Request).ParseMultipartForm` は `*T` のメソッドで、静的呼び出しの
+照合はポインタ性を比べる）。
+
+**測定**: 7 形。上流 3 件、guff も 3 件で一致（初回一致）。黙る 4 形は
+上の 3 つのアクセサと、**ここで作られたリクエスト**（`http.NewRequest` の結果は
+source ではない）。`http.MaxBytesReader` は**サニタイザではない** ——
+エンジンが追うのはリクエストのパラメータであって Body フィールドではない。
+上流の sample 自身が「`#nosec G120` で抑えろ」と書いていて、authelia は
+まさにそれを書いている。
+
+authelia **4 → 3**。台帳は 29/100 のまま。
+golden 208/208（`gosec` 166 → 169 キー、キー集合の差分で消失なし）、
+fix tier 208/208、reject 14、workspace テスト緑（新規テストは 7 呼び出しに対する
+3 件を `assert_eq!` で固定する）、OSS pr tier 8 target すべて P=R=100%、
+syncthing 9 / gitea clean のまま。

@@ -8,6 +8,15 @@ type Writer interface {
 	Write([]byte) (int, error)
 }
 
+type Closer interface {
+	Close() error
+}
+
+type ReadCloser interface {
+	Reader
+	Closer
+}
+
 func Copy(dst Writer, src Reader) (int64, error) {
 	return 0, nil
 }
