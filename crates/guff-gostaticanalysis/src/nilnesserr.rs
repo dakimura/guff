@@ -198,10 +198,27 @@ fn validate_variadic_alloc(
     Some(alloc_id)
 }
 
+/// `extractVariadicErrors`' unwrap: the value stored into the varargs array is
+/// the error *widened to `any`*, and upstream reads through that
+/// `ChangeInterface` before asking whether it is an error at all.
+///
+/// guff widens the same way (`error` is already an interface, so `emit_conv`
+/// answers `ChangeInterface`, not `MakeInterface`), but this peeled only
+/// `ChangeType`. Everything an `%v` argument goes through was therefore opaque:
+/// `log.Printf("failed: %v", err)` handed the check an `any`, `isErrType` said
+/// no, and the finding disappeared — while `sink(err)`, which needs no
+/// widening, reported. syncthing `cmd/strelaysrv/pool.go` is the first shape.
 fn peel_iface_wrap(func: &Function, v: Value) -> Value {
-    // Upstream peels ChangeInterface; guff-ssa ChangeInterface is still a stub,
-    // so peel ChangeType (same-underlying coercions) instead.
-    flatten_ssa_value(func, v)
+    let mut cur = flatten_ssa_value(func, v);
+    loop {
+        let Value::Instr(i) = cur else {
+            return cur;
+        };
+        match func.instrs.get(i) {
+            InstrData::ChangeInterface(ci) => cur = flatten_ssa_value(func, ci.x),
+            _ => return cur,
+        }
+    }
 }
 
 fn extract_variadic_errors(func: &Function, alloc_id: InstrId) -> Vec<Value> {
@@ -301,9 +318,13 @@ fn check_nilnesserr_block(
                 // args at/after the `...` parameter use the variadic message.
                 let variadic_from = fixed_param_count(prog, call);
                 for (i, &value) in call.call.args.iter().enumerate() {
-                    let msg = match variadic_from {
-                        Some(fixed) if i >= fixed => MSG_VARIADIC,
-                        _ => MSG_CALL,
+                    let (msg, value) = match variadic_from {
+                        // An argument in the `...` tail stands where upstream
+                        // reads a value out of the varargs array, so it is
+                        // unwrapped the same way. A fixed parameter is not:
+                        // upstream's plain `Call.Args` loop peels nothing.
+                        Some(fixed) if i >= fixed => (MSG_VARIADIC, peel_iface_wrap(func, value)),
+                        _ => (MSG_CALL, value),
                     };
                     report_if(
                         prog,
