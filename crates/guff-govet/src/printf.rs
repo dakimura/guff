@@ -13,7 +13,7 @@ use std::sync::OnceLock;
 use guff::ast::{CallExpr, Expr};
 use guff::node_mask;
 use guff::walk::NodeRef;
-use guff_analysis::code::{call_name, expr_to_bytes};
+use guff_analysis::code::{call_name, callee_full_name, expr_to_bytes};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use guff_types::arena::{ObjectData, TypeData};
@@ -27,14 +27,34 @@ use guff_types::alias::unalias_readonly;
 
 use crate::govet_util::expr_type;
 
+/// Upstream's `isPrint`, restricted to the formatted half — the entries whose
+/// name ends in `f`, which is exactly the test `callKind` applies before
+/// settling on `KindPrintf`. Keys are `types.Func.FullName()`, so a method
+/// carries its receiver.
+///
+/// guff had seven of them and leaned on a short-name heuristic for the rest,
+/// which has no entry for `Logf`: `t.Logf("no verbs", x)` went unreported.
 const KNOWN_PRINTF: &[&str] = &[
+    "fmt.Appendf",
     "fmt.Errorf",
     "fmt.Fprintf",
     "fmt.Printf",
     "fmt.Sprintf",
+    "runtime/trace.Logf",
     "log.Printf",
     "log.Fatalf",
     "log.Panicf",
+    "(*log.Logger).Fatalf",
+    "(*log.Logger).Panicf",
+    "(*log.Logger).Printf",
+    "(*testing.common).Errorf",
+    "(*testing.common).Fatalf",
+    "(*testing.common).Logf",
+    "(*testing.common).Skipf",
+    "(testing.TB).Errorf",
+    "(testing.TB).Fatalf",
+    "(testing.TB).Logf",
+    "(testing.TB).Skipf",
 ];
 
 // Argument-type categories (a bitmask). `rune` is folded into `INT`.
@@ -76,7 +96,11 @@ fn is_string_ish(verb: char) -> bool {
 }
 
 fn printf_kind(pass: &Pass<'_>, fun: &Expr) -> Option<()> {
-    let name = call_name(pass, fun)?;
+    // The table is keyed on `FullName()`, so a method has to be named as one.
+    let name = match fun_full_name(pass, fun) {
+        Some(n) => n,
+        None => call_name(pass, fun)?,
+    };
     if KNOWN_PRINTF.iter().any(|k| *k == name) {
         return Some(());
     }
@@ -88,6 +112,25 @@ fn printf_kind(pass: &Pass<'_>, fun: &Expr) -> Option<()> {
         return Some(());
     }
     None
+}
+
+/// `types.Func.FullName()` for a call's `Fun` expression — the same string
+/// [`callee_full_name`] answers, reached without a whole `CallExpr`.
+fn fun_full_name(pass: &Pass<'_>, fun: &Expr) -> Option<String> {
+    let obj = guff_analysis::code::call_target_object(pass, fun)?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    if !matches!(
+        artifacts.objects.get(obj),
+        guff_types::arena::ObjectData::Func(_)
+    ) {
+        return None;
+    }
+    Some(guff_analysis::code::type_func_name(
+        &artifacts.types,
+        &artifacts.objects,
+        &artifacts.packages,
+        obj,
+    ))
 }
 
 /// Index into `call.args` of the format-string argument.
@@ -620,7 +663,14 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         if printf_kind(pass, &call.fun).is_none() {
             return;
         }
-        let name = call_name(pass, &call.fun).unwrap_or_else(|| "Printf".into());
+        // Upstream names the callee with `types.Func.FullName()`, so a method
+        // is `(*github.com/sirupsen/logrus.Entry).Errorf` — receiver and all.
+        // `call_name` is package path plus object name, which for a method is
+        // `logrus.Errorf`: a name Go never prints, and one that happens to
+        // collide with the package-level function of the same name.
+        let name = callee_full_name(pass, call)
+            .or_else(|| call_name(pass, &call.fun))
+            .unwrap_or_else(|| "Printf".into());
         let is_errorf = name.ends_with("Errorf");
         let fmt_idx = format_index(pass, call);
         let Some(format_arg) = call.args.get(fmt_idx) else {
@@ -766,6 +816,23 @@ fn check_one(
     // `argCanBeChecked` bails out silently on the final argument of such a
     // call, and skips the leftover-argument check as well.
     let ellipsis = call.ellipsis.is_valid();
+
+    // A format string with no `%` at all is its own branch, before any
+    // parsing: upstream reports the leftover arguments at the **first argument
+    // after the format**, with its own wording, and returns. guff fell through
+    // to the arity check, which says `call needs 0 args but has 3 args` at the
+    // callee — a different message at a different position, so the two tools
+    // disagreed on a shape they both meant to report (velero's
+    // `p.log.Errorf("error parsing operation ID's StartedTime", …)`).
+    if !format.contains(&b'%') {
+        if nargs > first_arg {
+            out.push((
+                call.args[first_arg].pos().0 as u32,
+                format!("{name} call has arguments but no formatting directives"),
+            ));
+        }
+        return;
+    }
 
     // Upstream parses the whole format string before checking a single
     // argument (`fmtstr.Parse`), so a malformed directive is the only thing

@@ -112,6 +112,53 @@ fn printf_flags_unknown_verb() {
 }
 
 #[test]
+fn printf_names_the_callee_in_full_and_has_a_no_directives_branch() {
+    // Two defects, both visible on one shape. A format string with no `%` in it
+    // is upstream's own branch, before any parsing: it reports the leftover
+    // arguments at the **first argument after the format**, with its own
+    // wording. guff fell through to the arity check — a different message at a
+    // different position, so the two tools disagreed on a shape they both meant
+    // to report (velero's `p.log.Errorf("error parsing operation ID's
+    // StartedTime", …)`).
+    //
+    // And the name is `types.Func.FullName()`, so a method carries its
+    // receiver. guff used package-path-plus-name, which for a method is
+    // `logrus.Errorf` — a name Go never prints, and one that collides with the
+    // package-level function of the same name. The table is keyed on those full
+    // names, and picking up upstream's entries brought `Logf` with it, which
+    // guff's short-name heuristic never had.
+    let dir = support::testdata("printf");
+    let fmt_stub = dir.join("stub/fmt/print.go");
+    let log_stub = dir.join("stub/log/log.go");
+    let testing_stub = dir.join("stub/testing/testing.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/govet/printf/noverbs",
+        &dir.join("noverbs_unit.go"),
+        &[
+            ("fmt", &fmt_stub),
+            ("log", &log_stub),
+            ("testing", &testing_stub),
+        ],
+    );
+    let messages = support::run_analyzer(printf_analyzer(), &pkg);
+    assert_eq!(
+        messages,
+        vec![
+            "fmt.Printf call has arguments but no formatting directives",
+            "fmt.Errorf call has arguments but no formatting directives",
+            "fmt.Sprintf call has arguments but no formatting directives",
+            "fmt.Printf call has arguments but no formatting directives",
+            "fmt.Printf call needs 1 arg but has 2 args",
+            "(*log.Logger).Printf call has arguments but no formatting directives",
+            "(*testing.common).Errorf call has arguments but no formatting directives",
+            "(*testing.common).Logf call has arguments but no formatting directives",
+            "(*testing.common).Fatalf call has arguments but no formatting directives",
+        ],
+        "{messages:?}"
+    );
+}
+
+#[test]
 fn printf_allows_valid_format() {
     let dir = support::testdata("printf");
     let stub = dir.join("stub/fmt/print.go");

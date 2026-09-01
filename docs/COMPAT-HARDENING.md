@@ -18691,3 +18691,57 @@ SA4016 の 3 件を教えてくれた**）、fix tier 206/206（両 case を録�
 reject 14、isolate 116、smoke 1、workspace テスト緑、
 OSS pr tier 8 target すべて P=R=100%、hunt は thanos / prometheus / gitea /
 jaeger / argo-cd / nats-server / fiber すべて allowlist 内。
+
+### 2026-09-01（続き 126）— verb の無い書式は**独立した枝**である。そしてメソッドの名前は `FullName()` でなければ表と照合できない
+
+velero の最後の 1 件を追ったら、`printf` に 3 つの欠陥があった。そのうち 2 つを直す
+（3 つ目は wrapper の fact 推論で、別タスク）。
+
+**1. `%` を 1 つも含まない書式は、解析より前の独立した枝。**
+
+```go
+firstArg := idx + 1
+if !strings.Contains(format, "%") {
+	if len(call.Args) > firstArg {
+		pass.ReportRangef(call.Args[firstArg], "%s call has arguments but no formatting directives", name)
+	}
+	return
+}
+```
+
+報告先は**書式の次の引数**で、文言も専用。guff はこの枝を持たず arity の判定に
+落ちていたので、`call needs 0 args but has 3 args` を**呼び出しの位置**に出していた ——
+両ツールとも報告するつもりの形で、**キーだけが食い違う**。
+velero の `p.log.Errorf("error parsing operation ID's StartedTime", …)` がそれ。
+
+**2. 名前は `types.Func.FullName()`。** メソッドなら
+`(*github.com/sirupsen/logrus.Entry).Errorf`。guff は `call_name`
+（パスとオブジェクト名）を使っていて、メソッドが `logrus.Errorf` になっていた ——
+**Go が決して出さない名前**で、しかも同名のパッケージ関数と衝突する。
+`code::callee_full_name` は既にあり、`code.rs` のその doc コメントが
+「これを必要とする移植は毎回自前で組み直している」と書いていた。printf もそうだった。
+
+表を `FullName` で引けるようになったので、上流の `isPrint` のうち
+**`f` で終わるもの**（`callKind` が `KindPrintf` を選ぶ条件）を写した。
+guff は 7 個しか持たず残りは短い名前のヒューリスティック
+（`Printf|Sprintf|Fprintf|Errorf|Fatalf|Panicf`）で拾っていて、
+**`Logf` が無い** —— `t.Logf("no verbs", x)` が報告されていなかった。
+
+**残る 1 つ（velero の最後の 1 件）**: `p.log` は `logrus.FieldLogger` という
+**インタフェース**で、上流はインタフェースのメソッドを printf ラッパと見なさない
+（fact が無い）。guff の短い名前のヒューリスティックは受け手を見ないので撃つ。
+正しく直すには上流の `findPrintLike` / `propagate` / `methodImplementations` を
+移植して fact を出す必要がある（`isPrint` は既定で**短い名前を 1 つも持たない**ので、
+表だけにするとラッパを全部落とす）。**この PR では直さない** —— 300 行規模の別件で、
+ヒューリスティックを表だけに置き換えると今一致している finding を大量に落とす。
+
+**測定**: 19 形（`logrus` を本物の依存として入れたモジュールで 4 形、
+verb 無し 8 形、`(*log.Logger).Printf` と `testing` の 3 形、`%%`、空文字列、
+通常の arity）。18 形が一致し、残る 1 形が上のインタフェースの件。
+velero **1 → 1**（件数は変わらないが、**メッセージと位置が上流と同じ形になった**ので、
+残っている差は「インタフェースのメソッドをラッパと見なすか」の 1 点だけになった）。
+golden 206/206（`govet` 126 → 137 キー、キー集合の差分で消失なし）、
+fix tier 206/206、reject 14、isolate 116、smoke 1、workspace テスト緑、
+OSS pr tier 8 target すべて P=R=100%、hunt は thanos / prometheus / gitea /
+jaeger / argo-cd / nats-server / fiber すべて allowlist 内。
+syncthing は **29 → 24**（本セッションの他の修正のぶん。printf 由来の差は 0）。

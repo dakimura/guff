@@ -93,6 +93,17 @@ printf/indexes/indexes.go:35:13:govet::printf: fmt.Printf format %[1] is missing
 printf/indexes/indexes.go:40:14:govet::printf: fmt.Printf format %d has arg str of wrong type string
 printf/indexes/indexes.go:41:14:govet::printf: fmt.Printf format %d has arg str of wrong type string
 printf/indexes/indexes.go:42:14:govet::printf: fmt.Printf format %z has unknown verb z
+printf/noverbs/noverbs.go:18:30:govet::printf: fmt.Printf call has arguments but no formatting directives
+printf/noverbs/noverbs.go:19:30:govet::printf: fmt.Printf call has arguments but no formatting directives
+printf/noverbs/noverbs.go:20:34:govet::printf: fmt.Errorf call has arguments but no formatting directives
+printf/noverbs/noverbs.go:21:35:govet::printf: fmt.Sprintf call has arguments but no formatting directives
+printf/noverbs/noverbs.go:23:17:govet::printf: fmt.Printf call has arguments but no formatting directives
+printf/noverbs/noverbs.go:25:2:govet::printf: fmt.Printf call needs 0 args but has 1 arg
+printf/noverbs/noverbs.go:27:2:govet::printf: fmt.Printf call needs 1 arg but has 2 args
+printf/noverbs/noverbs.go:33:28:govet::printf: (*log.Logger).Printf call has arguments but no formatting directives
+printf/noverbs/noverbs_test.go:9:28:govet::printf: (*testing.common).Errorf call has arguments but no formatting directives
+printf/noverbs/noverbs_test.go:10:26:govet::printf: (*testing.common).Logf call has arguments but no formatting directives
+printf/noverbs/noverbs_test.go:11:28:govet::printf: (*testing.common).Fatalf call has arguments but no formatting directives
 printf/wrongtype/wrongtype.go:6:14:govet::printf: fmt.Printf format %d has arg "str" of wrong type string
 printf/wrongtype/wrongtype.go:7:14:govet::printf: fmt.Printf format %s has arg 42 of wrong type int
 printf/wrongtype/wrongtype.go:8:14:govet::printf: fmt.Printf format %t has arg 5 of wrong type int
