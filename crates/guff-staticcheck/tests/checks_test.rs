@@ -1179,6 +1179,54 @@ fn s1004_flags_bad_patterns() {
 }
 
 #[test]
+fn integer_literal_is_syntactic_not_a_folded_constant() {
+    // honnef's `IntegerLiteral` is a pattern —
+    // `(Or (BasicLit "INT" _) (UnaryExpr (Or "+" "-") (IntegerLiteral _)))` —
+    // and SA4003 explains the choice: "We only check for the math constants and
+    // integer literals, not for all constant expressions. This is to avoid
+    // false positives when constant values differ under different build tags."
+    //
+    // guff answered it with the folded constant, in the pattern engine and in
+    // `code::is_integer_literal` alike, so any named constant holding the right
+    // number matched. velero's `entry.Logger.GetLevel() >= logrus.PanicLevel`
+    // is that shape; S1004, SA4024 and SA4028 had it too.
+    //
+    // Five literal spellings fire and two constants plus a folded expression do
+    // not — the five are the control, since a fixture where nothing fires
+    // certifies nothing.
+    let dir = support::testdata("sa4003");
+    let pkg = support::typecheck_file(
+        &dir,
+        "literal.go",
+        "example.com/staticcheck/sa4003/literal",
+    );
+    support::assert_well_typed(&pkg);
+
+    let sa4003 = support::run_analyzer(sa4003::analyzer(), &pkg);
+    assert_eq!(sa4003.len(), 5, "{sa4003:?}");
+    // The message names the *underlying* basic type: honnef v0.7.0 formats
+    // `basic`, not the named type, so `Level` is reported as `uint32`. (A later
+    // upstream switched to the named type; the version golangci-lint 2.12.2
+    // pins did not, and the local checkout is not that version.)
+    assert!(
+        sa4003
+            .iter()
+            .all(|m| m == "every value of type uint32 is >= 0"),
+        "{sa4003:?}"
+    );
+
+    let sa4024 = support::run_analyzer(sa4024::analyzer(), &pkg);
+    assert_eq!(
+        sa4024,
+        vec!["builtin function len does not return negative values"],
+        "{sa4024:?}"
+    );
+
+    let sa4028 = support::run_analyzer(sa4028::analyzer(), &pkg);
+    assert_eq!(sa4028, vec!["x % 1 is always zero"], "{sa4028:?}");
+}
+
+#[test]
 fn s1004_allows_ok_patterns() {
     let dir = support::testdata("s1004");
     let bytes_stub = dir.join("stub/bytes/bytes.go");

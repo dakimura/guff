@@ -40,7 +40,7 @@ fn ident_name(expr: &Expr) -> Option<&str> {
 }
 
 fn compare_number_lit(pass: &Pass<'_>, expr: &Expr, val: i64) -> bool {
-    if code::is_integer_literal(pass, expr, val) {
+    if code::is_integer_constant(pass, expr, val) {
         return true;
     }
     // Fallback for fixtures where typed constants are missing.

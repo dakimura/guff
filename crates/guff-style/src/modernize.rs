@@ -788,7 +788,7 @@ fn check_rangeint(pass: &Pass<'_>, for_stmt: &ForStmt, pending: &mut Vec<Diagnos
     let Some(index_name) = ident_name(&init.lhs[0]) else {
         return;
     };
-    if !code::is_integer_literal(pass, &init.rhs[0], 0) {
+    if !code::is_integer_constant(pass, &init.rhs[0], 0) {
         return;
     }
     let Some(Expr::BinaryExpr(BinaryExpr { x, op, y, .. })) = for_stmt.cond.as_ref() else {
@@ -2773,7 +2773,7 @@ fn check_waitgroupgo(
         if !is_waitgroup_method(pass, add_call, "Add") || add_call.args.len() != 1 {
             continue;
         }
-        if !code::is_integer_literal(pass, &add_call.args[0], 1) {
+        if !code::is_integer_constant(pass, &add_call.args[0], 1) {
             continue;
         }
         let Some(add_recv) = waitgroup_recv(add_call) else {
@@ -2954,7 +2954,7 @@ fn check_slicesbackward(
     let Expr::BinaryExpr(bin) = &init.rhs[0] else {
         return;
     };
-    if bin.op != Token::SUB || !code::is_integer_literal(pass, &bin.y, 1) {
+    if bin.op != Token::SUB || !code::is_integer_constant(pass, &bin.y, 1) {
         return;
     }
     let Expr::CallExpr(len_call) = bin.x.as_ref() else {
@@ -2971,7 +2971,7 @@ fn check_slicesbackward(
     };
     if cond.op != Token::GEQ
         || ident_name(&cond.x) != Some(index_name)
-        || !code::is_integer_literal(pass, &cond.y, 0)
+        || !code::is_integer_constant(pass, &cond.y, 0)
     {
         return;
     }
@@ -3841,7 +3841,7 @@ fn increment_loop_index(pass: &Pass<'_>, for_stmt: &ForStmt) -> Option<ObjectId>
     if init.tok != Some(Token::DEFINE) || init.lhs.len() != 1 || init.rhs.len() != 1 {
         return None;
     }
-    if !code::is_integer_literal(pass, &init.rhs[0], 0) {
+    if !code::is_integer_constant(pass, &init.rhs[0], 0) {
         return None;
     }
     let Expr::Ident(lhs) = &init.lhs[0] else {
@@ -4192,7 +4192,7 @@ fn check_stringscut(pass: &Pass<'_>, assign: &AssignStmt, pending: &mut Vec<Diag
     let Expr::IndexExpr(ix) = &assign.rhs[0] else {
         return;
     };
-    if !code::is_integer_literal(pass, &ix.index, 0) {
+    if !code::is_integer_constant(pass, &ix.index, 0) {
         return;
     }
     let Expr::CallExpr(call) = ix.x.as_ref() else {
@@ -4210,7 +4210,7 @@ fn check_stringscut(pass: &Pass<'_>, assign: &AssignStmt, pending: &mut Vec<Diag
         return;
     };
     if need_n {
-        if call.args.len() != 3 || !code::is_integer_literal(pass, &call.args[2], 2) {
+        if call.args.len() != 3 || !code::is_integer_constant(pass, &call.args[2], 2) {
             return;
         }
     } else if call.args.len() != 2 {
@@ -5906,7 +5906,7 @@ fn check_stditerators_for(pass: &Pass<'_>, for_stmt: &ForStmt, pending: &mut Vec
     let Some(index_name) = ident_name(&init.lhs[0]) else {
         return;
     };
-    if !code::is_integer_literal(pass, &init.rhs[0], 0) {
+    if !code::is_integer_constant(pass, &init.rhs[0], 0) {
         return;
     }
     let Some(Expr::BinaryExpr(cmp)) = for_stmt.cond.as_ref() else {

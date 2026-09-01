@@ -365,6 +365,19 @@ impl<'a> Matcher<'a> {
     }
 
     fn match_integer_literal(&mut self, lit: &IntegerLiteral, node: NodeRef<'a>) -> Option<MatchValue<'a>> {
+        // Upstream matches the *shape* first —
+        // `(Or (BasicLit "INT" _) (UnaryExpr (Or "+" "-") (IntegerLiteral _)))`
+        // — and only then reads the folded constant. The comment in SA4003
+        // says why: "We only check for the math constants and integer
+        // literals, not for all constant expressions. This is to avoid false
+        // positives when constant values differ under different build tags."
+        //
+        // Reading the constant alone made every named constant that happens to
+        // hold the right number match: `x % one`, `len(s) < zero`, and
+        // velero's `level >= logrus.PanicLevel`.
+        if !is_integer_literal_shape(node) {
+            return None;
+        }
         // The node must be a constant integer expression.
         let val = integer_literal_value(&self.env, node)?;
         // Match the value sub-pattern. `_` (Any) accepts any integer literal;
@@ -918,6 +931,35 @@ fn unquote(s: &str) -> String {
         return inner.to_string();
     }
     s.to_string()
+}
+
+/// `(Or (BasicLit "INT" _) (UnaryExpr (Or "+" "-") (IntegerLiteral _)))`, as a
+/// shape. Note there is no `ParenExpr` arm: upstream's pattern has none, so
+/// `(0)` is not an integer literal to it either.
+fn is_integer_literal_shape(node: NodeRef<'_>) -> bool {
+    match node {
+        NodeRef::BasicLit(l) => l.kind == Some(guff::token::Token::INT),
+        NodeRef::UnaryExpr(u) => {
+            matches!(u.op, guff::token::Token::ADD | guff::token::Token::SUB)
+                && is_integer_literal_expr_shape(&u.x)
+        }
+        // `match` strips parentheses from both sides before it dispatches, so
+        // `(0)` reaches the literal arm.
+        NodeRef::ParenExpr(p) => is_integer_literal_expr_shape(&p.x),
+        _ => false,
+    }
+}
+
+fn is_integer_literal_expr_shape(expr: &guff::ast::Expr) -> bool {
+    match expr {
+        guff::ast::Expr::BasicLit(l) => l.kind == Some(guff::token::Token::INT),
+        guff::ast::Expr::UnaryExpr(u) => {
+            matches!(u.op, guff::token::Token::ADD | guff::token::Token::SUB)
+                && is_integer_literal_expr_shape(&u.x)
+        }
+        guff::ast::Expr::ParenExpr(p) => is_integer_literal_expr_shape(&p.x),
+        _ => false,
+    }
 }
 
 fn integer_literal_value(env: &MatchEnv<'_>, node: NodeRef<'_>) -> Option<i64> {

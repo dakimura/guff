@@ -294,8 +294,38 @@ pub fn bool_const(pass: &Pass<'_>, expr: &Expr) -> bool {
 /// Reports whether `expr` is an integer constant equal to `value`.
 ///
 /// Port of `code.IsIntegerLiteral` (simplified to `i64` values).
-pub fn is_integer_literal(pass: &Pass<'_>, expr: &Expr, value: i64) -> bool {
+/// Reports whether `expr` is an integer **constant** equal to `value` — any
+/// constant expression the type checker folded, `size` and `2*n+1` included.
+pub fn is_integer_constant(pass: &Pass<'_>, expr: &Expr, value: i64) -> bool {
     expr_to_int(pass, expr) == Some(value)
+}
+
+/// Reports whether `expr` is an integer **literal** equal to `value`.
+///
+/// This is honnef's `code.IsIntegerLiteral`, whose pattern is
+/// `(Or (BasicLit "INT" _) (UnaryExpr (Or "+" "-") (IntegerLiteral _)))` — a
+/// *syntactic* test, deliberately: "We only check for the math constants and
+/// integer literals, not for all constant expressions. This is to avoid false
+/// positives when constant values differ under different build tags."
+///
+/// Answering it with the folded constant instead made `l >= logrus.PanicLevel`
+/// — a named constant that happens to be zero — read as `l >= 0` (velero,
+/// SA4003; S1004, SA4024 and SA4028 had the same shape).
+pub fn is_integer_literal(pass: &Pass<'_>, expr: &Expr, value: i64) -> bool {
+    fn is_literal_shape(expr: &Expr) -> bool {
+        match expr {
+            Expr::BasicLit(lit) => lit.kind == Some(guff::token::Token::INT),
+            Expr::UnaryExpr(u) => {
+                matches!(u.op, guff::token::Token::ADD | guff::token::Token::SUB)
+                    && is_literal_shape(&u.x)
+            }
+            // `pattern.match` strips parentheses before dispatching, so `(0)`
+            // is an integer literal to upstream as well.
+            Expr::ParenExpr(p) => is_literal_shape(&p.x),
+            _ => false,
+        }
+    }
+    is_literal_shape(expr) && expr_to_int(pass, expr) == Some(value)
 }
 
 /// Reports whether `pos` lies in a generated file (`// Code generated ... DO NOT EDIT.`).

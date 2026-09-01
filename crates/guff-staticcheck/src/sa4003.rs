@@ -25,7 +25,13 @@ fn is_unsigned(pass: &Pass<'_>, expr: &Expr) -> Option<(String, bool)> {
     let u = tav.typ.underlying(&artifacts.types);
     let TypeData::Basic(b) = artifacts.types.get(u) else { return None };
     let unsigned = matches!(b.kind(), BasicKind::Uint | BasicKind::Uint8 | BasicKind::Uint16 | BasicKind::Uint32 | BasicKind::Uint64 | BasicKind::Uintptr);
-    let name = type_string(&artifacts.types, &artifacts.objects, &artifacts.packages, tav.typ, None);
+    // The message names the **underlying** basic type: honnef v0.7.0 does
+    // `basic, ok := tx.Underlying().(*types.Basic)` and formats `basic`, so a
+    // named type is reported as what it is made of — `uint32`, not
+    // `logrus.Level`. (A later upstream switched to `tx`; the version
+    // golangci-lint 2.12.2 pins does not, and the local checkout is not that
+    // version.)
+    let name = type_string(&artifacts.types, &artifacts.objects, &artifacts.packages, u, None);
     Some((name, unsigned))
 }
 

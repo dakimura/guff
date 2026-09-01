@@ -30,6 +30,10 @@ s1003/bad/bad.go:15:5:staticcheck::S1003: should use bytes.Contains(b, []byte("x
 s1003/ok/ok.go:6:2:staticcheck::SA9003: empty branch
 s1003/ok/ok.go:8:2:staticcheck::SA9003: empty branch
 s1004/bad/bad.go:6:9:staticcheck::S1004: should use bytes.Equal(a, b) instead
+s1004/literal/literal.go:11:6:staticcheck::S1004: should use bytes.Equal(a, b) instead
+s1004/literal/literal.go:12:6:staticcheck::S1004: should use bytes.Equal(a, b) instead
+s1004/literal/literal.go:15:29:staticcheck::SA4000: identical expressions on the left and right side of the '-' operator
+s1004/literal/literal.go:20:21:staticcheck::S1019: should use make(chan int) instead
 s1005/bad/bad.go:4:2:staticcheck::S1005: unnecessary assignment to the blank identifier
 s1005/bad/bad.go:15:6:staticcheck::S1005: unnecessary assignment to the blank identifier
 s1005/bad/bad.go:21:6:staticcheck::S1005: unnecessary assignment to the blank identifier

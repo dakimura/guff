@@ -126,6 +126,19 @@
 -	return bytes.Compare(a, b) == 0
 +	return bytes.Equal(a, b)
  }
+--- a/s1004/literal/literal.go
++++ b/s1004/literal/literal.go
+@@ -8,8 +8,8 @@
+ // a named constant that holds zero is not one.
+ func compares(a, b []byte) {
+ 	// Reported.
+-	_ = bytes.Compare(a, b) == 0
+-	_ = bytes.Compare(a, b) == (0)
++	_ = bytes.Equal(a, b)
++	_ = bytes.Equal(a, b)
+ 	// Silent.
+ 	_ = bytes.Compare(a, b) == zero
+ 	_ = bytes.Compare(a, b) == 1-1
 --- a/s1005/bad/bad.go
 +++ b/s1005/bad/bad.go
 @@ -1,7 +1,7 @@
