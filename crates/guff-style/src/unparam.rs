@@ -580,6 +580,51 @@ fn collect_types_implementing(pass: &Pass<'_>) -> HashSet<String> {
             }
         }
     }
+
+    // The AST half of `addImplementing`, which upstream reads before it looks
+    // at any call: `var _ SomeIface = value`. It is the way a package says "this
+    // type implements that interface" without ever converting one, and go/ssa
+    // does not necessarily emit a `MakeInterface` for it — the destination is
+    // the blank identifier.
+    //
+    // Upstream's shape is exact: one name, that name is `_`, an explicit type,
+    // and one value (`check/check.go`'s `case *ast.ValueSpec`).
+    if let Some(info) = pass.types_info() {
+        for file in pass.files() {
+            walk::inspect(NodeRef::File(file), |n| {
+                let Some(NodeRef::ValueSpec(spec)) = n else {
+                    return true;
+                };
+                if spec.values.len() != 1 || spec.names.len() != 1 || spec.names[0].name != "_" {
+                    return true;
+                }
+                let Some(ty) = spec.ty.as_ref() else {
+                    return true;
+                };
+                let (Some(iface_tv), Some(val_tv)) = (
+                    info.types.get(&ty.id()),
+                    info.types.get(&spec.values[0].id()),
+                ) else {
+                    return true;
+                };
+                let arena = &ir.prog.type_arena;
+                let iface = iface_tv.typ.underlying(arena);
+                if !matches!(arena.get(iface), guff_types::arena::TypeData::Interface(_)) {
+                    return true;
+                }
+                let Some(named) = find_named_name(&ir.prog, val_tv.typ) else {
+                    return true;
+                };
+                let mut names = Vec::new();
+                collect_iface_method_names(&ir.prog, iface, &mut names, 0);
+                for m in names {
+                    out.insert(format!("{named}.{m}"));
+                }
+                true
+            });
+        }
+    }
+
     out
 }
 
@@ -922,9 +967,14 @@ fn check_func_decl(
     if fd.recv.is_some() && sign_required_methods.contains(&fd.name.name) {
         return;
     }
-    if fd.recv.is_some() && interface_methods.contains(&method_key(&fd.name.name, &fd.ty)) {
-        return;
-    }
+    // No `interface_methods` skip here. guff used to also silence a method
+    // whose name and signature matched *any* interface declared in the package,
+    // whether or not the receiver's own type implements it. Upstream has no
+    // such rule: `typesImplementing` is filled from evidence — a `var _ I = T`
+    // assertion, a conversion — and asks whether **this** named type needs the
+    // method. syncthing declares `getState() (folderState, time.Time, error)`
+    // in an interface that `*folder` implements by embedding a `stateTracker`,
+    // and it is `(*stateTracker).getState` that upstream reports.
     if let Some(recv) = &fd.recv {
         if let Some(base) = recv_base_type_name(recv) {
             if types_implementing.contains(&format!("{base}.{}", fd.name.name)) {

@@ -45,6 +45,7 @@ bad/bad.go:366:14:unparam::retCall - key always receives "K"
 bad/bad.go:366:26:unparam::retCall - result 0 (int) is never used
 bad/bad.go:370:20:unparam::retConversion - key always receives "K"
 bad/bad.go:370:32:unparam::retConversion - result 0 (int64) is never used
+ifacename/ifacename.go:24:46:unparam::(*tracker).getState - result changed is never used
 literal/literal.go:21:27:unparam::neverGiven - count always receives nil
 literal/literal.go:21:41:unparam::neverGiven - result 0 (string) is never used
 literal/literal.go:31:42:unparam::alwaysGiven - result 0 (string) is never used
