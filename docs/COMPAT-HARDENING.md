@@ -18891,3 +18891,60 @@ hunt は gitea / thanos / connect-go すべて allowlist 内。
 golangci が `canonicalheader` 2 件を落として 656 → 654 になり、差分が 15 → 17 に
 見えた。**guff 側は 3 回とも 651 で動かない。** 「golangci は全 linter 有効だと
 非決定的」がこの target でも出る —— 台帳の数字が 1 つ動いたら、まず**もう一度測る**。
+
+### 2026-09-01（続き 130）— `const (…)` の doc は**グループの doc だけ**である。仲間の doc を混ぜると、ブロック全部が deprecated になる
+
+syncthing の `staticcheck` 3 件。対象は `lib/protocol/bep_fileinfo.go`:
+
+```go
+const (
+	FileInfoTypeFile             = bep.FileInfoType_FILE_INFO_TYPE_FILE
+	FileInfoTypeDirectory        = bep.FileInfoType_FILE_INFO_TYPE_DIRECTORY
+	FileInfoTypeSymlinkFile      = bep.FileInfoType_FILE_INFO_TYPE_SYMLINK_FILE
+	FileInfoTypeSymlinkDirectory = bep.FileInfoType_FILE_INFO_TYPE_SYMLINK_DIRECTORY
+	FileInfoTypeSymlink          = bep.FileInfoType_FILE_INFO_TYPE_SYMLINK
+)
+```
+
+生成側（`internal/gen/bep/bep.pb.go`）で `// Deprecated:` が付いているのは
+`SYMLINK_FILE` と `SYMLINK_DIRECTORY` の 2 つだけ。上流はその 2 つを SA1019 で
+報告し、guff は**5 つ全部**を報告していた。
+
+原因は fact パス `fact_deprecated` の 2 箇所:
+
+1. `GenDecl` の枝が、**グループ自身の doc と、中の各 spec の doc を 1 つのリストに
+   束ねて**「どれかが Deprecated ならグループの全名前に付ける」としていた。
+   上流（honnef v0.7.0 `analysis/facts/deprecated`）は `doDocs` を
+   **ノードごとに 1 回**呼び、`GenDecl` では `node.Doc` **だけ**を渡す。
+   spec の doc は降りていった先で 1 spec ずつ読む。
+2. AST に doc が無いとき（共有ロードは `Mode::NONE`）に引く再パース由来の表を、
+   **最初に見つかった名前の**メッセージで引いて**全名前に貼って**いた。
+
+**なぜ今まで golden で出なかったか。** SA1019 は依存パッケージのソースを自前で
+走査する経路も持っていて、そちらは正しい。fact を読むのは
+**依存パッケージが解析されたとき**だけで、それが起きるかどうかは
+**同時に有効な linter**で変わる。staticcheck 単独では 2 件（正解）、
+`contextcheck` を足すと 5 件。72 個の enabled linter を二分して当てた。
+新しい golden case `staticcheck-sa1019-group-doc` は
+**staticcheck + contextcheck** で回す —— staticcheck だけの case は、
+この欠陥が生きていても緑になる。
+
+**測定**: 2 パッケージの fixture に 1 形 1 宣言で 9 つの形を置いた
+（spec の doc / グループの doc / 両方 / 多名前 spec / `type (…)` グループ /
+行末コメント（doc ではない）/ 2 段落目の `Deprecated:` / 構造体フィールド /
+インタフェースのメソッド）。上流 **17 キー**、修正前の guff は **26 キー**
+（余分 10、**欠け 1**）、修正後は 17 キーで**完全一致**。
+
+欠けていた 1 件が 2 つ目の原因を指していた: グループと spec の**両方**に doc が
+あるとき、上流は `ExportObjectFact` をグループ → spec の順に呼んで**後から
+上書き**するので **spec のメッセージが勝つ**。guff の再パース表は
+`or_insert` で**先に入れたグループのメッセージを守って**いたので、
+`MixB` に `spec message.` ではなく `group message.` を出していた。`insert` に変えた。
+
+syncthing **15 → 12**、台帳は 29/100 のまま。
+golden 208/208（新 case 17 キー）、fix tier 208/208、reject 14、
+workspace テスト緑（新規 2 本は `docs_by_offset_from_source` を
+`assert_eq!` で 14 名前ぶん固定する）、OSS pr tier 8 target すべて P=R=100%。
+
+**測り直しの注意**: 続き 129 と同じく golangci が `canonicalheader` 2 件を落とす
+回があり、同じバイナリで 14 と 12 の両方が出た。**guff は 651 で動かない。**
