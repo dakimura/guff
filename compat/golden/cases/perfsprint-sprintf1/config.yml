@@ -1,0 +1,35 @@
+# Golden case: perfsprint with `sprintf1` turned off.
+#
+# Upstream carries the flag on the *case* that recognizes a one-argument
+# `fmt.Sprintf` — `case calledObj == fmtSprintfObj && len(call.Args) == 1 &&
+# n.strFormat.sprintf1` — so with it off no arm matches and the call is passed
+# over entirely. guff gated it at the report instead, and with an *or*
+# (`string_format || sprintf1`), so leaving `string-format` at its default kept
+# the finding alive however `sprintf1` was set. velero writes `sprintf1: false`
+# and got the finding anyway.
+#
+# The rest of the settings match the `perfsprint` case, so the two expected sets
+# differ by exactly the shapes `sprintf1` governs.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - perfsprint
+  settings:
+    perfsprint:
+      errorf: true
+      sprintf1: false
+      strconcat: true
+      err-error: true
+      hex-format: true
+      int-conversion: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

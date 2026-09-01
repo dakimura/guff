@@ -9,3 +9,7 @@ gotook/goto_ok.go                  crates/guff-ineffassign/tests/testdata/basic/
 zeroinit/zero_init_ok.go           crates/guff-ineffassign/tests/testdata/basic/zero_init_ok.go
 gotofunclit/goto_funclit_ok.go     crates/guff-ineffassign/tests/testdata/basic/goto_funclit_ok.go
 gotofunclitbad/goto_funclit_bad.go  crates/guff-ineffassign/tests/testdata/basic/goto_funclit_bad.go
+# Two packages, because a dot-imported name is one the parser cannot resolve —
+# which is the whole reason upstream never tracks it.
+dotimport/shared/shared.go          crates/guff-ineffassign/tests/testdata/dotimport/shared/shared.go
+dotimport/user/user.go              crates/guff-ineffassign/tests/testdata/dotimport/user/user.go

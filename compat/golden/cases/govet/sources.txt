@@ -108,6 +108,9 @@ unreachable/ok/ok.go                               crates/guff-govet/tests/testd
 unsafeptr/bad/bad.go                               crates/guff-govet/tests/testdata/unsafeptr/bad.go
 unsafeptr/ok/ok.go                                 crates/guff-govet/tests/testdata/unsafeptr/ok.go
 unusedresult/bad/bad.go                            crates/guff-govet/tests/testdata/unusedresult/bad.go
+# The list is keyed on the package *path*, most of it is `maps`/`slices`, and
+# there is a second list of `func() string` methods.
+unusedresult/wider/wider.go                        crates/guff-govet/tests/testdata/unusedresult/wider.go
 unusedresult/ok/ok.go                              crates/guff-govet/tests/testdata/unusedresult/ok.go
 waitgroup/bad/bad.go                               crates/guff-govet/tests/testdata/waitgroup/bad.go
 waitgroup/ok/ok.go                                 crates/guff-govet/tests/testdata/waitgroup/ok.go

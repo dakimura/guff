@@ -504,10 +504,74 @@ fn atomic_allows_discarded_result() {
 #[test]
 fn unusedresult_flags_fmt_errorf() {
     let dir = support::testdata("unusedresult");
-    let pkg = support::typecheck_pkg("example.com/govet/unusedresult", &dir.join("bad.go"));
+    let pkg = support::typecheck_with_deps(
+        "example.com/govet/unusedresult",
+        &dir.join("bad.go"),
+        &unusedresult_stub_refs(&unusedresult_stubs(&dir)),
+    );
     let messages = support::run_analyzer(unusedresult_analyzer(), &pkg);
     assert_eq!(messages.len(), 1, "{messages:?}");
     assert!(messages[0].contains("errors.New"));
+}
+
+/// The stdlib packages the two `unusedresult` fixtures import, as stubs. The
+/// analyzer keys on the callee's **package path**, so the check needs packages
+/// with paths rather than bare identifiers — the very thing the defect was
+/// about.
+fn unusedresult_stubs(dir: &std::path::Path) -> Vec<(&'static str, std::path::PathBuf)> {
+    ["errors", "fmt", "maps", "slices", "sort"]
+        .into_iter()
+        .map(|p| (p, dir.join("stub").join(p).join(format!("{p}.go"))))
+        .collect()
+}
+
+fn unusedresult_stub_refs<'a>(
+    stubs: &'a [(&'static str, std::path::PathBuf)],
+) -> Vec<(&'static str, &'a std::path::Path)> {
+    stubs.iter().map(|(p, path)| (*p, path.as_path())).collect()
+}
+
+#[test]
+fn unusedresult_matches_the_package_path_and_the_string_methods() {
+    // Upstream resolves the callee and keys on `{fn.Pkg().Path(), fn.Name()}`.
+    // guff matched the identifier written before the dot, so
+    // `github.com/pkg/errors.New` read as `errors.New` and was reported, while
+    // the real one imported under a name was not (velero, both halves).
+    //
+    // Its table also held ten entries where upstream's list holds sixty — the
+    // `fmt.Append*`, `maps.*` and `slices.*` families were missing entirely —
+    // and there was no *method* branch at all: `Error` and `String`, and only
+    // when the signature is identical to `func() string`.
+    let dir = support::testdata("unusedresult");
+    let pkg = support::typecheck_with_deps(
+        "example.com/govet/unusedresult",
+        &dir.join("wider.go"),
+        &unusedresult_stub_refs(&unusedresult_stubs(&dir)),
+    );
+    let messages = support::run_analyzer(unusedresult_analyzer(), &pkg);
+    // Nine package-level calls and three methods; `Describe`, `Errorf(1)` and
+    // the call through a func-typed variable say nothing.
+    assert_eq!(messages.len(), 12, "{messages:?}");
+    for want in [
+        "result of errors.New call not used",
+        "result of fmt.Append call not used",
+        "result of fmt.Appendf call not used",
+        "result of fmt.Appendln call not used",
+        "result of maps.Keys call not used",
+        "result of maps.Clone call not used",
+        "result of slices.Clone call not used",
+        "result of slices.Contains call not used",
+        "result of sort.Reverse call not used",
+        // The receiver is written with a nil qualifier — the package path, which
+        // the golden case shows in full as
+        // `(example.com/govet/unusedresult/wider.stringer)`; this harness
+        // type-checks one file with no module path, so the name stands alone.
+        "result of (stringer).String call not used",
+        "result of (stringer).Error call not used",
+        "result of (error).Error call not used",
+    ] {
+        assert!(messages.iter().any(|m| m == want), "{want}: {messages:?}");
+    }
 }
 
 #[test]
