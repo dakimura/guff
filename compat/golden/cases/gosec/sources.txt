@@ -21,6 +21,7 @@ g115/g115.go          crates/guff-style/tests/testdata/gosec/g115.go
 g118/g118.go          crates/guff-style/tests/testdata/gosec/g118.go
 g123/g123.go          crates/guff-style/tests/testdata/gosec/g123.go
 g7xx/g7xx.go          crates/guff-style/tests/testdata/gosec/g7xx.go
+g117/g117.go          crates/guff-style/tests/testdata/gosec/g117.go
 
 # The stub `golang.org/x/crypto` module (see the replace in go.mod). Its go.mod
 # is case scaffolding and so lives in the case directory; the packages under it
@@ -29,5 +30,11 @@ xcrypto/go.mod                  compat/golden/cases/gosec/xcrypto.go.mod
 xcrypto/md4/md4.go              crates/guff-style/tests/testdata/gosec/stub/golang.org/x/crypto/md4/md4.go
 xcrypto/ripemd160/ripemd160.go  crates/guff-style/tests/testdata/gosec/stub/golang.org/x/crypto/ripemd160/ripemd160.go
 xcrypto/ssh/ssh.go              crates/guff-style/tests/testdata/gosec/stub/golang.org/x/crypto/ssh/ssh.go
+
+# The stub YAML and TOML modules G117's third-party sinks live in.
+yamlv3/go.mod                   compat/golden/cases/gosec/yamlv3.go.mod
+yamlv3/yaml.go                  crates/guff-style/tests/testdata/gosec/stub/gopkg.in/yaml.v3/yaml.go
+bstoml/go.mod                   compat/golden/cases/gosec/bstoml.go.mod
+bstoml/toml.go                  crates/guff-style/tests/testdata/gosec/stub/github.com/BurntSushi/toml/toml.go
 entropy/entropy.go    crates/guff-style/tests/testdata/gosec/entropy.go
 nosec/nosec.go        crates/guff-style/tests/testdata/gosec/nosec.go

@@ -164,6 +164,48 @@ fn gosec_g123_reports_verifypeer_without_a_resumption_guard() {
     );
 }
 
+/// G117 over one fixture whose every function is one marshal call, marked
+/// `// fires` or `// silent`.
+///
+/// The rule is a call rule with four separate ways to stay silent (a custom
+/// marshaler around the call, a marshaler method on the type, a field that is
+/// not serialized or not string-ish, and a literal that passes a call result),
+/// so a port that implements only the field-name match reports every silent
+/// shape here.
+#[test]
+fn gosec_g117_reports_only_fields_that_are_actually_serialized() {
+    let pkg = support::typecheck_fixture("gosec", "example.com/gosec/g117", "g117.go");
+    let messages = support::run_analyzer(gosec(), &pkg);
+    let mut g117: Vec<&str> = messages
+        .iter()
+        .filter(|m| m.starts_with("G117: "))
+        .map(|m| m.as_str())
+        .collect();
+    g117.sort_unstable();
+    // Counted and spelled out: the fixture has 24 marshal calls and exactly 14
+    // of them are findings. `any(contains(…))` passes with all 24 reported.
+    assert_eq!(
+        g117,
+        vec![
+            "G117: Marshaled struct field \"Password\" (JSON key \"Password\") matches secret pattern",
+            "G117: Marshaled struct field \"Password\" (JSON key \"Password\") matches secret pattern",
+            "G117: Marshaled struct field \"Password\" (JSON key \"pass\") matches secret pattern",
+            "G117: Marshaled struct field \"Password\" (JSON key \"password\") matches secret pattern",
+            "G117: Marshaled struct field \"Password\" (JSON key \"password\") matches secret pattern",
+            "G117: Marshaled struct field \"Password\" (JSON key \"password\") matches secret pattern",
+            "G117: Marshaled struct field \"Password\" (JSON key \"password\") matches secret pattern",
+            "G117: Marshaled struct field \"Password\" (JSON key \"password\") matches secret pattern",
+            "G117: Marshaled struct field \"Password\" (JSON key \"password\") matches secret pattern",
+            "G117: Marshaled struct field \"Password\" (JSON key \"password\") matches secret pattern",
+            "G117: Marshaled struct field \"Password\" (TOML key \"Password\") matches secret pattern",
+            "G117: Marshaled struct field \"Password\" (XML key \"Password\") matches secret pattern",
+            "G117: Marshaled struct field \"Password\" (YAML key \"Password\") matches secret pattern",
+            "G117: Marshaled struct field \"Secret\" (JSON key \"harmless\") matches secret pattern",
+        ],
+        "{messages:?}"
+    );
+}
+
 /// The taint engine — G702 / G703 / G705 / G706 / G710 — over one fixture whose
 /// every function is marked `// fires` or `// silent`.
 ///

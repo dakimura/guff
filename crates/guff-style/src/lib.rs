@@ -133,6 +133,7 @@ mod grouper;
 mod ireturn;
 mod gosec;
 mod gosec_g115;
+mod gosec_g117;
 mod gosec_g118;
 mod gosec_g123;
 mod gosec_g602;
@@ -178,7 +179,7 @@ pub use options::{
     GocognitOptions, GoconstOptions, GocriticCheckSettings, GocriticOptions, GocycloOptions,
     GoheaderOptions,
     GosmopolitanOptions,
-    G101Options, IfaceOptions, GosecOptions, GrouperOptions, InamedparamOptions,
+    G101Options, G117Options, IfaceOptions, GosecOptions, GrouperOptions, InamedparamOptions,
     InterfacebloatOptions,
     IotamixingOptions, IreturnOptions, LllOptions, MaintidxOptions, LoggercheckOptions, MndOptions,
     ModernizeOptions, MusttagFunc, MusttagOptions, NakedretOptions, NestifOptions, NlreturnOptions,
