@@ -18789,3 +18789,52 @@ hunt は connect-go / gitea / thanos / jaeger すべて allowlist 内。
 `ChangeInterface` も追っていない。今回入れたのは「上流のどの枝が何を答えるか」を
 形ごとに測って写した 5 つで、`isopen` そのものの移植ではない。
 新しい fixture の**黙る 6 形が主張**で、撃つ 4 形はその走査がまだ生きている対照である。
+
+### 2026-09-01（続き 128）— 除外は `//nolint` より**先**に走る。だから除外された finding の directive は「未使用」になる
+
+syncthing の 23 件のうち 5 件が 1 つの原因だった。しかも linter ではなく
+**プロセッサの順序**である。
+
+```
+golangci-only  internal/db/sqlite/folderdb_update.go:47:nolintlint:directive `//nolint:errcheck` is unused for linter "errcheck"
+```
+
+対象は `defer tx.Rollback() //nolint:errcheck` で、syncthing の設定にはこうある:
+
+```yaml
+- linters: [errcheck]
+  source: Rollback
+```
+
+上流の `Runner.Run` のプロセッサ順は `… exclude → exclude_rules → nolint …` なので、
+**除外が先に finding を消し、directive は何も抑制しないまま残る** —— それを
+nolintlint が「未使用」と言う。guff は nolint を先に当てていたので directive が
+finding を取ってしまい、何も報告しなかった。
+
+`exclude.rs` にはこう書いてあった:
+
+```rust
+// When reporting unused `//nolint`, build the index and mark matches
+// *before* exclude-rules so directives that only cover preset-excluded
+// findings still count as used (golangci analysis-level parity).
+```
+
+**測ると成り立たない。** `exclusions.rules` の `source:` でも、
+`std-error-handling` preset の EXC0001（`.*Close`）でも、上流は
+`directive … is unused` を報告する。preset も `exclude` プロセッサの一部で、
+やはり `nolint` より前に走るからである。「注記の理由は腐る」の 5 回目で、
+今回は**注記が測定を主張していた**ぶんたちが悪い。
+
+`mark_matches` を除外の**後ろ**に動かした。`filter_issues` の後で 3 つの除外を
+もう一度掛ける処理（nolintlint 自身の finding はそこで生まれるので k9s の
+`internal/x` パス除外に掛からなかった、という続きの修正）はそのまま残る。
+
+**測定**: 8 形 ×2 config（`exclusions.rules` の `source:` と preset）。
+除外＋directive の 2 形が乖離し、修正後は全一致。対照は
+「directive だけ（使われている）」「除外だけ（directive 無し）」「どちらも無い」の 3 形。
+syncthing **23 → 17**、台帳は 29/100 のまま。
+authelia は動かず（あちらの `nolintlint` 11 件は **guff-only** で向きが逆 ——
+guff だけが「未使用」と言う側なので別件）。
+golden 206 → **207 case**（新 case `nolint-after-exclusions`）、
+fix tier 207/207（新 case を録り直し）、reject 14、isolate 116、smoke 1、
+workspace テスト緑、OSS pr tier 8 target すべて P=R=100%。
