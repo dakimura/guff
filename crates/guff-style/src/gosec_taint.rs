@@ -175,6 +175,16 @@ impl Sink {
         Sink { pkg, receiver, method, pointer: false, check_args, arg_type_guards: &[] }
     }
 
+    /// The same, declared on `*T`: `(*pkg.Receiver).Method`.
+    const fn ptr_method(
+        pkg: &'static str,
+        receiver: &'static str,
+        method: &'static str,
+        check_args: &'static [usize],
+    ) -> Sink {
+        Sink { pkg, receiver, method, pointer: true, check_args, arg_type_guards: &[] }
+    }
+
     /// A package-level function that is only a sink when its arguments carry
     /// the named types.
     const fn guarded(
@@ -437,7 +447,30 @@ static FMT_DATA_ARGS: &[usize] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 /// `ArgTypeGuards: map[int]string{0: "net/http.ResponseWriter"}`.
 static RESPONSE_WRITER_ARG0: &[(usize, &str)] = &[(0, "net/http.ResponseWriter")];
 
-pub(crate) static TAINT_RULES: &[&TaintRule] = &[&G702, &G703, &G705, &G706, &G710];
+/// `analyzers/form_parsing_limits.go`. The smallest of the six: one source,
+/// one sink, no sanitizers.
+///
+/// `ParseMultipartForm` alone, and the comment upstream puts on that says why —
+/// `ParseForm`, `FormValue` and `PostFormValue` already cap the body at 10 MiB
+/// inside the standard library, while `ParseMultipartForm`'s `maxMemory`
+/// argument bounds only the in-memory part.
+///
+/// `CheckArgs: [0]` is the **receiver**: for a static method call go/ssa passes
+/// it as argument 0, so this rule asks one question — did this `*http.Request`
+/// come from outside? Nothing about the argument matters, which is also why
+/// `http.MaxBytesReader` does not make it silent: the engine tracks the request
+/// parameter, not the body field. Upstream's own sample records that (it says
+/// to use `#nosec G120`), and authelia writes exactly that suppression.
+static G120: TaintRule = TaintRule {
+    id: "G120",
+    what: "Unbounded form parsing in HTTP handlers can cause memory exhaustion",
+    type_sources: &[TypeSource { pkg: "net/http", name: "Request" }],
+    func_sources: &[],
+    sinks: &[Sink::ptr_method("net/http", "Request", "ParseMultipartForm", &[0])],
+    sanitizers: &[],
+};
+
+pub(crate) static TAINT_RULES: &[&TaintRule] = &[&G120, &G702, &G703, &G705, &G706, &G710];
 
 // ---------------------------------------------------------------------------
 // Call graph

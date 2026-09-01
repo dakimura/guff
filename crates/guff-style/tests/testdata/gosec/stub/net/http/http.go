@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"io"
 	"net/url"
 	"time"
 )
@@ -26,10 +27,18 @@ type Request struct {
 	Host       string
 	RemoteAddr string
 	URL        *url.URL
+	Body       io.ReadCloser
 }
 
-func (r *Request) Context() context.Context    { return context.Background() }
-func (r *Request) FormValue(key string) string { return "" }
+func (r *Request) Context() context.Context                 { return context.Background() }
+func (r *Request) FormValue(key string) string              { return "" }
+func (r *Request) PostFormValue(key string) string          { return "" }
+func (r *Request) ParseForm() error                         { return nil }
+func (r *Request) ParseMultipartForm(maxMemory int64) error { return nil }
+
+func MaxBytesReader(w ResponseWriter, r io.ReadCloser, n int64) io.ReadCloser { return r }
+
+func NewRequest(method, url string, body io.Reader) (*Request, error) { return nil, nil }
 
 const StatusFound = 302
 

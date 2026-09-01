@@ -238,6 +238,23 @@ fn gosec_taint_rules_report_only_reachable_sources() {
     );
 }
 
+/// G120 is the engine's smallest configuration: one source, one sink, no
+/// sanitizers, and `CheckArgs: [0]` names the receiver rather than an argument.
+///
+/// The three silent shapes are the rule: `ParseForm`, `FormValue` and
+/// `PostFormValue` are *not* sinks, because the standard library already caps
+/// the body for them. A port that treats "parses a form" as the sink reports
+/// all four.
+#[test]
+fn gosec_g120_reports_only_parse_multipart_form_on_an_outside_request() {
+    let pkg = support::typecheck_fixture("gosec", "example.com/gosec/g7xx", "g7xx.go");
+    let messages = support::run_analyzer(gosec(), &pkg);
+    let g120 = messages.iter().filter(|m| m.starts_with("G120: ")).count();
+    // Counted: seven calls, three findings. The four silent ones are the other
+    // three form accessors plus a request built locally, which is not a source.
+    assert_eq!(g120, 3, "{messages:?}");
+}
+
 /// CHA resolves a call through a func-typed value to every address-taken bare
 /// function with an **identical signature**, and `CallCommon.Signature()` is
 /// the *core* type of the called value. Keyed by the named func type instead,

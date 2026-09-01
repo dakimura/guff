@@ -507,3 +507,60 @@ func G710UseClosure(w http.ResponseWriter, r *http.Request) {
 	h := g710MakeRedirector("x")
 	h(&url.URL{Scheme: "https", Host: "example.com"}, w, r, true)
 }
+
+// --- G120: unbounded multipart form parsing ---------------------------------
+//
+// The smallest configuration of the engine: one source, one sink, no
+// sanitizers, and `CheckArgs: [0]` names the **receiver**. The only question
+// the rule asks is whether this `*http.Request` came from outside.
+
+// fires — the request is a handler's parameter.
+func G120Handler(w http.ResponseWriter, r *http.Request) {
+	_ = w
+	_ = r.ParseMultipartForm(32 << 20)
+}
+
+// silent — `ParseForm` is not a sink: the standard library already caps the
+// body at 10 MiB for it, which is the whole reason the sink list names only
+// `ParseMultipartForm`.
+func g120ParseForm(w http.ResponseWriter, r *http.Request) {
+	_ = w
+	_ = r.ParseForm()
+}
+
+// silent — `FormValue` calls `ParseForm`.
+func g120FormValue(w http.ResponseWriter, r *http.Request) {
+	_ = w
+	_ = r.FormValue("q")
+}
+
+// silent — and so does `PostFormValue`.
+func g120PostFormValue(w http.ResponseWriter, r *http.Request) {
+	_ = w
+	_ = r.PostFormValue("q")
+}
+
+// fires — `MaxBytesReader` is not a sanitizer here. The engine tracks the
+// request parameter, not the body field, and gosec's own sample says to reach
+// for `#nosec G120` instead. authelia writes exactly that suppression.
+func G120Bounded(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	_ = r.ParseMultipartForm(32 << 20)
+}
+
+// silent — a request built here is not a source. `http.NewRequest` returning
+// `*http.Request` is exactly the case the type-source rule exists for.
+func g120LocalRequest() {
+	req, _ := http.NewRequest("GET", "http://example.com", nil)
+	_ = req.ParseMultipartForm(32 << 20)
+}
+
+// fires — through a helper, which is what the call graph is for.
+func g120Helper(r *http.Request) {
+	_ = r.ParseMultipartForm(32 << 20)
+}
+
+func G120CallsHelper(w http.ResponseWriter, r *http.Request) {
+	_ = w
+	g120Helper(r)
+}
