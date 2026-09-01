@@ -19380,3 +19380,69 @@ golden 208/208（`gosec` 187 → 198 キー、キー集合の差分で消失な�
 fix tier 208/208、reject 14、workspace テスト緑（新規テストは 11 の walk に対する
 4 件を `assert_eq!` で固定する）、OSS pr tier 8 target すべて P=R=100%、
 syncthing 9 / gitea / prometheus は動かず。
+
+### 2026-09-02（続き 139）— ゼロ定数は**値を持つ**。`NewConst` は `nil` を `false` / `0` / `""` に正規化する
+
+authelia の残り 2 件のうち 1 件。`internal/commands/crypto.go:637` の
+`//nolint:unparam` が guff では未使用になる。
+
+**上流が何を抑えているかを直接見る方法がある**: `GL_DEBUG=nolint_filter`。
+golangci-lint は nolint プロセッサの判断をそのまま出す:
+
+```
+[nolint_filter] got issue: {unparam runCryptoPairGenerate - privateKeyLegacyPath always receives ""  … crypto.go:638:91}
+[nolint_filter] found range is {[unparam] {637 637}} for node &ast.FuncDecl{…} [638;717], expanded range is {[unparam] {637 717}}
+```
+
+抑えられていたのは `privateKeyLegacyPath always receives ""` と
+`publicKeyLegacyPath` の 2 件（指示子が自分の行だけでなく**囲むノードまで
+広がる**のもここで見える）。
+
+**最小再現を 10 形作って 1 形だけが落ちた**: 呼び出し側が
+**同じ定数を 2 通りの書き方で渡す**とき。authelia は 4 か所が `""` と書き、
+1 か所が `var privateKeyLegacyPath string` をそのまま渡している。
+
+原因は SSA のゼロ定数だった。`ssa.NewConst` は
+
+```go
+func NewConst(val constant.Value, typ types.Type) *Const {
+	if val == nil {
+		switch soleTypeKind(typ) {
+		case types.IsBoolean: val = constant.MakeBool(false)
+		case types.IsInteger: val = constant.MakeInt64(0)
+		case types.IsString:  val = constant.MakeString("")
+		}
+	}
+	…
+```
+
+と **`nil` を正規化する**。guff は `None` のまま持っていた（`const_val.rs` の
+DEFERRED 注記と DEVELOPMENT.md §8 R27.1 が、まさにこれを「本当の修理」として
+書いていた）。unparam の `eqlConsts` は
+`if c1.Value == nil || c2.Value == nil { return c1.Value == c2.Value }` なので、
+`""` と「値なし」は**別の定数**になり、「always receives」が消えていた。
+`soleTypeKind` は float も complex も `IsInteger` に畳むので、`float64` の
+ゼロも**整数の 0** になる —— 発明せずそのまま写した。
+
+`Program::emit_const` の 1 か所で正規化する。`None` が残るのは
+ポインタ・インタフェース・マップ・スライス・チャネル・シグネチャ・構造体・配列
+——つまり「nil」が意味を持つ型だけになり、`is_nil()` が初めて正しくなった。
+
+**測定**: unparam 11 形。修正前は 3 形が乖離（混ざった書き方の string / int /
+bool）、修正後は 10 形一致。全ゲート緑で、5 つの hunt（authelia / syncthing /
+gitea / prometheus / thanos）はどれも動かなかった —— コア SSA の変更としては
+これが要点である。
+
+**この grid が未修正の乖離を 1 つ見つけた**: `*int` のパラメータに 4 か所が
+**ゼロ値の変数**を渡す形で、上流は黙り guff は撃つ。`eqlConsts` は
+`c1.Type() != c2.Type()` と **ポインタ同一性**で型を比べ、go/types は `*int` を
+interning しないので `var p *int` が 4 つあれば型オブジェクトも 4 つになる。
+guff の arena は構造型を interning するので「同じ」と答える。fixture には
+**`nil` と書く方**（両ツールとも撃つ）を入れ、変数の方は入れていない ——
+オブジェクト同一性はここでは模せない。
+
+authelia **2 → 1**。台帳は 29/100 のまま。
+golden 208/208（`unparam` 53 → 57 キー、キー集合の差分で消失なし）、
+fix tier 208/208、reject 14、workspace テスト緑（新規テストは 10 個の型に対する
+ゼロ定数の値を列で固定し、unparam 側は 5 関数に対する 4 件を固定する）、
+OSS pr tier 8 target すべて P=R=100%。

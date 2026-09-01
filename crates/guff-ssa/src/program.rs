@@ -286,8 +286,70 @@ impl Program {
     /// (Go: `Program.Const`)
     pub fn emit_const(&mut self, val: Option<ConstantValue>, typ: TypeId) -> Value {
         // TODO: deduplication
+        let val = match val {
+            Some(v) => Some(v),
+            None => self.zero_constant_value(typ),
+        };
         let id = self.constants.alloc(Const::new(val, typ));
         Value::Const(id)
+    }
+
+    /// go/ssa's `NewConst` normalization: a `None` value becomes the type's
+    /// zero when every type in the type set agrees on what that zero *looks
+    /// like* — `false`, `0` or `""`. Everything else keeps `None`, which is
+    /// what "nil" means for a pointer, an interface, a map, a slice, a channel,
+    /// a signature, a struct or an array.
+    ///
+    /// `soleTypeKind` folds float and complex into `IsInteger`, so the zero of
+    /// a `float64` is the *integer* `0` there too; this follows it rather than
+    /// inventing a float zero.
+    ///
+    /// Without this, "no value" meant two different things — a nil pointer and
+    /// the zero of an `int` — and every consumer had to tell them apart on its
+    /// own. `unparam`'s `eqlConsts` is the one that showed it: a call passing
+    /// `var s string` and a call passing `""` disagreed, so "always receives"
+    /// went unreported (authelia `runCryptoPairGenerate`). `gosec_g115` had
+    /// already grown a local normalization for the same reason.
+    fn zero_constant_value(&mut self, typ: TypeId) -> Option<ConstantValue> {
+        use guff_types::{IS_BOOLEAN, IS_INTEGER, IS_NUMERIC, IS_STRING};
+
+        // The terms first, then the arena: `under_is` holds it mutably while it
+        // computes an interface's type set, and reading a `Basic`'s info needs
+        // it too. Upstream stops as soon as the state is empty; folding all the
+        // terms afterwards reaches the same state.
+        let mut unders: Vec<Option<TypeId>> = Vec::new();
+        guff_types::under::under_is(
+            &mut self.type_arena,
+            &self.object_arena,
+            &self.package_arena,
+            typ,
+            |u| {
+                unders.push(u);
+                true
+            },
+        );
+        let mut state = IS_BOOLEAN.0 | IS_INTEGER.0 | IS_STRING.0;
+        for u in unders {
+            let mut c = 0u32;
+            if let Some(u) = u {
+                if let guff_types::arena::TypeData::Basic(b) = self.type_arena.get(u) {
+                    c = b.info().0;
+                }
+            }
+            if c & IS_NUMERIC.0 != 0 {
+                c = IS_INTEGER.0;
+            }
+            state &= c;
+        }
+        if state & IS_BOOLEAN.0 != 0 {
+            Some(ConstantValue::Bool(false))
+        } else if state & IS_INTEGER.0 != 0 {
+            Some(ConstantValue::Int64(0))
+        } else if state & IS_STRING.0 != 0 {
+            Some(ConstantValue::String(std::sync::Arc::new(Vec::new())))
+        } else {
+            None
+        }
     }
 
     /// Applies the building function's type-parameter substitution to `t`, if any.

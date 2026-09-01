@@ -30,18 +30,18 @@
     "authelia": {
       "tier": "hunt",
       "state": "open",
-      "at": "20260901T144343Z",
-      "open": 2,
-      "guff_only": 2,
+      "at": "20260901T152250Z",
+      "open": 1,
+      "guff_only": 1,
       "gcl_only": 0,
       "by_linter": {
-        "nolintlint": 2
+        "nolintlint": 1
       }
     },
     "caddy": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260901T144134Z",
+      "at": "20260901T152034Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -57,7 +57,7 @@
     "cobra": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260901T144134Z",
+      "at": "20260901T152034Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -143,7 +143,7 @@
     "gin": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260901T144134Z",
+      "at": "20260901T152034Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -151,7 +151,7 @@
     "gitea": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260901T144419Z",
+      "at": "20260901T152325Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -159,7 +159,7 @@
     "go-client": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260901T144134Z",
+      "at": "20260901T152034Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -183,7 +183,7 @@
     "helm": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260901T144134Z",
+      "at": "20260901T152034Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -199,7 +199,7 @@
     "k9s": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260901T144134Z",
+      "at": "20260901T152034Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -227,7 +227,7 @@
     "prometheus": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260901T144503Z",
+      "at": "20260901T152406Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -259,7 +259,7 @@
     "syncthing": {
       "tier": "hunt",
       "state": "open",
-      "at": "20260901T144409Z",
+      "at": "20260901T152314Z",
       "open": 9,
       "guff_only": 0,
       "gcl_only": 9,
@@ -273,7 +273,7 @@
     "thanos": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260901T100615Z",
+      "at": "20260901T152449Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0

@@ -7762,6 +7762,33 @@ fn varnamelen_respects_ignore_names() {
     assert!(messages.is_empty(), "{messages:?}");
 }
 
+/// "always receives" over call sites that spell the same constant two ways.
+///
+/// go/ssa's `NewConst` normalizes a zero value, so the constant for `var s
+/// string` carries `""` and compares equal to a written `""`. A zero constant
+/// that keeps "no value" disagrees with the literal and the parameter goes
+/// unreported — authelia's `runCryptoPairGenerate` has four call sites writing
+/// `""` and one passing a `var privateKeyLegacyPath string` straight down.
+#[test]
+fn unparam_sees_a_zero_variable_and_a_written_zero_as_one_constant() {
+    let pkg = support::typecheck_fixture("unparam", "example.com/unparam/zeroconst", "zeroconst.go");
+    let messages = support::run_analyzer(unparam(), &pkg);
+    let mut got: Vec<&str> = messages.iter().map(|m| m.as_str()).collect();
+    got.sort_unstable();
+    // Counted: five functions, four of them findings. Without the
+    // normalization the three mixed-spelling ones answer nothing.
+    assert_eq!(
+        got,
+        vec![
+            "mixedBool - on always receives false",
+            "mixedInt - n always receives 0",
+            "mixedString - legacyPath always receives \"\"",
+            "nilPointer - p always receives nil",
+        ],
+        "{messages:?}"
+    );
+}
+
 #[test]
 fn unparam_flags_unused_parameters() {
     let pkg = support::typecheck_fixture("unparam", "example.com/unparam", "bad.go");

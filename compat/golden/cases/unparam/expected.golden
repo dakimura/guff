@@ -59,3 +59,7 @@ literal/literal.go:75:34:unparam::(*box).tagged - count always receives nil
 literal/literal.go:75:48:unparam::(*box).tagged - result 0 (int) is never used
 literal/literal.go:219:19:unparam::litCapturedFreeVar$1 - result 0 (error) is always nil
 literal/literal.go:251:21:unparam::litLiveIIFE$1 - unused is unused
+zeroconst/zeroconst.go:17:39:unparam::mixedString - legacyPath always receives ""
+zeroconst/zeroconst.go:38:43:unparam::mixedInt - n always receives 0
+zeroconst/zeroconst.go:57:44:unparam::mixedBool - on always receives false
+zeroconst/zeroconst.go:86:45:unparam::nilPointer - p always receives nil
