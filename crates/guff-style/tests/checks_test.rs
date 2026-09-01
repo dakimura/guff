@@ -8131,6 +8131,44 @@ fn promlinter_flags_bad_metric_names() {
     );
 }
 
+/// `MetricTypeInName` reports *every* metric type name the metric name carries,
+/// not just the metric's own type — golangci-lint builds promlinter v0.3.0
+/// against client_golang v1.12.1, whose rule ranges over all of
+/// `dto.MetricType_name` and skips only `UNTYPED`. A newer client_golang
+/// checkout says the opposite, which is the rule guff had: syncthing's gauge
+/// `syncthing_model_folder_summary` then went unreported.
+#[test]
+fn promlinter_reports_every_type_name_in_a_metric_name() {
+    let pkg = support::typecheck_fixture(
+        "promlinter",
+        "example.com/promlinter/typeinname",
+        "typeinname.go",
+    );
+    let messages = support::run_analyzer(promlinter(), &pkg);
+    let mut type_msgs: Vec<&String> = messages
+        .iter()
+        .filter(|m| m.contains("should not include type"))
+        .collect();
+    type_msgs.sort();
+    // Counted: seven metrics, four of them named after a type and one of those
+    // carrying two type names. `any(contains(…))` passes with the three silent
+    // shapes reported as well.
+    assert_eq!(
+        type_msgs
+            .iter()
+            .map(|m| m.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "Metric: folder_summary Error: metric name should not include type 'summary'",
+            "Metric: queue_counter_gauge Error: metric name should not include type 'counter'",
+            "Metric: queue_counter_gauge Error: metric name should not include type 'gauge'",
+            "Metric: queue_gauge Error: metric name should not include type 'gauge'",
+            "Metric: queue_histogram_depth Error: metric name should not include type 'histogram'",
+        ],
+        "{messages:?}"
+    );
+}
+
 #[test]
 fn promlinter_allows_good_metrics() {
     let pkg = support::typecheck_fixture("promlinter", "example.com/promlinter/ok", "ok.go");

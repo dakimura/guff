@@ -19006,3 +19006,55 @@ golden 208/208（`wastedassign` 4 → 5 キー、キー集合の差分で消失�
 workspace テスト緑（新規テストは 8 関数の fixture を `assert_eq!(messages.len(), 2)`
 で固定する —— `any(contains(…))` では 6 形が全部報告されても緑になる）、
 OSS pr tier 8 target すべて P=R=100%、gitea も allowlist 内。
+
+### 2026-09-01（続き 132）— `MetricTypeInName` は**全部の型名**を見る。新しい checkout を読むと逆の規則が書いてある
+
+syncthing の `nolintlint` 1 件 —— `lib/model/metrics.go`:
+
+```go
+metricFolderSummary = promauto.NewGaugeVec(prometheus.GaugeOpts{ //nolint:promlinter
+	Namespace: "syncthing",
+	Subsystem: "model",
+	Name:      "folder_summary",
+	…
+```
+
+`directive `//nolint:promlinter` is unused` は**間接シグナル**で、本当の欠陥は
+promlinter が発火していないこと。
+
+`promlinter` v0.3.0 は client_golang の `promlint` を呼ぶ。golangci-lint が
+ビルドしているのは **v1.12.1** で、その `lintMetricTypeInName` は
+
+```go
+for i, t := range dto.MetricType_name {
+	if i == int32(dto.MetricType_UNTYPED) { continue }
+	typename := strings.ToLower(t)
+	if strings.Contains(n, "_"+typename+"_") || strings.HasSuffix(n, "_"+typename) { … }
+}
+```
+
+と **`dto.MetricType_name` の全部**（`UNTYPED` だけ除外）を回す。だから
+**gauge** の `syncthing_model_folder_summary` が `'summary'` で報告される。
+
+新しい client_golang（v1.24.0）の `LintMetricTypeInName` は**逆**で、
+`mf.GetType()` と一致する型名しか見ない。guff が移植していたのはそちら。
+「**上流の checkout は pin 版ではない**」の再発 —— 続き 125 で honnef を
+1 つ新しい版で読んで SA4003 を逆に直しかけたのと同じ形。今回は golangci の
+`go.mod` に `client_golang v1.12.1 // indirect` と書いてあるのが決め手だった。
+
+**測定**: 14 形。修正前は 4 形が乖離（別の型名で終わる gauge / 途中に型名 /
+1 つの名前に 2 つの型名（**2 件出る**）/ gauge 名の summary）、修正後は全一致で
+上流 12 件・guff 12 件。黙る側も測った —— `_untyped` は規則が唯一飛ばす名前、
+`xgauge` は `_` で区切られていないので当たらない。
+
+**並び**: 上流は map を回すので 1 メトリクスに 2 件出るときの順序は仕様上不定。
+`a_x_counter_gauge` で 4 回測ったら毎回 counter → gauge だった。tier は集合で
+比較するので順序は効かないが、こちらは `["counter","gauge","summary","histogram"]`
+の固定順にした。
+
+syncthing **11 → 10**、そして **P=100.0%** —— guff 側の過剰報告が 0 になった
+（残り 10 件はすべて golangci-only: gosec 4 / modernize 4 / nilnesserr 1 / unparam 1）。
+台帳は 29/100 のまま。golden 208/208（`promlinter` 5 → 10 キー、キー集合の差分で
+消失なし）、fix tier 208/208、reject 14、workspace テスト緑（新規テストは 7 メトリクスの
+fixture を 5 件のメッセージ列で `assert_eq!` 固定する）、OSS pr tier 8 target すべて
+P=R=100%。
