@@ -130,6 +130,75 @@ fn nolintlint_reports_unused_directive() {
     );
 }
 
+/// Every exclusion runs *before* the `//nolint` processor upstream, so a
+/// finding an exclusion removes never reaches a directive and the directive is
+/// left unused.
+///
+/// guff marked directives first, with a comment claiming that a directive
+/// covering an excluded finding still counts as used. It does not — measured
+/// with an `exclusions.rules` entry matching `source: Rollback` (syncthing,
+/// five directives) and with the `std-error-handling` preset's EXC0001 over
+/// `defer f.Close()`.
+///
+/// The second directive is the control: nothing excludes *its* finding, so it
+/// stays used and nolintlint says nothing about it.
+#[test]
+fn an_excluded_finding_leaves_its_nolint_directive_unused() {
+    let dir = fixture_dir("nolint_excluded");
+    let pkg = typecheck_fixture(&dir, "example.com/guff-test/nolint_excluded", "bad.go");
+    assert!(!pkg.ill_typed, "{:?}", pkg.errors);
+
+    let analyzers = analyzers_for_linter("errcheck").expect("errcheck");
+    let mut filter = IssueFilter::from_config(
+        &IssuesConfig {
+            exclude_use_default: false,
+            max_issues_per_linter: 0,
+            max_same_issues: 0,
+            exclude_dirs_use_default: Some(false),
+            exclude_rules: vec![guff_lint::ExcludeRule {
+                linters: vec!["errcheck".into()],
+                source: Some("Rollback".into()),
+                ..guff_lint::ExcludeRule::default()
+            }],
+            ..IssuesConfig::default()
+        },
+        &SeverityConfig::default(),
+    );
+    filter.nolintlint = Some(guff_lint::NolintlintStyle {
+        report_unused: true,
+        ..guff_lint::NolintlintStyle::default()
+    });
+
+    let result = LintResult {
+        packages: vec![pkg.clone()],
+        run: run_on_packages(
+            &analyzers,
+            std::slice::from_ref(&pkg),
+            &RunnerOptions {
+                sequential: true,
+                ..RunnerOptions::default()
+            },
+        )
+        .expect("run"),
+        filter,
+        cached_issues: Vec::new(),
+        path_mode: guff_lint::PathMode::Rel,
+        path_prefix: None,
+    };
+
+    let issues = result.issues();
+    let unused: Vec<&str> = issues
+        .iter()
+        .filter(|i| i.from_linter == NOLINTLINT_NAME)
+        .map(|i| i.text.as_str())
+        .collect();
+    assert_eq!(
+        unused,
+        vec!["directive `//nolint:errcheck` is unused for linter \"errcheck\""],
+        "{issues:?}"
+    );
+}
+
 /// A directive that suppressed nothing, inside the range of one that did.
 ///
 /// nolintlint emits an unused *candidate* for every directive and the nolint

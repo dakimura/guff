@@ -414,22 +414,29 @@ impl IssueFilter {
                 .any(|re| re.is_match(&issue.text))
         });
 
-        // When reporting unused `//nolint`, build the index and mark matches
-        // *before* exclude-rules so directives that only cover preset-excluded
-        // findings still count as used (golangci analysis-level parity).
-        // When unused reporting is off (typical; prometheus), exclude first so
-        // we index fewer files and skip the extra mark pass.
+        // Every exclusion runs *before* the nolint processor upstream —
+        // `exclude` (the presets and `exclude` patterns) and `exclude_rules`
+        // both sit ahead of it in `Runner.Run`'s processor list — so a finding
+        // an exclusion removes never reaches a `//nolint` directive, and the
+        // directive is left unused.
+        //
+        // This used to mark matches *first*, with a comment claiming that a
+        // directive covering a preset-excluded finding still counts as used.
+        // It does not, measured both ways: with `exclusions.rules` matching
+        // `source: Rollback` (syncthing, five directives) and with the
+        // `std-error-handling` preset's EXC0001 covering `defer f.Close()`,
+        // upstream reports `directive … is unused` and guff said nothing.
         if self.nolintlint.is_some() && !packages.is_empty() {
-            let mut idx =
-                NolintIndex::from_packages_for_issues(packages, &issues, self.nolintlint.as_ref());
-            idx.set_enabled_linters(self.enabled_linters.iter().cloned());
-            idx.mark_matches(&issues);
             issues.retain(|issue| {
                 !self
                     .exclude_rules
                     .iter()
                     .any(|rule| rule.matches(issue, self.path_base.as_deref()))
             });
+            let mut idx =
+                NolintIndex::from_packages_for_issues(packages, &issues, self.nolintlint.as_ref());
+            idx.set_enabled_linters(self.enabled_linters.iter().cloned());
+            idx.mark_matches(&issues);
             let report_unused = self
                 .nolintlint
                 .as_ref()

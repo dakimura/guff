@@ -1,0 +1,12 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh nolint-after-exclusions
+# Produced by running golangci-lint on compat/golden/cases/nolint-after-exclusions/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+nolintorder/nolintorder.go:20:21:nolintlint::directive `//nolint:errcheck` is unused for linter "errcheck"
+nolintorder/nolintorder.go:26:18:nolintlint::directive `//nolint:errcheck` is unused for linter "errcheck"
+nolintorder/nolintorder.go:43:16:errcheck::Error return value of `t.Commit` is not checked
+nolintorder/nolintorder.go:44:14:errcheck::Error return value of `f.Sync` is not checked

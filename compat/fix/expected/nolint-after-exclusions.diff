@@ -1,0 +1,28 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh nolint-after-exclusions
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/nolint-after-exclusions/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/nolintorder/nolintorder.go
++++ b/nolintorder/nolintorder.go
+@@ -17,13 +17,13 @@
+ 
+ // The `source:` rule removes this one, so the directive is unused.
+ func excludedByRule(t *tx) {
+-	defer t.Rollback() //nolint:errcheck
++	defer t.Rollback()
+ }
+ 
+ // EXC0001 of the std-error-handling preset covers `.*Close`, so this directive
+ // is unused too — the presets are an exclusion like any other.
+ func excludedByPreset(f *file) {
+-	defer f.Close() //nolint:errcheck
++	defer f.Close()
+ }
+ 
+ // Nothing excludes these, so the directives really are used.
