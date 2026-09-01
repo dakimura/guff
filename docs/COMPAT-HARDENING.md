@@ -19124,3 +19124,58 @@ fix tier 208/208、reject 14、workspace テスト緑
 （`G710` の総数を 2 → 3 に締め、新規テストが「クリーンなディスパッチ 4 つは黙る」を
 `assert_eq!` で固定する）、OSS pr tier 8 target すべて P=R=100%、
 syncthing は 10 のまま。台帳は 29/100。
+
+### 2026-09-01（続き 134）— クロージャの**コード**は上流では operand である。辿らないと、メソッド値も捕捉するリテラルもグラフから消える
+
+続き 133 の grid が見つけた乖離。`var h namedType = b.redirect`（メソッド値）で
+上流は黙り guff は `G710` を撃つ。
+
+go/ssa では `b.redirect` は **bound thunk**（レシーバを持たない合成関数
+`redirect$bound`）への `MakeClosure` になる。thunk は「メソッド値が生む唯一の
+*裸の*関数」なので、CHA の `funcsBySig` が拾うのは thunk であり、
+thunk の本体の静的呼び出しが**本体のメソッドに与える唯一の辺**になる。
+
+`ssautil.AllFunctions` がそこへ届くのは、`MakeClosure.Operands` が
+**`&v.Fn` を bindings の前に返す**から。guff は `MakeClosure` の
+`fn_` を `FuncId` フィールドで持っていて `for_each_operand` が出さないので、
+**捕捉するクロージャで到達性の walk が止まっていた** —— メソッド値の thunk も、
+外側の変数を捕まえる関数リテラルも。
+
+最小再現を SSA レベルで確かめた（`all_functions` を直接呼ぶテスト）:
+
+```
+--- all_functions (2):  Dispatch, init
+--- every function in the program (4):  Dispatch, init, redirect, redirect$bound
+```
+
+直したのは `visit_fn` の 1 箇所 —— `InstrData::MakeClosure(mc)` なら
+`mc.fn_` へ降りる。
+
+**両方向に効く。** ノード集合に入っていない関数は「呼び出し元 0＝エントリポイント」
+に見えるので source 型の引数が自動汚染される（過剰報告）。同時に、
+**呼び出し元の辺が無いので `string` の引数は汚染を学べない**（欠落）。
+
+- authelia: **11 のまま**（続き 133 で 14 → 11 になった分がこの形。fixture に
+  入れられなかった 1 形をここで閉じた）
+- syncthing **10 → 9** —— `lib/api/api.go:1030` の
+  `G705: XSS via taint analysis` が**出るようになった**。
+  `func (*service) flushResponse(resp string, w http.ResponseWriter)` の
+  `w.Write([]byte(resp + "\n"))` で、`*service` は非公開型なのでメソッドは
+  interface 経由でしかグラフに入らない。ハンドラは `s.postSystemShutdown` の
+  ような**メソッド値**で登録されていて、その thunk が届いていなかった。
+
+**測定**: scratch で 14 形（名前付き func 型のディスパッチ 10 形＋クロージャ 4 形）、
+さらに fixture 自身の前後で **golden が 2 キー余分**になることを確かめた
+（`g7xx.go:482` のメソッド値と `:502` の捕捉リテラル）。修正後は 152/152。
+
+**scratch の grid が一度嘘をついた**: `./closure/` に置いた最初のクロージャ 4 形は
+両ツールとも同じ答えを返して「乖離なし」に見えた。原因は同じパッケージに
+**同じシグネチャの汚染されたディスパッチ**を置いていたこと —— 辺はシグネチャ単位なので、
+その 1 つがリテラルまで汚染していた。fixture では形ごとに別シグネチャ
+（`_ bool` / `_ float64`）にしてある。
+
+golden 208/208（`gosec` 152 キーのまま、キー集合の差分で増減なし —— 新しい 2 形は
+両ツールとも黙る）、fix tier 208/208、reject 14、workspace テスト緑
+（新規テストは `all_functions` の答えを 4 つの名前の**列**で固定する。
+thunk を落とす実装は `["Dispatch", "init"]` を返す）、
+OSS pr tier 8 target すべて P=R=100%、gitea も clean のまま。台帳は 29/100。

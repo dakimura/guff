@@ -465,3 +465,45 @@ func G710DispatchTainted(w http.ResponseWriter, r *http.Request) {
 
 	h(u, w, r, "x")
 }
+
+// silent — and it takes two things to be silent. `b.redirect` is a *method
+// value*: go/ssa compiles it to a `MakeClosure` over a **bound thunk**, a
+// synthetic receiver-less function, and the thunk is the only bare function
+// the expression produces. CHA's `funcsBySig` matches the thunk, so the
+// dispatch below resolves to it, and the thunk's body statically calls the
+// method — which is the only in-edge `g710Box.redirect` ever gets.
+//
+// guff's reachability walk did not follow `MakeClosure`'s function operand, so
+// neither the thunk nor the method was in the node set, and the method's
+// `issuer *url.URL` was auto-tainted as an entry point's parameter.
+type g710Box struct{}
+
+func (b g710Box) redirect(issuer *url.URL, w http.ResponseWriter, r *http.Request, _ float64) {
+	http.Redirect(w, r, issuer.String(), http.StatusFound)
+}
+
+type g710NamedMethod func(issuer *url.URL, w http.ResponseWriter, r *http.Request, _ float64)
+
+func G710DispatchMethodValue(w http.ResponseWriter, r *http.Request) {
+	var b g710Box
+
+	var h g710NamedMethod = b.redirect
+
+	h(&url.URL{Scheme: "https", Host: "example.com"}, w, r, 1)
+}
+
+// silent — a capturing function literal is reached the same way, through the
+// `MakeClosure` operand. The call site's argument is clean.
+type g710Redirector func(issuer *url.URL, w http.ResponseWriter, r *http.Request, _ bool)
+
+func g710MakeRedirector(tag string) g710Redirector {
+	return func(issuer *url.URL, w http.ResponseWriter, r *http.Request, _ bool) {
+		_ = tag
+		http.Redirect(w, r, issuer.String(), http.StatusFound)
+	}
+}
+
+func G710UseClosure(w http.ResponseWriter, r *http.Request) {
+	h := g710MakeRedirector("x")
+	h(&url.URL{Scheme: "https", Host: "example.com"}, w, r, true)
+}
