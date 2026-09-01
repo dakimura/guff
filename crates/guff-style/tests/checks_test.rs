@@ -6150,7 +6150,7 @@ fn modernize_minmax_matches_the_assignment_above_the_if() {
             .iter()
             .filter(|m| m.starts_with("if statement can be modernized using"))
             .count(),
-        5,
+        6,
         "{got:?}"
     );
     // The if/else control still fires, and the three silent shapes stay silent:
@@ -6163,7 +6163,8 @@ fn modernize_minmax_matches_the_assignment_above_the_if() {
         1,
         "{got:?}"
     );
-    assert_eq!(messages.len(), 6, "{got:?}");
+    // Seven in total: six pattern-2 findings and the one if/else control.
+    assert_eq!(messages.len(), 7, "{got:?}");
 }
 
 #[test]
@@ -6206,6 +6207,9 @@ fn modernize_rangeint_skips_mutated_limits() {
     );
 }
 
+/// The four functions upstream looks up are `strings.Split`, `strings.Fields`,
+/// `bytes.Split` and `bytes.Fields` — `bytes` grew `SplitSeq`/`FieldsSeq` in
+/// the same release. guff had only the `strings` half.
 #[test]
 fn modernize_flags_stringsseq() {
     let pkg = support::typecheck_fixture(
@@ -6214,10 +6218,22 @@ fn modernize_flags_stringsseq() {
         "stringsseq.go",
     );
     let messages = support::run_analyzer(modernize(), &pkg);
-    assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("SplitSeq") || m.contains("FieldsSeq")),
+    let mut seq: Vec<&str> = messages
+        .iter()
+        .filter(|m| m.contains("SplitSeq") || m.contains("FieldsSeq"))
+        .map(|m| m.as_str())
+        .collect();
+    seq.sort_unstable();
+    // Counted: two `Split`s, two `Fields`, and a `SplitN` that is not one of
+    // the four.
+    assert_eq!(
+        seq,
+        vec![
+            "Ranging over FieldsSeq is more efficient",
+            "Ranging over FieldsSeq is more efficient",
+            "Ranging over SplitSeq is more efficient",
+            "Ranging over SplitSeq is more efficient",
+        ],
         "{messages:?}"
     );
 }

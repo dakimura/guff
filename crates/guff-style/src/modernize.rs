@@ -140,6 +140,56 @@ fn ident_name(expr: &Expr) -> Option<&str> {
     }
 }
 
+/// The source text a node occupies, which is what upstream's `Format` prints.
+///
+/// [`expr_text`] renders the tree by hand, and a hand-written printer has
+/// holes — a call with two arguments, a function literal, a composite literal.
+/// A hole there does not merely produce a worse fix: the caller drops the
+/// finding, because it cannot build one. Reading the bytes back has no holes.
+///
+/// syncthing `internal/db/sqlite/folderdb_update.go` is the shape that showed
+/// it: `globIdx := slices.IndexFunc(es, func(e fileRow) bool { … })` followed by
+/// `if globIdx < 0 { globIdx = 0 }` is a `max`, and the whole diagnostic went
+/// missing because the preceding call could not be rendered.
+fn node_text(pass: &Pass<'_>, pos: guff::Pos, end: guff::Pos) -> Option<String> {
+    let fset = pass.fset();
+    let file = fset.file(pos)?;
+    let (lo, hi) = (file.offset(pos), file.offset(end));
+    if lo < 0 || hi < lo {
+        return None;
+    }
+    let base = std::path::Path::new(file.name())
+        .file_name()
+        .and_then(|s| s.to_str())?
+        .to_string();
+    let pkg = pass.pkg();
+    let idx = pkg
+        .compiled_go_files
+        .iter()
+        .position(|p| p.file_name().and_then(|s| s.to_str()) == Some(base.as_str()))?;
+    let owned;
+    let src: &[u8] = match pkg.source_bytes(idx) {
+        Some(bytes) => bytes,
+        None => match fs::read(&pkg.compiled_go_files[idx]) {
+            Ok(bytes) => {
+                owned = bytes;
+                &owned
+            }
+            Err(_) => return None,
+        },
+    };
+    let (lo, hi) = (lo as usize, hi as usize);
+    if hi > src.len() {
+        return None;
+    }
+    String::from_utf8(src[lo..hi].to_vec()).ok()
+}
+
+/// [`expr_text`], falling back to the node's own source text.
+fn expr_text_src(pass: &Pass<'_>, expr: &Expr) -> Option<String> {
+    expr_text(expr).or_else(|| node_text(pass, expr.pos(), expr.end()))
+}
+
 fn expr_text(expr: &Expr) -> Option<String> {
     match expr {
         Expr::Ident(id) => Some(id.name.clone()),
@@ -959,9 +1009,11 @@ fn check_minmax_block(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<Diag
             b = rhs0;
         }
         let sym = if sign < 0 { "min" } else { "max" };
-        let (Some(lhs_text), Some(a_text), Some(b_text)) =
-            (expr_text(lhs), expr_text(a), expr_text(b))
-        else {
+        let (Some(lhs_text), Some(a_text), Some(b_text)) = (
+            expr_text_src(pass, lhs),
+            expr_text_src(pass, a),
+            expr_text_src(pass, b),
+        ) else {
             continue;
         };
         let tok_text = if fassign.tok == Some(Token::DEFINE) {
@@ -1062,13 +1114,13 @@ fn check_minmax(pass: &Pass<'_>, if_stmt: &IfStmt, pending: &mut Vec<Diagnostic>
         return;
     }
     let sym = if sign < 0 { "min" } else { "max" };
-    let Some(lhs_text) = expr_text(&tassign.lhs[0]) else {
+    let Some(lhs_text) = expr_text_src(pass, &tassign.lhs[0]) else {
         return;
     };
-    let Some(a_text) = expr_text(a) else {
+    let Some(a_text) = expr_text_src(pass, a) else {
         return;
     };
-    let Some(b_text) = expr_text(b) else {
+    let Some(b_text) = expr_text_src(pass, b) else {
         return;
     };
     let end = if_stmt
@@ -2526,10 +2578,19 @@ fn check_mapsloop(
     });
 }
 
+/// The four functions upstream's index looks up: `strings.Split`,
+/// `strings.Fields`, **`bytes.Split` and `bytes.Fields`**. `bytes` grew
+/// `SplitSeq`/`FieldsSeq` in the same release, and the analyzer's own doc
+/// comment lists them; guff had only the `strings` half, so syncthing's
+/// `bytes.Split(data, []byte("\n"))` in `cmd/syncthing/crash_reporting.go`
+/// went unreported.
 fn split_or_fields_seq_name(pass: &Pass<'_>, call: &CallExpr) -> Option<&'static str> {
-    if code::is_call_to(pass, call, "strings.Split") {
+    if code::is_call_to(pass, call, "strings.Split") || code::is_call_to(pass, call, "bytes.Split")
+    {
         Some("SplitSeq")
-    } else if code::is_call_to(pass, call, "strings.Fields") {
+    } else if code::is_call_to(pass, call, "strings.Fields")
+        || code::is_call_to(pass, call, "bytes.Fields")
+    {
         Some("FieldsSeq")
     } else {
         None

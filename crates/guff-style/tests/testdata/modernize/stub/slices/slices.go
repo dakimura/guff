@@ -9,3 +9,5 @@ func Delete[S ~[]E, E any](s S, i, j int) S { return s }
 type cmpOrdered interface {
 	~int | ~string
 }
+
+func IndexFunc[S ~[]E, E any](s S, f func(E) bool) int { return -1 }

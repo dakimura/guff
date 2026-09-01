@@ -99,3 +99,19 @@ func clampArith(buf []byte, written, chunk int) int {
 
 	return toWrite
 }
+
+// The value above the `if` is a *call*, and the fix has to name it. guff built
+// the replacement text by rendering the tree by hand, which had no case for a
+// call with two arguments, and dropped the whole diagnostic rather than the
+// fix. syncthing `internal/db/sqlite/folderdb_update.go` writes this with a
+// function literal inside the call, which no hand-written printer covers.
+func clampIndexFromCall(es []int) int {
+	globIdx := slicesIndexFunc(es, func(e int) bool { return e > 0 })
+	if globIdx < 0 {
+		globIdx = 0
+	}
+
+	return es[globIdx]
+}
+
+func slicesIndexFunc(s []int, f func(int) bool) int { return -1 }
