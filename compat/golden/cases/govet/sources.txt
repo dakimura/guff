@@ -80,6 +80,10 @@ printf/indexes/indexes.go                          crates/guff-govet/tests/testd
 printf/bad/bad.go                                  crates/guff-govet/tests/testdata/printf/bad.go
 printf/ok/ok.go                                    crates/guff-govet/tests/testdata/printf/ok.go
 printf/ok2/ok2.go                                  crates/guff-govet/tests/testdata/printf/ok2.go
+# A format string with no directives is its own branch, and the name in the
+# message is `FullName()` — receiver included.
+printf/noverbs/noverbs.go                          crates/guff-govet/tests/testdata/printf/noverbs.go
+printf/noverbs/noverbs_test.go                     crates/guff-govet/tests/testdata/printf/noverbs_test.go
 printf/wrongtype/wrongtype.go                      crates/guff-govet/tests/testdata/printf/wrongtype.go
 shift/bad/bad.go                                   crates/guff-govet/tests/testdata/shift/bad.go
 shift/ok/ok.go                                     crates/guff-govet/tests/testdata/shift/ok.go
