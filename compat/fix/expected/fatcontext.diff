@@ -28,3 +28,32 @@
  		_ = ctx
  	}
  }
+--- a/scope.go
++++ b/scope.go
+@@ -56,7 +56,7 @@
+ // Reported: a package-level variable is declared outside the function, so the
+ // predicate really is being asked and really can say no.
+ func PackageVarAtTopLevel() {
+-	pkgCtx = context.WithValue(pkgCtx, "k", "v")
++	pkgCtx := context.WithValue(pkgCtx, "k", "v")
+ 	_ = pkgCtx
+ }
+ 
+@@ -76,7 +76,7 @@
+ // parameter is not declared there.
+ func ParamInLoop(ctx context.Context, n int) {
+ 	for range n {
+-		ctx = context.WithValue(ctx, "k", "v")
++		ctx := context.WithValue(ctx, "k", "v")
+ 		_ = ctx
+ 	}
+ }
+@@ -84,7 +84,7 @@
+ // Reported as a loop: so is the package variable.
+ func PackageVarInLoop(n int) {
+ 	for range n {
+-		pkgCtx = context.WithValue(pkgCtx, "k", "v")
++		pkgCtx := context.WithValue(pkgCtx, "k", "v")
+ 		_ = pkgCtx
+ 	}
+ }

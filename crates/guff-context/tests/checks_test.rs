@@ -35,8 +35,35 @@ fn fatcontext_flags_nested_context_in_loop() {
     let dir = support::testdata("fatcontext");
     let pkg = support::typecheck_pkg("example.com/fatcontext", &dir.join("bad.go"));
     let messages = support::run_analyzer(fatcontext(), &pkg);
-    assert!(
-        messages.iter().any(|m| m.contains("nested context in loop")),
+    assert_eq!(messages, vec!["nested context in loop"], "{messages:?}");
+}
+
+#[test]
+fn fatcontext_asks_whether_the_variable_was_declared_inside_the_node() {
+    // `isWithinLoop` — the badly named predicate behind every category — is
+    // asked with the node the report would be attributed to, and for an
+    // assignment written in a plain function body that node is the `FuncDecl`.
+    // A `context.Context` parameter's scope *is* the function body, so it lies
+    // inside its own declaration and upstream leaves it alone. guff's span
+    // helper had arms for `ForStmt`, `RangeStmt` and `FuncLit` and none for
+    // `FuncDecl` — the node had been added to the body lookup for the
+    // struct-pointer category and not here — so the predicate answered "not
+    // within" for every one of them (prometheus, 14 findings).
+    //
+    // Twelve shapes: the eight that must stay silent are the assertion, and the
+    // three that fire are what proves the predicate is still being asked.
+    let dir = support::testdata("fatcontext");
+    let pkg = support::typecheck_pkg("example.com/fatcontext/scope", &dir.join("scope.go"));
+    let messages = support::run_analyzer(fatcontext(), &pkg);
+    assert_eq!(
+        messages,
+        vec![
+            // packageVarAtTopLevel
+            "nested context in function literal",
+            // paramInLoop, packageVarInLoop
+            "nested context in loop",
+            "nested context in loop",
+        ],
         "{messages:?}"
     );
 }

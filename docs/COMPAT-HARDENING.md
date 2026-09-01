@@ -18480,3 +18480,65 @@ hunt は fiber / gitea / thanos / jaeger / argo-cd / nats-server すべて allow
 guff が `nested context in function literal` と言う。`fatcontext` は `inspect` しか
 要求せず本日の変更はどれも触っていないので本件の回帰ではない（最小再現あり）。
 2026-08-23 の測定以降 hunt を回していなかったぶんの遅れが出たもので、次のタスク。
+
+### 2026-09-01（続き 123）— ノードを片方の関数にだけ足すと、対になる述語がそのノードを知らないまま残る
+
+続き 122 の hunt で prometheus に `fatcontext` 14 件の guff-only が出た。
+`fatcontext` は `inspect` しか要求せず、その日の変更はどれも触っていない ——
+2026-08-23 以降 hunt を回していなかったぶんの遅れである。
+
+```
++guff rules/group.go:219:fatcontext:nested context in function literal
+```
+
+指している行は
+
+```go
+func (g *Group) run(ctx context.Context) {
+	…
+	ctx = promql.NewOriginContext(ctx, map[string]any{ … })
+```
+
+—— **ループでも無名関数でもない、関数の直下**である。
+
+上流の `findNestedContext` は報告する前に `isWithinLoop` を訊く（名前に反して
+「その変数は**報告先のノードの内側**で宣言されたか」を訊く述語）:
+
+```go
+scope := pass.TypesInfo.ObjectOf(lhs).Parent()
+return scope.Pos() >= node.Pos() && scope.End() <= node.End()
+```
+
+`node` は `Preorder` が渡したノードで、平文の関数本体の代入なら **`FuncDecl`**。
+go/types の関数スコープは**本体の `{`〜`}`** なので、`context.Context` の
+**引数**のスコープは自分の宣言の内側にあり、上流は黙る。
+
+guff の `enclosing_span` には `ForStmt` / `RangeStmt` / `FuncLit` の腕しか無く、
+`FuncDecl` は `_ => None` に落ちていた。`None` は「内側ではない」なので、
+**平文の関数本体に書かれた再代入を全部報告していた**。
+
+`FuncDecl` は続き（`body_of`）には**足してある** —— struct-pointer カテゴリに
+届かせるために足したときのコメントも残っている。**ノードを片方の関数にだけ足した**
+形で、対になる述語がそのノードを知らないまま残っていた。
+直しは 1 腕（Go の `(*ast.FuncDecl).Pos()` は `d.Type.Pos()`、`End()` は本体の `}`）。
+
+**測定**: 18 形。乖離は 3 形（引数の直下再代入 / 関数内 `var` / 直下の `if` の中）で、
+残り 15 形は元から一致 —— パッケージ変数の直下再代入（**報告される**、
+述語が実際に訊かれていることの対照）、ポインタレシーバのフィールド（既定 off）、
+値レシーバ自身のフィールド、ローカル構造体のフィールド、無名関数**自身の**引数、
+`switch` / `select` の中、`context.Background()` でリセットした後、`:=`、
+ループ内の引数、ループ内のパッケージ変数、ループ本体で宣言したローカル、
+無名関数内で外の ctx。修正後は 18 形すべて一致。
+
+prometheus **34 → 20**（`fatcontext` 14 → 0、P=R=100%）、台帳 **27 → 28**。
+golden 205/205（`fatcontext` 3 → 6 キー、キー集合の差分で**消失なし**）、
+fix tier 205/205（新しい fixture のぶん記録を録り直した。上流の `--fix` は
+`ctx = …` を `ctx := …` に書き換えるので、報告される 3 形には
+`_ = ctx` を添えて**書き換え後も木がビルドできる**ようにしてある ——
+添えないと「ビルドしない木」が 9 → 10 に増える）、reject 14、isolate 116、
+filesets 116、smoke 1、workspace テスト緑、OSS pr tier 8 target すべて P=R=100%、
+hunt は prometheus / fiber / thanos / gitea すべて allowlist 内。
+
+単体テストは `any(contains("nested context in loop"))` だったので
+`assert_eq!(messages, vec![…])` にした。新しい 12 形のテストは
+**黙る 8 形が主張**で、撃つ 3 形は述語が今も訊かれていることの対照である。
