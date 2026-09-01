@@ -27,7 +27,7 @@ use guff_ssa::ssautil::build_package_for_analysis;
 pub(crate) fn check_ssa_analyzers(
     pass: &mut Pass<'_>,
     enabled: &HashSet<&'static str>,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<(u32, u32, String)>,
 ) {
     let want_g602 = enabled.contains("G602");
     let want_g115 = enabled.contains("G115");

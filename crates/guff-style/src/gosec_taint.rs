@@ -642,7 +642,7 @@ pub(crate) fn collect_taint(
     src_funcs: &[FuncId],
     reachable: HashSet<FuncId>,
     rules: &[&'static TaintRule],
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<(u32, u32, String)>,
 ) {
     if rules.is_empty() || src_funcs.is_empty() {
         return;
@@ -669,7 +669,7 @@ impl Taint<'_> {
         self.prog.functions.get(fid)
     }
 
-    fn analyze_function_sinks(&mut self, fid: FuncId, pending: &mut Vec<(u32, String)>) {
+    fn analyze_function_sinks(&mut self, fid: FuncId, pending: &mut Vec<(u32, u32, String)>) {
         let func = self.func(fid);
         if func.blocks.is_empty() {
             return;
@@ -719,7 +719,7 @@ impl Taint<'_> {
             // `SinkPos: call.Pos()` on an `*ssa.Call`, which go/ssa sets to the
             // CallExpr's Lparen — not to the callee.
             if let Some(pos) = func.instr_pos.get(&iid) {
-                pending.push((pos.0 as u32, msg.clone()));
+                pending.push((pos.0 as u32, pos.0 as u32, msg.clone()));
             }
         }
     }

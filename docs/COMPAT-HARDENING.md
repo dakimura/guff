@@ -17983,3 +17983,84 @@ fixture の内容の副作用で境界値が動くのは構造的に脆いので
 `nolintlint` 9（`fieldalignment` 4 / wrapcheck 2 / unparam 2 / contextcheck 1）、
 `staticcheck` 2（SA1029 —— guff-ssa の代入パス）。
 **どちらも土台（未実装の analyzer と SSA）に触る。**
+
+### 2026-09-01（続き 117）— `#nosec` は「その下の行」ではなく**コメントが付いたノードの行範囲**を黙らせる
+
+velero の `gosec` 3 件。1 件目は `pkg/install/daemonset.go:198`:
+
+```go
+Secret: &corev1api.SecretVolumeSource{        // ← guff はここで撃つ（198 行）
+    DefaultMode: ptr.To(int32(0444)),
+    // #nosec G101 -- This is a reference to a Secret resource name, not a credential
+    SecretName: "cloud-credentials",          // ← directive は 201 行
+},
+```
+
+**directive が finding の 3 行“下”にある。** guff の `nosec_suppresses` は報告行から
+**上に 3 行**しか見ないので、どう探しても届かない。
+
+上流はまったく別の仕組みだった。`analyzer.go` は
+`ast.NewCommentMap(fset, file, file.Comments)` を作り、
+`updateIgnoredRulesForNode(n)` が**コメントが結び付いたノード `n` の行範囲**を
+`ignores` に登録する（`ignore{start, end, suppressions}`）。範囲は
+**ノードと コメントグループの和**（`startPos = min(n.Pos(), group.Pos())`,
+`endPos = max(n.End(), group.End())`）。そして照合は `ignores.get` の
+
+```go
+if i.start <= start && i.end >= end || start <= i.start && end >= i.end {
+```
+
+—— **どちらかがもう一方を含めば一致**。velero では ignore が 201–201、
+issue が 198–201 なので**後半の枝**で当たる。つまり
+「issue の**終わり**の行」を持っていないと再現できない。guff の `pending` は
+`(pos, msg)` で終端を捨てていたので、23 か所すべてに終端を通した。
+
+同じ `NewIssue(node, …)` を読んで**位置の欠陥が 2 つ**出た。
+`issue.New` は `fobj.Position(node.Pos()).Column` を使う:
+
+| 形 | 上流 | guff（修正前） |
+|---|---|---|
+| `&creds{ … Password: "…" }` | `CompositeLit.Pos()` = **型式**の先頭（79:**10**） | `lbrace`（79:**15**） |
+| `password == "AZURE_STORAGE_KEY"` | `BinaryExpr.Pos()` = `X.Pos()`（128:**9**） | `op_pos`（128:**18**） |
+
+前者は `composite_lit_pos()` として**G112 が既に持っていた**もので、G101 だけが
+`lbrace` のままだった。後者は**14 形目のグリッドを足すまで出てこなかった**
+—— しかも最初に書いた対照は `func equality(s string)` で、`s` も値も cred パターンに
+当たらず**両ツールとも黙っていた**（＝何も測っていない対照）。引数名を
+`password` にして初めて割れた。
+
+さらに、guff の directive 解釈が緩すぎた。`comment_suppresses_nosec` は
+`text.contains("#nosec")` で、`!text.contains('G') || text.contains(rule)` という
+近似だった。上流の `findNoSecTag` は `CommentGroup.Text()` に対して
+**タグが先頭か行頭にあること**を要求する:
+
+```go
+if idx := strings.Index(text, tag); idx > 0 {
+    for i := idx - 1; i >= 0; i-- {
+        if text[i] == '\n' { return true, text[idx+len(tag):] }
+        if text[i] != ' ' && text[i] != '\t' { break }
+    }
+}
+```
+
+これを入れないと、**この fixture 自身の doc コメント**（「`#nosec` を説明する散文」）が
+File ノードに結び付いて**ファイル全体を黙らせた** —— 実際に踏んで 9 件が 0 件になった。
+規則 ID の解釈も `-- justification` を落としてから `G` + 3 桁を走査する上流の実装に
+置き換えた（`#nosec -- a Great reason` は近似では `G` を含むので**効かなかった**）。
+
+移植は既存の `guff::commentmap::new_comment_map`（`NewCommentMap` の完全移植、
+S1008 が使っている）を使った。共有ロードは `PARSE_COMMENTS` 無しなので、
+`nosec` を含むファイルだけ**バイト列から再パース**して map を作り、行番号で照合する。
+上流と同じく**後方 3 行スキャンは削除**した —— 仕組みは 1 つでよい。
+
+**測定**（27 形のグリッド a.go/b.go/c.go）: 修正前は 3 形が乖離
+（composite 内の directive、関数内の `secret := "…" // #nosec`、composite の列）、
+修正後は **27 形すべて一致**。velero **9 → 6**（`gosec` 3 → 0）。
+golden 204/204（`gosec` 142 → 151 キー、キー集合の差分で**消失なし**）、
+fix tier 204/204、reject 14、isolate 116、filesets 116、smoke 1、
+workspace テスト緑、OSS pr tier 8 target すべて P=R=100%。
+
+**`#nosec` には fixture が 1 つも無かった。** これが 3 つの欠陥が同居できた理由で、
+新設した `nosec.go` は 4 つの AST 形すべてと 13 の directive 配置を含み、
+単体テストは**メッセージではなく 9 個の (行, 列) の集合**を固定する
+—— この 3 欠陥はすべて `any(contains("G101"))` を通ってしまう。

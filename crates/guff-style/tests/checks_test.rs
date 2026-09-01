@@ -379,6 +379,51 @@ fn gosec_g101_entropy_follows_zxcvbn() {
     );
 }
 
+/// Every `#nosec` shape, and the report position of all four AST nodes G101
+/// fires on. Both halves had no fixture at all, and both were wrong.
+///
+/// The expected set is what golangci-lint 2.12.2 (gosec v2.26.1) prints for
+/// this file, measured 2026-09-01. It is asserted as a **set of positions**,
+/// not with `any(contains("G101"))`: the two defects this file exists for are
+/// a finding that should not be there (line 71) and two findings at the wrong
+/// column (79/86 at the `&creds{` type, 128 at the `password` operand), and a
+/// message-substring assertion is true of all of them.
+#[test]
+fn gosec_nosec_directive_scope_and_report_positions() {
+    let pkg = support::typecheck_fixture("gosec", "example.com/gosec/nosec", "nosec.go");
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64)> = support::run_analyzer_diagnostics(gosec(), &pkg)
+        .into_iter()
+        .filter(|d| d.message.contains("G101:"))
+        .map(|d| {
+            let p = fset.position(guff::position::Pos(d.pos as i64));
+            (p.line, p.column)
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            // ValueSpec: `const secretConst`, `var secretVar`, and the two
+            // whose directive names G102 rather than G101.
+            (27, 7),
+            (31, 5),
+            (36, 7),
+            (44, 5),
+            // AssignStmt.
+            (49, 2),
+            // CompositeLit: `CompositeLit.Pos()` is the type expression, so
+            // the column is the `c` of `creds`, not the `{` five over.
+            (79, 10),
+            (86, 10),
+            (113, 10),
+            // BinaryExpr: `X.Pos()`, not the `==`.
+            (128, 9),
+        ],
+        "G101 report positions"
+    );
+}
+
 #[test]
 fn gosec_respects_includes_excludes() {
     use guff_style::GosecOptions;

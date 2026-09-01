@@ -177,7 +177,7 @@ struct Ctx<'a> {
 pub(crate) fn collect_g118(
     prog: &mut Program,
     src_funcs: &[FuncId],
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<(u32, u32, String)>,
 ) {
     // The type partition and the two indexes exist only for the lost-cancel
     // walk, so a package that never calls `context.With…` pays for none of
@@ -251,7 +251,7 @@ pub(crate) fn collect_g118(
     }
 
     for (pos, msg) in issues {
-        pending.push((pos.0 as u32, msg.to_string()));
+        pending.push((pos.0 as u32, pos.0 as u32, msg.to_string()));
     }
 }
 

@@ -143,6 +143,15 @@ g7xx/g7xx.go:364:2:gosec:low:G104: Errors unhandled
 g7xx/g7xx.go:369:2:gosec:low:G104: Errors unhandled
 g7xx/g7xx.go:389:13:gosec:medium:G705: XSS via taint analysis
 g7xx/g7xx.go:400:9:gosec:medium:G203: The used method does not auto-escape HTML. This can potentially lead to 'Cross-site Scripting' vulnerabilities, in case the attacker controls the input.
+nosec/nosec.go:27:7:gosec:high:G101: Potential hardcoded credentials
+nosec/nosec.go:31:5:gosec:high:G101: Potential hardcoded credentials
+nosec/nosec.go:36:7:gosec:high:G101: Potential hardcoded credentials
+nosec/nosec.go:44:5:gosec:high:G101: Potential hardcoded credentials
+nosec/nosec.go:49:2:gosec:high:G101: Potential hardcoded credentials
+nosec/nosec.go:79:10:gosec:high:G101: Potential hardcoded credentials
+nosec/nosec.go:86:10:gosec:high:G101: Potential hardcoded credentials
+nosec/nosec.go:113:10:gosec:high:G101: Potential hardcoded credentials
+nosec/nosec.go:128:9:gosec:high:G101: Potential hardcoded credentials
 scores/scores.go:3:8:gosec:medium:G501: Blocklisted import crypto/md5: weak cryptographic primitive
 scores/scores.go:7:7:gosec:high:G101: Potential hardcoded credentials
 scores/scores.go:13:6:gosec:medium:G401: Use of weak cryptographic primitive

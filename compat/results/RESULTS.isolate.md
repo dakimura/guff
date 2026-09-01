@@ -38,7 +38,7 @@
 | isolate-perfsprint | 7 | 7 | 7 | 100.0% | 100.0% | 0 |
 | isolate-tagalign | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-modernize | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
-| isolate-wastedassign | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
+| isolate-wastedassign | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | isolate-decorder | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-funlen | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-maintidx | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
@@ -68,7 +68,7 @@
 | isolate-noctx | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | isolate-musttag | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-reassign | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
-| isolate-tagliatelle | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
+| isolate-tagliatelle | 31 | 31 | 31 | 100.0% | 100.0% | 0 |
 | isolate-canonicalheader | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | isolate-ireturn | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-iface | 5 | 5 | 5 | 100.0% | 100.0% | 0 |
@@ -341,7 +341,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| wastedassign | 3 | 3 | 3 | 100.0% | 100.0% |
+| wastedassign | 4 | 4 | 4 | 100.0% | 100.0% |
 
 ## isolate-decorder
 
@@ -521,7 +521,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| tagliatelle | 4 | 4 | 4 | 100.0% | 100.0% |
+| tagliatelle | 31 | 31 | 31 | 100.0% | 100.0% |
 
 ## isolate-canonicalheader
 

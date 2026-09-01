@@ -30,3 +30,4 @@ xcrypto/md4/md4.go              crates/guff-style/tests/testdata/gosec/stub/gola
 xcrypto/ripemd160/ripemd160.go  crates/guff-style/tests/testdata/gosec/stub/golang.org/x/crypto/ripemd160/ripemd160.go
 xcrypto/ssh/ssh.go              crates/guff-style/tests/testdata/gosec/stub/golang.org/x/crypto/ssh/ssh.go
 entropy/entropy.go    crates/guff-style/tests/testdata/gosec/entropy.go
+nosec/nosec.go        crates/guff-style/tests/testdata/gosec/nosec.go

@@ -62,7 +62,7 @@ struct TlsConfigState {
 pub(crate) fn collect_g123(
     prog: &Program,
     src_funcs: &[FuncId],
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<(u32, u32, String)>,
 ) {
     let funcs = collect_analyzer_functions(prog, src_funcs);
     if funcs.is_empty() {
@@ -108,7 +108,7 @@ pub(crate) fn collect_g123(
     }
 
     for pos in issues {
-        pending.push((pos.0 as u32, MSG.to_string()));
+        pending.push((pos.0 as u32, pos.0 as u32, MSG.to_string()));
     }
 }
 
