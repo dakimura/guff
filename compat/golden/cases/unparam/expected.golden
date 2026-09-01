@@ -45,3 +45,17 @@ bad/bad.go:366:14:unparam::retCall - key always receives "K"
 bad/bad.go:366:26:unparam::retCall - result 0 (int) is never used
 bad/bad.go:370:20:unparam::retConversion - key always receives "K"
 bad/bad.go:370:32:unparam::retConversion - result 0 (int64) is never used
+literal/literal.go:21:27:unparam::neverGiven - count always receives nil
+literal/literal.go:21:41:unparam::neverGiven - result 0 (string) is never used
+literal/literal.go:31:42:unparam::alwaysGiven - result 0 (string) is never used
+literal/literal.go:40:37:unparam::spread - result 0 (string) is never used
+literal/literal.go:49:26:unparam::spreadNil - count always receives nil
+literal/literal.go:49:40:unparam::spreadNil - result 0 (string) is never used
+literal/literal.go:58:41:unparam::mixedGiven - result 0 (string) is never used
+literal/literal.go:67:19:unparam::onlyVariadic - count always receives nil
+literal/literal.go:67:33:unparam::onlyVariadic - result 0 (int) is never used
+literal/literal.go:75:22:unparam::(*box).tagged - tag always receives "t"
+literal/literal.go:75:34:unparam::(*box).tagged - count always receives nil
+literal/literal.go:75:48:unparam::(*box).tagged - result 0 (int) is never used
+literal/literal.go:219:19:unparam::litCapturedFreeVar$1 - result 0 (error) is always nil
+literal/literal.go:251:21:unparam::litLiveIIFE$1 - unused is unused
