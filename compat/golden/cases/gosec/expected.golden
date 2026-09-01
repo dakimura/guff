@@ -108,6 +108,17 @@ g118/g118.go:136:33:gosec:medium:G118: context cancellation function returned by
 g118/g118.go:147:2:gosec:high:G118: Goroutine uses context.Background/TODO while request-scoped context is available
 g118/g118.go:151:2:gosec:high:G118: Goroutine uses context.Background/TODO while request-scoped context is available
 g118/g118.go:176:13:gosec:high:G118: Long-running loop performs calls without a ctx.Done() cancellation guard
+g122/g122.go:21:10:gosec:medium:G304: Potential file inclusion via variable
+g122/g122.go:21:21:gosec:high:G122: Filesystem operation in filepath.Walk/WalkDir callback uses race-prone path; consider root-scoped APIs (e.g. os.Root) to prevent symlink TOCTOU traversal
+g122/g122.go:30:9:gosec:medium:G304: Potential file inclusion via variable
+g122/g122.go:30:20:gosec:high:G122: Filesystem operation in filepath.Walk/WalkDir callback uses race-prone path; consider root-scoped APIs (e.g. os.Root) to prevent symlink TOCTOU traversal
+g122/g122.go:51:9:gosec:medium:G304: Potential file inclusion via variable
+g122/g122.go:51:20:gosec:high:G122: Filesystem operation in filepath.Walk/WalkDir callback uses race-prone path; consider root-scoped APIs (e.g. os.Root) to prevent symlink TOCTOU traversal
+g122/g122.go:76:9:gosec:medium:G304: Potential file inclusion via variable
+g122/g122.go:90:9:gosec:medium:G304: Potential file inclusion via variable
+g122/g122.go:105:9:gosec:medium:G304: Potential file inclusion via variable
+g122/g122.go:125:10:gosec:medium:G304: Potential file inclusion via variable
+g122/g122.go:125:21:gosec:high:G122: Filesystem operation in filepath.Walk/WalkDir callback uses race-prone path; consider root-scoped APIs (e.g. os.Root) to prevent symlink TOCTOU traversal
 g123/g123.go:26:24:gosec:high:G123: tls.Config uses VerifyPeerCertificate while session resumption may remain enabled and VerifyConnection is not set; resumed sessions can bypass custom certificate checks
 g123/g123.go:46:4:gosec:high:G123: tls.Config uses VerifyPeerCertificate while session resumption may remain enabled and VerifyConnection is not set; resumed sessions can bypass custom certificate checks
 g123/g123.go:70:21:gosec:high:G123: tls.Config uses VerifyPeerCertificate while session resumption may remain enabled and VerifyConnection is not set; resumed sessions can bypass custom certificate checks

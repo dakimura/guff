@@ -685,11 +685,59 @@ fn imported_pkg_path(pass: &Pass<'_>, pkg_ident: &Ident) -> Option<String> {
 ///
 /// Covers inline `FuncLit` callbacks (the common case). Named-function callbacks
 /// and full SSA path-dependence remain DEFERRED.
-fn check_g122_walk_call(
+/// The callback of a `Walk` / `WalkDir` call, resolved to something with a
+/// body.
+///
+/// Upstream's `ResolveFuncs` answers an `*ssa.Value`, and its cases are exactly
+/// these two plus the ones that cannot reach a function here: an
+/// `*ssa.MakeClosure` (a literal, and also a **method value** — whose thunk
+/// takes the receiver as parameter 0, so the string test rejects it), a `Phi`,
+/// a `ChangeType` and a `*` load. A callback that arrives as a call result, a
+/// struct field or the caller's own parameter resolves to nothing at all;
+/// measured, upstream is silent on all three.
+enum G122Callback<'a> {
+    Lit(&'a guff::ast::FuncLit),
+    Decl(&'a guff::ast::FuncDecl),
+}
+
+impl<'a> G122Callback<'a> {
+    /// The name of the first parameter, which is the path the walk hands in.
+    fn path_param(&self) -> Option<&str> {
+        let params = match self {
+            G122Callback::Lit(fl) => fl.ty.params.as_ref()?,
+            G122Callback::Decl(fd) => fd.ty.params.as_ref()?,
+        };
+        let name = params
+            .list
+            .first()
+            .and_then(|f| f.names.first())
+            .map(|id| id.name.as_str())?;
+        (!name.is_empty() && name != "_").then_some(name)
+    }
+
+    fn body_pos(&self) -> Option<guff::Pos> {
+        match self {
+            G122Callback::Lit(fl) => Some(fl.body.pos()),
+            G122Callback::Decl(fd) => fd.body.as_ref().map(|b| b.pos()),
+        }
+    }
+
+    fn node(&self) -> NodeRef<'a> {
+        match self {
+            G122Callback::Lit(fl) => NodeRef::FuncLit(fl),
+            G122Callback::Decl(fd) => NodeRef::FuncDecl(fd),
+        }
+    }
+}
+
+fn check_g122_walk_call<'a>(
     pass: &Pass<'_>,
-    call: &CallExpr,
+    call: &'a CallExpr,
     pkg: &str,
     name: &str,
+    funcs: &HashMap<guff_types::ObjectId, &'a guff::ast::FuncDecl>,
+    aliases: &HashMap<guff_types::ObjectId, guff_types::ObjectId>,
+    seen: &mut HashSet<u32>,
     pending: &mut Vec<(u32, u32, String)>,
 ) {
     let cb_idx = match (pkg, name) {
@@ -700,23 +748,28 @@ fn check_g122_walk_call(
     let Some(cb_expr) = call.args.get(cb_idx) else {
         return;
     };
-    let Expr::FuncLit(fl) = cb_expr else {
+    let cb = match cb_expr {
+        Expr::FuncLit(fl) => G122Callback::Lit(fl),
+        // A plain identifier: either a package-level function or a local that
+        // was assigned one. In SSA both are the same `*ssa.Function` value.
+        Expr::Ident(id) => {
+            let Some(obj) = code::object_of(pass, id) else {
+                return;
+            };
+            let target = aliases.get(&obj).copied().unwrap_or(obj);
+            let Some(fd) = funcs.get(&target) else {
+                return;
+            };
+            G122Callback::Decl(fd)
+        }
+        _ => return,
+    };
+    let Some(path_param) = cb.path_param() else {
         return;
     };
-    let Some(params) = fl.ty.params.as_ref() else {
+    let Some(body_pos) = cb.body_pos() else {
         return;
     };
-    let Some(path_param) = params
-        .list
-        .first()
-        .and_then(|f| f.names.first())
-        .map(|id| id.name.as_str())
-    else {
-        return;
-    };
-    if path_param.is_empty() || path_param == "_" {
-        return;
-    }
     // Upstream's `pathDependsOn` is a backward walk from the sink argument
     // through BinOp / Convert / UnOp / **call arguments**, so anything derived
     // from the callback's path is still the callback's path — `cleanPath :=
@@ -729,8 +782,8 @@ fn check_g122_walk_call(
     // taints what it defines.
     let mut tainted: HashSet<String> = HashSet::new();
     tainted.insert(path_param.to_string());
-    let root = fl.body.pos();
-    preorder(NodeRef::FuncLit(fl), |n| {
+    let root = body_pos;
+    preorder(cb.node(), |n| {
         match n {
             // Upstream scans the callback's *own* blocks
             // (`scanCallbackForRaceSinks` walks `fn.Blocks`). A nested function
@@ -780,7 +833,11 @@ fn check_g122_walk_call(
             NodeRef::CallExpr(inner) => {
                 for name in &tainted {
                     if let Some(pos) = g122_sink_pos(pass, inner, name) {
-                        pending.push((pos, pos, format!("G122: {G122_WHAT}")));
+                        // `issuesByPos`: one named callback reached from three
+                        // `Walk` calls is one finding, not three.
+                        if seen.insert(pos) {
+                            pending.push((pos, pos, format!("G122: {G122_WHAT}")));
+                        }
                         break;
                     }
                 }
@@ -2751,6 +2808,92 @@ fn g304_tracked_assign<'a>(
     matches!(artifacts.objects.get(obj), ObjectData::Var(_)).then_some((obj, call))
 }
 
+/// G122 — a filesystem operation inside a `Walk`/`WalkDir` callback, on a path
+/// derived from the one the walk handed in.
+///
+/// A pass of its own rather than a branch of [`check_call`] because the
+/// callback does not have to be written at the call: it can be a function
+/// declared anywhere in the package, or a local that was assigned one. Upstream
+/// works on SSA, where both are the same `*ssa.Function` operand, and dedupes
+/// findings by position — a callback named at three `Walk` calls is one
+/// finding.
+fn check_g122(pass: &Pass<'_>, enabled: &HashSet<&'static str>, pending: &mut Vec<(u32, u32, String)>) {
+    if !enabled.contains("G122") {
+        return;
+    }
+    // Package-level functions, from every file: the callback may be declared in
+    // another one. Methods are skipped — a method value's SSA thunk takes the
+    // receiver as parameter 0, so upstream's `isStringType(cb.Params[0])`
+    // rejects it, and this list is what "is a callback" is answered from.
+    let mut funcs: HashMap<guff_types::ObjectId, &guff::ast::FuncDecl> = HashMap::new();
+    for file in pass.files() {
+        for decl in &file.decls {
+            let Decl::FuncDecl(fd) = decl else {
+                continue;
+            };
+            if fd.recv.is_some() || fd.body.is_none() {
+                continue;
+            }
+            if let Some(obj) = code::object_of(pass, &fd.name) {
+                funcs.insert(obj, fd);
+            }
+        }
+    }
+
+    let mut seen: HashSet<u32> = HashSet::new();
+    for file in pass.files() {
+        // `cb := namedCallback` — in SSA the register simply *is* the function.
+        let mut aliases: HashMap<guff_types::ObjectId, guff_types::ObjectId> = HashMap::new();
+        preorder(NodeRef::File(file), |n| {
+            match n {
+                NodeRef::AssignStmt(assign) => {
+                    if let (Some(Expr::Ident(lhs)), Some(Expr::Ident(rhs))) =
+                        (assign.lhs.first(), assign.rhs.first())
+                    {
+                        g122_record_alias(pass, lhs, rhs, &funcs, &mut aliases);
+                    }
+                }
+                NodeRef::ValueSpec(spec) => {
+                    if let (Some(lhs), Some(Expr::Ident(rhs))) =
+                        (spec.names.first(), spec.values.first())
+                    {
+                        g122_record_alias(pass, lhs, rhs, &funcs, &mut aliases);
+                    }
+                }
+                NodeRef::CallExpr(call) => {
+                    if let Some((pkg, name)) = resolve_pkg_call(pass, call) {
+                        check_g122_walk_call(
+                            pass, call, &pkg, &name, &funcs, &aliases, &mut seen, pending,
+                        );
+                    }
+                }
+                _ => {}
+            }
+            true
+        });
+    }
+}
+
+fn g122_record_alias(
+    pass: &Pass<'_>,
+    lhs: &Ident,
+    rhs: &Ident,
+    funcs: &HashMap<guff_types::ObjectId, &guff::ast::FuncDecl>,
+    aliases: &mut HashMap<guff_types::ObjectId, guff_types::ObjectId>,
+) {
+    if lhs.name == "_" {
+        return;
+    }
+    let (Some(lhs_obj), Some(rhs_obj)) = (code::object_of(pass, lhs), code::object_of(pass, rhs))
+    else {
+        return;
+    };
+    let target = aliases.get(&rhs_obj).copied().unwrap_or(rhs_obj);
+    if funcs.contains_key(&target) {
+        aliases.insert(lhs_obj, target);
+    }
+}
+
 fn check_g304(pass: &Pass<'_>, enabled: &HashSet<&'static str>, pending: &mut Vec<(u32, u32, String)>) {
     if !enabled.contains("G304") {
         return;
@@ -3224,10 +3367,6 @@ fn check_call(
         }
     }
 
-    if enabled.contains("G122") {
-        check_g122_walk_call(pass, call, &pkg, &name, pending);
-    }
-
     if enabled.contains("G301") && G301_CALLS.iter().any(|(p, n)| *p == pkg && *n == name) {
         if let Some(mode_arg) = call.args.last() {
             let bad = is_os_mode_perm(mode_arg)
@@ -3381,6 +3520,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     check_g110(pass, &enabled, &mut pending);
     check_g124_cookie_params(pass, &enabled, &mut pending);
     check_g204(pass, &enabled, &mut pending);
+    check_g122(pass, &enabled, &mut pending);
     check_g304(pass, &enabled, &mut pending);
     crate::gosec_ssa::check_ssa_analyzers(pass, &enabled, &mut pending);
 
