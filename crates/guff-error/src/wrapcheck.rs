@@ -167,8 +167,13 @@ fn call_sig(pass: &Pass<'_>, call: &CallExpr) -> Option<String> {
         &artifacts.packages,
         obj,
     );
+    // Upstream renders the signature with `obj.String()`, which is
+    // `types.TypeString(..., nil)` — a **nil** qualifier, and go/types writes
+    // the package *path* for one, not its name. So the message reads
+    // `req *net/http.Request`, and every `ignore-sigs` pattern is matched
+    // against that. guff wrote `req *http.Request`.
     let qf = |pkg_id, parena: &guff_types::arena::PackageArena| {
-        parena.get(pkg_id).name().to_string()
+        parena.get(pkg_id).path().to_string()
     };
     let sig = match artifacts.types.get(typ) {
         TypeData::Signature(_) => signature_string(
@@ -229,8 +234,13 @@ fn is_iface_method(pass: &Pass<'_>, sel: &SelectorExpr) -> bool {
 fn interface_type_name(pass: &Pass<'_>, sel: &SelectorExpr) -> Option<String> {
     let typ = type_of(pass, &sel.x)?;
     let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    // Upstream renders the signature with `obj.String()`, which is
+    // `types.TypeString(..., nil)` — a **nil** qualifier, and go/types writes
+    // the package *path* for one, not its name. So the message reads
+    // `req *net/http.Request`, and every `ignore-sigs` pattern is matched
+    // against that. guff wrote `req *http.Request`.
     let qf = |pkg_id, parena: &guff_types::arena::PackageArena| {
-        parena.get(pkg_id).name().to_string()
+        parena.get(pkg_id).path().to_string()
     };
     Some(type_string(
         &artifacts.types,
@@ -316,6 +326,22 @@ fn call_returns_error(pass: &Pass<'_>, call: &CallExpr) -> bool {
     is_error_typ(pass, typ) || is_tuple_with_error(pass, typ)
 }
 
+/// Is the call's type a `types.Tuple`? Upstream abandons the return statement
+/// when a returned call is neither an error nor a tuple.
+fn call_type_is_tuple(pass: &Pass<'_>, call: &CallExpr) -> bool {
+    let typ = type_of(pass, &Expr::CallExpr(call.clone())).or_else(|| {
+        pass.types_info()
+            .and_then(|info| info.types.get(&call.id).map(|tav| tav.typ))
+    });
+    let Some(typ) = typ else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    matches!(artifacts.types.get(typ), TypeData::Tuple(_))
+}
+
 fn is_tuple_with_error(pass: &Pass<'_>, typ: guff_types::TypeId) -> bool {
     let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
         return false;
@@ -366,23 +392,35 @@ fn check_return(
     opts: &CompiledOptions,
     pending: &mut Vec<(u32, String)>,
 ) {
-    // Skip returns inside FuncLit.
-    for n in stack.iter().rev() {
-        match n {
-            NodeRef::FuncLit(_) => return,
-            NodeRef::FuncDecl(_) => break,
-            _ => {}
-        }
-    }
-
     for expr in &ret.results {
         if let Expr::CallExpr(call) = unparen(expr) {
+            // Upstream walks the parent stack **here**, inside the call branch,
+            // and nowhere else: `return f()` from a func literal is skipped,
+            // but `err := f(); return err` is reported from one — the ident
+            // path below never consults the stack. guff skipped the whole
+            // return statement, so fiber's
+            // `httpReadResponse = func(…) { resp, err := http.ReadResponse(…);
+            // return resp, err }` was silent.
+            for n in stack.iter().rev() {
+                match n {
+                    NodeRef::FuncLit(_) => return,
+                    NodeRef::FuncDecl(_) => break,
+                    _ => {}
+                }
+            }
             if call_returns_error(pass, call) {
                 // `call.Pos()`, which for a CallExpr is `Fun.Pos()` — the
                 // start of `flags.SetAnnotation(…)`, not its `(`. Upstream
                 // reports there, and the two only differ once the callee is a
                 // selector, so `return f()` agreed and `return x.M()` did not.
                 report_unwrapped(pass, call, call.pos().0 as u32, opts, pending);
+                return;
+            }
+            // A call whose type is not a tuple ends the whole return statement
+            // upstream (`if !ok { return true }`); a tuple without an error
+            // falls through to the error check below, which passes it over.
+            if !call_type_is_tuple(pass, call) {
+                return;
             }
             continue;
         }
@@ -390,19 +428,67 @@ fn check_return(
             continue;
         }
         let Expr::Ident(ident) = unparen(expr) else {
-            continue;
+            return;
         };
-        let Some(ass) = prev_err_assign(pass, file, ident) else {
-            continue;
-        };
-        if ass.rhs.len() != 1 {
-            continue;
-        }
-        let Expr::CallExpr(call) = unparen(&ass.rhs[0]) else {
-            continue;
+        // Upstream looks for the *most recent assignment* first, and only when
+        // there is none falls back to the identifier's declaration — a
+        // `var resp, err = http.ReadResponse(…)` has no `AssignStmt` anywhere,
+        // so guff had nothing to fall back to and stayed silent on the whole
+        // `var` form, inside a literal or not.
+        let call = if let Some(ass) = prev_err_assign(pass, file, ident) {
+            // `shortAss.Rhs[0]`, not "the only Rhs": `a, err = 1, f()` reads
+            // the `1` and gives up, it does not go looking for `f()`.
+            let Some(rhs) = ass.rhs.first() else {
+                return;
+            };
+            let Expr::CallExpr(call) = unparen(rhs) else {
+                return;
+            };
+            call
+        } else if object_of_ident(pass, ident).is_none() {
+            // `isUnresolved`: nothing to follow.
+            return;
+        } else {
+            let Some(spec) = decl_value_spec(pass, file, ident) else {
+                return;
+            };
+            let Some(value) = spec.values.first() else {
+                return;
+            };
+            let Expr::CallExpr(call) = unparen(value) else {
+                return;
+            };
+            call
         };
         report_unwrapped(pass, call, ident.name_pos.0 as u32, opts, pending);
     }
+}
+
+/// The `var` declaration `ident` was declared by, if any. (Go:
+/// `ident.Obj.Decl.(*ast.ValueSpec)`.)
+fn decl_value_spec<'a>(
+    pass: &Pass<'_>,
+    file: &'a guff::ast::File,
+    ident: &Ident,
+) -> Option<&'a guff::ast::ValueSpec> {
+    let want = object_of_ident(pass, ident)?;
+    let mut found: Option<&guff::ast::ValueSpec> = None;
+    walk::preorder(NodeRef::File(file), |n| {
+        if found.is_some() {
+            return false;
+        }
+        let NodeRef::ValueSpec(spec) = n else {
+            return true;
+        };
+        for name in &spec.names {
+            if object_of_ident(pass, name) == Some(want) {
+                found = Some(spec);
+                return false;
+            }
+        }
+        true
+    });
+    found
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {

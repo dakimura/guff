@@ -9,3 +9,9 @@
 bad/bad.go:7:9:wrapcheck::error returned from external package is unwrapped: sig: func os.Open(name string) (*os.File, error)
 bad/bad.go:15:9:wrapcheck::error returned from external package is unwrapped: sig: func (*os.File).Close() error
 bad/bad.go:20:9:wrapcheck::error returned from external package is unwrapped: sig: func (*os.File).Sync() error
+literal/literal.go:27:16:wrapcheck::error returned from external package is unwrapped: sig: func net/http.ReadResponse(r *bufio.Reader, req *net/http.Request) (*net/http.Response, error)
+literal/literal.go:43:11:wrapcheck::error returned from external package is unwrapped: sig: func os.Open(name string) (*os.File, error)
+literal/literal.go:56:16:wrapcheck::error returned from external package is unwrapped: sig: func net/http.ReadResponse(r *bufio.Reader, req *net/http.Request) (*net/http.Response, error)
+literal/literal.go:63:15:wrapcheck::error returned from external package is unwrapped: sig: func net/http.ReadResponse(r *bufio.Reader, req *net/http.Request) (*net/http.Response, error)
+literal/literal.go:85:11:wrapcheck::error returned from external package is unwrapped: sig: func os.Open(name string) (*os.File, error)
+literal/literal.go:100:9:wrapcheck::error returned from external package is unwrapped: sig: func os.Open(name string) (*os.File, error)

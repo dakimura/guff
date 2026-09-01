@@ -18335,3 +18335,84 @@ Go 側はそちらに置き換え、空白 2 つは Rust の `#[test]` で持た
 `TaskFunc[any, any]` の実引数が `func(ctx, *Task, any) (any, error)` と一致しないと言う
 **ジェネリクスの型検査器の穴**で、本件とは無関係（2026-08-31 の hunt でも
 同じ 3 エラーが同じ行に出ている）。baseline には書かずに残す。
+
+### 2026-09-01（続き 121）— FuncLit 除外は `return f()` の枝だけに掛かる。`return err` には掛からない
+
+fiber の `nolintlint` 4 件のうち 2 件:
+
+```
++guff app_test.go:3014:nolintlint:directive `//nolint:wrapcheck // unnecessary to wrap it` is unused for linter "wrapcheck"
++guff app_test.go:3071:〃
+```
+
+「未使用の directive」は**その裏の linter が発火していない**という意味なので、
+`//nolint` を一時的に外して両ツールを直接測った（測ったら `git checkout --` で戻す）:
+
+```
+upstream only  app_test.go:3014:16  error returned from external package is unwrapped:
+                 sig: func net/http.ReadResponse(r *bufio.Reader, req *net/http.Request) (*net/http.Response, error)
+```
+
+対象は
+
+```go
+httpReadResponse = func(r *bufio.Reader, req *http.Request) (*http.Response, error) {
+	resp, err := http.ReadResponse(r, req)
+	…
+	return resp, err
+}
+```
+
+上流の `wrapcheck` は結果の式ごとに枝が分かれていて、**親の探索は
+`*ast.CallExpr` の枝の中にしか無い**:
+
+```go
+retFn, ok := expr.(*ast.CallExpr)
+if ok {
+	for i := len(parents) - 1; i > 0; i-- {
+		if _, ok := parents[i].(*ast.FuncLit); ok { return true }
+		else if _, ok := parents[i].(*ast.FuncDecl); ok { break }
+	}
+	…
+}
+// ident の枝はここから下。parents を一度も見ない。
+```
+
+つまり `return f()` は無名関数から報告しないが、`err := f(); return err` は**する**。
+guff は除外を **return 文全体**に掛けていたので、後者が丸ごと黙っていた。
+
+`return` と `continue` の違いも移した。上流は Inspect のコールバックから
+`return true` するので、**その return 文の残りの結果式を見ない**:
+エラーでもタプルでもない呼び出しが最初の結果にあると（`return countOnly(), err`）
+隣の `err` は検査されない。guff は `continue` していた。
+
+**そして、形を広げたら 3 つ目が出た。** 10 形のグリッドに
+`var resp, err = http.ReadResponse(r, req)` を入れたら、**無名関数の中でも外でも**
+上流だけが撃った。上流は「直前の代入文」が無ければ
+`ident.Obj.Decl.(*ast.ValueSpec)` に落ちるが、guff の `prev_err_assign` は
+`AssignStmt` しか探さず、落ちる先が無かった。`var` 形は**元から**の穴で、
+FuncLit とは無関係。新しい fixture が見つけた。
+
+**4 つ目はメッセージだった。** 一致している形でも文言が違っていた:
+
+```
+upstream  sig: func net/http.ReadResponse(r *bufio.Reader, req *net/http.Request) (*net/http.Response, error)
+guff      sig: func net/http.ReadResponse(r *bufio.Reader, req *http.Request)     (*http.Response, error)
+```
+
+上流は `obj.String()` = `types.TypeString(…, nil)`、**nil qualifier** なので
+go/types はパッケージの**パス**を書く。guff の `qf` は `parena.get(pkg).name()` を
+返していた。既存の fixture は `os` しか呼んでおらず、**`os` は name と path が同じ**
+なので golden も isolate も気付けなかった。`ignore-sigs` はこの文字列に対して
+照合されるので、設定の効き方まで一緒にずれていた。
+
+**測定**: 15 形（うち 4 形が乖離）と、`report-internal-errors: true` の 2 つ目の
+config でも全一致。fiber **4 → 2**（`wrapcheck` 由来の 2 件が消えた。残るは
+`unparam` の 2 件で別件）。golden 205/205（`wrapcheck` 3 → 9 キー、
+キー集合の差分で**消失なし**）、fix tier 205/205、reject 14、isolate 116
+（`isolate-wrapcheck` 3 → 9）、filesets 116、smoke 1、workspace テスト緑、
+OSS pr tier 8 target すべて P=R=100%。
+
+既存の単体テストは `any(m.contains("external package") && m.contains("unwrapped"))`
+で、**シグネチャの中身を一度も見ていなかった** —— 修飾子の欠陥はこの assert を
+素通りする。メッセージを丸ごと定数に括り出して固定した。

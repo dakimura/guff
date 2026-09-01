@@ -128,10 +128,45 @@ fn wrapcheck_flags_unwrapped_external_error() {
     let dir = support::testdata("wrapcheck");
     let pkg = support::typecheck_pkg("example.com/wrapcheck", &dir.join("bad.go"));
     let messages = support::run_analyzer(wrapcheck(), &pkg);
+    // The whole message, and the count: `any(contains(..))` passed while the
+    // signature's package qualifier was the package *name* rather than its
+    // path, which every `ignore-sigs` pattern is also matched against.
+    assert_eq!(
+        messages,
+        vec![WRAPCHECK_JSON_MARSHAL],
+        "{messages:?}"
+    );
+}
+
+/// The whole message for an unwrapped `encoding/json.Marshal`, signature
+/// included: the package qualifier is its *path*, which is what go/types
+/// prints for a nil qualifier and what `ignore-sigs` is matched against.
+const WRAPCHECK_JSON_MARSHAL: &str = "error returned from external package is unwrapped: sig: func encoding/json.Marshal(v any) ([]byte, error)";
+
+#[test]
+fn wrapcheck_reports_the_ident_form_from_a_func_literal() {
+    // Upstream walks the parent stack looking for a `FuncLit` **inside the
+    // call branch only**: `return json.Marshal(v)` from a literal is skipped,
+    // but `b, err := json.Marshal(v); return b, err` is reported from one.
+    // guff skipped the whole return statement, which is why fiber's
+    // `httpReadResponse = func(…) { …; return resp, err }` was silent.
+    //
+    // The `var b, err = json.Marshal(v)` form has no assignment statement to
+    // find at all; upstream falls back to the identifier's own declaration,
+    // and guff had no fallback — that shape was silent inside a literal and
+    // outside one alike.
+    //
+    // The message is fixed whole because it carries the signature, and
+    // `encoding/json` is the package whose *path* and *name* differ: go/types
+    // renders a nil qualifier as the path, so a fixture that only ever calls
+    // `os` (where the two are the same) cannot tell the two apart.
+    let dir = support::testdata("wrapcheck");
+    let pkg = support::typecheck_pkg("example.com/wrapcheck/literal", &dir.join("literal.go"));
+    let messages = support::run_analyzer(wrapcheck(), &pkg);
+    // identInLiteral, varDeclInLiteral, varDeclInDecl, nestedLiterals.
+    assert_eq!(messages.len(), 4, "{messages:?}");
     assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("external package") && m.contains("unwrapped")),
+        messages.iter().all(|m| *m == WRAPCHECK_JSON_MARSHAL),
         "{messages:?}"
     );
 }
