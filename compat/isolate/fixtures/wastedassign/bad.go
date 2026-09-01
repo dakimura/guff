@@ -105,3 +105,91 @@ func VarBesideConst(cond bool) int {
 	}
 	return n
 }
+
+// A variable whose address is taken is heap-allocated by go/ssa, and
+// `finishBody` drops heap allocs from `Function.Locals` — the set wastedassign
+// walks. So none of the shapes below is a finding, however dead the store
+// looks: the pointer can write the cell from anywhere.
+//
+// syncthing `cmd/syncthing/perfstats_unix.go` is EscapesStructInLoop:
+// `runtime.ReadMemStats(&prevMem)` before the loop, `prevMem = curMem` at the
+// tail of it, and `prevMem` never read.
+
+func fillInt(p *int) { *p = 1 }
+
+type memish struct{ n int }
+
+func fillMemish(p *memish) { p.n = 1 }
+
+func EscapesStructInLoop() {
+	var cur, prev memish
+	fillMemish(&prev)
+	for i := 0; i < 3; i++ {
+		fillMemish(&cur)
+		_ = cur.n
+		prev = cur
+	}
+}
+
+func EscapesIntInLoop() {
+	var cur, prev int
+	fillInt(&prev)
+	for i := 0; i < 3; i++ {
+		fillInt(&cur)
+		_ = cur
+		prev = cur
+	}
+}
+
+func EscapesOnce() {
+	var prev int
+	fillInt(&prev)
+	prev = 3
+}
+
+func EscapesTwice() {
+	var prev int
+	fillInt(&prev)
+	prev = 3
+	prev = 4
+}
+
+// The mark is not flow-sensitive, in either tool: the address is taken after
+// the wasted store and the store is still not reported.
+func EscapesAfterTheWaste() {
+	x := 1
+	x = 2
+	fillInt(&x)
+}
+
+// Captured by a closure that reads it — also escaping, also silent.
+func CapturedAndRead() func() int {
+	x := 1
+	x = 2
+	return func() int { return x }
+}
+
+// Captured by a closure that does *not* mention it: nothing escapes, so the
+// wasted store is still a finding. This is the control for the four above.
+func CapturedByNothing() int {
+	x := 1
+	x = 2
+	f := func() int { return 7 }
+	return f() + x
+}
+
+// A field and a slice element are addressed through FieldAddr/IndexAddr, not
+// through an Alloc in Locals, so neither tool reports these either.
+func FieldStore() memish {
+	var b memish
+	b.n = 1
+	b.n = 2
+	return b
+}
+
+func ElemStore() []int {
+	s := make([]int, 2)
+	s[0] = 1
+	s[0] = 2
+	return s
+}

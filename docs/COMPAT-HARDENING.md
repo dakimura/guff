@@ -18948,3 +18948,61 @@ workspace テスト緑（新規 2 本は `docs_by_offset_from_source` を
 
 **測り直しの注意**: 続き 129 と同じく golangci が `canonicalheader` 2 件を落とす
 回があり、同じバイナリで 14 と 12 の両方が出た。**guff は 651 で動かない。**
+
+### 2026-09-01（続き 131）— アドレスを取られた変数は `Locals` から落ちる。`wastedassign` が見ているのはその `Locals` だけ
+
+syncthing の `wastedassign` 1 件。対象は `cmd/syncthing/perfstats_unix.go`:
+
+```go
+var curMem, prevMem runtime.MemStats
+runtime.ReadMemStats(&prevMem)
+for t := range ticker.C {
+	runtime.ReadMemStats(&curMem)
+	…
+	prevMem = curMem   // ← guff はここを報告していた
+}
+```
+
+`prevMem` は確かに一度も**読まれない**。それでも上流は黙る。
+
+上流（sanposhiho/wastedassign v2.1.0）は `ssa.NaiveForm` で SSA を建て、
+`opInLocals(sf.Locals, op)` で **`Function.Locals` にある `Alloc` への Store しか
+見ない**。そして go/ssa の `finishBody` は
+
+```go
+// Remove from f.Locals any Allocs that escape to the heap.
+```
+
+を持っていて、`&x` のように**アドレスを取られたセルは `Locals` から外れる**
+（`lookup(obj, escaping=true)` が `alloc.Heap = true` を立てる）。
+ポインタ越しに書ける以上、Store だけを見て「代入されたが読まれない」とは言えない。
+
+guff の `lookup` は `escaping` を**受け取るが使っていなかった**
+（doc コメントに `DEFERRED vs go/ssa` と書いてあった）。`heap` フラグは
+`print.rs` が `local`/`new` を出し分ける以外どこも読んでいない。入れたのは 2 つ:
+
+- `Builder::address` の Ident 枝と `lookup` で、escaping なら `Alloc`
+  （go1.22 の for 変数なら `Phi` の各辺）に `heap` を立てる。
+- `Program::finish_function` で `heap` な `Alloc` を `locals` から外す（lift の前）。
+
+`locals` を読んでいるのは `wastedassign` だけなので、波及はこの 1 linter に閉じる。
+
+**測定**: 16 形。修正前は 6 形が乖離（`&x` を渡す / ループの尻尾で構造体ごと代入 /
+1 回だけ代入 / 2 回続けて代入 / **代入の後で**アドレスを取る / クロージャに読まれる）、
+修正後は全一致。対照として**撃つ側**も測った —— 変数に触れないクロージャを作るだけなら
+セルは局所のまま**報告される**、フィールドやスライス要素への store は
+`FieldAddr`/`IndexAddr` 経由なので**どちらのツールも黙る**。
+
+**副作用が 1 つ、そして上流に照らして正しかった**: `funclit_test` が
+`local int (x)` を主張していたが、キャプチャされたパラメータのセルは
+escaping なので `new int (x)` になる。x/tools **v0.48.0** の `go/ssa` を
+NaiveForm で同じソースに掛けて確かめた —— 上流も `t0 = new int (x)` を出し、
+`adder` の `Locals` に `x` は**入っていない**。テストが固定していたのは
+修正前の挙動のほうだった。
+
+syncthing **12 → 11**、台帳は 29/100 のまま。
+golden 208/208（`wastedassign` 4 → 5 キー、キー集合の差分で消失なし。
+増えた 1 つは「クロージャが変数に触れない」対照）、fix tier 208/208、reject 14、
+workspace テスト緑（新規テストは 8 関数の fixture を `assert_eq!(messages.len(), 2)`
+で固定する —— `any(contains(…))` では 6 形が全部報告されても緑になる）、
+OSS pr tier 8 target すべて P=R=100%、gitea も allowlist 内。

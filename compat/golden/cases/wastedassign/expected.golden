@@ -10,3 +10,4 @@ bad.go:4:2:wastedassign::assigned to n, but reassigned without using the value
 bad.go:6:3:wastedassign::assigned to n, but reassigned without using the value
 bad.go:51:5:wastedassign::assigned to line, but never used afterwards
 bad.go:101:6:wastedassign::assigned to n, but reassigned without using the value
+bad.go:175:2:wastedassign::assigned to x, but reassigned without using the value

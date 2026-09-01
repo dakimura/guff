@@ -8288,6 +8288,29 @@ fn wastedassign_flags_unused_local_assignments() {
     );
 }
 
+/// A cell whose address is taken is heap-allocated by go/ssa and dropped from
+/// `Function.Locals` in `finishBody`; wastedassign only walks `Locals`, so no
+/// store to such a cell is a finding however dead it looks. syncthing
+/// `cmd/syncthing/perfstats_unix.go` was one over-report of this shape
+/// (`runtime.ReadMemStats(&prevMem)`, then `prevMem = curMem` at the tail of
+/// the loop, never read).
+#[test]
+fn wastedassign_ignores_cells_whose_address_escapes() {
+    let pkg = support::typecheck_fixture("wastedassign", "example.com/wastedassign", "escapes.go");
+    let messages = support::run_analyzer(wastedassign(), &pkg);
+    // Counted: the fixture has eight functions with a store that looks dead and
+    // only the two controls may be reported. `any(contains(…))` would pass with
+    // all six escaping shapes reported as well.
+    assert_eq!(messages.len(), 2, "{messages:?}");
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.contains("assigned to x, but reassigned without using the value")
+                || m.contains("assigned to y, but reassigned without using the value")),
+        "only the two controls are reported: {messages:?}"
+    );
+}
+
 #[test]
 fn wastedassign_allows_used_assignments() {
     let pkg = support::typecheck_fixture("wastedassign", "example.com/wastedassign/ok", "ok.go");
