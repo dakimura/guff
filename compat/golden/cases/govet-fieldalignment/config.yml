@@ -1,0 +1,29 @@
+# Golden case: `fieldalignment`, the first of govet's ten non-default
+# analyzers guff implements.
+#
+# `cmd/vet` leaves it off, so golangci-lint only runs it under
+# `govet.enable-all` or an explicit `enable` — this case takes the explicit
+# route so the golden is about the analyzer and nothing else.
+#
+# Both of its diagnostics are wordings the fixture exercises: one about the
+# struct's size, one about its pointer bytes. The **columns** matter as much
+# as the lines: upstream reports at `node.Pos()`, which for a `struct`
+# expression is the `struct` keyword, not the type name and not the `{`.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+  settings:
+    govet:
+      enable:
+        - fieldalignment
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

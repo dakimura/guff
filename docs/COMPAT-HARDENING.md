@@ -18145,3 +18145,81 @@ linter が 1 つも走らないまま「上流は何も直さない」という�
 
 `#nosec` と同じ話で、SA1029 の fixture の assert は `messages.len() >= 4` だった。
 20 形に広げて `assert_eq!(len, 6)` と種類別の件数に変えた。
+
+### 2026-09-01（続き 119）— `fieldalignment` を移植した。所有権のマップは**設定で絞った後**の集合から作られていた
+
+fiber の `nolintlint` 9 件のうち 4 件:
+
+```
++guff app.go:186:nolintlint:directive `//nolint:govet // Aligning the struct fields is not necessary...` is unused for linter "govet"
++guff path.go:30:  〃 `//nolint:govet // fieldalignment: the slash bounds lead deliberately, see above`
++guff router.go:51: 〃 `//nolint:govet // fieldalignment: the router's scan dictates this order, see below`
++guff app_integration_test.go:111: 〃
+```
+
+fiber は `govet: enable-all: true` を書いており、`fieldalignment` は
+golangci-lint が `enable-all` か明示 `enable` でしか回さない**非既定 10 本**の 1 つ。
+guff はその 10 本を 1 本も実装していなかったので、
+**directive が指す finding が出ず「未使用の directive」になっていた。**
+
+移植は 389 行の 1 ファイル。注意点が 3 つ:
+
+1. **サイズモデルは `types.Sizes` ではない。** upstream は `gcSizes` という
+   私物を持っていて、`ptrdata`（GC が走査する先頭バイト数）を返せるのがその理由。
+   guff にも `Sizes` はあるが、混ぜずに `gcSizes` をそのまま写した。
+   word size と max align だけが `pass.TypesSizes` 由来。
+
+2. **診断は 2 種類ある。** サイズが最適でも**ポインタバイト数**が改善できることがあり、
+   文言が変わる（`struct of size 24 could be 16` / `struct with 16 pointer bytes could be 8`）。
+   `struct { uint32; string }` は前者が最適で後者が改善できる。
+
+3. **位置は `struct` キーワード。** `NewIssue` ではなく
+   `Pos: node.Pos(), End: node.Pos() + len("struct")` で、型名でも `{` でもない。
+   golden の列がこれを固定する（`bad.go:16:24`、`53:4` は無名構造体）。
+
+`--fix` は `format.Node` に**新しい FileSet**を渡して並べ替えた構造体を印字し直す
+（コメントと doc は落とし、`a, c bool` は 1 名 1 行に展開する）。
+guff の `guff::format::node` に同じことをさせたところ、
+**2 ファイル 28 形でバイト単位で一致**した。
+
+**そして所有権のマップに穴が空いた。** 移植直後、findings はこう出た:
+
+```
+a.go:3:9: struct of size 24 could be 16 (fieldalignment)     ← guff
+a.go:3:9: fieldalignment: struct of size 24 could be 16 (govet) ← 上流
+```
+
+linter 名が `govet` にならず、`fieldalignment: ` の接頭辞も付かない。
+接頭辞は `format_issue_text` が「pass 名 ≠ linter 名」のときだけ付けるので、
+**両方とも同じ 1 つの原因**だった。`linter_name_for_analyzer` は
+analyzer → linter のマップを `analyzers_for_linter(linter)` から組んでおり、
+それは `LinterSettings::default()` を通す —— govet の default は
+**`cmd/vet` の既定集合**なので、`fieldalignment` はマップに入らない。
+所有権は設定に依存しない（golangci-lint の表は静的）ので、
+`LinterSettings::unfiltered()` を足してマップだけそこから組むようにした。
+同じ穴が `//nolint:fieldalignment` の名前解決（`nolint.rs`）と
+`linters: [govet]` を書いた exclude ルールにも効いていた。
+
+**測定**: 28 形（`a.go` 8 / `b.go` 18 と fixture 30 構造体）。
+fixture 30 構造体のうち **14 が発火**し、位置・文言・`--fix` の出力とも全一致。
+黙る 16 形（既に最適な順、空構造体、単一フィールド、複数名グループ、
+埋め込み、先頭の 0 サイズフィールド、末尾の 0 サイズフィールド、
+長さ 0 のポインタ配列、既に先頭のポインタ、入れ子）も込みで固定した。
+fiber **9 → 5**（`nolintlint` 9 → 5）。
+golden 205/205（新 case `govet-fieldalignment` 14 キー。
+`govet-enable-all` は動かず —— その fixture は非既定 analyzer が
+何も報告しない形に保たれている、という宣言どおりだった）、
+fix tier 205/205（新 case の記録 114 行）、reject 14、isolate 116、
+filesets 116、smoke 1、workspace テスト緑、OSS pr tier 8 target すべて P=R=100%。
+
+**残った health の赤**: fiber は `internal/logtemplate/sanitize.go:41` が
+`ill_typed` のままで、これは本件と無関係の**型検査器の穴**（本日の fiber hunt すべてに出ている）。
+
+```go
+func ScrubControls[S ~string | ~[]byte](s S, idx int) []byte {
+	scrubbed := make([]byte, len(s))
+	copy(scrubbed, s)   // guff: invalid copy: source s is not a slice or string
+```
+
+型パラメータの core type が slice / string のとき `copy` は合法。baseline には
+書かずに残す（行を足せば 1 件の劣化を許し続ける）。

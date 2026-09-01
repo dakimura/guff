@@ -11,6 +11,7 @@ mod copylocks;
 mod defers;
 mod directive;
 mod errorsas;
+mod fieldalignment;
 mod expreq;
 mod framepointer;
 mod govet_util;
@@ -56,6 +57,7 @@ pub use ifaceassert::analyzer as ifaceassert_analyzer;
 pub use inline::analyzer as inline_analyzer;
 pub use loopclosure::analyzer as loopclosure_analyzer;
 pub use lostcancel::analyzer as lostcancel_analyzer;
+pub use fieldalignment::analyzer as fieldalignment_analyzer;
 pub use nilfunc::analyzer as nilfunc_analyzer;
 pub use printf::analyzer as printf_analyzer;
 pub use shift::analyzer as shift_analyzer;
@@ -96,6 +98,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         inline::analyzer(),
         loopclosure::analyzer(),
         lostcancel::analyzer(),
+        fieldalignment::analyzer(),
         nilfunc::analyzer(),
         printf::analyzer(),
         shift::analyzer(),

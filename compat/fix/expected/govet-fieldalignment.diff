@@ -1,0 +1,124 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh govet-fieldalignment
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/govet-fieldalignment/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/fieldalignment/bad.go
++++ b/fieldalignment/bad.go
+@@ -14,28 +14,28 @@
+ 
+ // bool, int64, bool: 24 bytes as written, 16 with the int64 first.
+ type sizeBoolInt64Bool struct {
++	b int64
+ 	a bool
+-	b int64
+ 	c bool
+ }
+ 
+ // The array's element alignment is what counts, not the array's own size.
+ type sizeWithArray struct {
++	b [3]int64
+ 	a bool
+-	b [3]int64
+ 	c bool
+ }
+ 
+ // Tags do not move a field.
+ type sizeWithTags struct {
++	B int64 `json:"b"`
+ 	A bool  `json:"a"`
+-	B int64 `json:"b"`
+ 	C bool  `json:"c"`
+ }
+ 
+ type sizeWithComplex struct {
++	c complex128
+ 	b bool
+-	c complex128
+ 	d bool
+ }
+ 
+@@ -43,8 +43,8 @@
+ // written, not at the field.
+ type sizeAnonymous struct {
+ 	x struct {
++		b int64
+ 		a bool
+-		b int64
+ 		c bool
+ 	}
+ }
+@@ -53,59 +53,59 @@
+ 
+ // uint32 then string: the collector must scan 16 bytes, 8 if the string leads.
+ type ptrsUint32String struct {
++	s string
+ 	u uint32
+-	s string
+ }
+ 
+ // string then *uint32 scans 24; the other way round, 16.
+ type ptrsStringPtr struct {
++	p *uint32
+ 	s string
+-	p *uint32
+ }
+ 
+ type ptrsArrayOfPtr struct {
++	p [2]*int
+ 	n bool
+-	p [2]*int
+ }
+ 
+ // An interface is two words and fully pointerful, so moving it first fixes
+ // the struct's *size* — this one reports the size wording despite living in
+ // the pointer section.
+ type ptrsInterface struct {
++	i interface{ M() }
+ 	b bool
+-	i interface{ M() }
+ 	c bool
+ }
+ 
+ type ptrsAny struct {
++	i any
+ 	b bool
+-	i any
+ }
+ 
+ type ptrsSlice struct {
++	s []byte
+ 	b bool
+-	s []byte
+ }
+ 
+ type ptrsMapChanFunc struct {
+-	b bool
+ 	m map[string]int
+ 	c chan int
+ 	f func()
++	b bool
+ }
+ 
+ type ptrsString struct {
+-	b bool
+ 	s string
+ 	i int64
++	b bool
+ }
+ 
+ // A type parameter's constraint decides its layout: `T any` is an interface,
+ // so it is two words wide and fully pointerful.
+ type ptrsGeneric[T any] struct {
+-	b bool
+ 	v T
+ 	i int64
++	b bool
+ }
+ 
+ // ---- already optimal, and therefore silent ------------------------------

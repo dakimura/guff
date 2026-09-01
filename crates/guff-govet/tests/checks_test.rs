@@ -7,10 +7,65 @@ use guff_govet::{
     hostport_analyzer, ifaceassert_analyzer, inline_analyzer, loopclosure_analyzer, lostcancel_analyzer,
     nilfunc_analyzer, printf_analyzer, shift_analyzer, sigchanyzer_analyzer, slog_analyzer,
     stdmethods_analyzer, stringintconv_analyzer, structtag_analyzer, tests_analyzer,
-    timeformat_analyzer, unmarshal_analyzer, unreachable_analyzer, unsafeptr_analyzer,
+    fieldalignment_analyzer, timeformat_analyzer, unmarshal_analyzer, unreachable_analyzer,
+    unsafeptr_analyzer,
     testinggoroutine_analyzer, unusedresult_analyzer, waitgroup_analyzer,
 };
 use guff_types::Config;
+
+/// `fieldalignment` reports at the `struct` keyword — `node.Pos()` of an
+/// `*ast.StructType` — which is neither the type name nor the `{`, and the
+/// message carries no hint of where it landed. So this pins `(line, column)`
+/// as well as the message, and pins the **count**: thirty struct types are
+/// written in the fixture and fourteen of them are reported. The sixteen
+/// silent ones are the point of the other half of the file — an analyzer that
+/// reported every struct would still pass an `any(contains(…))` assertion.
+#[test]
+fn fieldalignment_reports_size_and_pointer_bytes_at_the_struct_keyword() {
+    let dir = support::testdata("fieldalignment");
+    let pkg = support::typecheck_pkg("example.com/govet/fieldalignment", &dir.join("bad.go"));
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64, String)> = support::run_analyzer_diagnostics(
+        fieldalignment_analyzer(),
+        &pkg,
+    )
+    .into_iter()
+    .map(|d| {
+        let p = fset.position(guff::position::Pos(d.pos as i64));
+        (p.line, p.column, d.message)
+    })
+    .collect();
+    got.sort();
+
+    let size = |line, col, from, to| (line, col, format!("struct of size {from} could be {to}"));
+    let ptrs = |line, col, from, to| {
+        (
+            line,
+            col,
+            format!("struct with {from} pointer bytes could be {to}"),
+        )
+    };
+    assert_eq!(
+        got,
+        vec![
+            size(16, 24, 24, 16),  // bool, int64, bool
+            size(23, 20, 40, 32),  // an array's element alignment counts
+            size(30, 19, 24, 16),  // tags do not move a field
+            size(36, 22, 32, 24),  // complex128
+            size(45, 4, 24, 16),   // the anonymous struct, at its own `struct`
+            ptrs(55, 23, 16, 8),   // uint32 then string
+            ptrs(61, 20, 24, 16),  // string then *uint32
+            ptrs(66, 21, 24, 16),  // an array of pointers
+            size(74, 20, 32, 24),  // an interface is two words: a size finding
+            ptrs(80, 14, 24, 16),  // any
+            ptrs(85, 16, 16, 8),   // a slice
+            ptrs(90, 22, 32, 24),  // map, chan, func
+            ptrs(97, 17, 16, 8),   // bool, string, int64
+            ptrs(105, 25, 24, 16), // a type parameter constrained by `any`
+        ],
+        "fieldalignment findings"
+    );
+}
 
 #[test]
 fn copylocks_flags_value_param() {
