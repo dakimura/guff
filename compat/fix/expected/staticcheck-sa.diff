@@ -60,6 +60,32 @@
 +		<-t.C
  	}
  }
+--- a/sa1029/bad/bad.go
++++ b/sa1029/bad/bad.go
+@@ -40,12 +40,11 @@
+ 	// reported both; fiber had one of each.
+ 	var k2 ctxKey = struct{}{}
+ 	context.WithValue(ctx, k2, val)
+-	var k5 ctxKey
+-	k5 = struct{}{}
++	var k5 ctxKey = struct{}{}
+ 	context.WithValue(ctx, k5, val)
+ 
+ 	// The same named type, spelled the ordinary ways.
+-	var k1 ctxKey = ctxKey{}
++	var k1 = ctxKey{}
+ 	context.WithValue(ctx, k1, val)
+ 	k3 := ctxKey{}
+ 	context.WithValue(ctx, k3, val)
+@@ -56,7 +55,7 @@
+ 
+ 	// A named struct with a field, and a named built-in type: neither is a
+ 	// `*types.Struct` with no fields, and neither is a `*types.Basic`.
+-	var k12 ctxKeyField = ctxKeyField{n: 1}
++	var k12 = ctxKeyField{n: 1}
+ 	context.WithValue(ctx, k12, val)
+ 	var k11 namedInt = 3
+ 	context.WithValue(ctx, k11, val)
 --- a/sa4013/bad/bad.go
 +++ b/sa4013/bad/bad.go
 @@ -1,2 +1,3 @@

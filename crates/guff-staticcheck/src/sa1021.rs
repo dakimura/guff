@@ -9,8 +9,19 @@ use guff_analysis::callcheck::{self, Call, CallContext};
 use guff_analysis::passes::buildir;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
-fn is_net_ip(ctx: &CallContext<'_>, value: callcheck::SsaValue) -> bool {
-    let typ = callcheck::ssa_value_type(ctx.prog, ctx.caller, value);
+/// `isConvertedFrom(v, "net.IP")`: the value must **be** a conversion, and the
+/// thing it converts must be a `net.IP`. Asking instead whether the argument's
+/// type is `net.IP` — which is what this did while `ssa_value_type` peeled
+/// `ChangeType` for every rule — answers yes for a plain `net.IP` operand that
+/// was never converted at all.
+fn is_converted_from_net_ip(ctx: &CallContext<'_>, value: callcheck::SsaValue) -> bool {
+    let Some(typ) = callcheck::change_type_operand_type(ctx.prog, ctx.caller, value) else {
+        return false;
+    };
+    // `types.TypeString(types.Unalias(change.X.Type()), nil)`: an alias of
+    // `net.IP` is a `net.IP`. Without the unalias, `type myIP = net.IP`
+    // renders as the alias's own name and the comparison fails.
+    let typ = guff_types::alias::unalias_readonly(&ctx.prog.type_arena, typ);
     callcheck::render_type(
         &ctx.prog.type_arena,
         &ctx.prog.object_arena,
@@ -23,7 +34,7 @@ fn check(call: &mut Call<'_>, ctx: &CallContext<'_>) {
     let (Some(a), Some(b)) = (call.args.get(0), call.args.get(1)) else {
         return;
     };
-    if is_net_ip(ctx, a.value) && is_net_ip(ctx, b.value) {
+    if is_converted_from_net_ip(ctx, a.value) && is_converted_from_net_ip(ctx, b.value) {
         call.invalid("use net.IP.Equal to compare net.IPs, not bytes.Equal");
     }
 }
