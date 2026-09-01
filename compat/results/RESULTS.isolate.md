@@ -78,7 +78,7 @@
 | isolate-errchkjson | 5 | 5 | 5 | 100.0% | 100.0% | 0 |
 | isolate-bodyclose | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-rowserrcheck | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
-| isolate-sqlclosecheck | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
+| isolate-sqlclosecheck | 7 | 7 | 7 | 100.0% | 100.0% | 0 |
 | isolate-contextcheck | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-wsl | 7 | 7 | 7 | 100.0% | 100.0% | 0 |
 | isolate-gocritic | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
@@ -581,7 +581,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| sqlclosecheck | 3 | 3 | 3 | 100.0% | 100.0% |
+| sqlclosecheck | 7 | 7 | 7 | 100.0% | 100.0% |
 
 ## isolate-contextcheck
 

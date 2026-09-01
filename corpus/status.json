@@ -42,7 +42,7 @@
     "caddy": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260901T093801Z",
+      "at": "20260901T100031Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -58,7 +58,7 @@
     "cobra": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260901T093801Z",
+      "at": "20260901T100031Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -66,7 +66,7 @@
     "connect-go": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260901T085902Z",
+      "at": "20260901T100643Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -144,7 +144,7 @@
     "gin": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260901T093801Z",
+      "at": "20260901T100031Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -152,7 +152,7 @@
     "gitea": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260901T092557Z",
+      "at": "20260901T100538Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -160,7 +160,7 @@
     "go-client": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260901T093801Z",
+      "at": "20260901T100031Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -184,7 +184,7 @@
     "helm": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260901T093801Z",
+      "at": "20260901T100031Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -200,7 +200,7 @@
     "k9s": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260901T093801Z",
+      "at": "20260901T100031Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -260,15 +260,14 @@
     "syncthing": {
       "tier": "hunt",
       "state": "open",
-      "at": "20260901T092229Z",
-      "open": 17,
-      "guff_only": 7,
+      "at": "20260901T100733Z",
+      "open": 15,
+      "guff_only": 5,
       "gcl_only": 10,
       "by_linter": {
         "gosec": 4,
         "modernize": 4,
         "staticcheck": 3,
-        "sqlclosecheck": 2,
         "wastedassign": 1,
         "nolintlint": 1,
         "nilnesserr": 1,
@@ -278,7 +277,7 @@
     "thanos": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260901T092640Z",
+      "at": "20260901T100615Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0

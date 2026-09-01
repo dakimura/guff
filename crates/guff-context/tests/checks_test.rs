@@ -231,6 +231,33 @@ fn sqlclosecheck_flags_missing_and_non_defer() {
 }
 
 #[test]
+fn sqlclosecheck_settles_a_phi_and_a_close_inside_a_returned_literal() {
+    // Upstream decides on the SSA value: two assignments in the arms of an
+    // `if` meet in one φ, and one close settles every edge into it. This port
+    // tracks a name in a statement list, so the second assignment orphaned the
+    // first and reported it — syncthing's `PrefixKV`, twice over. A
+    // *sequential* reassignment is not that shape: the first really does lose
+    // its rows, and upstream reports it even though a close follows the second.
+    //
+    // The close itself only counted when it sat in a `defer func(){ … }()` at
+    // the site; `PrefixKV` hands the closure back instead. A capture on its own
+    // settles nothing here, which is where this differs from bodyclose.
+    let dir = support::testdata("sqlclosecheck");
+    let pkg = support::typecheck_pkg("example.com/sqlclosecheck/branches", &dir.join("branches.go"));
+    let messages = support::run_analyzer(sqlclosecheck(), &pkg);
+    // Two never-closed arms, the first of the sequential pair, and the capture
+    // that never closes. `BranchesClosedAfter` and `ClosedInReturnedClosure`
+    // are the two that must stay silent.
+    assert_eq!(messages.len(), 4, "{messages:?}");
+    assert!(
+        messages
+            .iter()
+            .all(|m| m == "Rows/Stmt/NamedStmt was not closed"),
+        "{messages:?}"
+    );
+}
+
+#[test]
 fn sqlclosecheck_allows_defer_return_and_pass() {
     let dir = support::testdata("sqlclosecheck");
     let pkg = support::typecheck_pkg("example.com/sqlclosecheck/ok", &dir.join("ok.go"));
