@@ -2801,6 +2801,28 @@ fn filter_govet(
         .collect()
 }
 
+impl LinterSettings {
+    /// Settings that filter nothing, for questions about **ownership** rather
+    /// than about what this run should execute.
+    ///
+    /// `Default` is not that: for govet it means `cmd/vet`'s default set, so
+    /// the ten passes outside it look like they belong to no linter. See
+    /// [`crate::registry::linter_name_for_analyzer`].
+    pub fn unfiltered() -> Self {
+        Self {
+            govet: GovetSettings {
+                enable_all: true,
+                ..GovetSettings::default()
+            },
+            staticcheck: StaticcheckSettings {
+                checks: Some(vec!["all".to_string()]),
+                ..StaticcheckSettings::default()
+            },
+            ..Self::default()
+        }
+    }
+}
+
 /// Port of golangci-lint's `isAnalyzerEnabled` (`golinters/govet/govet.go`).
 ///
 /// The order of the arms is the whole content of the function, and two of them
@@ -2813,10 +2835,12 @@ fn filter_govet(
 ///   under it — but `disable-all` alone, with no `enable`, is empty rather than
 ///   "the default set".
 ///
-/// The default arm is the reason [`GOVET_DEFAULT_ANALYZERS`] exists even though
-/// guff currently implements no analyzer outside it: the day one of the ten
-/// non-default passes (nilness, shadow, fieldalignment, …) is ported, a config
-/// with no `settings.govet` block must not start firing it.
+/// The default arm is why [`GOVET_DEFAULT_ANALYZERS`] exists: `fieldalignment`
+/// is ported and is *not* on it, so a config with no `settings.govet` block
+/// must not fire it. Note that this filter answers "what should run", not
+/// "who owns this analyzer" — attribution goes through
+/// [`LinterSettings::unfiltered`], because `fieldalignment` belongs to `govet`
+/// whether or not this run enables it.
 fn govet_analyzer_enabled(
     name: &str,
     settings: &GovetSettings,

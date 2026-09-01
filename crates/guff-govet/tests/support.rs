@@ -148,6 +148,30 @@ fn unquote_import_path(lit: &str) -> String {
     lit.to_string()
 }
 
+/// The diagnostics themselves, for checks whose **position** is the thing
+/// being tested. `fieldalignment` reports at the `struct` keyword, which is
+/// neither the type name nor the `{`, and the message says nothing about it.
+pub fn run_analyzer_diagnostics(
+    analyzer: &'static guff_analysis::Analyzer,
+    pkg: &Arc<Package>,
+) -> Vec<guff_analysis::Diagnostic> {
+    let result = run_on_packages(
+        &[analyzer],
+        std::slice::from_ref(pkg),
+        &RunnerOptions {
+            sequential: true,
+            ..RunnerOptions::default()
+        },
+    )
+    .expect("run analyzer");
+    for action in result.graph.all_actions() {
+        if let Some(err) = action.error() {
+            panic!("analyzer {} failed: {err}", action.string_id());
+        }
+    }
+    result.diagnostics().into_iter().map(|(_, d)| d).collect()
+}
+
 pub fn run_analyzer(
     analyzer: &'static guff_analysis::Analyzer,
     pkg: &Arc<Package>,

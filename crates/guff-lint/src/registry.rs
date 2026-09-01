@@ -24,6 +24,21 @@ pub fn analyzers_for_linter(name: &str) -> Option<Vec<&'static Analyzer>> {
     analyzers_for_linter_with_settings(name, &LinterSettings::default())
 }
 
+/// Every analyzer registered under `name`, with no `linters.settings` filter.
+///
+/// Ownership — which linter an analyzer's findings are attributed to — does
+/// not depend on configuration. golangci-lint's table is static: `printf`
+/// belongs to `govet` whether or not this run enables it. Asking
+/// [`analyzers_for_linter`] instead answers through
+/// `LinterSettings::default()`, which for govet is `cmd/vet`'s default set —
+/// so the ten passes outside it (fieldalignment and friends) had no owner and
+/// were reported under their own name, with no `fieldalignment: ` prefix and
+/// no match for an exclude rule naming `govet`.
+fn all_analyzers_for_linter(name: &str) -> Option<Vec<&'static Analyzer>> {
+    let unfiltered = LinterSettings::unfiltered();
+    analyzers_for_linter_with_settings(name, &unfiltered)
+}
+
 /// Like [`analyzers_for_linter`], applying `linters.settings` (govet/staticcheck filters).
 pub fn analyzers_for_linter_with_settings(
     name: &str,
@@ -581,7 +596,7 @@ pub fn linter_name_for_analyzer(analyzer: &str) -> &str {
             }
             // Default settings omit opinionated ST* from the staticcheck
             // filter; those IDs are mapped via [`is_staticcheck_check_id`].
-            if let Some(analyzers) = analyzers_for_linter(linter) {
+            if let Some(analyzers) = all_analyzers_for_linter(linter) {
                 for a in analyzers {
                     // Keep the first (alphabetically earliest) owner so shared
                     // analyzers — e.g. `gomodguard` vs its `gomodguard_v2`
