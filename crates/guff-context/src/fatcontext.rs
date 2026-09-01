@@ -130,6 +130,22 @@ fn enclosing_span(n: NodeRef<'_>) -> Option<(u32, u32)> {
         NodeRef::FuncLit(FuncLit { ty, body, .. }) => {
             Some((ty.pos().0 as u32, body.end().0 as u32))
         }
+        // `FuncDecl` was added to [`body_of`] for the struct-pointer category
+        // and not here, so `is_defined_within` answered `None` — false — for
+        // every assignment in a plain function body. A `context.Context`
+        // *parameter*'s scope is the function body, which is inside the
+        // declaration, so upstream lets `ctx = ctx2(ctx)` at the top level of
+        // `func f(ctx context.Context)` alone; guff reported all of them
+        // (prometheus, 14 findings). Go's `(*ast.FuncDecl).Pos()` is
+        // `d.Type.Pos()` and its `End()` is the body's `}`.
+        NodeRef::FuncDecl(fd) => {
+            let end = fd
+                .body
+                .as_ref()
+                .map(|b| b.end())
+                .unwrap_or_else(|| fd.ty.end());
+            Some((fd.ty.pos().0 as u32, end.0 as u32))
+        }
         _ => None,
     }
 }

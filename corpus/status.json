@@ -7,8 +7,8 @@
   ],
   "goal": 100,
   "defined": 34,
-  "clean": 27,
-  "open": 6,
+  "clean": 28,
+  "open": 5,
   "unmeasured": 1,
   "targets": {
     "argo-cd": {
@@ -42,7 +42,7 @@
     "caddy": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260901T045905Z",
+      "at": "20260901T054057Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -58,7 +58,7 @@
     "cobra": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260901T045905Z",
+      "at": "20260901T054057Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -141,7 +141,7 @@
     "fiber": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260901T050300Z",
+      "at": "20260901T054625Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -149,7 +149,7 @@
     "gin": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260901T045905Z",
+      "at": "20260901T054057Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -157,7 +157,7 @@
     "gitea": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260901T050316Z",
+      "at": "20260901T054718Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -165,7 +165,7 @@
     "go-client": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260901T045905Z",
+      "at": "20260901T054057Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -189,7 +189,7 @@
     "helm": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260901T045905Z",
+      "at": "20260901T054057Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -205,7 +205,7 @@
     "k9s": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260901T045905Z",
+      "at": "20260901T054057Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -232,14 +232,11 @@
     },
     "prometheus": {
       "tier": "hunt",
-      "state": "open",
-      "at": "20260901T050838Z",
-      "open": 14,
-      "guff_only": 14,
-      "gcl_only": 0,
-      "by_linter": {
-        "fatcontext": 14
-      }
+      "state": "clean",
+      "at": "20260901T054549Z",
+      "open": 0,
+      "guff_only": 0,
+      "gcl_only": 0
     },
     "rclone": {
       "tier": "hunt",
@@ -289,7 +286,7 @@
     "thanos": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260901T050352Z",
+      "at": "20260901T054641Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0

@@ -9,3 +9,6 @@
 bad.go:11:3:fatcontext::nested context in loop
 bad.go:19:3:fatcontext::nested context in function literal
 bad.go:36:2:fatcontext::potential nested context in struct pointer
+scope.go:59:2:fatcontext::nested context in function literal
+scope.go:79:3:fatcontext::nested context in loop
+scope.go:87:3:fatcontext::nested context in loop

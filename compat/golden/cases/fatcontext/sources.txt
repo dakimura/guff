@@ -1,2 +1,5 @@
 # The isolate fixture, so the two tiers cannot drift.
 bad.go  compat/isolate/fixtures/fatcontext/bad.go
+# Which node the report is attributed to, and so which declarations count as
+# "inside" it: twelve shapes around `isWithinLoop`.
+scope.go  compat/isolate/fixtures/fatcontext/scope.go
