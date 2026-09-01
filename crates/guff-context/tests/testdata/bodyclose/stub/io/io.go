@@ -24,3 +24,5 @@ type ReadCloser interface {
 	Reader
 	Closer
 }
+
+var Discard Writer

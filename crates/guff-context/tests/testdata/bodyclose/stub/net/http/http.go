@@ -10,10 +10,11 @@ type Body interface {
 }
 
 type Response struct {
-	Status     string
-	StatusCode int
-	Header     Header
-	Body       Body
+	Status       string
+	StatusCode   int
+	Header       Header
+	Body         Body
+	Uncompressed bool
 }
 
 type Client struct{}

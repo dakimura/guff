@@ -18745,3 +18745,47 @@ fix tier 206/206、reject 14、isolate 116、smoke 1、workspace テスト緑、
 OSS pr tier 8 target すべて P=R=100%、hunt は thanos / prometheus / gitea /
 jaeger / argo-cd / nats-server / fiber すべて allowlist 内。
 syncthing は **29 → 24**（本セッションの他の修正のぶん。printf 由来の差は 0）。
+
+### 2026-09-01（続き 127）— `isopen` は**参照元を辿る**。近似は 6 つの枝を 2 つに畳んでいた
+
+connect-go の 6 件はすべて `bodyclose` で、1 件が過剰報告、5 件が
+「directive が未使用」= 発火していない側だった。
+
+guff の `bodyclose` は自分のヘッダにこう書いてある:
+
+```rust
+//! Upstream uses `buildssa`. This port is an **AST / intra-procedural approximation**
+//! DEFERRED: full SSA referrer / Phi / closure-capture / FieldAddr / io.Closer ChangeInterface parity.
+```
+
+15 形を測って、**上流の `isopen` が持つ枝のうち 5 つ**が畳まれていると分かった。
+どれも「その値の参照元が何であるか」で決まる:
+
+| 参照元 | 上流 | guff（修正前） |
+|---|---|---|
+| 束縛されない呼び出し（`getReqCall` は結果型に `*http.Response` を含む**あらゆる call** を拾う） | 報告 | **黙る**（代入しか追わない） |
+| `*ssa.Global` への store | 黙る（"Referrers for globals are always nil, so skip"） | **報告** |
+| `*ssa.FieldAddr` への store ＋ そのフィールド越しの `Close()` | 黙る | **報告** |
+| `*ssa.MakeClosure` に捕まる（Body を読もうが触るまいが） | 黙る | **報告** |
+| callee へ渡す（`*ssa.Call` の枝は**静的な callee に入って close を探す**） | close する callee だけ黙る | **常に黙る** |
+| インラインで drain するだけ | 報告 | 一致 |
+
+最後の 1 つが特に効いていた。`mark_escaped_arg` は
+「引数に渡したら callee が所有する」という**近似**で、コミットメッセージも
+`Shrink nightly OSS finding-set gaps` だった。上流はそうではなく、
+`httputil.DumpResponse(response, false)` も `d.validateResponse(response)` も
+**close しないので報告される**。このパッケージ内で `*http.Response` 引数の
+Body を閉じる関数だけを集めて、その呼び出しに限って settle するようにした。
+
+**測定**: 15 形（4 ファイル）。修正前は 6 形が乖離、修正後は全一致。
+connect-go **6 → 0**（clean）、syncthing **24 → 23**（`bodyclose` が 5/5 の
+P=R=100% になった）、台帳 **28 → 29**。
+golden 206/206（`bodyclose` 13 → 17 キー、キー集合の差分で消失なし）、
+fix tier 206/206、reject 14、isolate 116、filesets 116、smoke 1、
+workspace テスト緑、OSS pr tier 8 target すべて P=R=100%、
+hunt は connect-go / gitea / thanos / jaeger すべて allowlist 内。
+
+**まだ近似のまま**であることは変わらない —— Phi も `io.Closer` の
+`ChangeInterface` も追っていない。今回入れたのは「上流のどの枝が何を答えるか」を
+形ごとに測って写した 5 つで、`isopen` そのものの移植ではない。
+新しい fixture の**黙る 6 形が主張**で、撃つ 4 形はその走査がまだ生きている対照である。

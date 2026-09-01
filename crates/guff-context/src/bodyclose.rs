@@ -362,10 +362,28 @@ fn mark_cleanup_close(call: &CallExpr, usages: &mut HashMap<String, RespUsage>) 
     });
 }
 
-/// If a tracked response ident is passed as a call argument, treat it as
-/// closed/escaped (callee owns the body). Skips `.Body.Close()` itself.
-fn mark_escaped_arg(call: &CallExpr, usages: &mut HashMap<String, RespUsage>) {
+/// Handing a tracked response to another call only settles it when that call
+/// **closes the body**.
+///
+/// Upstream's `*ssa.Call` arm walks into a static callee and answers `false`
+/// — not open — only on finding an `isCloseCall` in it; a callee it cannot
+/// see, or one that does not close, leaves the response open and the finding
+/// stands. guff treated *any* argument position as handing over ownership,
+/// which silenced `httputil.DumpResponse(response, false)`, a method that only
+/// validates (connect-go's `d.validateResponse(response)`), and everything
+/// else that merely reads.
+fn mark_escaped_arg(
+    pass: &Pass<'_>,
+    call: &CallExpr,
+    closers: &HashSet<guff_types::arena::ObjectId>,
+    usages: &mut HashMap<String, RespUsage>,
+) {
     if body_close_var(call).is_some() {
+        return;
+    }
+    let callee_closes = code::call_target_object(pass, &call.fun)
+        .is_some_and(|obj| closers.contains(&obj));
+    if !callee_closes {
         return;
     }
     for arg in &call.args {
@@ -376,6 +394,84 @@ fn mark_escaped_arg(call: &CallExpr, usages: &mut HashMap<String, RespUsage>) {
             }
         }
     }
+}
+
+/// Any tracked response a func literal mentions is settled: upstream stops at
+/// the `MakeClosure` and `calledInFunc` answers "not open".
+fn mark_captured_by_closure(lit: &guff::ast::FuncLit, usages: &mut HashMap<String, RespUsage>) {
+    if usages.is_empty() {
+        return;
+    }
+    let mut seen: Vec<String> = Vec::new();
+    inspect(NodeRef::BlockStmt(&lit.body), |n| {
+        if let Some(NodeRef::Ident(id)) = n {
+            if usages.contains_key(id.name.as_str()) {
+                seen.push(id.name.clone());
+            }
+        }
+        true
+    });
+    for name in seen {
+        if let Some(u) = usages.get_mut(&name) {
+            u.closed = true;
+            u.consumed = true;
+        }
+    }
+}
+
+/// The functions of this package that close a `*http.Response` parameter's
+/// body — the ones upstream's walk into a static callee would answer `false`
+/// for.
+fn response_closing_funcs(pass: &Pass<'_>) -> HashSet<guff_types::arena::ObjectId> {
+    let mut out = HashSet::new();
+    let Some(info) = pass.types_info() else {
+        return out;
+    };
+    for file in pass.files() {
+        for decl in &file.decls {
+            let guff::ast::Decl::FuncDecl(fd) = decl else {
+                continue;
+            };
+            let Some(body) = &fd.body else {
+                continue;
+            };
+            // Which parameters are `*http.Response`, by name.
+            let mut params: HashSet<&str> = HashSet::new();
+            if let Some(list) = fd.ty.params.as_ref() {
+                for field in &list.list {
+                    if !field
+                        .ty
+                        .as_ref()
+                        .is_some_and(type_expr_looks_like_response)
+                    {
+                        continue;
+                    }
+                    for name in &field.names {
+                        params.insert(name.name.as_str());
+                    }
+                }
+            }
+            if params.is_empty() {
+                continue;
+            }
+            let mut closes = false;
+            inspect(NodeRef::BlockStmt(body), |n| {
+                let Some(NodeRef::CallExpr(c)) = n else {
+                    return true;
+                };
+                if body_close_var(c).is_some_and(|v| params.contains(v)) {
+                    closes = true;
+                }
+                true
+            });
+            if closes {
+                if let Some(Some(obj)) = info.defs.get(&fd.name.id) {
+                    out.insert(*obj);
+                }
+            }
+        }
+    }
+    out
 }
 
 /// `return resp.Body, nil` counts as closed.
@@ -443,21 +539,48 @@ fn check_body(
     // outside it can be told from one declared within.
     func_start: u32,
     closure_reassigned: &ClosureStores,
+    closers: &HashSet<guff_types::arena::ObjectId>,
     check_consumption: bool,
     pending: &mut Vec<(u32, String)>,
 ) {
     let mut usages: HashMap<String, RespUsage> = HashMap::new();
+    // `x.f = resp` — upstream's `*ssa.Store` into a `FieldAddr`, which it
+    // settles by looking for a close on the body reached through that field.
+    // Keyed by the rendered left-hand side (`d.response`).
+    let mut field_aliases: HashMap<String, String> = HashMap::new();
+    // Every `<chain>.Body.Close()` seen anywhere in the body.
+    let mut chain_closes: HashSet<String> = HashSet::new();
+    let mut usages_to_close: Vec<String> = Vec::new();
+    // Calls whose result the walk below already accounts for: the right-hand
+    // side of an assignment or a `var` spec (tracked by name), and a call
+    // statement (reported by the `ExprStmt` arm).
+    let handled_calls = calls_handled_elsewhere(body);
 
     inspect(NodeRef::BlockStmt(body), |n| {
         let Some(n) = n else {
             return true;
         };
-        if matches!(n, NodeRef::FuncLit(_)) {
+        if let NodeRef::FuncLit(lit) = n {
+            // A response captured by a func literal is upstream's `*ssa.Store`
+            // -> `*ssa.MakeClosure` branch, and `calledInFunc` answers "not
+            // open" for it however the closure uses the body — draining it,
+            // reading a field, or touching nothing at all. Only the closure
+            // that actually closes was recognised here before, so
+            // `defer func() { io.Copy(io.Discard, resp.Body) }()` — connect-go's
+            // `bench_test.go` — read as a leak.
+            mark_captured_by_closure(lit, &mut usages);
             return false;
         }
 
         match n {
             NodeRef::AssignStmt(assign) => {
+                note_indirect_store(
+                    pass,
+                    assign,
+                    &usages,
+                    &mut field_aliases,
+                    &mut usages_to_close,
+                );
                 handle_assign(
                     pass,
                     assign,
@@ -472,6 +595,26 @@ fn check_body(
                 handle_value_spec(pass, spec, check_consumption, &mut usages, pending);
             }
             NodeRef::CallExpr(call) => {
+                if let Some(chain) = body_close_chain(call) {
+                    chain_closes.insert(chain);
+                }
+                // `getReqCall` accepts *any* call whose result type mentions
+                // `*net/http.Response` — a helper of this package as much as
+                // `client.Do` — and a result nobody binds has no referrers, so
+                // `isopen` reports. guff only ever tracked assignments, so
+                // `getPingResponse(t, "ping").Uncompressed` (connect-go, four
+                // times) said nothing.
+                if !handled_calls.contains(&call.id)
+                    && call_result_is_response(pass, call)
+                    && !is_httptest_result_call(pass, &Expr::CallExpr(call.clone()))
+                {
+                    let msg = if check_consumption {
+                        MSG_CLOSE_AND_CONSUME
+                    } else {
+                        MSG_CLOSE
+                    };
+                    pending.push((call.lparen.0 as u32, msg.to_string()));
+                }
                 // `getReqCall` accepts any call whose *type string* contains
                 // `*net/http.Response`, which is true of a call returning a
                 // `func(*http.Request) (*http.Response, error)` as well. No
@@ -492,7 +635,7 @@ fn check_body(
                 mark_cleanup_close(call, &mut usages);
                 // Passing `resp` to another call transfers ownership for this
                 // AST approximation (e.g. `return handleResponse(res)`).
-                mark_escaped_arg(call, &mut usages);
+                mark_escaped_arg(pass, call, closers, &mut usages);
                 if check_consumption {
                     mark_consumption(pass, call, &mut usages);
                 }
@@ -556,9 +699,162 @@ fn check_body(
         true
     });
 
+    // A response stored into a field is settled when the body is closed
+    // through that field — connect-go closes `d.response.Body` from a
+    // different method, but gitea and others do it in the same one.
+    for (chain, resp) in &field_aliases {
+        if chain_closes.contains(chain) {
+            if let Some(u) = usages.get_mut(resp) {
+                u.closed = true;
+                u.consumed = true;
+            }
+        }
+    }
+    for name in usages_to_close {
+        if let Some(u) = usages.get_mut(&name) {
+            u.closed = true;
+            u.consumed = true;
+        }
+    }
+
     for (_, u) in usages {
         u.report(check_consumption, pending);
     }
+}
+
+/// Does this call's result include a `*http.Response`?
+fn call_result_is_response(pass: &Pass<'_>, call: &CallExpr) -> bool {
+    let Some(typ) = type_of(pass, &Expr::CallExpr(call.clone())) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    if matches!(artifacts.types.get(typ), TypeData::Tuple(_)) {
+        let n = tuple_len(&artifacts.types, Some(typ));
+        return (0..n).any(|i| {
+            tuple_at(&artifacts.types, typ, i)
+                .typ(&artifacts.objects)
+                .is_some_and(|t| is_http_response_ptr(pass, t))
+        });
+    }
+    is_http_response_ptr(pass, typ)
+}
+
+/// The calls whose result some other arm of the walk already accounts for.
+fn calls_handled_elsewhere(body: &BlockStmt) -> HashSet<u32> {
+    let mut out = HashSet::new();
+    let mut note = |e: &Expr, out: &mut HashSet<u32>| {
+        if let Expr::CallExpr(c) = e {
+            out.insert(c.id);
+        }
+    };
+    inspect(NodeRef::BlockStmt(body), |n| {
+        match n {
+            Some(NodeRef::AssignStmt(a)) => {
+                for e in &a.rhs {
+                    note(e, &mut out);
+                }
+            }
+            Some(NodeRef::ValueSpec(v)) => {
+                for e in &v.values {
+                    note(e, &mut out);
+                }
+            }
+            Some(NodeRef::ExprStmt(es)) => note(&es.x, &mut out),
+            _ => {}
+        }
+        true
+    });
+    out
+}
+
+/// The rendered receiver of a `<chain>.Body.Close()` call, where `<chain>` is a
+/// dotted path of identifiers (`d.response`).
+fn body_close_chain(call: &CallExpr) -> Option<String> {
+    let Expr::SelectorExpr(close_sel) = call.fun.as_ref() else {
+        return None;
+    };
+    if close_sel.sel.name != CLOSE_METHOD {
+        return None;
+    }
+    let Expr::SelectorExpr(body_sel) = close_sel.x.as_ref() else {
+        return None;
+    };
+    if body_sel.sel.name != BODY_FIELD {
+        return None;
+    }
+    render_chain(&body_sel.x)
+}
+
+/// `d.response` → `Some("d.response")`; anything that is not a dotted path of
+/// identifiers → `None`.
+fn render_chain(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Ident(id) => Some(id.name.clone()),
+        Expr::SelectorExpr(sel) => Some(format!("{}.{}", render_chain(&sel.x)?, sel.sel.name)),
+        Expr::ParenExpr(p) => render_chain(&p.x),
+        _ => None,
+    }
+}
+
+/// Records `x.f = resp` (a field store) and settles `pkgVar = resp` (a store to
+/// a package-level variable, which upstream answers `false` for outright:
+/// "Referrers for globals are always nil, so skip").
+fn note_indirect_store(
+    pass: &Pass<'_>,
+    assign: &AssignStmt,
+    usages: &HashMap<String, RespUsage>,
+    field_aliases: &mut HashMap<String, String>,
+    to_close: &mut Vec<String>,
+) {
+    for (i, lhs) in assign.lhs.iter().enumerate() {
+        let Some(rhs) = rhs_for_index(assign, i) else {
+            continue;
+        };
+        let Some(resp) = ident_name(rhs).filter(|n| usages.contains_key(*n)) else {
+            continue;
+        };
+        match lhs {
+            Expr::SelectorExpr(_) => {
+                if let Some(chain) = render_chain(lhs) {
+                    field_aliases.insert(chain, resp.to_string());
+                }
+            }
+            Expr::Ident(id) => {
+                if is_package_level_var(pass, id) {
+                    to_close.push(resp.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Is `id` a package-level variable of the package being analysed?
+fn is_package_level_var(pass: &Pass<'_>, id: &guff::ast::Ident) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(obj) = info
+        .uses
+        .get(&id.id)
+        .copied()
+        .or_else(|| info.defs.get(&id.id).and_then(|o| *o))
+    else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(scope) = obj.parent(&artifacts.objects) else {
+        return false;
+    };
+    // The package scope is the one whose own parent is the universe.
+    artifacts.scopes.get(scope).parent().is_none_or(|p| {
+        artifacts.scopes.get(p).parent().is_none()
+    })
 }
 
 fn handle_assign(
@@ -1012,6 +1308,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     let mut pending: Vec<(u32, String)> = Vec::new();
     let closure_reassigned = collect_closure_reassigned(pass);
+    let closers = response_closing_funcs(pass);
     for file in pass.files() {
         // Rooted at each `FuncDecl`, not at the file: `buildssa` builds
         // `SrcFuncs` from those alone, so a literal in a package-level `var`
@@ -1030,6 +1327,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                             body,
                             fd.ty.func.0 as u32,
                             &closure_reassigned,
+                            &closers,
                             check_consumption,
                             &mut pending,
                         );
@@ -1044,6 +1342,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         &fl.body,
                         fl.ty.func.0 as u32,
                         &closure_reassigned,
+                        &closers,
                         check_consumption,
                         &mut pending,
                     );
