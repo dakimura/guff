@@ -1,0 +1,11 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# Two packages on purpose. SA1019 lets a package use its own deprecated
+# objects, so a one-package fixture cannot report any of this: the messages
+# have to travel from `dep` to `depr` as facts.
+
+dep/dep.go    crates/guff-staticcheck/tests/testdata/sa1019groupdoc/dep/dep.go
+dep/more.go   crates/guff-staticcheck/tests/testdata/sa1019groupdoc/dep/more.go
+use.go        crates/guff-staticcheck/tests/testdata/sa1019groupdoc/use.go
+use2.go       crates/guff-staticcheck/tests/testdata/sa1019groupdoc/use2.go

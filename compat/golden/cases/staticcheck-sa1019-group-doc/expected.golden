@@ -1,0 +1,25 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh staticcheck-sa1019-group-doc
+# Produced by running golangci-lint on compat/golden/cases/staticcheck-sa1019-group-doc/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+use.go:12:6:staticcheck::SA1019: dep.KindC is deprecated: Marked as deprecated in x.proto. 
+use.go:13:6:staticcheck::SA1019: dep.KindD is deprecated: Marked as deprecated in x.proto. 
+use.go:16:4:staticcheck::SA1019: dep.Beta is deprecated: use Alpha. 
+use.go:19:6:staticcheck::SA1019: dep.VarB is deprecated: use VarA. 
+use.go:24:2:staticcheck::SA1019: dep.OldThing is deprecated: use NewThing. 
+use2.go:6:6:staticcheck::SA1019: dep.GroupA is deprecated: whole group is gone. 
+use2.go:7:6:staticcheck::SA1019: dep.GroupB is deprecated: whole group is gone. 
+use2.go:8:6:staticcheck::SA1019: dep.MixA is deprecated: group message. 
+use2.go:9:6:staticcheck::SA1019: dep.MixB is deprecated: spec message. 
+use2.go:10:6:staticcheck::SA1019: dep.MixC is deprecated: group message. 
+use2.go:11:6:staticcheck::SA1019: dep.PairA is deprecated: pair message. 
+use2.go:12:6:staticcheck::SA1019: dep.PairB is deprecated: pair message. 
+use2.go:14:4:staticcheck::SA1019: dep.TypeA is deprecated: type group message. 
+use2.go:15:4:staticcheck::SA1019: dep.TypeB is deprecated: type group message. 
+use2.go:18:6:staticcheck::SA1019: dep.ParaA is deprecated: second paragraph. 
+use2.go:24:6:staticcheck::SA1019: f.Old is deprecated: field message. 
+use2.go:27:2:staticcheck::SA1019: i.Old is deprecated: method message. 

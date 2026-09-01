@@ -85,26 +85,33 @@ fn export_deprecated(
     names: &[&Ident],
     docs: &[&Option<guff::ast::CommentGroup>],
 ) {
-    let msg = match extract_deprecated_message(docs) {
-        Some(m) => Some(m),
-        // The analysis AST carries no doc comments (see `docs_by_offset`), so
-        // for the package being analysed every message comes from the reparse,
-        // keyed by the byte offset of the declared name.
-        None => names
-            .iter()
-            .find_map(|n| offset_of(pass, n.pos()).and_then(|off| docs_by_offset.get(&off).cloned())),
-    };
-    let Some(msg) = msg else {
-        return;
-    };
+    // The doc of the declaration itself. Upstream calls `doDocs` once per node
+    // with only that node's own doc, so a group's `Deprecated:` covers every
+    // name it declares and nothing else.
+    let group_msg = extract_deprecated_message(docs);
     for name in names {
+        // The fallback is per name, not per group. The analysis AST carries no
+        // doc comments (see `docs_by_offset`), so for the package being
+        // analysed every message comes from the reparse, keyed by the byte
+        // offset of the declared name — and asking only the *first* name that
+        // happens to have an entry, then stamping the answer on all of them,
+        // marks a whole `const (…)` block deprecated because one member is.
+        let msg = match &group_msg {
+            Some(m) => m.clone(),
+            None => match offset_of(pass, name.pos())
+                .and_then(|off| docs_by_offset.get(&off).cloned())
+            {
+                Some(m) => m,
+                None => continue,
+            },
+        };
         if let Some(obj) = pass.types_info().and_then(|info| {
             info.defs
                 .get(&name.id)
                 .and_then(|o| *o)
                 .or_else(|| info.uses.get(&name.id).copied())
         }) {
-            pass.export_object_fact(obj, Box::new(IsDeprecated { msg: msg.clone() }));
+            pass.export_object_fact(obj, Box::new(IsDeprecated { msg }));
         }
     }
 }
@@ -156,6 +163,14 @@ fn deprecated_docs_by_offset(pass: &Pass<'_>, file: &File) -> HashMap<i64, Strin
     let Ok(src) = std::fs::read(path) else {
         return out;
     };
+    docs_by_offset_from_source(&base, &src)
+}
+
+/// The reparse half of [`deprecated_docs_by_offset`], split out so the walk can
+/// be tested without a `Pass`: `Deprecated:` messages declared in `src`, keyed
+/// by the byte offset of the declared name.
+fn docs_by_offset_from_source(base: &str, src: &[u8]) -> HashMap<i64, String> {
+    let mut out = HashMap::new();
     // Cheap filter before the reparse, the same shape `inline`, `directive` and
     // `buildtag` already use for theirs: the only thing this function can
     // extract is a `Deprecated: ` paragraph, so a file whose bytes never
@@ -170,7 +185,7 @@ fn deprecated_docs_by_offset(pass: &Pass<'_>, file: &File) -> HashMap<i64, Strin
         return out;
     }
     let rfset = guff::position::FileSet::new();
-    let Ok(rfile) = guff::parser::parse_file(&rfset, &base, &src, guff::parser::COMMENTS_ONLY)
+    let Ok(rfile) = guff::parser::parse_file(&rfset, base, src, guff::parser::COMMENTS_ONLY)
     else {
         return out;
     };
@@ -183,7 +198,11 @@ fn deprecated_docs_by_offset(pass: &Pass<'_>, file: &File) -> HashMap<i64, Strin
             if let Some(f) = rfset.file(n.pos()) {
                 let off = f.offset(n.pos());
                 if off >= 0 {
-                    out.entry(off).or_insert_with(|| msg.clone());
+                    // Overwrite, not `or_insert`: the group is visited before
+                    // its specs, and upstream's later `ExportObjectFact` for a
+                    // spec replaces the fact the group put there, so a spec's
+                    // own message wins over the group's.
+                    out.insert(off, msg.clone());
                 }
             }
         }
@@ -196,22 +215,18 @@ fn deprecated_docs_by_offset(pass: &Pass<'_>, file: &File) -> HashMap<i64, Strin
                 Some(Token::TYPE) | Some(Token::CONST) | Some(Token::VAR) => {}
                 _ => return false,
             }
-            let mut docs: Vec<&Option<guff::ast::CommentGroup>> = vec![&decl.doc];
+            // Only the group's own doc: upstream appends `node.Doc` and the
+            // *names* of the specs, never the specs' docs. The specs' docs are
+            // read on the way down, one spec at a time.
             let mut names: Vec<&Ident> = Vec::new();
             for spec in &decl.specs {
                 match spec {
-                    guff::ast::Spec::ValueSpec(vs) => {
-                        docs.push(&vs.doc);
-                        names.extend(vs.names.iter());
-                    }
-                    guff::ast::Spec::TypeSpec(ts) => {
-                        docs.push(&ts.doc);
-                        names.push(&ts.name);
-                    }
+                    guff::ast::Spec::ValueSpec(vs) => names.extend(vs.names.iter()),
+                    guff::ast::Spec::TypeSpec(ts) => names.push(&ts.name),
                     _ => {}
                 }
             }
-            record(&names, &docs);
+            record(&names, &[&decl.doc]);
             true
         }
         NodeRef::FuncDecl(decl) => {
@@ -339,22 +354,16 @@ fn walk_gen_decl(
         Some(Token::TYPE) | Some(Token::CONST) | Some(Token::VAR) => {}
         _ => return false,
     }
-    let mut docs: Vec<&Option<guff::ast::CommentGroup>> = vec![&decl.doc];
+    // Only the group's own doc — see `deprecated_docs_by_offset`.
     let mut names: Vec<&Ident> = Vec::new();
     for spec in &decl.specs {
         match spec {
-            guff::ast::Spec::ValueSpec(vs) => {
-                docs.push(&vs.doc);
-                names.extend(vs.names.iter());
-            }
-            guff::ast::Spec::TypeSpec(ts) => {
-                docs.push(&ts.doc);
-                names.push(&ts.name);
-            }
+            guff::ast::Spec::ValueSpec(vs) => names.extend(vs.names.iter()),
+            guff::ast::Spec::TypeSpec(ts) => names.push(&ts.name),
             _ => {}
         }
     }
-    export_deprecated(pass, docs_by_offset, &names, &docs);
+    export_deprecated(pass, docs_by_offset, &names, &[&decl.doc]);
     true
 }
 
@@ -397,6 +406,152 @@ mod tests {
         // SA1019 message. golangci-lint prints it too, and the golden tier
         // compares message text byte for byte.
         assert_eq!(msg, "use New instead. ");
+    }
+
+    /// Every shape the group/spec split discriminates on, in one file. The
+    /// grid was measured against golangci-lint 2.12.2 before it was written
+    /// down, as a two-package fixture whose second package uses every name:
+    /// the twelve reachable findings and the six silent names both match.
+    const GRID: &[u8] = br#"package dep
+
+const (
+	KindA Kind = 0
+	// Deprecated: Marked as deprecated in x.proto.
+	KindC Kind = 2
+	KindE Kind = 4
+)
+
+// Deprecated: whole group is gone.
+const (
+	GroupA = 1
+	GroupB = 2
+)
+
+// Deprecated: group message.
+const (
+	MixA = 1
+	// Deprecated: spec message.
+	MixB = 2
+	MixC = 3
+)
+
+const (
+	// Deprecated: pair message.
+	PairA, PairB = 1, 2
+	PairC        = 3
+)
+
+// Deprecated: type group message.
+type (
+	TypeA struct{}
+	TypeB struct{}
+)
+
+const (
+	LineA = 1 // Deprecated: trailing comment, not a doc.
+	LineB = 2
+)
+
+const (
+	// Some prose first.
+	//
+	// Deprecated: second paragraph.
+	ParaA = 1
+	ParaB = 2
+)
+
+// Deprecated: use NewThing.
+func OldThing() {}
+
+func NewThing() {}
+
+type Fields struct {
+	Plain int
+	// Deprecated: field message.
+	Old  int
+	Also int
+}
+
+type Iface interface {
+	Plain()
+	// Deprecated: method message.
+	Old()
+	Also()
+}
+"#;
+
+    /// Read the identifier that starts at `off`, so the assertions below can be
+    /// written in names rather than byte offsets.
+    fn ident_at(src: &[u8], off: i64) -> String {
+        let start = off as usize;
+        let end = src[start..]
+            .iter()
+            .position(|c| !(c.is_ascii_alphanumeric() || *c == b'_'))
+            .map(|n| start + n)
+            .unwrap_or(src.len());
+        String::from_utf8_lossy(&src[start..end]).into_owned()
+    }
+
+    fn grid_messages() -> Vec<(String, String)> {
+        let map = docs_by_offset_from_source("dep.go", GRID);
+        let mut out: Vec<(String, String)> = map
+            .into_iter()
+            .map(|(off, msg)| (ident_at(GRID, off), msg))
+            .collect();
+        out.sort();
+        out
+    }
+
+    /// The defect this grid was written for: a `Deprecated:` doc on one member
+    /// of a `const (…)` group was pooled with the group's own doc and stamped
+    /// on every name the group declared. syncthing's `lib/protocol` used five
+    /// `bep.FileInfoType_*` constants of which upstream deprecates two, and
+    /// guff reported all five.
+    #[test]
+    fn spec_doc_does_not_leak_to_its_siblings() {
+        let msgs = grid_messages();
+        let named: Vec<&str> = msgs.iter().map(|(n, _)| n.as_str()).collect();
+        assert!(named.contains(&"KindC"), "{msgs:?}");
+        for silent in ["KindA", "KindE", "PairC", "LineA", "LineB", "ParaB"] {
+            assert!(
+                !named.contains(&silent),
+                "{silent} is not deprecated but was marked: {msgs:?}"
+            );
+        }
+    }
+
+    /// A doc on the group covers every name the group declares — including the
+    /// names of a `type (…)` group and of a multi-name spec.
+    #[test]
+    fn group_doc_covers_every_name_it_declares() {
+        let msgs = grid_messages();
+        // Counted, not `any(contains(…))`: the grid declares exactly fourteen
+        // deprecated names, and a rule that marks one name too many or too few
+        // has to change this number.
+        assert_eq!(msgs.len(), 14, "{msgs:?}");
+        assert_eq!(
+            msgs,
+            vec![
+                ("GroupA".into(), "whole group is gone. ".into()),
+                ("GroupB".into(), "whole group is gone. ".into()),
+                ("KindC".into(), "Marked as deprecated in x.proto. ".into()),
+                ("MixA".into(), "group message. ".into()),
+                // The spec's own message wins over the group's: upstream calls
+                // `ExportObjectFact` for the group first and for the spec
+                // second, and the later call replaces the fact.
+                ("MixB".into(), "spec message. ".into()),
+                ("MixC".into(), "group message. ".into()),
+                ("Old".into(), "field message. ".into()),
+                ("Old".into(), "method message. ".into()),
+                ("OldThing".into(), "use NewThing. ".into()),
+                ("PairA".into(), "pair message. ".into()),
+                ("PairB".into(), "pair message. ".into()),
+                ("ParaA".into(), "second paragraph. ".into()),
+                ("TypeA".into(), "type group message. ".into()),
+                ("TypeB".into(), "type group message. ".into()),
+            ],
+            "{msgs:?}"
+        );
     }
 
     #[test]
