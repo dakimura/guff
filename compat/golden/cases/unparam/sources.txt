@@ -8,3 +8,6 @@ literal/literal.go   crates/guff-style/tests/testdata/unparam/literal.go
 
 # The zero constant a call site can spell two ways.
 zeroconst/zeroconst.go   crates/guff-style/tests/testdata/unparam/zeroconst.go
+
+# Which type an interface method belongs to.
+ifacename/ifacename.go   crates/guff-style/tests/testdata/unparam/ifacename.go

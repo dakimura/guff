@@ -19572,3 +19572,48 @@ golden 208/208（`modernize` 54 → 55 キー、消失なし）、fix tier 208/2
 （`modernize.diff` を録り直し、増えたのは新しい fixture 1 形ぶん）、reject 14、
 workspace テスト緑（`mapsloop` は 2 件と、fix の置換テキスト 2 本を列で固定する）、
 OSS pr tier 8 target すべて P=R=100%。
+
+### 2026-09-02（続き 143）— インタフェースのメソッドは**実装している型のもの**である。宣言しただけの名前で黙ってはいけない
+
+syncthing の `unparam` 1 件、`lib/model/folderstate.go:142`:
+
+```go
+func (s *stateTracker) getState() (current folderState, changed time.Time, err error)
+```
+
+呼び出しは 3 か所あって、どれも `changed` を `_` で捨てている。上流は
+`result changed is never used` と言い、guff は黙っていた。
+
+**最小再現が 2 回外れた**。素の関数でも、メソッドでも、両ツールとも同じ答えを返す。
+落ちたのは 3 形目 —— **同じ名前のメソッドを宣言したインタフェースがあり、それを
+実装しているのは `stateTracker` を埋め込んだ別の型**、という形。
+
+guff には上流に無い枝があった:
+
+```rust
+if fd.recv.is_some() && interface_methods.contains(&method_key(&fd.name.name, &fd.ty)) {
+    return;
+}
+```
+
+「このパッケージのどこかのインタフェースが同じ名前と署名のメソッドを宣言していれば
+黙る」。上流の判定は `typesImplementing[named]` —— **レシーバ自身の名前付き型**が
+そのインタフェースを実装すると分かっているときだけ黙る、である。syncthing では
+`*folder` が実装していて `stateTracker` はしていないので、上流は報告する。
+
+その枝を落とすと、今度は**対照が撃たれた**。`var _ readerIface = (*reader)(nil)` と
+書いてある型まで報告するようになる。guff の `collect_types_implementing` は IR の
+`MakeInterface` だけを見ていて、**代入先が空白識別子だと go/ssa は変換を出さない**。
+上流は `addImplementing` を **AST から先に**埋めていて、その最初の枝がまさに
+`var _ SomeIface = value`（名前が 1 つで、それが `_` で、型があり、値が 1 つ）。
+それを移植して埋めた。
+
+**測定**: 6 形。修正前は 1 形が乖離（埋め込み越しの実装）、途中で 1 形が過剰に
+なり（`var _ I = T` の宣言）、最後は全一致。
+
+syncthing **4 → 3**（うち 2 は golangci 側が落とす `canonicalheader` なので、
+実質の残りは `nilnesserr` 1 件だけ）。台帳は 29/100 のまま。
+golden 208/208（`unparam` 57 → 58 キー、キー集合の差分で消失なし）、
+fix tier 208/208、reject 14、workspace テスト緑（新規テストは「ほぼ同じ 2 つの
+メソッドのうち、自分の型が実装を主張していない方だけが報告される」を
+メッセージの列で固定する）、OSS pr tier 8 target すべて P=R=100%。

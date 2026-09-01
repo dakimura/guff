@@ -7838,6 +7838,28 @@ fn varnamelen_respects_ignore_names() {
     assert!(messages.is_empty(), "{messages:?}");
 }
 
+/// An interface method belongs to the type that *implements* the interface.
+///
+/// Upstream skips a method only when the receiver's own named type is known to
+/// implement an interface that requires it. guff also silenced any method whose
+/// name and signature matched an interface declared in the package, whoever
+/// implemented it — a rule upstream has no counterpart for, and the reason
+/// syncthing's `(*stateTracker).getState` went unreported: the interface is
+/// implemented by a `folder` that *embeds* the tracker.
+#[test]
+fn unparam_asks_whether_this_type_implements_the_interface() {
+    let pkg =
+        support::typecheck_fixture("unparam", "example.com/unparam/ifacename", "ifacename.go");
+    let messages = support::run_analyzer(unparam(), &pkg);
+    // Counted: two near-identical methods, and only the one whose own type is
+    // not asserted to implement the interface is reported.
+    assert_eq!(
+        messages,
+        vec!["(*tracker).getState - result changed is never used".to_string()],
+        "{messages:?}"
+    );
+}
+
 /// "always receives" over call sites that spell the same constant two ways.
 ///
 /// go/ssa's `NewConst` normalizes a zero value, so the constant for `var s
