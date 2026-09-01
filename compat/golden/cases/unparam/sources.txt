@@ -5,3 +5,6 @@ ok/ok.go     crates/guff-style/tests/testdata/unparam/ok.go
 # each of the ways upstream can (and cannot) follow a literal's value back to
 # its function.
 literal/literal.go   crates/guff-style/tests/testdata/unparam/literal.go
+
+# The zero constant a call site can spell two ways.
+zeroconst/zeroconst.go   crates/guff-style/tests/testdata/unparam/zeroconst.go
