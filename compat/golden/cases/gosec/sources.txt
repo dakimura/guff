@@ -24,6 +24,8 @@ g7xx/g7xx.go          crates/guff-style/tests/testdata/gosec/g7xx.go
 g117/g117.go          crates/guff-style/tests/testdata/gosec/g117.go
 g304/g304.go          crates/guff-style/tests/testdata/gosec/g304.go
 g122/g122.go          crates/guff-style/tests/testdata/gosec/g122.go
+g102/g102.go          crates/guff-style/tests/testdata/gosec/g102.go
+g402/g402.go          crates/guff-style/tests/testdata/gosec/g402.go
 
 # The stub `golang.org/x/crypto` module (see the replace in go.mod). Its go.mod
 # is case scaffolding and so lives in the case directory; the packages under it

@@ -15,6 +15,7 @@ type Config struct {
 	InsecureSkipVerify bool
 	MinVersion         uint16
 	MaxVersion         uint16
+	CipherSuites       []uint16
 
 	// The G123 fields. Their *names* are what the analyzer keys on (it reads
 	// the struct field at the FieldAddr's index), so they have to match the
@@ -31,3 +32,15 @@ type Listener interface {
 }
 
 func Listen(network, laddr string, config *Config) (Listener, error) { return nil, nil }
+
+// The cipher-suite constants G402 names. Their *values* are irrelevant: the
+// rule matches the selector's name against its table.
+const (
+	TLS_AES_128_GCM_SHA256                  uint16 = 0x1301
+	TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256   uint16 = 0xc02f
+	TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 uint16 = 0xc02b
+	TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384   uint16 = 0xc030
+	TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA      uint16 = 0xc013
+	TLS_RSA_WITH_AES_128_CBC_SHA            uint16 = 0x002f
+	TLS_RSA_WITH_3DES_EDE_CBC_SHA           uint16 = 0x000a
+)

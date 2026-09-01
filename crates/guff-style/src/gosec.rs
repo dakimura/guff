@@ -1951,27 +1951,69 @@ fn directive_suppresses(args: &str, rule: &str) -> bool {
 const NOSEC_TAG: &str = "#nosec";
 const GOSEC_DISABLE_PREFIX: &str = "//gosec:disable";
 
-fn check_g402_tls_field(
-    field: &str,
-    value: &Expr,
-    report_pos: u32,
-    pending: &mut Vec<(u32, u32, String)>,
-) {
-    if field != "InsecureSkipVerify" {
-        return;
-    }
-    match resolve_bool_const(value) {
-        Some(true) => pending.push((
-            report_pos,
-            report_pos,
-            "G402: TLS InsecureSkipVerify set to true.".to_string(),
-        )),
-        None => pending.push((
-            report_pos,
-            report_pos,
-            "G402: TLS InsecureSkipVerify may be set to true.".to_string(),
-        )),
-        Some(false) => {}
+/// `goodCiphers` of `NewIntermediateTLSCheck`, which is the constructor
+/// `rulelist.go` gives G402. The other two tables in `tls_config.go` (Modern,
+/// Old) belong to rules golangci-lint does not run.
+const G402_GOOD_CIPHERS: &[&str] = &[
+    "TLS_AES_128_GCM_SHA256",
+    "TLS_AES_256_GCM_SHA384",
+    "TLS_CHACHA20_POLY1305_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+    "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+    "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+    "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305",
+    "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
+    "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305",
+    "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
+    "TLS_DHE_RSA_WITH_AES_128_GCM_SHA256",
+    "TLS_DHE_RSA_WITH_AES_256_GCM_SHA384",
+];
+
+/// The finding one `tls.Config` field makes, or `None`.
+///
+/// An `Option` rather than a push: `Match` returns the **first** issue a
+/// composite literal produces and stops, so a config that sets both
+/// `InsecureSkipVerify` and a weak cipher is one finding, not two.
+fn check_g402_tls_field(field: &str, value: &Expr, report_pos: u32) -> Option<(u32, u32, String)> {
+    match field {
+        "InsecureSkipVerify" => match resolve_bool_const(value) {
+            Some(true) => Some((
+                report_pos,
+                report_pos,
+                "G402: TLS InsecureSkipVerify set to true.".to_string(),
+            )),
+            None => Some((
+                report_pos,
+                report_pos,
+                "G402: TLS InsecureSkipVerify may be set to true.".to_string(),
+            )),
+            Some(false) => None,
+        },
+        // `CipherSuites: []uint16{tls.X, …}` — the *name* of each selector, and
+        // the first one that is not on the list. Nothing resolves here: an
+        // element that is not a selector (a constant, a variable, a spread) is
+        // skipped rather than reported.
+        "CipherSuites" => {
+            let Expr::CompositeLit(ciphers) = value else {
+                return None;
+            };
+            for elt in &ciphers.elts {
+                let Expr::SelectorExpr(sel) = elt else {
+                    continue;
+                };
+                if !G402_GOOD_CIPHERS.contains(&sel.sel.name.as_str()) {
+                    let pos = sel.x.pos().0 as u32;
+                    return Some((
+                        pos,
+                        pos,
+                        format!("G402: TLS Bad Cipher Suite: {}", sel.sel.name),
+                    ));
+                }
+            }
+            None
+        }
+        _ => None,
     }
 }
 
@@ -2009,12 +2051,12 @@ fn check_g402_composite(
             let Expr::Ident(key) = kv.key.as_ref() else {
                 continue;
             };
-            check_g402_tls_field(
-                &key.name,
-                kv.value.as_ref(),
-                kv.value.pos().0 as u32,
-                pending,
-            );
+            if let Some(found) =
+                check_g402_tls_field(&key.name, kv.value.as_ref(), kv.value.pos().0 as u32)
+            {
+                pending.push(found);
+                break;
+            }
         }
         return;
     };
@@ -2028,12 +2070,12 @@ fn check_g402_composite(
         let Expr::Ident(key) = kv.key.as_ref() else {
             continue;
         };
-        check_g402_tls_field(
-            &key.name,
-            kv.value.as_ref(),
-            kv.value.pos().0 as u32,
-            pending,
-        );
+        if let Some(found) =
+            check_g402_tls_field(&key.name, kv.value.as_ref(), kv.value.pos().0 as u32)
+        {
+            pending.push(found);
+            break;
+        }
     }
 }
 
@@ -2055,12 +2097,13 @@ fn check_g402_assign(
     if !is_tls_config_assign_type_name(&name) {
         return;
     }
-    check_g402_tls_field(
+    if let Some(found) = check_g402_tls_field(
         &sel.sel.name,
         &assign.rhs[0],
         assign.rhs[0].pos().0 as u32,
-        pending,
-    );
+    ) {
+        pending.push(found);
+    }
 }
 
 fn composite_has_timeout_field(lit: &CompositeLit) -> bool {
@@ -2808,6 +2851,107 @@ fn g304_tracked_assign<'a>(
     matches!(artifacts.objects.get(obj), ObjectData::Var(_)).then_some((obj, call))
 }
 
+/// G102 — a listener bound to every interface.
+///
+/// A pass of its own because the address does not have to be written at the
+/// call: `GetIdentStringValues` follows an identifier to its declaration and
+/// reads the string literals there, which is how syncthing's
+/// `cmd/infra/strelaypoolsrv` reports — it declares `listen = ":80"` at the top
+/// of the file and hands the variable to both `tls.Listen` and `net.Listen`.
+///
+/// The resolution is the parser's, not the type checker's: upstream reads
+/// `ident.Obj.Decl`, which is set only for an identifier declared in the same
+/// file. [`FileDecls`] answers the same question the same way.
+fn check_g102(pass: &Pass<'_>, enabled: &HashSet<&'static str>, pending: &mut Vec<(u32, u32, String)>) {
+    if !enabled.contains("G102") {
+        return;
+    }
+    for file in pass.files() {
+        let decls = FileDecls::build(pass, file);
+        preorder(NodeRef::File(file), |n| {
+            if let NodeRef::CallExpr(call) = n {
+                check_g102_call(pass, &decls, call, pending);
+            }
+            true
+        });
+    }
+}
+
+fn check_g102_call(
+    pass: &Pass<'_>,
+    decls: &FileDecls<'_>,
+    call: &CallExpr,
+    pending: &mut Vec<(u32, u32, String)>,
+) {
+    let Some((pkg, name)) = resolve_pkg_call(pass, call) else {
+        return;
+    };
+    if !G102_CALLS.iter().any(|(p, n)| *p == pkg && *n == name) {
+        return;
+    }
+    // `net.Listen(network, address)` / `tls.Listen(network, address, …)`.
+    //
+    // Upstream also has a one-argument branch that reads the string arguments
+    // of a *call* in position 0; both listeners take a network and an address,
+    // so nothing well-typed reaches it.
+    if call.args.len() < 2 {
+        return;
+    }
+    let matched = match &call.args[1] {
+        Expr::BasicLit(_) => string_lit_from_expr(&call.args[1])
+            .is_some_and(|addr| bind_all_pattern().is_match(&addr)),
+        Expr::Ident(id) => g102_ident_string_values(pass, decls, id)
+            .iter()
+            .any(|v| bind_all_pattern().is_match(v)),
+        _ => false,
+    };
+    if matched {
+        pending.push((
+            call.pos().0 as u32,
+            call.end().0 as u32,
+            "G102: Binds to all network interfaces".to_string(),
+        ));
+    }
+}
+
+/// `GetIdentStringValues`: the string literals an identifier's declaration
+/// gives it. One hop and no recursion — upstream's `GetString` accepts a
+/// `BasicLit` and nothing else, so `addr := prefix + ":80"` resolves to nothing.
+fn g102_ident_string_values(
+    pass: &Pass<'_>,
+    decls: &FileDecls<'_>,
+    id: &Ident,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return out;
+    };
+    let Some(obj) = code::object_of(pass, id) else {
+        return out;
+    };
+    let decl_pos = obj.pos(&artifacts.objects);
+    match decls.decls.get(&decl_pos) {
+        Some(DeclNode::Value(spec)) => {
+            for v in &spec.values {
+                if let Some(s) = string_lit_from_expr(v) {
+                    out.push(s);
+                }
+            }
+        }
+        Some(DeclNode::Assign(assign)) => {
+            for v in &assign.rhs {
+                if let Some(s) = string_lit_from_expr(v) {
+                    out.push(s);
+                }
+            }
+        }
+        // A parameter, a range clause, a type switch …: `Obj.Decl` is a node
+        // `getIdentStringValues` does not read.
+        None => {}
+    }
+    out
+}
+
 /// G122 — a filesystem operation inside a `Walk`/`WalkDir` callback, on a path
 /// derived from the one the walk handed in.
 ///
@@ -3333,22 +3477,6 @@ fn check_call(
         }
     }
 
-    if enabled.contains("G102") && G102_CALLS.iter().any(|(p, n)| *p == pkg && *n == name) {
-        // net.Listen(network, address) / tls.Listen(network, address, …)
-        if call.args.len() >= 2 {
-            if let Some(addr) = string_lit_from_expr(&call.args[1]) {
-                if bind_all_pattern().is_match(&addr) {
-                    pending.push((
-                        call.pos().0 as u32,
-                        call.end().0 as u32,
-                        "G102: Binds to all network interfaces".to_string(),
-                    ));
-                }
-            }
-            // DEFERRED: Ident const resolution (GetIdentStringValues).
-        }
-    }
-
     // G204 needs the file's declarations, so it runs as its own pass over the
     // files (`check_g204`) rather than from here.
 
@@ -3520,6 +3648,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     check_g110(pass, &enabled, &mut pending);
     check_g124_cookie_params(pass, &enabled, &mut pending);
     check_g204(pass, &enabled, &mut pending);
+    check_g102(pass, &enabled, &mut pending);
     check_g122(pass, &enabled, &mut pending);
     check_g304(pass, &enabled, &mut pending);
     crate::gosec_ssa::check_ssa_analyzers(pass, &enabled, &mut pending);

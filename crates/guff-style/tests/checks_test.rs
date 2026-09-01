@@ -164,6 +164,49 @@ fn gosec_g123_reports_verifypeer_without_a_resumption_guard() {
     );
 }
 
+/// G102 over a fixture that is about *where the address comes from*.
+///
+/// `GetIdentStringValues` follows an identifier to its declaration and reads
+/// the string literals there — one hop, literals only, and the parser's
+/// file-scoped resolution. syncthing `cmd/infra/strelaypoolsrv` declares
+/// `listen = ":80"` and hands the variable to two listeners; a rule that only
+/// reads a literal at the call sees neither.
+#[test]
+fn gosec_g102_resolves_the_address_through_its_declaration() {
+    let pkg = support::typecheck_fixture("gosec", "example.com/gosec/g102", "g102.go");
+    let messages = support::run_analyzer(gosec(), &pkg);
+    let g102 = messages.iter().filter(|m| m.starts_with("G102: ")).count();
+    // Counted: twelve calls, five findings. Four of the silent ones are
+    // addresses that do not match, and three are declarations the resolution
+    // does not read (no initializer, a call, a parameter).
+    assert_eq!(g102, 5, "{messages:?}");
+}
+
+/// G402's cipher-suite half, and its "first finding wins" rule.
+#[test]
+fn gosec_g402_names_the_first_cipher_off_the_list() {
+    let pkg = support::typecheck_fixture("gosec", "example.com/gosec/g402", "g402.go");
+    let messages = support::run_analyzer(gosec(), &pkg);
+    let mut g402: Vec<&str> = messages
+        .iter()
+        .filter(|m| m.starts_with("G402: "))
+        .map(|m| m.as_str())
+        .collect();
+    g402.sort_unstable();
+    // Counted and spelled out: eight `tls.Config` literals, three findings.
+    // `BothBad` and `BothBadReversed` set two bad fields each and report one
+    // apiece — whichever comes first — because `Match` returns on the first.
+    assert_eq!(
+        g402,
+        vec![
+            "G402: TLS Bad Cipher Suite: TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA",
+            "G402: TLS Bad Cipher Suite: TLS_RSA_WITH_AES_128_CBC_SHA",
+            "G402: TLS InsecureSkipVerify set to true.",
+        ],
+        "{messages:?}"
+    );
+}
+
 /// G122 over a fixture that is about *which callbacks are found*.
 ///
 /// The callback argument is resolved as an SSA value upstream, so a function
