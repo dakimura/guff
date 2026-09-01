@@ -19,3 +19,5 @@ func Join(elem ...string) string { return "" }
 func Base(path string) string                       { return path }
 func Abs(path string) (string, error)               { return path, nil }
 func Rel(basepath, targpath string) (string, error) { return "", nil }
+
+func EvalSymlinks(path string) (string, error) { return path, nil }

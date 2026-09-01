@@ -164,6 +164,23 @@ fn gosec_g123_reports_verifypeer_without_a_resumption_guard() {
     );
 }
 
+/// G304 over one fixture whose every function is one file-reading call.
+///
+/// "The argument is a variable" is one of five branches. The other four are the
+/// reason for the count: a `Clean`ed path is trusted inline or through a
+/// variable, a `Join` is judged by its own arguments, a literal base plus a
+/// cleaned name is a trusted pair, and the two side maps are filled in AST
+/// visit order so a call before its assignment is still reported.
+#[test]
+fn gosec_g304_trusts_cleaned_and_constant_paths() {
+    let pkg = support::typecheck_fixture("gosec", "example.com/gosec/g304", "g304.go");
+    let messages = support::run_analyzer(gosec(), &pkg);
+    let g304 = messages.iter().filter(|m| m.starts_with("G304: ")).count();
+    // Counted: 22 functions, one call each, and 10 of them are findings.
+    // `any(contains(…))` passes with all 22 reported.
+    assert_eq!(g304, 10, "{messages:?}");
+}
+
 /// G117 over one fixture whose every function is one marshal call, marked
 /// `// fires` or `// silent`.
 ///
@@ -324,7 +341,16 @@ fn gosec_taint_crosses_a_call_only_when_the_caller_is_in_the_call_graph() {
 fn gosec_allows_strong_crypto() {
     let pkg = support::typecheck_fixture("gosec", "example.com/gosec/ok", "ok.go");
     let messages = support::run_analyzer(gosec(), &pkg);
-    assert!(messages.is_empty(), "{messages:?}");
+    // Three G304, and they are correct: golangci-lint reports the same three,
+    // and the golden records them. `ok.go` is silent for the rules its shapes
+    // are *about*, and three of those shapes need a non-constant path to exist
+    // at all — a `filepath.Walk` callback's `path` (G122), a config file name
+    // reaching a helper (G703), a `filepath.Join(dir, …)` fed to a callback
+    // (G703). Making them constants would delete what they test.
+    let (g304, other): (Vec<&String>, Vec<&String>) =
+        messages.iter().partition(|m| m.starts_with("G304: "));
+    assert!(other.is_empty(), "{other:?}");
+    assert_eq!(g304.len(), 3, "{messages:?}");
 }
 
 /// G404 matches by syntax, not by the callee's declaring package.
