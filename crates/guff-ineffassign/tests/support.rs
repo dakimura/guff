@@ -16,6 +16,19 @@ pub fn testdata(name: &str) -> PathBuf {
 }
 
 pub fn typecheck_pkg(pkg_id: &str, main_path: &Path) -> Arc<Package> {
+    typecheck_with_deps(pkg_id, main_path, &[])
+}
+
+/// Type-check `main_path` with `deps` available as imported packages.
+///
+/// Needed for the dot-import case: whether an identifier belongs to *another*
+/// package is the whole question there, and a single-file check has no other
+/// package to belong to.
+pub fn typecheck_with_deps(
+    pkg_id: &str,
+    main_path: &Path,
+    deps: &[(&str, &Path)],
+) -> Arc<Package> {
     let fset = FileSet::new();
     let main_src = fs::read(main_path).expect("read main source");
     let main_name = main_path
@@ -25,6 +38,12 @@ pub fn typecheck_pkg(pkg_id: &str, main_path: &Path) -> Arc<Package> {
     let main_file = parse_file(&fset, main_name, &main_src, Mode::NONE).expect("parse main");
 
     let mut check = Checker::new(Config::default());
+    for (import_path, dep_path) in deps {
+        let src = fs::read(dep_path).expect("read dep");
+        let name = dep_path.file_name().and_then(|s| s.to_str()).unwrap();
+        let file = parse_file(&fset, name, &src, Mode::NONE).expect("parse dep");
+        check.add_dependency_source(*import_path, vec![file]);
+    }
     check.check_files(vec![main_file.clone()]);
 
     let ill_typed = !check.errors.is_empty();

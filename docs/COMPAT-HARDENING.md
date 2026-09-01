@@ -18542,3 +18542,78 @@ hunt は prometheus / fiber / thanos / gitea すべて allowlist 内。
 単体テストは `any(contains("nested context in loop"))` だったので
 `assert_eq!(messages, vec![…])` にした。新しい 12 形のテストは
 **黙る 8 形が主張**で、撃つ 3 形は述語が今も訊かれていることの対照である。
+
+### 2026-09-01（続き 124）— 修飾子で照合すると、**別モジュールの同名パッケージ**を撃ち、**別名で入れた本物**を撃たない
+
+velero の 6 件のうち 4 件。3 つの linter に 3 つの独立した欠陥があった。
+
+**`unusedresult` は構文上の修飾子で照合していた。**
+
+```
++guff test/util/csi/common.go:69:govet:unusedresult: result of errors.New call not used
+```
+
+対象は `errors.New(fmt.Sprintf("API version %s is not valid", apiVersion))` で、
+その `errors` は **`github.com/pkg/errors`**。上流は
+
+```go
+fn, ok := typeutil.Callee(pass.TypesInfo, call).(*types.Func)
+…
+if pkgFuncs[[2]string{fn.Pkg().Path(), fn.Name()}] { … }
+```
+
+で**パッケージのパス**を鍵にする。guff は `is_must_use_call` が
+`(pkg.name.as_str(), sel.name.as_str())` —— **ドットの前に書かれた識別子** ——
+で照合していた。最小再現は両側に振れる: 同名の別モジュールを撃ち（guff だけ）、
+`stderrors "errors"` と**別名で入れた本物を撃たない**（上流だけ）。同じ 1 つの原因である。
+
+同時に 2 つ足りなかった。既定リストが **10 個**（上流は 60 個超 ——
+`fmt.Append*` / `maps.*` / `slices.*` が丸ごと無い）で、
+**メソッドの枝が無い**: 上流は署名が `func() string` と同一で名前が
+`Error` / `String` のときだけ `result of (recv).M call not used` を出し、
+受け手の型は nil qualifier で書くのでパスが入る（interface なら `error`）。
+15 形測って全一致にした。
+
+**`perfsprint` は `sprintf1: false` を見ていなかった。** 上流はフラグを
+**arm 側**に持っている:
+
+```go
+case calledObj == fmtSprintfObj && len(call.Args) == 1 && n.strFormat.sprintf1:
+```
+
+—— 偽なら 1 引数の `Sprintf` に**当たる arm が無く**、その呼び出しは素通りする。
+guff は報告側で `string_format || (sprintf1 && …)` と **or** で見ていたので、
+`string-format` を既定のままにしていると `sprintf1` をどう書いても効かない。
+velero は `sprintf1: false` と書いている。
+
+**`ineffassign` は dot import 由来の変数を局所変数として追っていた。**
+
+```
++guff test/perf/e2e_suite_test.go:89:ineffassign:ineffectual assignment to ReportData
+```
+
+`ReportData` は `. "github.com/vmware-tanzu/velero/test"` から来る。
+上流は `*ast.Object` を鍵にしていて、**パーサが解決できない名前は `Obj` が nil**
+なので最初から追跡対象ではない。guff は型検査器で解決するため
+別パッケージの変数まで局所として扱っていた。解決結果のパッケージが
+解析中のパッケージでなければ `None` を返すようにした
+（同名を隠すローカルは**今も報告される**のが対照）。
+
+**測定**: 3 つのグリッド —— `unusedresult` 15 形、`perfsprint` は同じ fixture を
+3 つの config（既定 / `sprintf1: false` / `string-format: false`）で、
+`ineffassign` 4 形 —— すべて一致。
+velero **6 → 3**（残りは `printf` 1 件と `SA4003` 2 件で、どちらも
+`logrus` 越しの別件。次の PR）。
+golden 205 → **206 case**（新 case `perfsprint-sprintf1` は同じ fixture を
+`sprintf1: false` で読むので、`perfsprint` との差が**ちょうど 1 キー**になる。
+`govet` 114 → 126 キー、`ineffassign` 9 → 10 キー、いずれもキー集合の差分で消失なし）、
+fix tier 206/206（新 case を録り直し）、reject 14、isolate 116、filesets 116、
+smoke 1、workspace テスト緑、OSS pr tier 8 target すべて P=R=100%、
+hunt は gitea / thanos / prometheus / jaeger / argo-cd / nats-server すべて allowlist 内。
+
+`unusedresult` の単体テストは `messages[0].contains("errors.New")` の 1 本だけで、
+**パッケージが解決できていなくても通っていた**（1 ファイルだけを型検査する
+ハーネスに依存パッケージが無かった）。stdlib の stub を 5 つ足して
+`typecheck_with_deps` に載せ替え、12 形をメッセージごと固定した。
+`guff-ineffassign` のハーネスには依存を渡す口が無かったので追加した ——
+「別のパッケージに属するか」が問い全体なのに、1 ファイルには属する先が無い。

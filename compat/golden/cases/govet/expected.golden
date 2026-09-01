@@ -119,4 +119,16 @@ unmarshal/bad/bad.go:7:16:govet::unmarshal: call of Unmarshal passes non-pointer
 unreachable/bad/bad.go:5:2:govet::unreachable: unreachable code
 unsafeptr/bad/bad.go:7:6:govet::unsafeptr: possible misuse of unsafe.Pointer
 unusedresult/bad/bad.go:6:2:govet::unusedresult: result of errors.New call not used
+unusedresult/wider/wider.go:17:2:govet::unusedresult: result of errors.New call not used
+unusedresult/wider/wider.go:23:2:govet::unusedresult: result of fmt.Append call not used
+unusedresult/wider/wider.go:24:2:govet::unusedresult: result of fmt.Appendf call not used
+unusedresult/wider/wider.go:25:2:govet::unusedresult: result of fmt.Appendln call not used
+unusedresult/wider/wider.go:26:2:govet::unusedresult: result of maps.Keys call not used
+unusedresult/wider/wider.go:27:2:govet::unusedresult: result of maps.Clone call not used
+unusedresult/wider/wider.go:28:2:govet::unusedresult: result of slices.Clone call not used
+unusedresult/wider/wider.go:29:2:govet::unusedresult: result of slices.Contains call not used
+unusedresult/wider/wider.go:30:2:govet::unusedresult: result of sort.Reverse call not used
+unusedresult/wider/wider.go:50:2:govet::unusedresult: result of (example.com/govet/unusedresult/wider.stringer).String call not used
+unusedresult/wider/wider.go:51:2:govet::unusedresult: result of (example.com/govet/unusedresult/wider.stringer).Error call not used
+unusedresult/wider/wider.go:52:2:govet::unusedresult: result of (error).Error call not used
 waitgroup/bad/bad.go:7:9:govet::waitgroup: WaitGroup.Add called from inside new goroutine

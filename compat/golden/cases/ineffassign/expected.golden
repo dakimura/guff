@@ -8,6 +8,7 @@
 
 compositekey/composite_key_bad.go:8:3:ineffassign::ineffectual assignment to lookback
 dead/bad.go:4:2:ineffassign::ineffectual assignment to x
+dotimport/user/user.go:29:2:ineffassign::ineffectual assignment to Shared
 fallthrough/switch_bad.go:9:3:ineffassign::ineffectual assignment to x
 gotofunclitbad/goto_funclit_bad.go:14:3:ineffassign::ineffectual assignment to p
 gotofunclitbad/goto_funclit_bad.go:28:3:ineffassign::ineffectual assignment to x

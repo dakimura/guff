@@ -3,6 +3,35 @@ mod support;
 use guff_ineffassign::analyzer;
 
 #[test]
+fn ineffassign_does_not_track_a_dot_imported_variable() {
+    // Upstream keys its variable table on `*ast.Object`, which the parser fills
+    // in — so an identifier it cannot resolve within the file has a nil `Obj`
+    // and is never tracked at all. A dot-imported name is exactly that. guff
+    // resolved identifiers through the type checker, which does know the name,
+    // and reported an assignment to another package's variable as an
+    // ineffectual assignment to a local (velero's `ReportData`, reached through
+    // `. "github.com/vmware-tanzu/velero/test"`).
+    //
+    // The local that shadows the same name is the control: it still reports, so
+    // the fix is "not this object", not "not this name".
+    let dir = support::testdata("dotimport");
+    let pkg = support::typecheck_with_deps(
+        "example.com/ineffassign/dotimport/user",
+        &dir.join("user/user.go"),
+        &[(
+            "example.com/ineffassign/dotimport/shared",
+            &dir.join("shared/shared.go"),
+        )],
+    );
+    let messages = support::run_analyzer(guff_ineffassign::analyzer(), &pkg);
+    assert_eq!(
+        messages,
+        vec!["ineffectual assignment to Shared"],
+        "{messages:?}"
+    );
+}
+
+#[test]
 fn ineffassign_flags_if_branch_dead_store() {
     let dir = support::testdata("basic");
     let pkg = support::typecheck_pkg("example.com/ineffassign/if_bad", &dir.join("if_bad.go"));

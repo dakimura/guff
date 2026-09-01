@@ -234,7 +234,16 @@ fn check_call(
     let (fn_name, verb, value): (&str, String, &Expr) = match name.as_str() {
         "fmt.Errorf" if call.args.len() == 1 => ("fmt.Errorf", "%s".into(), &call.args[0]),
         "fmt.Sprint" if call.args.len() == 1 => ("fmt.Sprint", "%v".into(), &call.args[0]),
-        "fmt.Sprintf" if call.args.len() == 1 => ("fmt.Sprintf", "%s".into(), &call.args[0]),
+        // Upstream's arm carries the flag: `case calledObj == fmtSprintfObj &&
+        // len(call.Args) == 1 && n.strFormat.sprintf1`. With `sprintf1` off no
+        // other arm matches a one-argument `Sprintf`, so the call is passed
+        // over entirely. guff gated it at the report instead, and with
+        // `string_format || (sprintf1 && …)` — an *or*, so leaving
+        // `string-format` at its default kept the finding alive however
+        // `sprintf1` was set (velero writes `sprintf1: false`).
+        "fmt.Sprintf" if call.args.len() == 1 && options.sprintf1 => {
+            ("fmt.Sprintf", "%s".into(), &call.args[0])
+        }
         "fmt.Sprintf" if call.args.len() == 2 => {
             let Some(lit) = as_string_lit(&call.args[0]) else {
                 return;
@@ -267,10 +276,7 @@ fn check_call(
             "error-format" => options.error_format && options.errorf,
             // err.Error() rewrite: err-error (cleared when error-format is off).
             "err-error" => options.err_error,
-            "string-format" => {
-                options.string_format
-                    || (options.sprintf1 && fn_name == "fmt.Sprintf" && call.args.len() == 1)
-            }
+            "string-format" => options.string_format,
             "bool-format" => options.bool_format,
             "hex-format" => options.hex_format,
             _ => true,

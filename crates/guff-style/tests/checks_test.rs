@@ -2980,6 +2980,55 @@ fn perfsprint_flags_fmt_shortcuts() {
 }
 
 #[test]
+fn perfsprint_sprintf1_governs_the_one_argument_form() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::PerfsprintOptions;
+
+    // Upstream carries the flag on the *arm* that recognizes a one-argument
+    // `fmt.Sprintf` — `case calledObj == fmtSprintfObj && len(call.Args) == 1 &&
+    // n.strFormat.sprintf1` — so with it off no arm matches and the call is
+    // passed over. guff gated it at the report instead, and with an *or*
+    // (`string_format || sprintf1`), so leaving `string-format` at its default
+    // kept the finding alive however `sprintf1` was set. velero writes
+    // `sprintf1: false` and got it anyway.
+    let pkg = support::typecheck_fixture("perfsprint", "example.com/perfsprint/sprintf1", "bad.go");
+
+    let one_arg = |messages: &[String]| -> usize {
+        messages
+            .iter()
+            .filter(|m| m.contains("string-format") && m.contains("just using the string"))
+            .count()
+    };
+
+    let on = support::run_analyzer(perfsprint(), &pkg);
+    assert_eq!(one_arg(&on), 4, "{on:?}");
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "perfsprint",
+        PerfsprintOptions {
+            sprintf1: false,
+            ..PerfsprintOptions::default()
+        },
+    );
+    let off = support::run_analyzer_with_settings(
+        perfsprint(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    // The two-argument forms (`fmt.Sprintf("%s", s)` and friends) keep their
+    // findings — a different arm — and only `fmt.Sprintf("hello")` falls
+    // silent.
+    assert_eq!(one_arg(&off), 3, "{off:?}");
+}
+
+#[test]
 fn perfsprint_allows_complex_fmt() {
     let pkg = support::typecheck_fixture("perfsprint", "example.com/perfsprint/ok", "ok.go");
     assert!(support::run_analyzer(perfsprint(), &pkg).is_empty());
