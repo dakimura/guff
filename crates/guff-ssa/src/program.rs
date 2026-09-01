@@ -306,6 +306,21 @@ impl Program {
             return;
         }
 
+        // Remove from f.locals any Allocs that escape to the heap.
+        // (Go: `Function.finishBody`.) A cell whose address was taken can be
+        // written through that pointer, so it is no longer a plain frame slot;
+        // `wastedassign` is the analyzer that reads `locals` and it must not
+        // reason about such a cell from its stores alone.
+        let heap: Vec<crate::ids::InstrId> = f
+            .locals
+            .iter()
+            .copied()
+            .filter(|&id| matches!(f.instrs.get(id), crate::instr::InstrData::Alloc(a) if a.heap))
+            .collect();
+        if !heap.is_empty() {
+            f.locals.retain(|id| !heap.contains(id));
+        }
+
         crate::blockopt::optimize_blocks(f);
         crate::dom::build_dom_tree(f);
 

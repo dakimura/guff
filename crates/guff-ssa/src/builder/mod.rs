@@ -391,6 +391,41 @@ pub(crate) fn lookup(prog: &mut Program, fid: FuncId, obj: ObjectId, escaping: b
     lookup_depth(prog, fid, obj, escaping, 0)
 }
 
+/// Mark the cell `v` of function `fid` heap-allocated, as go/ssa's
+/// `Function.lookup` does for a reference that may outlive the activation
+/// (`&x`, or a capture plumbed out to an enclosing function).
+///
+/// The flag is what `Program::finish_function` reads to drop the cell from
+/// `Function::locals` — upstream's `finishBody` does the same, and
+/// `wastedassign` only looks at stores whose address is still in `Locals`. A
+/// variable whose address was taken can be written through that pointer, so
+/// "assigned but never read" is not a statement the store alone supports.
+pub(crate) fn mark_escaping(prog: &mut Program, fid: FuncId, v: Value) {
+    let Value::Instr(id) = v else {
+        return;
+    };
+    let f = prog.functions.get_mut(fid);
+    // A Phi is what a go1.22 `for` loop variable resolves to; its edges are the
+    // per-iteration cells, and go/ssa marks each of them.
+    let edges: Vec<Value> = match f.instrs.get(id) {
+        InstrData::Alloc(_) => {
+            if let InstrData::Alloc(a) = f.instrs.get_mut(id) {
+                a.heap = true;
+            }
+            return;
+        }
+        InstrData::Phi(p) => p.edges.iter().flatten().copied().collect(),
+        _ => return,
+    };
+    for edge in edges {
+        if let Value::Instr(eid) = edge {
+            if let InstrData::Alloc(a) = f.instrs.get_mut(eid) {
+                a.heap = true;
+            }
+        }
+    }
+}
+
 fn lookup_depth(
     prog: &mut Program,
     fid: FuncId,
@@ -403,6 +438,9 @@ fn lookup_depth(
         return prog.emit_const(None, typ);
     }
     if let Some(&v) = prog.functions.get(fid).objects.get(&obj) {
+        if escaping {
+            mark_escaping(prog, fid, v);
+        }
         return v; // local to fid (or already captured)
     }
     // The definition is in an enclosing function; plumb it through.
@@ -718,6 +756,13 @@ impl<'a> Builder<'a> {
         match e {
             Expr::Ident(id) => {
                 let v = self.ident(id);
+                // `&x` on a local: the cell may outlive this activation.
+                // (Go: the `*ast.Ident` case of `builder.addr` passes
+                // `escaping` straight into `fn.lookup`.)
+                if escaping {
+                    let fid = self.func_id;
+                    crate::builder::mark_escaping(self.prog, fid, v);
+                }
                 // The location's type is the pointee of the address value's
                 // type. Deriving it from the address (rather than Info.types)
                 // also covers a `:=`/`var` define ident, which has no recorded

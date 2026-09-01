@@ -115,11 +115,26 @@ fn test_capturing_funclit_emits_make_closure() {
     assert_eq!(fv.name, "x", "captured free variable name");
 
     // Reference capture (go/ssa faithful, resolving the D17 value-capture
-    // divergence): `x` is spilled to a stack cell, and the closure captures that
+    // divergence): `x` is spilled to a cell, and the closure captures that
     // *address*. So adder spills x, then `make closure adder$1 [<spill addr>]`.
+    //
+    // `new`, not `local`: the capture reaches the cell through `lookup(…,
+    // escaping = true)`, which heap-allocates it. Measured against x/tools
+    // v0.48.0 `go/ssa` in NaiveForm on this exact source — it prints
+    // `t0 = new int (x)` and `adder`'s `Locals` does not contain `x` at all.
     let adder_asm = disassemble_function(prog.functions.get(adder_fid), &prog);
     println!("--- adder ---\n{adder_asm}");
-    assert!(adder_asm.contains("local int (x)"), "x is spilled:\n{adder_asm}");
+    assert!(adder_asm.contains("new int (x)"), "x is spilled to a heap cell:\n{adder_asm}");
+    assert!(
+        !prog
+            .functions
+            .get(adder_fid)
+            .locals
+            .iter()
+            .any(|&id| matches!(prog.functions.get(adder_fid).instrs.get(id),
+                guff_ssa::instr::InstrData::Alloc(a) if a.comment == "x")),
+        "an escaping cell is not a local"
+    );
     assert!(adder_asm.contains("*t0 = x"), "param stored to its cell:\n{adder_asm}");
     // The closure binds the spill cell (a register), not the bare param value.
     assert!(
