@@ -209,10 +209,17 @@ fn gosec_g710_resolves_a_dispatch_through_a_named_func_type() {
     let pkg = support::typecheck_fixture("gosec", "example.com/gosec/g7xx", "g7xx.go");
     let messages = support::run_analyzer(gosec(), &pkg);
     let g710: Vec<&String> = messages.iter().filter(|m| m.starts_with("G710: ")).collect();
-    // Counted over the whole fixture: the four functions reached through a
+    // Counted over the whole fixture: the six functions reached through a
     // dispatch with a clean argument are silent, and only the one whose call
     // site passes a request value is reported. Three G710 in total — the two
     // that predate the dispatch shapes, plus `g710ViaNamedTainted`.
+    //
+    // Two of the six are reached through a `MakeClosure` rather than by name:
+    // `g710Box.redirect` (a method value, which compiles to a bound thunk) and
+    // the capturing literal `g710MakeRedirector` returns. A reachability walk
+    // that does not follow the closure's function operand leaves both out of
+    // the call graph, and an absent node is an entry point whose source-typed
+    // parameters are auto-tainted — this count goes to 5.
     assert_eq!(g710.len(), 3, "{messages:?}");
 }
 

@@ -79,6 +79,23 @@ fn visit_fn(prog: &Program, fid: FuncId, seen: &mut HashSet<FuncId>) {
                     visit_fn(prog, *callee, seen);
                 }
             });
+            // A closure's code is an operand upstream: `MakeClosure.Operands`
+            // returns `&v.Fn` before the bindings, so `visitor.function`
+            // descends into it. guff keeps it as a `FuncId` field rather than a
+            // `Value`, so `for_each_operand` never offers it and the walk
+            // stopped at every capturing closure — a function literal that
+            // captures anything, and the bound-method thunk `x.M` compiles to.
+            //
+            // The thunk is what makes this visible: it is the only *bare*
+            // function a method value produces, so it is what CHA's
+            // `funcsBySig` matches when such a value is later called, and its
+            // body's static call is the only edge the real method ever gets.
+            // Missing, gosec's taint engine saw the method as a function with
+            // no callers — an entry point, whose source-typed parameters are
+            // auto-tainted.
+            if let crate::instr::InstrData::MakeClosure(mc) = instr {
+                visit_fn(prog, mc.fn_, seen);
+            }
         }
     }
 }

@@ -30,7 +30,7 @@
     "authelia": {
       "tier": "hunt",
       "state": "open",
-      "at": "20260901T122533Z",
+      "at": "20260901T131139Z",
       "open": 11,
       "guff_only": 11,
       "gcl_only": 0,
@@ -41,7 +41,7 @@
     "caddy": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260901T122000Z",
+      "at": "20260901T130920Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -57,7 +57,7 @@
     "cobra": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260901T122000Z",
+      "at": "20260901T130920Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -143,7 +143,7 @@
     "gin": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260901T122000Z",
+      "at": "20260901T130920Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -151,7 +151,7 @@
     "gitea": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260901T111143Z",
+      "at": "20260901T131217Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -159,7 +159,7 @@
     "go-client": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260901T122000Z",
+      "at": "20260901T130920Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -183,7 +183,7 @@
     "helm": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260901T122000Z",
+      "at": "20260901T130920Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -199,7 +199,7 @@
     "k9s": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260901T122000Z",
+      "at": "20260901T130920Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -259,13 +259,13 @@
     "syncthing": {
       "tier": "hunt",
       "state": "open",
-      "at": "20260901T122557Z",
-      "open": 10,
+      "at": "20260901T131205Z",
+      "open": 9,
       "guff_only": 0,
-      "gcl_only": 10,
+      "gcl_only": 9,
       "by_linter": {
-        "gosec": 4,
         "modernize": 4,
+        "gosec": 3,
         "nilnesserr": 1,
         "unparam": 1
       }

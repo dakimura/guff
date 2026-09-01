@@ -40,6 +40,67 @@ fn test_all_functions_reaches_closure_operand() {
     assert!(fns.contains(&helper_fid));
 }
 
+/// A closure's code is an operand upstream (`MakeClosure.Operands` returns
+/// `&v.Fn` first), so `visitor.function` descends into it. guff keeps it as a
+/// `FuncId` field, so the walk used to stop at every capturing closure — and at
+/// the bound-method thunk that `x.M` compiles to, which is the only *bare*
+/// function a method value produces.
+///
+/// The thunk is what CHA's `funcsBySig` matches when such a value is later
+/// called, and its body's static call is the only edge the real method ever
+/// gets. Without it gosec's taint engine saw the method as a function with no
+/// callers, i.e. an entry point, and auto-tainted its source-typed parameters.
+const METHOD_VALUE: &str = "\
+package p
+
+type box struct{}
+
+func (b box) redirect(s string) {}
+
+type handler func(string)
+
+func Dispatch() {
+	var b box
+	var h handler = b.redirect
+	h(\"x\")
+}
+";
+
+#[test]
+fn test_all_functions_follows_a_make_closure_into_a_bound_thunk() {
+    let fset = FileSet::new();
+    let file = parse_file(&fset, "p.go", METHOD_VALUE.as_bytes(), Mode::NONE).expect("parse");
+
+    let mut check = Checker::new(Config::default());
+    check.check_files(vec![file.clone()]);
+
+    let mut prog = Program::new(
+        BuilderMode::default(),
+        check.info,
+        check.types,
+        check.objects,
+        check.packages,
+    );
+    let ssa_pkg = create_package(&mut prog, check.pkg);
+    populate_package_members(&mut prog, ssa_pkg, &[file.clone()]);
+    build_package(&mut prog, ssa_pkg, &[file]);
+
+    let fns = all_functions(&mut prog);
+    let mut names: Vec<&str> = fns
+        .iter()
+        .map(|&f| prog.functions.get(f).name.as_str())
+        .collect();
+    names.sort_unstable();
+    // Counted, and the program has exactly these four functions: reachability
+    // that misses the thunk answers `["Dispatch", "init"]` and still contains
+    // everything a `contains` assertion would look for.
+    assert_eq!(
+        names,
+        vec!["Dispatch", "init", "redirect", "redirect$bound"],
+        "the walk must reach the bound thunk and, through its body, the method"
+    );
+}
+
 #[test]
 fn test_main_packages() {
     let fset = FileSet::new();
