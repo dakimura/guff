@@ -11,3 +11,8 @@ bad.go:12:26:promlinter::Metric: queue_depth Error: no help text
 bad.go:16:28:promlinter::Metric: requests_made Error: counter metrics should have "_total" suffix
 bad.go:20:30:promlinter::Metric: latency_milliseconds Error: use base unit "seconds" instead of "milliseconds"
 bad.go:27:26:promlinter::Metric: queueDepth Error: metric names should be written in 'snake_case' not 'camelCase'
+bad.go:37:26:promlinter::Metric: folder_summary Error: metric name should not include type 'summary'
+bad.go:41:26:promlinter::Metric: queue_gauge Error: metric name should not include type 'gauge'
+bad.go:46:26:promlinter::Metric: queue_histogram_depth Error: metric name should not include type 'histogram'
+bad.go:51:26:promlinter::Metric: queue_counter_gauge Error: metric name should not include type 'counter'
+bad.go:51:26:promlinter::Metric: queue_counter_gauge Error: metric name should not include type 'gauge'

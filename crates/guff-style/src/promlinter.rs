@@ -30,18 +30,6 @@ enum MetricType {
     Untyped,
 }
 
-impl MetricType {
-    fn as_promlint_name(self) -> &'static str {
-        match self {
-            MetricType::Counter => "counter",
-            MetricType::Gauge => "gauge",
-            MetricType::Histogram => "histogram",
-            MetricType::Summary => "summary",
-            MetricType::Untyped => "untyped",
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 struct MetricFamily {
     name: String,
@@ -310,12 +298,28 @@ fn lint_metric(mf: &MetricFamily) -> Vec<String> {
         }
     }
 
-    // MetricTypeInName
-    if mf.metric_type != MetricType::Untyped {
+    // MetricTypeInName — *every* type name, not just this metric's own.
+    //
+    // promlinter v0.3.0 calls promlint from client_golang, and golangci-lint
+    // builds against **v1.12.1**, whose `lintMetricTypeInName` ranges over all
+    // of `dto.MetricType_name` (skipping only `UNTYPED`) and reports each one
+    // the name carries. Reading a checkout of a newer client_golang gives the
+    // opposite rule: v1.24.0's `LintMetricTypeInName` returns early unless the
+    // name carries the metric's *own* type, which is what guff had. syncthing
+    // `lib/model/metrics.go` is the difference in one line — a **gauge** named
+    // `syncthing_model_folder_summary`, which upstream reports for 'summary'
+    // and guff did not report at all (the `//nolint:promlinter` above it then
+    // showed up as an unused directive, which is how this was found).
+    //
+    // Upstream ranges over a map, so the order of two problems on one metric is
+    // nominally unspecified; measured four times on `a_x_counter_gauge` it was
+    // always counter then gauge, and the compat tiers compare sets.
+    {
         let n = name.to_lowercase();
-        let typename = mf.metric_type.as_promlint_name();
-        if n.contains(&format!("_{typename}_")) || n.ends_with(&format!("_{typename}")) {
-            problems.push(format!("metric name should not include type '{typename}'"));
+        for typename in ["counter", "gauge", "summary", "histogram"] {
+            if n.contains(&format!("_{typename}_")) || n.ends_with(&format!("_{typename}")) {
+                problems.push(format!("metric name should not include type '{typename}'"));
+            }
         }
     }
 
