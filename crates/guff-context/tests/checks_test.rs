@@ -120,6 +120,39 @@ fn bodyclose_skips_packages_without_a_direct_net_http_import() {
 }
 
 #[test]
+fn bodyclose_follows_the_referrers_of_the_response() {
+    // Upstream decides with `isopen`, a walk over the response value's SSA
+    // referrers. Six of its branches had no counterpart in guff's AST port:
+    //
+    //   * `getReqCall` accepts *any* call whose result mentions
+    //     `*http.Response`, so a helper of this package is a candidate too, and
+    //     a result nobody binds has no referrers — reported. guff only ever
+    //     tracked assignments (connect-go, four times).
+    //   * a store into a global is skipped outright ("referrers for globals are
+    //     always nil"), and guff reported it.
+    //   * a store into a field is settled by a close reached through that field.
+    //   * a capture by a func literal is settled however the literal uses the
+    //     body — `defer func() { io.Copy(io.Discard, resp.Body) }()` included,
+    //     which guff read as a leak (connect-go's `bench_test.go`).
+    //   * handing the response to a callee settles it only when that callee
+    //     closes; guff treated every argument position as handing over
+    //     ownership, which silenced `d.validateResponse(response)`.
+    //
+    // The six silent shapes are the assertion here; the four that fire are what
+    // keeps the walk from simply going quiet.
+    let dir = support::testdata("bodyclose");
+    let pkg = support::typecheck_pkg("example.com/bodyclose/referrers", &dir.join("referrers.go"));
+    let messages = support::run_analyzer(bodyclose(), &pkg);
+    assert_eq!(messages.len(), 4, "{messages:?}");
+    assert!(
+        messages
+            .iter()
+            .all(|m| m == "response body must be closed"),
+        "{messages:?}"
+    );
+}
+
+#[test]
 fn bodyclose_allows_closed_and_returned() {
     let dir = support::testdata("bodyclose");
     let pkg = support::typecheck_pkg("example.com/bodyclose/ok", &dir.join("ok.go"));

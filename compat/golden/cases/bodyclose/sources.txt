@@ -1,5 +1,9 @@
 # The fixtures the Rust tests use, so the two cannot drift.
 bad/bad.go     crates/guff-context/tests/testdata/bodyclose/bad.go
+# The referrer walk: a helper call, a global, a field with and without a close
+# through it, a closure capture, and a hand-off to a callee that does or does
+# not close.
+referrers/referrers.go   crates/guff-context/tests/testdata/bodyclose/referrers.go
 ok/ok.go       crates/guff-context/tests/testdata/bodyclose/ok.go
 nohttp/nohttp.go   crates/guff-context/tests/testdata/bodyclose/nohttp.go
 dialer/dialer.go   crates/guff-context/tests/testdata/bodyclose/stub/example.com/bodyclose/dialer/dialer.go
