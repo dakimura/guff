@@ -17,6 +17,7 @@ bad/bad.go:50:2:modernize::slicescontains: Loop can be simplified using slices.C
 bad/bad.go:59:24:modernize::omitzero: Omitempty has no effect on nested struct fields
 bloop/bloop.go:93:6:modernize::rangeint: for loop can be modernized using range over int
 mapsloop/mapsloop.go:7:3:modernize::mapsloop: Replace m[k]=v loop with maps.Copy
+mapsloop/mapsloop.go:22:3:modernize::mapsloop: Replace m[k]=v loop with maps.Copy
 minmax/minmax.go:8:5:modernize::minmax: if statement can be modernized using min
 minmax/minmax.go:17:5:modernize::minmax: if statement can be modernized using max
 minmax/minmax.go:29:5:modernize::minmax: if statement can be modernized using min

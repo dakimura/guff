@@ -19534,3 +19534,41 @@ stringsseq は 4 件をメッセージの列で固定する）、OSS pr tier 8 t
 **測り直しの注意**: この 3 回の測定では **golangci が `canonicalheader` 2 件を
 落とす側**が 3 回中 2 回だった（`syncthing.golangci.json` の出現数が 3 と 1 で分かる）。
 台帳の 5 のうち 2 はそれで、guff は毎回同じ答えを出している。
+
+### 2026-09-02（続き 142）— 続き 141 の穴を全部塞ぐ。`w.Header()[k] = v` は**引数ゼロの呼び出し**で落ちていた
+
+syncthing の `modernize` 最後の 1 件、`lib/httpcache/httpcache.go:47`:
+
+```go
+for k, v := range resp.header {
+	w.Header()[k] = v
+}
+```
+
+`mapsloop` の形は guff も判定していて、落ちていたのはまた**fix の文面**だった。
+代入先が `w.Header()[k]` —— `expr_text` の呼び出し枝は
+**引数がちょうど 1 つ**のときしか書けないので、`w.Header()`（引数ゼロ）で失敗し、
+診断ごと消えていた。続き 141 で minmax の 2 か所だけ直したときに
+「残り 38 か所は同じ落とし方をしうる」と書いた、そのうちの 1 つである。
+
+今回は **`expr_text(...)` の失敗が finding を落とす形の 17 か所すべて**を
+`expr_text_src`（失敗したらソースのバイトを切り出す）に替えた。
+これは**振る舞いを保つ変更**である —— `expr_text` が書けていた場所の文面は
+1 文字も変わらず、書けなかった場所だけが初めて答えを持つ。
+golden 208/208 と fix tier 208/208 が変換の前後で無変更だったことがそれを示していて、
+新しい形を fixture に足して初めてキーが増えた。
+
+**測定**: 17 形（modernize の grid 13 形＋ mapsloop 4 形）。修正前は 1 形が乖離
+（呼び出しの結果を添字にする代入先）、修正後は全一致。黙る対照も測った ——
+本文が代入だけでないループは両ツールとも黙る。
+
+fix の文面は上流と一致する: `maps.Copy(w.Header(), r.header)`。
+上流は `astutil.Format`（go/printer）で書き、guff はソースを切り出すので、
+**gofmt 済みのソースでは同じ文字列になる**。ずれたら fix tier が落とす。
+
+syncthing **5 → 4**（うち 2 は golangci 側が落とす `canonicalheader`。実質の残りは
+`nilnesserr` 1 と `unparam` 1 で、どちらも golangci-only）。台帳は 29/100 のまま。
+golden 208/208（`modernize` 54 → 55 キー、消失なし）、fix tier 208/208
+（`modernize.diff` を録り直し、増えたのは新しい fixture 1 形ぶん）、reject 14、
+workspace テスト緑（`mapsloop` は 2 件と、fix の置換テキスト 2 本を列で固定する）、
+OSS pr tier 8 target すべて P=R=100%。
