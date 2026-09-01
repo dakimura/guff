@@ -738,8 +738,14 @@ fn sa1021_flags_bytes_equal_on_net_ip() {
     );
     support::assert_well_typed(&pkg);
     let messages = support::run_analyzer(sa1021::analyzer(), &pkg);
-    assert_eq!(messages.len(), 1, "{messages:?}");
-    assert!(messages[0].contains("net.IP.Equal"));
+    // Four shapes fire: the implicit conversion, the written-out one, one
+    // through an alias of net.IP, and a conversion of a conversion. Counting
+    // them is the point — upstream's test is "the argument **is** a
+    // ChangeType whose operand unaliases to net.IP", and a check that merely
+    // asks whether the argument's type is net.IP passes the first shape while
+    // getting the alias wrong. See `ok.go` for the six that must stay silent.
+    assert_eq!(messages.len(), 4, "{messages:?}");
+    assert!(messages.iter().all(|m| m.contains("net.IP.Equal")));
 }
 
 #[test]
@@ -795,10 +801,16 @@ fn sa1029_flags_bad_context_keys() {
     );
     support::assert_well_typed(&pkg);
     let messages = support::run_analyzer(sa1029::analyzer(), &pkg);
-    assert!(messages.len() >= 4, "{messages:?}");
-    assert!(messages.iter().any(|m| m.contains("built-in type string")));
-    assert!(messages.iter().any(|m| m.contains("not comparable")));
-    assert!(messages.iter().any(|m| m.contains("empty anonymous struct")));
+    // Twenty key shapes, six of which fire. The count is the assertion: nine
+    // of the silent fourteen are named types, and guff reported two of them
+    // (`var k ctxKey = struct{}{}` and the same assigned after the fact)
+    // because `ssa_value_type` peeled the conversion `emit_store` inserts.
+    // `>= 4` was true throughout.
+    assert_eq!(messages.len(), 6, "{messages:?}");
+    let count = |needle: &str| messages.iter().filter(|m| m.contains(needle)).count();
+    assert_eq!(count("built-in type string"), 1, "{messages:?}");
+    assert_eq!(count("empty anonymous struct"), 3, "{messages:?}");
+    assert_eq!(count("not comparable"), 2, "{messages:?}");
 }
 
 #[test]

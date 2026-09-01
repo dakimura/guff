@@ -125,7 +125,10 @@ sa1019/ok/ok.go:5:1:staticcheck::ST1021: comment on exported type Embedder shoul
 sa1020/bad/bad.go:7:22:staticcheck::SA1020: invalid port or service name in host:port pair
 sa1020/bad/bad.go:8:22:staticcheck::SA1020: invalid port or service name in host:port pair
 sa1020/bad/bad.go:9:25:staticcheck::SA1020: invalid port or service name in host:port pair
-sa1021/bad/bad.go:10:2:staticcheck::SA1021: use net.IP.Equal to compare net.IPs, not bytes.Equal
+sa1021/bad/bad.go:15:2:staticcheck::SA1021: use net.IP.Equal to compare net.IPs, not bytes.Equal
+sa1021/bad/bad.go:18:2:staticcheck::SA1021: use net.IP.Equal to compare net.IPs, not bytes.Equal
+sa1021/bad/bad.go:22:2:staticcheck::SA1021: use net.IP.Equal to compare net.IPs, not bytes.Equal
+sa1021/bad/bad.go:26:2:staticcheck::SA1021: use net.IP.Equal to compare net.IPs, not bytes.Equal
 sa1023/bad/bad.go:10:2:staticcheck::SA1023: io.Writer.Write must not modify the provided buffer, not even temporarily
 sa1024/bad/bad.go:6:2:staticcheck::SA4017: TrimLeft doesn't have side effects and its return value is ignored
 sa1024/bad/bad.go:6:26:staticcheck::SA1024: cutset contains duplicate characters
@@ -144,10 +147,17 @@ sa1026/bad/bad.go:17:15:staticcheck::SA1026: trying to marshal unsupported type 
 sa1028/bad/bad.go:13:13:staticcheck::SA1028: sort.Slice must only be called on slices, was called on [1]int
 sa1028/bad/bad.go:14:13:staticcheck::SA1028: sort.Slice must only be called on slices, was called on string
 sa1028/bad/bad.go:15:13:staticcheck::SA1028: sort.Slice must only be called on slices, was called on int
-sa1029/bad/bad.go:12:25:staticcheck::SA1029: should not use built-in type string as key for value; define your own type to avoid collisions
-sa1029/bad/bad.go:13:25:staticcheck::SA1029: keys used with context.WithValue must be comparable, but type example.com/sa1029/bad.T3 is not comparable
-sa1029/bad/bad.go:15:25:staticcheck::SA1029: should not use empty anonymous struct as key for value; define your own type to avoid collisions
-sa1029/bad/bad.go:16:25:staticcheck::SA1029: should not use empty anonymous struct as key for value; define your own type to avoid collisions
+sa1029/bad/bad.go:16:25:staticcheck::SA1029: should not use built-in type string as key for value; define your own type to avoid collisions
+sa1029/bad/bad.go:17:25:staticcheck::SA1029: keys used with context.WithValue must be comparable, but type example.com/sa1029/bad.T3 is not comparable
+sa1029/bad/bad.go:19:25:staticcheck::SA1029: should not use empty anonymous struct as key for value; define your own type to avoid collisions
+sa1029/bad/bad.go:20:25:staticcheck::SA1029: should not use empty anonymous struct as key for value; define your own type to avoid collisions
+sa1029/bad/bad.go:24:25:staticcheck::SA1029: should not use empty anonymous struct as key for value; define your own type to avoid collisions
+sa1029/bad/bad.go:33:25:staticcheck::SA1029: keys used with context.WithValue must be comparable, but type []int is not comparable
+sa1029/bad/bad.go:43:2:staticcheck::S1021: should merge variable declaration with assignment on next line
+sa1029/bad/bad.go:48:9:staticcheck::QF1011: could omit type ctxKey from declaration; it will be inferred from the right-hand side
+sa1029/bad/bad.go:48:9:staticcheck::ST1023: should omit type ctxKey from declaration; it will be inferred from the right-hand side
+sa1029/bad/bad.go:59:10:staticcheck::QF1011: could omit type ctxKeyField from declaration; it will be inferred from the right-hand side
+sa1029/bad/bad.go:59:10:staticcheck::ST1023: should omit type ctxKeyField from declaration; it will be inferred from the right-hand side
 sa1030/bad/bad.go:6:24:staticcheck::SA1030: 'base' must not be smaller than 2, unless it is 0
 sa1030/bad/bad.go:7:27:staticcheck::SA1030: 'bitSize' argument is invalid, must be within 0 and 64
 sa1030/bad/bad.go:8:26:staticcheck::SA1030: 'bitSize' argument is invalid, must be either 32 or 64

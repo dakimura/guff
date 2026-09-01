@@ -18064,3 +18064,84 @@ workspace テスト緑、OSS pr tier 8 target すべて P=R=100%。
 新設した `nosec.go` は 4 つの AST 形すべてと 13 の directive 配置を含み、
 単体テストは**メッセージではなく 9 個の (行, 列) の集合**を固定する
 —— この 3 欠陥はすべて `any(contains("G101"))` を通ってしまう。
+
+### 2026-09-01（続き 118）— 共有ヘルパが上流に無い `ChangeType` 剥がしをしていて、それを別の近似が支えていた
+
+fiber の `staticcheck` 2 件、`client/client_test.go:2101` と
+`client/request_test.go:89`。どちらも
+
+```go
+type ctxKey struct{}
+var key ctxKey = struct{}{}
+ctx = context.WithValue(ctx, key, "v1")
+```
+
+上流の SA1029 は
+
+```go
+T := arg.Value.Value.Type()
+if s, ok := T.(*types.Struct); ok && s.NumFields() == 0 { … }
+```
+
+—— **`Underlying()` を呼ばない**。だから名前付きの `ctxKey` は `*types.Named` で
+一致せず黙る。guff は撃っていた。
+
+最初は「guff-ssa の代入パスが複合リテラルを宣言型に変換していない」と読み、
+上流 `builder.assign` に**あって** guff に無い in-place 初期化の枝
+（`if _, ok := loc.(*address); ok` の側、`_is_zero` が未使用なのがその痕跡）を移植した。
+14 形は一致した。**が、広めのグリッド（`default: standard` で 12 形の複合リテラル代入）を
+取ったら `SA4006: this value of k is never used` が 1 件消えた。**
+上流の IR は複合リテラルを **`CompositeValue` という 1 つの値**にして 1 回だけ store するが、
+guff の `comp_lit` は go/ssa 流に `FieldAddr` を並べる。in-place にすると
+Alloc の referrer に `FieldAddr` が入り、`hasUse` が「使われている」と答えてしまう。
+**同じ枝でも、その下の `compLit` が違えば結果は違う。** 変更前後で測って分かったので revert した。
+
+本当の原因は共有ヘルパだった。上流の `callcheck.checkCalls` が引数に対してやるのは
+
+```go
+if iarg, ok := arg.(*ir.MakeInterface); ok { arg = iarg.X }
+```
+
+**これだけ**で、あとは各 rule が `arg.Value.Value.Type()` を読む。
+guff の `ssa_value_type` は `MakeInterface` を剥がしたうえで **`ChangeType` も剥がし、
+`Phi` も畳んで**いた。`emit_store` は `emitStore` と同じく `emit_conv` するので
+`struct{}{}` は `ChangeType → ctxKey` になっており、その剥がしが
+**わざわざ `struct{}` に戻していた**。11 個の analyzer がこのヘルパを共有している。
+
+剥がしを外すと SA1021 が落ちる —— それが**剥がしを支えていた近似**だった。
+上流の SA1021 は
+
+```go
+change, ok := v.Value.(*ir.ChangeType)
+return ok && types.TypeString(types.Unalias(change.X.Type()), nil) == typ
+```
+
+で、「**値が変換であること**」と「その被変換の型が `net.IP` であること」の 2 つを訊く。
+guff は「剥がした後の型が `net.IP`」しか訊いていなかった。上流どおりに書き直したら
+剥がし無しで golden の `sa1021/bad/bad.go:10:2` は戻った。
+**近似が別の近似を必要としていた**形で、両方直して初めて素直になる。
+
+SA1021 の fixture を 12 形に広げたら、**その場で 3 つ目の欠陥**が出た:
+`type myIP = net.IP` 経由の `bytes.Equal([]byte(a1), []byte(a2))` を上流は撃つが
+guff は黙る —— `types.Unalias` を呼んでいなかった。これは剥がしの有無に関係ない
+**元からの穴**で、新しい fixture が見つけた。
+
+**測定**: SA1029 は 14 形中 2 形が乖離（`var k ctxKey = struct{}{}` と
+`var k ctxKey; k = struct{}{}`。`var k ctxKey = ctxKey{}` / `k := ctxKey{}` /
+`var k ctxKey` / ポインタ / 名前付き基本型 / フィールド付き / 非比較可能は元から一致）、
+修正後は 14 形すべて一致。SA1021 は 12 形すべて一致（修正前は alias の 1 形が乖離）。
+広めのグリッド 12 形は変更前後とも一致（残る 2 件の `unused` 差は本件と無関係で、
+変更前のバイナリでも同じ）。fiber **11 → 9**（`staticcheck` 2 → 0）。
+golden 204/204（`staticcheck-sa` 289 → 299 キー、キー集合の差分で**消失なし**）、
+fix tier 204/204（`staticcheck-sa` の記録は fixture が伸びた分 186 → 212 行で録り直し
+—— 上流も S1021 / ST1023 / QF1011 を適用することを 4 形で確かめてから）、
+reject 14、isolate 116、filesets 116、smoke 1、workspace テスト緑、
+OSS pr tier 8 target すべて P=R=100%。
+
+**踏んだ罠**: `--fix` の挙動を確かめるとき、比較用の原本 `a.orig.go` を
+**同じディレクトリに置いた**ので `f redeclared in this block` の typecheck エラーになり、
+linter が 1 つも走らないまま「上流は何も直さない」という測定を 3 回続けて得た。
+出力は `NO CHANGE` としか言わない。**原本はパッケージの外に置く。**
+
+`#nosec` と同じ話で、SA1029 の fixture の assert は `messages.len() >= 4` だった。
+20 形に広げて `assert_eq!(len, 6)` と種類別の件数に変えた。

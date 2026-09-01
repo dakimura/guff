@@ -657,8 +657,42 @@ pub fn global_import_path(prog: &Program, gid: GlobalId) -> Option<String> {
 }
 
 /// Returns the SSA type of an operand after peeling `ChangeType` wrappers.
+/// The type of a call argument, as upstream's rules ask for it
+/// (`arg.Value.Value.Type()`).
+///
+/// Deliberately **not** flattened. `callcheck.checkCalls` unwraps exactly one
+/// thing — a `MakeInterface` — and it does that when the `Argument` is built,
+/// which [`Call`] already mirrors. Every rule then reads the operand's own
+/// type. This used to peel `ChangeType` and collapse `Phi` nodes as well, and
+/// that peel is why guff reported `var key ctxKey = struct{}{}` for SA1029:
+/// `emit_store` converts the anonymous literal to the declared type, and
+/// peeling the `ChangeType` handed the check back the `struct{}` that
+/// `T.(*types.Struct)` matches. Upstream sees `ctxKey` and says nothing.
+///
+/// The one rule that wants the operand *under* a conversion is SA1021, and
+/// upstream writes that out itself — it matches `*ir.ChangeType` and reads
+/// `change.X.Type()`. See [`change_type_operand`].
 pub fn ssa_value_type(prog: &Program, caller: &Function, value: SsaValue) -> TypeId {
-    value_type_of(prog, caller, flatten_value(caller, value.inner))
+    value_type_of(prog, caller, value.inner)
+}
+
+/// The type of `v`'s operand when `v` **is** a `ChangeType`, else `None`.
+///
+/// (Go: `change, ok := v.Value.(*ir.ChangeType)` in SA1021's
+/// `isConvertedFrom`. The test is on the value itself — a value that merely
+/// *has* the type is not a conversion from it.)
+pub fn change_type_operand_type(
+    prog: &Program,
+    caller: &Function,
+    v: SsaValue,
+) -> Option<TypeId> {
+    let Value::Instr(i) = v.inner else {
+        return None;
+    };
+    match caller.instrs.get(i) {
+        InstrData::ChangeType(ct) => Some(value_type_of(prog, caller, ct.x)),
+        _ => None,
+    }
 }
 
 /// Reports whether `typ`'s underlying type is a pointer or interface.
