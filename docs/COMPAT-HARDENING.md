@@ -18838,3 +18838,56 @@ guff だけが「未使用」と言う側なので別件）。
 golden 206 → **207 case**（新 case `nolint-after-exclusions`）、
 fix tier 207/207（新 case を録り直し）、reject 14、isolate 116、smoke 1、
 workspace テスト緑、OSS pr tier 8 target すべて P=R=100%。
+
+### 2026-09-01（続き 129）— φ に合流する 2 つの代入は、後ろの 1 つの `Close()` で両方片付く
+
+syncthing の `sqlclosecheck` 2 件。対象は `PrefixKV`:
+
+```go
+var rows *sqlx.Rows
+if prefix == "" {
+	rows, err = s.stmt(`SELECT key, value FROM kv`).Queryx()
+} else {
+	rows, err = s.stmt(`… WHERE key >= ? AND key < ?`).Queryx(prefix, end)
+}
+…
+return func(yield func(db.KeyValue) bool) {
+		defer rows.Close()
+```
+
+guff は**両方の枝**を報告していた。原因は 2 つある。
+
+**1. close がリテラルの中にある。** guff が見ていたのは
+`defer func(){ … }()`（その場で defer された無引数クロージャ）だけで、
+`PrefixKV` は**クロージャを返す**。リテラルの中で閉じているなら、そのリテラルが
+どこへ行こうと閉じている。
+
+**2. 2 つの代入が「再代入」に見えていた。** guff は名前ごとに 1 つの usage を持ち、
+上書きされたら前のものを報告する。上流は SSA の値で見るので、`if` の両腕は
+**1 つの φ に合流**し、後ろの 1 つの close が**すべての辺**を片付ける。
+
+ただし**逐次の再代入は違う**。8 形測って境界が出た:
+
+| 形 | 上流 |
+|---|---|
+| 同じ文リストで 2 回代入し、最後に close | **最初のものを報告**（本当に漏れる） |
+| `if`/`else` の両腕で代入し、後で close | 黙る |
+| `if`/`else` の両腕で代入し、close 無し | **両方報告** |
+| リテラルの中で close（返しても defer しても） | 黙る |
+| リテラルに捕まるだけで close しない | **報告** —— bodyclose との違い |
+
+そこで「代入がどの文リストに直接いるか」を記録し、**同じリストなら従来どおり
+前のものを孤児にして報告、違うリストなら 1 つの usage に位置を足す**ようにした。
+`0`（どの文リストにも直接いない＝`if` の初期化子など）は従来の読みのまま残す。
+
+**測定**: 8 形、修正前は 3 形が乖離、修正後は全一致。
+syncthing **17 → 15**、台帳は 29/100 のまま。
+golden 207/207（`sqlclosecheck` 3 → 7 キー、キー集合の差分で消失なし）、
+fix tier 207/207、reject 14、isolate 116、filesets 116、smoke 1、
+workspace テスト緑、OSS pr tier 8 target すべて P=R=100%、
+hunt は gitea / thanos / connect-go すべて allowlist 内。
+
+**測り直しの注意**: 同じバイナリで syncthing を 3 回測ったら、1 回だけ
+golangci が `canonicalheader` 2 件を落として 656 → 654 になり、差分が 15 → 17 に
+見えた。**guff 側は 3 回とも 651 で動かない。** 「golangci は全 linter 有効だと
+非決定的」がこの target でも出る —— 台帳の数字が 1 つ動いたら、まず**もう一度測る**。

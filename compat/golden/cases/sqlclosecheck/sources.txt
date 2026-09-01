@@ -1,2 +1,5 @@
 # The isolate fixture, so the two tiers cannot drift.
 bad.go  compat/isolate/fixtures/sqlclosecheck/bad.go
+# Two assignments meeting in a φ, and a close inside a literal that is returned
+# rather than deferred here.
+branches.go  compat/isolate/fixtures/sqlclosecheck/branches.go

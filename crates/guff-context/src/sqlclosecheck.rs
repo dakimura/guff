@@ -154,6 +154,14 @@ fn func_returns_target(ty: &FuncType) -> bool {
 
 struct SqlUsage {
     pos: u32,
+    /// Further assignments to the same name that no assignment *after* them
+    /// can reach — the arms of an `if`/`switch`. Upstream sees one φ and one
+    /// close settling every edge into it; here they are extra positions the
+    /// same close settles, and the same absence reports.
+    also: Vec<u32>,
+    /// The statement list the assignment sits in, so a *sequential* reassign
+    /// (same list) can still orphan what came before it.
+    block: u32,
     closed: bool,
     deferred: bool,
     passed: bool,
@@ -173,6 +181,9 @@ impl SqlUsage {
             return;
         }
         pending.push((self.pos, MSG_NOT_CLOSED.to_string()));
+        for pos in self.also {
+            pending.push((pos, MSG_NOT_CLOSED.to_string()));
+        }
     }
 }
 
@@ -266,20 +277,77 @@ fn handle_defer_close(call: &CallExpr, usages: &mut HashMap<String, SqlUsage>) {
     }
 }
 
+/// The statement list each assignment sits directly in, keyed by the
+/// assignment's node id and valued by the block's `{` position.
+///
+/// `0` means "not a direct statement of any block" (an `if` initialiser, say),
+/// which keeps the old sequential reading for shapes this cannot place.
+fn assign_block_ids(body: &BlockStmt) -> HashMap<u32, u32> {
+    let mut out = HashMap::new();
+    preorder(NodeRef::BlockStmt(body), |n| {
+        if let NodeRef::BlockStmt(b) = n {
+            for stmt in &b.list {
+                if let guff::ast::Stmt::AssignStmt(a) = stmt {
+                    out.insert(a.tok_pos.0 as u32, b.lbrace.0 as u32);
+                }
+            }
+        }
+        true
+    });
+    out
+}
+
+/// Marks every tracked target the literal closes, at any depth.
+///
+/// The close counts as deferred: upstream's `defer-only` analyzer asks whether
+/// the `Close` is reached through a `*ssa.Defer`, and inside the literal it is.
+fn mark_closed_in_closure(lit: &guff::ast::FuncLit, usages: &mut HashMap<String, SqlUsage>) {
+    if usages.is_empty() {
+        return;
+    }
+    let mut closed: Vec<String> = Vec::new();
+    preorder(NodeRef::FuncLit(lit), |n| {
+        if let NodeRef::CallExpr(c) = n {
+            if let Some(name) = close_var(c) {
+                closed.push(name.to_string());
+            }
+        }
+        true
+    });
+    for name in closed {
+        if let Some(u) = usages.get_mut(&name) {
+            u.closed = true;
+            u.deferred = true;
+        }
+    }
+}
+
 fn check_body(pass: &Pass<'_>, body: &BlockStmt, pending: &mut Vec<(u32, String)>) {
     let mut usages: HashMap<String, SqlUsage> = HashMap::new();
+    let assign_blocks = assign_block_ids(body);
 
     inspect(NodeRef::BlockStmt(body), |n| {
         let Some(n) = n else {
             return true;
         };
-        if matches!(n, NodeRef::FuncLit(_)) {
+        if let NodeRef::FuncLit(lit) = n {
+            // A target closed inside a func literal is closed, wherever that
+            // literal goes. Only `defer func(){ … }()` at the site was
+            // recognised, so syncthing's `PrefixKV` — which hands back
+            // `func(yield …) { defer rows.Close(); … }` — read as a leak, and
+            // twice over, once for each branch of the `if` that assigns `rows`.
+            //
+            // A capture on its own settles nothing here: a literal that only
+            // ranges over the rows is still a finding, which is the difference
+            // from bodyclose's `MakeClosure` branch.
+            mark_closed_in_closure(lit, &mut usages);
             return false;
         }
 
         match n {
             NodeRef::AssignStmt(assign) => {
-                handle_assign(pass, assign, &mut usages, pending);
+                let block = assign_blocks.get(&(assign.tok_pos.0 as u32)).copied().unwrap_or(0);
+                handle_assign(pass, assign, block, &mut usages, pending);
             }
             NodeRef::ValueSpec(spec) => {
                 handle_value_spec(pass, spec, &mut usages, pending);
@@ -337,6 +405,7 @@ fn check_body(pass: &Pass<'_>, body: &BlockStmt, pending: &mut Vec<(u32, String)
 fn handle_assign(
     pass: &Pass<'_>,
     assign: &AssignStmt,
+    block: u32,
     usages: &mut HashMap<String, SqlUsage>,
     pending: &mut Vec<(u32, String)>,
 ) {
@@ -349,16 +418,31 @@ fn handle_assign(
         }
 
         let is_tgt = expr_is_target(pass, lhs) || rhs_result_is_target(pass, assign, i);
+        let pos = assign_report_pos(assign, i);
 
-        if let Some(prev) = usages.remove(name) {
-            prev.report(pending);
+        // Two assignments in the *same* statement list run one after the other,
+        // so the first really does lose its rows — upstream reports it even
+        // when a close follows the second. Two in different lists are the arms
+        // of a branch: upstream sees one φ, and one close settles every edge
+        // into it. Orphaning the first there reported syncthing's `PrefixKV`
+        // twice, once per arm of the `if` that assigns `rows`.
+        if let Some(prev) = usages.get_mut(name) {
+            if is_tgt && prev.block != block && !prev.closed && !prev.passed {
+                prev.also.push(pos);
+                continue;
+            }
+            if let Some(prev) = usages.remove(name) {
+                prev.report(pending);
+            }
         }
 
         if is_tgt {
             usages.insert(
                 name.to_string(),
                 SqlUsage {
-                    pos: assign_report_pos(assign, i),
+                    pos,
+                    also: Vec::new(),
+                    block,
                     closed: false,
                     deferred: false,
                     passed: false,
@@ -431,6 +515,8 @@ fn handle_value_spec(
                 name.to_string(),
                 SqlUsage {
                     pos,
+                    also: Vec::new(),
+                    block: 0,
                     closed: false,
                     deferred: false,
                     passed: false,

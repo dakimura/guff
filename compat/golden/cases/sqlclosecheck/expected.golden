@@ -9,3 +9,7 @@
 bad.go:10:23:sqlclosecheck::Rows/Stmt/NamedStmt was not closed
 bad.go:27:12:sqlclosecheck::Close should use defer
 bad.go:33:25:sqlclosecheck::Rows/Stmt/NamedStmt was not closed
+branches.go:34:23:sqlclosecheck::Rows/Stmt/NamedStmt was not closed
+branches.go:36:23:sqlclosecheck::Rows/Stmt/NamedStmt was not closed
+branches.go:45:23:sqlclosecheck::Rows/Stmt/NamedStmt was not closed
+branches.go:74:23:sqlclosecheck::Rows/Stmt/NamedStmt was not closed
