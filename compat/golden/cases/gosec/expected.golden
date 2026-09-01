@@ -56,12 +56,15 @@ bad/bad.go:96:6:gosec:medium:G203: The used method does not auto-escape HTML. Th
 bad/bad.go:99:19:gosec:high:G122: Filesystem operation in filepath.Walk/WalkDir callback uses race-prone path; consider root-scoped APIs (e.g. os.Root) to prevent symlink TOCTOU traversal
 bad/bad.go:108:20:gosec:high:G122: Filesystem operation in filepath.Walk/WalkDir callback uses race-prone path; consider root-scoped APIs (e.g. os.Root) to prevent symlink TOCTOU traversal
 bad/bad.go:117:19:gosec:high:G122: Filesystem operation in filepath.Walk/WalkDir callback uses race-prone path; consider root-scoped APIs (e.g. os.Root) to prevent symlink TOCTOU traversal
+bad/bad.go:121:10:gosec:medium:G304: Potential file inclusion via variable
 bad/bad.go:121:21:gosec:high:G703: Path traversal via taint analysis
 bad/bad.go:131:20:gosec:medium:G202: SQL string concatenation
 bad/bad.go:137:2:gosec:low:G104: Errors unhandled
 bad/bad.go:137:10:gosec:medium:G202: SQL string concatenation
 bad/bad.go:145:22:gosec:medium:G202: SQL string concatenation
+bad/bad.go:156:14:gosec:medium:G304: Potential file inclusion via variable
 bad/bad.go:161:21:gosec:high:G703: Path traversal via taint analysis
+bad/bad.go:172:15:gosec:medium:G304: Potential file inclusion via variable
 bad/bad.go:179:21:gosec:high:G703: Path traversal via taint analysis
 entropy/entropy.go:12:2:gosec:high:G101: Potential hardcoded credentials
 entropy/entropy.go:13:2:gosec:high:G101: Potential hardcoded credentials
@@ -110,6 +113,16 @@ g123/g123.go:46:4:gosec:high:G123: tls.Config uses VerifyPeerCertificate while s
 g123/g123.go:70:21:gosec:high:G123: tls.Config uses VerifyPeerCertificate while session resumption may remain enabled and VerifyConnection is not set; resumed sessions can bypass custom certificate checks
 g123/g123.go:71:46:gosec:high:G123: tls.Config uses VerifyPeerCertificate while session resumption may remain enabled and VerifyConnection is not set; resumed sessions can bypass custom certificate checks
 g123/g123.go:82:8:gosec:high:G123: tls.Config uses VerifyPeerCertificate while session resumption may remain enabled and VerifyConnection is not set; resumed sessions can bypass custom certificate checks
+g304/g304.go:22:49:gosec:medium:G304: Potential file inclusion via variable
+g304/g304.go:34:58:gosec:medium:G304: Potential file inclusion via variable
+g304/g304.go:46:9:gosec:medium:G304: Potential file inclusion via variable
+g304/g304.go:57:53:gosec:medium:G304: Potential file inclusion via variable
+g304/g304.go:63:50:gosec:medium:G304: Potential file inclusion via variable
+g304/g304.go:65:52:gosec:medium:G304: Potential file inclusion via variable
+g304/g304.go:86:52:gosec:medium:G304: Potential file inclusion via variable
+g304/g304.go:89:60:gosec:medium:G304: Potential file inclusion via variable
+g304/g304.go:109:12:gosec:medium:G304: Potential file inclusion via variable
+g304/g304.go:124:9:gosec:medium:G304: Potential file inclusion via variable
 g602/g602.go:10:8:gosec:low:G602: slice bounds out of range
 g602/g602.go:16:10:gosec:low:G602: slice index out of range
 g602/g602.go:22:10:gosec:low:G602: slice index out of range
@@ -131,9 +144,11 @@ g7xx/g7xx.go:102:6:gosec:medium:G204: Subprocess launched with variable
 g7xx/g7xx.go:118:9:gosec:medium:G204: Subprocess launched with variable
 g7xx/g7xx.go:118:21:gosec:high:G702: Command injection via taint analysis
 g7xx/g7xx.go:125:17:gosec:high:G703: Path traversal via taint analysis
+g7xx/g7xx.go:144:10:gosec:medium:G304: Potential file inclusion via variable
 g7xx/g7xx.go:144:17:gosec:high:G703: Path traversal via taint analysis
 g7xx/g7xx.go:150:16:gosec:high:G703: Path traversal via taint analysis
 g7xx/g7xx.go:162:17:gosec:high:G703: Path traversal via taint analysis
+g7xx/g7xx.go:170:14:gosec:medium:G304: Potential file inclusion via variable
 g7xx/g7xx.go:174:21:gosec:high:G703: Path traversal via taint analysis
 g7xx/g7xx.go:189:13:gosec:low:G706: Log injection via taint analysis
 g7xx/g7xx.go:205:11:gosec:low:G706: Log injection via taint analysis
@@ -170,6 +185,9 @@ nosec/nosec.go:79:10:gosec:high:G101: Potential hardcoded credentials
 nosec/nosec.go:86:10:gosec:high:G101: Potential hardcoded credentials
 nosec/nosec.go:113:10:gosec:high:G101: Potential hardcoded credentials
 nosec/nosec.go:128:9:gosec:high:G101: Potential hardcoded credentials
+ok/ok.go:170:11:gosec:medium:G304: Potential file inclusion via variable
+ok/ok.go:287:16:gosec:medium:G304: Potential file inclusion via variable
+ok/ok.go:315:15:gosec:medium:G304: Potential file inclusion via variable
 scores/scores.go:3:8:gosec:medium:G501: Blocklisted import crypto/md5: weak cryptographic primitive
 scores/scores.go:7:7:gosec:high:G101: Potential hardcoded credentials
 scores/scores.go:13:6:gosec:medium:G401: Use of weak cryptographic primitive

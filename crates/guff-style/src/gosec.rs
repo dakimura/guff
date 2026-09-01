@@ -290,7 +290,7 @@ const EXTRA_RULE_IDS: &[&str] = &[
     "G122", "G124",
     "G123", "G202",
     "G203",
-    "G204", "G301", "G302", "G303", "G306", "G402", "G403", "G602",
+    "G204", "G301", "G302", "G303", "G304", "G306", "G402", "G403", "G602",
     // The taint engine's five rules (`gosec_taint`), all SSA analyzers.
     "G702", "G703", "G705", "G706", "G710",
 ];
@@ -567,6 +567,7 @@ const RULE_SCORES: &[(&str, Score, Score)] = &[
     ("G301", Score::Medium, Score::High),
     ("G302", Score::Medium, Score::High),
     ("G303", Score::Medium, Score::High),
+    ("G304", Score::Medium, Score::High),
     ("G306", Score::Medium, Score::High),
     ("G401", Score::Medium, Score::High),
     // G402 is message-dependent; see `issue_scores`.
@@ -2599,6 +2600,255 @@ fn resolve_ident(pass: &Pass<'_>, decls: &FileDecls<'_>, id: &Ident, depth: u32)
 ///
 /// A pass of its own because it needs [`FileDecls`]. Everything else in this
 /// file decides from the call alone.
+/// G304 — a file read whose path is not a compile-time constant.
+///
+/// Port of securego/gosec v2.27.1 `rules/readfile.go`. The rule is a call list
+/// plus two side maps, and the maps are what make it more than "the argument is
+/// a variable": a path that came out of `filepath.Clean` (or `Rel`, or
+/// `EvalSymlinks`) is trusted, whether it is written inline or assigned to a
+/// variable first, and a `filepath.Join` of a literal base with a cleaned name
+/// is trusted as a pair.
+///
+/// Upstream keeps both maps on the rule instance, so they are filled in AST
+/// visit order and a call that precedes its assignment does not see it. One
+/// preorder over each file, in order, is the same thing.
+const G304_CALLS: &[(&str, &str)] = &[
+    ("io/ioutil", "ReadFile"),
+    ("os", "ReadFile"),
+    ("os", "Open"),
+    ("os", "OpenFile"),
+    ("os", "Create"),
+];
+
+const G304_JOIN_CALLS: &[(&str, &str)] = &[("path/filepath", "Join"), ("path", "Join")];
+
+const G304_CLEAN_CALLS: &[(&str, &str)] = &[
+    ("path/filepath", "Clean"),
+    ("path/filepath", "Rel"),
+    ("path/filepath", "EvalSymlinks"),
+];
+
+const G304_WHAT: &str = "Potential file inclusion via variable";
+
+/// What `isSafeJoin` needs to know about a recorded `filepath.Join` call, split
+/// so the answer can be given later: whether a cleaned *variable* was one of
+/// the arguments depends on assignments that may not have been seen yet.
+#[derive(Default)]
+struct G304Join {
+    /// A literal, or an identifier that resolves to one.
+    has_base_dir: bool,
+    /// A `Clean`/`Rel`/`EvalSymlinks` call written inline.
+    direct_clean: bool,
+    /// Identifier arguments that did not resolve; each is a cleaned path if it
+    /// is in the cleaned set when the question is asked.
+    idents: Vec<guff_types::ObjectId>,
+}
+
+impl G304Join {
+    fn is_safe(&self, cleaned: &HashSet<guff_types::ObjectId>) -> bool {
+        let has_clean = self.direct_clean || self.idents.iter().any(|o| cleaned.contains(o));
+        self.has_base_dir && has_clean
+    }
+}
+
+fn g304_call_is(pass: &Pass<'_>, call: &CallExpr, list: &[(&str, &str)]) -> bool {
+    match resolve_pkg_call(pass, call) {
+        Some((pkg, name)) => list.iter().any(|(p, n)| *p == pkg && *n == name),
+        None => false,
+    }
+}
+
+/// `isJoinFunc`: a `Join` with at least one argument that is not a constant.
+fn g304_join_is_tainted(pass: &Pass<'_>, decls: &FileDecls<'_>, call: &CallExpr) -> bool {
+    if !g304_call_is(pass, call, G304_JOIN_CALLS) {
+        return false;
+    }
+    for arg in &call.args {
+        match arg {
+            Expr::BinaryExpr(b) => {
+                if g304_binary_has_var(pass, decls, b) {
+                    return true;
+                }
+            }
+            Expr::Ident(id) => {
+                if g304_is_unresolved_var(pass, decls, id) {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// `FindVarIdentities`: does this concatenation mention a variable that is not
+/// a compile-time constant?
+fn g304_binary_has_var(pass: &Pass<'_>, decls: &FileDecls<'_>, bin: &BinaryExpr) -> bool {
+    if let Expr::Ident(right) = &*bin.y {
+        if g304_is_unresolved_var(pass, decls, right) {
+            return true;
+        }
+    }
+    match &*bin.x {
+        Expr::BinaryExpr(left) => g304_binary_has_var(pass, decls, left),
+        Expr::Ident(left) => g304_is_unresolved_var(pass, decls, left),
+        _ => false,
+    }
+}
+
+fn g304_is_unresolved_var(pass: &Pass<'_>, decls: &FileDecls<'_>, id: &Ident) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(obj) = code::object_of(pass, id) else {
+        return false;
+    };
+    matches!(artifacts.objects.get(obj), ObjectData::Var(_))
+        && !try_resolve(pass, decls, &Expr::Ident(id.clone()), 0)
+}
+
+fn g304_summarize_join(pass: &Pass<'_>, decls: &FileDecls<'_>, call: &CallExpr) -> G304Join {
+    let mut out = G304Join::default();
+    for arg in &call.args {
+        match arg {
+            Expr::BasicLit(_) => out.has_base_dir = true,
+            Expr::Ident(id) => {
+                if try_resolve(pass, decls, &Expr::Ident(id.clone()), 0) {
+                    out.has_base_dir = true;
+                } else if let Some(obj) = code::object_of(pass, id) {
+                    out.idents.push(obj);
+                }
+            }
+            Expr::CallExpr(c) => {
+                if g304_call_is(pass, c, G304_CLEAN_CALLS) {
+                    out.direct_clean = true;
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// The left-hand identifier's object for `x := f(…)` / `x, _ := f(…)`, when the
+/// right-hand side's first expression is a call matching `list`.
+fn g304_tracked_assign<'a>(
+    pass: &Pass<'_>,
+    assign: &'a AssignStmt,
+    list: &[(&str, &str)],
+) -> Option<(guff_types::ObjectId, &'a CallExpr)> {
+    let Expr::CallExpr(call) = assign.rhs.first()? else {
+        return None;
+    };
+    if !g304_call_is(pass, call, list) {
+        return None;
+    }
+    let Expr::Ident(ident) = assign.lhs.first()? else {
+        return None;
+    };
+    let obj = code::object_of(pass, ident)?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    matches!(artifacts.objects.get(obj), ObjectData::Var(_)).then_some((obj, call))
+}
+
+fn check_g304(pass: &Pass<'_>, enabled: &HashSet<&'static str>, pending: &mut Vec<(u32, u32, String)>) {
+    if !enabled.contains("G304") {
+        return;
+    }
+    let mut cleaned: HashSet<guff_types::ObjectId> = HashSet::new();
+    let mut joined: HashMap<guff_types::ObjectId, G304Join> = HashMap::new();
+    for file in pass.files() {
+        let decls = FileDecls::build(pass, file);
+        preorder(NodeRef::File(file), |n| {
+            match n {
+                NodeRef::AssignStmt(assign) => {
+                    if let Some((obj, _)) = g304_tracked_assign(pass, assign, G304_CLEAN_CALLS) {
+                        cleaned.insert(obj);
+                    }
+                    if let Some((obj, call)) = g304_tracked_assign(pass, assign, G304_JOIN_CALLS) {
+                        joined.insert(obj, g304_summarize_join(pass, &decls, call));
+                    }
+                }
+                NodeRef::CallExpr(call) => {
+                    check_g304_call(pass, &decls, call, &cleaned, &joined, pending);
+                }
+                _ => {}
+            }
+            true
+        });
+    }
+}
+
+fn check_g304_call(
+    pass: &Pass<'_>,
+    decls: &FileDecls<'_>,
+    call: &CallExpr,
+    cleaned: &HashSet<guff_types::ObjectId>,
+    joined: &HashMap<guff_types::ObjectId, G304Join>,
+    pending: &mut Vec<(u32, u32, String)>,
+) {
+    if !g304_call_is(pass, call, G304_CALLS) {
+        return;
+    }
+    let Some(path_arg) = call.args.first() else {
+        return;
+    };
+    let report = |pending: &mut Vec<(u32, u32, String)>| {
+        pending.push((
+            call.pos().0 as u32,
+            call.end().0 as u32,
+            format!("G304: {G304_WHAT}"),
+        ));
+    };
+    match path_arg {
+        // `os.Open(filepath.Clean(p))` is trusted; `os.Open(filepath.Join(a, b))`
+        // is judged as a pair before it is judged as a call.
+        Expr::CallExpr(inner) => {
+            if g304_call_is(pass, inner, G304_CLEAN_CALLS) {
+                return;
+            }
+            if g304_call_is(pass, inner, G304_JOIN_CALLS) {
+                if g304_summarize_join(pass, decls, inner).is_safe(cleaned) {
+                    return;
+                }
+                if g304_join_is_tainted(pass, decls, inner) {
+                    report(pending);
+                }
+            }
+        }
+        Expr::BinaryExpr(bin) => {
+            if g304_binary_has_var(pass, decls, bin) {
+                report(pending);
+            }
+        }
+        Expr::Ident(id) => {
+            let Some(obj) = code::object_of(pass, id) else {
+                return;
+            };
+            let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+                return;
+            };
+            if !matches!(artifacts.objects.get(obj), ObjectData::Var(_)) {
+                return;
+            }
+            // A variable assigned from `Join` is judged by that call, and the
+            // `Clean` set wins over it — upstream asks `isFilepathClean` first.
+            if let Some(join) = joined.get(&obj) {
+                if cleaned.contains(&obj) || join.is_safe(cleaned) {
+                    return;
+                }
+                report(pending);
+                return;
+            }
+            if try_resolve(pass, decls, path_arg, 0) || cleaned.contains(&obj) {
+                return;
+            }
+            report(pending);
+        }
+        _ => {}
+    }
+}
+
 fn check_g204(pass: &Pass<'_>, enabled: &HashSet<&'static str>, pending: &mut Vec<(u32, u32, String)>) {
     if !enabled.contains("G204") {
         return;
@@ -3131,6 +3381,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     check_g110(pass, &enabled, &mut pending);
     check_g124_cookie_params(pass, &enabled, &mut pending);
     check_g204(pass, &enabled, &mut pending);
+    check_g304(pass, &enabled, &mut pending);
     crate::gosec_ssa::check_ssa_analyzers(pass, &enabled, &mut pending);
 
     for file in pass.files() {

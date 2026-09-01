@@ -19285,3 +19285,54 @@ golden 208/208（`gosec` 166 → 169 キー、キー集合の差分で消失な�
 fix tier 208/208、reject 14、workspace テスト緑（新規テストは 7 呼び出しに対する
 3 件を `assert_eq!` で固定する）、OSS pr tier 8 target すべて P=R=100%、
 syncthing 9 / gitea clean のまま。
+
+### 2026-09-01（続き 137）— G304 を移植した。台帳は動かない —— authelia はこの規則を**文面で除外している**
+
+authelia の残り 3 件のうち `internal/suites/utils.go:262` を追った。指示子を外した
+写しを別パッケージで測ると `G304: Potential file inclusion via variable` が出る。
+**guff に G304 は無かった**ので securego/gosec v2.27.1 `rules/readfile.go`
+（246 行）を移植した。
+
+規則は呼び出しリスト（`os.ReadFile` / `Open` / `OpenFile` / `Create` と
+`io/ioutil.ReadFile`）＋**2 つの副次表**でできている。副次表が「引数が変数か」
+以上のものにしている:
+
+- `filepath.Clean` / `Rel` / `EvalSymlinks` の結果を代入された変数は信用する
+- `filepath.Join` を代入された変数は、その `Join` 自身の引数で判定する
+- **リテラルの base と Clean 済みの名前の組**は信用する（`isSafeJoin`。
+  どちらか片方だけでは足りない）
+
+2 つの表は上流では rule インスタンス上にあり、**AST の訪問順**に埋まる ——
+だから代入より前にある呼び出しはその代入を見ない。ファイルごとの 1 回の preorder が
+同じものになる。
+
+**測定**: 24 形。上流 10 件、guff も 10 件で一致（初回一致）。黙る形が規則の本体で、
+`os.Stat` はリストに無い／`Join` の引数が全部定数／`Clean` してから使う／
+リテラル 2 つの連結。撃つ形の中で一番言いたいのは **`UseBeforeClean`** ——
+呼び出しが `Clean` の代入より前にあるので**報告される**。この規則はフロー感応ではない。
+
+**台帳は動かない。** authelia の設定にはこの行がある:
+
+```yaml
+- path: (.+)\.go$
+  text: Potential file inclusion via variable
+```
+
+**G304 を文面で全部除外している。** だから 51 件（両ツール一致）は全部消える。
+除外は `//nolint` より先に走る（続き 128）ので、あの指示子は G304 では
+「使われていない」ままになる —— つまり 262 行を抑えているのは**別の規則**だった。
+
+**追いかけた先で分かったこと（次のタスク）**: `includes: [G122]` で測ると、
+上流は 262 行の指示子を報告せず（＝G122 が撃って抑えられている）、guff は
+「未使用」と言う。`fixCoveragePath` は `filepath.Walk` に**名前で**渡される
+コールバックで、guff の G122 は自分の doc に
+「Covers inline `FuncLit` callbacks … Named-function callbacks … remain DEFERRED」
+と書いてある。それがこの 1 件の正体。
+
+golden 208/208（`gosec` 169 → 187 キー、キー集合の差分で消失なし）。増えた 18 のうち
+10 が新しい fixture で、8 は**既にあった fixture が初めて G304 で見られた**もの
+（`bad` 3 / `g7xx` 2 / `ok` 3、いずれも両ツール一致）。`ok.go` の 3 件は残す ——
+G122 の sink も G703 の形も**定数でないパスを必要としている**ので、定数にすると
+測っているものが消える。単体テストは「G304 以外は 0 件、G304 はちょうど 3 件」に締めた。
+fix tier 208/208、reject 14、workspace テスト緑、OSS pr tier 8 target すべて
+P=R=100%、authelia は 3 のまま。台帳は 29/100。
