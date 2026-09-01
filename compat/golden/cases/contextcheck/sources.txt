@@ -15,3 +15,15 @@ httphandler_bad/bad.go     crates/guff-context/tests/testdata/contextcheck_httph
 # Two packages, because the bug is in how a fact crosses between them.
 crosspkg/inner/inner.go    crates/guff-context/tests/testdata/contextcheck_crosspkg/inner/inner.go
 crosspkg/outer/outer.go    crates/guff-context/tests/testdata/contextcheck_crosspkg/outer/outer.go
+# Seven ways to replace an inherited context, and which of them silences the
+# rest of the function. The columns are the assertion: a lifted phi reports at
+# the *parameter*, not at the assignment and not at the `func` token.
+reassign/reassign.go       crates/guff-context/tests/testdata/contextcheck_reassign/reassign.go
+# A method handed over as a value (`$bound`) or as an expression (`$thunk`) is
+# not the method.
+boundmethod/bound.go       crates/guff-context/tests/testdata/contextcheck_boundmethod/bound.go
+# contextcheck's own doc directives, which are not golangci-lint's `//nolint`.
+docflag/docflag.go         crates/guff-context/tests/testdata/contextcheck_docflag/docflag.go
+reqctx/reqctx.go           crates/guff-context/tests/testdata/contextcheck_reqctx/reqctx.go
+# A fresh context that goes nowhere is not a finding.
+background/background.go   crates/guff-context/tests/testdata/contextcheck_background/background.go

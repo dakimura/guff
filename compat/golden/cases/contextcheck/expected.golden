@@ -6,8 +6,10 @@
 
 # golangci-lint: 2.12.2
 
+background/background.go:32:17:contextcheck::Function `bgToClosure` should pass the context parameter
 bad/bad.go:12:7:contextcheck::Function `inner` should pass the context parameter
 bad/bad.go:16:9:contextcheck::Non-inherited new context, use function like `context.WithXXX` instead
+boundmethod/bound.go:47:16:contextcheck::Function `Complete->autoComplete` should pass the context parameter
 closure/closure.go:25:15:contextcheck::Function `getThings->fromClient->fromClient$1` should pass the context parameter
 closures/closures.go:19:8:contextcheck::Function `deferred$1->helper` should pass the context parameter
 closures/closures.go:25:5:contextcheck::Function `spawned$1->helper` should pass the context parameter
@@ -15,4 +17,17 @@ closures/closures.go:31:2:contextcheck::Function `immediate$1->helper` should pa
 closures/closures.go:37:8:contextcheck::Function `assigned$1->helper` should pass the context parameter
 closures/closures.go:45:2:contextcheck::Function `nocapture$1->helper` should pass the context parameter
 crosspkg/outer/outer.go:23:8:contextcheck::Function `New$1->Close->Close` should pass the context parameter
+docflag/docflag.go:37:23:contextcheck::Function `notSkippedOtherLinter` should pass the context parameter
+docflag/docflag.go:47:23:contextcheck::Function `notSkippedSpacedColon` should pass the context parameter
+docflag/docflag.go:57:10:contextcheck::Function `plainDoc` should pass the context parameter
 httphandler_bad/bad.go:13:9:contextcheck::Non-inherited new context, use function like `context.WithXXX` or `r.Context` instead
+reassign/reassign.go:16:8:contextcheck::Function `helper` should pass the context parameter
+reassign/reassign.go:24:9:contextcheck::Non-inherited new context, use function like `context.WithXXX` instead
+reassign/reassign.go:25:8:contextcheck::Function `helper` should pass the context parameter
+reassign/reassign.go:30:18:contextcheck::Non-inherited new context, use function like `context.WithXXX` instead
+reassign/reassign.go:42:3:contextcheck::Non-inherited new context, use function like `context.WithXXX` instead
+reassign/reassign.go:50:19:contextcheck::Non-inherited new context, use function like `context.WithXXX` instead
+reassign/reassign.go:65:8:contextcheck::Function `helper` should pass the context parameter
+reqctx/reqctx.go:15:9:contextcheck::Non-inherited new context, use function like `context.WithXXX` or `r.Context` instead
+reqctx/reqctx.go:29:14:contextcheck::Function `PlainRequest` should pass the context parameter
+reqctx/reqctx.go:34:9:contextcheck::Non-inherited new context, use function like `context.WithXXX` or `r.Context` instead

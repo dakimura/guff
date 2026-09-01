@@ -183,6 +183,13 @@ fn lift_alloc(
     } else {
         panic!("not an alloc");
     };
+    // A φ inherits the cell's position (Go: `phi.pos = alloc.Pos()`), which for
+    // a spilled parameter is that parameter's identifier. Without it a
+    // conditionally reassigned variable has no position anywhere in the
+    // function, and a diagnostic anchored on the φ either lands on the `func`
+    // token or is dropped: contextcheck's "Non-inherited new context" went
+    // missing for every `if … { ctx = context.Background() }`.
+    let alloc_pos = f.pos(alloc_id);
 
     while let Some(u_id) = w.pop() {
         for &v_id in &df.frontier[u_id.index()] {
@@ -194,6 +201,7 @@ fn lift_alloc(
                     typ: alloc_typ,
                 };
                 let phi_id = f.instrs.alloc(InstrData::Phi(phi));
+                f.set_pos(phi_id, alloc_pos);
                 new_phis.entry(v_id).or_default().push(NewPhi { phi_id, alloc_id });
 
                 if work.insert(v_id) {
