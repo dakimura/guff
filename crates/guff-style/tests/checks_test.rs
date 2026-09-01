@@ -7666,6 +7666,63 @@ fn unparam_flags_unused_parameters() {
 const UNPARAM_BAD_KEYS: usize = 39;
 
 #[test]
+fn unparam_reads_variadic_parameters_and_func_literals() {
+    // `bad.go` has neither a variadic parameter nor a func literal, so two
+    // whole families went unmeasured.
+    //
+    // Variadic: go/ssa packs the tail into a slice, so upstream's
+    // `call.Args[pos]` is a nil constant exactly when no caller fills it and an
+    // `*ssa.Slice` — never constant — as soon as one does. guff does not build
+    // that slice (`guff_ssa::builder::call`), and skipped the parameter
+    // outright rather than reading the same answer off the argument count and
+    // the `ellipsis` flag; `count always receives nil` was unreachable.
+    //
+    // Literals: `checkFunc` runs the result families over them too, which guff
+    // never did, and `signRequiredBy` pins a literal's signature only when the
+    // value can be followed back to its function. An assignment to a plain
+    // local is not one of those ways — guff's syntactic stand-in treated it as
+    // one, so a literal held in a variable was never checked at all.
+    let pkg = support::typecheck_fixture("unparam", "example.com/unparam/literal", "literal.go");
+    let messages = support::run_analyzer(unparam(), &pkg);
+    assert_eq!(messages.len(), 14, "{messages:?}");
+
+    // Four variadic parameters that no caller ever fills, one of them reached
+    // through `nil...` and one of them a method (whose SSA argument list
+    // carries the receiver and whose AST one does not).
+    for want in [
+        "neverGiven - count always receives nil",
+        "spreadNil - count always receives nil",
+        "onlyVariadic - count always receives nil",
+        "(*box).tagged - count always receives nil",
+    ] {
+        assert!(messages.iter().any(|m| m == want), "{want}: {messages:?}");
+    }
+    // The three that *are* filled say nothing about their variadic parameter.
+    for quiet in ["alwaysGiven - count", "spread - count", "mixedGiven - count"] {
+        assert!(
+            !messages.iter().any(|m| m.starts_with(quiet)),
+            "{quiet}: {messages:?}"
+        );
+    }
+    // Two of the fourteen literals are checkable: the capturing one held in a
+    // cell another closure captures, and the plain immediately-invoked one.
+    // `litDeadIIFE` is the same literal as `litLiveIIFE` in a statement nothing
+    // reaches: go/ssa never builds it, so upstream criticises neither its
+    // parameters nor its results — not even the unused one that its live twin
+    // is reported for. guff builds it regardless, and reported it.
+    let mut lits: Vec<&String> = messages.iter().filter(|m| m.contains("$1 -")).collect();
+    lits.sort();
+    assert_eq!(
+        lits,
+        vec![
+            "litCapturedFreeVar$1 - result 0 (error) is always nil",
+            "litLiveIIFE$1 - unused is unused",
+        ],
+        "{messages:?}"
+    );
+}
+
+#[test]
 fn unparam_allows_used_and_intentional_keep() {
     let pkg = support::typecheck_fixture("unparam", "example.com/unparam/ok", "ok.go");
     assert!(support::run_analyzer(unparam(), &pkg).is_empty());

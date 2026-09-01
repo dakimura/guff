@@ -1175,9 +1175,6 @@ fn always_received_consts(
     }
     // go/ast's `CallExpr.Args` does not include the receiver, go/ssa's does.
     let recv_offset = usize::from(fd.recv.is_some());
-    // go/ssa packs variadic arguments into a slice, so the last parameter of a
-    // variadic function never *is* a constant there. thanos calls
-    // `zLabelSetFromStrings("a", "1")` fifteen times.
     let variadic = fd
         .ty
         .params
@@ -1187,10 +1184,11 @@ fn always_received_consts(
         .is_some_and(|t| matches!(t, Expr::Ellipsis(_)));
 
     for i in 0..count {
-        if variadic && i + 1 == count {
-            continue;
-        }
-        out[i] = ssa.const_received_at(sites, i + recv_offset, i);
+        out[i] = if variadic && i + 1 == count {
+            ssa.variadic_nil_at(sites, i + recv_offset)
+        } else {
+            ssa.const_received_at(sites, i + recv_offset, i)
+        };
     }
     out
 }
@@ -1265,6 +1263,178 @@ fn recv_prefix(recv: Option<&guff::ast::FieldList>) -> String {
 /// Functions whose *results* another function fixes by returning them
 /// directly — `return f(...)` means f's results cannot change. (Go:
 /// `resultsRequiredBy["return"]`, via `callExtract`.)
+/// `findFunction`: the function a value denotes, if it can be told.
+///
+/// The `free_vars` map is upstream's, and its *failures* are what matter here.
+/// It is filled only from a `MakeClosure` binding that is an `Alloc` whose
+/// stored value is a **bare function** — so a literal that captures anything is
+/// a `MakeClosure`, not a bare function, and a load of the free variable
+/// holding it resolves to nothing. That is exactly why fiber's capturing
+/// `handler` stays checkable even though `app.Get(pattern, handler)` passes it
+/// to a call from inside another closure.
+fn find_function(
+    prog: &guff_ssa::program::Program,
+    free_vars: &std::collections::HashMap<(guff_ssa::ids::FuncId, guff_ssa::ids::FreeVarId), guff_ssa::ids::FuncId>,
+    func: guff_ssa::ids::FuncId,
+    value: guff_ssa::value::Value,
+) -> Option<guff_ssa::ids::FuncId> {
+    use guff_ssa::instr::InstrData;
+    use guff_ssa::value::Value;
+
+    match value {
+        Value::Function(fid) => Some(fid),
+        Value::Instr(iid) => match prog.functions.get(func).instrs.get(iid) {
+            InstrData::MakeClosure(mc) => Some(mc.fn_),
+            InstrData::UnOp(u) if u.op == guff::token::Token::MUL => match u.x {
+                Value::FreeVar(fv) => free_vars.get(&(func, fv)).copied(),
+                _ => None,
+            },
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// `signRequiredBy`: functions whose signature is pinned by the way their value
+/// is used, so neither their parameters nor their results may be criticised.
+///
+/// guff had an AST approximation of this for func literals — "the literal
+/// appears in a call argument, a composite element, an assignment right-hand
+/// side, or a return" — and the assignment case is the one upstream does not
+/// have. Upstream pins a `*ssa.Store` only into a field, an element, or a
+/// global; a store into a plain local is nothing, and the value is followed
+/// from there only when it can be resolved back to a function. `handler :=
+/// func(c Ctx) error { … }` therefore stays checkable, and a fixture that never
+/// assigned a literal to a variable could not tell the two rules apart.
+fn collect_sign_required(ir: &buildir::BuildIrResult) -> HashSet<guff_ssa::ids::FuncId> {
+    use guff_ssa::instr::InstrData;
+    use guff_ssa::value::Value;
+
+    let pkg_funcs: Vec<guff_ssa::ids::FuncId> = ir
+        .prog
+        .functions
+        .iter()
+        .filter(|(_, f)| f.pkg == Some(ir.pkg))
+        .map(|(fid, _)| fid)
+        .collect();
+
+    let mut free_vars: std::collections::HashMap<
+        (guff_ssa::ids::FuncId, guff_ssa::ids::FreeVarId),
+        guff_ssa::ids::FuncId,
+    > = std::collections::HashMap::new();
+    for &fid in &pkg_funcs {
+        let func = ir.prog.functions.get(fid);
+        for (_, block) in func.live_blocks() {
+            for &iid in &block.instrs {
+                let InstrData::MakeClosure(mc) = func.instrs.get(iid) else {
+                    continue;
+                };
+                let inner = ir.prog.functions.get(mc.fn_);
+                for (i, (fvid, _)) in inner.freevars.iter().enumerate() {
+                    let Some(&binding) = mc.bindings.get(i) else {
+                        continue;
+                    };
+                    let Value::Instr(alloc) = binding else {
+                        continue;
+                    };
+                    if !matches!(func.instrs.get(alloc), InstrData::Alloc(_)) {
+                        continue;
+                    }
+                    let Some(refs) = func.referrers.as_ref().and_then(|r| r.get(&binding)) else {
+                        continue;
+                    };
+                    for &rid in refs {
+                        let InstrData::Store(st) = func.instrs.get(rid) else {
+                            continue;
+                        };
+                        if let Value::Function(target) = st.val {
+                            free_vars.insert((mc.fn_, fvid), target);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut out = HashSet::new();
+    for &fid in &pkg_funcs {
+        let func = ir.prog.functions.get(fid);
+        for (_, block) in func.live_blocks() {
+            for &iid in &block.instrs {
+                match func.instrs.get(iid) {
+                    // someFunc(fn)
+                    InstrData::Call(c) => {
+                        for &arg in &c.call.args {
+                            if let Some(t) = find_function(&ir.prog, &free_vars, fid, arg) {
+                                out.insert(t);
+                            }
+                        }
+                    }
+                    // nonConstVar = fn
+                    InstrData::Phi(phi) => {
+                        for edge in phi.edges.iter().flatten() {
+                            if let Some(t) = find_function(&ir.prog, &free_vars, fid, *edge) {
+                                out.insert(t);
+                            }
+                        }
+                    }
+                    // return fn
+                    InstrData::Return(ret) => {
+                        for &val in &ret.results {
+                            if let Some(t) = find_function(&ir.prog, &free_vars, fid, val) {
+                                out.insert(t);
+                            }
+                        }
+                    }
+                    // x.field = fn / x[i] = fn / someGlobal = fn — and nothing
+                    // else: a store into a plain local does not pin anything.
+                    InstrData::Store(st) => {
+                        let pinned = match st.addr {
+                            Value::Global(_) => true,
+                            Value::Instr(a) => matches!(
+                                func.instrs.get(a),
+                                InstrData::FieldAddr(_) | InstrData::IndexAddr(_)
+                            ),
+                            _ => false,
+                        };
+                        if pinned {
+                            if let Some(t) = find_function(&ir.prog, &free_vars, fid, st.val) {
+                                out.insert(t);
+                            }
+                        }
+                    }
+                    // emptyIface = fn
+                    InstrData::MakeInterface(mi) => {
+                        if let Some(t) = find_function(&ir.prog, &free_vars, fid, mi.x) {
+                            out.insert(t);
+                        }
+                    }
+                    // someType(fn) — upstream only ever sees `ChangeType` for
+                    // this, because go/ssa spells every no-op conversion that
+                    // way. guff emits `Convert` when the two types are distinct
+                    // ids that happen to be identical, which is what a call to
+                    // a *generic* function does to a func literal handed to one
+                    // of its instantiated parameters: gitea's
+                    // `db.Iterate(ctx, nil, func(ctx, attach) error { … })`.
+                    InstrData::ChangeType(ct) => {
+                        if let Some(t) = find_function(&ir.prog, &free_vars, fid, ct.x) {
+                            out.insert(t);
+                        }
+                    }
+                    InstrData::Convert(cv) => {
+                        if let Some(t) = find_function(&ir.prog, &free_vars, fid, cv.x) {
+                            out.insert(t);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    out
+}
+
 fn collect_results_required(ir: &buildir::BuildIrResult) -> HashSet<guff_ssa::ids::FuncId> {
     use guff_ssa::instr::InstrData;
     use guff_ssa::value::Value;
@@ -1552,6 +1722,8 @@ struct SsaFuncs<'a> {
     by_object: std::collections::HashMap<guff_types::ObjectId, guff_ssa::ids::FuncId>,
     sites: CallSites,
     results_required: HashSet<guff_ssa::ids::FuncId>,
+    /// `signRequiredBy`, read off the IR rather than guessed from the syntax.
+    sign_required: HashSet<guff_ssa::ids::FuncId>,
     /// Rendered arguments of every call in the package, keyed by the position
     /// go/ssa gives the call — its `(`. (Go: `callByPos`.)
     call_by_pos: std::collections::HashMap<u32, Vec<String>>,
@@ -1614,6 +1786,7 @@ impl<'a> SsaFuncs<'a> {
             by_object,
             sites: CallSites::build(ir, dead),
             results_required: collect_results_required(ir),
+            sign_required: collect_sign_required(ir),
             call_by_pos,
             lit_names,
             lit_funcs,
@@ -1645,6 +1818,56 @@ impl<'a> SsaFuncs<'a> {
         let obj = (*info.defs.get(&fd.name.id)?)?;
         let fid = *self.by_object.get(&obj)?;
         Some((fid, self.prog.functions.get(fid)))
+    }
+
+    /// What upstream sees at a **variadic** parameter.
+    ///
+    /// go/ssa packs the variadic tail into a fresh slice, so `call.Args[pos]`
+    /// is that slice: an untyped `nil` constant when the tail is empty, and an
+    /// `*ssa.Slice` — never a constant — as soon as anything is passed. guff
+    /// deliberately does not build the slice (see `guff_ssa::builder::call`,
+    /// which passes the tail through individually and records `f(a, xs...)` in
+    /// `CallCommon::ellipsis`), so the same answer has to be read off the
+    /// argument count and that flag instead.
+    ///
+    /// Skipping the parameter outright — what guff did, to keep thanos's
+    /// `zLabelSetFromStrings("a", "1")` from reading its first *argument* as
+    /// the parameter's constant — also lost `count always receives nil` for
+    /// every helper whose variadic tail no caller ever fills (fiber's
+    /// `testClient`).
+    fn variadic_nil_at(
+        &self,
+        sites: &[(guff_ssa::ids::FuncId, guff_ssa::ids::InstrId, bool)],
+        ssa_pos: usize,
+    ) -> Option<String> {
+        use guff_ssa::instr::InstrData;
+
+        for &(caller, iid, _) in sites {
+            let caller_fn = self.prog.functions.get(caller);
+            let common = match caller_fn.instrs.get(iid) {
+                InstrData::Call(c) => &c.call,
+                InstrData::Go(g) => &g.call,
+                InstrData::Defer(d) => &d.call,
+                _ => return None,
+            };
+            if common.ellipsis {
+                // `f(xs...)` hands the slice straight through, so it is a
+                // constant only when the spread value itself is `nil`.
+                let arg = *common.args.get(ssa_pos)?;
+                let cid = const_of(self.prog, caller_fn, arg)?;
+                let (_, repr) = const_repr(self.prog, self.prog.constants.get(cid));
+                if repr != "nil" {
+                    return None;
+                }
+            } else if common.args.len() != ssa_pos {
+                // Something was passed: upstream's packed slice is an
+                // `*ssa.Slice`, which is not a constant.
+                return None;
+            }
+        }
+        // Upstream's `origArg` is empty for a parameter that was not given, so
+        // the message is the bare value with no source spelling beside it.
+        Some("nil".to_string())
     }
 
     /// The constant argument every call site passes at `ssa_pos`, described as
@@ -1725,13 +1948,6 @@ fn check_func_lit(
     dead: Option<&DeadView<'_>>,
     pending: &mut Vec<(u32, String)>,
 ) {
-    // Literals stored / passed / returned have a fixed signature.
-    if value_lits.contains(&func_lit_key(lit)) {
-        return;
-    }
-    let Some(params) = &lit.ty.params else {
-        return;
-    };
     // Upstream names the literal after its enclosing function (`l1$1`). Without
     // the SSA name there is nothing truthful to print, and a placeholder can
     // only produce a finding golangci-lint never emits — so stay silent.
@@ -1739,14 +1955,56 @@ fn check_func_lit(
         return;
     };
     let name = name.to_string();
-    // Upstream runs `checkFunc` — and so `dummyImpl` — over literals as well.
-    let mut ir_decided_stub = false;
-    if let Some(ssa) = ssa {
-        if let Some(fid) = ssa.lit_func(lit.ty.func) {
-            if dummy_impl(ssa.prog, ssa.prog.functions.get(fid), dead.map(|d| d.flow)) {
+    // A literal written in a statement nothing reaches is not a function at
+    // all upstream: go/ssa's builder only visits statements while it has a
+    // current block, so the `MakeClosure` is never built, no `AnonFuncs` entry
+    // is appended, and `ssautil.AllFunctions` cannot reach it. Its parameters
+    // and results are therefore never criticised — not even a genuinely unused
+    // one. guff builds the literal regardless, so the check has to be declined
+    // here (thanos's `TestProxyStoreWithTSDBSelector_Acceptance`, whose body
+    // begins with `t.Skip`, is seven such findings).
+    if dead.is_some_and(|d| d.is_dead(lit.ty.func)) {
+        return;
+    }
+    let lit_fid = ssa.and_then(|s| s.lit_func(lit.ty.func));
+    match (ssa, lit_fid) {
+        // With the IR in hand, ask `signRequiredBy` the way upstream does.
+        (Some(ssa), Some(fid)) => {
+            if ssa.sign_required.contains(&fid) {
                 return;
             }
-            ir_decided_stub = true;
+        }
+        // Without it, fall back to the syntactic guess. It is stricter than
+        // upstream (it pins a literal assigned to a plain local, which upstream
+        // does not), and being stricter can only cost findings, never invent
+        // them.
+        _ => {
+            if value_lits.contains(&func_lit_key(lit)) {
+                return;
+            }
+        }
+    }
+    let Some(params) = &lit.ty.params else {
+        return;
+    };
+    // Upstream runs `checkFunc` — and so `dummyImpl`, and the two result
+    // families — over literals just as it does over declared functions. guff
+    // only ever ran the parameter family here, so `result 0 (error) is always
+    // nil` could not be reported for a func literal at all.
+    let mut ir_decided_stub = false;
+    if let (Some(ssa), Some(fid)) = (ssa, lit_fid) {
+        let func = ssa.prog.functions.get(fid);
+        if dummy_impl(ssa.prog, func, dead.map(|d| d.flow)) {
+            return;
+        }
+        ir_decided_stub = true;
+        let fields = result_fields(&lit.ty);
+        let types = ssa.result_types(func);
+        if fields.len() == types.len() && !ssa.results_required.contains(&fid) {
+            check_constant_results(ssa.prog, func, &name, &fields, &types, dead, pending);
+            check_unused_results(
+                ssa.prog, &ssa.sites, fid, func, &name, &fields, &types, dead, pending,
+            );
         }
     }
     check_params(

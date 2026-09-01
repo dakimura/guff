@@ -1,3 +1,7 @@
 # The fixtures the Rust tests use, so the two cannot drift.
 bad/bad.go   crates/guff-style/tests/testdata/unparam/bad.go
 ok/ok.go     crates/guff-style/tests/testdata/unparam/ok.go
+# Variadic parameters and func literals — two shapes `bad.go` has none of, and
+# each of the ways upstream can (and cannot) follow a literal's value back to
+# its function.
+literal/literal.go   crates/guff-style/tests/testdata/unparam/literal.go

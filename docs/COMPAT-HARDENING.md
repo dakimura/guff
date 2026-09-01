@@ -18416,3 +18416,67 @@ OSS pr tier 8 target すべて P=R=100%。
 既存の単体テストは `any(m.contains("external package") && m.contains("unwrapped"))`
 で、**シグネチャの中身を一度も見ていなかった** —— 修飾子の欠陥はこの assert を
 素通りする。メッセージを丸ごと定数に括り出して固定した。
+
+### 2026-09-01（続き 122）— go/ssa は可変長の尻尾を slice に詰める。詰めない移植は「渡されなかった」を言えない
+
+fiber の残り 2 件（どちらも `nolintlint` の「未使用の directive」）。
+`//nolint` を外して測ると:
+
+```
+upstream only  client/helper_test.go:141:102  testClient - count always receives nil
+upstream only  router_test.go:4072:25         assertScanMatchesReference$2 - result 0 (error) is always nil
+```
+
+**1 件目は可変長引数。** 上流の `call.Args[pos]` は go/ssa が詰めた slice なので、
+尻尾が空なら **nil の定数**、1 つでも渡されれば `*ssa.Slice`（定数ではない）。
+guff は詰めるのを意図的に移植しておらず
+（`guff_ssa::builder::call` が個別に渡して `CallCommon::ellipsis` に記録する）、
+そのため `unparam` は**最後の引数を丸ごと飛ばして**いた ——
+thanos の `zLabelSetFromStrings("a", "1")` が最初の*実引数*を
+その引数の定数と読んでしまうのを避けるための guard で、
+同時に「誰も埋めない可変長」の finding を全部落としていた。
+guard を消すのではなく、**引数の個数と `ellipsis` フラグから詰めた slice を模す**。
+8 形（渡さない／毎回渡す／spread／`nil...`／一部だけ／可変長のみ／メソッド）で全一致。
+
+**2 件目は無名関数で、原因が 2 段だった。**
+
+1. `check_func_lit` は `check_params` しか呼んでおらず、**結果族を無名関数に
+   一度も掛けていなかった**。上流の `checkFunc` は宣言と同じものを literal にも掛ける。
+2. guff の `value_lits`（上流 `signRequiredBy` の AST 近似）は
+   **代入の右辺にある literal を必ず「署名固定」**と見なしていた。上流はローカルへの
+   store では固定せず（`*ssa.Store` で固定するのは field / element / global だけ）、
+   値を関数に**解決できたとき**だけ固定する。fiber の handler は自分がクロージャなので
+   `freeVars` の解決（`store.Val` が**裸の Function** であることが条件）が失敗し、
+   検査対象のまま残る。AST では表現できないので `SsaFuncs` から組み直した。
+
+**測って初めて出たものが 3 つ。**
+
+- **thanos が 7 件増えた**（`TestProxyStoreWithTSDBSelector_Acceptance$1 - tt is unused` ほか）。
+  最初は「literal の本体は生きているのに囲む関数の dead range を見ている」と読み、
+  dead 範囲を literal の内側に絞った。**が、もう 1 形測ったら間違いだった**:
+  `panic()` の後ろに置いた IIFE の**本当に未使用な引数**を上流は報告しない。
+  go/ssa の builder は current block がある間しか文を訪れないので
+  `MakeClosure` が作られず `AnonFuncs` に入らず `ssautil.AllFunctions` が届かない ——
+  **dead code の中の literal は関数ですらない**。正しい直しは「絞る」ではなく
+  「その literal を検査しない」だった（`DeadCode` に足した `restricted_to` は revert した）。
+- **gitea が 22 件増えた。** `db.Iterate(ctx, nil, func(ctx, attach) error { … })` ——
+  **ジェネリック関数**への引数で、guff は実引数を `Convert` で包む
+  （上流の go/ssa は同じものを `ChangeType` と綴り、上流の switch はその枝で固定する）。
+  `Convert` を `ChangeType` と同じ枝に足した。
+- **既存の穴を 1 つ踏んだ（本件とは無関係）。** `func f(cond any, fn func(int) error) error { return fn(0) }`
+  —— **自分の関数型の引数を呼ぶ**関数で、上流は `cond` を報告せず guff は報告する。
+  変更前のバイナリを建てて**同じ結果**を確認したので本件の回帰ではない。
+  ゲート済みコーパスのどの target にも出ていないため、ここに測定だけ残す。
+
+**測定**: 5 つのグリッド（可変長 8 形 / 署名固定 12 形 / dead code 4 形 /
+ジェネリック 2 形 / 鎖 3 形）で、上の 1 形を除きすべて一致。
+fiber **2 → 0**（台帳で clean）。golden 205/205（`unparam` 39 → 53 キー、
+キー集合の差分で**消失なし**）、fix tier 205/205、reject 14、isolate 116、
+smoke 1、workspace テスト緑、OSS pr tier 8 target すべて P=R=100%、
+hunt は fiber / gitea / thanos / jaeger / argo-cd / nats-server すべて allowlist 内。
+
+**台帳で 1 つ開いた**: prometheus に `fatcontext` 14 件の guff-only。
+`ctx = newOrigin(ctx, …)` を**ループでも無名関数でもない**関数の直下に書いた形で
+guff が `nested context in function literal` と言う。`fatcontext` は `inspect` しか
+要求せず本日の変更はどれも触っていないので本件の回帰ではない（最小再現あり）。
+2026-08-23 の測定以降 hunt を回していなかったぶんの遅れが出たもので、次のタスク。
