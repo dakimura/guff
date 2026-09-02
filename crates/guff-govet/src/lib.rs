@@ -24,6 +24,7 @@ mod loopclosure;
 mod lostcancel;
 mod nilfunc;
 mod printf;
+mod printf_wrappers;
 mod shift;
 mod sigchanyzer;
 mod slog;

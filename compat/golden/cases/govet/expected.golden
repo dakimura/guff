@@ -104,6 +104,15 @@ printf/noverbs/noverbs.go:33:28:govet::printf: (*log.Logger).Printf call has arg
 printf/noverbs/noverbs_test.go:9:28:govet::printf: (*testing.common).Errorf call has arguments but no formatting directives
 printf/noverbs/noverbs_test.go:10:26:govet::printf: (*testing.common).Logf call has arguments but no formatting directives
 printf/noverbs/noverbs_test.go:11:28:govet::printf: (*testing.common).Fatalf call has arguments but no formatting directives
+printf/wrappers/wrappers.go:35:33:govet::printf: example.com/govet/printf/wrappers.wrapf does not support error-wrapping directive %w
+printf/wrappers/wrappers.go:66:2:govet::printf: missing ... in args forwarded to printf-like function
+printf/wrappers/wrappers.go:72:45:govet::printf: example.com/govet/printf/wrappers.wrapf format %z has unknown verb z
+printf/wrappers/wrappers.go:80:31:govet::printf: litf format %z has unknown verb z
+printf/wrappers/wrappers.go:85:30:govet::printf: example.com/govet/printf/wrappers.hop1 format %z has unknown verb z
+printf/wrappers/wrappers.go:106:56:govet::printf: (*testing.common).Errorf does not support error-wrapping directive %w
+printf/wrappers/wrappers.go:110:2:govet::printf: missing ... in args forwarded to print-like function
+printf/wrappers/wrappers.go:120:52:govet::printf: example.com/govet/printf/wrappers.sprintfWrapper format %z has unknown verb z
+printf/wrappers/wrappers.go:131:12:govet::printf: logf format %z has unknown verb z
 printf/wrongtype/wrongtype.go:6:14:govet::printf: fmt.Printf format %d has arg "str" of wrong type string
 printf/wrongtype/wrongtype.go:7:14:govet::printf: fmt.Printf format %s has arg 42 of wrong type int
 printf/wrongtype/wrongtype.go:8:14:govet::printf: fmt.Printf format %t has arg 5 of wrong type int

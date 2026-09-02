@@ -85,6 +85,7 @@ printf/ok2/ok2.go                                  crates/guff-govet/tests/testd
 printf/noverbs/noverbs.go                          crates/guff-govet/tests/testdata/printf/noverbs.go
 printf/noverbs/noverbs_test.go                     crates/guff-govet/tests/testdata/printf/noverbs_test.go
 printf/wrongtype/wrongtype.go                      crates/guff-govet/tests/testdata/printf/wrongtype.go
+printf/wrappers/wrappers.go                        crates/guff-govet/tests/testdata/printf/wrappers.go
 shift/bad/bad.go                                   crates/guff-govet/tests/testdata/shift/bad.go
 shift/ok/ok.go                                     crates/guff-govet/tests/testdata/shift/ok.go
 sigchanyzer/bad/bad.go                             crates/guff-govet/tests/testdata/sigchanyzer/bad.go

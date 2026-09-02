@@ -19664,3 +19664,85 @@ golden 208/208（`nilnesserr` 2 → 5 キー、キー集合の差分で消失な
 fix tier 208/208、reject 14、workspace テスト緑（可変長の findings を 2 件で固定
 —— `join(err)` は広げが無く、`logf("… %v", err)` は広げがある）、
 OSS pr tier 8 target すべて P=R=100%。
+
+### 2026-09-02（続き 145）— printf 系かどうかは**名前で決めない**。上流はパッケージの中で帰納する
+
+velero の残り 1 件、`pkg/backup/actions/csi/volumesnapshot_action.go:273`:
+
+```
+govet:printf: (github.com/sirupsen/logrus.FieldLogger).Errorf call has arguments but no formatting directives
+```
+
+guff は「この呼び出しは printf 系か」を **callee のベース名**で決めていた:
+
+```rust
+if matches!(short, "Printf" | "Sprintf" | "Fprintf" | "Errorf" | "Fatalf" | "Panicf") {
+    return Some(());
+}
+```
+
+上流（`go/analysis/passes/printf`）はそれを一度もしない。`callKind` の答えは 3 つ:
+
+1. `types.Func.FullName()` をキーにした allowlist（`isPrint`）、
+2. 依存パッケージから import した object fact、
+3. **そのパッケージの中での帰納** —— 最後の引数が `args ...any` で、その body が
+   `args...` を既に printf 系と分かっている関数に転送している関数は、それ自身が
+   printf 系であり、**その呼び出し元も**再帰的にそうである（`findPrintLike`）。
+
+guff には (3) が丸ごと無く、その代わりが名前の推測だった。
+
+**推測は両方向に外れる。** 2 パッケージ・20 形の再現を作って golangci-lint 2.12.2 と
+並べたら、答えは **交わりゼロ**だった —— 上流 6 件、guff 3 件、共通 0 件。
+
+```text
+guff だけが撃つ（f で終わる名前だが、body は何も転送しない）
+  (*sugar).Panicf("a %w", err)   body は s.log(0, template, args) —— args はスライス
+  (quiet).Errorf("d %z", 1)      body は両方の引数を捨てる
+  (quiet).Printf("i %z", 1)      同上
+上流だけが撃つ（本物の wrapper だが guff は名前を付けられない）
+  wrapf("b %w", err)             func wrapf(f string, a ...any) { fmt.Printf(f, a...) }
+  badForward(...)                missing ... in args forwarded to printf-like function
+  wrapf("f %z", 1)               wrapper 越しの未知の verb
+  litf("j %z", 1)                var litf = func(f string, a ...any) { fmt.Printf(f, a...) }
+  hop1("k %z", 1)                wrapper の先がまた wrapper
+```
+
+`findPrintLike` を `printf_wrappers.rs` に移植した。候補は「最後の引数が `...any`」の
+関数・メソッドと、**関数リテラルを持つ変数**（`ValueSpec` / `AssignStmt` / 構造体
+フィールド）。body を走査して `args` を最後の引数として渡す呼び出しを集め、
+`doCall` → `propagate` → `checkForward` で kind を**呼び出し元へ逆向きに**伝播する。
+`args` や `format` に代入する、あるいはアドレスを取る候補はそこで走査を止める
+（上流の `break scan`）。
+
+**上流の `isPrint` は unformatted の半分も持っている**ので、そのまま写した。
+`fmt.Println` を包んだ wrapper が `Kind::Print` になるかどうかが、その転送呼び出しを
+`missing ... in args forwarded to **print**-like function` と言うか
+`printf-like` と言うかを決める —— guff がこれまで一度も出していなかった診断で、
+上流では `checkForward` から出る。
+
+**副産物**: `KindErrorf` は上流では **`fmt.Errorf` ただ 1 つ**である。guff は名前が
+`Errorf` で終われば errorf 扱いにしていたので、`t.Errorf("%w", err)` の `%w` を
+黙って許していた。`(*testing.common).Errorf` は allowlist にあり `f` で終わるので
+`KindPrintf` —— `%w` は診断である。
+
+**止まる場所**（推測ではなく測った）: guff はリントするパッケージだけを型検査するので、
+**別パッケージで宣言された wrapper**には import する fact が無い。20 形のうち
+`sub.ExportedWrapf("g %z", 1)` の 1 形だけが乖離として残り、上流は報告し guff は黙る。
+黙る側は guff が元から持っていた側なので、台帳は動かない。テストで固定してある
+（`printf_does_not_see_a_wrapper_declared_in_another_package`）。
+インタフェースメソッドの帰納（上流は `satisfy` パスで実装側のメソッドを見つけ、
+暗黙の呼び出しとして扱う）と `-printf.funcs` も同じ理由で DEFERRED、いずれも
+モジュールの doc に測定つきで書いた。
+
+velero **1 → 0**。台帳 **30 → 31/100**。ついでに未計測だった Tekton pipeline も
+guff-only **21 → 6** になった —— 消えた 15 件はすべて
+`(*go.uber.org/zap.SugaredLogger).Panicf` で、zap は `args` を**スライスとして**
+渡すので上流は wrapper と見なさない（再現の 1 形目がそれ）。pipeline はこの回で
+はじめて台帳に載る: `open 13`（nolintlint 6 / gocritic 6 / perfsprint 1）で、
+**残っている乖離に printf は 1 件もない**。
+
+golden 208/208（`govet` 137 → 146 キー、キー集合の差分で消失なし）、fix tier 208、
+reject 14、workspace テスト緑（20 形の fixture を `assert_eq!` の**メッセージ列**で
+固定 —— `any(contains(…))` では他の 19 形が黙っても緑になる）、
+OSS pr tier 8 target すべて P=R=100%、gitea / prometheus / thanos / authelia /
+syncthing は再測して動かず。
