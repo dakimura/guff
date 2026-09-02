@@ -22,6 +22,7 @@ pub use durationcheck::analyzer as durationcheck;
 pub use err113::analyzer as err113;
 pub use errchkjson::analyzer as errchkjson;
 pub use errchkjson::ErrchkjsonOptions;
+pub use errorlint::ErrorlintOptions;
 pub use errname::analyzer as errname;
 pub use errorlint::analyzer as errorlint;
 pub use rowserrcheck::analyzer as rowserrcheck;

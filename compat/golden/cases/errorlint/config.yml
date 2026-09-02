@@ -1,0 +1,28 @@
+# Golden case: errorlint.
+#
+# errorlint had an isolate fixture and no golden case, so nothing compared its
+# **columns** — and three of them were wrong (a type assertion reported at its
+# `(`, a type switch at the `switch` keyword, and a suppression guard upstream
+# does not have). The golden tier is the only one that reads a column.
+#
+# Every setting is left at its default on purpose: golangci-lint's defaults are
+# not the analyzer's. errorlint ships `errorf` off; golangci-lint seeds
+# `ErrorLint{Errorf: true, ErrorfMulti: true, Asserts: true, Comparison: true}`
+# and forwards all four every run, so this is what a user actually gets.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errorlint
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # Two `fmt.Errorf` calls can share a line, and each has its own error
+  # argument. With uniq-by-line on, the second would never be compared.
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

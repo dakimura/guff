@@ -48,6 +48,7 @@ pub struct LinterSettings {
     pub sloglint: SloglintSettings,
     pub testifylint: TestifylintSettings,
     pub errchkjson: ErrchkjsonSettings,
+    pub errorlint: ErrorlintSettings,
     pub wrapcheck: WrapcheckSettings,
     pub rowserrcheck: RowserrcheckSettings,
     pub bodyclose: BodycloseSettings,
@@ -814,6 +815,38 @@ pub struct ErrchkjsonSettings {
     /// golangci-lint default: false.
     #[serde(default, rename = "report-no-exported")]
     pub report_no_exported: bool,
+}
+
+/// `linters.settings.errorlint` / `linters-settings.errorlint`.
+///
+/// Every field is an `Option<bool>` because an absent key is not `false`: it is
+/// golangci-lint's own default, and for all four of these that default is
+/// **true**. errorlint's analyzer ships `errorf` off; golangci-lint seeds
+/// `ErrorLint{Errorf: true, ErrorfMulti: true, Asserts: true, Comparison: true}`
+/// in `pkg/config/linters_settings.go` and forwards all four unconditionally,
+/// so the analyzer's own default is never the one that runs.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct ErrorlintSettings {
+    #[serde(default)]
+    pub errorf: Option<bool>,
+    #[serde(default, rename = "errorf-multi")]
+    pub errorf_multi: Option<bool>,
+    #[serde(default)]
+    pub asserts: Option<bool>,
+    #[serde(default)]
+    pub comparison: Option<bool>,
+}
+
+impl ErrorlintSettings {
+    pub fn to_guff_errorlint(&self) -> guff_error::ErrorlintOptions {
+        let d = guff_error::ErrorlintOptions::default();
+        guff_error::ErrorlintOptions {
+            comparison: self.comparison.unwrap_or(d.comparison),
+            asserts: self.asserts.unwrap_or(d.asserts),
+            errorf: self.errorf.unwrap_or(d.errorf),
+            errorf_multi: self.errorf_multi.unwrap_or(d.errorf_multi),
+        }
+    }
 }
 
 /// `linters.settings.wrapcheck` / `linters-settings.wrapcheck`.
@@ -2355,6 +2388,11 @@ impl LinterSettings {
                 out.errchkjson = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("errorlint".into())) {
+            if let Some(s) = parse_settings::<ErrorlintSettings>("errorlint", v) {
+                out.errorlint = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("wrapcheck".into())) {
             if let Some(s) = parse_settings::<WrapcheckSettings>("wrapcheck", v) {
                 out.wrapcheck = s;
@@ -2656,6 +2694,7 @@ impl LinterSettings {
         bag.insert("sloglint", self.sloglint.to_guff_sloglint());
         bag.insert("testifylint", self.testifylint.to_guff_testifylint());
         bag.insert("errchkjson", self.errchkjson.to_guff_errchkjson());
+        bag.insert("errorlint", self.errorlint.to_guff_errorlint());
         bag.insert("wrapcheck", self.wrapcheck.to_guff_wrapcheck());
         bag.insert("rowserrcheck", self.rowserrcheck.to_guff_rowserrcheck());
         bag.insert("bodyclose", self.bodyclose.to_guff_bodyclose());

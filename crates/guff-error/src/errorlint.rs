@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 use guff::ast::{
-    BinaryExpr, CaseClause, Expr, FuncDecl, Ident, Stmt, SwitchStmt, TypeAssertExpr,
+    BinaryExpr, CallExpr, CaseClause, Expr, FuncDecl, Ident, Stmt, SwitchStmt, TypeAssertExpr,
     TypeSwitchStmt,
 };
 use guff::token::Token;
@@ -332,6 +332,39 @@ fn in_error_is_method(stack: &[NodeRef<'_>], pass: &Pass<'_>) -> bool {
     false
 }
 
+/// Pass-time options from `linters.settings.errorlint`.
+///
+/// The defaults here are **golangci-lint's**, not the analyzer's. errorlint
+/// ships `errorf` off (`a.Flags.BoolVar(&checkErrorf, "errorf", false, …)`),
+/// and golangci-lint overwrites it: `pkg/config/linters_settings.go` seeds
+/// `ErrorLint{Errorf: true, ErrorfMulti: true, Asserts: true, Comparison: true}`
+/// and always forwards all four. Reading the analyzer's default here would
+/// have left the `fmt.Errorf` half switched off in every corpus run — which is
+/// exactly what it did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ErrorlintOptions {
+    /// `comparison`: plain `==` / `!=` against an error.
+    pub comparison: bool,
+    /// `asserts`: plain type assertions and type switches on an error.
+    pub asserts: bool,
+    /// `errorf`: `fmt.Errorf` must use `%w` for an error argument.
+    pub errorf: bool,
+    /// `errorf-multi`: more than one `%w` is permitted (valid since Go 1.20).
+    /// It also selects a *different* traversal — see [`check_errorf`].
+    pub errorf_multi: bool,
+}
+
+impl Default for ErrorlintOptions {
+    fn default() -> Self {
+        Self {
+            comparison: true,
+            asserts: true,
+            errorf: true,
+            errorf_multi: true,
+        }
+    }
+}
+
 fn check_comparison<'a>(
     pass: &Pass<'_>,
     idx: &AllowIndex<'a>,
@@ -414,7 +447,10 @@ fn check_type_assert(
         "type assertion on error will fail on wrapped errors. Use errors.As to check for specific errors";
     let fix = type_assert_fix(ta, ty, stack);
     pending.push(Diagnostic {
-        pos: ta.lparen.0 as u32,
+        // `typeAssert.Pos()`, and a `TypeAssertExpr` starts at its `X` — the
+        // error being asserted, not the `(` four columns over. Only the golden
+        // tier compares columns, and it had no shape that reached this line.
+        pos: ta.x.pos().0 as u32,
         message: message.into(),
         suggested_fixes: fix.into_iter().collect(),
         ..Diagnostic::default()
@@ -579,29 +615,14 @@ fn check_type_switch(
     if !is_error_type(pass, assert_x) {
         return;
     }
-    // Only report if some case asserts to an error-implementing type
-    let mut has_error_case = false;
-    for stmt in &ts.body.list {
-        let Stmt::CaseClause(CaseClause { list, .. }) = stmt else {
-            continue;
-        };
-        for e in list {
-            if is_nil_ident(e) {
-                continue;
-            }
-            if let Some(t) = type_of(pass, e) {
-                if implements_error(pass, t) {
-                    has_error_case = true;
-                    break;
-                }
-            }
-        }
-    }
-    if !has_error_case {
-        return;
-    }
+    // There is no "and some case must implement error" test upstream: the
+    // switched value being an error is the whole condition. guff had one, and
+    // it silenced two measured shapes — `case someNonErrorInterface:` and
+    // `case nil:` — both of which upstream reports.
     pending.push((
-        ts.switch.0 as u32,
+        // `typeAssert.Pos()` again: the error being switched on. For
+        // `switch e := err.(type)` that is `err`, not the `switch` keyword.
+        assert_x.pos().0 as u32,
         "type switch on error will fail on wrapped errors. Use errors.As to check for specific errors"
             .into(),
     ));
@@ -675,10 +696,298 @@ fn check_value_switch<'a>(
     ));
 }
 
+/// One verb parsed out of a format string: the letter, its byte offset inside
+/// the string literal's *contents*, and an explicit `[n]` argument index (`-1`
+/// when the verb did not carry one).
+///
+/// Upstream's `printf.go` `verb`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Verb {
+    format: String,
+    format_offset: usize,
+    index: i32,
+}
+
+/// Upstream's `printfParser`, transcribed.
+///
+/// It is not a correct printf parser and it is not trying to be — what it has
+/// to be is the *same* parser, because which verbs it finds and where it says
+/// they are decides both the finding and the byte the fix rewrites. Two of its
+/// habits are worth naming, and both are pinned by the fixture:
+///
+/// - a flag it does not know ends the verb. `%-10v` parses as the verb `-`,
+///   not `v`, and `-` is neither `w` nor `T`, so the call is still reported —
+///   at the argument, with the fix aiming at the `-`.
+/// - `%%` restarts the scan (`return pp.parseVerb()`), so an escaped percent
+///   consumes no argument.
+struct PrintfParser<'a> {
+    str: &'a str,
+    at: usize,
+}
+
+impl<'a> PrintfParser<'a> {
+    fn new(s: &'a str) -> Self {
+        PrintfParser { str: s, at: 0 }
+    }
+
+    /// `ParseAllVerbs`: every verb, or `None` if the string is malformed —
+    /// upstream drops the whole call in that case.
+    fn parse_all_verbs(&mut self) -> Option<Vec<Verb>> {
+        let mut verbs = Vec::new();
+        loop {
+            match self.parse_verb() {
+                ParseStep::Verb(v) => verbs.push(v),
+                ParseStep::Eof => break,
+                ParseStep::Err => return None,
+            }
+        }
+        Some(verbs)
+    }
+
+    fn parse_verb(&mut self) -> ParseStep {
+        // Recursion in upstream (`%%` restarts); a loop here, same effect.
+        loop {
+            if self.skip_to_percent().is_none() {
+                return ParseStep::Eof;
+            }
+            if self.next() != Some('%') {
+                return ParseStep::Err;
+            }
+            let mut index = -1i32;
+            let mut restart = false;
+            loop {
+                match self.peek() {
+                    Some('%') => {
+                        self.next();
+                        restart = true;
+                    }
+                    Some('+') | Some('#') => {
+                        self.next();
+                        continue;
+                    }
+                    Some('[') => match self.parse_index() {
+                        Some(i) => index = i,
+                        None => return ParseStep::Err,
+                    },
+                    Some(c) if c.is_ascii_digit() || c == '.' => self.parse_precision(),
+                    None => return ParseStep::Eof,
+                    _ => {}
+                }
+                break;
+            }
+            if restart {
+                continue;
+            }
+            let format = match self.next() {
+                Some(c) => c,
+                None => '\0',
+            };
+            return ParseStep::Verb(Verb {
+                format: format.to_string(),
+                format_offset: self.at - 1,
+                index,
+            });
+        }
+    }
+
+    fn parse_index(&mut self) -> Option<i32> {
+        if self.next() != Some('[') {
+            return None;
+        }
+        let end = self.str.find(']')?;
+        let index = self.str[..end].parse::<i32>().ok()?;
+        self.str = &self.str[end + 1..];
+        self.at += end + 1;
+        Some(index)
+    }
+
+    fn parse_precision(&mut self) {
+        while let Some(r) = self.peek() {
+            if !r.is_ascii_digit() && r != '.' {
+                break;
+            }
+            self.next();
+        }
+    }
+
+    fn skip_to_percent(&mut self) -> Option<()> {
+        let i = self.str.find('%')?;
+        self.str = &self.str[i..];
+        self.at += i;
+        Some(())
+    }
+
+    /// Upstream indexes bytes (`rune(pp.str[0])`), so a multi-byte rune is
+    /// walked one byte at a time and the offsets stay byte offsets.
+    fn peek(&self) -> Option<char> {
+        self.str.as_bytes().first().map(|&b| b as char)
+    }
+
+    fn next(&mut self) -> Option<char> {
+        let b = *self.str.as_bytes().first()?;
+        self.str = &self.str[1..];
+        self.at += 1;
+        Some(b as char)
+    }
+}
+
+enum ParseStep {
+    Verb(Verb),
+    Eof,
+    Err,
+}
+
+/// `isFmtErrorfCallExpr`: is this a call of `fmt.Errorf`, named through a
+/// selector?
+fn is_fmt_errorf_call(pass: &Pass<'_>, call: &CallExpr) -> Option<()> {
+    // "TODO: Support fmt.Errorf variable aliases?" — upstream needs a selector.
+    let Expr::SelectorExpr(sel) = unparen(&call.fun) else {
+        return None;
+    };
+    let info = pass.types_info()?;
+    let obj = *info.uses.get(&sel.sel.id)?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    if obj.name(&artifacts.objects) != "Errorf" {
+        return None;
+    }
+    let pkg = obj.pkg(&artifacts.objects)?;
+    if artifacts.packages.get(pkg).name() != "fmt" {
+        return None;
+    }
+    Some(())
+}
+
+/// `printfFormatStringVerbs`: the verbs of a call whose first argument is a
+/// string literal. A format string that is not a literal is ignored, which is
+/// why `fmt.Errorf(f, err)` is silent in both tools.
+fn format_string_verbs(pass: &Pass<'_>, call: &CallExpr) -> Option<Vec<Verb>> {
+    if call.args.len() <= 1 {
+        return None;
+    }
+    let Expr::BasicLit(_) = &call.args[0] else {
+        return None;
+    };
+    let info = pass.types_info()?;
+    let tv = info.types.get(&call.args[0].id())?;
+    // `constant.StringVal` yields bytes; the parser and the fix offsets are
+    // byte offsets into them. A format string that is not valid UTF-8 is
+    // dropped rather than repaired, because repairing it would move every
+    // offset the fix depends on.
+    let text = String::from_utf8(guff_constant::string_val(tv.val.as_ref()?)).ok()?;
+    PrintfParser::new(&text).parse_all_verbs()
+}
+
+/// `LintFmtErrorfCalls`.
+///
+/// golangci-lint pins `errorf: true` and `errorf-multi: true` (its own
+/// defaults, not the analyzer's — the analyzer ships `errorf` **off**), so the
+/// `multiple_wraps` branch is the one every corpus run takes. Both are here
+/// because the setting is readable from `linters.settings.errorlint`.
+fn check_errorf(
+    pass: &Pass<'_>,
+    call: &CallExpr,
+    multiple_wraps: bool,
+    diags: &mut Vec<Diagnostic>,
+) {
+    const MSG: &str = "non-wrapping format verb for fmt.Errorf. Use `%w` to format errors";
+
+    let Some(verbs) = format_string_verbs(pass, call) else {
+        return;
+    };
+    let args = &call.args[1..];
+
+    if !multiple_wraps {
+        let mut wrap_count = 0;
+        for (i, arg) in args.iter().enumerate() {
+            let Some(verb) = verbs.get(i) else { break };
+            let Some(t) = type_of(pass, arg) else { continue };
+            if !implements_error(pass, t) {
+                continue;
+            }
+            if verb.format == "w" {
+                wrap_count += 1;
+                if wrap_count > 1 {
+                    diags.push(Diagnostic {
+                        pos: arg.pos().0 as u32,
+                        end: 0,
+                        message: "only one %w verb is permitted per format string".into(),
+                        suggested_fixes: Vec::new(),
+                        ..Default::default()
+                    });
+                    break;
+                }
+            }
+            if wrap_count == 0 {
+                diags.push(Diagnostic {
+                    pos: arg.pos().0 as u32,
+                    end: 0,
+                    message: MSG.into(),
+                    suggested_fixes: Vec::new(),
+                    ..Default::default()
+                });
+                break;
+            }
+        }
+        return;
+    }
+
+    // One diagnostic per call, carrying one suggested fix per offending verb.
+    let str_start = call.args[0].pos().0 as u32;
+    let mut lint: Option<Diagnostic> = None;
+    let mut arg_index: i32 = 0;
+    for verb in &verbs {
+        if verb.index != -1 {
+            arg_index = verb.index;
+        } else {
+            arg_index += 1;
+        }
+        if verb.format == "w" || verb.format == "T" {
+            continue;
+        }
+        if arg_index - 1 >= args.len() as i32 || arg_index - 1 < 0 {
+            continue;
+        }
+        let arg = &args[(arg_index - 1) as usize];
+        let Some(t) = type_of(pass, arg) else { continue };
+        if !implements_error(pass, t) {
+            continue;
+        }
+        let d = lint.get_or_insert_with(|| Diagnostic {
+            pos: arg.pos().0 as u32,
+            end: 0,
+            message: MSG.into(),
+            suggested_fixes: Vec::new(),
+            ..Default::default()
+        });
+        let mut fix_message = "Use `%w` to format errors".to_string();
+        if !d.suggested_fixes.is_empty() {
+            fix_message = format!("{fix_message} ({})", d.suggested_fixes.len() + 1);
+        }
+        // `strStart` is the opening quote, so +1 lands on the first byte of the
+        // string's contents and the verb letter is one past its offset.
+        d.suggested_fixes.push(SuggestedFix {
+            message: fix_message,
+            text_edits: vec![TextEdit {
+                pos: str_start + verb.format_offset as u32 + 1,
+                end: str_start + verb.format_offset as u32 + 2,
+                new_text: "w".into(),
+            }],
+        });
+    }
+    if let Some(d) = lint {
+        diags.push(d);
+    }
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "errorlint requires inspect analyzer".to_string())?;
+
+    let opts = pass
+        .settings::<ErrorlintOptions>("errorlint")
+        .cloned()
+        .unwrap_or_default();
 
     let mut diags = Vec::new();
     let mut msgs = Vec::new();
@@ -689,10 +998,27 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             let mut stack = Vec::new();
             walk::preorder_stack(NodeRef::File(file), &mut stack, |n, stack| {
                 match n {
-                    NodeRef::BinaryExpr(be) => check_comparison(pass, &idx, be, stack, &mut diags),
-                    NodeRef::TypeAssertExpr(ta) => check_type_assert(pass, ta, stack, &mut diags),
-                    NodeRef::TypeSwitchStmt(ts) => check_type_switch(pass, ts, stack, &mut msgs),
-                    NodeRef::SwitchStmt(sw) => check_value_switch(pass, &idx, sw, stack, &mut msgs),
+                    NodeRef::BinaryExpr(be) if opts.comparison => {
+                        check_comparison(pass, &idx, be, stack, &mut diags)
+                    }
+                    NodeRef::TypeAssertExpr(ta) if opts.asserts => {
+                        check_type_assert(pass, ta, stack, &mut diags)
+                    }
+                    NodeRef::TypeSwitchStmt(ts) if opts.asserts => {
+                        check_type_switch(pass, ts, stack, &mut msgs)
+                    }
+                    NodeRef::SwitchStmt(sw) if opts.comparison => {
+                        check_value_switch(pass, &idx, sw, stack, &mut msgs)
+                    }
+                    // Upstream walks `info.Types` for expressions whose type is
+                    // exactly `error`; every such expression that is a call is
+                    // reached by this walk too, and a call whose type is not
+                    // `error` is dropped by `fmt_errorf_call` anyway.
+                    NodeRef::CallExpr(call) if opts.errorf => {
+                        if is_fmt_errorf_call(pass, call).is_some() {
+                            check_errorf(pass, call, opts.errorf_multi, &mut diags);
+                        }
+                    }
                     _ => {}
                 }
                 true
