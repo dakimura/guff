@@ -177,5 +177,13 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "15m"
+  },
+  {
+    "name": "alertmanager",
+    "url": "https://github.com/prometheus/alertmanager.git",
+    "ref": "v0.34.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
   }
 ]
