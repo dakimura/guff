@@ -20096,3 +20096,98 @@ if len(tcIssues) > 0 { return tcIssues, nil }
 台帳は 33/100 のまま、alertmanager も `open 1` のまま —— 既定の挙動は 1 バイトも変わらない。
 golden 209/209、fix 209、reject 14、workspace テスト緑、OSS pr tier 8/8 P=R=100%
 （どれも「変わらないこと」の確認である）。
+
+### 2026-09-02（続き 152）— 足りなかったのは `embed` という語だった。native lister に `//go:embed` を入れて 13 形が一致、alertmanager が zero に
+
+続き 151 が「足りないのは **native lister の embed パターン解決**という名前の付いた 1 つだけ」
+と書いた、その 1 つを入れた。`./corpus/status.py next` は `close alertmanager (1 open: typecheck=1)`。
+
+**最小再現を先に作って 13 形を測った**（Rust を触る前に）。`go list -e`、
+golangci-lint 2.12.2、`GUFF_NATIVE_LIST=0` の guff、の 3 つで同じツリーを測る:
+
+| 形 | `go list -e` の Error | 何を決めているか |
+|---|---|---|
+| `//go:embed app/dist` | `pattern app/dist: no matching files found` | alertmanager の `ui/web.go` そのもの |
+| `//go:embed have.txt nope.txt` | 位置は **5:21** | 失敗した*パターン*の桁であって行頭ではない |
+| `//go:embed "no such.txt"` | `pattern no such.txt: …` | 引用は外れる。桁は引用符の位置 |
+| `//go:embed all:hidden` | `pattern all:hidden: …` | `all:` はパターンの一部として報告される |
+| `//go:embed ../ok` | `invalid pattern syntax` | 「無い」ではなく「書けない」 |
+| `//go:embed only`（`only/.hidden` だけ） | `cannot embed directory only: contains no embeddable files` | 空ディレクトリとは別の文言 |
+| `//go:embed *.tmpl` | `no matching files found` | glob もリテラルと同じ扱い |
+| 同じパターンが `a.go` と `b.go` に | 位置は **a.go** | `EmbedPatternPos[p][0]`、走査順（名前順） |
+| `_test.go` にだけある | `P [P.test]` に付く | 変種ごとにパターン集合が違う |
+| prod + test + xtest | prod のエラーが `P [P.test]` にも出る | `if ptest.Error == nil { ptest.Error = ptestErr }` |
+| `import "embed"` が無い | **Error 無し** | `go list` は黙る。文句を言うのはコンパイラ |
+| `//go:embed data` | Error 無し、`data/x.txt` … | dot 名は落ちる |
+| `//go:embed all:data` | `.hidden` も入る | `all:` の肯定側 |
+
+**入れたのは 3 つの部品で、境界は測った線の上にある。**
+
+1. `guff-build` の `embed.rs` —— `readGoInfo` が `import "embed"` を見たときにだけ走る
+   コメント走査。**この gate が `noimport` 形の全部**である: import が無ければパターンは
+   1 つも生まれず、`go list` と同じく黙る。字句解析は「行コメントかどうか」だけを見る
+   小さなもの（文字列・raw 文字列・rune・ブロックコメントの中の `//go:embed` は
+   ディレクティブではない、を 1 つのテストで固定した）。壊れた行は**何も生まない** ——
+   上流も `if err == nil` で捨てている。
+2. `guff-golist` の `embed.rs` —— `resolveEmbed` + `path.Match` + `filepath.Glob` の移植。
+3. list.rs の配線と、`ListPackage.errors` → `Package.errors`（`ErrorKind::List`）。
+
+**そして 1 つ、キャッシュに沈んでいた。** 最初の verify で caddy に 2 件の差が出た:
+
+```
+cel-go/cel: embed_patterns native=[] golist=["…/templates/authoring.tmpl"]
+protobuf/internal/editiondefaults: embed_patterns native=[] golist=[…]
+```
+
+`modmeta` は module ごとの**永続**メタキャッシュで、`CachedPkgMeta` に embed の欄が無い。
+GOMODCACHE の package は 2 度目からそこから戻るので、パターンは常に空になる。
+欄を足して `MODMETA_VERSION` を `modmeta-v2` → `v3` に上げた。**古い blob は
+「パターンが 1 つも無い」と見分けがつかない** —— そして「パターンが無い」は
+「エラーが無い」なので、キャッシュは静かに正しく見える。
+
+**検算は 35 target 全部で取った。** `GUFF_NATIVE_LIST=verify` に
+`embed_patterns` / `embed_files` / `ErrorKind::List` の比較を足して、コーパスの
+全ターゲットを回した:
+
+```
+ok  alertmanager … ok  velero        (35/35, 差 0)
+```
+
+grafana だけで `//go:embed` を持つファイルが 50、kubernetes が 13、rclone / jaeger /
+argo-cd が 11。**片方向に外れていないこと**（guff が余計なエラーを出さないこと）は、
+ここが一番強く効く —— typecheck の issue は 1 件でその run の findings を全部消すので、
+誤報 1 件の代償はレポート全体である。
+
+**上流の非決定性も測った（これは直せない側）。** 壊れたパッケージが**複数**あると、
+golangci-lint が出す typecheck issue は**実行ごとに変わる**:
+
+```
+5 パッケージ壊した ./a/… ./f/… を 5 回:  4件 4件 4件 4件 3件
+--concurrency=1:                        1件 1件 1件
+```
+
+原因は `runner_loadingpackage.go` の `err := actsWg.Wait(); if err != nil { cancel() }` ——
+最初に失敗した analysis action が run 全体の context を切り、`analyze()` の入口で
+`<-ctx.Done()` を待っていたパッケージはそのまま捨てられる。**通るのは概ね
+GOMAXPROCS 個まで**で、どれが通るかはスケジューリング順。
+コーパスの target は今のところ壊れたパッケージが 1 つ以下なので影響しないが、
+**golden の case は 1 つに限る**（この理由を case の config.yml に書いた）。
+
+**新しい golden case `typecheck-embed` は、findings が 1 件であること自体が主張である。**
+`embed/a.go`（壊れた埋め込み）と `other/bad.go`（errorlint の fixture、8 件）を
+同じ run に置いて、期待値は **typecheck 1 件だけ**。9 件並んだ golden は
+「guff が `InvalidIssue` の上書きを取りこぼした」の意味になる。
+
+Rust 側は `crates/guff-golist/tests/embed_shapes.rs` が 14 ディレクトリを
+**ディレクトリ集合ごと** `assert_eq!` で固定する（形を足して assert し忘れる、が
+できない）。Go ツールチェインは要らない —— 測っている native lister が要らないので。
+
+**残る 1 形は `noimport`**、つまり `//go:embed` があるのに `embed` を import していない形。
+golangci は `go:embed requires import "embed"` を出し、guff は黙る。これは
+続き 151 で境界として書いた**型検査側の半分**で、`go list` は何も言わない
+（`go list` 由来の文言だけを出す、という線はそのまま）。この形は fixture に
+`noimport/` として残してあり、テストは「パターンが 0 であること」を主張している ——
+ここが 0 でなくなったら guff は誤報を作っている。
+
+台帳: alertmanager `open 1 → 0`。**34/100**（35 定義・open 1・cri-o は linux 専用）。
+golden 210/210、fix 210、reject 14、workspace テスト緑、OSS pr tier 8/8 P=R=100%。

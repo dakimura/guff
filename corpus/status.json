@@ -7,20 +7,17 @@
   ],
   "goal": 100,
   "defined": 35,
-  "clean": 33,
-  "open": 2,
+  "clean": 34,
+  "open": 1,
   "unmeasured": 0,
   "targets": {
     "alertmanager": {
       "tier": "hunt",
-      "state": "open",
-      "at": "20260902T045147Z",
-      "open": 1,
+      "state": "clean",
+      "at": "20260902T073709Z",
+      "open": 0,
       "guff_only": 0,
-      "gcl_only": 1,
-      "by_linter": {
-        "typecheck": 1
-      }
+      "gcl_only": 0
     },
     "argo-cd": {
       "tier": "hunt",
@@ -49,7 +46,7 @@
     "caddy": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260902T042619Z",
+      "at": "20260902T073730Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -65,7 +62,7 @@
     "cobra": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260902T042619Z",
+      "at": "20260902T073730Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -151,7 +148,7 @@
     "gin": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260902T042619Z",
+      "at": "20260902T073730Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -167,7 +164,7 @@
     "go-client": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260902T042619Z",
+      "at": "20260902T073730Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -191,7 +188,7 @@
     "helm": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260902T042619Z",
+      "at": "20260902T073730Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -207,7 +204,7 @@
     "k9s": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260902T042619Z",
+      "at": "20260902T073730Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0

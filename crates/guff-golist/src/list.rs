@@ -62,6 +62,21 @@ pub struct ListPackage {
     pub for_test: String,
     /// True when the package has `CgoFiles` (needs `go list -compiled` for real CompiledGoFiles).
     pub has_cgo: bool,
+    /// `EmbedPatterns`: the sorted `//go:embed` patterns of this variant.
+    pub embed_patterns: Vec<String>,
+    /// `EmbedFiles`: what they resolved to, relative to `dir` and slash-separated.
+    pub embed_files: Vec<String>,
+    /// `Error` in the `go list -e` JSON. golangci-lint renders these as its
+    /// `typecheck` pseudo linter, so they are findings, not diagnostics.
+    pub errors: Vec<ListError>,
+}
+
+/// A package-level `go list` error.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListError {
+    /// `file:line:col`, relativized the way `base.ShortPath` does.
+    pub pos: String,
+    pub msg: String,
 }
 
 #[derive(Debug, Clone)]
@@ -231,6 +246,9 @@ pub fn list_packages(cfg: &ListConfig, patterns: &[String]) -> Result<ListRespon
                             dep_only: true,
                             for_test: String::new(),
                             has_cgo: false,
+                            embed_patterns: Vec::new(),
+                            embed_files: Vec::new(),
+                            errors: Vec::new(),
                         },
                     );
                     let _ = e;
@@ -241,6 +259,7 @@ pub fn list_packages(cfg: &ListConfig, patterns: &[String]) -> Result<ListRespon
             // ... rest of package processing continues below via helper
             process_listed_package(
                 cfg,
+                &src_dir,
                 &workspace,
                 &cache,
                 &goroot,
@@ -331,6 +350,7 @@ pub fn list_packages(cfg: &ListConfig, patterns: &[String]) -> Result<ListRespon
 #[allow(clippy::too_many_arguments)]
 fn process_listed_package(
     cfg: &ListConfig,
+    src_dir: &Path,
     workspace: &Workspace,
     cache: &ModCache,
     goroot: &Path,
@@ -417,6 +437,13 @@ fn process_listed_package(
             Some(to_list_module(&module))
         };
 
+        // `//go:embed` resolution, which is where `go list -e` gets the error
+        // golangci-lint reports as `typecheck`. The three variants each resolve
+        // their own pattern set, and `ptest` inherits the production error when
+        // there is one (`if ptest.Error == nil { ptest.Error = ptestErr }`).
+        let (prod_patterns, prod_files, prod_error) =
+            resolve_embeds(&build_pkg.dir, &build_pkg.embed_patterns, src_dir);
+
         packages.insert(
             pkg_path.clone(),
             ListPackage {
@@ -434,6 +461,9 @@ fn process_listed_package(
                 dep_only: !is_root,
                 for_test: String::new(),
                 has_cgo,
+                embed_patterns: prod_patterns.clone(),
+                embed_files: prod_files.clone(),
+                errors: prod_error.clone().into_iter().collect(),
             },
         );
 
@@ -471,6 +501,13 @@ fn process_listed_package(
                         &mut queue,
                         None,
                     )?;
+                    let (_, test_files, test_error) = resolve_embeds(
+                        &build_pkg.dir,
+                        &build_pkg.test_embed_patterns,
+                        src_dir,
+                    );
+                    let mut ptest_files = prod_files.clone();
+                    ptest_files.extend(test_files);
                     direct_imports.insert(internal_id.clone(), directs);
                     packages.insert(
                         internal_id.clone(),
@@ -503,6 +540,15 @@ fn process_listed_package(
                             dep_only: false,
                             for_test: pkg_path.clone(),
                             has_cgo,
+                            // `*ptest = *p` copies EmbedPatterns verbatim; only
+                            // the file list gains the test patterns' output.
+                            embed_patterns: prod_patterns.clone(),
+                            embed_files: ptest_files,
+                            errors: prod_error
+                                .clone()
+                                .or(test_error)
+                                .into_iter()
+                                .collect(),
                         },
                     );
                     response.roots.push(internal_id.clone());
@@ -543,6 +589,11 @@ fn process_listed_package(
                     pairs.dedup_by(|a, b| a.0 == b.0);
                     directs.sort();
                     directs.dedup();
+                    let (_, xtest_embed_files, xtest_error) = resolve_embeds(
+                        &build_pkg.dir,
+                        &build_pkg.xtest_embed_patterns,
+                        src_dir,
+                    );
                     direct_imports.insert(xtest_id.clone(), directs);
                     packages.insert(
                         xtest_id.clone(),
@@ -561,6 +612,11 @@ fn process_listed_package(
                             dep_only: false,
                             for_test: pkg_path.clone(),
                             has_cgo: false,
+                            // `pxtest` is built fresh: no EmbedPatterns, only
+                            // XTestEmbedFiles and its own error.
+                            embed_patterns: Vec::new(),
+                            embed_files: xtest_embed_files,
+                            errors: xtest_error.into_iter().collect(),
                         },
                     );
                     response.roots.push(xtest_id.clone());
@@ -616,6 +672,9 @@ fn process_listed_package(
                             dep_only: false,
                             for_test: String::new(),
                             has_cgo: false,
+                            embed_patterns: Vec::new(),
+                            embed_files: Vec::new(),
+                            errors: Vec::new(),
                         },
                     );
                     response.roots.push(test_bin);
@@ -900,6 +959,9 @@ fn ensure_unsafe(packages: &mut FxHashMap<String, ListPackage>, seen: &mut FxHas
             dep_only: true,
             for_test: String::new(),
             has_cgo: false,
+            embed_patterns: Vec::new(),
+            embed_files: Vec::new(),
+            errors: Vec::new(),
         },
     );
 }
@@ -1111,4 +1173,82 @@ fn transitive_deps(id: &str, direct: &FxHashMap<String, Vec<String>>) -> Vec<Str
     }
     out.sort();
     out
+}
+
+/// `resolveEmbed` plus the position `cmd/go` attaches to its error.
+///
+/// Returns `(EmbedPatterns, EmbedFiles, Error)`. The error's position is the
+/// *first* recorded occurrence of the failing pattern —
+/// `setPos(EmbedPatternPos[pattern])` reads `posList[0]` — with the filename
+/// put through `base.ShortPath`, which is why `go list` prints `ui/web.go:31:12`
+/// and not the absolute path.
+fn resolve_embeds(
+    dir: &Path,
+    patterns: &[guff_build::EmbedPattern],
+    src_dir: &Path,
+) -> (Vec<String>, Vec<String>, Option<ListError>) {
+    if patterns.is_empty() {
+        return (Vec::new(), Vec::new(), None);
+    }
+    let names: Vec<String> = patterns.iter().map(|p| p.pattern.clone()).collect();
+    match crate::embed::resolve_embed(dir, &names) {
+        Ok(files) => (names, files, None),
+        Err(e) => {
+            let pos = patterns
+                .iter()
+                .find(|p| p.pattern == e.pattern)
+                .map(|p| {
+                    format!(
+                        "{}:{}:{}",
+                        short_path(&dir.join(&p.file), src_dir),
+                        p.line,
+                        p.column
+                    )
+                })
+                .unwrap_or_default();
+            (
+                names,
+                Vec::new(),
+                Some(ListError {
+                    pos,
+                    msg: e.text(),
+                }),
+            )
+        }
+    }
+}
+
+/// `base.ShortPath`: the path relative to the listing directory when that is
+/// shorter, else the path itself.
+fn short_path(path: &Path, base: &Path) -> String {
+    let full = path.to_string_lossy().into_owned();
+    let Some(rel) = relative_to(path, base) else {
+        return full;
+    };
+    if rel.len() < full.len() {
+        rel
+    } else {
+        full
+    }
+}
+
+/// `filepath.Rel` for two absolute paths, slash-separated.
+fn relative_to(path: &Path, base: &Path) -> Option<String> {
+    let mut p = path.components().peekable();
+    let mut b = base.components().peekable();
+    while let (Some(x), Some(y)) = (p.peek(), b.peek()) {
+        if x != y {
+            break;
+        }
+        p.next();
+        b.next();
+    }
+    let up = b.count();
+    let rest: Vec<String> = p.map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+    let mut parts: Vec<String> = std::iter::repeat_n("..".to_string(), up).collect();
+    parts.extend(rest);
+    if parts.is_empty() {
+        return Some(".".to_string());
+    }
+    Some(parts.join("/"))
 }
