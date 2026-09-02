@@ -19988,3 +19988,56 @@ pipeline **5 → 0**。台帳 **32 → 33/100**。
 golden 208 → **209 case**（新しい `errorlint` case は 30 キー）、
 fix tier 209（`errorlint.diff` を expected と pending の両方に記録）、reject 14、
 workspace テスト緑、OSS pr tier 8 target すべて P=R=100%。
+
+### 2026-09-02（続き 150）— alertmanager を採り、**zero に届かない 1 件が何なのかを特定した**: guff は `typecheck` 疑似 linter を持たない
+
+`./corpus/status.py next` が `adopt alertmanager` を出したので
+`corpus/candidates-100.json` から `corpus/hunt.json` に足して測った（v0.34.0、56.8MB）。
+
+```
+alertmanager: guff=0 golangci=1 both=0 P=100.0% R=0.0%
+  +gcl   ui/web.go:31:typecheck:pattern app/dist: no matching files found
+```
+
+**リンタの乖離は 1 件も無い。** 出ている 1 件は golangci の `typecheck` 疑似 linter で、
+`ui/web.go` の
+
+```go
+//go:embed app/dist
+var asset embed.FS
+```
+
+—— `app/dist` は `make ui`（npm ビルド）が作るディレクトリで、素のチェックアウトには無い。
+`go list -e` はそれをパッケージの `Error` として返す:
+
+```json
+"Error": {"Pos": "ui/web.go:31:12", "Err": "pattern app/dist: no matching files found"}
+```
+
+型エラーではない（`var asset embed.FS` は通る）。両ツールともこのパッケージを解析していて、
+golangci だけがこのロードエラーを finding として出す。
+
+**guff は typecheck エラーを finding として出さない。** これは 2026-08 から
+本書に書いてある既知の別件（2026-08-11「`_ = f()` の arity を型検査し…」の末尾に
+「これは別件」と書いてある）で、今回はじめて**台帳の数字に効いた**。
+cri-o の 116 件のうち 1 件も同じ種類である。
+
+**上流の実装を読んで大きさを測った**（推測ではなく）。`pkg/goanalysis/pkgerrors/` の
+2 ファイル・**190 行**で、中身は:
+
+- `extractErrorsImpl` —— `pkg.IllTyped` なパッケージの `pkg.Errors` を返す。空なら
+  **import を再帰**して最初に見つかった ill-typed な依存のエラーを返す。
+- `extractErrors` —— `stackCrusher`（`(...)` の入れ子から一番内側の `file:line:col: msg`
+  を取り出す）で重複を潰し、位置の無いエラーには `GoFiles[0]:1` を与える。
+- `parseError` —— `file:line[:col]` を切って `FromLinter: "typecheck"` の issue にする。
+
+**移植には 1 つ前提がある**: 出る文言が `packages.Error` のものであること。今回の 1 件は
+**`go list` が返す文字列そのもの**なので一致するが、**型チェッカ由来のエラーは guff 自身の
+文言**で、同じ 2026-08-11 の測定では 9 形中 2 形が `go build` と文言が違っていた。さらに guff には
+「ill-typed N, at baseline」という別勘定があり、**guff だけが ill-typed と見なす
+パッケージがあれば、そのエラーはそのまま偽陽性になる**。半分だけ移植すると、
+片方向に外れる。だからこの回では**入れていない** —— 次の作業はこれで、
+最初に測るべきは「guff が ill-typed と呼ぶパッケージの集合が golangci のそれと一致するか」である。
+
+台帳: alertmanager を採用して **35 target**、`open 1 (typecheck=1)`。33/100 のまま。
+この回の成果は台帳と、この 1 件の正体である。

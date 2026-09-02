@@ -6,11 +6,22 @@
     "`unmeasured` is not `clean`: an absent measurement is a question."
   ],
   "goal": 100,
-  "defined": 34,
+  "defined": 35,
   "clean": 33,
-  "open": 1,
+  "open": 2,
   "unmeasured": 0,
   "targets": {
+    "alertmanager": {
+      "tier": "hunt",
+      "state": "open",
+      "at": "20260902T045147Z",
+      "open": 1,
+      "guff_only": 0,
+      "gcl_only": 1,
+      "by_linter": {
+        "typecheck": 1
+      }
+    },
     "argo-cd": {
       "tier": "hunt",
       "state": "clean",
