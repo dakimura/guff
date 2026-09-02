@@ -159,6 +159,83 @@ fn printf_names_the_callee_in_full_and_has_a_no_directives_branch() {
 }
 
 #[test]
+fn printf_deduces_wrappers_instead_of_guessing_from_the_name() {
+    // guff decided a call was printf-like by looking at the callee's base name
+    // (`Printf`/`Sprintf`/`Fprintf`/`Errorf`/`Fatalf`/`Panicf`). Upstream never
+    // does that: outside its allowlist a function is printf-like only if its
+    // body forwards `args...` to something that already is. A two-package
+    // reproducer put the two tools' answers side by side and they were
+    // *disjoint* — six findings against three, nothing in common. The three
+    // guff had were methods whose names end in `f` and whose bodies forward
+    // nothing; the six it lacked were real wrappers it could not name.
+    //
+    // Every shape below was measured against golangci-lint 2.12.2 first. The
+    // list is exhaustive and ordered by position, so a shape that stops firing
+    // fails here rather than quietly leaving the grid.
+    //
+    // The package-level names come out bare here (`wrapf`, not
+    // `example.com/govet/printf/wrappers.wrapf`): this harness type-checks a
+    // single file without stamping the import path onto the package, and the
+    // end-to-end runs above print the qualified form. Only the *shape* of each
+    // name matters below — which object was blamed, and whether it carries a
+    // receiver.
+    let dir = support::testdata("printf");
+    let fmt_stub = dir.join("stub/fmt/print.go");
+    let testing_stub = dir.join("stub/testing/testing.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/govet/printf/wrappers",
+        &dir.join("wrappers.go"),
+        &[("fmt", &fmt_stub), ("testing", &testing_stub)],
+    );
+    let messages = support::run_analyzer(printf_analyzer(), &pkg);
+    assert_eq!(
+        messages,
+        vec![
+            // a wrapper deduced from its body; `fmt.Printf` is not KindErrorf
+            "wrapf does not support error-wrapping directive %w",
+            // forwarding without `...`, named by the callee's kind
+            "missing ... in args forwarded to printf-like function",
+            // an unknown verb reached through the wrapper
+            "wrapf format %z has unknown verb z",
+            // a function literal is named by the variable that holds it
+            "litf format %z has unknown verb z",
+            // and the kind travels back along a chain of wrappers
+            "hop1 format %z has unknown verb z",
+            // `(*testing.common).Errorf` is KindPrintf, so `%w` is a diagnostic
+            "(*testing.common).Errorf does not support error-wrapping directive %w",
+            // an unformatted wrapper says "print-like"
+            "missing ... in args forwarded to print-like function",
+            "sprintfWrapper format %z has unknown verb z",
+            // a literal assigned to a struct field is named by the field
+            "logf format %z has unknown verb z",
+        ],
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn printf_does_not_see_a_wrapper_declared_in_another_package() {
+    // The one shape in the wrapper grid where the two tools disagree, pinned so
+    // that it is a recorded gap rather than a surprise. Upstream exports an
+    // `isWrapper` object fact from `sub` and reports `format %z has unknown
+    // verb z` on the call; guff analyses only the packages being linted and
+    // `printf` advertises no facts, so it stays silent. Measured against
+    // golangci-lint 2.12.2 on a two-package module.
+    let dir = support::testdata("printf");
+    let fmt_stub = dir.join("stub/fmt/print.go");
+    let sub_stub = dir.join("stub/sub/sub.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/govet/printf/imported",
+        &dir.join("wrappers_imported.go"),
+        &[
+            ("fmt", &fmt_stub),
+            ("example.com/govet/printf/sub", &sub_stub),
+        ],
+    );
+    assert_eq!(support::run_analyzer(printf_analyzer(), &pkg), Vec::<String>::new());
+}
+
+#[test]
 fn printf_allows_valid_format() {
     let dir = support::testdata("printf");
     let stub = dir.join("stub/fmt/print.go");

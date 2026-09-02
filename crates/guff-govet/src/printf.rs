@@ -13,7 +13,7 @@ use std::sync::OnceLock;
 use guff::ast::{CallExpr, Expr};
 use guff::node_mask;
 use guff::walk::NodeRef;
-use guff_analysis::code::{call_name, callee_full_name, expr_to_bytes};
+use guff_analysis::code::{call_name, expr_to_bytes};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use guff_types::arena::{ObjectData, TypeData};
@@ -26,36 +26,7 @@ use guff_types::api_predicates::api_implements;
 use guff_types::alias::unalias_readonly;
 
 use crate::govet_util::expr_type;
-
-/// Upstream's `isPrint`, restricted to the formatted half — the entries whose
-/// name ends in `f`, which is exactly the test `callKind` applies before
-/// settling on `KindPrintf`. Keys are `types.Func.FullName()`, so a method
-/// carries its receiver.
-///
-/// guff had seven of them and leaned on a short-name heuristic for the rest,
-/// which has no entry for `Logf`: `t.Logf("no verbs", x)` went unreported.
-const KNOWN_PRINTF: &[&str] = &[
-    "fmt.Appendf",
-    "fmt.Errorf",
-    "fmt.Fprintf",
-    "fmt.Printf",
-    "fmt.Sprintf",
-    "runtime/trace.Logf",
-    "log.Printf",
-    "log.Fatalf",
-    "log.Panicf",
-    "(*log.Logger).Fatalf",
-    "(*log.Logger).Panicf",
-    "(*log.Logger).Printf",
-    "(*testing.common).Errorf",
-    "(*testing.common).Fatalf",
-    "(*testing.common).Logf",
-    "(*testing.common).Skipf",
-    "(testing.TB).Errorf",
-    "(testing.TB).Fatalf",
-    "(testing.TB).Logf",
-    "(testing.TB).Skipf",
-];
+use crate::printf_wrappers;
 
 // Argument-type categories (a bitmask). `rune` is folded into `INT`.
 const B_BOOL: u32 = 1 << 0;
@@ -93,44 +64,6 @@ fn verb_arg_type(verb: char) -> Option<u32> {
 
 fn is_string_ish(verb: char) -> bool {
     matches!(verb, 's' | 'q' | 'v' | 'x' | 'X')
-}
-
-fn printf_kind(pass: &Pass<'_>, fun: &Expr) -> Option<()> {
-    // The table is keyed on `FullName()`, so a method has to be named as one.
-    let name = match fun_full_name(pass, fun) {
-        Some(n) => n,
-        None => call_name(pass, fun)?,
-    };
-    if KNOWN_PRINTF.iter().any(|k| *k == name) {
-        return Some(());
-    }
-    let short = name.rsplit('.').next()?;
-    if matches!(
-        short,
-        "Printf" | "Sprintf" | "Fprintf" | "Errorf" | "Fatalf" | "Panicf"
-    ) {
-        return Some(());
-    }
-    None
-}
-
-/// `types.Func.FullName()` for a call's `Fun` expression — the same string
-/// [`callee_full_name`] answers, reached without a whole `CallExpr`.
-fn fun_full_name(pass: &Pass<'_>, fun: &Expr) -> Option<String> {
-    let obj = guff_analysis::code::call_target_object(pass, fun)?;
-    let artifacts = pass.pkg().type_artifacts.as_ref()?;
-    if !matches!(
-        artifacts.objects.get(obj),
-        guff_types::arena::ObjectData::Func(_)
-    ) {
-        return None;
-    }
-    Some(guff_analysis::code::type_func_name(
-        &artifacts.types,
-        &artifacts.objects,
-        &artifacts.packages,
-        obj,
-    ))
 }
 
 /// Index into `call.args` of the format-string argument.
@@ -655,23 +588,36 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "printf requires inspect analyzer".to_string())?
         .clone();
 
-    let mut pending: Vec<(u32, String)> = Vec::new();
+    // Upstream's `run` is `findPrintLike` then `checkCalls`: which functions
+    // are print-like has to be settled for the whole package before any call
+    // site is judged, because a wrapper's kind can be learned from a call that
+    // appears later in the file than a call to the wrapper itself.
+    let (mut wrappers, mut pending) = printf_wrappers::find_print_like(pass);
+
     inspect.preorder_typed(node_mask!(CallExpr), pass.files(), |n| {
         let NodeRef::CallExpr(call) = n else {
             return;
         };
-        if printf_kind(pass, &call.fun).is_none() {
+        let Some(callee) = guff_analysis::code::call_target_object(pass, &call.fun) else {
             return;
-        }
-        // Upstream names the callee with `types.Func.FullName()`, so a method
-        // is `(*github.com/sirupsen/logrus.Entry).Errorf` — receiver and all.
-        // `call_name` is package path plus object name, which for a method is
-        // `logrus.Errorf`: a name Go never prints, and one that happens to
-        // collide with the package-level function of the same name.
-        let name = callee_full_name(pass, call)
-            .or_else(|| call_name(pass, &call.fun))
-            .unwrap_or_else(|| "Printf".into());
-        let is_errorf = name.ends_with("Errorf");
+        };
+        // Upstream's `fullname`: `types.Func.FullName()` for a function, so a
+        // method is `(*github.com/sirupsen/logrus.Entry).Errorf` — receiver and
+        // all — and the bare object name for anything else, which is how a
+        // function literal held in a variable gets named (`litf`, not the name
+        // of whatever it forwards to).
+        let Some((name, base)) = printf_wrappers::names_of(pass, callee) else {
+            return;
+        };
+        let kind = wrappers.kind_of(&name, &base, callee);
+        // `Kind::Print` reaches upstream's `checkPrint`, which guff does not
+        // implement; the kind still matters, because it is what made the
+        // forwarding call inside a print wrapper well-formed.
+        let is_errorf = match kind {
+            printf_wrappers::Kind::Printf => false,
+            printf_wrappers::Kind::Errorf => true,
+            printf_wrappers::Kind::Print | printf_wrappers::Kind::None => return,
+        };
         let fmt_idx = format_index(pass, call);
         let Some(format_arg) = call.args.get(fmt_idx) else {
             return;
@@ -683,6 +629,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         check_one(pass, call, &name, is_errorf, fmt_idx, &format, &mut pending);
     });
 
+    pending.sort_by_key(|(pos, _)| *pos);
     for (pos, message) in pending {
         pass.reportf(pos, message);
     }
