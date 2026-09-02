@@ -19871,3 +19871,51 @@ pipeline **13 → 6**（残りは `errorlint` の指示子 5 件 —— guff の
 golden 208/208（`gocritic` 197 → 217 キー、キー集合の差分で消失なし）、
 fix tier 208、reject 14、workspace テスト緑（新規テストは `(行, メッセージ)` の列で固定）、
 OSS pr tier 8 target すべて P=R=100%、gitea / prometheus / thanos / syncthing は動かず。
+
+### 2026-09-02（続き 148）— `hex-format` は**2 つの case** である。1 つの述語に畳むと両方向に外れる
+
+pipeline に残っていた golangci-only 1 件、`pkg/resolution/resource/name.go:88`:
+
+```go
+hex := fmt.Sprintf("%x", hasher.Sum(nil))
+```
+
+guff は `hex-format` を実装している。撃たない理由は上流の分岐を**1 つに畳んでいた**ことだった。
+catenacyber/perfsprint の `analyzer.go` にはこの規則が **2 つの case** として書いてある:
+
+```go
+case isArray && isBasicType(a.Elem(), types.Uint8) && oneOf(verb, "%x"):
+    if _, ok := value.(*ast.Ident); !ok { return }   // "Doesn't support array literals."
+    …TextEdits: 前置き + value.End() に "[:]"
+case isSlice && isBasicType(s.Elem(), types.Uint8) && oneOf(verb, "%x"):
+    …TextEdits: 前置きだけ
+```
+
+2 つは**両方向に違う**。array は識別子しか受けず `[:]` を足す。slice はどう書かれていても
+受け、何も足さない。guff は「これはバイト列か」を答える述語 1 つを持っていて、その bool を
+**「array か」として読んでいた**。結果:
+
+- `[]byte` が array の規則を継承し、**識別子でない値が黙った** —— `hasher.Sum(nil)` は
+  呼び出しなので識別子ではない。pipeline の 1 件はこれ。
+- **識別子だった `[]byte` の fix が壊れていた**: `hex.EncodeToString(b[:])` と書いていた。
+  上流は `hex.EncodeToString(b)`。
+- 要素がバイトでない場合、述語は `Some(false)` を返して**array 扱いで通過**していた ——
+  `fmt.Sprintf("%x", []int{…})` を guff だけが撃っていた。
+
+**測定** 16 形。修正前は上流 5・guff 4 で、共通は 2 —— **guff-only 2 / 上流-only 3**。
+修正後は全一致。黙る形も測った: 定義型 `type digest []byte`（上流の型アサーションは
+`valueType.(*types.Slice)` で **underlying を見ない**）、array のフィールド・リテラル・
+呼び出し結果（識別子でない 3 形）、`%X`、`%v`、`string` に対する `%x`。
+
+**fix の穴は finding の集合には映らない。** golden のキーはメッセージまでで、
+置換テキストは入っていない。`[:]` の誤りを止めているのは fix tier と、新しい単体テストの
+「その fix が `[:]` を足したか」を形ごとに固定する `assert_eq!` である。
+
+**この規則の fixture は 1 形しか無かった** —— `%x` に `[]byte` の**識別子**を渡す形、
+つまり畳んだ述語が偶然正しく答える唯一の形。isolate の fixture には `%x` が 1 つも無い。
+
+pipeline **6 → 5**（残りは `errorlint` の指示子 5 件。guff の errorlint には比較と型アサーションの
+半分はあるが `fmt.Errorf` の verb を見る半分が無い）。R=100% になった。台帳は 32/100 のまま。
+golden 208/208（`perfsprint` 7 → 12 キー、キー集合の差分で消失なし）、
+fix tier 208（`perfsprint.diff` 録り直し —— 上流の `--fix` が書く 5 行と 1 文字も違わない）、
+reject 14、workspace テスト緑、OSS pr tier 8 target すべて P=R=100%。

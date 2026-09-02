@@ -13,3 +13,8 @@ bad.go:32:9:perfsprint::bool-format: fmt.Sprintf can be replaced with faster str
 bad.go:36:20:perfsprint::string-format: fmt.Sprintf can be replaced with just using the string
 bad.go:46:9:perfsprint::error-format: fmt.Sprintf can be replaced with w.errs[i*2+j].Error()
 bad.go:50:9:perfsprint::error-format: fmt.Sprintf can be replaced with f().Error()
+hex.go:37:36:perfsprint::hex-format: fmt.Sprintf can be replaced with faster hex.EncodeToString
+hex.go:39:46:perfsprint::hex-format: fmt.Sprintf can be replaced with faster hex.EncodeToString
+hex.go:41:43:perfsprint::hex-format: fmt.Sprintf can be replaced with faster hex.EncodeToString
+hex.go:43:40:perfsprint::hex-format: fmt.Sprintf can be replaced with faster hex.EncodeToString
+hex.go:45:47:perfsprint::hex-format: fmt.Sprintf can be replaced with faster hex.EncodeToString

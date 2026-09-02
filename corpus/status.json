@@ -30,7 +30,7 @@
     "authelia": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260902T024622Z",
+      "at": "20260902T034536Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -38,7 +38,7 @@
     "caddy": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260902T031250Z",
+      "at": "20260902T033725Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -54,7 +54,7 @@
     "cobra": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260902T031250Z",
+      "at": "20260902T033725Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -140,7 +140,7 @@
     "gin": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260902T031250Z",
+      "at": "20260902T033725Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -148,7 +148,7 @@
     "gitea": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260902T031531Z",
+      "at": "20260902T034040Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -156,7 +156,7 @@
     "go-client": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260902T031250Z",
+      "at": "20260902T033725Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -180,7 +180,7 @@
     "helm": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260902T031250Z",
+      "at": "20260902T033725Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -196,7 +196,7 @@
     "k9s": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260902T031250Z",
+      "at": "20260902T033725Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -220,19 +220,18 @@
     "pipeline": {
       "tier": "hunt",
       "state": "open",
-      "at": "20260902T031504Z",
-      "open": 6,
+      "at": "20260902T034004Z",
+      "open": 5,
       "guff_only": 5,
-      "gcl_only": 1,
+      "gcl_only": 0,
       "by_linter": {
-        "nolintlint": 5,
-        "perfsprint": 1
+        "nolintlint": 5
       }
     },
     "prometheus": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260902T031609Z",
+      "at": "20260902T034116Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -264,7 +263,7 @@
     "syncthing": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260902T031804Z",
+      "at": "20260902T034222Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -272,7 +271,7 @@
     "thanos": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260902T031647Z",
+      "at": "20260902T034154Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -296,7 +295,7 @@
     "velero": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260902T024855Z",
+      "at": "20260902T034232Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
