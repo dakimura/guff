@@ -145,6 +145,20 @@ g402/g402.go:52:4:gosec:high:G402: TLS Bad Cipher Suite: TLS_RSA_WITH_AES_128_CB
 g602/g602.go:10:8:gosec:low:G602: slice bounds out of range
 g602/g602.go:16:10:gosec:low:G602: slice index out of range
 g602/g602.go:22:10:gosec:low:G602: slice index out of range
+g602v/g602_variadic.go:26:15:gosec:low:G602: slice index out of range
+g602v/g602_variadic.go:39:15:gosec:low:G602: slice index out of range
+g602v/g602_variadic.go:51:15:gosec:low:G602: slice index out of range
+g602v/g602_variadic.go:61:15:gosec:low:G602: slice index out of range
+g602v/g602_variadic.go:80:15:gosec:low:G602: slice index out of range
+g602v/g602_variadic.go:95:15:gosec:low:G602: slice index out of range
+g602v/g602_variadic.go:109:15:gosec:low:G602: slice index out of range
+g602v/g602_variadic.go:126:16:gosec:low:G602: slice index out of range
+g602v/g602_variadic.go:137:15:gosec:low:G602: slice index out of range
+g602v/g602_variadic.go:144:60:gosec:low:G602: slice index out of range
+g602v/g602_variadic.go:155:15:gosec:low:G602: slice index out of range
+g602v/g602_variadic.go:166:65:gosec:low:G602: slice index out of range
+g602v/g602_variadic.go:171:59:gosec:low:G602: slice index out of range
+g602v/g602_variadic.go:180:13:gosec:low:G602: slice index out of range
 g7xx/g7xx.go:37:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
 g7xx/g7xx.go:37:18:gosec:high:G702: Command injection via taint analysis
 g7xx/g7xx.go:42:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments

@@ -8,6 +8,34 @@
 //! guff lowers `make([]T, n)` as [`MakeSlice`] (go/ssa often uses Alloc of
 //! `[n]T` + Slice); the MakeSlice entry covers isolate fixtures.
 //!
+//! # Where guff's SSA does not spell the slice the way upstream reads it
+//!
+//! Upstream never asks "how big is this slice"; it asks "which `Alloc` of an
+//! array does this slice come from", and every capacity it knows is read off
+//! that array's type. Two of guff's lowerings put no such array in the program,
+//! and each cost the analyzer a whole family of findings — measured against
+//! golangci-lint 2.12.2 on twenty-four shapes, sixteen of which upstream
+//! reports:
+//!
+//! - **`make([]T, constN)` passed to a function.** go/ssa lowers a constant
+//!   `make` to `Alloc *[N]T` + `Slice`; guff emits a single [`MakeSlice`]. The
+//!   entry point below already knows that, but [`track_slice_bounds`]'s
+//!   `Call → parameter` step was a literal transcription of upstream's
+//!   `arg.(*ssa.Slice)` test, so the walk stopped at the call.
+//! - **a variadic call.** go/ssa packs `f(a, b)` into a fresh `Alloc *[2]any` +
+//!   `Slice`, which is where upstream's capacity for `f`'s `args` parameter
+//!   comes from. guff deliberately does not build that slice — it passes the
+//!   tail through individually and records the spread in
+//!   [`CallCommon::ellipsis`](guff_ssa::instr::CallCommon::ellipsis) — so there
+//!   was no array, no entry point, and G602 never looked inside a variadic
+//!   callee at all. [`variadic_call_cap`] synthesises exactly the capacity that
+//!   array would have had.
+//!
+//! Two shapes say where that synthesis stops, and both were measured:
+//! `f()` with an empty tail is silent upstream (go/ssa passes the `nil` slice
+//! constant, not an `Alloc`), and a call through a function *value* is silent
+//! too (upstream needs `Call.Value.(*ssa.Function)`).
+//!
 //! The SSA program and the `SrcFuncs` list come from [`crate::gosec_ssa`], which
 //! builds them once for every SSA-based gosec analyzer.
 
@@ -17,11 +45,12 @@ use guff::token::Token;
 use guff_analysis::callcheck::{extract_const_int, static_callee, SsaValue};
 use guff_analysis::referrers;
 use guff_ssa::function::Function;
-use guff_ssa::ids::{BlockId, FuncId, InstrId};
-use guff_ssa::instr::InstrData;
+use guff_ssa::ids::{BlockId, FuncId, InstrId, ParamId};
+use guff_ssa::instr::{CallCommon, InstrData};
 use guff_ssa::program::{value_type_of, Program};
 use guff_ssa::value::Value;
 use guff_types::arena::TypeData;
+use guff_types::signature::signature_variadic;
 use guff_types::TypeId;
 
 const MAX_DEPTH: u32 = 20;
@@ -161,6 +190,30 @@ fn collect_reports(
                             reports.insert((vf, vi), if is_bounds { MSG_BOUNDS } else { MSG_INDEX });
                         }
                     }
+                    // The variadic tail go/ssa would have packed into an
+                    // array. Upstream's entry point is that array's `Alloc`;
+                    // guff never builds it, so the capacity is read off the
+                    // call site instead and the callee's parameter is entered
+                    // directly. See [`variadic_call_cap`].
+                    InstrData::Call(c) => {
+                        let Some((callee, pid, slice_cap)) = variadic_call_cap(prog, &c.call)
+                        else {
+                            continue;
+                        };
+                        let mut violations: Vec<(FuncId, InstrId, bool)> = Vec::new();
+                        track_slice_bounds(
+                            prog,
+                            0,
+                            slice_cap,
+                            Node::Param(callee, pid),
+                            &mut violations,
+                            &mut ifs,
+                            &mut HashMap::new(),
+                        );
+                        for (vf, vi, is_bounds) in violations {
+                            reports.insert((vf, vi), if is_bounds { MSG_BOUNDS } else { MSG_INDEX });
+                        }
+                    }
                     InstrData::IndexAddr(ia) => {
                         // Nil slice constant index (go/ssa Const nil).
                         if let Value::Const(cid) = ia.x {
@@ -292,11 +345,24 @@ fn track_slice_bounds(
                     local.ifs.insert((fid, if_id), binop_id);
                     continue;
                 }
-                // Call→Param only when the tracked node is a *Slice* (gosec).
+                // Call→Param only when the tracked node is the slice *value*
+                // itself. Upstream writes that as `arg.(*ssa.Slice)`, which in
+                // go/ssa covers `make([]T, constN)` as well, because that is
+                // lowered to `Alloc` + `Slice`. guff emits a single MakeSlice
+                // for it, so MakeSlice stands in the same place and has to be
+                // accepted here too — without it `f(make([]any, 2))` never
+                // reached `f`'s body.
+                //
+                // A *parameter* is still excluded, and that is not an
+                // oversight: upstream stops there as well, so a variadic tail
+                // forwarded on with `pairs...` is silent in both tools.
                 let Node::Instr(_, tracked_iid) = node else {
                     continue;
                 };
-                if !matches!(func.instrs.get(tracked_iid), InstrData::Slice(_)) {
+                if !matches!(
+                    func.instrs.get(tracked_iid),
+                    InstrData::Slice(_) | InstrData::MakeSlice(_)
+                ) {
                     continue;
                 }
                 let mut par_pos: Option<usize> = None;
@@ -393,13 +459,27 @@ fn extract_slice_if_len_condition(
         return None;
     }
 
-    let mut refs: Vec<InstrId> = referrers(func, Value::Instr(call_id)).to_vec();
+    // Upstream returns the *first* `if` it reaches, and only that one is
+    // recorded — so which comparison against `len(s)` is found decides whether
+    // the whole family of issues in the branch is deleted. go/ssa's referrer
+    // list is in the order the referrers were built, which follows the source;
+    // guff's is not, and on
+    //
+    //     for i := 0; i < p; i += 2 {
+    //         if i+1 < p { _ = pairs[i+1] }
+    //     }
+    //
+    // it offered `i+1 < p` first. That comparison has `lenOffset == -1`, which
+    // makes the deletion rule `lenOffset+idxOffset-1 < 0` fire and the finding
+    // disappear; upstream sees `i < p` (`lenOffset == 0`), keeps the finding,
+    // and reports it. So the referrers are put back into build order here.
+    let mut refs: Vec<InstrId> = in_build_order(func, referrers(func, Value::Instr(call_id)));
     let mut depth = 0u32;
     while !refs.is_empty() && depth < MAX_DEPTH {
         let mut newrefs = Vec::new();
         for rid in refs {
             if matches!(func.instrs.get(rid), InstrData::BinOp(_)) {
-                for &r2 in referrers(func, Value::Instr(rid)) {
+                for &r2 in in_build_order(func, referrers(func, Value::Instr(rid))).iter() {
                     if matches!(func.instrs.get(r2), InstrData::If(_)) {
                         return Some((r2, rid));
                     }
@@ -407,10 +487,40 @@ fn extract_slice_if_len_condition(
                 }
             }
         }
-        refs = newrefs;
+        refs = in_build_order(func, &newrefs);
         depth += 1;
     }
     None
+}
+
+/// `ids`, reordered the way go/ssa lists a value's referrers: in the order the
+/// builder created them, which — because the builder walks the AST — is source
+/// order.
+///
+/// guff's block arena is *not* that order: it holds a `for` statement's body
+/// before its condition, so `referrers(p)` on
+///
+/// ```text
+/// for i := 0; i < p; i += 2 { if i+1 < p { ... } }
+/// ```
+///
+/// offers `i+1 < p` before `i < p`. Sorting on position puts them back.
+/// Instructions with no position sort last rather than first, so a synthetic
+/// instruction never displaces a real comparison.
+fn in_build_order(func: &Function, ids: &[InstrId]) -> Vec<InstrId> {
+    if ids.len() < 2 {
+        return ids.to_vec();
+    }
+    let mut out = ids.to_vec();
+    out.sort_by_key(|&iid| {
+        let p = func.pos(iid).0;
+        if p == 0 {
+            u32::MAX
+        } else {
+            p as u32
+        }
+    });
+    out
 }
 
 /// Post-pass: delete issues in if successor blocks (gosec `runSliceBounds` ~255–347).
@@ -613,7 +723,46 @@ fn extract_index_offset(
     None
 }
 
-fn resolve_static_func(common: &guff_ssa::instr::CallCommon) -> Option<FuncId> {
+/// The capacity go/ssa's variadic packing would have given the callee's
+/// `args ...T` parameter at this call site — the number of arguments past the
+/// last declared parameter — together with the callee and that parameter.
+///
+/// go/ssa turns `f(a, b)` into `Alloc *[2]any` + `Slice` + `f(t)`, and every
+/// bound upstream's G602 knows about `f`'s `args` comes from that array's
+/// type. guff passes the tail through individually, so this reads the same
+/// number off the call.
+///
+/// `None` is the answer for the shapes that have no such array upstream
+/// either, each one measured against golangci-lint rather than reasoned about:
+///
+/// - a spread call, `f(xs...)`: the length is whatever `xs` holds, and go/ssa
+///   forwards the slice instead of building one;
+/// - a call through a function *value* or an interface method: upstream needs
+///   `Call.Value.(*ssa.Function)` to find the parameter at all;
+/// - a non-variadic callee;
+/// - an **empty tail**, `f()`: go/ssa passes the `nil` slice constant, not an
+///   `Alloc`, so upstream is silent even though the capacity would be 0 and
+///   every index into it out of range.
+fn variadic_call_cap(prog: &Program, common: &CallCommon) -> Option<(FuncId, ParamId, i32)> {
+    if common.ellipsis || common.method.is_some() {
+        return None;
+    }
+    let callee = resolve_static_func(common)?;
+    let f = prog.functions.get(callee);
+    if !signature_variadic(&prog.type_arena, f.signature?) {
+        return None;
+    }
+    // A method's receiver occupies both `params[0]` and `args[0]`, so counting
+    // from the end is right for functions and methods alike.
+    let last = f.params.iter().map(|(pid, _)| pid).last()?;
+    let n_fixed = f.params.len() - 1;
+    if common.args.len() <= n_fixed {
+        return None;
+    }
+    Some((callee, last, (common.args.len() - n_fixed) as i32))
+}
+
+fn resolve_static_func(common: &CallCommon) -> Option<FuncId> {
     if let Some(fid) = static_callee(common) {
         return Some(fid);
     }
