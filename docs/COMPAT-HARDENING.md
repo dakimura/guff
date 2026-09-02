@@ -19919,3 +19919,72 @@ pipeline **6 → 5**（残りは `errorlint` の指示子 5 件。guff の error
 golden 208/208（`perfsprint` 7 → 12 キー、キー集合の差分で消失なし）、
 fix tier 208（`perfsprint.diff` 録り直し —— 上流の `--fix` が書く 5 行と 1 文字も違わない）、
 reject 14、workspace テスト緑、OSS pr tier 8 target すべて P=R=100%。
+
+### 2026-09-02（続き 149）— **上流のフラグの既定値は上流のものではない**。golangci が後から pin する。errorlint はその半分が丸ごと走っていなかった
+
+pipeline に残っていた 5 件はすべて guff だけが言う
+「`//nolint:errorlint` は未使用」で、抑えられていたのは
+`non-wrapping format verb for fmt.Errorf. Use `%w` to format errors`。
+`fmt.Errorf("%w: %v", ErrX, err)` の 2 つ目の verb である。
+
+guff の `errorlint.rs` の doc にはこう書いてあった:
+
+> Default flags match upstream analyzer defaults: comparison + asserts on,
+> **errorf off**.
+
+その記述は上流の analyzer については**正しい**。
+
+```go
+a.Flags.BoolVar(&checkErrorf, "errorf", false, "…")
+a.Flags.BoolVar(&checkErrorfMulti, "errorf-multi", true, "…")
+```
+
+**そして golangci-lint はそれを毎回上書きする。**
+
+```go
+ErrorLint: ErrorLintSettings{Errorf: true, ErrorfMulti: true, Asserts: true, Comparison: true},
+```
+
+`pkg/config/linters_settings.go` の既定値で、wrapper は 4 つとも無条件に
+forward する。つまり **analyzer の既定値が走ることは一度もない**。
+続き 133 の「golangci はラップした linter の option を後から pin する」と同じ形で、
+今回は**既定値を上げる**方向だった —— guff はこの check を**一度も走らせていなかった**。
+
+`printfParser`（122 行）と `LintFmtErrorfCalls` を移植し、
+`linters.settings.errorlint` の 4 キーを `Option<bool>`（absent ＝ golangci の既定 ＝ 全部 true）で配線した。
+`errorf-multi: false` は「`%w` を 1 つに制限する」だけではない —— 上流の**別の走査**を選ぶ。
+verb ではなく引数を歩くので、`%w: %v` は findings でなくなり `%w: %w` が
+`only one %w verb is permitted per format string` になる。両方の枝を実装して測った。
+
+**パーサは正しい printf パーサではない。同じパーサであることが要る。**
+知らない flag は verb を終わらせるので `%-10v` は verb `-` として読まれ、
+`-` は `w` でも `T` でもないから**その呼び出しは報告される**（fix は `-` を狙う）。
+`%%` は走査をやり直して引数を消費しない。どちらも fixture で固定した。
+
+**同じ grid が、既にあった半分の欠陥を 3 つ出した。** 30 形のうち errorf 以外の 6 件で:
+
+- 型アサーションの位置。上流は `typeAssert.Pos()` ＝ **`X`**（アサートされる error）で、
+  guff は `(` を指していた（4 桁ずれ）。
+- 型 switch の位置。上流は同じく assert の `X` で、guff は `switch` キーワードを指していた
+  （`switch e := err.(type)` では `err`）。
+- **上流に無い抑制 guard**。guff は「どれかの case が error を実装していること」を要求していて、
+  `case someNonErrorInterface:` と `case nil:` を黙らせていた。上流の条件は
+  「switch している値が error であること」だけである。
+
+**桁を測っていた tier が 1 つも無かった。** errorlint には isolate の fixture はあるが
+**golden case が無く**、桁を見るのは golden だけ（続き 111）。この回で case を足した。
+
+**golden case を足したら fix tier も読むようになり、6 つ目が出た**: 上流の `--fix` は
+型 switch を `{ var errCase0 *ptrErr; switch { case errors.As(err, &errCase0): … } }` に
+書き換えるが、guff は型 switch に fix を持たない。`compat/fix/pending/errorlint.diff` に
+記録した（上流 215 行 / guff 155 行）—— pending は allowlist ではなく台帳で、
+guff の出力がどちらに動いても落ちる。**次の作業はこれ。**
+
+**測定** 30 形。修正前は上流 24・guff 4（うち 3 件が違う桁）→ 全一致。
+設定は 6 通り（既定 / errorf off / errorf-multi off / asserts off / comparison off / 全部 off）
+すべてで一致。
+
+pipeline **5 → 0**。台帳 **32 → 33/100**。
+golden 208 → **209 case**（新しい `errorlint` case は 30 キー）、
+fix tier 209（`errorlint.diff` を expected と pending の両方に記録）、reject 14、
+workspace テスト緑、OSS pr tier 8 target すべて P=R=100%。

@@ -1,0 +1,164 @@
+# What guff's `--fix` writes TODAY for errorlint — generated, do not hand-edit.
+#
+# A pending baseline, not an allowlist: the case's real expectation is
+# expected/errorlint.diff, and it is printed in full on every run. This file only
+# keeps CI green while the gap is worked down, and it fails the gate if guff's
+# output moves in *either* direction — including once guff gets it right, so the
+# ledger cannot quietly outlive the defect it records.
+#
+# Re-record with: ./compat/fix/regen.sh --pending errorlint
+--- a/bad/bad.go
++++ b/bad/bad.go
+@@ -5,7 +5,7 @@
+ var errSentinel = errors.New("x")
+ 
+ func Bad(err error) bool {
+-	return err == errSentinel
++	return errors.Is(err, errSentinel)
+ }
+ 
+ // The type-assertion check carries an `errors.As` suggested fix, in four
+@@ -22,7 +22,8 @@
+ func (e valErr) Error() string { return e.msg }
+ 
+ func AssignTwo(err error) string {
+-	target, ok := err.(*myErr)
++	target := &myErr{}
++	ok := errors.As(err, &target)
+ 	if !ok {
+ 		return ""
+ 	}
+@@ -30,19 +31,22 @@
+ }
+ 
+ func AssignBlank(err error) bool {
+-	_, ok := err.(*myErr)
++	myErr := &myErr{}
++	ok := errors.As(err, &myErr)
+ 	return ok
+ }
+ 
+ func IfInit(err error) string {
+-	if target, ok := err.(*myErr); ok {
++	target := &myErr{}
++	if errors.As(err, &target) {
+ 		return target.msg
+ 	}
+ 	return ""
+ }
+ 
+ func AssignValue(err error) string {
+-	target, ok := err.(valErr)
++	var target valErr
++	ok := errors.As(err, &target)
+ 	if !ok {
+ 		return ""
+ 	}
+@@ -50,5 +54,9 @@
+ }
+ 
+ func Standalone(err error) string {
+-	return err.(*myErr).msg
++	return func() *myErr {
++		target := &myErr{}
++		_ = errors.As(err, &target)
++		return target
++	}().msg
+ }
+--- a/errorf/errorf.go
++++ b/errorf/errorf.go
+@@ -26,19 +26,19 @@
+ 
+ func (myErr) Error() string { return "my" }
+ 
+-func pipelineShape(err error) error { return fmt.Errorf("%w: %v", ErrSentinel, err) } // FINDING
++func pipelineShape(err error) error { return fmt.Errorf("%w: %w", ErrSentinel, err) } // FINDING
+ 
+-func plainV(err error) error { return fmt.Errorf("%v", err) } // FINDING
++func plainV(err error) error { return fmt.Errorf("%w", err) } // FINDING
+ 
+ // `%w` is the point of the check: silent.
+ func plainW(err error) error { return fmt.Errorf("%w", err) }
+ 
+-func plainS(err error) error { return fmt.Errorf("%s", err) } // FINDING
++func plainS(err error) error { return fmt.Errorf("%w", err) } // FINDING
+ 
+ // Two wraps are legal since Go 1.20, and `errorf-multi` is on by default.
+ func twoWraps(a, b error) error { return fmt.Errorf("%w: %w", a, b) }
+ 
+-func intThenErr(err error) error { return fmt.Errorf("%d %v", 1, err) } // FINDING
++func intThenErr(err error) error { return fmt.Errorf("%d %w", 1, err) } // FINDING
+ 
+ // The argument is not an error.
+ func notAnError(s string) error { return fmt.Errorf("%v", s) }
+@@ -54,39 +54,39 @@
+ func typeVerb(err error) error { return fmt.Errorf("%T", err) }
+ 
+ // An explicit `[n]` sets the argument index, so `%[2]v` names the error.
+-func indexedVerbs(err error) error { return fmt.Errorf("%[2]v %[1]d", 1, err) } // FINDING
++func indexedVerbs(err error) error { return fmt.Errorf("%[2]w %[1]d", 1, err) } // FINDING
+ 
+ // `%%` restarts the parse and consumes no argument.
+-func escapedPercent(err error) error { return fmt.Errorf("100%% %v", err) } // FINDING
++func escapedPercent(err error) error { return fmt.Errorf("100%% %w", err) } // FINDING
+ 
+-func plusV(err error) error { return fmt.Errorf("%+v", err) } // FINDING
++func plusV(err error) error { return fmt.Errorf("%+w", err) } // FINDING
+ 
+ // The parser does not know `-`, so it ends the verb: this parses as the verb
+ // `-`, which is neither `w` nor `T`, and the call is still reported.
+-func dashWidth(err error) error { return fmt.Errorf("%-10v", err) } // FINDING
++func dashWidth(err error) error { return fmt.Errorf("%w10v", err) } // FINDING
+ 
+ // Two offending verbs, one diagnostic — at the first argument, carrying two
+ // suggested fixes.
+-func twoPlainErrs(a, b error) error { return fmt.Errorf("%v: %v", a, b) } // FINDING
++func twoPlainErrs(a, b error) error { return fmt.Errorf("%w: %w", a, b) } // FINDING
+ 
+-func customType(e myErr) error { return fmt.Errorf("%v", e) } // FINDING
++func customType(e myErr) error { return fmt.Errorf("%w", e) } // FINDING
+ 
+-func wrapThenPlain(a, b error) error { return fmt.Errorf("%w then %v", a, b) } // FINDING
++func wrapThenPlain(a, b error) error { return fmt.Errorf("%w then %w", a, b) } // FINDING
+ 
+-func plainThenWrap(a, b error) error { return fmt.Errorf("%v then %w", a, b) } // FINDING
++func plainThenWrap(a, b error) error { return fmt.Errorf("%w then %w", a, b) } // FINDING
+ 
+ // A verb past the end of the argument list is skipped, not counted.
+-func moreVerbsThanArgs(err error) error { return fmt.Errorf("%v %v", err) } // FINDING
++func moreVerbsThanArgs(err error) error { return fmt.Errorf("%w %v", err) } // FINDING
+ 
+-func moreArgsThanVerbs(a, b error) error { return fmt.Errorf("%v", a, b) } // FINDING
++func moreArgsThanVerbs(a, b error) error { return fmt.Errorf("%w", a, b) } // FINDING
+ 
+ // Two calls on one line, each with its own error argument: two findings. The
+ // default `uniq-by-line: true` would show only one.
+-func nestedCall(err error) error { return fmt.Errorf("%v", fmt.Errorf("%v", err)) } // FINDING x2
++func nestedCall(err error) error { return fmt.Errorf("%w", fmt.Errorf("%w", err)) } // FINDING x2
+ 
+-func precision(err error) error { return fmt.Errorf("%.3v", err) } // FINDING
++func precision(err error) error { return fmt.Errorf("%.3w", err) } // FINDING
+ 
+-func sharpVerb(err error) error { return fmt.Errorf("%#v", err) } // FINDING
++func sharpVerb(err error) error { return fmt.Errorf("%#w", err) } // FINDING
+ 
+ type ptrErr struct{}
+ 
+@@ -95,11 +95,15 @@
+ // --- the type-assertion half, whose positions the same grid corrected ---
+ 
+ // Reported at the comparison.
+-func plainComparison(err error) bool { return err == ErrSentinel } // FINDING
++func plainComparison(err error) bool { return errors.Is(err, ErrSentinel) } // FINDING
+ 
+ // `typeAssert.Pos()` is the `X`, so the column is `err` — guff pointed at the
+ // `(` four columns over.
+-func plainAssert(err error) bool { _, ok := err.(*ptrErr); return ok } // FINDING
++func plainAssert(err error) bool {
++	ptrErr := &ptrErr{}
++	ok := errors.As(err, &ptrErr)
++	return ok
++} // FINDING
+ 
+ // Likewise for a type switch: the position is the switched expression, not
+ // the `switch` keyword.

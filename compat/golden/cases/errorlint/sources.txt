@@ -1,0 +1,10 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# The golden tier keeps no copy: it points at the files the other gates already
+# read, so the two can never drift. bad.go is the isolate fixture; errorf.go is
+# the Rust unit test's, which is where the `fmt.Errorf` grid lives.
+# Each file gets its own directory: they are separate packages, and the Rust
+# unit tests type-check them that way too.
+bad/bad.go        compat/isolate/fixtures/errorlint/bad.go
+errorf/errorf.go  crates/guff-error/tests/testdata/errorlint/errorf.go

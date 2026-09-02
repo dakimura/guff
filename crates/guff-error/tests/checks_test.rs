@@ -574,6 +574,180 @@ fn errchkjson_flags_unchecked_encoder_encode() {
     );
 }
 
+/// The `fmt.Errorf` half of errorlint, which guff did not have, and the three
+/// defects the same grid turned up in the half it did.
+///
+/// **golangci-lint pins the check on.** The analyzer ships `errorf` *off*
+/// (`a.Flags.BoolVar(&checkErrorf, "errorf", false, …)`); golangci-lint seeds
+/// `ErrorLint{Errorf: true, ErrorfMulti: true, Asserts: true, Comparison: true}`
+/// and forwards all four every run. guff read the analyzer's default, so the
+/// half never ran on any corpus target.
+///
+/// The other three, all found by the same twenty-nine-shape grid rather than
+/// by reading:
+///
+/// - a type assertion was reported at its `(`, not at the error being
+///   asserted (`typeAssert.Pos()` is `X.Pos()`);
+/// - a type switch was reported at the `switch` keyword, not at the switched
+///   expression;
+/// - and guff had an "and some case must implement error" guard that upstream
+///   does not have, which silenced `case someNonErrorInterface:` and
+///   `case nil:`.
+///
+/// Nothing was gating any of the columns: errorlint has an isolate fixture but
+/// had no golden case, and the golden tier is the only one that compares
+/// columns. This change adds the case.
+///
+/// Asserted as `(line, column, which check)`. Measured against golangci-lint
+/// 2.12.2 (go-errorlint v1.9.0).
+#[test]
+fn errorlint_checks_fmt_errorf_and_reports_at_the_error() {
+    let dir = support::testdata("errorlint");
+    let pkg = support::typecheck_pkg("example.com/errorlint/errorf", &dir.join("errorf.go"));
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64, char)> = support::run_analyzer_diagnostics(errorlint(), &pkg)
+        .into_iter()
+        .map(|d| {
+            let p = fset.position(guff::position::Pos(d.pos as i64));
+            let kind = if d.message.starts_with("non-wrapping") {
+                'W'
+            } else if d.message.starts_with("comparing") {
+                'C'
+            } else if d.message.starts_with("type assertion") {
+                'A'
+            } else {
+                'S'
+            };
+            (p.line, p.column, kind)
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            (29, 80, 'W'),
+            (31, 56, 'W'),
+            (36, 56, 'W'),
+            (41, 66, 'W'),
+            // `%[2]v` names the second argument
+            (57, 74, 'W'),
+            // `%%` consumes nothing
+            (60, 70, 'W'),
+            (62, 56, 'W'),
+            // `%-10v` parses as the verb `-`, and `-` is not `w`
+            (66, 62, 'W'),
+            // two offending verbs, one diagnostic, at the first argument
+            (70, 67, 'W'),
+            (72, 58, 'W'),
+            (74, 75, 'W'),
+            (76, 72, 'W'),
+            (79, 70, 'W'),
+            (81, 68, 'W'),
+            // two calls on one line, each with its own error argument
+            (85, 60, 'W'),
+            (85, 77, 'W'),
+            (87, 61, 'W'),
+            (89, 60, 'W'),
+            // the comparison half, unchanged
+            (98, 47, 'C'),
+            // …and the two positions that moved
+            (102, 45, 'A'),
+            (107, 9, 'S'),
+            // the two the removed guard had been silencing
+            (119, 9, 'S'),
+            (128, 14, 'S'),
+            (138, 9, 'S'),
+        ],
+        "errorlint findings"
+    );
+}
+
+/// `errorf`, `errorf-multi`, `asserts` and `comparison` each switch off their
+/// own half, and an absent key means golangci-lint's default (all four on) —
+/// not `false`. `errorf-multi: false` does not merely permit fewer wraps: it
+/// selects upstream's *other* traversal, which walks arguments rather than
+/// verbs, so `fmt.Errorf("%w: %v", a, b)` stops being a finding and
+/// `fmt.Errorf("%w: %w", a, b)` starts being one.
+#[test]
+fn errorlint_settings_switch_each_half() {
+    use guff_analysis::SettingsBag;
+    use guff_error::ErrorlintOptions;
+    use guff_runner::RunnerOptions;
+    use std::sync::Arc;
+
+    let dir = support::testdata("errorlint");
+    let pkg = support::typecheck_pkg("example.com/errorlint/errorf", &dir.join("errorf.go"));
+
+    let run = |opts: ErrorlintOptions| -> Vec<String> {
+        let mut bag = SettingsBag::new();
+        bag.insert("errorlint", opts);
+        support::run_analyzer_with_settings(
+            errorlint(),
+            &pkg,
+            &RunnerOptions {
+                settings: Arc::new(bag),
+                ..RunnerOptions::default()
+            },
+        )
+    };
+    let count = |ms: &[String], prefix: &str| ms.iter().filter(|m| m.starts_with(prefix)).count();
+
+    let all = run(ErrorlintOptions::default());
+    assert_eq!(
+        (
+            count(&all, "non-wrapping"),
+            count(&all, "comparing"),
+            count(&all, "type assertion"),
+            count(&all, "type switch"),
+        ),
+        (18, 1, 1, 4),
+        "defaults: every half on"
+    );
+
+    let no_errorf = run(ErrorlintOptions {
+        errorf: false,
+        ..ErrorlintOptions::default()
+    });
+    assert_eq!(count(&no_errorf, "non-wrapping"), 0, "{no_errorf:?}");
+    assert_eq!(no_errorf.len(), 6, "the other halves stay: {no_errorf:?}");
+
+    let no_asserts = run(ErrorlintOptions {
+        asserts: false,
+        ..ErrorlintOptions::default()
+    });
+    assert_eq!(
+        (
+            count(&no_asserts, "type assertion"),
+            count(&no_asserts, "type switch")
+        ),
+        (0, 0),
+        "{no_asserts:?}"
+    );
+
+    let no_comparison = run(ErrorlintOptions {
+        comparison: false,
+        ..ErrorlintOptions::default()
+    });
+    assert_eq!(count(&no_comparison, "comparing"), 0, "{no_comparison:?}");
+
+    // The other traversal: `%w: %v` goes quiet and `%w: %w` becomes
+    // "only one %w verb is permitted per format string".
+    let single = run(ErrorlintOptions {
+        errorf_multi: false,
+        ..ErrorlintOptions::default()
+    });
+    assert_eq!(
+        count(&single, "only one %w verb is permitted"),
+        1,
+        "{single:?}"
+    );
+    assert_eq!(
+        count(&single, "non-wrapping"),
+        17,
+        "the two-wrap call stops being one: {single:?}"
+    );
+}
+
 #[test]
 fn errorlint_suggests_errors_as_for_type_assertions() {
     // errorlint's `errors.As` rewrite, `lint.go` ~470-608. Four shapes, and the
