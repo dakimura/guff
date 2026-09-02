@@ -7297,6 +7297,80 @@ fn gocritic_disabled_tags_style_skips_if_else_chain() {
     );
 }
 
+/// Which doc comments `deprecatedComment` is shown, and what each malformed
+/// notice is called.
+///
+/// The checker is `astwalk.WalkerForDocComment`, whose file walk starts at
+/// `f.Decls` and reaches a `GenDecl`'s doc *and* every spec inside it, plus
+/// every `Field` under a `TypeSpec`'s type. guff walked only the outermost two
+/// and additionally visited the *package* doc, which upstream never reaches —
+/// six `Deprecated: ` notices on Tekton pipeline's grouped constants and struct
+/// fields went unreported, and a `//nolint:gocritic` covering a seventh was
+/// called unused.
+///
+/// Asserted as `(line, message)` pairs. Four of the five messages this checker
+/// can produce had no fixture at all before this one, and one of them was
+/// wrong: `warnPattern` says ``the proper format is `Deprecated: <text>` ``,
+/// not ``the proper format is `Deprecated: ` ``. Measured against
+/// golangci-lint 2.12.2 (go-critic v0.14.3).
+#[test]
+fn gocritic_deprecated_comment_sees_every_declaration_doc() {
+    let pkg = support::typecheck_fixture(
+        "gocritic",
+        "example.com/gocritic/deprecated",
+        "deprecated.go",
+    );
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let paragraph = "deprecatedComment: `Deprecated: ` notices should be in a dedicated paragraph, separated from the rest";
+    let pattern = "deprecatedComment: the proper format is `Deprecated: <text>`";
+    let casing = "deprecatedComment: use `Deprecated: ` (note the casing) instead of `DEPRECATED: `";
+    let mut got: Vec<(i64, String)> = support::run_analyzer_diagnostics(gocritic(), &pkg)
+        .into_iter()
+        .map(|d| {
+            (
+                fset.position(guff::position::Pos(d.pos as i64)).line,
+                d.message,
+            )
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            // an ImportSpec doc, then a GenDecl doc — and the GenDecl one is
+            // reported once, though guff's parser hangs it on the lone
+            // ValueSpec as well
+            (19, paragraph.into()),
+            (26, paragraph.into()),
+            // a spec inside `const (…)` and one inside `type (…)`
+            (31, paragraph.into()),
+            (37, paragraph.into()),
+            // struct fields, including one nested two types deep…
+            (43, paragraph.into()),
+            (46, pattern.into()),
+            (53, paragraph.into()),
+            // …and an interface method
+            (60, paragraph.into()),
+            // a previous line shorter than the prefix still counts as text
+            (73, paragraph.into()),
+            // the five messages, one declaration each
+            (97, casing.into()),
+            (100, "deprecatedComment: use `:` instead of `,` in `Deprecated, `".into()),
+            (103, "deprecatedComment: typo in `Deprecatd`; should be `Deprecated`".into()),
+            (106, pattern.into()),
+            (109, pattern.into()),
+            (112, pattern.into()),
+            (115, pattern.into()),
+            (118, pattern.into()),
+            (121, pattern.into()),
+            (124, pattern.into()),
+            // two problems in one comment: the walk returns after the first
+            (128, casing.into()),
+        ],
+        "deprecatedComment findings"
+    );
+}
+
 #[test]
 fn gocritic_enable_all_extras() {
     // Counts over `extras.go` alone (the golden case also reads bad.go and

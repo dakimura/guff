@@ -49,6 +49,26 @@ bad.go:223:6:gocritic::badCond: `x == a && x == b` condition is suspicious
 bad.go:231:9:gocritic::regexpMust: for const patterns like "abc", use regexp.MustCompile
 bad.go:235:6:gocritic::wrapperFunc: use strings.Split method in `strings.SplitN(s, ",", -1)`
 bad.go:240:6:gocritic::argOrder: "#" and s arguments order looks reversed
+deprecated.go:19:2:gocritic::deprecatedComment: `Deprecated: ` notices should be in a dedicated paragraph, separated from the rest
+deprecated.go:26:1:gocritic::deprecatedComment: `Deprecated: ` notices should be in a dedicated paragraph, separated from the rest
+deprecated.go:31:2:gocritic::deprecatedComment: `Deprecated: ` notices should be in a dedicated paragraph, separated from the rest
+deprecated.go:37:2:gocritic::deprecatedComment: `Deprecated: ` notices should be in a dedicated paragraph, separated from the rest
+deprecated.go:43:2:gocritic::deprecatedComment: `Deprecated: ` notices should be in a dedicated paragraph, separated from the rest
+deprecated.go:46:2:gocritic::deprecatedComment: the proper format is `Deprecated: <text>`
+deprecated.go:53:3:gocritic::deprecatedComment: `Deprecated: ` notices should be in a dedicated paragraph, separated from the rest
+deprecated.go:60:2:gocritic::deprecatedComment: `Deprecated: ` notices should be in a dedicated paragraph, separated from the rest
+deprecated.go:73:1:gocritic::deprecatedComment: `Deprecated: ` notices should be in a dedicated paragraph, separated from the rest
+deprecated.go:97:1:gocritic::deprecatedComment: use `Deprecated: ` (note the casing) instead of `DEPRECATED: `
+deprecated.go:100:1:gocritic::deprecatedComment: use `:` instead of `,` in `Deprecated, `
+deprecated.go:103:1:gocritic::deprecatedComment: typo in `Deprecatd`; should be `Deprecated`
+deprecated.go:106:1:gocritic::deprecatedComment: the proper format is `Deprecated: <text>`
+deprecated.go:109:1:gocritic::deprecatedComment: the proper format is `Deprecated: <text>`
+deprecated.go:112:1:gocritic::deprecatedComment: the proper format is `Deprecated: <text>`
+deprecated.go:115:1:gocritic::deprecatedComment: the proper format is `Deprecated: <text>`
+deprecated.go:118:1:gocritic::deprecatedComment: the proper format is `Deprecated: <text>`
+deprecated.go:121:1:gocritic::deprecatedComment: the proper format is `Deprecated: <text>`
+deprecated.go:124:1:gocritic::deprecatedComment: the proper format is `Deprecated: <text>`
+deprecated.go:128:1:gocritic::deprecatedComment: use `Deprecated: ` (note the casing) instead of `DEPRECATED: `
 extras.go:5:2:gocritic::dupImport: package is imported 2 times under different aliases on lines 5 and 6
 extras.go:6:2:gocritic::dupImport: package is imported 2 times under different aliases on lines 5 and 6
 extras.go:16:2:gocritic::commentedOutImport: remove commented-out "os" import

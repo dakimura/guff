@@ -2913,7 +2913,7 @@ fn check_deprecated_comment(doc: &CommentGroup, pending: &mut Pending) {
                     pending,
                     comment.slash.0 as u32,
                     "deprecatedComment",
-                    "the proper format is `Deprecated: `",
+                    "the proper format is `Deprecated: <text>`",
                 );
                 return;
             }
@@ -2971,23 +2971,68 @@ fn reparse_with_comments(path: &Path, cached: Option<&[u8]>) -> Option<(Arc<File
     Some((fset, file))
 }
 
+/// `astwalk.WalkerForDocComment`'s file walk: every doc comment attached to a
+/// declaration.
+///
+/// The list is longer than "the things at the top level". A `const (…)` block
+/// is one `GenDecl` whose specs each carry their own doc, and a struct's fields
+/// carry theirs — upstream reaches all of them, and reaching only the two
+/// outermost was seven of Tekton pipeline's thirteen diffs (six `Deprecated: `
+/// notices on grouped constants and struct fields that guff never saw, and one
+/// `//nolint:gocritic` it therefore called unused).
+///
+/// The **package doc comment is not in the list**, and that is upstream's
+/// walk, not an omission: it starts at `f.Decls`. guff used to include it and
+/// reported a package comment no tool else does.
 fn declaration_docs(file: &File) -> Vec<&CommentGroup> {
-    let mut out = Vec::new();
-    if let Some(doc) = &file.doc {
+    // go/parser gives an unparenthesised `var x int` its doc on the `GenDecl`
+    // and leaves the single `ValueSpec`'s doc nil; guff's parser puts it on
+    // both, so without deduplication the notice on such a declaration is
+    // reported twice. The group's own position identifies it — two
+    // declarations cannot share one.
+    fn push<'a>(out: &mut Vec<&'a CommentGroup>, doc: Option<&'a CommentGroup>) {
+        let Some(doc) = doc else { return };
+        let at = doc.list.first().map(|c| c.slash);
+        if at.is_some() && out.iter().any(|d| d.list.first().map(|c| c.slash) == at) {
+            return;
+        }
         out.push(doc);
     }
+
+    let mut out: Vec<&CommentGroup> = Vec::new();
     for decl in &file.decls {
         match decl {
             Decl::GenDecl(g) => {
-                if let Some(doc) = &g.doc {
-                    out.push(doc);
+                push(&mut out, g.doc.as_ref());
+                for spec in &g.specs {
+                    match spec {
+                        Spec::ImportSpec(sp) => push(&mut out, sp.doc.as_ref()),
+                        Spec::ValueSpec(sp) => push(&mut out, sp.doc.as_ref()),
+                        Spec::TypeSpec(sp) => {
+                            push(&mut out, sp.doc.as_ref());
+                            // Upstream inspects the spec's *type* for `Field`
+                            // nodes, so this reaches struct fields and
+                            // interface methods at any nesting depth — but only
+                            // under a named type. A field of an anonymous
+                            // struct in `var x = struct{…}{}` is never visited,
+                            // and neither is a documented parameter.
+                            let mut fields: Vec<&CommentGroup> = Vec::new();
+                            walk::inspect(walk::expr_ref(&sp.ty), |n| {
+                                if let Some(NodeRef::Field(f)) = n {
+                                    if let Some(doc) = f.doc.as_ref() {
+                                        fields.push(doc);
+                                    }
+                                }
+                                true
+                            });
+                            for doc in fields {
+                                push(&mut out, Some(doc));
+                            }
+                        }
+                    }
                 }
             }
-            Decl::FuncDecl(f) => {
-                if let Some(doc) = &f.doc {
-                    out.push(doc);
-                }
-            }
+            Decl::FuncDecl(f) => push(&mut out, f.doc.as_ref()),
             Decl::BadDecl(_) => {}
         }
     }

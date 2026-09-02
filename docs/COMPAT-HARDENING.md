@@ -19805,3 +19805,69 @@ golden 208/208（`gosec` 206 → 220 キー、キー集合の差分で消失な�
 新しい fixture のもので、`assert_eq!` の**位置の列**で固定してある —— この規則は
 findings の文面が全部同じなので、`any(contains("G602"))` はどの部分集合でも緑になる）、
 fix tier 208、reject 14、workspace テスト緑、OSS pr tier 8 target すべて P=R=100%。
+
+### 2026-09-02（続き 147）— doc コメントは宣言ごとに 1 つではない。**group の中の spec にも、struct の field にも**付いている
+
+pipeline の 13 件のうち 7 件が 1 つの原因だった —— golangci だけが出す
+`gocritic:deprecatedComment` 6 件と、guff だけが出す
+「`//nolint:gocritic` は未使用」1 件。
+
+上流の `deprecatedComment` は `astwalk.WalkerForDocComment` で走る。その file walk は
+**44 行**で、これが規則の本体である:
+
+```go
+for _, decl := range f.Decls {
+	case *ast.FuncDecl: decl.Doc
+	case *ast.GenDecl:
+		decl.Doc
+		for _, spec := range decl.Specs {
+			case *ast.ImportSpec: spec.Doc
+			case *ast.ValueSpec:  spec.Doc
+			case *ast.TypeSpec:
+				spec.Doc
+				ast.Inspect(spec.Type, …)   // *ast.Field の Doc すべて
+		}
+}
+```
+
+guff の `declaration_docs` は **GenDecl と FuncDecl の doc だけ**だった。
+`const ( … )` は 1 つの GenDecl で、通知は**その中の各 ValueSpec** に付いている。
+struct の field も同じ。pipeline の 6 件はすべてそこにあった。
+
+**それと逆向きの穴も 1 つあった**: guff は **package の doc コメント**も見ていた。
+上流の walk は `f.Decls` から始まるのでそこには届かない。測定で 1 形出た
+（`// Deprecated: …` で始まる package コメントを guff だけが撃つ）。
+
+guff だけが「未使用」と言っていた `//nolint:gocritic` は
+`pkg/apis/config/feature_flags.go:478` で、コメントは
+
+```go
+// Deprecated indicates whether the feature is deprecated
+```
+
+—— `Deprecated: ` ではないので通知ではないが、上流の `commonPatterns` の
+**`deprecated in`** に `EqualFold` で前方一致する（`Deprecated in`）。だから上流は
+`the proper format is …` を撃ち、指示子はそれを抑えていた。
+
+**メッセージも 1 つ違っていた。** `warnPattern` は
+「the proper format is `` `Deprecated: <text>` ``」で、guff は `<text>` を落としていた。
+この checker が出しうる 5 つの文面のうち、**4 つに fixture が 1 つも無かった** ——
+既存の fixture にあった `deprecatedComment` は「黙る」1 形だけである。
+
+**spec の doc を見た瞬間に別のことが壊れた**: 括弧なしの `var x int` に付いた doc を、
+go/parser は GenDecl にだけ置き `ValueSpec.Doc` は nil にするが、**guff の parser は
+両方に置く**。同じ通知が 2 回出た（golden case は `uniq-by-line: false` なので
+これはそのまま差分になる）。group の位置で重複排除した。
+
+**測定** 37 形 → 20 findings、5 つの文面すべてを通して全一致。
+黙る形も測った: 独立した段落の通知、前に何も無い通知、`var x = struct{…}{}` の
+**無名 struct の field**（TypeSpec の下ではない）、**doc の付いたパラメータ**（同じく `Field`
+だが TypeSpec の型の下ではない）、そして 1 つのコメントに 2 つ問題があるとき
+（上流は最初の 1 つで `return` する）。
+
+pipeline **13 → 6**（残りは `errorlint` の指示子 5 件 —— guff の errorlint には
+`fmt.Errorf` の verb を見る半分が無い —— と `perfsprint` の `hex-format` 1 件）。
+台帳は 32/100 のまま。
+golden 208/208（`gocritic` 197 → 217 キー、キー集合の差分で消失なし）、
+fix tier 208、reject 14、workspace テスト緑（新規テストは `(行, メッセージ)` の列で固定）、
+OSS pr tier 8 target すべて P=R=100%、gitea / prometheus / thanos / syncthing は動かず。
