@@ -17,6 +17,7 @@ pub mod nolintlint;
 mod pathutil;
 mod registry;
 mod settings;
+mod typecheck;
 mod watch;
 
 pub use config::{
@@ -850,6 +851,14 @@ impl LintResult {
             };
             issues.extend(IssueFilter::collect_issues(fset, &[(action_id, diag)]));
         }
+        // The loader's own errors, as golangci's `typecheck` pseudo linter.
+        // They come from the packages rather than from the analysis, so they
+        // are rebuilt every run and never take part in the issue cache.
+        let base = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        issues.extend(crate::typecheck::issues_from_package_errors(
+            &self.packages,
+            &base,
+        ));
         issues
     }
 

@@ -20041,3 +20041,58 @@ cri-o の 116 件のうち 1 件も同じ種類である。
 
 台帳: alertmanager を採用して **35 target**、`open 1 (typecheck=1)`。33/100 のまま。
 この回の成果は台帳と、この 1 件の正体である。
+
+### 2026-09-02（続き 151）— `typecheck` の本体は 190 行の抽出ではなく、**4 行の上書き**である。移植したが、既定では 1 件も出ない —— その理由を 1 か所に特定した
+
+続き 150 で「次の作業」と書いた typecheck 疑似 linter を測って移植した。
+**最初に測るべき**と書いた「guff が ill-typed と呼ぶパッケージの集合」は、
+測ったら**空だった** —— `compat/baselines/health.json` と `health-hunt.json` は
+どちらも `targets: {}` で、行が無いのは厳密にゼロを意味する（続き 96）。
+`go list -e` の側も 4 target・**771 パッケージで Error は 1 件だけ**だった。
+
+**そして規則の本体は抽出ではなかった。** `pkg/goanalysis/pkgerrors/` は 190 行だが、
+効き目の大きいのは `pkg/result/processors/invalid_issue.go` の冒頭 4 行である:
+
+```go
+tcIssues := filterIssuesUnsafe(issues, func(i *result.Issue) bool {
+	return i.FromLinter == typeCheckName
+})
+if len(tcIssues) > 0 { return tcIssues, nil }
+```
+
+**typecheck の issue が 1 件でもあると、その run の findings は他が全部消える。**
+壊れていないパッケージのものも消える —— `./b/... ./c/...` を測ると、
+`b` の `//go:embed missing` だけが出て **`c` の errorlint は消える**（`c` 単独なら出る）。
+これは processor 列の **4 番目**（`Cgo` の後、あらゆる exclusion の前）なので、
+`exclude-rules` で戻すこともできない。
+
+移植は `ErrorKind::List` のエラーだけに限った。これは**測った境界**である:
+`go list` のエラー文言は両ツールとも `go list` そのものなので一致しかしないが、
+型エラーは **guff 自身の文言**で、2026-08-11 の測定では 9 形中 2 形が `go build` と
+違っていた。そして間違えた代償は 1 件の誤報ではなく、**レポート全体が空になること**である。
+
+**`./...` は再帰を不要にする。** 上流の `extractErrorsImpl` は、そのパッケージに
+エラーが無ければ import を辿る —— 壊れた `a` を import する `d` が
+`could not import example.com/tc/a (a/a.go:5:12: …)` になるのはそれ。測ると、
+この finding は **`d` だけを lint したときに出て、`a` が同じ run にいると消える**
+（`stackCrusher` が内側の文言に潰し、`a` 自身のエラーが先に取っている）。
+コーパスの target はすべて `./...` なので、壊れたパッケージは常に集合の中にいる。
+
+**そして既定の run では 1 件も出ない。** 原因は 1 か所に特定できた:
+
+- guff の lister は **2026-07-31 から native が既定**（`GUFF_NATIVE_LIST` 未設定で `On`）、
+- `guff-golist` には **`embed` という語が 1 度も出てこない**。パターンを解決しないので
+  エラーも生まれない。
+
+`GUFF_NATIVE_LIST=0` で `go list` 経路に戻すと、**8 形すべてが上流と一致する** ——
+消される側の finding まで含めて。だから移植したコードは正しく、足りないのは
+**native lister の embed パターン解決**という名前の付いた 1 つだけである。
+
+**書く人への 1 つの落とし穴**: `go list -e -json=<fields>` は、
+**`EmbedFiles` を要求したときにだけ**このエラーを計算する。`EmbedPatterns` だけでは
+出ない（4 通りの field list で測った）。要求する費用はゼロ
+（prometheus `./...` で 0.32s vs 0.21s、誤差の内）。guff の field list は既に両方を要求している。
+
+台帳は 33/100 のまま、alertmanager も `open 1` のまま —— 既定の挙動は 1 バイトも変わらない。
+golden 209/209、fix 209、reject 14、workspace テスト緑、OSS pr tier 8/8 P=R=100%
+（どれも「変わらないこと」の確認である）。
