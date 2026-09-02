@@ -8,8 +8,9 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::context::Context;
+use crate::embed::parse_go_embeds;
 use crate::go_source::parse_go_file_info;
-use crate::package::{BuildError, MultiplePackageError, NoGoError, Package};
+use crate::package::{BuildError, EmbedPattern, MultiplePackageError, NoGoError, Package};
 
 impl Context {
     /// Loads the Go package in the named directory.
@@ -57,6 +58,9 @@ impl Context {
         let mut seen_imp = HashSet::new();
         let mut seen_test_imp = HashSet::new();
         let mut seen_xtest_imp = HashSet::new();
+        let mut embeds: Vec<EmbedPattern> = Vec::new();
+        let mut test_embeds: Vec<EmbedPattern> = Vec::new();
+        let mut xtest_embeds: Vec<EmbedPattern> = Vec::new();
 
         let entries = fs::read_dir(&pkg.dir)?;
         let mut names: Vec<String> = entries
@@ -143,9 +147,20 @@ impl Context {
                 }));
             }
 
+            // `readGoInfo` only re-reads the file for `//go:embed` when the
+            // file imports "embed" — that gate is why a directive in a package
+            // without the import contributes no pattern and `go list` stays
+            // silent about it (the compiler is what rejects that program).
+            let file_embeds = if info.imports.iter().any(|imp| imp == "embed") {
+                parse_go_embeds(&read_whole_go_file(&path, content)?)
+            } else {
+                Vec::new()
+            };
+
             if info.imports_c {
                 all_tags.insert("cgo".to_string());
                 if self.cgo_enabled {
+                    push_embeds(&mut embeds, &name, file_embeds);
                     pkg.cgo_files.push(name);
                     for imp in info.imports {
                         if seen_imp.insert(imp.clone()) {
@@ -153,9 +168,12 @@ impl Context {
                         }
                     }
                 } else {
+                    // Imports *and* embeds from cgo files are dropped when cgo
+                    // is off, matching the `IgnoredGoFiles` arm of `Import`.
                     pkg.ignored_go_files.push(name);
                 }
             } else if is_xtest {
+                push_embeds(&mut xtest_embeds, &name, file_embeds);
                 pkg.xtest_go_files.push(name);
                 for imp in info.imports {
                     if seen_xtest_imp.insert(imp.clone()) {
@@ -163,6 +181,7 @@ impl Context {
                     }
                 }
             } else if is_test {
+                push_embeds(&mut test_embeds, &name, file_embeds);
                 pkg.test_go_files.push(name);
                 for imp in info.imports {
                     if seen_test_imp.insert(imp.clone()) {
@@ -170,6 +189,7 @@ impl Context {
                     }
                 }
             } else {
+                push_embeds(&mut embeds, &name, file_embeds);
                 pkg.go_files.push(name);
                 for imp in info.imports {
                     if seen_imp.insert(imp.clone()) {
@@ -178,6 +198,16 @@ impl Context {
                 }
             }
         }
+
+        // `cleanDecls` sorts the pattern list; `resolveEmbed` then walks it in
+        // that order, so the pattern blamed for a failure is the first *sorted*
+        // one that fails, not the first written.
+        for list in [&mut embeds, &mut test_embeds, &mut xtest_embeds] {
+            list.sort_by(|a, b| a.pattern.cmp(&b.pattern));
+        }
+        pkg.embed_patterns = embeds;
+        pkg.test_embed_patterns = test_embeds;
+        pkg.xtest_embed_patterns = xtest_embeds;
 
         pkg.imports = imports;
         pkg.test_imports = test_imports;
@@ -204,6 +234,32 @@ impl Context {
 /// Must clear large leading documentation comments — `math/big/natdiv.go` puts
 /// `package` past 24 KiB. Shrinking this broke `GUFF_NATIVE_LIST=verify`.
 const GO_HEADER_BYTES: u64 = 64 * 1024;
+
+/// The bytes of the whole file, reusing the header read when it already holds
+/// all of them (`read_go_header` stops at [`GO_HEADER_BYTES`]).
+fn read_whole_go_file(path: &Path, header: Vec<u8>) -> Result<Vec<u8>, BuildError> {
+    if (header.len() as u64) < GO_HEADER_BYTES {
+        return Ok(header);
+    }
+    fs::read(path).map_err(BuildError::Io)
+}
+
+/// Records each pattern's *first* occurrence; a repeat in a later file (or a
+/// later line) keeps the earlier position, which is what `EmbedPatternPos[p][0]`
+/// is after `go/build` appends in file order.
+fn push_embeds(out: &mut Vec<EmbedPattern>, file: &str, found: Vec<crate::embed::FileEmbed>) {
+    for emb in found {
+        if out.iter().any(|e| e.pattern == emb.pattern) {
+            continue;
+        }
+        out.push(EmbedPattern {
+            pattern: emb.pattern,
+            file: file.to_string(),
+            line: emb.line,
+            column: emb.column,
+        });
+    }
+}
 
 fn read_go_header(path: &Path) -> std::io::Result<Vec<u8>> {
     let f = fs::File::open(path)?;

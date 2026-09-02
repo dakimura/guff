@@ -12,12 +12,14 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use guff_golist::{list_packages, Bail, BailReason, ListConfig, ListModule, ListPackage, ListResponse};
+use guff_golist::{
+    list_packages, Bail, BailReason, ListConfig, ListModule, ListPackage, ListResponse,
+};
 
 use crate::config::Config;
 use crate::golist::{go_available, go_list_driver, uses_export_data};
 use crate::load_mode::LoadMode;
-use crate::package::{DriverResponse, Module, Package};
+use crate::package::{DriverResponse, Error, ErrorKind, Module, Package};
 use crate::typecheck::TypecheckEnv;
 use crate::LoadError;
 
@@ -252,11 +254,12 @@ fn to_package(p: ListPackage) -> Package {
     } else {
         p.pkg_path.clone()
     };
+    let dir = p.dir;
     Package {
         id: p.id,
         name: p.name,
         pkg_path,
-        dir: p.dir,
+        dir: dir.clone(),
         go_files: p.go_files,
         compiled_go_files: p.compiled_go_files,
         ignored_files: p.ignored_files,
@@ -265,6 +268,24 @@ fn to_package(p: ListPackage) -> Package {
         module: p.module.map(to_module),
         for_test: p.for_test,
         has_cgo: p.has_cgo,
+        // `go list`'s converter joins patterns onto the package dir
+        // (`abs_join`), odd as that is for a glob; match it so the two routes
+        // are comparable under `GUFF_NATIVE_LIST=verify`.
+        embed_patterns: p.embed_patterns.iter().map(|pat| dir.join(pat)).collect(),
+        embed_files: p.embed_files.iter().map(|f| dir.join(f)).collect(),
+        // `go list -e` errors reach the report as golangci-lint's `typecheck`
+        // pseudo linter (`pkg/goanalysis/pkgerrors`), so they must survive the
+        // conversion — dropping them here is what kept guff silent on
+        // alertmanager's missing `//go:embed app/dist`.
+        errors: p
+            .errors
+            .into_iter()
+            .map(|e| Error {
+                pos: e.pos,
+                msg: e.msg,
+                kind: ErrorKind::List,
+            })
+            .collect(),
         ..Package::default()
     }
 }
@@ -435,10 +456,65 @@ pub fn diff_responses(native: &DriverResponse, golist: &DriverResponse) -> Vec<S
             }
             _ => {}
         }
+        // `//go:embed` resolution: patterns, the files they expand to, and the
+        // `go list` error a failed pattern produces. The error is not a graph
+        // detail — golangci-lint reports it as `typecheck`, and one such issue
+        // deletes every other finding in the run, so a native/golist mismatch
+        // here is a whole target's report.
+        let npat = norm_embed(&np.embed_patterns);
+        let gpat = norm_embed(&gp.embed_patterns);
+        if npat != gpat {
+            diffs.push(format!(
+                "{id}: embed_patterns native={npat:?} golist={gpat:?}"
+            ));
+        }
+        let nemb = norm_embed(&np.embed_files);
+        let gemb = norm_embed(&gp.embed_files);
+        if nemb != gemb {
+            diffs.push(format!(
+                "{id}: embed_files native={} golist={} Δ={:?}",
+                nemb.len(),
+                gemb.len(),
+                sym_diff(&nemb, &gemb)
+            ));
+        }
+        let nerr = list_errors(np);
+        let gerr = list_errors(gp);
+        if nerr != gerr {
+            diffs.push(format!("{id}: list errors native={nerr:?} golist={gerr:?}"));
+        }
         // export_file intentionally ignored (C-3d).
     }
 
     diffs
+}
+
+/// Embed paths as sorted slash strings; the two paths agree on `dir`, so the
+/// absolute prefix carries no information.
+fn norm_embed(paths: &[PathBuf]) -> Vec<String> {
+    let mut v: Vec<String> = paths
+        .iter()
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .collect();
+    v.sort();
+    v
+}
+
+fn sym_diff(a: &[String], b: &[String]) -> Vec<String> {
+    let sa: std::collections::BTreeSet<_> = a.iter().collect();
+    let sb: std::collections::BTreeSet<_> = b.iter().collect();
+    sa.symmetric_difference(&sb).map(|s| (*s).clone()).collect()
+}
+
+fn list_errors(p: &Package) -> Vec<String> {
+    let mut v: Vec<String> = p
+        .errors
+        .iter()
+        .filter(|e| e.kind == crate::package::ErrorKind::List)
+        .map(|e| format!("{}: {}", e.pos, e.msg))
+        .collect();
+    v.sort();
+    v
 }
 
 fn norm_files(files: &[PathBuf]) -> Vec<String> {

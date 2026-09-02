@@ -5,6 +5,7 @@
 //! `DriverResponse` and fall back to `go list` on [`Bail`].
 
 mod bail;
+pub mod embed;
 mod escape;
 mod list;
 mod modcache;
@@ -14,6 +15,7 @@ mod vendor;
 mod workspace;
 
 pub use bail::{Bail, BailReason};
+pub use embed::{resolve_embed, EmbedError};
 pub use escape::escape_path;
 pub use list::{list_packages, ListConfig, ListModule, ListPackage, ListResponse};
 pub use modcache::{default_gomodcache, module_dir, ModCache};

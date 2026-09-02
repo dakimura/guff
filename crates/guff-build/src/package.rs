@@ -53,6 +53,30 @@ pub struct Package {
 
     /// Build tags consulted while classifying files in this directory.
     pub all_tags: Vec<String>,
+
+    /// `//go:embed` patterns from GoFiles + CgoFiles, sorted and deduplicated.
+    pub embed_patterns: Vec<EmbedPattern>,
+    /// `//go:embed` patterns from TestGoFiles.
+    pub test_embed_patterns: Vec<EmbedPattern>,
+    /// `//go:embed` patterns from XTestGoFiles.
+    pub xtest_embed_patterns: Vec<EmbedPattern>,
+}
+
+/// A `//go:embed` pattern with the position `go list` blames when it fails.
+///
+/// `go/build` keeps `EmbedPatternPos map[string][]token.Position`, but
+/// `cmd/go`'s `setPos` only ever reads `posList[0]`, so one position per
+/// pattern is the whole of the observable behaviour. That first position is
+/// the first occurrence in file-scan order (files are visited sorted by name),
+/// which is why a pattern repeated in `k1.go` and `k2.go` is reported at
+/// `k1.go`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct EmbedPattern {
+    pub pattern: String,
+    /// Base name of the file holding the first occurrence.
+    pub file: String,
+    pub line: usize,
+    pub column: usize,
 }
 
 impl Package {

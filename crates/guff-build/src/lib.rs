@@ -8,6 +8,7 @@
 //!   Use of this source code is governed by a BSD-style license.
 
 mod context;
+pub mod embed;
 pub mod go_source;
 mod import_dir;
 mod import_path;
@@ -22,6 +23,7 @@ pub use module::{
     find_module_root, module_import_dir, parse_mod_contents, parse_mod_file, ModFile, Replace,
     Require,
 };
+pub use embed::{parse_go_embeds, FileEmbed};
 pub use package::{
-    BuildError, ImportMode, MultiplePackageError, NoGoError, Package,
+    BuildError, EmbedPattern, ImportMode, MultiplePackageError, NoGoError, Package,
 };

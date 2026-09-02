@@ -1,0 +1,39 @@
+# Golden case: the `typecheck` pseudo linter, and the override that comes with it.
+#
+# `typecheck` is not a linter and has no analyzer: the findings are the package
+# loader's own errors, rendered as issues by `pkg/goanalysis/pkgerrors`. It is
+# always on — `default: none` does not turn it off — because a package that does
+# not load makes every other answer unreliable.
+#
+# The case carries two packages on purpose:
+#
+#   embed/  a `//go:embed` naming a directory a build step would have produced
+#           (alertmanager's `ui/web.go` shape, which is what put this on the
+#           corpus). `go list -e` reports `pattern app/dist: no matching files
+#           found` at the column of the pattern text.
+#   other/  errorlint's fixture, which has eight findings of its own.
+#
+# The expected set is the typecheck issue **alone**: `InvalidIssue` drops every
+# non-typecheck issue in a run that produced one, and it sits fourth in the
+# processor list — before every exclusion — so no config can bring the other
+# eight back. A golden that listed nine findings would mean guff had missed it.
+#
+# One broken package, not two: with several, golangci-lint's first failing
+# analysis action cancels the run's context, and the packages still queued are
+# dropped — measured at 4-of-5 and 3-of-5 across repeats, and 1-of-5 under
+# `--concurrency=1`. A case with one is the only one that has a stable answer.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errorlint
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

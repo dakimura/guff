@@ -16,9 +16,12 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use guff_build::{Context, Package as BuildPackage};
+use guff_build::{Context, EmbedPattern, Package as BuildPackage};
 
-const MODMETA_VERSION: &str = "modmeta-v2";
+// v3 adds the `//go:embed` pattern lists. A blob written by v2 has no
+// patterns at all, and a package whose patterns are missing resolves to no
+// files and no error — which is exactly the silence this cache was hiding.
+const MODMETA_VERSION: &str = "modmeta-v3";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CachedPkgMeta {
@@ -31,6 +34,41 @@ pub struct CachedPkgMeta {
     pub imports: Vec<String>,
     pub test_imports: Vec<String>,
     pub xtest_imports: Vec<String>,
+    #[serde(default)]
+    pub embed_patterns: Vec<CachedEmbed>,
+    #[serde(default)]
+    pub test_embed_patterns: Vec<CachedEmbed>,
+    #[serde(default)]
+    pub xtest_embed_patterns: Vec<CachedEmbed>,
+}
+
+/// [`EmbedPattern`] as stored in a module blob.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CachedEmbed {
+    pub pattern: String,
+    pub file: String,
+    pub line: usize,
+    pub column: usize,
+}
+
+impl CachedEmbed {
+    fn from_pattern(p: &EmbedPattern) -> Self {
+        Self {
+            pattern: p.pattern.clone(),
+            file: p.file.clone(),
+            line: p.line,
+            column: p.column,
+        }
+    }
+
+    fn to_pattern(&self) -> EmbedPattern {
+        EmbedPattern {
+            pattern: self.pattern.clone(),
+            file: self.file.clone(),
+            line: self.line,
+            column: self.column,
+        }
+    }
 }
 
 impl CachedPkgMeta {
@@ -45,6 +83,17 @@ impl CachedPkgMeta {
             imports: pkg.imports.clone(),
             test_imports: pkg.test_imports.clone(),
             xtest_imports: pkg.xtest_imports.clone(),
+            embed_patterns: pkg.embed_patterns.iter().map(CachedEmbed::from_pattern).collect(),
+            test_embed_patterns: pkg
+                .test_embed_patterns
+                .iter()
+                .map(CachedEmbed::from_pattern)
+                .collect(),
+            xtest_embed_patterns: pkg
+                .xtest_embed_patterns
+                .iter()
+                .map(CachedEmbed::from_pattern)
+                .collect(),
         }
     }
 
@@ -58,6 +107,17 @@ impl CachedPkgMeta {
         pkg.imports = self.imports.clone();
         pkg.test_imports = self.test_imports.clone();
         pkg.xtest_imports = self.xtest_imports.clone();
+        pkg.embed_patterns = self.embed_patterns.iter().map(CachedEmbed::to_pattern).collect();
+        pkg.test_embed_patterns = self
+            .test_embed_patterns
+            .iter()
+            .map(CachedEmbed::to_pattern)
+            .collect();
+        pkg.xtest_embed_patterns = self
+            .xtest_embed_patterns
+            .iter()
+            .map(CachedEmbed::to_pattern)
+            .collect();
     }
 }
 
