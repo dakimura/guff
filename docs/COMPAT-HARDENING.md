@@ -19746,3 +19746,62 @@ reject 14、workspace テスト緑（20 形の fixture を `assert_eq!` の**メ
 固定 —— `any(contains(…))` では他の 19 形が黙っても緑になる）、
 OSS pr tier 8 target すべて P=R=100%、gitea / prometheus / thanos / authelia /
 syncthing は再測して動かず。
+
+### 2026-09-02（続き 146）— 上流が容量を知る入口は**固定長配列の Alloc** ただ 1 つ。guff がそれを作らない形では、規則が一度も始まっていない
+
+authelia の残り 1 件は `internal/templates/funcs.go:412` の
+`//nolint:gosec // This can only panic on invalid inputs …` が guff では未使用になる件。
+
+**何が抑えられているかは `GL_DEBUG=nolint_filter` が直接答える**（続き 139 と同じ手）:
+
+```
+[nolint_filter] got issue: {gosec G602: slice index out of range low …
+  internal/templates/funcs.go:412:17 …}
+```
+
+`FuncDict(pairs ...any)` の `m[key] = pairs[i+1]` である。guff に G602 は**ある**。
+
+**測り方でつまずいた 1 回目**: 最小再現を 16 パッケージ並べて golangci-lint に通したら、
+**毎回ちがう 3 件**が返ってきた（6 回走って 6 通りの集合）。非決定に見えるが違う ——
+golangci の既定 `issues.max-same-issues` は **3** で、G602 の findings は
+**全部同じ文面**なので、どれが残るかだけが揺れていた。`max-same-issues: 0` と
+`max-issues-per-linter: 0` を置いたら決定的になり、16 形が出た。
+（compat の config はこれを patched config で入れている。手で書いた config で測ると
+この形の規則は必ず化ける。）
+
+**24 形で測って、修正前は上流 16・guff 5、guff-only は 0。** 落ちている 11 形は
+3 つの原因に分かれ、どれも「guff の SSA が上流の読む形でスライスを綴らない」だった。
+上流は「このスライスは大きいか」を訊かない —— 訊くのは
+**「どの固定長配列の `Alloc` から来たスライスか」**で、知っている容量はすべて
+その配列の型から読んでいる。
+
+1. **可変長呼び出し。** go/ssa は `f(a, b)` を `Alloc *[2]any` + `Slice` に詰め替える。
+   guff は**意図的にそれを作らない** —— tail を個別に渡して spread を
+   `CallCommon::ellipsis` に記録する（`builder/call.rs` に "Deliberately not ported"
+   と書いてある）。配列が無いので入口も無く、**G602 は可変長の callee の中を一度も
+   見ていなかった**。呼び出し側から容量を合成する `variadic_call_cap` を足した。
+2. **`make([]T, constN)` を関数に渡す形。** go/ssa は定数 `make` を `Alloc` + `Slice`
+   に落とすが guff は `MakeSlice` 1 つ。入口はそれを知っていたのに、
+   `track_slice_bounds` の `Call → parameter` の枝が上流の `arg.(*ssa.Slice)` の
+   **逐語訳**だったので、呼び出しで walk が止まっていた。
+3. **`ifs` に記録する比較の選び方。** 上流の `extractSliceIfLenCondition` は
+   最初に届いた `if` **1 つだけ**を記録し、それが枝の中の finding を消すかどうかを決める。
+   go/ssa の referrer は**構築順（＝ソース順）**なので `i < p` が先に来る。
+   guff の block arena は for の**本体を条件より先に**持っていて `i+1 < p` を渡していた ——
+   `lenOffset` が `0` ではなく `-1` になり、削除規則 `lenOffset+idxOffset-1 < 0` が
+   発火して finding が消える。位置で並べ直した。
+
+**黙る形が規則を決める**（3 つとも測った）:
+引数ゼロの可変長呼び出し `f()` は上流も黙る（go/ssa が渡すのは `nil` スライス定数で
+`Alloc` ではない。容量 0 で全ての添字が範囲外なのに、である）。
+関数**値**経由の呼び出しも黙る（上流は `Call.Value.(*ssa.Function)` を要求する）。
+`pairs...` での転送も黙る —— 上流の `Call → parameter` は**追跡中のスライス値そのもの**
+である引数しか見ず、パラメータはそれではないので、両ツールとも 1 ホップで止まる。
+
+**測定** 24 形、修正前 上流 16・guff 5 → **全一致**。
+
+authelia **1 → 0**。台帳 **31 → 32/100**。
+golden 208/208（`gosec` 206 → 220 キー、キー集合の差分で消失なし。増えた 14 は
+新しい fixture のもので、`assert_eq!` の**位置の列**で固定してある —— この規則は
+findings の文面が全部同じなので、`any(contains("G602"))` はどの部分集合でも緑になる）、
+fix tier 208、reject 14、workspace テスト緑、OSS pr tier 8 target すべて P=R=100%。

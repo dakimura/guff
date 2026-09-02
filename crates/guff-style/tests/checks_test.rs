@@ -84,6 +84,65 @@ fn gosec_g602_tracks_bounds_through_reslices() {
     assert_eq!((bounds, index), (1, 2), "{messages:?}");
 }
 
+/// Where G602 gets a capacity from when guff's SSA does not spell the slice the
+/// way upstream reads it.
+///
+/// Upstream only ever learns a bound from an `Alloc` of a fixed-size array.
+/// guff builds no such array for a variadic call — it passes the tail through
+/// individually — and none for `make([]T, constN)`, which it lowers to one
+/// `MakeSlice`. So G602 never looked inside a variadic callee at all, and the
+/// authelia diff that started this (`m[key] = pairs[i+1]` in a `FuncDict`
+/// helper) was one of eight shapes out of twenty-four that upstream reported
+/// and guff did not.
+///
+/// Asserted as the **set of report positions**: every finding here carries the
+/// identical message, so `any(contains("G602"))` — or even a count — is true of
+/// any subset. Measured against golangci-lint 2.12.2 (gosec v2.26.1).
+#[test]
+fn gosec_g602_learns_a_bound_from_variadic_calls_and_makeslice() {
+    let pkg = support::typecheck_fixture("gosec", "example.com/gosec/g602_variadic", "g602_variadic.go");
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64)> = support::run_analyzer_diagnostics(gosec(), &pkg)
+        .into_iter()
+        .filter(|d| d.message.contains("G602:"))
+        .map(|d| {
+            let p = fset.position(guff::position::Pos(d.pos as i64));
+            (p.line, p.column)
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            // the two that already worked: the array is in this function
+            (26, 15),
+            (39, 15),
+            // …and the two that reach a callee through a slice value
+            (51, 15),
+            (61, 15),
+            // make([]any, 2) handed to a function: guff's MakeSlice stands
+            // where go/ssa's Alloc+Slice stands, and the walk has to accept it
+            (80, 15),
+            // the variadic tail, whose capacity is now read off the call site
+            (95, 15),
+            (109, 15),
+            // the guard *around* the access, which is what decides whether the
+            // `ifs` map records `i < p` or `i+1 < p`
+            (126, 16),
+            (137, 15),
+            (144, 60),
+            (155, 15),
+            // a method: the receiver is args[0] and params[0] alike
+            (166, 65),
+            // two call sites, and the shorter one is what makes it bad
+            (171, 59),
+            // the tail re-sliced before being indexed
+            (180, 13),
+        ],
+        "G602 report positions"
+    );
+}
+
 /// G115 is the other SSA analyzer (gosec `conversion_overflow.go` +
 /// `range_analyzer.go`). The fixture marks every conversion `// FINDING` or
 /// `// silent`, and those marks are gated against golangci-lint 2.12.2 by
