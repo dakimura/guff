@@ -1,7 +1,8 @@
 //! Post-processing filters for lint issues (golangci `result/processors`).
 //!
 //! Pipeline order (subset of golangci-lint):
-//! GOCACHE/cgo → path (dirs/files) → text exclude → exclude-rules (+ default excludes) →
+//! GOCACHE/cgo → typecheck-overrides-everything → path (dirs/files) → text exclude →
+//! exclude-rules (+ default excludes) →
 //! nolint → generated → diff (new-from-*) → uniq-by-line → max-per-linter → max-same →
 //! severity (+ unused nolintlint).
 
@@ -406,6 +407,13 @@ impl IssueFilter {
         issues.retain(|issue| {
             !is_under_go_cache(Path::new(&issue.filename), go_cache)
         });
+
+        // golangci `InvalidIssue`, fourth in its processor list: a run with any
+        // typecheck issue reports *only* those. It is here, ahead of every
+        // exclusion, because that is where upstream puts it — an exclude rule
+        // cannot bring the silenced findings back.
+        crate::typecheck::keep_only_typecheck(&mut issues);
+
         issues.retain(|issue| !self.is_excluded_by_path(issue));
         issues.retain(|issue| {
             !self
