@@ -3262,6 +3262,54 @@ fn perfsprint_sprintf1_governs_the_one_argument_form() {
     assert_eq!(one_arg(&off), 3, "{off:?}");
 }
 
+/// `hex-format` is two upstream cases, not one, and the fix differs between
+/// them.
+///
+/// catenacyber/perfsprint has `case isArray && …` — which refuses anything but
+/// an identifier ("Doesn't support array literals") and appends `[:]` — and
+/// `case isSlice && …`, which takes any expression and appends nothing. guff
+/// had a single "is this a byte sequence" predicate whose bool was read as "is
+/// it an array", so a `[]byte` inherited the array rules in both directions:
+/// `fmt.Sprintf("%x", hasher.Sum(nil))` went unreported (a call is not an
+/// identifier), and a `[]byte` that *was* an identifier was rewritten to
+/// `hex.EncodeToString(b[:])`. A non-byte element fell through the same
+/// predicate as an array, so `%x` on a `[]int` was reported.
+///
+/// The `[:]` half is invisible to every finding-set comparison — the golden
+/// key carries the message, not the replacement — so the edits are asserted
+/// here. Measured against golangci-lint 2.12.2.
+#[test]
+fn perfsprint_hex_format_separates_the_slice_case_from_the_array_case() {
+    let pkg = support::typecheck_fixture("perfsprint", "example.com/perfsprint/hex", "hex.go");
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, bool)> = support::run_analyzer_diagnostics(perfsprint(), &pkg)
+        .into_iter()
+        .filter(|d| d.message.contains("hex.EncodeToString"))
+        .map(|d| {
+            let line = fset.position(guff::position::Pos(d.pos as i64)).line;
+            let slices = d.suggested_fixes[0]
+                .text_edits
+                .iter()
+                .any(|e| e.new_text == "[:]");
+            (line, slices)
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            // a call, a field and a composite literal are all fine for a slice…
+            (37, false),
+            (39, false),
+            (41, false),
+            (43, false),
+            // …and only the array case appends `[:]`
+            (45, true),
+        ],
+        "(line, fix appends `[:]`)"
+    );
+}
+
 #[test]
 fn perfsprint_allows_complex_fmt() {
     let pkg = support::typecheck_fixture("perfsprint", "example.com/perfsprint/ok", "ok.go");

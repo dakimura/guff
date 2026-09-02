@@ -1,2 +1,9 @@
 # The isolate fixture, so the two tiers cannot drift.
 bad.go  compat/isolate/fixtures/perfsprint/bad.go
+
+# `hex-format` is two upstream cases with different fixes, and bad.go carries
+# exactly one `%x` shape — the `[]byte` identifier, the one the collapsed
+# predicate happened to get right. This file is the grid; it lives with the
+# Rust fixtures because the unit test asserts the *edits* too, which no key
+# here can see.
+hex.go  crates/guff-style/tests/testdata/perfsprint/hex.go

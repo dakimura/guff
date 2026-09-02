@@ -47,21 +47,37 @@ fn is_basic(pass: &Pass<'_>, typ: TypeId, kinds: &[BasicKind]) -> bool {
     basic_kind(pass, typ).is_some_and(|k| kinds.contains(&k))
 }
 
-fn is_byte_slice_or_array(pass: &Pass<'_>, typ: TypeId) -> Option<bool> {
+/// Which of upstream's two `%x` cases a value's type falls into, if either.
+///
+/// They are separate `case`s in `analyzer.go` and they differ in both
+/// directions: the array one refuses anything but an identifier ("Doesn't
+/// support array literals") and appends `[:]`, the slice one accepts any
+/// expression and appends nothing. A single predicate answering "is this a
+/// byte sequence" collapsed them and got both halves wrong — `fmt.Sprintf("%x",
+/// h.Sum(nil))` went unreported (a call is not an identifier) and a `[]byte`
+/// that *was* an identifier was rewritten to `hex.EncodeToString(b[:])`.
+///
+/// `None` also covers a non-byte element, which used to fall through as if it
+/// were an array and report `[]int` under `%x`.
+///
+/// The assertion is on the type itself, not its underlying type — upstream
+/// writes `valueType.(*types.Array)` — so a defined `type digest []byte` is
+/// neither, and `%x` on one is silent in both tools.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ByteSeq {
+    Slice,
+    Array,
+}
+
+fn byte_sequence(pass: &Pass<'_>, typ: TypeId) -> Option<ByteSeq> {
     let artifacts = pass.pkg().type_artifacts.as_ref()?;
     let resolved = unalias_readonly(&artifacts.types, typ);
     match artifacts.types.get(resolved) {
-        TypeData::Slice(s) => {
-            Some(matches!(
-                basic_kind(pass, s.elem()),
-                Some(BasicKind::Uint8)
-            ))
+        TypeData::Slice(s) if basic_kind(pass, s.elem()) == Some(BasicKind::Uint8) => {
+            Some(ByteSeq::Slice)
         }
-        TypeData::Array(a) => {
-            Some(matches!(
-                basic_kind(pass, a.elem()),
-                Some(BasicKind::Uint8)
-            ))
+        TypeData::Array(a) if basic_kind(pass, a.elem()) == Some(BasicKind::Uint8) => {
+            Some(ByteSeq::Array)
         }
         _ => None,
     }
@@ -340,9 +356,11 @@ fn check_call(
         return;
     }
 
-    if let Some(is_array) = is_byte_slice_or_array(pass, value_type) {
+    if let Some(seq) = byte_sequence(pass, value_type) {
         if one_of(verb_ref, &["%x"]) {
-            if is_array && !matches!(value, Expr::Ident(_)) {
+            if seq == ByteSeq::Array && !matches!(value, Expr::Ident(_)) {
+                // "Doesn't support array literals." Only the array case says
+                // this; a slice is taken however it is spelled.
                 return;
             }
             let mut edits = vec![TextEdit {
@@ -350,7 +368,7 @@ fn check_call(
                 end: value.pos().0 as u32,
                 new_text: "hex.EncodeToString(".into(),
             }];
-            if is_array {
+            if seq == ByteSeq::Array {
                 edits.push(TextEdit {
                     pos: value.end().0 as u32,
                     end: value.end().0 as u32,

@@ -59,3 +59,26 @@
 -	return fmt.Sprintf("%s", f())
 +	return f().Error()
  }
+--- a/hex.go
++++ b/hex.go
+@@ -34,15 +34,15 @@
+ 
+ func arr4() [4]byte { return [4]byte{} }
+ 
+-func HexFromCall() string { return fmt.Sprintf("%x", sum()) } // FINDING
++func HexFromCall() string { return hex.EncodeToString(sum()) } // FINDING
+ 
+-func HexSliceIdent(b []byte) string { return fmt.Sprintf("%x", b) } // FINDING
++func HexSliceIdent(b []byte) string { return hex.EncodeToString(b) } // FINDING
+ 
+-func HexSliceField(x box) string { return fmt.Sprintf("%x", x.sl) } // FINDING
++func HexSliceField(x box) string { return hex.EncodeToString(x.sl) } // FINDING
+ 
+-func HexSliceLiteral() string { return fmt.Sprintf("%x", []byte{1, 2}) } // FINDING
++func HexSliceLiteral() string { return hex.EncodeToString([]byte{1, 2}) } // FINDING
+ 
+-func HexArrayIdent(a [4]byte) string { return fmt.Sprintf("%x", a) } // FINDING
++func HexArrayIdent(a [4]byte) string { return hex.EncodeToString(a[:]) } // FINDING
+ 
+ // The type assertion upstream makes is on the type itself, not its underlying
+ // type (`valueType.(*types.Slice)`), so a defined slice type is neither case.
