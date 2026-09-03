@@ -51,6 +51,10 @@ EXCLUDED = {
     "terraform": "no .golangci.yml on the default branch",
     "istio": "no .golangci.yml on the default branch",
     "cockroach": "no .golangci.yml on the default branch",
+    "harness": "no tag carries a v2 config (newest tag v3.3.0 is 2025-08-14; the "
+    "config went version: \"2\" on 2025-10-17, and no tag has been cut since), and "
+    "./... on main measures only typecheck: one //go:embed of an unbuilt frontend "
+    "deletes the whole report",
 }
 
 # Targets whose numbers this host cannot produce. Measuring them anywhere but
