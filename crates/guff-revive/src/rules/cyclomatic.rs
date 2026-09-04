@@ -7,15 +7,22 @@ use guff_analysis::Pass;
 
 use crate::failure::Failure;
 
-const MAX_COMPLEXITY: usize = 10;
+const DEFAULT_MAX_COMPLEXITY: i64 = 10;
+
+/// `Configure`: `arguments[0]` is the limit, 10 when there is none.
+pub fn max_complexity(pass: &Pass<'_>) -> i64 {
+    crate::config::rule_arg_int(pass, "cyclomatic", 0).unwrap_or(DEFAULT_MAX_COMPLEXITY)
+}
 
 pub struct Checker {
+    max: i64,
     failures: Vec<Failure>,
 }
 
 impl Checker {
-    pub fn new() -> Self {
+    pub fn new(pass: &Pass<'_>) -> Self {
         Self {
+            max: max_complexity(pass),
             failures: Vec::new(),
         }
     }
@@ -25,7 +32,7 @@ impl Checker {
             return;
         };
         let c = complexity(f);
-        if c > MAX_COMPLEXITY {
+        if c as i64 > self.max {
             self.failures.push(Failure {
                 rule: "cyclomatic",
                 pos: f.ty.func.0 as u32,
@@ -33,7 +40,7 @@ impl Checker {
                     "function {} has cyclomatic complexity {} (> max enabled {})",
                     func_name(f),
                     c,
-                    MAX_COMPLEXITY
+                    self.max
                 ),
                 ..Failure::default()
             });
@@ -46,7 +53,7 @@ impl Checker {
 }
 
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut c = Checker::new();
+    let mut c = Checker::new(pass);
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
             if let Some(n) = n {

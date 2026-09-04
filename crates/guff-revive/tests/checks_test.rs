@@ -1515,3 +1515,123 @@ fn revive_cognitive_complexity_reads_its_max_argument() {
         );
     });
 }
+
+const LIMIT_RULES: [&str; 6] = [
+    "argument-limit:",
+    "cyclomatic:",
+    "function-length:",
+    "function-result-limit:",
+    "line-length-limit:",
+    "max-control-nesting:",
+];
+
+fn limit_messages(settings: guff_revive::Settings) -> Vec<String> {
+    guff_revive::with_settings(settings, || {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/rulelimits",
+            "rule_limits.go",
+        );
+        let mut messages: Vec<String> = support::run_analyzer(revive(), &pkg)
+            .into_iter()
+            .filter(|m| LIMIT_RULES.iter().any(|r| m.starts_with(r)))
+            .collect();
+        messages.sort();
+        messages
+    })
+}
+
+/// The six revive rules whose limit is a number, at their defaults.
+///
+/// Every one of them takes the limit from `arguments[0]` — `function-length`
+/// takes two — and falls back to a default. guff had all of those defaults
+/// baked in as `const`s and never read the argument, so no configuration could
+/// move them. This test is the "no arguments" half; the next one moves every
+/// limit, and the two would be identical if the arguments were still ignored.
+#[test]
+fn revive_numeric_limits_default() {
+    let messages = limit_messages(guff_revive::extended_test_settings());
+    assert_eq!(
+        messages,
+        vec![
+            "argument-limit: maximum number of arguments per function exceeded; max 8 but got 10",
+            "argument-limit: maximum number of arguments per function exceeded; max 8 but got 9",
+            "cyclomatic: function complexityEleven has cyclomatic complexity 11 (> max enabled 10)",
+            "function-length: maximum number of statements per function exceeded; max 50 but got 52",
+            "function-result-limit: maximum number of return results per function exceeded; max 3 but got 4",
+            "line-length-limit: line is 100 characters, out of limit 80",
+            "max-control-nesting: control flow nesting exceeds 5",
+        ],
+        "{messages:?}"
+    );
+}
+
+/// The same fixture with every limit moved, including `function-length`'s pair.
+#[test]
+fn revive_numeric_limits_read_their_arguments() {
+    let mut settings = guff_revive::extended_test_settings();
+    if let Some(rules) = settings.rules.as_mut() {
+        for (name, args) in [
+            ("argument-limit", vec![4]),
+            ("cyclomatic", vec![3]),
+            ("function-length", vec![4, 12]),
+            ("function-result-limit", vec![1]),
+            ("line-length-limit", vec![60]),
+            ("max-control-nesting", vec![2]),
+        ] {
+            if let Some(rule) = rules.iter_mut().find(|r| r.name == name) {
+                rule.arguments = args
+                    .into_iter()
+                    .map(guff_revive::RuleArgument::Integer)
+                    .collect();
+            }
+        }
+    }
+    let messages = limit_messages(settings);
+    // Every limit moved, so no row here is a row of the previous test.
+    assert!(
+        messages
+            .iter()
+            .all(|m| !m.contains("max 8 ") && !m.contains("max enabled 10")),
+        "{messages:?}"
+    );
+    for needle in [
+        "argument-limit: maximum number of arguments per function exceeded; max 4 but got 6",
+        "cyclomatic: function complexityFour has cyclomatic complexity 4 (> max enabled 3)",
+        "function-length: maximum number of statements per function exceeded; max 4 but got 7",
+        "function-length: maximum number of lines per function exceeded; max 12 but got 14",
+        "function-result-limit: maximum number of return results per function exceeded; max 1 but got 2",
+        "line-length-limit: line is 100 characters, out of limit 60",
+        "max-control-nesting: control flow nesting exceeds 2",
+    ] {
+        assert!(messages.iter().any(|m| m == needle), "missing {needle} in {messages:?}");
+    }
+}
+
+/// `function-length` gates each half on `> 0`, so `[0, 12]` turns the statement
+/// half **off** rather than reporting every function.
+#[test]
+fn revive_function_length_zero_disables_that_half() {
+    let mut settings = guff_revive::extended_test_settings();
+    if let Some(rules) = settings.rules.as_mut() {
+        if let Some(rule) = rules.iter_mut().find(|r| r.name == "function-length") {
+            rule.arguments = vec![
+                guff_revive::RuleArgument::Integer(0),
+                guff_revive::RuleArgument::Integer(12),
+            ];
+        }
+    }
+    let messages: Vec<String> = limit_messages(settings)
+        .into_iter()
+        .filter(|m| m.starts_with("function-length:"))
+        .collect();
+    assert_eq!(
+        messages,
+        vec![
+            "function-length: maximum number of lines per function exceeded; max 12 but got 14",
+            "function-length: maximum number of lines per function exceeded; max 12 but got 31",
+            "function-length: maximum number of lines per function exceeded; max 12 but got 52",
+        ],
+        "{messages:?}"
+    );
+}

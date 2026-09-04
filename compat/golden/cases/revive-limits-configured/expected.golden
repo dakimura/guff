@@ -1,0 +1,42 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh revive-limits-configured
+# Produced by running golangci-lint on compat/golden/cases/revive-limits-configured/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+rulelimits/rule_limits.go:1:0:revive:warning:line-length-limit: line is 77 characters, out of limit 60
+rulelimits/rule_limits.go:3:0:revive:warning:line-length-limit: line is 79 characters, out of limit 60
+rulelimits/rule_limits.go:4:0:revive:warning:line-length-limit: line is 79 characters, out of limit 60
+rulelimits/rule_limits.go:5:0:revive:warning:line-length-limit: line is 79 characters, out of limit 60
+rulelimits/rule_limits.go:7:0:revive:warning:line-length-limit: line is 72 characters, out of limit 60
+rulelimits/rule_limits.go:10:0:revive:warning:line-length-limit: line is 80 characters, out of limit 60
+rulelimits/rule_limits.go:11:0:revive:warning:line-length-limit: line is 71 characters, out of limit 60
+rulelimits/rule_limits.go:15:0:revive:warning:line-length-limit: line is 76 characters, out of limit 60
+rulelimits/rule_limits.go:15:1:revive:warning:argument-limit: maximum number of arguments per function exceeded; max 4 but got 6
+rulelimits/rule_limits.go:17:1:revive:warning:argument-limit: maximum number of arguments per function exceeded; max 4 but got 9
+rulelimits/rule_limits.go:22:1:revive:warning:function-result-limit: maximum number of return results per function exceeded; max 1 but got 2
+rulelimits/rule_limits.go:24:0:revive:warning:line-length-limit: line is 61 characters, out of limit 60
+rulelimits/rule_limits.go:24:1:revive:warning:function-result-limit: maximum number of return results per function exceeded; max 1 but got 4
+rulelimits/rule_limits.go:26:0:revive:warning:line-length-limit: line is 80 characters, out of limit 60
+rulelimits/rule_limits.go:27:1:revive:warning:cyclomatic: function complexityFour has cyclomatic complexity 4 (> max enabled 3)
+rulelimits/rule_limits.go:27:1:revive:warning:function-length: maximum number of statements per function exceeded; max 4 but got 7
+rulelimits/rule_limits.go:40:0:revive:warning:line-length-limit: line is 62 characters, out of limit 60
+rulelimits/rule_limits.go:40:1:revive:warning:argument-limit: maximum number of arguments per function exceeded; max 4 but got 10
+rulelimits/rule_limits.go:40:1:revive:warning:cyclomatic: function complexityEleven has cyclomatic complexity 11 (> max enabled 3)
+rulelimits/rule_limits.go:40:1:revive:warning:function-length: maximum number of lines per function exceeded; max 12 but got 31
+rulelimits/rule_limits.go:40:1:revive:warning:function-length: maximum number of statements per function exceeded; max 4 but got 21
+rulelimits/rule_limits.go:75:1:revive:warning:cyclomatic: function nestingThree has cyclomatic complexity 4 (> max enabled 3)
+rulelimits/rule_limits.go:75:1:revive:warning:function-length: maximum number of statements per function exceeded; max 4 but got 5
+rulelimits/rule_limits.go:78:4:revive:warning:max-control-nesting: control flow nesting exceeds 2
+rulelimits/rule_limits.go:86:1:revive:warning:argument-limit: maximum number of arguments per function exceeded; max 4 but got 6
+rulelimits/rule_limits.go:86:1:revive:warning:cyclomatic: function nestingSix has cyclomatic complexity 7 (> max enabled 3)
+rulelimits/rule_limits.go:86:1:revive:warning:function-length: maximum number of lines per function exceeded; max 12 but got 14
+rulelimits/rule_limits.go:86:1:revive:warning:function-length: maximum number of statements per function exceeded; max 4 but got 8
+rulelimits/rule_limits.go:89:4:revive:warning:max-control-nesting: control flow nesting exceeds 2
+rulelimits/rule_limits.go:103:0:revive:warning:line-length-limit: line is 68 characters, out of limit 60
+rulelimits/rule_limits.go:104:0:revive:warning:line-length-limit: line is 100 characters, out of limit 60
+rulelimits/rule_limits.go:106:0:revive:warning:line-length-limit: line is 73 characters, out of limit 60
+rulelimits/rule_limits.go:107:1:revive:warning:function-length: maximum number of lines per function exceeded; max 12 but got 52
+rulelimits/rule_limits.go:107:1:revive:warning:function-length: maximum number of statements per function exceeded; max 4 but got 52

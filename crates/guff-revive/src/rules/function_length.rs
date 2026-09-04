@@ -6,8 +6,24 @@ use guff_analysis::Pass;
 
 use crate::failure::Failure;
 
-const MAX_STMTS: usize = 50;
-const MAX_LINES: usize = 75;
+const DEFAULT_MAX_STMTS: i64 = 50;
+const DEFAULT_MAX_LINES: i64 = 75;
+
+/// `parseArguments`: either no arguments (50 / 75) or **exactly two**, and each
+/// check is then gated on `> 0` — `arguments: [0, 100]` turns the statement
+/// half off entirely. guff had both limits baked in as constants.
+pub fn limits(pass: &Pass<'_>) -> (i64, i64) {
+    let args = crate::config::rule_arguments(pass, "function-length");
+    if args.len() != 2 {
+        return (DEFAULT_MAX_STMTS, DEFAULT_MAX_LINES);
+    }
+    let stmts = crate::config::rule_arg_int(pass, "function-length", 0);
+    let lines = crate::config::rule_arg_int(pass, "function-length", 1);
+    match (stmts, lines) {
+        (Some(s), Some(l)) => (s, l),
+        _ => (DEFAULT_MAX_STMTS, DEFAULT_MAX_LINES),
+    }
+}
 
 pub struct Checker<'a> {
     pass: &'a Pass<'a>,
@@ -45,6 +61,7 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
 }
 
 fn check_file(pass: &Pass<'_>, file: &File, out: &mut Vec<Failure>) {
+    let limits = limits(pass);
     {
         // Upstream walks `file.AST.Decls` itself and bails out of the *whole
         // file* on the first function with an empty body:
@@ -70,7 +87,7 @@ fn check_file(pass: &Pass<'_>, file: &File, out: &mut Vec<Failure>) {
                 aborted = true;
                 break;
             }
-            check_func(pass, f, &mut per_file);
+            check_func(pass, f, limits, &mut per_file);
         }
         if !aborted {
             out.append(&mut per_file);
@@ -78,28 +95,31 @@ fn check_file(pass: &Pass<'_>, file: &File, out: &mut Vec<Failure>) {
     }
 }
 
-fn check_func(pass: &Pass<'_>, f: &FuncDecl, failures: &mut Vec<Failure>) {
+fn check_func(pass: &Pass<'_>, f: &FuncDecl, limits: (i64, i64), failures: &mut Vec<Failure>) {
+    let (max_stmts, max_lines) = limits;
     let Some(body) = &f.body else {
         return;
     };
     let stmt_count = count_stmts(&body.list);
-    if stmt_count > MAX_STMTS {
+    // `if r.maxStmt > 0` / `if r.maxLines > 0`: a zero limit turns that half of
+    // the rule off rather than reporting every function.
+    if max_stmts > 0 && stmt_count as i64 > max_stmts {
         failures.push(Failure {
             rule: "function-length",
             pos: f.ty.func.0 as u32,
             message: format!(
-                "maximum number of statements per function exceeded; max {MAX_STMTS} but got {stmt_count}"
+                "maximum number of statements per function exceeded; max {max_stmts} but got {stmt_count}"
             ),
             ..Failure::default()
         });
     }
     let line_count = count_lines(pass, body);
-    if line_count > MAX_LINES {
+    if max_lines > 0 && line_count as i64 > max_lines {
         failures.push(Failure {
             rule: "function-length",
             pos: f.ty.func.0 as u32,
             message: format!(
-                "maximum number of lines per function exceeded; max {MAX_LINES} but got {line_count}"
+                "maximum number of lines per function exceeded; max {max_lines} but got {line_count}"
             ),
             ..Failure::default()
         });

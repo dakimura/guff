@@ -6,10 +6,16 @@ use guff_analysis::Pass;
 
 use crate::failure::Failure;
 
-const MAX_LINE_LENGTH: usize = 80;
+const DEFAULT_MAX_LINE_LENGTH: i64 = 80;
+
+/// `Configure`: `arguments[0]` is the limit, 80 when there is none.
+fn max_line_length(pass: &Pass<'_>) -> i64 {
+    crate::config::rule_arg_int(pass, "line-length-limit", 0).unwrap_or(DEFAULT_MAX_LINE_LENGTH)
+}
 const TAB_WIDTH: usize = 4;
 
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let max = max_line_length(pass);
     let mut failures = Vec::new();
     let fset = pass.fset();
     let pkg = pass.pkg();
@@ -37,7 +43,7 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
             let line_number = idx + 1;
             let line = raw_line.replace('\t', &tab_spaces);
             let char_count = line.chars().count();
-            if char_count <= MAX_LINE_LENGTH {
+            if char_count as i64 <= max {
                 continue;
             }
             if line_number == 0 || line_number > ft.line_count() {
@@ -49,7 +55,7 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                 // Upstream reports `token.Position{Line: l, Column: 0}` —
                 // the whole line is at fault, so no column is meaningful.
                 0,
-                format!("line is {char_count} characters, out of limit {MAX_LINE_LENGTH}"),
+                format!("line is {char_count} characters, out of limit {max}"),
             ));
         }
     }

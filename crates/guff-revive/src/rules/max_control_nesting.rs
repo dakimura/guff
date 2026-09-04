@@ -6,9 +6,15 @@ use guff_analysis::Pass;
 
 use crate::failure::Failure;
 
-const MAX_NESTING: usize = 5;
+const DEFAULT_MAX_NESTING: i64 = 5;
+
+/// `Configure`: `arguments[0]` is the limit, 5 when there is none.
+fn max_nesting(pass: &Pass<'_>) -> i64 {
+    crate::config::rule_arg_int(pass, "max-control-nesting", 0).unwrap_or(DEFAULT_MAX_NESTING)
+}
 
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let max = max_nesting(pass);
     let mut failures = Vec::new();
     for file in pass.files() {
         for decl in &file.decls {
@@ -19,6 +25,7 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                 continue;
             };
             let mut walker = Walker {
+                max,
                 nesting: 0,
                 last_ctrl_pos: 0,
                 failures: &mut failures,
@@ -30,6 +37,7 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
 }
 
 struct Walker<'a> {
+    max: i64,
     nesting: usize,
     last_ctrl_pos: i64,
     failures: &'a mut Vec<Failure>,
@@ -43,11 +51,11 @@ impl Walker<'_> {
     }
 
     fn visit_stmt(&mut self, stmt: &Stmt) {
-        if self.nesting > MAX_NESTING {
+        if self.nesting as i64 > self.max {
             self.failures.push(Failure {
                 rule: "max-control-nesting",
                 pos: self.last_ctrl_pos as u32,
-                message: format!("control flow nesting exceeds {MAX_NESTING}"),
+                message: format!("control flow nesting exceeds {}", self.max),
                 ..Failure::default()
             });
             return;
@@ -131,6 +139,7 @@ impl Walker<'_> {
         if let Expr::FuncLit(lit) = expr {
             let body = &lit.body;
             let mut inner = Walker {
+                max: self.max,
                 nesting: 0,
                 last_ctrl_pos: 0,
                 failures: self.failures,

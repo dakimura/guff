@@ -1,0 +1,15 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh revive-limits-default
+# Produced by running golangci-lint on compat/golden/cases/revive-limits-default/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+rulelimits/rule_limits.go:17:1:revive:warning:argument-limit: maximum number of arguments per function exceeded; max 8 but got 9
+rulelimits/rule_limits.go:24:1:revive:warning:function-result-limit: maximum number of return results per function exceeded; max 3 but got 4
+rulelimits/rule_limits.go:40:1:revive:warning:argument-limit: maximum number of arguments per function exceeded; max 8 but got 10
+rulelimits/rule_limits.go:40:1:revive:warning:cyclomatic: function complexityEleven has cyclomatic complexity 11 (> max enabled 10)
+rulelimits/rule_limits.go:92:7:revive:warning:max-control-nesting: control flow nesting exceeds 5
+rulelimits/rule_limits.go:104:0:revive:warning:line-length-limit: line is 100 characters, out of limit 80
+rulelimits/rule_limits.go:107:1:revive:warning:function-length: maximum number of statements per function exceeded; max 50 but got 52

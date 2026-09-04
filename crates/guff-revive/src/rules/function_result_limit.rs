@@ -5,15 +5,23 @@ use guff_analysis::Pass;
 
 use crate::failure::Failure;
 
-const MAX_RESULTS: usize = 3;
+const DEFAULT_MAX_RESULTS: i64 = 3;
+
+/// `Configure`: `arguments[0]` is the limit, 3 when there is none. A negative
+/// value is a configuration error upstream, not a limit.
+pub fn max_results(pass: &Pass<'_>) -> i64 {
+    crate::config::rule_arg_int(pass, "function-result-limit", 0).unwrap_or(DEFAULT_MAX_RESULTS)
+}
 
 pub struct Checker {
+    max: i64,
     failures: Vec<Failure>,
 }
 
 impl Checker {
-    pub fn new() -> Self {
+    pub fn new(pass: &Pass<'_>) -> Self {
         Self {
+            max: max_results(pass),
             failures: Vec::new(),
         }
     }
@@ -36,12 +44,13 @@ impl Checker {
                 }
             })
             .sum();
-        if num > MAX_RESULTS {
+        if num as i64 > self.max {
             self.failures.push(Failure {
                 rule: "function-result-limit",
                 pos: f.ty.func.0 as u32,
                 message: format!(
-                    "maximum number of return results per function exceeded; max {MAX_RESULTS} but got {num}"
+                    "maximum number of return results per function exceeded; max {} but got {num}",
+                    self.max
                 ),
                 ..Failure::default()
             });
@@ -54,7 +63,7 @@ impl Checker {
 }
 
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut c = Checker::new();
+    let mut c = Checker::new(pass);
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
             if let Some(n) = n {
