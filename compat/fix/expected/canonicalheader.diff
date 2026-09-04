@@ -32,3 +32,14 @@
  }
  
  // Negatives: a header whose MIME-canonical form is in upstream's initialism
+--- a/fieldonly/fieldonly.go
++++ b/fieldonly/fieldonly.go
+@@ -10,6 +10,6 @@
+ import "net/http"
+ 
+ func Reported(r *http.Request) {
+-	_ = r.Header.Get("content-type")
+-	_ = r.Header.Values("if-none-match")
++	_ = r.Header.Get("Content-Type")
++	_ = r.Header.Values("If-None-Match")
+ }

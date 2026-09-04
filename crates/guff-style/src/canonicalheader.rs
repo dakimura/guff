@@ -347,10 +347,80 @@ fn check_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Pending>) {
     });
 }
 
+/// Upstream's opening move, and the reason a package can go completely silent:
+///
+/// ```go
+/// var headerObject types.Object
+/// for _, object := range pass.TypesInfo.Uses {
+///     if object.Pkg() != nil && object.Pkg().Path() == pkgPath && object.Name() == name {
+///         headerObject = object
+///         break
+///     }
+/// }
+/// if headerObject == nil { return nil, nil }
+/// ...
+/// if !types.Identical(gotType, headerObject.Type()) { return }
+/// ```
+///
+/// `net/http` has **four** objects named `Header`: the type `http.Header`, the
+/// fields `Request.Header` and `Response.Header` — whose type *is*
+/// `http.Header` — and the method `ResponseWriter.Header`, whose type is
+/// `func() http.Header`. The loop keeps whichever one a **map** iteration hands
+/// it first, so when it lands on the method the identity test never holds and
+/// the analyzer reports nothing in that package.
+///
+/// Measured against golangci-lint v2.12.2 with a fresh cache each run:
+///
+/// | package uses | upstream |
+/// |---|---|
+/// | only `w.Header().Set(…)` | **always silent** (the method is the only candidate) |
+/// | only `r.Header.Get(…)` | **always reports** (the field is the only candidate) |
+/// | both, or a written `http.Header` beside `w.Header()` | **0 or 2, at random** |
+///
+/// guff had no such gate and always reported. It now matches both deterministic
+/// halves: silent when every candidate is the method, reporting when any
+/// candidate carries the type itself. The mixed case is a coin flip upstream and
+/// no port can match it — guff takes the reporting side, and syncthing's
+/// `lib/api` is allowlisted for it.
+fn package_has_header_typed_object(pass: &Pass<'_>) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let is_http_header_type = |typ| {
+        let t = guff_types::unalias_readonly(&artifacts.types, typ);
+        match artifacts.types.get(t) {
+            guff_types::arena::TypeData::Named(_) => {
+                let obj = guff_types::named::named_obj(&artifacts.types, t);
+                obj.name(&artifacts.objects) == "Header"
+                    && obj.pkg(&artifacts.objects).is_some_and(|p| {
+                        artifacts.packages.get(p).path() == "net/http"
+                    })
+            }
+            _ => false,
+        }
+    };
+    info.uses.values().any(|obj| {
+        obj.name(&artifacts.objects) == "Header"
+            && obj
+                .pkg(&artifacts.objects)
+                .is_some_and(|p| artifacts.packages.get(p).path() == "net/http")
+            && obj
+                .typ(&artifacts.objects)
+                .is_some_and(&is_http_header_type)
+    })
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "canonicalheader requires inspect analyzer".to_string())?;
+
+    if !package_has_header_typed_object(pass) {
+        return Ok(None);
+    }
 
     let mut pending = Vec::new();
     for file in pass.files() {
