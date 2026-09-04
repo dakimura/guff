@@ -21847,3 +21847,56 @@ workspace **278 スイート** / OSS pr tier **8 ターゲットすべて P=R=10
 
 k6 に残るのは **9 件**: nolintlint 7（unused 4・exhaustive 1・gocritic 1・revive 1 の
 取りこぼしの従属。exhaustive の 1 件は続き 174 で測定済み）、contextcheck 1、unparam 1。
+
+### 2026-09-05（続き 177）— unparam の「always receives」は定数の**値**を比べる。`Value.String()` は 72 文字で短縮するので、長い 1 行目を共有する 4 本のスクリプトが同じ定数に見えていた
+
+k6 `internal/js/runner_test.go:385` の guff-only 1 件:
+
+```
+internal/js/runner_test.go:385:26: unparam: testSetupDataHelper - data always receives `"\n\texports.options = { setupTimeout: \"1s\", teardownTimeout: \"1s\" };\n\t..."`
+```
+
+**メッセージ自身がヒントだった** —— 末尾の `...` は上流の `constValueString` が
+短縮した印である。呼び出し 4 箇所は**それぞれ違う JavaScript** で、共有しているのは
+最初の 60 数文字だけ。guff はその**短縮された表示**同士を比べていたので、
+「常に同じ定数を受け取る」と判定していた。
+
+上流（`mvdan.cc/unparam/check`）は表示ではなく値を比べる:
+
+```go
+func constEqual(c1, c2 constant.Value) bool { … return constant.Compare(c1, token.EQL, c2) }
+```
+
+`constant.Value.String()` の doc は
+"a short, quoted (human-readable) form … **for String values the result may be a
+shortened string**" で、`go/constant` の `stringVal.String()` は 72 文字
+(`maxLen`) を超えると切って `...` を足す。だから **72 文字を超える文字列定数どうしは、
+先頭 72 文字が一致すれば `String()` が一致する**。
+
+guff は `x.to_string() == y.to_string()`。`guff_constant::compare(x, EQL, y)` に
+差し替えた —— 短縮を経ない値比較で、これは既にある移植である。
+なお**メッセージの方は短縮形のままが正しい**（上流の `constValueString` がそう出す）。
+
+fixture `unparam/longconst.go` に 3 関数 × 呼び出し 4 箇所を置いて両ツールで測った:
+
+| 形 | 上流 |
+|---|---|
+| 長い 1 行目を共有する 4 本の別スクリプト | 黙る |
+| **まったく同じ長いスクリプト 4 回** | **出す** |
+| 短い別々のリテラル 4 つ（短縮に届かない） | 黙る |
+
+`unparam` は「定数」と言うのに呼び出し 4 箇所を要求するので、各関数はちょうど 4 箇所。
+テストは関数名だけで照合する（メッセージが短縮形を引用するため）。
+
+```
+k6: guff-only 9 → 8
+```
+
+#### ゲート
+
+golden **213 完全一致**（再生成不要）/ fix **213** / reject **14** /
+workspace **278 スイート** / OSS pr tier **8 ターゲットすべて P=R=100%**。
+台帳は **39/100 のまま**（41 定義）。
+
+k6 に残るのは **8 件**: nolintlint 7（unused 4・exhaustive 1・gocritic 1・revive 1 の
+取りこぼしの従属）、contextcheck 1。

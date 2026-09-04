@@ -8203,6 +8203,30 @@ fn unparam_sees_a_zero_variable_and_a_written_zero_as_one_constant() {
     );
 }
 
+/// "always receives" compares constant *values*, not their printed form.
+///
+/// `constant.Value.String()` is "a short, quoted (human-readable) form … for
+/// String values the result may be a shortened string", and it shortens at 72
+/// characters. Comparing that — which guff did — makes four different scripts
+/// sharing a long opening line look like one constant. k6
+/// `internal/js/runner_test.go:385` passes four distinct JavaScript sources
+/// that share their first sixty-odd characters.
+#[test]
+fn unparam_compares_constant_values_not_their_shortened_form() {
+    let pkg =
+        support::typecheck_fixture("unparam", "example.com/unparam/longconst", "longconst.go");
+    let messages = support::run_analyzer(unparam(), &pkg);
+    // Three functions, four call sites each: only the one that really passes
+    // the same script every time is a finding. The message quotes the shortened
+    // form, which is upstream's `constValueString`, so match on the name alone.
+    let mut got: Vec<&str> = messages
+        .iter()
+        .map(|m| m.split(" - ").next().unwrap_or(m))
+        .collect();
+    got.sort_unstable();
+    assert_eq!(got, vec!["sameLongScript"], "{messages:?}");
+}
+
 #[test]
 fn unparam_flags_unused_parameters() {
     let pkg = support::typecheck_fixture("unparam", "example.com/unparam", "bad.go");
