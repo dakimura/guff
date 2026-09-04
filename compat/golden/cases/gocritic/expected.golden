@@ -69,6 +69,33 @@ deprecated.go:118:1:gocritic::deprecatedComment: the proper format is `Deprecate
 deprecated.go:121:1:gocritic::deprecatedComment: the proper format is `Deprecated: <text>`
 deprecated.go:124:1:gocritic::deprecatedComment: the proper format is `Deprecated: <text>`
 deprecated.go:128:1:gocritic::deprecatedComment: use `Deprecated: ` (note the casing) instead of `DEPRECATED: `
+duparg.go:59:6:gocritic::dupArg: suspicious method call with the same argument and receiver
+duparg.go:60:6:gocritic::dupArg: suspicious method call with the same argument and receiver
+duparg.go:61:6:gocritic::dupArg: suspicious method call with the same argument and receiver
+duparg.go:62:6:gocritic::dupArg: suspicious method call with the same argument and receiver
+duparg.go:63:6:gocritic::dupArg: suspicious method call with the same argument and receiver
+duparg.go:64:6:gocritic::dupArg: suspicious method call with the same argument and receiver
+duparg.go:65:6:gocritic::dupArg: suspicious method call with the same argument and receiver
+duparg.go:66:6:gocritic::dupArg: suspicious method call with the same argument and receiver
+duparg.go:67:6:gocritic::dupArg: suspicious method call with the same argument and receiver
+duparg.go:70:6:gocritic::dupArg: suspicious method call with the same argument and receiver
+duparg.go:86:6:gocritic::dupArg: suspicious duplicated args in strings.LastIndex(s, s)
+duparg.go:87:6:gocritic::dupArg: suspicious duplicated args in strings.Split(s, s)
+duparg.go:88:6:gocritic::dupArg: suspicious duplicated args in strings.SplitAfter(s, s)
+duparg.go:89:6:gocritic::dupArg: suspicious duplicated args in strings.SplitAfterN(s, s, n)
+duparg.go:90:6:gocritic::dupArg: suspicious duplicated args in strings.SplitN(s, s, n)
+duparg.go:91:6:gocritic::dupArg: suspicious duplicated args in strings.Replace("z", s, s, n)
+duparg.go:92:6:gocritic::dupArg: suspicious duplicated args in strings.ReplaceAll("z", s, s)
+duparg.go:93:6:gocritic::dupArg: suspicious duplicated args in bytes.LastIndex(b, b)
+duparg.go:94:6:gocritic::dupArg: suspicious duplicated args in bytes.Split(b, b)
+duparg.go:95:6:gocritic::dupArg: suspicious duplicated args in bytes.SplitAfter(b, b)
+duparg.go:96:6:gocritic::dupArg: suspicious duplicated args in bytes.SplitAfterN(b, b, n)
+duparg.go:97:6:gocritic::dupArg: suspicious duplicated args in bytes.SplitN(b, b, n)
+duparg.go:98:6:gocritic::dupArg: suspicious duplicated args in bytes.Replace(nil, b, b, n)
+duparg.go:99:6:gocritic::dupArg: suspicious duplicated args in bytes.ReplaceAll(nil, b, b)
+duparg.go:100:6:gocritic::dupArg: suspicious duplicated args in gotypes.Identical(t, t)
+duparg.go:101:6:gocritic::dupArg: suspicious duplicated args in gotypes.IdenticalIgnoreTags(t, t)
+duparg.go:105:2:gocritic::dupArg: suspicious duplicated args in draw.Draw(dst, r, dst, p, draw.Src)
 extras.go:5:2:gocritic::dupImport: package is imported 2 times under different aliases on lines 5 and 6
 extras.go:6:2:gocritic::dupImport: package is imported 2 times under different aliases on lines 5 and 6
 extras.go:16:2:gocritic::commentedOutImport: remove commented-out "os" import

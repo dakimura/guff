@@ -12,3 +12,10 @@ func HasPrefix(s, prefix []byte) bool          { return false }
 func HasSuffix(s, suffix []byte) bool          { return false }
 func Index(s, sep []byte) int                  { return -1 }
 func Repeat(b []byte, count int) []byte        { return nil }
+
+// dupArg patterns guff did not know.
+func LastIndex(s, sep []byte) int               { return -1 }
+func Split(s, sep []byte) [][]byte              { return nil }
+func SplitAfter(s, sep []byte) [][]byte         { return nil }
+func SplitAfterN(s, sep []byte, n int) [][]byte { return nil }
+func ReplaceAll(s, old, new []byte) []byte      { return s }
