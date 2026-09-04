@@ -715,9 +715,8 @@ pub(crate) fn run_linters_on_graph(
 /// members, so it is never non-exhaustive. Measured with a two-package module —
 /// golangci-lint reports `missing cases in switch of type enumpkg.Type`, guff
 /// says nothing — and the fact never arrives because the importing action skips
-/// the dep whose `type_artifacts` is `None`:
-///
-///     FACT-DEP exhaustive exrepro -> exrepro/enumpkg typed=false table=false
+/// the dep whose `type_artifacts` is `None`. An instrumented build printed
+/// `FACT-DEP exhaustive exrepro -> exrepro/enumpkg typed=false table=false`.
 ///
 /// Adding `exhaustive` here would close the same-module half. It would not
 /// close the other half: k6 `internal/js/modules/k6/browser/common/remote_object.go`
