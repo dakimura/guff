@@ -20643,3 +20643,65 @@ fix tier は新 case の expected を録り直すまで「上流は 0 行、guff
 `w.Base.Old` → `w.Old` を書く。上流も同じものを書く）。
 
 台帳: buildkit `open 2 → 1`（残りは続き 158 の SA4023、SSA 待ち）。
+
+### 2026-09-04（続き 160）— 続き 159 で revert した推移的解決を、**パッケージローダ側を直して**入れ直した。`connect_imports` は `HashMap` を 1 パスしか舐めていない
+
+続き 159 は「BFS で依存を推移的に探す」版を書いて、**同じ形の fixture で
+モジュール名を変えただけで結果が割れた**ので revert した。その原因を直す回である。
+
+**まず落ちるテストを書いた。** `root → dep → inner` の 3 パッケージを
+`load_with_driver` に通して `root.imports["dep"].imports["inner"]` が
+ファイルを持つことを見る（`refine_connects_imports_of_imports`）。
+**12 回中 12 回落ちる** —— guff の `HashMap` は `FxBuildHasher`（固定シード）なので、
+続き 159 で見た「割れる」は flaky ではなく**入力文字列で決まる**再現性のある挙動だった。
+
+**原因。** `connect_imports` は
+
+```rust
+let ids: Vec<String> = by_id.keys().cloned().collect();
+for id in ids { /* この id の imports を by_id から引いて差し替える */ }
+```
+
+と 1 パスで回り、差し替えのたびに**その時点の**隣人の `Arc` を格納する。
+`root` を `dep` より先に処理すると、`root.imports["dep"]` に入るのは
+**`dep` 自身の imports がまだ `build_import_stubs` の id だけの stub である**
+スナップショットになる。つまりグラフは**どこから見ても 1 段しか繋がっていない**。
+どのパッケージが浅いコピーを掴むかは `HashMap` の反復順 = パス文字列で決まる。
+
+**直し方。** `connect_order` を足して**依存側から先に**処理する。
+これで隣人は必ず「自分の辺を解決し終えた後」に参照される。
+
+- **再帰ではなく明示スタックの後行順 DFS。** 大きなコーパスの依存鎖は深い。
+  20,000 段の鎖を通す `#[test]` でこの選択を固定した（再帰版はここで落ちる）。
+- 隣人は**ソート順**で訪れる。結果がマップのシードに依存しないこと自体が要件である。
+- 逆辺（`go list` が出すはずのない循環）はそこで切る。`a ↔ b` で 2 件とも出ることを
+  テストで固定した。
+- レスポンスに実体が無い import は従来どおり飛ばす —— そのパッケージ自身は
+  order から落ちない（`connect_order_keeps_a_package_whose_import_is_missing`）。
+
+**入れ直したもの。** `sa1019.rs` の `resolve_import`（import グラフの BFS）と、
+新 case `staticcheck-sa1019-promoted-field` の `use.go` から
+`_ "…/inner"` の空 import を削除した。続き 159 で割れた 2 つの形は、
+**同じバイナリで両方 7 形**になる:
+
+```
+module example.com/promoted        → 7   (159: 7)
+module example.com/sa1019promoted  → 7   (159: 6)
+```
+
+`scan_import_deprecated` と `is_local_source_dep` の両方が `resolve_import` を通る
+——「このパッケージからそのソースが見えるか」という同じ問いなので揃えた。
+go_files を持たない hit を答えにしない guard は残してある: レスポンスに
+実体が無い import は繋いだ後も stub のままで、そこから作った
+「scan 済み・fact 無し」を process-global に載せると全 root で黙る。
+
+**ゲート**: golden 213 / fix 213 / reject 14 / workspace 278 スイート /
+OSS pr tier 8 ターゲットすべて P=R=100%。**`connect_imports` は全アナライザが
+見るグラフを変える**ので、効いたのは OSS tier である。
+buildkit は `open 1` のまま（残りは続き 158 の SA4023）。
+
+`regress --profile tsdb` は **PASS**（wall 0.810 → 0.870s、peak RSS 701MB → 759MB、
+finding set は 4/4/4 で P=R=1.0）。静かな機械での 1 回の測定で、どちらも許容内。
+`connect_order` が足すのは辺の数に比例する 1 パスと id の `Vec` ひとつなので、
+数百パッケージ規模でこの差を説明できる量ではない —— **差ではなく分散**と読む。
+気にするなら HEAD と交互に測ること（続き 108 / 2026-08-17 の C を参照）。

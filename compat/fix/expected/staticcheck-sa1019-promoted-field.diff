@@ -10,7 +10,7 @@
 
 --- a/use.go
 +++ b/use.go
-@@ -25,7 +25,7 @@
+@@ -16,7 +16,7 @@
  
  func NamedThenPromoted(h *dep.Holder) { h.Cfg.Old = "x" }
  
