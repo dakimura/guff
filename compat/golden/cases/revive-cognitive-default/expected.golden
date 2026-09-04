@@ -1,0 +1,10 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh revive-cognitive-default
+# Produced by running golangci-lint on compat/golden/cases/revive-cognitive-default/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+cognitivecomplexity/cognitive_complexity.go:111:1:revive:warning:cognitive-complexity: function deepMix has cognitive complexity 21 (> max enabled 7)
+cognitivecomplexity/cognitive_complexity.go:127:1:revive:warning:cognitive-complexity: function overDefault has cognitive complexity 8 (> max enabled 7)

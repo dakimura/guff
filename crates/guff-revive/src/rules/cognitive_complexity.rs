@@ -8,17 +8,26 @@ use guff_analysis::Pass;
 
 use crate::failure::Failure;
 
-const MAX_COMPLEXITY: usize = 7;
+const DEFAULT_MAX_COMPLEXITY: i64 = 7;
+
+/// `Configure`: `arguments[0]` is the limit, and anything that is not an
+/// integer is a configuration *error* upstream. guff had the default baked in
+/// as a constant and never read the argument at all.
+fn max_complexity(pass: &Pass<'_>) -> i64 {
+    crate::config::rule_arg_int(pass, "cognitive-complexity", 0)
+        .unwrap_or(DEFAULT_MAX_COMPLEXITY)
+}
 
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let max = max_complexity(pass);
     let mut failures = Vec::new();
     for file in pass.files() {
         for decl in &file.decls {
             let Decl::FuncDecl(f) = decl else {
                 continue;
             };
-            let c = complexity(f);
-            if c > MAX_COMPLEXITY {
+            let c = complexity(f) as i64;
+            if c > max {
                 failures.push(Failure {
                     rule: "cognitive-complexity",
                     pos: f.ty.func.0 as u32,
@@ -26,7 +35,7 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                         "function {} has cognitive complexity {} (> max enabled {})",
                         func_name(f),
                         c,
-                        MAX_COMPLEXITY
+                        max
                     ),
                     ..Failure::default()
                 });
@@ -74,20 +83,29 @@ impl<'a> ComplexityVisitor<'a> {
         }
     }
 
-    fn inc_nesting(&mut self) {
+    /// Upstream's `walk(complexityIncrement, targets...)`:
+    ///
+    /// ```go
+    /// v.complexity += complexityIncrement + v.nestingLevel
+    /// nesting := v.nestingLevel
+    /// v.nestingLevel++
+    /// for _, t := range targets { ast.Walk(v, t) }
+    /// v.nestingLevel = nesting
+    /// ```
+    ///
+    /// The increment is added to the *current* nesting level, which is why a
+    /// function literal — increment 0 — still costs something once it is inside
+    /// a loop.
+    fn walk(&mut self, increment: usize, body: impl FnOnce(&mut Self)) {
+        self.complexity += increment + self.nesting;
+        let nesting = self.nesting;
         self.nesting += 1;
-    }
-
-    fn dec_nesting(&mut self) {
-        self.nesting = self.nesting.saturating_sub(1);
+        body(self);
+        self.nesting = nesting;
     }
 
     fn inc_complexity(&mut self) {
         self.complexity += 1;
-    }
-
-    fn nest_inc_complexity(&mut self) {
-        self.complexity += self.nesting + 1;
     }
 
     fn mark_else(&mut self, id: u32) {
@@ -113,71 +131,49 @@ impl<'a> ComplexityVisitor<'a> {
     fn walk_stmt(&mut self, stmt: &Stmt) {
         match stmt {
             Stmt::IfStmt(n) => self.visit_if(n),
+            // `v.walk(1, n.Body)` — neither the init statement nor the tag.
             Stmt::SwitchStmt(n) => {
-                self.nest_inc_complexity();
-                if let Some(init) = &n.init {
-                    self.walk_stmt(init);
-                }
-                if let Some(tag) = &n.tag {
-                    self.walk_expr(tag);
-                }
-                self.inc_nesting();
-                for s in &n.body.list {
-                    self.walk_stmt(s);
-                }
-                self.dec_nesting();
+                self.walk(1, |v| {
+                    for s in &n.body.list {
+                        v.walk_stmt(s);
+                    }
+                });
             }
             Stmt::TypeSwitchStmt(n) => {
-                self.nest_inc_complexity();
-                if let Some(init) = &n.init {
-                    self.walk_stmt(init);
-                }
-                self.walk_stmt(&n.assign);
-                self.inc_nesting();
-                for s in &n.body.list {
-                    self.walk_stmt(s);
-                }
-                self.dec_nesting();
+                self.walk(1, |v| {
+                    for s in &n.body.list {
+                        v.walk_stmt(s);
+                    }
+                });
             }
             Stmt::SelectStmt(n) => {
-                self.nest_inc_complexity();
-                self.inc_nesting();
-                for s in &n.body.list {
-                    self.walk_stmt(s);
-                }
-                self.dec_nesting();
+                self.walk(1, |v| {
+                    for s in &n.body.list {
+                        v.walk_stmt(s);
+                    }
+                });
             }
+            // `targets := []ast.Node{n.Cond, n.Body}` — upstream walks the
+            // condition and the body and **not** `Init` or `Post`, so a
+            // logical operator in either does not count.
             Stmt::ForStmt(n) => {
-                self.nest_inc_complexity();
-                if let Some(init) = &n.init {
-                    self.walk_stmt(init);
-                }
-                if let Some(cond) = &n.cond {
-                    self.walk_expr(cond);
-                }
-                if let Some(post) = &n.post {
-                    self.walk_stmt(post);
-                }
-                self.inc_nesting();
-                for s in &n.body.list {
-                    self.walk_stmt(s);
-                }
-                self.dec_nesting();
+                self.walk(1, |v| {
+                    if let Some(cond) = &n.cond {
+                        v.walk_expr(cond);
+                    }
+                    for s in &n.body.list {
+                        v.walk_stmt(s);
+                    }
+                });
             }
+            // `v.walk(1, n.Body)` — the key, the value and the ranged
+            // expression are not walked.
             Stmt::RangeStmt(n) => {
-                self.nest_inc_complexity();
-                if let Some(key) = &n.key {
-                    self.walk_expr(key);
-                }
-                if let Some(value) = &n.value {
-                    self.walk_expr(value);
-                }
-                self.walk_expr(&n.x);
-                self.inc_nesting();
-                for s in &n.body.list {
-                    self.walk_stmt(s);
-                }
-                self.dec_nesting();
+                self.walk(1, |v| {
+                    for s in &n.body.list {
+                        v.walk_stmt(s);
+                    }
+                });
             }
             Stmt::BranchStmt(n) => {
                 if n.label.is_some() {
@@ -242,34 +238,36 @@ impl<'a> ComplexityVisitor<'a> {
         }
     }
 
+    /// Upstream's `walkIfElse`:
+    ///
+    /// ```go
+    /// v.complexity += 1 + v.nestingLevel
+    /// v.nestingLevel++
+    /// w(n)   // Cond, Body, then +1 per `else if`; a plain `else` is walked
+    /// v.nestingLevel--
+    /// ```
+    ///
+    /// Two things guff had wrong. The `Init` statement is not walked at all, so
+    /// `if x := a && b; x {}` is 1 and not 2. And a **plain trailing `else` adds
+    /// nothing** — only an `else if` costs 1 — so an if / else-if / else-if /
+    /// else chain is 3, where guff counted 4.
     fn visit_if(&mut self, n: &guff::ast::IfStmt) {
-        if self.is_else(n.id) {
-            self.inc_complexity();
-        } else {
-            self.nest_inc_complexity();
-        }
+        self.complexity += 1 + self.nesting;
+        let nesting = self.nesting;
+        self.nesting += 1;
+        self.walk_if_chain(n);
+        self.nesting = nesting;
+    }
 
-        if let Some(init) = &n.init {
-            self.walk_stmt(init);
-        }
+    fn walk_if_chain(&mut self, n: &guff::ast::IfStmt) {
         self.walk_expr(&n.cond);
-
-        self.inc_nesting();
         for s in &n.body.list {
             self.walk_stmt(s);
         }
-        self.dec_nesting();
-
         match n.else_.as_deref() {
-            Some(Stmt::BlockStmt(b)) => {
-                self.inc_complexity();
-                for s in &b.list {
-                    self.walk_stmt(s);
-                }
-            }
             Some(Stmt::IfStmt(else_if)) => {
-                self.mark_else(else_if.id);
-                self.visit_if(else_if);
+                self.inc_complexity();
+                self.walk_if_chain(else_if);
             }
             Some(other) => self.walk_stmt(other),
             None => {}
@@ -278,12 +276,17 @@ impl<'a> ComplexityVisitor<'a> {
 
     fn walk_expr(&mut self, expr: &Expr) {
         match expr {
+            // `v.walk(0, n.Body)` — "do not increment the complexity, just do
+            // the nesting", but `walk` still adds the *current* nesting level.
+            // guff added nothing, so every function literal below a loop
+            // undercounted: `for range s { f := func() {} }` is 2 upstream and
+            // was 1 here.
             Expr::FuncLit(lit) => {
-                self.inc_nesting();
-                for s in &lit.body.list {
-                    self.walk_stmt(s);
-                }
-                self.dec_nesting();
+                self.walk(0, |v| {
+                    for s in &lit.body.list {
+                        v.walk_stmt(s);
+                    }
+                });
             }
             Expr::BinaryExpr(b) => self.visit_binary(b),
             Expr::CallExpr(c) => self.visit_call(c),
