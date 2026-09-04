@@ -69,17 +69,37 @@ fn type_of(pass: &Pass<'_>, expr: &Expr) -> Option<TypeId> {
     Some(info.types.get(&expr.id())?.typ)
 }
 
+/// Upstream is two unchecked type assertions, and they are the whole rule:
+///
+/// ```go
+/// sliceType, ok := typ.(*types.Slice)
+/// if !ok { return }
+/// elemType, ok := sliceType.Elem().(*types.Interface)
+/// if !ok { return }
+/// return elemType.NumMethods() == 0
+/// ```
+///
+/// Neither unaliases, and under `gotypesalias=1` — the default since Go 1.23 —
+/// `any` is an `*types.Alias`, not an `*types.Interface`. So the pinned
+/// asasalint reports **only** code that spells `interface{}` on both sides, and
+/// says nothing about `[]any`. Measured across eleven shapes: `[]interface{}`
+/// into `...interface{}` is the one that is reported; `[]any` into `...any`,
+/// either mixture of the two spellings, an alias for the slice type, and an
+/// alias for the element are all silent. A *named* slice type is silent in both
+/// tools, because a `Named` is not a `*types.Slice` either.
+///
+/// guff unaliased both and reported all of them, which is one of k6's
+/// (`internal/js/modules/k6/browser/common/element_handle.go:516`, a `[]any`).
+/// This follows upstream rather than the intent; if asasalint starts unaliasing,
+/// so does this.
 fn is_slice_any_type(pass: &Pass<'_>, typ: TypeId) -> bool {
     let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
         return false;
     };
-    let typ = unalias_readonly(&artifacts.types, typ);
     let TypeData::Slice(slice) = artifacts.types.get(typ) else {
         return false;
     };
-    let elem = unalias_readonly(&artifacts.types, slice.elem());
-    let u = elem.underlying(&artifacts.types);
-    match artifacts.types.get(u) {
+    match artifacts.types.get(slice.elem()) {
         TypeData::Interface(i) => i.num_explicit_methods() == 0 && i.num_embeddeds() == 0,
         _ => false,
     }
