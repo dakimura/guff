@@ -193,5 +193,13 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "15m"
+  },
+  {
+    "name": "buildkit",
+    "url": "https://github.com/moby/buildkit.git",
+    "ref": "v0.32.2",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
   }
 ]
