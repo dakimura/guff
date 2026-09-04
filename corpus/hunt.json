@@ -221,5 +221,13 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "15m"
+  },
+  {
+    "name": "external-dns",
+    "url": "https://github.com/kubernetes-sigs/external-dns.git",
+    "ref": "v0.22.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
   }
 ]
