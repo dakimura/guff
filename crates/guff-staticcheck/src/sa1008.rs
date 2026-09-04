@@ -53,18 +53,36 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "SA1008 requires inspect analyzer".to_string())?
         .clone();
 
+    // An assignment that writes an `http.Header` key takes its **whole subtree**
+    // out of the walk, not just the index on its left:
+    //
+    //     if code.IsOfTypeWithName(pass, op.X, "net/http.Header") {
+    //         return false      // `inspector.Nodes`: do not descend
+    //     }
+    //
+    // and upstream's TODO says so in as many words — "this risks missing some
+    // Header reads, for example in `h1["foo"] = h2["foo"]`". guff only skipped
+    // the left-hand index, so `h[k] = append(h[k], v)` reported the read on the
+    // right. k6 `internal/output/prometheusrw/sigv4/sigv4.go` writes two of
+    // those.
     let mut skip: HashSet<u32> = HashSet::new();
     inspect.preorder_typed(node_mask!(AssignStmt), pass.files(), |node| {
-        let NodeRef::AssignStmt(AssignStmt { lhs, .. }) = node else {
+        let NodeRef::AssignStmt(assign) = node else {
             return;
         };
-        for lhs in lhs {
-            if let Expr::IndexExpr(ix) = lhs {
-                if index_on_header(pass, ix) {
-                    skip.insert(ix.id);
-                }
-            }
+        let writes_header = assign.lhs.iter().any(|lhs| match lhs {
+            Expr::IndexExpr(ix) => index_on_header(pass, ix),
+            _ => false,
+        });
+        if !writes_header {
+            return;
         }
+        guff::walk::preorder(node, |n| {
+            if let NodeRef::IndexExpr(ix) = n {
+                skip.insert(ix.id);
+            }
+            true
+        });
     });
 
     let mut pending: Vec<(u32, String, Option<TextEdit>)> = Vec::new();
