@@ -55,6 +55,11 @@ EXCLUDED = {
     "config went version: \"2\" on 2025-10-17, and no tag has been cut since), and "
     "./... on main measures only typecheck: one //go:embed of an unbuilt frontend "
     "deletes the whole report",
+    "opentelemetry-collector": "100 go.mod files and no go.work: ./... at the "
+    "checkout root reaches exactly one package (internal/statusutil), and a "
+    "submodule cannot be named from there (go list ./pdata/... -> \"directory "
+    "prefix pdata does not contain main module\"). Upstream lints it as 100 runs "
+    "(make golint cds into each module); the harness runs one",
 }
 
 # Targets whose numbers this host cannot produce. Measuring them anywhere but
