@@ -1400,3 +1400,38 @@ fn revive_time_equal_quotes_the_operator_not_its_token_name() {
         );
     });
 }
+
+/// `empty-block` prunes a range subtree only when the range body is *empty*.
+///
+/// Upstream (revive v1.15.0, `rule/empty_block.go`):
+///
+/// ```go
+/// case *ast.RangeStmt:
+///     if len(n.Body.List) == 0 {
+///         w.onFailure(…)
+///         return nil // skip visiting the range subtree
+///     }
+/// ```
+///
+/// guff pruned at every range statement, so nothing inside a non-empty
+/// `for … range` was ever visited — an empty drain loop two closures deep
+/// inside `for _, tc := range tests` (k6 `ramping_arrival_rate_test.go:294`)
+/// went unreported, and the `//nolint:revive` over it became an unused
+/// directive.
+///
+/// Exact count: every one of these carries the same message, so only a count
+/// can tell ten from three.
+#[test]
+fn revive_empty_block_walks_into_a_non_empty_range() {
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/emptyblockrange",
+        "empty_block_range.go",
+    );
+    let messages = support::run_analyzer(revive(), &pkg);
+    let empty = messages
+        .iter()
+        .filter(|m| m.starts_with("empty-block:"))
+        .count();
+    assert_eq!(empty, 10, "{messages:?}");
+}
