@@ -247,6 +247,20 @@ sa4022/bad/bad.go:5:6:staticcheck::SA4022: the address of a variable cannot be n
 sa4022/ok/ok.go:4:5:staticcheck::SA9003: empty branch
 sa4023/bad/bad.go:5:2:staticcheck::S1021: should merge variable declaration with assignment on next line
 sa4023/bad/bad.go:7:6:staticcheck::SA4023: this comparison is never true
+sa4023/bad/bad.go:24:9:staticcheck::SA4023: this comparison is always true
+sa4023/bad/bad.go:29:2:staticcheck::S1021: should merge variable declaration with assignment on next line
+sa4023/bad/bad.go:31:9:staticcheck::SA4023: this comparison is always true
+sa4023/bad/bad.go:37:9:staticcheck::SA4023: this comparison is always true
+sa4023/bad/bad.go:43:9:staticcheck::SA4023: this comparison is never true
+sa4023/bad/bad.go:49:2:staticcheck::S1021: should merge variable declaration with assignment on next line
+sa4023/bad/bad.go:51:9:staticcheck::SA4023: this comparison is never true
+sa4023/bad/bad.go:57:9:staticcheck::SA4023: this comparison is always true
+sa4023/bad/bad.go:66:9:staticcheck::SA4023: this comparison is always true
+sa4023/bad/bad.go:72:9:staticcheck::SA4023: this comparison is always true
+sa4023/bad/bad.go:79:9:staticcheck::SA4023: this comparison is always true
+sa4023/bad/bad.go:87:9:staticcheck::SA4023: this comparison is always true
+sa4023/bad/bad.go:98:9:staticcheck::SA4023: this comparison is always true
+sa4023/bad/bad.go:104:9:staticcheck::SA4023: this comparison is always true
 sa4024/bad/bad.go:4:5:staticcheck::SA9003: empty branch
 sa4024/bad/bad.go:4:8:staticcheck::SA4024: builtin function len does not return negative values
 sa4025/bad/bad.go:2:19:staticcheck::SA4025: the integer division '2 / 3' results in zero

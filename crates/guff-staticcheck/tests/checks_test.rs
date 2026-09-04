@@ -2115,7 +2115,70 @@ sa_check_bad_ok!(sa4019, sa4019_flags_bad_cases, sa4019_allows_ok_cases);
 sa_check_bad_ok!(sa4020, sa4020_flags_bad_cases, sa4020_allows_ok_cases);
 sa_check_bad_ok!(sa4021, sa4021_flags_bad_cases, sa4021_allows_ok_cases);
 sa_check_bad_ok!(sa4022, sa4022_flags_bad_cases, sa4022_allows_ok_cases);
-sa_check_bad_ok!(sa4023, sa4023_flags_bad_cases, sa4023_allows_ok_cases);
+#[test]
+fn sa4023_flags_every_shape_that_flattens_to_a_make_interface() {
+    // The IR path was unreachable: it asked whether the *`BinOp`* had an
+    // interface type, but a comparison's type is `bool`, so every candidate was
+    // dropped before the `MakeInterface` test. What fired instead was an AST
+    // approximation — "a concrete pointer was assigned to this variable earlier
+    // in the file" — which reports the shapes upstream is silent on and misses
+    // the ones it reports. buildkit `client/client.go:166` was the first
+    // measured instance; `ok.go` holds it and eleven more silent shapes.
+    //
+    // Counted by position, not by `any(contains(…))`: every message here is one
+    // of two strings, so a substring assertion passes with twelve of the
+    // thirteen missing.
+    let pkg = typecheck_rule("sa4023", "bad.go");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64, String)> =
+        support::run_analyzer_diagnostics(sa4023::analyzer(), &pkg)
+            .into_iter()
+            .map(|d| {
+                let p = fset.position(guff::position::Pos(d.pos as i64));
+                (p.line, p.column, d.message)
+            })
+            .collect();
+    got.sort();
+
+    let always = |line| (line, 9, "this comparison is always true".to_string());
+    let never = |line| (line, 9, "this comparison is never true".to_string());
+    assert_eq!(
+        got,
+        vec![
+            // The column is the start of the left operand, not the operator:
+            // upstream reports the `ast.BinaryExpr`, whose `Pos()` is `X.Pos()`.
+            (7, 6, "this comparison is never true".to_string()),
+            always(24),  // var d iface = &concrete{}
+            always(31),  // d = &concrete{}
+            always(37),  // d := iface(&concrete{})
+            never(43),   // ==, so "never"
+            never(51),   // assigned a typed nil pointer
+            always(57),  // the concrete value comes from a call
+            always(66),  // [T int | string]
+            always(72),  // [T ~int]
+            always(79),  // [T *concrete]
+            always(87),  // [T num], a named union
+            always(98),  // [T stringy], a method and a term
+            always(104), // [T interface{ *concrete }]
+        ],
+        "{got:?}"
+    );
+}
+
+#[test]
+fn sa4023_allows_ok_cases() {
+    // Twelve shapes upstream stays quiet on, measured against it one shape per
+    // declaration: a conditional assignment in a loop (buildkit's) and in an
+    // `if`, two branches assigning different concrete values, an assignment
+    // that only happens after the comparison, `nil` on the left, a struct
+    // field, a package-level variable, a local captured by a closure, and three
+    // type parameters whose constraint has no structural terms.
+    let pkg = typecheck_rule("sa4023", "ok.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa4023::analyzer(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
+}
 sa_check_bad_ok!(sa4024, sa4024_flags_bad_cases, sa4024_allows_ok_cases);
 sa_check_bad_ok!(sa4025, sa4025_flags_bad_cases, sa4025_allows_ok_cases);
 sa_check_bad_ok!(sa4026, sa4026_flags_bad_cases, sa4026_allows_ok_cases);
