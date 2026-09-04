@@ -21004,3 +21004,110 @@ golden の再生成はキー集合で確認（**消えたキー 0**、追加 18 
 SA5003 が 9、fixture が増えたことで S1000 が 6・SA4011 が 2・S1023 が 1）。
 
 **kubeshark `open 2 → 0`。台帳 37/100 → 38/100**（39 定義）。
+
+### 2026-09-04（続き 165）— external-dns を採用。**guff の挙動は変えていない。**3 件の乖離は**独立した 2 原因**で、どちらも最小再現まで落として測った
+
+`adopt external-dns`（v0.22.0）。
+
+```
+external-dns: guff=95 golangci=94 both=93 P=97.9% R=98.9% [UNEXPECTED]
+  +guff registry/registry.go:32:misspell:`normalises` is a misspelling of `normalizes`
+  +guff source/annotations/provider_specific.go:69:misspell:`normalise` is a misspelling of `normalize`
+  +gcl  internal/testutils/init.go:29:gochecknoinits:don't use `init` function
+```
+
+**2 件は guff-only、1 件は gcl-only。従属していない。** それぞれ別の原因である。
+
+#### A. misspell —— 上流は**辞書の優先順位**で潰しており、guff は語ごとの HashMap を引いている
+
+上流の `Replacer` は `Replacements: DictMain` に `AddRuleList(DictAmerican)` を
+**追記**して 1 本の `StringReplacer`（Go の `strings.Replacer` 相当の trie）にする。
+この trie は**長さではなく引数順**で勝者を決める:
+
+```go
+// priority is the priority (higher is more important) of the trie node's
+// key/value pair; keys are not necessarily matched shortest- or longest-first.
+```
+
+そして `recheckLine` は語を 1 つ取り出して `engine.Replace(word)` を掛け、
+**その結果が `corrected[word]` と一致したときだけ**報告する:
+
+```go
+if StringEqualFold(r.corrected[strings.ToLower(word)], newword) { ...report... }
+// Word got corrected into something unknown. Ignore it
+```
+
+`normalise` の場合、DictMain に**先に**入っている
+
+```
+words.go:23033  "normalis", "normals"
+```
+
+が `normalise` の接頭辞として trie で勝つので `engine.Replace("normalise")` は
+`"normalse"` になり、`corrected["normalise"]`（= `"normalize"`、DictAmerican 由来）
+と一致しないので**上流は黙る**。
+
+guff は `dict_main + dict_us` を 1 つの `FxHashMap` にマージして
+**語全体で 1 回引く**だけなので、接頭辞の衝突が存在しない。よって出す。
+
+**辞書は一致している。** guff の `data/*.tsv` は上流と同じ行数
+（main 28,096 / us 1,618 / uk 1,477）で、`dict_main.tsv:23027` に
+`normalis→normals` も入っている。**違うのは照合であって語彙ではない。**
+
+**影響範囲を数えた。** 「自分より前に、自分の接頭辞である鍵がある」語:
+
+| locale | 影響する語数 |
+|---|--:|
+| US | **97** |
+| UK | 11 |
+| （無し） | 0 |
+
+`capitalis→capitals` / `criticis→critics` / `crystallis→crystals` /
+`energis→energies` / `normalis→normals` といった DictMain の「途中で切れた語」の
+補正が、英国綴りの語族を丸ごと覆っている。最小再現で確認:
+
+```
+guff-only: capitalise criticise crystallise energise normalise   （5 語とも上流は黙る）
+一致:      analyse colour behaviour organise recognise seperate  （6 語）
+```
+
+#### B. gochecknoinits —— 上流の除外パスは**config ファイルのあるディレクトリ相対**で、guff は go.mod 相対
+
+config の除外規則:
+
+```yaml
+- linters: [gochecknoinits]
+  path: ^(internal/.*/init\.go|.*/metrics\.go|...)$
+```
+
+`internal/testutils/init.go` はこれに当たる**はず**なのに上流は出す。理由は
+**config の置き場所**だった。`compat/hunt.sh` はパッチした config を
+`compat/results/hunt-*/` に書いてそこを `-c` に渡す。golangci は
+`run.relative-path-mode` の既定 `cfg` で**config のあるディレクトリ**を base path にし、
+`RelativePath = filepath.Rel(basePath, file)` を除外規則に照合する
+（`pkg/result/processors/path_relativity.go` と `base_rule.go`）。
+その結果パスは `../../../corpus/cache/external-dns/internal/testutils/init.go` になり、
+`^internal/` が当たらない。**同じ config を repo 直下に置いて回すと上流も除外する** ——
+測った:
+
+```
+config を repo 直下に置く : 1 issue （init は除外される）
+config を results/ に置く : 2 issues（gochecknoinits が出る）
+```
+
+guff は**どちらでも同じ答え**を返す。`crates/guff-lint/src/exclude.rs` の
+`path_for_match` が「base が接頭辞でないときは go.mod を探して**モジュールルート相対**にする」
+と書いてあるからで、コメントは理由として「ハーネスが config を temp dir に置くから」
+と明記している —— **その場面こそ上流と食い違う場面である**。上流は
+`filepath.Rel` なので `../` 付きの相対パスを作る。
+
+**これは共有 config（`-c ../shared/.golangci.yml`）を使う実利用でも出る乖離である。**
+ハーネス側の話（相対パス規則が黙って無効化される config で測っている）は別にあるが、
+それを直すと guff の欠陥が偶然隠れるので、**先に guff を上流に合わせる**。
+
+#### この回で出すもの
+
+**guff は 1 行も変えていない。** 台帳に external-dns を `open 3` で入れ、
+次の `close external-dns` に A と B を渡す（buildkit を続き 156 で `open 39` として
+採用し、157 / 159 で閉じたのと同じ運び）。台帳は **38/100 のまま**（40 定義、
+open は cri-o と external-dns）。
