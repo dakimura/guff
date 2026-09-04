@@ -14,7 +14,7 @@
     "alertmanager": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260904T204846Z",
+      "at": "20260904T230911Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -22,7 +22,7 @@
     "argo-cd": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260904T204846Z",
+      "at": "20260904T230911Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -30,7 +30,7 @@
     "atlas": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260904T204846Z",
+      "at": "20260904T230911Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -38,7 +38,7 @@
     "authelia": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260904T204846Z",
+      "at": "20260904T230911Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -46,7 +46,7 @@
     "buildkit": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260904T204846Z",
+      "at": "20260904T230911Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -54,7 +54,7 @@
     "caddy": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260904T204547Z",
+      "at": "20260904T230656Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -62,7 +62,7 @@
     "cli": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260904T204846Z",
+      "at": "20260904T230911Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -70,7 +70,7 @@
     "cobra": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260904T204547Z",
+      "at": "20260904T230656Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -78,7 +78,7 @@
     "connect-go": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260904T204846Z",
+      "at": "20260904T230911Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -110,7 +110,7 @@
     "coredns": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260904T204846Z",
+      "at": "20260904T230911Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -119,7 +119,7 @@
       "tier": "hunt",
       "needs_platform": "linux",
       "state": "open",
-      "at": "20260904T204846Z",
+      "at": "20260904T230911Z",
       "open": 110,
       "guff_only": 109,
       "gcl_only": 1,
@@ -140,7 +140,7 @@
     "dapr": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260904T204846Z",
+      "at": "20260904T230911Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -148,7 +148,7 @@
     "ebpf": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260904T204846Z",
+      "at": "20260904T230911Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -156,7 +156,7 @@
     "external-dns": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260904T204846Z",
+      "at": "20260904T230911Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -164,7 +164,7 @@
     "fiber": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260904T204846Z",
+      "at": "20260904T230911Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -172,7 +172,7 @@
     "gin": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260904T204547Z",
+      "at": "20260904T230656Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -180,7 +180,7 @@
     "gitea": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260904T204846Z",
+      "at": "20260904T230911Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -188,7 +188,7 @@
     "go-client": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260904T204547Z",
+      "at": "20260904T230656Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -196,7 +196,7 @@
     "go-redis": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260904T204846Z",
+      "at": "20260904T230911Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -212,7 +212,7 @@
     "helm": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260904T204547Z",
+      "at": "20260904T230656Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -220,7 +220,7 @@
     "jaeger": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260904T204846Z",
+      "at": "20260904T230911Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -228,19 +228,18 @@
     "k6": {
       "tier": "hunt",
       "state": "open",
-      "at": "20260904T204846Z",
-      "open": 2,
-      "guff_only": 2,
+      "at": "20260904T230911Z",
+      "open": 1,
+      "guff_only": 1,
       "gcl_only": 0,
       "by_linter": {
-        "contextcheck": 1,
         "nolintlint": 1
       }
     },
     "k9s": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260904T204547Z",
+      "at": "20260904T230656Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -256,7 +255,7 @@
     "kubeshark": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260904T204846Z",
+      "at": "20260904T230911Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -264,7 +263,7 @@
     "nats-server": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260904T204846Z",
+      "at": "20260904T230911Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -272,7 +271,7 @@
     "pipeline": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260904T204846Z",
+      "at": "20260904T230911Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -280,7 +279,7 @@
     "prometheus": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260904T204846Z",
+      "at": "20260904T230911Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -288,7 +287,7 @@
     "rclone": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260904T204846Z",
+      "at": "20260904T230911Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -296,7 +295,7 @@
     "restic": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260904T204846Z",
+      "at": "20260904T230911Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -304,7 +303,7 @@
     "scaleway-cli": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260904T204846Z",
+      "at": "20260904T230911Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -312,7 +311,7 @@
     "skopeo": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260904T204846Z",
+      "at": "20260904T230911Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -320,7 +319,7 @@
     "syncthing": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260904T204846Z",
+      "at": "20260904T230911Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -328,7 +327,7 @@
     "thanos": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260904T204846Z",
+      "at": "20260904T230911Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -336,7 +335,7 @@
     "traefik": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260904T204846Z",
+      "at": "20260904T230911Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -352,7 +351,7 @@
     "velero": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260904T204846Z",
+      "at": "20260904T230911Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0

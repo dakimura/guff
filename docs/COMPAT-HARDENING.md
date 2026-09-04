@@ -22346,3 +22346,57 @@ fixture は空 body の関数を 1 つも持てない —— 上流の `function
 golden **218**（新規 3 case、既存 215 は無変更）/ fix **218** / reject **14** /
 isolate **116 ターゲット** / workspace **278 スイート** /
 OSS pr tier **8 ターゲットすべて P=R=100%**。台帳は **39/100 のまま**（41 定義）。
+
+### 2026-09-05（続き 184）— contextcheck は無名関数を親の名前で登録する。guff は素の `run$1` で登録していたので、同じパッケージの別の `run` のクロージャと**鍵が衝突**していた
+
+k6 最後から 2 つ目の guff-only、`internal/cmd/cloud_run.go:151`。
+
+```go
+func (c *cmdCloudRun) run(cmd *cobra.Command, args []string) error {
+	if c.localExecution {
+		c.runCmd.loadConfiguredTest = func(*cobra.Command, []string) (…) {
+			test, err := loadAndConfigureLocalTest(c.runCmd.gs, cmd, args, …)
+```
+
+このクロージャは ctx を param にも free var にも持たないので、上流の
+`checkIsEntry` は `EntryWithCtx` を返さない —— つまり報告の起点にならない。
+なのに guff は報告していた。
+
+**最小再現は最初から作れなかった。** k6 と同じ鎖（8 段・パッケージ跨ぎ・
+`fetch` が自前で `context.WithTimeout` を作る）を書いても両ツールが一致する。
+そこで guff に「どの関数を起点として報告したか」を出す計器を入れたら
+`entry=run$1 tp=WithCtx` —— **クロージャ自身が `EntryWithCtx` になっていた**。
+
+原因は鍵の作り方だった。上流の `(*ssa.Function).RelString(nil)`:
+
+```go
+if f.parent != nil {
+	parent := f.parent.RelString(from)
+	for i, anon := range f.parent.AnonFuncs {
+		if anon == f { return fmt.Sprintf("%s$%d", parent, 1+i) }
+	}
+	return f.name // should never happen
+}
+```
+
+無名関数は**親の RelString + `$n`** で、`(*go.k6.io/k6/internal/cmd.cmdCloudRun).run$1`
+になる。guff は `f.object` が無いときに `f.name` をそのまま返していたので
+**`run$1`** —— k6 の `internal/cmd` には `run` メソッドが 5 つあり、そのクロージャは
+全部この 1 つの鍵を共有していた。この鍵は `checkIsEntry` のメモにも**輸出 fact にも**
+使われるので、先に処理されたクロージャの entry type が後のものに漏れる。
+
+fixture `contextcheck_anonkey` は `run` メソッドを **3 つ**持ち、ctx を捕まえるのは
+最初の 1 つだけ。**修正前の guff は 3 件、上流と修正後は 1 件。**
+
+```
+k6: guff-only 2 → 1
+```
+
+#### ゲート
+
+golden **215**（`contextcheck` を再生成 —— **消えたキー 0、追加 1**）/ fix **215** /
+reject **14** / isolate **116 ターゲット** / workspace **278 スイート** /
+OSS pr tier **8 ターゲットすべて P=R=100%**。台帳は **39/100 のまま**（41 定義）。
+
+k6 に残るのは **1 件**: `remote_object.go:83` の nolintlint で、親は続き 174 で
+測定済みの exhaustive のモジュール跨ぎ enum（whole-program モードが要る）。
