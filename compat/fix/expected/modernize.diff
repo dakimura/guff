@@ -234,6 +234,29 @@
  	return found
  }
  
+@@ -122,20 +100,10 @@
+ 
+ // Reported: the parameter type is the element type.
+ func containsFuncIdenticalParam(stack []*obj) bool {
+-	for _, vis := range stack {
+-		if objPred(vis) {
+-			return true
+-		}
+-	}
+-	return false
++	return slices.ContainsFunc(stack, objPred)
+ }
+ 
+ // Reported: the element type *is* the interface.
+ func containsFuncIfaceElem(stack []value) bool {
+-	for _, vis := range stack {
+-		if ifacePred(vis) {
+-			return true
+-		}
+-	}
+-	return false
++	return slices.ContainsFunc(stack, ifacePred)
+ }
 --- a/stditerators/stditerators.go
 +++ b/stditerators/stditerators.go
 @@ -6,22 +6,22 @@

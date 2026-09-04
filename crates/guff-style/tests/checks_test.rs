@@ -6727,6 +6727,41 @@ fn modernize_rangeint_drops_an_index_the_body_never_reads() {
 /// `found := false` into `found = slices.Contains(...)` — `undefined: found`,
 /// a `--fix` that does not compile.
 #[test]
+fn modernize_slicescontains_reads_the_predicate_signature() {
+    // The `ContainsFunc` half declines a variadic predicate, and one whose
+    // parameter type is not *identical* to the slice's element type —
+    // assignability is not enough, because `slices.ContainsFunc` instantiates
+    // `F ~func(E) bool` with the element type. guff checked neither, and k6
+    // `internal/js/modules/k6/grpc/client.go:445` is the second shape: `stack`
+    // is `[]*sobek.Object` while `SameAs(other Value) bool` takes the interface.
+    let pkg = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/slicescontains",
+        "slicescontains.go",
+    );
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<i64> = support::run_analyzer_diagnostics(modernize(), &pkg)
+        .into_iter()
+        .filter(|d| d.message.contains("Loop can be simplified using slices."))
+        .map(|d| fset.position(guff::position::Pos(d.pos as i64)).line)
+        .collect();
+    got.sort_unstable();
+    assert_eq!(
+        got,
+        vec![
+            4,   // v == needle
+            13,  // s[i] == needle
+            23,  // a func literal predicate of the element type
+            32,  // a break body
+            42,  // the bool accumulator
+            125, // a predicate whose parameter *is* the element type
+            135, // …and one where the element type is the interface
+        ],
+        "{got:?}"
+    );
+}
+
+#[test]
 fn modernize_slicescontains_keeps_the_assignment_token() {
     let pkg = support::typecheck_fixture(
         "modernize",
