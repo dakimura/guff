@@ -1492,7 +1492,11 @@ fn check_assign_op(pass: &Pass<'_>, assign: &AssignStmt, pending: &mut Pending) 
     // and the only call it accepts is a type conversion. dapr writes
     // `executionMap[ctx.GetTaskExecutionID()] = executionMap[…] + 1`, where
     // rewriting to `++` would call the getter once instead of twice.
-    if !side_effect_free(pass, lhs) {
+    //
+    // An assignment target is never a slice expression, a type assertion or a
+    // function literal, so this is the one `Pure` site where `isPure` and
+    // `typep.SideEffectFree` cannot disagree.
+    if !is_pure(pass, lhs) {
         return;
     }
     // KNOWN DIFFERENCE: these are re-printed from the AST, and upstream echoes
@@ -1536,52 +1540,113 @@ fn check_assign_op(pass: &Pass<'_>, assign: &AssignStmt, pending: &mut Pending) 
     report(pending, assign_pos(assign), "assignOp", msg);
 }
 
+/// The `$x` positions of each `dupArg` call pattern, with the arity the
+/// pattern fixes.
+///
+/// Upstream is a ruleguard rule, and most of its patterns are
+/// `pkg.Fn($x, $x)` — but three are not: `strings.Replace($_, $x, $x, $_)` and
+/// `strings.ReplaceAll($_, $x, $x)` compare arguments **1 and 2**, and
+/// `draw.Draw($x, $_, $x, $_, $_)` compares **0 and 2**. guff compared 0 and 1
+/// for every name it knew, and did not know those three at all.
+///
+/// The names are spelled by **import path**, because ruleguard resolves the
+/// package rather than matching the qualifier's spelling: measured, an aliased
+/// `gotypes "go/types"` is still reported, and a local package whose name
+/// happens to be `strings` or `draw` is not.
+const DUP_ARG_CALLS: &[(&str, usize, usize, usize)] = &[
+    ("copy", 2, 0, 1),
+    ("cmp.Compare", 2, 0, 1),
+    ("maps.Equal", 2, 0, 1),
+    ("math.Dim", 2, 0, 1),
+    ("math.Max", 2, 0, 1),
+    ("math.Min", 2, 0, 1),
+    ("reflect.Copy", 2, 0, 1),
+    ("reflect.DeepEqual", 2, 0, 1),
+    ("slices.Compare", 2, 0, 1),
+    ("slices.Equal", 2, 0, 1),
+    ("strings.Contains", 2, 0, 1),
+    ("strings.Compare", 2, 0, 1),
+    ("strings.EqualFold", 2, 0, 1),
+    ("strings.HasPrefix", 2, 0, 1),
+    ("strings.HasSuffix", 2, 0, 1),
+    ("strings.Index", 2, 0, 1),
+    ("strings.LastIndex", 2, 0, 1),
+    ("strings.Split", 2, 0, 1),
+    ("strings.SplitAfter", 2, 0, 1),
+    ("strings.SplitAfterN", 3, 0, 1),
+    ("strings.SplitN", 3, 0, 1),
+    ("strings.Replace", 4, 1, 2),
+    ("strings.ReplaceAll", 3, 1, 2),
+    ("bytes.Contains", 2, 0, 1),
+    ("bytes.Compare", 2, 0, 1),
+    ("bytes.Equal", 2, 0, 1),
+    ("bytes.EqualFold", 2, 0, 1),
+    ("bytes.HasPrefix", 2, 0, 1),
+    ("bytes.HasSuffix", 2, 0, 1),
+    ("bytes.Index", 2, 0, 1),
+    ("bytes.LastIndex", 2, 0, 1),
+    ("bytes.Split", 2, 0, 1),
+    ("bytes.SplitAfter", 2, 0, 1),
+    ("bytes.SplitAfterN", 3, 0, 1),
+    ("bytes.SplitN", 3, 0, 1),
+    ("bytes.Replace", 4, 1, 2),
+    ("bytes.ReplaceAll", 3, 1, 2),
+    ("go/types.Identical", 2, 0, 1),
+    ("go/types.IdenticalIgnoreTags", 2, 0, 1),
+    ("image/draw.Draw", 5, 0, 2),
+];
+
 fn check_dup_arg(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
+    // `m.Match(`$x.Equal($x)`, `$x.Equals($x)`, `$x.Compare($x)`, `$x.Cmp($x)`)
+    //  .Where(m["x"].Pure)`
+    //
+    // Purely syntactic, as gogrep always is: measured, it fires on a *field* of
+    // function type named `Equal`, and on a variadic method called with one
+    // argument — but not on the same variadic method called with two, because
+    // the pattern fixes the arity at one.
+    if call.args.len() == 1 {
+        if let Expr::SelectorExpr(sel) = call.fun.as_ref() {
+            if matches!(sel.sel.name.as_str(), "Equal" | "Equals" | "Compare" | "Cmp")
+                && exprs_equal(&sel.x, &call.args[0])
+                && is_pure(pass, &sel.x)
+            {
+                report(
+                    pending,
+                    call.fun.pos().0 as u32,
+                    "dupArg",
+                    "suspicious method call with the same argument and receiver".to_string(),
+                );
+            }
+        }
+        return;
+    }
     if call.args.len() < 2 {
         return;
     }
     let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
         return;
     };
-    let watch = matches!(
-        name.as_str(),
-        "copy"
-            | "cmp.Compare"
-            | "maps.Equal"
-            | "math.Dim"
-            | "math.Max"
-            | "math.Min"
-            | "reflect.Copy"
-            | "reflect.DeepEqual"
-            | "slices.Compare"
-            | "slices.Equal"
-            | "strings.Contains"
-            | "strings.Compare"
-            | "strings.EqualFold"
-            | "strings.HasPrefix"
-            | "strings.HasSuffix"
-            | "strings.Index"
-            | "bytes.Contains"
-            | "bytes.Compare"
-            | "bytes.Equal"
-            | "bytes.EqualFold"
-            | "bytes.HasPrefix"
-            | "bytes.HasSuffix"
-            | "bytes.Index"
-    );
-    if !watch {
+    let Some(&(_, arity, i, j)) = DUP_ARG_CALLS.iter().find(|(n, ..)| *n == name) else {
+        return;
+    };
+    if call.args.len() != arity {
         return;
     }
-    // Most of these take (a, b) as first two args.
-    if exprs_equal(&call.args[0], &call.args[1]) {
-        let whole = call_text(pass, call).unwrap_or_else(|| format!("{name}(...)"));
-        report(
-            pending,
-            call.fun.pos().0 as u32,
-            "dupArg",
-            format!("suspicious duplicated args in {whole}"),
-        );
+    if !exprs_equal(&call.args[i], &call.args[j]) {
+        return;
     }
+    // `.Where(m["x"].Pure)`, on `$x` only — the `$_` holes are unconstrained,
+    // so `strings.Replace(mk(), s, s, n)` is still a finding.
+    if !is_pure(pass, &call.args[i]) {
+        return;
+    }
+    let whole = call_text(pass, call).unwrap_or_else(|| format!("{name}(...)"));
+    report(
+        pending,
+        call.fun.pos().0 as u32,
+        "dupArg",
+        format!("suspicious duplicated args in {whole}"),
+    );
 }
 
 fn stmt_text(stmt: &Stmt) -> Option<String> {
@@ -6614,8 +6679,9 @@ fn check_equal_fold_strings(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Pen
 
     // `.Where(m["x"].Pure && m["y"].Pure)`: ruleguard's `isPure` accepts a type
     // conversion, and dapr compares `strings.ToLower(string(v.Protocol))` with
-    // `string(protocol)`.
-    if !side_effect_free(pass, x) || !side_effect_free(pass, y) {
+    // `string(protocol)`. It does **not** accept a type assertion, so
+    // `strings.ToLower(v.(string)) == t` is not a finding.
+    if !is_pure(pass, x) || !is_pure(pass, y) {
         return;
     }
     let (Some(xt), Some(yt)) = (expr_text(x), expr_text(y)) else {
@@ -8628,6 +8694,45 @@ fn expr_contains_float_cmp(pass: &Pass<'_>, expr: &Expr) -> bool {
                 }
             }
             expr_contains_float_cmp(pass, &b.x) || expr_contains_float_cmp(pass, &b.y)
+        }
+        _ => false,
+    }
+}
+
+/// go-ruleguard's `isPure` (`ruleguard/utils.go`) — the `m["x"].Pure` filter
+/// every `rules.go` rule is written against.
+///
+/// This is **not** [`side_effect_free`]. go-critic has two whitelists that read
+/// almost the same, and they disagree on three arms:
+///
+/// | arm | `typep.SideEffectFree` | ruleguard `isPure` |
+/// |---|---|---|
+/// | `ast.SliceExpr` | accepted | **rejected** (falls to `default`) |
+/// | `ast.TypeAssertExpr` | accepted | **rejected** |
+/// | `ast.FuncLit` | rejected | **accepted** |
+///
+/// The hand-written checkers (`mapKey`, `dupSubExpr`, `badCond`, `sortSlice`, …)
+/// call `typep.SideEffectFree`; the `Where(… .Pure)` of a ruleguard rule calls
+/// this one. guff used `side_effect_free` for both, so `equalFold` reported
+/// `strings.ToLower(v.(string)) == t`, which upstream stays quiet on.
+fn is_pure(pass: &Pass<'_>, expr: &Expr) -> bool {
+    match expr {
+        // `case *ast.BasicLit, *ast.Ident, *ast.FuncLit: return true`. A
+        // function literal cannot reach any of the three rules that use this
+        // filter (an assignment target, a `string` operand, an argument
+        // compared with `astequal`), but it is what upstream says.
+        Expr::BasicLit(_) | Expr::Ident(_) | Expr::FuncLit(_) => true,
+        Expr::StarExpr(e) => is_pure(pass, &e.x),
+        Expr::BinaryExpr(e) => is_pure(pass, &e.x) && is_pure(pass, &e.y),
+        // The one operator upstream rejects is a channel receive.
+        Expr::UnaryExpr(e) => e.op != Token::ARROW && is_pure(pass, &e.x),
+        Expr::IndexExpr(e) => is_pure(pass, &e.x) && is_pure(pass, &e.index),
+        Expr::SelectorExpr(e) => is_pure(pass, &e.x),
+        Expr::ParenExpr(e) => is_pure(pass, &e.x),
+        Expr::CompositeLit(e) => e.elts.iter().all(|x| is_pure(pass, x)),
+        // The only call upstream accepts is a type conversion.
+        Expr::CallExpr(e) => {
+            is_type_expr(pass, &e.fun) && e.args.iter().all(|x| is_pure(pass, x))
         }
         _ => false,
     }

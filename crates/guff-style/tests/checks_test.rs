@@ -7332,6 +7332,57 @@ fn modernize_disable_skips_checkers() {
     );
 }
 
+/// `dupArg` has two halves, and guff only had part of one.
+///
+/// The method half (`$x.Equal($x)`, `.Equals`, `.Compare`, `.Cmp`) was missing
+/// altogether — k6 `lib/execution_segment_test.go:34` writes `es.Equal(es)`.
+/// The call half was missing eleven names, and compared arguments 0 and 1 for
+/// all of them, when `strings.Replace($_, $x, $x, $_)` compares 1 and 2 and
+/// `draw.Draw($x, $_, $x, $_, $_)` compares 0 and 2.
+///
+/// Exact counts, not `any(contains(…))`: every method-form finding carries the
+/// same message, so only a count can tell ten from three.
+#[test]
+fn gocritic_dup_arg_covers_the_method_form_and_every_call_pattern() {
+    let pkg = support::typecheck_fixture("gocritic", "example.com/gocritic", "duparg.go");
+    let messages = support::run_analyzer(gocritic(), &pkg);
+    let method = messages
+        .iter()
+        .filter(|m| *m == "dupArg: suspicious method call with the same argument and receiver")
+        .count();
+    assert_eq!(method, 10, "{messages:?}");
+
+    let mut calls: Vec<&str> = messages
+        .iter()
+        .filter(|m| m.starts_with("dupArg: suspicious duplicated args in "))
+        .map(|m| m.trim_start_matches("dupArg: suspicious duplicated args in "))
+        .collect();
+    calls.sort_unstable();
+    assert_eq!(
+        calls,
+        vec![
+            "bytes.LastIndex(b, b)",
+            "bytes.Replace(nil, b, b, n)",
+            "bytes.ReplaceAll(nil, b, b)",
+            "bytes.Split(b, b)",
+            "bytes.SplitAfter(b, b)",
+            "bytes.SplitAfterN(b, b, n)",
+            "bytes.SplitN(b, b, n)",
+            "draw.Draw(dst, r, dst, p, draw.Src)",
+            "gotypes.Identical(t, t)",
+            "gotypes.IdenticalIgnoreTags(t, t)",
+            "strings.LastIndex(s, s)",
+            "strings.Replace(\"z\", s, s, n)",
+            "strings.ReplaceAll(\"z\", s, s)",
+            "strings.Split(s, s)",
+            "strings.SplitAfter(s, s)",
+            "strings.SplitAfterN(s, s, n)",
+            "strings.SplitN(s, s, n)",
+        ],
+        "{messages:?}"
+    );
+}
+
 #[test]
 fn gocritic_flags_common_patterns() {
     let pkg = support::typecheck_fixture("gocritic", "example.com/gocritic", "bad.go");

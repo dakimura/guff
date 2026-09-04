@@ -21900,3 +21900,92 @@ workspace **278 スイート** / OSS pr tier **8 ターゲットすべて P=R=10
 
 k6 に残るのは **8 件**: nolintlint 7（unused 4・exhaustive 1・gocritic 1・revive 1 の
 取りこぼしの従属）、contextcheck 1。
+
+### 2026-09-05（続き 178）— dupArg は半分しか無かった。メソッド形が丸ごと欠け、呼び出し形は 11 名と「引数 0 と 1 以外を比べる 3 パターン」を落とし、`Pure` は別の述語だった
+
+k6 `lib/execution_segment_test.go:34` の `//nolint:gocritic` が unused と言われる
+（guff-only 1 件）。中身は
+
+```go
+require.True(t, es.Equal(es)) //nolint:gocritic
+```
+
+上流の規則は 2 本立てで、guff は 2 本目しか持っていなかった:
+
+```go
+m.Match(`$x.Equal($x)`, `$x.Equals($x)`, `$x.Compare($x)`, `$x.Cmp($x)`).
+	Where(m["x"].Pure).
+	Report(`suspicious method call with the same argument and receiver`)
+
+m.Match(`copy($x, $x)`, …, `strings.Replace($_, $x, $x, $_)`,
+	`draw.Draw($x, $_, $x, $_, $_)`).
+	Where(m["x"].Pure).
+	Report(`suspicious duplicated args in $$`)
+```
+
+**測ってみると欠陥は 4 つあった。**
+
+**A. メソッド形が無い。** gogrep はいつも通り構文だけを見るので、`Equal` という名の
+**関数型フィールド**でも当たり、可変長メソッドを引数 1 個で呼べば当たるが 2 個では
+当たらない（パターンが arity を 1 に固定する）。
+
+**B. 呼び出し表に 11 名足りない。** `strings`/`bytes` の
+`LastIndex`・`Split`・`SplitAfter`・`SplitAfterN`・`SplitN`・`ReplaceAll`（`Split` は
+`bytes` 側のみ欠）、`go/types.Identical`、`go/types.IdenticalIgnoreTags`、
+`image/draw.Draw`。
+
+**C. 比べる引数の位置が 3 パターンで違う。** guff は全部 0 と 1 を比べていた:
+
+| パターン | 比べる位置 |
+|---|---|
+| `strings.Replace($_, $x, $x, $_)` / `bytes.Replace` | **1 と 2** |
+| `strings.ReplaceAll($_, $x, $x)` / `bytes.ReplaceAll` | **1 と 2** |
+| `draw.Draw($x, $_, $x, $_, $_)` | **0 と 2** |
+
+**D. `Pure` は `typep.SideEffectFree` ではない。** go-critic には**よく似た許可リストが
+2 つ**あり、3 つの腕で食い違う:
+
+| 腕 | `typep.SideEffectFree` | ruleguard `isPure` |
+|---|---|---|
+| `ast.SliceExpr` | 通す | **落とす** |
+| `ast.TypeAssertExpr` | 通す | **落とす** |
+| `ast.FuncLit` | 落とす | **通す** |
+
+手書きの checker（`mapKey` / `dupSubExpr` / `badCond` / `sortSlice` …）は前者を、
+ruleguard 規則の `Where(… .Pure)` は後者を呼ぶ。guff は両方に `side_effect_free`
+（＝前者の移植）を使っていたので、**`equalFold` が
+`strings.ToLower(v.(string)) == t` を出していた**（上流は黙る）。`is_pure` を足して
+ruleguard 側の 3 箇所に配った。`assignOp` は代入先が slice 式にも型アサーションにも
+関数リテラルにもなり得ないので、**唯一 2 つが食い違えない `Pure` 呼び出し**である。
+
+**`Pure` は `$x` にだけ掛かる。** `$_` の穴は無制約なので
+`strings.Replace(mk(), s, s, n)` は出る。
+
+**修飾子は綴りではなく import path で解決される。** `gotypes "go/types"` と別名を
+付けても出るが、たまたま `strings` や `draw` という名前のローカルパッケージには
+当たらない（2 パッケージ要るのでこの形だけ fixture には入っていない）。表を
+import path で綴った理由である。
+
+**4 モジュール 60 形**を両ツールに通して、修正後は全形一致。fixture
+`gocritic/duparg.go` に 27 件の finding と、黙る 10 形（4 名以外のメソッド、引数 2 個、
+可変長 2 引数、レシーバと引数が違う、呼び出しレシーバ、チャネル受信レシーバ、
+`$x` が非 Pure な 2 形、`Replace` の 0 と 1 だけが一致する形、slice 式）を置いた。
+メッセージが全部同じメソッド形は**件数でしか区別できない**ので、テストは
+`assert_eq!(method, 10)` と呼び出し形 17 件の完全一致で押さえてある。
+golden case `gocritic` に足したので行・桁も上流と突き合わせている。
+
+`stub/` に `go/types`・`image`・`image/draw` を足し、`strings`/`bytes` に 9 関数を
+追記した（既存行の整形が動かないよう空行で別ブロックにしている）。
+
+```
+k6: guff-only 8 → 7
+```
+
+#### ゲート
+
+golden **213**（`gocritic` を再生成 —— **消えたキー 0、追加 27、すべて dupArg**）/
+fix **213** / reject **14** / workspace **278 スイート** /
+OSS pr tier **8 ターゲットすべて P=R=100%**。台帳は **39/100 のまま**（41 定義）。
+
+k6 に残るのは **7 件**: nolintlint 6（unused 4・exhaustive 1・revive 1 の取りこぼしの
+従属）、contextcheck 1。
