@@ -41,3 +41,16 @@ parsingLoop:
 	}
 	return n
 }
+
+// The other side of the self-edge fix: this store *is* wasted, because the top
+// of the next iteration overwrites `x` before reading it. Keeping the self-edge
+// must not silence it — the revisit finds a Store, which is `reassignedSoon`,
+// not `notWasted`.
+func wastedInsideIntegerRange(n int) {
+	x := 0
+	for i := range n {
+		x = i
+		fmt.Print(x)
+		x = 99
+	}
+}

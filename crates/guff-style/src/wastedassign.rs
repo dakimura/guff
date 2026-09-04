@@ -544,10 +544,30 @@ fn is_next_operation_to_op_is_store(
         }
 
         if !block.succs.is_empty() && !break_flag {
-            let succs: Vec<(BlockId, Option<&[InstrId]>)> = rm_same_block(&block.succs, bid)
-                .into_iter()
-                .map(|b| (b, None))
-                .collect();
+            // Upstream hands the first frame a *copy* of the block
+            // (`blCopy := *bl`, then `[]*ssa.BasicBlock{&blCopy}`), and
+            // `rmSameBlock` compares successors against it by pointer. A copy
+            // is not any block in the CFG, so nothing is filtered on that
+            // first hop — a block that is its own successor is walked again.
+            //
+            // That is load-bearing. `optimizeBlocks` fuses `rangeint.loop`
+            // into `rangeint.body`, so a `for i := range n` loop is a single
+            // block that jumps to itself, and the read at the top of the next
+            // iteration lives in that same block. Filtering the self-edge here
+            // — which guff did, by passing the real `BlockId` — hid it, and
+            // the last assignment in such a loop looked dead. k6
+            // `lib/execution_segment_test.go` and `lib/executor/ramping_vus_test.go`
+            // are two of them; go/ssa and guff agree on the CFG, byte for byte.
+            //
+            // Deeper frames pass the real block and do filter, as upstream does.
+            let succs: Vec<(BlockId, Option<&[InstrId]>)> = if instr_override.is_some() {
+                block.succs.iter().copied().map(|b| (b, None)).collect()
+            } else {
+                rm_same_block(&block.succs, bid)
+                    .into_iter()
+                    .map(|b| (b, None))
+                    .collect()
+            };
             let reason =
                 is_next_operation_to_op_is_store(func, &succs, current_op, have_checked);
             if reason == WastedReason::NotWasted {

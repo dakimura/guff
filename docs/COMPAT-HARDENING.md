@@ -21405,3 +21405,87 @@ k6: guff-only 24 → 17   （nolintlint 14 → 7）
 
 golden **213 完全一致** / fix **213** / reject **14** / workspace **278 スイート** /
 OSS pr tier **8 ターゲットすべて P=R=100%**。台帳は **39/100 のまま**（41 定義）。
+
+### 2026-09-04（続き 170）— wastedassign は**最初の 1 ホップだけ自己辺を消さない**。上流がブロックの**コピー**を渡していて、`rmSameBlock` がポインタ比較だから
+
+k6 の残りから wastedassign 2 件。どちらも同じ形:
+
+```go
+from := big.NewRat(0, 1)
+for i := range n {
+    to := new(big.Rat).Add(big.NewRat(numerators[i], denominator), from)
+    ess[i], err = NewExecutionSegment(from, to)
+    require.NoError(t, err)
+    from = to        // guff: 「assigned to from, but never used afterwards」
+}
+return ess
+```
+
+`from` は**次のイテレーションの先頭で読まれる**ので生きている。
+
+**最小再現は 25 形。** 最初の素朴な形（`for i := 0; i < n; i++` に int の蓄積変数）
+では**再現しなかった**ので、条件を絞った:
+
+| 形 | 再現 |
+|---|---|
+| `for i := range n`（int / int64 / int32）で、ループ後に読まれない | **する** |
+| 同じ形でループ後に読まれる（`return from`） | しない |
+| `for i := 0; i < n; i++` | しない |
+| `for i := range xs`（スライス）/ map / chan | しない |
+| `for i < n`（while 形） | しない |
+
+**range-over-int だけ**である。理由は SSA の形にある —— guff の SSA を落とすと
+
+```
+1:  rangeint.body P:2 S:2 idom:0
+    ...
+    *t3 = t17        <- from = to
+    ...
+    if t21 goto 1 else 2
+```
+
+`optimizeBlocks` が `rangeint.loop` を `rangeint.body` に融合するので、
+**ループが自分自身に飛ぶ 1 ブロック**になり、次のイテレーションの読みは
+**同じブロックの中**にある。**go/ssa も同じ形を作る**（x/tools を
+`ssa.NaiveForm` で回して逐語で確認した —— 上流 wastedassign も NaiveForm）。
+
+つまり SSA は同じで、違うのは**歩き方**だった:
+
+```go
+blCopy := *bl                                   // ← 構造体のコピー
+...
+reason := isNextOperationToOpIsStore([]*ssa.BasicBlock{&blCopy}, op, nil)
+```
+
+```go
+func rmSameBlock(bls []*ssa.BasicBlock, currentBl *ssa.BasicBlock) []*ssa.BasicBlock {
+	for _, bl := range bls { if bl != currentBl { ... } }   // ポインタ比較
+}
+```
+
+`&blCopy` は CFG のどのブロックとも**別のポインタ**なので、
+**最初のホップでは自己辺が消えない**。guff は本物の `BlockId` を渡していたので
+消えていた。2 段目以降は上流も本物のブロックを渡すので消える —— そこは同じ。
+
+**直しは 1 箇所**: 最初のフレーム（命令列を差し替えてある = `instr_override.is_some()`）
+だけ `rm_same_block` を通さない。
+
+**反対側も測った。** 同じ range-over-int ループでも、次のイテレーションの先頭が
+**読む前に上書きする**なら本当に wasted で、上流は報告する。自己辺を残すと
+再訪で最初に当たるのが `Store` になり `reassignedSoon` を返すので、
+そこは黙らない。fixture の `wastedInsideIntegerRange` がそれで、
+`x = i` と `x = 99` の**2 件とも**両ツールが出す。
+
+```
+k6: guff-only 17 → 15
+```
+
+#### ゲート
+
+golden **213 完全一致**（再生成不要 —— golden の wastedassign ケースは
+isolate の fixture を引いている）/ fix **213** / reject **14** /
+workspace **278 スイート** / OSS pr tier **8 ターゲットすべて P=R=100%**。
+
+台帳は **39/100 のまま**（41 定義）。k6 に残るのは
+nolintlint 7・modernize 2・staticcheck 2・contextcheck / makezero / asasalint /
+unparam 各 1 の **15 件**。
