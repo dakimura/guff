@@ -50,6 +50,15 @@
 +	strings.ReplaceAll("abc", "a", "b")
  	strings.Replace("abc", "a", "b", 1)
  }
+--- a/sa1019/bad/bad.go
++++ b/sa1019/bad/bad.go
+@@ -26,5 +26,5 @@
+ 	h.Cfg.Old = 4
+ 
+ 	// Writing the embedding out by hand selects the same field.
+-	w.Options.Old = 5
++	w.Old = 5
+ }
 --- a/sa1025/bad/bad.go
 +++ b/sa1025/bad/bad.go
 @@ -5,6 +5,6 @@

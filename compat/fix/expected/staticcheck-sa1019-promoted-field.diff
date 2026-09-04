@@ -1,0 +1,21 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh staticcheck-sa1019-promoted-field
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/staticcheck-sa1019-promoted-field/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/use.go
++++ b/use.go
+@@ -25,7 +25,7 @@
+ 
+ func NamedThenPromoted(h *dep.Holder) { h.Cfg.Old = "x" }
+ 
+-func ExplicitPath(w *dep.Wrapper) { w.Base.Old = "x" }
++func ExplicitPath(w *dep.Wrapper) { w.Old = "x" }
+ 
+ // Controls: live siblings at each depth, and a same-named live field.
+ func SiblingIsFine(w *dep.Wrapper) { w.New = "x"; w.Extra = "y" }

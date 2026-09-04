@@ -20563,3 +20563,83 @@ d.image.Config.ArgsEscaped = true //nolint:staticcheck // ignore SA1019: field i
 **非推奨の struct フィールド**の使用であって、関数・変数ではない。
 
 台帳は 35/100 のまま、buildkit `open 2` のまま。**この回の成果は測定である。**
+
+### 2026-09-04（続き 159）— 続き 158 の B を直した。SA1019 は**フィールドを「選択の receiver」で引いていた** —— 埋め込みで昇格したフィールドは全部黙っていた
+
+続き 158 が測った buildkit の 2 件目、`convert.go:1605` の nolintlint
+「`//nolint:staticcheck` は unused」。親は **SA1019 の見落とし**で、
+見落としの正体は**フィールドの持ち主の取り違え**だった。
+
+```go
+d.image.Config.ArgsEscaped = true //nolint:staticcheck // ignore SA1019: ...
+```
+
+`d.image.Config` は `dockerspec.DockerOCIImageConfig`（moby/docker-image-spec）、
+`ArgsEscaped` はそれが**埋め込んでいる** `ocispecs.ImageConfig`
+（opencontainers/image-spec）の側で `Deprecated:` が付いている。
+guff の `sa1019.rs` は fields を `TypeName.Field` で持ち、引くときに
+`selection_recv_base_name`（= **x の型**）を使っていたので
+`DockerOCIImageConfig.ArgsEscaped` を探す —— **誰も書かない鍵**である。
+上流は receiver を一切見ない（フィールドの `Var` オブジェクトを
+`Deprecated` fact の表に直接引く）ので、この問いが存在しない。
+
+**最小再現は実モジュールで作った**（image-spec v1.1.1 / docker-image-spec v1.3.1、
+どちらも module cache にある）。1 ファイル 5 形:
+
+| 形 | golangci-lint | guff（修正前） | guff（修正後） |
+|---|---|---|---|
+| 宣言元の struct で直接 | 出す | 出す | 出す |
+| 埋め込み値ごしに昇格 | 出す | **黙る** | 出す |
+| `i.Config.ArgsEscaped`（buildkit の形） | 出す | **黙る** | 出す |
+| 昇格＋読み（代入でない） | 出す | **黙る** | 出す |
+| composite literal のキー | 黙る | 黙る | 黙る |
+
+**直し方**: `Selection::index()` を歩く。上流 go/types と同じで、
+末尾の要素が**宣言元 struct 内のフィールド番号**、その手前が**辿った埋め込み**なので、
+最後の 1 つを落として歩けば持ち主の型に着く（`field_owner_base_name`）。
+receiver 経由の旧経路は fallback に残した。
+
+**なぜ golden 213 ケースが 1 つも落ちなかったか。** SA1019 には経路が 2 つある ——
+依存パッケージの `Deprecated` fact を読む経路と、**fact が無いときに依存の
+ソースを自分で走査して doc を読み直す経路**。receiver で引いていたのは後者だけで、
+前者は object をそのまま引くので昇格フィールドでも正しい。
+そして fact が存在するかどうかは**同時に有効な linter で変わる**（続き 130）。
+既存の `staticcheck-sa1019-group-doc` は `contextcheck` を併走させる
+＝ fact 経路 —— **壊れていた経路を 1 度も通っていなかった**。
+新 case `staticcheck-sa1019-promoted-field` は **staticcheck 単独**で回す。
+
+**測って捨てたもの: 依存の推移的な解決。** 3 パッケージ fixture の 7 形目
+（`dep.Outer` → `dep.Mid` → `inner.Deep` の `DeepOld`、**use 側は `inner` を
+import しない**）は、上流は出すが guff は黙る。原因は昇格ではなく
+**宣言元パッケージが見つからないこと**で、`scan_import_deprecated` は
+`Package::imports`（= 直接の辺だけ）を引く。import グラフを BFS する版を書いて
+測ったところ、**同じ形の fixture で結果が割れた**:
+
+```
+module example.com/promoted       → 7 形すべて一致
+module example.com/sa1019promoted → 6 形（DeepOld だけ黙る）
+```
+
+差はモジュール名だけである。計測すると
+`DBG resolve_import FAIL ... visited=2 fileless_hits=1` ——
+BFS が届いた `inner` は **go_files が空の id だけの stub** だった。
+`guff_packages::load::connect_imports` は `HashMap` を**1 パスだけ**舐めるので、
+`root` が `dep` より先に処理されると `root.imports["dep"]` には
+**まだ繋がれていない `dep`** のスナップショットが入る。
+どちらが先かはパス文字列のハッシュ順で決まる。
+**これは SA1019 ではなくパッケージローダの欠陥**なので、この回では revert した
+（結果が入力のハッシュ順で変わる修正は出さない）。新 case の `use.go` には
+`_ "…/inner"` の空 import を置いて 7 形目を決定的に測れるようにし、
+config.yml にそれが**guff にだけ効く**理由を書いた。**次に直すならここ**:
+`connect_imports` を依存の側から先に処理すれば 1 パスで繋がり切る。
+
+**ゲートの追随**: 既存の golden `staticcheck-sa` は同じ fixture
+（`sa1019/bad.go` と `old` stub）を materialize しているので regen が要る。
+キー集合で差分すると**消えたキー 0・追加 6**（昇格 5 形 + `w.Options.Old` に
+乗る QF1008 1 件）で、ratchet は `missing 3 / extra 1` の baseline に戻った。
+fix tier は新 case の expected を録り直すまで「上流は 0 行、guff は 11 行」と
+出る —— **expected/<case>.diff が無い＝上流は何も書かない**という規約なので、
+録っていないだけである。録ると 11 行で一致した（QF1008 の fix が
+`w.Base.Old` → `w.Old` を書く。上流も同じものを書く）。
+
+台帳: buildkit `open 2 → 1`（残りは続き 158 の SA4023、SSA 待ち）。
