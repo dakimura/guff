@@ -1181,11 +1181,17 @@ fn is_byte_slice_conversion(pass: &Pass<'_>, call: &CallExpr) -> bool {
     if tav.mode != OperandMode::TypeExpr {
         return false;
     }
+    // `types.Identical(tv.Type, byteSliceType)` — the conversion has to be to
+    // `[]byte` itself, not to something whose *underlying* type is. A named
+    // byte slice keeps its own methods and its own nil-vs-empty contract, and
+    // upstream leaves it alone; guff took `underlying()` on both the slice and
+    // its element and rewrote `json.RawMessage(fmt.Sprintf(…))` (k6
+    // `cloudapi/logs_test.go`). An alias still qualifies, which is what
+    // `unalias_readonly` is for.
     let typ = unalias_readonly(&artifacts.types, tav.typ);
-    let under = typ.underlying(&artifacts.types);
-    match artifacts.types.get(under) {
+    match artifacts.types.get(typ) {
         TypeData::Slice(s) => {
-            let elem = s.elem().underlying(&artifacts.types);
+            let elem = unalias_readonly(&artifacts.types, s.elem());
             matches!(
                 artifacts.types.get(elem),
                 TypeData::Basic(b) if b.kind() == BasicKind::Uint8
@@ -1193,6 +1199,96 @@ fn is_byte_slice_conversion(pass: &Pass<'_>, call: &CallExpr) -> bool {
         }
         _ => false,
     }
+}
+
+/// `mayFormatEmpty` — can this format string render as the empty string?
+///
+/// `[]byte(fmt.Sprintf(""))` is an empty but non-nil slice while
+/// `fmt.Appendf(nil, "")` is nil, so upstream declines the rewrite whenever the
+/// format might come out empty. It decides that by parsing the format and
+/// asking two questions: is every byte part of an operation, and is every
+/// verb one of `s v x X`.
+///
+/// Any other verb answers no. `%d` is reported and `%s` is not — measured
+/// against golangci-lint on eighteen formats, which is also how the rule was
+/// pinned down: upstream's own condition reads
+/// `!strings.ContainsRune("svxX", verb) && op.Prec.Fixed != 0`, and `%d`
+/// without a precision still takes it.
+///
+/// A format with no operations at all fails to parse upstream, which the caller
+/// reads as "cannot be empty", so `"plain"` is reported.
+fn may_format_empty(format: &str) -> bool {
+    if format.is_empty() {
+        return true;
+    }
+    let b = format.as_bytes();
+    let mut i = 0usize;
+    let mut ops_len = 0usize;
+    let mut saw_op = false;
+    while i < b.len() {
+        if b[i] != b'%' {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        i += 1;
+        // flags
+        while i < b.len() && matches!(b[i], b'-' | b'+' | b'#' | b' ' | b'0') {
+            i += 1;
+        }
+        // `[n]` argument index
+        i = skip_arg_index(b, i);
+        // width
+        if i < b.len() && b[i] == b'*' {
+            i += 1;
+            i = skip_arg_index(b, i);
+        } else {
+            while i < b.len() && b[i].is_ascii_digit() {
+                i += 1;
+            }
+        }
+        // precision
+        if i < b.len() && b[i] == b'.' {
+            i += 1;
+            if i < b.len() && b[i] == b'*' {
+                i += 1;
+                i = skip_arg_index(b, i);
+            } else {
+                while i < b.len() && b[i].is_ascii_digit() {
+                    i += 1;
+                }
+            }
+        }
+        i = skip_arg_index(b, i);
+        // verb
+        let Some(verb) = format[i..].chars().next() else {
+            return false; // trailing `%`: malformed
+        };
+        i += verb.len_utf8();
+        if !matches!(verb, 's' | 'v' | 'x' | 'X') {
+            return false;
+        }
+        saw_op = true;
+        ops_len += i - start;
+    }
+    // No operations at all is a parse error upstream, and a parse error is
+    // "cannot be empty".
+    saw_op && ops_len == format.len()
+}
+
+fn skip_arg_index(b: &[u8], mut i: usize) -> usize {
+    if i < b.len() && b[i] == b'[' {
+        let start = i;
+        i += 1;
+        while i < b.len() && b[i].is_ascii_digit() {
+            i += 1;
+        }
+        if i < b.len() && b[i] == b']' {
+            return i + 1;
+        }
+        return start;
+    }
+    i
 }
 
 fn check_fmtappendf(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagnostic>) {
@@ -1218,6 +1314,17 @@ fn check_fmtappendf(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagnost
     }
     if inner.args.is_empty() {
         return;
+    }
+    // `fmt.Sprint` and `fmt.Sprintf` disagree with their `Append` twins on nil
+    // when the result is empty, so upstream skips those two whenever the format
+    // may render empty. `Sprintln` always writes a newline and is never
+    // skipped.
+    if matches!(name.as_str(), "fmt.Sprintf" | "fmt.Sprint") {
+        if let Some(format) = code::expr_to_string(pass, &inner.args[0]) {
+            if may_format_empty(&format) {
+                return;
+            }
+        }
     }
     let args: Option<Vec<String>> = inner.args.iter().map(expr_text).collect();
     let Some(args) = args else {

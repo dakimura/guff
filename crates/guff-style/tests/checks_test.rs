@@ -6411,6 +6411,49 @@ fn modernize_flags_stringsseq() {
 }
 
 #[test]
+fn modernize_fmtappendf_wants_exactly_a_byte_slice_and_a_format_that_cannot_be_empty() {
+    // Two guards, both measured against golangci-lint on the shapes below.
+    //
+    // The conversion must be `[]byte` by `types.Identical`, not by underlying
+    // type: guff rewrote `json.RawMessage(fmt.Sprintf(…))` (k6
+    // `cloudapi/logs_test.go`), and a named byte slice keeps its own methods.
+    //
+    // And `[]byte(fmt.Sprintf(""))` is an empty but non-nil slice where
+    // `fmt.Appendf(nil, "")` is nil, so `Sprint`/`Sprintf` are skipped when the
+    // format may render empty — the whole string is operations and every verb
+    // is one of `s v x X`. `%d` is reported and `%s` is not.
+    let pkg = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/fmtappendf",
+        "fmtappendf.go",
+    );
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<i64> = support::run_analyzer_diagnostics(modernize(), &pkg)
+        .into_iter()
+        .filter(|d| d.message.contains("fmt.Append"))
+        .map(|d| fset.position(guff::position::Pos(d.pos as i64)).line)
+        .collect();
+    got.sort_unstable();
+    assert_eq!(
+        got,
+        vec![
+            15, // []byte(…)
+            18, // an alias of []byte
+            27, // %d
+            32, // %q
+            33, // a%s — literal text outside the operations
+            36, // %.5d
+            38, // "plain" — no operations at all
+            39, // %%%s — `%%` is an operation whose verb is not s/v/x/X
+            41, // %v%d
+            45, // fmt.Sprint of a non-constant
+            48, // fmt.Sprintln is never skipped
+        ],
+        "{got:?}"
+    );
+}
+
+#[test]
 fn modernize_flags_waitgroupgo() {
     let pkg = support::typecheck_fixture(
         "modernize",
