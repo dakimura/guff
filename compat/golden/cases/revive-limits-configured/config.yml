@@ -1,0 +1,40 @@
+# Golden case: the same six rules, every limit moved.
+#
+# The message quotes the limit, so every row here differs from
+# `revive-limits-default` — including the rows both cases report.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      rules:
+        - name: argument-limit
+          arguments:
+            - 4
+        - name: cyclomatic
+          arguments:
+            - 3
+        - name: function-length
+          arguments:
+            - 4
+            - 12
+        - name: function-result-limit
+          arguments:
+            - 1
+        - name: line-length-limit
+          arguments:
+            - 60
+        - name: max-control-nesting
+          arguments:
+            - 2
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

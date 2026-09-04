@@ -138,7 +138,7 @@ impl<'a> SharedFileRules<'a> {
         Self {
             file_is_test: false,
             file_index: 0,
-            argument_limit: enabled("argument-limit").then(argument_limit::Checker::new),
+            argument_limit: enabled("argument-limit").then(|| argument_limit::Checker::new(pass)),
             atomic: enabled("atomic").then(|| atomic::Checker::try_new(pass)).flatten(),
             banned_characters: enabled("banned-characters")
                 .then(|| banned_characters::Checker::try_new(pass))
@@ -155,7 +155,7 @@ impl<'a> SharedFileRules<'a> {
                 .then(constant_logical_expr::Checker::new),
             context_keys_type: enabled("context-keys-type")
                 .then(|| context_keys_type::Checker::new(pass)),
-            cyclomatic: enabled("cyclomatic").then(cyclomatic::Checker::new),
+            cyclomatic: enabled("cyclomatic").then(|| cyclomatic::Checker::new(pass)),
             deep_exit: enabled("deep-exit").then(|| deep_exit::Checker::new(pass)),
             defer: enabled("defer").then(defer::Checker::new),
             dot_imports: enabled("dot-imports").then(dot_imports::Checker::new),
@@ -187,7 +187,7 @@ impl<'a> SharedFileRules<'a> {
             function_length: enabled("function-length")
                 .then(|| function_length::Checker::new(pass)),
             function_result_limit: enabled("function-result-limit")
-                .then(function_result_limit::Checker::new),
+                .then(|| function_result_limit::Checker::new(pass)),
             get_return: enabled("get-return").then(get_return::Checker::new),
             identical_branches: enabled("identical-branches").then(identical_branches::Checker::new),
             identical_ifelseif_branches: enabled("identical-ifelseif-branches")

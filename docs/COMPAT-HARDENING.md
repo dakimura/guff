@@ -22289,3 +22289,60 @@ OSS pr tier **8 ターゲットすべて P=R=100%**。台帳は **39/100 のま�
 `function-length`(50, 75) / `function-result-limit`(3) / `line-length-limit`(80) /
 `max-control-nesting`(5) —— どれも上限を `const` で焼き込んでいて
 `arguments` を読まない。**次のタスク**として記録する。
+
+### 2026-09-05（続き 183）— revive の数値上限は **6 規則すべてで設定を読んでいなかった**
+
+続き 182 で `cognitive-complexity` の 1 件を直したときに同型を数えたら 6 つあった:
+
+| 規則 | 上流の既定 | guff |
+|---|--:|---|
+| `argument-limit` | 8 | `const MAX_ARGUMENTS: usize = 8` |
+| `cyclomatic` | 10 | `const MAX_COMPLEXITY: usize = 10` |
+| `function-length` | 50 / 75 | `const MAX_STMTS` / `const MAX_LINES` |
+| `function-result-limit` | 3 | `const MAX_RESULTS: usize = 3` |
+| `line-length-limit` | 80 | `const MAX_LINE_LENGTH: usize = 80` |
+| `max-control-nesting` | 5 | `const MAX_NESTING: usize = 5` |
+
+どれも上流は `Configure` で `arguments[0].(int64)` を読み、無ければ既定値に落ちる。
+guff は既定値を焼き込んでいて**設定でまったく動かなかった**。既定値そのものは
+合っていたので、既定のまま使う限り差は出ない —— だから golden にも OSS tier にも
+出てこなかった。
+
+**`function-length` だけ形が違う。** 引数は 0 個か**ちょうど 2 個**で、
+`Apply` は各半分を `> 0` で門番する:
+
+```go
+if r.maxStmt > 0 { … }
+if r.maxLines > 0 { … }
+```
+
+つまり `arguments: [0, 12]` は「文の上限 0 で全部報告」ではなく
+**文の側を丸ごと切る**。これも測って合わせた。
+
+**5 規則 × 引数 1 個と `function-length` の 4 通り（`[4,100]` / `[0,4]` /
+`[100,0]` / `[2,4]`）を両ツールで測って全形一致。**
+
+golden case は **3 つ**足した。1 つの fixture を共有し、引数だけが違う:
+
+| case | 引数 | キー数 |
+|---|---|--:|
+| `revive-limits-default` | なし（8 / 10 / 50,75 / 3 / 80 / 5） | 7 |
+| `revive-limits-configured` | 4 / 3 / 4,12 / 1 / 60 / 2 | **34** |
+| `revive-limits-zero` | `function-length: [0, 12]` | 3（行だけ） |
+
+**引数が無視されていれば最初の 2 つは同一になる。** メッセージが上限を引用するので、
+両方が報告する行すら互いに違う。
+
+fixture は空 body の関数を 1 つも持てない —— 上流の `function-length` は最初の
+1 つで**ファイルごと** `return nil` するからで、この癖は guff が既に写している
+（続き 61）。
+
+```
+台帳への影響なし（6 規則とも既定では無効、既定値は元から一致）
+```
+
+#### ゲート
+
+golden **218**（新規 3 case、既存 215 は無変更）/ fix **218** / reject **14** /
+isolate **116 ターゲット** / workspace **278 スイート** /
+OSS pr tier **8 ターゲットすべて P=R=100%**。台帳は **39/100 のまま**（41 定義）。
