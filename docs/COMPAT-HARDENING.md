@@ -20191,3 +20191,66 @@ golangci は `go:embed requires import "embed"` を出し、guff は黙る。こ
 
 台帳: alertmanager `open 1 → 0`。**34/100**（35 定義・open 1・cri-o は linux 専用）。
 golden 210/210、fix 210、reject 14、workspace テスト緑、OSS pr tier 8/8 P=R=100%。
+
+### 2026-09-04（続き 153）— harness は採らない。**タグに v2 config が 1 つも無く**、`./...` は typecheck しか測らない。ついでに exclude-rule の正規表現が両方向に外れているのを見つけた
+
+`./corpus/status.py next` の `adopt harness (58.7MB)`。採らないと決めた回で、
+根拠は 2 つとも測ったものである。
+
+**(1) タグに v2 config が無い。** 候補行の `ref: v2.28.2` は**旧 Drone**
+（`module github.com/drone/drone`、5.0MB、`.golangci.yml` が**そもそも無い**）。
+survey は `_config` を default branch から読み、`ref` は releases API から取ったが、
+このリポジトリではその 2 つは**別のコードベース**である。最新タグ `v3.3.0` は
+2025-08-14 で、config が `version: "2"` になったのは **2025-10-17**（`92cb4098f`）。
+以後 12 か月タグが切られていない一方 `main` は動いている（tip 2026-09-01）。
+つまり**待っていても解決しない**。
+
+**(2) `main` の `./...` は typecheck しか測らない。** `web/dist.go` が `dist/*` を
+埋め込んでいて、`dist/` は npm ビルドの出力なのでチェックアウトには無い:
+
+```
+web/dist.go:34:12: pattern dist/*: no matching files found (typecheck)
+```
+
+両ツールとも**この 1 件だけ**を出す。続き 152 の `InvalidIssue` により、
+typecheck の issue 1 件が run の findings を全部消すので、**有効な 40 個の linter が
+430 パッケージに対して何も測らない**。P=R=100% にはなるが、**落ちようのない target** を
+1 つ足すだけである（「緑だが何も測っていない」の 5 つ目の形）。
+
+なお続き 152 の実装はここで**実地に効いている**: `dist/*` は**グロブ**の形で、
+guff は今これを上流と 1 文字違わず出す。採らない理由は乖離ではなく、
+**測る中身が無いこと**の方である。
+
+**採る道が無いわけではない、という測定も残す。** `./registry/...` だけなら
+159 パッケージ・**94 件**（goconst 50 / gosec 18 / govet 15 / noctx 10 / gocritic 1）が
+出る（`app` の 201 パッケージは `web` を import しているので入れられない）。
+SHA で pin すれば採れるが、`prepare.sh` の新規 clone 経路は
+**default branch の shallow clone から非 tip の SHA を checkout できない**
+（`fatal: unable to read tree`）。`git fetch --depth 1 origin <sha>` を 1 行足せば通る
+—— ここまで測ってある。タグ縛りを緩める判断が要るので、この回では**足していない**。
+
+台帳: `corpus/README.md` の除外表と `status.py` の `EXCLUDED` に上記。34/100 のまま。
+
+**測定中に見つけた別件（次の作業）: exclude-rule の正規表現が両方向に外れている。**
+harness の config には
+
+```yaml
+- text: '^\s+if _, ok := err\.\([^.]+\.InternalError\); ok {'
+```
+
+があり、guff は起動時にこう言う: `skipping exclude-rule: invalid regex … unclosed
+counted repetition`。7 形を両ツールに通して測った:
+
+| text | golangci-lint | guff |
+|---|---|---|
+| `^\s+…; ok {`（harness の実物） | 通る（Go は `{` をリテラルとして読む） | **規則を捨てる** |
+| `a{` | 通る | **規則を捨てる** |
+| `a{,3}` | 通る | **規則を捨てる**（`repetition quantifier expects a valid decimal`） |
+| `}` / `a{2}` / `(?P<n>x)` | 通る | 通る |
+| `x(?!y)` | **run 全体を拒否**（`invalid or unsupported Perl syntax`） | 規則を捨てて**そのまま lint する** |
+
+**外れ方は 2 つで、向きが逆である。** 上の 3 行は golangci が適用する除外を guff が
+落とすので、**guff だけが出す finding**（precision 側）。最後の 1 行は逆で、
+golangci が起動を拒む config を guff が受け入れてしまう —— これは
+`compat/reject/` の形である。harness で表に出なかったのは、typecheck が
+レポートを空にしていたからにすぎない。
