@@ -1488,38 +1488,30 @@ fn copyloopvar_flags_redundant_copies() {
 }
 
 #[test]
-fn asasalint_flags_slice_any_as_variadic_any() {
+fn asasalint_flags_only_the_interface_spelling() {
+    // The pinned asasalint is two unchecked type assertions —
+    // `typ.(*types.Slice)` and `Elem().(*types.Interface)` — and neither
+    // unaliases. Under `gotypesalias=1`, the default since Go 1.23, `any` is an
+    // `*types.Alias`, so only code spelling `interface{}` on both sides is
+    // reported. guff unaliased both and reported the `any` spellings too; k6
+    // `internal/js/modules/k6/browser/common/element_handle.go:516` is one.
     let pkg = support::typecheck_fixture("asasalint", "example.com/asasalint", "bad.go");
-    let messages = support::run_analyzer(asasalint(), &pkg);
-    assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("pass []any as any to func A")),
-        "{messages:?}"
-    );
-    assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("pass []any as any to func errMsg")),
-        "{messages:?}"
-    );
-    assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("pass []any as any to func B")),
-        "{messages:?}"
-    );
-    assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("pass []any as any to func Err")),
-        "{messages:?}"
-    );
-    assert!(messages.len() >= 4, "{messages:?}");
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<i64> = support::run_analyzer_diagnostics(asasalint(), &pkg)
+        .into_iter()
+        .map(|d| fset.position(guff::position::Pos(d.pos as i64)).line)
+        .collect();
+    got.sort_unstable();
+    assert_eq!(got, vec![14, 23, 27, 28], "{got:?}");
 }
 
 #[test]
-fn asasalint_allows_spread_and_builtin_exclusions() {
+fn asasalint_allows_spread_and_the_any_spelling() {
+    // Eleven silent shapes: a `...` spread, plain elements, a builtin
+    // exclusion, `[]any` into `...any`, either mixture of the two spellings, an
+    // alias for the slice type, an alias for the element, and a *named* slice
+    // type — the last one silent in both tools, because a `Named` is not a
+    // `*types.Slice` either.
     let pkg = support::typecheck_fixture("asasalint", "example.com/asasalint/ok", "ok.go");
     let messages = support::run_analyzer(asasalint(), &pkg);
     assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");

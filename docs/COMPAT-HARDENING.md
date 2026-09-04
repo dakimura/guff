@@ -21789,3 +21789,61 @@ k6: guff-only 11 → 10
 golden **213 完全一致**（再生成不要）/ fix **213** / reject **14** /
 workspace **278 スイート** / OSS pr tier **8 ターゲットすべて P=R=100%**。
 台帳は **39/100 のまま**（41 定義）。
+
+### 2026-09-05（続き 176）— asasalint は**`any` を一切見ていない**。上流の型アサーションが unalias しないので、`interface{}` と綴った箇所だけが finding になる
+
+k6 `internal/js/modules/k6/browser/common/element_handle.go:516` の guff-only 1 件。
+`values []any` を `evalWithScript(..., args ...any)` に `...` 無しで渡す形で、
+**asasalint が存在する理由そのもの**の形である。上流は黙る。
+
+上流（v0.0.11）は型アサーション 2 つだけで、**どちらも unalias しない**:
+
+```go
+sliceType, ok := typ.(*types.Slice)
+if !ok { return }
+elemType, ok := sliceType.Elem().(*types.Interface)
+if !ok { return }
+return elemType.NumMethods() == 0
+```
+
+Go 1.23 以降の既定 `gotypesalias=1` では **`any` は `*types.Alias`** であって
+`*types.Interface` ではない。だから引数側でも引数の型でも、`any` と綴った瞬間に
+このチェックは何も言わなくなる。
+
+**11 形を両ツールに通して線を引いた:**
+
+| 形 | 上流 |
+|---|---|
+| `[]interface{}` → `...interface{}` | **出す** |
+| `[]any` → `...any` | 黙る |
+| `[]interface{}` → `...any` | 黙る |
+| `[]any` → `...interface{}` | 黙る |
+| スライス型の alias（`type S = []interface{}`） | 黙る |
+| 要素の alias（`type A = interface{}`） | 黙る |
+| **名前付きスライス型**（`type S []interface{}`） | 黙る（`Named` も `*types.Slice` ではない） |
+| `...` で展開 / 要素を並べる / `fmt.Println` | 黙る |
+
+guff は両方 unalias していたので、`any` 綴りを全部出していた。
+
+**上流に合わせた。** 意図としては guff の方が正しい —— `[]any` を可変長 `...any` に
+1 引数として渡すのは asasalint が防ごうとしているバグそのものである。
+だがこのリポジトリの目標は golangci-lint と finding 集合が一致することなので、
+上流の綴り依存をそのまま写し、**「上流が unalias するようになれば guff も追随する」**と
+`is_slice_any_type` の doc に書いた。
+
+fixture は `any` 綴りだったので `interface{}` に書き換えた
+（`settings.go` も同様 —— そうしないと exclude 設定のテストが何も測らなくなる）。
+golden / isolate の fixture は元から `interface{}` なので影響は無い。
+
+```
+k6: guff-only 10 → 9
+```
+
+#### ゲート
+
+golden **213 完全一致**（再生成不要）/ fix **213** / reject **14** /
+workspace **278 スイート** / OSS pr tier **8 ターゲットすべて P=R=100%**。
+台帳は **39/100 のまま**（41 定義）。
+
+k6 に残るのは **9 件**: nolintlint 7（unused 4・exhaustive 1・gocritic 1・revive 1 の
+取りこぼしの従属。exhaustive の 1 件は続き 174 で測定済み）、contextcheck 1、unparam 1。
