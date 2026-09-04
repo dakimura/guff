@@ -185,5 +185,13 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "15m"
+  },
+  {
+    "name": "ebpf",
+    "url": "https://github.com/cilium/ebpf.git",
+    "ref": "v0.22.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
   }
 ]

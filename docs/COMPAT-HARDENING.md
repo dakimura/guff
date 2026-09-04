@@ -20254,3 +20254,88 @@ counted repetition`。7 形を両ツールに通して測った:
 golangci が起動を拒む config を guff が受け入れてしまう —— これは
 `compat/reject/` の形である。harness で表に出なかったのは、typecheck が
 レポートを空にしていたからにすぎない。
+
+### 2026-09-04（続き 154）— ebpf を採用。**guff-only の 1 件は「生成ファイル判定」で、そこには打ち消し合う 2 つのバグが入っていた**
+
+`./corpus/status.py next` の `adopt ebpf`。候補行はそのまま使えた ——
+pin されたタグ `v0.22.0` に `version: "2"` の config があり（linters 5 + formatters 2）、
+28 パッケージ・`go list -e` の Error は **darwin で 0**。cri-o と違ってこのホストで測れる。
+
+```
+ebpf: guff=2 golangci=1 both=1 P=50.0% R=100.0% [UNEXPECTED]
+  +guff  asm/func_lin.go:1:gofmt:File is not properly formatted
+ebpf: ill-typed packages 1 > baseline 0; e.g. github.com/cilium/ebpf/pin
+```
+
+**まず、guff の gofmt は正しい。** `asm/func_lin.go` はリポジトリで唯一 **UTF-8 BOM**
+を持つファイルで、本物の `gofmt -l` もこれを挙げる（gofmt は BOM を落とす）。
+違うのは golangci が**生成ファイルとして除外している**ことの方である。
+
+**上流の線を 8 形で測った**（1 形から推測せず）。`GeneratedFileMatcher.IsGeneratedFile` は
+`parser.ParseFile(..., PackageClauseOnly|ParseComments)` を通し、go/scanner の `Init` は
+
+```go
+s.next()
+if s.ch == bom { s.next() } // ignore BOM at file beginning
+```
+
+——「先頭の BOM は読み飛ばす」。この matcher は 8 形すべてを generated=true と答える。
+
+**しかし `golangci-lint run` はその既定を使っていない。** `config.Loader.Load`
+（`loader.go:77`）が空の `linters.exclusions.generated` を **strict** で埋め、
+`handleFormatterExclusions` が linters 側に畳むのは `formatters.exclusions.**paths**`
+だけで `generated` は畳まない。だから `run` の gofmt finding を濾すのは **strict** ——
+`ast.IsGenerated`、すなわち `^// Code generated .* DO NOT EDIT\.$` の
+**`//` 行コメントだけ**である。（lax なのは `golangci-lint fmt` の側で、どちらも上流の挙動。）
+
+最小再現（7 形、`gofmt -l` はどの形も flag する）:
+
+| 形 | golangci | guff | |
+|---|--:|--:|---|
+| BOM + `//` マーカー | 0 | 1 | **guff の欠陥: BOM を読み飛ばさない** |
+| BOM 無し + `//` マーカー | 0 | 0 | 一致 |
+| BOM + `//go:build` + マーカー | 0 | 1 | **同じ BOM の欠陥** |
+| BOM 無し + `/* */` マーカー | 1 | 0 | **guff の欠陥: run が strict のところで lax** |
+| BOM + `/* */` マーカー | 1 | 1 | **2 つの欠陥が打ち消し合って一致している** |
+| BOM のみ・マーカー無し | 1 | 1 | 一致 |
+| マーカーが package doc に密着 | 0 | 0 | 一致 |
+
+**5 行目が今回の教訓である。** BOM 形だけ見て直していたら、`/* */` 側の
+過剰除外（golangci が出す finding を guff が落とす）が残ったまま、
+しかも BOM を直した瞬間に**新しい乖離として表に出る**。片方だけ直すと壊れる。
+
+guff 側の場所も特定した: `crates/guff-fmt/src/generated.rs::leading_comment_doc` は
+`str::trim` を使っているが、Rust の White_Space に **U+FEFF は入らない**ので
+1 行目で走査が止まる。そして gofmt の finding は
+`formatters.exclusions.generated`（`config.rs:523`、未設定なら lax）を通っていて、
+linters 側の strict 既定ではない —— `config.rs:1317` には上流のこの分岐が
+**すでに正しく書いてある**のに、`run` では効いていない側に付いている。
+
+**もう 1 つは型検査の穴で、こちらは linter ではない。** `pin/load_test.go:93,98`:
+
+```go
+qt.Assert(t, qt.Satisfies(m, testutils.Contains[*ebpf.Map]))
+```
+
+guff は `cannot infer the remaining type arguments (got 1, want 2)`、`go build` は通る。
+最小再現は**1 ファイル**で、パッケージ跨ぎは関係なかった:
+
+```go
+func Contains[T, I any](i I) bool
+func Satisfies[T any](got T, f func(T) bool) Checker
+Satisfies(x, Contains[*Map])   // T は x から、Contains の残る I は func(T) bool から
+```
+
+`x` が名前付き interface でも `any` でも同じく出る。**部分適用したジェネリック関数値の
+残りの型引数を、引数の型から逆に推論する**（Go 1.21 の reverse type inference）。
+続き 151 で「guff が ill-typed と呼ぶパッケージの集合は空だった」と書いたが、
+**これがその 1 つ目**である。
+
+**書く人への落とし穴を 1 つ**: `guff: ill_typed ...` の行は
+**`GUFF_DEBUG_ILL_TYPED=1` のときにしか出ない**（`compat/hunt.sh:228` が付けている）。
+付け忘れた run は静かで、クリーンな run と**見分けがつかない** ——
+この回、その静けさを 2 度「再現しない」と読み違えた。
+
+台帳: ebpf を採用して **36 target**、`open 1 (gofmt=1)`。34/100 のまま。
+health-hunt の baseline には**行を足していない** —— 行を足すことは
+その劣化を恒久的に許すことなので（続き 96）、次の 2 つの作業で消す方が正しい。
