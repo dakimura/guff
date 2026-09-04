@@ -6,8 +6,8 @@
     "`unmeasured` is not `clean`: an absent measurement is a question."
   ],
   "goal": 100,
-  "defined": 37,
-  "clean": 36,
+  "defined": 38,
+  "clean": 37,
   "open": 1,
   "unmeasured": 0,
   "targets": {
@@ -277,6 +277,14 @@
       "tier": "hunt",
       "state": "clean",
       "at": "20260901T031329Z",
+      "open": 0,
+      "guff_only": 0,
+      "gcl_only": 0
+    },
+    "skopeo": {
+      "tier": "hunt",
+      "state": "clean",
+      "at": "20260904T075351Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0

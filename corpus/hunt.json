@@ -201,5 +201,17 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "15m"
+  },
+  {
+    "name": "skopeo",
+    "url": "https://github.com/podman-container-tools/skopeo.git",
+    "ref": "v1.24.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m",
+    "build_tags": [
+      "exclude_graphdriver_btrfs",
+      "containers_image_openpgp"
+    ]
   }
 ]

@@ -26,7 +26,7 @@ Fixture / synthetic targets still use `compat/standard.yml` /
 | `pr` | PR CI (`compat` oss-pr) | gin, caddy, helm, k9s, cobra, go-client |
 | `nightly` | Nightly showcase | consul, grafana (`./pkg/... ./apps/advisor/...`), containerd (`./pkg/...`) |
 | `weekly` | Sunday CI (`compat-weekly` oss-weekly) | controller-runtime, vault (`./helper/...`), kubernetes (apimachinery + `hack/golangci.yaml`) |
-| `hunt` | Nothing — run by hand ([`hunt.json`](hunt.json), `compat/hunt.sh`) | 24 repos; a discovery tier that is *expected* to carry open diffs |
+| `hunt` | Nothing — run by hand ([`hunt.json`](hunt.json), `compat/hunt.sh`) | 26 repos; a discovery tier that is *expected* to carry open diffs |
 
 moby/moby is excluded: public tree has no root `go.mod` (Docker-image builds only).
 

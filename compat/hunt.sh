@@ -202,6 +202,15 @@ PY
   # The repo ships a `noassets` build tag for exactly this, so the tier carries
   # the tags rather than the generator.
   #
+  # skopeo is the same shape one layer down: its `signature` dependency reaches
+  # cgo `github.com/proglottis/gpgme`, so on a host without the gpgme C library
+  # golangci-lint reports one `could not import` typecheck issue and nothing
+  # else. The tags here are skopeo's own — its Makefile sets
+  # `BUILDTAGS = exclude_graphdriver_btrfs containers_image_openpgp` when
+  # `DISABLE_CGO=1` and passes them straight to `golangci-lint run
+  # --build-tags`, so this is what `make lint` measures without cgo, not a tag
+  # list invented here.
+  #
   # A plain string, not an array: macOS ships bash 3.2, where `"${a[@]}"` on an
   # empty array is an unbound-variable error under `set -u`. Tag lists are
   # comma-separated and contain no spaces, so word splitting is exact here.
