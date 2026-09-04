@@ -933,7 +933,18 @@ fn consts_equal(
     }
     match (&ca.val, &cb.val) {
         (None, None) => true,
-        (Some(x), Some(y)) => x.to_string() == y.to_string(),
+        // `constant.Compare(c1.Value, token.EQL, c2.Value)`, not
+        // `String() == String()`. `Value.String()` is documented as "a short,
+        // quoted (human-readable) form … for String values the result may be a
+        // shortened string", and it shortens at 72 characters — so four
+        // different scripts that open with the same long line compared equal
+        // and the parameter looked constant. k6
+        // `internal/js/runner_test.go:385` passes four distinct JavaScript
+        // sources that share their first 60-odd characters.
+        //
+        // The shortened form is still what the *message* quotes, which is
+        // upstream's `constValueString`.
+        (Some(x), Some(y)) => guff_constant::compare(x.clone(), Token::EQL, y.clone()),
         _ => false,
     }
 }
