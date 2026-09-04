@@ -6,6 +6,7 @@
 
 # golangci-lint: 2.12.2
 
+anonkey/anonkey.go:46:11:contextcheck::Function `chainTop->chainMiddle->chainBottom` should pass the context parameter
 background/background.go:32:17:contextcheck::Function `bgToClosure` should pass the context parameter
 bad/bad.go:12:7:contextcheck::Function `inner` should pass the context parameter
 bad/bad.go:16:9:contextcheck::Non-inherited new context, use function like `context.WithXXX` instead

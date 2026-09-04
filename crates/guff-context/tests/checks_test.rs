@@ -492,3 +492,40 @@ fn contextcheck_allows_inherited_context() {
         support::run_analyzer(contextcheck(), &pkg)
     );
 }
+
+/// A closure is filed under its parent's name, not under `"run$1"`.
+///
+/// `(*ssa.Function).RelString(nil)` — the key for both the entry memo and the
+/// exported fact — qualifies an anonymous function by its parent:
+///
+/// ```text
+/// if f.parent != nil {
+///     parent := f.parent.RelString(from)
+///     for i, anon := range f.parent.AnonFuncs {
+///         if anon == f { return fmt.Sprintf("%s$%d", parent, 1+i) }
+///     }
+///     return f.name // should never happen
+/// }
+/// ```
+///
+/// guff returned the bare `Function.name`, so **every `run` method in a package
+/// shared one key**. The fixture has three, and only the first captures a
+/// context: with a shared key the other two inherited `EntryWithCtx` and guff
+/// reported all three. k6's `internal/cmd` has five `run` methods, and that is
+/// how `(*cmdCloudRun).run`'s closure came to report a chain upstream never
+/// reaches (`cloud_run.go:151`).
+#[test]
+fn contextcheck_keys_a_closure_by_its_parent() {
+    let dir = support::testdata("contextcheck_anonkey");
+    let pkg = support::typecheck_pkg(
+        "example.com/contextcheck_anonkey",
+        &dir.join("anonkey.go"),
+    );
+    let messages = support::run_analyzer(contextcheck(), &pkg);
+    // One: the closure of the method that has a context to pass down.
+    assert_eq!(
+        messages,
+        vec!["Function `chainTop->chainMiddle->chainBottom` should pass the context parameter"],
+        "{messages:?}"
+    );
+}

@@ -27,3 +27,6 @@ docflag/docflag.go         crates/guff-context/tests/testdata/contextcheck_docfl
 reqctx/reqctx.go           crates/guff-context/tests/testdata/contextcheck_reqctx/reqctx.go
 # A fresh context that goes nowhere is not a finding.
 background/background.go   crates/guff-context/tests/testdata/contextcheck_background/background.go
+# A closure is keyed by its parent, not by its bare `run$1` name: three `run`
+# methods here, and only the one that captures a context is a finding.
+anonkey/anonkey.go         crates/guff-context/tests/testdata/contextcheck_anonkey/anonkey.go

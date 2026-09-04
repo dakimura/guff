@@ -253,7 +253,38 @@ impl<'a> Runner<'a> {
     /// from the *object* alone dropped the suffix, so `newPrompt(c.Complete)`
     /// read as a direct call to `(*Completer).Complete` and reported its whole
     /// chain (scaleway-cli `core/shell.go:230`).
+    /// `(*ssa.Function).RelString(nil)`, which is the key for both the entry
+    /// memo and the exported fact.
+    ///
+    /// The anonymous case is the one that matters:
+    ///
+    /// ```go
+    /// if f.parent != nil {
+    ///     parent := f.parent.RelString(from)
+    ///     for i, anon := range f.parent.AnonFuncs {
+    ///         if anon == f { return fmt.Sprintf("%s$%d", parent, 1+i) }
+    ///     }
+    ///     return f.name // should never happen
+    /// }
+    /// ```
+    ///
+    /// guff returned the bare `Function.name` — `"run$1"` — for every closure,
+    /// so **every `run` method in a package shared one key**. k6's
+    /// `internal/cmd` has five, and the entry memo written for one closure was
+    /// read back for another: `(*cmdCloudRun).run`'s closure inherited
+    /// `EntryWithCtx` from a namesake and reported a chain upstream never
+    /// reaches (`cloud_run.go:151`).
     fn func_rel_string(&self, f: &Function) -> String {
+        if let Some(parent_id) = f.parent {
+            let parent = self.prog.functions.get(parent_id);
+            let base = self.func_rel_string(parent);
+            for (i, &anon) in parent.anon_funcs.iter().enumerate() {
+                if std::ptr::eq(self.prog.functions.get(anon), f) {
+                    return format!("{base}${}", i + 1);
+                }
+            }
+            return f.name.clone();
+        }
         if let Some(obj) = f.object {
             let base = code::type_func_name(
                 &self.prog.type_arena,
