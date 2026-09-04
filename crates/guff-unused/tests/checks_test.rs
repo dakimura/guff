@@ -159,3 +159,60 @@ fn unused_keeps_interface_impl_methods() {
     assert_eq!(messages.len(), 1, "{messages:?}");
     assert!(messages[0].contains("trulyUnused is unused"));
 }
+
+/// The struct-field half of `unused`, which guff did not model at all.
+///
+/// honnef makes a named struct type *own* its fields (`edgeKindOwn`): they are
+/// candidates in their own right, but a field is reported only when its owner
+/// type is used — otherwise the type is the finding and `colorAndQuieten`
+/// silences what it owns. `type neverUsed` below is the one finding for its two
+/// fields; `type plainInner` is reported *and* so is the embedded field that
+/// names it, because (7.2) "fields use their types" is an edge from the field.
+///
+/// Exact list, not `any(contains(…))`: most of these messages differ only in a
+/// name, and the two `deadCv` rows differ in nothing at all.
+#[test]
+fn unused_reports_struct_fields() {
+    let dir = support::testdata("fields");
+    let pkg = support::typecheck_pkg("example.com/unused/fields", &dir.join("fields.go"));
+    let mut messages = support::run_analyzer(analyzer(), &pkg);
+    messages.sort();
+    assert_eq!(
+        messages,
+        vec![
+            "field dead is unused",
+            "field deadBlnk is unused",
+            "field deadBox is unused",
+            "field deadCv is unused",
+            "field deadCv is unused",
+            "field deadE is unused",
+            "field deadF is unused",
+            "field deadI is unused",
+            "field deadIn is unused",
+            "field deadIn3 is unused",
+            "field deadLoc is unused",
+            "field deadNode is unused",
+            "field deadOut is unused",
+            "field deadOut2 is unused",
+            "field deadOut3 is unused",
+            "field deadP is unused",
+            "field deadProm is unused",
+            "field deadQ is unused",
+            "field f is unused",
+            "field m is unused",
+            "field mumbler2 is unused",
+            "field plainInner is unused",
+            "field private is unused",
+            "field shared is unused",
+            "field unrTag is unused",
+            "field unread is unused",
+            "field unset is unused",
+            "func deadReader is unused",
+            "func mumbler2.mumble2 is unused",
+            "type mumbler2 is unused",
+            "type neverUsed is unused",
+            "type plainInner is unused",
+        ],
+        "{messages:?}"
+    );
+}

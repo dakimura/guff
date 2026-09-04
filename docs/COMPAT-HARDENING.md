@@ -21989,3 +21989,97 @@ OSS pr tier **8 ターゲットすべて P=R=100%**。台帳は **39/100 のま�
 
 k6 に残るのは **7 件**: nolintlint 6（unused 4・exhaustive 1・revive 1 の取りこぼしの
 従属）、contextcheck 1。
+
+### 2026-09-05（続き 179）— `unused` は struct のフィールドを一つもモデル化していなかった。honnef は named struct 型が**フィールドを所有する**（`edgeKindOwn`）
+
+k6 の nolintlint 7 件のうち **4 件**の親（`js/common/bridge_test.go:15,16` の
+`unexported string //nolint:unused`、`internal/js/tc39/tc39_test.go:260,281`）。
+`crates/guff-unused/src/lib.rs` には「Struct fields are not modelled as
+candidates here」と注記があった。cri-o の `unused=4` も同じ族である。
+
+honnef のモデルは 2 本の辺を持つ。`use` は到達可能性を運び、`own` は運ばない
+——`colorAndQuieten` は「使われていないノードが所有するもの」を **quiet**
+（報告しない）にする。だから **`type neverUsed struct { a, b int }` の finding は
+型 1 件だけ**で、フィールドは出ない。逆に `type outer struct { inner }` は
+**埋め込みフィールド `inner` と型 `inner` の 2 件**になる ——(7.2)「fields use
+their types」の辺は**フィールドから**出ているので、埋め込みフィールドが死ねば
+その型も死ぬ。
+
+**7 モジュール 47 形**を両ツールに通して規則を確定した。
+
+| 規則 | 形 | 上流 |
+|---|---|---|
+| (6.2) | 大文字始まりのフィールド（タグ有無を問わず） | 黙る |
+| — | 小文字のフィールドで、読まれる／**書かれるだけ** | 黙る（`FieldWritesAreUses`） |
+| — | struct タグが付いていても読まれない | **出す** |
+| — | keyless な複合リテラル `T{1, 2}` | 全フィールドを使う |
+| — | keyed な複合リテラル | 名指しした分だけ |
+| (6.1) | `Lock`/`Unlock` を持つ空 struct（noCopy 番兵） | 黙る |
+| (6.3) | 埋め込み型がパッケージ内のインタフェースの要求メソッドを持つ（**非公開でも**） | 黙る |
+| (6.4) | 埋め込み型が公開メソッドを持つ（`sync.Mutex` など） | 黙る |
+| (6.5) | 埋め込み struct が公開フィールドを持つ | 黙る |
+| — | どれでもない埋め込み struct | **フィールドも型も出す** |
+| (6.6) | `structs.HostLayout` フィールドがある | 全フィールドを使う |
+| (5.2) | `unsafe.Pointer` との変換 | 全フィールドを使う |
+| (5.1) | 同型 struct 間の変換 | **互いを使う辺**。どちらも触られなければ**両方出す** |
+| (7.1) | promoted なフィールド／メソッドの選択 | 経路上の埋め込みフィールドを全部使う |
+| (11.1) | 無名 struct 型 | 全フィールドを使う（追跡しない） |
+| — | 関数の中で宣言された named struct | **普通に追う** |
+| — | ジェネリック struct | 実体化でフィールドは**別オブジェクト**になる |
+| — | 同名フィールドを持つ 2 つの型 | 名前ではなくオブジェクトで区別 |
+| — | 型に付いた `//lint:ignore U1000` | フィールドも覆う |
+
+**実装は「所有者と添字」で引く。** `box[int]` の `b.v` は
+`type box[T any] struct { v T }` の `v` とは別の ObjectId なので、参照側は必ず
+origin の named 型に戻して添字で引き直す。`Selection.Index()` の経路を歩くのが
+promoted の (7.1) で、メソッド選択のときは**最後の 1 段がメソッド**なので落とす。
+
+**踏んだ落とし穴が 3 つ。**
+
+1. **型からフィールドを数えると別パッケージのものが混ざる。** `type myConn tls.Conn`
+   は underlying が `crypto/tls` の `types.Struct` そのもので、フィールド
+   オブジェクトも tls のものである。上流の `namedType` は **AST の field list**
+   を歩くのでこれを見ない。型で数えた最初の版は caddy に `field ekm`、gin に
+   `field ctx` を**位置 0** で出した（輸入オブジェクトは位置を持たない）。
+   `ts.ty` が `StructType` であることを要求して直した。
+
+2. **6.x の免除は「候補から外す」ではなく「struct からの辺」。** 上流は
+   `g.use(field, typ)` と書く。単に飛ばすとフィールドの (7.2) 辺が張られず、
+   `type hasExportedField` が使われていないように見えた。
+
+3. **関数の中で宣言された型は `Info.Defs` に載らない**（guff の型チェッカ）。
+   ローカル型は必ずどこかで参照されるので、`Info.Uses` の値からオブジェクトの
+   宣言位置の索引を作り、TypeSpec の名前の位置で引いている。
+
+fixture は `unused/fields`（出る 32・黙る形はその倍）と `unused/fieldsunsafe`。
+後者は import が要る (5.2)/(6.6) 専用で、単体テストの型チェッカは importer を
+持たないため **golden case だけが materialize する**。メッセージはほとんどが
+名前しか違わないので、テストは 32 件の**完全一致リスト**で押さえてある。
+
+```
+k6: guff-only 7 → 3
+```
+
+#### ゲート
+
+golden **213**（`unused` を再生成 —— **消えたキー 0、追加 33**）/ fix **213** /
+reject **14** / isolate **116 ターゲット** / workspace **278 スイート** /
+OSS pr tier **8 ターゲットすべて P=R=100%**。
+台帳は **39/100 のまま**（41 定義）。
+
+**hunt tier 29 ターゲット全部**を回した（`unused` の変更はどのリポジトリにも
+当たるので）。差分が出たのは 3 つで、**どれもこの変更のものではない**ことを
+main のバイナリで測って確かめた:
+
+| ターゲット | 差分 | main でも出るか |
+|---|---|---|
+| cri-o | linux 専用（台帳の除外行） | — |
+| k6 | 残り 3 件 | — |
+| syncthing | canonicalheader 2 件（`X-Syncthing-ID` / `X-API-Key`） | **出る** |
+
+health の 4 件（fiber / scaleway-cli / ebpf の ill-typed 1 個ずつ、と cri-o）も
+main で同じだった。**syncthing の canonicalheader 2 件と ill-typed 3 件は
+別件として残っている。**
+
+k6 に残るのは **3 件**: nolintlint 2（exhaustive 1・revive 1 の取りこぼしの従属）、
+contextcheck 1。
