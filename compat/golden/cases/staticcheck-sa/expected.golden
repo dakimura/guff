@@ -281,7 +281,25 @@ sa5000/bad/bad.go:2:31:staticcheck::SA5000: assignment to nil map
 sa5001/bad/bad.go:14:2:staticcheck::SA5001: should check error returned from fn1() before deferring rc.Close()
 sa5001/bad/bad.go:15:2:staticcheck::SA9003: empty branch
 sa5002/bad/bad.go:2:12:staticcheck::SA5002: this loop will spin, using 100% CPU
-sa5003/bad/bad.go:2:18:staticcheck::SA5003: defers in this infinite loop will never run
+sa5003/bad/bad.go:17:3:staticcheck::SA5003: defers in this infinite loop will never run
+sa5003/bad/bad.go:22:2:staticcheck::S1000: should use for range instead of for { select {} }
+sa5003/bad/bad.go:25:4:staticcheck::SA5003: defers in this infinite loop will never run
+sa5003/bad/bad.go:32:3:staticcheck::S1000: should use a simple channel send/receive instead of select with a single case
+sa5003/bad/bad.go:34:4:staticcheck::SA5003: defers in this infinite loop will never run
+sa5003/bad/bad.go:43:4:staticcheck::SA5003: defers in this infinite loop will never run
+sa5003/bad/bad.go:52:4:staticcheck::SA5003: defers in this infinite loop will never run
+sa5003/bad/bad.go:60:3:staticcheck::SA5003: defers in this infinite loop will never run
+sa5003/bad/bad.go:70:3:staticcheck::SA5003: defers in this infinite loop will never run
+sa5003/bad/bad.go:72:4:staticcheck::S1023: redundant return statement
+sa5003/bad/bad.go:80:3:staticcheck::SA5003: defers in this infinite loop will never run
+sa5003/bad/bad.go:88:3:staticcheck::SA5003: defers in this infinite loop will never run
+sa5003/bad/bad.go:98:4:staticcheck::SA5003: defers in this infinite loop will never run
+sa5003/ok/ok.go:38:3:staticcheck::S1000: should use a simple channel send/receive instead of select with a single case
+sa5003/ok/ok.go:48:3:staticcheck::S1000: should use a simple channel send/receive instead of select with a single case
+sa5003/ok/ok.go:75:4:staticcheck::SA4011: ineffective break statement. Did you mean to break out of the outer loop?
+sa5003/ok/ok.go:83:3:staticcheck::S1000: should use a simple channel send/receive instead of select with a single case
+sa5003/ok/ok.go:85:4:staticcheck::SA4011: ineffective break statement. Did you mean to break out of the outer loop?
+sa5003/ok/ok.go:105:3:staticcheck::S1000: should use a simple channel send/receive instead of select with a single case
 sa5004/bad/bad.go:9:3:staticcheck::SA5004: should not have an empty default case in a for+select loop; the loop will spin
 sa5007/bad/bad.go:2:12:staticcheck::SA5007: infinite recursive call
 sa5008/bad/bad.go:15:8:staticcheck::SA5008: invalid XML tag: unknown option "unknown"

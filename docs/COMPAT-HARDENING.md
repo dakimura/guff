@@ -20912,3 +20912,95 @@ opentelemetry-collector-contrib など同型が他にもあるので効き続け
 「1 回の呼び出しでは届かない」と書いた。
 
 台帳は **37/100 のまま**（38 定義）。`next` は kubeshark に進む。
+
+### 2026-09-04（続き 164）— kubeshark を採用。SA5003 の本体走査が**自前の文レベル歩行**で、`switch` / `select` / ラベル文が丸ごと死角だった。**両方向に外れる**
+
+`adopt kubeshark` を測ると guff-only が 2 件:
+
+```
+kubeshark: guff=2 golangci=0 P=0.0% R=100.0% [UNEXPECTED]
+  +guff cmd/console.go:102:staticcheck:defers in this infinite loop will never run
+  +guff cmd/console.go:126:staticcheck:defers in this infinite loop will never run
+```
+
+`cmd/console.go` の形は `for { defer c.Close(); ...; select { case <-done: ... continue; case <-interrupt: ...; return } }`。
+**ループから出る `return` は `select` の中に書いてある。**
+
+#### 原因
+
+上流は**ループ本体全体を `ast.Inspect`** し、`FuncLit` でだけ枝を止める:
+
+```go
+ast.Inspect(loop.Body, func(node ast.Node) bool {
+    switch stmt := node.(type) {
+    case *ast.ReturnStmt: mightExit = true; return false
+    case *ast.BranchStmt: if stmt.Tok == token.BREAK { mightExit = true; return false }
+    case *ast.DeferStmt:  defers = append(defers, stmt)
+    case *ast.FuncLit:    return false   // Don't look into function bodies
+    }
+    return true
+})
+```
+
+guff は `walk_block` という自前の文レベル歩行で、降りる先が
+`BlockStmt` / `IfStmt` / `ForStmt` / `RangeStmt` の 4 つ**だけ**だった。
+`SwitchStmt` / `TypeSwitchStmt` / `SelectStmt` / `LabeledStmt` は素通りする。
+
+**この 1 つの死角が両方向に効く。** 1 形しか試していなければ「過剰報告」に見えて、
+直す向きを間違えていた（続き 158 と同じ罠）。20 形を 1 形 1 宣言で書いて測った:
+
+| 群 | 形 | 上流 | 直す前 |
+|---|---|---|---|
+| 誤報 5 形 | `select` の中の `return` / `switch` の中の `return` / `switch` の中の `break` / `select` の中の `break` / `select` の中の `if` の中の `return` / ラベル付き `break outer` | 黙る | **出す** |
+| 見落とし 4 形 | `select` の case の中の `defer` / `select` の `default` の中の `defer` / `switch` の case の中の `defer` / 型 switch の中の `defer` / ラベル文の中の `defer` | 出す | **黙る** |
+| 一致 | 素の `for { defer }` / FuncLit 内の `return` は出口でない / `continue` は出口でない / cond 無しで post だけ / 内側ループの `break` / `if` の中の `break` / FuncLit 内の `defer` | — | — |
+
+直しは `preorder_prune`（= `ast.Inspect`。false を返すとその節の**子だけ**を飛ばし、
+兄弟は続く）に置き換えて `FuncLit` で止めるだけ。
+`switch` の中の `break` はループではなく `switch` を抜けるので本当は出口ではないが、
+**上流のコメントがそれを TODO として明記した上で出口として数えている**ので、
+そこに揃えるのが一致の条件である。
+
+#### 途中で見つかったもう 1 つ: 同一診断の重複
+
+20 形のうち「入れ子の無限ループ 1 つの `defer`」だけが、直した後も
+guff 11 / 上流 10 で残った。**上流も 2 回報告している** —— `code.Preorder` は
+外側と内側の `ForStmt` を両方訪れ、どちらの走査もその `defer` を見つける。
+golangci-lint 側が root action から取り出すところで潰していた:
+
+```go
+// De-duplicate diagnostics by position (not token.Pos) to
+// avoid double-reporting in source files that belong to
+// multiple packages, such as foo and foo.test.
+type key struct { token.Position; *analysis.Analyzer; message string }
+```
+
+guff にはこの段が無い。**「foo と foo.test」の方は `filter_duplicate_packages` で
+別に処理してあるが、「1 つのアナライザが 1 行について 2 回言う」方はどこにも無かった。**
+`Graph::root_diagnostics` に `(analyzer, pos, column, message)` の重複除去を足した
+（パッケージは鍵に入れない —— 読み手にとって同じ位置・同じ文言・同じアナライザは 1 件である）。
+
+**これは set ベースのゲートには見えない**と最初思ったが、**間違いだった**:
+`compat/golden/golden.py` の `diff` は `collections.Counter` の multiset 差分で、
+`staticcheck-sa` が `extra 2 > 1` でちゃんと落ちた。見えないのは OSS tier の
+`normalize.issue_keys`（`set`）の方だけである。
+
+#### fixture とテスト
+
+`sa5003/bad.go` は**1 行**だった（`func f() { for { defer func(){}() } }`）。
+`ok.go` も 1 行。10 形 / 12 形に増やし、`ok.go` の先頭付近に kubeshark の形を置いた。
+`sa5003_flags_a_defer_wherever_it_sits_in_an_infinite_loop` は
+**`(行, 桁)` の完全一致**で固定する（このチェックの文言は 1 種類しかないので、
+substring assertion は 10 形のうち 9 形が欠けても通る）。
+重複除去そのものは `guff-runner` 側に単体テストを足した ——
+同じ位置・同じ文言を 2 回、位置違いを 1 回、文言違いを 1 回報告する
+合成アナライザを回して 3 件になることを見る。
+
+#### ゲート
+
+golden **213 完全一致** / fix **213** / reject **14** / workspace **278 スイート** /
+OSS pr tier **8 ターゲットすべて P=R=100%**。
+golden の再生成はキー集合で確認（**消えたキー 0**、追加 18 ——
+SA5003 が 9、fixture が増えたことで S1000 が 6・SA4011 が 2・S1023 が 1）。
+
+**kubeshark `open 2 → 0`。台帳 37/100 → 38/100**（39 定義）。
