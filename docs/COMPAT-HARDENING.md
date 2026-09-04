@@ -21111,3 +21111,87 @@ guff は**どちらでも同じ答え**を返す。`crates/guff-lint/src/exclude
 次の `close external-dns` に A と B を渡す（buildkit を続き 156 で `open 39` として
 採用し、157 / 159 で閉じたのと同じ運び）。台帳は **38/100 のまま**（40 定義、
 open は cri-o と external-dns）。
+
+### 2026-09-04（続き 166）— 続き 165 の 2 原因を直した。**misspell は語彙ではなく照合順序**、除外パスは **`filepath.Rel` そのもの**
+
+続き 165 で測った external-dns の 3 件（guff-only 2 = misspell、gcl-only 1 = gochecknoinits）。
+どちらも上流のコードに合わせるだけで閉じた。
+
+#### A. misspell —— 辞書は同じ、勝ち方が違う
+
+上流の `Replacer` は `DictMain` に locale 辞書を**追記**した 1 本の trie で、
+`lookup` は**引数順（先に書かれた方が高優先）**で勝者を決める:
+
+```go
+// priority ... keys are not necessarily matched shortest- or longest-first.
+```
+
+そして `recheckLine` は語ごとに `engine.Replace(word)` を掛け、
+**結果が `corrected[word]` と一致したときだけ**報告する。
+
+guff は `dict_main + dict_locale` を 1 つの `FxHashMap` にマージして
+**語全体で 1 回引く**だけだったので、この「途中で別の規則に食われる」経路が存在しなかった。
+
+**直し方**は上流の 2 段をそのまま持ち込む:
+
+1. 辞書を**ファイル順の `Vec`** で読む（順序が優先度なので map にはできない）。
+   鍵ごとに `Entry { index, first, last }` を持つ ——
+   trie の `add` は重複鍵の**最初**の値を残し（`if t.priority == 0`）、
+   `Compile` の `corrected` は**最後**の値を採るので、**両方要る**。
+2. `engine_replace(word)`: 左から右へ、各位置で**接頭辞になる鍵のうち index が最小のもの**を採る。
+3. `correction_for(word)`: `engine_replace(word)` が `corrected[word]` と
+   （大小無視で）一致したときだけ報告する。
+
+`normalise` は `dict_main.tsv:23027` の `normalis→normals` が先にあるので
+`engine_replace("normalise") == "normalse"` になり、`normalize` と一致しない。
+**上流と同じく黙る。**
+
+影響範囲は続き 165 で数えたとおり **US 97 語 / UK 11 語 / locale 無し 0 語**。
+単体テストは 6 語（`capitalise` `criticise` `crystallise` `energise` `normalise`
+`normalises`）が黙ることと、対照の 6 語（`analyse` `colour` `behaviour`
+`organise` `recognise` `seperate`）が 1 件ずつ出ることを両方見る。
+`engine_replace` 自体も 3 形で固定した（`normalise→normalse` /
+`analyse→analyze` / 規則の無い語はそのまま）。
+
+`engine_replace` は**辞書に載っている語にしか走らない**（先に map を引いて外れたら
+そこで終わり）ので、走査のコストは変わっていない。
+
+#### B. 除外パス —— 上流は `filepath.Rel`、guff は go.mod 探し
+
+golangci はプロセッサを 2 つ通す: `path_absoluter` が作業ディレクトリで絶対化し、
+`path_relativity` が `RelativePath = filepath.Rel(basePath, file)` を置く。
+`path` / `path-except` の正規表現は**その `RelativePath`** に当たる（`base_rule.go`）。
+`basePath` は既定 `relative-path-mode: cfg` で**config ファイルのあるディレクトリ**。
+
+guff の `path_for_match` は「base が接頭辞でなければ go.mod を探して
+モジュールルート相対にする」だった。コメントは理由として
+「ハーネスが config を temp dir に置くから」と書いてあったが、
+**それこそ上流と食い違う場面**である（続き 165 の測定: 同じ config を repo 直下に
+置くと上流も除外し、`results/` に置くと除外しない）。
+
+**直し方**は `filepath.Rel` を移植し、go.mod 探しを消す。ついでに 1 つ嵌まった:
+`-c .golangci.yml` のように**相対で config を指すと `parent()` が空パス**になり、
+そのままでは base が「相対」、ファイルが「絶対」で `Rel` がエラーになる。
+上流は config のパスを解決してからディレクトリを採るので、
+**base も `path_absoluter` と同じ作業ディレクトリで絶対化する**。
+これを入れるまで「repo 直下に置いた config で除外が効かない」という
+**逆向きの退行**が出ていた（測ってから気づいた。両方の置き方で測ること）。
+
+単体テストは `rel_from_base` を `filepath.Rel` の 7 形で固定し
+（`.` / 下り / 上り / 別枝 / 末尾スラッシュ / 相対と絶対の混在 = None /
+base が `..` を含む = None）、`path_for_match` は
+**同じファイルを 2 つの base で引いて `^(internal/.*/init\.go)$` が
+片方だけに当たる**ことを見る。
+
+#### ゲート
+
+golden **213 完全一致** / fix **213** / reject **14** / workspace **278 スイート** /
+OSS pr tier **8 ターゲットすべて P=R=100%**。goldenのキーは 1 つも動いていない
+（fixture を触っていないので当然だが、**除外パスの base はどのケースでも
+config がケースディレクトリにあるので効かない**ことの確認でもある）。
+
+```
+external-dns: guff=94 golangci=94 both=94 P=100.0% R=100.0% [OK]
+```
+
+**external-dns `open 3 → 0`。台帳 38/100 → 39/100**（40 定義、残る open は cri-o のみ）。

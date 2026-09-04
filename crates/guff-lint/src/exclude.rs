@@ -740,25 +740,141 @@ fn normalize_path_regex(pat: &str) -> String {
 
 /// Relativize `filename` against `base` for path-pattern matching.
 ///
-/// golangci matches `exclusions.paths` against paths relative to the config /
-/// module root. Matching the absolute path lets `.github` (regex `.` = any
-/// char) hit `/github.com/` in the checkout path — a nats-server OSS hunt
-/// false negative for every finding under a `github.com/...` tree.
+/// golangci runs two processors in a row: `path_absoluter` resolves the file
+/// against the working directory, then `path_relativity` sets
+/// `RelativePath = filepath.Rel(basePath, file)`, and every `path` /
+/// `path-except` regex is matched against *that* (`base_rule.go`). The base is
+/// the config file's directory under the default `relative-path-mode: cfg`.
 ///
-/// When `base` does not prefix the file (e.g. harness copies the config to a
-/// temp dir), walk up from the file looking for `go.mod` and relativize to
-/// that module root.
+/// Matching the absolute path instead lets `.github` (regex `.` = any char) hit
+/// `/github.com/` in the checkout path — a nats-server OSS hunt false negative
+/// for every finding under a `github.com/...` tree.
+///
+/// `filepath.Rel` is the whole rule, `..` segments included. This used to walk
+/// up to the nearest `go.mod` whenever `base` was not a prefix of the file, on
+/// the grounds that a harness may copy the config elsewhere — but that is
+/// exactly when the two tools part company. Measured on external-dns, whose
+/// config excludes `gochecknoinits` at `^(internal/.*/init\.go|…)$`: with the
+/// config at the repo root golangci-lint reports 1 issue in `./internal/...`,
+/// with the same config one directory away it reports 2, because the path it
+/// matches has become `../../../corpus/cache/external-dns/internal/…` and the
+/// `^internal/` anchor no longer holds. A shared `-c ../shared/.golangci.yml`
+/// gets the same treatment.
 fn path_for_match<'a>(filename: &'a str, base: Option<&Path>) -> Cow<'a, str> {
     let norm = normalize_slashes(filename);
-    if let Some(base) = base {
-        if let Some(rel) = strip_base_prefix(norm.as_ref(), base) {
-            return Cow::Owned(rel);
-        }
-    }
-    if let Some(rel) = relativize_via_gomod(norm.as_ref()) {
+    let Some(base) = base else {
+        return norm;
+    };
+    if let Some(rel) = strip_base_prefix(norm.as_ref(), base) {
         return Cow::Owned(rel);
     }
-    norm
+    // Both sides go through the working directory first. golangci resolves the
+    // config path before taking its directory, so `-c .golangci.yml` has the
+    // checkout as its base, not the empty path — miss that and every anchored
+    // rule stops matching for a config named relatively.
+    let base_norm = normalize_slashes(&base.to_string_lossy()).into_owned();
+    let (Some(base_abs), Some(abs)) = (absolutize(&base_norm), absolutize(norm.as_ref())) else {
+        return norm;
+    };
+    match rel_from_base(Path::new(&base_abs), &abs) {
+        Some(rel) => Cow::Owned(rel),
+        // `filepath.Rel` failing makes golangci drop the issue outright; guff
+        // keeps it and matches the path it has. Unreachable while both sides
+        // are absolute, which they are once `absolutize` has run.
+        None => norm,
+    }
+}
+
+/// Resolve a relative path against the working directory (golangci
+/// `path_absoluter`). The cwd is read once — this runs per issue.
+fn absolutize(norm: &str) -> Option<String> {
+    if Path::new(norm).is_absolute() {
+        return Some(norm.to_string());
+    }
+    static CWD: OnceLock<Option<String>> = OnceLock::new();
+    let cwd = CWD
+        .get_or_init(|| {
+            std::env::current_dir()
+                .ok()
+                .map(|p| normalize_slashes(&p.to_string_lossy()).into_owned())
+        })
+        .as_deref()?;
+    let cwd = cwd.trim_end_matches('/');
+    if norm.is_empty() || norm == "." {
+        return Some(cwd.to_string());
+    }
+    Some(format!("{cwd}/{norm}"))
+}
+
+/// Port of `filepath.Rel` for slash-separated paths.
+///
+/// Returns `None` where Go returns an error: one path relative and the other
+/// absolute, or a base that cannot be escaped (`..` left in the base after the
+/// common prefix).
+fn rel_from_base(base: &Path, target: &str) -> Option<String> {
+    let base_s = normalize_slashes(&base.to_string_lossy()).into_owned();
+    let base_c = clean_slash(&base_s);
+    let targ_c = clean_slash(target);
+    if base_c == targ_c {
+        return Some(".".to_string());
+    }
+    if base_c.starts_with('/') != targ_c.starts_with('/') {
+        return None;
+    }
+    let split = |p: &str| -> Vec<String> {
+        p.trim_start_matches('/')
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect()
+    };
+    let (b, t) = (split(&base_c), split(&targ_c));
+    let mut i = 0;
+    while i < b.len() && i < t.len() && b[i] == t[i] {
+        i += 1;
+    }
+    if b[i..].iter().any(|s| s == "..") {
+        return None;
+    }
+    let mut out: Vec<&str> = std::iter::repeat("..").take(b.len() - i).collect();
+    out.extend(t[i..].iter().map(String::as_str));
+    if out.is_empty() {
+        return Some(".".to_string());
+    }
+    Some(out.join("/"))
+}
+
+/// `path.Clean` for slash-separated paths: collapse `//`, drop `.`, resolve
+/// `..` where a real element precedes it.
+fn clean_slash(p: &str) -> String {
+    let rooted = p.starts_with('/');
+    let mut out: Vec<&str> = Vec::new();
+    for seg in p.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                if let Some(last) = out.last() {
+                    if *last != ".." {
+                        out.pop();
+                        continue;
+                    }
+                }
+                if rooted {
+                    continue;
+                }
+                out.push("..");
+            }
+            s => out.push(s),
+        }
+    }
+    let joined = out.join("/");
+    if rooted {
+        format!("/{joined}")
+    } else if joined.is_empty() {
+        ".".to_string()
+    } else {
+        joined
+    }
 }
 
 fn strip_base_prefix(norm: &str, base: &Path) -> Option<String> {
@@ -775,62 +891,6 @@ fn strip_base_prefix(norm: &str, base: &Path) -> Option<String> {
         return Some(String::new());
     }
     None
-}
-
-fn relativize_via_gomod(abs: &str) -> Option<String> {
-    let path = Path::new(abs);
-    if !path.is_absolute() {
-        return None;
-    }
-    let parent = path.parent()?;
-    // Cache module roots: path exclusion runs per-issue and must not walk
-    // the filesystem on every call (prometheus / OSS hunt scale).
-    static CACHE: OnceLock<std::sync::Mutex<HashMap<String, Option<PathBuf>>>> = OnceLock::new();
-    let cache = CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
-    let parent_key = normalize_slashes(&parent.to_string_lossy()).into_owned();
-    if let Ok(mut guard) = cache.lock() {
-        if let Some(cached) = guard.get(&parent_key) {
-            return cached
-                .as_ref()
-                .and_then(|root| strip_base_prefix(abs, root));
-        }
-        let mut dir = parent;
-        let found = loop {
-            if dir.join("go.mod").is_file() {
-                break Some(dir.to_path_buf());
-            }
-            match dir.parent() {
-                Some(p) => dir = p,
-                None => break None,
-            }
-        };
-        // Also remember intermediate dirs under the same root.
-        if let Some(ref root) = found {
-            let mut d = parent;
-            loop {
-                let key = normalize_slashes(&d.to_string_lossy()).into_owned();
-                guard.insert(key, Some(root.clone()));
-                if d == root.as_path() {
-                    break;
-                }
-                match d.parent() {
-                    Some(p) => d = p,
-                    None => break,
-                }
-            }
-        } else {
-            guard.insert(parent_key, None);
-        }
-        return found.as_ref().and_then(|root| strip_base_prefix(abs, root));
-    }
-    // Mutex poisoned — fall back to a one-shot walk.
-    let mut dir = parent;
-    loop {
-        if dir.join("go.mod").is_file() {
-            return strip_base_prefix(abs, dir);
-        }
-        dir = dir.parent()?;
-    }
 }
 
 /// Normalize `\` → `/` without allocating when the path already uses `/`.
@@ -1340,20 +1400,40 @@ linters:
     }
 
     #[test]
-    fn path_for_match_falls_back_to_gomod_when_base_misses() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let root = tmp.path().join("github.com").join("nats-io").join("mod");
-        let server = root.join("server");
-        std::fs::create_dir_all(&server).unwrap();
-        std::fs::write(root.join("go.mod"), "module example.com/mod\n").unwrap();
-        let file = server.join("test_test.go");
-        std::fs::write(&file, "package server\n").unwrap();
+    fn path_for_match_walks_up_with_dotdot_when_the_base_is_elsewhere() {
+        // `filepath.Rel`, not "find the module root". A config one directory
+        // away from the checkout is what the hunt harness produces and what a
+        // shared `-c ../shared/.golangci.yml` produces, and upstream's answer
+        // carries `../` — which is why an anchored rule stops matching. guff
+        // used to walk up to the nearest `go.mod` here and kept excluding.
+        let file = "/Users/me/src/checkout/internal/testutils/init.go";
+        let rel = path_for_match(file, Some(Path::new("/Users/me/src/results/run-1")));
+        assert_eq!(rel.as_ref(), "../../checkout/internal/testutils/init.go");
+        let anchored = Regex::new(&normalize_path_regex("^(internal/.*/init\\.go)$")).unwrap();
+        assert!(
+            !anchored.is_match(rel.as_ref()),
+            "an anchored rule must miss a path the base cannot reach: {rel}"
+        );
+        // With the config beside the code, the same rule holds.
+        let rel = path_for_match(file, Some(Path::new("/Users/me/src/checkout")));
+        assert_eq!(rel.as_ref(), "internal/testutils/init.go");
+        assert!(anchored.is_match(rel.as_ref()));
+    }
 
-        // Config copied outside the module (hunt harness) — base does not prefix.
-        let rel = path_for_match(file.to_str().unwrap(), Some(Path::new("/tmp/hunt-results")));
-        assert_eq!(rel.as_ref(), "server/test_test.go");
-        let re = Regex::new(&normalize_path_regex(".github")).unwrap();
-        assert!(!re.is_match(rel.as_ref()));
+    #[test]
+    fn rel_from_base_matches_filepath_rel() {
+        let rel = |b: &str, t: &str| rel_from_base(Path::new(b), t);
+        assert_eq!(rel("/a/b", "/a/b/c"), Some("c".into()));
+        assert_eq!(rel("/a/b", "/a/b"), Some(".".into()));
+        assert_eq!(rel("/a/b/c", "/a/d"), Some("../../d".into()));
+        assert_eq!(rel("/a/b", "/x/y"), Some("../../x/y".into()));
+        // Trailing slashes and `.` segments are cleaned first.
+        assert_eq!(rel("/a/b/", "/a/./b/c"), Some("c".into()));
+        // Go returns an error when one side is relative and the other is not.
+        assert_eq!(rel("/a/b", "c/d"), None);
+        assert_eq!(rel("a/b", "/c/d"), None);
+        // …and when the base itself climbs out of the tree.
+        assert_eq!(rel("../a", "b"), None);
     }
 
     #[test]
