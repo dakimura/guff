@@ -1,0 +1,42 @@
+# Golden case: `linters.settings.gosec.config` for the three file-permission
+# rules, which is where 37 of buildkit's 39 guff-only findings came from
+# (COMPAT-HARDENING 2026-09-04 続き 157).
+#
+# `rules/fileperms.go` gives G301 / G302 / G306 one scalar each: the most
+# permissive mode that is *not* a finding. Two things follow from it, and both
+# are asserted here:
+#
+#   1. the threshold — a call whose mode is a subset of the configured one is
+#      silent, so `os.Mkdir(0755)` and `os.Chmod(0644)` and
+#      `os.WriteFile(0644)` all disappear under this config and would all be
+#      reported under gosec's defaults (0750 / 0600 / 0600);
+#   2. the message text — "Expect ... to be %#o or less" prints the mode that
+#      was in force, so a golden that still said "0600 or less" would mean the
+#      config had not been read even if the counts happened to line up.
+#
+# `getConfiguredMode` takes the value as a **string** through
+# `strconv.ParseInt(v, 0, 64)`: base 0, so the leading zero here is octal. An
+# unquoted `0644` is an int to Go's YAML and is ignored upstream; guff cannot
+# tell the two apart because YAML 1.2 makes a leading-zero scalar a string.
+# That boundary is recorded in `gosec_mode`'s doc comment, not papered over.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gosec
+  settings:
+    gosec:
+      config:
+        G301: "0777"
+        G302: "0644"
+        G306: "0644"
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

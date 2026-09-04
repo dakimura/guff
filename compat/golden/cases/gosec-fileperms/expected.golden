@@ -1,0 +1,11 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh gosec-fileperms
+# Produced by running golangci-lint on compat/golden/cases/gosec-fileperms/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+perms/perms.go:18:51:gosec:medium:G301: Expect directory permissions to be 0777 or less
+perms/perms.go:19:51:gosec:medium:G302: Expect file permissions to be 0644 or less
+perms/perms.go:20:51:gosec:medium:G306: Expect WriteFile permissions to be 0644 or less
