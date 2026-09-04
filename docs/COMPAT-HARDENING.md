@@ -21666,3 +21666,73 @@ workspace **278 スイート** / OSS pr tier **8 ターゲットすべて P=R=10
 k6 に残るのは **11 件** —— nolintlint 7（他 linter の取りこぼしの従属:
 unused 4・exhaustive 1・gocritic 1・revive 1）と
 contextcheck / makezero / asasalint / unparam 各 1。
+
+### 2026-09-05（続き 174）— `exhaustive` は**別パッケージの enum を一切見ていない**。fact は輸出されているのに、輸入側がその依存アクションを飛ばしている
+
+k6 に残る nolintlint 7 件のうち 1 件、
+`internal/js/modules/k6/browser/common/remote_object.go:83` の
+`switch t { //nolint:exhaustive`。guff は `exhaustive` を出さないので
+「directive は unused」と言い、上流は出すので言わない —— 続き 158 の B と同じ従属である。
+
+**2 パッケージの最小モジュールで再現した。**
+
+```go
+// enumpkg/enum.go
+type Type string
+const ( TypeAccessor Type = "accessor"; TypeBigint Type = "bigint"; /* …6 個 */ )
+
+// a.go
+switch t {              // t は enumpkg.Type、default 無し、2 case だけ
+case enumpkg.TypeAccessor: ...
+case enumpkg.TypeBigint:   ...
+}
+```
+
+```
+golangci: missing cases in switch of type enumpkg.Type: … （出す）
+guff:     何も出さない
+```
+
+**同じファイルのローカル enum は両ツールとも出す。** つまり
+「別パッケージの enum だけが見えない」。
+
+#### どこで落ちているか
+
+計器を入れて上から追った:
+
+```
+EX-EXPORT pkg=exrepro/enumpkg enums=[ObjectId(71)]     ← fact は作られている
+EX-DEBUG  pkg=exrepro tag_type=Type obj=ObjectId(64) local_hit=false fact=false
+```
+
+`FACT-DECODE` は**一度も呼ばれない**。理由は依存の張り方だった:
+
+```
+FACT-DEP exhaustive exrepro -> exrepro/enumpkg typed=false table=false
+```
+
+`action.rs` は fact 生産者を import 先にもスケジュールするが、
+`typed_import(typed_by_id, dep_pkg)` が **`typed_by_id` を持っていない**ので
+メタデータ stub のままで、`type_artifacts.is_none()` により**その依存アクションを
+丸ごと飛ばす**。`enumpkg` の action は root として走って fact を作っているのに、
+`exrepro` の action はそれを継承する辺を持っていない。
+
+`typed_by_id` は `analyzers_need_same_module_fact_packages` が真のときだけ作られ、
+その述語は **`contextcheck` だけ**を見ている。関数の doc は
+
+> modernize / deprecated / **exhaustive** advertise facts but do not need the
+> same-module source expansion
+
+と書いてあったが、**exhaustive は必要である。** その一文を測定つきで訂正した
+（`deferral note の理由は腐る` の 3 度目）。
+
+#### なぜ 1 行で直さないか
+
+述語に `exhaustive` を足せば**同一モジュール**の enum は閉じる。
+k6 は閉じない —— `github.com/chromedp/cdproto/runtime.Type` は**別モジュール**で、
+guff はそれをソースから型検査しない。上流が両方見えるのは、fact 生産者が有効なとき
+**依存の構文まで読む**からである。閉じるにはその whole-program モードと、
+それに見合う RSS の予算が要る（この関数の doc が挙げている prometheus の懸念は、
+まさにその予算の話である）。**この回の成果は測定と、腐っていた注記の訂正である。**
+
+台帳は **39/100 のまま**（41 定義）。k6 は `open 11` のまま。
