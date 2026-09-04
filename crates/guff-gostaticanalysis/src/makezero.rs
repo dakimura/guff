@@ -176,24 +176,32 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .copied()
         .unwrap_or_default();
 
-    let mut nonzero: HashSet<ObjectId> = HashSet::new();
     let mut pending = Vec::new();
 
-    // First pass: record non-zero-length slice makes.
-    // Second pass: flag appends. Two passes keep order independent of
-    // declaration vs use across siblings.
+    // One `ast.Walk` per file, in source order, against a set that is *filled
+    // as the walk goes* — upstream builds a fresh `visitor` per file and its
+    // `nonZeroLengthSliceDecls` only ever holds the `make`s already seen.
+    //
+    // guff used to walk twice, collecting every `make` in the file before
+    // looking at any `append`. That reports an `append` written *before* the
+    // `make` that gives the slice its length, which upstream does not:
+    //
+    //     seen = append(seen, name)          // not reported
+    //     old := seen
+    //     seen = make([]string, len(old)+1)  // the length arrives here
+    //
+    // k6 `internal/dashboard/registry.go:78` is exactly that, inside a closure.
     for file in pass.files() {
+        let mut nonzero: HashSet<ObjectId> = HashSet::new();
         walk::preorder(NodeRef::File(file), |n| {
-            if let NodeRef::AssignStmt(s) = n {
-                check_assign(pass, s, &mut nonzero, opts.always, &mut pending);
-            }
-            true
-        });
-    }
-    for file in pass.files() {
-        walk::preorder(NodeRef::File(file), |n| {
-            if let NodeRef::CallExpr(call) = n {
-                check_append(pass, call, &nonzero, &mut pending);
+            match n {
+                NodeRef::AssignStmt(s) => {
+                    check_assign(pass, s, &mut nonzero, opts.always, &mut pending);
+                }
+                NodeRef::CallExpr(call) => {
+                    check_append(pass, call, &nonzero, &mut pending);
+                }
+                _ => {}
             }
             true
         });

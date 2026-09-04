@@ -21736,3 +21736,56 @@ guff はそれをソースから型検査しない。上流が両方見えるの
 まさにその予算の話である）。**この回の成果は測定と、腐っていた注記の訂正である。**
 
 台帳は **39/100 のまま**（41 定義）。k6 は `open 11` のまま。
+
+### 2026-09-05（続き 175）— makezero は**ファイルを 1 回、順に**歩く。guff は 2 パスにしていて、`make` より**前**の `append` まで出していた
+
+k6 `internal/dashboard/registry.go:78` の guff-only 1 件:
+
+```go
+process := func(name string) {
+    idx := sort.SearchStrings(seen, name)
+    if idx == len(seen) {
+        seen = append(seen, name)          // guff がここを出す
+        ...
+    }
+    ...
+    old := seen
+    seen = make([]string, len(old)+1)      // 長さが付くのはここ
+    ...
+}
+```
+
+上流は `visitor` を**ファイルごとに 1 つ**作り、`ast.Walk` で 1 回だけ回す。
+`nonZeroLengthSliceDecls` は**歩きながら埋まる**ので、`append` を見た時点で
+まだ登録されていない `make` は効かない。
+
+guff は
+
+```rust
+// First pass: record non-zero-length slice makes.
+// Second pass: flag appends. Two passes keep order independent of
+// declaration vs use across siblings.
+```
+
+と 2 パスにしていた。意図はコメントのとおりだが、**上流は順序に依存する**。
+1 ファイル 1 走査（`nonzero` もファイルごと）に直した。
+
+9 形で測って修正後は一致:
+
+| 形 | 上流 | 直す前 |
+|---|---|---|
+| `make([]T, n)` → `append` | 出す | 出す |
+| `make` の後の `append`（同一関数 / クロージャ内） | 出す | 出す |
+| **`append` の後に `make`（同一関数 / クロージャ内）** | 黙る | **出す** |
+| `make([]T, 0, n)` → `append` | 黙る | 黙る |
+| パラメータ / `var` 宣言への `append` | 黙る | 黙る |
+
+```
+k6: guff-only 11 → 10
+```
+
+#### ゲート
+
+golden **213 完全一致**（再生成不要）/ fix **213** / reject **14** /
+workspace **278 スイート** / OSS pr tier **8 ターゲットすべて P=R=100%**。
+台帳は **39/100 のまま**（41 定義）。

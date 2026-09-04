@@ -96,23 +96,35 @@ fn nilnil_allows_valid_returns() {
 }
 
 #[test]
-fn makezero_flags_append_to_nonzero_slice() {
+fn makezero_flags_only_appends_after_the_make() {
+    // Upstream walks each file once, in source order, against a set that only
+    // holds the `make`s already seen. guff collected every `make` in the file
+    // first, so an `append` written *before* the one that gives the slice its
+    // length was reported too — k6 `internal/dashboard/registry.go:78`, inside
+    // a closure whose `seen = make([]string, len(old)+1)` comes later.
+    //
+    // Every message this check makes is the same sentence, so the lines are
+    // what carry the claim.
     let dir = support::testdata("makezero");
     let pkg = support::typecheck_pkg("example.com/makezero", &dir.join("bad.go"));
-    let messages = support::run_analyzer(makezero(), &pkg);
-    assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("non-zero initialized length")),
-        "{messages:?}"
+    assert_eq!(
+        support::run_analyzer_lines(makezero(), &pkg),
+        vec![
+            5,  // make([]int, 8) then append
+            12, // …with the make one statement earlier
+            19, // …and one closure in
+        ],
     );
 }
 
 #[test]
 fn makezero_allows_zero_length_make() {
+    // Six silent shapes: a zero-length make with a capacity, an append before
+    // the make (plain and in a closure), a parameter, and a plain declaration.
     let dir = support::testdata("makezero");
     let pkg = support::typecheck_pkg("example.com/makezero/ok", &dir.join("ok.go"));
-    assert!(support::run_analyzer(makezero(), &pkg).is_empty());
+    let messages = support::run_analyzer(makezero(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
 }
 
 #[test]
