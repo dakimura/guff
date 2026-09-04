@@ -130,3 +130,80 @@ func okLabelledBreakOutOfSwitch(read func() string) int {
 		}
 	}
 }
+
+// A loop-carried accumulator: the last store in the body is read at the *top of
+// the next iteration*, so it is live. `optimizeBlocks` fuses `rangeint.loop`
+// into `rangeint.body`, which makes such a loop one block that jumps to itself,
+// and the read lives in that same block.
+//
+// Upstream reaches it because its first walk frame is a *copy* of the block
+// (`blCopy := *bl`) and `rmSameBlock` compares by pointer, so the self-edge
+// survives that first hop. guff passed the real block and filtered the edge
+// away, and every one of these read as "never used afterwards". k6
+// `lib/execution_segment_test.go:445` and
+// `lib/executor/ramping_vus_test.go:1117`.
+func okLoopCarriedIntegerRange(n int, out []int) []int {
+	from := 0
+	for i := range n {
+		to := from + 1
+		out[i] = to
+		from = to
+	}
+	return out
+}
+
+func okLoopCarriedIntegerRangeInt64(n int64, out []int) []int {
+	from := 0
+	for i := range n {
+		to := from + 1
+		out[i] = to
+		from = to
+	}
+	return out
+}
+
+type rat struct{ v int }
+
+func okLoopCarriedPointer(n int, out []int) []int {
+	from := &rat{0}
+	for i := range n {
+		to := &rat{from.v + 1}
+		out[i] = to.v
+		from = to
+	}
+	return out
+}
+
+// The same accumulator in the loop forms that never fused into a self-edge, so
+// they were right before and must stay right.
+func okLoopCarriedCounted(n int, out []int) []int {
+	from := 0
+	for i := 0; i < n; i++ {
+		to := from + 1
+		out[i] = to
+		from = to
+	}
+	return out
+}
+
+func okLoopCarriedRangeSlice(xs []int, out []int) []int {
+	from := 0
+	for i := range xs {
+		to := from + 1
+		out[i] = to
+		from = to
+	}
+	return out
+}
+
+func okLoopCarriedWhile(n int, out []int) []int {
+	from := 0
+	i := 0
+	for i < n {
+		to := from + 1
+		out[i] = to
+		from = to
+		i++
+	}
+	return out
+}

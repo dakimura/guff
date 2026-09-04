@@ -8814,18 +8814,33 @@ fn ginkgolinter_respects_settings() {
 #[test]
 fn wastedassign_flags_unused_local_assignments() {
     let pkg = support::typecheck_fixture("wastedassign", "example.com/wastedassign", "bad.go");
-    let messages = support::run_analyzer(wastedassign(), &pkg);
-    assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("assigned to a, but never used afterwards")),
-        "{messages:?}"
-    );
-    assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("assigned to b, but reassigned without using the value")),
-        "{messages:?}"
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, String)> = support::run_analyzer_diagnostics(wastedassign(), &pkg)
+        .into_iter()
+        .map(|d| {
+            (
+                fset.position(guff::position::Pos(d.pos as i64)).line,
+                d.message,
+            )
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            (8, "assigned to a, but never used afterwards".to_string()),
+            (14, "assigned to b, but reassigned without using the value".to_string()),
+            // `break parsingLoop` leaves the outer loop and nothing reads
+            // `line` again.
+            (36, "assigned to line, but never used afterwards".to_string()),
+            // Both stores in an integer-range loop whose top overwrites `x`
+            // before reading it. Keeping the self-edge (see `ok.go`) must not
+            // silence these: the revisit finds a Store, which is
+            // `reassignedSoon`, not `notWasted`.
+            (50, "assigned to x, but reassigned without using the value".to_string()),
+            (54, "assigned to x, but reassigned without using the value".to_string()),
+        ],
+        "{got:?}"
     );
 }
 
