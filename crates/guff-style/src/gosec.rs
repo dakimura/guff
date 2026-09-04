@@ -81,7 +81,7 @@ use guff_types::TypeId;
 use guff_types::alias::unalias_readonly;
 use regex::Regex;
 
-use crate::options::GosecOptions;
+use crate::options::{FilePermOptions, GosecOptions};
 
 struct RuleDef {
     id: &'static str,
@@ -295,9 +295,9 @@ const EXTRA_RULE_IDS: &[&str] = &[
     "G702", "G703", "G705", "G706", "G710",
 ];
 
-const G301_MODE: i64 = 0o750;
-const G302_MODE: i64 = 0o600;
-const G306_MODE: i64 = 0o600;
+// The `rules/fileperms.go` defaults, now only the starting point:
+// `linters.settings.gosec.config.G30x` overrides each one, and the message text
+// is built from whatever is in force. See [`FilePermOptions`].
 const G403_MIN_BITS: i64 = 2048;
 
 const G301_CALLS: &[(&str, &str)] = &[("os", "Mkdir"), ("os", "MkdirAll")];
@@ -3451,6 +3451,7 @@ fn check_call(
     pass: &Pass<'_>,
     call: &CallExpr,
     enabled: &HashSet<&'static str>,
+    perms: &FilePermOptions,
     pending: &mut Vec<(u32, u32, String)>,
 ) {
     // Every rule reached from here is a `MatchCallByPackage` /
@@ -3498,14 +3499,14 @@ fn check_call(
     if enabled.contains("G301") && G301_CALLS.iter().any(|(p, n)| *p == pkg && *n == name) {
         if let Some(mode_arg) = call.args.last() {
             let bad = is_os_mode_perm(mode_arg)
-                || get_int(mode_arg).is_some_and(|m| !mode_is_subset(m, G301_MODE));
+                || get_int(mode_arg).is_some_and(|m| !mode_is_subset(m, perms.g301));
             if bad {
                 pending.push((
                     call.pos().0 as u32,
                     call.end().0 as u32,
                     format!(
                         "G301: Expect directory permissions to be {} or less",
-                        format_octal_mode(G301_MODE)
+                        format_octal_mode(perms.g301)
                     ),
                 ));
             }
@@ -3515,14 +3516,14 @@ fn check_call(
     if enabled.contains("G302") && G302_CALLS.iter().any(|(p, n)| *p == pkg && *n == name) {
         if let Some(mode_arg) = call.args.last() {
             let bad = is_os_mode_perm(mode_arg)
-                || get_int(mode_arg).is_some_and(|m| !mode_is_subset(m, G302_MODE));
+                || get_int(mode_arg).is_some_and(|m| !mode_is_subset(m, perms.g302));
             if bad {
                 pending.push((
                     call.pos().0 as u32,
                     call.end().0 as u32,
                     format!(
                         "G302: Expect file permissions to be {} or less",
-                        format_octal_mode(G302_MODE)
+                        format_octal_mode(perms.g302)
                     ),
                 ));
             }
@@ -3532,14 +3533,14 @@ fn check_call(
     if enabled.contains("G306") && G306_CALLS.iter().any(|(p, n)| *p == pkg && *n == name) {
         if let Some(mode_arg) = call.args.last() {
             let bad = is_os_mode_perm(mode_arg)
-                || get_int(mode_arg).is_some_and(|m| !mode_is_subset(m, G306_MODE));
+                || get_int(mode_arg).is_some_and(|m| !mode_is_subset(m, perms.g306));
             if bad {
                 pending.push((
                     call.pos().0 as u32,
                     call.end().0 as u32,
                     format!(
                         "G306: Expect WriteFile permissions to be {} or less",
-                        format_octal_mode(G306_MODE)
+                        format_octal_mode(perms.g306)
                     ),
                 ));
             }
@@ -3656,7 +3657,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     for file in pass.files() {
         preorder(NodeRef::File(file), |n| {
             match n {
-                NodeRef::CallExpr(call) => check_call(pass, call, &enabled, &mut pending),
+                NodeRef::CallExpr(call) => {
+                    check_call(pass, call, &enabled, &opts.file_perms, &mut pending)
+                }
                 NodeRef::CompositeLit(lit) => {
                     check_g402_composite(pass, lit, &enabled, &mut pending);
                     check_g112_composite(pass, lit, &enabled, &mut pending);

@@ -20439,3 +20439,64 @@ gosec:
 そこを確かめること。**
 
 台帳: buildkit を採用して **37 target**、`open 39`。35/100 のまま。
+
+### 2026-09-04（続き 157）— `gosec.config` の閾値を読む。**文言もその閾値から作られている**ので、片方だけでは合わない
+
+続き 156 で buildkit の 39 件中 37 件の原因として名前を付けた欠陥。
+
+**7 形 × 実測で上流の線を引いた**（`rules/fileperms.go` を読むだけで済ませず）:
+
+| config | golangci-lint |
+|---|---|
+| 鍵なし | G301 `0750` / G302 `0600` / G306 `0600`（既定） |
+| `G306: "0644"` | G306 は 0666 だけ、文言は「**0644** or less」 |
+| `g306: "0644"`（小文字） | **同一** —— 鍵は大小を問わない |
+| `G306: "644"` | **3 件**、文言は「**01204** or less」 |
+| `G306: 0644`（引用なし） | **効かない**（既定のまま） |
+| `G306: "bogus"` | 効かない（既定のまま） |
+| `G301: "0777"` / `G302: "0644"` | その 2 つの finding が消える |
+
+読み方は `getConfiguredMode` そのもの —— 値は **`int64` か `string` だけ**を取り、
+文字列は `strconv.ParseInt(v, 0, 64)`（**base 0**、先頭 `0` は 8 進）。
+鍵が大小を問わないのは、golangci の loader が全キーを小文字化し
+`toGosecConfig` が `strings.ToUpper` で戻すからである。
+
+**そして外れていたのは閾値だけではない。** メッセージは
+「Expect ... to be `%#o` or less」で**その閾値から作られる**ので、
+閾値だけ直して文言を既定のままにすると golden のキーが合わない。
+`FilePermOptions` に 3 つまとめ、判定と文言の両方をそこから引くようにした。
+
+**1 つだけ合わせられない形があり、隠さずに記録した。** 引用なしの `G306: 0644` は、
+Go の YAML では整数 420 になり gosec の型 switch が落とす（＝効かない）が、
+**YAML 1.2 の serde_yaml では `String("0644")`** になり、引用付きと**区別が付かない**。
+引用付きを捨てれば buildkit を含む実際に動いている書き方が壊れるので、
+guff はこの形も適用する —— つまりこの書き方の config では guff の方が
+finding が**少なく**なる。`gosec_mode` の doc コメントに測定つきで書いてある。
+なお `644` や `0o644` は serde_yaml でも `Number` になるので**上流と一致する**。
+ずれるのは「先頭 0 の引用なし」1 形だけである。
+
+新しい golden case `gosec-fileperms` は、**3 件それぞれの文言**が主張である:
+
+```
+perms/perms.go:18:51:gosec:medium:G301: Expect directory permissions to be 0777 or less
+perms/perms.go:19:51:gosec:medium:G302: Expect file permissions to be 0644 or less
+perms/perms.go:20:51:gosec:medium:G306: Expect WriteFile permissions to be 0644 or less
+```
+
+subset 側の 4 呼び出し（`0755` / `0777` / `0644` / `0644`）は**黙る**ことで閾値を、
+残る 3 件は**文言**で「どの mode が効いていたか」を固定する。
+件数だけ合っていて文言が `0600` のままなら、config が読まれていない印になる。
+
+**fixture に `gofmt -w` をかける前に diff を読んだ** —— 変わったのは整列だけで
+8 進リテラルは無傷、ただし桁が動くので golden を再生成した（続き 110 の逆で、
+「かけない」ではなく「かけた結果を確かめる」）。
+
+台帳: buildkit `open 39 → 2`。35/100 のまま（残り 2 件は下記）。
+golden 212/212、fix 212、reject 14、workspace テスト緑（終了コードで確認）、
+OSS pr tier 8/8 P=R=100%。
+
+**残る 2 件は次の作業で、順番に効く可能性がある**:
+`client/client.go:166` の `SA4023: this comparison is always true` が guff-only、
+`convert.go:1605` の nolintlint「`//nolint:staticcheck` は unused」も guff-only。
+後者は前者の従属かもしれない —— guff がそこで SA1019 を出していないなら
+directive は未使用に見える。**2 件と数える前にそこを確かめること。**

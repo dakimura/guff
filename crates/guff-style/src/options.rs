@@ -1014,7 +1014,7 @@ pub struct IreturnOptions {
 /// `includes` means all implemented rules; `excludes` removes from that set.
 /// `severity` / `confidence` drop findings scoring below the threshold
 /// (golangci `filterIssues`: `i.Severity >= severity && i.Confidence >= confidence`).
-/// Concurrency and the non-G101 parts of `config` are DEFERRED.
+/// Concurrency is DEFERRED.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct GosecOptions {
     /// Only run these rule ids (golangci `includes`).
@@ -1030,6 +1030,41 @@ pub struct GosecOptions {
     pub g101: G101Options,
     /// `config.G117` knobs.
     pub g117: G117Options,
+    /// `config.G301` / `G302` / `G306` — the file-permission thresholds.
+    pub file_perms: FilePermOptions,
+}
+
+/// `linters.settings.gosec.config.G301` / `G302` / `G306`.
+///
+/// The three `rules/fileperms.go` rules each take one scalar: the most
+/// permissive mode that is *not* a finding. `getConfiguredMode` reads it as
+///
+/// ```go
+/// case int64: mode = value
+/// case string:
+///     if m, e := strconv.ParseInt(value, 0, 64); e != nil { mode = defaultMode } else { mode = m }
+/// ```
+///
+/// The mode is also what the message says ("Expect ... to be `%#o` or less"),
+/// so a wrong threshold and a wrong message text are the same bug.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FilePermOptions {
+    /// `os.Mkdir` / `os.MkdirAll` (`NewMkdirPerms`, default `0750`).
+    pub g301: i64,
+    /// `os.Chmod` / `os.OpenFile` (`NewFilePerms`, default `0600`).
+    pub g302: i64,
+    /// `os.WriteFile` / `ioutil.WriteFile` (`NewWritePerms`, default `0600`).
+    pub g306: i64,
+}
+
+impl Default for FilePermOptions {
+    fn default() -> Self {
+        Self {
+            g301: 0o750,
+            g302: 0o600,
+            g306: 0o600,
+        }
+    }
 }
 
 /// `linters.settings.gosec.config.G117` — secret-serialization tuning.

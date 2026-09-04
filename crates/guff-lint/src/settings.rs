@@ -1876,8 +1876,8 @@ pub struct GosecSettings {
     pub severity: String,
     #[serde(default)]
     pub confidence: String,
-    /// Per-rule `config` map. Only the `G101` sub-map is interpreted; the rest
-    /// (`G301`, `global`, …) is DEFERRED.
+    /// Per-rule `config` map. `G101` / `G117` sub-maps and the `G301` /
+    /// `G302` / `G306` scalars are interpreted; `global` is DEFERRED.
     #[serde(default)]
     pub config: Option<serde_yaml::Value>,
     // DEFERRED: concurrency.
@@ -1893,9 +1893,75 @@ fn gosec_config_key<'a>(
     rule: &str,
     key: &str,
 ) -> Option<&'a serde_yaml::Value> {
+    gosec_config_rule(config, rule)?.get(serde_yaml::Value::String(key.to_string()))
+}
+
+/// The `config.<rule>` entry, matched without regard to case.
+///
+/// golangci-lint's loader lower-cases every mapping key, and `toGosecConfig`
+/// puts it back with `strings.ToUpper(k)` before handing it to gosec — so
+/// `g306:` and `G306:` are the same key upstream. Measured: both spellings
+/// change the threshold identically.
+fn gosec_config_rule<'a>(
+    config: &'a serde_yaml::Value,
+    rule: &str,
+) -> Option<&'a serde_yaml::Value> {
+    if let Some(v) = config.get(serde_yaml::Value::String(rule.to_string())) {
+        return Some(v);
+    }
     config
-        .get(serde_yaml::Value::String(rule.to_string()))?
-        .get(serde_yaml::Value::String(key.to_string()))
+        .as_mapping()?
+        .iter()
+        .find(|(k, _)| k.as_str().is_some_and(|k| k.eq_ignore_ascii_case(rule)))
+        .map(|(_, v)| v)
+}
+
+/// `rules.getConfiguredMode`: the file-permission threshold for one rule.
+///
+/// Upstream takes **only** an `int64` or a `string`, and the string goes
+/// through `strconv.ParseInt(value, 0, 64)` — base 0, so a leading `0` means
+/// octal and a bare `644` is decimal 644 (which prints as `01204`). Anything
+/// else, and any string `ParseInt` rejects, leaves the default in place.
+///
+/// The `int64` arm is unreachable from a config file: golangci decodes YAML
+/// scalars into `int`, which the type switch does not match. Measured —
+/// `G306: 0644` unquoted changes nothing upstream, so guff must ignore it too.
+/// Being "more forgiving" here would invent a divergence rather than remove
+/// one.
+fn gosec_mode(config: &serde_yaml::Value, rule: &str, default: i64) -> i64 {
+    let Some(v) = gosec_config_rule(config, rule) else {
+        return default;
+    };
+    let Some(text) = v.as_str() else {
+        return default;
+    };
+    parse_go_int_base0(text.trim()).unwrap_or(default)
+}
+
+/// `strconv.ParseInt(s, 0, 64)`: base from the prefix, `_` separators allowed.
+fn parse_go_int_base0(s: &str) -> Option<i64> {
+    let (neg, s) = match s.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, s.strip_prefix('+').unwrap_or(s)),
+    };
+    let lower = s.to_ascii_lowercase();
+    let (digits, radix) = if let Some(d) = lower.strip_prefix("0x") {
+        (d, 16)
+    } else if let Some(d) = lower.strip_prefix("0o") {
+        (d, 8)
+    } else if let Some(d) = lower.strip_prefix("0b") {
+        (d, 2)
+    } else if lower.len() > 1 && lower.starts_with('0') {
+        (&lower[1..], 8)
+    } else {
+        (lower.as_str(), 10)
+    };
+    let digits: String = digits.chars().filter(|c| *c != '_').collect();
+    if digits.is_empty() {
+        return None;
+    }
+    let n = i64::from_str_radix(&digits, radix).ok()?;
+    Some(if neg { -n } else { n })
 }
 
 fn gosec_config_f64(config: &serde_yaml::Value, rule: &str, key: &str) -> Option<f64> {
@@ -1943,6 +2009,12 @@ impl GosecSettings {
                 }
             }
         }
+        let mut file_perms = guff_style::FilePermOptions::default();
+        if let Some(config) = &self.config {
+            file_perms.g301 = gosec_mode(config, "G301", file_perms.g301);
+            file_perms.g302 = gosec_mode(config, "G302", file_perms.g302);
+            file_perms.g306 = gosec_mode(config, "G306", file_perms.g306);
+        }
         guff_style::GosecOptions {
             includes: self.includes.clone(),
             excludes: self.excludes.clone(),
@@ -1950,6 +2022,7 @@ impl GosecSettings {
             confidence: self.confidence.clone(),
             g101,
             g117,
+            file_perms,
         }
     }
 }
@@ -4062,6 +4135,94 @@ fn convert_revive_argument(value: &serde_yaml::Value) -> guff_revive::RuleArgume
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn gosec_perms(yaml: &str) -> guff_style::FilePermOptions {
+        let v: serde_yaml::Value = serde_yaml::from_str(yaml).expect("yaml");
+        let g: GosecSettings =
+            serde_yaml::from_value(v.get("gosec").cloned().expect("gosec")).expect("gosec settings");
+        g.to_guff_gosec().file_perms
+    }
+
+    /// Every row here was read off `golangci-lint run` on the same three
+    /// `os.WriteFile` / `os.Mkdir` / `os.Chmod` calls, not from the source.
+    #[test]
+    fn gosec_file_perm_config_matches_upstream() {
+        let d = guff_style::FilePermOptions::default();
+        assert_eq!((d.g301, d.g302, d.g306), (0o750, 0o600, 0o600));
+
+        // No config at all: the rule defaults stand.
+        assert_eq!(gosec_perms("gosec: {}"), d);
+
+        // A leading zero is octal, because `ParseInt(v, 0, 64)` takes the base
+        // from the prefix.
+        assert_eq!(
+            gosec_perms("gosec:\n  config:\n    G306: \"0644\"\n").g306,
+            0o644
+        );
+
+        // The key is case-insensitive: golangci lower-cases every mapping key
+        // and `toGosecConfig` upper-cases it back.
+        assert_eq!(
+            gosec_perms("gosec:\n  config:\n    g306: \"0644\"\n").g306,
+            0o644
+        );
+
+        // No leading zero means decimal — 644, which prints as 01204 and is a
+        // *wider* mask than 0644, so it reports strictly more.
+        assert_eq!(
+            gosec_perms("gosec:\n  config:\n    G306: \"644\"\n").g306,
+            644
+        );
+
+        // Unquoted spellings that YAML 1.2 calls numbers reach us as
+        // `Value::Number`, which is not a string, so the default stands — and
+        // that is also what upstream does, because viper hands gosec an `int`
+        // and its type switch takes only `int64` or `string`.
+        assert_eq!(gosec_perms("gosec:\n  config:\n    G306: 644\n").g306, 0o600);
+        assert_eq!(gosec_perms("gosec:\n  config:\n    G306: 0o644\n").g306, 0o600);
+
+        // The one spelling the two YAML layers disagree about: a bare `0644`.
+        // YAML 1.2 (serde_yaml) says String("0644"); Go's yaml.v3 says the
+        // integer 420, which gosec then ignores. Measured: upstream keeps 0600
+        // here and guff applies 0644, so guff reports *fewer* findings for a
+        // config written this way. It is indistinguishable from the quoted
+        // form once parsed — `"0644"` and `0644` are the same `Value` — and
+        // refusing both would break the common, working spelling that
+        // buildkit and everyone else uses. Recorded rather than guessed at.
+        assert_eq!(
+            gosec_perms("gosec:\n  config:\n    G306: 0644\n").g306,
+            0o644,
+            "known boundary: serde_yaml cannot tell 0644 from \"0644\""
+        );
+
+        // A string ParseInt rejects leaves the default.
+        assert_eq!(
+            gosec_perms("gosec:\n  config:\n    G306: \"bogus\"\n").g306,
+            0o600
+        );
+
+        // All three rules read their own key, and each keeps its own default.
+        let p = gosec_perms("gosec:\n  config:\n    G301: \"0777\"\n    G302: \"0644\"\n");
+        assert_eq!((p.g301, p.g302, p.g306), (0o777, 0o644, 0o600));
+    }
+
+    #[test]
+    fn parse_go_int_base0_follows_strconv() {
+        assert_eq!(parse_go_int_base0("0644"), Some(0o644));
+        assert_eq!(parse_go_int_base0("644"), Some(644));
+        assert_eq!(parse_go_int_base0("0o644"), Some(0o644));
+        assert_eq!(parse_go_int_base0("0x1ff"), Some(0x1ff));
+        assert_eq!(parse_go_int_base0("0b110"), Some(0b110));
+        assert_eq!(parse_go_int_base0("0"), Some(0));
+        assert_eq!(parse_go_int_base0("-0644"), Some(-0o644));
+        // `_` is a legal separator in Go integer literals.
+        assert_eq!(parse_go_int_base0("0o6_44"), Some(0o644));
+        // Rejected, so the caller keeps its default.
+        assert_eq!(parse_go_int_base0("bogus"), None);
+        assert_eq!(parse_go_int_base0("0999"), None); // 9 is not an octal digit
+        assert_eq!(parse_go_int_base0(""), None);
+        assert_eq!(parse_go_int_base0("0x"), None);
+    }
 
     #[test]
     fn parse_errcheck_check_blank() {
