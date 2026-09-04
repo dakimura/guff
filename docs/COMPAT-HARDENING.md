@@ -20393,3 +20393,49 @@ OSS pr tier 8/8 P=R=100%。
 **ebpf の health gate はまだ落ちている** —— `pin` の
 `cannot infer the remaining type arguments`（続き 154 の 2 つ目、Go 1.21 の
 reverse type inference）は別の作業で、baseline に行は足していない。
+
+### 2026-09-04（続き 156）— buildkit を採用。**39 件のうち 37 件が 1 つの原因**で、guff は `gosec.config` を読んでいない
+
+`./corpus/status.py next` の `adopt buildkit`。候補行はそのまま使えた ——
+`v0.32.2` に `version: "2"` の config（23 linter）、vendor 済み
+（`run.modules-download-mode: vendor`）、87MB。
+`go list -e -mod=vendor ./...` は darwin で **242 パッケージ・Error 0**、
+つまりこのホストで測れる（cri-o と違って）。
+
+```
+buildkit: guff=39 golangci=0 both=0 P=0.0% R=100.0%
+  guff-only by linter: {'gosec': 37, 'staticcheck': 1, 'nolintlint': 1}
+```
+
+**`golangci=0` を「走っていない」と読み違えないこと**をまず確かめた ——
+stderr は空、JSON レポートには linter 一覧が入っていて、**本当に 0 件**である。
+23 linter・242 パッケージで 0 件なのは、この config の exclusions が効いているから。
+
+**37 件は 1 つの原因。** buildkit の config は
+
+```yaml
+gosec:
+  config:
+    G306: "0644"
+```
+
+を持つが、guff は `crates/guff-style/src/gosec.rs:300` の
+`const G306_MODE: i64 = 0o600` を固定で使い、**gosec の per-rule `config` マップを
+そもそも読んでいない**。最小再現（`os.WriteFile` を 0644 / 0600 / 0666 の 3 形）:
+
+| config | golangci-lint | guff |
+|---|---|---|
+| 既定 | 0644 と 0666 を報告、文言は「0600 or less」 | 同じ（一致） |
+| `config.G306: "0644"` | **0666 だけ**、文言は「**0644** or less」 | 両方報告、文言は「0600 or less」 |
+
+**外れているのは閾値だけではない。文言もその閾値から作られている** ——
+片方だけ直すと golden のキーが合わない。
+
+残る 2 件は未診断で、順番に効く可能性がある:
+`client/client.go:166:staticcheck:this comparison is always true` が guff-only で、
+`convert.go:1605` の nolintlint「`//nolint:staticcheck` は unused」も guff-only。
+**後者は前者の従属かもしれない** —— golangci がそこで SA1019 を出していて guff が
+出さないなら、guff からは directive が未使用に見える。**別件として数える前に
+そこを確かめること。**
+
+台帳: buildkit を採用して **37 target**、`open 39`。35/100 のまま。

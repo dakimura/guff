@@ -6,9 +6,9 @@
     "`unmeasured` is not `clean`: an absent measurement is a question."
   ],
   "goal": 100,
-  "defined": 36,
+  "defined": 37,
   "clean": 35,
-  "open": 1,
+  "open": 2,
   "unmeasured": 0,
   "targets": {
     "alertmanager": {
@@ -42,6 +42,19 @@
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
+    },
+    "buildkit": {
+      "tier": "hunt",
+      "state": "open",
+      "at": "20260904T003608Z",
+      "open": 39,
+      "guff_only": 39,
+      "gcl_only": 0,
+      "by_linter": {
+        "gosec": 37,
+        "staticcheck": 1,
+        "nolintlint": 1
+      }
     },
     "caddy": {
       "tier": "pr",
