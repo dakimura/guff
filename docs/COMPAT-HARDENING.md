@@ -20863,3 +20863,52 @@ SA9003 empty branch / S1002 comparison to bool / QF1004 ReplaceAll / unused
 台帳 **36/100 → 37/100**（38 定義、1 open = cri-o のみ）。
 `corpus/README.md` の hunt tier の repo 数を 24 → 26 に直した
 （buildkit の追加時から古かった）。
+
+### 2026-09-04（続き 163）— opentelemetry-collector は除外。**ルートの `./...` が 1 パッケージ**で、サブモジュールはハーネスの 1 回の呼び出しでは届かない
+
+`./corpus/status.py next` の `adopt opentelemetry-collector`。エントリを足して測ると
+
+```
+opentelemetry-collector: guff=0 golangci=0 both=0 P=100.0% R=100.0% [OK]
+```
+
+**この 0 対 0 は採用の根拠にならない。** 続き 162 の skopeo では「両方 0」が
+本物であることを 1 ファイル置いて確かめた（4 パッケージ / 47 ファイル）。
+ここで同じ問いを立てると答えが違う:
+
+```
+$ find . -name go.mod -not -path '*/vendor/*' | wc -l
+     100
+$ go list ./... | wc -l
+       1
+$ go list ./...
+go.opentelemetry.io/collector/internal/statusutil
+```
+
+**100 モジュールのうち `./...` が届くのは 1 パッケージだけ**である。`go.work` は無い。
+ルートからサブモジュールを名指しすることもできない:
+
+```
+$ go list ./pdata/...
+pattern ./pdata/...: directory prefix pdata does not contain main module or its selected dependencies
+```
+
+上流自身は**100 回に分けて**lint している —— `make golint` →
+`Makefile.Common` の `for-all-target` → 各モジュールに `cd` して
+`golangci-lint run`。対して corpus のエントリは**チェックアウト直下での 1 回の呼び出し**で、
+スキーマ（`name` / `url` / `ref` / `packages` / `tier` / `timeout` / `config` /
+`build_tags`）にモジュールディレクトリを指す項目が無い。
+
+kubernetes が `./staging/src/k8s.io/apimachinery/...` で通るのは、ルートの
+`go.mod` が staging を `replace` していてメインモジュールのビルドに入るからで、
+otel-collector にはそれが無い。
+
+**`dir` 項目を足せば届く**（`compat/hunt.sh`・`compat/run.sh`・`corpus/select.py`・
+`corpus/prepare.sh`・`corpus/status.py` に跨る）。残り 61 候補には
+opentelemetry-collector-contrib など同型が他にもあるので効き続ける改修だが、
+**今回は入れないと決めた**。除外理由は `corpus/README.md` の除外表と
+`corpus/status.py` の `EXCLUDED` に、測定つきで置いてある ——
+スキーマが伸びたら再検討できるように「届かない」ではなく
+「1 回の呼び出しでは届かない」と書いた。
+
+台帳は **37/100 のまま**（38 定義）。`next` は kubeshark に進む。
