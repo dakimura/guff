@@ -10228,6 +10228,8 @@ guff は 4 件を返した。**これを穴と呼ぶ前に**、同じソース�
 | gitea | 1 | `modules/setting/config_env.go:128` nolintlint（SA4006 の影） | 上流の `go/ir` が同じ値に**バイト同一の σ ノードを 2 つ**残し、`keyValue := envValue` の右辺が**深い枝の読みが辿らないほう**に束縛されるために出る SA4006。深い枝の綴りを `kv` に変えるだけで上流は黙り、ループの外に出すと `simplifyPhisAndSigmas` が 2 つを畳んで黙る —— **同じプログラムで答えが変わる**。guff の SSA に σ は無く 2 つの名前は 1 つの Value。gitea 自身が `// false positive` と書いている偽陽性。9 形の測定は §4 の 2026-08-31（続き 105）、全文は `compat/allowlists/gitea.txt` | 2026-08-31 |
 | jaeger | 2 | `…/handlers/search_traces.go:141` revive time-naming / `…/tracestore/from_dbmodel_test.go:27` revive epoch-naming | §6 の「revive の importer 盲目には追従しない」そのもの。**上流の沈黙はホスト依存**で、golangci-lint の `Env.Discover` が値レシーバ（`pkg/goutil/env.go`）なので `build.Default.GOROOT` がバイナリのビルド時 GOROOT のまま残り、この開発機ではそれが消えた Homebrew の go1.26.2 を指している。`GOROOT` を export すると**上流はこの 2 件を撃つ**。guff / revive v1.15.0 単体 / GOROOT を入れた golangci-lint の3 者は 13 形すべてで一致。測定は §4 の 2026-08-31（続き 106）、全文は `compat/allowlists/jaeger.txt` | 2026-08-31 |
 
+| syncthing | 2 | `lib/api/api.go:616` / `lib/api/api_csrf.go:99` canonicalheader | **上流の答えがコイン投げ**。`canonicalheader` は `TypesInfo.Uses` を **map で** 走査して最初に見つけた `net/http` の `Header` という名前のオブジェクトを掴み、以後 `types.Identical(recv, headerObject.Type())` を要求する。`net/http` にはその名前が 4 つあり、型 `Header` と フィールド `Request.Header`／`Response.Header` は型が `http.Header` だが、**メソッド `ResponseWriter.Header` は `func() Header`** なので、そこに当たるとパッケージ全体が黙る。syncthing の `lib/api` は `w.Header().Set(…)` と `r.Header.Get(…)` の両方を持つので候補が 2 つあり、map の順で決まる。**キャッシュを毎回捨てて測ると 0 か 2 が交互に出る**（`compat/run.sh` は confirmation ごとに新しいキャッシュを渡す）。guff は決定的な両端（メソッドだけ＝黙る／フィールドだけ＝出す）に合わせたうえで、コイン投げの側では**出す方**を採る。測定は §4 の 2026-09-05（続き 180）、全文は `compat/allowlists/syncthing.txt` | 2026-09-05 |
+
 これ以外の allowlist ファイルは**すべてヘッダのみ（0 件）**。記録するのは
 `oss-nightly` / weekly を CI ゲートにするため — 恒久的に赤いゲートは次の劣化に
 日付を付けられない。**残りを消すのが Phase 3 の残タスク**であり、
@@ -22083,3 +22085,70 @@ main で同じだった。**syncthing の canonicalheader 2 件と ill-typed 3 �
 
 k6 に残るのは **3 件**: nolintlint 2（exhaustive 1・revive 1 の取りこぼしの従属）、
 contextcheck 1。
+
+### 2026-09-05（続き 180）— canonicalheader は「`net/http` の `Header` という名前のオブジェクト」を **map から 1 つ拾って**判定に使う。メソッドを拾うとパッケージ全体が黙る
+
+syncthing の guff-only 2 件（`lib/api/api.go:616` の `X-Syncthing-ID`、
+`lib/api/api_csrf.go:99` の `X-API-Key`）。台帳では 09-02 に clean だったのに、
+今回は出た。**再測すると出たり出なかったりする。**
+
+上流（lasiar/canonicalheader v1.1.2）の入口:
+
+```go
+var headerObject types.Object
+for _, object := range pass.TypesInfo.Uses {
+	if object.Pkg() != nil && object.Pkg().Path() == pkgPath && object.Name() == name {
+		headerObject = object
+		break
+	}
+}
+if headerObject == nil { return nil, nil }
+…
+if !types.Identical(gotType, headerObject.Type()) { return }
+```
+
+`net/http` には `Header` という名前のオブジェクトが **4 つ**ある:
+
+| オブジェクト | `Type()` | 判定 |
+|---|---|---|
+| 型 `Header` | `http.Header` | 通る |
+| フィールド `Request.Header` | `http.Header` | 通る |
+| フィールド `Response.Header` | `http.Header` | 通る |
+| **メソッド `ResponseWriter.Header`** | **`func() Header`** | **一致しない** |
+
+`range` は map なので順序はランダムである。メソッドを拾った瞬間、そのパッケージの
+**すべての呼び出しで恒等判定が失敗し、finding が 1 件も出ない。**
+
+**キャッシュを毎回捨てて 3 形を測った**（`compat/run.sh` は confirmation ごとに
+新しい `GOLANGCI_LINT_CACHE` を渡すので、これが harness の見る条件そのものである）:
+
+| パッケージが使うもの | 上流 |
+|---|---|
+| `w.Header().Set(…)` だけ | **常に 0 件**（候補はメソッドだけ） |
+| `r.Header.Get(…)` だけ | **常に出す**（候補はフィールドだけ） |
+| 両方、あるいは `http.Header` を書いた上で `w.Header()` | **0 か全部、ランダム** |
+
+**guff にはこのゲートが無く、常に出していた。** 決定的な両端に合わせた
+（`package_has_header_typed_object`）—— これは**実在の欠陥の修正**で、
+`w.Header().Set("x-request-id", …)` しか書かないパッケージ（ごく普通の形）で
+guff だけが出していた。コイン投げの側では**出す方**を採る。どちらを採っても
+半分は外れるので、これは選択であって一致ではない。
+
+fixture は isolate の `canonicalheader` に 2 パッケージを足した ——
+`methodonly/`（黙る）と `fieldonly/`（出す）。golden と fix tier も同じファイルを
+見るので、行・桁・`--fix` のバイトまで上流と突き合わせている。単体テストは
+「methodonly は空」「fieldonly は 2 件完全一致」。
+
+syncthing の 2 件は `compat/allowlists/syncthing.txt` に理由つきで記録した。
+**allowlist を入れたあと 4 回連続で緑**（うち 3 回は上流が 654、1 回は 656）。
+
+```
+syncthing: guff-only 2 → 0（allowlist、両側どちらでも緑）
+```
+
+#### ゲート
+
+golden **213**（`canonicalheader` を再生成 —— **消えたキー 0、追加 2**）/
+fix **213**（`canonicalheader` の期待値に `fieldonly` の書き換えが増えた。消えた行 0）/
+reject **14** / isolate **116 ターゲット** / workspace **278 スイート** /
+OSS pr tier **8 ターゲットすべて P=R=100%**。台帳は **39/100 のまま**（41 定義）。

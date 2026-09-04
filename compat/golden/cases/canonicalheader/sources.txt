@@ -1,2 +1,4 @@
 # The isolate fixture, so the two tiers cannot drift.
 bad.go  compat/isolate/fixtures/canonicalheader/bad.go
+methodonly/methodonly.go  compat/isolate/fixtures/canonicalheader/methodonly/methodonly.go
+fieldonly/fieldonly.go    compat/isolate/fixtures/canonicalheader/fieldonly/fieldonly.go
