@@ -20,37 +20,26 @@ fn is_word_byte(b: u8) -> bool {
     matches!(b, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'\'')
 }
 
-static DICT_MAIN: LazyLock<FxHashMap<String, String>> =
+static DICT_MAIN: LazyLock<Vec<(Box<str>, Box<str>)>> =
     LazyLock::new(|| load_dict_tsv(include_str!("../data/dict_main.tsv")));
-static DICT_US: LazyLock<FxHashMap<String, String>> =
+static DICT_US: LazyLock<Vec<(Box<str>, Box<str>)>> =
     LazyLock::new(|| load_dict_tsv(include_str!("../data/dict_us.tsv")));
-static DICT_UK: LazyLock<FxHashMap<String, String>> =
+static DICT_UK: LazyLock<Vec<(Box<str>, Box<str>)>> =
     LazyLock::new(|| load_dict_tsv(include_str!("../data/dict_uk.tsv")));
 
 /// Default golangci/misspell replacer (DictMain + US locale, no extras/ignores).
 /// Shared across packages — building the ~30k-entry map once instead of once
 /// per package is the main cold-analyze win for this linter.
-static DEFAULT_US: LazyLock<Replacer> = LazyLock::new(|| {
-    let mut corrected = DICT_MAIN.clone();
-    corrected.extend(DICT_US.iter().map(|(k, v)| (k.clone(), v.clone())));
-    Replacer {
-        corrected: Arc::new(corrected),
-    }
-});
+static DEFAULT_US: LazyLock<Replacer> =
+    LazyLock::new(|| Replacer::build(DICT_MAIN.iter().chain(DICT_US.iter()), &[]));
 
 /// DictMain only (empty locale, no extras/ignores).
-static DEFAULT_MAIN: LazyLock<Replacer> = LazyLock::new(|| Replacer {
-    corrected: Arc::new(DICT_MAIN.clone()),
-});
+static DEFAULT_MAIN: LazyLock<Replacer> =
+    LazyLock::new(|| Replacer::build(DICT_MAIN.iter(), &[]));
 
 /// DictMain + UK locale.
-static DEFAULT_UK: LazyLock<Replacer> = LazyLock::new(|| {
-    let mut corrected = DICT_MAIN.clone();
-    corrected.extend(DICT_UK.iter().map(|(k, v)| (k.clone(), v.clone())));
-    Replacer {
-        corrected: Arc::new(corrected),
-    }
-});
+static DEFAULT_UK: LazyLock<Replacer> =
+    LazyLock::new(|| Replacer::build(DICT_MAIN.iter().chain(DICT_UK.iter()), &[]));
 
 /// A single spelling correction in a line.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,10 +50,39 @@ pub struct Diff {
     pub corrected: String,
 }
 
+/// One dictionary key.
+///
+/// A key can appear more than once: `AddRuleList` appends the locale list to
+/// `DictMain` without checking for duplicates, and the two halves of upstream
+/// then disagree on purpose. `Compile` builds `corrected` with a plain map
+/// assignment, so **the last** value wins there, while the trie's `add` keeps
+/// the **first** (`if t.priority == 0`). Both are needed: the engine writes
+/// `first`, and `recheckLine` compares its output against `last`.
+#[derive(Clone, Debug)]
+struct Entry {
+    /// Position of the first pair with this key in the concatenated rule list.
+    /// Upstream's trie gives earlier pairs the higher priority, so this is what
+    /// decides which of two overlapping keys wins — *not* their length.
+    index: u32,
+    /// Value of that first pair: what the engine writes when this key matches.
+    first: Box<str>,
+    /// Value of the last pair, when it differs from `first`.
+    last: Option<Box<str>>,
+}
+
+impl Entry {
+    /// What `corrected[word]` answers.
+    fn corrected(&self) -> &str {
+        self.last.as_deref().unwrap_or(&self.first)
+    }
+}
+
 /// Spelling replacer backed by golangci/misspell dictionaries.
 #[derive(Clone)]
 pub struct Replacer {
-    corrected: Arc<FxHashMap<String, String>>,
+    entries: Arc<FxHashMap<Box<str>, Entry>>,
+    /// Longest key, so the prefix scan stops instead of walking the word.
+    max_key_len: usize,
 }
 
 impl Replacer {
@@ -84,28 +102,126 @@ impl Replacer {
             }
         }
 
-        let mut corrected = DICT_MAIN.clone();
-        match options.locale.to_ascii_uppercase().as_str() {
-            "" => {}
-            "US" => corrected.extend(DICT_US.iter().map(|(k, v)| (k.clone(), v.clone()))),
-            "UK" | "GB" => corrected.extend(DICT_UK.iter().map(|(k, v)| (k.clone(), v.clone()))),
-            _ => {}
-        }
-        for word in &options.extra_words {
-            if word.typo.is_empty() || word.correction.is_empty() {
+        // `appendExtraWords` is another `AddRuleList`, so the extra pairs land
+        // after the locale list and carry the lowest priority. `RemoveRule`
+        // then drops every pair with a matching key, which is why the ignore
+        // list is applied to the built map rather than folded into the order.
+        let extra: Vec<(Box<str>, Box<str>)> = options
+            .extra_words
+            .iter()
+            .filter(|w| !w.typo.is_empty() && !w.correction.is_empty())
+            .map(|w| {
+                (
+                    w.typo.to_ascii_lowercase().into_boxed_str(),
+                    w.correction.to_ascii_lowercase().into_boxed_str(),
+                )
+            })
+            .collect();
+        let ignore: Vec<String> = options
+            .ignore_words
+            .iter()
+            .map(|w| w.to_ascii_lowercase())
+            .collect();
+        let locale = options.locale.to_ascii_uppercase();
+        let dict: &[(Box<str>, Box<str>)] = match locale.as_str() {
+            "US" => &DICT_US,
+            "UK" | "GB" => &DICT_UK,
+            _ => &[],
+        };
+        Self::build(
+            DICT_MAIN.iter().chain(dict.iter()).chain(extra.iter()),
+            &ignore,
+        )
+    }
+
+    fn build<'a, I>(pairs: I, ignore: &[String]) -> Self
+    where
+        I: Iterator<Item = &'a (Box<str>, Box<str>)>,
+    {
+        let mut entries: FxHashMap<Box<str>, Entry> = FxHashMap::default();
+        let mut max_key_len = 0usize;
+        for (index, (key, value)) in pairs.enumerate() {
+            if ignore.iter().any(|w| w.as_str() == key.as_ref()) {
                 continue;
             }
-            corrected.insert(
-                word.typo.to_ascii_lowercase(),
-                word.correction.to_ascii_lowercase(),
-            );
-        }
-        for ignore in &options.ignore_words {
-            corrected.remove(&ignore.to_ascii_lowercase());
+            match entries.get_mut(key.as_ref()) {
+                Some(existing) => {
+                    existing.last = (value != &existing.first).then(|| value.clone());
+                }
+                None => {
+                    max_key_len = max_key_len.max(key.len());
+                    entries.insert(
+                        key.clone(),
+                        Entry {
+                            index: index as u32,
+                            first: value.clone(),
+                            last: None,
+                        },
+                    );
+                }
+            }
         }
         Self {
-            corrected: Arc::new(corrected),
+            entries: Arc::new(entries),
+            max_key_len,
         }
+    }
+
+    /// `genericReplacer.Replace` over one lowercase ASCII word.
+    ///
+    /// Left to right, non-overlapping; at each position the winner is the
+    /// **highest-priority** key that matches there, which is the one written
+    /// earliest in the rule list — not the longest. That is the whole reason
+    /// upstream stays quiet on `normalise`: `DictMain`'s `normalis → normals`
+    /// is written before `DictAmerican`'s `normalise → normalize`, so the
+    /// prefix wins and the word becomes `normalse`.
+    fn engine_replace(&self, word: &str) -> String {
+        let mut out = String::with_capacity(word.len());
+        let mut i = 0;
+        while i < word.len() {
+            let limit = (word.len() - i).min(self.max_key_len);
+            let mut best: Option<(&Entry, usize)> = None;
+            for len in 1..=limit {
+                if let Some(e) = self.entries.get(&word[i..i + len]) {
+                    if best.is_none_or(|(b, _)| e.index < b.index) {
+                        best = Some((e, len));
+                    }
+                }
+            }
+            match best {
+                Some((e, len)) => {
+                    out.push_str(&e.first);
+                    i += len;
+                }
+                None => {
+                    out.push_str(&word[i..i + 1]);
+                    i += 1;
+                }
+            }
+        }
+        out
+    }
+
+    /// The correction upstream would report for `word` (already lowercase), or
+    /// `None`.
+    ///
+    /// `recheckLine` runs the whole engine over the word and reports only when
+    /// the result is the word's own correction:
+    ///
+    /// ```go
+    /// if StringEqualFold(r.corrected[strings.ToLower(word)], newword) { …report… }
+    /// // Word got corrected into something unknown. Ignore it
+    /// ```
+    ///
+    /// Looking the word up in a single merged map — which is what guff did —
+    /// skips that check, and reports the 97 `locale: US` words (11 for UK) that
+    /// an earlier `DictMain` prefix rule swallows.
+    fn correction_for(&self, word: &str) -> Option<&str> {
+        let entry = self.entries.get(word)?;
+        let corrected = entry.corrected();
+        self.engine_replace(word)
+            .eq_ignore_ascii_case(corrected)
+            .then_some(corrected)
     }
 
     /// Find misspellings in `input` (default golangci mode: full file as plain text).
@@ -172,7 +288,7 @@ impl Replacer {
             } else {
                 word
             };
-            let Some(corrected_lower) = self.corrected.get(lower) else {
+            let Some(corrected_lower) = self.correction_for(lower) else {
                 continue;
             };
             let corrected = apply_case(corrected_lower, style);
@@ -196,14 +312,13 @@ impl Default for Replacer {
     }
 }
 
-fn load_dict_tsv(data: &str) -> FxHashMap<String, String> {
-    let mut map = FxHashMap::default();
-    for line in data.lines() {
-        if let Some((typo, correction)) = line.split_once('\t') {
-            map.insert(typo.to_string(), correction.to_string());
-        }
-    }
-    map
+/// Parse a dictionary **in file order**: the order is the priority, so this
+/// cannot be a map.
+fn load_dict_tsv(data: &str) -> Vec<(Box<str>, Box<str>)> {
+    data.lines()
+        .filter_map(|line| line.split_once('\t'))
+        .map(|(typo, correction)| (typo.into(), correction.into()))
+        .collect()
 }
 
 fn offset_to_line_col(input: &str, offset: usize) -> (usize, usize) {
@@ -242,6 +357,74 @@ mod tests {
                 "input {input:?}: want correction {want_word:?}, got {diffs:?}"
             );
         }
+    }
+
+    #[test]
+    fn an_earlier_prefix_rule_silences_the_locale_word() {
+        // golangci-lint reports none of these with `locale: US`, because
+        // `DictMain` carries a correction for a *prefix* of each one earlier in
+        // the rule list — `capitalis→capitals`, `criticis→critics`,
+        // `crystallis→crystals`, `energis→energies`, `normalis→normals` — and
+        // the trie takes the earlier rule, not the longer one. The word then
+        // corrects into something that is not its own correction, and
+        // `recheckLine` drops it.
+        //
+        // guff merged main and locale into one map and looked the whole word up,
+        // so it reported all of them: two turned up on external-dns
+        // (`normalise`, `normalises`), and the dictionaries carry 97 such words
+        // for US and 11 for UK.
+        let r = Replacer::new();
+        for word in [
+            "capitalise",
+            "criticise",
+            "crystallise",
+            "energise",
+            "normalise",
+            "normalises",
+        ] {
+            assert!(
+                r.find_diffs(&format!("// {word} here")).is_empty(),
+                "{word} must be silent: {:?}",
+                r.find_diffs(&format!("// {word} here"))
+            );
+        }
+        // Controls: British spellings with no earlier prefix rule, and a plain
+        // `DictMain` typo. All of these upstream does report.
+        for (word, want) in [
+            ("analyse", "analyze"),
+            ("colour", "color"),
+            ("behaviour", "behavior"),
+            ("organise", "organize"),
+            ("recognise", "recognize"),
+            ("seperate", "separate"),
+        ] {
+            let diffs = r.find_diffs(&format!("// {word} here"));
+            assert_eq!(diffs.len(), 1, "{word}: {diffs:?}");
+            assert_eq!(diffs[0].corrected, want, "{word}");
+        }
+    }
+
+    #[test]
+    fn engine_replace_takes_the_earlier_rule_not_the_longer_one() {
+        let r = Replacer::new();
+        // `normalis` (DictMain) beats `normalise` (DictAmerican) and leaves the
+        // trailing `e` behind — which is not `normalize`, so nothing is
+        // reported for the word.
+        assert_eq!(r.engine_replace("normalise"), "normalse");
+        // A word whose own rule is the earliest match replaces whole.
+        assert_eq!(r.engine_replace("analyse"), "analyze");
+        // A word with no rule at all is copied through byte by byte.
+        assert_eq!(r.engine_replace("endpoint"), "endpoint");
+    }
+
+    #[test]
+    fn locale_none_reports_neither_the_shadowed_word_nor_the_plain_british_one() {
+        // Without a locale there is no `normalise` rule to be shadowed and no
+        // `analyse` rule either, so the whole family is silent — the shadowing
+        // only bites once a locale list is appended.
+        let r = Replacer::from_options(&Options::default());
+        assert!(r.find_diffs("// normalise and analyse").is_empty());
+        assert!(!r.find_diffs("// seperate").is_empty());
     }
 
     #[test]
@@ -300,7 +483,7 @@ mod tests {
             locale: "US".into(),
             ..Options::default()
         });
-        assert!(Arc::ptr_eq(&a.corrected, &b.corrected));
+        assert!(Arc::ptr_eq(&a.entries, &b.entries));
     }
 
     #[test]
@@ -310,10 +493,7 @@ mod tests {
             locale: String::new(),
             ..Options::default()
         });
-        assert!(Arc::ptr_eq(&a.corrected, &b.corrected));
-        assert!(!Arc::ptr_eq(
-            &a.corrected,
-            &Replacer::new().corrected
-        ));
+        assert!(Arc::ptr_eq(&a.entries, &b.entries));
+        assert!(!Arc::ptr_eq(&a.entries, &Replacer::new().entries));
     }
 }
