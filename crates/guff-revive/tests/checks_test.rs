@@ -1435,3 +1435,83 @@ fn revive_empty_block_walks_into_a_non_empty_range() {
         .count();
     assert_eq!(empty, 10, "{messages:?}");
 }
+
+/// `cognitive-complexity` counts what upstream counts, and reads its limit.
+///
+/// Four things were wrong. `arguments[0]` was never read — the limit was a
+/// `const` — so no configuration could move it. And the counter walked nodes
+/// upstream does not give it:
+///
+/// ```text
+/// case *ast.ForStmt:    targets := []ast.Node{n.Cond, n.Body}  // not Init/Post
+/// case *ast.RangeStmt:  v.walk(1, n.Body)                      // not Key/Value/X
+/// case *ast.SwitchStmt: v.walk(1, n.Body)                      // not Init/Tag
+/// case *ast.FuncLit:    v.walk(0, n.Body)                      // 0 + nesting
+/// ```
+///
+/// so an `&&` in a `for`'s init, a `switch`'s tag or an `if`'s init was counted
+/// where upstream ignores it; a function literal added nothing where upstream
+/// charges the nesting level; and a plain trailing `else` cost 1 where upstream
+/// charges only an `else if`.
+///
+/// The number for each shape is in the fixture's comments; the two
+/// `revive-cognitive-*` golden cases compare them against golangci-lint.
+#[test]
+fn revive_cognitive_complexity_matches_upstream_arithmetic() {
+    let settings = guff_revive::extended_test_settings();
+    guff_revive::with_settings(settings, || {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/cognitivecomplexity",
+            "cognitive_complexity.go",
+        );
+        let mut messages: Vec<String> = support::run_analyzer(revive(), &pkg)
+            .into_iter()
+            .filter(|m| m.starts_with("cognitive-complexity:"))
+            .collect();
+        messages.sort();
+        assert_eq!(
+            messages,
+            vec![
+                "cognitive-complexity: function deepMix has cognitive complexity 21 (> max enabled 7)",
+                "cognitive-complexity: function overDefault has cognitive complexity 8 (> max enabled 7)",
+            ],
+            "{messages:?}"
+        );
+    });
+}
+
+/// The same fixture with `arguments: [3]`. If the argument were still ignored
+/// this would be the previous test's two rows.
+#[test]
+fn revive_cognitive_complexity_reads_its_max_argument() {
+    let mut settings = guff_revive::extended_test_settings();
+    if let Some(rules) = settings.rules.as_mut() {
+        if let Some(rule) = rules.iter_mut().find(|r| r.name == "cognitive-complexity") {
+            rule.arguments = vec![guff_revive::RuleArgument::Integer(3)];
+        }
+    }
+    guff_revive::with_settings(settings, || {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/cognitivecomplexity",
+            "cognitive_complexity.go",
+        );
+        let mut messages: Vec<String> = support::run_analyzer(revive(), &pkg)
+            .into_iter()
+            .filter(|m| m.starts_with("cognitive-complexity:"))
+            .collect();
+        messages.sort();
+        assert_eq!(
+            messages,
+            vec![
+                "cognitive-complexity: function deepMix has cognitive complexity 21 (> max enabled 3)",
+                "cognitive-complexity: function funcLitTwoDeep has cognitive complexity 5 (> max enabled 3)",
+                "cognitive-complexity: function labeledBreak has cognitive complexity 4 (> max enabled 3)",
+                "cognitive-complexity: function nestedIf has cognitive complexity 6 (> max enabled 3)",
+                "cognitive-complexity: function overDefault has cognitive complexity 8 (> max enabled 3)",
+            ],
+            "{messages:?}"
+        );
+    });
+}

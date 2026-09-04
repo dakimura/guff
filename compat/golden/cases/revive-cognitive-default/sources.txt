@@ -1,0 +1,8 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# The two `revive-cognitive-*` cases share this fixture and differ only in
+# whether `cognitive-complexity` is given an argument. If the argument were
+# ignored — which it was — the two goldens would be identical, and they are not.
+
+cognitivecomplexity/cognitive_complexity.go   crates/guff-revive/tests/testdata/revive/cognitive_complexity.go

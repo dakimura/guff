@@ -22222,3 +22222,70 @@ OSS pr tier **8 ターゲットすべて P=R=100%**。台帳は **39/100 のま�
 
 k6 に残るのは **2 件**: nolintlint 1（exhaustive の取りこぼしの従属、続き 174 で
 測定済み）、contextcheck 1。
+
+### 2026-09-05（続き 182）— revive の `cognitive-complexity` は引数を読まず、上流が歩かない節点を歩いていた
+
+続き 181 の fixture が炙り出した差（**上流 15 / guff 14**）を追ったもの。
+
+**欠陥は 4 つあった。**
+
+**A. `arguments[0]` を読んでいない。** 上流の `Configure` は
+
+```go
+complexity, ok := arguments[0].(int64)
+```
+
+で上限を取り、無ければ 7。guff は `const MAX_COMPLEXITY: usize = 7` を焼き込んでいて、
+**どんな設定でも動かなかった**。`settings.revive.rules` に
+`cognitive-complexity` だけを引数つきで書いた設定で guff が何も出さない、という形で
+最初に見えた（上限が 7 のままなので小さい関数はどれも届かない）。
+
+**B〜D. `walk` に渡される子が決まっている。** 上流の visitor は
+`ast.Walk` に**節点を選んで**渡す:
+
+```go
+case *ast.ForStmt:    targets := []ast.Node{n.Cond, n.Body}  // Init/Post は歩かない
+case *ast.RangeStmt:  v.walk(1, n.Body)                      // Key/Value/X は歩かない
+case *ast.SwitchStmt: v.walk(1, n.Body)                      // Init/Tag は歩かない
+case *ast.FuncLit:    v.walk(0, n.Body)                      // 増分 0 ＋ **nesting**
+```
+
+そして `walkIfElse` は `Cond` と `Body` だけを歩き（**`Init` は歩かない**）、
+`else if` ごとに 1 を足すが**末尾の素の `else` には何も足さない**。
+
+guff は init / post / tag / range の被写体まで歩き、関数リテラルには何も足さず、
+素の `else` に 1 を足していた。
+
+**2 モジュール 36 形**を両ツールで測って線を引いた。差が出ていたのは 6 形:
+
+| 形 | 上流 | guff（修正前） |
+|---|--:|--:|
+| `for range s { f := func(){} }` | 2 | 1 |
+| `for range s { for range s { f := func(){} } }` | 5 | 3 |
+| `for range s { defer func(){}() }` | 2 | 1 |
+| `if/else if/else if/else` | 3 | 4 |
+| `if x := a && b; x {}` | 1 | 2 |
+| `switch a && b { … }` | 1 | 2 |
+
+一致していた形（`for` の init/post に `&&`、range の被写体に `&&`、括弧つきの
+論理式 2 形、再帰、ラベル付き break、`else { if … }`、深い混在 21 など）も
+そのまま fixture に入れた。
+
+golden case を **2 つ**足した —— `revive-cognitive-default`（引数なし＝7）と
+`revive-cognitive-max3`（`arguments: [3]`）。**引数が無視されていれば 2 つの
+golden は同一になる**ので、この対が A の pin である（2 件 対 5 件）。
+
+```
+台帳・k6 への影響なし（cognitive-complexity は既定で無効）
+```
+
+#### ゲート
+
+golden **215**（新規 2 case、既存 213 は無変更）/ fix **215** / reject **14** /
+isolate **116 ターゲット** / workspace **278 スイート** /
+OSS pr tier **8 ターゲットすべて P=R=100%**。台帳は **39/100 のまま**（41 定義）。
+
+**同じ形の欠陥が他に 7 つある。** `argument-limit`(8) / `cyclomatic`(10) /
+`function-length`(50, 75) / `function-result-limit`(3) / `line-length-limit`(80) /
+`max-control-nesting`(5) —— どれも上限を `const` で焼き込んでいて
+`arguments` を読まない。**次のタスク**として記録する。
