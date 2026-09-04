@@ -21,7 +21,23 @@
  func main() { fn("x") }
 --- a/sa1008/bad/bad.go
 +++ b/sa1008/bad/bad.go
-@@ -4,7 +4,7 @@
+@@ -7,7 +7,7 @@
+ // A named non-canonical key: upstream wraps it in `http.CanonicalHeaderKey`
+ // rather than rewriting the constant.
+ func readNamed(h http.Header) []string {
+-	return h[hostHeader]
++	return h[http.CanonicalHeaderKey(hostHeader)]
+ }
+ 
+ // An assignment with no `http.Header` index on its left is walked into, so the
+@@ -16,15 +16,15 @@
+ // golangci-lint's fixer then rewrites neither, which would quietly retire this
+ // file from the `--fix` tier.
+ func assignFromHeader(h http.Header, v []string) []string {
+-	v = h[hostHeader]
++	v = h[http.CanonicalHeaderKey(hostHeader)]
+ 	return v
+ }
  
  func main() {
  	h := http.Header{}
@@ -30,6 +46,8 @@
  	var r http.Request
 -	_ = r.Header["etag"]
 +	_ = r.Header["Etag"]
+ 	_ = readNamed(h)
+ 	_ = assignFromHeader(h, nil)
  }
 --- a/sa1013/bad/bad.go
 +++ b/sa1013/bad/bad.go

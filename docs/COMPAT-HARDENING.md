@@ -21489,3 +21489,68 @@ workspace **278 スイート** / OSS pr tier **8 ターゲットすべて P=R=10
 台帳は **39/100 のまま**（41 定義）。k6 に残るのは
 nolintlint 7・modernize 2・staticcheck 2・contextcheck / makezero / asasalint /
 unparam 各 1 の **15 件**。
+
+### 2026-09-04（続き 171）— SA1008 は「http.Header に書く代入」を**部分木ごと**歩行から外す。guff は左辺の添字だけ外していた
+
+k6 の残りから staticcheck 2 件。どちらも
+`internal/output/prometheusrw/sigv4/sigv4.go` の
+
+```go
+signed[hostHeader] = append(signed[hostHeader], host)
+```
+
+の**右辺**である。上流の `AssignStmt` の腕は
+
+```go
+for _, expr := range assign.Lhs {
+    op, ok := expr.(*ast.IndexExpr)
+    if !ok { continue }
+    if code.IsOfTypeWithName(pass, op.X, "net/http.Header") {
+        return false          // inspector.Nodes: この節の中には入らない
+    }
+}
+```
+
+で、`return false` は**その代入文の部分木すべて**を walk から外す。
+上流自身の TODO がそう書いている ——
+「this risks missing some Header reads, for example in `h1["foo"] = h2["foo"]`」。
+
+guff は左辺の `IndexExpr` の id だけを skip 集合に入れていたので、
+右辺の同じ添字を報告していた。
+
+**測った形は 9 つ。** 修正後は両ツール一致:
+
+| 形 | 上流 | 直す前 |
+|---|---|---|
+| `h["host"]` の読み / `h[hostHeader]` の読み / `r.Header["etag"]` | 出す | 出す |
+| **`h[k] = append(h[k], v)`（k6）** | 黙る | **右辺を出す** |
+| リテラル版 `h["host"] = append(h["host"], v)` | 黙る | **出す** |
+| **別のヘッダを読む右辺** `h[k] = append(h[k], other["content-length"]...)` | 黙る | **2 件出す** |
+| **skip された代入の中の関数リテラル** | 黙る | **出す** |
+| 右辺だけの代入 `v = h[k]`（左辺は添字でない） | 出す | 出す |
+| 正規形 `h["Host"]` | 黙る | 黙る |
+
+直しは、条件に当たる `AssignStmt` の部分木を `preorder` で舐めて
+`IndexExpr` の id を全部 skip に入れるだけ。
+
+**fixture を書き直すときに 1 つ踏んだ。** 最初 `var v []string; v = h[hostHeader]`
+と書いたら **S1021**（宣言と代入の併合）が同じ行に fix を出し、
+**golangci-lint の fixer は衝突した結果どちらも書かなくなる** ——
+`compat/fix` の期待値から sa1008 のブロックが丸ごと消えた。
+両ツールが揃って「何も書かない」ので**ゲートは緑のまま、その fix を測るのをやめただけ**になる
+（続き 110 の gofmt と同じ形）。パラメータへの代入に書き換えて S1021 を避けた。
+その注意は fixture のコメントに残してある。
+
+```
+k6: guff-only 15 → 13
+```
+
+#### ゲート
+
+golden **213 完全一致**（再生成: 消えたキー 0、追加 3 —— SA1008 2 と、
+パラメータ代入が呼ぶ SA4009 1）/ fix **213**（sa1008 のブロックは
+`http.CanonicalHeaderKey` の包みを 2 つ増やして残っている）/ reject **14** /
+workspace **278 スイート** / OSS pr tier **8 ターゲットすべて P=R=100%**。
+
+台帳は **39/100 のまま**（41 定義）。k6 に残るのは
+nolintlint 7・modernize 2・contextcheck / makezero / asasalint / unparam 各 1 の **13 件**。

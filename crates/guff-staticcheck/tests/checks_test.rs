@@ -398,10 +398,34 @@ fn sa1008_flags_non_canonical_header_keys() {
         &[("net/http", &http_stub)],
     );
     support::assert_well_typed(&pkg);
-    let messages = support::run_analyzer(sa1008::analyzer(), &pkg);
-    assert_eq!(messages.len(), 2, "{messages:?}");
-    assert!(messages.iter().all(|m| m.contains("not canonical")));
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64)> = support::run_analyzer_diagnostics(sa1008::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| {
+            assert!(d.message.contains("not canonical"), "{}", d.message);
+            let p = fset.position(guff::position::Pos(d.pos as i64));
+            (p.line, p.column)
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            (10, 9), // a named key
+            (19, 6), // an assignment whose left side is not a header index
+            (25, 6), // a literal key
+            (27, 6), // through a selector, `r.Header["etag"]`
+        ],
+        "{got:?}"
+    );
 }
+
+/// The counterpart of the `ok.go` half: an assignment that writes an
+/// `http.Header` key takes its **whole subtree** out of the walk, which is
+/// upstream's `return false` and its own TODO — "this risks missing some Header
+/// reads, for example in `h1["foo"] = h2["foo"]`". guff skipped only the index
+/// on the left, so `h[k] = append(h[k], v)` reported the read on the right; k6
+/// `internal/output/prometheusrw/sigv4/sigv4.go` writes two of those.
 
 #[test]
 fn sa1008_allows_canonical_header_keys() {
