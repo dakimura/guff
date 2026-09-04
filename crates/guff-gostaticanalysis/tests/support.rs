@@ -132,6 +132,38 @@ pub fn typecheck_fixture(name: &str, pkg_id: &str, file: &str) -> Arc<Package> {
     typecheck_with_deps(pkg_id, &main, &deps)
 }
 
+/// Like [`run_analyzer`], but keyed by source line — for checks whose every
+/// finding carries the same message, where a substring assertion measures
+/// nothing.
+#[allow(dead_code)]
+pub fn run_analyzer_lines(
+    analyzer: &'static guff_analysis::Analyzer,
+    pkg: &Arc<Package>,
+) -> Vec<i64> {
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let result = run_on_packages(
+        &[analyzer],
+        std::slice::from_ref(pkg),
+        &RunnerOptions {
+            sequential: true,
+            ..RunnerOptions::default()
+        },
+    )
+    .expect("run analyzer");
+    for action in result.graph.all_actions() {
+        if let Some(err) = action.error() {
+            panic!("analyzer {} failed: {err}", action.string_id());
+        }
+    }
+    let mut out: Vec<i64> = result
+        .diagnostics()
+        .into_iter()
+        .map(|(_, d)| fset.position(guff::position::Pos(d.pos as i64)).line)
+        .collect();
+    out.sort_unstable();
+    out
+}
+
 pub fn run_analyzer(
     analyzer: &'static guff_analysis::Analyzer,
     pkg: &Arc<Package>,

@@ -21324,3 +21324,84 @@ nolintlint 14・modernize 2・staticcheck 2・wastedassign 2・
 contextcheck / makezero / asasalint / unparam 各 1 の **24 件**で、
 **nolintlint 14 件は別の linter（nilnil 6・unused 4・exhaustive 1・gocritic 1・revive 1 …）
 の取りこぼしの従属**である —— 続き 158 の B と同じ形。
+
+### 2026-09-04（続き 169）— nilnil の**降りるか降りないか**は「棄却したか」で決まる。guff は「報告しなかったら降りない」にしていた
+
+k6 に残った 24 件のうち、nolintlint 14 件は**他の linter の取りこぼしの従属**である
+（続き 168 に書いたとおり）。その筆頭 6 件が `//nolint:nilnil`:
+
+```go
+return promise(vu, func() (any, error) {
+    ...
+    if !ok {
+        return nil, nil //nolint:nilnil
+    }
+    ...
+}), nil
+```
+
+上流の nilnil は `inspector.Nodes` の visitor で、返す `bool` は
+**「この節の中を見るか」**である。`ReturnStmt` の腕は
+
+- `len(v.Results) < 2` → `false`
+- フィールド数と戻り式の数が違う → `false`
+- 誤差スロットが `error` を満たさない → `false`
+- **報告した** → `false`
+- **それ以外（検査して何も出なかった）→ 末尾の `return true`**
+
+guff は最後の 1 本を落として、`check_return` が `None` を返したら
+無条件に `false` にしていた。ソースのコメントは
+「上流は ReturnStmt の腕の**すべての**経路で false を返す」と書いてあり、
+**gitea の 1 形から一般化した誤りだった**（続き 158 と同じ、
+「deferral note の理由は腐る」の別型）。
+
+gitea の形は `return db.WithTx2(ctx, func(…) (*Comment, error) {…})` で
+**戻り式が 1 つ**なので `len < 2` の棄却に当たり、上流も降りない。
+k6 の形は戻り式が 2 つあって検査を通り抜けるので、上流は降りる。
+**同じ「報告しない」でも、棄却と通過は別である。**
+
+#### もう 1 つ: グループ化された結果リスト
+
+上流は `len(ft.Results.List)`（**フィールド数**）と `len(v.Results)` を比べる。
+
+| 書き方 | List | 戻り式 | 上流 | 直す前の guff |
+|---|--:|--:|---|---|
+| `func () (a, b error)` | 1 | 2 | 棄却（**黙る**） | **出す** |
+| `func () (a error, b error)` | 2 | 2 | 検査して出す | 出す |
+
+guff は名前ごとに型を展開してから数えていたので、前者を誤報していた。
+
+#### 測った形
+
+1 形 1 宣言で 12 形。修正後は**両ツール一致**:
+
+| 形 | 上流 | 直す前 |
+|---|---|---|
+| 平叙 `return nil, nil` | 出す | 出す |
+| `(a error, b error)` | 出す | 出す |
+| 検査して通り抜けた return の中のリテラル（`&T{}, wrapped(f)`） | 出す | **黙る** |
+| k6 の形（`promise(f), nil`） | 出す | **黙る** |
+| 同上・外側の error が非 nil | 出す | **黙る** |
+| 代入の中のリテラル | 出す | 出す |
+| `(a, b error)` グループ | 黙る | **出す** |
+| gitea の形（戻り式 1 つ） | 黙る | 黙る |
+| 同上・2 段 | 黙る | 黙る |
+| `(a, b *T, err error)` グループ | 黙る | 黙る |
+| `(*T, *T, error)` + only-two | 黙る | 黙る |
+
+**fixture は 1 形ずつだった**（bad.go に 1 つ、ok.go に 2 つ）。
+bad 6 形 / ok 6 形に増やし、`run_analyzer_lines` を support に足して
+**行番号の完全一致**で固定した —— このチェックの文言は 1 種類しかないので、
+`any(contains("nil"))` は 6 形のうち 5 形が欠けても通っていた。
+
+golden の `nilnil` ケースは同じ fixture を引いているので再生成した
+（`bad/bad.go:6` の 1 行が新しい 6 行に置き換わる。isolate 由来の `bad.go` は不変）。
+
+```
+k6: guff-only 24 → 17   （nolintlint 14 → 7）
+```
+
+#### ゲート
+
+golden **213 完全一致** / fix **213** / reject **14** / workspace **278 スイート** /
+OSS pr tier **8 ターゲットすべて P=R=100%**。台帳は **39/100 のまま**（41 定義）。
