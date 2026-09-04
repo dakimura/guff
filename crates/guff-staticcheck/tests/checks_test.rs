@@ -2034,17 +2034,45 @@ fn sa1019_flags_a_deprecated_struct_field_of_an_imported_type() {
     // went to zero: five `//nolint:staticcheck` directives turned up "unused"
     // because the finding they suppress upstream was never made here.
     // `o.Fine` is the control — a live field of the same struct must stay quiet.
+    //
+    // The promoted forms come from buildkit's
+    // `d.image.Config.ArgsEscaped //nolint:staticcheck`, the same symptom one
+    // level of embedding out: `ArgsEscaped` is declared on the embedded
+    // `ocispecs.ImageConfig` while the selection's receiver is
+    // `dockerspec.DockerOCIImageConfig`, so a receiver-keyed lookup asked for a
+    // key no scan writes. Counted exactly, per form: an `any(contains(…))`
+    // assertion here passed all through the defect.
     let pkg = typecheck_rule("sa1019", "bad.go");
     support::assert_well_typed(&pkg);
     let messages = support::run_analyzer(sa1019::analyzer(), &pkg);
-    assert!(
-        messages.iter().any(|m| m.contains("o.Old is deprecated")),
-        "deprecated struct field not reported: {messages:?}"
-    );
-    assert!(
-        messages.iter().all(|m| !m.contains("o.Fine is deprecated")),
-        "a live field of the same struct must stay quiet: {messages:?}"
-    );
+    // `starts_with`, not `contains`: the rendered selector leads every message,
+    // and "w.Old" is a substring of "pw.Old".
+    let count = |needle: &str| messages.iter().filter(|m| m.starts_with(needle)).count();
+    assert_eq!(count("old.Legacy is deprecated"), 1, "{messages:?}");
+    assert_eq!(count("old.OldClient is deprecated"), 1, "{messages:?}");
+    // Declared on `Options`, selected on `Options`.
+    assert_eq!(count("o.Old is deprecated"), 1, "{messages:?}");
+    // Promoted through an embedded value — written and read.
+    assert_eq!(count("w.Old is deprecated"), 2, "{messages:?}");
+    // Promoted through an embedded pointer.
+    assert_eq!(count("pw.Old is deprecated"), 1, "{messages:?}");
+    // Named field, then promoted (buildkit's shape).
+    assert_eq!(count("h.Cfg.Old is deprecated"), 1, "{messages:?}");
+    // Embedding spelled out by hand.
+    assert_eq!(count("w.Options.Old is deprecated"), 1, "{messages:?}");
+    assert_eq!(messages.len(), 8, "{messages:?}");
+}
+
+#[test]
+fn sa1019_allows_live_fields_reached_through_embedding() {
+    // Controls for the promoted-field lookup: a live sibling of the deprecated
+    // field, a live field reached through a named-then-promoted selection, and
+    // `Other.Old` — a field with the *same name* on an unrelated type in the
+    // same package, which a lookup keyed by bare field name would report.
+    let pkg = typecheck_rule("sa1019", "ok.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa1019::analyzer(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
 }
 sa_check!(sa1023, sa1023_flags_writer_buffer_modified, sa1023_allows_readonly_write, "must not modify the provided buffer");
 sa_check!(sa1025, sa1025_flags_timer_reset_return, sa1025_allows_timer_reset_without_drain, "Reset's return value");

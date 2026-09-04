@@ -8,4 +8,16 @@ type Embedder struct {
 	old.OldClient
 }
 
-func main() {}
+func main() {
+	// Live siblings of a deprecated field, promoted the same way, must stay
+	// quiet — so must a same-named field on an unrelated type.
+	var w old.Wrapper
+	_ = w.Fine
+	_ = w.Extra
+
+	var h old.Holder
+	_ = h.Cfg.Fine
+
+	var other old.Other
+	_ = other.Old
+}

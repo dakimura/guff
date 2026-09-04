@@ -204,6 +204,62 @@ fn selection_recv_base_name(pass: &Pass<'_>, sel: &SelectorExpr) -> Option<Strin
     }
 }
 
+/// Name of the type that *declares* the selected field.
+///
+/// Not the same as [`selection_recv_base_name`] whenever the field is
+/// **promoted**: in buildkit's `d.image.Config.ArgsEscaped` the receiver is
+/// `DockerOCIImageConfig` (moby/docker-image-spec) while `ArgsEscaped` is
+/// declared on its embedded `ocispecs.ImageConfig` (opencontainers/image-spec),
+/// which is where the `Deprecated:` doc lives and how
+/// [`scan_import_deprecated`] keys the fact. Looking the receiver up produced
+/// `DockerOCIImageConfig.ArgsEscaped`, which no scan ever writes, so every
+/// promoted deprecated field was silent.
+///
+/// Upstream never asks this question — honnef looks the field's `Var` object
+/// straight up in the `Deprecated` fact map, and a promoted field's object is
+/// the one declared in the embedded struct. guff has to reconstruct the owner
+/// because facts for a dep read from export data carry no doc comments.
+///
+/// The selection's index path is exactly the answer: its last entry is the
+/// field's index in the declaring struct, and the entries before it are the
+/// embedded fields walked to get there.
+fn field_owner_base_name(pass: &Pass<'_>, sel: &SelectorExpr) -> Option<String> {
+    let info = pass.types_info()?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let types = &artifacts.types;
+    let selection = info.selections.get(&sel.id)?;
+    let (_, embedded) = selection.index().split_last()?;
+
+    let mut cur = selection.recv();
+    for &i in embedded {
+        cur = deref_named(types, cur);
+        let u = cur.underlying(types);
+        let TypeData::Struct(st) = types.get(u) else {
+            return None;
+        };
+        let field = st.field(usize::try_from(i).ok()?);
+        cur = field.typ(&artifacts.objects)?;
+    }
+    let cur = deref_named(types, cur);
+    match types.get(cur) {
+        TypeData::Named(_) => {
+            let obj = guff_types::named::named_obj(types, cur);
+            Some(obj.name(&artifacts.objects).to_string())
+        }
+        _ => None,
+    }
+}
+
+/// Strip aliases and a single pointer, as a field walk needs at every hop.
+fn deref_named(types: &guff_types::arena::TypeArena, id: guff_types::TypeId) -> guff_types::TypeId {
+    let resolved = guff_types::alias::unalias_readonly(types, id);
+    if let TypeData::Pointer(p) = types.get(resolved) {
+        guff_types::alias::unalias_readonly(types, p.elem())
+    } else {
+        resolved
+    }
+}
+
 #[derive(Default)]
 struct PkgDeprecatedFacts {
     package: Option<String>,
@@ -770,7 +826,10 @@ fn selector_diagnostic(
             })?;
             facts.methods.get(&method_fact_key(&recv, &name))
         } else if is_field {
-            let recv = selection_recv_base_name(pass, sel)?;
+            // The *declaring* struct, not the receiver — see
+            // `field_owner_base_name`. They differ for a promoted field.
+            let recv = field_owner_base_name(pass, sel)
+                .or_else(|| selection_recv_base_name(pass, sel))?;
             facts.fields.get(&method_fact_key(&recv, &name))
         } else {
             facts.objects.get(&name)
