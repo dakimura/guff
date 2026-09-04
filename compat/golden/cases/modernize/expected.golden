@@ -34,6 +34,8 @@ slicescontains/slicescontains.go:13:2:modernize::slicescontains: Loop can be sim
 slicescontains/slicescontains.go:23:2:modernize::slicescontains: Loop can be simplified using slices.ContainsFunc
 slicescontains/slicescontains.go:32:2:modernize::slicescontains: Loop can be simplified using slices.Contains
 slicescontains/slicescontains.go:42:2:modernize::slicescontains: Loop can be simplified using slices.Contains
+slicescontains/slicescontains.go:125:2:modernize::slicescontains: Loop can be simplified using slices.ContainsFunc
+slicescontains/slicescontains.go:135:2:modernize::slicescontains: Loop can be simplified using slices.ContainsFunc
 stditerators/stditerators.go:9:2:modernize::stditerators: NumFields/Field loop can simplified using Struct.Fields iteration
 stditerators/stditerators.go:16:11:modernize::stditerators: NumFields/Field loop can simplified using Struct.Fields iteration
 stditerators/stditerators.go:23:2:modernize::stditerators: Len/At loop can simplified using Tuple.Variables iteration

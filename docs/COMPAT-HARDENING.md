@@ -21613,3 +21613,56 @@ k6: guff-only 13 → 12
 golden **213 完全一致**（再生成不要）/ fix **213** / reject **14** /
 workspace **278 スイート** / OSS pr tier **8 ターゲットすべて P=R=100%**。
 台帳は **39/100 のまま**（41 定義）。
+
+### 2026-09-05（続き 173）— modernize の `slicescontains` は**述語のシグネチャ**を読む。可変長は棄却、パラメータ型は要素型と `types.Identical` でなければ棄却
+
+k6 `internal/js/modules/k6/grpc/client.go:445` の guff-only 1 件:
+
+```go
+for _, vis := range stack {          // stack []*sobek.Object
+    if obj.SameAs(vis) {             // func (o *Object) SameAs(other Value) bool
+        return nil, errors.New("cyclic reference to an object found")
+    }
+}
+```
+
+**最初の最小再現は外れた。** 「本体が 2 値を返すからでは」と読んで 6 形
+（2 値 return / 1 値 return / true+false / 等値比較 / 自由関数の述語 / break 本体）
+を書いたが**全形で一致**した。形ではないので、上流のソースに戻って条件を読み直し、
+`SameAs` の**シグネチャ**を見たところで当たった:
+
+```go
+if sig.Variadic() { return }
+tElem  = CoreType(info.TypeOf(rng.X)).(*types.Slice).Elem()   // *sobek.Object
+tParam = sig.Params().At(0).Type()                            // sobek.Value
+if !types.Identical(tElem, tParam) { return }
+```
+
+**代入可能では足りない。** `slices.ContainsFunc` は `F ~func(E) bool` を
+**要素型で**具体化するので、要素が実装しているだけのインタフェースを取る述語では
+書き換えた結果がコンパイルできない。guff はこのガードを 2 つとも持っていなかった。
+
+10 形で測って修正後は一致:
+
+| 形 | 上流 | 直す前 |
+|---|---|---|
+| メソッド値の引数がインタフェース（k6） | 黙る | **出す** |
+| 自由関数の引数がインタフェース | 黙る | **出す** |
+| 可変長の述語 | 黙る | **出す** |
+| 引数型＝要素型 / 要素型自体がインタフェース | 出す | 出す |
+| 等値比較 / `s[i]` / func literal / break 本体 / bool 蓄積 | 出す | 出す |
+
+```
+k6: guff-only 12 → 11
+```
+
+#### ゲート
+
+golden **213 完全一致**（再生成: 消えたキー 0、追加 2）/ fix **213**（modernize の
+期待値に `slices.ContainsFunc` の書き換えが 2 つ増えた）/ reject **14** /
+workspace **278 スイート** / OSS pr tier **8 ターゲットすべて P=R=100%**。
+台帳は **39/100 のまま**（41 定義）。
+
+k6 に残るのは **11 件** —— nolintlint 7（他 linter の取りこぼしの従属:
+unused 4・exhaustive 1・gocritic 1・revive 1）と
+contextcheck / makezero / asasalint / unparam 各 1。

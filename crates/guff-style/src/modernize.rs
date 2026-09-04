@@ -2185,6 +2185,48 @@ fn expr_may_have_effects(expr: &Expr) -> bool {
     }
 }
 
+/// The `ContainsFunc` half of upstream's signature check: not variadic, and the
+/// sole parameter's type identical to the ranged slice's element type.
+///
+/// A callee whose type is not a signature at all falls through, as upstream's
+/// `if isSignature` does.
+fn predicate_signature_matches_elem(pass: &Pass<'_>, rng: &RangeStmt, fun: &Expr) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return true;
+    };
+    let Some(fun_ty) = type_of(pass, fun) else {
+        return true;
+    };
+    let under = unalias_readonly(&artifacts.types, fun_ty).underlying(&artifacts.types);
+    let TypeData::Signature(sig) = artifacts.types.get(under) else {
+        return true;
+    };
+    if sig.variadic() {
+        return false;
+    }
+    let Some(params) = sig.params() else {
+        return false;
+    };
+    let TypeData::Tuple(tuple) = artifacts.types.get(params) else {
+        return false;
+    };
+    if tuple.len() != 1 {
+        return false;
+    }
+    let ObjectData::Var(var) = artifacts.objects.get(tuple.at(0)) else {
+        return false;
+    };
+    let param_ty = var.typ();
+    let Some(x_ty) = type_of(pass, &rng.x) else {
+        return true;
+    };
+    let x_under = unalias_readonly(&artifacts.types, x_ty).underlying(&artifacts.types);
+    let TypeData::Slice(slice) = artifacts.types.get(x_under) else {
+        return true;
+    };
+    types_identical(pass, slice.elem(), param_ty)
+}
+
 /// Analyze `if cond` for Contains / ContainsFunc. Returns (func_name, arg2_text).
 fn slicescontains_cond(
     pass: &Pass<'_>,
@@ -2229,6 +2271,22 @@ fn slicescontains_cond(
                 return None;
             }
             if expr_uses_range_vars(pass, &call.fun, rng) {
+                return None;
+            }
+            // Upstream reads the callee's signature and declines twice: a
+            // variadic predicate, and one whose parameter type is not
+            // *identical* to the slice's element type.
+            //
+            //     tElem  = CoreType(info.TypeOf(rng.X)).(*types.Slice).Elem()
+            //     tParam = sig.Params().At(0).Type()
+            //     if !types.Identical(tElem, tParam) { return }
+            //
+            // Assignability is not enough, and that is the whole of k6
+            // `internal/js/modules/k6/grpc/client.go:445`: `stack` is
+            // `[]*sobek.Object` while `SameAs(other Value) bool` takes the
+            // interface, so `slices.ContainsFunc(stack, obj.SameAs)` would not
+            // even compile. guff checked neither.
+            if !predicate_signature_matches_elem(pass, rng, &call.fun) {
                 return None;
             }
             let pred_text = expr_text(&call.fun)?;
