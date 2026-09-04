@@ -21195,3 +21195,71 @@ external-dns: guff=94 golangci=94 both=94 P=100.0% R=100.0% [OK]
 ```
 
 **external-dns `open 3 → 0`。台帳 38/100 → 39/100**（40 定義、残る open は cri-o のみ）。
+
+### 2026-09-04（続き 167）— k6 を採用。**`NormalizePathInRegex` は unix では恒等関数**で、guff は windows 版を常時掛けていた —— `\/` を書いた除外規則が丸ごと無効だった
+
+`adopt k6`（v2.2.0）の初回計測:
+
+```
+k6: guff=1126 golangci=423 both=423 P=37.6% R=100.0% [UNEXPECTED]
+guff-only 703 / gcl-only 0
+```
+
+**gcl-only が 0 で guff だけが 703 件多い。** 1 つの linter に偏らず
+revive 344 / paralleltest 263 / contextcheck 64 / nolintlint 14 / tparallel 6 …
+と広く散っている。**「チェックが違う」ではなく「除外が効いていない」の形**である。
+
+k6 の config はパスをこう書く:
+
+```yaml
+- linters: [contextcheck, revive]
+  path: js\/modules\/k6\/browser\/.*\.go
+```
+
+`\/` は Go の regexp では `/` そのもの。上流は
+`fsutils.NormalizePathInRegex` を通すが、**`path_unix.go` は `return path`
+—— 恒等関数**である。windows 版だけが
+
+1. `\/` の冗長なエスケープを外し（`golangci-lint#3277`。奇数個の `\` が `/` の前にあれば 1 つ落とす）、
+2. そのあと `/` をセパレータに置き換える。
+
+guff は windows 版に相当する置換を**常時**掛けていた:
+
+```rust
+fn normalize_path_regex(pat: &str) -> String {
+    pat.replace('/', r"[/\\]")
+}
+```
+
+`js\/modules\/k6\/browser\/.*\.go` は `js\[/\\]modules\[/\\]…` になる ——
+`\[` は文字クラスの開きではなく**リテラルの `[`** なので、この正規表現は
+**何にも当たらない**。規則は静かに無効化されていた。しかも
+「`\/` と書く」という綴りは、上流が windows 版に掃除を足した理由そのものである。
+
+**直し方**は上流と同じく 2 実装に分ける —— unix は恒等、windows は
+「冗長エスケープを外してから置換」。
+
+```
+k6: guff=1126 → 450    guff-only 703 → 27
+```
+
+**4 つの規則で 676 件**（browser 配下の revive 264 + contextcheck 63、
+html/http の paralleltest 263 + tparallel 6 ほか）。
+
+**残る 27 件は別原因の長い尾**である（nolintlint 14、funlen 3、modernize 2、
+staticcheck 2、wastedassign 2、contextcheck / makezero / asasalint / unparam 各 1）。
+1 つの原因ではないので `close k6` に渡す —— 続き 165 の external-dns と同じ運び。
+
+**単体テスト**は 2 本。`normalize_path_regex` が unix で恒等であること
+（`\/` を含む形・`third_party$`・`^(...)$` の 3 形）と、
+`js\/modules\/k6\/browser\/.*\.go` の除外規則が**実際に効く**こと
+（browser 配下の revive は落ち、http 配下の revive と同じファイルの govet は残る）。
+
+#### ゲート
+
+golden **213 完全一致** / fix **213** / reject **14** / workspace **278 スイート** /
+OSS pr tier **8 ターゲットすべて P=R=100%**。
+**除外の照合を変える修正**なので効くとしたら OSS tier だが、
+既存 8 ターゲットの config は `\/` を書いていないので動かなかった。
+
+台帳は **39/100 のまま**（41 定義、open は cri-o と k6）。

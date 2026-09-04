@@ -732,10 +732,54 @@ fn push_re(out: &mut Vec<Regex>, pat: &str, what: &str) {
     }
 }
 
-/// Replace `/` with a class that matches either separator (golangci
-/// `NormalizePathInRegex` subset).
-fn normalize_path_regex(pat: &str) -> String {
-    pat.replace('/', r"[/\\]")
+/// golangci `NormalizePathInRegex`, which has two implementations.
+///
+/// `path_unix.go` is the identity function. `path_windows.go` first removes the
+/// redundant escape in `\/` — an odd run of backslashes before a slash loses
+/// one, `golangci-lint#3277` — and only then swaps the separator.
+///
+/// guff used to run a windows-shaped rewrite everywhere, turning every `/` into
+/// `[/\\]` including the one in `\/`. A config that writes its paths as
+/// `js\/modules\/k6\/browser\/.*\.go` — k6's does, and that spelling is the
+/// reason upstream added the cleanup — came out as `js\[/\\]modules…`, which
+/// matches nothing. The rules were silently inert: k6 measured 703 guff-only
+/// findings, 596 of them from four such rules.
+#[cfg(not(windows))]
+fn normalize_path_regex(pat: &str) -> Cow<'_, str> {
+    Cow::Borrowed(pat)
+}
+
+#[cfg(windows)]
+fn normalize_path_regex(pat: &str) -> Cow<'_, str> {
+    let mut out = String::with_capacity(pat.len() + 8);
+    let bytes = pat.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            // Count the backslash run; an odd one escapes what follows.
+            let start = i;
+            while i < bytes.len() && bytes[i] == b'\\' {
+                i += 1;
+            }
+            let run = i - start;
+            if i < bytes.len() && bytes[i] == b'/' && run % 2 == 1 {
+                // Drop the escape, then normalize the slash itself.
+                out.push_str(&"\\".repeat(run - 1));
+                out.push_str(r"[/\\]");
+                i += 1;
+                continue;
+            }
+            out.push_str(&"\\".repeat(run));
+            continue;
+        }
+        if bytes[i] == b'/' {
+            out.push_str(r"[/\\]");
+        } else {
+            out.push(bytes[i] as char);
+        }
+        i += 1;
+    }
+    Cow::Owned(out)
 }
 
 /// Relativize `filename` against `base` for path-pattern matching.
@@ -1074,6 +1118,55 @@ mod tests {
         assert_eq!(kept.len(), 2);
         assert!(kept.iter().any(|i| i.filename.ends_with("ok.go")));
         assert!(kept.iter().any(|i| i.from_linter == "govet"));
+    }
+
+    #[test]
+    fn exclude_rule_path_keeps_a_redundant_slash_escape() {
+        // k6 writes its exclusion paths as `js\/modules\/k6\/browser\/.*\.go`.
+        // Go's regexp reads `\/` as `/`, and upstream's `NormalizePathInRegex`
+        // is the identity function on unix. guff rewrote every `/` into
+        // `[/\\]`, including the one inside `\/`, which produced `js\[/\\]…` —
+        // a regex that matches nothing, so the rule silently stopped
+        // excluding. It was worth 596 of k6's 703 guff-only findings across
+        // four rules and four linters.
+        let issues_cfg = IssuesConfig {
+            exclude_use_default: false,
+            max_issues_per_linter: 0,
+            max_same_issues: 0,
+            exclude_rules: vec![ExcludeRule {
+                linters: vec!["revive".into()],
+                path: Some(r"js\/modules\/k6\/browser\/.*\.go".into()),
+                ..ExcludeRule::default()
+            }],
+            ..IssuesConfig::default()
+        };
+        let filter = IssueFilter::from_config(&issues_cfg, &SeverityConfig::default())
+            .with_path_base(PathBuf::from("/tmp/k6"));
+        let kept = filter.apply(
+            vec![
+                issue("revive", "/tmp/k6/internal/js/modules/k6/browser/a.go", "exported"),
+                issue("revive", "/tmp/k6/internal/js/modules/k6/http/a.go", "exported"),
+                issue("govet", "/tmp/k6/internal/js/modules/k6/browser/a.go", "something"),
+            ],
+            &[],
+        );
+        assert_eq!(kept.len(), 2, "{kept:?}");
+        assert!(kept.iter().any(|i| i.filename.ends_with("k6/http/a.go")));
+        assert!(kept.iter().any(|i| i.from_linter == "govet"));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn normalize_path_regex_is_the_identity_off_windows() {
+        // `path_unix.go` is `return path`. Anything else changes what a
+        // user-written regex means.
+        for pat in [
+            r"js\/modules\/k6\/browser\/.*\.go",
+            "third_party$",
+            r"^(internal/.*/init\.go)$",
+        ] {
+            assert_eq!(normalize_path_regex(pat).as_ref(), pat);
+        }
     }
 
     #[test]
