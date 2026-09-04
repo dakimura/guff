@@ -5,9 +5,10 @@
 //! `lines=60`, `statements=40`, `ignore-comments=true`.
 //!
 //! The production typecheck parses without `PARSE_COMMENTS`, so `file.comments`
-//! is empty and `ignore-comments` had nothing to subtract. Files are re-parsed
-//! with comments on demand — only for functions that exceed the limit *before*
-//! subtracting comments, since subtracting can only lower the count.
+//! carries the package doc comment and nothing else, and `ignore-comments` has
+//! nothing to subtract. Files are re-parsed with comments on demand — only for
+//! functions that exceed the limit *before* subtracting comments, since
+//! subtracting can only lower the count.
 
 use std::fs;
 use std::path::Path;
@@ -151,15 +152,15 @@ fn check_func(
     }
 
     let lines = if options.ignore_comments {
-        // Prefer the in-pass comments when the file was parsed with them;
-        // otherwise fall back to the on-demand re-parse. Line numbers are
-        // identical between the two parses of the same source.
-        let comments = if file_comments.is_empty() {
-            reparsed.map_or(0, |(re_fset, re_file)| {
+        // The re-parse is the source of truth when it is there. The pass AST's
+        // own list is the fallback, and only that — "it has a comment" is not
+        // "it has every comment", which is what this used to assume. Line
+        // numbers are identical between the two parses of the same source.
+        let comments = match reparsed {
+            Some((re_fset, re_file)) => {
                 comment_count_in_lines(re_fset, &re_file.comments, start_line, end_line)
-            })
-        } else {
-            comment_count_in_lines(fset, file_comments, start_line, end_line)
+            }
+            None => comment_count_in_lines(fset, file_comments, start_line, end_line),
         };
         raw.saturating_sub(comments)
     } else {
@@ -191,10 +192,18 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let fset = pass.fset().clone();
     let paths = pass.pkg().compiled_go_files.clone();
     for (i, file) in pass.files().iter().enumerate() {
-        // Re-parse only when a function is actually over the limit and the
-        // pass ASTs carry no comments, so the common case reads no files.
+        // Re-parse only when a function is actually over the limit, so the
+        // common case reads no files.
+        //
+        // It used to also require `file.comments` to be empty, on the theory
+        // that a non-empty list means the file was parsed with comments. It does
+        // not: the production typecheck keeps the package doc comment and drops
+        // the rest, so any file with a doc comment took the fast path and
+        // subtracted nothing. k6 `internal/log/cloud/cloud.go` reported
+        // `Listen` at 105 lines where upstream counts 105 - 28 = 77 — measured
+        // as `file_comments=1, reparsed=none`.
         let mut reparsed = None;
-        if options.ignore_comments && file.comments.is_empty() {
+        if options.ignore_comments {
             let over_limit = file.decls.iter().any(|d| match d {
                 Decl::FuncDecl(f) => {
                     f.body.is_some() && raw_lines(&fset, f).2 > options.lines

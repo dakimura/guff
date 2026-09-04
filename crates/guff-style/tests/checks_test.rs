@@ -4453,6 +4453,71 @@ fn funlen_ignore_comments_subtracts_comment_lines() {
 }
 
 #[test]
+fn funlen_ignore_comments_works_in_a_file_that_has_a_package_doc() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::FunlenOptions;
+
+    // The re-parse used to be guarded on `file.comments.is_empty()`, on the
+    // theory that a non-empty list means the file was parsed with comments. It
+    // does not: the production typecheck keeps the package doc comment and
+    // drops the rest, so every file with a doc comment — which is most of
+    // them — took the fast path and subtracted nothing.
+    //
+    // Measured on k6 `internal/log/cloud/cloud.go`: `file_comments=1`, no
+    // re-parse, `Listen` reported at 105 lines where upstream counts 105 - 28.
+    // The same file without a doc comment passed, which is why the existing
+    // fixture never caught it.
+    let pkg = support::typecheck_fixture("funlen", "example.com/funlen/docfile", "docfile.go");
+
+    let run = |opts: FunlenOptions| {
+        let mut bag = SettingsBag::new();
+        bag.insert("funlen", opts);
+        support::run_analyzer_with_settings(
+            funlen(),
+            &pkg,
+            &RunnerOptions {
+                settings: Arc::new(bag),
+                ..RunnerOptions::default()
+            },
+        )
+    };
+
+    // 36 body lines, 12 of them comments → 24.
+    let counted = run(FunlenOptions {
+        lines: 30,
+        statements: 200,
+        ignore_comments: false,
+    });
+    assert!(
+        counted.iter().any(|m| m.contains("(36 > 30)")),
+        "without ignore-comments all 36 lines count: {counted:?}"
+    );
+
+    let ignored = run(FunlenOptions {
+        lines: 30,
+        statements: 200,
+        ignore_comments: true,
+    });
+    assert!(
+        ignored.is_empty(),
+        "the doc comment must not stop the re-parse: {ignored:?}"
+    );
+
+    let ignored_tight = run(FunlenOptions {
+        lines: 20,
+        statements: 200,
+        ignore_comments: true,
+    });
+    assert!(
+        ignored_tight.iter().any(|m| m.contains("(24 > 20)")),
+        "expected the comment-subtracted count: {ignored_tight:?}"
+    );
+}
+
+#[test]
 fn funlen_respects_statements_setting() {
     use std::sync::Arc;
 

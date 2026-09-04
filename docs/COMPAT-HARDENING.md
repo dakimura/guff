@@ -21263,3 +21263,64 @@ OSS pr tier **8 ターゲットすべて P=R=100%**。
 既存 8 ターゲットの config は `\/` を書いていないので動かなかった。
 
 台帳は **39/100 のまま**（41 定義、open は cri-o と k6）。
+
+### 2026-09-04（続き 168）— funlen の再パースは**「comments が空か」で門番していた**。本番パースは package doc だけ残すので、doc コメントのあるファイルは全部素通りだった
+
+続き 167 で k6 に残った 27 件のうち funlen 3 件。
+`internal/log/cloud/cloud.go:142` の `Listen` を guff は `105 > 80` と言い、上流は黙る。
+
+手で数えると **raw 105 行、内側のコメント 28 エントリ** ——
+上流の `getLines` は
+
+```go
+lineCount := Position(f.End()).Line - Position(f.Pos()).Line - 1
+// ignoreComments のとき、関数の内側にあるコメント群ごとに len(c.List) を引く
+```
+
+で 105 − 28 = 77 になる。`ignore-comments` の既定は
+golangci v2 で **`true`**（`linters_settings.go` の `Funlen: {IgnoreComments: true}`）で、
+guff の既定も `true` —— **設定は合っていた。**
+
+**原因は再パースの門番。** guff の本番型チェックは `PARSE_COMMENTS` 無しで走るので
+`file.comments` からコメントが落ちる。funlen はそれを見越して
+「必要なときだけ `COMMENTS_ONLY` で再パースする」機構を持っていたが、条件が
+
+```rust
+if options.ignore_comments && file.comments.is_empty() {
+```
+
+だった。**「コメントが 1 つでもある」＝「全部ある」ではない。** 本番パースは
+**package doc コメントだけ**を残すので、doc コメントのあるファイル（つまりほとんど）は
+`is_empty()` が false になり、再パースを飛ばして
+「内側のコメント 0 件」を引く。計器を入れて測った:
+
+```
+FUNLEN-DEBUG Listen raw=105 file_comments=1 reparsed=-1
+```
+
+`file_comments=1` が package doc、`reparsed=-1` が「再パースしていない」である。
+
+**直し方**は門番から `file.comments.is_empty()` を外し、
+再パースがあればそちらを、無いときだけ pass の AST を使う。
+再パースは従来どおり「raw が上限を超える関数があるファイル」だけなので、
+読むファイルの数は変わらない。
+
+**既存の fixture が捕まえられなかった理由もそれである** ——
+`funlen/comments.go` には package doc コメントが無い。
+doc コメント付きの `docfile.go` を足して、同じ 3 つの主張
+（`ignore-comments` 無しで 36、有りで黙る、上限 20 なら 24）を固定した。
+
+```
+k6: guff-only 27 → 24
+```
+
+#### ゲート
+
+golden **213 完全一致** / fix **213** / reject **14** / workspace **278 スイート** /
+OSS pr tier **8 ターゲットすべて P=R=100%**。
+
+台帳は **39/100 のまま**（41 定義）。k6 に残るのは
+nolintlint 14・modernize 2・staticcheck 2・wastedassign 2・
+contextcheck / makezero / asasalint / unparam 各 1 の **24 件**で、
+**nolintlint 14 件は別の linter（nilnil 6・unused 4・exhaustive 1・gocritic 1・revive 1 …）
+の取りこぼしの従属**である —— 続き 158 の B と同じ形。
