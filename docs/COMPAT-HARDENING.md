@@ -20500,3 +20500,66 @@ OSS pr tier 8/8 P=R=100%。
 `convert.go:1605` の nolintlint「`//nolint:staticcheck` は unused」も guff-only。
 後者は前者の従属かもしれない —— guff がそこで SA1019 を出していないなら
 directive は未使用に見える。**2 件と数える前にそこを確かめること。**
+
+### 2026-09-04（続き 158）— buildkit の残る 2 件を測った。SA4023 は**反転**していて、直すには guff に**無い部品**が要る
+
+続き 157 で buildkit を `open 39 → 2` にした、その残り 2 件。**2 件は独立**である
+（続き 156 で「後者は前者の従属かもしれない」と書いたが、**外れ**だった ——
+別ファイル・別チェックで、従属先は SA4023 ではなく**別の SA1019** である）。
+
+**A. SA4023 は反転している。** buildkit `client/client.go:166:5` を
+そのターゲット自身の config で再現:
+
+```
+guff:     client/client.go:166:5: SA4023: this comparison is always true
+golangci: 0 issues
+```
+
+形は `var tracerDelegate TracerDelegate`（nil）→ ループ内の `if ... ok` でだけ
+具体型 `*withTracerDelegate` を代入 → `!= nil`。最小再現は 1 ファイル 3 形:
+
+| 形 | golangci-lint | guff |
+|---|---|---|
+| ループ内の条件付き代入（buildkit の形） | 黙る | **出す**（誤報） |
+| `if` 内の条件付き代入 | 黙る | **出す**（誤報） |
+| `var x I = &impl{}`（本当に常に非 nil） | **出す** + `SA4023(related information)` 行 | **黙る**（見落とし） |
+
+**上流が出す形だけを出さず、出さない形だけを出している。** 1 形だけ試していたら
+「過剰報告」に見えて、修正の向きを間違えていた。
+なお上流は related information を**独立した issue 行**として出すので、
+finding 集合の一致にはそれも要る。
+
+**直せなかった理由も測った。** `sa4023.rs` には上流と同形の **IR 経路**
+（`BinOp` → lhs を flatten → `MakeInterface` か）と、**AST fallback**
+（「比較より前に具体型ポインタを代入されている」）の両方がある。fallback は
+モジュール自身の doc が「SSA の MakeInterface 生成が不完全な間の代用」と書いている。
+
+fallback を止めてビルドして測ると:
+
+- **IR 経路は 3 形すべてで何も見つけない** —— 上流が出す `AlwaysSet` すら。完全に不活性。
+- fallback は**外せない**: 止めると `compat/golden/cases/staticcheck-sa` の
+  `sa4023/bad/bad.go:7:6`（正しい検出）が消える。
+
+**試して捨てた修正**: SA4023 は `flatten_ssa_value`（`ChangeType` だけを辿る）を
+呼んでいるが、上流は `irutil.Flatten`（Sigma は常に、Phi は全辺一致のときだけ）で、
+guff には既に `flatten_ir_value` としてある。合成しても **3 形とも何も変わらなかった** ——
+つまり比較の被演算子はそもそも `MakeInterface` に届いていない。
+**測って効果が無かったので revert した**（効果を測っていない「改善」は出さない）。
+
+**足りない部品は SSA 側**である。上流の IR はローカルをレジスタに昇格するので
+`binop.X` が `MakeInterface` そのものになる。guff はそうなっていない。
+それが入るまで fallback は外せず、buildkit の誤報は残る ——
+続き 154 の ebpf の逆推論と**同じ種類の作業**である。
+
+**B. nolintlint はもう 1 つの SA1019 の従属。** `convert.go:1605` の
+
+```go
+d.image.Config.ArgsEscaped = true //nolint:staticcheck // ignore SA1019: field is deprecated ...
+```
+
+で guff が「directive は unused」と言うのは、**guff がそこで SA1019 を出していない**
+から。上流は出していて（directive がそれを抑止するので SA1019 自体はどちらの出力にも
+現れない）、見えるのは guff の nolintlint だけである。親は
+**非推奨の struct フィールド**の使用であって、関数・変数ではない。
+
+台帳は 35/100 のまま、buildkit `open 2` のまま。**この回の成果は測定である。**
