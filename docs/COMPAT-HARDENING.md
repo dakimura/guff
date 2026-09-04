@@ -22152,3 +22152,73 @@ golden **213**（`canonicalheader` を再生成 —— **消えたキー 0、追
 fix **213**（`canonicalheader` の期待値に `fieldonly` の書き換えが増えた。消えた行 0）/
 reject **14** / isolate **116 ターゲット** / workspace **278 スイート** /
 OSS pr tier **8 ターゲットすべて P=R=100%**。台帳は **39/100 のまま**（41 定義）。
+
+### 2026-09-05（続き 181）— revive の `empty-block` は range 文で walk を打ち切っていた。上流が打ち切るのは**本体が空のときだけ**
+
+k6 `lib/executor/ramping_arrival_rate_test.go:294` の `//nolint:revive` が
+unused directive と言われる（guff-only 1 件）。
+
+```go
+for _, tc := range tests {
+	b.Run(…, func(b *testing.B) {
+		engineOut := make(chan metrics.SampleContainer, 1000)
+		defer close(engineOut)
+		go func() {
+			for range engineOut { //nolint:revive // we want to discard samples
+			}
+		}()
+```
+
+**最初の測定は「両ツールとも revive の finding が 0 件」だった** —— これは
+**抑制後の出力**なので何の証拠にもならない。nolint が消したものは見えない。
+コメントを外した最小再現でようやく差が出た。
+
+上流（revive **v1.15.0** —— golangci-lint 2.12.2 が pin する版。
+`~/projects/src/github.com/mgechev/revive` の checkout は pin 版ではなく、
+そちらには「bare な `for range` は channel drain だから見送る」腕が既に入っている）:
+
+```go
+case *ast.RangeStmt:
+	if len(n.Body.List) == 0 {
+		w.onFailure(…)
+		return nil // skip visiting the range subtree
+	}
+```
+
+`return nil` は**本体が空のときだけ**である。空でない range の中は普通に歩く。
+guff は `NodeRef::RangeStmt` の腕で**無条件に `return false`** していたので、
+**`for … range` の中身が丸ごと死角**になっていた。k6 の空 drain ループは
+`for _, tc := range tests` の中の 2 段のクロージャの奥にある。
+
+**6 モジュールで測って線を引いた:**
+
+| 形 | 上流 |
+|---|---|
+| `for range ch {}`（本体空） | 出す（`for` の位置、confidence 0.9） |
+| 空でない range の中の `if x {}` / `for range ch {}` / `for {}` / `for cond {}` / `for i:=…{}` / 裸のブロック | **すべて出す** |
+| 空でない range の中の関数リテラルの中の `for range ch {}` | **出す** |
+| range 2 段の奥 | **出す** |
+| range の中の `func(){}` の本体 / `select {}` / `for call() {}` | 黙る（ignore 腕） |
+| key があって本体が空でない range | 黙る |
+
+修正は 4 行（`return false` を `if r.body.list.is_empty()` の中へ）。
+
+**測定中に別の欠陥が 1 つ見えた。** fixture の最初の版は空ブロック 7 個を 1 つの
+関数に入れていて、golden case が `cognitive-complexity` も回すため
+**上流 15 / guff 14** の食い違いが出た。empty-block とは別の規則なので
+fixture を小さな関数に割って隔離し、**この差は次のタスクとして記録する**
+（`arguments` を 1 つだけ書いた設定で guff が何も出さない件も同時に見つかっている）。
+
+```
+k6: guff-only 3 → 2
+```
+
+#### ゲート
+
+golden **213**（`revive` を再生成 —— **消えたキー 0、追加 15**。ratchet は
+baseline のまま missing 1 / extra 4）/ fix **213** / reject **14** /
+isolate **116 ターゲット** / workspace **278 スイート** /
+OSS pr tier **8 ターゲットすべて P=R=100%**。台帳は **39/100 のまま**（41 定義）。
+
+k6 に残るのは **2 件**: nolintlint 1（exhaustive の取りこぼしの従属、続き 174 で
+測定済み）、contextcheck 1。

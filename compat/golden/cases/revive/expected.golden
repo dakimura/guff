@@ -107,6 +107,21 @@ directives/sibling.go:7:6:revive:warning:exported: type name will be used as dir
 dot/dot.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
 dot/dot.go:1:1:revive:warning:package-comments: should have a package comment
 dot/dot.go:3:7:revive:warning:exported: exported const X should have comment or be unexported
+emptyblockrange/empty_block_range.go:17:1:revive:warning:file-header: the file doesn't have an appropriate header
+emptyblockrange/empty_block_range.go:23:2:revive:warning:empty-block: this block is empty, you can remove it
+emptyblockrange/empty_block_range.go:28:2:revive:warning:empty-block: this block is empty, you can remove it
+emptyblockrange/empty_block_range.go:41:10:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+emptyblockrange/empty_block_range.go:41:12:revive:warning:empty-block: this block is empty, you can remove it
+emptyblockrange/empty_block_range.go:49:3:revive:warning:empty-block: this block is empty, you can remove it
+emptyblockrange/empty_block_range.go:57:7:revive:warning:empty-block: this block is empty, you can remove it
+emptyblockrange/empty_block_range.go:65:11:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+emptyblockrange/empty_block_range.go:65:13:revive:warning:empty-block: this block is empty, you can remove it
+emptyblockrange/empty_block_range.go:73:12:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+emptyblockrange/empty_block_range.go:73:19:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+emptyblockrange/empty_block_range.go:73:26:revive:warning:empty-block: this block is empty, you can remove it
+emptyblockrange/empty_block_range.go:81:3:revive:warning:empty-block: this block is empty, you can remove it
+emptyblockrange/empty_block_range.go:90:4:revive:warning:empty-block: this block is empty, you can remove it
+emptyblockrange/empty_block_range.go:102:4:revive:warning:empty-block: this block is empty, you can remove it
 extended/util/extended_bad.go:2:1:revive:warning:file-header: the file doesn't have an appropriate header
 extended/util/extended_bad.go:2:9:revive:warning:package-naming: don't use "util" because it is a bad package name according to https://go.dev/blog/package-names#bad-package-names
 extended/util/extended_bad.go:14:8:revive:warning:imports-blocklist: should not use the following blocklisted import: "os"
