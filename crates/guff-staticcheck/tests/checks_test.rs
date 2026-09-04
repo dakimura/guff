@@ -2191,7 +2191,70 @@ sa_check_bad_ok!(sa4032, sa4032_flags_bad_cases, sa4032_allows_ok_cases);
 
 sa_check!(sa5000, sa5000_flags_nil_map, sa5000_allows_initialized_map, "assignment to nil map");
 sa_check!(sa5002, sa5002_flags_empty_loop, sa5002_allows_nonempty_loop, "spin");
-sa_check!(sa5003, sa5003_flags_defers_in_infinite_loop, sa5003_allows_finite_loop, "defers in this infinite loop");
+#[test]
+fn sa5003_flags_a_defer_wherever_it_sits_in_an_infinite_loop() {
+    // The fixture used to be one line — `for { defer func(){}() }` — and the
+    // assertion was a substring match, so nothing here was measured. The body
+    // scan was a hand-written statement walker that descended only into
+    // blocks, ifs and loops, which got both directions wrong at once: it
+    // missed every `defer` written inside a `switch`, a `select`, a type
+    // switch or a labelled statement, and it reported loops whose `return` or
+    // `break` was written in one of those (kubeshark `cmd/console.go`, two
+    // findings golangci-lint does not make). Upstream is `ast.Inspect` over
+    // the whole body, pruned at `FuncLit`.
+    //
+    // Counted by position: every message this check makes is the same string.
+    let pkg = typecheck_rule("sa5003", "bad.go");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64)> = support::run_analyzer_diagnostics(sa5003::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| {
+            assert_eq!(d.message, "defers in this infinite loop will never run");
+            let p = fset.position(guff::position::Pos(d.pos as i64));
+            (p.line, p.column)
+        })
+        .collect();
+    got.sort();
+
+    assert_eq!(
+        got,
+        vec![
+            (17, 3),  // bare
+            (25, 4),  // inside a select clause
+            (34, 4),  // inside a select's default clause
+            (43, 4),  // inside a switch clause
+            (52, 4),  // inside a type switch clause
+            (60, 3),  // inside a labelled statement
+            (70, 3),  // a return in a func literal does not exit the loop
+            (80, 3),  // continue is not break
+            (88, 3),  // no condition, but a post statement
+            // Two enclosing infinite loops, so the check reports twice — as
+            // upstream's does. One line, because `Graph::root_diagnostics`
+            // collapses them on (analyzer, position, message), which is what
+            // golangci-lint's runner does before its processors ever see them.
+            // Without that step `guff run` printed this line twice, and the
+            // golden tier saw it: its diff is a multiset, not a set.
+            (98, 4),
+        ],
+        "{got:?}"
+    );
+}
+
+#[test]
+fn sa5003_allows_a_loop_that_can_be_left() {
+    // Twelve shapes upstream stays quiet on, one per declaration: a loop with
+    // a condition, a plain `break`, a `break` under an `if`, a `return` inside
+    // a `select` (kubeshark's) and inside a `switch`, a `return` nested one
+    // `if` deeper, a `break` inside a `switch` and inside a `select` (both of
+    // which leave that statement rather than the loop — upstream's own TODO
+    // keeps the false negative), a `break` in an inner loop, a labelled
+    // `break`, and a `defer` that belongs to a function literal.
+    let pkg = typecheck_rule("sa5003", "ok.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa5003::analyzer(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
+}
 sa_check!(sa5004, sa5004_flags_empty_default_select, sa5004_allows_nonempty_default_select, "empty default case");
 sa_check!(sa5005, sa5005_flags_finalizer_self_ref, sa5005_allows_safe_finalizer, "finalizer closes over");
 sa_check!(sa5007, sa5007_flags_infinite_recursion, sa5007_allows_terminating_recursion, "infinite recursive call");

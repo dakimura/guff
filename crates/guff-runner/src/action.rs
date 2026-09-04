@@ -723,10 +723,36 @@ impl Graph {
         &self.all
     }
 
+    /// Diagnostics from the root actions, de-duplicated the way golangci-lint
+    /// does it.
+    ///
+    /// Upstream keys on `(token.Position, *analysis.Analyzer, message)` while
+    /// extracting them (`pkg/goanalysis/runner.go`, "De-duplicate diagnostics
+    /// by position"). The reason it gives is a file that belongs to two
+    /// packages — `foo` and `foo.test` — which guff avoids one step earlier in
+    /// `filter_duplicate_packages`; but the same rule also collapses a pair one
+    /// analyzer makes twice about one line, and that half is not covered
+    /// anywhere else. SA5003 reports a `defer` once per enclosing infinite
+    /// loop, so `for { for { defer f() } }` is two identical diagnostics
+    /// upstream renders as one, and `guff run` printed the line twice.
+    ///
+    /// The key deliberately does not carry the package: two roots reporting the
+    /// same analyzer, position and message are one finding to a reader, whatever
+    /// package produced them. It does carry the column override, because that is
+    /// what the issue is rendered with.
     pub fn root_diagnostics(&self) -> Vec<(String, Diagnostic)> {
+        let mut seen: HashSet<(&'static str, u32, Option<u32>, String)> = HashSet::default();
         let mut out = Vec::new();
         for root in &self.roots {
             for diag in root.diagnostics() {
+                if !seen.insert((
+                    root.analyzer.name,
+                    diag.pos,
+                    diag.column,
+                    diag.message.clone(),
+                )) {
+                    continue;
+                }
                 out.push((root.string_id(), diag));
             }
         }

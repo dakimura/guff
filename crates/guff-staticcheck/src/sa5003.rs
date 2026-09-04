@@ -1,47 +1,22 @@
 //! SA5003 — defers in infinite loops will never execute.
 //!
 //! Port of `honnef.co/go/tools/staticcheck/sa5003`.
+//!
+//! The body scan is `ast.Inspect` over the *whole* loop body, pruned at
+//! `FuncLit`. That breadth is the check: a `return` anywhere in the body means
+//! the loop can be left, and a `defer` anywhere in it is a defer that will not
+//! run. A walker that only descends into the statement kinds it names gets
+//! both directions wrong at once — see the fixtures for the eleven shapes a
+//! `switch`/`select`/labelled-statement blind spot moved.
 
 use std::sync::OnceLock;
 
-use guff::ast::{BranchStmt, DeferStmt, ForStmt, ReturnStmt, Stmt};
+use guff::ast::ForStmt;
 use guff::node_mask;
 use guff::token::Token;
-use guff::walk::NodeRef;
+use guff::walk::{preorder_prune, NodeRef};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
-
-fn walk_block(stmts: &[Stmt], might_exit: &mut bool, defers: &mut Vec<u32>) {
-    for stmt in stmts {
-        match stmt {
-            Stmt::ReturnStmt(ReturnStmt { return_, .. }) => {
-                *might_exit = true;
-                return;
-            }
-            Stmt::BranchStmt(BranchStmt { tok, .. }) if *tok == Token::BREAK => {
-                *might_exit = true;
-                return;
-            }
-            Stmt::DeferStmt(DeferStmt { defer_, .. }) => defers.push(defer_.0 as u32),
-            Stmt::BlockStmt(b) => walk_block(&b.list, might_exit, defers),
-            Stmt::IfStmt(i) => {
-                walk_block(&i.body.list, might_exit, defers);
-                if *might_exit {
-                    return;
-                }
-                if let Some(else_) = &i.else_ {
-                    walk_block(std::slice::from_ref(else_.as_ref()), might_exit, defers);
-                }
-            }
-            Stmt::ForStmt(f) => walk_block(&f.body.list, might_exit, defers),
-            Stmt::RangeStmt(r) => walk_block(&r.body.list, might_exit, defers),
-            _ => {}
-        }
-        if *might_exit {
-            return;
-        }
-    }
-}
 
 fn check_loop(loop_: &ForStmt, pending: &mut Vec<u32>) {
     if loop_.cond.is_some() {
@@ -49,7 +24,30 @@ fn check_loop(loop_: &ForStmt, pending: &mut Vec<u32>) {
     }
     let mut might_exit = false;
     let mut defers = Vec::new();
-    walk_block(&loop_.body.list, &mut might_exit, &mut defers);
+    // `preorder_prune` is `ast.Inspect`: returning false stops the descent into
+    // that node and the walk carries on with its siblings. Upstream relies on
+    // exactly that — `return false` on a `return`/`break` does not end the
+    // scan, it only stops looking inside the statement that already answered.
+    preorder_prune(NodeRef::BlockStmt(&loop_.body), |n| match n {
+        NodeRef::ReturnStmt(_) => {
+            might_exit = true;
+            false
+        }
+        // Upstream's own TODO: a `break` inside a `switch` or `select` leaves
+        // that statement, not the loop, and this counts it anyway. Keeping the
+        // false negative is what keeps the two tools equal.
+        NodeRef::BranchStmt(b) if b.tok == Token::BREAK => {
+            might_exit = true;
+            false
+        }
+        NodeRef::DeferStmt(d) => {
+            defers.push(d.defer_.0 as u32);
+            true
+        }
+        // A defer or return inside a function literal belongs to the literal.
+        NodeRef::FuncLit(_) => false,
+        _ => true,
+    });
     if might_exit {
         return;
     }

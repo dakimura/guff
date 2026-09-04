@@ -213,5 +213,13 @@
       "exclude_graphdriver_btrfs",
       "containers_image_openpgp"
     ]
+  },
+  {
+    "name": "kubeshark",
+    "url": "https://github.com/kubeshark/kubeshark.git",
+    "ref": "v53.4.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
   }
 ]
