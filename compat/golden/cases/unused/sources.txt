@@ -11,3 +11,8 @@ deadcycle/dead_cycle.go               crates/guff-unused/tests/testdata/basic/de
 # type it covers are in the second (nats-server's jetstream_helpers_test.go).
 fileignore/types.go                   crates/guff-unused/tests/testdata/fileignore/types.go
 fileignore/methods.go                 crates/guff-unused/tests/testdata/fileignore/methods.go
+# The struct-field rules. `fieldsunsafe` is the one package here the Rust tests
+# cannot use: its (5.2) and (6.6) shapes need imports, and the unit-test
+# type-checker has no importer.
+fields/fields.go                      crates/guff-unused/tests/testdata/fields/fields.go
+fieldsunsafe/fieldsunsafe.go          crates/guff-unused/tests/testdata/fieldsunsafe/fieldsunsafe.go
