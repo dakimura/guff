@@ -8,7 +8,7 @@
 //! sources (cached, `Deprecated:` byte-filtered) — same shape as ST1020 /
 //! govet-inline local discovery.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::sync::{Arc, OnceLock};
 
@@ -24,7 +24,9 @@ use guff_analysis::code::{
 use guff_analysis::passes::facts::deprecated;
 use guff_analysis::passes::facts::generated;
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, DeprecatedResult, IsDeprecated, RunError, RunFn, Pass};
+use guff_analysis::{
+    AnalysisResult, Analyzer, DeprecatedResult, IsDeprecated, Package, Pass, RunError, RunFn,
+};
 use guff_types::arena::{ObjectData, TypeData};
 
 use crate::render::render_expr;
@@ -390,7 +392,7 @@ fn worth_object_doc_scan(pkg_path: &str) -> bool {
 /// Deps whose sources are local replaces / nested modules / test stubs — not
 /// every in-repo package (that would reparse half of prometheus on cold wall).
 fn is_local_source_dep(pass: &Pass<'_>, pkg_path: &str) -> bool {
-    let Some(imp) = pass.pkg().imports.get(pkg_path) else {
+    let Some(imp) = resolve_import(pass.pkg(), pkg_path) else {
         return false;
     };
     let files = if !imp.compiled_go_files.is_empty() {
@@ -478,7 +480,7 @@ fn dep_facts<'a>(
     // Only scan (and cache globally) when this package can see the dep's
     // sources. A miss must not poison the process-wide store — another root
     // package may import the same path and need a real PARSE_COMMENTS scan.
-    if !pass.pkg().imports.contains_key(pkg_path) {
+    if resolve_import(pass.pkg(), pkg_path).is_none() {
         let empty = Arc::new(PkgDeprecatedFacts::default());
         cache.pkgs.insert(pkg_path.to_string(), empty);
         return cache.pkgs.get(pkg_path).expect("just inserted");
@@ -490,12 +492,51 @@ fn dep_facts<'a>(
     cache.pkgs.get(pkg_path).expect("just inserted")
 }
 
+/// The package `pkg_path` in this root package's import graph, direct or not.
+///
+/// [`guff_analysis::Package::imports`] holds only the *direct* edges, but the
+/// package that **declares** a symbol need not be one this file imports: a
+/// struct embedding a struct from a third package puts the declaring package
+/// one hop further out, and the receiver's package is not it either. Upstream
+/// never notices — honnef reads a `Deprecated` fact that propagated along the
+/// whole graph — while guff reconstructs the message from the declaring
+/// package's sources, so it has to find that package first.
+///
+/// Breadth-first with a visited set; `DepDeprecatedCache` memoises the answer
+/// per package path, so this walks at most once per missing path per pass and
+/// not at all for the common direct-import hit.
+///
+/// A hit is only accepted when it carries source files. `connect_imports` now
+/// stitches the graph dependency-first, so a neighbour's own edges are always
+/// resolved before anything points at it — but an import the response has no
+/// package for still resolves to the id-only stub, and caching a "scanned, no
+/// facts" answer built from one would silence the symbol process-wide.
+fn resolve_import<'a>(pkg: &'a Package, pkg_path: &str) -> Option<&'a Package> {
+    if let Some(direct) = pkg.imports.get(pkg_path) {
+        return Some(direct);
+    }
+    let mut seen: HashSet<&str> = HashSet::new();
+    let mut queue: VecDeque<&'a Package> = pkg.imports.values().map(Arc::as_ref).collect();
+    while let Some(cur) = queue.pop_front() {
+        if !seen.insert(cur.pkg_path.as_str()) {
+            continue;
+        }
+        if let Some(hit) = cur.imports.get(pkg_path) {
+            if !hit.go_files.is_empty() || !hit.compiled_go_files.is_empty() {
+                return Some(hit);
+            }
+        }
+        queue.extend(cur.imports.values().map(Arc::as_ref));
+    }
+    None
+}
+
 fn scan_import_deprecated(
     pass: &Pass<'_>,
     pkg_path: &str,
     need_objects: bool,
 ) -> PkgDeprecatedFacts {
-    let Some(imp) = pass.pkg().imports.get(pkg_path) else {
+    let Some(imp) = resolve_import(pass.pkg(), pkg_path) else {
         // Missing from this package's import graph — do not claim a completed
         // object scan (and callers must not poison the process-global cache).
         return PkgDeprecatedFacts::default();
@@ -992,5 +1033,66 @@ mod tests {
     #[test]
     fn sa1019_validates() {
         assert!(validate(&[analyzer()]).is_ok());
+    }
+
+    fn pkg(path: &str, files: &[&str]) -> Package {
+        Package {
+            id: path.to_string(),
+            pkg_path: path.to_string(),
+            go_files: files.iter().map(std::path::PathBuf::from).collect(),
+            ..Package::default()
+        }
+    }
+
+    fn with_imports(mut p: Package, imports: &[Package]) -> Package {
+        p.imports = imports
+            .iter()
+            .map(|i| (i.pkg_path.clone(), Arc::new(i.clone())))
+            .collect();
+        p
+    }
+
+    #[test]
+    fn resolve_import_finds_a_direct_import() {
+        let dep = pkg("example.com/dep", &["dep.go"]);
+        let root = with_imports(pkg("example.com/root", &["root.go"]), &[dep]);
+        let hit = resolve_import(&root, "example.com/dep").expect("direct import");
+        assert_eq!(hit.pkg_path, "example.com/dep");
+    }
+
+    #[test]
+    fn resolve_import_finds_a_package_only_reachable_transitively() {
+        // The shape SA1019 needs: `root` imports `dep`, `dep` embeds a struct
+        // from `inner`, and a promoted field's *declaring* package is `inner` —
+        // which `root` never imports.
+        let inner = pkg("example.com/inner", &["inner.go"]);
+        let dep = with_imports(pkg("example.com/dep", &["dep.go"]), &[inner]);
+        let root = with_imports(pkg("example.com/root", &["root.go"]), &[dep]);
+        let hit = resolve_import(&root, "example.com/inner").expect("transitive import");
+        assert_eq!(hit.pkg_path, "example.com/inner");
+        assert_eq!(hit.go_files.len(), 1);
+    }
+
+    #[test]
+    fn resolve_import_skips_a_transitive_stub_with_no_sources() {
+        // An import the driver response has no package for stays the id-only
+        // stub even after the graph is stitched. Scanning one would cache
+        // "scanned, no facts" process-wide and silence the symbol for every
+        // other root package, so a fileless hit is not an answer.
+        let stub = pkg("example.com/inner", &[]);
+        let dep = with_imports(pkg("example.com/dep", &["dep.go"]), &[stub]);
+        let root = with_imports(pkg("example.com/root", &["root.go"]), &[dep]);
+        assert!(resolve_import(&root, "example.com/inner").is_none());
+    }
+
+    #[test]
+    fn resolve_import_terminates_on_an_import_cycle() {
+        // Test variants make the graph cyclic in practice (`P [P.test]`), and a
+        // missing path walks the whole reachable set before giving up.
+        let mut a = pkg("example.com/a", &["a.go"]);
+        let b = with_imports(pkg("example.com/b", &["b.go"]), &[a.clone()]);
+        a = with_imports(a, &[b]);
+        let root = with_imports(pkg("example.com/root", &["root.go"]), &[a]);
+        assert!(resolve_import(&root, "example.com/nope").is_none());
     }
 }

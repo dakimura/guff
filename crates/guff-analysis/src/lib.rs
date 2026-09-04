@@ -46,6 +46,7 @@ pub use fact_codec::{
 pub use facts::{
     ensure_builtin_fact_decoders, Fact, FactStore, FactTypeId, ObjectFact, PackageFact, StringFact,
 };
+pub use guff_packages::Package;
 pub use pass::{Pass, PassInput};
 pub use settings::SettingsBag;
 pub use validate::{validate, ValidateError};
