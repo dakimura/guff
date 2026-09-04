@@ -20801,3 +20801,65 @@ golden の再生成はキー集合で確認 —— **消えたキー 0**、追�
 
 **buildkit `open 1 → 0`**（`guff=0 golangci=0 P=R=100%`）。台帳 **35/100 → 36/100**。
 残る open は cri-o（linux 専用、このホストでは測れない）だけになった。
+
+### 2026-09-04（続き 162）— skopeo を採用。**guff の挙動は変えていない。**素の checkout では golangci が `typecheck` 1 件だけを返し、それは guff が**意図的に出していない半分**だった
+
+`./corpus/status.py next` の `adopt skopeo`。`corpus/candidates-100.json` の行を
+`corpus/hunt.json` に足して測ると、最初はこうなった:
+
+```
+skopeo: guff=0 golangci=1 both=0 P=100.0% R=0.0% [UNEXPECTED]
+  +gcl integration/copy_test.go:27:typecheck:could not import go.podman.io/image/v5/signature
+       (vendor/.../mechanism_gpgme.go:14:2: could not import github.com/proglottis/gpgme
+        (-: # [pkg-config --cflags -- gpgme] Package 'gpgme' not found))
+```
+
+**guff-only ではなく gcl-only、しかも `typecheck`。**（`typecheck` の finding は
+`InvalidIssue` で他の全 finding を消すので、これが立つ限りこのターゲットは
+何も測っていない。）
+
+**1. この 0 対 1 は guff の新しい欠陥ではない。** cgo 抜きの最小再現を作った ——
+`broken` パッケージに型エラーを 1 つ、それを import する `user` パッケージ。
+`./broken/...` / `./user/...` / `./...` の 3 通りとも **golangci は `typecheck` 1 件、
+guff は無言で exit 0**。ただし `go list -e -json=ImportPath,Error,DepsErrors` は
+**どちらのパッケージにも Error を出さない** —— `go list` は型検査をしないからで、
+golangci はこれを go/packages の型検査器から取っている。
+`crates/guff-lint/src/typecheck.rs` の doc がこの境界を最初から書いている:
+guff は `ErrorKind::List` **だけ**を issue にし、型エラーの側は出さない
+（2026-08-11 の測定で 9 形のうち 2 形が `go build` と文言が違い、`typecheck` の
+finding は 1 件でもレポート全体を空にするので、推測で出す価値がない）。
+**deferral note が腐っていないか確かめてから先に進んだ。腐っていなかった。**
+
+**2. 素の checkout が壊れているのは環境ではなく tag の問題だった。** darwin に
+gpgme（C ライブラリ）が無いので `go build ./...` が pkg-config で落ちる。
+`brew install gpgme` して測ることもできるが、それは**このホストにだけある
+外部ライブラリ**の上での測定になる。**skopeo 自身が答えを持っていた**:
+Makefile は `DISABLE_CGO=1` のとき
+`BUILDTAGS = exclude_graphdriver_btrfs containers_image_openpgp` に切り替え、
+`lint` ターゲットはそれを `golangci-lint run --build-tags "${BUILDTAGS}"` に
+そのまま渡す。**つまり cgo 無しで `make lint` が測るものがこの tag 集合である。**
+tag を付けると `go build ./...` も `go vet ./...` も darwin で通る。
+syncthing の `noassets` と同じ扱い（`compat/hunt.sh` の該当コメントに追記した）。
+
+```
+skopeo: guff=0 golangci=0 both=0 P=100.0% R=100.0% [OK]
+```
+
+**3. 「両方 0」が不活性でないことを測った。** skopeo の `./...` は
+**4 パッケージ / 47 ファイル**しかない（vendor 済みの薄い CLI）。0 対 0 は
+「一致」ではなく「何も動いていない」かもしれないので、checkout に
+`if b == true {}` と `strings.Replace(s, a, b, -1)` を持つファイルを 1 つ置いて
+同じ config で両ツールに通した:
+
+```
+SA9003 empty branch / S1002 comparison to bool / QF1004 ReplaceAll / unused
+→ 両ツールとも同じ 4 件
+```
+
+置いたファイルは消し、`git -C corpus/cache/skopeo status --porcelain` が
+空であることを確認してから最終計測をやり直した（未追跡の `.go` が残ると
+次の計測を水増しする）。
+
+台帳 **36/100 → 37/100**（38 定義、1 open = cri-o のみ）。
+`corpus/README.md` の hunt tier の repo 数を 24 → 26 に直した
+（buildkit の追加時から古かった）。
