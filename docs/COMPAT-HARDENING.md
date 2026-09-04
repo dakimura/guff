@@ -20705,3 +20705,99 @@ finding set は 4/4/4 で P=R=1.0）。静かな機械での 1 回の測定で�
 `connect_order` が足すのは辺の数に比例する 1 パスと id の `Vec` ひとつなので、
 数百パッケージ規模でこの差を説明できる量ではない —— **差ではなく分散**と読む。
 気にするなら HEAD と交互に測ること（続き 108 / 2026-08-17 の C を参照）。
+
+### 2026-09-04（続き 161）— 続き 158 の「足りない部品は SSA 側」は**外れ**。SA4023 の IR 経路は**比較の型（`bool`）に interface かと聞いていた** —— 1 行で全体が不活性だった
+
+続き 158 は buildkit `client/client.go:166:5` の guff-only を測って、「IR 経路は 3 形
+すべてで何も見つけない、上流の IR はローカルをレジスタに昇格するので `binop.X` が
+`MakeInterface` そのものになる、guff はそうなっていない」と読み、
+「fallback は外せない、buildkit の誤報は残る」で止めた。**その診断が外れていた。**
+
+**原因は 1 行。** `run` はこう書いていた:
+
+```rust
+let InstrData::BinOp(BinOp { op, x, y, typ, .. }) = func.instrs.get(iid) else { continue };
+...
+if !is_interface_type(&ir.prog, *typ) { continue; }   // ← typ は比較の型 = bool
+```
+
+guff の SSA builder は `BinaryExpr` ノードの型をそのまま命令に載せる
+(`builder/expr.rs` の `binary_expr`)。`==` / `!=` の型は **`bool`** なので、
+`is_interface_type` は**常に false**。候補は `MakeInterface` を見る前に全部落ちていた。
+上流が見るのは命令自身ではなく `binop.X.Type()` である:
+
+```go
+if !types.IsInterface(binop.X.Type()) || typeparams.IsTypeParam(binop.X.Type()) { continue }
+```
+
+続き 158 の「IR 経路は完全に不活性」「flatten を上流に寄せても 3 形とも変わらなかった」は、
+flatten の問題ではなくこのゲートだった。**比較の被演算子は `MakeInterface` に届いていない**
+のではなく、**被演算子を見るところまで到達していなかった**。
+
+発火していたのは AST 近似だけで、それは「比較より前に具体型ポインタの ident を代入された」——
+続き 158 の表のとおり**上流が黙る形を出し、上流が出す形を黙る**。
+
+#### 直したもの
+
+1. **型を `binop.X` から引く。** `value_type_of(prog, func, x)` →
+   `guff_types::predicates::is_non_type_param_interface`（上流の
+   `IsInterface(X.Type()) && !IsTypeParam(X.Type())` そのもの）。
+2. **flatten を `irutil.Flatten` に揃える。** `flatten_ssa_value`（`ChangeType` だけを辿る）
+   から `flatten_ir_value`（既にあった Phi 全辺一致の移植）へ。**辺が食い違えば `None`** ——
+   これが「ループ内 / `if` 内の条件付き代入」を黙らせる本体である。零値の辺が残っている
+   のだから interface は本当に nil になり得る。
+3. **`NormalTerms` ガードを足した。** 上流の
+   `terms, err := typeparams.NormalTerms(x.X.Type()); if len(terms) == 0 || err != nil { continue }`。
+   型パラメータ以外では単項なので効かないが、ジェネリック本体では効く。
+   **これは推測ではなく測って見つけた** —— 1 と 2 だけ入れた版で `comparable` と
+   メソッドのみの制約の 2 形が guff-only になった。read-only で答えるため
+   `TypeParam::constraint()` → 制約 interface の `cached_typeset()` を読む
+   （アナライザは arena を `&` でしか持てない。非 interface の bound は
+   `wrap_in_implicit_interface` が 1 項の暗黙 interface にするので項ありと答える）。
+4. **AST 近似を削除**し、`inspect` 依存も外した。位置は `call_node_starts` で
+   `BinaryExpr` の先頭に戻す（上流は `ast.BinaryExpr` を報告し、その `Pos()` は `X.Pos()`。
+   `BinOp` が持つのは演算子位置）。**`pending` が空なら map を作らない** ——
+   SA4023 は prometheus の走査の 57% を占めていた checker である。
+
+#### 測った形（1 形 1 宣言、両ツールに通す）
+
+28 形。**guff = golangci-lint、ただし 1 形を除く。**
+
+| 群 | 形 | 上流 | 直す前の guff | 直した後 |
+|---|---|---|---|---|
+| 出る | `var d I = &impl{}` / `d = &impl{}` / `d := I(&impl{})` / `==` 版 / 呼び出し由来 | 出す | **黙る** | 出す |
+| 出る | `var p *impl; d = p`（既存 fixture） | 出す | 出す（近似が偶然当たる） | 出す |
+| 出る | 型パラメータ `int\|string` / `~int` / `*impl` / 名前付き union / メソッド+項 / インライン 1 項 | 出す | 黙る | 出す |
+| 黙る | **ループ内の条件付き代入（buildkit）** / `if` 内の条件付き代入 | 黙る | **出す（誤報）** | 黙る |
+| 黙る | 両分岐が別の具体値 / 比較より後にだけ代入 / `nil != d`（上流は TODO） | 黙る | 一部出す | 黙る |
+| 黙る | struct フィールド / パッケージ変数 / クロージャ捕捉 / map 由来（go-redis） | 黙る | 黙る | 黙る |
+| 黙る | 型パラメータ `any` / `comparable` / メソッドのみ / ジェネリック struct のフィールド | 黙る | 黙る | 黙る（3 は `NormalTerms` ガードが要る） |
+
+**残る乖離は 1 形**: `f() == nil`（`*ir.Call` + `nilness`）。モジュール doc が最初から
+deferred と書いている経路で、AST 近似も拾っていなかったので**この回の退行ではない**。
+入れるには上流の `nilness.Analysis`（関数ごとの返り値 nilness の fact）が要る。
+
+**測り方の罠を 1 つ踏んだ。** 最小再現の `.golangci.yml` に `max-same-issues` を書かず、
+golangci 側にだけ `--max-same-issues=0` を渡していた。既定は 3 なので、同じ文言が
+4 件出た瞬間に **guff 側だけ 1 件消えて「ファイルを足したら退行した」に見えた**。
+両ツールに同じ config を読ませること。
+
+#### fixture とテスト
+
+`bad.go` 13 形 / `ok.go` 12 形。`ok.go` の先頭に buildkit の形をそのまま置いてある。
+`sa4023_flags_every_shape_that_flattens_to_a_make_interface` は
+**`(行, 桁, 文言)` の完全一致**で固定する —— 文言は 2 種類しかないので
+`any(contains(…))` は 13 形のうち 12 形が欠けても通る。桁も見る:
+上流は左被演算子の先頭を報告するので `7:6` / `24:9` であって演算子位置ではない。
+
+#### ゲート
+
+golden **213** / fix **213** / reject **14** / workspace **278 スイート** /
+OSS pr tier **8 ターゲットすべて P=R=100%**。
+
+golden の再生成はキー集合で確認 —— **消えたキー 0**、追加 14（SA4023 12 + S1021 2）。
+`compat/fix/expected/staticcheck-sa.diff` も再録した（新しい `var d iface` + `d = …`
+2 箇所に S1021 の fix が付く）。
+
+**buildkit `open 1 → 0`**（`guff=0 golangci=0 P=R=100%`）。台帳 **35/100 → 36/100**。
+残る open は cri-o（linux 専用、このホストでは測れない）だけになった。

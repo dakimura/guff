@@ -135,7 +135,7 @@
  }
 --- a/sa4023/bad/bad.go
 +++ b/sa4023/bad/bad.go
-@@ -2,7 +2,6 @@
+@@ -2,8 +2,7 @@
  
  func main() {
  	var p *int
@@ -144,6 +144,27 @@
 +	var i any = p
  	_ = i == nil
  }
+ 
+@@ -26,8 +25,7 @@
+ 
+ // A plain assignment, unconditional.
+ func plainAssign() bool {
+-	var d iface
+-	d = &concrete{}
++	var d iface = &concrete{}
+ 	return d != nil
+ }
+ 
+@@ -46,8 +44,7 @@
+ // A typed nil pointer held in a variable — still a concrete type.
+ func typedNilPointer() bool {
+ 	var p *concrete
+-	var d iface
+-	d = p
++	var d iface = p
+ 	return d == nil
+ }
+ 
 --- a/sa4026/bad/bad.go
 +++ b/sa4026/bad/bad.go
 @@ -1,2 +1,3 @@
