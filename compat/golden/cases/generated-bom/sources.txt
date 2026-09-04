@@ -1,0 +1,8 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# Both are read by crates/guff-fmt/tests/generated_files.rs, which also asserts
+# that bomline/a.go still literally begins with the three BOM bytes — an editor
+# that strips it would turn this case into a duplicate of the other one.
+bomline/a.go      crates/guff-fmt/tests/testdata/generated/bomline/a.go
+blockmarker/a.go  crates/guff-fmt/tests/testdata/generated/blockmarker/a.go

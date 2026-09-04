@@ -406,6 +406,7 @@ fn run_cmd(args: RunArgs, startup: Instant) -> Result<i32, RunError> {
         !args.no_cache,
         loaded.tests,
         build_tags.clone(),
+        loaded.linters_generated,
     );
 
     let mut path_mode = loaded.path_mode;
@@ -481,6 +482,7 @@ fn build_formatter_run_config(
     use_format_cache: bool,
     include_tests: bool,
     build_tags: Vec<String>,
+    linters_generated: guff_fmt::GeneratedMode,
 ) -> Option<crate::FormatterRunConfig> {
     let enable: Vec<String> = formatters
         .enable
@@ -524,7 +526,18 @@ fn build_formatter_run_config(
         goimports: formatters.goimports_options(),
         gci: formatters.gci_options(),
         golines: formatters.golines_options(),
-        generated: formatters.exclusion_generated(),
+        // `formatters.exclusions.generated` does **not** apply here.
+        // `handleFormatterExclusions` folds only `formatters.exclusions.paths`
+        // into the linters rules, so in `golangci-lint run` a formatter's
+        // findings are filtered by `linters.exclusions.generated` — which
+        // `config.Loader.Load` defaults to *strict*, not lax. Measured over
+        // three shapes and four configs: setting `linters.exclusions.generated:
+        // disable` changes what `run` reports, setting
+        // `formatters.exclusions.generated: disable` changes nothing.
+        //
+        // The formatters key is upstream's `golangci-lint fmt` default and is
+        // still read there (`fmt_cmd`).
+        generated: linters_generated,
         exclude_paths: formatters.exclusion_paths(),
         paths,
         fix,
@@ -585,6 +598,11 @@ struct LoadedRun {
     out_formats: Vec<OutputSpec>,
     printer: PrinterOptions,
     formatters: FormattersV2,
+    /// `linters.exclusions.generated` after the v2 fold (strict when unset).
+    ///
+    /// The formatters that run inside `guff run` are filtered by *this*, not by
+    /// `formatters.exclusions.generated` — see `build_formatter_run_config`.
+    linters_generated: guff_fmt::GeneratedMode,
     go_version: Option<String>,
     path_mode: crate::PathMode,
     path_prefix: Option<String>,
@@ -669,6 +687,14 @@ fn load_run_config(
             LinterSettings::default(),
             String::new(),
         ),
+    };
+
+    // The generated-file mode the *linters* pipeline uses. `--no-config` has no
+    // config to read it from, so it keeps guff's unfiltered behaviour.
+    let issues_generated: Option<String> = if no_config {
+        None
+    } else {
+        issues.generated.clone()
     };
 
     // --no-config: still apply empty/default filter (no path excludes from file).
@@ -781,6 +807,7 @@ fn load_run_config(
         out_formats,
         printer,
         formatters,
+        linters_generated: guff_fmt::GeneratedMode::parse(issues_generated.as_deref()),
         go_version,
         path_mode,
         path_prefix: output.path_prefix.clone(),
