@@ -21554,3 +21554,62 @@ workspace **278 スイート** / OSS pr tier **8 ターゲットすべて P=R=10
 
 台帳は **39/100 のまま**（41 定義）。k6 に残るのは
 nolintlint 7・modernize 2・contextcheck / makezero / asasalint / unparam 各 1 の **13 件**。
+
+### 2026-09-05（続き 172）— modernize の `fmtappendf` に**ガードが 2 つ**足りない。`[]byte` は underlying ではなく `types.Identical`、そして「空になり得る書式」は書き換えない
+
+k6 `cloudapi/logs_test.go:301` の guff-only 1 件:
+
+```go
+rawmsg := json.RawMessage(fmt.Sprintf(`{"streams":[...]}`, t2, t1, t0))
+```
+
+guff は「`[]byte(fmt.Sprintf...)` を `fmt.Appendf` に」と言い、上流は黙る。
+
+#### A. 変換先は `[]byte` **そのもの**
+
+```go
+if tv.IsType() && types.Identical(tv.Type, byteSliceType) {
+```
+
+`json.RawMessage` は underlying が `[]byte` の**名前付き型**で、`types.Identical`
+ではない。guff は `underlying()` を型と要素の両方に掛けていたので通していた。
+**alias は通る**（`type aliasBytes = []byte`）ので、`unalias_readonly` は残す。
+
+#### B. 書式が空になり得るなら書き換えない
+
+`[]byte(fmt.Sprintf(""))` は**空だが非 nil**、`fmt.Appendf(nil, "")` は **nil** ——
+上流は `Sprint` / `Sprintf` について `mayFormatEmpty` が真なら見送る。
+guff にはこのガードが無かった。
+
+**上流の条件をコードから読むと `%d` も見送られるはず**に見えたが、測ると出す。
+そこで**書式 18 通りを両ツールに通して線を引いた**:
+
+| 書式 | 上流 |
+|---|---|
+| `""` / `%s` / `%v` / `%x` / `%X` / `%s%s` / `%.5s` / `%10s` / `%[1]s` | **黙る** |
+| `%d` / `%q` / `%.5d` / `a%s` / `plain` / `%%%s` / `%v%d` | 出す |
+| `fmt.Sprint(x)`（非定数）/ `fmt.Sprintln(x)` | 出す |
+| `fmt.Sprint("")` / `fmt.Sprint()` | 黙る |
+
+読める規則は「**書式全体が operation で、動詞が全部 `s v x X`**」。
+`%%` は動詞が `%` なので外れ、`plain` は operation が 1 つも無いので
+（上流では `fmtstr.Parse` がエラーになり）出る。それを 60 行ほどで実装した。
+
+#### fixture
+
+`modernize/bad.go` に 1 形あるだけだったので、`fmtappendf.go` を足して
+**出る 11 形・黙る 15 形**を置き、行番号の完全一致で固定した。
+gofmt は整列だけなので当てた（数値リテラルは無い）。
+
+```
+k6: guff-only 13 → 12
+```
+
+残る modernize 1 件は `slicescontains`（`internal/js/modules/k6/grpc/client.go:445`）で、
+ループ本体が `return nil, errors.New(...)` と**2 値を返す**形。別原因なので次に回す。
+
+#### ゲート
+
+golden **213 完全一致**（再生成不要）/ fix **213** / reject **14** /
+workspace **278 スイート** / OSS pr tier **8 ターゲットすべて P=R=100%**。
+台帳は **39/100 のまま**（41 定義）。
