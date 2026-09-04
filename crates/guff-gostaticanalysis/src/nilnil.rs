@@ -120,23 +120,37 @@ fn is_zero_lit(e: &Expr) -> bool {
     parse_go_int(value).is_some_and(|v| v == 0)
 }
 
-/// Expand `ft.Results` fields into one type per return value (matching upstream).
-fn result_types(pass: &Pass<'_>, ft: &FuncType) -> Option<Vec<TypeId>> {
+/// One result type per **field** of `ft.Results`, not per return value.
+///
+/// Upstream indexes `ft.Results.List` directly and compares its length with
+/// `len(v.Results)`, so a grouped list is one entry however many names it
+/// carries: `func () (a, b error)` has *one* field against *two* returned
+/// expressions and is dropped before anything is checked, while
+/// `func () (a error, b error)` has two and is checked. Expanding the names —
+/// which is what guff did — reports the first form, and golangci-lint does not.
+fn result_field_types(pass: &Pass<'_>, ft: &FuncType) -> Option<Vec<TypeId>> {
     let results = ft.results.as_ref()?;
-    let mut out = Vec::new();
+    let mut out = Vec::with_capacity(results.list.len());
     for field in &results.list {
-        let ty_expr = field.ty.as_ref()?;
-        let typ = type_of(pass, ty_expr)?;
-        let n = if field.names.is_empty() {
-            1
-        } else {
-            field.names.len()
-        };
-        for _ in 0..n {
-            out.push(typ);
-        }
+        out.push(type_of(pass, field.ty.as_ref()?)?);
     }
     Some(out)
+}
+
+/// What the walk should do with a `return` after looking at it.
+///
+/// Upstream's callback is an `inspector.Nodes` visitor, so its `bool` is "look
+/// inside this node", and the `ReturnStmt` arm answers `false` on each of its
+/// rejections **and after reporting** — but falls through to `true` when it
+/// checked the return and found nothing. That last path is the one guff was
+/// missing: it stopped on every return it declined to report, and a function
+/// literal written inside such a return was never visited.
+enum Outcome {
+    /// Do not descend (upstream's `return false`).
+    Stop,
+    /// Nothing to report here, but keep walking the subtree.
+    Descend,
+    Report(u32, String),
 }
 
 fn check_return(
@@ -144,35 +158,40 @@ fn check_return(
     ft: &FuncType,
     ret: &ReturnStmt,
     only_two: bool,
-) -> Option<(u32, String)> {
-    let types = result_types(pass, ft)?;
-    let n = types.len();
-    if ret.results.len() != n || n < 2 {
-        return None;
+) -> Outcome {
+    if ret.results.len() < 2 {
+        return Outcome::Stop;
     }
-    if only_two && n != 2 {
-        return None;
+    let Some(types) = result_field_types(pass, ft) else {
+        return Outcome::Stop;
+    };
+    if types.len() != ret.results.len() {
+        return Outcome::Stop;
     }
-    let last = n - 1;
+    // `only-two` does not skip the function, it pins the error slot to index 1
+    // (upstream `lastIdx = 1`), so a third result is simply never looked at.
+    let last = if only_two { 1 } else { types.len() - 1 };
     if !implements_error(pass, types[last]) {
-        return None;
+        return Outcome::Stop;
     }
-    if !code::is_nil(pass, &ret.results[last]) {
-        return None;
-    }
+    // The error operand is part of the report condition, not a precondition:
+    // a `return v, err` with a non-nil `err` reports nothing *and keeps
+    // walking*, which is how a literal in `v` is reached.
+    let err_is_nil = code::is_nil(pass, &ret.results[last]);
     for i in 0..last {
         let Some(zv) = danger_zero(pass, types[i]) else {
             continue;
         };
-        let hit = match zv {
-            ZeroValue::Nil => code::is_nil(pass, &ret.results[i]),
-            ZeroValue::Zero => is_zero_lit(&ret.results[i]),
-        };
+        let hit = err_is_nil
+            && match zv {
+                ZeroValue::Nil => code::is_nil(pass, &ret.results[i]),
+                ZeroValue::Zero => is_zero_lit(&ret.results[i]),
+            };
         if hit {
-            return Some((ret.return_.0 as u32, NIL_NIL_MSG.into()));
+            return Outcome::Report(ret.return_.0 as u32, NIL_NIL_MSG.into());
         }
     }
-    None
+    Outcome::Descend
 }
 
 fn enclosing_func_type<'a>(stack: &[NodeRef<'a>]) -> Option<&'a FuncType> {
@@ -200,24 +219,33 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             let NodeRef::ReturnStmt(ret) = n else {
                 return true;
             };
-            // Upstream's callback `return false`s on **every** path out of the
-            // ReturnStmt arm — after reporting, and on each of the rejections
-            // before it — and `inspector.Nodes` reads that as "do not descend".
-            // So a `return` the rule declines to judge takes its whole subtree
-            // with it, function literals included:
+            // The `bool` is "look inside this return". Upstream says no on each
+            // rejection and after reporting, and yes when it checked the return
+            // and found nothing — so gitea's
             //
             //     return db.WithTx2(ctx, func(…) (*Comment, error) {
             //         return nil, nil          // never visited: the outer
             //     })                           // return has one result
             //
-            // gitea writes six of those and golangci-lint reports none of them.
+            // stays quiet (six of those, and golangci-lint reports none), while
+            // k6's
+            //
+            //     return promise(vu, func() (any, error) {
+            //         return nil, nil          // visited: the outer return was
+            //     }), nil                      // checked and cleared
+            //
+            // is reported. guff answered no to both.
             let Some(ft) = enclosing_func_type(stack) else {
                 return false;
             };
-            if let Some(diag) = check_return(pass, ft, ret, opts.only_two) {
-                pending.push(diag);
+            match check_return(pass, ft, ret, opts.only_two) {
+                Outcome::Report(pos, message) => {
+                    pending.push((pos, message));
+                    false
+                }
+                Outcome::Stop => false,
+                Outcome::Descend => true,
             }
-            false
         });
     }
 
