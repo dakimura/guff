@@ -20339,3 +20339,57 @@ Satisfies(x, Contains[*Map])   // T は x から、Contains の残る I は func
 台帳: ebpf を採用して **36 target**、`open 1 (gofmt=1)`。34/100 のまま。
 health-hunt の baseline には**行を足していない** —— 行を足すことは
 その劣化を恒久的に許すことなので（続き 96）、次の 2 つの作業で消す方が正しい。
+
+### 2026-09-04（続き 155）— 生成ファイル判定の 2 つの欠陥を**同時に**直した。`run` が見るのは `linters` 側の鍵で、既定は strict
+
+続き 154 で ebpf の guff-only 1 件として名前を付けた欠陥。**2 つあり、片方だけ直すと
+壊れる**ことが分かっていたので、両方を 1 回で直した。
+
+**上流の線を「どの鍵が効くか」まで測った**（読むだけで済ませず）。3 形 × 4 config:
+
+| config | BOM+`//` | `//` のみ | `/* */` のみ |
+|---|--:|--:|--:|
+| 既定（鍵なし） | 0 | 0 | **1** |
+| `linters.exclusions.generated: disable` | **1** | **1** | 1 |
+| `formatters.exclusions.generated: disable` | 0 | 0 | 1 |
+| `linters.exclusions.generated: lax` | 0 | 0 | **0** |
+
+**`formatters` 側の鍵は `run` では 1 件も動かさない。** `handleFormatterExclusions` が
+linters 側に畳むのは `paths` だけで `generated` は畳まないからで、
+`run` の formatter finding を濾しているのは `linters.exclusions.generated` ——
+`config.Loader.Load`（`loader.go:77`）が空欄を **strict** で埋める方である。
+（lax は `golangci-lint fmt` の既定で、そちらも上流の挙動。）
+
+**guff の欠陥 1: BOM。** `crates/guff-fmt/src/generated.rs::leading_comment_doc` は
+`str::trim` で行頭を落とすが、Rust の `White_Space` に **U+FEFF は入らない**。
+先頭 3 バイトが BOM だと 1 行目がコメントにも package 節にも見えず、走査がそこで
+止まって「生成ファイルではない」になる。上流は `parser.ParseFile` 経由で読むので
+`go/scanner.Init` の `if s.ch == bom { s.next() }` により**そもそも BOM を見ない**。
+`is_generated` の入口で 3 バイトを落として合わせた。
+
+**guff の欠陥 2: `run` で lax を使っていた。** gofmt の finding は
+`formatters.exclusions.generated`（未設定なら lax）を通っていた。
+`config.rs:1317` には上流のこの分岐が**すでに正しく書いてある**のに、
+`run` の formatter 経路だけが lax 側に繋がっていた。`build_formatter_run_config` に
+linters 側のモードを渡すようにした。
+
+**この 2 つは BOM + `/* */` の形で打ち消し合っていた** —— そこだけ両ツールが
+一致して見えるので、BOM だけ直すと**新しい乖離が生まれる**。続き 154 の表の 5 行目が
+それで、今回両方を同時に直した理由である。
+
+直したあとの再測定は **8 形 × 既定 config + 3 形 × 3 config = 17 通りすべて一致**。
+
+新しい golden case `generated-bom` は**期待値 1 件**であること自体が主張である:
+`bomline/`（BOM + `//` マーカー）は除外され、`blockmarker/`（`/* */` マーカー）は
+出る。0 件なら guff が lax に戻った印、2 件なら BOM がまた隠している印。
+`crates/guff-fmt/tests/generated_files.rs` は**その fixture の先頭 3 バイトが
+本当に BOM であること**も assert する —— BOM は目に見えないので、
+エディタが落とせば case はもう一方の複製に成り下がる。
+
+台帳: ebpf `open 1 → 0`。**35/100**（36 定義・open 1・cri-o は linux 専用）。
+golden 211/211、fix 210、reject 14、workspace テスト緑（終了コードで確認）、
+OSS pr tier 8/8 P=R=100%。
+
+**ebpf の health gate はまだ落ちている** —— `pin` の
+`cannot infer the remaining type arguments`（続き 154 の 2 つ目、Go 1.21 の
+reverse type inference）は別の作業で、baseline に行は足していない。

@@ -1,0 +1,20 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh generated-bom
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/generated-bom/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/blockmarker/a.go
++++ b/blockmarker/a.go
+@@ -7,6 +7,6 @@
+ // F is misformatted on purpose. The marker is in a block comment, which the
+ // strict mode `run` uses does not match, so the finding must survive.
+ func F() int {
+-	x :=  1
++	x := 1
+ 	return x
+ }
