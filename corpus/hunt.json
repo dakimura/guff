@@ -229,5 +229,13 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "15m"
+  },
+  {
+    "name": "k6",
+    "url": "https://github.com/grafana/k6.git",
+    "ref": "v2.2.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
   }
 ]
