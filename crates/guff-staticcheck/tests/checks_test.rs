@@ -99,10 +99,25 @@ fn sa1026_flags_unmarshalable_types() {
         &[("encoding/json", &json_stub)],
     );
     support::assert_well_typed(&pkg);
-    let messages = support::run_analyzer(sa1026::analyzer(), &pkg);
-    assert!(messages.len() >= 3, "{messages:?}");
-    assert!(messages.iter().any(|m| m.contains("chan int")));
-    assert!(messages.iter().any(|m| m.contains("func()")));
+    let mut messages = support::run_analyzer(sa1026::analyzer(), &pkg);
+    messages.sort();
+    // Counted and spelled out. `>= 3` let four different defects through at
+    // once: three interface short-circuits `newTypeEncoder` opens with, and
+    // the `types.RelativeTo` qualifier — which makes even the findings both
+    // tools agree on read differently.
+    assert_eq!(
+        messages,
+        vec![
+            "trying to marshal unsupported type chan int",
+            "trying to marshal unsupported type chan int, via x.C",
+            "trying to marshal unsupported type chan int, via x.Ch",
+            "trying to marshal unsupported type func(), via x.Run",
+            "trying to marshal unsupported type map[PlainKey][]int",
+            "trying to marshal unsupported type map[PlainKey][]int, via x.M",
+            "trying to marshal unsupported type map[PtrTextKey][]int",
+        ],
+        "{messages:?}"
+    );
 }
 
 #[test]

@@ -23248,3 +23248,104 @@ workspace **278 スイート** / OSS pr tier **8 ターゲットすべて P=R=10
 
 telegraf に残るのは **1 件**: staticcheck の
 `plugins/common/docker/mock/server.go:224`（moby の `PortMap` marshal）だけである。
+
+### 2026-09-05（続き 196）— SA1026 は「自分で marshal する型」を歩かない。guff は 4 つの短絡を**全部**持っていなかった
+
+telegraf の**最後の 1 件**、`plugins/common/docker/mock/server.go:224`。
+**guff の誤報である。**
+
+`json.Marshal(data)` の `data` は moby の inspect レスポンスで、その
+`HostConfig.PortBindings` が `network.PortMap` ——
+`map[Port][]PortBinding` の型エイリアスである。`Port` は **struct** だが
+**値レシーバの `MarshalText`** を持つので、`encoding/json` は map の鍵として
+扱える。guff はそれを見ていなかった。
+
+#### 上流の `newTypeEncoder` は 4 つの短絡で始まる
+
+```go
+if t.Implements(knowledge.Interfaces["encoding/json.Marshaler"]) { return nil }
+if !t.IsPtr() && t.CanAddr() && PtrTo(t).Implements(…json.Marshaler) { return nil }
+if t.Implements(knowledge.Interfaces["encoding.TextMarshaler"]) { return nil }
+if !t.IsPtr() && t.CanAddr() && PtrTo(t).Implements(…TextMarshaler) { return nil }
+```
+
+**guff にはこの 4 つが 1 つも無かった。** 自分で marshal する型の中に
+`chan` があれば、上流は歩かないので黙り、guff は撃っていた。
+
+`CanAddr` も効く。`fakejson.Marshal` は
+`fakereflect.TypeAndCanAddr{Type: v}` から始まる —— `canAddr` は**ゼロ値の
+false** である。だから**ポインタレシーバの `MarshalJSON` は、値で渡された
+引数を救わない**。`canAddr` が true になるのは `Elem()` がポインタ・スライスの
+ときだけで、配列は継承、**map は明示的に false**、構造体フィールドは継承する。
+guff は最上位を `true` で始めていた。
+
+そして `newMapEncoder` に `PtrTo` の変種は**無い**:
+
+```go
+switch t.Key().Type.Underlying().(type) {
+case *types.Basic:
+default:
+    if !t.Key().Implements(knowledge.Interfaces["encoding.TextMarshaler"]) {
+        return &UnsupportedTypeError{Type: t.Type, Path: stack}
+    }
+}
+```
+
+鍵の `MarshalText` がポインタレシーバなら、やはり findings である。
+
+#### メッセージも違っていた
+
+```go
+typ := types.TypeString(err.Type, types.RelativeTo(call.Parent.Pkg.Pkg))
+```
+
+`RelativeTo` は**解析中のパッケージの型を修飾なしで**書く。guff は常に
+import path を付けていたので、**両方が撃つ 1 件ですら文言が違い**、
+guff-only と golangci-only の両方に立つ形だった
+（[[equal-only-counts-mean-a-rendering-diff]] の署名）。telegraf では
+上流が撃たないので guff-only 1 件としてしか見えていない。
+
+#### 測った形（14 形）
+
+`crates/guff-staticcheck/tests/testdata/sa1026/{bad,ok}.go` に全部入れた。
+上流 7 件・guff 7 件で**桁まで一致**（修正前は guff 12 件）。
+
+| 形 | 上流 |
+|---|---|
+| `map[TextKey][]int`（値レシーバ `MarshalText`） | 黙る |
+| `map[PtrTextKey][]int`（ポインタレシーバ） | 撃つ |
+| `map[PlainKey][]int` | 撃つ |
+| `JSONer`（値レシーバ `MarshalJSON`、中に `chan`） | 黙る |
+| `*PtrJSONer` | 黙る |
+| `PtrJSONer`（値で渡す） | **撃つ**（`CanAddr` が false） |
+| `Texter`（値レシーバ `MarshalText`） | 黙る |
+| `chan` / `func()` / 素の struct 内の `chan` | 撃つ |
+
+単体テストは `>= 3` から**7 件の完全一致**にした —— その下限は
+**4 つの欠陥を同時に通していた**。
+
+golden 再生成は**キー集合で差分した: 消えたキー 0、追加 4**（`ok.go` に足した
+5 形は上流も 0 件）。
+
+```
+telegraf: guff-only 1 → 0
+```
+
+#### telegraf が閉じた
+
+`compat/hunt.sh --name telegraf` が **`[OK]` / unexpected 0**。guff-only に
+残る 3 行は続き 190 で allowlist に降ろした `time-equal` である。
+
+台帳は **39/100 → 40/100**（42 定義、**open 3 → 2**）。open は cri-o（linux 専用、
+この host では測れない）と k6（続き 174 の `exhaustive` 待ち）だけになった。
+
+一日で telegraf は **3493 → 0**。内訳は続き 186–196 の 11 本で、
+そのうち**設定を読んでいなかった**のが 4 本（`exported` 7 フラグ /
+gocritic の per-check settings 5 つ / `import-alias-naming` の 2 本の正規表現 /
+`gosec.config`）、**環境差**が 1 本、**上流の形を取り違えていた**のが 6 本である。
+
+#### ゲート
+
+golden **228**（`staticcheck-sa` を再生成 —— **消えたキー 0、追加 4**）/
+fix **228** / reject **14** / isolate **116 ターゲット** /
+workspace **278 スイート** / OSS pr tier **8 ターゲットすべて P=R=100%**。
