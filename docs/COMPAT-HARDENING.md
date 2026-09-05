@@ -22664,3 +22664,63 @@ OSS pr tier **8 ターゲットすべて P=R=100%**。台帳は **39/100**（42 
 telegraf に残るのは **15 件**: nolintlint 5（下の従属）、gocritic
 `unconditional-recursion` 3・`time-equal` 3、perfsprint 1、staticcheck 1、
 bodyclose 1、sqlclosecheck 1。
+
+### 2026-09-05（続き 189）— `unconditional-recursion`: **無名レシーバは「レシーバ無し」ではない**
+
+telegraf の残りのうち 3 件。すべて同じ形:
+
+```go
+func (*configurationOriginal) normalizeInputDatatype(dataType string) (string, error) {
+	switch dataType { … }
+	return normalizeInputDatatype(dataType)   // ← パッケージ関数。自分ではない
+}
+```
+
+上流は宣言と呼び出しの両方から `funcDesc{receiverID, id}` を作って比べる。
+レシーバの場合分けは **3 通り**ある:
+
+```go
+case n.Recv == nil:                    rec = nil
+case … len(n.Recv.List[0].Names) < 1:  rec = &ast.Ident{Name: "_"}
+default:                               rec = n.Recv.List[0].Names[0]
+```
+
+そして `equal` は nil と非 nil を**別物**として扱う:
+
+```go
+receiversAreEqual := (fd.receiverID == nil && other.receiverID == nil) ||
+	fd.receiverID != nil && other.receiverID != nil &&
+		fd.receiverID.Name == other.receiverID.Name
+```
+
+guff は真ん中を `None` に潰していたので、**無名レシーバのメソッドが自由関数に
+見え**、同名のパッケージ関数への裸の呼び出しが「自分を呼んでいる」に化けていた。
+
+**6 形**を両ツールで測って一致:
+
+| 形 | 上流 |
+|---|---|
+| 自由関数が自分を呼ぶ | **出す** |
+| 名前付きレシーバのメソッドが `r.m()` を呼ぶ | **出す** |
+| 名前付きレシーバのメソッドが同名のパッケージ関数を呼ぶ | 黙る |
+| **無名レシーバのメソッドが同名のパッケージ関数を呼ぶ** | 黙る（telegraf の形） |
+| 無名レシーバのメソッドが変数越しに `v.m()` を呼ぶ | 黙る |
+| 自由関数が同名のメソッドを `v.m()` で呼ぶ | 黙る |
+
+修正前の guff は 4 番目も出していた（stash して実測）。
+
+```
+telegraf: guff-only 15 → 12
+```
+
+#### ゲート
+
+golden **228**（`revive` を再生成 —— **消えたキー 0、追加 3**）/ fix **228** /
+reject **14** / isolate **116 ターゲット** / workspace **278 スイート** /
+OSS pr tier **8 ターゲットすべて P=R=100%**。台帳は **39/100**（42 定義、open 3）。
+
+telegraf に残るのは **12 件**: nolintlint 5、revive `time-equal` 3、
+perfsprint 1、staticcheck 1、bodyclose 1、sqlclosecheck 1。
+**`time-equal` の 3 件は §6 の「revive の importer 盲目には追従しない」そのもの**で、
+`GOROOT` を export して新しいキャッシュで走らせると**上流もこの 3 件を撃つ**
+（最小再現で実測、2026-09-05）。次のタスクで allowlist に降ろす。

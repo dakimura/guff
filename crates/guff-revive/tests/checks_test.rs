@@ -1889,3 +1889,57 @@ fn revive_import_alias_naming_reads_both_expressions() {
         ],
     );
 }
+
+/// An unnamed receiver is not "no receiver".
+///
+/// `unconditional-recursion` compares a `funcDesc` of (receiver ident,
+/// function ident), and the receiver has three cases:
+///
+/// ```text
+/// case n.Recv == nil:                    rec = nil
+/// case … len(n.Recv.List[0].Names) < 1:  rec = &ast.Ident{Name: "_"}
+/// default:                               rec = n.Recv.List[0].Names[0]
+/// ```
+///
+/// with `equal` treating nil and non-nil as different. guff collapsed the
+/// middle case into `None`, so a method with an unnamed receiver looked like a
+/// free function — and telegraf's
+/// `func (*configurationOriginal) normalizeInputDatatype(…)`, which ends with
+/// `return normalizeInputDatatype(dataType)` (the *package* function), was
+/// reported as unconditional recursion three times over.
+#[test]
+fn revive_unconditional_recursion_distinguishes_an_unnamed_receiver() {
+    let settings = guff_revive::Settings {
+        severity: None,
+        rules: Some(vec![guff_revive::RuleSetting {
+            name: "unconditional-recursion".into(),
+            arguments: Vec::new(),
+            disabled: false,
+            severity: None,
+            exclude: Vec::new(),
+        }]),
+        confidence: Some(0.0),
+        ignore_generated_header: false,
+        enable_default_rules: false,
+        enable_all_rules: false,
+        go: None,
+    };
+    let messages = guff_revive::with_settings(settings, || {
+        let pkg = support::typecheck_fixture_dir(
+            "revive",
+            "uncond_recursion",
+            "example.com/revive/uncondrecursion",
+        );
+        support::run_analyzer_at(revive(), &pkg)
+    });
+    // Only the free function calling itself and the named receiver calling
+    // itself. The four silent shapes are the point.
+    assert_eq!(
+        messages,
+        vec![
+            "32:31: unconditional-recursion: unconditional recursive call",
+            "35:46: unconditional-recursion: unconditional recursive call",
+        ],
+        "{messages:?}"
+    );
+}
