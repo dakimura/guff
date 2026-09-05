@@ -237,7 +237,11 @@ pub struct ReviveRuleSetting {
     /// Per-rule severity override (`warning`, `error`, …).
     #[serde(default)]
     pub severity: Option<String>,
-    // DEFERRED: exclude.
+    /// Per-rule file excludes. golangci passes this straight through to
+    /// revive's `lint.RuleConfig.Exclude`, which skips the rule for any file
+    /// the list matches.
+    #[serde(default)]
+    pub exclude: Vec<String>,
 }
 
 /// `linters.settings.dupl` / `linters-settings.dupl`.
@@ -3148,6 +3152,7 @@ impl ReviveSettings {
                         .collect(),
                     disabled: rule.disabled,
                     severity: rule.severity.clone(),
+                    exclude: rule.exclude.clone(),
                 })
                 .collect()
         });

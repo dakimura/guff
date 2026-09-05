@@ -194,6 +194,31 @@ pub fn rule_severity(pass: &Pass<'_>, name: &str) -> String {
 const SEVERITY_WARNING: &str = "warning";
 const SEVERITY_ERROR: &str = "error";
 
+/// Parsed `exclude` lists, keyed by rule name.
+///
+/// Built once per package: `ParseFileFilter` compiles a regular expression per
+/// entry, and telegraf's `exported` alone carries twenty-three of them.
+pub fn rule_excludes(pass: &Pass<'_>) -> std::collections::HashMap<String, Vec<crate::filefilter::FileFilter>> {
+    let mut out = std::collections::HashMap::new();
+    let settings = effective_settings(pass);
+    let Some(rules) = settings.rules.as_ref() else {
+        return out;
+    };
+    for rule in rules {
+        if rule.exclude.is_empty() {
+            continue;
+        }
+        out.insert(
+            rule.name.clone(),
+            rule.exclude
+                .iter()
+                .map(|e| crate::filefilter::FileFilter::parse(e))
+                .collect(),
+        );
+    }
+    out
+}
+
 pub fn rule_arguments(pass: &Pass<'_>, name: &str) -> Vec<RuleArgument> {
     effective_settings(pass)
         .rule(name)
@@ -446,6 +471,7 @@ pub fn extended_test_settings() -> Settings {
             arguments: extended_test_arguments(name),
             disabled: false,
             severity: None,
+            exclude: Vec::new(),
         });
     }
     for name in EXTENDED_RULES.iter().chain(AHEAD_OF_PIN_RULES) {
@@ -454,6 +480,7 @@ pub fn extended_test_settings() -> Settings {
             arguments: extended_test_arguments(name),
             disabled: false,
             severity: None,
+            exclude: Vec::new(),
         });
     }
     Settings {

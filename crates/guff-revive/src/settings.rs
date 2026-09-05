@@ -10,6 +10,16 @@ pub struct RuleSetting {
     pub disabled: bool,
     /// Per-rule severity override (`warning`, `error`, …).
     pub severity: Option<String>,
+    /// Per-rule file excludes (`lint.RuleConfig.Exclude`). A file the list
+    /// matches is skipped **for this rule only**:
+    ///
+    /// ```go
+    /// ruleConfig := rulesConfig[currentRule.Name()]
+    /// if ruleConfig.MustExclude(f.Name) { continue }
+    /// ```
+    ///
+    /// See [`crate::filefilter`] for the four pattern forms.
+    pub exclude: Vec<String>,
 }
 
 /// A single rule argument (string, int, list, or map).

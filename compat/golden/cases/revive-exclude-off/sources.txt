@@ -1,0 +1,9 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# The two `revive-exclude-*` cases share these files and differ only in whether
+# the `exported` rule carries an `exclude` list. Both files are in one package,
+# because the filter is per file and per rule — not per package.
+
+ruleexclude/kept.go       crates/guff-revive/tests/testdata/revive/rule_exclude/kept.go
+ruleexclude/excluded.go   crates/guff-revive/tests/testdata/revive/rule_exclude/excluded.go

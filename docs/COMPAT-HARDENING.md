@@ -22400,3 +22400,86 @@ OSS pr tier **8 ターゲットすべて P=R=100%**。台帳は **39/100 のま�
 
 k6 に残るのは **1 件**: `remote_object.go:83` の nolintlint で、親は続き 174 で
 測定済みの exhaustive のモジュール跨ぎ enum（whole-program モードが要る）。
+
+### 2026-09-05（続き 185）— corpus に telegraf を採用。3493 件の guff-only のうち **2748 件が 1 原因** —— revive の規則ごとの `exclude` が未実装だった
+
+k6 の残り 1 件は続き 174 の exhaustive 待ちなので、台帳を前に進めるために
+候補から次の 1 つを採った。
+
+**最初に harness を試して外した。** 候補表は `_config: ".golangci.yml"` と
+書いているが、それは **default branch** の話で、`ref` に書かれた `v2.28.2` は
+**旧 Drone のタグ**（`module github.com/drone/drone`、設定ファイル無し）である。
+corpus/README の除外表に 2026-09-02 付けで既に同じことが測って書いてあった ——
+**候補表と除外表を突き合わせてから clone する**のが正しい順序だった。
+
+次に小さいものから設定の実在を GitHub API で確認して（telegraf / karmada /
+tailscale / ollama / buildah / tetragon / celestia-node / kratos —— **8 つとも
+pin 版に v2 設定がある**）、いちばん設定の厚い **telegraf v1.39.3**（643 行）を採った。
+
+初回の hunt は **guff-only 3493 件**。内訳は
+`revive=3191, gocritic=290, nolintlint=8, その他 4`。
+
+**revive の 3191 件はほぼ 1 原因だった。** telegraf の設定は規則ごとに
+`exclude` を書く:
+
+```yaml
+- name: exported
+  exclude:
+    - "**/accumulator.go"
+    - "**/agent/**"
+    - "**/cmd/**"
+    …（23 行）
+- name: enforce-map-style
+  exclude: [ "TEST" ]
+```
+
+上流はこれを `lint.RuleConfig.Exclude` としてそのまま revive に渡し、
+`lint/file.go` が**規則が走る前に**ファイルごと飛ばす:
+
+```go
+ruleConfig := rulesConfig[currentRule.Name()]
+if ruleConfig.MustExclude(f.Name) { continue }
+```
+
+guff の設定構造体には `// DEFERRED: exclude.` と書いてあった。
+
+`lint/filefilter.go` を移植した。パターンは 4 形あり、`prepareRegexp` が
+試す順に:
+
+| 形 | 意味 |
+|---|---|
+| `""` | 何にも当たらない |
+| `*` / `~` | 全部に当たる |
+| `TEST` | `~_test\.go` に書き換え |
+| `~…` | 残りが正規表現 |
+| `*` を含む | glob。`**` は `[\s\S]*` で、**直後の `/` は `/?`** になる（だから `**/x.go` は裸の `x.go` にも当たる） |
+| それ以外 | ファイル全体のマスク（`\`→`/`、`.` を escape、両端 anchor） |
+
+照合される名前は golangci が revive に渡す**絶対パス**
+（`internal.GetGoFileNames`）で、実設定が軒並み `**/` で始まるのはそのためである。
+
+**golden case を 2 つ足した** —— 同じ 2 ファイルを共有し、`exported` に
+`exclude` を書くかどうかだけが違う。除外されるファイルには
+`bool-literal-in-expr` の finding も置いてある: **これが残ることが「規則ごと」の
+証拠**で、ファイルごと飛ばしているのと区別できる。
+
+```
+telegraf: guff-only 3493 → 745
+```
+
+#### 残り（次のタスク）
+
+| 原因 | 件数 |
+|---|--:|
+| revive `exported` の `disable-checks-on-types` 引数が未実装 | 312 |
+| gocritic `hugeParam` / `rangeValCopy` の閾値設定 | 290 |
+| revive `import-alias-naming` の正規表現引数が読まれていない | 128 |
+| nolintlint（上の従属） | 5 |
+| その他 | 10 |
+
+#### ゲート
+
+golden **220**（新規 2 case、既存 218 は無変更）/ fix **220** / reject **14** /
+isolate **116 ターゲット** / workspace **278 スイート** /
+OSS pr tier **8 ターゲットすべて P=R=100%**。
+台帳は **39/100**（**42 定義**、open 3 —— cri-o / k6 / telegraf）。

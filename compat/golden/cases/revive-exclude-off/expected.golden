@@ -1,0 +1,11 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh revive-exclude-off
+# Produced by running golangci-lint on compat/golden/cases/revive-exclude-off/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+ruleexclude/excluded.go:3:1:revive:warning:exported: comment on exported type Excluded should be of the form "Excluded ..." (with optional leading article)
+ruleexclude/excluded.go:12:9:revive:warning:bool-literal-in-expr: omit Boolean literal in expression
+ruleexclude/kept.go:17:6:revive:warning:exported: exported type Kept should have comment or be unexported

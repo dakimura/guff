@@ -1,0 +1,25 @@
+# Golden case: `exported` with no `exclude` list.
+#
+# The baseline for `revive-exclude-on`. `bool-literal-in-expr` is enabled
+# alongside so the excluded file still has something to say — an exclude list is
+# per rule, and a case where the excluded file goes silent entirely could not
+# tell that apart from "the file was skipped".
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      rules:
+        - name: exported
+        - name: bool-literal-in-expr
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

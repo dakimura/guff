@@ -41,9 +41,29 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let directives = crate::directives::collect(pass, &enabled_rules);
     let failures = crate::directives::filter(pass, &directives, failures);
     crate::util::clear_reparse_cache();
+    // `lint/file.go` skips a rule for a file its `exclude` list matches, before
+    // the rule ever runs:
+    //
+    //     ruleConfig := rulesConfig[currentRule.Name()]
+    //     if ruleConfig.MustExclude(f.Name) { continue }
+    //
+    // guff runs a rule over the package and filters here instead, which is the
+    // same set as long as the rule's answer for a file does not depend on the
+    // files around it. `f.Name` is the absolute path golangci-lint hands
+    // revive (`internal.GetGoFileNames`), so that is what the patterns see —
+    // telegraf's are all `**/…` for exactly that reason.
+    let excludes = config::rule_excludes(pass);
     for failure in failures {
         if failure.confidence() < settings.confidence_threshold() {
             continue;
+        }
+        if let Some(filters) = excludes.get(failure.rule) {
+            let fpos = guff::position::Pos(i64::from(failure.pos));
+            if let Some(file) = pass.fset().file(fpos) {
+                if crate::filefilter::must_exclude(filters, file.name()) {
+                    continue;
+                }
+            }
         }
         if settings.ignore_generated_header && code::is_generated_at(pass, failure.pos) {
             continue;

@@ -10,6 +10,7 @@ mod astfmt;
 mod config;
 mod directives;
 mod failure;
+pub mod filefilter;
 mod ifelse;
 mod names;
 mod revive;
