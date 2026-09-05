@@ -23349,3 +23349,95 @@ gocritic の per-check settings 5 つ / `import-alias-naming` の 2 本の正規
 golden **228**（`staticcheck-sa` を再生成 —— **消えたキー 0、追加 4**）/
 fix **228** / reject **14** / isolate **116 ターゲット** /
 workspace **278 スイート** / OSS pr tier **8 ターゲットすべて P=R=100%**。
+
+### 2026-09-05（続き 198）— `copy` の**特例は core type を訊く前に走る**。型パラメータ 1 つで fiber の 1 パッケージが死んでいた
+
+続き 197 で数えた「型検査がパッケージを丸ごと落とす」4 件のうち 1 つ目、
+fiber の `internal/logtemplate`。
+
+```go
+func ScrubControls[S ~string | ~[]byte](s S, idx int) []byte {
+	scrubbed := make([]byte, len(s))
+	copy(scrubbed, s)          // ← guff: invalid copy: source s is not a slice or string
+	…
+```
+
+#### 上流には**先に走る特例**がある
+
+`go/types` の `_Copy` は core type を訊く前にこれをやる:
+
+```go
+y := args[1]
+var special bool
+if ok, _ := x.assignableTo(check, NewSlice(universeByte), nil); ok {
+	special = true
+	for _, u := range typeset(y.typ) {
+		if s, _ := u.(*Slice); s != nil && Identical(s.elem, universeByte) {
+		} else if u != nil && isString(u) {
+		} else { special = false; break }
+	}
+}
+```
+
+**宛先が `[]byte` に代入可能で、source の型集合が丸ごと `[]byte` か string**
+なら、それだけで通る。core type は要らない ——
+`~string | ~[]byte` に core type は無いので、訊いた時点で負ける。
+
+特例に落ちなかったときだけ一般の道に進む:
+
+```go
+dstE, err := sliceElem(x); if err != nil { … }
+srcE, err := sliceElem(y)
+if err != nil {
+	if !allString(y.typ) { … }
+	srcE = universeByte
+}
+if !Identical(dstE, srcE) { … }
+```
+
+guff は具体型の `copy([]byte, string)` しか知らず、`under(S)` を見ていた。
+両方の道を移植した。
+
+#### 11 形を **Go ツールチェイン自身の判定**と突き合わせた
+
+`go vet` は**最初のエラーで止まる**ので、1 ファイルに並べると 1 形しか測れず
+残り 10 形が隠れる。**1 形 1 パッケージ**にして `go build` を掛けた。
+
+| | 形 | Go |
+|---|---|---|
+| s01 | `[S ~string\|~[]byte]` → `[]byte` | OK |
+| s02 | `[S ~string]` → `[]byte` | OK |
+| s03 | `[S ~[]byte]` → `[]byte` | OK |
+| s04 | `string` → `[]byte` | OK |
+| s05 | 宛先が型パラメータ `[S ~[]byte]` | OK |
+| s11 | `copy([]byte, S)` | OK |
+| s06 | `copy([]int, S)`（S=ByteStr） | `argument must be a slice; have s` |
+| s07 | `[S ~string\|~[]int]` | `argument must be a slice; have s` |
+| s08 | `[S ~[]byte\|~[]int]` | `mismatched slice element types byte and int in s` |
+| s09 | `copy([]int, string)` | `arguments … have different element types int and byte` |
+| s10 | `copy(int, []int)` | `argument must be a slice; have d` |
+
+**11 形すべて、可否も位置も一致**した。`crates/guff-types/tests/check_files.rs`
+に等値アサーションで入れてある。
+
+```
+fiber: ill_typed 1 → 0
+```
+
+#### まだ違う 2 つ（この修正とは無関係・既存）
+
+guff のエラー文は Go と 2 点で違う: operand の `(variable of type …)` が
+無いことと、`byte` を `uint8` と書くこと。どちらも guff の operand/type
+printer 側の話で、**今は compat に出ない** —— guff は ill-typed な
+パッケージを findings にせず捨てるからである。出るようになったら直す。
+
+`compat/hunt.sh --name fiber` は **health 0**（以前は ill-typed 1）。
+取り戻したパッケージ自体の findings は両ツールとも 0 なので**数字は動かない**
+——動いたのは「解析されていなかったものが解析されるようになった」ことである。
+残る ill-typed は scaleway-cli / ebpf / karmada の 3 つ。
+
+#### ゲート
+
+golden **228** / fix **228** / reject **14** / isolate **116 ターゲット** /
+workspace **278 スイート** / OSS pr tier **8 ターゲットすべて P=R=100%**。
+台帳は **40/100**（42 定義、open 2）—— karmada の採用は #281 が保留中。
