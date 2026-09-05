@@ -9117,6 +9117,42 @@ fn wastedassign_flags_unused_local_assignments() {
     );
 }
 
+/// `_` denotes no location: go/ssa's `addr` answers with its `blank` lvalue
+/// and allocates nothing, so a store through it is not an assignment anyone
+/// could read. guff's `Builder::address` had no such arm, and the one caller
+/// that did not check blank itself was the `select` comm clause — so
+/// `case _, ok := <-ch:` built a local named `_`, stored into it, and
+/// wastedassign reported the store. celestia-node `blob/service_test.go` had
+/// two of them, and only a `select` with a second case reaches that path.
+///
+/// The fixture holds seven blank shapes that must stay silent and one control
+/// that must not: a *named* receive variable in the same two-case `select`,
+/// overwritten before it is read. Without the control, deleting wastedassign's
+/// `select` handling entirely would pass this test.
+#[test]
+fn wastedassign_ignores_stores_to_the_blank_identifier() {
+    let pkg = support::typecheck_fixture("wastedassign", "example.com/wastedassign", "blank.go");
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, String)> = support::run_analyzer_diagnostics(wastedassign(), &pkg)
+        .into_iter()
+        .map(|d| {
+            (
+                fset.position(guff::position::Pos(d.pos as i64)).line,
+                d.message,
+            )
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            (75, "assigned to v, but reassigned without using the value".to_string()),
+            (77, "assigned to v, but reassigned without using the value".to_string()),
+        ],
+        "{got:?}"
+    );
+}
+
 /// A cell whose address is taken is heap-allocated by go/ssa and dropped from
 /// `Function.Locals` in `finishBody`; wastedassign only walks `Locals`, so no
 /// store to such a cell is a finding however dead it looks. syncthing

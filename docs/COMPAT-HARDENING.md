@@ -25160,3 +25160,81 @@ workspace 278 ok 0 failed。
 `case _, ok := <-ch:` で `_` の local を作って store している）と
 `nolintlint` 2（撃たなかった linter の影 —— SA1019 の deprecated
 package import と gocritic `exitAfterDefer` の `select` 未走査）。
+
+### 2026-09-06（続き 220）— `_` は場所ではない。`Builder::address` に go/ssa の `blank` の枝が無く、`select` だけがそれを踏んでいた
+
+`close celestia-node` の残りのうち `wastedassign` 2 件。どちらも
+`blob/service_test.go` の
+
+```go
+select {
+case _, ok := <-subCh:
+	…
+case <-ctx.Done():
+	…
+}
+```
+
+に対する「assigned to `_`, but never used afterwards」。上流は黙る。
+
+#### 最小再現が 1 回目は再現しなかった
+
+最初に書いた再現は**1 ケースだけの `select`** で、両ツールとも 0 件だった。
+プロトコルどおり「再現しないなら形のせいではない」と考えて celestia の
+現物を読み直したら、**`select` に 2 つ目の case がある**。足したら出た:
+
+```
+guff 3 件 / golangci 0 件
+```
+
+1 ケースの `select` は縮退して素の receive に落ちるので、問題の経路に
+届かない。**ケースを 1 つ足すかどうかが分かれ目**だった。
+
+#### 原因
+
+go/ssa の `builder.addr` は先頭がこうなっている:
+
+```go
+func (b *builder) addr(fn *Function, e ast.Expr, escaping bool) lvalue {
+	switch e := e.(type) {
+	case *ast.Ident:
+		if isBlankIdent(e) {
+			return blank{}
+		}
+```
+
+`_` は**場所ではない**。store は捨てられ、local は作られない。
+
+guff の `Builder::address` にはこの枝が無く、代わりに**呼ぶ側**が
+`is_blank_ident` を見ていた。`assign_stmt` は見ていたが、
+**`select` の comm clause は見ていなかった** —— なので
+`case _, ok := <-ch:` が `_` という名前の local を作って store し、
+`wastedassign` が「読まれない代入」として報告していた。
+
+枝を `address` 側に足した。呼ぶ側が忘れられる場所ではなくなる。
+
+#### 測定
+
+fixture `wastedassign/blank.go` は**黙るべき 7 形**（2 ケース select ×
+ループ / 非ループ / クロージャ内、1 ケース select、素の `_, ok := <-ch`、
+`for _, v := range m`、`_, ok := x.(int)`）と、**撃つべき 1 形**:
+同じ 2 ケース `select` の中の**名前付き**受信変数を、読む前に上書きする。
+これが無いと「`select` の中を見るのをやめた」修正でも緑になる。
+両ツールで**同じ 2 件のみ**（75 行目と 77 行目）。
+
+golden 再生成は**追加 2・削除 0**（追加はその control）。
+単体テストは `assert_eq!` で 2 タプルを等値比較。
+
+- **celestia-node: guff=58 → 56、P=93.1% → 96.4%**、R は 100.0% のまま。
+- golden 230／fix 230／reject 14／oss pr 8 ターゲット P=R=100%／
+  isolate wastedassign P=R=100%／workspace 278 ok 0 failed。
+  SSA の共有部分を触ったが何も動かなかった。
+
+```
+台帳: 43/100 at zero（47 定義、open 1＝celestia-node 2、unmeasured 3）
+```
+
+残り 2 件はどちらも `nolintlint`「directive is unused」＝**撃たなかった
+linter の影**: `//nolint:staticcheck` は SA1019（deprecated な
+package import）、`//nolint:gocritic` は `exitAfterDefer`（guff の walk が
+`select` / type switch / labeled statement に入らない）。

@@ -1,2 +1,5 @@
 # The isolate fixture, so the two tiers cannot drift.
 bad.go  compat/isolate/fixtures/wastedassign/bad.go
+# Stores through `_`: no location, so never a finding. The control in the
+# same file is a named receive variable in the same two-case `select`.
+blank/blank.go  crates/guff-style/tests/testdata/wastedassign/blank.go

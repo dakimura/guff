@@ -761,6 +761,18 @@ impl<'a> Builder<'a> {
     /// DEFERRED vs go/ssa: `CompositeLit`, `IndexExpr`, and `StarExpr` lvalues.
     pub fn address(&mut self, e: &Expr, escaping: bool) -> Box<dyn LValue> {
         match e {
+            // `_` denotes no location: a store through it is discarded and
+            // nothing is allocated for it. (Go: `builder.addr` opens with
+            // `if isBlankIdent(e) { return blank{} }`.)
+            //
+            // Without this arm every caller had to remember the check itself.
+            // `assign_stmt` did; the `select` comm clause did not, so
+            // `case _, ok := <-ch:` built a real local named `_` and stored
+            // into it — which `wastedassign` then reported as an assignment
+            // that is never read. celestia-node has two (and only when the
+            // `select` has a second case; a one-case `select` lowers to a
+            // plain receive and never reaches here).
+            Expr::Ident(id) if id.name == "_" => Box::new(crate::lvalue::Blank),
             Expr::Ident(id) => {
                 let v = self.ident(id);
                 // `&x` on a local: the cell may outlive this activation.
