@@ -250,6 +250,14 @@ impl<'a> Builder<'a> {
             InstrData::Call(Call { call: c, typ }),
             e.lparen,
         );
+        // A static call to a function `ctrlflow` proved cannot return is
+        // followed by a `Panic`, and the rest of this block belongs to a new,
+        // unreachable one. (Go: the second half of `emitCall`.)
+        if let Some(next) =
+            crate::emit::emit_no_return_panic(self.prog, self.func_id, block, id, e.lparen)
+        {
+            self.set_block(Some(next));
+        }
         Value::Instr(id)
     }
 

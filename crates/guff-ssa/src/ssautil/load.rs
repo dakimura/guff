@@ -82,12 +82,16 @@ pub fn build_package_from_loaded(
 /// Builds SSA from a snapshot of type-checker artifacts without mutating the
 /// loaded [`guff_packages::Package`].
 ///
-/// Used by the `buildir` analysis pass.
+/// Used by the `buildir` analysis pass. `no_return` is the set of function
+/// objects that cannot return normally (`ctrlflow`'s answer); pass an empty
+/// set where the caller has no such analysis, which leaves the dead code
+/// after `log.Fatal(…)` in the IR.
 pub fn build_package_for_analysis(
     artifacts: TypecheckArtifacts,
     files: &[File],
     fset: Arc<FileSet>,
     mode: BuilderMode,
+    no_return: std::collections::HashSet<guff_types::ObjectId>,
 ) -> Result<BuildPackageResult, BuildFromLoadedError> {
     if files.is_empty() {
         return Err(BuildFromLoadedError::MissingSyntax);
@@ -101,6 +105,10 @@ pub fn build_package_for_analysis(
         artifacts.packages,
     );
     prog.set_fset(fset);
+    // Must be installed before `build_package`: `emit_call` reads it as each
+    // call is emitted. (Go: `buildssa` calls `prog.SetNoReturn` right after
+    // `ssa.NewProgram`, before `ssapkg.Build()`.)
+    prog.set_no_return(no_return.into_iter().collect());
 
     create_import_packages(&mut prog, type_pkg);
 

@@ -17,6 +17,7 @@ use guff_types::PackageId as TypePackageId;
 
 use crate::analyzer::{AnalysisResult, Analyzer, RunError, RunFn};
 use crate::pass::Pass;
+use crate::passes::facts::ctrlflow;
 use crate::passes::inspect;
 
 /// SSA intermediate representation for the current package.
@@ -228,7 +229,15 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     } else {
         BuilderMode::default()
     };
-    let built = build_package_for_analysis(artifacts, pass.files(), fset, mode)
+    // go/ssa drops the statements after a call that cannot return, and every
+    // linter downstream of `buildssa` sees the IR that way. `ctrlflow` is what
+    // knows which calls those are. (Go: `buildssa`'s
+    // `prog.SetNoReturn(cfgs.NoReturn)`.)
+    let no_return = pass
+        .result_of::<ctrlflow::CtrlFlowResult>(ctrlflow::analyzer())
+        .map(|r| r.no_return_objects().clone())
+        .unwrap_or_default();
+    let built = build_package_for_analysis(artifacts, pass.files(), fset, mode, no_return)
         .map_err(|e| format!("buildir: {e}"))?;
     if let Some(t0) = t0 {
         let el = t0.elapsed().as_secs_f64();
@@ -325,7 +334,7 @@ fn buildir_analyzer_impl() -> Analyzer {
         // contextcheck is enabled). Without this, helm's ill-typed pkgs are
         // skipped before contextcheck can see SSA.
         run_despite_errors: true,
-        requires: vec![inspect::analyzer()],
+        requires: vec![inspect::analyzer(), ctrlflow::analyzer()],
         fact_types: vec![],
     }
 }

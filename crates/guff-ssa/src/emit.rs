@@ -6,7 +6,7 @@ use crate::function::Function;
 use crate::ids::{BlockId, FuncId, InstrId};
 use crate::instr::{
     Alloc, Call, CallCommon, ChangeInterface, ChangeType, Convert, Extract, Field, FieldAddr,
-    IndexAddr, InstrData, MakeInterface, Return, Store, TypeAssert, UnOp,
+    IndexAddr, InstrData, MakeInterface, Panic, Return, Store, TypeAssert, UnOp,
 };
 use crate::program::{value_type_of, Program};
 use crate::value::Value;
@@ -435,12 +435,106 @@ pub fn emit_type_test(
     Value::Instr(id)
 }
 
+/// The `*Function` a call statically resolves to, or `None` for a dynamic
+/// call, an interface invoke, or a builtin. (Go: `CallCommon.StaticCallee`.)
+pub fn static_callee(prog: &Program, f: &Function, common: &CallCommon) -> Option<FuncId> {
+    match common.value {
+        Value::Function(fid) => Some(fid),
+        Value::Instr(iid) => match f.instrs.get(iid) {
+            InstrData::MakeClosure(mc) => Some(mc.fn_),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The operand go/ssa panics with behind a no-return call: the string
+/// `"noreturn"` boxed into `any`. (Go: `vNoReturn`, converted to `tEface`.)
+///
+/// Falls back to the bare string constant when the universe's `any` is not in
+/// the arena, which only happens for hand-built test programs; nothing reads
+/// this operand's type, and leaving the `Panic` out entirely would keep the
+/// dead code alive.
+fn no_return_operand(prog: &mut Program, fid: FuncId, block: BlockId) -> Value {
+    let string_ty = prog.basic_type(guff_types::BasicKind::String);
+    let v = prog.emit_const(
+        Some(guff_constant::Value::String(std::sync::Arc::new(b"noreturn".to_vec()))),
+        string_ty,
+    );
+    match universe_any(prog) {
+        Some(any) => emit_conv(prog, fid, block, v, any),
+        None => v,
+    }
+}
+
+/// The universe's `any` (the predeclared alias for `interface{}`).
+fn universe_any(prog: &Program) -> Option<TypeId> {
+    for oid in prog.object_arena.ids() {
+        let guff_types::ObjectData::TypeName(tn) = prog.object_arena.get(oid) else {
+            continue;
+        };
+        if tn.name() != "any" || oid.pkg(&prog.object_arena).is_some() {
+            continue;
+        }
+        return tn.typ();
+    }
+    None
+}
+
+/// If `common` statically calls a function the `ctrlflow` analysis proved
+/// cannot return, emit the `Panic` that go/ssa puts behind such a call and
+/// return the fresh `unreachable.noreturn` block the caller must continue in.
+/// Returns `None` when the call can return, leaving the caller's block alone.
+///
+/// `blockopt::delete_unreachable_blocks` then takes that block — which has no
+/// predecessors — and everything it dominates away, which is how the
+/// statements after `log.Fatal(…)` stop existing.
+///
+/// (Go: the second half of `emitCall`.)
+pub fn emit_no_return_panic(
+    prog: &mut Program,
+    fid: FuncId,
+    block: BlockId,
+    call: InstrId,
+    pos: Pos,
+) -> Option<BlockId> {
+    let f = prog.functions.get(fid);
+    let InstrData::Call(Call { call, .. }) = f.instrs.get(call) else {
+        return None;
+    };
+    let callee = static_callee(prog, f, call)?;
+    let obj = prog.functions.get(callee).object?;
+    if !prog.is_no_return(obj) {
+        return None;
+    }
+    let x = no_return_operand(prog, fid, block);
+    emit_with_pos(
+        prog.functions.get_mut(fid),
+        block,
+        InstrData::Panic(Panic { x }),
+        pos,
+    );
+    Some(new_block(
+        prog.functions.get_mut(fid),
+        fid,
+        "unreachable.noreturn",
+    ))
+}
+
+/// Appends a fresh, unattached basic block to `f`. (Go: `Function.newBasicBlock`.)
+fn new_block(f: &mut Function, fid: FuncId, comment: &str) -> BlockId {
+    let index = f.blocks.len() as i32;
+    let mut b = crate::block::BasicBlock::new(index, fid);
+    b.comment = comment.to_string();
+    f.blocks.alloc(b)
+}
+
 /// emit_call emits a call instruction with the given call components and result
 /// type, returning the call's result value. (Go: `emitCall`)
 ///
-/// DEFERRED vs. go/ssa: the "no-return callee" handling (inserting a `Panic`
-/// and an unreachable block after a call to a function known never to return)
-/// is omitted — `Program.noReturn` is not yet modelled.
+/// The no-return handling lives in [`emit_no_return_panic`], which the callers
+/// that own a "current block" invoke after this: go/ssa's `emitCall` moves
+/// `fn.currentBlock`, and this function has no builder to move.
 pub fn emit_call(
     prog: &mut Program,
     fid: FuncId,

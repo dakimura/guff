@@ -75,6 +75,9 @@ lostcancel/paths/paths.go                          crates/guff-govet/tests/testd
 nilfunc/bad/bad.go                                 crates/guff-govet/tests/testdata/nilfunc/bad.go
 nilfunc/ok/ok.go                                   crates/guff-govet/tests/testdata/nilfunc/ok.go
 nilness/bad/bad.go                                 crates/guff-govet/tests/testdata/nilness/bad.go
+# The IR cut behind a call that cannot return; needs the real `log`, so it
+# is a package of its own rather than part of nilness/bad.
+nilness/noreturn/noreturn.go                       crates/guff-govet/tests/testdata/nilness/noreturn.go
 printf/argcount/argcount.go                        crates/guff-govet/tests/testdata/printf/argcount.go
 printf/escapes/escapes.go                          crates/guff-govet/tests/testdata/printf/escapes.go
 printf/indexes/indexes.go                          crates/guff-govet/tests/testdata/printf/indexes.go

@@ -53,6 +53,7 @@ pub(crate) fn check_ssa_analyzers(
         files,
         pass.fset().clone(),
         BuilderMode::GLOBAL_DEBUG,
+        Default::default(),
     ) else {
         return;
     };

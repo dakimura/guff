@@ -60,7 +60,7 @@
     "caddy": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260905T181642Z",
+      "at": "20260905T201506Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -76,7 +76,7 @@
     "cobra": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260905T181642Z",
+      "at": "20260905T201506Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -162,7 +162,7 @@
     "gin": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260905T181642Z",
+      "at": "20260905T201506Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -178,7 +178,7 @@
     "go-client": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260905T181642Z",
+      "at": "20260905T201506Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -202,7 +202,7 @@
     "helm": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260905T181642Z",
+      "at": "20260905T201506Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -226,7 +226,7 @@
     "k9s": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260905T181642Z",
+      "at": "20260905T201506Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -322,12 +322,12 @@
     "tailscale": {
       "tier": "hunt",
       "state": "open",
-      "at": "20260905T181848Z",
-      "open": 4,
+      "at": "20260905T201713Z",
+      "open": 1,
       "guff_only": 0,
-      "gcl_only": 4,
+      "gcl_only": 1,
       "by_linter": {
-        "govet": 4
+        "govet": 1
       }
     },
     "telegraf": {

@@ -24732,3 +24732,87 @@ if err != nil {   // impossible condition: nil != nil
 ```
 台帳: 42/100 at zero（45 定義、open 1＝tailscale govet 4、unmeasured 2）
 ```
+
+### 2026-09-06（続き 215）— SSA ビルダに no-return を配線した。「`log.Fatalf` の後ろ」が **IR から消える**
+
+続き 214 で tailscale の残り 3 件（`govet:nilness`）の原因を特定した:
+nilness のバグではなく、**`emit_call` が no-return を読んでいない**こと。
+上流の `buildssa` は
+
+```go
+prog.SetNoReturn(cfgs.NoReturn)
+```
+
+を呼び、`emitCall` が no-return な**静的**呼び出しの後ろに `Panic` を置いて
+`unreachable.noreturn` ブロックを始める。そのブロックは先行を持たないので
+`deleteUnreachableBlocks` が丸ごと落とす —— つまり
+**`log.Fatal(…)` の後の文は、どの linter が見るより前に存在しなくなる**。
+
+#### 配線
+
+- `Program` に `no_return: HashSet<ObjectId>` と `set_no_return` /
+  `is_no_return`（上流の `Program.noReturn` は `func(*types.Func) bool` だが、
+  guff 側はどちらにせよ fact の引き当てなので集合で足りる）。
+- `build_package_for_analysis` が集合を受け取り、**`build_package` より前に**
+  差し込む（上流も `NewProgram` の直後・`Build()` の前）。
+- `buildir` が `ctrlflow` を `requires` に足して `CtrlFlowResult` から集合を
+  もらう。判定そのものは前からあった —— **読む側が無かっただけ**。
+- `emit::emit_no_return_panic` が `Panic("noreturn" を any に箱詰め)` を出して
+  新しいブロックを返し、`Builder::emit_call` がそれを現在ブロックにする
+  （上流の `emitCall` は `fn.currentBlock` を動かすが、guff の `emit_call` は
+  ビルダを持たないので分けた）。
+- `static_callee` は `Value::Function` と `MakeClosure` の 2 形
+  （上流 `CallCommon.StaticCallee` と同じ）。
+
+`ctrlflow` の doc が「配線は独自の測定を伴う別タスク」と書いていたとおり、
+影響範囲は **buildir を使う全解析器**（staticcheck 137 本 / unused / unparam /
+nilness / contextcheck …）である。
+
+#### 測定
+
+最小再現（続き 214 で作ったもの）:
+
+```go
+v, err := g()
+if err != nil {
+	log.Fatalf("boom: %v", err)
+}
+_ = v
+if err != nil {   // impossible condition: nil != nil
+```
+
+配線前は golangci 1 / guff 0、配線後は **両方 1**。返る呼び出し
+（`log.Println`）に変えると両方 0 のまま。
+
+**tailscale: guff=43 golangci=43 both=39（P=R=90.7%）→ guff=46 golangci=43
+both=42（P=91.3% R=97.7%）**。gcl-only は 4 → 1（残りは `govet:inline` 1 件）。
+guff-only の 4 件は続き 209 で allowlist に入れた `revive:time-equal` のままで、
+**新しい guff-only は 1 件も出ていない**。
+
+全ゲート:
+
+- golden 230 exact（govet ケースの再生成はキー集合差分で**追加 1・削除 0**）
+- fix 230 / reject 14
+- oss `--tier pr` 8 ターゲット 全部 P=R=100%
+- isolate govet P=R=100%
+- workspace 278 ok / 0 failed
+
+fixture は `nilness/noreturn.go`。`log` が要るので `nilness/bad.go` とは別
+パッケージにした（golden の source としても別ディレクトリ）。**黙るべき 2 形**
+も入れてある —— 返る呼び出しの同型（**全部の呼び出しの後で切る実装でも
+通ってしまう**のを防ぐ）と、分岐の中で abort したあとの到達可能な使用。
+
+#### 残っている stand-in 3 つ（次のタスク）
+
+この切断が無かったから置かれていた名前ベースの代用が、まだ 3 箇所ある:
+
+| 場所 | 何をしているか |
+|---|---|
+| `sa5011.rs` | `is_package_abort_call`（`os.Exit` / `log.Fatal*` / `runtime.Goexit`）と `is_testing_abort_call` でブロックを「落ちない」とみなす |
+| `lostcancel.rs` | 同じ名前ベースの中断リスト |
+| `unparam.rs` | `ctrlflow::DeadCode` を AST 上で引いて、使用・呼び出し・return を数えない |
+
+**全ゲートが緑のまま**なので今は二重に切っても害は出ていないが、
+理由が消えた代用が残るのは続き 211 と同じ形（[[deferral-notes-outlive-their-reasons]]）。
+外すのは 1 つずつ、それぞれ測定を付けて別タスクにする —— 外して何かが
+動いたなら、その代用は**別のもの**を支えていたということになる。

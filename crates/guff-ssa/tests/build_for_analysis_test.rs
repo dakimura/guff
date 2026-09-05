@@ -38,6 +38,7 @@ fn build_package_for_analysis_leaves_package_intact() {
         &files,
         fset_arc,
         BuilderMode::SANITY_CHECK_FUNCTIONS,
+        Default::default(),
     )
     .expect("build");
 
