@@ -2101,3 +2101,89 @@ fn nil_comparison_against_a_type_parameter_matches_the_toolchain() {
         }
     }
 }
+
+/// A type parameter that appears **only inside another parameter's
+/// constraint** is inferred by unifying the constraint's methods.
+///
+/// ```go
+/// func SliceOfViews[T ViewCloner[T, V], V StructView[T]](x []T) SliceView[T, V]
+/// ```
+///
+/// `V` is in no parameter type, so nothing the arguments say can reach it.
+/// Upstream's `infer` step 2 runs `hasAllMethods(tx, constraint, true,
+/// unify-exact)` once `T` is known, and matching `ViewCloner`'s `View() V`
+/// against the method set of that `T` is what binds `V`. Four of tailscale's
+/// packages — `types/prefs`, `types/views`, `control/controlclient` and
+/// `cmd/viewer/tests` — were ill-typed without it.
+#[test]
+fn a_type_parameter_named_only_in_a_constraint_is_inferred_from_methods() {
+    const PRELUDE: &str = "package p\n\
+         type Viewer[V any] interface{ View() V }\n\
+         func get[T Viewer[V], V any](t T) V { return t.View() }\n\
+         type ItemView struct{}\n";
+
+    let cases: &[(&str, Option<&str>)] = &[
+        // The constraint names V in a method result.
+        (
+            "type Item struct{}\n\
+             func (Item) View() ItemView { return ItemView{} }\n\
+             func use(i Item) ItemView { return get(i) }",
+            None,
+        ),
+        // Through a pointer receiver.
+        (
+            "type Item struct{}\n\
+             func (*Item) View() ItemView { return ItemView{} }\n\
+             func use(i *Item) ItemView { return get(i) }",
+            None,
+        ),
+        // Through an embedded type.
+        (
+            "type base struct{}\n\
+             func (base) View() ItemView { return ItemView{} }\n\
+             type Item struct{ base }\n\
+             func use(i Item) ItemView { return get(i) }",
+            None,
+        ),
+        // The method exists with the wrong signature: nothing binds V, so
+        // inference fails. Upstream words it "T (type Item) does not satisfy
+        // Viewer[V] (wrong type for method View)"; the verdict is the point.
+        (
+            "type Item struct{}\n\
+             func (Item) View(int) string { return \"\" }\n\
+             func use(i Item) string { return get(i) }",
+            Some("cannot infer type arguments in call"),
+        ),
+        // No such method.
+        (
+            "type Item struct{}\n\
+             func use(i Item) int { return get(i) }",
+            Some("cannot infer type arguments in call"),
+        ),
+    ];
+
+    for (body, want) in cases {
+        let src = format!("{PRELUDE}{body}\n");
+        let check = check_src(&src);
+        let msgs: Vec<String> = check.errors.iter().map(|e| e.msg.clone()).collect();
+        match want {
+            None => assert!(msgs.is_empty(), "{body}\nunexpected: {msgs:?}"),
+            Some(w) => assert_eq!(msgs, vec![w.to_string()], "{body}"),
+        }
+    }
+
+    // The two constraints referring to each other, as tailscale writes them.
+    let mutual = "package p\n\
+         type StructView[T any] interface { Valid() bool; AsStruct() T }\n\
+         type ViewCloner[T any, V StructView[T]] interface { View() V; Clone() T }\n\
+         func sliceOfViews[T ViewCloner[T, V], V StructView[T]](x []T) (T, V) { var t T; var v V; return t, v }\n\
+         type Item struct{}\n\
+         type ItemView struct{ p *Item }\n\
+         func (i *Item) View() ItemView { return ItemView{i} }\n\
+         func (i *Item) Clone() *Item { return &Item{} }\n\
+         func (v ItemView) Valid() bool { return v.p != nil }\n\
+         func (v ItemView) AsStruct() *Item { return v.p }\n\
+         func use(x []*Item) (*Item, ItemView) { return sliceOfViews(x) }\n";
+    let check = check_src(mutual);
+    assert!(check.errors.is_empty(), "{:?}", check.errors);
+}
