@@ -55,6 +55,14 @@ EXCLUDED = {
     "config went version: \"2\" on 2025-10-17, and no tag has been cut since), and "
     "./... on main measures only typecheck: one //go:embed of an unbuilt frontend "
     "deletes the whole report",
+    "ollama": "app/ui/app.go embeds app/dist, a React build output that is in "
+    ".gitignore and so exists in no tag or clone. go list ./... fails with "
+    "\"pattern app/dist: no matching files found\", golangci-lint's whole report "
+    "collapses to that one typecheck finding, and a typecheck finding deletes "
+    "every other issue in the run — the same shape as harness. Stubbing the "
+    "embed by hand loads 104 packages and gives golangci 0 / guff 10, so the "
+    "repository itself is measurable; reachable if the schema ever grows a "
+    "prepare step. Measured 2026-09-06 at v0.33.1",
     "opentelemetry-collector": "100 go.mod files and no go.work: ./... at the "
     "checkout root reaches exactly one package (internal/statusutil), and a "
     "submodule cannot be named from there (go list ./pdata/... -> \"directory "
