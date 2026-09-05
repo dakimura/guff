@@ -24238,3 +24238,67 @@ findings の数は動かない —— 取り戻したパッケージは両ツー
 
 golden **230** / fix **230** / reject **14** / workspace **278 スイート** /
 OSS pr tier **8 ターゲット**。
+
+### 2026-09-05（続き 208）— 制約の検証が**インスタンスではなく origin のメソッド**を見ていた。`have func() *Item[T]` と guff 自身が書いていた
+
+tailscale の ill-typed 最後の族、`cmd/viewer/tests`（7 件）と
+`types/prefs`（2 件）。どちらも生成コードで、
+`func (src *T[P]) Clone() *T[P]` が並んでいる。21 行に縮めた再現:
+
+```go
+type Cloner[T any] interface{ Clone() T }
+type Item[T any] struct{ v T }
+
+func (src *Item[T]) Clone() *Item[T] { return &Item[T]{src.v} }
+
+type Holder[T Cloner[T]] struct{ x T }
+
+var _ Holder[*Item[int]]
+```
+
+guff のエラーが原因をそのまま書いていた:
+
+```
+*Item[int] does not satisfy Cloner[*Item[int]] (wrong type for method Clone)
+    have func() *Item[T]        ← origin のシグネチャ
+    want func() *Item[int]
+```
+
+ジェネリックな**インスタンスは、訊かれるまでメソッド一覧を持たない**。
+`implements` は自由関数なので訊けない。`Checker.assignable_to` は
+まさにこの理由で先に `expand_instance_methods` / `ensure_method_sigs` を
+呼んでいるのに、`verify_targs` は呼んでいなかった。同じ 2 行を足しただけ。
+
+#### 測った形（7 形、1 形 1 パッケージ）
+
+| 形 | Go | guff |
+|---|---|---|
+| メソッドの**結果**がレシーバの型パラメータを名指す | OK | OK |
+| 値レシーバ | OK | OK |
+| メソッドの**引数**が名指す | OK | OK |
+| レシーバの型パラメータが 2 つ | OK | OK |
+| **埋め込んだジェネリックインスタンス**がメソッドを提供 | OK | OK |
+| 明示インスタンス化ではなく**呼び出しからの推論** | OK | OK |
+| インスタンス化後の署名が**本当に違う**（`Clone() T`） | 拒否 | 拒否（同じ位置） |
+
+最後の 1 形が肝で、これが通ってしまうと「メソッドを展開したら何でも
+満たす」になる。**一度誤って「guff が拒否しない」と読んだ** —— guff の
+メッセージが 3 行に渡るのに、grep を `(Type)` が同じ行にある前提で
+書いていた（[[grep-on-tool-output-drops-absolute-paths]] と同じ族）。
+
+#### 効果
+
+続き 207 の `make` 修正と合わせて、**tailscale の ill-typed は 0**（実測）。
+採用時は 8 パッケージだった。この修正だけでも `cmd/viewer/tests` と
+`types/prefs` が消え、残るのは `util/mak` の `make` 1 件（続き 207 が直す）。
+findings の数は動かない —— 取り戻したパッケージは両ツールとも 0 件で、
+tailscale に残る 11 件の乖離（revive `time-equal` 4 / govet 6 /
+goimports 1）は型検査とは無関係。
+
+4 つの型検査バグ（続き 205 nil 比較・206 制約からの推論・207 `make`・
+208 これ）で、**採用時 8 → 0**。
+
+#### ゲート
+
+golden **230** / fix **230** / reject **14** / workspace **278 スイート** /
+OSS pr tier **8 ターゲット**。
