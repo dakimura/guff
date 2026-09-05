@@ -1,0 +1,9 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh staticcheck-sa1019-package-doc
+# Produced by running golangci-lint on compat/golden/cases/staticcheck-sa1019-package-doc/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+use.go:4:2:staticcheck::SA1019: "example.com/sa1019pkgdoc/dep" is deprecated: The database-backed peerstore will be removed in the future. 

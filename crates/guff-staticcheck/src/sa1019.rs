@@ -304,6 +304,29 @@ fn src_has_deprecated_doc(src: &[u8]) -> bool {
 /// Package comments sit immediately above the `package` clause. Object-level
 /// `// Deprecated:` elsewhere must not force a Mode::NONE parse when we only
 /// need the package fact (e.g. golang/protobuf/proto/deprecated.go).
+/// How much of a file to read when only the package doc is wanted. A package
+/// doc comment sits above the `package` clause, so this covers any real one
+/// (licence header included) without reading the body.
+const PACKAGE_DOC_PREFIX: usize = 8 * 1024;
+
+/// Reads at most `n` bytes from `path`. A short read is fine: the caller only
+/// looks for text before the `package` clause.
+fn read_prefix(path: &std::path::Path, n: usize) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let mut f = fs::File::open(path).ok()?;
+    let mut buf = vec![0u8; n];
+    let mut filled = 0;
+    while filled < n {
+        match f.read(&mut buf[filled..]) {
+            Ok(0) => break,
+            Ok(k) => filled += k,
+            Err(_) => return None,
+        }
+    }
+    buf.truncate(filled);
+    Some(buf)
+}
+
 fn src_has_package_deprecated_doc(src: &[u8]) -> bool {
     let preamble = match memchr::memmem::find(src, b"\npackage") {
         Some(i) => &src[..=i],
@@ -557,19 +580,22 @@ fn scan_import_deprecated(
     } else {
         guff::parser::SKIP_OBJECT_RESOLUTION
     };
-    let mut paths = prefer_package_doc_files(files, pkg_path);
-    if !need_objects {
-        // Import diagnostics only need the package doc. Restrict to the
-        // conventional homes (`doc.go`, `{basename}.go`) — walking every
-        // file of every third-party import dominates prometheus cold ./...
-        // wall. Object-level Deprecated: lives elsewhere and is handled by
-        // the gated PARSE_COMMENTS path.
-        let base = format!("{}.go", pkg_path.rsplit('/').next().unwrap_or(""));
-        paths.retain(|(_, p)| {
-            let n = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
-            n == "doc.go" || n == base.as_str()
-        });
-    }
+    // `prefer_package_doc_files` puts `doc.go` and `{basename}.go` first and
+    // the loop below stops at the first package doc it finds, so the
+    // conventional homes still cost one read.
+    //
+    // They are only a *preference*: Go puts the package doc on whichever file
+    // carries the comment above `package`, and nothing says which. go-libp2p's
+    // `pstoreds` keeps its deprecation in `deprecate.go`, so restricting the
+    // scan to the two conventional names — which this did, to keep prometheus'
+    // cold `./...` wall down — meant guff never saw it and celestia-node's
+    // `//nolint:staticcheck` over that import read as unused.
+    //
+    // The cost is bounded instead: for import diagnostics the answer lives
+    // entirely before the `package` clause (`src_has_package_deprecated_doc`
+    // slices there), so a file that is not already in memory is read as a
+    // prefix rather than whole.
+    let paths = prefer_package_doc_files(files, pkg_path);
     // `source_files` is parallel to `syntax`, which holds only the files that
     // parsed: a file that failed to parse is dropped from both, and every later
     // index shifts. So the index is a valid key into `source_files` only when
@@ -585,13 +611,24 @@ fn scan_import_deprecated(
             // their bytes. Opening every dependency file again was a third of
             // this analyzer's CPU on prometheus `./...`.
             Some(bytes) => bytes,
-            None => match fs::read(path) {
-                Ok(read) => {
-                    owned = read;
-                    &owned
+            None => {
+                let read = if need_objects {
+                    fs::read(path).ok()
+                } else {
+                    // Only the package doc is wanted, and it precedes
+                    // `package`. Reading a prefix keeps a package with no
+                    // deprecation at all — the common case, where every file
+                    // is visited before the loop gives up — cheap.
+                    read_prefix(path, PACKAGE_DOC_PREFIX)
+                };
+                match read {
+                    Some(read) => {
+                        owned = read;
+                        &owned
+                    }
+                    None => continue,
                 }
-                Err(_) => continue,
-            },
+            }
         };
         // Package-only: preamble filter so object-level Deprecated: files are
         // skipped cheaply. Object scan: any doc Deprecated: may matter.
@@ -1094,5 +1131,54 @@ mod tests {
         a = with_imports(a, &[b]);
         let root = with_imports(pkg("example.com/root", &["root.go"]), &[a]);
         assert!(resolve_import(&root, "example.com/nope").is_none());
+    }
+
+    /// A package doc is not required to live in `doc.go` or `{basename}.go` —
+    /// Go puts it on whichever file carries the comment above `package`.
+    /// `prefer_package_doc_files` may *order* those two first, but it must not
+    /// drop the rest: go-libp2p's `pstoreds` keeps its deprecation in
+    /// `deprecate.go`, and dropping the file meant SA1019 never saw it and
+    /// celestia-node's `//nolint:staticcheck` read as unused.
+    #[test]
+    fn package_doc_scan_keeps_every_file_and_prefers_the_conventional_ones() {
+        let files: Vec<std::path::PathBuf> = [
+            "/m/pstoreds/cache.go",
+            "/m/pstoreds/deprecate.go",
+            "/m/pstoreds/pstoreds.go",
+            "/m/pstoreds/doc.go",
+            "/m/pstoreds/addr_book_test.go",
+        ]
+        .iter()
+        .map(std::path::PathBuf::from)
+        .collect();
+
+        let got: Vec<&str> = prefer_package_doc_files(&files, "github.com/libp2p/pstoreds")
+            .into_iter()
+            .map(|(_, p)| p.file_name().and_then(|s| s.to_str()).unwrap())
+            .collect();
+
+        // `doc.go` first, then `{basename}.go`, then the rest in their original
+        // order — and `_test.go` is the only thing excluded.
+        assert_eq!(
+            got,
+            vec!["doc.go", "pstoreds.go", "cache.go", "deprecate.go"],
+        );
+    }
+
+    /// The index each entry keeps is its position in the *original* list, which
+    /// the caller uses to ask the package for bytes it already holds. Sorting
+    /// must not invalidate it.
+    #[test]
+    fn package_doc_scan_keeps_the_original_index() {
+        let files: Vec<std::path::PathBuf> = ["/m/p/a.go", "/m/p/doc.go", "/m/p/b.go"]
+            .iter()
+            .map(std::path::PathBuf::from)
+            .collect();
+        let got = prefer_package_doc_files(&files, "example.com/p");
+        assert_eq!(got[0].0, 1, "doc.go is index 1 in the original list");
+        assert_eq!(
+            got[0].1.file_name().and_then(|s| s.to_str()),
+            Some("doc.go")
+        );
     }
 }

@@ -1,0 +1,26 @@
+# Golden case: SA1019 against a *package-level* `Deprecated:` doc that does not
+# live in `doc.go` or `{basename}.go`.
+#
+# guff restricted its scan of a dependency's sources to those two conventional
+# names, to keep prometheus' cold `./...` wall down. Go does not require
+# either: the package doc sits on whichever file carries the comment above
+# `package`, and go-libp2p's `pstoreds` keeps its deprecation in
+# `deprecate.go`. celestia-node imports it under a `//nolint:staticcheck`,
+# which guff then reported as unused because its SA1019 never fired.
+#
+# `live` is the control: a dependency with no deprecation anywhere, which is
+# the case that pays the scan in full before giving up.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - staticcheck
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
