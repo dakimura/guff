@@ -182,6 +182,7 @@ fn revive_comments_density_reports_a_ratio_below_the_minimum() {
                 arguments: vec![RuleArgument::Integer(10)],
                 disabled: false,
                 severity: None,
+                exclude: Vec::new(),
             }]),
             confidence: None,
             ignore_generated_header: false,
@@ -240,6 +241,7 @@ fn revive_unnecessary_if_compares_the_rendered_targets() {
                 arguments: Vec::new(),
                 disabled: false,
                 severity: None,
+                exclude: Vec::new(),
             }]),
             confidence: None,
             ignore_generated_header: false,
@@ -302,6 +304,7 @@ fn revive_never_unwraps_parentheses() {
         arguments: Vec::new(),
         disabled: false,
         severity: None,
+        exclude: Vec::new(),
     };
     let mut bag = SettingsBag::new();
     bag.insert(
@@ -769,12 +772,14 @@ fn revive_applies_per_rule_and_global_severity() {
                 arguments: Vec::new(),
                 disabled: false,
                 severity: Some("error".into()),
+                exclude: Vec::new(),
             },
             RuleSetting {
                 name: "blank-imports".into(),
                 arguments: Vec::new(),
                 disabled: false,
                 severity: None,
+                exclude: Vec::new(),
             },
         ]),
         confidence: None,
@@ -888,6 +893,7 @@ fn revive_context_as_argument_respects_allow_types_before() {
             })],
             disabled: false,
             severity: None,
+            exclude: Vec::new(),
         }]),
         ..Settings::default()
     };
@@ -942,12 +948,14 @@ fn revive_preserve_scope_suppresses_scope_enlarging_suggestions() {
                 arguments: vec![RuleArgument::String("preserveScope".into())],
                 disabled: false,
                 severity: None,
+                exclude: Vec::new(),
             },
             RuleSetting {
                 name: "superfluous-else".into(),
                 arguments: vec![RuleArgument::String("preserveScope".into())],
                 disabled: false,
                 severity: None,
+                exclude: Vec::new(),
             },
         ]),
         ..Settings::default()
@@ -1006,6 +1014,7 @@ fn revive_var_naming_skip_initialism_name_checks() {
             ],
             disabled: false,
             severity: None,
+            exclude: Vec::new(),
         }]),
         ..Settings::default()
     };
@@ -1060,6 +1069,7 @@ fn revive_var_naming_upper_case_const() {
             ],
             disabled: false,
             severity: None,
+            exclude: Vec::new(),
         }]),
         ..Settings::default()
     };
@@ -1103,6 +1113,7 @@ fn revive_var_naming_allowlist_blocklist() {
             ],
             disabled: false,
             severity: None,
+            exclude: Vec::new(),
         }]),
         ..Settings::default()
     };
@@ -1147,6 +1158,7 @@ fn revive_unused_parameter_and_receiver_honour_allow_regex() {
             arguments: arguments.clone(),
             disabled: false,
             severity: None,
+            exclude: Vec::new(),
         };
         let settings = Settings {
             rules: Some(vec![rule("unused-parameter"), rule("unused-receiver")]),
@@ -1633,5 +1645,73 @@ fn revive_function_length_zero_disables_that_half() {
             "function-length: maximum number of lines per function exceeded; max 12 but got 52",
         ],
         "{messages:?}"
+    );
+}
+
+fn exclude_messages(exclude: Vec<&str>) -> Vec<String> {
+    let mut settings = guff_revive::Settings {
+        severity: None,
+        rules: Some(vec![
+            guff_revive::RuleSetting {
+                name: "exported".into(),
+                arguments: Vec::new(),
+                disabled: false,
+                severity: None,
+                exclude: exclude.into_iter().map(str::to_string).collect(),
+            },
+            guff_revive::RuleSetting {
+                name: "bool-literal-in-expr".into(),
+                arguments: Vec::new(),
+                disabled: false,
+                severity: None,
+                exclude: Vec::new(),
+            },
+        ]),
+        confidence: Some(0.0),
+        ignore_generated_header: false,
+        enable_default_rules: false,
+        enable_all_rules: false,
+        go: None,
+    };
+    settings.confidence = Some(0.0);
+    guff_revive::with_settings(settings, || {
+        let pkg = support::typecheck_fixture_dir("revive", "rule_exclude", "example.com/revive/ruleexclude");
+        let mut messages = support::run_analyzer(revive(), &pkg);
+        messages.sort();
+        messages
+    })
+}
+
+/// A rule's `exclude` list skips that rule for the files it matches.
+///
+/// `lint/file.go`, before the rule runs:
+///
+/// ```text
+/// ruleConfig := rulesConfig[currentRule.Name()]
+/// if ruleConfig.MustExclude(f.Name) { continue }
+/// ```
+///
+/// guff had `// DEFERRED: exclude.` where the config field should have been.
+/// telegraf excludes twenty-three paths from `exported` alone, and without this
+/// guff reported **2748** findings golangci-lint does not.
+///
+/// The `bool-literal-in-expr` row is the point of the second file: the filter is
+/// per *rule*, so the excluded file still reports everything else.
+#[test]
+fn revive_rule_exclude_skips_only_that_rule() {
+    assert_eq!(
+        exclude_messages(Vec::new()),
+        vec![
+            "bool-literal-in-expr: omit Boolean literal in expression",
+            "exported: comment on exported type Excluded should be of the form \"Excluded ...\" (with optional leading article)",
+            "exported: exported type Kept should have comment or be unexported",
+        ],
+    );
+    assert_eq!(
+        exclude_messages(vec!["**/excluded.go"]),
+        vec![
+            "bool-literal-in-expr: omit Boolean literal in expression",
+            "exported: exported type Kept should have comment or be unexported",
+        ],
     );
 }

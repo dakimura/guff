@@ -237,5 +237,13 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "15m"
+  },
+  {
+    "name": "telegraf",
+    "url": "https://github.com/influxdata/telegraf.git",
+    "ref": "v1.39.3",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
   }
 ]
