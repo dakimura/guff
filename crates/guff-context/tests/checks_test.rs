@@ -97,10 +97,15 @@ fn bodyclose_flags_missing_close() {
     );
 }
 
-/// Every reporting shape in `testdata/bodyclose/bad.go` — the same ten keys
+/// Every reporting shape in `testdata/bodyclose/bad.go` — the same keys
 /// `compat/golden/cases/bodyclose` pins against golangci-lint. Raise it when
 /// the fixture grows; a drop is a shape that stopped reporting.
-const BODYCLOSE_BAD_SHAPES: usize = 10;
+///
+/// Eleven of the twenty-one are the merge shapes: two stores to one variable
+/// are two SSA values, and the second kills the first only when it dominates
+/// it. The ones that merge instead reach a `*ssa.Phi` and a single close
+/// settles them all — those live in `ok.go`.
+const BODYCLOSE_BAD_SHAPES: usize = 21;
 
 #[test]
 fn bodyclose_skips_packages_without_a_direct_net_http_import() {

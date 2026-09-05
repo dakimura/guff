@@ -25,7 +25,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
-use guff::ast::{AssignStmt, BlockStmt, CallExpr, Expr, FieldList, FuncType, ReturnStmt, ValueSpec};
+use guff::ast::{AssignStmt, BlockStmt, CallExpr, Expr, FieldList, FuncType, ReturnStmt, Stmt, ValueSpec};
 use guff::walk::{inspect, preorder, NodeRef};
 use guff_analysis::code;
 use guff_analysis::passes::inspect as inspect_pass;
@@ -194,28 +194,194 @@ fn func_returns_response(ty: &FuncType) -> bool {
     field_list_has_response(ty.results.as_ref())
 }
 
-struct RespUsage {
+/// One `*http.Response` a variable held. A variable can hold several at once:
+/// two arms of an `if` assigning the same name are one `ssa.Phi` downstream,
+/// and a close on the phi closes both.
+struct RespEntry {
     pos: u32,
     closed: bool,
     consumed: bool,
+    /// If this value reached the current variable through a `Phi`, how many
+    /// loops enclosed the branch that made it. `None` means it never merged.
+    ///
+    /// Upstream's `*ssa.Phi` arm looks for a `FieldAddr` among **that phi's**
+    /// own referrers and stops there — it does not follow a phi into another
+    /// phi. So a value merged inside a loop and closed outside it passes
+    /// through the loop header's phi as well, and upstream loses it: it
+    /// reports. That is what this depth records.
+    merged_depth: Option<u32>,
+}
+
+struct RespUsage {
+    entries: Vec<RespEntry>,
+    /// Branch path of the assignment that last wrote this variable, so the
+    /// next one can tell "kills it" from "merges with it".
+    path: Vec<(u32, u16)>,
 }
 
 impl RespUsage {
-    fn report(self, check_consumption: bool, pending: &mut Vec<(u32, String)>) {
-        let ok = if check_consumption {
-            self.closed && self.consumed
-        } else {
-            self.closed
-        };
-        if !ok {
-            let msg = if check_consumption {
-                MSG_CLOSE_AND_CONSUME
-            } else {
-                MSG_CLOSE
-            };
-            pending.push((self.pos, msg.to_string()));
+    fn new(pos: u32, path: Vec<(u32, u16)>) -> Self {
+        Self {
+            entries: vec![RespEntry {
+                pos,
+                closed: false,
+                consumed: false,
+                merged_depth: None,
+            }],
+            path,
         }
     }
+
+    /// Every entry a close written at loop depth `depth` can reach.
+    fn reachable(&mut self, depth: u32) -> impl Iterator<Item = &mut RespEntry> {
+        self.entries
+            .iter_mut()
+            .filter(move |e| e.merged_depth.is_none_or(|d| d <= depth))
+    }
+
+    fn mark_closed(&mut self, depth: u32) {
+        for e in self.reachable(depth) {
+            e.closed = true;
+        }
+    }
+
+    fn mark_consumed(&mut self, depth: u32) {
+        for e in self.reachable(depth) {
+            e.consumed = true;
+        }
+    }
+
+    /// Ownership left this function — passed to a call, captured by a closure,
+    /// returned, stored in a field. Nothing downstream is a phi question.
+    fn mark_settled(&mut self) {
+        for e in &mut self.entries {
+            e.closed = true;
+            e.consumed = true;
+        }
+    }
+
+    fn report(self, check_consumption: bool, pending: &mut Vec<(u32, String)>) {
+        for e in self.entries {
+            let ok = if check_consumption {
+                e.closed && e.consumed
+            } else {
+                e.closed
+            };
+            if !ok {
+                let msg = if check_consumption {
+                    MSG_CLOSE_AND_CONSUME
+                } else {
+                    MSG_CLOSE
+                };
+                pending.push((e.pos, msg.to_string()));
+            }
+        }
+    }
+}
+
+/// Where each position sits in the function's branch and loop structure.
+///
+/// Two assignments to one variable are two different things in SSA. If the
+/// second *dominates* the first — same block, or one arm out — it kills it,
+/// and the first value has no referrer left, which is upstream's
+/// `len(*call.Referrers()) == 0 { return true }`. If instead they sit in
+/// sibling arms, or the first is outside a branch the second is inside, both
+/// values flow into one `Phi` and a later close covers both.
+#[derive(Default)]
+struct Shape {
+    /// `(branch statement position, arm index, arm start, arm end)`.
+    arms: Vec<(u32, u16, u32, u32)>,
+    /// `(start, end)` of every `for` / `range` body.
+    loops: Vec<(u32, u32)>,
+}
+
+impl Shape {
+    fn collect(body: &BlockStmt) -> Self {
+        let mut s = Shape::default();
+        inspect(NodeRef::BlockStmt(body), |n| {
+            let Some(n) = n else {
+                return true;
+            };
+            match n {
+                // A closure is its own function; `check_body` stops there too.
+                NodeRef::FuncLit(_) => return false,
+                NodeRef::IfStmt(i) => {
+                    let at = i.if_.0 as u32;
+                    s.arms
+                        .push((at, 0, i.body.lbrace.0 as u32, i.body.rbrace.0 as u32));
+                    if let Some(e) = i.else_.as_deref() {
+                        s.arms
+                            .push((at, 1, e.pos().0 as u32, e.end().0 as u32));
+                    }
+                }
+                NodeRef::SwitchStmt(sw) => Self::clauses(&mut s, sw.switch.0 as u32, &sw.body.list),
+                NodeRef::TypeSwitchStmt(sw) => {
+                    Self::clauses(&mut s, sw.switch.0 as u32, &sw.body.list)
+                }
+                NodeRef::SelectStmt(se) => Self::clauses(&mut s, se.select_.0 as u32, &se.body.list),
+                NodeRef::ForStmt(f) => s
+                    .loops
+                    .push((f.body.lbrace.0 as u32, f.body.rbrace.0 as u32)),
+                NodeRef::RangeStmt(r) => s
+                    .loops
+                    .push((r.body.lbrace.0 as u32, r.body.rbrace.0 as u32)),
+                _ => {}
+            }
+            true
+        });
+        s
+    }
+
+    fn clauses(s: &mut Shape, at: u32, list: &[Stmt]) {
+        for (i, c) in list.iter().enumerate() {
+            let (start, body) = match c {
+                Stmt::CaseClause(c) => (c.colon.0 as u32, &c.body),
+                Stmt::CommClause(c) => (c.colon.0 as u32, &c.body),
+                _ => continue,
+            };
+            let end = body.last().map_or(start, |st| st.end().0 as u32);
+            s.arms.push((at, i as u16, start, end));
+        }
+    }
+
+    /// The arms containing `pos`, outermost first.
+    fn path(&self, pos: u32) -> Vec<(u32, u16)> {
+        let mut hits: Vec<&(u32, u16, u32, u32)> = self
+            .arms
+            .iter()
+            .filter(|(_, _, s, e)| pos >= *s && pos <= *e)
+            .collect();
+        hits.sort_by_key(|(_, _, s, _)| *s);
+        hits.iter().map(|(at, arm, _, _)| (*at, *arm)).collect()
+    }
+
+    fn loop_depth(&self, pos: u32) -> u32 {
+        self.loops
+            .iter()
+            .filter(|(s, e)| pos >= *s && pos <= *e)
+            .count() as u32
+    }
+}
+
+/// Does the assignment at `new` kill the one at `prev`, or merge with it?
+///
+/// It kills when `new`'s path is a prefix of `prev`'s — the same block, or one
+/// branch further out, where the store is unconditional relative to the old
+/// one. Anything else is a merge: sibling arms, or an old value that survives
+/// on the branch's other edge.
+fn kills(new: &[(u32, u16)], prev: &[(u32, u16)]) -> bool {
+    new.len() <= prev.len() && new.iter().zip(prev).all(|(a, b)| a == b)
+}
+
+/// The branch whose phi merges the two paths: the first step `new` takes that
+/// `prev` did not.
+fn merge_branch(new: &[(u32, u16)], prev: &[(u32, u16)]) -> Option<u32> {
+    let i = new
+        .iter()
+        .zip(prev)
+        .position(|(a, b)| a != b)
+        .unwrap_or(prev.len());
+    new.get(i).map(|(at, _)| *at)
 }
 
 /// The right-hand side that feeds `lhs_index`: the single multi-value call, or
@@ -313,23 +479,28 @@ fn is_consumption_call(pass: &Pass<'_>, call: &CallExpr) -> bool {
     )
 }
 
-fn mark_consumption(pass: &Pass<'_>, call: &CallExpr, usages: &mut HashMap<String, RespUsage>) {
+fn mark_consumption(
+    pass: &Pass<'_>,
+    call: &CallExpr,
+    depth: u32,
+    usages: &mut HashMap<String, RespUsage>,
+) {
     if !is_consumption_call(pass, call) {
         return;
     }
     for arg in &call.args {
         if let Some(var) = body_field_var(arg) {
             if let Some(u) = usages.get_mut(var) {
-                u.consumed = true;
+                u.mark_consumed(depth);
             }
         }
     }
 }
 
-fn mark_close(call: &CallExpr, usages: &mut HashMap<String, RespUsage>) {
+fn mark_close(call: &CallExpr, depth: u32, usages: &mut HashMap<String, RespUsage>) {
     if let Some(var) = body_close_var(call) {
         if let Some(u) = usages.get_mut(var) {
-            u.closed = true;
+            u.mark_closed(depth);
         }
     }
 }
@@ -341,7 +512,7 @@ fn mark_close(call: &CallExpr, usages: &mut HashMap<String, RespUsage>) {
 /// the closure's `MakeClosure` is a referrer of the alloc (or free variable),
 /// and `calledInFunc` walks into it and finds the `Close` on the
 /// `io.ReadCloser`. The callee's name plays no part, so neither does it here.
-fn mark_cleanup_close(call: &CallExpr, usages: &mut HashMap<String, RespUsage>) {
+fn mark_cleanup_close(call: &CallExpr, depth: u32, usages: &mut HashMap<String, RespUsage>) {
     let Some(Expr::FuncLit(fun)) = call.args.first() else {
         return;
     };
@@ -356,7 +527,7 @@ fn mark_cleanup_close(call: &CallExpr, usages: &mut HashMap<String, RespUsage>) 
             return false;
         }
         if let NodeRef::CallExpr(c) = n {
-            mark_close(c, usages);
+            mark_close(c, depth, usages);
         }
         true
     });
@@ -389,8 +560,7 @@ fn mark_escaped_arg(
     for arg in &call.args {
         if let Some(name) = ident_name(arg) {
             if let Some(u) = usages.get_mut(name) {
-                u.closed = true;
-                u.consumed = true;
+                u.mark_settled();
             }
         }
     }
@@ -413,8 +583,7 @@ fn mark_captured_by_closure(lit: &guff::ast::FuncLit, usages: &mut HashMap<Strin
     });
     for name in seen {
         if let Some(u) = usages.get_mut(&name) {
-            u.closed = true;
-            u.consumed = true;
+            u.mark_settled();
         }
     }
 }
@@ -491,7 +660,9 @@ fn mark_returned_body(ret: &ReturnStmt, usages: &mut HashMap<String, RespUsage>)
     for result in &ret.results {
         if let Some(name) = body_field_var(result) {
             if let Some(u) = usages.get_mut(name) {
-                u.closed = true;
+                for e in &mut u.entries {
+                    e.closed = true;
+                }
             }
         }
     }
@@ -508,9 +679,9 @@ fn is_response_composite(expr: &Expr) -> bool {
     }
 }
 
-fn handle_defer_close(call: &CallExpr, usages: &mut HashMap<String, RespUsage>) {
+fn handle_defer_close(call: &CallExpr, depth: u32, usages: &mut HashMap<String, RespUsage>) {
     match call.fun.as_ref() {
-        Expr::SelectorExpr(_) => mark_close(call, usages),
+        Expr::SelectorExpr(_) => mark_close(call, depth, usages),
         Expr::FuncLit(fun) => {
             if fun.ty.params.as_ref().is_some_and(|p| !p.list.is_empty()) {
                 return;
@@ -523,7 +694,7 @@ fn handle_defer_close(call: &CallExpr, usages: &mut HashMap<String, RespUsage>) 
                     return false;
                 }
                 if let NodeRef::CallExpr(c) = n {
-                    mark_close(c, usages);
+                    mark_close(c, depth, usages);
                 }
                 true
             });
@@ -543,6 +714,7 @@ fn check_body(
     check_consumption: bool,
     pending: &mut Vec<(u32, String)>,
 ) {
+    let shape = Shape::collect(body);
     let mut usages: HashMap<String, RespUsage> = HashMap::new();
     // `x.f = resp` — upstream's `*ssa.Store` into a `FieldAddr`, which it
     // settles by looking for a close on the body reached through that field.
@@ -586,6 +758,7 @@ fn check_body(
                     assign,
                     (func_start, body.rbrace.0 as u32),
                     closure_reassigned,
+                    &shape,
                     check_consumption,
                     &mut usages,
                     pending,
@@ -629,22 +802,24 @@ fn check_body(
                     };
                     pending.push((call.lparen.0 as u32, msg.to_string()));
                 }
-                mark_close(call, &mut usages);
+                let depth = shape.loop_depth(call.lparen.0 as u32);
+                mark_close(call, depth, &mut usages);
                 // `t.Cleanup(func() { resp.Body.Close() })` — common in tests;
                 // upstream SSA sees the close; scan no-arg Cleanup closures.
-                mark_cleanup_close(call, &mut usages);
+                mark_cleanup_close(call, depth, &mut usages);
                 // Passing `resp` to another call transfers ownership for this
                 // AST approximation (e.g. `return handleResponse(res)`).
                 mark_escaped_arg(pass, call, closers, &mut usages);
                 if check_consumption {
-                    mark_consumption(pass, call, &mut usages);
+                    mark_consumption(pass, call, depth, &mut usages);
                 }
             }
             NodeRef::ReturnStmt(ret) => {
                 mark_returned_body(ret, &mut usages);
             }
             NodeRef::DeferStmt(d) => {
-                handle_defer_close(&d.call, &mut usages);
+                let depth = shape.loop_depth(d.defer_.0 as u32);
+                handle_defer_close(&d.call, depth, &mut usages);
                 if check_consumption {
                     // defer io.Copy(...) is unusual; still scan nested calls.
                     if let Expr::FuncLit(fun) = d.call.fun.as_ref() {
@@ -657,7 +832,7 @@ fn check_body(
                                     return false;
                                 }
                                 if let NodeRef::CallExpr(c) = n {
-                                    mark_consumption(pass, c, &mut usages);
+                                    mark_consumption(pass, c, depth, &mut usages);
                                 }
                                 true
                             });
@@ -705,15 +880,13 @@ fn check_body(
     for (chain, resp) in &field_aliases {
         if chain_closes.contains(chain) {
             if let Some(u) = usages.get_mut(resp) {
-                u.closed = true;
-                u.consumed = true;
+                u.mark_settled();
             }
         }
     }
     for name in usages_to_close {
         if let Some(u) = usages.get_mut(&name) {
-            u.closed = true;
-            u.consumed = true;
+            u.mark_settled();
         }
     }
 
@@ -862,6 +1035,7 @@ fn handle_assign(
     assign: &AssignStmt,
     func_span: (u32, u32),
     closure_reassigned: &ClosureStores,
+    shape: &Shape,
     check_consumption: bool,
     usages: &mut HashMap<String, RespUsage>,
     pending: &mut Vec<(u32, String)>,
@@ -917,9 +1091,26 @@ fn handle_assign(
             && from_call
             && (expr_is_response(pass, lhs) || rhs_result_is_response(pass, assign, i));
 
-        if let Some(prev) = usages.remove(name) {
-            prev.report(check_consumption, pending);
-        }
+        // Two assignments to one name are two SSA values. The second kills the
+        // first only when it dominates it — the same block, or one branch
+        // further out; in sibling arms, or one arm in from the other, both
+        // reach a `Phi` and one close settles them together. guff used to
+        // report the earlier one on sight, which is telegraf's
+        // `plugins/inputs/prometheus/prometheus.go:581`: two clients, one
+        // `resp`, one `defer resp.Body.Close()`.
+        let path = shape.path(assign_report_pos(assign, i));
+        let merged = match usages.get(name) {
+            Some(prev) if !kills(&path, &prev.path) => {
+                merge_branch(&path, &prev.path).map(|at| shape.loop_depth(at))
+            }
+            Some(_) => {
+                if let Some(prev) = usages.remove(name) {
+                    prev.report(check_consumption, pending);
+                }
+                None
+            }
+            None => None,
+        };
 
         // Assigning into a variable the enclosing function owns stores through
         // an `ssa.FreeVar`, and a free variable's referrers live inside the
@@ -939,14 +1130,27 @@ fn handle_assign(
         }
 
         if is_resp {
-            usages.insert(
-                name.to_string(),
-                RespUsage {
-                    pos: assign_report_pos(assign, i),
-                    closed: false,
-                    consumed: false,
-                },
-            );
+            let pos = assign_report_pos(assign, i);
+            match usages.get_mut(name) {
+                // A merge: the earlier values are still live, and every one of
+                // them now sits behind the branch's phi.
+                Some(u) => {
+                    let depth = merged.unwrap_or(0);
+                    for e in &mut u.entries {
+                        e.merged_depth = Some(e.merged_depth.unwrap_or(0).max(depth));
+                    }
+                    u.entries.push(RespEntry {
+                        pos,
+                        closed: false,
+                        consumed: false,
+                        merged_depth: Some(depth),
+                    });
+                    u.path = path.clone();
+                }
+                None => {
+                    usages.insert(name.to_string(), RespUsage::new(pos, path.clone()));
+                }
+            }
         }
     }
 }
@@ -1246,14 +1450,9 @@ fn handle_value_spec(
                     .map(|e| e.pos().0 as u32)
                     .unwrap_or(name_id.pos().0 as u32)
             };
-            usages.insert(
-                name.to_string(),
-                RespUsage {
-                    pos,
-                    closed: false,
-                    consumed: false,
-                },
-            );
+            // A `var` declaration introduces the name, so there is nothing
+            // for it to merge with.
+            usages.insert(name.to_string(), RespUsage::new(pos, Vec::new()));
         }
     }
 }
