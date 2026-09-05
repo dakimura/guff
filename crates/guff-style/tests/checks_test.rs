@@ -7511,6 +7511,58 @@ fn gocritic_dup_arg_covers_the_method_form_and_every_call_pattern() {
     );
 }
 
+/// `exitAfterDefer` walks the function body **generically** — upstream is
+/// `astutil.Apply`, not a switch over statement kinds. guff enumerated the
+/// kinds it recursed into and so missed every construct nobody had added:
+/// `select`, type switches, labelled statements and `go`. Measured against
+/// golangci-lint 2.12.2, guff found 1 of 4. celestia-node's shrex peer manager
+/// is a `log.Fatal` inside a `select` inside a `for`, under two defers.
+///
+/// Six shapes fire and six must not, and the silent half is the point: a
+/// traversal that simply visited everything would report the function literal,
+/// the `else` branch, `defer os.Exit(…)` (allowed by go-critic #995), the call
+/// that precedes its defer, and `log.Panic`, which is not one of the four
+/// names.
+#[test]
+fn gocritic_exit_after_defer_walks_every_construct() {
+    let pkg = support::typecheck_fixture("gocritic", "example.com/gocritic", "exitafterdefer.go");
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, String)> = support::run_analyzer_diagnostics(gocritic(), &pkg)
+        .into_iter()
+        .filter(|d| d.message.starts_with("exitAfterDefer:"))
+        .map(|d| {
+            (
+                fset.position(guff::position::Pos(d.pos as i64)).line,
+                d.message,
+            )
+        })
+        .collect();
+    got.sort();
+    let fatal = |line: i64| {
+        (
+            line,
+            "exitAfterDefer: log.Fatal will exit, and `defer log.Println(\"bye\")` will not run"
+                .to_string(),
+        )
+    };
+    assert_eq!(
+        got,
+        vec![
+            fatal(24), // inside a `select`, inside a `for`
+            fatal(36), // inside an `if` — the one shape guff already had
+            fatal(44), // inside a type switch
+            fatal(54), // inside a labelled `for`
+            fatal(61), // inside a `go` statement
+            (
+                67,
+                "exitAfterDefer: os.Exit will exit, and `defer log.Println(\"bye\")` will not run"
+                    .to_string()
+            ), // inside a `range` body
+        ],
+        "{got:?}"
+    );
+}
+
 #[test]
 fn gocritic_flags_common_patterns() {
     let pkg = support::typecheck_fixture("gocritic", "example.com/gocritic", "bad.go");

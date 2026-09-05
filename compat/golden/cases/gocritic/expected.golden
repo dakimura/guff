@@ -96,6 +96,15 @@ duparg.go:99:6:gocritic::dupArg: suspicious duplicated args in bytes.ReplaceAll(
 duparg.go:100:6:gocritic::dupArg: suspicious duplicated args in gotypes.Identical(t, t)
 duparg.go:101:6:gocritic::dupArg: suspicious duplicated args in gotypes.IdenticalIgnoreTags(t, t)
 duparg.go:105:2:gocritic::dupArg: suspicious duplicated args in draw.Draw(dst, r, dst, p, draw.Src)
+exitafterdefer.go:24:5:gocritic::exitAfterDefer: log.Fatal will exit, and `defer log.Println("bye")` will not run
+exitafterdefer.go:36:3:gocritic::exitAfterDefer: log.Fatal will exit, and `defer log.Println("bye")` will not run
+exitafterdefer.go:44:3:gocritic::exitAfterDefer: log.Fatal will exit, and `defer log.Println("bye")` will not run
+exitafterdefer.go:52:1:gocritic::unlabelStmt: label loop is redundant
+exitafterdefer.go:54:3:gocritic::exitAfterDefer: log.Fatal will exit, and `defer log.Println("bye")` will not run
+exitafterdefer.go:61:5:gocritic::exitAfterDefer: log.Fatal will exit, and `defer log.Println("bye")` will not run
+exitafterdefer.go:67:3:gocritic::exitAfterDefer: os.Exit will exit, and `defer log.Println("bye")` will not run
+exitafterdefer.go:77:2:gocritic::unnecessaryDefer: defer os.Exit(1) is placed just before return
+exitafterdefer.go:101:2:gocritic::unnecessaryDefer: defer log.Println("bye") is placed just before return
 extras.go:5:2:gocritic::dupImport: package is imported 2 times under different aliases on lines 5 and 6
 extras.go:6:2:gocritic::dupImport: package is imported 2 times under different aliases on lines 5 and 6
 extras.go:16:2:gocritic::commentedOutImport: remove commented-out "os" import

@@ -25238,3 +25238,81 @@ golden 再生成は**追加 2・削除 0**（追加はその control）。
 linter の影**: `//nolint:staticcheck` は SA1019（deprecated な
 package import）、`//nolint:gocritic` は `exitAfterDefer`（guff の walk が
 `select` / type switch / labeled statement に入らない）。
+
+### 2026-09-06（続き 221）— gocritic `exitAfterDefer` は**汎用の walk**。手書きの statement switch は「まだ足していない構文」を静かに落とす
+
+`close celestia-node` の `nolintlint` 2 件のうち 1 件は
+`//nolint:gocritic` が「unused」と言われるもの。**上流はそこで撃って
+nolint に消されており、guff は撃っていない** —— nolintlint はその影である。
+
+現場（`share/shwap/p2p/shrex/peers/manager.go`）は 2 つの `defer` の下、
+`for` の中の `select` の中の `log.Fatal`。
+
+#### 4 形測って 1 形しか出なかった
+
+```
+                 golangci  guff(前)
+select 内            ○        ×
+if 内                ○        ○
+type switch 内       ○        ×
+labeled for 内       ○        ×
+```
+
+`gocritic.rs` の `check_exit_after_defer` は**文の種類を手で列挙して再帰
+する walk** で、`ForStmt` / `RangeStmt` / `SwitchStmt` / `IfStmt` /
+`BlockStmt` / `AssignStmt` / `ExprStmt` しか入らない。**`SelectStmt` /
+`TypeSwitchStmt` / `LabeledStmt` が抜けていた** —— 誰も足していない構文が
+静かに落ちる形である。`GoStmt` には「goroutine には入らない」という
+コメント付きで**意図的に**入らないようにしてあったが、これも**上流とは
+違う**（後述）。
+
+#### 上流はそもそも列挙していない
+
+`go-critic/checkers/exitAfterDefer_checker.go`:
+
+```go
+astutil.Apply(fn.Body, pre, post)
+```
+
+**汎用の走査**で、規則は 3 つだけ:
+
+- pre: 関数リテラルには入らない／`defer` を見た後の `Else` には入らない
+- post: `DeferStmt` を見たら覚える
+- post: `CallExpr` の**直接の親が `DeferStmt` でなく**（`defer os.Exit(…)`
+  は許す、go-critic #995）、`defer` が保留中で、名前が
+  `os.Exit` / `log.Fatal` / `log.Fatalf` / `log.Fatalln` のどれかなら警告
+
+なので `select` も type switch も labeled も `go` も、**書かなくても入る**。
+手書きの switch を捨てて `for_each_child` の上に同じ 3 規則を実装した。
+
+**post-order である理由**も規則から出る: 保留中の `defer` は call ノードで
+*読み*、defer ノードで*書く*。`defer f(os.Exit(1))` では内側の call が
+外側の `defer` より先に訪問される必要があり、上流の「直接の親」判定だけでは
+そこを覆えない。
+
+#### 測った 14 形
+
+撃つ 6 形（select ／ if ／ type switch ／ labeled ／ **go** ／ range）と、
+黙る 8 形（`defer os.Exit(…)`、関数リテラル内、`defer` 後の `else` 枝、
+call より後ろの `defer`、`log.Panic`（4 つの名前に無い）、`defer` 無し、
+switch の tag 位置の非対象呼び出し、1 ケース select）。
+**両ツールで完全一致**。
+
+`go log.Fatal(…)` が撃つのは測って初めて分かった —— guff の
+「goroutine には入らない」というコメントは**上流を推測した記述**だった。
+
+fixture `gocritic/exitafterdefer.go`、単体テストは 6 タプルを `assert_eq!`。
+golden 再生成は**キー集合で削除 0**、追加は 5（うち 3 つは fixture が
+ついでに踏んだ別の checker —— `unlabelStmt` と `unnecessaryDefer` ×2）。
+`log` の stub に `Println` / `Panic` を足した。
+
+- **celestia-node: guff=56 → 55、P=96.4% → 98.2%**、R は 100.0% のまま。
+- golden 230／fix 230／reject 14／oss pr 8 ターゲット P=R=100%／
+  isolate gocritic P=R=100%／workspace 278 ok 0 failed。
+
+```
+台帳: 43/100 at zero（47 定義、open 1＝celestia-node 1、unmeasured 3）
+```
+
+残り 1 件は `//nolint:staticcheck` が unused＝**SA1019 の取りこぼし**
+（deprecated な package を import している）。
