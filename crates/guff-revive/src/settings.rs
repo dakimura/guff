@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 /// Per-rule configuration entry (mirrors golangci-lint / revive `rules` list items).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct RuleSetting {
     pub name: String,
     pub arguments: Vec<RuleArgument>,

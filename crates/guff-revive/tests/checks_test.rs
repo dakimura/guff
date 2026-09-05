@@ -1943,3 +1943,159 @@ fn revive_unconditional_recursion_distinguishes_an_unnamed_receiver() {
         "{messages:?}"
     );
 }
+
+/// `defer` runs the sub-checks its **argument list** names, and all six when it
+/// has none.
+///
+/// `DeferRule.allowFromArgs` builds an allow-set from `arguments[0]` and
+/// `newFailure` drops every failure whose sub-case is not in it. guff ran all
+/// six regardless, which put 55 findings on tailscale — 42 "prefer not to defer
+/// inside loops" and 13 "prefer not to defer chains of function calls" — that
+/// golangci-lint does not report, because tailscale names three sub-checks:
+///
+/// ```yaml
+/// - name: defer
+///   arguments: [["immediate-recover", "recover", "return"]]
+/// ```
+///
+/// The fixture is the one the two `revive-defer-*` golden cases read, so this
+/// test and those two cannot drift apart.
+#[test]
+fn revive_defer_runs_only_the_subcases_its_arguments_name() {
+    use guff_revive::{with_settings, RuleArgument, RuleSetting, Settings};
+
+    fn rule(arguments: Vec<RuleArgument>) -> Settings {
+        Settings {
+            rules: Some(vec![RuleSetting {
+                name: "defer".into(),
+                arguments,
+                ..RuleSetting::default()
+            }]),
+            ..Settings::default()
+        }
+    }
+
+    fn messages(settings: Settings) -> Vec<String> {
+        with_settings(settings, || {
+            let pkg = support::typecheck_fixture_dir("revive", "defer_rule", "example.com/deferrule");
+            let mut m = support::run_analyzer(revive(), &pkg);
+            m.sort();
+            m
+        })
+    }
+
+    let count = |m: &[String], needle: &str| m.iter().filter(|s| s.contains(needle)).count();
+
+    // No arguments: every sub-case.
+    let all = messages(rule(Vec::new()));
+    assert_eq!(
+        (
+            count(&all, "prefer not to defer inside loops"),
+            count(&all, "prefer not to defer chains of function calls"),
+            count(&all, "be careful when deferring calls to methods"),
+            count(&all, "return in a defer function has no effect"),
+            count(&all, "recover must be called inside a deferred function, this is executing"),
+            count(&all, "recover must be called inside a deferred function\"")
+                + all
+                    .iter()
+                    .filter(|s| s.ends_with("recover must be called inside a deferred function"))
+                    .count(),
+        ),
+        (2, 1, 1, 1, 2, 2),
+        "default (all six sub-cases): {all:?}"
+    );
+    assert_eq!(all.len(), 9, "{all:?}");
+
+    // tailscale's three. The other three sub-cases go quiet, and nothing else
+    // moves: same fixture, same findings for what stays enabled.
+    let subset = messages(rule(vec![RuleArgument::List(vec![
+        RuleArgument::String("immediate-recover".into()),
+        RuleArgument::String("recover".into()),
+        RuleArgument::String("return".into()),
+    ])]));
+    assert_eq!(
+        (
+            count(&subset, "prefer not to defer inside loops"),
+            count(&subset, "prefer not to defer chains of function calls"),
+            count(&subset, "be careful when deferring calls to methods"),
+            count(&subset, "return in a defer function has no effect"),
+        ),
+        (0, 0, 0, 1),
+        "three sub-cases named: {subset:?}"
+    );
+    assert_eq!(subset.len(), 5, "{subset:?}");
+
+    // A name upstream does not know turns nothing on: the list is an allow-set,
+    // not a deny-set, so this is five sub-cases off rather than one.
+    let unknown = messages(rule(vec![RuleArgument::List(vec![RuleArgument::String(
+        "loop".into(),
+    )])]));
+    assert_eq!(
+        (
+            count(&unknown, "prefer not to defer inside loops"),
+            unknown.len()
+        ),
+        (2, 2),
+        "only loop named: {unknown:?}"
+    );
+}
+
+/// The parse-time gate that decides whether `ast::Ident.obj` gets filled in.
+///
+/// Only `defer`'s `methodCall` reads it, so asking the analyzer list alone —
+/// "is revive enabled?" — would turn the resolution walk on for every
+/// configuration that enables revive, at about 0.2s of 5.2s on tailscale, to
+/// serve a sub-case that configuration has switched off.
+#[test]
+fn revive_asks_for_object_resolution_only_when_method_call_can_fire() {
+    use guff_revive::{needs_ast_object_resolution, RuleArgument, RuleSetting, Settings};
+
+    let with_rules = |rules: Vec<RuleSetting>| Settings {
+        rules: Some(rules),
+        ..Settings::default()
+    };
+    let defer_with = |arguments: Vec<RuleArgument>| RuleSetting {
+        name: "defer".into(),
+        arguments,
+        ..RuleSetting::default()
+    };
+
+    // No settings at all: the default rule set has no `defer`.
+    assert!(!needs_ast_object_resolution(None));
+    // Some other rule.
+    assert!(!needs_ast_object_resolution(Some(&with_rules(vec![
+        RuleSetting {
+            name: "exported".into(),
+            ..RuleSetting::default()
+        }
+    ]))));
+    // `defer` with no arguments runs every sub-case, methodCall included.
+    assert!(needs_ast_object_resolution(Some(&with_rules(vec![
+        defer_with(Vec::new())
+    ]))));
+    // tailscale's list leaves methodCall out.
+    assert!(!needs_ast_object_resolution(Some(&with_rules(vec![
+        defer_with(vec![RuleArgument::List(vec![
+            RuleArgument::String("immediate-recover".into()),
+            RuleArgument::String("recover".into()),
+            RuleArgument::String("return".into()),
+        ])])
+    ]))));
+    // Named explicitly, in either spelling upstream accepts.
+    for spelling in ["methodCall", "method-call"] {
+        assert!(
+            needs_ast_object_resolution(Some(&with_rules(vec![defer_with(vec![
+                RuleArgument::List(vec![RuleArgument::String(spelling.into())])
+            ])]))),
+            "{spelling}"
+        );
+    }
+    // Disabled outright.
+    assert!(!needs_ast_object_resolution(Some(&with_rules(vec![
+        RuleSetting {
+            name: "defer".into(),
+            disabled: true,
+            ..RuleSetting::default()
+        }
+    ]))));
+}

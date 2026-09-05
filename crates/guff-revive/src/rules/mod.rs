@@ -104,6 +104,8 @@ mod shared_walk;
 
 use guff_analysis::Pass;
 
+pub(crate) use defer::allow_from_arg_list as defer_allow_from_arg_list;
+
 use crate::config;
 use crate::failure::Failure;
 use crate::ifelse;

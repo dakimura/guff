@@ -1,0 +1,13 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh revive-defer-subset
+# Produced by running golangci-lint on compat/golden/cases/revive-defer-subset/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+deferrule/defer_rule.go:69:2:revive:warning:defer: recover must be called inside a deferred function, this is executing recover immediately
+deferrule/defer_rule.go:74:13:revive:warning:defer: recover must be called inside a deferred function, this is executing recover immediately
+deferrule/defer_rule.go:82:3:revive:warning:defer: return in a defer function has no effect
+deferrule/defer_rule.go:97:6:revive:warning:defer: recover must be called inside a deferred function
+deferrule/defer_rule.go:103:7:revive:warning:defer: recover must be called inside a deferred function

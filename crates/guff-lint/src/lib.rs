@@ -403,6 +403,20 @@ fn analyzers_need_ast_object_resolution(analyzers: &[&Analyzer]) -> bool {
         .any(|a| AST_OBJECT_RESOLUTION_ANALYZERS.contains(&a.name))
 }
 
+/// The same question for revive, which cannot be answered from the analyzer
+/// list alone: only one *rule* of it reads `Ident.obj` (`defer`'s `methodCall`
+/// sub-case), and whether that sub-case runs depends on the rule's arguments.
+///
+/// Asking precisely keeps the resolution walk off for configurations that
+/// enable revive but cannot use it — tailscale is one, and the walk costs it
+/// about 0.2s of 5.2s.
+fn revive_needs_ast_object_resolution(opts: &LintOptions) -> bool {
+    if !opts.analyzers.iter().any(|a| a.name == "revive") {
+        return false;
+    }
+    guff_revive::needs_ast_object_resolution(opts.settings.get("revive"))
+}
+
 /// Load packages and run analyzers. Returns diagnostics and non-zero exit hint.
 pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
     guff_runner::init_rayon_global_stack();
@@ -465,8 +479,8 @@ pub(crate) fn prepare_linter_run(opts: &LintOptions) -> Result<PreparedLint, Run
     let mut speculate_env = TypecheckEnv::from_env(&meta_cfg.resolved_env(), "gc");
     speculate_env.from_source = dep_source;
     speculate_env.parallel = !sequential;
-    speculate_env.skip_object_resolution =
-        !analyzers_need_ast_object_resolution(&opts.analyzers);
+    speculate_env.skip_object_resolution = !analyzers_need_ast_object_resolution(&opts.analyzers)
+        && !revive_needs_ast_object_resolution(opts);
     let speculate_job = if !opts.use_cache && dep_source {
         start_seed_speculation(&meta_cfg, &opts.patterns, &speculate_env)
     } else {
@@ -615,7 +629,8 @@ pub(crate) fn run_linters_on_graph(
     let mut env = TypecheckEnv::from_env(&full_cfg.resolved_env(), "gc");
     env.from_source = dep_source;
     env.parallel = !sequential;
-    env.skip_object_resolution = !analyzers_need_ast_object_resolution(&opts.analyzers);
+    env.skip_object_resolution = !analyzers_need_ast_object_resolution(&opts.analyzers)
+        && !revive_needs_ast_object_resolution(opts);
     let prebuilt = speculate_job.and_then(|job| {
         job.finish_if_matches(all_packages, &typecheck_ids)
             .map(|s| (s.seed, s.fset))

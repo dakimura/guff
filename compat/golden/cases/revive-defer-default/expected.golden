@@ -1,0 +1,17 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh revive-defer-default
+# Produced by running golangci-lint on compat/golden/cases/revive-defer-default/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+deferrule/defer_rule.go:29:3:revive:warning:defer: prefer not to defer inside loops
+deferrule/defer_rule.go:36:3:revive:warning:defer: prefer not to defer inside loops
+deferrule/defer_rule.go:59:8:revive:warning:defer: prefer not to defer chains of function calls
+deferrule/defer_rule.go:64:8:revive:warning:defer: be careful when deferring calls to methods without pointer receiver
+deferrule/defer_rule.go:69:2:revive:warning:defer: recover must be called inside a deferred function, this is executing recover immediately
+deferrule/defer_rule.go:74:13:revive:warning:defer: recover must be called inside a deferred function, this is executing recover immediately
+deferrule/defer_rule.go:82:3:revive:warning:defer: return in a defer function has no effect
+deferrule/defer_rule.go:97:6:revive:warning:defer: recover must be called inside a deferred function
+deferrule/defer_rule.go:103:7:revive:warning:defer: recover must be called inside a deferred function
