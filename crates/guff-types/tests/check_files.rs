@@ -2257,3 +2257,99 @@ fn make_over_a_type_parameter_matches_the_toolchain() {
         }
     }
 }
+
+/// Verifying a type argument against its constraint has to look at the
+/// **instance's** methods, not the origin's.
+///
+/// A generic instance carries no method list until something asks for one, and
+/// `implements` is a free function that cannot ask. `Checker.assignable_to`
+/// expands first; `verify_targs` did not, so the check read the origin's
+/// methods — whose signatures still mention the origin's type parameters — and
+/// reported `*Item[int]` as not satisfying `Cloner[*Item[int]]` with
+/// "have func() *Item[T], want func() *Item[int]".
+///
+/// tailscale's `cmd/viewer/tests` and `types/prefs` are generated code full of
+/// `func (src *T[P]) Clone() *T[P]`, and both packages were ill-typed for it.
+#[test]
+fn a_constraint_is_verified_against_the_instances_own_methods() {
+    let cases: &[(&str, Option<&str>)] = &[
+        // The method's result names the receiver's type parameter.
+        (
+            "type Cloner[T any] interface{ Clone() T }\n\
+             type Item[T any] struct{ v T }\n\
+             func (src *Item[T]) Clone() *Item[T] { return &Item[T]{src.v} }\n\
+             type Holder[T Cloner[T]] struct{ x T }\n\
+             var _ Holder[*Item[int]]",
+            None,
+        ),
+        // Value receiver.
+        (
+            "type Cloner[T any] interface{ Clone() T }\n\
+             type Item[T any] struct{ v T }\n\
+             func (src Item[T]) Clone() Item[T] { return src }\n\
+             type Holder[T Cloner[T]] struct{ x T }\n\
+             var _ Holder[Item[int]]",
+            None,
+        ),
+        // The method's *parameter* names it.
+        (
+            "type Setter[T any] interface{ Set(T) }\n\
+             type Item[T any] struct{ v T }\n\
+             func (dst *Item[T]) Set(v T) { dst.v = v }\n\
+             type Holder[T Setter[int]] struct{ x T }\n\
+             var _ Holder[*Item[int]]",
+            None,
+        ),
+        // Two type parameters on the receiver.
+        (
+            "type Pairer[K, V any] interface{ Pair() (K, V) }\n\
+             type Item[K, V any] struct{ k K; v V }\n\
+             func (i *Item[K, V]) Pair() (K, V) { return i.k, i.v }\n\
+             type Holder[T Pairer[string, int]] struct{ x T }\n\
+             var _ Holder[*Item[string, int]]",
+            None,
+        ),
+        // The method arrives through an embedded generic instance.
+        (
+            "type Cloner[T any] interface{ Clone() T }\n\
+             type base[T any] struct{ v T }\n\
+             func (b *base[T]) Clone() *base[T] { return &base[T]{b.v} }\n\
+             type Item struct{ *base[int] }\n\
+             type Holder[T Cloner[*base[int]]] struct{ x T }\n\
+             var _ Holder[Item]",
+            None,
+        ),
+        // Inferred at a call site rather than written out.
+        (
+            "type Cloner[T any] interface{ Clone() T }\n\
+             type Item[T any] struct{ v T }\n\
+             func (src *Item[T]) Clone() *Item[T] { return &Item[T]{src.v} }\n\
+             func dup[T Cloner[T]](x T) T { return x.Clone() }\n\
+             func use(i *Item[int]) *Item[int] { return dup(i) }",
+            None,
+        ),
+        // Still rejected when the instantiated signature really is wrong:
+        // `Clone() T` becomes `Clone() int`, and the bound wants `*Item[int]`.
+        (
+            "type Cloner[T any] interface{ Clone() T }\n\
+             type Item[T any] struct{ v T }\n\
+             func (src *Item[T]) Clone() T { return src.v }\n\
+             type Holder[T Cloner[T]] struct{ x T }\n\
+             var _ Holder[*Item[int]]",
+            Some("wrong type for method Clone"),
+        ),
+    ];
+
+    for (body, want) in cases {
+        let src = format!("package p\n{body}\n");
+        let check = check_src(&src);
+        let msgs: Vec<String> = check.errors.iter().map(|e| e.msg.clone()).collect();
+        match want {
+            None => assert!(msgs.is_empty(), "{body}\nunexpected: {msgs:?}"),
+            Some(w) => {
+                assert_eq!(msgs.len(), 1, "{body}: {msgs:?}");
+                assert!(msgs[0].contains(w), "{body}: {msgs:?}");
+            }
+        }
+    }
+}

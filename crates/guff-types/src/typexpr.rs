@@ -538,6 +538,15 @@ impl Checker {
                 ),
                 None => continue,
             };
+            // A generic *instance* carries no method list until it is asked
+            // for one, and `implements` cannot ask — it is a free function.
+            // Without this the check reads the **origin's** methods, whose
+            // signatures still mention the origin's type parameters:
+            // `*Item[int]` was reported as not satisfying `Cloner[*Item[int]]`
+            // with "have func() *Item[T], want func() *Item[int]".
+            // `Checker.assignable_to` expands for the same reason.
+            self.expand_instance_methods(targs[i]);
+            self.ensure_method_sigs(targs[i]);
             if let Err(cause) = implements(
                 &mut self.types,
                 &self.objects,
