@@ -331,13 +331,12 @@
     "tailscale": {
       "tier": "hunt",
       "state": "open",
-      "at": "20260905T144026Z",
-      "open": 11,
-      "guff_only": 6,
+      "at": "20260905T161156Z",
+      "open": 7,
+      "guff_only": 2,
       "gcl_only": 5,
       "by_linter": {
         "govet": 6,
-        "revive": 4,
         "goimports": 1
       }
     },
