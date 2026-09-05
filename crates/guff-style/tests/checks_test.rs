@@ -3405,15 +3405,17 @@ fn perfsprint_flags_concat_loop() {
         .iter()
         .filter(|m| m.contains("concat-loop"))
         .collect();
-    assert!(
-        concat.len() >= 8,
-        "expected several concat-loop diagnostics, got {}: {messages:?}",
-        concat.len()
-    );
+    // Counted, not "several": eight loops report, and `>= 8` is a bar that
+    // three different defects could clear while getting the set wrong. The
+    // eighth is the nested-loop pair, which is two loops and two findings —
+    // upstream reaches the inner one because `runConcatLoop` visits every
+    // `ForStmt` / `RangeStmt` in the file, not by walking out of the outer
+    // body. Which lines they land on is gated by `compat/golden/cases/perfsprint`.
+    assert_eq!(concat.len(), 9, "{messages:?}");
     assert!(
         concat
             .iter()
-            .all(|m| m.contains("string concatenation in a loop")),
+            .all(|m| *m == "concat-loop: string concatenation in a loop"),
         "{concat:?}"
     );
 }
@@ -3426,6 +3428,13 @@ fn perfsprint_concat_loop_allows_local_and_other_ops() {
         "concat_loop_ok.go",
     );
     let messages = support::run_analyzer(perfsprint(), &pkg);
+    // Every shape in the file is silent, and each is silent for its own
+    // reason: a local declaration (four spellings), a non-string variable, a
+    // right-hand side that is not the variable itself, the `otherOps` bail
+    // that `loop-other-ops=false` turns into silence — and six kinds of block
+    // upstream's breadth-first walk never enters (`switch` twice, a type
+    // switch, a `select`, a bare block, and an `else if`, whose `Else` is an
+    // `*ast.IfStmt` rather than the `*ast.BlockStmt` the walk asks for).
     assert!(
         !messages.iter().any(|m| m.contains("concat-loop")),
         "default loop-other-ops=false should skip otherOps cases; locals should be ignored: {messages:?}"

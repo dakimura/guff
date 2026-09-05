@@ -7,3 +7,10 @@ bad.go  compat/isolate/fixtures/perfsprint/bad.go
 # Rust fixtures because the unit test asserts the *edits* too, which no key
 # here can see.
 hex.go  crates/guff-style/tests/testdata/perfsprint/hex.go
+
+# `concat-loop` is on by default and had no golden at all: the two fixtures
+# below were read only by Rust tests that assert "several" findings, which is
+# a count no defect can fail. They live in their own directory because they are
+# a package of their own.
+concat/bad.go  crates/guff-style/tests/testdata/perfsprint/concat_loop_bad.go
+concat/ok.go   crates/guff-style/tests/testdata/perfsprint/concat_loop_ok.go

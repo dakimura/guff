@@ -22991,3 +22991,80 @@ OSS pr tier **8 ターゲットすべて P=R=100%**。台帳は **39/100**（42 
 
 telegraf に残るのは **4 件**: perfsprint 1、staticcheck 1、bodyclose 1、
 sqlclosecheck 1。**nolintlint は 0 になった。**
+
+### 2026-09-05（続き 193）— `concat-loop` はループ本体から `if` にしか降りない。guff は `switch` にも降りていた
+
+telegraf の残り 4 件のうち 1 件、`migrations/inputs_udp_listener/migration.go:45`。
+**guff の誤報である。**
+
+```go
+for k, v := range old {
+	switch k {
+	case "allowed_pending_messages":
+		msg += allowPendingMessagesMsg      // ← guff だけが撃つ
+	case "udp_packet_size":
+		msg += udpPacketSizeMsg
+	…
+```
+
+#### 上流はループ本体を幅優先で歩き、**1 種類の文からしか出ない**
+
+perfsprint v0.10.1（golangci-lint 2.12.2 の pin）`runConcatLoop`:
+
+```go
+case *ast.IfStmt:
+	// explore breadth first, but go inside the if/else blocks
+	if st.Body != nil { bl = append(bl, st.Body.List...) }
+	el, ok := st.Else.(*ast.BlockStmt)
+	if ok && el != nil { bl = append(bl, el.List...) }
+```
+
+`switch` でも、裸のブロックでも、`select` でも、**入れ子のループ**でもない。
+入れ子のループが報告されるのは `runConcatLoop` が
+**ファイル中の `ForStmt` / `RangeStmt` をすべて訪ねる**からで、外側の本体から
+降りているからではない。`else if` も入らない —— `st.Else` が
+`*ast.IfStmt` であって `*ast.BlockStmt` ではないからである。
+
+guff は `SwitchStmt` / `CaseClause` / `RangeStmt` / `ForStmt` にも降りていた。
+そして入れ子ループを二重に拾うので、**位置で重複を潰す `already` 集合**を
+自前で持っていた —— **抑制ガードが近似を支えていた**形である（§4 の
+2026-09-02 と同型）。歩き方を上流に合わせると 1 つの代入が 2 つのループに
+現れることは無くなるので、`already` ごと外した。
+
+**11 形で測った**（`direct` / `if` / `else` / `switch` 1 case / `switch` 2 case /
+裸ブロック / 入れ子ループ / `s = s + x` / type switch / `select` / `else if`）:
+上流 5 件・guff 5 件で**完全一致**。修正前は guff が 7 件だった。
+
+#### 「緑だが何も測っていない」の 5 形目
+
+`concat_loop_bad.go` には**この switch の形が既に入っていた**。それでも
+気づかれなかったのは、**この fixture に golden が無かった**からである。
+読んでいたのは Rust の単体テストだけで、そのアサーションは
+
+```rust
+assert!(concat.len() >= 8, "expected several concat-loop diagnostics, …");
+```
+
+—— **どんな欠陥でも越えられる下限**だった。golden case `perfsprint` の
+`sources.txt` に 2 ファイルを足し（自分のディレクトリに置いて別パッケージに
+する）、単体テストは **9 件ちょうど**の等値アサーションに変えた。
+switch の形は `concat_loop_ok.go` に移し、上流が入らないブロック 6 種
+（switch ×2・type switch・select・裸ブロック・else if）を並べた。
+
+golden 再生成は**キー集合で差分した: 消えたキー 0、追加 9**（すべて
+`concat/bad.go` の `concat-loop`。`concat/ok.go` は 0 件）。
+fix tier の `perfsprint` も録り直し —— **83 行の追加のみ、削除なし**。
+
+```
+telegraf: guff-only 4 → 3
+```
+
+#### ゲート
+
+golden **228**（`perfsprint` を再生成 —— **消えたキー 0、追加 9**）/
+fix **228**（`perfsprint` を録り直し —— **83 行の追加のみ、削除なし**）/
+reject **14** / isolate **116 ターゲット** / workspace **278 スイート** /
+OSS pr tier **8 ターゲットすべて P=R=100%**。台帳は **39/100**（42 定義、open 3）。
+
+telegraf に残るのは **3 件**: staticcheck 1（moby の `PortMap` marshal）、
+bodyclose 1、sqlclosecheck 1。

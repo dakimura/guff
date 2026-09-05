@@ -59,6 +59,89 @@
 -	return fmt.Sprintf("%s", f())
 +	return f().Error()
  }
+--- a/concat/bad.go
++++ b/concat/bad.go
+@@ -3,49 +3,69 @@
+ func positive() {
+ 	var s string
+ 	words := []string{"one", "two", "three"}
++	var sSb6 strings.Builder
+ 	for w := range words {
+-		s += words[w]
++		sSb6.WriteString(words[w])
+ 	}
++	s += sSb6.String()
++	var sSb9 strings.Builder
+ 	for w := range words {
+-		s = s + words[w]
++		sSb9.WriteString(words[w])
+ 	}
++	s += sSb9.String()
++	var sSb12 strings.Builder
+ 	for w := 0; w < 10; w++ {
+-		s = s + "y"
++		sSb12.WriteString("y")
+ 	}
++	s += sSb12.String()
++	var sSb15 strings.Builder
+ 	for w := 0; w < 10; w++ {
+ 		if w%2 == 1 {
+-			s = s + "y"
++			sSb15.WriteString("y")
+ 		}
+ 	}
++	s += sSb15.String()
+ 	nb := 0
++	var sSb21 strings.Builder
+ 	for w := 0; w < 10; w++ {
+ 		if w%2 == 1 {
+ 			nb += 1
+ 		} else {
+-			s = s + "y"
++			sSb21.WriteString("y")
+ 		}
+ 	}
++	s += sSb21.String()
++	var sSb28 strings.Builder
+ 	for w := 0; w < 10; w++ {
+ 		if w%2 == 1 {
+-			s = s + "x"
++			sSb28.WriteString("x")
+ 		} else {
+-			s = s + "y"
++			sSb28.WriteString("y")
+ 		}
+ 	}
++	s += sSb28.String()
+ 	s2 := "prefix"
++	var sSb36 strings.Builder
++	var s2Sb36 strings.Builder
+ 	for w := 0; w < 10; w++ {
+ 		if w%2 == 1 {
+-			s2 = s2 + "x"
++			s2Sb36.WriteString("x")
+ 		} else {
+-			s = s + "y"
++			sSb36.WriteString("y")
+ 		}
+ 	}
++	s += sSb36.String()
++	s2 += s2Sb36.String()
++	var sSb43 strings.Builder
+ 	for w := 0; w < 10; w++ {
++		var sSb44 strings.Builder
+ 		for y := 0; y < 10; y++ {
+-			s = s + "a"
++			sSb44.WriteString("a")
+ 		}
+-		s = s + ","
++		s += sSb44.String()
++		sSb43.WriteString(",")
+ 	}
++	s += sSb43.String()
+ 	_ = nb
+ 	_ = s2
+ }
 --- a/hex.go
 +++ b/hex.go
 @@ -34,15 +34,15 @@

@@ -584,12 +584,11 @@ fn assign_stmt_end(st: &AssignStmt) -> u32 {
         .unwrap_or(st.tok_pos.0 as u32)
 }
 
-/// Collect loop-external string concatenations (BFS into nested blocks).
-fn process_loop(
-    pass: &Pass<'_>,
-    body: &[Stmt],
-    already: &HashSet<u32>,
-) -> BTreeMap<String, Vec<ConcatAssign>> {
+/// Collect the loop's own string concatenations.
+///
+/// No de-duplication across loops: with the walk staying inside its own body
+/// (see the `IfStmt` arm), one assignment can only ever belong to one loop.
+fn process_loop(pass: &Pass<'_>, body: &[Stmt]) -> BTreeMap<String, Vec<ConcatAssign>> {
     let mut decl_in_loop: HashSet<String> = HashSet::new();
     let mut adds: BTreeMap<String, Vec<ConcatAssign>> = BTreeMap::new();
     let mut queue: Vec<&Stmt> = body.iter().collect();
@@ -598,10 +597,22 @@ fn process_loop(
         let st = queue[i];
         i += 1;
         match st {
-            Stmt::RangeStmt(r) => queue.extend(r.body.list.iter()),
-            Stmt::ForStmt(f) => queue.extend(f.body.list.iter()),
-            Stmt::SwitchStmt(sw) => queue.extend(sw.body.list.iter()),
-            Stmt::CaseClause(c) => queue.extend(c.body.iter()),
+            // Upstream's walk leaves the loop body for **one** kind of
+            // statement and no other:
+            //
+            //     case *ast.IfStmt:
+            //         // explore breadth first, but go inside the if/else blocks
+            //         if st.Body != nil { bl = append(bl, st.Body.List...) }
+            //         el, ok := st.Else.(*ast.BlockStmt)
+            //         if ok && el != nil { bl = append(bl, el.List...) }
+            //
+            // Not a `switch`, not a bare block, not a `select`, and not a
+            // nested loop — a nested loop is reached as a loop of its own,
+            // because `runConcatLoop` visits every `ForStmt` / `RangeStmt` in
+            // the file. guff walked into `switch` bodies as well, which is one
+            // finding in telegraf's `migrations/inputs_udp_listener` and
+            // nothing golangci-lint reports. (perfsprint gained the `switch`
+            // case in a commit *after* v0.10.1, the pinned version.)
             Stmt::IfStmt(ifs) => {
                 queue.extend(ifs.body.list.iter());
                 if let Some(Stmt::BlockStmt(el)) = ifs.else_.as_deref() {
@@ -660,9 +671,6 @@ fn process_loop(
                                 _ => break,
                             };
                             let tok_pos = asgn.tok_pos.0 as u32;
-                            if already.contains(&tok_pos) {
-                                break;
-                            }
                             adds.entry(id.name.clone()).or_default().push(ConcatAssign {
                                 tok_pos,
                                 stmt_pos: assign_stmt_pos(asgn),
@@ -723,7 +731,6 @@ fn report_concat_loop(
     loop_node: NodeRef<'_>,
     adds: &BTreeMap<String, Vec<ConcatAssign>>,
     options: &PerfsprintOptions,
-    already: &mut HashSet<u32>,
     pending: &mut Vec<Pending>,
 ) {
     let add_todo = other_ops_ident(loop_node, adds);
@@ -741,9 +748,6 @@ fn report_concat_loop(
     }
     let mut suffix = String::new();
     for k in adds.keys() {
-        for st in &adds[k] {
-            already.insert(st.tok_pos);
-        }
         prefix.push_str(&format!("var {k}Sb{loop_start_line} strings.Builder\n"));
         suffix.push_str(&format!("\n{k} += {k}Sb{loop_start_line}.String()"));
     }
@@ -789,7 +793,6 @@ fn check_concat_loops(pass: &Pass<'_>, options: &PerfsprintOptions, pending: &mu
     if !options.concat_loop {
         return;
     }
-    let mut already: HashSet<u32> = HashSet::new();
     for file in pass.files() {
         // Collect (pos, end, body slice pointers via indices) in Preorder so outer
         // loops are handled before nested ones (matches upstream inspect.Preorder).
@@ -829,7 +832,7 @@ fn check_concat_loops(pass: &Pass<'_>, options: &PerfsprintOptions, pending: &mu
                     }
                     _ => return true,
                 };
-                let adds = process_loop(pass, body, &already);
+                let adds = process_loop(pass, body);
                 if !adds.is_empty() {
                     report_concat_loop(
                         pass,
@@ -838,7 +841,6 @@ fn check_concat_loops(pass: &Pass<'_>, options: &PerfsprintOptions, pending: &mu
                         node,
                         &adds,
                         options,
-                        &mut already,
                         pending,
                     );
                 }
