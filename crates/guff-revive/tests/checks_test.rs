@@ -1715,3 +1715,107 @@ fn revive_rule_exclude_skips_only_that_rule() {
         ],
     );
 }
+
+fn exported_flag_messages(args: &[&str]) -> Vec<String> {
+    let settings = guff_revive::Settings {
+        severity: None,
+        rules: Some(vec![guff_revive::RuleSetting {
+            name: "exported".into(),
+            arguments: args
+                .iter()
+                .map(|a| guff_revive::RuleArgument::String((*a).into()))
+                .collect(),
+            disabled: false,
+            severity: None,
+            exclude: Vec::new(),
+        }]),
+        confidence: Some(0.0),
+        ignore_generated_header: false,
+        enable_default_rules: false,
+        enable_all_rules: false,
+        go: None,
+    };
+    guff_revive::with_settings(settings, || {
+        let pkg = support::typecheck_fixture_dir("revive", "exported_flags", "example.com/revive/exflags");
+        let mut messages = support::run_analyzer(revive(), &pkg);
+        messages.sort();
+        messages
+    })
+}
+
+/// `exported` has seven configuration flags and guff read two.
+///
+/// ```text
+/// r.disabledChecks = disabledChecks{PrivateReceivers: true, PublicInterfaces: true}
+/// r.isRepetitiveMsg = "stutters"
+/// checkPrivateReceivers          -> PrivateReceivers = false
+/// disableStutteringCheck         -> RepetitiveNames  = true
+/// sayRepetitiveInsteadOfStutters -> isRepetitiveMsg  = "is repetitive"
+/// checkPublicInterface           -> PublicInterfaces = false
+/// disableChecksOn{Constants,Functions,Methods,Types,Variables}
+/// ```
+///
+/// telegraf writes four of them, and `disable-checks-on-types` alone was 312
+/// findings golangci-lint does not make. The three `revive-exported-*` golden
+/// cases compare the same three sets against golangci-lint.
+#[test]
+fn revive_exported_reads_all_of_its_flags() {
+    // Two of the defaults *skip* something, so the unconfigured set is small.
+    assert_eq!(
+        exported_flag_messages(&[]),
+        vec![
+            "exported: exported const UndocumentedConst should have comment or be unexported",
+            "exported: exported function UndocumentedFunc should have comment or be unexported",
+            "exported: exported method Undocumented.UndocumentedMethod should have comment or be unexported",
+            "exported: exported type Undocumented should have comment or be unexported",
+            "exported: exported var UndocumentedVar should have comment or be unexported",
+            "exported: type name will be used as exflags.ExflagsThing by other packages, and that stutters; consider calling this Thing",
+        ],
+    );
+
+    // telegraf's four: the type row goes, the wording changes, and two rows the
+    // defaults were skipping appear.
+    assert_eq!(
+        exported_flag_messages(&[
+            "check-private-receivers",
+            "say-repetitive-instead-of-stutters",
+            "check-public-interface",
+            "disable-checks-on-types",
+        ]),
+        vec![
+            "exported: comment on exported method unexportedRecv.ExportedOnPrivate should be of the form \"ExportedOnPrivate ...\"",
+            "exported: exported const UndocumentedConst should have comment or be unexported",
+            "exported: exported function UndocumentedFunc should have comment or be unexported",
+            "exported: exported method Undocumented.UndocumentedMethod should have comment or be unexported",
+            "exported: exported var UndocumentedVar should have comment or be unexported",
+            "exported: public interface method PublicIface.Undoc should be commented",
+            "exported: type name will be used as exflags.ExflagsThing by other packages, and that is repetitive; consider calling this Thing",
+        ],
+    );
+
+    // Every doc check off. What survives is the one check that is not behind
+    // `disabledChecks.isDisabled` — `checkRepetitiveNames`.
+    assert_eq!(
+        exported_flag_messages(&[
+            "disableChecksOnConstants",
+            "disableChecksOnFunctions",
+            "disableChecksOnMethods",
+            "disableChecksOnTypes",
+            "disableChecksOnVariables",
+        ]),
+        vec![
+            "exported: type name will be used as exflags.ExflagsThing by other packages, and that stutters; consider calling this Thing",
+        ],
+    );
+
+    // And `disableStutteringCheck` takes that last one away.
+    assert!(exported_flag_messages(&[
+        "disableChecksOnConstants",
+        "disableChecksOnFunctions",
+        "disableChecksOnMethods",
+        "disableChecksOnTypes",
+        "disableChecksOnVariables",
+        "disableStutteringCheck",
+    ])
+    .is_empty());
+}

@@ -1,0 +1,7 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# The three `revive-exported-*` cases share this fixture and differ only in the
+# rule arguments. Seven flags, and guff read two of them.
+
+exflags/exflags.go   crates/guff-revive/tests/testdata/revive/exported_flags/exflags.go

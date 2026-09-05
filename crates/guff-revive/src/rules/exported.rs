@@ -23,14 +23,107 @@ use crate::util::{
     reparse_with_comments, Reparsed,
 };
 
+/// `disabledChecks` plus `isRepetitiveMsg` — upstream's whole configuration
+/// for this rule.
+///
+/// ```go
+/// r.disabledChecks = disabledChecks{PrivateReceivers: true, PublicInterfaces: true}
+/// r.isRepetitiveMsg = "stutters"
+/// ```
+///
+/// Two of the flags *enable* something (`checkPrivateReceivers`,
+/// `checkPublicInterface` clear a default-on skip); five turn a kind of
+/// declaration off; one changes a word in the message. guff read only the
+/// first and `disableStutteringCheck`, so telegraf's
+/// `disable-checks-on-types` — 312 findings golangci-lint does not make —
+/// went nowhere.
+#[derive(Clone, Copy, Debug)]
+pub struct DisabledChecks {
+    pub const_: bool,
+    pub function: bool,
+    pub method: bool,
+    /// Default **true**: methods on unexported receivers are skipped.
+    pub private_receivers: bool,
+    /// Default **true**: exported interfaces' methods are not checked.
+    pub public_interfaces: bool,
+    pub repetitive_names: bool,
+    pub type_: bool,
+    pub var: bool,
+}
+
+impl Default for DisabledChecks {
+    fn default() -> Self {
+        Self {
+            const_: false,
+            function: false,
+            method: false,
+            private_receivers: true,
+            public_interfaces: true,
+            repetitive_names: false,
+            type_: false,
+            var: false,
+        }
+    }
+}
+
+impl DisabledChecks {
+    /// `disabledChecks.isDisabled(kind)` for the kinds the doc checks pass in.
+    fn is_disabled(&self, kind: &str) -> bool {
+        match kind {
+            "var" => self.var,
+            "const" => self.const_,
+            "function" => self.function,
+            "method" => self.method,
+            "type" => self.type_,
+            _ => false,
+        }
+    }
+}
+
+/// `Configure`. An unknown flag is a configuration *error* upstream; guff
+/// ignores it, because refusing a config is `compat/reject`'s business and a
+/// linter that stops the run over one word would lose every other finding.
+fn configure(pass: &Pass<'_>) -> (DisabledChecks, &'static str) {
+    let mut dc = DisabledChecks::default();
+    let mut msg = "stutters";
+    let has = |o: &str| crate::config::rule_has_string_option(pass, "exported", o);
+    if has("checkPrivateReceivers") {
+        dc.private_receivers = false;
+    }
+    if has("disableStutteringCheck") {
+        dc.repetitive_names = true;
+    }
+    if has("sayRepetitiveInsteadOfStutters") {
+        msg = "is repetitive";
+    }
+    if has("checkPublicInterface") {
+        dc.public_interfaces = false;
+    }
+    if has("disableChecksOnConstants") {
+        dc.const_ = true;
+    }
+    if has("disableChecksOnFunctions") {
+        dc.function = true;
+    }
+    if has("disableChecksOnMethods") {
+        dc.method = true;
+    }
+    if has("disableChecksOnTypes") {
+        dc.type_ = true;
+    }
+    if has("disableChecksOnVariables") {
+        dc.var = true;
+    }
+    (dc, msg)
+}
+
 pub struct Checker<'a> {
     pass: &'a Pass<'a>,
     failures: Vec<Failure>,
     gen_decl_missing: HashMap<usize, bool>,
     skip_file: bool,
-    skip_stutter: bool,
-    /// When false (upstream default), skip exported methods on unexported receivers.
-    check_private_receivers: bool,
+    disabled: DisabledChecks,
+    repetitive_msg: &'static str,
     /// Receiver type keys that implement `sort.Interface` (Len+Less+Swap).
     sortable: HashSet<String>,
     /// `PARSE_COMMENTS` reparse for the current file (docs + private FileSet).
@@ -42,19 +135,14 @@ impl<'a> Checker<'a> {
         if !is_importable_package(&pass.pkg().name) {
             return None;
         }
-        let skip_stutter =
-            crate::config::rule_has_string_option(pass, "exported", "disableStutteringCheck");
-        // Upstream default: PrivateReceivers=true (skip methods on unexported
-        // receivers). `checkPrivateReceivers` disables that skip.
-        let check_private_receivers =
-            crate::config::rule_has_string_option(pass, "exported", "checkPrivateReceivers");
+        let (disabled, repetitive_msg) = configure(pass);
         Some(Self {
             pass,
             failures: Vec::new(),
             gen_decl_missing: HashMap::new(),
             skip_file: false,
-            skip_stutter,
-            check_private_receivers,
+            disabled,
+            repetitive_msg,
             sortable: scan_sortable(pass.files()),
             comments: None,
         })
@@ -102,8 +190,8 @@ impl<'a> Checker<'a> {
             check_file(
                 &rp.file,
                 pkg,
-                self.skip_stutter,
-                self.check_private_receivers,
+                self.disabled,
+                self.repetitive_msg,
                 &self.sortable,
                 &mut self.gen_decl_missing,
                 &mut batch,
@@ -116,8 +204,8 @@ impl<'a> Checker<'a> {
             check_file(
                 report,
                 pkg,
-                self.skip_stutter,
-                self.check_private_receivers,
+                self.disabled,
+                self.repetitive_msg,
                 &self.sortable,
                 &mut self.gen_decl_missing,
                 &mut self.failures,
@@ -253,8 +341,8 @@ fn ast_type_name(ty: &Expr) -> &str {
 fn check_file(
     file: &File,
     pkg: &str,
-    skip_stutter: bool,
-    check_private_receivers: bool,
+    disabled: DisabledChecks,
+    repetitive_msg: &str,
     sortable: &HashSet<String>,
     gen_decl_missing: &mut HashMap<usize, bool>,
     failures: &mut Vec<Failure>,
@@ -269,20 +357,33 @@ fn check_file(
                 for spec in &g.specs {
                     match spec {
                         Spec::TypeSpec(ts) => {
-                            lint_type_doc(ts, g, failures);
-                            if !skip_stutter {
+                            lint_type_doc(ts, g, disabled, failures);
+                            // `checkRepetitiveNames` is *not* behind
+                            // `isDisabled("type")`: turning the type doc check
+                            // off leaves the naming one running.
+                            if !disabled.repetitive_names {
                                 check_repetitive(
                                     pkg,
                                     &ts.name.name,
                                     "type",
                                     ts.name.name_pos.0,
+                                    repetitive_msg,
                                     failures,
                                 );
+                            }
+                            if !disabled.public_interfaces {
+                                if let Expr::InterfaceType(iface) = &ts.ty {
+                                    if ts.name.is_exported() {
+                                        for m in &iface.methods.list {
+                                            lint_interface_method(&ts.name.name, m, failures);
+                                        }
+                                    }
+                                }
                             }
                         }
                         Spec::ValueSpec(vs) => {
                             if let Some(gd) = last_gen {
-                                lint_value_spec(vs, gd, gen_decl_missing, failures);
+                                lint_value_spec(vs, gd, disabled, gen_decl_missing, failures);
                             }
                         }
                         _ => {}
@@ -290,9 +391,16 @@ fn check_file(
                 }
             }
             Decl::FuncDecl(f) => {
-                lint_func_doc(f, check_private_receivers, sortable, failures);
-                if f.recv.is_none() && !skip_stutter {
-                    check_repetitive(pkg, &f.name.name, "func", f.name.name_pos.0, failures);
+                lint_func_doc(f, disabled, sortable, failures);
+                if f.recv.is_none() && !disabled.repetitive_names {
+                    check_repetitive(
+                        pkg,
+                        &f.name.name,
+                        "func",
+                        f.name.name_pos.0,
+                        repetitive_msg,
+                        failures,
+                    );
                 }
             }
             _ => {}
@@ -326,7 +434,7 @@ fn must_check_method(
 
 fn lint_func_doc(
     f: &FuncDecl,
-    check_private_receivers: bool,
+    disabled: DisabledChecks,
     sortable: &HashSet<String>,
     failures: &mut Vec<Failure>,
 ) {
@@ -334,7 +442,7 @@ fn lint_func_doc(
         return;
     }
     let (kind, name) = if f.recv.is_some() {
-        if !must_check_method(f, check_private_receivers, sortable) {
+        if !must_check_method(f, !disabled.private_receivers, sortable) {
             return;
         }
         let recv = f
@@ -348,6 +456,12 @@ fn lint_func_doc(
     } else {
         ("function", f.name.name.clone())
     };
+    // `if w.disabledChecks.isDisabled(kind) { return }` — after the kind is
+    // known, so `disableChecksOnMethods` and `disableChecksOnFunctions` are
+    // separate switches.
+    if disabled.is_disabled(kind) {
+        return;
+    }
     let first = first_comment_line(f.doc.as_ref());
     let status = check_go_doc_status(&first, &f.name.name);
     match status {
@@ -439,7 +553,15 @@ fn check_go_doc_status(first_comment_line: &str, name: &str) -> GoDocStatus {
     GoDocStatus::CaseMismatch
 }
 
-fn lint_type_doc(ts: &TypeSpec, gd: &GenDecl, failures: &mut Vec<Failure>) {
+fn lint_type_doc(
+    ts: &TypeSpec,
+    gd: &GenDecl,
+    disabled: DisabledChecks,
+    failures: &mut Vec<Failure>,
+) {
+    if disabled.is_disabled("type") {
+        return;
+    }
     if !ts.name.is_exported() {
         return;
     }
@@ -499,9 +621,14 @@ fn lint_type_doc(ts: &TypeSpec, gd: &GenDecl, failures: &mut Vec<Failure>) {
 fn lint_value_spec(
     vs: &ValueSpec,
     gd: &GenDecl,
+    disabled: DisabledChecks,
     gen_decl_missing: &mut HashMap<usize, bool>,
     failures: &mut Vec<Failure>,
 ) {
+    let kind = if gd.tok == Some(Token::CONST) { "const" } else { "var" };
+    if disabled.is_disabled(kind) {
+        return;
+    }
     let kind = if gd.tok == Some(Token::CONST) {
         "const"
     } else {
@@ -576,7 +703,56 @@ fn lint_value_spec(
     ));
 }
 
-fn check_repetitive(pkg: &str, name: &str, thing: &str, pos: i64, failures: &mut Vec<Failure>) {
+/// `lintInterfaceMethod`, reached only when `checkPublicInterface` cleared the
+/// default `PublicInterfaces` skip.
+fn lint_interface_method(type_name: &str, m: &guff::ast::Field, failures: &mut Vec<Failure>) {
+    let Some(name_ident) = m.names.first() else {
+        return;
+    };
+    if !name_ident.is_exported() {
+        return;
+    }
+    let name = &name_ident.name;
+    let first = first_comment_line(m.doc.as_ref());
+    let status = check_go_doc_status(&first, name);
+    match status {
+        GoDocStatus::Ok => (),
+        GoDocStatus::Missing => {
+            failures.push(Failure::with_confidence(
+                "exported",
+                name_ident.name_pos.0 as u32,
+                format!("public interface method {type_name}.{name} should be commented"),
+                status.confidence(),
+            ));
+        }
+        _ => {
+            let hint = status.correction_hint(&first);
+            let pos = m
+                .doc
+                .as_ref()
+                .and_then(|d| d.list.first())
+                .map(|c| c.slash.0)
+                .unwrap_or(name_ident.name_pos.0);
+            failures.push(Failure::with_confidence(
+                "exported",
+                pos as u32,
+                format!(
+                    "comment on exported interface method {type_name}.{name} should be of the form \"{name} ...\"{hint}"
+                ),
+                status.confidence(),
+            ));
+        }
+    }
+}
+
+fn check_repetitive(
+    pkg: &str,
+    name: &str,
+    thing: &str,
+    pos: i64,
+    repetitive_msg: &str,
+    failures: &mut Vec<Failure>,
+) {
     if !guff::ast::ast_is_exported(name) || name.len() <= pkg.len() {
         return;
     }
@@ -592,7 +768,7 @@ fn check_repetitive(pkg: &str, name: &str, thing: &str, pos: i64, failures: &mut
             rule: "exported",
             pos: pos as u32,
             message: format!(
-                "{thing} name will be used as {pkg}.{name} by other packages, and that stutters; consider calling this {rem}"
+                "{thing} name will be used as {pkg}.{name} by other packages, and that {repetitive_msg}; consider calling this {rem}"
             ),
             ..Failure::default()
         });

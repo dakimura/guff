@@ -1,0 +1,9 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh revive-exported-disable-kinds
+# Produced by running golangci-lint on compat/golden/cases/revive-exported-disable-kinds/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+exflags/exflags.go:43:6:revive:warning:exported: type name will be used as exflags.ExflagsThing by other packages, and that stutters; consider calling this Thing
