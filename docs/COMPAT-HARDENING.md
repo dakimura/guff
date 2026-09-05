@@ -23068,3 +23068,91 @@ OSS pr tier **8 ターゲットすべて P=R=100%**。台帳は **39/100**（42 
 
 telegraf に残るのは **3 件**: staticcheck 1（moby の `PortMap` marshal）、
 bodyclose 1、sqlclosecheck 1。
+
+### 2026-09-05（続き 194）— 1 つの変数への 2 回の代入は 2 つの値。**支配していなければ殺さない**
+
+telegraf の残り 3 件のうち 1 件、`plugins/inputs/prometheus/prometheus.go:581`。
+**guff の誤報である。**
+
+```go
+var resp *http.Response
+if u.url.Scheme != "unix" {
+	resp, err = p.client.Do(req)
+} else {
+	resp, err = uClient.Do(req)      // ← guff だけが撃つ
+}
+…
+defer resp.Body.Close()
+```
+
+client が 2 つ、`resp` が 1 つ、`defer` が 1 つ。guff は**同じ名前への再代入を
+見た瞬間に前の値を「閉じられていない」と報告して**いた。
+
+#### 上流の形
+
+`isopen` は SSA の referrer を辿る。値が誰にも参照されていなければ
+
+```go
+if len(*call.Referrers()) == 0 {
+	return true
+}
+```
+
+で報告される —— これが「殺された値」である。一方、分岐で合流した値は
+`*ssa.Phi` に流れ込み、`isopen` の Phi の枝が**その phi の referrer**から
+`FieldAddr` → `Body` → close を見つけて黙る。
+
+つまり **2 回目の代入が 1 回目を殺すのは、それを支配しているときだけ**である。
+
+**20 形を実測**して、規則は 2 つに落ちた:
+
+1. **殺す**のは、新しい代入の**分岐パスが古い方の接頭辞**であるとき
+   （同じブロック、または 1 つ外側の分岐）。それ以外は**合流**する ——
+   兄弟の arm 同士、および「古い方が外・新しい方が arm の中」。
+   後者は順序が効く: `if` の**前**に置いた代入は分岐の反対側の辺を通って
+   生き残るので合流し（黙る）、`if` の**後**に置いた代入は arm の値を殺す（撃つ）。
+2. 合流した値でも、**合流がループの中で起き、close がその外**なら上流は撃つ。
+   Phi の枝は**その phi の referrer しか見ない**ので、ループヘッダの phi が
+   間に挟まると届かないからである。`for { for { if … } }` で depth 2 の合流を
+   depth 1 で閉じても同じく撃つ。
+
+guff 側は `RespUsage` を **エントリの配列**にし、各エントリに
+「どのループ深さで合流したか」を持たせた。close はその深さ以上で書かれたときだけ
+そのエントリに届く。分岐と arm の範囲、ループの範囲は関数本体から一度だけ
+収集する（`Shape`）。
+
+#### 測った形（20 形）
+
+`crates/guff-context/tests/testdata/bodyclose/{bad,ok}.go` に全部入れた。
+報告 12 件・沈黙 8 形で、guff と golangci-lint は**桁まで一致**。
+
+| 形 | 上流 |
+|---|---|
+| 同じブロックで 2 回 | 1 回目を撃つ |
+| arm の中 → その後で無条件 | arm を撃つ |
+| 無条件 → その後 arm の中 | **黙る**（合流） |
+| 兄弟の arm 2 つ / 3 つ / `select` / 入れ子 | **黙る** |
+| 同じ arm で 2 回 | 1 回目を撃つ |
+| ループ本体で 2 回 | 1 回目を撃つ |
+| ループ内で合流・ループ外で close | **両方撃つ** |
+| ループ内で合流・同じループ内で close | 黙る |
+| 二重ループの内側で合流・外側で close | **両方撃つ** |
+| 片方の arm だけ close | 閉じない方を撃つ |
+| 合流して一度も close しない | 両方撃つ |
+
+golden 再生成は**キー集合で差分した: 消えたキー 0、追加 11**（すべて
+`bad/bad.go`。`ok.go` に足した 7 形は上流も 0 件）。
+単体テストの `BODYCLOSE_BAD_SHAPES` は **10 → 21**。
+
+```
+telegraf: guff-only 3 → 2
+```
+
+#### ゲート
+
+golden **228**（`bodyclose` を再生成 —— **消えたキー 0、追加 11**）/ fix **228** /
+reject **14** / isolate **116 ターゲット** / workspace **278 スイート** /
+OSS pr tier **8 ターゲットすべて P=R=100%**。台帳は **39/100**（42 定義、open 3）。
+
+telegraf に残るのは **2 件**: staticcheck 1（moby の `PortMap` marshal）、
+sqlclosecheck 1。

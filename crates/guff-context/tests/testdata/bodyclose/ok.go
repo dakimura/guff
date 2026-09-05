@@ -130,7 +130,6 @@ func closureClosesInNestedClosure(run func(func()), cleanup func(func())) {
 	})
 }
 
-
 // suite stands in for Ginkgo's Describe: a function taking a closure, called
 // from a package-level variable initializer.
 func suite(name string, body func()) bool { return true }
@@ -175,3 +174,132 @@ var (
 		_ = resp
 	})
 )
+
+// The merge shapes that stay silent — the counterparts of the ones in
+// `bad.go`. Two stores to one variable that do not kill each other reach a
+// `*ssa.Phi`, and `isopen`'s phi arm settles every value behind it when the
+// body is closed through that phi.
+
+// telegraf's `plugins/inputs/prometheus/prometheus.go`: two clients, one
+// `resp`, one deferred close.
+func twoArmsOneClose(x bool) {
+	var resp *http.Response
+	var err error
+	if x {
+		resp, err = http.Get("https://example.com/two-arms-1")
+	} else {
+		resp, err = http.Get("https://example.com/two-arms-2")
+	}
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+}
+
+// Three arms of a `switch` are still one phi.
+func threeArmsOneClose(x int) {
+	var resp *http.Response
+	var err error
+	switch x {
+	case 0:
+		resp, err = http.Get("https://example.com/three-1")
+	case 1:
+		resp, err = http.Get("https://example.com/three-2")
+	default:
+		resp, err = http.Get("https://example.com/three-3")
+	}
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+}
+
+// And so is a `select`.
+func selectArmsOneClose(ch chan int) {
+	var resp *http.Response
+	var err error
+	select {
+	case <-ch:
+		resp, err = http.Get("https://example.com/select-1")
+	default:
+		resp, err = http.Get("https://example.com/select-2")
+	}
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+}
+
+// The unconditional store comes *first*: it survives on the branch's other
+// edge, so it merges rather than dying. (Reverse the order and the second
+// store kills the first — `armThenUnconditional` in `bad.go`.)
+func unconditionalThenArm(x bool) {
+	resp, err := http.Get("https://example.com/merge-1")
+	if err != nil {
+		return
+	}
+	if x {
+		resp, err = http.Get("https://example.com/merge-2")
+		if err != nil {
+			return
+		}
+	}
+	defer resp.Body.Close()
+}
+
+// Nested branches merge at the inner one first.
+func nestedArmsOneClose(x, y bool) {
+	var resp *http.Response
+	var err error
+	if x {
+		if y {
+			resp, err = http.Get("https://example.com/nested-1")
+		} else {
+			resp, err = http.Get("https://example.com/nested-2")
+		}
+	} else {
+		resp, err = http.Get("https://example.com/nested-3")
+	}
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+}
+
+// Merged inside a loop and closed inside the same loop: one phi, so the close
+// reaches it. (Close it after the loop instead and there are two —
+// `loopArmAssignClosedAfter` in `bad.go`.)
+func branchInLoopClosedInLoop(x bool) {
+	var resp *http.Response
+	var err error
+	for i := 0; i < 3; i++ {
+		if x {
+			resp, err = http.Get("https://example.com/in-loop-1")
+		} else {
+			resp, err = http.Get("https://example.com/in-loop-2")
+		}
+		if err != nil {
+			return
+		}
+		resp.Body.Close()
+	}
+}
+
+// Each arm closes its own response before the next store.
+func bothArmsClose(x bool) {
+	var resp *http.Response
+	var err error
+	if x {
+		resp, err = http.Get("https://example.com/both-1")
+		if err != nil {
+			return
+		}
+		resp.Body.Close()
+	} else {
+		resp, err = http.Get("https://example.com/both-2")
+		if err != nil {
+			return
+		}
+		resp.Body.Close()
+	}
+}

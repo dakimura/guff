@@ -16,6 +16,17 @@ bad/bad.go:61:20:bodyclose::response body must be closed
 bad/bad.go:83:23:bodyclose::response body must be closed
 bad/bad.go:94:23:bodyclose::response body must be closed
 bad/bad.go:100:23:bodyclose::response body must be closed
+bad/bad.go:119:23:bodyclose::response body must be closed
+bad/bad.go:135:23:bodyclose::response body must be closed
+bad/bad.go:149:23:bodyclose::response body must be closed
+bad/bad.go:165:23:bodyclose::response body must be closed
+bad/bad.go:184:24:bodyclose::response body must be closed
+bad/bad.go:186:24:bodyclose::response body must be closed
+bad/bad.go:204:25:bodyclose::response body must be closed
+bad/bad.go:206:25:bodyclose::response body must be closed
+bad/bad.go:218:23:bodyclose::response body must be closed
+bad/bad.go:223:23:bodyclose::response body must be closed
+bad/bad.go:240:23:bodyclose::response body must be closed
 referrers/referrers.go:35:14:bodyclose::response body must be closed
 referrers/referrers.go:61:30:bodyclose::response body must be closed
 referrers/referrers.go:93:28:bodyclose::response body must be closed
