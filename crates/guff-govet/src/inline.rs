@@ -19,10 +19,13 @@
 
 use std::collections::{HashMap, HashSet};
 
-/// A finding, and the edit that inlines it when there is one. The two
-/// `cannot inline` arms below carry `None`: upstream reports those without a
-/// fix because type-parameter inference is not implemented.
-type Pending = Vec<(u32, String, Option<(u32, u32, String)>)>;
+/// A finding, and the edits that inline it when there are any. The two
+/// `cannot inline` arms below carry an empty list: upstream reports those
+/// without a fix because type-parameter inference is not implemented.
+///
+/// Constants need one edit; a type alias may need a second one that adds the
+/// import its right-hand side names.
+type Pending = Vec<(u32, String, Vec<TextEdit>)>;
 use std::fs;
 use std::sync::OnceLock;
 
@@ -37,10 +40,12 @@ use guff_analysis::code::{
     call_name, effective_file_go_version, object_pkg_path, toolchain_go_version, version_compare,
 };
 use guff_analysis::passes::inspect;
+use guff_analysis::refactor;
 use guff_analysis::{
     AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
 };
 use guff_types::arena::{ObjectData, ObjectId};
+use guff_types::TypeId;
 use guff_types::scope::lookup as scope_lookup;
 
 use crate::expreq::unparen;
@@ -358,7 +363,7 @@ fn check_exp_gofix_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending)
         pending.push((
             call.lparen.0 as u32,
             "cannot inline: type parameter inference is not yet supported".into(),
-            None,
+            Vec::new(),
         ));
     }
 }
@@ -415,7 +420,383 @@ fn check_ioutil_go_version(
     pending.push((
         pos,
         format!("cannot inline call to {display} (declared using {callee}) into a file using {caller}"),
-        None,
+        Vec::new(),
+    ));
+}
+
+/// Type aliases carrying `//go:fix inline` that guff cannot discover from
+/// export data, keyed by `(package path, name)`.
+///
+/// Upstream learns this from a `goFixInlineAliasFact` exported by the package
+/// that declares the alias; guff only analyses the packages being linted, so a
+/// dependency's directive leaves no fact behind. Unlike the constant table
+/// above this records only *that* the alias is inlinable — the replacement
+/// text is rendered from the alias's right-hand side in the type arena, which
+/// export data does carry.
+///
+/// One entry, because there is exactly one such alias in the standard library
+/// and `golang.org/x/exp` combined: `constraints.Ordered = cmp.Ordered`,
+/// redundant since Go 1.21 introduced `cmp.Ordered`.
+fn is_known_inlinable_alias(pkg_path: &str, name: &str) -> bool {
+    matches!((pkg_path, name), ("golang.org/x/exp/constraints", "Ordered"))
+}
+
+/// Names of type aliases marked `//go:fix inline` in a reparsed file.
+/// (Go: the `*ast.TypeSpec` arm of `gofixdirective.Find`.)
+fn go_fix_alias_names(file: &guff::ast::File) -> Vec<String> {
+    let mut names = Vec::new();
+    for decl in &file.decls {
+        let Decl::GenDecl(GenDecl {
+            doc,
+            tok: Some(Token::TYPE),
+            specs,
+            ..
+        }) = decl
+        else {
+            continue;
+        };
+        let decl_inline = has_fix_inline(doc);
+        for spec in specs {
+            let Spec::TypeSpec(ts) = spec else { continue };
+            // Only an alias — `type A = B`, not `type A B`.
+            if !ts.assign.is_valid() {
+                continue;
+            }
+            if !decl_inline && !has_fix_inline(&ts.doc) {
+                continue;
+            }
+            names.push(ts.name.name.clone());
+        }
+    }
+    names
+}
+
+/// The alias `TypeName`s in the package under analysis that carry the
+/// directive.
+fn collect_inlinable_aliases(pass: &Pass<'_>) -> HashSet<ObjectId> {
+    let mut out = HashSet::new();
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return out;
+    };
+    let Some(type_pkg) = pass.type_pkg() else {
+        return out;
+    };
+    let scope = artifacts.packages.get(type_pkg).scope();
+    for (i, _) in pass.files().iter().enumerate() {
+        let path = pass
+            .pkg()
+            .compiled_go_files
+            .get(i)
+            .cloned()
+            .or_else(|| pass.pkg().go_files.get(i).cloned());
+        let Some(path) = path else { continue };
+        let owned;
+        let src: &[u8] = match pass.pkg().source_bytes(i) {
+            Some(bytes) => bytes,
+            None => match fs::read(&path) {
+                Ok(read) => {
+                    owned = read;
+                    &owned
+                }
+                Err(_) => continue,
+            },
+        };
+        if memchr::memmem::find(src, b"go:fix inline").is_none() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let re_fset = FileSet::new();
+        let Ok(parsed) = parse_file(&re_fset, name, src, PARSE_COMMENTS) else {
+            continue;
+        };
+        for alias_name in go_fix_alias_names(&parsed) {
+            let Some(obj) = scope_lookup(&artifacts.scopes, scope, &alias_name) else {
+                continue;
+            };
+            if matches!(artifacts.objects.get(obj), ObjectData::TypeName(_)) {
+                out.insert(obj);
+            }
+        }
+    }
+    out
+}
+
+/// Whether `obj` is a type alias that should be inlined at its uses.
+///
+/// # Where the discovery stops
+///
+/// Like `printf`'s wrapper induction and `ctrlflow`'s no-return induction,
+/// this runs *inside* a package. Upstream exports a `goFixInlineAliasFact`
+/// per package, so an alias declared in a **sibling** package of the same
+/// module is inlinable at its uses there; here it is not, and advertising
+/// `fact_types` on `inline` would schedule it across every transitive import
+/// for facts that could not be produced anyway (the reason `printf_wrappers`
+/// gives for the same choice). Measured, as a golangci-only report:
+/// `type H[T b.Ord] []T` where `b.Ord` is a `//go:fix inline` alias in a
+/// sibling package. The constant arm above already has this same boundary.
+fn inlinable_alias(
+    pass: &Pass<'_>,
+    obj: ObjectId,
+    local: &mut Option<HashSet<ObjectId>>,
+) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    if !matches!(artifacts.objects.get(obj), ObjectData::TypeName(_)) {
+        return false;
+    }
+    let name = obj.name(&artifacts.objects);
+    if let Some(pkg_path) = object_pkg_path(pass, obj) {
+        if is_known_inlinable_alias(&pkg_path, name) {
+            return true;
+        }
+    }
+    let Some(obj_pkg) = obj.pkg(&artifacts.objects) else {
+        return false;
+    };
+    let Some(type_pkg) = pass.type_pkg() else {
+        return false;
+    };
+    if obj_pkg != type_pkg {
+        return false;
+    }
+    let set = local.get_or_insert_with(|| {
+        if !package_has_go_fix_inline(pass) {
+            return HashSet::new();
+        }
+        collect_inlinable_aliases(pass)
+    });
+    set.contains(&obj)
+}
+
+/// Whether package `from` is allowed to import package `to` under the
+/// `internal/` visibility rule. (Go: `packagepath.CanImport`.)
+fn can_import(from: &str, to: &str) -> bool {
+    if to == "internal" || to.starts_with("internal/") {
+        // Only std packages may import `internal/...`, and we cannot reliably
+        // know whether we are in std, so upstream uses a first-segment
+        // heuristic.
+        let first = from.split('/').next().unwrap_or("");
+        if first.contains('.') {
+            return false; // example.com/foo is not std
+        }
+        if first == "testdata" {
+            return false;
+        }
+    }
+    if let Some(stem) = to.strip_suffix("/internal") {
+        return from.starts_with(stem);
+    }
+    if let Some(i) = to.rfind("/internal/") {
+        return from.starts_with(&to[..i]);
+    }
+    true
+}
+
+/// The `TypeName`s of the named, alias and type-parameter types within `t`
+/// (including `t` itself). The same name may appear more than once.
+/// (Go: `typenames`.)
+fn typenames(arena: &guff_types::TypeArena, t: TypeId, out: &mut Vec<ObjectId>) {
+    typenames_seen(arena, t, out, &mut HashSet::new());
+}
+
+fn typenames_seen(
+    arena: &guff_types::TypeArena,
+    t: TypeId,
+    out: &mut Vec<ObjectId>,
+    seen: &mut HashSet<TypeId>,
+) {
+    if !seen.insert(t) {
+        return;
+    }
+    use guff_types::arena::TypeData;
+    match arena.get(t) {
+        TypeData::Named(n) => {
+            out.push(n.obj());
+            for &a in guff_types::named_type_args(arena, t)
+                .map(|l| l.list())
+                .unwrap_or(&[])
+            {
+                typenames_seen(arena, a, out, seen);
+            }
+        }
+        TypeData::Alias(al) => {
+            out.push(al.obj());
+            let targs: Vec<TypeId> = al
+                .type_args()
+                .map(|l| l.list().to_vec())
+                .unwrap_or_default();
+            for a in targs {
+                typenames_seen(arena, a, out, seen);
+            }
+        }
+        TypeData::TypeParam(tp) => out.push(tp.obj()),
+        TypeData::Pointer(p) => typenames_seen(arena, p.elem(), out, seen),
+        TypeData::Slice(sl) => typenames_seen(arena, sl.elem(), out, seen),
+        TypeData::Array(ar) => typenames_seen(arena, ar.elem(), out, seen),
+        TypeData::Chan(c) => typenames_seen(arena, c.elem(), out, seen),
+        TypeData::Map(m) => {
+            typenames_seen(arena, m.key(), out, seen);
+            typenames_seen(arena, m.elem(), out, seen);
+        }
+        _ => {}
+    }
+}
+
+/// `astutil.Format`: the expression as `go/printer` renders it, which is what
+/// upstream's message carries — so a generic alias keeps its type arguments
+/// (`b.Pair[string, int]`).
+///
+/// Rendering the AST rather than slicing the source is not a detail: the first
+/// attempt subtracted `File.pos()` from the position, but a `Pos` indexes the
+/// whole `FileSet` and a file's `package` keyword is not its base, so the
+/// message came out as `Type alias a BSD-style // lice should be inlined` on
+/// tailscale's `tempfork/heap`. A source-text fallback also disagrees with the
+/// printer wherever the two differ, and silently, which is worse than either.
+fn format_expr(pass: &Pass<'_>, e: &Expr) -> String {
+    let mut buf: Vec<u8> = Vec::new();
+    match guff::printer::fprint(&mut buf, pass.fset(), guff::printer::PrintNode::Expr(e)) {
+        Ok(()) => String::from_utf8(buf).unwrap_or_default(),
+        Err(_) => String::new(),
+    }
+}
+
+/// Report a use of an inlinable type alias, with the edits that replace it by
+/// the alias's right-hand side. (Go: `analyzer.inlineAlias`.)
+///
+/// `expr_id` is the whole use expression — the `SelectorExpr` for `pkg.A`, the
+/// `IndexExpr` for `A[int]` — because that is what carries the instantiated
+/// type and what upstream spans.
+fn report_alias_inline(
+    pass: &Pass<'_>,
+    expr_id: u32,
+    span: (u32, u32),
+    display: String,
+    pending: &mut Pending,
+) {
+    let Some(info) = pass.types_info() else { return };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return;
+    };
+    let arena = &artifacts.types;
+    let objects = &artifacts.objects;
+    let packages = &artifacts.packages;
+
+    let Some(tv) = info.types.get(&expr_id) else {
+        return;
+    };
+    let guff_types::arena::TypeData::Alias(alias) = arena.get(tv.typ) else {
+        return;
+    };
+    let Some(rhs) = alias.rhs() else { return };
+
+    let Some(file) = refactor::enclosing_file(pass, span.0) else {
+        return;
+    };
+    let cur_pkg = pass.type_pkg();
+    let cur_path = pass.pkg().pkg_path.clone();
+
+    // The alias's own type parameters do not appear in the instantiated result.
+    let type_param_objs: HashSet<ObjectId> = alias
+        .type_params()
+        .map(|l| {
+            (0..l.len())
+                .filter_map(|i| match arena.get(l.at(i)) {
+                    guff_types::arena::TypeData::TypeParam(tp) => Some(tp.obj()),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut tns = Vec::new();
+    typenames(arena, rhs, &mut tns);
+
+    let mut prefixes: HashMap<guff_types::PackageId, String> = HashMap::new();
+    let mut import_edits: Vec<TextEdit> = Vec::new();
+    for tn in tns {
+        if type_param_objs.contains(&tn) {
+            continue;
+        }
+        let tn_pkg = tn.pkg(objects);
+        let tn_name = tn.name(objects).to_string();
+        let same_package = match (tn_pkg, cur_pkg) {
+            (None, _) => true, // universe scope
+            (Some(p), Some(c)) => p == c,
+            (Some(_), None) => false,
+        };
+        if same_package {
+            // No import is needed, but the name must still mean the same thing
+            // at the use site as it does in the right-hand side.
+            // (Go: `scope.LookupParent(tn.Name(), id.Pos())` must find `tn`.)
+            let Some(file_scope) = info.scopes.get(&file.id).copied() else {
+                return;
+            };
+            let Some(scope) =
+                guff_types::scope::innermost(&artifacts.scopes, file_scope, span.0)
+            else {
+                return;
+            };
+            match guff_types::scope::lookup_parent(
+                &artifacts.scopes,
+                objects,
+                scope,
+                &tn_name,
+                span.0,
+            ) {
+                Some((_, found)) if found == tn => {}
+                _ => return,
+            }
+            if let Some(p) = tn_pkg {
+                prefixes.insert(p, String::new());
+            }
+            continue;
+        }
+        let pkg_id = tn_pkg.expect("same_package covers the None case");
+        let pkg_path = packages.get(pkg_id).path().to_string();
+        if !can_import(&cur_path, &pkg_path) {
+            return;
+        }
+        if prefixes.contains_key(&pkg_id) {
+            continue;
+        }
+        let pkg_name = packages.get(pkg_id).name().to_string();
+        let Some((prefix, edits)) =
+            refactor::add_import(pass, file, &pkg_name, &pkg_path, &tn_name, span.0)
+        else {
+            return;
+        };
+        prefixes.insert(pkg_id, prefix.trim_end_matches('.').to_string());
+        import_edits.extend(edits);
+    }
+
+    let new_text = {
+        let qf = |pkg: guff_types::PackageId, parena: &guff_types::PackageArena| -> String {
+            if Some(pkg) == cur_pkg {
+                return String::new();
+            }
+            match prefixes.get(&pkg) {
+                Some(p) => p.clone(),
+                // Every package in `rhs` went through the loop above, so this
+                // is unreachable; render the path rather than panicking.
+                None => parena.get(pkg).path().to_string(),
+            }
+        };
+        guff_types::type_string(arena, objects, packages, rhs, Some(&qf))
+    };
+
+    let mut edits = import_edits;
+    edits.push(TextEdit {
+        pos: span.0,
+        end: span.1,
+        new_text,
+    });
+    pending.push((
+        span.0,
+        format!("Type alias {display} should be inlined"),
+        edits,
     ));
 }
 
@@ -433,9 +814,31 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
     });
 
+    // `A[int]` / `A[K, V]`: the use expression upstream spans and types is the
+    // index expression, not the `A` inside it. Key them by the id of their
+    // operand so the Ident/SelectorExpr arms can widen.
+    let mut indexed: HashMap<u32, (u32, Expr)> = HashMap::new();
+    inspect.preorder_typed(
+        node_mask!(IndexExpr, IndexListExpr),
+        pass.files(),
+        |n| match n {
+            NodeRef::IndexExpr(ie) => {
+                indexed.insert(unparen(&ie.x).id(), (ie.id, Expr::IndexExpr(ie.clone())));
+            }
+            NodeRef::IndexListExpr(ie) => {
+                indexed.insert(
+                    unparen(&ie.x).id(),
+                    (ie.id, Expr::IndexListExpr(ie.clone())),
+                );
+            }
+            _ => {}
+        },
+    );
+
     // Local `//go:fix inline` discovery re-reads sources; defer until a
     // non-stdlib candidate appears (prometheus typically only hits reflect.Ptr).
     let mut local: Option<HashMap<ObjectId, String>> = None;
+    let mut local_aliases: Option<HashSet<ObjectId>> = None;
     let mut pending: Pending = Vec::new();
     // Only visit CallExpr when a known call-site diagnostic can fire.
     let visit_exp = package_imports_exp_gofix(pass);
@@ -478,6 +881,16 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     return;
                 };
                 let Some(target) = inline_target(pass, obj, &mut local) else {
+                    if inlinable_alias(pass, obj, &mut local_aliases) {
+                        let base = Expr::SelectorExpr(sel.clone());
+                        let (node, expr) = match indexed.get(&sel.id) {
+                            Some((_, e)) => (e.id(), e.clone()),
+                            None => (sel.id, base),
+                        };
+                        let span = (expr.pos().0 as u32, expr.end().0 as u32);
+                        let display = format_expr(pass, &expr);
+                        report_alias_inline(pass, node, span, display, &mut pending);
+                    }
                     return;
                 };
                 let name = format_expr_name(&Expr::SelectorExpr(sel.clone()));
@@ -487,7 +900,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 pending.push((
                     sel.x.pos().0 as u32,
                     format!("Constant {name} should be inlined"),
-                    Some((sel.x.pos().0 as u32, sel.sel.end().0 as u32, target)),
+                    vec![TextEdit {
+                        pos: sel.x.pos().0 as u32,
+                        end: sel.sel.end().0 as u32,
+                        new_text: target,
+                    }],
                 ));
             }
             NodeRef::Ident(id) => {
@@ -503,33 +920,43 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     return;
                 };
                 let Some(target) = inline_target(pass, obj, &mut local) else {
+                    if inlinable_alias(pass, obj, &mut local_aliases) {
+                        let base = Expr::Ident(id.clone());
+                        let (node, expr) = match indexed.get(&id.id) {
+                            Some((_, e)) => (e.id(), e.clone()),
+                            None => (id.id, base),
+                        };
+                        let span = (expr.pos().0 as u32, expr.end().0 as u32);
+                        let display = format_expr(pass, &expr);
+                        report_alias_inline(pass, node, span, display, &mut pending);
+                    }
                     return;
                 };
                 pending.push((
                     id.pos().0 as u32,
                     format!("Constant {} should be inlined", id.name),
-                    Some((id.pos().0 as u32, id.end().0 as u32, target)),
+                    vec![TextEdit {
+                        pos: id.pos().0 as u32,
+                        end: id.end().0 as u32,
+                        new_text: target,
+                    }],
                 ));
             }
             _ => {}
         }
     });
 
-    for (pos, message, fix) in pending {
-        let Some((from, to, new_text)) = fix else {
+    for (pos, message, text_edits) in pending {
+        if text_edits.is_empty() {
             pass.reportf(pos, message);
             continue;
-        };
+        }
         pass.report(Diagnostic {
             pos,
             message,
             suggested_fixes: vec![SuggestedFix {
                 message: String::new(),
-                text_edits: vec![TextEdit {
-                    pos: from,
-                    end: to,
-                    new_text,
-                }],
+                text_edits,
             }],
             ..Diagnostic::default()
         });

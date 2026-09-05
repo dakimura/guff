@@ -24816,3 +24816,96 @@ fixture は `nilness/noreturn.go`。`log` が要るので `nilness/bad.go` と�
 理由が消えた代用が残るのは続き 211 と同じ形（[[deferral-notes-outlive-their-reasons]]）。
 外すのは 1 つずつ、それぞれ測定を付けて別タスクにする —— 外して何かが
 動いたなら、その代用は**別のもの**を支えていたということになる。
+
+### 2026-09-06（続き 216）— `//go:fix inline` の**型エイリアス**を実装。tailscale が閉じた（P=91.5% R=100.0%）
+
+続き 215 で残った tailscale 最後の 1 件は
+`tempfork/heap/heap_test.go:14:govet:inline:
+Type alias constraints.Ordered should be inlined`。
+`inline.rs` の doc に「Full function/alias inlining is omitted」と書いてあった
+ところである。
+
+#### 上流を 8 形で測ってから書いた
+
+| 形 | 上流 |
+|---|---|
+| export data の `constraints.Ordered` | 撃つ → `cmp.Ordered`、`import "cmp"` を足す |
+| ローカル エイリアスを非修飾で使う（`Ord`） | 撃つ |
+| ローカル エイリアスを修飾で使う（`b.Ord`） | 撃つ |
+| ジェネリック エイリアス `b.Pair[string, int]` | 撃つ。**メッセージも span も型引数を含む**。fix は**インスタンス化した** RHS（`map[string]int`）|
+| 指令の無いエイリアス（`Plain`） | 黙る |
+| 別のエイリアス宣言の RHS | 撃つ（宣言の RHS も use）|
+| `internal/…` のエイリアスを import 可能な位置から | 撃つ |
+| 使用位置で対象パッケージ名が shadow されている | **撃つ**。fix は別名を選び `import cmp0 "cmp"` を足す |
+
+`//go:fix inline` の付いた型エイリアスは **stdlib と x/exp を合わせて 1 つ**
+しかない（`constraints.Ordered = cmp.Ordered`、Go 1.21 の `cmp.Ordered` 以降
+冗長）。なので export data 用の表は 1 行で済む。しかも**置換先の文字列は
+表に持たない** —— RHS は型アリーナから読める（上流も
+`goFixInlineAliasFact` は「inline 可能である」ことだけを運び、RHS は型から
+取る）。定数の表とはそこが違う。
+
+一番重いはずだった `refactor.AddImport`（既存 alias の再利用、dot import、
+名前衝突時の `cmp0`）は **guff に移植済み**だったので、書いたのは発見・
+使用箇所の検出・RHS のレンダリングだけ。
+
+#### 2 度間違えた
+
+1. **メッセージがライセンスヘッダになった。** 最初 `expr_source` は
+   `File.pos()` を引いてソースを切り出していたが、`Pos` は **FileSet 全体の
+   添字**で、ファイルの `package` キーワードはその base ではない。tailscale で
+   `Type alias a BSD-style // lice should be inlined` と出た。上流は
+   `astutil.Format(fset, expr)` —— **printer で AST を出す**のであって
+   ソースを切るのではない。`guff::printer::fprint` に置き換えた。
+   ソース切り出しの fallback は printer と食い違いうえに黙るので、両方やめた。
+2. **fixture が別の欠落を掘り当てた。** `type NotAnAlias Local` に指令を
+   付けたら上流は
+   `invalid //go:fix inline directive: not a type alias` を出した。
+   `gofixdirective.Find` の**検証診断 4 つ**（not a type alias / array types
+   not supported / const value is iota / const value is not the name of
+   another constant）は **guff がどれも出していない** —— 定数側も `iota` を
+   黙って飛ばしている。これは別の欠落なので fixture からその形を外し、
+   ここに測定として記録する。次のタスク。
+
+#### 測定
+
+- fixture `inline_alias/bad.go`: 上流と **4 件が行・列・文言すべて一致**、
+  `--fix` の出力も**バイト一致**。黙るべき 4 形（指令の無いエイリアス、
+  `type A B` 定義、その使用、エイリアス宣言の名前そのもの）入り。
+  グループ宣言の spec で「指令は宣言単位だけでなく spec 単位でも読む」ことを、
+  ジェネリックで「RHS は使用箇所の型引数でインスタンス化して出す」ことを
+  それぞれ固定している。
+- golden 再生成は**追加 4・削除 0**、fix の期待値も再生成して**上流と一致**。
+- **tailscale: guff=46 golangci=43 both=42（P=91.3% R=97.7%）→
+  guff=47 golangci=43 both=43（P=91.5% R=100.0%）unexpected=0**。
+  guff-only 4 は続き 209 の allowlist 済み `revive:time-equal`。
+- 全ゲート green（workspace 278 / golden 230 / fix 230 / reject 14 /
+  oss pr 8 ターゲット P=R=100% / isolate govet P=R=100%）。
+
+#### 出せないもの（測った）
+
+**別パッケージで宣言されたエイリアス**は見えない。上流は
+`goFixInlineAliasFact` をパッケージごとに export するので、同じモジュールの
+兄弟パッケージの `b.Ord` も inline 対象になる。guff は lint 対象の
+パッケージしか解析しないので fact が無く、`inline` に `fact_types` を
+広告すると**産めない fact のために全推移 import へ解析をスケジュールする**
+ことになる —— `printf_wrappers` が同じ理由で同じ選択をしている。
+定数側にも前から同じ境界がある。
+
+測った形（golangci だけが撃つ）:
+
+```go
+// package b
+//go:fix inline
+type Ord = cmp.Ordered
+
+// package a
+type H2[T b.Ord] []T        // golangci 1 件 / guff 0 件
+var M b.Pair[string, int]   // 同上
+```
+
+```
+台帳: 43/100 at zero（45 定義、open 0、unmeasured 2＝buildah/cri-o）
+```
+
+open が 0 になったのは 2026-08 以来。次は `adopt tetragon`。
