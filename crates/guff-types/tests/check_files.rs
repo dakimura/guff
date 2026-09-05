@@ -2187,3 +2187,73 @@ fn a_type_parameter_named_only_in_a_constraint_is_inferred_from_methods() {
     let check = check_src(mutual);
     assert!(check.errors.is_empty(), "{:?}", check.errors);
 }
+
+/// `make(T)` where `T` is a **type parameter**.
+///
+/// Go asks `commonUnder(T, cond)` — the underlying type every term of the
+/// type set shares, with `cond` rejecting the terms `make` cannot build.
+/// Reading `underlying()` straight off the operand instead sees a type
+/// parameter's *constraint interface* and rejects it out of hand, so
+/// `make(T)` inside `func Set[K comparable, V any, T ~map[K]V]` was "cannot
+/// make T: type must be slice, map, or channel". tailscale's `util/mak` is
+/// that function.
+///
+/// The messages are asserted, not just the verdicts: all three causes
+/// upstream can give are reachable from a type parameter, and they are the
+/// only way to tell which term the check rejected.
+#[test]
+fn make_over_a_type_parameter_matches_the_toolchain() {
+    let cases: &[(&str, Option<&str>)] = &[
+        // A map type parameter: one argument is enough.
+        (
+            "func f[K comparable, V any, T ~map[K]V](m *T) { *m = make(T) }",
+            None,
+        ),
+        ("func f[E any, S ~[]E]() S { return make(S, 0) }", None),
+        ("func f[E any, S ~[]E]() S { return make(S, 1, 2) }", None),
+        ("func f[T ~chan int]() T { return make(T) }", None),
+        // Two terms that share an underlying type.
+        (
+            "type A map[string]int\n\
+             type B map[string]int\n\
+             func f[T A | B]() T { return make(T) }",
+            None,
+        ),
+        // A slice still needs its length, type parameter or not.
+        (
+            "func f[E any, S ~[]E]() S { return make(S) }",
+            Some("make expects 2 or 3 arguments; found 1"),
+        ),
+        // Capacity below length is still caught.
+        (
+            "func f[E any, S ~[]E]() S { return make(S, 5, 2) }",
+            Some("length and capacity swapped"),
+        ),
+        // Terms with different underlying types have no common one.
+        (
+            "func f[T ~[]int | ~map[string]int]() T { return make(T) }",
+            Some("cannot make T: []int and map[string]int have different underlying types"),
+        ),
+        // A term `make` cannot build is reported as such, even though these
+        // two terms also differ — `cond` runs before the identical check.
+        (
+            "func f[T ~[]int | ~int]() T { return make(T) }",
+            Some("cannot make T: type must be slice, map, or channel"),
+        ),
+        // No specific terms at all.
+        (
+            "func f[T any]() T { return make(T) }",
+            Some("cannot make T: no specific type"),
+        ),
+    ];
+
+    for (body, want) in cases {
+        let src = format!("package p\n{body}\n");
+        let check = check_src(&src);
+        let msgs: Vec<String> = check.errors.iter().map(|e| e.msg.clone()).collect();
+        match want {
+            None => assert!(msgs.is_empty(), "{body}\nunexpected: {msgs:?}"),
+            Some(w) => assert_eq!(msgs, vec![w.to_string()], "{body}"),
+        }
+    }
+}

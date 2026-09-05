@@ -859,21 +859,87 @@ impl Checker {
         if !is_valid(&self.types, t) {
             return false;
         }
-        // DEFERRED: commonUnder over a type parameter's type set — use the
-        // underlying type directly.
-        let u = t.underlying(&self.types);
-        let min = match self.types.get(u) {
-            TypeData::Slice(_) => 2,
-            TypeData::Map(_) | TypeData::Chan(_) => 1,
-            _ => {
+        // `commonUnder(T, cond)`: for a type parameter this is the underlying
+        // type shared by every term of its type set, with `cond` rejecting the
+        // terms `make` cannot build. Reading `underlying()` directly — what
+        // this did — sees the *constraint interface* of a type parameter and
+        // rejects it out of hand, so `make(T)` inside
+        // `func Set[K comparable, V any, T ~map[K]V]` was "cannot make T: type
+        // must be slice, map, or channel" and took tailscale's `util/mak` with
+        // it.
+        //
+        // The loop is written out rather than calling `under::common_under`
+        // because the condition has to look types up in the arena, and that
+        // function holds it mutably for the whole call.
+        let mut pairs: Vec<(Option<TypeId>, Option<TypeId>)> = Vec::new();
+        crate::under::typeset_iter(
+            &mut self.types,
+            &self.objects,
+            &self.packages,
+            t,
+            |tt, uu| {
+                pairs.push((tt, uu));
+                true
+            },
+        );
+        let mut cu: Option<TypeId> = None;
+        let mut ct: Option<TypeId> = None;
+        let mut cause: Option<String> = None;
+        for (tt, uu) in pairs {
+            // `cond` first, exactly as upstream orders it: a term `make`
+            // cannot build is reported as such even when the terms also differ.
+            match uu {
+                None => {
+                    cause = Some("no specific type".to_string());
+                }
+                Some(u) => match self.types.get(u) {
+                    TypeData::Slice(_) | TypeData::Map(_) | TypeData::Chan(_) => {}
+                    _ => cause = Some("type must be slice, map, or channel".to_string()),
+                },
+            }
+            if cause.is_some() {
+                break;
+            }
+            let u = uu.expect("checked above");
+            let this_t = tt.expect("tt is Some when uu is Some");
+            if let Some(prev) = cu {
+                if !crate::predicates::identical(
+                    &mut self.types,
+                    &self.objects,
+                    &self.packages,
+                    prev,
+                    u,
+                ) {
+                    // `commonUnder`'s own wording for terms that do not share
+                    // an underlying type.
+                    let (a, b) = (
+                        self.type_str(ct.expect("set with cu")),
+                        self.type_str(this_t),
+                    );
+                    cause = Some(format!("{a} and {b} have different underlying types"));
+                    break;
+                }
+            }
+            cu = Some(u);
+            ct = Some(this_t);
+        }
+        let u = match (cu, cause) {
+            (Some(u), None) => u,
+            (_, cause) => {
                 let ts = self.type_str(t);
+                let cause = cause.unwrap_or_else(|| "no specific type".to_string());
                 self.error(
                     call.args[0].pos().0 as u32,
                     Code::InvalidMake,
-                    format!("cannot make {}: type must be slice, map, or channel", ts),
+                    format!("cannot make {}: {}", ts, cause),
                 );
                 return false;
             }
+        };
+        let min = match self.types.get(u) {
+            TypeData::Slice(_) => 2,
+            // Any other term was excluded by the condition above.
+            _ => 1,
         };
         if nargs < min || min + 1 < nargs {
             self.error(
