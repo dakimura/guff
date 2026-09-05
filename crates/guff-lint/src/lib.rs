@@ -709,22 +709,17 @@ pub(crate) fn run_linters_on_graph(
 /// Do **not** key this off arbitrary `fact_types`: expanding for every fact
 /// producer regresses peak RSS on large corpora (prometheus).
 ///
-/// This note used to say modernize, deprecated and exhaustive "do not need"
-/// the expansion. **exhaustive does**, and the cost of not having it is a
-/// missing finding: a `switch` over an enum declared in another package sees no
-/// members, so it is never non-exhaustive. Measured with a two-package module —
-/// golangci-lint reports `missing cases in switch of type enumpkg.Type`, guff
-/// says nothing — and the fact never arrives because the importing action skips
-/// the dep whose `type_artifacts` is `None`. An instrumented build printed
-/// `FACT-DEP exhaustive exrepro -> exrepro/enumpkg typed=false table=false`.
+/// This note used to say `exhaustive` belongs here, because a `switch` over an
+/// enum declared in another package saw no members and so was never
+/// non-exhaustive — and that reaching an enum in another *module* would need
+/// whole-program mode and the RSS budget for it (continuation 174).
 ///
-/// Adding `exhaustive` here would close the same-module half. It would not
-/// close the other half: k6 `internal/js/modules/k6/browser/common/remote_object.go`
-/// switches over `github.com/chromedp/cdproto/runtime.Type`, and an enum in
-/// another *module* is never typechecked from source at all. golangci-lint
-/// reaches both because it loads dependency syntax whenever a fact producer is
-/// enabled. Closing this needs that whole-program mode, and the RSS budget for
-/// it, not a line in this function — see COMPAT-HARDENING 続き 174.
+/// **It does not belong here, and it never needed the syntax.** The members
+/// upstream can ask of a foreign enum are exactly its *exported* constants
+/// (`checklist.add` passes `includeUnexported = pass.Pkg == e.typ.Pkg()`), and
+/// those are in the imported package's scope however the package arrived. The
+/// analyzer reads them there when no fact exists; same module and other module
+/// close together, at no cost to this function — see COMPAT-HARDENING 続き 201.
 pub(crate) fn analyzers_need_same_module_fact_packages(
     analyzers: &[&guff_analysis::Analyzer],
 ) -> bool {

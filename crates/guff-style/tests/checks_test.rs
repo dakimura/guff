@@ -9293,3 +9293,76 @@ fn gocritic_reads_its_per_check_settings() {
         "{tuned:?}"
     );
 }
+
+/// An enum declared in an **imported** package still has members.
+///
+/// Upstream learns them from an object fact it exported while analysing that
+/// package; guff analyses only the packages it was asked about, so for
+/// everything else the fact is simply absent and a switch over an imported
+/// enum was never non-exhaustive. k6's
+/// `internal/js/modules/k6/browser/common/remote_object.go` is the shape: it
+/// switches over `github.com/chromedp/cdproto/runtime.Type` behind a
+/// `//nolint:exhaustive`, and with the finding missing the directive read as
+/// unused — the one thing separating k6 from golangci-lint.
+///
+/// The fixture's enum lives in a module of its own precisely so this test
+/// cannot pass through the fact path. Every case here was measured against
+/// golangci-lint 2.12.2 one shape at a time.
+#[test]
+fn exhaustive_reads_an_imported_packages_enum() {
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::ExhaustiveOptions;
+    use std::sync::Arc;
+
+    let main = support::isolate_fixture("exhaustive", "foreign.go");
+    let dep = support::isolate_fixture("exhaustive", "enumdep/enum.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/exhaustive/foreign",
+        &main,
+        &[("example.com/enumdep", dep.as_path())],
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "exhaustive",
+        ExhaustiveOptions {
+            check_map: true,
+            ..ExhaustiveOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        exhaustive(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+
+    // Exact set, in report order. The five silent shapes in the fixture — a
+    // complete switch, an enum whose only missing members are unexported, an
+    // **alias** to the enum, a defined type over it, and a struct — are absent
+    // from this list, and that is what says they stayed silent.
+    assert_eq!(
+        messages,
+        vec![
+            // Declaration order, not lexical and not by value: the fixture's
+            // `Kind` is declared Z, A, M with values "zeta", "alpha", "mu".
+            "missing cases in switch of type enumdep.Kind: enumdep.KindA, enumdep.KindM"
+                .to_string(),
+            // FlagOne and FlagUno share a value, so one stands for both, and
+            // the unexported flagHide is never demanded across packages.
+            "missing cases in switch of type enumdep.Flag: enumdep.FlagTwo".to_string(),
+            // A `default` clause does not satisfy exhaustiveness by default.
+            "missing cases in switch of type enumdep.Kind: enumdep.KindA, enumdep.KindM"
+                .to_string(),
+            // The tag is a conversion to the foreign enum.
+            "missing cases in switch of type enumdep.Kind: enumdep.KindA, enumdep.KindM"
+                .to_string(),
+            "missing keys in map of key type enumdep.Kind: enumdep.KindA, enumdep.KindM"
+                .to_string(),
+        ],
+        "foreign-enum shapes"
+    );
+}
