@@ -348,7 +348,7 @@ impl<'a> Builder<'a> {
             }
         }
         if want_value {
-            let v = self.range_indexed_value(x, x_ty, incr, s);
+            let v = self.range_indexed_value(x, x_ty, incr);
             if let Some(value) = &s.value {
                 self.address(value, false).store(self, v);
             }
@@ -524,9 +524,13 @@ impl<'a> Builder<'a> {
         }
     }
 
-    fn range_indexed_value(&mut self, x: Value, x_ty: TypeId, index: Value, s: &RangeStmt) -> Value {
+    fn range_indexed_value(&mut self, x: Value, x_ty: TypeId, index: Value) -> Value {
         let core = x_ty.underlying(&self.prog.type_arena);
         let block = self.block.expect("no current block");
+        // (Go: `instr.setPos(x.Pos())` in all three arms of `rangeIndexed` —
+        // the range expression, not the `for` keyword. nilness reports
+        // "range of nil slice" at exactly this position.)
+        let x_pos = crate::program::value_pos(self.prog, self.func(), x);
         match self.prog.type_arena.get(core) {
             TypeData::Array(_) => {
                 let elem = array_elem(&self.prog.type_arena, core);
@@ -534,7 +538,7 @@ impl<'a> Builder<'a> {
                     self.func_mut(),
                     block,
                     InstrData::Index(Index { x, index, typ: elem }),
-                    s.for_,
+                    x_pos,
                 );
                 Value::Instr(id)
             }
@@ -542,7 +546,7 @@ impl<'a> Builder<'a> {
                 let elem = slice_elem(&self.prog.type_arena, core);
                 let ptr_ty = guff_types::new_pointer(&mut self.prog.type_arena, elem);
                 let iaddr =
-                    crate::emit::emit_index_addr(self.prog, self.func_id, block, x, index, ptr_ty, s.for_);
+                    crate::emit::emit_index_addr(self.prog, self.func_id, block, x, index, ptr_ty, x_pos);
                 self.emit_load(iaddr, elem)
             }
             TypeData::Pointer(_) => {
@@ -550,7 +554,7 @@ impl<'a> Builder<'a> {
                 let elem = array_elem(&self.prog.type_arena, arr);
                 let ptr_ty = guff_types::new_pointer(&mut self.prog.type_arena, elem);
                 let iaddr =
-                    crate::emit::emit_index_addr(self.prog, self.func_id, block, x, index, ptr_ty, s.for_);
+                    crate::emit::emit_index_addr(self.prog, self.func_id, block, x, index, ptr_ty, x_pos);
                 self.emit_load(iaddr, elem)
             }
             // Incomplete hybrid info mis-routed an indexed range — placeholder.

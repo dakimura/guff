@@ -197,7 +197,9 @@ impl<'a> Builder<'a> {
             Expr::StarExpr(star) => {
                 let x = self.expr(&star.x);
                 let typ = self.type_of(star.id);
-                self.emit_load(x, typ)
+                // (Go: `b.addr(fn, e, false).load(fn)`, whose `address.pos` is
+                // `e.Star` — the position nilness reports a nil load at.)
+                self.emit_load_at(x, typ, star.star)
             }
             // Type expressions must not reach value lowering (they belong in
             // `T(x)` / `make` paths). Incomplete hybrid type info can still
@@ -311,7 +313,9 @@ impl<'a> Builder<'a> {
         match v {
             Value::Instr(_) | Value::Global(_) | Value::FreeVar(_) => {
                 let typ = self.type_of(id.id);
-                self.emit_load(v, typ)
+                // (Go: `b.addr(fn, e, false).load(fn)`, whose `address.pos` is
+                // `e.Pos()` — the identifier itself.)
+                self.emit_load_at(v, typ, id.name_pos)
             }
             _ => v,
         }
@@ -390,7 +394,7 @@ impl<'a> Builder<'a> {
                 // pointer dereference (load)
                 let x = self.expr(&un.x);
                 let typ = self.type_of(un.id);
-                return self.emit_load(x, typ);
+                return self.emit_load_at(x, typ, un.op_pos);
             }
             _ => {}
         }
@@ -404,12 +408,13 @@ impl<'a> Builder<'a> {
         }
 
         let block = self.block.expect("no current block");
-        let id = crate::emit::emit(self.func_mut(), block, InstrData::UnOp(crate::instr::UnOp {
+        // (Go: `v.setPos(e.OpPos)` in expr0's NOT/ARROW/SUB/XOR arm.)
+        let id = crate::emit::emit_with_pos(self.func_mut(), block, InstrData::UnOp(crate::instr::UnOp {
             op: un.op,
             x,
             comma_ok: false,
             typ,
-        }));
+        }), un.op_pos);
         Value::Instr(id)
     }
 

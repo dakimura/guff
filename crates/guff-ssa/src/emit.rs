@@ -36,7 +36,34 @@ pub fn emit_with_pos(f: &mut Function, block: BlockId, data: InstrData, pos: Pos
     id
 }
 
-/// emit_load emits a load instruction (`*addr`).
+/// emit_load emits a load instruction (`*addr`) at source position `pos`.
+///
+/// go/ssa's `emitLoad` sets no position and its callers assign one afterwards
+/// (`address.load` does `load.pos = a.pos`); guff takes the position as an
+/// argument instead, so a caller cannot silently leave it unset.
+pub fn emit_load_with_pos(
+    f: &mut Function,
+    block: BlockId,
+    addr: Value,
+    typ: TypeId,
+    pos: Pos,
+) -> Value {
+    let id = emit_with_pos(
+        f,
+        block,
+        InstrData::UnOp(UnOp {
+            op: Token::MUL,
+            x: addr,
+            comma_ok: false,
+            typ,
+        }),
+        pos,
+    );
+    Value::Instr(id)
+}
+
+/// emit_load emits a load instruction (`*addr`) with no source position — for
+/// loads that correspond to no syntax (spilled parameters, lifted locals).
 pub fn emit_load(f: &mut Function, block: BlockId, addr: Value, typ: TypeId) -> Value {
     let id = emit(f, block, InstrData::UnOp(UnOp {
         op: Token::MUL,

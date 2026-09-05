@@ -90,6 +90,20 @@ pub fn value_type_of(prog: &Program, f: &Function, v: Value) -> TypeId {
     }
 }
 
+/// The source position of an SSA value, or `NO_POS` for one that denotes no
+/// syntax. (Go: `Value.Pos()`.)
+///
+/// Parameters, globals and free variables carry no position in guff-ssa
+/// (`Global.pos` is an explicit deferral), so they answer `NO_POS`; every
+/// caller so far asks about instruction values.
+pub fn value_pos(prog: &Program, f: &Function, v: Value) -> guff::Pos {
+    match v {
+        Value::Instr(i) => f.pos(i),
+        Value::Function(fid) => prog.func_pos(fid),
+        _ => guff::NO_POS,
+    }
+}
+
 impl Program {
     pub fn new(
         mode: BuilderMode,

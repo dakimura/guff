@@ -74,7 +74,7 @@ impl LValue for Address {
     }
 
     fn load(&self, b: &mut Builder) -> Value {
-        b.emit_load(self.addr, self.typ)
+        b.emit_load_at(self.addr, self.typ, self.pos)
     }
 
     fn address(&self, b: &mut Builder) -> Value {
@@ -136,8 +136,7 @@ impl LValue for LazyAddress {
 
     fn load(&self, b: &mut Builder) -> Value {
         let addr = self.emit_addr(b);
-        // DEFERRED vs go/ssa: `load.pos = l.pos` (load position tracking).
-        b.emit_load(addr, self.typ)
+        b.emit_load_at(addr, self.typ, self.pos)
     }
 
     fn address(&self, b: &mut Builder) -> Value {

@@ -5,7 +5,7 @@ use guff_govet::{
     cgocall_analyzer, composites_analyzer, copylocks_analyzer, defers_analyzer,
     directive_analyzer, errorsas_analyzer, framepointer_analyzer, httpresponse_analyzer,
     hostport_analyzer, ifaceassert_analyzer, inline_analyzer, loopclosure_analyzer, lostcancel_analyzer,
-    nilfunc_analyzer, printf_analyzer, shift_analyzer, sigchanyzer_analyzer, slog_analyzer,
+    nilfunc_analyzer, nilness_analyzer, printf_analyzer, shift_analyzer, sigchanyzer_analyzer, slog_analyzer,
     stdmethods_analyzer, stringintconv_analyzer, structtag_analyzer, tests_analyzer,
     fieldalignment_analyzer, timeformat_analyzer, unmarshal_analyzer, unreachable_analyzer,
     unsafeptr_analyzer,
@@ -875,6 +875,73 @@ fn nilfunc_allows_pointer_nil_comparison() {
     let dir = support::testdata("nilfunc");
     let pkg = support::typecheck_pkg("example.com/govet/nilfunc/ok", &dir.join("ok.go"));
     assert!(support::run_analyzer(nilfunc_analyzer(), &pkg).is_empty());
+}
+
+/// `nilness` is the only SSA-based analyzer in `guff-govet`, and every one of
+/// its report categories is a distinct instruction shape, so this pins the
+/// **exact set** of (line, column, message) triples. The columns matter as
+/// much as the messages: three of the shapes here (`*p`, `<-c`, and the
+/// implicit `&s[i]` of a `for range`) only report at the right column because
+/// guff-ssa now carries the source position through `emitLoad`, the unary
+/// operator, and `rangeIndexed` — before that they were reported at the wrong
+/// place, or (position 0) not at all.
+///
+/// The fixture also holds ten shapes that must stay silent — a static method
+/// call on a nil receiver, `len` and index reads of a nil map/slice/chan, a
+/// zero-valued struct passed to `panic`, a comma-ok assertion to a bare
+/// interface, a reloaded struct field, the pruned arm of a tautology, and a
+/// `MakeInterface` of an unconstrained type parameter. Measured against
+/// golangci-lint 2.12.2 with `govet.enable: [nilness]`: 28 findings, and this
+/// list is that output.
+#[test]
+fn nilness_reports_every_category_at_upstreams_position() {
+    let dir = support::testdata("nilness");
+    let pkg = support::typecheck_pkg("example.com/govet/nilness", &dir.join("bad.go"));
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64, String)> =
+        support::run_analyzer_diagnostics(nilness_analyzer(), &pkg)
+            .into_iter()
+            .map(|d| {
+                let p = fset.position(guff::position::Pos(d.pos as i64));
+                (p.line, p.column, d.message)
+            })
+            .collect();
+    got.sort();
+
+    let at = |line: i64, col: i64, msg: &str| (line, col, msg.to_string());
+    assert_eq!(
+        got,
+        vec![
+            at(20, 7, "tautological condition: nil == nil"),
+            at(27, 7, "tautological condition: non-nil != nil"),
+            at(34, 7, "impossible condition: non-nil == nil"),
+            at(41, 8, "impossible condition: nil != nil"),
+            at(49, 8, "tautological condition: nil == nil"),
+            at(59, 7, "impossible condition: non-nil == nil"),
+            at(66, 7, "impossible condition: non-nil == nil"),
+            at(75, 12, "nil dereference in field selection"),
+            at(82, 10, "nil dereference in load"),
+            at(89, 3, "nil dereference in store"),
+            at(95, 4, "nil dereference in map update"),
+            at(101, 3, "range over nil map"),
+            at(109, 3, "receive from nil channel"),
+            at(115, 5, "send to nil channel"),
+            at(121, 11, "index of nil slice"),
+            at(128, 21, "range of nil slice"),
+            at(136, 11, "nil dereference in array index operation"),
+            at(143, 21, "nil dereference in array index operation"),
+            at(151, 11, "nil dereference in slice operation"),
+            at(158, 12, "nil dereference in type assertion"),
+            at(165, 6, "nil dereference in dynamic method call"),
+            at(171, 4, "nil dereference in dynamic function call"),
+            at(177, 3, "nil dereference in dynamic function call"),
+            at(178, 3, "nil dereference in dynamic function call"),
+            at(195, 7, "panic with nil value"),
+            at(209, 12, "nil dereference in field selection"),
+            at(232, 6, "nil dereference in dynamic method call"),
+            at(278, 7, "impossible condition: non-nil == nil"),
+        ],
+    );
 }
 
 #[test]
