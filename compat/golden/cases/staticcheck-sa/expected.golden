@@ -153,6 +153,10 @@ sa1025/bad/bad.go:8:3:staticcheck::S1005: unnecessary assignment to the blank id
 sa1026/bad/bad.go:14:15:staticcheck::SA1026: trying to marshal unsupported type chan int, via x.Ch
 sa1026/bad/bad.go:15:15:staticcheck::SA1026: trying to marshal unsupported type func(), via x.Run
 sa1026/bad/bad.go:17:15:staticcheck::SA1026: trying to marshal unsupported type chan int
+sa1026/bad/bad.go:52:15:staticcheck::SA1026: trying to marshal unsupported type chan int, via x.C
+sa1026/bad/bad.go:53:15:staticcheck::SA1026: trying to marshal unsupported type map[PlainKey][]int
+sa1026/bad/bad.go:54:15:staticcheck::SA1026: trying to marshal unsupported type map[PtrTextKey][]int
+sa1026/bad/bad.go:57:15:staticcheck::SA1026: trying to marshal unsupported type map[PlainKey][]int, via x.M
 sa1028/bad/bad.go:13:13:staticcheck::SA1028: sort.Slice must only be called on slices, was called on [1]int
 sa1028/bad/bad.go:14:13:staticcheck::SA1028: sort.Slice must only be called on slices, was called on string
 sa1028/bad/bad.go:15:13:staticcheck::SA1028: sort.Slice must only be called on slices, was called on int

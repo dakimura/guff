@@ -11,6 +11,15 @@ use guff_types::basic::BasicKind;
 use guff_types::object::is_exported;
 use guff_types::TypeId;
 
+/// Answers upstream's `t.Implements(knowledge.Interfaces[…])` and
+/// `fakereflect.PtrTo(t).Implements(…)` — a method set question the type arena
+/// alone cannot answer, so the caller supplies it.
+pub trait MarshalerLookup {
+    /// Does the method set of `typ` (or of `*typ` when `ptr`) hold `method`
+    /// with the signature `func() ([]byte, error)`?
+    fn implements(&self, typ: TypeId, method: &str, ptr: bool) -> bool;
+}
+
 /// Error returned when a type cannot be JSON-marshaled.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnsupportedTypeError {
@@ -23,10 +32,16 @@ pub fn marshal(
     arena: &TypeArena,
     objects: &ObjectArena,
     packages: &PackageArena,
+    lookup: &dyn MarshalerLookup,
     typ: TypeId,
 ) -> Option<UnsupportedTypeError> {
     let mut enc = Encoder::default();
-    enc.check_type(arena, objects, packages, typ, true, "x".to_string())
+    // `fakejson.Marshal` starts from `fakereflect.TypeAndCanAddr{Type: v}`,
+    // whose `canAddr` is the zero value — **false**. It matters: the
+    // `PtrTo(t).Implements(…)` short-circuits are gated on it, so a type whose
+    // `MarshalJSON` has a pointer receiver is still walked when the argument
+    // was passed by value.
+    enc.check_type(arena, objects, packages, lookup, typ, false, "x".to_string())
 }
 
 #[derive(Default)]
@@ -41,6 +56,7 @@ impl Encoder {
         arena: &TypeArena,
         objects: &ObjectArena,
         packages: &PackageArena,
+        lookup: &dyn MarshalerLookup,
         typ: TypeId,
         can_addr: bool,
         path: String,
@@ -54,7 +70,23 @@ impl Encoder {
             return None;
         }
 
+        // Four short-circuits, in upstream's order. A type that marshals
+        // itself is never walked, so the `chan` inside it is not a finding.
+        //
+        //     if t.Implements(Interfaces["encoding/json.Marshaler"]) { return nil }
+        //     if !t.IsPtr() && t.CanAddr() && PtrTo(t).Implements(…) { return nil }
+        //     if t.Implements(Interfaces["encoding.TextMarshaler"]) { return nil }
+        //     if !t.IsPtr() && t.CanAddr() && PtrTo(t).Implements(…) { return nil }
         let u = unalias_readonly(arena, typ).underlying(arena);
+        let is_ptr = matches!(arena.get(u), TypeData::Pointer(_));
+        for method in ["MarshalJSON", "MarshalText"] {
+            if lookup.implements(typ, method, false) {
+                return None;
+            }
+            if !is_ptr && can_addr && lookup.implements(typ, method, true) {
+                return None;
+            }
+        }
         match arena.get(u) {
             TypeData::Basic(_) | TypeData::Interface(_) => None,
             TypeData::Struct(s) => {
@@ -81,6 +113,7 @@ impl Encoder {
                                 arena,
                                 objects,
                                 packages,
+                                lookup,
                                 ftyp,
                                 can_addr,
                                 field_path,
@@ -90,24 +123,32 @@ impl Encoder {
                             continue;
                         }
                     }
-                    if let Some(err) =
-                        self.check_type(arena, objects, packages, ftyp, can_addr, field_path)
-                    {
+                    if let Some(err) = self.check_type(
+                        arena,
+                        objects,
+                        packages,
+                        lookup,
+                        ftyp,
+                        can_addr,
+                        field_path,
+                    ) {
                         return Some(err);
                     }
                 }
                 None
             }
             TypeData::Map(m) => {
-                if !map_key_ok(arena, m.key()) {
+                if !map_key_ok(arena, lookup, m.key()) {
                     return Some(UnsupportedTypeError { typ, path });
                 }
+                // `Elem()` of a map is explicitly `canAddr: false`.
                 self.check_type(
                     arena,
                     objects,
                     packages,
+                    lookup,
                     m.elem(),
-                    can_addr,
+                    false,
                     format!("{path}[k]"),
                 )
             }
@@ -115,25 +156,29 @@ impl Encoder {
                 if is_byte_elem(arena, s.elem()) {
                     return None;
                 }
+                // `Elem()` of a slice is `canAddr: true`.
                 self.check_type(
                     arena,
                     objects,
                     packages,
+                    lookup,
                     s.elem(),
-                    can_addr,
+                    true,
                     format!("{path}[0]"),
                 )
             }
+            // An array's element inherits; a pointer's is addressable.
             TypeData::Array(a) => self.check_type(
                 arena,
                 objects,
                 packages,
+                lookup,
                 a.elem(),
                 can_addr,
                 format!("{path}[0]"),
             ),
             TypeData::Pointer(p) => {
-                self.check_type(arena, objects, packages, p.elem(), can_addr, path)
+                self.check_type(arena, objects, packages, lookup, p.elem(), true, path)
             }
             TypeData::Chan(_) | TypeData::Signature(_) => {
                 Some(UnsupportedTypeError { typ, path })
@@ -192,11 +237,31 @@ fn struct_tag_get<'a>(tag: &'a str, key: &str) -> &'a str {
     ""
 }
 
-fn map_key_ok(arena: &TypeArena, key: TypeId) -> bool {
-    matches!(
+/// `newMapEncoder`: a basic key is always fine, and any other key has to
+/// marshal itself.
+///
+/// ```go
+/// switch t.Key().Type.Underlying().(type) {
+/// case *types.Basic:
+/// default:
+///     if !t.Key().Implements(knowledge.Interfaces["encoding.TextMarshaler"]) {
+///         return &UnsupportedTypeError{Type: t.Type, Path: stack}
+///     }
+/// }
+/// ```
+///
+/// Note there is no `PtrTo` variant here: a key whose `MarshalText` has a
+/// pointer receiver is still a finding. moby's `network.PortMap` is
+/// `map[Port][]PortBinding`, and `Port` is a struct with a **value**-receiver
+/// `MarshalText` — telegraf marshals one and guff reported it.
+fn map_key_ok(arena: &TypeArena, lookup: &dyn MarshalerLookup, key: TypeId) -> bool {
+    if matches!(
         arena.get(key.underlying(arena)),
         TypeData::Basic(b) if b.kind() != BasicKind::UntypedNil
-    )
+    ) {
+        return true;
+    }
+    lookup.implements(key, "MarshalText", false)
 }
 
 fn is_byte_elem(arena: &TypeArena, elem: TypeId) -> bool {
