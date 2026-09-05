@@ -1,0 +1,15 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh revive-exported-telegraf
+# Produced by running golangci-lint on compat/golden/cases/revive-exported-telegraf/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+exflags/exflags.go:25:7:revive:warning:exported: exported const UndocumentedConst should have comment or be unexported
+exflags/exflags.go:27:5:revive:warning:exported: exported var UndocumentedVar should have comment or be unexported
+exflags/exflags.go:29:1:revive:warning:exported: exported function UndocumentedFunc should have comment or be unexported
+exflags/exflags.go:31:1:revive:warning:exported: exported method Undocumented.UndocumentedMethod should have comment or be unexported
+exflags/exflags.go:35:1:revive:warning:exported: comment on exported method unexportedRecv.ExportedOnPrivate should be of the form "ExportedOnPrivate ..."
+exflags/exflags.go:43:6:revive:warning:exported: type name will be used as exflags.ExflagsThing by other packages, and that is repetitive; consider calling this Thing
+exflags/exflags.go:48:2:revive:warning:exported: public interface method PublicIface.Undoc should be commented

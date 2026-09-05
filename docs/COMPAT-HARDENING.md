@@ -22483,3 +22483,65 @@ golden **220**（新規 2 case、既存 218 は無変更）/ fix **220** / rejec
 isolate **116 ターゲット** / workspace **278 スイート** /
 OSS pr tier **8 ターゲットすべて P=R=100%**。
 台帳は **39/100**（**42 定義**、open 3 —— cri-o / k6 / telegraf）。
+
+### 2026-09-05（続き 186）— revive の `exported` は設定フラグが 7 つあり、guff は 2 つしか読んでいなかった
+
+telegraf の残り 745 件のうち最大の 1 原因（312 件）。上流の `Configure`:
+
+```go
+r.disabledChecks = disabledChecks{PrivateReceivers: true, PublicInterfaces: true}
+r.isRepetitiveMsg = "stutters"
+…
+case isRuleOption(flag, "checkPrivateReceivers"):          PrivateReceivers = false
+case isRuleOption(flag, "disableStutteringCheck"):         RepetitiveNames  = true
+case isRuleOption(flag, "sayRepetitiveInsteadOfStutters"): isRepetitiveMsg  = "is repetitive"
+case isRuleOption(flag, "checkPublicInterface"):           PublicInterfaces = false
+case isRuleOption(flag, "disableChecksOnConstants"):       Const    = true
+case isRuleOption(flag, "disableChecksOnFunctions"):       Function = true
+case isRuleOption(flag, "disableChecksOnMethods"):         Method   = true
+case isRuleOption(flag, "disableChecksOnTypes"):           Type     = true
+case isRuleOption(flag, "disableChecksOnVariables"):       Var      = true
+```
+
+guff が読んでいたのは `checkPrivateReceivers` と `disableStutteringCheck` の
+2 つだけ。telegraf は 4 つ書いていて、そのうち `disable-checks-on-types` だけで
+**312 件**が上流に無い finding になっていた。
+
+**掛かる位置が 3 種類ある。**
+
+1. `isDisabled(kind)` —— 関数/メソッドの doc 検査は**種別が決まったあと**に
+   掛かるので `disableChecksOnFunctions` と `disableChecksOnMethods` は別の
+   スイッチ。値宣言は `gd.Tok == CONST` で `const`/`var` を分けてから掛かる。
+   型は `lintTypeDoc` の先頭。
+2. `RepetitiveNames` —— `checkRepetitiveNames` は
+   **`isDisabled("type")` の後ろに無い**。型の doc 検査を切っても名前の検査は
+   残る（golden case がそれを固定している）。
+3. `PublicInterfaces` —— `checkPublicInterface` を書くと
+   `lintInterfaceMethod` が動く。**guff にはこの検査自体が無かった**ので、
+   併せて移植した（`public interface method T.M should be commented` と
+   `comment on exported interface method T.M should be of the form "M ..."`）。
+
+**11 通りの設定**を両ツールに通して全形一致。golden case は 3 つで、同じ
+fixture を引数だけ変えて共有する:
+
+| case | 引数 | キー数 |
+|---|---|--:|
+| `revive-exported-default` | なし | 6 |
+| `revive-exported-telegraf` | telegraf の 4 つ（kebab-case） | **7** |
+| `revive-exported-disable-kinds` | `disableChecksOn*` 5 つ | **1**（名前検査だけ残る） |
+
+kebab-case で書いてあるのは意図的で、`isRuleOption` が小文字化して `-` を
+落とすため camelCase と同じ集合になることを固定している。
+
+```
+telegraf: guff-only 745 → 433
+```
+
+#### ゲート
+
+golden **223**（新規 3 case、既存 220 は無変更）/ fix **223** / reject **14** /
+isolate **116 ターゲット** / workspace **278 スイート** /
+OSS pr tier **8 ターゲットすべて P=R=100%**。台帳は **39/100**（42 定義、open 3）。
+
+telegraf に残るのは **433 件**: gocritic の `hugeParam`/`rangeValCopy` 閾値 290、
+revive `import-alias-naming` の正規表現引数 128、nolintlint 5、他 10。
