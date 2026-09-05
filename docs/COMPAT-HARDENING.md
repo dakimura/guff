@@ -23562,3 +23562,107 @@ ebpf と karmada は**この修正では動かない**ことを実測した —�
 golden **228** / fix **228** / reject **14** / isolate **116 ターゲット** /
 workspace **278 スイート** / OSS pr tier **8 ターゲットすべて P=R=100%**。
 `compat/hunt.sh --name scaleway-cli` は **health 0**。
+
+### 2026-09-05（続き 200）— **逆方向の型推論**（go1.21）。「代入先の型」から型引数が決まる経路が丸ごと無く、ebpf と karmada が同じ 1 つのバグだった
+
+続き 197 で数えた 4 件の残り 2 つ、ebpf の `btf` と karmada の
+`pkg/util/helper`。**40 行の再現 1 本で両方**出た（`go build` は全部通す）:
+
+```go
+func Contains[T, I any](i I) bool { _, ok := any(i).(T); return ok }
+func Satisfies[T any](got T, f func(T) bool) bool { return f(got) }
+func objMatches[T Obj](obj T) bool { return obj.Name() != "" }
+func take(f func(d *Dep) bool) bool { return f(nil) }
+
+_ = Satisfies(m, Contains[*Dep])   // ebpf:    16:19 cannot infer the remaining type arguments (got 1, want 2)
+_ = take(objMatches)               // karmada: 26:11 cannot use func[T Obj](obj T) bool value as func(d *Dep) bool value in argument to call
+var f func(*Dep) bool = objMatches //          31:26 同上、in variable declaration
+_ = take(objMatches[*Dep])         // ← 明示インスタンス化は前から通っていた
+```
+
+「型引数を書かなかったジェネリック関数**値**」は、呼び出しの引数から推論する
+経路しか無かった。go1.21 の逆方向推論——**その値が置かれる先の型**から決まる
+経路——が 3 箇所とも欠けていた。
+
+#### 1. 引数位置：`genericExprList` の `infer` フラグ
+
+上流は引数を評価するとき、go1.21 以降は `funcInst(nil, …, infer=false)` を
+渡す。**部分インスタンス化のまま返して良い**からで、残りは呼び出し全体の
+`infer` が引数の型と一緒に解く。guff は引数を普通の式として評価していたので
+`f[targs]` は `expr_internal` の IndexExpr 枝に入り、`infer=true` で
+「remaining type arguments が推論できない」と即エラーになっていた。書かれた
+型引数（上流の `targsList` / `atargs`）を集めて joint inference の対応する
+スロットに置く配線ごと入れた。
+
+#### 2. 呼ばれる側がジェネリックでないとき、推論が**走らない**
+
+上流の `arguments` は callee と**ジェネリックな引数**の型パラメータを 1 本の
+`tparams` に連ね、`len(tparams) > 0` で推論に入る。guff は callee の
+`tparams` だけを見ていた。`take(objMatches)` は callee に型パラメータが
+無いので、推論は 1 度も走らずに代入検査へ落ちる——これが karmada の
+`cannot use … in argument to call` である。callee が非ジェネリックなら
+`infer` の結果で callee を instantiate しない、という分岐も要る。
+
+#### 3. 代入先（`target`）が渡っていない
+
+上流は `rawExpr` に `T *target` を通し、`nonGeneric` がジェネリック関数値を
+見つけたら `funcInst(T, …)` を呼ぶ。そこで**合成された呼び出し**
+
+```
+func g[type_parameters_of_x](func_type_of_x)   を   g(tvar)  で呼ぶ
+```
+
+を作り、`func(*Dep) bool` を `func(T) bool` に unify して `T` を得る。
+guff の `func_inst` の doc は「Deferred」、`call.rs` の `got < want` 枝は
+「the assignment-target path is not ported」と**自分で書いてあった**。
+`Target { sig }` を足し、`raw_expr` → `expr_internal` に引数として通した
+（`Checker` のフィールドに置くと部分式に漏れる）。target を渡すのは上流と
+同じ 3 箇所だけ:`assign_var` / `init_vars` の n:n 枝（`return` を含む）/
+単一 `var` 宣言。
+
+上流の `desc`（エラー文で左辺を指す）は運んでいない。guff は逆方向推論の
+失敗を `infer` 側の文言で出さないので、持っても誰も読まない。
+
+#### 測った形
+
+**15 形**、1 形 1 パッケージで `go build ./...` に掛けて突き合わせた:
+
+| 形 | Go | guff（この修正後） |
+|---|---|---|
+| `var F func(*Dep) bool = objMatches` | OK | OK |
+| `g = id`（既存変数への代入） | OK | OK |
+| `return id` | OK | OK |
+| `take(id)`（callee 非ジェネリック） | OK | OK |
+| `Satisfies(3, Contains[string])` | OK | OK |
+| `var F func(int) bool = Contains[string]` | OK | OK |
+| `two(id, id)`（同じ関数を 2 通りに） | OK | OK |
+| `var F func(int)(int,string) = pair` | OK | OK |
+| 可変長 `var F func(...int) int = sum` | OK | OK |
+| `apply(apply(1, id), id)` | OK | OK |
+| `var F func() int = Box[int]{}.Get` | OK | OK |
+| 制約違反 `var F func(string,string) string = add` | 拒否 | 拒否 |
+| 結果の不一致 `var F func(int) string = id` | 拒否 | 拒否 |
+| 複合リテラル `S{F: id}` | 拒否 | 拒否（文言は別） |
+| `g := id` | 拒否 | **通す** |
+
+最後の 1 つは上流の `nonGeneric` の**拒否**側——「ジェネリック関数を
+instantiate せずに使った」——で、guff は元から出していない。ここで足すのは
+「通るようになる」ではなく「**新しいエラーを出す**」変更であり、しかもこの形は
+コンパイルが通らないので、どのリポジトリにも存在しない。今回は入れず、
+**測った上で**テストに現状として書いてある。13 形は等値アサーション、
+2 形は文言つきで `crates/guff-types/tests/check_files.rs`。
+
+#### 効果
+
+```
+ebpf:    ill_typed 1 → 0   guff=1 golangci=1  P=R=100%  [OK]
+karmada: ill_typed 1 → 0   guff=18 golangci=19 P=100% R=94.7%
+```
+
+karmada に残る 1 件は gosec **G704**（SSRF taint、`aggregate.go:255`）で、
+型チェックとは別件。続き 197 で数えた 4 パッケージはこれで**全部片付いた**。
+
+#### ゲート
+
+golden **228** / fix **228** / reject **14** / workspace **278 スイート** /
+OSS pr tier **8 ターゲット**。

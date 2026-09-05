@@ -86,7 +86,7 @@ impl Checker {
                 // `single_value` must not reduce it first.
                 let a = &call.args[0];
                 let mut op = Operand::invalid();
-                self.raw_expr(&mut op, a, None);
+                self.raw_expr(&mut op, a, None, None);
                 let tuple = op.typ.filter(|_| op.mode != OperandMode::Invalid).filter(
                     |t| matches!(self.types.get(*t), crate::arena::TypeData::Tuple(_)),
                 );

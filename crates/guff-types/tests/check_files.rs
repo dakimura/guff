@@ -1871,3 +1871,153 @@ fn generic_instance_inside_a_type_cycle_resolves() {
     let check = check_src(acyclic);
     assert!(check.errors.is_empty(), "{:?}", check.errors);
 }
+
+/// Reverse type inference (go1.21): a generic function's type arguments can
+/// come from the type it is assigned to, returned as, or passed to.
+///
+/// Every case below was measured against the Go toolchain one package per
+/// shape (`go build ./...` over 15 single-file packages); the comment records
+/// what the toolchain said, and the assertion records what guff says.
+#[test]
+fn reverse_type_inference_matches_the_toolchain() {
+    const PRELUDE: &str = "package p\n\
+         type Obj interface{ Name() string }\n\
+         type Dep struct{ n string }\n\
+         func (d *Dep) Name() string { return d.n }\n\
+         func objMatches[T Obj](obj T) bool { return obj.Name() != \"\" }\n\
+         func id[T any](v T) T { return v }\n\
+         func Contains[T, I any](i I) bool { _, ok := any(i).(T); return ok }\n\
+         func Satisfies[T any](got T, f func(T) bool) bool { return f(got) }\n\
+         func take(f func(int) int) int { return f(1) }\n";
+
+    let cases: &[(&str, &[&str])] = &[
+        // --- accepted by the toolchain, and now by guff -----------------
+        // 1. variable declaration with a declared function type.
+        ("var F func(*Dep) bool = objMatches", &[]),
+        // 2. assignment to an existing variable.
+        ("func f() { var g func(int) int; g = id; _ = g }", &[]),
+        // 3. return statement.
+        ("func get() func(string) string { return id }", &[]),
+        // 4. argument to a *non-generic* callee — the callee has no type
+        //    parameters at all, so inference has to run for the argument alone.
+        ("var X = take(id)", &[]),
+        // 5. partially instantiated argument to a generic callee: `T` is
+        //    written, `I` comes from the parameter `f func(T) bool`.
+        ("var X = Satisfies(3, Contains[string])", &[]),
+        // 6. partially instantiated in a variable declaration.
+        ("var F func(int) bool = Contains[string]", &[]),
+        // 7. the same generic function twice in one call, instantiated
+        //    differently — each argument needs its own type-parameter identity.
+        (
+            "func two(a func(int) int, b func(string) string) {}\n\
+             func f() { two(id, id) }",
+            &[],
+        ),
+        // 8. two type parameters, one inferable from the parameter and one
+        //    only from the result.
+        (
+            "func pair[T, U any](t T) (T, U) { var u U; return t, u }\n\
+             var F func(int) (int, string) = pair",
+            &[],
+        ),
+        // 9. variadic.
+        (
+            "func sum[T ~int](xs ...T) T { var s T; for _, x := range xs { s += x }; return s }\n\
+             var F func(...int) int = sum",
+            &[],
+        ),
+        // 10. a nested call whose argument is itself a generic call.
+        (
+            "func apply[T any](v T, f func(T) T) T { return f(v) }\n\
+             var X = apply(apply(1, id), id)",
+            &[],
+        ),
+        // 11. an instantiated generic type's method value — no inference, but
+        //     it travels the same target-carrying path.
+        (
+            "type Box[T any] struct{ v T }\n\
+             func (b Box[T]) Get() T { return b.v }\n\
+             var F func() int = Box[int]{}.Get",
+            &[],
+        ),
+
+        // --- rejected by the toolchain, and by guff ----------------------
+        // 12. the inferred type argument violates the constraint. Toolchain:
+        //     "string does not satisfy Num (string missing in ~int | ~float64)".
+        (
+            "type Num interface{ ~int | ~float64 }\n\
+             func add[T Num](a, b T) T { return a + b }\n\
+             var F func(string, string) string = add",
+            // guff's constraint message omits upstream's parenthetical cause
+            // — a pre-existing printer gap, not part of this port.
+            &["string does not satisfy Num"],
+        ),
+        // 13. inference succeeds from the parameter and the result then
+        //     disagrees. Toolchain: "inferred type func(v int) int for
+        //     func(v T) T does not match type func(int) string of F".
+        //     Both reject it; upstream's wording comes from `infer`'s own
+        //     error builder (which reports the partially inferred list), guff's
+        //     from the caller — the verdict is what this port is about.
+        (
+            "var F func(int) string = id",
+            &["cannot infer the remaining type arguments (got 0, want 1)"],
+        ),
+
+        // --- no target at all --------------------------------------------
+        // Neither position carries one, so the toolchain falls through to
+        // `nonGeneric`'s "cannot use generic function id without
+        // instantiation". A composite-literal field is rejected by guff too,
+        // by the ordinary assignment check further on; a short variable
+        // declaration has nothing to check against and guff accepts it. That
+        // last lenience is not this port's: `nonGeneric`'s rejection is a new
+        // diagnostic, and any file containing the shape fails to compile, so
+        // no repository can hold one. Measured, not assumed.
+        (
+            "type S struct{ F func(int) int }\nvar X = S{F: id}",
+            &["cannot use func[T any](v T) T value as func(int) int value in struct literal"],
+        ),
+        ("func f() { g := id; _ = g }", &[]),
+    ];
+
+    for (body, want) in cases {
+        let src = format!("{PRELUDE}{body}\n");
+        let check = check_src(&src);
+        let msgs: Vec<String> = check.errors.iter().map(|e| e.msg.clone()).collect();
+        let want: Vec<String> = want.iter().map(|s| s.to_string()).collect();
+        assert_eq!(msgs, want, "{body}");
+    }
+}
+
+/// An ordinary indexed argument is evaluated once.
+///
+/// Deciding whether `f(g[int])` is an explicit instantiation means evaluating
+/// the index expression, and upstream's `genericExprList` then evaluates a
+/// *non*-generic one a second time through `rawExpr`. Every error inside it
+/// would be reported twice — `f(m[1])` on a `map[string]int` gave two
+/// "cannot convert untyped int to type string" — so the probe is undone.
+#[test]
+fn an_indexed_argument_reports_its_errors_once() {
+    let cases: &[(&str, &[&str])] = &[
+        (
+            "func f(x int) {}\nfunc g() { var s struct{}; f(s[0]) }",
+            &["cannot index s"],
+        ),
+        (
+            "func f(x int) {}\nfunc g(m map[string]int) { f(m[1]) }",
+            &["cannot convert untyped int to type string"],
+        ),
+        (
+            "func f(a, b int) {}\nfunc g(m map[string]int) { f(m[1], m[2]) }",
+            &[
+                "cannot convert untyped int to type string",
+                "cannot convert untyped int to type string",
+            ],
+        ),
+    ];
+    for (body, want) in cases {
+        let check = check_src(&format!("package p\n{body}\n"));
+        let msgs: Vec<String> = check.errors.iter().map(|e| e.msg.clone()).collect();
+        let want: Vec<String> = want.iter().map(|s| s.to_string()).collect();
+        assert_eq!(msgs, want, "{body}");
+    }
+}

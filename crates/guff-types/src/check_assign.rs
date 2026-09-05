@@ -521,7 +521,10 @@ impl Checker {
             None => {
                 let mut xx = Operand::invalid();
                 if let Some(r) = rhs {
-                    self.expr(&mut xx, r);
+                    // The left-hand side is the assignment *target*: a generic
+                    // function on the right learns its type arguments from it.
+                    let target = self.new_target(t);
+                    self.expr_with_target(&mut xx, r, target);
                 }
                 xx
             }
@@ -625,7 +628,7 @@ impl Checker {
         x.mode = OperandMode::Value; // anything but invalid
         // Evaluating blank is not an error.
         if !matches!(unparen(e), Expr::Ident(id) if id.name == "_") {
-            self.raw_expr(&mut x, e, None);
+            self.raw_expr(&mut x, e, None, None);
         }
         x.mode != OperandMode::Invalid
     }
@@ -681,7 +684,11 @@ impl Checker {
         if l == r {
             for i in 0..l {
                 let mut x = Operand::invalid();
-                self.expr(&mut x, &rhs[i]);
+                // `var f func(*Dep) bool = objMatches`, and the same for a
+                // `return` of a generic function value: the declared type is
+                // the target the type arguments come from.
+                let target = self.new_target(lhs[i].typ(&self.objects));
+                self.expr_with_target(&mut x, &rhs[i], target);
                 self.init_var(lhs[i], &mut x, context);
             }
             return;
@@ -713,7 +720,7 @@ impl Checker {
         // `raw_expr`, not `expr`: this is the one context that *may* yield a
         // tuple, so `single_value` must not run (Go's `multiExpr` calls
         // `rawExpr` for the same reason).
-        self.raw_expr(&mut x, e, None);
+        self.raw_expr(&mut x, e, None, None);
         if x.mode == OperandMode::Invalid {
             return (vec![x], false);
         }

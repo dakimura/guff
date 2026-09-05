@@ -93,6 +93,7 @@ impl Checker {
                         std::slice::from_ref(&*ie.index),
                         ie.x.pos().0 as u32,
                         false,
+                        None,
                     );
                 }
                 // Otherwise `index_expr` already fully evaluated `x` (ordinary
@@ -103,7 +104,7 @@ impl Checker {
                 self.expr(x, &ie.x);
                 if self.is_generic_func_value(x) {
                     partial_targs =
-                        self.func_inst(x, &ie.x, &ie.indices, ie.x.pos().0 as u32, false);
+                        self.func_inst(x, &ie.x, &ie.indices, ie.x.pos().0 as u32, false, None);
                 } else if x.mode == OperandMode::TypeExpr {
                     // `T[A, B](v)` — a conversion to an instantiated generic
                     // *type*, not a call. The single-argument form reaches this
@@ -330,6 +331,7 @@ impl Checker {
         index_exprs: &[Expr],
         pos: u32,
         infer: bool,
+        t: Option<crate::expr::Target>,
     ) -> Vec<TypeId> {
         // Go: verifyVersionf(go1_18, "function instantiation") — gate deferred.
 
@@ -377,24 +379,117 @@ impl Checker {
                 // and everything importing it.
                 return targs;
             }
-            // No call to learn the rest from, and the assignment-target path is
-            // not ported: same diagnostic upstream gives when `infer` finds
-            // nothing to work with.
-            self.error(
-                pos,
-                Code::CannotInferTypeArgs,
-                format!(
-                    "cannot infer the remaining type arguments (got {}, want {})",
-                    got, want
-                ),
+            // Reverse type inference (go1.21). There is no call to learn the
+            // rest from, but there may be an assignment *target*: upstream
+            // treats
+            //
+            //     var tvar tsig = x
+            //
+            // as a call `g(tvar)` of a synthetic generic function
+            //
+            //     func g[type_parameters_of_x](func_type_of_x)
+            //
+            // so unifying the target's concrete signature against x's own
+            // parameter and result types yields the missing type arguments.
+            // `var f func(*Dep) bool = objMatches` is the shape.
+            let (sig_params, sig_results, sig_variadic) = match self.types.get(sig) {
+                TypeData::Signature(s) => (s.params(), s.results(), s.variadic()),
+                _ => (None, None, false),
+            };
+            let mut args: Vec<Option<TypeId>> = Vec::new();
+            let mut synth_params: Option<TypeId> = None;
+            if let Some(tg) = t {
+                if !tparams.is_empty() {
+                    // DEFERRED: the go1.21 version error upstream reports here
+                    // ("implicitly instantiated function in assignment") for
+                    // code that asks for an older language version — reporting
+                    // it would be a new diagnostic, not a new acceptance.
+                    let gsig = new_signature_type(
+                        &mut self.types,
+                        None,
+                        &[],
+                        &[],
+                        sig_params,
+                        sig_results,
+                        sig_variadic,
+                    );
+                    let v = new_param(&mut self.objects, "", gsig);
+                    synth_params = new_tuple(&mut self.types, &[v]);
+                    args.push(Some(tg.sig));
+                }
+            }
+
+            // Rename the type parameters so a recursive instantiation cannot
+            // collide with the ones being inferred (Go: `renameTParams`).
+            let (tparams2, params2) = match synth_params {
+                Some(pt) => {
+                    let (tp, pt) = rename_tparams(&mut self.types, &mut self.objects, &tparams, pt);
+                    (tp, Some(pt))
+                }
+                None => {
+                    let (tp, _) = rename_tparams(&mut self.types, &mut self.objects, &tparams, sig);
+                    (tp, None)
+                }
+            };
+            let mut targs_in: Vec<Option<TypeId>> = vec![None; tparams2.len()];
+            for (i, ta) in targs.iter().enumerate() {
+                targs_in[i] = Some(*ta);
+            }
+            let untyped: Vec<Option<TypeId>> = vec![None; args.len()];
+            let typ_table = self.typ.clone();
+            let enable_iface_inference = self.allow_version(&crate::version::go1_21());
+            let result = crate::infer::infer(
+                &mut self.types,
+                &mut self.objects,
+                &self.packages,
+                &tparams2,
+                &targs_in,
+                params2,
+                &args,
+                &untyped,
+                &typ_table,
+                enable_iface_inference,
             );
-            x.mode = OperandMode::Invalid;
-            x.typ = Some(self.invalid_type());
-            return Vec::new();
+            let targs = match result {
+                InferResult::Ok(ts) => ts,
+                InferResult::Failed(_) => {
+                    self.error(
+                        pos,
+                        Code::CannotInferTypeArgs,
+                        format!(
+                            "cannot infer the remaining type arguments (got {}, want {})",
+                            got, want
+                        ),
+                    );
+                    x.mode = OperandMode::Invalid;
+                    x.typ = Some(self.invalid_type());
+                    return Vec::new();
+                }
+            };
+            return self.instantiate_signature(x, base, sig, &tparams, targs, index_exprs, pos);
         }
 
         // got == want: verify constraints (soft error) and instantiate.
-        if let Some((i, cause)) = self.verify_targs(&tparams, &targs) {
+        self.instantiate_signature(x, base, sig, &tparams, targs, index_exprs, pos)
+    }
+
+    /// Verify `targs` against `tparams`, instantiate `sig` with them, and write
+    /// the resulting concrete signature onto `x`.
+    ///
+    /// The tail of `Checker.funcInst` plus `Checker.instantiateSignature`,
+    /// shared by the explicit (`f[int]`) and inferred (reverse-inference) paths.
+    #[allow(clippy::too_many_arguments)]
+    fn instantiate_signature(
+        &mut self,
+        x: &mut Operand,
+        base: &Expr,
+        sig: TypeId,
+        tparams: &[TypeId],
+        targs: Vec<TypeId>,
+        index_exprs: &[Expr],
+        pos: u32,
+    ) -> Vec<TypeId> {
+        if let Some((i, cause)) = self.verify_targs(tparams, &targs) {
             let at = index_exprs.get(i).map(|e| e.pos().0 as u32).unwrap_or(pos);
             self.error(at, Code::InvalidTypeArg, cause);
         } else {
@@ -405,7 +500,7 @@ impl Checker {
                 &self.packages,
                 self.pkg,
                 pos,
-                &tparams,
+                tparams,
                 &targs,
                 index_exprs,
             );
@@ -460,10 +555,17 @@ impl Checker {
         // calls `rawExpr` and unpacks a tuple, every other arm goes through
         // `genericExpr`, which ends in `singleValue`.
         let mut args: Vec<Operand> = Vec::with_capacity(nargs);
-        for a in &call.args {
+        // Per-argument *partial* type arguments: `f(g[int])` where `g` has two
+        // type parameters leaves one written and one to infer. Upstream's
+        // `genericExprList` returns them alongside the operands (`targsList`)
+        // and `arguments` appends them to the list `infer` starts from.
+        let mut atargs: Vec<Vec<TypeId>> = vec![Vec::new(); nargs];
+        for (i, a) in call.args.iter().enumerate() {
             let mut op = Operand::invalid();
-            if nargs == 1 {
-                self.raw_expr(&mut op, a, None);
+            if let Some(targs) = self.generic_index_arg(&mut op, a) {
+                atargs[i] = targs;
+            } else if nargs == 1 {
+                self.raw_expr(&mut op, a, None, None);
             } else {
                 self.expr(&mut op, a);
             }
@@ -537,8 +639,26 @@ impl Checker {
                 .unwrap_or_default(),
             _ => Vec::new(),
         };
-        let rsig = if !tparam_ids.is_empty() {
-            match self.infer_call(call, sig, &tparam_ids, &mut args, nargs, ddd, partial_targs) {
+        // Inference runs when the *callee* is generic — and also when only an
+        // **argument** is: `take(objMatches)`, a fully generic function value
+        // passed where a concrete `func(*Dep) bool` is wanted, has all its type
+        // arguments inferred from the parameter it lands on. Upstream builds one
+        // `tparams` list from the callee and every generic argument and enters
+        // inference on `len(tparams) > 0`, not on the callee alone; gating on the
+        // callee left karmada's `pkg/util/helper` (and ebpf's `btf`) with
+        // "cannot use func[T Obj](obj T) bool value as func(d *Dep) bool value".
+        let any_generic_arg = args.iter().any(|a| self.is_generic_func_value(a));
+        let rsig = if !tparam_ids.is_empty() || any_generic_arg {
+            match self.infer_call(
+                call,
+                sig,
+                &tparam_ids,
+                &mut args,
+                nargs,
+                ddd,
+                partial_targs,
+                &atargs,
+            ) {
                 Some(s) => s,
                 None => return None,
             }
@@ -558,6 +678,65 @@ impl Checker {
             self.assignment(&mut args[i], Some(ptyp), "argument to call");
         }
         Some(rsig)
+    }
+
+    /// Evaluate a call argument written as an explicit (possibly *partial*)
+    /// instantiation of a generic function — `g[int]` — returning the type
+    /// arguments it wrote when they do not complete the list.
+    ///
+    /// Returns `None` when `a` is not an index expression on a generic function
+    /// (the caller evaluates it the ordinary way). An empty vector means the
+    /// argument was fully instantiated and needs nothing further.
+    ///
+    /// Equivalent to the `unpackIndexedExpr` arms of `Checker.genericExprList`,
+    /// including its `infer` flag: from go1.21 an argument may stay partially
+    /// instantiated, because the call's own arguments finish the job. Passing
+    /// `infer = true` here is what made `Satisfies(m, Contains[*Dep])` report
+    /// "cannot infer the remaining type arguments (got 1, want 2)" at the
+    /// argument rather than inferring `I` from `m`.
+    fn generic_index_arg<'a>(&mut self, x: &mut Operand<'a>, a: &'a Expr) -> Option<Vec<TypeId>> {
+        let infer = !self.allow_version(&crate::version::go1_21());
+        let targs = match a {
+            Expr::IndexExpr(ie) => {
+                // `index_expr` evaluates the whole expression on its way to
+                // deciding, so a *non*-generic index — an ordinary `m[k]`
+                // argument — must leave no trace: the caller evaluates it
+                // again the ordinary way, and without undoing this probe every
+                // error inside it is reported twice.
+                let mark = self.errors.len();
+                if !self.index_expr(x, ie) {
+                    self.errors.truncate(mark);
+                    *x = Operand::invalid();
+                    return None;
+                }
+                self.func_inst(
+                    x,
+                    &ie.x,
+                    std::slice::from_ref(&*ie.index),
+                    ie.x.pos().0 as u32,
+                    infer,
+                    None,
+                )
+            }
+            Expr::IndexListExpr(ie) => {
+                let mark = self.errors.len();
+                self.expr(x, &ie.x);
+                if !self.is_generic_func_value(x) {
+                    // Not a generic function: undo the evaluation and let the
+                    // ordinary path (conversion, indexing, error) handle it.
+                    self.errors.truncate(mark);
+                    *x = Operand::invalid();
+                    return None;
+                }
+                self.func_inst(x, &ie.x, &ie.indices, ie.x.pos().0 as u32, infer, None)
+            }
+            _ => return None,
+        };
+        // `genericExprList` records the operand itself on this path, since it
+        // bypassed `rawExpr`'s tail.
+        x.expr = Some(a);
+        self.record(x, a);
+        Some(targs)
     }
 
     /// Infer the type arguments of a generic callee `sig` from the call's
@@ -584,6 +763,7 @@ impl Checker {
         nargs: usize,
         ddd: bool,
         partial_targs: &[TypeId],
+        atargs: &[Vec<TypeId>],
     ) -> Option<TypeId> {
         // Build the parameter tuple matching the call's argument count
         // (variadic functions need their tail expanded — `infer` requires
@@ -689,6 +869,9 @@ impl Checker {
         let mut all_tparams = renamed_tparams.clone();
         let callee_ntparams = renamed_tparams.len();
         let mut generic_args: Vec<usize> = Vec::new();
+        // Where each generic argument's type parameters start in the joint
+        // list, so its own written type arguments seed the right slots.
+        let mut arg_targ_slots: Vec<(usize, usize)> = Vec::new();
         if self.allow_version(&crate::version::go1_21()) {
             for i in 0..arg_types.len() {
                 let Some(at) = arg_types[i] else { continue };
@@ -709,6 +892,7 @@ impl Checker {
                     crate::typelists::TypeParamList::from_bound(new_tparams.clone()),
                 );
                 arg_types[i] = Some(renamed);
+                arg_targ_slots.push((all_tparams.len(), new_tparams.len()));
                 all_tparams.extend(new_tparams);
                 generic_args.push(i);
             }
@@ -722,6 +906,15 @@ impl Checker {
         let mut targs_in: Vec<Option<TypeId>> = vec![None; renamed_tparams.len()];
         for (i, t) in partial_targs.iter().take(callee_ntparams).enumerate() {
             targs_in[i] = Some(*t);
+        }
+        // A generic argument may itself have written some of its type
+        // arguments (`Satisfies(m, Contains[*Dep])`): they pre-bind its first
+        // slots and the rest are inferred with everything else.
+        for (&i, &(start, count)) in generic_args.iter().zip(arg_targ_slots.iter()) {
+            let Some(written) = atargs.get(i) else { continue };
+            for (j, t) in written.iter().take(count).enumerate() {
+                targs_in[start + j] = Some(*t);
+            }
         }
         let typ_table = self.typ.clone();
         // Go enables shared-method interface inference for go1.21+ (an unset
@@ -765,6 +958,12 @@ impl Checker {
                     );
                     args[i].typ = Some(inst_arg);
                     j = k;
+                }
+                // A non-generic callee with a generic argument — `take(objMatches)`
+                // — has nothing of its own to instantiate; the inference existed
+                // only to type the argument, which the loop above just did.
+                if callee_ntparams == 0 {
+                    return Some(sig);
                 }
                 let callee_targs: Vec<TypeId> =
                     targs.iter().copied().take(callee_ntparams).collect();
