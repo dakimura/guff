@@ -1,99 +1,11 @@
 [
   {
-    "name": "go-redis",
-    "url": "https://github.com/redis/go-redis.git",
-    "ref": "v9.22.0",
+    "name": "alertmanager",
+    "url": "https://github.com/prometheus/alertmanager.git",
+    "ref": "v0.34.0",
     "packages": "./...",
     "tier": "hunt",
     "timeout": "15m"
-  },
-  {
-    "name": "restic",
-    "url": "https://github.com/restic/restic.git",
-    "ref": "v0.19.1",
-    "packages": "./...",
-    "tier": "hunt",
-    "timeout": "20m"
-  },
-  {
-    "name": "nats-server",
-    "url": "https://github.com/nats-io/nats-server.git",
-    "ref": "v2.14.4",
-    "packages": "./...",
-    "tier": "hunt",
-    "timeout": "20m"
-  },
-  {
-    "name": "rclone",
-    "url": "https://github.com/rclone/rclone.git",
-    "ref": "v1.72.1",
-    "packages": "./...",
-    "tier": "hunt",
-    "timeout": "30m"
-  },
-  {
-    "name": "cli",
-    "url": "https://github.com/cli/cli.git",
-    "ref": "v2.83.2",
-    "packages": "./...",
-    "tier": "hunt",
-    "timeout": "20m"
-  },
-  {
-    "name": "traefik",
-    "url": "https://github.com/traefik/traefik.git",
-    "ref": "v3.6.8",
-    "packages": "./pkg/...",
-    "tier": "hunt",
-    "timeout": "30m"
-  },
-  {
-    "name": "coredns",
-    "url": "https://github.com/coredns/coredns.git",
-    "ref": "v1.14.6",
-    "packages": "./...",
-    "tier": "hunt",
-    "timeout": "20m"
-  },
-  {
-    "name": "jaeger",
-    "url": "https://github.com/jaegertracing/jaeger.git",
-    "ref": "v2.20.0",
-    "packages": "./...",
-    "tier": "hunt",
-    "timeout": "20m"
-  },
-  {
-    "name": "thanos",
-    "url": "https://github.com/thanos-io/thanos.git",
-    "ref": "v0.42.4",
-    "packages": "./...",
-    "tier": "hunt",
-    "timeout": "30m"
-  },
-  {
-    "name": "prometheus",
-    "url": "https://github.com/prometheus/prometheus.git",
-    "ref": "v3.14.0",
-    "packages": "./...",
-    "tier": "hunt",
-    "timeout": "30m"
-  },
-  {
-    "name": "dapr",
-    "url": "https://github.com/dapr/dapr.git",
-    "ref": "v1.18.3",
-    "packages": "./...",
-    "tier": "hunt",
-    "timeout": "30m"
-  },
-  {
-    "name": "gitea",
-    "url": "https://github.com/go-gitea/gitea.git",
-    "ref": "v1.27.2",
-    "packages": "./...",
-    "tier": "hunt",
-    "timeout": "30m"
   },
   {
     "name": "argo-cd",
@@ -120,47 +32,20 @@
     "timeout": "20m"
   },
   {
-    "name": "syncthing",
-    "url": "https://github.com/syncthing/syncthing.git",
-    "ref": "v2.1.3",
-    "packages": "./...",
-    "tier": "hunt",
-    "timeout": "20m",
-    "build_tags": [
-      "noassets"
-    ]
-  },
-  {
-    "name": "cri-o",
-    "url": "https://github.com/cri-o/cri-o.git",
-    "ref": "v1.36.4",
-    "packages": "./...",
-    "tier": "hunt",
-    "timeout": "25m"
-  },
-  {
-    "name": "pipeline",
-    "url": "https://github.com/tektoncd/pipeline.git",
-    "ref": "v1.15.0",
-    "packages": "./...",
-    "tier": "hunt",
-    "timeout": "25m"
-  },
-  {
-    "name": "fiber",
-    "url": "https://github.com/gofiber/fiber.git",
-    "ref": "v3.5.0",
+    "name": "buildkit",
+    "url": "https://github.com/moby/buildkit.git",
+    "ref": "v0.32.2",
     "packages": "./...",
     "tier": "hunt",
     "timeout": "15m"
   },
   {
-    "name": "scaleway-cli",
-    "url": "https://github.com/scaleway/scaleway-cli.git",
-    "ref": "v2.61.0",
+    "name": "cli",
+    "url": "https://github.com/cli/cli.git",
+    "ref": "v2.83.2",
     "packages": "./...",
     "tier": "hunt",
-    "timeout": "15m"
+    "timeout": "20m"
   },
   {
     "name": "connect-go",
@@ -171,20 +56,28 @@
     "timeout": "10m"
   },
   {
-    "name": "velero",
-    "url": "https://github.com/velero-io/velero.git",
-    "ref": "v1.18.2",
+    "name": "coredns",
+    "url": "https://github.com/coredns/coredns.git",
+    "ref": "v1.14.6",
     "packages": "./...",
     "tier": "hunt",
-    "timeout": "15m"
+    "timeout": "20m"
   },
   {
-    "name": "alertmanager",
-    "url": "https://github.com/prometheus/alertmanager.git",
-    "ref": "v0.34.0",
+    "name": "cri-o",
+    "url": "https://github.com/cri-o/cri-o.git",
+    "ref": "v1.36.4",
     "packages": "./...",
     "tier": "hunt",
-    "timeout": "15m"
+    "timeout": "25m"
+  },
+  {
+    "name": "dapr",
+    "url": "https://github.com/dapr/dapr.git",
+    "ref": "v1.18.3",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
   },
   {
     "name": "ebpf",
@@ -195,9 +88,113 @@
     "timeout": "15m"
   },
   {
-    "name": "buildkit",
-    "url": "https://github.com/moby/buildkit.git",
-    "ref": "v0.32.2",
+    "name": "external-dns",
+    "url": "https://github.com/kubernetes-sigs/external-dns.git",
+    "ref": "v0.22.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
+  },
+  {
+    "name": "fiber",
+    "url": "https://github.com/gofiber/fiber.git",
+    "ref": "v3.5.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
+  },
+  {
+    "name": "gitea",
+    "url": "https://github.com/go-gitea/gitea.git",
+    "ref": "v1.27.2",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "go-redis",
+    "url": "https://github.com/redis/go-redis.git",
+    "ref": "v9.22.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
+  },
+  {
+    "name": "jaeger",
+    "url": "https://github.com/jaegertracing/jaeger.git",
+    "ref": "v2.20.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "20m"
+  },
+  {
+    "name": "k6",
+    "url": "https://github.com/grafana/k6.git",
+    "ref": "v2.2.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
+  },
+  {
+    "name": "karmada",
+    "url": "https://github.com/karmada-io/karmada.git",
+    "ref": "v1.18.2",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
+  },
+  {
+    "name": "kubeshark",
+    "url": "https://github.com/kubeshark/kubeshark.git",
+    "ref": "v53.4.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
+  },
+  {
+    "name": "nats-server",
+    "url": "https://github.com/nats-io/nats-server.git",
+    "ref": "v2.14.4",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "20m"
+  },
+  {
+    "name": "pipeline",
+    "url": "https://github.com/tektoncd/pipeline.git",
+    "ref": "v1.15.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
+  },
+  {
+    "name": "prometheus",
+    "url": "https://github.com/prometheus/prometheus.git",
+    "ref": "v3.14.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "rclone",
+    "url": "https://github.com/rclone/rclone.git",
+    "ref": "v1.72.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "restic",
+    "url": "https://github.com/restic/restic.git",
+    "ref": "v0.19.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "20m"
+  },
+  {
+    "name": "scaleway-cli",
+    "url": "https://github.com/scaleway/scaleway-cli.git",
+    "ref": "v2.61.0",
     "packages": "./...",
     "tier": "hunt",
     "timeout": "15m"
@@ -215,28 +212,15 @@
     ]
   },
   {
-    "name": "kubeshark",
-    "url": "https://github.com/kubeshark/kubeshark.git",
-    "ref": "v53.4.0",
+    "name": "syncthing",
+    "url": "https://github.com/syncthing/syncthing.git",
+    "ref": "v2.1.3",
     "packages": "./...",
     "tier": "hunt",
-    "timeout": "15m"
-  },
-  {
-    "name": "external-dns",
-    "url": "https://github.com/kubernetes-sigs/external-dns.git",
-    "ref": "v0.22.0",
-    "packages": "./...",
-    "tier": "hunt",
-    "timeout": "15m"
-  },
-  {
-    "name": "k6",
-    "url": "https://github.com/grafana/k6.git",
-    "ref": "v2.2.0",
-    "packages": "./...",
-    "tier": "hunt",
-    "timeout": "15m"
+    "timeout": "20m",
+    "build_tags": [
+      "noassets"
+    ]
   },
   {
     "name": "telegraf",
@@ -245,5 +229,29 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "25m"
+  },
+  {
+    "name": "thanos",
+    "url": "https://github.com/thanos-io/thanos.git",
+    "ref": "v0.42.4",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "traefik",
+    "url": "https://github.com/traefik/traefik.git",
+    "ref": "v3.6.8",
+    "packages": "./pkg/...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "velero",
+    "url": "https://github.com/velero-io/velero.git",
+    "ref": "v1.18.2",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
   }
 ]
