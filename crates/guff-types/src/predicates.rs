@@ -251,7 +251,12 @@ pub fn same_pkg(a: Option<()>, b: Option<()>) -> bool {
 ///
 /// Equivalent to `hasNil`. Doesn't handle the TypeParam-typeset case yet
 /// (that needs the `underIs` helper — chunk-N).
-pub fn has_nil(arena: &TypeArena, t: TypeId) -> bool {
+pub fn has_nil(
+    arena: &mut TypeArena,
+    oarena: &ObjectArena,
+    parena: &PackageArena,
+    t: TypeId,
+) -> bool {
     let u = t.underlying(arena);
     match arena.get(u) {
         TypeData::Basic(b) => b.kind() == BasicKind::UnsafePointer,
@@ -260,7 +265,30 @@ pub fn has_nil(arena: &TypeArena, t: TypeId) -> bool {
         | TypeData::Signature(_)
         | TypeData::Map(_)
         | TypeData::Chan(_) => true,
-        TypeData::Interface(_) => !is_type_param(arena, t),
+        // A type parameter's underlying type is its constraint interface, so
+        // it lands here — and it has nil when **every** term of its type set
+        // does. Answering `false` for all of them (the shape this arm had)
+        // rejected `*m == nil` on a `T ~map[K]V`, which is how tailscale's
+        // `util/mak` and seven more of its packages went ill-typed.
+        TypeData::Interface(_) => {
+            if !is_type_param(arena, t) {
+                return true;
+            }
+            // `underIs(t, func(u) { return u != nil && hasNil(u) })`. The terms
+            // are snapshotted first: computing the type set needs the arena
+            // mutably, and so does the recursive `has_nil` on each term.
+            let mut unders: Vec<Option<TypeId>> = Vec::new();
+            crate::under::typeset_iter(arena, oarena, parena, t, |_, u| {
+                unders.push(u);
+                true
+            });
+            // A constraint with no specific terms yields one `None`, which is
+            // upstream's `u != nil` failing: `any` and `comparable` have no nil.
+            !unders.is_empty()
+                && unders
+                    .iter()
+                    .all(|u| u.is_some_and(|u| has_nil(arena, oarena, parena, u)))
+        }
         _ => false,
     }
 }

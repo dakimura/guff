@@ -94,13 +94,18 @@ fn has_nil_predicate() {
     let ch = new_chan(&mut t, ChanDir::SendRecv, int);
     let sig = new_signature_type(&mut t, None, &[], &[], None, None, false);
 
-    assert!(has_nil(&t, ptr));
-    assert!(has_nil(&t, sl));
-    assert!(has_nil(&t, mp));
-    assert!(has_nil(&t, ch));
-    assert!(has_nil(&t, sig));
-    assert!(has_nil(&t, unsafe_ptr));
-    assert!(!has_nil(&t, int));
+    // `has_nil` takes the object and package arenas because a *type
+    // parameter*'s answer depends on its constraint's type set, which is
+    // computed lazily; none of the concrete types below reach that path.
+    let o = ObjectArena::new();
+    let pk = PackageArena::new();
+    assert!(has_nil(&mut t, &o, &pk, ptr));
+    assert!(has_nil(&mut t, &o, &pk, sl));
+    assert!(has_nil(&mut t, &o, &pk, mp));
+    assert!(has_nil(&mut t, &o, &pk, ch));
+    assert!(has_nil(&mut t, &o, &pk, sig));
+    assert!(has_nil(&mut t, &o, &pk, unsafe_ptr));
+    assert!(!has_nil(&mut t, &o, &pk, int));
 }
 
 #[test]

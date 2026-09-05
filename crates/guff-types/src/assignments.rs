@@ -82,7 +82,7 @@ pub fn assignable_to(
     x: &Operand,
     target: TypeId,
     implements: &dyn Fn(&mut TypeArena, &ObjectArena, &PackageArena, TypeId, TypeId) -> bool,
-    representable: &dyn Fn(&TypeArena, &Operand, TypeId) -> bool,
+    representable: &dyn Fn(&mut TypeArena, &ObjectArena, &PackageArena, &Operand, TypeId) -> bool,
 ) -> AssignableResult {
     // An invalid operand or invalid target avoids spurious errors.
     if x.mode == OperandMode::Invalid || !is_valid(arena, target) {
@@ -114,7 +114,7 @@ pub fn assignable_to(
             // T is a type parameter: x must be representable by each specific
             // type in T's type set.
             let terms = tparam_terms(arena, oarena, parena, t);
-            let ok = terms_all(&terms, |tt| representable(arena, x, tt));
+            let ok = terms_all(&terms, |tt| representable(arena, oarena, parena, x, tt));
             return AssignableResult {
                 ok,
                 code: if ok {
@@ -150,7 +150,7 @@ pub fn assignable_to(
                 },
             };
         }
-        let ok = representable(arena, x, t);
+        let ok = representable(arena, oarena, parena, x, t);
         return AssignableResult {
             ok,
             code: if ok {
@@ -284,7 +284,7 @@ fn assign_over_terms<'a>(
     parena: &PackageArena,
     terms: &[(bool, Option<TypeId>)],
     implements: &dyn Fn(&mut TypeArena, &ObjectArena, &PackageArena, TypeId, TypeId) -> bool,
-    representable: &dyn Fn(&TypeArena, &Operand, TypeId) -> bool,
+    representable: &dyn Fn(&mut TypeArena, &ObjectArena, &PackageArena, &Operand, TypeId) -> bool,
     mut make: impl FnMut(TypeId) -> (Operand<'a>, TypeId),
 ) -> AssignableResult {
     let mut result = AssignableResult::no(Code::IncompatibleAssign);

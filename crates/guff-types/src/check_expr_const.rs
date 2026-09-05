@@ -366,6 +366,11 @@ impl Checker {
         }
 
         let u = target.underlying(&self.types);
+        // Asking whether the target has nil may need to compute a type
+        // parameter's constraint type set, which borrows the arena mutably —
+        // so it happens before the match below takes a reference into it.
+        let target_has_nil =
+            x.is_nil() && has_nil(&mut self.types, &self.objects, &self.packages, target);
         match self.types.get(u) {
             TypeData::Basic(_) => {
                 if x.mode == OperandMode::Constant {
@@ -388,7 +393,7 @@ impl Checker {
                     | BasicKind::UntypedComplex => is_numeric(&self.types, target),
                     BasicKind::UntypedString => is_string(&self.types, target),
                     BasicKind::UntypedNil => {
-                        if !has_nil(&self.types, target) {
+                        if !has_nil(&mut self.types, &self.objects, &self.packages, target) {
                             return (None, None, Some(Code::InvalidUntypedConversion));
                         }
                         // Preserve nil as UntypedNil (go.dev/issue/13061).
@@ -406,7 +411,7 @@ impl Checker {
             // requires the default type to implement the interface). Needed for
             // `iface == ""` / `iface == 0` (vault helper/random FieldData.Raw).
             other if is_interface(&self.types, u) => {
-                if x.is_nil() && has_nil(&self.types, target) {
+                if target_has_nil {
                     return (Some(self.basic(BasicKind::UntypedNil)), None, None);
                 }
                 if is_type_param(&self.types, target) {
@@ -462,7 +467,7 @@ impl Checker {
                 }
             }
             _ => {
-                if x.is_nil() && has_nil(&self.types, target) {
+                if x.is_nil() && has_nil(&mut self.types, &self.objects, &self.packages, target) {
                     (Some(target), None, None)
                 } else {
                     (None, None, Some(Code::InvalidUntypedConversion))

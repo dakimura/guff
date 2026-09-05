@@ -14,12 +14,13 @@ use guff_types::{
 use guff_types_errors::Code;
 
 type ImplementsFn = dyn Fn(&mut TypeArena, &ObjectArena, &PackageArena, TypeId, TypeId) -> bool;
-type RepresentableFn = dyn Fn(&TypeArena, &Operand, TypeId) -> bool;
+type RepresentableFn =
+    dyn Fn(&mut TypeArena, &ObjectArena, &PackageArena, &Operand, TypeId) -> bool;
 
 const IMPLEMENTS_NONE: &ImplementsFn = &|_, _, _, _, _| false;
 const IMPLEMENTS_ALL: &ImplementsFn = &|_, _, _, _, _| true;
-const REPR_NONE: &RepresentableFn = &|_, _, _| false;
-const REPR_ALL: &RepresentableFn = &|_, _, _| true;
+const REPR_NONE: &RepresentableFn = &|_, _, _, _, _| false;
+const REPR_ALL: &RepresentableFn = &|_, _, _, _, _| true;
 
 fn b(u: &Universe, k: BasicKind) -> TypeId {
     u.typ[k as usize]

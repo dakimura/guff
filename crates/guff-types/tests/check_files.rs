@@ -2021,3 +2021,83 @@ fn an_indexed_argument_reports_its_errors_once() {
         assert_eq!(msgs, want, "{body}");
     }
 }
+
+/// Comparison with `nil` when one side is a **type parameter**.
+///
+/// `hasNil` is what decides it, and its interface arm reads:
+///
+/// ```go
+/// case *Interface:
+///     return !isTypeParam(t) || underIs(t, func(u Type) bool {
+///         return u != nil && hasNil(u)
+///     })
+/// ```
+///
+/// guff had the first half and not the second, so a type parameter never had
+/// nil and every comparison against it was rejected. tailscale's `util/mak`
+/// opens with `func Set[K comparable, V any, T ~map[K]V](m *T, …) { if *m == nil`,
+/// and that one line took the package out of the run — along with seven more.
+///
+/// Every case below was measured against the Go toolchain one package per
+/// shape; `go vet` stops at the first error, so each shape is its own package.
+#[test]
+fn nil_comparison_against_a_type_parameter_matches_the_toolchain() {
+    // (source, the message the toolchain gives, or None when it accepts)
+    let cases: &[(&str, Option<&str>)] = &[
+        // --- accepted: every term of the type set has nil ----------------
+        (
+            "func f[K comparable, V any, T ~map[K]V](m *T) bool { return *m == nil }",
+            None,
+        ),
+        ("func f[E any, S ~[]E](s S) bool { return s != nil }", None),
+        (
+            "type Nilable interface{ ~[]int | ~map[string]int | ~*int | ~chan int | ~func() }\n\
+             func f[T Nilable](v T) bool { return v == nil }",
+            None,
+        ),
+        // A `switch` on the same value is the same question: `comparison`
+        // handles a case clause with op forced to EQL, so it reaches `hasNil`
+        // too. guff used to answer "cannot switch on s (S is not comparable)".
+        (
+            "func f[E any, S ~[]E](s S) int { switch s { case nil: return 0 }; return 1 }",
+            None,
+        ),
+        // Assigning, returning and passing nil were already accepted; they are
+        // here so a change to `has_nil` cannot quietly take them away.
+        ("func f[E any, S ~[]E](p *S) { *p = nil }", None),
+        ("func f[E any, S ~[]E]() S { return nil }", None),
+        // A *pointer to* a type parameter is an ordinary pointer.
+        ("func f[T any](p *T) bool { return p == nil }", None),
+
+        // --- rejected: some term has no nil ------------------------------
+        // One non-nilable term is enough. Upstream words it "invalid
+        // operation: v == nil (mismatched types T and untyped nil)" — it fails
+        // the assignability step before the comparison one; guff reports the
+        // same verdict from the conversion path, in its own words.
+        (
+            "type Mixed interface{ ~[]int | ~int }\n\
+             func f[T Mixed](v T) bool { return v == nil }",
+            Some("cannot convert untyped nil to type T"),
+        ),
+        // `any` and `comparable` have no terms at all, which is `underIs`
+        // calling its callback once with a nil underlying: not nilable.
+        (
+            "func f[T any](v T) bool { return v == nil }",
+            Some("cannot convert untyped nil to type T"),
+        ),
+        (
+            "func f[T comparable](v T) bool { return v == nil }",
+            Some("cannot convert untyped nil to type T"),
+        ),
+    ];
+
+    for (body, want) in cases {
+        let src = format!("package p\n{body}\n");
+        let check = check_src(&src);
+        let msgs: Vec<String> = check.errors.iter().map(|e| e.msg.clone()).collect();
+        match want {
+            None => assert!(msgs.is_empty(), "{body}\nunexpected: {msgs:?}"),
+            Some(w) => assert_eq!(msgs, vec![w.to_string()], "{body}"),
+        }
+    }
+}

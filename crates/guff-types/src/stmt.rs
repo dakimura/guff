@@ -1105,7 +1105,7 @@ impl Checker {
                     if x.mode != OperandMode::Invalid {
                         let xtyp = x.typ.unwrap_or_else(|| self.invalid_type());
                         let cmp = comparable(&mut self.types, &self.objects, &self.packages, xtyp);
-                        let nilable = has_nil(&self.types, xtyp);
+                        let nilable = has_nil(&mut self.types, &self.objects, &self.packages, xtyp);
                         if !cmp && !nilable {
                             let (xs, ts) = (self.operand_str(&x), self.type_str(xtyp));
                             self.error(

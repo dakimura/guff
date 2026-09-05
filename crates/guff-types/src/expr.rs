@@ -682,7 +682,9 @@ impl Checker {
     pub(crate) fn match_types<'a>(&mut self, x: &mut Operand<'a>, y: &mut Operand<'a>) {
         let xt = x.typ.unwrap_or_else(|| self.invalid_type());
         let yt = y.typ.unwrap_or_else(|| self.invalid_type());
-        if (x.is_nil() && has_nil(&self.types, yt)) || (y.is_nil() && has_nil(&self.types, xt)) {
+        if (x.is_nil() && has_nil(&mut self.types, &self.objects, &self.packages, yt))
+            || (y.is_nil() && has_nil(&mut self.types, &self.objects, &self.packages, xt))
+        {
             return;
         }
         if is_typed(&self.types, xt) && is_typed(&self.types, yt) {
@@ -716,7 +718,8 @@ impl Checker {
         // Nil vs typed: covered by assignable_to, but keep the explicit path
         // for the defined-on-operands check below.
         let nil_ok =
-            (x.is_nil() && has_nil(&self.types, yt)) || (y.is_nil() && has_nil(&self.types, xt));
+            (x.is_nil() && has_nil(&mut self.types, &self.objects, &self.packages, yt))
+                || (y.is_nil() && has_nil(&mut self.types, &self.objects, &self.packages, xt));
         if !nil_ok {
             let ok = self.assignable_to(x, yt).ok || self.assignable_to(y, xt).ok;
             if !ok {

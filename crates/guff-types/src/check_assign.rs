@@ -54,12 +54,18 @@ fn implements_closure(
 /// made `bool(v != 0)` — the shape every `generated.pb.go` unmarshaller emits —
 /// fail its conversion, and with it the whole package: 9 of kubernetes'
 /// apimachinery ill-typed errors were this one line.
-fn representable_closure(a: &TypeArena, x: &Operand, t: TypeId) -> bool {
+fn representable_closure(
+    a: &mut TypeArena,
+    o: &ObjectArena,
+    pk: &PackageArena,
+    x: &Operand,
+    t: TypeId,
+) -> bool {
     if let Some(v) = &x.val {
         return representable_const(a, v, t).is_some();
     }
     if x.is_nil() {
-        return has_nil(a, t);
+        return has_nil(a, o, pk, t);
     }
     let Some(xtyp) = x.typ else { return false };
     if !is_untyped(a, xtyp) {
@@ -82,7 +88,7 @@ fn representable_closure(a: &TypeArena, x: &Operand, t: TypeId) -> bool {
         | BasicKind::UntypedFloat
         | BasicKind::UntypedComplex => is_numeric(a, t),
         BasicKind::UntypedString => is_string(a, t),
-        BasicKind::UntypedNil => has_nil(a, t),
+        BasicKind::UntypedNil => has_nil(a, o, pk, t),
         _ => false,
     }
 }
