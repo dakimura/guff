@@ -760,6 +760,16 @@ pub struct GocriticCheckSettings {
     pub if_else_chain_min_threshold: usize,
     /// `unnamedResult.checkExported` — when true, only exported funcs are checked.
     pub unnamed_result_check_exported: bool,
+    /// `hugeParam.sizeThreshold` — bytes at which a parameter is "heavy".
+    pub huge_param_size_threshold: i64,
+    /// `rangeValCopy.sizeThreshold` — bytes copied per iteration.
+    pub range_val_copy_size_threshold: i64,
+    /// `rangeExprCopy.sizeThreshold` — bytes of the ranged expression.
+    pub range_expr_copy_size_threshold: i64,
+    /// `nestingReduce.bodyWidth` — statements an `if` body needs to trigger.
+    pub nesting_reduce_body_width: usize,
+    /// `truncateCmp.skipArchDependent` — skip `int` / `uint` / `uintptr`.
+    pub truncate_cmp_skip_arch_dependent: bool,
 }
 
 impl Default for GocriticCheckSettings {
@@ -768,6 +778,13 @@ impl Default for GocriticCheckSettings {
             too_many_results_max: 5,
             if_else_chain_min_threshold: 2,
             unnamed_result_check_exported: false,
+            // go-critic's own `checkers/*_checker.go` `Params` defaults, kept
+            // next to the checks that read them.
+            huge_param_size_threshold: crate::gocritic::DEFAULT_HUGE_PARAM_SIZE_THRESHOLD,
+            range_val_copy_size_threshold: crate::gocritic::DEFAULT_RANGE_VAL_COPY_SIZE_THRESHOLD,
+            range_expr_copy_size_threshold: crate::gocritic::DEFAULT_RANGE_EXPR_COPY_SIZE_THRESHOLD,
+            nesting_reduce_body_width: crate::gocritic::DEFAULT_NESTING_REDUCE_BODY_WIDTH,
+            truncate_cmp_skip_arch_dependent: true,
         }
     }
 }

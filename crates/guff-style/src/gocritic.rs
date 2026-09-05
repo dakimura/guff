@@ -4323,9 +4323,15 @@ fn check_method_expr_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pendin
     );
 }
 
-const RANGE_EXPR_COPY_SIZE_THRESHOLD: i64 = 512;
+/// `rangeExprCopy.sizeThreshold`'s default, from go-critic's own `Params`.
+pub(crate) const DEFAULT_RANGE_EXPR_COPY_SIZE_THRESHOLD: i64 = 512;
 
-fn check_range_expr_copy(pass: &Pass<'_>, rs: &RangeStmt, pending: &mut Pending) {
+fn check_range_expr_copy(
+    pass: &Pass<'_>,
+    rs: &RangeStmt,
+    size_threshold: i64,
+    pending: &mut Pending,
+) {
     if rs.key.is_none() || rs.value.is_none() {
         return;
     }
@@ -4352,7 +4358,7 @@ fn check_range_expr_copy(pass: &Pass<'_>, rs: &RangeStmt, pending: &mut Pending)
         &artifacts.packages,
         typ,
     );
-    if size < RANGE_EXPR_COPY_SIZE_THRESHOLD {
+    if size < size_threshold {
         return;
     }
     let Some(x_t) = expr_text(&rs.x) else {
@@ -4940,7 +4946,8 @@ fn walk_block_for_val_swap(body: &BlockStmt, pending: &mut Pending) {
     }
 }
 
-const NESTING_REDUCE_BODY_WIDTH: usize = 5;
+/// `nestingReduce.bodyWidth`'s default.
+pub(crate) const DEFAULT_NESTING_REDUCE_BODY_WIDTH: usize = 5;
 
 fn trunc_cast_name(expr: &Expr) -> Option<&str> {
     let Expr::CallExpr(call) = expr else {
@@ -4955,7 +4962,12 @@ fn trunc_cast_name(expr: &Expr) -> Option<&str> {
     }
 }
 
-fn check_truncate_cmp(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Pending) {
+fn check_truncate_cmp(
+    pass: &Pass<'_>,
+    bin: &BinaryExpr,
+    skip_arch_dependent: bool,
+    pending: &mut Pending,
+) {
     match bin.op {
         Token::LSS | Token::GTR | Token::LEQ | Token::GEQ | Token::EQL | Token::NEQ => {}
         _ => return,
@@ -4966,8 +4978,20 @@ fn check_truncate_cmp(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Pending) 
     let left = trunc_cast_name(bin.x.as_ref()).is_some();
     let right = trunc_cast_name(bin.y.as_ref()).is_some();
     match (left, right) {
-        (true, false) => check_truncate_cmp_side(pass, bin.x.as_ref(), bin.y.as_ref(), pending),
-        (false, true) => check_truncate_cmp_side(pass, bin.y.as_ref(), bin.x.as_ref(), pending),
+        (true, false) => check_truncate_cmp_side(
+            pass,
+            bin.x.as_ref(),
+            bin.y.as_ref(),
+            skip_arch_dependent,
+            pending,
+        ),
+        (false, true) => check_truncate_cmp_side(
+            pass,
+            bin.y.as_ref(),
+            bin.x.as_ref(),
+            skip_arch_dependent,
+            pending,
+        ),
         _ => {}
     }
 }
@@ -4976,6 +5000,7 @@ fn check_truncate_cmp_side(
     pass: &Pass<'_>,
     cast_expr: &Expr,
     other: &Expr,
+    skip_arch_dependent: bool,
     pending: &mut Pending,
 ) {
     let Expr::CallExpr(xcast) = cast_expr else {
@@ -5021,10 +5046,14 @@ fn check_truncate_cmp_side(
     if xsize <= ysize {
         return;
     }
-    // skipArchDependent=true (golangci / go-critic default)
-    match basic_kind(&artifacts.types, x_under) {
-        BasicKind::Int | BasicKind::Uint | BasicKind::Uintptr => return,
-        _ => {}
+    // `skipArchDependent`, whose go-critic default is true. guff had the
+    // default baked in, so `skipArchDependent: false` could not reach the
+    // `int` / `uint` / `uintptr` comparisons it exists to surface.
+    if skip_arch_dependent {
+        match basic_kind(&artifacts.types, x_under) {
+            BasicKind::Int | BasicKind::Uint | BasicKind::Uintptr => return,
+            _ => {}
+        }
     }
     let suggest = type_string(
         &artifacts.types,
@@ -5189,7 +5218,7 @@ fn check_hex_literal(lit: &BasicLit, pending: &mut Pending) {
     }
 }
 
-fn check_nesting_reduce_for(body: &BlockStmt, pending: &mut Pending) {
+fn check_nesting_reduce_for(body: &BlockStmt, body_width: usize, pending: &mut Pending) {
     if body.list.len() != 1 {
         return;
     }
@@ -5199,7 +5228,7 @@ fn check_nesting_reduce_for(body: &BlockStmt, pending: &mut Pending) {
     if ifs.else_.is_some() {
         return;
     }
-    if ifs.body.list.len() >= NESTING_REDUCE_BODY_WIDTH {
+    if ifs.body.list.len() >= body_width {
         report(
             pending,
             ifs.if_.0 as u32,
@@ -7803,8 +7832,10 @@ fn check_why_no_lint(cg: &CommentGroup, pending: &mut Pending) {
     }
 }
 
-const HUGE_PARAM_SIZE_THRESHOLD: i64 = 80;
-const RANGE_VAL_COPY_SIZE_THRESHOLD: i64 = 128;
+/// `hugeParam.sizeThreshold`'s default.
+pub(crate) const DEFAULT_HUGE_PARAM_SIZE_THRESHOLD: i64 = 80;
+/// `rangeValCopy.sizeThreshold`'s default.
+pub(crate) const DEFAULT_RANGE_VAL_COPY_SIZE_THRESHOLD: i64 = 128;
 
 /// Upstream `checkers.isUnitTestFunc`: `func TestXxx(*testing.T)` returning
 /// nothing.
@@ -7871,6 +7902,7 @@ fn is_stringer_method(decl: &FuncDecl) -> bool {
 fn check_huge_param_fields(
     pass: &Pass<'_>,
     fields: Option<&FieldList>,
+    size_threshold: i64,
     pending: &mut Pending,
 ) {
     let Some(fl) = fields else {
@@ -7904,7 +7936,7 @@ fn check_huge_param_fields(
                 &artifacts.packages,
                 typ,
             );
-            if size >= HUGE_PARAM_SIZE_THRESHOLD {
+            if size >= size_threshold {
                 report(
                     pending,
                     id.pos().0 as u32,
@@ -7919,15 +7951,25 @@ fn check_huge_param_fields(
     }
 }
 
-fn check_huge_param(pass: &Pass<'_>, f: &FuncDecl, pending: &mut Pending) {
+fn check_huge_param(
+    pass: &Pass<'_>,
+    f: &FuncDecl,
+    size_threshold: i64,
+    pending: &mut Pending,
+) {
     if is_stringer_method(f) {
         return;
     }
-    check_huge_param_fields(pass, f.recv.as_ref(), pending);
-    check_huge_param_fields(pass, f.ty.params.as_ref(), pending);
+    check_huge_param_fields(pass, f.recv.as_ref(), size_threshold, pending);
+    check_huge_param_fields(pass, f.ty.params.as_ref(), size_threshold, pending);
 }
 
-fn check_range_val_copy(pass: &Pass<'_>, rs: &RangeStmt, pending: &mut Pending) {
+fn check_range_val_copy(
+    pass: &Pass<'_>,
+    rs: &RangeStmt,
+    size_threshold: i64,
+    pending: &mut Pending,
+) {
     let Some(value) = &rs.value else {
         return;
     };
@@ -7966,7 +8008,7 @@ fn check_range_val_copy(pass: &Pass<'_>, rs: &RangeStmt, pending: &mut Pending) 
         &artifacts.packages,
         typ,
     );
-    if size >= RANGE_VAL_COPY_SIZE_THRESHOLD {
+    if size >= size_threshold {
         report(
             pending,
             rs.for_.0 as u32,
@@ -9318,7 +9360,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         check_bad_cond_for(s, &mut pending);
                     }
                     if scoped("nestingReduce", s.for_) {
-                        check_nesting_reduce_for(&s.body, &mut pending);
+                        check_nesting_reduce_for(&s.body, params.nesting_reduce_body_width, &mut pending);
                     }
                     if enabled(&set, "sliceClear") {
                         check_slice_clear(s, &mut pending);
@@ -9332,13 +9374,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         .iter()
                         .any(|(lo, hi)| s.for_.0 as u32 >= *lo && (s.for_.0 as u32) <= *hi);
                     if scoped("rangeExprCopy", s.for_) && !in_test_func {
-                        check_range_expr_copy(pass, s, &mut pending);
+                        check_range_expr_copy(pass, s, params.range_expr_copy_size_threshold, &mut pending);
                     }
                     if scoped("rangeValCopy", s.for_) && !in_test_func {
-                        check_range_val_copy(pass, s, &mut pending);
+                        check_range_val_copy(pass, s, params.range_val_copy_size_threshold, &mut pending);
                     }
                     if scoped("nestingReduce", s.for_) {
-                        check_nesting_reduce_for(&s.body, &mut pending);
+                        check_nesting_reduce_for(&s.body, params.nesting_reduce_body_width, &mut pending);
                     }
                 }
                 NodeRef::BinaryExpr(b) => {
@@ -9361,7 +9403,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         check_weak_cond(pass, b, &mut pending);
                     }
                     if enabled(&set, "truncateCmp") {
-                        check_truncate_cmp(pass, b, &mut pending);
+                        check_truncate_cmp(pass, b, params.truncate_cmp_skip_arch_dependent, &mut pending);
                     }
                     if enabled(&set, "preferFilepathJoin") {
                         check_prefer_filepath_join(pass, b, &mut pending);
@@ -9473,7 +9515,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         );
                     }
                     if enabled(&set, "hugeParam") {
-                        check_huge_param(pass, f, &mut pending);
+                        check_huge_param(pass, f, params.huge_param_size_threshold, &mut pending);
                     }
                     if enabled(&set, "ptrToRefParam") {
                         check_ptr_to_ref_param(pass, f, &mut pending);

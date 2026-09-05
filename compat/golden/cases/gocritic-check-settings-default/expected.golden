@@ -1,0 +1,17 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh gocritic-check-settings-default
+# Produced by running golangci-lint on compat/golden/cases/gocritic-check-settings-default/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+gocritic/checksettings.go:19:19:gocritic::hugeParam: s is heavy (80 bytes); consider passing it by pointer
+gocritic/checksettings.go:20:20:gocritic::hugeParam: m is heavy (128 bytes); consider passing it by pointer
+gocritic/checksettings.go:21:19:gocritic::hugeParam: l is heavy (512 bytes); consider passing it by pointer
+gocritic/checksettings.go:30:2:gocritic::rangeValCopy: each iteration copies 128 bytes (consider pointers or indexing)
+gocritic/checksettings.go:36:2:gocritic::rangeValCopy: each iteration copies 512 bytes (consider pointers or indexing)
+gocritic/checksettings.go:43:23:gocritic::hugeParam: xs is heavy (512 bytes); consider passing it by pointer
+gocritic/checksettings.go:44:2:gocritic::rangeExprCopy: copy of xs (512 bytes) can be avoided with &xs
+gocritic/checksettings.go:67:3:gocritic::nestingReduce: invert if cond, replace body with `continue`, move old body after the statement
+gocritic/checksettings.go:84:9:gocritic::truncateCmp: truncation in comparison 64->32 bit; cast the other operand to int64 instead
