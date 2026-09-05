@@ -10230,6 +10230,8 @@ guff は 4 件を返した。**これを穴と呼ぶ前に**、同じソース�
 
 | syncthing | 2 | `lib/api/api.go:616` / `lib/api/api_csrf.go:99` canonicalheader | **上流の答えがコイン投げ**。`canonicalheader` は `TypesInfo.Uses` を **map で** 走査して最初に見つけた `net/http` の `Header` という名前のオブジェクトを掴み、以後 `types.Identical(recv, headerObject.Type())` を要求する。`net/http` にはその名前が 4 つあり、型 `Header` と フィールド `Request.Header`／`Response.Header` は型が `http.Header` だが、**メソッド `ResponseWriter.Header` は `func() Header`** なので、そこに当たるとパッケージ全体が黙る。syncthing の `lib/api` は `w.Header().Set(…)` と `r.Header.Get(…)` の両方を持つので候補が 2 つあり、map の順で決まる。**キャッシュを毎回捨てて測ると 0 か 2 が交互に出る**（`compat/run.sh` は confirmation ごとに新しいキャッシュを渡す）。guff は決定的な両端（メソッドだけ＝黙る／フィールドだけ＝出す）に合わせたうえで、コイン投げの側では**出す方**を採る。測定は §4 の 2026-09-05（続き 180）、全文は `compat/allowlists/syncthing.txt` | 2026-09-05 |
 
+| telegraf | 3 | `plugins/inputs/vsphere/endpoint.go:1200` / `plugins/outputs/logzio/logzio_test.go:118` / `plugins/processors/dedup/dedup.go:56` revive time-equal | §6 の「revive の importer 盲目には追従しない」そのもので、jaeger の 2 行と同じ機構。`time-equal` は型を要るので revive が**自分のファイルを型検査**し（`if w.file.Pkg.TypeCheck() != nil { return nil }`）、その `importer.Default()` が `$build.Default.GOROOT/bin/go list -export` を叩く。golangci-lint の `Env.Discover` が**値レシーバ**（`pkg/goutil/env.go`）なので `build.Default.GOROOT` はバイナリのビルド時 GOROOT のまま残り、この開発機ではそれが消えた Homebrew の go1.26.2 を指している（現在の toolchain は 1.26.5）。**規則ごと nil を返す**のでパッケージ全体が黙る。**キャッシュを毎回捨てて測ると、`GOROOT` を export した golangci-lint は guff と同じ 3 件を撃つ**。測定は §4 の 2026-09-05（続き 190）、全文は `compat/allowlists/telegraf.txt` | 2026-09-05 |
+
 これ以外の allowlist ファイルは**すべてヘッダのみ（0 件）**。記録するのは
 `oss-nightly` / weekly を CI ゲートにするため — 恒久的に赤いゲートは次の劣化に
 日付を付けられない。**残りを消すのが Phase 3 の残タスク**であり、
@@ -22724,3 +22726,53 @@ perfsprint 1、staticcheck 1、bodyclose 1、sqlclosecheck 1。
 **`time-equal` の 3 件は §6 の「revive の importer 盲目には追従しない」そのもの**で、
 `GOROOT` を export して新しいキャッシュで走らせると**上流もこの 3 件を撃つ**
 （最小再現で実測、2026-09-05）。次のタスクで allowlist に降ろす。
+
+### 2026-09-05（続き 190）— telegraf の `time-equal` 3 件は §6 の環境差。allowlist に降ろした
+
+続き 189 で telegraf を 12 件まで詰めた残りのうち 3 件。**guff の欠陥ではない。**
+
+`time-equal` は型を要る規則で、revive は golangci が渡したファイルを
+**自分で型検査してから**でないと動かない:
+
+```go
+w := &lintTimeEqual{file, onFailure}
+if w.file.Pkg.TypeCheck() != nil {
+	return nil
+}
+```
+
+`lint.Package.TypeCheck` は `types.Config{Importer: importer.Default()}` を使い、
+Go 1.20 以降その importer は `$build.Default.GOROOT/bin/go list -export` を叩いて
+stdlib の export data に届く。golangci-lint は `build.Default.GOROOT` を実物の
+toolchain に向けるつもりでいるが、その値を `func (e Env) Discover(...)`
+—— **値レシーバ**（`pkg/goutil/env.go`）—— 経由で読むので `Env.Get(GOROOT)` が
+空を返し、`build.Default.GOROOT` は**バイナリのビルド時 GOROOT のまま**残る。
+この開発機のそれは Homebrew の go1.26.2 で、toolchain は既に 1.26.5 に上がって
+いるためパスごと消えている。結果、**規則が nil を返してパッケージ全体が黙る。**
+
+jaeger の `time-naming` / `epoch-naming`（§5、2026-08-31）と同じ機構で、
+`cases/revive` の ratchet が抱えている 4 行の "extra" も同じものである。
+
+**最小再現で測った**（2 関数のモジュール、毎回新しい `GOLANGCI_LINT_CACHE`）:
+
+| 実行 | 結果 |
+|---|---|
+| 素の `golangci-lint run` | `unconditional-recursion` だけ |
+| `GOROOT=$(go env GOROOT)` を付けて | **`time-equal` 2 件も出る**（guff と同一） |
+
+guff は渡されたパッケージを型検査するので、いつでも `time.Time` が見える。
+**維持すべきはこちら**で、違うのは環境のほうである。
+`compat/allowlists/telegraf.txt` に理由つきで記録した。
+
+```
+telegraf: guff-only 12 → 9
+```
+
+#### ゲート
+
+golden **228** / fix **228** / reject **14** / isolate **116 ターゲット** /
+workspace **278 スイート** / OSS pr tier **8 ターゲットすべて P=R=100%**。
+台帳は **39/100**（42 定義、open 3）。
+
+telegraf に残るのは **9 件**: nolintlint 5（gosec 4・gocritic 1 の取りこぼしの
+従属）、perfsprint 1、staticcheck 1、bodyclose 1、sqlclosecheck 1。
