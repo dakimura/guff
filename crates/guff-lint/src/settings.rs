@@ -2245,6 +2245,11 @@ fn gocritic_param_usize(settings: &serde_yaml::Value, check: &str, param: &str) 
         .or_else(|| v.as_str()?.trim().parse().ok())
 }
 
+fn gocritic_param_i64(settings: &serde_yaml::Value, check: &str, param: &str) -> Option<i64> {
+    let v = gocritic_param(settings, check, param)?;
+    v.as_i64().or_else(|| v.as_str()?.trim().parse().ok())
+}
+
 fn gocritic_param_bool(settings: &serde_yaml::Value, check: &str, param: &str) -> Option<bool> {
     let v = gocritic_param(settings, check, param)?;
     v.as_bool().or_else(|| v.as_str()?.trim().parse().ok())
@@ -3856,6 +3861,24 @@ impl GocriticSettings {
             }
             if let Some(b) = gocritic_param_bool(settings, "unnamedResult", "checkExported") {
                 check_settings.unnamed_result_check_exported = b;
+            }
+            // The three size thresholds are what telegraf moves — `hugeParam`
+            // and `rangeValCopy` both to 512 — and guff had all five of these
+            // baked in as constants.
+            if let Some(n) = gocritic_param_i64(settings, "hugeParam", "sizeThreshold") {
+                check_settings.huge_param_size_threshold = n;
+            }
+            if let Some(n) = gocritic_param_i64(settings, "rangeValCopy", "sizeThreshold") {
+                check_settings.range_val_copy_size_threshold = n;
+            }
+            if let Some(n) = gocritic_param_i64(settings, "rangeExprCopy", "sizeThreshold") {
+                check_settings.range_expr_copy_size_threshold = n;
+            }
+            if let Some(n) = gocritic_param_usize(settings, "nestingReduce", "bodyWidth") {
+                check_settings.nesting_reduce_body_width = n;
+            }
+            if let Some(b) = gocritic_param_bool(settings, "truncateCmp", "skipArchDependent") {
+                check_settings.truncate_cmp_skip_arch_dependent = b;
             }
         }
         guff_style::GocriticOptions {

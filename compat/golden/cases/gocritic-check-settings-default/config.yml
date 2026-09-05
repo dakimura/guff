@@ -1,0 +1,31 @@
+# Golden case: the five numeric/flag gocritic checks at their defaults.
+#
+# `hugeParam.sizeThreshold` 80, `rangeValCopy.sizeThreshold` 128,
+# `rangeExprCopy.sizeThreshold` 512, `nestingReduce.bodyWidth` 5,
+# `truncateCmp.skipArchDependent` true — go-critic's own `Params` values.
+#
+# The pair with `gocritic-check-settings-tuned` is what pins that the settings
+# are read at all: guff had every one of them baked in as a `const`.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gocritic
+  settings:
+    gocritic:
+      disable-all: true
+      enabled-checks:
+        - hugeParam
+        - rangeValCopy
+        - rangeExprCopy
+        - nestingReduce
+        - truncateCmp
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

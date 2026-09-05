@@ -9157,3 +9157,97 @@ fn gocritic_selector_keys_follow_infer_enabled_checks() {
         vec!["rangeValCopy"]
     );
 }
+
+fn gocritic_check_settings_messages(
+    settings: guff_style::GocriticCheckSettings,
+) -> Vec<String> {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::GocriticOptions;
+
+    let pkg = support::typecheck_fixture("gocritic", "example.com/gocritic", "checksettings.go");
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "gocritic",
+        GocriticOptions {
+            disable_all: true,
+            enabled_checks: vec![
+                "hugeParam".into(),
+                "rangeValCopy".into(),
+                "rangeExprCopy".into(),
+                "nestingReduce".into(),
+                "truncateCmp".into(),
+            ],
+            check_settings: settings,
+            ..GocriticOptions::default()
+        },
+    );
+    let mut messages = support::run_analyzer_with_settings(
+        gocritic(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    messages.sort();
+    messages
+}
+
+/// Five gocritic checks read a number or a flag from `settings`, and guff had
+/// all five baked in as constants.
+///
+/// go-critic's own `Params` defaults: `hugeParam.sizeThreshold` 80,
+/// `rangeValCopy.sizeThreshold` 128, `rangeExprCopy.sizeThreshold` 512,
+/// `nestingReduce.bodyWidth` 5, `truncateCmp.skipArchDependent` **true**.
+/// telegraf moves the first two to 512 — 290 findings golangci-lint does not
+/// make.
+///
+/// Every struct in the fixture sits exactly on a default, so a threshold that
+/// moved shows up as a row appearing or disappearing. The two
+/// `gocritic-check-settings-*` golden cases compare the same two sets against
+/// golangci-lint.
+#[test]
+fn gocritic_reads_its_per_check_settings() {
+    let default = gocritic_check_settings_messages(guff_style::GocriticCheckSettings::default());
+    // 80 / 128 / 512 / 5 / skip: the row for the arch-dependent `int`
+    // comparison is absent, and only the 512-byte array copies.
+    assert_eq!(default.len(), 9, "{default:?}");
+    assert!(
+        default
+            .iter()
+            .any(|m| m == "rangeExprCopy: copy of xs (512 bytes) can be avoided with &xs"),
+        "{default:?}"
+    );
+    assert!(
+        !default
+            .iter()
+            .any(|m| m.contains("cast the other operand to int instead")),
+        "{default:?}"
+    );
+
+    let tuned = gocritic_check_settings_messages(guff_style::GocriticCheckSettings {
+        huge_param_size_threshold: 1,
+        range_val_copy_size_threshold: 1,
+        range_expr_copy_size_threshold: 1,
+        nesting_reduce_body_width: 1,
+        truncate_cmp_skip_arch_dependent: false,
+        ..guff_style::GocriticCheckSettings::default()
+    });
+    assert_eq!(tuned.len(), 25, "{tuned:?}");
+    // The one row only `skipArchDependent: false` can produce.
+    assert!(
+        tuned
+            .iter()
+            .any(|m| m.contains("cast the other operand to int instead")),
+        "{tuned:?}"
+    );
+    assert!(
+        tuned
+            .iter()
+            .any(|m| m == "rangeExprCopy: copy of xs (64 bytes) can be avoided with &xs"),
+        "{tuned:?}"
+    );
+}

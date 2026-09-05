@@ -22545,3 +22545,68 @@ OSS pr tier **8 ターゲットすべて P=R=100%**。台帳は **39/100**（42 
 
 telegraf に残るのは **433 件**: gocritic の `hugeParam`/`rangeValCopy` 閾値 290、
 revive `import-alias-naming` の正規表現引数 128、nolintlint 5、他 10。
+
+### 2026-09-05（続き 187）— gocritic の per-check `settings` を 5 つとも読んでいなかった
+
+telegraf の残り 433 件のうち **290 件**。設定はこう書いてある:
+
+```yaml
+gocritic:
+  settings:
+    hugeParam:
+      sizeThreshold: 512   # 既定 80
+    rangeValCopy:
+      sizeThreshold: 512   # 既定 128
+```
+
+guff は `tooManyResultsChecker.maxResults` / `ifElseChain.minThreshold` /
+`unnamedResult.checkExported` の 3 つだけ配線していて、残りは
+`gocritic.rs` の先頭の DEFERRED 行に名前だけ挙がっていた:
+
+> remaining per-check `settings` params (rangeExprCopy/rangeValCopy/hugeParam
+> sizeThreshold, nestingReduce bodyWidth, truncateCmp skipArchDependent)
+
+**5 つとも配線した。** go-critic 自身の `Params` 既定値は
+`hugeParam.sizeThreshold` 80 / `rangeValCopy.sizeThreshold` 128 /
+`rangeExprCopy.sizeThreshold` 512 / `nestingReduce.bodyWidth` 5 /
+`truncateCmp.skipArchDependent` **true**。guff の定数はどれも合っていたので、
+**既定のまま使う限り差は出ない** —— これも golden にも OSS tier にも出てこない類の穴で、
+**引数を変えた golden を並べて初めて見える**。
+
+`truncateCmp` だけ形が違い、値ではなく**枝を 1 つ丸ごと**門番している:
+
+```go
+if c.skipArchDependent {
+	switch xtyp.Kind() {
+	case types.Int, types.Uint, types.Uintptr:
+		return
+	}
+}
+```
+
+guff はこの `switch` を無条件に書いていたので、`skipArchDependent: false` は
+**この設定が存在する理由そのもの**（`int` の比較）に届かなかった。
+
+fixture の構造体は 3 つの既定値（80 / 128 / 512）にぴったり乗せてある。
+`rangeExprCopy` は **key と value の両方**があって、**addressable** で、かつ
+**配列型**でなければ撃たないので（slice では撃たない）、その形も入れた。
+
+golden case は 2 つ:
+
+| case | 設定 | キー数 |
+|---|---|--:|
+| `gocritic-check-settings-default` | なし | 9 |
+| `gocritic-check-settings-tuned` | 3 閾値を 1、bodyWidth 1、skipArchDependent false | **25** |
+
+```
+telegraf: guff-only 433 → 143
+```
+
+#### ゲート
+
+golden **225**（新規 2 case、既存 223 は無変更）/ fix **225** / reject **14** /
+isolate **116 ターゲット** / workspace **278 スイート** /
+OSS pr tier **8 ターゲットすべて P=R=100%**。台帳は **39/100**（42 定義、open 3）。
+
+telegraf に残るのは **143 件**: revive `import-alias-naming` の正規表現引数 128、
+nolintlint 5、他 10。
