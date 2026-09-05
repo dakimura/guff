@@ -67,6 +67,9 @@ inline_local/bad/bad.go                            crates/guff-govet/tests/testd
 inline_local/ok/ok.go                              crates/guff-govet/tests/testdata/inline_local/ok.go
 inline/bad/bad.go                                  crates/guff-govet/tests/testdata/inline/bad.go
 inline/ok/ok.go                                    crates/guff-govet/tests/testdata/inline/ok.go
+# The type-alias arm of `//go:fix inline`. Its right-hand side names `cmp`,
+# which is in the standard library, so no stub is materialized here.
+inline_alias/bad/bad.go                            crates/guff-govet/tests/testdata/inline_alias/bad.go
 loopclosure/bad/bad.go                             crates/guff-govet/tests/testdata/loopclosure/bad.go
 loopclosure/ok/ok.go                               crates/guff-govet/tests/testdata/loopclosure/ok.go
 lostcancel/bad/bad.go                              crates/guff-govet/tests/testdata/lostcancel/bad.go

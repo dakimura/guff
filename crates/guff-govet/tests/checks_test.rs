@@ -444,6 +444,48 @@ fn inline_allows_preferred_const() {
     assert!(support::run_analyzer(inline_analyzer(), &pkg).is_empty());
 }
 
+/// A use of a type alias marked `//go:fix inline` is reported, and the fix
+/// replaces it with the alias's right-hand side.
+///
+/// The exact set matters here: the fixture also holds four shapes that must
+/// stay silent — an alias with no directive, a `type A B` definition (not an
+/// alias), a use of that definition, and the alias declaration's own name.
+/// The grouped-declaration spec proves the directive is read per spec and not
+/// only per declaration, and the generic alias proves the right-hand side is
+/// rendered *instantiated* with the type arguments at the use
+/// (`Pair[string, int]` → `map[string]int`), which is also why the message
+/// carries them. Measured against golangci-lint 2.12.2 with
+/// `govet.enable: [inline]`: four findings, and this is the list.
+#[test]
+fn inline_flags_go_fix_type_aliases() {
+    let dir = support::testdata("inline_alias");
+    let stub = dir.join("stub/cmp/cmp.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/govet/inline_alias",
+        &dir.join("bad.go"),
+        &[("cmp", &stub)],
+    );
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let got: Vec<(i64, i64, String)> =
+        support::run_analyzer_diagnostics(inline_analyzer(), &pkg)
+            .into_iter()
+            .map(|d| {
+                let p = fset.position(guff::position::Pos(d.pos as i64));
+                (p.line, p.column, d.message)
+            })
+            .collect();
+    let at = |line: i64, col: i64, msg: &str| (line, col, msg.to_string());
+    assert_eq!(
+        got,
+        vec![
+            at(39, 15, "Type alias Ord should be inlined"),
+            at(41, 19, "Type alias Grouped should be inlined"),
+            at(45, 16, "Type alias Pair[string, int] should be inlined"),
+            at(50, 17, "Type alias Ord should be inlined"),
+        ],
+    );
+}
+
 #[test]
 fn inline_flags_ioutil_go_version_mismatch() {
     let dir = support::testdata("inline_ioutil");

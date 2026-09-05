@@ -49,6 +49,28 @@
 -	return v.Kind() == reflect.Ptr
 +	return v.Kind() == reflect.Pointer
  }
+--- a/inline_alias/bad/bad.go
++++ b/inline_alias/bad/bad.go
+@@ -36,15 +36,15 @@
+ // permanent golden diff.
+ type NotAnAlias Local
+ 
+-func useOrd[T Ord](a, b T) bool { return a < b }
++func useOrd[T cmp.Ordered](a, b T) bool { return a < b }
+ 
+-func useGrouped(g Grouped) int { return g.N }
++func useGrouped(g Local) int { return g.N }
+ 
+ func usePlain(p Plain) int { return p.N }
+ 
+-func usePair(m Pair[string, int]) int { return len(m) }
++func usePair(m map[string]int) int { return len(m) }
+ 
+ func useNotAnAlias(n NotAnAlias) int { return n.N }
+ 
+ // The right-hand side of another alias declaration is itself a use.
+-type Indirect = Ord
++type Indirect = cmp.Ordered
 --- a/inline_local/bad/bad.go
 +++ b/inline_local/bad/bad.go
 @@ -6,5 +6,5 @@

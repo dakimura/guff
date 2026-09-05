@@ -37,6 +37,10 @@ httpresponse/bad/bad.go:38:9:govet::httpresponse: using resp before checking for
 httpresponse/bad/bad.go:51:8:govet::httpresponse: using h before checking for errors
 ifaceassert/bad/bad.go:12:9:govet::ifaceassert: impossible type assertion: no type can implement both example.com/govet/ifaceassert/bad.I and example.com/govet/ifaceassert/bad.J (conflicting types for M method)
 inline/bad/bad.go:6:21:govet::inline: Constant reflect.Ptr should be inlined
+inline_alias/bad/bad.go:39:15:govet::inline: Type alias Ord should be inlined
+inline_alias/bad/bad.go:41:19:govet::inline: Type alias Grouped should be inlined
+inline_alias/bad/bad.go:45:16:govet::inline: Type alias Pair[string, int] should be inlined
+inline_alias/bad/bad.go:50:17:govet::inline: Type alias Ord should be inlined
 inline_local/bad/bad.go:9:9:govet::inline: Constant Legacy should be inlined
 lostcancel/bad/bad.go:6:5:govet::lostcancel: the cancel function returned by context.WithCancel should be called, not discarded, to avoid a context leak
 lostcancel/bad/bad.go:11:8:govet::lostcancel: the cancel function returned by context.WithCancel should be called, not discarded, to avoid a context leak
