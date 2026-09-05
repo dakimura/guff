@@ -1829,3 +1829,45 @@ fn copy_over_type_parameters_matches_the_toolchain() {
     }
 }
 
+/// A generic named type instantiated *inside its own reference cycle*.
+///
+/// ```go
+/// type TaskFunc[T any, U any] func(t *Task, args T) (U, error)
+/// type Task struct{ taskFunction TaskFunc[any, any] }
+/// ```
+///
+/// Resolving `TaskFunc`'s right-hand side reaches `*Task`, whose field
+/// instantiates `TaskFunc[any, any]` — and at that moment `TaskFunc` has no
+/// right-hand side to substitute into, so `new_named_instance` left the
+/// instance with no underlying at all. Everything downstream then fails: the
+/// instance is not assignable from a matching func literal, and calling it is
+/// "cannot call non-function". scaleway-cli's `internal/tasks` was ill-typed
+/// for it, and an ill-typed package is one guff analyses not at all.
+///
+/// Breaking the cycle — pointing `TaskFunc` at some other struct — was enough
+/// to make the same file check cleanly, which is what identified the cause.
+#[test]
+fn generic_instance_inside_a_type_cycle_resolves() {
+    let cyclic = "package p\n\
+         type TaskFunc[T any, U any] func(t *Task, args T) (nextArgs U, err error)\n\
+         type Task struct { taskFunction TaskFunc[any, any] }\n\
+         type Tasks struct { tasks []*Task }\n\
+         func Add[A any, R any](ts *Tasks, fn TaskFunc[A, R]) {\n\
+         \tts.tasks = append(ts.tasks, &Task{\n\
+         \t\ttaskFunction: func(t *Task, i any) (any, error) { return fn(t, i.(A)) },\n\
+         \t})\n\
+         }\n\
+         func run(t *Task, data any) { _, _ = t.taskFunction(t, data) }\n";
+    let check = check_src(cyclic);
+    assert!(check.errors.is_empty(), "{:?}", check.errors);
+
+    // The same shape with the cycle broken has always worked; keep it beside
+    // the other so a regression cannot be mistaken for "generics are broken".
+    let acyclic = "package p\n\
+         type Other struct { n int }\n\
+         type TaskFunc[T any, U any] func(t *Other, args T) (nextArgs U, err error)\n\
+         type Task struct { taskFunction TaskFunc[any, any] }\n\
+         func run(t *Task, o *Other, data any) { _, _ = t.taskFunction(o, data) }\n";
+    let check = check_src(acyclic);
+    assert!(check.errors.is_empty(), "{:?}", check.errors);
+}

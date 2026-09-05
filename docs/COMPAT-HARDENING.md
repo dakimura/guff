@@ -23498,3 +23498,67 @@ printer 側の話で、**今は compat に出ない** —— guff は ill-typed 
 golden **228** / fix **228** / reject **14** / isolate **116 ターゲット** /
 workspace **278 スイート** / OSS pr tier **8 ターゲットすべて P=R=100%**。
 台帳は **40/100**（42 定義、open 2）—— karmada の採用は #281 が保留中。
+
+### 2026-09-05（続き 199）— 型の**参照サイクルの中で**インスタンス化されたジェネリック型は underlying を持たないまま残っていた
+
+続き 197 で数えた 4 件のうち 2 つ目、scaleway-cli の `internal/tasks`。
+**24 行まで縮めた再現**:
+
+```go
+type TaskFunc[T any, U any] func(ctx context.Context, t *Task, args T) (nextArgs U, err error)
+
+type Task struct {
+	taskFunction TaskFunc[any, any]        // ← ここでインスタンス化
+}
+
+func Add[TaskArg any, TaskReturn any](ts *Tasks, taskFunc TaskFunc[TaskArg, TaskReturn]) {
+	ts.tasks = append(ts.tasks, &Task{
+		taskFunction: func(ctx context.Context, t *Task, i any) (passedData any, err error) { … },
+	})
+}
+```
+
+guff は 2 つ撃つ:
+
+```
+cannot use func(ctx context.Context, t *Task, i any) (passedData any, err error)
+  value as TaskFunc[any, any] value in struct literal
+cannot call non-function (of type TaskFunc[any, any])
+```
+
+**「関数として呼べない」**が効いている —— guff にとって `TaskFunc[any, any]` は
+underlying を持たない型だった。
+
+#### サイクルが窓を開ける
+
+`TaskFunc` の右辺を解決すると `*Task` に行き、`Task` のフィールドが
+`TaskFunc[any, any]` をインスタンス化する。その瞬間 `TaskFunc` にはまだ
+右辺が無い。`new_named_instance` は
+
+```rust
+if let Some(rhs) = orig_from_rhs { … set_underlying … }
+```
+
+と**その場で展開する**ので、右辺が無ければ underlying は**永久に空**になる。
+
+**サイクルを切ると同じコードが通る**ことを確かめた —— `TaskFunc` の
+`*Task` を無関係な構造体に変えるだけで guff は黙る。原因の特定はこれで、
+両方の形を単体テストに並べてある（「ジェネリクスが壊れた」と読み違えないため）。
+
+go/types にこの窓は無い。`Named.underlying` は `resolve()` で**必要になった
+ときに**計算される。guff は先に展開するので、**競争に負けたインスタンスを
+後から埋める** —— パッケージレベルの型がすべて解決したあと、関数本体が
+1 つも検査される前に（本体は `process_delayed` で走る）。
+
+```
+scaleway-cli: ill_typed 1 → 0
+```
+
+ebpf と karmada は**この修正では動かない**ことを実測した ——
+続き 197 に書いたとおり別の欠陥である。4 件のうち 2 件が閉じた。
+
+#### ゲート
+
+golden **228** / fix **228** / reject **14** / isolate **116 ターゲット** /
+workspace **278 スイート** / OSS pr tier **8 ターゲットすべて P=R=100%**。
+`compat/hunt.sh --name scaleway-cli` は **health 0**。
