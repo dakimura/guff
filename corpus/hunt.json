@@ -48,6 +48,14 @@
     "timeout": "15m"
   },
   {
+    "name": "celestia-node",
+    "url": "https://github.com/celestiaorg/celestia-node.git",
+    "ref": "v0.31.4",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
+  },
+  {
     "name": "cli",
     "url": "https://github.com/cli/cli.git",
     "ref": "v2.83.2",

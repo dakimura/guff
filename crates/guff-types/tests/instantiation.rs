@@ -613,3 +613,59 @@ fn too_many_type_arguments_is_still_counted_first() {
         c.errors
     );
 }
+
+// --- non-interface constraints ---------------------------------------------
+//
+// A constraint need not be written as an interface. `type Option[T Params]`
+// with a *struct* `Params` is legal Go and means the implicit
+// `interface{ Params }` — go/types builds that wrapper in `TypeParam.iface()`
+// before any bounds check (golang/go#51048).
+//
+// guff's `verify_targs` read the raw bound instead, so `implements` was handed
+// a struct and rejected the type argument against its own constraint:
+// "Params does not satisfy Params (Params is not an interface)". Every
+// instantiation in the package failed, and the package went ill-typed —
+// celestia-node's `nodebuilder/header`, through go-header's
+// `p2p.Option[T ClientParameters]`.
+
+#[test]
+fn a_struct_may_be_used_directly_as_a_constraint() {
+    let c = check_src(
+        "package p\n\
+         type Params struct{ N int }\n\
+         type Option[T Params] func(*T)\n\
+         func With[T Params](n int) Option[T] { return func(*T) {} }\n\
+         var _ = []Option[Params]{With[Params](1)}\n",
+    );
+    assert!(c.errors.is_empty(), "expected no errors, got {:?}", c.errors);
+}
+
+#[test]
+fn a_named_basic_may_be_used_directly_as_a_constraint() {
+    let c = check_src(
+        "package p\n\
+         type MyInt int\n\
+         func Ident[T MyInt](v T) T { return v }\n\
+         var _ = Ident[MyInt](3)\n",
+    );
+    assert!(c.errors.is_empty(), "expected no errors, got {:?}", c.errors);
+}
+
+/// The wrapper is `interface{ Params }`, a one-term type set — so it still
+/// rejects everything that is not `Params`. Without this the fix above could
+/// have been "accept any type argument", which no test above would catch.
+#[test]
+fn a_non_interface_constraint_still_rejects_other_types() {
+    let c = check_src(
+        "package p\n\
+         type Params struct{ N int }\n\
+         type Other struct{ N int }\n\
+         func With[T Params](n int) T { var z T; return z }\n\
+         func f() { _ = With[Other] }\n",
+    );
+    assert!(
+        c.errors.iter().any(|e| e.code == Code::InvalidTypeArg),
+        "expected InvalidTypeArg, got {:?}",
+        c.errors
+    );
+}
