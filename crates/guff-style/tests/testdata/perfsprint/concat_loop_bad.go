@@ -46,13 +46,6 @@ func positive() {
 		}
 		s = s + ","
 	}
-	for w := 0; w < 10; w++ {
-		switch w {
-		case 1:
-		default:
-			s = s + "y"
-		}
-	}
 	_ = nb
 	_ = s2
 }
