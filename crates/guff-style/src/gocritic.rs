@@ -1168,128 +1168,150 @@ fn call_qualified_name(call: &CallExpr) -> Option<String> {
     expr_text(&call.fun)
 }
 
+/// `exitAfterDefer`: a call that exits the process, reached after a `defer`
+/// that will therefore not run.
+///
+/// Upstream is `astutil.Apply` over the whole function body — a *generic*
+/// traversal, not a statement-kind switch — with three rules:
+///
+/// * **pre**: do not descend into a function literal, and do not descend into
+///   an `else` branch once a `defer` has been seen (it may not be reached);
+/// * **post**: a `DeferStmt` records itself as the pending defer;
+/// * **post**: a `CallExpr` whose direct parent is *not* a `DeferStmt`
+///   (upstream allows `defer os.Exit(…)`, go-critic #995) warns when a defer
+///   is pending and its qualified name is one of the four exits.
+///
+/// guff walked statements by hand and enumerated the kinds it recursed into,
+/// which silently missed every kind nobody had added yet: `select`, type
+/// switches, labelled statements, and `go`. Measured against golangci-lint
+/// 2.12.2, guff found 1 of 4 shapes. celestia-node's
+/// `share/shwap/p2p/shrex/peers/manager.go` is a `log.Fatal` inside a `select`
+/// inside a `for`, with two defers above it.
+///
+/// The traversal is post-order because the pending defer is *read* at call
+/// nodes and *written* at defer nodes: in `defer f(os.Exit(1))` the inner call
+/// is visited before the enclosing `defer` is recorded, and upstream's
+/// direct-parent test would not have covered it.
 fn check_exit_after_defer(pass: &Pass<'_>, func: &FuncDecl, pending: &mut Pending) {
     let Some(body) = &func.body else {
         return;
     };
-    let mut defer_pos: Option<(u32, String)> = None;
-    let mut found = false;
-
-    /// Upstream renders the whole `defer` statement with `astfmt.Sprint`, but
-    /// collapses a function literal to `func(…){...}(...)` so the warning stays
-    /// on one line.
-    fn defer_label(pass: &Pass<'_>, stmt: &Stmt, d: &DeferStmt) -> String {
-        if let Expr::FuncLit(fl) = d.call.fun.as_ref() {
-            let sig =
-                node_text(pass, &Expr::FuncType(Box::new(fl.ty.clone()))).unwrap_or_else(|| "func()".into());
-            return format!("defer {sig}{{...}}(...)");
+    let mut st = ExitAfterDeferState {
+        defer_label: None,
+        done: false,
+    };
+    for stmt in &body.list {
+        exit_after_defer_walk(
+            pass,
+            guff::walk::stmt_ref(stmt),
+            /*parent_is_defer*/ false,
+            &mut st,
+            pending,
+        );
+        if st.done {
+            break;
         }
-        node_text_stmt(pass, stmt).unwrap_or_else(|| "defer ...".into())
+    }
+}
+
+struct ExitAfterDeferState {
+    /// The rendered text of the most recently seen `defer`, which the warning
+    /// quotes. `None` until one is seen.
+    defer_label: Option<String>,
+    /// Upstream's `post` returns false after warning, which aborts the whole
+    /// `astutil.Apply`: at most one finding per function.
+    done: bool,
+}
+
+/// Upstream renders the whole `defer` statement, but collapses a function
+/// literal to `func(…){...}(...)` so the warning stays on one line.
+fn exit_after_defer_label(pass: &Pass<'_>, stmt: &Stmt, d: &DeferStmt) -> String {
+    if let Expr::FuncLit(fl) = d.call.fun.as_ref() {
+        let sig = node_text(pass, &Expr::FuncType(Box::new(fl.ty.clone())))
+            .unwrap_or_else(|| "func()".into());
+        return format!("defer {sig}{{...}}(...)");
+    }
+    node_text_stmt(pass, stmt).unwrap_or_else(|| "defer ...".into())
+}
+
+fn exit_after_defer_walk(
+    pass: &Pass<'_>,
+    node: guff::walk::NodeRef<'_>,
+    parent_is_defer: bool,
+    st: &mut ExitAfterDeferState,
+    pending: &mut Pending,
+) {
+    use guff::walk::NodeRef;
+    if st.done {
+        return;
+    }
+    // pre: never descend into a function literal.
+    if matches!(node, NodeRef::FuncLit(_)) {
+        return;
     }
 
-    fn walk(
-        pass: &Pass<'_>,
-        stmts: &[Stmt],
-        defer_pos: &mut Option<(u32, String)>,
-        found: &mut bool,
-        pending: &mut Pending,
-        in_else: bool,
-    ) {
-        if *found {
-            return;
+    let node_is_defer = matches!(node, NodeRef::DeferStmt(_));
+
+    // Children, in source order. `if` is the one kind that needs its edges
+    // named: once a defer is pending, the `else` branch is not descended into
+    // because control may never reach it.
+    if let NodeRef::IfStmt(i) = node {
+        if let Some(init) = &i.init {
+            exit_after_defer_walk(pass, guff::walk::stmt_ref(init), false, st, pending);
         }
-        for s in stmts {
-            match s {
-                Stmt::DeferStmt(d) => {
-                    *defer_pos = Some((d.defer_.0 as u32, defer_label(pass, s, d)));
-                }
-                Stmt::ExprStmt(e) => {
-                    if let Expr::CallExpr(call) = &e.x {
-                        check_exit_call(call, defer_pos, found, pending);
-                    }
-                }
-                Stmt::IfStmt(i) => {
-                    walk(pass, &i.body.list, defer_pos, found, pending, false);
-                    if !*found {
-                        if let Some(e) = &i.else_ {
-                            // Don't treat else-branch exits as after defer when
-                            // defer was only seen on the if path (upstream skips Else).
-                            if defer_pos.is_some() && !in_else {
-                                // Still check else if defer already recorded before if.
-                            }
-                            match e.as_ref() {
-                                Stmt::BlockStmt(b) => {
-                                    walk(pass, &b.list, defer_pos, found, pending, true)
-                                }
-                                Stmt::IfStmt(_) => walk(
-                                    pass,
-                                    std::slice::from_ref(e.as_ref()),
-                                    defer_pos,
-                                    found,
-                                    pending,
-                                    true,
-                                ),
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-                Stmt::BlockStmt(b) => walk(pass, &b.list, defer_pos, found, pending, in_else),
-                Stmt::ForStmt(f) => walk(pass, &f.body.list, defer_pos, found, pending, false),
-                Stmt::RangeStmt(r) => walk(pass, &r.body.list, defer_pos, found, pending, false),
-                Stmt::SwitchStmt(sw) => {
-                    for c in &sw.body.list {
-                        if let Stmt::CaseClause(cc) = c {
-                            walk(pass, &cc.body, defer_pos, found, pending, false);
-                        }
-                    }
-                }
-                Stmt::AssignStmt(a) => {
-                    for rhs in &a.rhs {
-                        if let Expr::CallExpr(call) = rhs {
-                            check_exit_call(call, defer_pos, found, pending);
-                        }
-                    }
-                }
-                Stmt::GoStmt(_) => {
-                    // Don't recurse into goroutines.
-                }
-                _ => {}
+        exit_after_defer_walk(pass, guff::walk::expr_ref(&i.cond), false, st, pending);
+        for stmt in &i.body.list {
+            exit_after_defer_walk(pass, guff::walk::stmt_ref(stmt), false, st, pending);
+        }
+        if st.defer_label.is_none() {
+            if let Some(e) = &i.else_ {
+                exit_after_defer_walk(pass, guff::walk::stmt_ref(e), false, st, pending);
             }
-            if *found {
+        }
+    } else {
+        let mut children = Vec::new();
+        guff::walk::for_each_child(node, |c| children.push(c));
+        for c in children {
+            exit_after_defer_walk(pass, c, node_is_defer, st, pending);
+            if st.done {
                 return;
             }
         }
     }
 
-    fn check_exit_call(
-        call: &CallExpr,
-        defer_pos: &mut Option<(u32, String)>,
-        found: &mut bool,
-        pending: &mut Pending,
-    ) {
-        let Some(name) = call_qualified_name(call) else {
-            return;
-        };
-        let is_exit = matches!(
-            name.as_str(),
-            "os.Exit" | "log.Fatal" | "log.Fatalf" | "log.Fatalln"
-        );
-        if !is_exit {
-            return;
+    // post
+    match node {
+        NodeRef::DeferStmt(d) => {
+            let stmt = Stmt::DeferStmt(d.clone());
+            st.defer_label = Some(exit_after_defer_label(pass, &stmt, d));
         }
-        if let Some((_, defer_label)) = defer_pos {
+        NodeRef::CallExpr(call) => {
+            // `defer os.Exit(…)` is allowed (go-critic #995).
+            if parent_is_defer {
+                return;
+            }
+            let Some(defer_label) = st.defer_label.as_ref() else {
+                return;
+            };
+            let Some(name) = call_qualified_name(call) else {
+                return;
+            };
+            if !matches!(
+                name.as_str(),
+                "os.Exit" | "log.Fatal" | "log.Fatalf" | "log.Fatalln"
+            ) {
+                return;
+            }
             report(
                 pending,
                 call.fun.pos().0 as u32,
                 "exitAfterDefer",
                 format!("{name} will exit, and `{defer_label}` will not run"),
             );
-            *found = true;
+            st.done = true;
         }
+        _ => {}
     }
-
-    walk(pass, &body.list, &mut defer_pos, &mut found, pending, false);
 }
 
 fn count_if_else_len(stmt: &IfStmt) -> i32 {

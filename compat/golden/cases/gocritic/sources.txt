@@ -10,3 +10,6 @@ extras.go  crates/guff-style/tests/testdata/gocritic/extras.go
 deprecated.go  crates/guff-style/tests/testdata/gocritic/deprecated.go
 testfuncs.go  crates/guff-style/tests/testdata/gocritic/testfuncs.go
 duparg.go  crates/guff-style/tests/testdata/gocritic/duparg.go
+# exitAfterDefer over every construct that can hold a call — the walk is
+# generic upstream, and guff used to enumerate statement kinds by hand.
+exitafterdefer.go  crates/guff-style/tests/testdata/gocritic/exitafterdefer.go
