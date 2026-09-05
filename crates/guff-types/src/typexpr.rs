@@ -527,6 +527,27 @@ impl Checker {
         }
         let smap = make_subst_map(tparams, targs);
         for (i, &tpar) in tparams.iter().enumerate() {
+            // A constraint need not be written as an interface: `type Option[T
+            // ClientParameters]` with a *struct* `ClientParameters` is legal Go
+            // and means the implicit `interface{ ClientParameters }`.
+            // `type_param_iface` builds that wrapper and memoises it back onto
+            // the type parameter, so the read below sees an interface.
+            //
+            // Without it `implements` rejected the type argument against its
+            // own constraint — "ClientParameters does not satisfy
+            // ClientParameters (ClientParameters is not an interface)" — and
+            // the whole package went ill-typed. celestia-node's
+            // `nodebuilder/header` is one (go-header's `p2p.Option[T
+            // ClientParameters]`).
+            //
+            // (Go: `verify` calls `tpar.iface()` before substituting
+            // `tpar.bound`, for the same reason — golang/go#51048.)
+            crate::typeparam::type_param_iface(
+                &mut self.types,
+                &self.objects,
+                &self.packages,
+                tpar,
+            );
             let bound = match type_param_constraint(&self.types, tpar) {
                 Some(b) => subst(
                     &mut self.types,

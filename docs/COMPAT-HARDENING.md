@@ -24983,3 +24983,96 @@ CI の実費が要る判断なので、ここでは事実の記録に留める�
 ```
 台帳: 43/100 at zero（46 定義、open 0、unmeasured 3＝buildah / cri-o / tetragon）
 ```
+
+### 2026-09-06（続き 218）— `adopt celestia-node`。**構造体を制約に書いた型パラメータ**で 1 パッケージ丸ごと ill-typed だった
+
+tetragon が platform-bound だったので次の候補 **celestia-node v0.31.4**。
+darwin でも **84 パッケージが全部 load できる**（`go list` ではなく
+`go build ./...` で確認した —— 続き 217 で `go list` は型検査をしないと
+学んだところ）。linter 26 本 + formatter 4 本（`gofmt` / `gofumpt` /
+`goimports` / `golines`、`golines` は `max-len: 200` と
+`shorten-comments: true`）はすべて guff が持っている。
+
+最初の測定:
+
+```
+celestia-node: guff=60 golangci=54 both=54 P=90.0% R=100.0%
+               ill-typed packages 1 > baseline 0
+               （nodebuilder/header）
+```
+
+#### ill-typed の中身は 1 行で言える型チェッカのバグ
+
+```
+constructors.go:52:23:
+  p2p.ClientParameters does not satisfy p2p.ClientParameters
+  (p2p.ClientParameters is not an interface)
+```
+
+**自分自身の制約を満たさない**と言っている。go-header の宣言はこう:
+
+```go
+func WithPeerIDStore[T ClientParameters](pidstore PeerIDStore) Option[T]
+```
+
+`ClientParameters` は **struct** である。Go では制約はインタフェースで
+なくてもよく、非インタフェースの bound は暗黙の
+`interface{ ClientParameters }` を意味する。go/types は bounds check の前に
+**`TypeParam.iface()`** を呼んでその wrapper を作る（golang/go#51048）。
+
+guff の `verify_targs` は `type_param_constraint` で **生の bound** を読んで
+そのまま `implements` に渡していたので、struct を渡された `implements` が
+「インタフェースではない」と言って落ちる。**そのパッケージの
+instantiation が全部失敗し、パッケージごと ill-typed になる。**
+
+`type_param_iface`（wrapper を作って TypeParam の bound に memoise する、
+Go と同じ最適化）は**前からあった** —— `verify_targs` が呼んでいなかった
+だけ。upstream の 2 行と同じものを足した。
+
+22 行の最小再現で `go vet` は 0 件、guff は **4 件**。修正後 **0 件**:
+
+```go
+type ClientParameters struct{ N int }
+type Option[T ClientParameters] func(*T)
+func WithPeerIDStore[T ClientParameters](n int) Option[T] { … }
+var _ = []Option[ClientParameters]{WithPeerIDStore[ClientParameters](1)}
+
+type MyInt int
+func Ident[T MyInt](v T) T { return v }
+var _ = Ident[MyInt](3)
+```
+
+単体テストは 3 本。struct 制約 / named basic 制約に加えて
+**「他の型は依然として弾く」** を入れてある —— wrapper は
+`interface{ Params }` すなわち 1 項の type set なので、`Other` は
+`InvalidTypeArg` のままでなければならない。これが無いと
+「全部通す」修正でも他の 2 本は緑になる。
+
+#### 測定
+
+- **celestia-node: ill-typed 1 → 0**、`health=1 → 0`。
+  finding 集合は変わらず `guff=60 golangci=54 both=54 P=90.0% R=100.0%`。
+  **recall は最初から 100%** —— 上流が出すものは全部出ている。
+- golden 230 / fix 230 / reject 14 / oss pr 8 ターゲット P=R=100% /
+  workspace 278 ok 0 failed。型チェッカの変更にしては何も動かなかった。
+
+#### 残る 6 件（次のタスク: `close celestia-node`）
+
+| linter | 件数 | 場所 |
+|---|---|---|
+| `gofumpt` | 2 | `blob/commitment_proof.go:125`、`nodebuilder/p2p/pubsub.go:51` |
+| `wastedassign` | 2 | `blob/service_test.go:723,753` |
+| `nolintlint` | 2 | `nodebuilder/p2p/misc.go:10`、`share/shwap/p2p/shrex/peers/manager.go:339` |
+
+`nolintlint` の 2 件は「directive is unused」で、**撃たなかった linter の影**
+である（[[equal-only-counts-mean-a-rendering-diff]] の親戚）。上流は
+`//nolint:staticcheck` / `//nolint:gocritic` を *used* と判定している ——
+つまり上流の staticcheck / gocritic はそこで撃っていて nolint に消されており、
+guff は撃っていない。**recall 100% と矛盾しない**: 消された finding は
+どちらの集合にも現れないので、乖離は nolintlint の側にしか見えない。
+6 件のうち 2 件は実は「guff の過剰報告」ではなく **guff の取りこぼしの影**
+だということになる。
+
+```
+台帳: 43/100 at zero（47 定義、open 1＝celestia-node 6、unmeasured 3）
+```
