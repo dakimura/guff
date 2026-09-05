@@ -1,3 +1,6 @@
 # The fixture the Rust test uses, so the two cannot drift.
 longoneline/longoneline.go   crates/guff-fmt/testdata/gofumpt/longoneline.go
 unformatted/unformatted.go   crates/guff-fmt/testdata/gofumpt/unformatted.go
+# Comment groups: one bare `//` line disqualifies the whole group from the
+# add-a-space rule, which is what guff used to get wrong.
+comments/comments.go         crates/guff-fmt/testdata/gofumpt/comments.go

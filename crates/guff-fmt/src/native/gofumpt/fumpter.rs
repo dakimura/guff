@@ -362,11 +362,24 @@ impl Fumpter {
                         skip = true;
                         break;
                     }
-                    if let Some(r) = body.chars().next() {
-                        if !r.is_alphabetic() && !r.is_numeric() && !r.is_whitespace() {
-                            skip = true;
-                            break;
-                        }
+                    // An empty body — a bare `//` line — disqualifies the
+                    // group, and this is the whole reason the `unwrap_or`
+                    // is here rather than an `if let Some`. Upstream reads
+                    // the rune with `utf8.DecodeRuneInString(body)`, which
+                    // answers `RuneError` for the empty string; `RuneError`
+                    // is not a letter, number or space, so the group "could
+                    // be code" and is left alone.
+                    //
+                    // With `if let Some(..)` the check simply did not run for
+                    // `//`, and guff went on to add a space to the group's
+                    // other lines. celestia-node has two of these — a URL on
+                    // an unspaced line under a bare `//` — where gofumpt
+                    // itself changes nothing and guff claimed the file was
+                    // not properly formatted.
+                    let r = body.chars().next().unwrap_or(char::REPLACEMENT_CHARACTER);
+                    if !r.is_alphabetic() && !r.is_numeric() && !r.is_whitespace() {
+                        skip = true;
+                        break;
                     }
                 }
                 skip || comment_group_looks_like_code(&file.comments[gi])

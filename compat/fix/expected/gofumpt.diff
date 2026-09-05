@@ -8,6 +8,25 @@
 # guff must change nothing either.
 # golangci-lint: 2.12.2
 
+--- a/comments/comments.go
++++ b/comments/comments.go
+@@ -8,7 +8,7 @@
+ // whole group.
+ 
+ func interior() {
+-	//solo
++	// solo
+ 	_ = 1
+ 
+ 	// A bare `//` in the group: gofumpt leaves every line alone, including
+@@ -29,6 +29,6 @@
+ 
+ 	// Nothing disqualifying: every line gets the space.
+ 	// spaced
+-	//unspaced
++	// unspaced
+ 	_ = 5
+ }
 --- a/unformatted/unformatted.go
 +++ b/unformatted/unformatted.go
 @@ -4,7 +4,6 @@

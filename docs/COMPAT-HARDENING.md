@@ -25076,3 +25076,87 @@ guff は撃っていない。**recall 100% と矛盾しない**: 消された fi
 ```
 台帳: 43/100 at zero（47 定義、open 1＝celestia-node 6、unmeasured 3）
 ```
+
+### 2026-09-06（続き 219）— gofumpt: **空の `//` 1 行がコメントグループ全体を対象外にする**。`if let Some` がそれを黙って飛ばしていた
+
+`close celestia-node` の 6 件のうち `gofumpt` 2 件。どちらも
+「File is not properly formatted」だが、**gofumpt 本体はそのファイルを
+1 バイトも変えない**（`gofumpt -d` が空）。
+
+guff が入れようとしていた差分:
+
+```
+ 	// the subtree roots width is defined in ADR-013:
+ 	//
+-	//https://github.com/celestiaorg/celestia-app/...
++	// https://github.com/celestiaorg/celestia-app/...
+```
+
+#### 上流の規則（コードを読んだ）
+
+`mvdan.cc/gofumpt` の `format.go`、コメントグループのループ:
+
+```go
+groupLoop:
+	for _, group := range node.Comments {
+		for _, comment := range group.List {
+			body := strings.TrimPrefix(comment.Text, "//")
+			if body == comment.Text { continue groupLoop }              // /* */
+			if rxCommentDirective.MatchString(body) { continue groupLoop }
+			r, _ := utf8.DecodeRuneInString(body)
+			if !unicode.IsLetter(r) && !unicode.IsNumber(r) && !unicode.IsSpace(r) {
+				continue groupLoop                                       // "//{" 等、コード片かもしれない
+			}
+		}
+		// どの行も directive でもコード片でもないときだけ、空白を足す
+		for _, comment := range group.List { … }
+	}
+```
+
+**空の body に対して `utf8.DecodeRuneInString("")` は `RuneError` を返す。**
+`RuneError` は letter でも number でも space でもないので、**裸の `//` が
+1 行あるだけでグループ全体が対象外になる。**
+
+guff 側:
+
+```rust
+if let Some(r) = body.chars().next() {   // 空の body では中身が走らない
+    if !r.is_alphabetic() && !r.is_numeric() && !r.is_whitespace() { skip = true; }
+}
+```
+
+`if let Some` は「文字が無い」を「文句なし」として通していた。
+`unwrap_or(char::REPLACEMENT_CHARACTER)` に変えると Go と同じになる
+（`REPLACEMENT_CHARACTER` は U+FFFD、`RuneError` そのもの）。
+
+#### 測定
+
+黒箱で規則を当てにいって 2 回外した（interior と doc で挙動が違うように
+見えたのは、**doc コメントは gofumpt の規則ではなく gofmt の doc
+コメント正規化を通る**から）。**ソースの規則をそのまま移植して、
+一致を測って確かめる**方が速かった。
+
+9 ファイル（celestia の 2 本 + 形の行列 7 本）で
+`gofumpt <f>` と `guff fmt --stdin -E gofumpt <f>` を突き合わせて
+**agree=9 / differ=0**。
+
+fixture `crates/guff-fmt/testdata/gofumpt/comments.go` は測った 5 形:
+単独行（足す）／裸の `//` 入り（触らない＝celestia の形）／directive 入り
+（触らない）／`//{` 入り（触らない）／どれでもない 2 行（足す）。
+golden 再生成は**追加 1・削除 0**、`--fix` の期待値も上流から再生成して
+**変わるのは予測どおりの 2 行だけ**。
+
+**celestia-node: guff=60 → 58、P=90.0% → 93.1%、R は 100.0% のまま。**
+golden 230／fix 230／reject 14／oss pr 8 ターゲット P=R=100%／
+workspace 278 ok 0 failed。
+
+```
+台帳: 43/100 at zero（47 定義、open 1＝celestia-node 4、unmeasured 3）
+```
+
+残り 4 件は `wastedassign` 2（`_` への代入を報告している —— go/ssa の
+`b.addr` は先頭で `isBlankIdent` を見て `blank{}` を返すが、guff の
+`Builder::address` にその枝が無く、select の comm clause が
+`case _, ok := <-ch:` で `_` の local を作って store している）と
+`nolintlint` 2（撃たなかった linter の影 —— SA1019 の deprecated
+package import と gocritic `exitAfterDefer` の `select` 未走査）。
