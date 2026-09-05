@@ -44,7 +44,7 @@ use crate::selection::SelectionKind;
 use crate::signature::new_signature_type;
 use crate::sizes::{default_sizes, Sizes};
 use crate::slice::{new_slice, slice_elem};
-use crate::under::common_under;
+use crate::under::{all, common_under};
 use crate::version::{go1_17, go1_20, go1_21, go1_26};
 
 impl Checker {
@@ -1166,56 +1166,132 @@ impl Checker {
     }
 
     /// `copy(dst, src []E) int`.
+    ///
+    /// go/types has two paths and guff had neither of them quite right.
+    ///
+    /// ```go
+    /// // get special case out of the way
+    /// y := args[1]
+    /// var special bool
+    /// if ok, _ := x.assignableTo(check, NewSlice(universeByte), nil); ok {
+    ///     special = true
+    ///     for _, u := range typeset(y.typ) {
+    ///         if s, _ := u.(*Slice); s != nil && Identical(s.elem, universeByte) {
+    ///         } else if u != nil && isString(u) {
+    ///         } else { special = false; break }
+    ///     }
+    /// }
+    ///
+    /// // general case
+    /// if !special {
+    ///     dstE, err := sliceElem(x); if err != nil { … }
+    ///     srcE, err := sliceElem(y)
+    ///     if err != nil {
+    ///         if !allString(y.typ) { … }
+    ///         srcE = universeByte
+    ///     }
+    ///     if !Identical(dstE, srcE) { … }
+    /// }
+    /// ```
+    ///
+    /// The special case is the one that matters for type parameters: a source
+    /// whose **type set** is entirely `[]byte` and strings is accepted without
+    /// asking for a core type at all. fiber's
+    /// `func ScrubControls[S ~string | ~[]byte](s S, idx int) []byte` copies
+    /// such an `s` into a `[]byte`, and guff — which only knew the concrete
+    /// `copy([]byte, string)` special case — called `internal/logtemplate`
+    /// ill-typed and analysed the whole package not at all.
     fn builtin_copy<'a>(&mut self, x: &mut Operand<'a>, args: &[Operand<'a>]) -> bool {
         let y = &args[1];
-        let dst_typ = x.typ.unwrap_or_else(|| self.invalid_type());
         let src_typ = y.typ.unwrap_or_else(|| self.invalid_type());
 
-        let dst_e = match self.slice_elem_of(dst_typ) {
-            Some(e) => e,
-            None => {
-                let xs = self.operand_str(x);
+        let byte = self.basic(BasicKind::Uint8);
+        let byte_slice = new_slice(&mut self.types, byte);
+        let mut special = self.assignable_to(x, byte_slice).ok;
+        if special {
+            let mut unders: Vec<Option<TypeId>> = Vec::new();
+            all(
+                &mut self.types,
+                &self.objects,
+                &self.packages,
+                src_typ,
+                |_, uu| {
+                    unders.push(uu);
+                    true
+                },
+            );
+            for uu in unders {
+                let ok = match uu {
+                    Some(u) => {
+                        if matches!(self.types.get(u), TypeData::Slice(_)) {
+                            let e = slice_elem(&self.types, u);
+                            crate::predicates::identical(
+                                &mut self.types,
+                                &self.objects,
+                                &self.packages,
+                                e,
+                                byte,
+                            )
+                        } else {
+                            is_string(&self.types, u)
+                        }
+                    }
+                    None => false,
+                };
+                if !ok {
+                    special = false;
+                    break;
+                }
+            }
+        }
+
+        if !special {
+            let dst_e = match self.copy_slice_elem(x) {
+                Ok(e) => e,
+                Err(msg) => {
+                    self.error(x.pos() as u32, Code::InvalidCopy, format!("invalid copy: {msg}"));
+                    return false;
+                }
+            };
+            let src_e = match self.copy_slice_elem(y) {
+                Ok(e) => e,
+                Err(msg) => {
+                    // "If we have a string, for a better error message proceed
+                    // with byte element type."
+                    if !crate::predicates::all_string(
+                        &mut self.types,
+                        &self.objects,
+                        &self.packages,
+                        src_typ,
+                    ) {
+                        self.error(
+                            y.pos() as u32,
+                            Code::InvalidCopy,
+                            format!("invalid copy: {msg}"),
+                        );
+                        return false;
+                    }
+                    byte
+                }
+            };
+            if !crate::predicates::identical(
+                &mut self.types,
+                &self.objects,
+                &self.packages,
+                dst_e,
+                src_e,
+            ) {
+                let (xs, ys) = (self.operand_str(x), self.operand_str(y));
+                let (de, se) = (self.type_str(dst_e), self.type_str(src_e));
                 self.error(
                     x.pos() as u32,
                     Code::InvalidCopy,
-                    format!("invalid copy: destination {} is not a slice", xs),
+                    format!(
+                        "invalid copy: arguments {xs} and {ys} have different element types {de} and {se}"
+                    ),
                 );
                 return false;
             }
-        };
-        // copy([]byte, string) special case: a string source copies its bytes.
-        let src_is_string = is_string(&self.types, src_typ.underlying(&self.types));
-        let src_e = match self.slice_elem_of(src_typ) {
-            Some(e) => e,
-            None if src_is_string => self.basic(BasicKind::Uint8),
-            None => {
-                let ys = self.operand_str(y);
-                self.error(
-                    y.pos() as u32,
-                    Code::InvalidCopy,
-                    format!("invalid copy: source {} is not a slice or string", ys),
-                );
-                return false;
-            }
-        };
-
-        if !crate::predicates::identical(
-            &mut self.types,
-            &self.objects,
-            &self.packages,
-            dst_e,
-            src_e,
-        ) {
-            let (de, se) = (self.type_str(dst_e), self.type_str(src_e));
-            self.error(
-                x.pos() as u32,
-                Code::InvalidCopy,
-                format!(
-                    "invalid copy: arguments have different element types {} and {}",
-                    de, se
-                ),
-            );
-            return false;
         }
 
         x.mode = OperandMode::Value;
@@ -1223,10 +1299,51 @@ impl Checker {
         true
     }
 
-    /// The element type of a slice operand's type, or `None` if it isn't a
-    /// slice. Simplified `sliceElem` (type-parameter type sets deferred).
-    /// Element type of `t` when `t` is a slice — **or is constrained to be one**.
-    ///
+    /// `sliceElem` — the element type shared by every term of the operand's
+    /// type set, or the message go/types would print.
+    fn copy_slice_elem<'a>(&mut self, x: &Operand<'a>) -> Result<TypeId, String> {
+        let typ = x.typ.unwrap_or_else(|| self.invalid_type());
+        let mut unders: Vec<Option<TypeId>> = Vec::new();
+        all(&mut self.types, &self.objects, &self.packages, typ, |_, uu| {
+            unders.push(uu);
+            true
+        });
+        let mut e: Option<TypeId> = None;
+        for uu in unders {
+            let is_slice = uu.is_some_and(|u| matches!(self.types.get(u), TypeData::Slice(_)));
+            if !is_slice {
+                if x.mode == OperandMode::Value && x.typ.is_none() {
+                    return Err("argument must be a slice; have untyped nil".to_string());
+                }
+                let xs = self.operand_str(x);
+                return Err(format!("argument must be a slice; have {xs}"));
+            }
+            let elem = slice_elem(&self.types, uu.unwrap());
+            match e {
+                None => e = Some(elem),
+                Some(prev) => {
+                    if !crate::predicates::identical(
+                        &mut self.types,
+                        &self.objects,
+                        &self.packages,
+                        prev,
+                        elem,
+                    ) {
+                        let (pe, ce) = (self.type_str(prev), self.type_str(elem));
+                        let xs = self.operand_str(x);
+                        return Err(format!(
+                            "mismatched slice element types {pe} and {ce} in {xs}"
+                        ));
+                    }
+                }
+            }
+        }
+        e.ok_or_else(|| {
+            let xs = self.operand_str(x);
+            format!("argument must be a slice; have {xs}")
+        })
+    }
+
     /// `append`, `copy` and friends ask go/types for `coreType(S)`, not
     /// `under(S)`: a type parameter's underlying type is its constraint
     /// interface, and only its *type set* says whether every member is a slice.
