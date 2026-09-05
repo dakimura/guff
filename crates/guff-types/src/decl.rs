@@ -273,7 +273,11 @@ impl Checker {
         // Ordinary single-variable declaration.
         if lhs.len() <= 1 {
             let mut x = Operand::invalid();
-            self.expr(&mut x, init);
+            // The declared type is the assignment target, so a generic
+            // function initializer is instantiated from it (go1.21 reverse
+            // type inference).
+            let target = self.new_target(obj.typ(&self.objects));
+            self.expr_with_target(&mut x, init, target);
             self.init_var(obj, &mut x, "variable declaration");
             return;
         }

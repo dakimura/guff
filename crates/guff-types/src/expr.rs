@@ -46,13 +46,65 @@ use crate::predicates::{
     is_unsigned, is_untyped, is_valid,
 };
 
+/// The signature an expression is being assigned to, when there is one.
+///
+/// Go's `target` (`type target struct { sig *Signature; desc string }`) exists
+/// for one purpose — inferring a generic function's type arguments from the
+/// type it is being assigned to (go1.21 "reverse type inference"). Go's `desc`
+/// only names the left-hand side in the error message `infer` builds for a
+/// failed reverse inference, which guff does not produce, so it is not carried.
+#[derive(Clone, Copy)]
+pub(crate) struct Target {
+    pub sig: TypeId,
+}
+
 impl Checker {
+    /// `newTarget`: a target only exists when the type is a signature.
+    pub(crate) fn new_target(&self, typ: Option<TypeId>) -> Option<Target> {
+        let typ = typ?;
+        let u = typ.underlying(&self.types);
+        matches!(self.types.get(u), TypeData::Signature(_)).then_some(Target { sig: u })
+    }
+
+    /// Instantiate a generic function value from the type it is assigned to.
+    ///
+    /// Go's `nonGeneric` also rejects a generic function or type used without
+    /// instantiation; guff has never reported that, and adding the rejection
+    /// here would be a new diagnostic rather than a new acceptance, so only the
+    /// reverse-inference arm is ported.
+    fn non_generic(&mut self, x: &mut Operand, e: &Expr, t: Target) {
+        if x.mode == OperandMode::Invalid || x.mode == OperandMode::NoValue {
+            return;
+        }
+        let Some(typ) = x.typ else { return };
+        let generic = matches!(self.types.get(typ), TypeData::Signature(s) if s
+            .type_params()
+            .is_some_and(|l| !l.is_empty()));
+        if generic {
+            self.func_inst(x, e, &[], e.pos().0 as u32, true, Some(t));
+        }
+    }
+
     /// Type-check the expression `e`, recording the result in `x`.
     ///
     /// Equivalent to `Checker.expr` (without the assignment target).
     pub fn expr<'a>(&mut self, x: &mut Operand<'a>, e: &'a Expr) -> ExprKind {
-        let kind = self.raw_expr(x, e, None);
+        let kind = self.raw_expr(x, e, None, None);
         // DEFERRED: exclude(x, novalue|builtin|typexpr).
+        self.single_value(x);
+        kind
+    }
+
+    /// [`Checker::expr`] with the assignment target that `e` is being checked
+    /// against, so a generic function value can have its type arguments
+    /// inferred from it.
+    pub(crate) fn expr_with_target<'a>(
+        &mut self,
+        x: &mut Operand<'a>,
+        e: &'a Expr,
+        t: Option<Target>,
+    ) -> ExprKind {
+        let kind = self.raw_expr(x, e, None, t);
         self.single_value(x);
         kind
     }
@@ -68,7 +120,7 @@ impl Checker {
         e: &'a Expr,
         hint: TypeId,
     ) -> ExprKind {
-        let kind = self.raw_expr(x, e, Some(hint));
+        let kind = self.raw_expr(x, e, Some(hint), None);
         self.single_value(x);
         kind
     }
@@ -142,12 +194,18 @@ impl Checker {
         x: &mut Operand<'a>,
         e: &'a Expr,
         hint: Option<TypeId>,
+        t: Option<Target>,
     ) -> ExprKind {
-        let kind = self.expr_internal(x, e, hint);
+        let kind = self.expr_internal(x, e, hint, t);
         // Go's `rawExpr` tail sets `x.expr = e` before recording, so the
         // delayed-untyped machinery (`update_expr_type`, which keys on the
         // operand's expr) sees the full source node. Mirror that here.
         x.expr = Some(e);
+        // `nonGeneric`: a bare generic function value assigned to a function
+        // type gets its type arguments from that type.
+        if let Some(t) = t {
+            self.non_generic(x, e, t);
+        }
         // Record the type (and constant value) of `e` in `Info.Types`
         // (Go's `rawExpr` tail `check.record(x)`, chunk 50).
         self.record(x, e);
@@ -163,6 +221,7 @@ impl Checker {
         x: &mut Operand<'a>,
         e: &'a Expr,
         hint: Option<TypeId>,
+        t: Option<Target>,
     ) -> ExprKind {
         // Ensure a valid invalid-state on bailout (Go's go.dev/issue/5770).
         x.mode = OperandMode::Invalid;
@@ -188,7 +247,7 @@ impl Checker {
             // builder with a signature-less function literal, whose parameters
             // then could not be declared, so `input` looked like a captured
             // free variable.
-            Expr::ParenExpr(p) => return self.raw_expr(x, &p.x, None),
+            Expr::ParenExpr(p) => return self.raw_expr(x, &p.x, None, t),
             Expr::StarExpr(st) => self.star_expr(x, st),
             // Channel receive `<-ch` is a valid statement (select case / bare
             // ExprStmt). Go's exprInternal returns `statement` for `token.ARROW`.
@@ -215,6 +274,7 @@ impl Checker {
                         std::slice::from_ref(&*ie.index),
                         ie.x.pos().0 as u32,
                         true,
+                        t,
                     );
                 }
             }
@@ -222,7 +282,7 @@ impl Checker {
                 // Multi-argument explicit instantiation `f[T1, T2]` as a value.
                 self.expr(x, &ie.x);
                 if self.is_generic_func_value(x) {
-                    self.func_inst(x, &ie.x, &ie.indices, ie.x.pos().0 as u32, true);
+                    self.func_inst(x, &ie.x, &ie.indices, ie.x.pos().0 as u32, true, t);
                 } else if x.mode != OperandMode::Invalid {
                     let xs = self.operand_str(x);
                     self.error(

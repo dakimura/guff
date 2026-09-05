@@ -887,7 +887,7 @@ impl Checker {
                 // line), so `single_value` must not run here. Go's ExprStmt
                 // case calls `rawExpr` for the same reason.
                 let mut x = Operand::invalid();
-                let kind = self.raw_expr(&mut x, &es.x, None);
+                let kind = self.raw_expr(&mut x, &es.x, None, None);
                 let diag = match x.mode {
                     OperandMode::Invalid => None,
                     OperandMode::Builtin => Some(("must be called", Code::UncalledBuiltin)),
