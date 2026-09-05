@@ -25,6 +25,11 @@ func (db *DB) Query(query string, args ...any) (*Rows, error) { return nil, nil 
 
 func (db *DB) QueryRow(query string, args ...any) *Row { return nil }
 
+// `Prepare` is in gosec's `sqlCallIdents` at argument 0, same as `Query`.
+func (db *DB) Prepare(query string) (*Stmt, error) { return nil, nil }
+
+type Stmt struct{}
+
 type Tx struct{}
 
 func (tx *Tx) Exec(query string, args ...any) (Result, error) { return nil, nil }

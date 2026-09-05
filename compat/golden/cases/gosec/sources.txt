@@ -27,6 +27,7 @@ g304/g304.go          crates/guff-style/tests/testdata/gosec/g304.go
 g122/g122.go          crates/guff-style/tests/testdata/gosec/g122.go
 g102/g102.go          crates/guff-style/tests/testdata/gosec/g102.go
 g402/g402.go          crates/guff-style/tests/testdata/gosec/g402.go
+g201/g201.go          crates/guff-style/tests/testdata/gosec/g201.go
 
 # The stub `golang.org/x/crypto` module (see the replace in go.mod). Its go.mod
 # is case scaffolding and so lives in the case directory; the packages under it
@@ -41,5 +42,9 @@ yamlv3/go.mod                   compat/golden/cases/gosec/yamlv3.go.mod
 yamlv3/yaml.go                  crates/guff-style/tests/testdata/gosec/stub/gopkg.in/yaml.v3/yaml.go
 bstoml/go.mod                   compat/golden/cases/gosec/bstoml.go.mod
 bstoml/toml.go                  crates/guff-style/tests/testdata/gosec/stub/github.com/BurntSushi/toml/toml.go
+
+# The stub `github.com/lib/pq` module G201's `noIssueQuoted` entry names.
+libpq/go.mod                    compat/golden/cases/gosec/libpq.go.mod
+libpq/pq.go                     crates/guff-style/tests/testdata/gosec/stub/github.com/lib/pq/pq.go
 entropy/entropy.go    crates/guff-style/tests/testdata/gosec/entropy.go
 nosec/nosec.go        crates/guff-style/tests/testdata/gosec/nosec.go

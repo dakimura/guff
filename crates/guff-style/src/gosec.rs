@@ -25,6 +25,7 @@
 //! - **G123** — `tls.Config` sets `VerifyPeerCertificate` but leaves session
 //!   resumption able to skip it (SSA; see `gosec_g123`)
 //! - **G124** — `http.Cookie` missing Secure / HttpOnly / SameSite (AST approx of SSA rule)
+//! - **G201** — SQL string formatting
 //! - **G202** — SQL string concatenation
 //! - **G203** — `html/template` non-escaping helpers with non-literal args
 //! - **G204** — subprocess launched with non-literal args (`os/exec` / `syscall` / `execabs`;
@@ -48,7 +49,7 @@
 //!
 //! Message format matches golangci: `"Gxxx: <what>"`.
 //!
-//! DEFERRED: remaining rules (G113, G116–G117, G119–G121, G201, G304–G305, G307
+//! DEFERRED: remaining rules (G113, G116–G117, G119–G121, G304–G305, G307
 //! config-gated, G402 MinVersion/CipherSuites, G601, and the taint rules the
 //! engine has no table for — G701 SQL, G704 SSRF, G707–G709),
 //! full `gosec:disable` block directives / per-rule
@@ -288,7 +289,7 @@ const RULES: &[RuleDef] = &[
 const EXTRA_RULE_IDS: &[&str] = &[
     "G101", "G102", "G104", "G107", "G109", "G110", "G111", "G112", "G115", "G117", "G118", "G120",
     "G122", "G124",
-    "G123", "G202",
+    "G123", "G201", "G202",
     "G203",
     "G204", "G301", "G302", "G303", "G304", "G306", "G402", "G403", "G602",
     // The taint engine's five rules (`gosec_taint`), all SSA analyzers.
@@ -561,6 +562,7 @@ const RULE_SCORES: &[(&str, Score, Score)] = &[
     ("G123", Score::High, Score::High),
     ("G122", Score::High, Score::Medium),
     ("G124", Score::Medium, Score::High),
+    ("G201", Score::Medium, Score::High),
     ("G202", Score::Medium, Score::High),
     ("G203", Score::Medium, Score::Low),
     ("G204", Score::Medium, Score::High),
@@ -848,7 +850,17 @@ fn check_g122_walk_call<'a>(
     });
 }
 
+const G201_WHAT: &str = "SQL string formatting";
 const G202_WHAT: &str = "SQL string concatenation";
+
+/// `sqlFormatRegexp` — a verb that is not one of `b d o x X f F p`.
+///
+/// The point of the exclusion list is that those verbs cannot carry a quote or
+/// a keyword: `%d` is a number, `%p` a pointer. `%s` and `%v` can be anything.
+fn sql_format_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"%[^bdoxXfFp]").unwrap())
+}
 
 /// gosec's `sqlCallIdents`: the receiver's *type string* and method name, with
 /// the index of the argument that carries the query.
@@ -1089,6 +1101,183 @@ fn g202_find_decl(file: &File, decl_pos: u32) -> Option<G202Decl<'_>> {
 
 fn ident_pos_is(e: &Expr, pos: u32) -> bool {
     matches!(e, Expr::Ident(id) if id.pos().0 as u32 == pos)
+}
+
+/// gosec's `ConcatString`: the constant string an expression builds, if it
+/// builds one at all.
+///
+/// `TryResolve` gates it, then the traversal accepts a string literal, an
+/// identifier whose declaration is one, and `+` over those. Anything else — a
+/// call, a `%`-formatted value — gives up.
+fn g201_concat_string(pass: &Pass<'_>, file: &File, e: &Expr) -> Option<String> {
+    if !g202_try_resolve(pass, file, e) {
+        return None;
+    }
+    fn traverse(pass: &Pass<'_>, file: &File, e: &Expr, out: &mut String) -> bool {
+        match e {
+            Expr::BasicLit(_) => match string_lit_from_expr(e) {
+                Some(s) => {
+                    out.push_str(&s);
+                    true
+                }
+                None => false,
+            },
+            Expr::BinaryExpr(b) if b.op == Token::ADD => {
+                traverse(pass, file, &b.x, out) && traverse(pass, file, &b.y, out)
+            }
+            Expr::Ident(id) => {
+                // `GetIdentStringValuesRecursive`: the string values the
+                // identifier's declaration assigns.
+                let Some(obj) = code::object_of(pass, id) else {
+                    return false;
+                };
+                let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+                    return false;
+                };
+                let decl_pos = obj.pos(&artifacts.objects);
+                let values: &[Expr] = match g202_find_decl(file, decl_pos) {
+                    Some(G202Decl::Assign(rhs)) => rhs,
+                    Some(G202Decl::Values(v)) => v,
+                    _ => return false,
+                };
+                let mut any = false;
+                for v in values {
+                    if let Some(s) = string_lit_from_expr(v) {
+                        out.push_str(&s);
+                        any = true;
+                    }
+                }
+                any
+            }
+            _ => false,
+        }
+    }
+    let mut out = String::new();
+    traverse(pass, file, e, &mut out).then_some(out)
+}
+
+/// `fmtCalls.AddAll("fmt", "Sprint", "Sprintf", "Sprintln", "Fprintf")`.
+fn g201_fmt_call<'a>(pass: &Pass<'_>, e: &'a Expr) -> Option<(&'a CallExpr, &'static str)> {
+    let Expr::CallExpr(call) = e else {
+        return None;
+    };
+    let name = code::call_name(pass, &call.fun)?;
+    let short = match name.as_str() {
+        "fmt.Sprint" => "Sprint",
+        "fmt.Sprintf" => "Sprintf",
+        "fmt.Sprintln" => "Sprintln",
+        "fmt.Fprintf" => "Fprintf",
+        _ => return None,
+    };
+    Some((call, short))
+}
+
+/// `noIssueQuoted.Add("github.com/lib/pq", "QuoteIdentifier")`.
+fn g201_is_quoted(pass: &Pass<'_>, e: &Expr) -> bool {
+    code::call_name(pass, match e {
+        Expr::CallExpr(c) => &c.fun,
+        _ => return false,
+    })
+    .is_some_and(|n| n == "github.com/lib/pq.QuoteIdentifier")
+}
+
+/// `sqlStrFormat.checkFormatting`.
+fn g201_check_formatting(
+    pass: &Pass<'_>,
+    file: &File,
+    e: &Expr,
+    pending: &mut Vec<(u32, u32, String)>,
+) -> bool {
+    let Some((call, which)) = g201_fmt_call(pass, e) else {
+        return false;
+    };
+    let mut arg_index = 0usize;
+    if which == "Fprintf" {
+        // `os.Stdout` / `os.Stderr` as the writer is not a query.
+        if let Some(Expr::SelectorExpr(sel)) = call.args.first() {
+            if let Expr::Ident(id) = &*sel.x {
+                if id.name == "os" && (sel.sel.name == "Stdout" || sel.sel.name == "Stderr") {
+                    return false;
+                }
+            }
+        }
+        arg_index = 1;
+    }
+    if call.args.is_empty() {
+        return false;
+    }
+    let Some(arg) = call.args.get(arg_index) else {
+        return false;
+    };
+    let Some(formatter) = g201_concat_string(pass, file, arg) else {
+        return false;
+    };
+    if formatter.is_empty() {
+        return false;
+    }
+    // "If all formatter args are quoted or constant, then the SQL construction
+    // is safe" — the check only runs when there *are* arguments after the
+    // format string.
+    if arg_index + 1 < call.args.len() {
+        let all_safe = call.args[arg_index + 1..]
+            .iter()
+            .all(|a| g201_is_quoted(pass, a) || g202_try_resolve(pass, file, a));
+        if all_safe {
+            return false;
+        }
+    }
+    if sql_keyword_re().is_match(&formatter) && sql_format_re().is_match(&formatter) {
+        pending.push((
+            e.pos().0 as u32,
+            e.end().0 as u32,
+            format!("G201: {G201_WHAT}"),
+        ));
+        return true;
+    }
+    false
+}
+
+/// G201 — SQL string formatting.
+///
+/// Upstream's `checkQuery` is indirect: the query argument has to be a plain
+/// identifier, and the rule then finds that identifier's `:=` declaration in
+/// the same file and asks whether *its* right-hand side is a risky
+/// `fmt.Sprintf`. A query built inline (`db.QueryRow(fmt.Sprintf(…))`) is not a
+/// finding, and neither is one whose variable came from a `var` block.
+///
+/// Returns whether `call` *was* one of `sqlCallIdents`' methods — upstream's
+/// caller returns on that, not on having found an issue.
+fn check_g201_call(
+    pass: &Pass<'_>,
+    file: &File,
+    call: &CallExpr,
+    pending: &mut Vec<(u32, u32, String)>,
+) -> bool {
+    let Some(query) = g202_query_arg(pass, file, call) else {
+        return false;
+    };
+    let Expr::Ident(id) = query else {
+        return true;
+    };
+    let Some(obj) = code::object_of(pass, id) else {
+        return true;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return true;
+    };
+    if !matches!(artifacts.objects.get(obj), ObjectData::Var(_)) {
+        return true;
+    }
+    let decl_pos = obj.pos(&artifacts.objects);
+    let Some(G202Decl::Assign(rhs)) = g202_find_decl(file, decl_pos) else {
+        return true;
+    };
+    for expr in rhs {
+        if g201_check_formatting(pass, file, expr, pending) {
+            break; // upstream stops at the first
+        }
+    }
+    true
 }
 
 /// G202 — SQL string concatenation, the direct branch of upstream's
@@ -3673,6 +3862,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         if enabled.contains("G202") {
                             check_g202_call(pass, file, call, &mut pending);
                         }
+                        if enabled.contains("G201") {
+                            check_g201_call(pass, file, call, &mut pending);
+                        }
                     }
                 }
                 NodeRef::AssignStmt(stmt) => {
@@ -3684,6 +3876,30 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         for rhs in &stmt.rhs {
                             if let Expr::CallExpr(call) = rhs {
                                 check_g202_call(pass, file, call, &mut pending);
+                            }
+                        }
+                    }
+                    if enabled.contains("G201") {
+                        for rhs in &stmt.rhs {
+                            let Expr::CallExpr(call) = rhs else {
+                                continue;
+                            };
+                            // `sqlStrFormat.Match` has a branch `sqlStrConcat`
+                            // does not: the SQL call can be the *receiver* of
+                            // the assigned call, which is how
+                            // `err := db.QueryRow(q).Scan(&x)` is reached. Both
+                            // branches `return` upstream — on the *first* SQL
+                            // call found, issue or not — so one assignment
+                            // yields at most one finding however many database
+                            // calls it holds.
+                            let mut matched = false;
+                            if let Expr::SelectorExpr(sel) = &*call.fun {
+                                if let Expr::CallExpr(inner) = &*sel.x {
+                                    matched = check_g201_call(pass, file, inner, &mut pending);
+                                }
+                            }
+                            if matched || check_g201_call(pass, file, call, &mut pending) {
+                                break;
                             }
                         }
                     }
