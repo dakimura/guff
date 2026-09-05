@@ -24558,3 +24558,58 @@ React アプリの本体で、リポジトリに実在する。`git status --por
 
 `corpus/README.md` の除外表と `corpus/status.py` の `EXCLUDED` に記録。
 次の候補は buildah（89.8MB）。
+
+### 2026-09-06（続き 213）— `adopt buildah`。**darwin では測れない**ので採用はするが台帳には数字を入れない ——ついでに cri-o の 102 も darwin 由来だった
+
+ollama を除外したので次の候補 **buildah v1.45.0**（89.8MB）。darwin で
+走らせるとこう出る:
+
+```
+buildah: guff-only 47（revive 34 / unused 9 / unparam 2 / unconvert 1 / staticcheck 1）
+         gcl-only  1（typecheck）
+```
+
+**この 47 件は互換性の話ではない。**
+
+- `go build ./...` が darwin で**そもそも通らない**:
+  `build constraints exclude all Go files in .../go.podman.io/common/libnetwork/network`。
+  buildah は Linux（と FreeBSD）向けのコンテナツールで、vendor した依存に
+  darwin 用のファイルが無い。
+- gcl-only の 1 件は `tests/wait/wait_unix.go` の
+  `undefined: unix.Prctl` / `PR_SET_CHILD_SUBREAPER` —— Linux 専用 API。
+  そして **typecheck の finding は run の他の issue を全部消す**ので、
+  golangci のレポートはこの 1 件に潰れる（ollama と同じ）。
+- guff の 34 件（revive:unused-parameter）はすべて
+  `pkg/chrootuser/user_basic.go` にある。このファイルの先頭は
+  **`//go:build !linux && !freebsd`** —— Linux では**コンパイルされない
+  スタブ**で、引数を使わない空実装が並んでいる。上流の CI が見ることは無い。
+
+#### 採用はする。ただし台帳には入れない
+
+CI は **ubuntu-latest** なので、Linux では測れる。cri-o と同じ
+`PLATFORM_BOUND` に入れて `corpus/hunt.json` には足した。
+
+そのうえで **`status.py probe` を直した**: これまで `PLATFORM_BOUND` は
+レポートに「(linux only)」と出すだけで、**darwin で測った数字をそのまま
+台帳に書いていた**。プロトコルの「このホストで出せない測定を記録しない」は
+人間の規律だけで守られていたことになる。
+
+- platform-bound なターゲットを**そのプラットフォーム以外**で probe したら、
+  今回の測定は捨てて `skipped_on: darwin` を付ける。
+- 正しいプラットフォームで測った行には `measured_on: linux` を刻む。
+  probe はその刻印がある行だけを保存する。
+
+#### その結果 cri-o の 102 が消えた
+
+`cri-o` の行（open 102）には刻印が無い —— **darwin で測った数字だった**。
+ガードが落として `unmeasured` になる。CI が測り直せば
+`measured_on: linux` 付きで戻り、以後 darwin から probe しても消えない。
+
+```
+台帳: 42/100 at zero（45 定義、open 1、unmeasured 2）
+  open        = tailscale（govet 4。nilness 3 は guff に実装が無い）
+  unmeasured  = buildah / cri-o（どちらも linux でのみ測れる）
+```
+
+open が 2 → 1 に減ったのは進捗ではなく、**数えてはいけない数字を数えるのを
+やめた**ということである。

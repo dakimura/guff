@@ -32,6 +32,14 @@
     "timeout": "20m"
   },
   {
+    "name": "buildah",
+    "url": "https://github.com/podman-container-tools/buildah.git",
+    "ref": "v1.45.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
+  },
+  {
     "name": "buildkit",
     "url": "https://github.com/moby/buildkit.git",
     "ref": "v0.32.2",

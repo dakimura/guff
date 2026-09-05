@@ -73,7 +73,7 @@ EXCLUDED = {
 # Targets whose numbers this host cannot produce. Measuring them anywhere but
 # Linux records the platform, not the compatibility — cri-o is Linux-only and
 # both tools go ill-typed on darwin (COMPAT-HARDENING 2026-08-30 続き 103).
-PLATFORM_BOUND = {"cri-o": "linux"}
+PLATFORM_BOUND = {"cri-o": "linux", "buildah": "linux"}
 
 
 def defined_targets() -> dict[str, dict]:
@@ -118,14 +118,50 @@ def by_linter(keys: list[str]) -> dict[str, int]:
     return dict(counter.most_common())
 
 
+def host_platform() -> str:
+    """`linux` / `darwin` / … — the key `PLATFORM_BOUND` values are written in."""
+    return "linux" if sys.platform.startswith("linux") else sys.platform
+
+
+def previous_rows() -> dict[str, dict]:
+    """The rows already in the ledger, so a skipped probe keeps what CI wrote."""
+    if not LEDGER.exists():
+        return {}
+    try:
+        return json.loads(LEDGER.read_text()).get("targets", {})
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
 def build() -> dict:
     defined = defined_targets()
     measured = latest_measurements()
+    previous = previous_rows()
+    host = host_platform()
     rows = {}
     for name, entry in sorted(defined.items()):
         row: dict = {"tier": entry.get("tier", "?")}
         if name in PLATFORM_BOUND:
             row["needs_platform"] = PLATFORM_BOUND[name]
+            if PLATFORM_BOUND[name] != host:
+                # A measurement taken on the wrong platform describes the
+                # platform, not the compatibility: buildah does not even
+                # `go build` on darwin (a vendored dependency has no darwin
+                # files), and the findings that do appear are in `!linux` stub
+                # files that Linux never compiles.
+                #
+                # Keep only a row the *right* platform wrote — `measured_on`
+                # says which one did. A row without that stamp predates this
+                # guard and was taken here, so it is dropped rather than
+                # frozen; CI runs on ubuntu and will fill it in properly.
+                keep = previous.get(name, {})
+                if keep.get("measured_on") == PLATFORM_BOUND[name]:
+                    row.update({k: v for k, v in keep.items() if k != "tier"})
+                else:
+                    row["state"] = "unmeasured"
+                row["skipped_on"] = host
+                rows[name] = row
+                continue
         m = measured.get(name)
         if m is None:
             row["state"] = "unmeasured"
@@ -134,6 +170,8 @@ def build() -> dict:
             gcl_only = m.get("unexpected_golangci") or []
             row["state"] = "clean" if not guff_only and not gcl_only else "open"
             row["at"] = m["at"]
+            if name in PLATFORM_BOUND:
+                row["measured_on"] = host
             row["open"] = len(guff_only) + len(gcl_only)
             row["guff_only"] = len(guff_only)
             row["gcl_only"] = len(gcl_only)

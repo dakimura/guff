@@ -6,10 +6,10 @@
     "`unmeasured` is not `clean`: an absent measurement is a question."
   ],
   "goal": 100,
-  "defined": 44,
+  "defined": 45,
   "clean": 42,
-  "open": 2,
-  "unmeasured": 0,
+  "open": 1,
+  "unmeasured": 2,
   "targets": {
     "alertmanager": {
       "tier": "hunt",
@@ -42,6 +42,12 @@
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
+    },
+    "buildah": {
+      "tier": "hunt",
+      "needs_platform": "linux",
+      "state": "unmeasured",
+      "skipped_on": "darwin"
     },
     "buildkit": {
       "tier": "hunt",
@@ -118,23 +124,8 @@
     "cri-o": {
       "tier": "hunt",
       "needs_platform": "linux",
-      "state": "open",
-      "at": "20260905T031614Z",
-      "open": 102,
-      "guff_only": 101,
-      "gcl_only": 1,
-      "by_linter": {
-        "goconst": 41,
-        "wsl_v5": 26,
-        "godot": 17,
-        "gofumpt": 4,
-        "unused": 4,
-        "gci": 4,
-        "nolintlint": 2,
-        "goimports": 2,
-        "modernize": 1,
-        "typecheck": 1
-      }
+      "state": "unmeasured",
+      "skipped_on": "darwin"
     },
     "dapr": {
       "tier": "hunt",
