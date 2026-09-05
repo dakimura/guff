@@ -24178,3 +24178,63 @@ tailscale: ill-typed 8 パッケージ → 3
 
 golden **230** / fix **230** / reject **14** / workspace **278 スイート** /
 OSS pr tier **8 ターゲット**。
+
+### 2026-09-05（続き 207）— `make(T)` の T が型パラメータのとき、guff は**制約インタフェースを見て**「slice でも map でも channel でもない」と言っていた
+
+続き 206 のあと tailscale に残った ill-typed 3 パッケージのうち
+`util/mak` の最後の 1 件。9 行:
+
+```go
+func Set[K comparable, V any, T ~map[K]V](m *T, k K, v V) {
+	if *m == nil {
+		*m = make(T)     // guff: cannot make T: type must be slice, map, or channel
+```
+
+上流 `_Make` は `commonUnder(T, cond)` —— 型集合の**全項が共有する
+underlying** を求め、`cond` が「slice / map / chan 以外」を弾く。guff は
+`t.underlying()` を直接読んでいた。型パラメータの underlying は制約
+インタフェースなので、必ず弾かれる。ここにも
+`DEFERRED: commonUnder over a type parameter's type set` と書いてあった。
+
+`under::common_under` は**既にある**が、`cond` がアリーナを引けない
+（`&mut TypeArena` を関数が抱えたままコールバックを呼ぶ）ので、
+`typeset_iter` でペアを集めてから builtins 側でループを書いた。
+順序は上流と同じ ——**`cond` が identical チェックより先**。
+
+#### 測った形（10 形、1 形 1 パッケージ）
+
+可否も位置も**文言も**全一致。
+
+| 形 | 結果 |
+|---|---|
+| `~map[K]V` に `make(T)` | 通る |
+| `~[]E` に `make(S, 0)` / `make(S, 1, 2)` | 通る |
+| `~chan int` に `make(T)` | 通る |
+| underlying が同じ 2 項（`A \| B`） | 通る |
+| `~[]E` に `make(S)`（長さ無し） | `make expects 2 or 3 arguments; found 1` |
+| `make(S, 5, 2)` | `length and capacity swapped` |
+| `~[]int \| ~map[string]int` | `[]int and map[string]int have different underlying types` |
+| `~[]int \| ~int` | `type must be slice, map, or channel` |
+| `any` | `no specific type` |
+
+最後の 3 つは上流が出しうる**原因 3 種**で、どれも型パラメータから到達
+できる。`~[]int | ~int` は「項が違う」でもあるが、上流は **cond が先**なので
+「slice でも map でも channel でもない」と言う —— そこも合わせてある。
+単体テストは文言まで等値で固定した。
+
+#### 効果
+
+続き 205（nil 比較）・続き 206（制約からの推論）と合わせて:
+
+```
+tailscale: ill-typed 8 パッケージ → 2   （util/mak は 4 errors → 0）
+```
+
+残り 2 つ（`cmd/viewer/tests` 7 件 / `types/prefs` 2 件）は
+`ViewCloner[...]` に対する **Clone の署名不一致**という 1 つの族で、別タスク。
+findings の数は動かない —— 取り戻したパッケージは両ツールとも 0 件。
+
+#### ゲート
+
+golden **230** / fix **230** / reject **14** / workspace **278 スイート** /
+OSS pr tier **8 ターゲット**。
