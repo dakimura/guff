@@ -24501,3 +24501,60 @@ tailscale: guff=42 golangci=43 both=38 P=90.5% R=88.4%
 残るは gcl-only 4 件（govet:nilness 3 / govet:inline 1）。**nilness は
 guff に実装が無い** —— govet の analyzer 1 本（上流 ~500 行の SSA
 データフロー）で、バグではなく欠落。別タスク。
+
+### 2026-09-06（続き 212）— `adopt ollama` は**除外**。`//go:embed app/dist` は `.gitignore` の中にあり、どのタグにも clone にも存在しない
+
+tailscale の残り 4 件は `govet:nilness`（guff に実装が無い、上流 ~500 行の
+SSA データフロー）なので、台帳を進めるには次の候補を取る。除外表に無い
+最小は **ollama v0.33.1**（89.4MB）。
+
+```
+ollama: guff=15 golangci=1 both=1 P=6.7% R=100.0%
+  guff-only by linter: {'nolintlint': 14}
+```
+
+**golangci の 1 件がすべてを説明する**:
+
+```
+typecheck app/ui/app.go:15  pattern app/dist: no matching files found
+```
+
+`app/ui/app.go` の `//go:embed app/dist` は React SPA のビルド成果物で、
+`dist` は **`.gitignore` に入っている** —— タグにも clone にも存在しない。
+`go list ./...` はここで失敗し、golangci-lint の**レポート全体がこの
+typecheck 1 件に潰れる**（typecheck の finding は run の他の issue を全部
+消す）。harness/harness と同じ形。
+
+guff 側の 14 件は全部 `nolintlint`「directive is unused」で、**走らなかった
+linter の影**である（`//nolint:containedctx` などが何も抑制しないので
+「未使用」に見える）。ollama の config はそれらを有効にしているので、
+[[upstream-linters-gate-on-direct-imports]] のような設定の話ではない。
+
+#### リポジトリ自体は測れる
+
+embed を手で埋めると（`app/ui/app/dist/index.html` を 1 つ置く）
+**104 パッケージ**が load でき、**golangci 0 / guff 10**。つまり
+corpus のスキーマに `prepare` フックがあれば採用できる。その 10 件は
+将来のタスクとして書き残す:
+
+| 件数 | linter | 備考 |
+|---|---|---|
+| 8 | `unused` | `discover/` と `app/cmd/app/`。**`./...` でだけ出る** —— 同じパッケージを単独で lint すると 0。`mergeNativeProbeDevices` は `native_probe_test.go` から使われており、単独 run では guff もそれを数えている |
+| 1 | `staticcheck` | SA1003（`convert/convert_phi3.go:121`） |
+| 1 | `intrange` | `tokenizer/bytepairencoding_test.go:215` |
+
+**`unused` のスケール依存**は単独の欠陥として面白い ——
+最小再現（test からしか使われない関数）では guff も上流も一致するので、
+形の問題ではない。`./...` のときだけ test 由来の use が数えられていない。
+
+#### 作業中のミス
+
+embed の stub を消すとき `rm -rf app/ui/app` と書いた —— 作ったのは
+`app/ui/app/dist/index.html` だけなのに**親ごと消した**。`app/ui/app` は
+React アプリの本体で、リポジトリに実在する。`git status --porcelain` が
+`D` の列を出したので気づき、`git checkout --` で復元した
+（[[corpus-cache-may-hold-a-previous-repro]] の逆方向：cache は汚れるだけ
+でなく**壊れる**。消すときは自分が作ったパスだけを名指しする）。
+
+`corpus/README.md` の除外表と `corpus/status.py` の `EXCLUDED` に記録。
+次の候補は buildah（89.8MB）。
