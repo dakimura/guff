@@ -1,6 +1,6 @@
 // Package g7xx is gosec's taint engine: G702 (command injection), G703 (path
-// traversal), G705 (XSS), G706 (log injection) and G710 (open redirect). One
-// engine, five tables of sources, sinks and sanitizers.
+// traversal), G704 (SSRF), G705 (XSS), G706 (log injection) and G710 (open
+// redirect). One engine, six tables of sources, sinks and sanitizers.
 //
 // Every function is marked `// fires` or `// silent`, and the silent ones are
 // the point: a taint rule that reports everything is easy, and gosec's answer
@@ -11,6 +11,7 @@ package g7xx
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -18,7 +19,9 @@ import (
 	"io"
 	"log"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"os/exec"
@@ -26,6 +29,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // --- G702: command injection ------------------------------------------------
@@ -563,4 +567,153 @@ func g120Helper(r *http.Request) {
 func G120CallsHelper(w http.ResponseWriter, r *http.Request) {
 	_ = w
 	g120Helper(r)
+}
+
+// --- G704: SSRF ---------------------------------------------------------------
+//
+// The only rule whose sinks include methods on a pointer receiver: an
+// `(*http.Client)` method takes the *request object*, so what is checked is the
+// request and not a URL string. There are no sanitizers at all — nothing in the
+// standard library restricts which host a URL may name.
+
+// fires — the shortest path there is: a request field straight into http.Get.
+func G704GetFromRequest(r *http.Request) {
+	resp, err := http.Get(r.URL.Query().Get("u"))
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+}
+
+// fires twice — once for NewRequest's URL argument, once for the Do that sends
+// the request it returned.
+func G704NewRequestThenDo(r *http.Request) {
+	req, err := http.NewRequest("GET", r.URL.RawQuery, nil)
+	if err != nil {
+		return
+	}
+	c := &http.Client{}
+	resp, err := c.Do(req)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+}
+
+// fires — karmada's shape, and the reason only the Do reports: the URL handed
+// to NewRequest is a `*url.URL` rendered with String(), which the engine does
+// not treat as tainted, but the *method* argument is a request field, so the
+// request NewRequest returns carries the taint into Do.
+func G704URLStructThenDo(r *http.Request, base *url.URL, transport http.RoundTripper) {
+	location := *base
+	location.RawQuery = r.URL.RawQuery
+
+	req, err := http.NewRequest(r.Method, location.String(), nil)
+	if err != nil {
+		return
+	}
+	c := &http.Client{Transport: transport}
+	resp, err := c.Do(req)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+}
+
+// silent — the same field store without the tainted method argument. Storing
+// into a `*url.URL` field and rendering it does not carry taint: `url.URL` is a
+// source type for G703, not for this rule.
+func g704URLStructOnly(r *http.Request, base *url.URL) {
+	location := *base
+	location.RawQuery = r.URL.RawQuery
+	resp, err := http.Get(location.String())
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+}
+
+// fires three times — Post, Head and PostForm all check argument 0.
+func G704PostHeadPostForm(r *http.Request) {
+	u := r.URL.RawQuery
+	_, _ = http.Post(u, "text/plain", strings.NewReader(""))
+	_, _ = http.Head(u)
+	_, _ = http.PostForm(u, nil)
+}
+
+// fires — NewRequestWithContext shifts the URL to argument 2.
+func G704NewRequestWithContext(ctx context.Context, r *http.Request) {
+	_, _ = http.NewRequestWithContext(ctx, "GET", r.URL.RawQuery, nil)
+}
+
+// fires three times — the client methods take a URL string, and the receiver
+// occupies index 0 so the checked argument is index 1.
+func G704ClientMethods(r *http.Request, c *http.Client) {
+	u := r.URL.RawQuery
+	_, _ = c.Get(u)
+	_, _ = c.Post(u, "text/plain", strings.NewReader(""))
+	_, _ = c.Head(u)
+}
+
+// fires — a Client *value*: the method set still resolves to `(*Client).Get`.
+func G704ClientValue(r *http.Request) {
+	var c http.Client
+	_, _ = c.Get(r.URL.RawQuery)
+}
+
+// fires three times — net.Dial and net.DialTimeout check the address (argument
+// 1), net.LookupHost the host (argument 0).
+func G704NetDial(r *http.Request) {
+	addr := r.URL.Host
+	_, _ = net.Dial("tcp", addr)
+	_, _ = net.DialTimeout("tcp", addr, time.Second)
+	_, _ = net.LookupHost(addr)
+}
+
+// fires — a reverse proxy pointed at a user-controlled URL.
+func G704ReverseProxy(r *http.Request) *httputil.ReverseProxy {
+	u, err := url.Parse(r.URL.RawQuery)
+	if err != nil {
+		return nil
+	}
+	return httputil.NewSingleHostReverseProxy(u)
+}
+
+// fires twice — the function sources: os.Getenv and os.Args.
+func G704EnvAndArgs() {
+	_, _ = http.Get(os.Getenv("TARGET"))
+	_, _ = http.Get(os.Args[1])
+}
+
+// fires — a bufio.Scanner is external input.
+func G704ScannerSource() {
+	sc := bufio.NewScanner(os.Stdin)
+	for sc.Scan() {
+		_, _ = http.Get(sc.Text())
+	}
+}
+
+// fires — url.QueryEscape sanitizes for XSS (G705) and not for this rule: an
+// escaped string still names whatever host it named.
+func G704QueryEscapeIsNotASanitizer(r *http.Request) {
+	_, _ = http.Get(url.QueryEscape(r.URL.RawQuery))
+}
+
+// silent — a constant URL, and a tainted *method* with a constant URL:
+// NewRequest checks argument 1 only.
+func g704ConstantURL(r *http.Request) {
+	_, _ = http.Get("https://example.com/health")
+	_, _ = http.NewRequest(r.Method, "https://example.com/health", nil)
+}
+
+// fires — the source arrives as a closure parameter, the way a handler does.
+func G704HandlerClosure() http.Handler {
+	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		_ = rw
+		resp, err := http.Get(r.URL.RawQuery)
+		if err != nil {
+			return
+		}
+		defer resp.Body.Close()
+	})
 }

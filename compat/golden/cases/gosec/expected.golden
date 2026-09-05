@@ -169,56 +169,79 @@ g602v/g602_variadic.go:155:15:gosec:low:G602: slice index out of range
 g602v/g602_variadic.go:166:65:gosec:low:G602: slice index out of range
 g602v/g602_variadic.go:171:59:gosec:low:G602: slice index out of range
 g602v/g602_variadic.go:180:13:gosec:low:G602: slice index out of range
-g7xx/g7xx.go:37:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
-g7xx/g7xx.go:37:18:gosec:high:G702: Command injection via taint analysis
-g7xx/g7xx.go:42:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
-g7xx/g7xx.go:42:18:gosec:high:G702: Command injection via taint analysis
-g7xx/g7xx.go:50:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
-g7xx/g7xx.go:50:18:gosec:high:G702: Command injection via taint analysis
-g7xx/g7xx.go:55:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
-g7xx/g7xx.go:55:18:gosec:high:G702: Command injection via taint analysis
-g7xx/g7xx.go:62:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
-g7xx/g7xx.go:62:18:gosec:high:G702: Command injection via taint analysis
-g7xx/g7xx.go:69:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
-g7xx/g7xx.go:69:18:gosec:high:G702: Command injection via taint analysis
-g7xx/g7xx.go:80:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
-g7xx/g7xx.go:93:6:gosec:medium:G204: Subprocess launched with variable
-g7xx/g7xx.go:102:6:gosec:medium:G204: Subprocess launched with variable
-g7xx/g7xx.go:118:9:gosec:medium:G204: Subprocess launched with variable
-g7xx/g7xx.go:118:21:gosec:high:G702: Command injection via taint analysis
-g7xx/g7xx.go:125:17:gosec:high:G703: Path traversal via taint analysis
-g7xx/g7xx.go:144:10:gosec:medium:G304: Potential file inclusion via variable
-g7xx/g7xx.go:144:17:gosec:high:G703: Path traversal via taint analysis
-g7xx/g7xx.go:150:16:gosec:high:G703: Path traversal via taint analysis
-g7xx/g7xx.go:162:17:gosec:high:G703: Path traversal via taint analysis
-g7xx/g7xx.go:170:14:gosec:medium:G304: Potential file inclusion via variable
-g7xx/g7xx.go:174:21:gosec:high:G703: Path traversal via taint analysis
-g7xx/g7xx.go:189:13:gosec:low:G706: Log injection via taint analysis
-g7xx/g7xx.go:205:11:gosec:low:G706: Log injection via taint analysis
-g7xx/g7xx.go:216:12:gosec:low:G706: Log injection via taint analysis
-g7xx/g7xx.go:221:13:gosec:low:G706: Log injection via taint analysis
-g7xx/g7xx.go:253:12:gosec:low:G706: Log injection via taint analysis
-g7xx/g7xx.go:266:15:gosec:medium:G710: Open redirect via taint analysis
-g7xx/g7xx.go:282:15:gosec:medium:G710: Open redirect via taint analysis
-g7xx/g7xx.go:299:2:gosec:low:G104: Errors unhandled
-g7xx/g7xx.go:299:9:gosec:medium:G705: XSS via taint analysis
-g7xx/g7xx.go:304:13:gosec:medium:G705: XSS via taint analysis
-g7xx/g7xx.go:309:12:gosec:medium:G705: XSS via taint analysis
-g7xx/g7xx.go:310:14:gosec:medium:G705: XSS via taint analysis
-g7xx/g7xx.go:316:2:gosec:low:G104: Errors unhandled
-g7xx/g7xx.go:316:16:gosec:medium:G705: XSS via taint analysis
-g7xx/g7xx.go:325:13:gosec:medium:G705: XSS via taint analysis
-g7xx/g7xx.go:330:2:gosec:low:G104: Errors unhandled
-g7xx/g7xx.go:330:9:gosec:medium:G705: XSS via taint analysis
-g7xx/g7xx.go:347:2:gosec:low:G104: Errors unhandled
-g7xx/g7xx.go:364:2:gosec:low:G104: Errors unhandled
-g7xx/g7xx.go:369:2:gosec:low:G104: Errors unhandled
-g7xx/g7xx.go:389:13:gosec:medium:G705: XSS via taint analysis
-g7xx/g7xx.go:400:9:gosec:medium:G203: The used method does not auto-escape HTML. This can potentially lead to 'Cross-site Scripting' vulnerabilities, in case the attacker controls the input.
-g7xx/g7xx.go:458:15:gosec:medium:G710: Open redirect via taint analysis
-g7xx/g7xx.go:520:26:gosec:medium:G120: Unbounded form parsing in HTTP handlers can cause memory exhaustion
-g7xx/g7xx.go:548:26:gosec:medium:G120: Unbounded form parsing in HTTP handlers can cause memory exhaustion
-g7xx/g7xx.go:560:26:gosec:medium:G120: Unbounded form parsing in HTTP handlers can cause memory exhaustion
+g7xx/g7xx.go:41:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
+g7xx/g7xx.go:41:18:gosec:high:G702: Command injection via taint analysis
+g7xx/g7xx.go:46:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
+g7xx/g7xx.go:46:18:gosec:high:G702: Command injection via taint analysis
+g7xx/g7xx.go:54:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
+g7xx/g7xx.go:54:18:gosec:high:G702: Command injection via taint analysis
+g7xx/g7xx.go:59:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
+g7xx/g7xx.go:59:18:gosec:high:G702: Command injection via taint analysis
+g7xx/g7xx.go:66:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
+g7xx/g7xx.go:66:18:gosec:high:G702: Command injection via taint analysis
+g7xx/g7xx.go:73:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
+g7xx/g7xx.go:73:18:gosec:high:G702: Command injection via taint analysis
+g7xx/g7xx.go:84:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
+g7xx/g7xx.go:97:6:gosec:medium:G204: Subprocess launched with variable
+g7xx/g7xx.go:106:6:gosec:medium:G204: Subprocess launched with variable
+g7xx/g7xx.go:122:9:gosec:medium:G204: Subprocess launched with variable
+g7xx/g7xx.go:122:21:gosec:high:G702: Command injection via taint analysis
+g7xx/g7xx.go:129:17:gosec:high:G703: Path traversal via taint analysis
+g7xx/g7xx.go:148:10:gosec:medium:G304: Potential file inclusion via variable
+g7xx/g7xx.go:148:17:gosec:high:G703: Path traversal via taint analysis
+g7xx/g7xx.go:154:16:gosec:high:G703: Path traversal via taint analysis
+g7xx/g7xx.go:166:17:gosec:high:G703: Path traversal via taint analysis
+g7xx/g7xx.go:174:14:gosec:medium:G304: Potential file inclusion via variable
+g7xx/g7xx.go:178:21:gosec:high:G703: Path traversal via taint analysis
+g7xx/g7xx.go:193:13:gosec:low:G706: Log injection via taint analysis
+g7xx/g7xx.go:209:11:gosec:low:G706: Log injection via taint analysis
+g7xx/g7xx.go:220:12:gosec:low:G706: Log injection via taint analysis
+g7xx/g7xx.go:225:13:gosec:low:G706: Log injection via taint analysis
+g7xx/g7xx.go:257:12:gosec:low:G706: Log injection via taint analysis
+g7xx/g7xx.go:270:15:gosec:medium:G710: Open redirect via taint analysis
+g7xx/g7xx.go:286:15:gosec:medium:G710: Open redirect via taint analysis
+g7xx/g7xx.go:303:2:gosec:low:G104: Errors unhandled
+g7xx/g7xx.go:303:9:gosec:medium:G705: XSS via taint analysis
+g7xx/g7xx.go:308:13:gosec:medium:G705: XSS via taint analysis
+g7xx/g7xx.go:313:12:gosec:medium:G705: XSS via taint analysis
+g7xx/g7xx.go:314:14:gosec:medium:G705: XSS via taint analysis
+g7xx/g7xx.go:320:2:gosec:low:G104: Errors unhandled
+g7xx/g7xx.go:320:16:gosec:medium:G705: XSS via taint analysis
+g7xx/g7xx.go:329:13:gosec:medium:G705: XSS via taint analysis
+g7xx/g7xx.go:334:2:gosec:low:G104: Errors unhandled
+g7xx/g7xx.go:334:9:gosec:medium:G705: XSS via taint analysis
+g7xx/g7xx.go:351:2:gosec:low:G104: Errors unhandled
+g7xx/g7xx.go:368:2:gosec:low:G104: Errors unhandled
+g7xx/g7xx.go:373:2:gosec:low:G104: Errors unhandled
+g7xx/g7xx.go:393:13:gosec:medium:G705: XSS via taint analysis
+g7xx/g7xx.go:404:9:gosec:medium:G203: The used method does not auto-escape HTML. This can potentially lead to 'Cross-site Scripting' vulnerabilities, in case the attacker controls the input.
+g7xx/g7xx.go:462:15:gosec:medium:G710: Open redirect via taint analysis
+g7xx/g7xx.go:524:26:gosec:medium:G120: Unbounded form parsing in HTTP handlers can cause memory exhaustion
+g7xx/g7xx.go:552:26:gosec:medium:G120: Unbounded form parsing in HTTP handlers can cause memory exhaustion
+g7xx/g7xx.go:564:26:gosec:medium:G120: Unbounded form parsing in HTTP handlers can cause memory exhaustion
+g7xx/g7xx.go:581:23:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:591:29:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:596:19:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:616:19:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:639:9:gosec:medium:G107: Potential HTTP request made with variable url
+g7xx/g7xx.go:639:18:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:640:9:gosec:medium:G107: Potential HTTP request made with variable url
+g7xx/g7xx.go:640:18:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:641:9:gosec:medium:G107: Potential HTTP request made with variable url
+g7xx/g7xx.go:641:22:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:646:35:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:653:14:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:654:15:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:655:15:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:661:14:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:668:17:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:669:24:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:670:23:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:679:43:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:684:17:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:685:17:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:699:17:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:713:24:gosec:high:G704: SSRF via taint analysis
 nosec/nosec.go:27:7:gosec:high:G101: Potential hardcoded credentials
 nosec/nosec.go:31:5:gosec:high:G101: Potential hardcoded credentials
 nosec/nosec.go:36:7:gosec:high:G101: Potential hardcoded credentials

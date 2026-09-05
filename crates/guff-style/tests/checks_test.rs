@@ -378,7 +378,7 @@ fn gosec_g117_reports_only_fields_that_are_actually_serialized() {
     );
 }
 
-/// The taint engine — G702 / G703 / G705 / G706 / G710 — over one fixture whose
+/// The taint engine — G702 / G703 / G704 / G705 / G706 / G710 — over one fixture whose
 /// every function is marked `// fires` or `// silent`.
 ///
 /// The counts alone would pass on a rule that reports everything, so the
@@ -401,13 +401,47 @@ fn gosec_taint_rules_report_only_reachable_sources() {
         (
             count("G702"),
             count("G703"),
+            count("G704"),
             count("G705"),
             count("G706"),
             count("G710")
         ),
-        (7, 5, 8, 5, 3),
+        (7, 5, 20, 8, 5, 3),
         "{messages:?}"
     );
+}
+
+/// G704's two shapes that no other taint rule in the engine has.
+///
+/// **A sink on a pointer receiver.** `(*http.Client).Do` and its three
+/// siblings are the first sinks declared on `*T`; every other rule's method
+/// sink is either a package-level function or, in G705's case, an interface
+/// method (an SSA *invoke*, matched by a different branch entirely). The
+/// receiver occupies argument 0, so the request is at index 1 — read the
+/// indices as written for a package function and `c.Do(req)` checks the client
+/// instead of the request, and nothing fires.
+///
+/// **No sanitizers at all.** Every other rule has a table of them, and
+/// `url.QueryEscape` is in two of those tables. It is not in this one: escaping
+/// a string does not change which host it names. Sharing G705's sanitizer list
+/// would delete the finding in `G704QueryEscapeIsNotASanitizer`.
+///
+/// karmada's `pkg/registry/cluster/storage/aggregate.go:255` is the shape
+/// `G704URLStructThenDo` reproduces, and it was the last finding separating
+/// that target from golangci-lint.
+#[test]
+fn gosec_g704_checks_the_request_a_client_method_sends() {
+    let pkg = support::typecheck_fixture("gosec", "example.com/gosec/g7xx", "g7xx.go");
+    let messages = support::run_analyzer(gosec(), &pkg);
+    let g704: Vec<&String> = messages.iter().filter(|m| m.starts_with("G704: ")).collect();
+    // Twenty findings over fourteen functions; the two silent ones carry the
+    // weight. `g704ConstantURL` writes a tainted *method* with a constant URL,
+    // which fires only if `NewRequest`'s CheckArgs are ignored, and
+    // `g704URLStructOnly` stores a request field into a `*url.URL` and renders
+    // it — a shape upstream does **not** report, because `net/url.URL` is a
+    // source type for G703 and not for this rule. Reaching for G703's source
+    // table here turns both silent shapes into findings.
+    assert_eq!(g704.len(), 20, "{messages:?}");
 }
 
 /// G120 is the engine's smallest configuration: one source, one sink, no
