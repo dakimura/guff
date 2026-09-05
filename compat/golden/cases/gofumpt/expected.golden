@@ -6,4 +6,5 @@
 
 # golangci-lint: 2.12.2
 
+comments/comments.go:11:1:gofumpt::File is not properly formatted
 unformatted/unformatted.go:7:1:gofumpt::File is not properly formatted
