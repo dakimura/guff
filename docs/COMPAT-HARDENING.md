@@ -23847,3 +23847,74 @@ karmada: guff=18 golangci=19 both=18 P=100% R=94.7%  →  guff=19 golangci=19 P=
 
 golden 再生成は**キー集合差分で消えたキー 0・追加 23**（G704 が 20、
 新しい fixture 関数が変数 URL を使うので G107 が 3）。
+
+### 2026-09-05（続き 203）— `adopt tailscale`。66 件のうち **55 件は revive `defer` の `arguments` を読んでいないこと**。ついでに ill-typed が 8 パッケージ
+
+台帳の open が cri-o（linux 専用でこの host では測れない）だけになったので、
+進めるには**新しいターゲットを取る**しかない。除外表に載っていない最小の候補
+**tailscale v1.102.3**（84.5MB）を採用した。候補行はそのまま使えた ——
+タグに `version: "2"` の config があり、`./...` が通る。
+
+```
+tailscale: guff=99 golangci=43 both=38 P=38.4% R=88.4%
+  guff-only by linter: {'revive': 59, 'govet': 2}
+  gcl-only  by linter: {'govet': 4, 'goimports': 1}
+  ill-typed packages: 8
+```
+
+#### 55 件の原因: revive の rule ごとの `arguments`
+
+tailscale の config は `defer` rule に**引数**を渡している:
+
+```yaml
+- name: defer
+  arguments: [["immediate-recover", "recover", "return"]]
+```
+
+上流の revive `defer` は、この配列で**どのサブチェックを有効にするか**を
+選ぶ。既定は全部（`loop` / `callChain` / `methodCall` / `immediate-recover` /
+`recover` / `return`）で、tailscale は 3 つだけにしている。guff は
+`arguments` を読まないので `loop` と `callChain` も撃つ ——
+「prefer not to defer inside loops」が 42 件、「prefer not to defer chains of
+function calls」が 13 件。
+
+**45 行の再現**（1 形 1 関数、6 サブチェックを並べて上の config を当てる）で
+2 つ出た:
+
+```
+gcl:  a.go:29:2 recover must be called inside a deferred function, this is executing recover immediately
+      a.go:41:6 recover must be called inside a deferred function
+guff: a.go:12:3 prefer not to defer inside loops        ← 引数で切られているのに撃つ
+      a.go:29:2 （一致）
+```
+
+`arguments` を無視しているだけでなく、**`recover`（deferred function の外での
+`recover()`）サブチェックが実装されていない** —— 41 行目を guff は撃たない。
+[[upstream-linters-gate-on-direct-imports]] と同じ「設定が読まれていない」族で、
+telegraf の revive per-rule `exclude`（続き 168）に続いて **revive で 2 度目**。
+
+#### 残り 11 件（それぞれ別の原因、未着手）
+
+| 件数 | 側 | 内容 |
+|---|---|---|
+| 4 | guff-only | `revive:time-equal`。3 件が `_test.go`、1 件は `net/dns/resolver/tsdns.go:704`。test 除外の形ではないので、素の過剰報告 |
+| 2 | guff-only | `govet:printf`（`[24]byte` を `%s` に渡す形、`%r`） |
+| 3 | gcl-only | `govet:nilness`「impossible condition: nil != nil」 |
+| 1 | gcl-only | `govet:inline`「Type alias constraints.Ordered should be inlined」 |
+| 1 | gcl-only | `goimports`（`feature/acme/cert.go:463`） |
+
+#### ill-typed 8 パッケージ
+
+`util/mak` が最小の形:
+
+```go
+func Set[K comparable, V any, T ~map[K]V](m *T, k K, v V) {
+	if *m == nil {          // guff: operator EQL not defined on operands (Type)
+```
+
+型パラメータの値と `nil` の比較。型集合の全項が nil と比較できるなら Go は
+許す。`types/prefs`（29 errors）/`types/views`/`util/slicesx`/
+`control/controlclient`/`ipn/ipnlocal`/`cmd/viewer/tests`/
+`types/prefs/prefs_example` も落ちていて、原因が同じかはまだ測っていない。
+
+**この PR に Rust の変更は無い。** 採用と測定と原因の切り分けまで。
