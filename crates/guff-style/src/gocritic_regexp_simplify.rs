@@ -3,6 +3,8 @@
 //! Uses `regex-syntax` AST instead of quasilyte/regex. Full edge-case parity with
 //! upstream (e.g. Go-only `[][]` class spelling) is DEFERRED.
 
+use std::collections::HashSet;
+
 use regex_syntax::ast::parse::ParserBuilder;
 use regex_syntax::ast::{
     AssertionKind, Ast, ClassAsciiKind, ClassBracketed, ClassPerlKind, ClassSet, ClassSetItem,
@@ -34,12 +36,32 @@ pub fn simplify(pat: &str) -> Option<String> {
 
 fn simplify_once(pat: &str) -> Option<String> {
     let mut parser = ParserBuilder::new().octal(true).build();
-    let Ok(ast) = parser.parse(pat) else {
-        return None;
+    let (ast, unangled, seed) = match parser.parse(pat) {
+        Ok(ast) => (ast, HashSet::new(), 0),
+        Err(_) => {
+            // `\<` and `\>` are word-boundary assertions to `regex-syntax` and
+            // plain escaped characters to the parser upstream uses. Outside a
+            // character class the `Ast::Assertion` arm below already answers as
+            // upstream does; **inside** one they are a parse error, and a parse
+            // error drops the pattern in silence — taking every other
+            // simplification in it with it. telegraf's
+            // `plugins/serializers/graphite/graphite.go:21` is one.
+            let (rewritten, marks) = unescape_angle_brackets(pat);
+            if marks.is_empty() {
+                return None;
+            }
+            let n = marks.len() as u32;
+            // `regex-syntax`'s parser is single-use: the failed attempt left
+            // state behind, so the retry needs a fresh one.
+            let mut retry = ParserBuilder::new().octal(true).build();
+            let ast = retry.parse(&rewritten).ok()?;
+            (ast, marks, n)
+        }
     };
     let mut ctx = Ctx {
         out: String::new(),
-        score: 0,
+        score: seed,
+        unangled,
     };
     ctx.walk(&ast);
     if ctx.score > 0 {
@@ -49,9 +71,38 @@ fn simplify_once(pat: &str) -> Option<String> {
     }
 }
 
+/// Drop the backslash of every `\<` / `\>`, returning the offsets the bare
+/// characters landed on. Those offsets are how the walker remembers that a
+/// plain-looking `<` is really an `OpEscapeChar` — which matters because
+/// `\<` is **not** a valid char-range operand upstream.
+fn unescape_angle_brackets(pat: &str) -> (String, HashSet<usize>) {
+    let mut out = String::with_capacity(pat.len());
+    let mut marks = HashSet::new();
+    let mut it = pat.chars().peekable();
+    while let Some(ch) = it.next() {
+        if ch == '\\' {
+            if let Some(&c2) = it.peek() {
+                it.next();
+                if c2 == '<' || c2 == '>' {
+                    marks.insert(out.len());
+                    out.push(c2);
+                    continue;
+                }
+                out.push(ch);
+                out.push(c2);
+                continue;
+            }
+        }
+        out.push(ch);
+    }
+    (out, marks)
+}
+
 struct Ctx {
     out: String,
     score: u32,
+    /// Offsets in the parsed text where a `\<` / `\>` lost its backslash.
+    unangled: HashSet<usize>,
 }
 
 impl Ctx {
@@ -330,36 +381,112 @@ impl Ctx {
         }
     }
 
+    /// A `-` inside a character class is a range only when upstream's parser
+    /// says so, and it only *simplifies* a range when both ends are plain
+    /// characters.
+    ///
+    /// ```go
+    /// func (p *Parser) isValidCharRangeOperand(e *Expr) bool {
+    ///     switch e.Op {
+    ///     case OpEscapeHex, OpEscapeOctal, OpEscapeMeta, OpChar:
+    ///         return true
+    ///     case OpEscapeChar:
+    ///         switch p.exprValue(e) {
+    ///         case `\\`, `\|`, `\*`, `\+`, `\?`, `\.`, `\[`, `\^`, `\$`, `\(`, `\)`:
+    ///     …
+    /// func (c *regexpSimplifyChecker) simplifyCharRange(rng syntax.Expr) string {
+    ///     if rng.Args[0].Op != syntax.OpChar || rng.Args[1].Op != syntax.OpChar {
+    ///         return ""
+    ///     }
+    /// ```
+    ///
+    /// So there are three outcomes, and guff had only the first two blurred
+    /// together: a real range with two plain ends may be expanded; a real range
+    /// with any other end is written back **exactly as it was read**, escapes
+    /// and all; and a `-` whose left operand is not a valid operand never
+    /// became a range at all, so its three parts are walked separately and may
+    /// each be unescaped.
     fn walk_range(&mut self, r: &ClassSetRange) {
-        let lo = r.start.c;
-        let hi = r.end.c;
-        if lo.is_ascii() && hi.is_ascii() {
-            let span = hi as u8 - lo as u8;
-            match span {
-                0 => {
-                    self.out.push(lo);
-                    self.score += 1;
-                    return;
+        if !self.is_valid_range_operand(&r.start) {
+            // Not a range upstream: three elements, each on its own.
+            self.walk_literal(&r.start, true);
+            self.out.push('-');
+            self.walk_literal(&r.end, true);
+            return;
+        }
+        if self.is_plain_char(&r.start) && self.is_plain_char(&r.end) {
+            let (lo, hi) = (r.start.c, r.end.c);
+            if lo.is_ascii() && hi.is_ascii() {
+                match hi as u8 - lo as u8 {
+                    0 => {
+                        self.out.push(lo);
+                        self.score += 1;
+                        return;
+                    }
+                    1 => {
+                        self.out.push(lo);
+                        self.out.push(hi);
+                        self.score += 1;
+                        return;
+                    }
+                    2 => {
+                        self.out.push(lo);
+                        self.out.push(char::from(lo as u8 + 1));
+                        self.out.push(hi);
+                        self.score += 1;
+                        return;
+                    }
+                    _ => {}
                 }
-                1 => {
-                    self.out.push(lo);
-                    self.out.push(hi);
-                    self.score += 1;
-                    return;
-                }
-                2 => {
-                    self.out.push(lo);
-                    self.out.push(char::from(lo as u8 + 1));
-                    self.out.push(hi);
-                    self.score += 1;
-                    return;
-                }
-                _ => {}
             }
         }
-        self.walk_literal(&r.start, true);
+        // `out.WriteString(e.Value)` — the range verbatim.
+        self.write_literal_verbatim(&r.start);
         self.out.push('-');
-        self.walk_literal(&r.end, true);
+        self.write_literal_verbatim(&r.end);
+    }
+
+    /// upstream `OpChar`: a character that was written without a backslash.
+    fn is_plain_char(&self, lit: &Literal) -> bool {
+        matches!(lit.kind, LiteralKind::Verbatim)
+            && !self.unangled.contains(&lit.span.start.offset)
+    }
+
+    fn is_valid_range_operand(&self, lit: &Literal) -> bool {
+        if self.is_plain_char(lit) {
+            return true;
+        }
+        match lit.kind {
+            // OpEscapeHex / OpEscapeOctal.
+            LiteralKind::Octal | LiteralKind::HexFixed(_) | LiteralKind::HexBrace(_) => true,
+            // Inside a character class quasilyte's metachars are only `-` and
+            // `]`; every other escape is an `OpEscapeChar`, valid as an operand
+            // only for the eleven regexp metacharacters. `\<` and `\>` — which
+            // reach here as rewritten `Verbatim` characters — are not among
+            // them, and neither are `\t` and friends.
+            LiteralKind::Meta | LiteralKind::Superfluous => matches!(
+                lit.c,
+                '-' | ']' | '\\' | '|' | '*' | '+' | '?' | '.' | '[' | '^' | '$' | '(' | ')'
+            ),
+            _ => false,
+        }
+    }
+
+    /// Write a literal back the way it was read — no unescaping, no score.
+    fn write_literal_verbatim(&mut self, lit: &Literal) {
+        if self.unangled.contains(&lit.span.start.offset) {
+            self.out.push('\\');
+            self.out.push(lit.c);
+            return;
+        }
+        match lit.kind {
+            LiteralKind::Meta | LiteralKind::Superfluous => {
+                self.out.push('\\');
+                self.out.push(lit.c);
+            }
+            LiteralKind::Verbatim => self.out.push(lit.c),
+            _ => self.out.push_str(&format!("{}", Ast::literal(lit.clone()))),
+        }
     }
 
     fn walk_alt(&mut self, alts: &[Ast]) {
@@ -711,6 +838,66 @@ fn is_meta_outside(c: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::simplify;
+
+    /// A `-` inside a character class, as exact answers.
+    ///
+    /// Two questions decide the outcome, and guff used to ask neither: whether
+    /// upstream's parser made a range at all (`isValidCharRangeOperand` on the
+    /// **left** operand), and whether both ends are plain characters
+    /// (`simplifyCharRange`). Every line was measured against
+    /// golangci-lint 2.12.2.
+    #[test]
+    fn char_range_operands_decide_the_rewrite() {
+        let cases: &[(&str, Option<&str>)] = &[
+            // Two plain ends, three characters apart or fewer.
+            (r"[x-z]", Some("[xyz]")),
+            (r"[\<-\>]", Some("[<=>]")),
+            (r"[\<-=]", Some("[<=]")),
+            // WAS WRONG (false positives): a real range with an escaped end is
+            // written back exactly as read — not expanded, not unescaped, even
+            // when the escaped character is on the thirteen-character list.
+            (r"[\|-~]", None),
+            (r"[\.-z]", None),
+            (r"[;-\>]", None),
+            (r"[a-\|]", None),
+            (r"[!-\x7A]", None),
+            (r"[\x41-\x5A]", None),
+            (r"[\101-\132]", None),
+            (r"[\--z]", None),
+            (r"[\+-z]", None),
+            // Not a range upstream, so the parts are walked separately; `~` is
+            // not on the list, so it keeps its backslash.
+            (r"[\<-\~]", Some(r"[<-\~]")),
+            (r"[\t-\r]", None),
+            // Too far apart to shorten.
+            (r"[!-_]", None),
+        ];
+        for (pat, want) in cases {
+            assert_eq!(simplify(pat).as_deref(), *want, "pattern {pat}");
+        }
+    }
+
+    /// `\<` and `\>` inside a character class used to be a parse error, and a
+    /// parse error is silent — so one of them hid every simplification in its
+    /// pattern. Outside a class the assertion arm already answered correctly.
+    #[test]
+    fn escaped_angle_brackets_inside_a_class() {
+        let cases: &[(&str, Option<&str>)] = &[
+            (r"[\<\<]", Some("[<<]")),
+            (r"[\<<]", Some("[<<]")),
+            (r"[\>\>]", Some("[>>]")),
+            (r"[\<>-\]]", Some(r"[<>-\]]")),
+            (
+                r#"[^ "-:\<>-\]_a-~\p{L}]"#,
+                Some(r#"[^ "-:<>-\]_a-~\p{L}]"#),
+            ),
+            (r"\<abc\>", Some("<abc>")),
+            (r#"[">-\]]"#, None),
+        ];
+        for (pat, want) in cases {
+            assert_eq!(simplify(pat).as_deref(), *want, "pattern {pat}");
+        }
+    }
 
     #[test]
     fn basic_rewrites() {

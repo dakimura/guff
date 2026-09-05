@@ -137,6 +137,88 @@ func badRegexpExtra() {
 	regexp.MustCompile(`[\w_]`)
 }
 
+// The char-class range check reads exactly one thing — `e.Args[0]`, the *low*
+// bound — and reads it twice:
+//
+//	switch e.Args[0].Op {
+//	case syntax.OpEscapeOctal, syntax.OpEscapeHex:
+//		continue
+//	}
+//	ch := c.charClassBoundRune(e.Args[0])
+//	if ch == 0 { return false }
+//
+// `charClassBoundRune` answers only for `OpChar`, so every *escaped* low bound
+// yields 0, and 0 does not skip the range — it returns false, which takes the
+// whole class out of the duplicate check too. The high bound is never looked
+// at. telegraf's `plugins/serializers/graphite/graphite.go:21` is the third
+// shape below.
+func badRegexpCharClassRanges() {
+	// Reported: a plain low bound that is neither letter nor digit.
+	regexp.MustCompile(`[!-_]`)
+	// Reported: the high bound is hex, and upstream never consults it.
+	regexp.MustCompile(`[!-\x7A]`)
+	// Reported twice: `\<` is a literal `<` to go-critic's parser, and the two
+	// ranges around it both have plain low bounds. telegraf's line.
+	regexp.MustCompile(`[^ "-:\<>-\]_a-~\p{L}]`)
+	// Reported twice: the same class without the escape, to show the escape is
+	// not what makes the findings.
+	regexp.MustCompile(`[^ -:<-~\p{L}]`)
+	// Reported: an escaped element that is not a range bound changes nothing.
+	regexp.MustCompile(`[\|"-:]`)
+
+	// Silent: a hex or octal low bound skips just that range.
+	regexp.MustCompile(`[\x41-\x5A]`)
+	regexp.MustCompile(`[\101-\132]`)
+	// Silent: an escaped low bound returns 0 and stops the whole class.
+	regexp.MustCompile(`[\|-~]`)
+	regexp.MustCompile(`[\--z]`)
+	regexp.MustCompile(`[\+-z]`)
+	regexp.MustCompile(`[\.-z]`)
+	regexp.MustCompile(`[\t-\r]`)
+	regexp.MustCompile(`[\<-\~]`)
+	// Silent: a letter low bound is "good", whatever the high bound is.
+	regexp.MustCompile(`[a-\|]`)
+}
+
+// `\<` and `\>` are two of the five symbols `checkCharClassDups` names
+// explicitly (`\|`, `\<`, `\>`, `\+`, `\=`) because `unicode.IsPunct` says no
+// to all of them — they are math symbols. The messages quote the escape, not
+// the character it stands for.
+func badRegexpEscapedAngleBrackets() {
+	regexp.MustCompile(`[\<\<]`)
+	regexp.MustCompile(`[\<<]`)
+	regexp.MustCompile(`[\>\>]`)
+	regexp.MustCompile(`(\<a|\<a)`)
+	// Silent: nothing to intersect with.
+	regexp.MustCompile(`\<abc\>`)
+	regexp.MustCompile(`[\<>-\]]`)
+	regexp.MustCompile(`[">-\]]`)
+}
+
+// `regexpSimplify` reads the same classes, and it has its own two questions
+// about a `-`: was this a range at all, and may it be shortened?
+//
+//	func (p *Parser) isValidCharRangeOperand(e *Expr) bool { … }
+//	func (c *regexpSimplifyChecker) simplifyCharRange(rng syntax.Expr) string {
+//		if rng.Args[0].Op != syntax.OpChar || rng.Args[1].Op != syntax.OpChar {
+//			return ""
+//		}
+//
+// A `-` whose left operand is not valid never became a range, so its parts are
+// walked separately and each may be unescaped; a real range with any escaped
+// end is written back exactly as it was read.
+func regexpSimplifyCharRanges() {
+	// A three-character range shortens.
+	regexp.MustCompile(`[x-z]`)
+	// `\<` is not a valid range operand, so these are three elements — and two
+	// passes: `[\<-\>]` unescapes to `[<->]`, which then shortens.
+	regexp.MustCompile(`[\<-\>]`)
+	regexp.MustCompile(`[\<-=]`)
+	// Silent: `;` *is* a valid operand, so this is a real range with an escaped
+	// end, written back untouched — the `\>` is not unescaped.
+	regexp.MustCompile(`[;-\>]`)
+}
+
 func regexpSimplifyExtra() {
 	regexp.MustCompile(`[0-9]+`)
 	regexp.MustCompile(`(?:a|b|c)`)

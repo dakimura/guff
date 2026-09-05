@@ -22880,3 +22880,114 @@ OSS pr tier **8 ターゲットすべて P=R=100%**。台帳は **39/100**（42 
 telegraf に残るのは **5 件**: perfsprint 1、staticcheck 1、bodyclose 1、
 sqlclosecheck 1、nolintlint 1（`plugins/serializers/graphite/graphite.go:21` の
 gocritic 取りこぼしの従属）。すべて原因が別である。
+
+### 2026-09-05（続き 192）— `\<` を 1 つ書くと gocritic の regexp 検査が 2 つとも黙る。範囲の**下限しか見ない**規則も 3 通り外していた
+
+telegraf の残り 5 件のうち 1 件。`plugins/serializers/graphite/graphite.go:21`
+の `//nolint:gocritic // valid range for use-case` が「使われていない」と
+言われていた —— 続き 191 と同型で、**1 つの穴が 2 つの linter に立っている**。
+
+nolint を剥がして gocritic だけを走らせると（21 行目と 22 行目の違いは
+`\<` と `\]` だけである）:
+
+| | 21 行目 `[^ "-:\<>-\]_a-~\p{L}]` | 22 行目 `[^ -:<-~\p{L}]` |
+|---|---|---|
+| golangci-lint | `badRegexp` 2 件 | `badRegexp` 2 件 |
+| guff（修正前） | **0 件** | 2 件 |
+
+#### パーサが違う
+
+go-critic は `quasilyte/regex/syntax` で読む。その lexer は
+**`\X` を何でも 1 つの `tokEscapeChar` / `tokEscapeMeta` にする**
+（`scanEscape` の `default` 節）。guff は Rust の `regex-syntax` を使っており、
+既知のエスケープしか受け付けないうえ、**`\<` / `\>` を Rust 独自の単語境界
+アサーション**として読む。文字クラスの中でそれはパースエラーで、
+`badRegexp` も `regexpSimplify` も
+
+```rust
+let Ok(ast) = parser.parse(pat) else { return … };
+```
+
+と**黙って諦める**ので、`\<` が 1 つあるだけでそのパターンの findings が
+両方の検査から丸ごと消えていた。`regexpSimplify` はクラスの**外**の `\<` だけは
+`Ast::Assertion` の枝で正しく答えていたので、既存の fixture
+（`a\<\>\:\;\/\,\=b`）は通っていた —— **クラスの中だけが死角**だった。
+
+直し方は「バックスラッシュを落として `<` にしたものをパースし、落とした位置を
+覚えておく」。`badRegexp` はメッセージが `\<` と書かれた側を引用しなければ
+ならない（上流は `e.Value` ＝エスケープそのものを持つ）ので `Pat { orig, san,
+map, escaped }` を作り、`slice()` が `san` のスパンを `orig` の範囲に写す。
+
+#### `badRegexp` の範囲検査は下限しか見ない —— 外し方が 3 通りあった
+
+```go
+switch e.Args[0].Op {
+case syntax.OpEscapeOctal, syntax.OpEscapeHex:
+	continue
+}
+ch := c.charClassBoundRune(e.Args[0])
+if ch == 0 {
+	return false
+}
+```
+
+`charClassBoundRune` が答えるのは `OpChar` だけなので**エスケープされた下限は
+すべて 0** で、0 は「この範囲を飛ばす」ではなく `return false` ——
+呼び出し側が `if checkCharClassRanges(cc) { checkCharClassDups(cc) }` なので
+**クラス全体が両方の検査から外れる**。**上限は一度も参照されない。**
+
+1. guff は**上限が hex/octal なら飛ばして**いた。`[!-\x7A]` が**取りこぼし**。
+2. guff は**エスケープされた下限を素の文字として評価**していた（`r.start.c`
+   をそのまま使い、0 を持っていなかった）。`[\|-~]` `[\--z]` `[\+-z]`
+   `[\.-z]` `[\t-\r]` の **5 件が誤報**。
+3. `\<` を含むパターンは丸ごと黙っていた（上記）。
+
+#### `regexpSimplify` の範囲も同じ場所で 2 通り外していた
+
+こちらは質問が 2 つある。**範囲になったのか**（`isValidCharRangeOperand` を
+**左**の被演算子に）と、**短くしてよいのか**（`simplifyCharRange` は
+**両端が `OpChar`** であることを要求する）。範囲になったが端がエスケープなら
+`OpCharRange` は walker の `default` 節に落ち、**読んだままの文字列**で書き戻される。
+
+guff はどちらも訊いておらず、`[\|-~]` を `[|}~]` に、`[\.-z]` を `[.-z]` に
+**書き換えろと言っていた**（上流はどちらも黙る）。逆に左が無効な被演算子なら
+上流は範囲を作らないので 3 要素として歩き、それぞれが unescape される ——
+`[\<-\>]` は 1 周目で `[<->]`、2 周目で `[<=>]` になる。
+
+#### 測った形（25 形）
+
+`crates/guff-style/tests/testdata/gocritic/extras.go` に全部入れ、Rust 側は
+**完全一致のアサーション**で 5 本の新しいテストにした。`any(contains(...))` では
+5 つの欠陥のどれも落ちない。
+
+golden 再生成は**キー集合（行・桁を落として）で差分した: 消えたキー 0、追加 25**
+——badRegexp 14、regexpSimplify 11。
+
+```
+telegraf: guff-only 5 → 4
+```
+
+#### まだ違う形（測定済み・未対応）
+
+`regex-syntax` が受け付けず quasilyte が `tokEscapeChar` にするエスケープは
+`\<` `\>` だけではない。`\q` `\e` のような**未知のエスケープ**は今も
+パースエラーで黙る:
+
+```
+[a\qb"-:]   上流 badRegexp `"-:` 1 件 / guff 0 件
+[\e"-:]     上流 badRegexp `"-:` 1 件 / guff 0 件
+```
+
+上流はこれらを「未知のエスケープ」として **`checkCharClassDups` だけを諦める**
+（範囲検査は動く）ので、直すには `escaped` に「既知／未知」の 2 種類を持たせ、
+かつ **Rust が知っているエスケープの表**が要る。別の作業として残す。
+
+#### ゲート
+
+golden **228**（`gocritic` 系 10 case を再生成 —— **消えたキー 0、追加 25**）/
+fix **228**（`gocritic` の記録を録り直し —— **変わったのは hunk ヘッダ 5 行だけ**）/
+reject **14** / isolate **116 ターゲット** / workspace **278 スイート** /
+OSS pr tier **8 ターゲットすべて P=R=100%**。台帳は **39/100**（42 定義、open 3）。
+
+telegraf に残るのは **4 件**: perfsprint 1、staticcheck 1、bodyclose 1、
+sqlclosecheck 1。**nolintlint は 0 になった。**
