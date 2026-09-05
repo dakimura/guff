@@ -188,16 +188,12 @@ fn format_only_inner(src: &[u8], opts: &NativeOptions) -> Result<Vec<u8>, AstFor
     let region = import_region(&fset, &file, src)?;
     let imps = collect_imps(&fset, &file, src)?;
     if imps.is_empty() && !region.saw_import && region.c_chunks.is_empty() {
-        // No imports to rewrite. `go/format.Source` would still re-parse; for an
-        // already-clean file the identity result is `src` (check mode). When the
-        // body needs gofmt, gofumpt/gofmt in the same `guff run` catch it.
-        return Ok(src.to_vec());
+        // No imports to rewrite — but the body still has to be gofmt'd, since
+        // goimports is gofmt plus import fixing. See `format_inner_impl`.
+        return go_format::source(src);
     }
     let dist = reconstruct(src, &region, &imps, &local);
     let dist = strip_cr(&dist);
-    if bytes_eq_strip_cr(dist.as_slice(), src) {
-        return Ok(src.to_vec());
-    }
     go_format::source(&dist)
 }
 
@@ -238,7 +234,9 @@ fn format_inner_impl(src: &[u8], opts: &NativeOptions) -> Result<FormatOutcome, 
     let imps = arrange(collect_imps(&fset, &file, src)?, &fixes);
 
     if imps.is_empty() && !region.saw_import && region.c_chunks.is_empty() {
-        return Ok(FormatOutcome::Formatted(src.to_vec()));
+        // No imports to arrange — but goimports still *formats*, so the body
+        // has to go through gofmt before we can call the file clean.
+        return Ok(FormatOutcome::Formatted(go_format::source(src)?));
     }
 
     // No add/delete/rename: only rewrite when in-run sort order actually
@@ -250,18 +248,26 @@ fn format_inner_impl(src: &[u8], opts: &NativeOptions) -> Result<FormatOutcome, 
         && !import_runs_need_group_blanks(&imps, &local)
         && !needs_import_decl_merge(&file)
     {
-        return Ok(FormatOutcome::Formatted(src.to_vec()));
+        return Ok(FormatOutcome::Formatted(go_format::source(src)?));
     }
 
     let dist = reconstruct(src, &region, &imps, &local);
     let dist = strip_cr(&dist);
-    if bytes_eq_strip_cr(dist.as_slice(), src) {
-        // Import rewrite is a no-op. Skip `go/format.Source` (re-parse+print)
-        // and the AST print — check mode only needs output==input, and a body
-        // that still needs gofmt is reported by gofumpt/gofmt when enabled.
-        // Profile: print/Source was ~half of native goimports CPU on prometheus.
-        return Ok(FormatOutcome::Formatted(src.to_vec()));
-    }
+    // The import rewrite may be a no-op, but `goimports` is `gofmt` plus
+    // import fixing: a body that still needs gofmt makes the file unformatted
+    // *for goimports too*, and upstream reports it under both names.
+    //
+    // This used to return `src` here and in the two exits above, on the
+    // reasoning that "gofmt or gofumpt in the same run catches the body". They
+    // do not always: with only `goimports` enabled the finding disappeared
+    // entirely, and with both enabled golangci-lint still reports two — one per
+    // formatter — which `issues.uniq-by-line: false` (what the compat tiers
+    // set) makes visible. tailscale's `feature/acme/cert.go` is the shape: its
+    // imports are already correct and one struct's comment column is not.
+    //
+    // The exits were a real saving (print/Source was about half of native
+    // goimports CPU on prometheus), so the cost is measured in the PR rather
+    // than assumed away.
     Ok(FormatOutcome::Formatted(go_format::source(&dist)?))
 }
 
@@ -1023,6 +1029,69 @@ func f() {
         let start = s.find("import (").expect("paren import block");
         let end = s[start..].find("\n)").expect("block close") + start + 2;
         s[start..end].to_string()
+    }
+
+    /// goimports is **gofmt plus import fixing**, so a file whose imports are
+    /// already correct is still unformatted when its body is.
+    ///
+    /// guff used to return the source bytes unchanged from three exits — no
+    /// imports at all, nothing to sort, and an import rewrite that came out
+    /// byte-identical — on the reasoning that "gofmt or gofumpt in the same run
+    /// reports the body". They do not always: with only `goimports` enabled the
+    /// finding vanished, and with both enabled golangci-lint reports **two**,
+    /// one per formatter, which `issues.uniq-by-line: false` makes visible.
+    /// tailscale's `feature/acme/cert.go` is the shape — correct imports, one
+    /// struct whose comment column is a space short.
+    #[test]
+    fn a_body_that_needs_gofmt_is_unformatted_for_goimports_too() {
+        // Imports already correct and sorted; the struct's comments are not
+        // aligned to the widest field.
+        let src = br#"package p
+
+import "strings"
+
+type args struct {
+	cs   string            // one
+	opts []strings.Builder // two
+	n    int              // three
+}
+"#;
+        let out = format(src, &opts("", "p.go")).unwrap();
+        assert_ne!(
+            out.as_slice(),
+            src.as_slice(),
+            "a body needing gofmt must not come back unchanged"
+        );
+        assert!(
+            String::from_utf8(out).unwrap().contains("n    int               // three"),
+            "the comment column should be widened to the longest field"
+        );
+
+        // A file with no imports at all takes a different exit, and must
+        // behave the same way.
+        let noimports = br#"package p
+
+type args struct {
+	cs   string // one
+	opts int    // two
+	n    int   // three
+}
+"#;
+        let out = format(noimports, &opts("", "p.go")).unwrap();
+        assert_ne!(out.as_slice(), noimports.as_slice(), "no-import exit");
+
+        // And an already-formatted file is still returned unchanged.
+        let clean = br#"package p
+
+import "strings"
+
+var _ = strings.TrimSpace
+"#;
+        assert_eq!(
+            format(clean, &opts("", "p.go")).unwrap().as_slice(),
+            clean.as_slice(),
+            "a clean file must stay byte-identical"
+        );
     }
 
     /// `addImportSpaces`: goimports always separates import groups, even when

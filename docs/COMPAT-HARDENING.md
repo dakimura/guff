@@ -24440,3 +24440,64 @@ tailscale: guff=44 → 42、P=86.4% → 90.5%
 既定は **`./...`**。compat の harness は常に明示的にパターンを渡すので
 findings には出ないが、素の実行では別のものを測る。CLI の既定値の話なので
 別タスク。
+
+### 2026-09-06（続き 211）— goimports は **gofmt でもある**。import が正しいファイルで、guff は本文を整形せずに「きれい」と答えていた
+
+tailscale の gcl-only 1 件、`feature/acme/cert.go:463` の
+`File is not properly formatted (goimports)`。中身は struct のコメント列の
+ずれ 1 つで、**import は既に正しい**。
+
+```
+-	cs            certStore          // certificate and ACME account storage
++	cs            certStore           // certificate and ACME account storage
+ 	opts          []xacme.OrderOption // ACME order options
+```
+
+#### 12 行に縮める前に 2 回間違えた
+
+1. **リポジトリの `.golangci.yml` で再現しようとした。** 上流も 1 件
+   （gofmt だけ）しか出さず「非決定的か？」と思った。harness が使うのは
+   **patched config**（`compat/results/hunt-*/<target>.config.yml`）で、
+   そこには `issues.uniq-by-line: false` が入っている。既定の
+   `uniq-by-line: true` は**同じ行の 2 件を 1 件に潰す** ——
+   gofmt と goimports が同じ行を指すので、goimports 側が消えていた。
+   [[always-write-repo-files-with-absolute-paths]] と同じ「自分で書いた
+   config で測るな」。
+2. 最小再現からも `uniq-by-line: false` を落としていて、同じ理由で
+   差が出なかった。
+
+#### 原因: 「import に触らないなら何もしない」3 つの出口
+
+`native/goimports/mod.rs` は 3 箇所で**ソースをそのまま返して**いた ——
+import が無い / 並べ替え不要 / 再構成した結果が元と同一。コメントには
+
+> a body that still needs gofmt is reported by gofumpt/gofmt when enabled.
+> Profile: print/Source was ~half of native goimports CPU on prometheus.
+
+とあった。**前半は成り立たない**: `goimports` だけを有効にした設定では
+finding が丸ごと消えるし、両方有効でも上流は**2 件**（formatter ごとに 1
+件）出す。3 つの出口すべてで `go_format::source` を通すようにした。
+
+#### 後半（コスト）も測り直した
+
+prometheus、goimports だけの設定で 3 回ずつ:
+
+| | wall |
+|---|---|
+| 早期 return あり（従来） | 1.14 / 1.12 / 1.13 |
+| 常に整形（この修正） | 1.17 / 1.17 / 1.15 |
+
+**1.13s → 1.15s、誤差の範囲**。「CPU の半分」はもう成り立たない ——
+B-10（formatter の read+parse 共有）以降に測り直されていなかったのだろう。
+[[deferral-notes-outlive-their-reasons]] の 5 例目。
+
+#### 効果
+
+```
+tailscale: guff=42 golangci=43 both=38 P=90.5% R=88.4%
+       →   guff=43 golangci=43 both=39 P=R=90.7%
+```
+
+残るは gcl-only 4 件（govet:nilness 3 / govet:inline 1）。**nilness は
+guff に実装が無い** —— govet の analyzer 1 本（上流 ~500 行の SSA
+データフロー）で、バグではなく欠落。別タスク。
