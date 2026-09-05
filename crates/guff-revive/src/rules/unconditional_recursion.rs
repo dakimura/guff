@@ -37,10 +37,24 @@ fn check_func_decl(f: &FuncDecl, failures: &mut Vec<Failure>) {
     let Some(body) = &f.body else {
         return;
     };
-    let receiver = f.recv.as_ref().and_then(|recv| {
+    // Upstream distinguishes **three** cases, not two:
+    //
+    //     case n.Recv == nil:                    rec = nil
+    //     case … len(n.Recv.List[0].Names) < 1:  rec = &ast.Ident{Name: "_"}
+    //     default:                               rec = n.Recv.List[0].Names[0]
+    //
+    // and `funcDesc.equal` treats nil and non-nil as different. guff collapsed
+    // the middle case into `None`, so a method with an **unnamed receiver**
+    // looked like a free function and a bare call to the package function of
+    // the same name became "unconditional recursion". telegraf's
+    // `func (*configurationOriginal) normalizeInputDatatype(…)` ends with
+    // `return normalizeInputDatatype(dataType)` — the free function, not
+    // itself — three times over.
+    let receiver = f.recv.as_ref().map(|recv| {
         recv.list
             .first()
             .and_then(|field| field.names.first().map(|id| id.name.clone()))
+            .unwrap_or_else(|| "_".to_string())
     });
     let status = FuncStatus {
         desc: FuncDesc {

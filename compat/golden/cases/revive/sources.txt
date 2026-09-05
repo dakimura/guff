@@ -85,3 +85,8 @@ commentsdensity/comments_density_edge.go                 crates/guff-revive/test
 # empty-block stops walking at a range statement only when the range body is
 # empty. Everything inside a non-empty `for … range` has to be reached.
 emptyblockrange/empty_block_range.go   crates/guff-revive/tests/testdata/revive/empty_block_range.go
+
+# Which call counts as the function calling itself: an unnamed receiver is not
+# "no receiver", so a bare call to the package function of the same name is not
+# recursion.
+uncondrecursion/recursion.go   crates/guff-revive/tests/testdata/revive/uncond_recursion/recursion.go
