@@ -77,6 +77,11 @@ printf/escapes/escapes.go:16:14:govet::printf: fmt.Printf format %é has unknown
 printf/escapes/escapes.go:17:14:govet::printf: fmt.Printf format %☃ has unknown verb ☃
 printf/escapes/escapes.go:21:14:govet::printf: fmt.Printf format %� has unknown verb �
 printf/escapes/escapes.go:22:20:govet::printf: fmt.Printf format %d reads arg #2, but call has 1 arg
+printf/formatter/formatter.go:36:65:govet::printf: fmt.Sprintf format %y has unknown verb y
+printf/formatter/formatter.go:39:64:govet::printf: fmt.Sprintf format %y has unknown verb y
+printf/formatter/formatter.go:47:60:govet::printf: fmt.Sprintf does not support error-wrapping directive %w
+printf/formatter/formatter.go:66:58:govet::printf: fmt.Sprintf format %s has arg r of wrong type []rune
+printf/formatter/formatter.go:69:63:govet::printf: fmt.Sprintf format %s has arg a of wrong type [3]int
 printf/indexes/indexes.go:11:14:govet::printf: fmt.Printf format %[2]*[1]d has arg str of wrong type string
 printf/indexes/indexes.go:12:14:govet::printf: fmt.Printf format %[1]*[2]s uses non-int str as argument of *
 printf/indexes/indexes.go:14:14:govet::printf: fmt.Printf format %*s uses non-int str as argument of *

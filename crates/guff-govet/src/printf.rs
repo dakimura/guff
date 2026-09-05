@@ -390,6 +390,42 @@ fn basic_bits(pass: &Pass<'_>, typ: TypeId) -> u32 {
 }
 
 /// Whether an argument of type `typ` is acceptable for `verb` (bitmask `bits`).
+/// Could this argument implement `fmt.Formatter`?
+///
+/// ```go
+/// if _, ok := typ.Underlying().(*types.Interface); ok {
+///     if !typeparams.IsTypeParam(typ) {
+///         return true
+///     }
+/// }
+/// obj, _, _ := types.LookupFieldOrMethod(typ, false, nil, "Format")
+/// … signature is func(fmt.State, rune)
+/// ```
+///
+/// A value that formats itself makes every other check meaningless, so
+/// upstream skips the operand entirely. The interface arm is the one that
+/// matters in practice — an `error` or an `any` argument silences the check —
+/// and a **type parameter** is excluded, because a constraint says what the
+/// value can be.
+fn arg_may_be_formatter(pass: &Pass<'_>, arg: &Expr) -> bool {
+    let Some(typ) = expr_type(pass, arg) else {
+        return false;
+    };
+    let Some(art) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    if matches!(art.types.get(typ), TypeData::TypeParam(_)) {
+        return false;
+    }
+    if matches!(
+        art.types.get(typ.underlying(&art.types)),
+        TypeData::Interface(_)
+    ) {
+        return true;
+    }
+    type_has_method(pass, typ, "Format")
+}
+
 fn match_arg_type(pass: &Pass<'_>, verb: char, bits: u32, typ: TypeId, depth: u32) -> bool {
     if depth > 8 {
         return true;
@@ -448,11 +484,14 @@ fn match_arg_type(pass: &Pass<'_>, verb: char, bits: u32, typ: TypeId, depth: u3
         }
         TypeData::Slice(s) => {
             let elem = s.elem();
-            // []byte / []rune print like strings for the string-ish verbs.
+            // `[]byte` prints like a string for the string verbs — and only
+            // `[]byte`. Accepting `[]rune` here as well cost the finding
+            // upstream makes for `fmt.Sprintf("%s", []rune{…})`: `fmt` prints
+            // that as a list of int32, which is exactly what the check is for.
             if is_string_ish(verb)
                 && matches!(
                     basic_kind(&art.types, elem.underlying(&art.types)),
-                    BasicKind::Uint8 | BasicKind::Int32
+                    BasicKind::Uint8
                 )
             {
                 return true;
@@ -462,7 +501,21 @@ fn match_arg_type(pass: &Pass<'_>, verb: char, bits: u32, typ: TypeId, depth: u3
             }
             match_arg_type(pass, verb, bits, elem, depth + 1)
         }
-        TypeData::Array(a) => match_arg_type(pass, verb, bits, a.elem(), depth + 1),
+        TypeData::Array(a) => {
+            // "Same as slice" upstream: `[N]byte` prints like a string for the
+            // string verbs. Note this is **byte only** — the slice arm above
+            // also takes rune, which upstream does not do for either.
+            let elem = a.elem();
+            if is_string_ish(verb)
+                && matches!(
+                    basic_kind(&art.types, elem.underlying(&art.types)),
+                    BasicKind::Uint8
+                )
+            {
+                return true;
+            }
+            match_arg_type(pass, verb, bits, elem, depth + 1)
+        }
         TypeData::Map(m) => {
             if bits & B_POINTER != 0 {
                 return true;
@@ -893,6 +946,27 @@ fn check_one(
         let arg = &call.args[arg_num];
         arg_num += 1;
         max_arg_num = max_arg_num.max(arg_num);
+
+        // `isFormatter`: an argument that might implement `fmt.Formatter`
+        // prints itself, so **no check applies to this operand** — not the
+        // verb, not the type. Upstream's test is generous: any interface that
+        // is not a type parameter counts, because the dynamic value it holds
+        // could be a Formatter.
+        //
+        // That is why `t.Fatalf("err %r", err)` is silent upstream while
+        // `fmt.Sprintf("s %y", s)` is reported: the first operand is an
+        // `error`, the second a `string`.
+        //
+        // `%w` is exempt ("Skip check for the %w verb, which requires an
+        // error"): it is the only verb whose entry carries `argError`, and
+        // every `%w` operand is an interface, so testing it here would delete
+        // the "does not support error-wrapping directive %w" diagnostic
+        // outright. An *unknown* verb is not exempt — upstream reaches this
+        // line with `v` left on the last table entry (`X`), whose bits are not
+        // `argError`.
+        if dir.verb != 'w' && arg_may_be_formatter(pass, arg) {
+            continue;
+        }
 
         let Some(bits) = verb_arg_type(dir.verb) else {
             out.push((

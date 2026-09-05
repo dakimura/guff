@@ -1433,3 +1433,46 @@ fn testinggoroutine_leaves_the_tests_own_goroutine_alone() {
     let messages = support::run_analyzer(testinggoroutine_analyzer(), &pkg);
     assert!(messages.is_empty(), "{messages:?}");
 }
+
+/// The two rules that decide whether printf looks at an operand at all.
+///
+/// **`isFormatter`.** A value that might format itself makes every other check
+/// meaningless, so upstream skips the operand — verb *and* type. Its test is
+/// generous: any interface that is not a type parameter counts, because the
+/// dynamic value could implement `fmt.Formatter`. That is the whole reason
+/// `t.Fatalf("err %r", err)` is silent while `fmt.Sprintf("s %y", s)` is
+/// reported, and guff had been reporting both.
+///
+/// `%w` is exempt from the test — every `%w` operand is an interface, so
+/// applying it there would delete the error-wrapping diagnostics outright.
+///
+/// **Byte arrays.** `[N]byte` prints like a string for the string verbs, "same
+/// as slice" upstream — and **byte only**: `[]rune` under `%s` is a finding,
+/// because `fmt` prints it as a list of int32.
+#[test]
+fn printf_skips_operands_that_might_format_themselves() {
+    let dir = support::testdata("printf");
+    let stub = dir.join("stub/fmt/print.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/govet/printf/formatter",
+        &dir.join("formatter.go"),
+        &[("fmt", &stub)],
+    );
+    let mut messages = support::run_analyzer(printf_analyzer(), &pkg);
+    messages.sort();
+
+    // Exactly the five `// fires` functions. The eight silent ones are what
+    // this pins: four operands that might be formatters, three byte-array or
+    // byte-slice shapes, and the `%w` that really is wrapping.
+    assert_eq!(
+        messages,
+        vec![
+            "fmt.Sprintf does not support error-wrapping directive %w".to_string(),
+            "fmt.Sprintf format %s has arg a of wrong type [3]int".to_string(),
+            "fmt.Sprintf format %s has arg r of wrong type []rune".to_string(),
+            "fmt.Sprintf format %y has unknown verb y".to_string(),
+            "fmt.Sprintf format %y has unknown verb y".to_string(),
+        ],
+        "{messages:?}"
+    );
+}
