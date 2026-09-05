@@ -1,0 +1,12 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh revive-import-alias-allow-deny
+# Produced by running golangci-lint on compat/golden/cases/revive-import-alias-allow-deny/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+aliases/aliases.go:24:2:revive:warning:import-alias-naming: import name (with_underscore) must match the regular expression: ^[a-z]+$
+aliases/aliases.go:25:2:revive:warning:import-alias-naming: import name (x9) must NOT match the regular expression: ^x
+aliases/aliases.go:25:2:revive:warning:import-alias-naming: import name (x9) must match the regular expression: ^[a-z]+$
+aliases/aliases.go:26:2:revive:warning:import-alias-naming: import name (Upper) must match the regular expression: ^[a-z]+$
