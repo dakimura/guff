@@ -210,30 +210,38 @@ fn bodyclose_check_consumption_requires_read() {
     );
 }
 
+/// Reads the **isolate** fixture, which is also the golden case's source, so
+/// the two gates cannot measure different files. The crate had its own
+/// forty-six-line copy of `bad.go` that no compat tier ever ran, and the only
+/// assertion on it was `>= 3` — a floor no defect can fail.
 #[test]
 fn sqlclosecheck_flags_missing_and_non_defer() {
-    let dir = support::testdata("sqlclosecheck");
-    let pkg = support::typecheck_pkg("example.com/sqlclosecheck", &dir.join("bad.go"));
+    let pkg = support::typecheck_with_stubs_from(
+        "example.com/sqlclosecheck",
+        &support::isolate_fixture("sqlclosecheck", "bad.go"),
+        &support::testdata("sqlclosecheck"),
+    );
     let messages = support::run_analyzer(sqlclosecheck(), &pkg);
-    assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("Rows/Stmt/NamedStmt was not closed")),
-        "{messages:?}"
-    );
-    assert!(
-        messages.iter().any(|m| m.contains("Close should use defer")),
-        "{messages:?}"
-    );
-    assert!(
-        messages
-            .iter()
-            .filter(|m| m.contains("was not closed"))
-            .count()
-            >= 3,
-        "expected ≥3 not-closed (rows + stmt + reassign): {messages:?}"
-    );
+    let not_closed = messages
+        .iter()
+        .filter(|m| m.contains("Rows/Stmt/NamedStmt was not closed"))
+        .count();
+    let use_defer = messages
+        .iter()
+        .filter(|m| m.contains("Close should use defer"))
+        .count();
+    // Counted. Four of the not-closed are store destinations that are *not*
+    // an `*ssa.FieldAddr` — a slice element, a map entry, a pointer
+    // indirection, and a plain copy to another local, which is reported once
+    // and not twice because only an `*ssa.Call` starts a value. The four
+    // `FieldAddr` shapes beside them draw nothing.
+    assert_eq!((not_closed, use_defer), (SQLCLOSE_NOT_CLOSED, 1), "{messages:?}");
 }
+
+/// Every "was not closed" shape in `compat/isolate/fixtures/sqlclosecheck/bad.go`
+/// — the same keys `compat/golden/cases/sqlclosecheck` pins against
+/// golangci-lint. A drop is a shape that stopped reporting.
+const SQLCLOSE_NOT_CLOSED: usize = 6;
 
 #[test]
 fn sqlclosecheck_settles_a_phi_and_a_close_inside_a_returned_literal() {
@@ -247,8 +255,11 @@ fn sqlclosecheck_settles_a_phi_and_a_close_inside_a_returned_literal() {
     // The close itself only counted when it sat in a `defer func(){ … }()` at
     // the site; `PrefixKV` hands the closure back instead. A capture on its own
     // settles nothing here, which is where this differs from bodyclose.
-    let dir = support::testdata("sqlclosecheck");
-    let pkg = support::typecheck_pkg("example.com/sqlclosecheck/branches", &dir.join("branches.go"));
+    let pkg = support::typecheck_with_stubs_from(
+        "example.com/sqlclosecheck/branches",
+        &support::isolate_fixture("sqlclosecheck", "branches.go"),
+        &support::testdata("sqlclosecheck"),
+    );
     let messages = support::run_analyzer(sqlclosecheck(), &pkg);
     // Two never-closed arms, the first of the sequential pair, and the capture
     // that never closes. `BranchesClosedAfter` and `ClosedInReturnedClosure`

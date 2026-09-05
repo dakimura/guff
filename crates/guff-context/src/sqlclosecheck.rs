@@ -14,8 +14,15 @@
 //! Built-in packages: `database/sql`, `github.com/jmoiron/sqlx`,
 //! `github.com/jackc/pgx/v5`, `github.com/jackc/pgx/v5/pgxpool`.
 //!
-//! DEFERRED: full SSA referrer / Phi / closure-capture / FieldAddr /
-//! MakeInterface / Store-into-struct parity.
+//! A target stored into a **struct field** is settled: upstream's
+//! `*ssa.Store` arm answers `actionReturned` for an `*ssa.FieldAddr`
+//! destination, with the comment "A Row/Stmt is stored in a struct, which may
+//! be closed later by a different flow". A slice element, a map entry, a
+//! pointer indirection and another local are all *not* `FieldAddr`, and stay
+//! findings.
+//!
+//! DEFERRED: full SSA referrer / Phi / closure-capture /
+//! MakeInterface parity.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -29,6 +36,7 @@ use guff_types::arena::TypeData;
 use guff_types::named::named_obj;
 use guff_types::pointer::pointer_elem;
 use guff_types::tuple::{tuple_at, tuple_len};
+use guff_types::SelectionKind;
 use guff_types::TypeId;
 
 const SQL_PACKAGES: &[&str] = &[
@@ -114,6 +122,41 @@ fn rhs_result_is_target(pass: &Pass<'_>, assign: &AssignStmt, lhs_index: usize) 
         .rhs
         .get(lhs_index)
         .is_some_and(|e| expr_is_target(pass, e))
+}
+
+/// The right-hand side feeding `lhs_index`: the single multi-value call, or
+/// the expression in the same position.
+fn rhs_for_index(assign: &AssignStmt, lhs_index: usize) -> Option<&Expr> {
+    if assign.rhs.len() == 1 {
+        assign.rhs.first()
+    } else {
+        assign.rhs.get(lhs_index)
+    }
+}
+
+/// A call whose result upstream would start tracking — not a conversion and
+/// not `make`/`new`, which `getTargetTypesValues` never sees as an `ssa.Call`
+/// producing a target.
+fn is_tracking_call(expr: &Expr) -> bool {
+    let Expr::CallExpr(call) = expr else {
+        return false;
+    };
+    !matches!(call.fun.as_ref(), Expr::Ident(id) if id.name == "make" || id.name == "new")
+}
+
+/// `x.f` where `f` is a struct field — upstream's `*ssa.FieldAddr` store
+/// destination. A package-qualified name (`pkg.Var`) is an `*ssa.Global` and
+/// has no `Selections` entry, so it is not one.
+fn is_struct_field(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Expr::SelectorExpr(sel) = expr else {
+        return false;
+    };
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    info.selections
+        .get(&sel.id)
+        .is_some_and(|s| s.kind() == SelectionKind::FieldVal)
 }
 
 fn ident_name(expr: &Expr) -> Option<&str> {
@@ -411,13 +454,45 @@ fn handle_assign(
 ) {
     for (i, lhs) in assign.lhs.iter().enumerate() {
         let Some(name) = ident_name(lhs) else {
+            // Not a plain name. Storing into a **struct field** hands the
+            // value to whoever owns the struct:
+            //
+            //     case *ssa.Store:
+            //         // A Row/Stmt is stored in a struct, which may be closed
+            //         // later by a different flow.
+            //         if _, ok := instr.Addr.(*ssa.FieldAddr); ok {
+            //             return actionReturned
+            //         }
+            //
+            // telegraf's `plugins/inputs/sql/sql.go:327` keeps its prepared
+            // statements in `s.Queries[i].statement` and closes them from
+            // `Stop`. A slice element, a map entry and a pointer
+            // indirection are not `FieldAddr` and are still findings.
+            if is_struct_field(pass, lhs) {
+                if let Some(name) = rhs_for_index(assign, i).and_then(ident_name) {
+                    if let Some(u) = usages.get_mut(name) {
+                        u.passed = true;
+                    }
+                }
+            }
             continue;
         };
         if name == "_" {
             continue;
         }
 
-        let is_tgt = expr_is_target(pass, lhs) || rhs_result_is_target(pass, assign, i);
+        // `getTargetTypesValues` starts from an `*ssa.Call` and nothing else:
+        //
+        //     instr := b.Instrs[i]
+        //     call, ok := instr.(*ssa.Call)
+        //     if !ok { return targetValues }
+        //
+        // so `y = stmt` never becomes a value of its own — the rows it names
+        // are the *call's*, already tracked. guff asked only what the type
+        // was, and reported the plain copy a second time.
+        let from_call = rhs_for_index(assign, i).is_some_and(is_tracking_call);
+        let is_tgt =
+            from_call && (expr_is_target(pass, lhs) || rhs_result_is_target(pass, assign, i));
         let pos = assign_report_pos(assign, i);
 
         // Two assignments in the *same* statement list run one after the other,
