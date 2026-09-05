@@ -54,3 +54,110 @@ var _ = suite("in a var initializer", func() {
 	for rows.Next() {
 	}
 })
+
+// A target stored into a **struct field** is settled. Upstream's `*ssa.Store`
+// arm says so in as many words:
+//
+//	case *ssa.Store:
+//		// A Row/Stmt is stored in a struct, which may be closed later
+//		// by a different flow.
+//		if _, ok := instr.Addr.(*ssa.FieldAddr); ok {
+//			return actionReturned
+//		}
+//
+// telegraf's `plugins/inputs/sql/sql.go:327` prepares its statements into
+// `s.Queries[i].statement` and closes them from `Stop`. Only a `FieldAddr`
+// counts: a slice element, a map entry, a pointer indirection and a plain
+// second variable are all other instructions, and all still findings.
+
+type stored struct {
+	stmt *sql.Stmt
+	rows *sql.Rows
+}
+
+type keeper struct {
+	db      *sql.DB
+	entries []stored
+	one     stored
+	arr     []*sql.Stmt
+	byName  map[string]*sql.Stmt
+}
+
+// Silent: a field of a slice element — telegraf's shape.
+func (k *keeper) IntoSliceElemField() {
+	for i := range k.entries {
+		stmt, err := k.db.Prepare("select 1")
+		if err != nil {
+			continue
+		}
+		k.entries[i].stmt = stmt
+	}
+}
+
+// Silent: a plain field.
+func (k *keeper) IntoField() {
+	stmt, err := k.db.Prepare("select 1")
+	if err != nil {
+		return
+	}
+	k.one.stmt = stmt
+}
+
+// Silent: a field on a local struct value is a `FieldAddr` too.
+func (k *keeper) IntoLocalStructField() {
+	stmt, err := k.db.Prepare("select 1")
+	if err != nil {
+		return
+	}
+	var s stored
+	s.stmt = stmt
+	_ = s
+}
+
+// Silent: rows, not just statements.
+func (k *keeper) RowsIntoField() {
+	rows, err := k.db.Query("select 1")
+	if err != nil {
+		return
+	}
+	k.one.rows = rows
+}
+
+// Reported: a slice element is an `IndexAddr`, not a `FieldAddr`.
+func (k *keeper) IntoSliceElem() {
+	stmt, err := k.db.Prepare("select 1")
+	if err != nil {
+		return
+	}
+	k.arr[0] = stmt
+}
+
+// Reported: a map entry is a `MapUpdate`, not a `Store` at all.
+func (k *keeper) IntoMapEntry() {
+	stmt, err := k.db.Prepare("select 1")
+	if err != nil {
+		return
+	}
+	k.byName["x"] = stmt
+}
+
+// Reported: through a pointer the destination is the pointer's own value.
+func (k *keeper) ThroughPointer(p **sql.Stmt) {
+	stmt, err := k.db.Prepare("select 1")
+	if err != nil {
+		return
+	}
+	*p = stmt
+}
+
+// Reported once, not twice. `getTargetTypesValues` starts from an `*ssa.Call`
+// and nothing else, so the plain copy never becomes a value of its own.
+func (k *keeper) CopiedToAnotherLocal() {
+	stmt, err := k.db.Prepare("select 1")
+	if err != nil {
+		return
+	}
+	var y *sql.Stmt
+	y = stmt
+	_ = y
+}

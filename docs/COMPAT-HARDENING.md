@@ -23156,3 +23156,95 @@ OSS pr tier **8 ターゲットすべて P=R=100%**。台帳は **39/100**（42 
 
 telegraf に残るのは **2 件**: staticcheck 1（moby の `PortMap` marshal）、
 sqlclosecheck 1。
+
+### 2026-09-05（続き 195）— 構造体のフィールドに入れた `Rows`/`Stmt` は「別の流れで閉じられる」
+
+telegraf の残り 2 件のうち 1 件、`plugins/inputs/sql/sql.go:327`。
+**guff の誤報である。**
+
+```go
+stmt, err := s.db.PrepareContext(ctx, q.Query)
+…
+s.Queries[i].statement = stmt      // ← guff だけが撃つ
+```
+
+#### 上流はコメントで明言している
+
+`ryanrolds/sqlclosecheck` v0.6.0 `defer_only.go` の `getAction`:
+
+```go
+case *ssa.Store:
+	// A Row/Stmt is stored in a struct, which may be closed later
+	// by a different flow.
+	if _, ok := instr.Addr.(*ssa.FieldAddr); ok {
+		return actionReturned
+	}
+```
+
+`actionReturned` は `checkClosed` を true にするので報告されない。
+**`FieldAddr` だけ**がこの扱いで、スライス要素（`IndexAddr`）、map（そもそも
+`MapUpdate` で `Store` ですらない）、ポインタ経由（`Addr` はポインタの値）は
+どれも該当せず、今も findings である。
+
+#### もう 1 つ —— 値になるのは**呼び出しの結果だけ**
+
+`getTargetTypesValues` は先頭で
+
+```go
+instr := b.Instrs[i]
+call, ok := instr.(*ssa.Call)
+if !ok { return targetValues }
+```
+
+と切る。`y = stmt` のような素のコピーは `ssa.Call` ではないので**値として
+追跡されない**（その rows は呼び出しの側で既に追跡されている）。guff は
+「型が対象型か」しか訊いていなかったので、同じ 1 つを **2 回**報告していた。
+
+#### 測った形（10 形）
+
+`compat/isolate/fixtures/sqlclosecheck/bad.go` に全部入れた。上流 5 件・
+guff 5 件で**桁まで一致**（修正前は guff 10 件）。
+
+| 保存先 | 上流 |
+|---|---|
+| スライス要素の**フィールド**（telegraf の形） | 黙る |
+| 素のフィールド／ローカル構造体のフィールド／`Rows` のフィールド | 黙る |
+| スライス要素 | 撃つ |
+| map のエントリ | 撃つ |
+| ポインタ経由 | 撃つ |
+| 別のローカル変数へのコピー | **1 回だけ**撃つ |
+
+#### fixture が 2 つあった
+
+Rust の単体テストは `crates/guff-context/tests/testdata/sqlclosecheck/bad.go`
+という **46 行の別コピー**を読んでいた。golden と isolate が読むのは
+`compat/isolate/fixtures/sqlclosecheck/bad.go`（163 行）で、
+`sources.txt` には「2 つの tier が drift しないように」と書いてあるのに、
+**単体テストだけが drift していた**。しかもそのアサーションは
+
+```rust
+assert!(messages.iter().filter(|m| m.contains("was not closed")).count() >= 3, …)
+```
+
+——「緑だが何も測っていない」の 6 形目である。単体テストを
+**isolate fixture 側に向け**（`support::isolate_fixture` と
+`typecheck_with_stubs_from` を追加）、**6 件ちょうど + `use defer` 1 件**の
+等値アサーションにした。使われなくなった `bad.go` / `branches.go` の
+コピーは消した。
+
+golden 再生成は**キー集合で差分した: 消えたキー 0、追加 4**（フィールド保存の
+4 形は上流も 0 件）。
+
+```
+telegraf: guff-only 2 → 1
+```
+
+#### ゲート
+
+golden **228**（`sqlclosecheck` を再生成 —— **消えたキー 0、追加 4**）/ fix **228** /
+reject **14** / isolate `sqlclosecheck` ターゲット OK（全 116 は CI）/
+workspace **278 スイート** / OSS pr tier **8 ターゲットすべて P=R=100%**。
+台帳は **39/100**（42 定義、open 3）。
+
+telegraf に残るのは **1 件**: staticcheck の
+`plugins/common/docker/mock/server.go:224`（moby の `PortMap` marshal）だけである。

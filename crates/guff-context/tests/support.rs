@@ -15,6 +15,26 @@ pub fn testdata(name: &str) -> PathBuf {
         .join(name)
 }
 
+/// A fixture the compat tiers already read, so a Rust test and a golden case
+/// can measure the same file instead of two copies that drift.
+pub fn isolate_fixture(linter: &str, file: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../compat/isolate/fixtures")
+        .join(linter)
+        .join(file)
+}
+
+/// Type-check a file from anywhere, with the stubs that live beside a
+/// `tests/testdata` fixture directory.
+pub fn typecheck_with_stubs_from(pkg_id: &str, main_path: &Path, stub_dir: &Path) -> Arc<Package> {
+    let stubs = collect_stubs(stub_dir);
+    let deps: Vec<(&str, &Path)> = stubs
+        .iter()
+        .map(|(p, path)| (p.as_str(), path.as_path()))
+        .collect();
+    typecheck_with_deps(pkg_id, main_path, &deps)
+}
+
 pub fn collect_stubs(dir: &Path) -> Vec<(String, PathBuf)> {
     let stub_dir = dir.join("stub");
     let mut deps = Vec::new();
