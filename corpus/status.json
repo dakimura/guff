@@ -6,10 +6,10 @@
     "`unmeasured` is not `clean`: an absent measurement is a question."
   ],
   "goal": 100,
-  "defined": 45,
+  "defined": 46,
   "clean": 43,
   "open": 0,
-  "unmeasured": 2,
+  "unmeasured": 3,
   "targets": {
     "alertmanager": {
       "tier": "hunt",
@@ -334,6 +334,12 @@
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
+    },
+    "tetragon": {
+      "tier": "hunt",
+      "needs_platform": "linux",
+      "state": "unmeasured",
+      "skipped_on": "darwin"
     },
     "thanos": {
       "tier": "hunt",

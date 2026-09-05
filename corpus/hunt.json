@@ -247,6 +247,14 @@
     "timeout": "25m"
   },
   {
+    "name": "tetragon",
+    "url": "https://github.com/cilium/tetragon.git",
+    "ref": "v1.7.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
+  },
+  {
     "name": "thanos",
     "url": "https://github.com/thanos-io/thanos.git",
     "ref": "v0.42.4",

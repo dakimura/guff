@@ -24909,3 +24909,77 @@ var M b.Pair[string, int]   // 同上
 ```
 
 open が 0 になったのは 2026-08 以来。次は `adopt tetragon`。
+
+### 2026-09-06（続き 217）— `adopt tetragon`。**219 パッケージ中 70 が darwin で読めない**ので採用はするが測らない ——ついでに hunt を回す CI が**存在しない**ことが分かった
+
+台帳が open 0 になったので次の候補 **tetragon v1.7.1**（cilium の eBPF
+セキュリティツール、92.6MB、22 linter）。config は guff が全部持っている
+（`goheader` のテンプレート、`gomodguard` の blocked modules、exclusion
+presets、`generated: lax`、`goimports` の local-prefixes）。
+
+`go list ./...` は **219 パッケージ**を darwin でも返す。**だから通ると思うと
+間違える** —— `go list` は型検査をしない。
+
+```
+$ go build ./...
+imports github.com/cilium/tetragon/pkg/constants:
+  build constraints exclude all Go files in .../pkg/constants
+```
+
+darwin 用ファイルを持たないパッケージが 4 つある:
+
+| パッケージ | 中身 |
+|---|---|
+| `pkg/constants` | `constants_linux.go` / `constants_windows.go` |
+| `pkg/reader/namespace` | `namespace_linux.go` / `namespace_windows.go` |
+| `pkg/asm` | 同種 |
+| `pkg/observer/observertesthelper` | 同種 |
+
+その推移閉包で **219 中 70 パッケージ（32%）が load できない**。
+
+#### 測ると何が出るか（そしてなぜ無意味か）
+
+```
+tetragon: guff=4 golangci=3 both=0 P=0.0% R=0.0%
+  ill-typed packages 54 > baseline 0
+  +gcl  pkg/reader/network/network.go:10:typecheck:
+        could not import .../pkg/constants (build constraints exclude all Go files)
+  +gcl  pkg/reader/network/inet.go:13,20:typecheck: undefined: inetFamily
+  +guff govet:inline ×2 / govet:tests ×1 / modernize:slicesbackward ×1
+```
+
+**両方向とも情報が無い。** golangci 側は typecheck の 3 件で
+レポート全体が潰れている（ollama・buildah と同じ）。guff 側の 4 件は
+load できたパッケージのもので、上流が黙っているのは「同意しない」からでは
+なく「そこまで到達していない」から。**どちらが正しいかを darwin では
+判定できない。** 54 の ill-typed も guff の欠陥ではなく同じ 70 の一部である。
+
+buildah / cri-o と同じ扱いにした: `hunt.json` には足し、
+`status.py` の `PLATFORM_BOUND` に `"tetragon": "linux"` を入れる。
+probe は darwin の数字を捨てて `skipped_on: darwin` を刻む。
+**health baseline には行を足さない** —— 行を足すと 54 の ill-typed を
+恒久的に許すことになり、Linux では 0 のはずだから（[[absent-baseline-row-means-strictly-zero]]）。
+
+#### 分かったこと: **hunt tier を回す CI が無い**
+
+続き 213 で buildah を PLATFORM_BOUND に入れたとき「CI は ubuntu-latest
+なので Linux では測れる」と書いた。**確認したら、hunt を走らせる workflow は
+1 つも無い**:
+
+```
+$ grep -ln hunt .github/workflows/*.yml
+（何も出ない）
+```
+
+`oss-pr` / `oss-nightly` / `oss-weekly` はそれぞれ pr / nightly / weekly tier で、
+hunt は「何もゲートしていないので shape 判定にも数えない」と
+`corpus/README.md` が明記している。つまり **buildah・cri-o・tetragon の 3 つは
+「Linux でなら測れる」ではなく「誰も測らない」** —— 台帳の `unmeasured` は
+正直だが、放っておけば永久に埋まらない。
+
+3 ターゲットだけを ubuntu で走らせる小さな workflow を足せば閉じる話だが、
+CI の実費が要る判断なので、ここでは事実の記録に留める。
+
+```
+台帳: 43/100 at zero（46 定義、open 0、unmeasured 3＝buildah / cri-o / tetragon）
+```

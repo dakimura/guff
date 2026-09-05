@@ -73,7 +73,12 @@ EXCLUDED = {
 # Targets whose numbers this host cannot produce. Measuring them anywhere but
 # Linux records the platform, not the compatibility — cri-o is Linux-only and
 # both tools go ill-typed on darwin (COMPAT-HARDENING 2026-08-30 続き 103).
-PLATFORM_BOUND = {"cri-o": "linux", "buildah": "linux"}
+#
+# tetragon is the same shape and the clearest case of it: four of its packages
+# (pkg/asm, pkg/constants, pkg/observer/observertesthelper, pkg/reader/namespace)
+# ship only `_linux.go` / `_windows.go`, so `go build ./...` fails on darwin and
+# **70 of its 219 packages** cannot be loaded at all (2026-09-06 続き 217).
+PLATFORM_BOUND = {"cri-o": "linux", "buildah": "linux", "tetragon": "linux"}
 
 
 def defined_targets() -> dict[str, dict]:
