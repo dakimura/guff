@@ -2,8 +2,17 @@
 //!
 //! Uses `regex-syntax` AST (Go RE2-like) instead of quasilyte/regex/syntax.
 //! Full dangling-anchor / flag edge-case parity with upstream is DEFERRED.
+//!
+//! The two parsers do not agree about escapes. quasilyte's lexer turns **any**
+//! `\X` into one `tokEscapeChar`/`tokEscapeMeta` token, while `regex-syntax`
+//! knows a fixed set — and reads `\<` / `\>` as Rust's own word-boundary
+//! assertions, which inside a character class is a parse error. A parse error
+//! here means the pattern is skipped in silence, so one `\<` used to hide
+//! every finding in its regexp. [`Pat`] rewrites those two escapes away and
+//! keeps an offset map so the messages still quote the source text.
 
 use std::cmp::Ordering;
+use std::collections::HashSet;
 
 use regex_syntax::ast::parse::ParserBuilder;
 use regex_syntax::ast::{
@@ -20,13 +29,72 @@ struct CharRange {
     source: String,
 }
 
+/// A pattern in two forms: the source text every message quotes, and the
+/// rewritten text `regex-syntax` can parse.
+///
+/// The only rewrite is dropping the backslash of `\<` and `\>`, which
+/// go-critic's parser reads as the literal characters and Rust's reads as
+/// word-boundary assertions. `map` carries each `san` byte offset back to the
+/// `orig` offset it came from, so a span over the rewritten `<` still slices
+/// `\<` out of the source.
+struct Pat<'a> {
+    orig: &'a str,
+    san: String,
+    /// `san` byte offset -> `orig` byte offset. Length is `san.len() + 1`.
+    map: Vec<usize>,
+    /// `san` byte offsets of characters that lost a backslash.
+    escaped: HashSet<usize>,
+}
+
+fn sanitize(orig: &str) -> Pat<'_> {
+    let mut san = String::with_capacity(orig.len());
+    let mut map: Vec<usize> = Vec::with_capacity(orig.len() + 1);
+    let mut escaped = HashSet::new();
+    let mut push = |san: &mut String, map: &mut Vec<usize>, at: usize, ch: char| {
+        let before = san.len();
+        san.push(ch);
+        map.resize(san.len(), at);
+        debug_assert!(map.len() > before);
+    };
+    let mut it = orig.char_indices().peekable();
+    while let Some((i, ch)) = it.next() {
+        if ch == '\\' {
+            if let Some(&(_, c2)) = it.peek() {
+                it.next();
+                if c2 == '<' || c2 == '>' {
+                    escaped.insert(san.len());
+                    // Both bytes of `\<` map to the backslash, so the slice of
+                    // the rewritten character is the whole escape.
+                    push(&mut san, &mut map, i, c2);
+                    continue;
+                }
+                // Copy the escape whole, so a `\\` can never be mistaken for
+                // the start of one.
+                push(&mut san, &mut map, i, ch);
+                push(&mut san, &mut map, i + ch.len_utf8(), c2);
+                continue;
+            }
+        }
+        push(&mut san, &mut map, i, ch);
+    }
+    map.push(orig.len());
+    Pat {
+        orig,
+        san,
+        map,
+        escaped,
+    }
+}
+
 /// Analyze a regexp pattern string and return diagnostic messages
 /// (without the `badRegexp: ` prefix — caller adds context).
 pub fn check_pattern(pat: &str) -> Vec<String> {
+    let pat = sanitize(pat);
     let mut parser = ParserBuilder::new().octal(true).build();
-    let Ok(ast) = parser.parse(pat) else {
+    let Ok(ast) = parser.parse(&pat.san) else {
         return Vec::new();
     };
+    let pat = &pat;
     let mut msgs = Vec::new();
     let mut good_carets: Vec<Span> = Vec::new();
     mark_good_carets(pat, &ast, &mut good_carets);
@@ -41,10 +109,15 @@ pub fn check_pattern(pat: &str) -> Vec<String> {
     msgs
 }
 
-fn slice<'a>(pat: &'a str, span: &Span) -> &'a str {
-    let start = span.start.offset.min(pat.len());
-    let end = span.end.offset.min(pat.len()).max(start);
-    &pat[start..end]
+fn slice<'a>(pat: &'a Pat<'_>, span: &Span) -> &'a str {
+    slice_offsets(pat, span.start.offset, span.end.offset)
+}
+
+/// `slice` for a span synthesized from two node offsets.
+fn slice_offsets<'a>(pat: &'a Pat<'_>, start: usize, end: usize) -> &'a str {
+    let start = start.min(pat.san.len());
+    let end = end.min(pat.san.len()).max(start);
+    &pat.orig[pat.map[start]..pat.map[end]]
 }
 
 fn can_skip(e: &Ast) -> bool {
@@ -60,7 +133,7 @@ fn can_skip(e: &Ast) -> bool {
     }
 }
 
-fn mark_good_carets(pat: &str, e: &Ast, out: &mut Vec<Span>) {
+fn mark_good_carets(pat: &Pat<'_>, e: &Ast, out: &mut Vec<Span>) {
     if let Ast::Concat(c) = e {
         if c.asts.len() > 1 {
             let mut i = 0;
@@ -100,7 +173,7 @@ fn is_good_anchor(good: &[Span], span: &Span) -> bool {
 }
 
 fn walk(
-    pat: &str,
+    pat: &Pat<'_>,
     e: &Ast,
     msgs: &mut Vec<String>,
     flag_states: &mut Vec<[bool; 128]>,
@@ -176,7 +249,7 @@ fn flag_char(f: Flag) -> Option<u8> {
 }
 
 fn update_flag_state(
-    pat: &str,
+    pat: &Pat<'_>,
     state: &mut [bool; 128],
     flags: &Flags,
     span: &Span,
@@ -214,7 +287,7 @@ fn update_flag_state(
 }
 
 fn check_nested_quantifier(
-    pat: &str,
+    pat: &Pat<'_>,
     r: &regex_syntax::ast::Repetition,
     msgs: &mut Vec<String>,
 ) {
@@ -236,7 +309,7 @@ fn check_nested_quantifier(
     }
 }
 
-fn check_alt_dups(pat: &str, alt: &regex_syntax::ast::Alternation, msgs: &mut Vec<String>) {
+fn check_alt_dups(pat: &Pat<'_>, alt: &regex_syntax::ast::Alternation, msgs: &mut Vec<String>) {
     let mut seen = std::collections::HashSet::new();
     for a in &alt.asts {
         let v = slice(pat, a.span()).to_string();
@@ -259,7 +332,7 @@ fn is_char_or_lit(e: &Ast) -> bool {
 
 /// If `e` is `^` followed by a literal/literal-seq (possibly as Concat), return
 /// the span of the part after `^`.
-fn caret_prefix_lit<'a>(pat: &'a str, e: &'a Ast) -> Option<&'a str> {
+fn caret_prefix_lit<'a>(pat: &'a Pat<'_>, e: &'a Ast) -> Option<&'a str> {
     match e {
         Ast::Concat(c) if c.asts.len() >= 2 => {
             let first = &c.asts[0];
@@ -279,7 +352,7 @@ fn caret_prefix_lit<'a>(pat: &'a str, e: &'a Ast) -> Option<&'a str> {
                 // Span from second start to end.
                 let start = c.asts[1].span().start.offset;
                 let end = c.span.end.offset;
-                return Some(&pat[start.min(pat.len())..end.min(pat.len())]);
+                return Some(slice_offsets(pat, start, end));
             };
             if is_char_or_lit(rest) {
                 Some(slice(pat, rest.span()))
@@ -291,7 +364,7 @@ fn caret_prefix_lit<'a>(pat: &'a str, e: &'a Ast) -> Option<&'a str> {
     }
 }
 
-fn dollar_suffix_lit<'a>(pat: &'a str, e: &'a Ast) -> Option<&'a str> {
+fn dollar_suffix_lit<'a>(pat: &'a Pat<'_>, e: &'a Ast) -> Option<&'a str> {
     match e {
         Ast::Concat(c) if c.asts.len() >= 2 => {
             let last = &c.asts[c.asts.len() - 1];
@@ -316,13 +389,13 @@ fn dollar_suffix_lit<'a>(pat: &'a str, e: &'a Ast) -> Option<&'a str> {
             }
             let start = c.asts[0].span().start.offset;
             let end = c.asts[c.asts.len() - 2].span().end.offset;
-            Some(&pat[start.min(pat.len())..end.min(pat.len())])
+            Some(slice_offsets(pat, start, end))
         }
         _ => None,
     }
 }
 
-fn check_alt_anchor(pat: &str, alt: &regex_syntax::ast::Alternation, msgs: &mut Vec<String>) {
+fn check_alt_anchor(pat: &Pat<'_>, alt: &regex_syntax::ast::Alternation, msgs: &mut Vec<String>) {
     if alt.asts.is_empty() {
         return;
     }
@@ -357,7 +430,7 @@ fn is_letter_or_digit(ch: char) -> bool {
 }
 
 fn check_char_class_ranges(
-    pat: &str,
+    pat: &Pat<'_>,
     cc: &regex_syntax::ast::ClassBracketed,
     msgs: &mut Vec<String>,
 ) -> bool {
@@ -366,19 +439,31 @@ fn check_char_class_ranges(
     };
     for item in items {
         if let ClassSetItem::Range(r) = item {
-            // Permit hex/octal bounds (go-critic skips OpEscapeHex/Octal).
+            // Upstream reads the **low** bound only — `e.Args[0]` — and it
+            // reads it twice, for two different decisions:
+            //
+            //     switch e.Args[0].Op {
+            //     case syntax.OpEscapeOctal, syntax.OpEscapeHex:
+            //         continue
+            //     }
+            //     ch := c.charClassBoundRune(e.Args[0])
+            //     if ch == 0 { return false }
+            //
+            // so a hex/octal low bound skips just this range, while anything
+            // that is not a plain character — every escape, since
+            // `charClassBoundRune` only answers for `OpChar` — returns 0 and
+            // takes the **whole class** out of both this check and the
+            // duplicate check. The high bound is never consulted at all.
             if matches!(
                 r.start.kind,
-                LiteralKind::Octal
-                    | LiteralKind::HexFixed(_)
-                    | LiteralKind::HexBrace(_)
-            ) || matches!(
-                r.end.kind,
-                LiteralKind::Octal
-                    | LiteralKind::HexFixed(_)
-                    | LiteralKind::HexBrace(_)
+                LiteralKind::Octal | LiteralKind::HexFixed(_) | LiteralKind::HexBrace(_)
             ) {
                 continue;
+            }
+            if !matches!(r.start.kind, LiteralKind::Verbatim)
+                || pat.escaped.contains(&r.start.span.start.offset)
+            {
+                return false;
             }
             let ch = r.start.c;
             if ch == '\0' {
@@ -405,7 +490,7 @@ fn class_items(kind: &ClassSet) -> Option<Vec<&ClassSetItem>> {
 }
 
 fn check_char_class_dups(
-    pat: &str,
+    pat: &Pat<'_>,
     cc: &regex_syntax::ast::ClassBracketed,
     msgs: &mut Vec<String>,
 ) {
@@ -451,7 +536,7 @@ fn check_char_class_dups(
     }
 }
 
-fn collect_item_ranges(pat: &str, item: &ClassSetItem, ranges: &mut Vec<CharRange>) -> bool {
+fn collect_item_ranges(pat: &Pat<'_>, item: &ClassSetItem, ranges: &mut Vec<CharRange>) -> bool {
     match item {
         ClassSetItem::Literal(lit) => {
             ranges.push(CharRange {
@@ -486,7 +571,7 @@ fn collect_item_ranges(pat: &str, item: &ClassSetItem, ranges: &mut Vec<CharRang
     }
 }
 
-fn add_perl_ranges(pat: &str, p: &ClassPerl, ranges: &mut Vec<CharRange>) {
+fn add_perl_ranges(pat: &Pat<'_>, p: &ClassPerl, ranges: &mut Vec<CharRange>) {
     let src = slice(pat, &p.span).to_string();
     let add = |ranges: &mut Vec<CharRange>, low: u32, high: u32, source: &str| {
         ranges.push(CharRange {
@@ -568,6 +653,82 @@ mod tests {
                 .any(|m| m.contains("repeated greedy quantifier")),
             "{msgs:?}"
         );
+    }
+
+    /// The char-class range check, shape by shape, as exact sets.
+    ///
+    /// Every line here was measured against golangci-lint 2.12.2 before it was
+    /// written down; the three that used to be wrong are marked.
+    #[test]
+    fn char_class_range_reads_only_the_low_bound() {
+        let cases: &[(&str, &[&str])] = &[
+            // A plain low bound that is neither letter nor digit.
+            (r"[!-_]", &[r"suspicious char range `!-_` in [!-_]"]),
+            // WAS WRONG (missing): upstream never looks at the high bound, so a
+            // hex *high* bound does not skip the range.
+            (r"[!-\x7A]", &[r"suspicious char range `!-\x7A` in [!-\x7A]"]),
+            // A hex or octal *low* bound skips this range and only this range.
+            (r"[\x41-\x5A]", &[]),
+            (r"[\101-\132]", &[]),
+            // WAS WRONG (false positives): an escaped low bound gives
+            // `charClassBoundRune` 0, which returns false for the whole class.
+            (r"[\|-~]", &[]),
+            (r"[\--z]", &[]),
+            (r"[\+-z]", &[]),
+            (r"[\.-z]", &[]),
+            (r"[\t-\r]", &[]),
+            // A letter low bound is good whatever the high bound is.
+            (r"[a-\|]", &[]),
+            // An escaped element that is not a range bound changes nothing.
+            (
+                r#"[\|"-:]"#,
+                &[r#"suspicious char range `"-:` in [\|"-:]"#],
+            ),
+        ];
+        for (pat, want) in cases {
+            assert_eq!(&check_pattern(pat), want, "pattern {pat}");
+        }
+    }
+
+    /// `\<` and `\>`: go-critic's lexer makes them plain escaped characters,
+    /// `regex-syntax` makes them word-boundary assertions — which inside a
+    /// character class is a parse error, and a parse error here is silent.
+    ///
+    /// WAS WRONG (missing): one `\<` anywhere in the pattern hid every finding
+    /// in it. telegraf's `plugins/serializers/graphite/graphite.go:21` is the
+    /// fifth case.
+    #[test]
+    fn escaped_angle_brackets_are_literals() {
+        let cases: &[(&str, &[&str])] = &[
+            (r"[\<\<]", &[r"`\<` is duplicated in [\<\<]"]),
+            (r"[\<<]", &[r"`\<` intersects with `<` in [\<<]"]),
+            (r"[\>\>]", &[r"`\>` is duplicated in [\>\>]"]),
+            (r"\<a|\<a", &[r"`\<a` is duplicated in \<a|\<a"]),
+            (
+                r#"[^ "-:\<>-\]_a-~\p{L}]"#,
+                &[
+                    r#"suspicious char range `"-:` in [^ "-:\<>-\]_a-~\p{L}]"#,
+                    r#"suspicious char range `>-\]` in [^ "-:\<>-\]_a-~\p{L}]"#,
+                ],
+            ),
+            (r"[\<>-\]]", &[r"suspicious char range `>-\]` in [\<>-\]]"]),
+            (r#"[">-\]]"#, &[r#"suspicious char range `>-\]` in [">-\]]"#]),
+            // Silent: `\<` as a range low bound still returns 0.
+            (r"[\<-\~]", &[]),
+            (r"[\<-\]]", &[]),
+            (r"\<abc\>", &[]),
+        ];
+        for (pat, want) in cases {
+            assert_eq!(&check_pattern(pat), want, "pattern {pat}");
+        }
+    }
+
+    /// The rewrite keeps the source text: messages quote `\<`, not `<`, and the
+    /// class they name is the one the programmer wrote.
+    #[test]
+    fn messages_quote_the_source_not_the_rewrite() {
+        let msgs = check_pattern(r"[\<\<]");
+        assert_eq!(msgs, vec![r"`\<` is duplicated in [\<\<]"]);
     }
 
     #[test]

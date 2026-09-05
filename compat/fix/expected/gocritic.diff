@@ -39,7 +39,7 @@
  func typeSwitchVar(v interface{}) int {
 --- a/extras.go
 +++ b/extras.go
-@@ -212,7 +212,7 @@
+@@ -294,7 +294,7 @@
  }
  
  func hexLiteralExtra() {
@@ -48,7 +48,7 @@
  	_ = 0xfF
  }
  
-@@ -265,7 +265,7 @@
+@@ -347,7 +347,7 @@
  type byteWriterExtra struct{}
  
  func (*byteWriterExtra) WriteRune(r rune) (int, error) { return 0, nil }
@@ -57,7 +57,7 @@
  
  type runeWriterExtra struct{}
  
-@@ -274,7 +274,7 @@
+@@ -356,7 +356,7 @@
  type wrongByteWriterExtra struct{}
  
  func (*wrongByteWriterExtra) WriteRune(r rune) (int, error) { return 0, nil }
@@ -66,7 +66,7 @@
  
  func preferWriteByteExtra(w *byteWriterExtra, runeOnly *runeWriterExtra, wrong *wrongByteWriterExtra) {
  	_, _ = w.WriteRune('\n')
-@@ -318,7 +318,7 @@
+@@ -400,7 +400,7 @@
  
  type preferWriterExtra struct{}
  
@@ -75,7 +75,7 @@
  func (*preferWriterExtra) WriteString(s string) (int, error) { return 0, nil }
  
  func preferFprintExtra(w *preferWriterExtra, x int) {
-@@ -541,7 +541,7 @@
+@@ -623,7 +623,7 @@
  
  func urNamedResults() (a, b int) { return 0, 0 }
  
