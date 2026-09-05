@@ -23666,3 +23666,105 @@ karmada に残る 1 件は gosec **G704**（SSRF taint、`aggregate.go:255`）�
 
 golden **228** / fix **228** / reject **14** / workspace **278 スイート** /
 OSS pr tier **8 ターゲット**。
+
+### 2026-09-05（続き 201）— `close k6`。**import しただけのパッケージの enum には member が無かった** —— fact が無いのだから、と黙っていた
+
+k6 の残り 1 件は `nolintlint` の guff-only:
+
+```
+internal/js/modules/k6/browser/common/remote_object.go:83:nolintlint:
+  directive `//nolint:exhaustive` is unused for linter "exhaustive"
+```
+
+**nolintlint の欠陥ではない。** 上流の `NolintFilter.doesMatch` は
+「その linter の finding をこの範囲で 1 つでも抑制したか」を見て、抑制して
+いれば unused 扱いを取り消す。golangci-lint は `exhaustive` をそこで撃って
+いる。guff は撃たない —— だから directive が浮く。**exhaustive の欠陥**で
+ある。
+
+#### 原因: fact は「解析したパッケージ」からしか来ない
+
+`nishanths/exhaustive` v0.12.0 の `fromNamed` は、自分の外の enum を
+`importFact` **だけ**で解決する。fact はそのパッケージを解析したときに
+`exportFact` されるもので、golangci-lint は fact producer が有効なら
+**依存の syntax まで読み込む**ので必ず存在する。guff は訊かれた
+パッケージだけを解析して残りは import するので、**存在しない**。結果、
+import した enum の switch は member 0 個 = 常に exhaustive。
+
+先代のメモは「別 module の enum はソースから型検査されないので無理、
+whole-program mode が要る」と書いていたが、**両方外れていた**。40 行の
+再現（`replace` で繋いだ 2 module）で測ると同 module の別パッケージでも
+同じく黙る。そして member は**ソースが要らない** —— `checklist.add` は
+`includeUnexported = pass.Pkg == e.typ.Pkg()` なので、他所の enum に
+求められるのは **exported な const だけ**。それは import 済みパッケージの
+スコープにそのまま入っている。
+
+#### 直し方: fact が無ければスコープを読む
+
+`enum_for_tag` に fallback を足す。ただし**並び順**が問題になる。上流の
+`groupify` は欠けている member を**宣言位置順**に並べるのに、guff の
+スコープは名前順で、値順でもない（`Zebra=7, Red=1, Mango=5` のような形で
+3 通りが全部違う）。
+
+依存パッケージはソースから型検査されている。しかし
+`WorkerOverlays::clear_source_positions` が **position を 0 に潰す** ——
+FileSet 絶対値なので run をまたいで再利用できないからで、これは正しい。
+潰されていないものがあった: **`ObjectMeta::order`**、Go の
+`object.order_` そのもので、パッケージレベル宣言に 1 から順に振られる。
+`(order, pos)` で並べれば、ソースから来た依存（order あり・pos 無し）も
+export data から来たもの（order 無し・pos あり）も正しく並ぶ。
+
+#### ついでに直した 1 件: **alias は enum ではない**
+
+計測中に別の乖離が出た。`type KindAlias = Kind` を tag にした switch を
+guff だけが撃つ。上流の `fromType` は `*types.Named` / `*types.Union` /
+`*types.TypeParam` しか受けず、**`*types.Alias` はどの枝にも当たらない**
+（go1.23 以降 alias は materialize される）。guff は
+`unalias_readonly` してから見ていた。**この欠陥は元からある**（ローカルな
+enum の alias でも出る）が、上の修正は同じ経路を通るので、直さなければ
+「import した enum の alias」で誤検出が増える。同じ PR で直した。
+
+#### 測った形
+
+`replace` で繋いだ 2 module に **18 形**。両ツールの出力を diff して全一致
+（`max-same-issues` は 0 にする —— 既定の 3 で同じ文が 4 回出る形を作って
+しまい、「上流は conversion を撃つのに guff は撃たない」と**一度読み違えた**）。
+
+| 形 | 結果 |
+|---|---|
+| 別 module の enum、宣言順が名前順とも値順とも違う | 一致（`Zebra, Mango, Apple`） |
+| 同 module 別パッケージの enum | 一致 |
+| 文字列 enum | 一致 |
+| 同値の 2 名（`FlagOne`/`FlagUno`）＋ blank ＋ unexported | 一致（代表 1 つ、unexported は要求しない） |
+| 全部書いてある switch | 両方黙る |
+| exported が 1 つだけの enum | 両方黙る |
+| `default` 節（既定では免罪しない） | 一致 |
+| **alias** を tag にした switch | 両方黙る（修正後） |
+| enum 上の defined type | 両方黙る |
+| enum でない型 | 両方黙る |
+| conversion を tag にした switch | 一致 |
+| map リテラルの鍵（`check: [map]`） | 一致 |
+| `ignore-enum-members` で 1 つ除外 | 一致 |
+| `default-signifies-exhaustive: true` | 一致 |
+
+fixture は **module を分けて**置いた（`enumdep/` に go.mod）。同じ module に
+置くと解析対象になって fact 経路が使われ、**テストは通るのに何も測らない**。
+golden / isolate / Rust 単体テストの 3 つが同じファイルを読む。単体テストは
+等値アサーションで、fallback を外すと 0 件になることと、`unalias` を戻すと
+6 件目が出ることを両方確かめてある。
+
+golden 再生成は**キー集合差分で消えたキー 0・追加 5**。
+
+#### 効果
+
+```
+k6: guff=424 golangci=423 both=423 P=99.8%  →  guff=423 golangci=423 P=R=100% [OK]
+```
+
+台帳 **40/100 → 41/100**（43 定義、open 2）。残る open は cri-o（linux 専用・
+この host では測れない）と karmada の gosec G704 だけになった。
+
+#### ゲート
+
+golden **228** / fix **228** / reject **14** / isolate（exhaustive ターゲット
+OK）/ workspace **278 スイート** / OSS pr tier **8 ターゲット**。

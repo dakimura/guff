@@ -9,3 +9,8 @@
 bad.go:16:2:exhaustive::missing cases in switch of type p.Color: p.Blue
 bad.go:25:13:exhaustive::missing keys in map of key type p.Color: p.Blue
 bad.go:41:2:exhaustive::missing cases in switch of type p.Size: p.Medium, p.Large
+foreign.go:10:2:exhaustive::missing cases in switch of type enumdep.Kind: enumdep.KindA, enumdep.KindM
+foreign.go:20:2:exhaustive::missing cases in switch of type enumdep.Flag: enumdep.FlagTwo
+foreign.go:51:2:exhaustive::missing cases in switch of type enumdep.Kind: enumdep.KindA, enumdep.KindM
+foreign.go:82:2:exhaustive::missing cases in switch of type enumdep.Kind: enumdep.KindA, enumdep.KindM
+foreign.go:99:18:exhaustive::missing keys in map of key type enumdep.Kind: enumdep.KindA, enumdep.KindM

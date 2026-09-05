@@ -245,6 +245,69 @@ fn import_enum_members(pass: &Pass<'_>, type_name: ObjectId) -> Option<EnumMembe
     None
 }
 
+/// Enum members read straight out of the declaring package's scope, for a type
+/// whose package this run never analysed.
+///
+/// Upstream learns a *foreign* enum's members from an object fact, which exists
+/// because golangci-lint runs the analyzer over dependency syntax too. guff
+/// analyses the packages it was asked about and imports the rest, so the fact
+/// is simply absent — and a `switch` over an imported enum then saw no members
+/// and was never non-exhaustive. Every member upstream would count is in that
+/// package's scope regardless of how the package arrived: `checklist.add`
+/// passes `includeUnexported = pass.Pkg == e.typ.Pkg()`, so for a foreign enum
+/// only the exported constants matter, and those are exactly what export data
+/// carries.
+///
+/// The fact's own order is AST order, which the scope does not keep — and
+/// which the message depends on, since `groupify` sorts the missing members by
+/// declaration position. See the sort key below for what stands in for it.
+fn enum_members_from_scope(pass: &Pass<'_>, type_name: ObjectId) -> Option<EnumMembersFact> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    // A type in the package under analysis is covered by `find_enums`; getting
+    // here for one means it has no members, not that they are elsewhere.
+    if Some(type_name.pkg(&artifacts.objects)?) == pass.type_pkg() {
+        return None;
+    }
+    let scope = artifacts
+        .packages
+        .get(type_name.pkg(&artifacts.objects)?)
+        .scope();
+    let mut found: Vec<((u32, u32), String, String)> = Vec::new();
+    for name in artifacts.scopes.get(scope).names() {
+        let Some(obj) = artifacts.scopes.get(scope).lookup_local(&name) else {
+            continue;
+        };
+        let Some((owner, member, val)) = possible_enum_member(pass, obj) else {
+            continue;
+        };
+        if owner != type_name {
+            continue;
+        }
+        // Declaration order, whichever way the package arrived. A dependency
+        // type-checked from source keeps Go's `object.order_` (1-based, in
+        // declaration order) but has its positions **erased**: they are
+        // FileSet-absolute and the overlay is reused across runs whose bases
+        // differ. One decoded from export data is the other way round — no
+        // order, but a synthesized position. Zero is the absent value on both
+        // sides, so the pair sorts correctly either way.
+        found.push((
+            (obj.order(&artifacts.objects), obj.pos(&artifacts.objects)),
+            member,
+            val,
+        ));
+    }
+    if found.is_empty() {
+        return None;
+    }
+    found.sort();
+    let mut fact = EnumMembersFact::default();
+    for (_, name, val) in found {
+        fact.names.push(name.clone());
+        fact.name_to_value.insert(name, val);
+    }
+    Some(fact)
+}
+
 fn type_of_expr(pass: &Pass<'_>, expr: &Expr) -> Option<(TypeId, OperandMode)> {
     let info = pass.types_info()?;
     let tv = info.types.get(&expr.id())?;
@@ -257,15 +320,22 @@ fn enum_for_tag(
     tag_typ: TypeId,
 ) -> Option<EnumTypeInfo> {
     let artifacts = pass.pkg().type_artifacts.as_ref()?;
-    let typ = unalias_readonly(&artifacts.types, tag_typ);
-    let TypeData::Named(n) = artifacts.types.get(typ) else {
+    // **No unaliasing.** Upstream's `fromType` switches on the type as
+    // recorded, and an alias is a `*types.Alias`, not a `*types.Named` — it
+    // matches no case and is not an enum. Go materializes aliases by default
+    // since go1.23, so `switch k` on a `type KindAlias = Kind` parameter is
+    // silent upstream while guff reported the whole of `Kind`'s membership.
+    let TypeData::Named(n) = artifacts.types.get(tag_typ) else {
         return None;
     };
     let type_name = n.obj();
     if let Some(info) = local.get(&type_name) {
         return Some(info.clone());
     }
-    let members = import_enum_members(pass, type_name)?;
+    let members = match import_enum_members(pass, type_name) {
+        Some(m) => m,
+        None => enum_members_from_scope(pass, type_name)?,
+    };
     let ObjectData::TypeName(tn) = artifacts.objects.get(type_name) else {
         return None;
     };

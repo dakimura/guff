@@ -15,6 +15,18 @@ pub fn testdata(name: &str) -> PathBuf {
         .join(name)
 }
 
+/// A file from the compat isolate fixture for `linter`.
+///
+/// Unit tests that read their own copy of a fixture drift from the tier that
+/// gates it: the copy keeps passing while the shape the tiers measure has
+/// moved. Point both at the same file instead.
+pub fn isolate_fixture(linter: &str, file: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../compat/isolate/fixtures")
+        .join(linter)
+        .join(file)
+}
+
 pub fn collect_stubs(dir: &Path) -> Vec<(String, PathBuf)> {
     let stub_dir = dir.join("stub");
     let mut deps = Vec::new();
