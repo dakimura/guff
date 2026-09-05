@@ -24015,3 +24015,72 @@ tailscale: guff=99 golangci=43 both=38 P=38.4% R=88.4%  unexpected 66
 golden **230**（新しい 2 本を含む）/ fix **230** / reject **14** /
 isolate（revive ターゲット）/ workspace **278 スイート** /
 OSS pr tier **8 ターゲット**。
+
+### 2026-09-05（続き 205）— **型パラメータは nil と比べられる**。`hasNil` の後半分が無く、tailscale の 8 パッケージが落ちていた
+
+続き 203 で数えた ill-typed 8 パッケージ。最小は `util/mak` の 17 行:
+
+```go
+func Set[K comparable, V any, T ~map[K]V](m *T, k K, v V) {
+	if *m == nil {          // guff: operator EQL not defined on operands
+```
+
+`go build` は通る。上流 `hasNil` の interface 枝はこう書いてある:
+
+```go
+case *Interface:
+    return !isTypeParam(t) || underIs(t, func(u Type) bool {
+        return u != nil && hasNil(u)
+    })
+```
+
+guff は**前半分だけ**だった（`TypeData::Interface(_) => !is_type_param(...)`）。
+型パラメータの underlying は制約インタフェースなのでこの枝に来て、常に
+「nil を持たない」と答える。**型集合の全項が nil を持つなら持つ**、が正しい。
+
+#### 引数の付け替え
+
+`under_is` は型集合の遅延計算をするので `&mut TypeArena` と object/package
+arena が要る。`has_nil` は `&TypeArena` しか取っていなかった —— これが
+「後半分を書かなかった」理由だと思われる。8 箇所の呼び出しを直し、
+`assignable_to` の `representable` コールバックの型を、**隣の `implements`
+コールバックと同じ形**（`&mut TypeArena, &ObjectArena, &PackageArena, …`）に
+広げた。1 箇所（`check_expr_const`）は `match self.types.get(u)` の借用と
+衝突するので、match の前に持ち上げてある。
+
+#### 測った形（11 形、1 形 1 パッケージ）
+
+| 形 | Go | guff（修正後） |
+|---|---|---|
+| `~map[K]V` の `*m == nil` | OK | OK |
+| `~[]E` の `s != nil` | OK | OK |
+| `~[]int \| ~map[string]int \| ~*int \| ~chan int \| ~func()` | OK | OK |
+| `switch s { case nil: }` | OK | OK |
+| `*p = nil`（型パラメータ変数への代入） | OK | OK |
+| `return nil`（型パラメータの結果） | OK | OK |
+| `g[int, []int](nil)`（引数） | OK | OK |
+| `*T` へのポインタ比較 | OK | OK |
+| `~[]int \| ~int`（nil を持たない項が 1 つ） | 拒否 | 拒否 |
+| `any` | 拒否 | 拒否 |
+| `comparable` | 拒否 | 拒否 |
+
+`switch` の形（4 行目）も**同じ原因**だった —— 上流の `comparison` は case 節を
+`op = EQL` として同じ経路に流すので `hasNil` に来る。guff は
+「cannot switch on s (S is not comparable)」と別の文言で拒否していた。
+
+拒否側 3 形の**文言は違う**（上流「invalid operation: v == nil (mismatched
+types T and untyped nil)」、guff「cannot convert untyped nil to type T」）。
+可否は一致していて、どちらもパッケージが ill-typed になるので compat には
+出ない。
+
+#### 効果
+
+```
+tailscale: ill-typed 8 パッケージ → 7、util/mak は 4 errors → 1
+```
+
+**全部は片付かない。** 残りは別原因で、`util/mak` の残り 1 件は
+`make(M)`（型パラメータに対する `make`。上流は core type を見る）、
+`control/controlclient` と `types/views` は
+「cannot infer type arguments in call」。`types/prefs` の 29 件は未調査。
+それぞれ別のタスク。

@@ -41,7 +41,13 @@ fn implements_closure(
 }
 
 /// The `representable` closure: is constant operand `x` representable as `t`?
-fn representable_closure(a: &TypeArena, x: &Operand, t: TypeId) -> bool {
+fn representable_closure(
+    a: &mut TypeArena,
+    o: &ObjectArena,
+    pk: &PackageArena,
+    x: &Operand,
+    t: TypeId,
+) -> bool {
     match &x.val {
         Some(v) => representable_const(a, v, t).is_some(),
         None => false,
