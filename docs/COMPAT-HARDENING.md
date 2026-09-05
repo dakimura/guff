@@ -24353,3 +24353,90 @@ golangci-lint は revive に**ファイル名の配列しか渡さない**
 tailscale: unexpected 11 → 7   （guff-only の revive が消えた）
 残り: govet 2（guff-only, printf）/ govet 4 + goimports 1（gcl-only）
 ```
+
+### 2026-09-06（続き 210）— printf が**見ないと決める**2 つの規則。`isFormatter` と「byte 配列は文字列として出る」
+
+tailscale の guff-only 2 件（govet:printf）。どちらも **`go vet` 自身が
+黙る**ので、guff の過剰報告:
+
+```
+net/tstun/wrap_test.go:686   %s に [disco.NonceLen]byte{} を渡している
+types/geo/point_test.go:368  t.Fatalf("… err %r, expected nil", err)
+```
+
+#### 1. `isFormatter` —— インタフェースの引数は**丸ごと見ない**
+
+```go
+// Could verb's arg implement fmt.Formatter?
+// Skip check for the %w verb, which requires an error.
+formatter := false
+if v.typ != argError && operation.Verb.ArgIndex < len(call.Args) {
+    if tv, ok := pass.TypesInfo.Types[call.Args[...]]; ok {
+        formatter = isFormatter(tv.Type)
+    }
+}
+if !formatter { …未知の verb / 型不一致 / すべての検査… }
+```
+
+そして `isFormatter` の 1 行目:
+
+```go
+// If the type is an interface, the value it holds might satisfy fmt.Formatter.
+if _, ok := typ.Underlying().(*types.Interface); ok {
+    if !typeparams.IsTypeParam(typ) {
+        return true
+    }
+}
+```
+
+**型パラメータでないインタフェースは全部** formatter 扱い。だから
+`%r` に `error` を渡しても黙り、`%y` に `string` を渡すと撃つ ——
+verb ではなく**引数の型**が効いている。実測で確かめた（`%y`+string は
+両ツールが撃ち、`%z`/`%r`+error はどちらも黙る）。
+
+**`%w` は除外**。`%w` の引数は必ずインタフェースなので、ここで formatter
+判定を掛けると「does not support error-wrapping directive %w」が消える。
+最初それをやって**既存の単体テストに捕まった**。未知の verb は除外されない
+——上流はこの行に来るとき `v` が表の最後（`X`）に残っており、その bits は
+`argError` ではないから。
+
+#### 2. byte 配列は `%s` に一致する
+
+`matchArgType` の `*types.Array` は「Same as slice」で、要素が `Byte` かつ
+verb が `argString` を含むなら true。guff の Array 枝は要素へ再帰するだけ
+だった。
+
+直したついでに**逆向きの食い違い**が出た: guff の Slice 枝は `[]rune` も
+文字列扱いしていたが、上流は **byte だけ**。`fmt` は rune スライスを int32
+の並びとして出すので、`fmt.Sprintf("%s", []rune{…})` は上流が撃つ。
+両方の枝を byte だけに揃えた。
+
+#### 測った形（19 形）
+
+1 モジュールに並べて両ツール diff で**全一致**。formatter 側:
+`error`/`any`/本物の `fmt.Formatter` は黙り、`string`/素の struct は撃つ。
+`%w` は wrapper なら黙り、`fmt.Sprintf` なら撃つ。配列側: `[24]byte` /
+配列リテラル / 名前付き `[32]byte` / `[]byte`（`%s %q %x`）は黙り、
+`[]rune` と `[3]int` は撃つ。
+
+fixture は `crates/guff-govet/tests/testdata/printf/formatter.go`（golden の
+govet ケースが読む）。golden 再生成は**キー集合差分で消えたキー 0・追加 5**
+——`// fires` と書いた 5 つちょうど。単体テストは**等値**で、
+formatter ガードを外すと 8 件、byte 配列の枝を戻すと 8 件になることも
+確認した。
+
+#### 効果
+
+```
+tailscale: guff=44 → 42、P=86.4% → 90.5%
+  guff-only: {revive: 4（allowlist 済み）}   printf は 2 → 0
+```
+
+残るのは gcl-only 5 件（govet:nilness 3 / govet:inline 1 / goimports 1）。
+
+#### ついでに気づいた別件
+
+`guff run` の既定パターンは **`.`**（`cli.rs`）だが、`golangci-lint run` の
+既定は **`./...`**。compat の harness は常に明示的にパターンを渡すので
+findings には出ないが、素の実行では別のものを測る。CLI の既定値の話なので
+別タスク。
