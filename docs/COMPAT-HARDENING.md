@@ -23918,3 +23918,100 @@ func Set[K comparable, V any, T ~map[K]V](m *T, k K, v V) {
 `types/prefs/prefs_example` も落ちていて、原因が同じかはまだ測っていない。
 
 **この PR に Rust の変更は無い。** 採用と測定と原因の切り分けまで。
+
+### 2026-09-05（続き 204）— `close tailscale` の 55 件。revive の rule ごとの **`arguments` はサブチェックの選択**で、guff は全部走らせていた
+
+続き 203 で切り分けた 55 件。tailscale の config:
+
+```yaml
+- name: defer
+  arguments: [["immediate-recover", "recover", "return"]]
+```
+
+上流 `DeferRule.allowFromArgs` は、**引数が無ければ 6 つ全部**（loop /
+callChain / methodCall / return / recover / immediateRecover）、あれば
+`arguments[0]` の配列に載っているものだけを allow-set に入れ、
+`newFailure` が set に無い failure を**捨てる**。guff は allow-set を持たず
+6 つ全部を撃っていた。
+
+#### 直したのは 3 つ
+
+**1. `arguments` を読む。** `allow_from_args` を足して `report` で弾く。
+引数リストは **allow-set であって deny-set ではない**ので、`["loop"]` と
+書けば loop **だけ**になる（テストで固定した）。
+
+**2. 歩き方を上流に合わせた。** guff の `visit_block` は FuncDecl の本体から
+`For` / `Range` / `Block` / `Defer` / `ExprStmt` / `Return` にしか降りていな
+かった。上流は `ast.Walk` で**全ノード**を訪れ、`ForStmt`/`RangeStmt`/
+`FuncLit`/`CallExpr`/`DeferStmt` でだけ状態を変えるか降下を止める。だから
+guff は `_ = recover()`（**代入文**）を見ておらず、`recover` サブチェックが
+「実装されているのに一度も発火しない」状態だった。`if` の中でも同じ。
+
+**3. `methodCall` を足した。** `defer V.M(v)` —— レシーバが**型**なら
+method expression で、値レシーバのメソッドを defer するのは危ない、という
+サブチェック。上流は `id.Obj.Kind == ast.Typ`、つまり**パーサの（ファイル
+単位の）オブジェクト解決**で判定する。型情報で代用すると**別の質問**に答えて
+しまう —— go/parser の解決は 1 ファイル内で閉じるので、同じパッケージでも
+**別ファイルで宣言された型なら上流は黙る**。
+
+#### `Ident.obj` は既定で埋まっていない（P0-3）
+
+guff は「`Ident.obj` を読む analyzer が 1 つも有効でなければ解決を飛ばす」
+（`AST_OBJECT_RESOLUTION_ANALYZERS`）。その doc は
+**「リストに無い analyzer は失敗しない —— 黙るだけだ」**と警告していて、
+まさにそれを踏んだ: revive はリストに無いので `methodCall` は永久に黙る。
+
+revive を丸ごとリストに足すと**解決の walk が revive を有効にした全設定で
+走る**。tailscale（`default: none` + revive）で測ると:
+
+| | wall（3 回） |
+|---|---|
+| 解決オフ | 5.21 / 5.17 / 5.36 |
+| 解決オン | 5.42 / 5.52 / 5.33 |
+
+5.2s に対して +0.2s ほど。**1 サブチェックのために全設定へ課すには高い**ので、
+`guff_revive::needs_ast_object_resolution(settings)` を足して
+**`defer` が有効かつ allow-set に `methodcall` があるときだけ**解決を有効に
+した。revive で `Ident.obj` を読むのはこのサブチェックだけであることは
+grep で確認済み（他の `.obj` は全部 `artifacts.objects`＝型側）。
+tailscale の設定では `methodCall` が外れているので、**この修正を入れても
+tailscale の wall は変わらない**。
+
+#### 測った形
+
+6 サブチェック + 黙る形を 1 関数ずつ並べた fixture を、**2 つの config**で。
+golden case を 2 本足した（`revive-defer-default` / `revive-defer-subset`）——
+`revive-exclude-on`/`off` と同じ「引数の有無で 2 本」の形で、同じ fixture を
+読ませてある。差分は**ちょうど 4 件**:
+
+```
+< prefer not to defer inside loops        (×2)
+< prefer not to defer chains of function calls
+< be careful when deferring calls to methods without pointer receiver
+```
+
+`defer a.B().C()` は **callChain ではない**（callee は SelectorExpr で、
+上流が見るのは callee が CallExpr かどうか）ことも fixture に入れてある。
+本物の callChain は `defer a.Cleanup()()` —— tailscale が
+`defer b.CheckDeadlocks()()` を 13 回書いている形。
+
+単体テストは 3 通りの引数（無し / tailscale の 3 つ / `["loop"]` だけ）で
+**件数を等値**で固定し、allow-set を無視するように戻すと落ちることも確認した。
+
+#### 効果
+
+```
+tailscale: guff=99 golangci=43 both=38 P=38.4% R=88.4%  unexpected 66
+       →   guff=44 golangci=43 both=38 P=86.4% R=88.4%  unexpected 11
+  guff-only: {'revive': 59, 'govet': 2}  →  {'revive': 4, 'govet': 2}
+```
+
+**55 件ちょうど**が消えて、他は 1 件も動いていない。残る revive 4 件は
+`time-equal` の過剰報告（続き 203 の表）で別件。ill-typed 8 パッケージも
+そのままで、これも別件。
+
+#### ゲート
+
+golden **230**（新しい 2 本を含む）/ fix **230** / reject **14** /
+isolate（revive ターゲット）/ workspace **278 スイート** /
+OSS pr tier **8 ターゲット**。
