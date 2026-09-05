@@ -1819,3 +1819,73 @@ fn revive_exported_reads_all_of_its_flags() {
     ])
     .is_empty());
 }
+
+fn import_alias_messages(args: Vec<guff_revive::RuleArgument>) -> Vec<String> {
+    let settings = guff_revive::Settings {
+        severity: None,
+        rules: Some(vec![guff_revive::RuleSetting {
+            name: "import-alias-naming".into(),
+            arguments: args,
+            disabled: false,
+            severity: None,
+            exclude: Vec::new(),
+        }]),
+        confidence: Some(0.0),
+        ignore_generated_header: false,
+        enable_default_rules: false,
+        enable_all_rules: false,
+        go: None,
+    };
+    guff_revive::with_settings(settings, || {
+        let pkg =
+            support::typecheck_fixture_dir("revive", "import_alias", "example.com/revive/aliases");
+        let mut messages = support::run_analyzer(revive(), &pkg);
+        messages.sort();
+        messages
+    })
+}
+
+/// `import-alias-naming` takes a string *or* a map with two expressions.
+///
+/// ```text
+/// case string:         r.setAllowRule(namingRule)
+/// case map[string]any: … isRuleOption(k, "allowRegex") / "denyRegex" …
+/// if r.allowRegexp == nil && r.denyRegexp == nil { … default … }
+/// ```
+///
+/// guff had the default `^[a-z][a-z0-9]{0,}$` baked in and **no deny side at
+/// all**. telegraf configures `^[a-z][a-z0-9_]*[a-z0-9]+$`, which allows the
+/// underscore its aliases use — 128 findings golangci-lint does not make.
+#[test]
+fn revive_import_alias_naming_reads_both_expressions() {
+    use guff_revive::RuleArgument;
+
+    assert_eq!(
+        import_alias_messages(Vec::new()),
+        vec![
+            "import-alias-naming: import name (Upper) must match the regular expression: ^[a-z][a-z0-9]{0,}$",
+            "import-alias-naming: import name (with_underscore) must match the regular expression: ^[a-z][a-z0-9]{0,}$",
+        ],
+    );
+
+    assert_eq!(
+        import_alias_messages(vec![RuleArgument::String("^[a-z][a-z0-9_]*[a-z0-9]+$".into())]),
+        vec![
+            "import-alias-naming: import name (Upper) must match the regular expression: ^[a-z][a-z0-9_]*[a-z0-9]+$",
+        ],
+    );
+
+    // Both sides can fire on one alias: upstream appends, it does not `else`.
+    let mut map = std::collections::HashMap::new();
+    map.insert("allowRegex".to_string(), RuleArgument::String("^[a-z]+$".into()));
+    map.insert("denyRegex".to_string(), RuleArgument::String("^x".into()));
+    assert_eq!(
+        import_alias_messages(vec![RuleArgument::Map(map)]),
+        vec![
+            "import-alias-naming: import name (Upper) must match the regular expression: ^[a-z]+$",
+            "import-alias-naming: import name (with_underscore) must match the regular expression: ^[a-z]+$",
+            "import-alias-naming: import name (x9) must NOT match the regular expression: ^x",
+            "import-alias-naming: import name (x9) must match the regular expression: ^[a-z]+$",
+        ],
+    );
+}

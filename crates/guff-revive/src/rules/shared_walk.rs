@@ -199,7 +199,7 @@ impl<'a> SharedFileRules<'a> {
             identical_switch_conditions: enabled("identical-switch-conditions")
                 .then(|| identical_switch_conditions::Checker::new(pass)),
             if_return: enabled("if-return").then(|| if_return::Checker::new(pass)),
-            import_alias_naming: enabled("import-alias-naming").then(import_alias_naming::Checker::new),
+            import_alias_naming: enabled("import-alias-naming").then(|| import_alias_naming::Checker::new(pass)),
             imports_blocklist: enabled("imports-blocklist")
                 .then(|| imports_blocklist::Checker::try_new(pass))
                 .flatten(),

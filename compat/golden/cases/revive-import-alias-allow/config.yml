@@ -1,0 +1,24 @@
+# Golden case: the bare-string form, with telegraf's expression.
+#
+# `^[a-z][a-z0-9_]*[a-z0-9]+$` allows the underscore, so only the capitalised
+# alias is left.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      rules:
+        - name: import-alias-naming
+          arguments:
+            - "^[a-z][a-z0-9_]*[a-z0-9]+$"
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

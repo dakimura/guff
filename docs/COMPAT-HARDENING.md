@@ -22610,3 +22610,57 @@ OSS pr tier **8 ターゲットすべて P=R=100%**。台帳は **39/100**（42 
 
 telegraf に残るのは **143 件**: revive `import-alias-naming` の正規表現引数 128、
 nolintlint 5、他 10。
+
+### 2026-09-05（続き 188）— `import-alias-naming` は正規表現を 2 本取る。guff は既定を焼き込み、**deny 側を持っていなかった**
+
+telegraf の残りのうち **128 件**。設定は
+
+```yaml
+- name: import-alias-naming
+  arguments:
+    - "^[a-z][a-z0-9_]*[a-z0-9]+$"
+```
+
+で、telegraf の alias（`crypto_rand`、`serializers_json` …）が使う下線を許す
+表現である。guff は既定の `^[a-z][a-z0-9]{0,}$` を焼き込んでいて、
+メッセージにもその既定を引用していた —— **メッセージ自身が「設定を読んでいない」と
+言っていた**（続き 177 と同じ形の手がかり）。
+
+上流の `Configure` は引数を**文字列か map** で取る:
+
+```go
+switch namingRule := arguments[0].(type) {
+case string:         r.setAllowRule(namingRule)
+case map[string]any: … isRuleOption(k, "allowRegex") / "denyRegex" …
+}
+if r.allowRegexp == nil && r.denyRegexp == nil { … 既定 … }
+```
+
+guff には **deny 側が存在しなかった**。しかも `Apply` は 2 つを `else` で
+繋がず**両方 append** するので、`allowRegex` に外れて `denyRegex` に当たる
+alias は **1 つで 2 件**になる。
+
+**5 形**を両ツールで測って一致（引数なし／文字列／`allowRegex` map／
+`denyRegex` だけ／両方）。golden case は 3 つ:
+
+| case | 引数 | キー数 |
+|---|---|--:|
+| `revive-import-alias-default` | なし | 2 |
+| `revive-import-alias-allow` | telegraf の文字列 | 1 |
+| `revive-import-alias-allow-deny` | `allowRegex` + `denyRegex` | **4**（うち 1 つの alias が 2 件） |
+
+`_` と `.` は上流が明示的に他の規則に譲っているので、どちらも報告しない。
+
+```
+telegraf: guff-only 143 → 15
+```
+
+#### ゲート
+
+golden **228**（新規 3 case、既存 225 は無変更）/ fix **228** / reject **14** /
+isolate **116 ターゲット** / workspace **278 スイート** /
+OSS pr tier **8 ターゲットすべて P=R=100%**。台帳は **39/100**（42 定義、open 3）。
+
+telegraf に残るのは **15 件**: nolintlint 5（下の従属）、gocritic
+`unconditional-recursion` 3・`time-equal` 3、perfsprint 1、staticcheck 1、
+bodyclose 1、sqlclosecheck 1。
