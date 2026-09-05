@@ -40,6 +40,34 @@ func MaxBytesReader(w ResponseWriter, r io.ReadCloser, n int64) io.ReadCloser { 
 
 func NewRequest(method, url string, body io.Reader) (*Request, error) { return nil, nil }
 
+func NewRequestWithContext(ctx context.Context, method, url string, body io.Reader) (*Request, error) {
+	return nil, nil
+}
+
+// HandlerFunc, and a Client whose methods live on the *pointer* — G704's sinks
+// are declared `Pointer: true`, and a value receiver here would let a port that
+// ignores pointer-ness pass while the real `(*http.Client).Do` never matched.
+type HandlerFunc func(ResponseWriter, *Request)
+
+func (f HandlerFunc) ServeHTTP(w ResponseWriter, r *Request) { f(w, r) }
+
+type RoundTripper interface {
+	RoundTrip(*Request) (*Response, error)
+}
+
+type Client struct {
+	Transport RoundTripper
+}
+
+func (c *Client) Do(req *Request) (*Response, error) { return nil, nil }
+func (c *Client) Get(url string) (*Response, error)  { return nil, nil }
+func (c *Client) Post(url, contentType string, body io.Reader) (*Response, error) {
+	return nil, nil
+}
+func (c *Client) Head(url string) (*Response, error) { return nil, nil }
+
+var DefaultClient = &Client{}
+
 const StatusFound = 302
 
 func Redirect(w ResponseWriter, r *Request, urlStr string, code int) {}

@@ -43,7 +43,7 @@
 //! - **G406** — deprecated weak hash (`golang.org/x/crypto/{md4,ripemd160}`)
 //! - **G501–G507** — blocklisted imports
 //! - **G602** — slice index / bounds out of range (SSA; see `gosec_g602`)
-//! - **G702 / G703 / G705 / G706 / G710** — command injection, path traversal,
+//! - **G702 / G703 / G704 / G705 / G706 / G710** — command injection, path traversal, SSRF,
 //!   XSS, log injection and open redirect: one taint engine over five tables of
 //!   sources, sinks and sanitizers (SSA; see `gosec_taint`)
 //!
@@ -292,8 +292,8 @@ const EXTRA_RULE_IDS: &[&str] = &[
     "G123", "G201", "G202",
     "G203",
     "G204", "G301", "G302", "G303", "G304", "G306", "G402", "G403", "G602",
-    // The taint engine's five rules (`gosec_taint`), all SSA analyzers.
-    "G702", "G703", "G705", "G706", "G710",
+    // The taint engine's rules (`gosec_taint`), all SSA analyzers.
+    "G702", "G703", "G704", "G705", "G706", "G710",
 ];
 
 // The `rules/fileperms.go` defaults, now only the starting point:
@@ -592,6 +592,7 @@ const RULE_SCORES: &[(&str, Score, Score)] = &[
     // fourth score.
     ("G702", Score::High, Score::High),
     ("G703", Score::High, Score::High),
+    ("G704", Score::High, Score::High),
     ("G705", Score::Medium, Score::High),
     ("G706", Score::Low, Score::High),
     ("G710", Score::Medium, Score::High),

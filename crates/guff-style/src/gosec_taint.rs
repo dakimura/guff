@@ -1,4 +1,4 @@
-//! Gosec's taint engine — **G702 / G703 / G705 / G706 / G710** (SSA).
+//! Gosec's taint engine — **G702 / G703 / G704 / G705 / G706 / G710** (SSA).
 //!
 //! Port of securego/gosec v2.26.1 `taint/taint.go` plus the four rule
 //! configurations that drive it (`analyzers/commandinjection.go`,
@@ -9,6 +9,7 @@
 //! |---|---|---|
 //! | G702 | Command injection | `os/exec.Command*`, `syscall.Exec` / `ForkExec` / `StartProcess`, `os.StartProcess` |
 //! | G703 | Path traversal | the `os` / `io/ioutil` / `path/filepath` file API, plus `http.ServeFile{,FS}` |
+//! | G704 | SSRF | `http.Get`/`Post`/`Head`/`PostForm`, `http.NewRequest{,WithContext}`, the `(*http.Client)` methods, `net.Dial{,Timeout}`, `net.LookupHost`, `httputil.NewSingleHostReverseProxy` |
 //! | G706 | Log injection | `log.*`, and `log/slog`'s four level functions — **message argument only** |
 //! | G705 | XSS | `(http.ResponseWriter).Write`, the `fmt.Fprint*` / `io.WriteString` family **when the writer is an `http.ResponseWriter`**, and the `html/template` unsafe-string conversions |
 //! | G710 | Open redirect | `http.Redirect`, **URL argument only** |
@@ -395,6 +396,53 @@ static G710: TaintRule = TaintRule {
 /// 0 is the writer (already spoken for by the guard) and the rest are format
 /// and data. guff passes variadic arguments individually rather than packing
 /// them into a slice, so those indices line up here the same way.
+/// `analyzers/ssrf.go`. The only rule whose sinks include **methods on a
+/// pointer receiver** (`(*http.Client).Do` and friends): the request object
+/// carries the taint, so the argument checked is the request, not a URL string.
+///
+/// No sanitizers. Upstream says why in the config itself — nothing in the
+/// standard library restricts which host a URL may name, `url.Parse` included,
+/// so an allowlist is the only real sanitizer and it is always custom code.
+///
+/// `net/url.URL` is **not** a source type here (it is for G703): a `*url.URL`
+/// parameter is not by itself external input.
+static G704: TaintRule = TaintRule {
+    id: "G704",
+    what: "SSRF via taint analysis",
+    type_sources: &[
+        TypeSource { pkg: "net/http", name: "Request" },
+        TypeSource { pkg: "bufio", name: "Reader" },
+        TypeSource { pkg: "bufio", name: "Scanner" },
+    ],
+    func_sources: &[
+        FuncSource { pkg: "os", name: "Args" },
+        FuncSource { pkg: "os", name: "Getenv" },
+    ],
+    sinks: &[
+        // The URL is the first data argument.
+        Sink::func("net/http", "Get", &[0]),
+        Sink::func("net/http", "Post", &[0]),
+        Sink::func("net/http", "Head", &[0]),
+        Sink::func("net/http", "PostForm", &[0]),
+        // NewRequest(method, url, body) and NewRequestWithContext(ctx, method,
+        // url, body): the URL only, so a tainted *method* string is not a
+        // finding here — it becomes one at the `Do` that sends the request.
+        Sink::func("net/http", "NewRequest", &[1]),
+        Sink::func("net/http", "NewRequestWithContext", &[2]),
+        // Receiver at index 0, request at 1.
+        Sink::ptr_method("net/http", "Client", "Do", &[1]),
+        Sink::ptr_method("net/http", "Client", "Get", &[1]),
+        Sink::ptr_method("net/http", "Client", "Post", &[1]),
+        Sink::ptr_method("net/http", "Client", "Head", &[1]),
+        // Dial(network, address) — the address.
+        Sink::func("net", "Dial", &[1]),
+        Sink::func("net", "DialTimeout", &[1]),
+        Sink::func("net", "LookupHost", &[0]),
+        Sink::func("net/http/httputil", "NewSingleHostReverseProxy", &[0]),
+    ],
+    sanitizers: &[],
+};
+
 static G705: TaintRule = TaintRule {
     id: "G705",
     what: "XSS via taint analysis",
@@ -470,7 +518,8 @@ static G120: TaintRule = TaintRule {
     sanitizers: &[],
 };
 
-pub(crate) static TAINT_RULES: &[&TaintRule] = &[&G120, &G702, &G703, &G705, &G706, &G710];
+pub(crate) static TAINT_RULES: &[&TaintRule] =
+    &[&G120, &G702, &G703, &G704, &G705, &G706, &G710];
 
 // ---------------------------------------------------------------------------
 // Call graph

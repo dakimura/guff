@@ -1,5 +1,7 @@
 package net
 
+import "time"
+
 type Listener interface {
 	Close() error
 }
@@ -11,3 +13,7 @@ type Conn interface {
 }
 
 func Dial(network, address string) (Conn, error) { return nil, nil }
+
+func DialTimeout(network, address string, timeout time.Duration) (Conn, error) { return nil, nil }
+
+func LookupHost(host string) ([]string, error) { return nil, nil }

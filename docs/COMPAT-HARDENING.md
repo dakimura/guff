@@ -23768,3 +23768,82 @@ k6: guff=424 golangci=423 both=423 P=99.8%  →  guff=423 golangci=423 P=R=100% 
 
 golden **228** / fix **228** / reject **14** / isolate（exhaustive ターゲット
 OK）/ workspace **278 スイート** / OSS pr tier **8 ターゲット**。
+
+### 2026-09-05（続き 202）— `close karmada`。**G704（SSRF）が丸ごと無かった** —— taint エンジンは 6 つあるルールのうち 5 つしか積んでいなかった
+
+karmada の残り 1 件:
+
+```
+pkg/registry/cluster/storage/aggregate.go:255:gosec:G704: SSRF via taint analysis
+```
+
+30 行に縮めた再現（`http.HandlerFunc` の中で `location.RawQuery = req.URL.RawQuery`
+→ `http.NewRequest(req.Method, location.String(), nil)` → `httpClient.Do`）で
+上流は撃ち、guff は黙る。**ただし原因は伝播の欠落ではなかった** ——
+`http.Get(req.URL.Query().Get("u"))` という最短の形ですら guff は黙る。
+`TAINT_RULES` に **G704 が入っていない**。エンジン（`gosec_taint.rs`）は
+G120 / G702 / G703 / G705 / G706 / G710 の 6 つで、SSRF だけ無かった。
+
+上流 `analyzers/ssrf.go` は宣言だけで、エンジンは既にある。足したのは
+テーブル 1 枚:
+
+- type source は `*http.Request` / `*bufio.Reader` / `*bufio.Scanner`。
+  **`net/url.URL` は入らない**（G703 には入る）。`*url.URL` の引数それ自体は
+  外部入力ではない、というのが上流の線。
+- func source は `os.Args` / `os.Getenv`。
+- sink は `http.Get/Post/Head/PostForm`（引数 0）、
+  `http.NewRequest`（引数 1）/ `NewRequestWithContext`（引数 2）、
+  **`(*http.Client)` の 4 メソッド**（レシーバが引数 0 なので request は 1）、
+  `net.Dial`/`DialTimeout`（引数 1）、`net.LookupHost`（引数 0）、
+  `httputil.NewSingleHostReverseProxy`（引数 0）。
+- **sanitizer は 1 つも無い**。上流が config の中で理由を書いている ——
+  標準ライブラリにホストを制限するものは無く、`url.Parse` も違う。
+
+`Sink::ptr_method` の**最初の利用者**でもある。`pointer` フィールドは
+「今は誰も立てていない」と doc に書かれたまま置いてあった。
+
+#### karmada の 1 件が `Do` にだけ出る理由
+
+`NewRequest` の CheckArgs は **URL（引数 1）だけ**で、そこに渡るのは
+`location.String()` —— `*url.URL` に request のフィールドを書き込んで
+render しただけなので **tainted ではない**（これも実測した。上流も黙る）。
+tainted なのは引数 0 の `req.Method` のほうで、CheckArgs 外なので
+`NewRequest` は撃たない。しかし返ってきた `*http.Request` は taint を運び、
+それが `Do` に渡って初めて sink になる。fixture の
+`G704URLStructThenDo` / `g704URLStructOnly` がこの 2 つを並べてある。
+
+#### 測った形
+
+17 形、1 形 1 パッケージで両ツールを diff して全一致。sink 側は上の表を
+全部（`Client` を**値**で持った `c.Get(…)` —— メソッドセットは `*Client` に
+解決する —— を含む）、source 側は request フィールド / `os.Getenv` /
+`os.Args` / `bufio.Scanner`、黙る側は定数 URL・CheckArgs 外の tainted method・
+`*url.URL` への field store。`url.QueryEscape` は G705 では sanitizer だが
+**ここでは違う**ので撃つ、も測ってある。
+
+#### 単体テストは golden の半分しか測っていなかった
+
+fixture を足して golden は 20 件になったのに、Rust 単体テストは **10 件**
+しか見なかった。`typecheck_fixture` が使う stub universe に
+`http.Client` も `net.Dial`/`DialTimeout`/`LookupHost` も
+`net/http/httputil` も無く、その 10 件は**型が付かないので存在しない**。
+stub を足して 20 件で揃えた —— これを直さないと「ポインタレシーバの sink」
+という**この rule の肝がテストされないまま緑**になる（[[empty-fixture-hides-defects]]
+の 7 形目）。
+
+#### ついでに見つけた別件（直していない）
+
+taint エンジンの findings は**位置順に並んでいない**。1 ファイルに 2 つ
+出る形で上流は 9→13 行、guff は 13→9 行。**G706 でも同じ**なので
+G704 とは無関係の既存の欠陥で、tier は集合で比較するので compat には
+出ない —— が、`max-same-issues` の既定 3 で**どの 3 件が残るかが変わる**
+経路なので、単独のタスクとして残す。
+
+#### 効果
+
+```
+karmada: guff=18 golangci=19 both=18 P=100% R=94.7%  →  guff=19 golangci=19 P=R=100% [OK]
+```
+
+golden 再生成は**キー集合差分で消えたキー 0・追加 23**（G704 が 20、
+新しい fixture 関数が変数 URL を使うので G107 が 3）。
