@@ -909,6 +909,7 @@ impl Checker {
         self.sort_objects();
         self.direct_cycles(); // report direct name-chain type cycles (cycles.go)
         self.package_objects();
+        self.resolve_deferred_instances();
         self.process_delayed(0); // includes all function bodies (once stmt.go lands)
         self.record_untyped(); // flush still-untyped expressions into Info.Types
         // init_order only fills Info.init_order (+ soft cycle errors). Seed
@@ -946,6 +947,100 @@ impl Checker {
         let pkg = self.packages.get_mut(self.pkg);
         pkg.set_go_version(go_version);
         pkg.mark_complete();
+    }
+
+    /// Fill in the underlying of generic instances that were created before
+    /// their origin's right-hand side existed.
+    ///
+    /// `new_named_instance` expands `orig.from_rhs` by substitution, and in a
+    /// reference cycle that field is still empty at the moment the instance is
+    /// made:
+    ///
+    /// ```go
+    /// type TaskFunc[T any, U any] func(ctx context.Context, t *Task, args T) (U, error)
+    /// type Task struct{ taskFunction TaskFunc[any, any] }
+    /// ```
+    ///
+    /// Resolving `TaskFunc`'s own right-hand side reaches `*Task`, whose field
+    /// instantiates `TaskFunc[any, any]` — and `TaskFunc` has no right-hand
+    /// side yet, so the instance is left with **no underlying at all**. It is
+    /// then neither assignable from a matching func literal nor callable, and
+    /// scaleway-cli's `internal/tasks` was ill-typed for exactly that: a whole
+    /// package guff analysed not at all.
+    ///
+    /// go/types has no such window — `Named.underlying` is computed on demand
+    /// by `resolve()`. guff expands eagerly, so the instances that lost the
+    /// race are filled in here: after every package-level type is resolved,
+    /// and before any function body is checked.
+    fn resolve_deferred_instances(&mut self) {
+        // Substituting may itself create instances, so repeat until nothing
+        // changes. The bound is a guard against a pathological cycle, not an
+        // expected limit — one pass settles every case measured.
+        for _ in 0..8 {
+            let mut pending: Vec<(TypeId, TypeId, Vec<TypeId>)> = Vec::new();
+            for i in 1..=self.types.len() {
+                let id = TypeId::from_index(i);
+                let crate::arena::TypeData::Named(n) = self.types.get(id) else {
+                    continue;
+                };
+                if n.underlying().is_some() {
+                    continue;
+                }
+                let Some(inst) = n.instance() else {
+                    continue;
+                };
+                let (orig, targs) = (inst.orig, inst.targs.list().to_vec());
+                let crate::arena::TypeData::Named(o) = self.types.get(orig) else {
+                    continue;
+                };
+                // Still unresolved, or an origin whose right-hand side is
+                // itself a Named (`type A[P] B[P]`) — `TypeId::underlying`
+                // re-dispatches for the latter, so leave it alone.
+                let Some(rhs) = o.from_rhs() else {
+                    continue;
+                };
+                let tparams: Vec<TypeId> = o
+                    .tparams
+                    .as_ref()
+                    .map(|l| l.list().to_vec())
+                    .unwrap_or_default();
+                if tparams.len() != targs.len() {
+                    continue;
+                }
+                pending.push((id, rhs, tparams));
+            }
+            if pending.is_empty() {
+                return;
+            }
+            let mut changed = false;
+            for (id, rhs, tparams) in pending {
+                let targs = match self.types.get(id) {
+                    crate::arena::TypeData::Named(n) => match n.instance() {
+                        Some(inst) => inst.targs.list().to_vec(),
+                        None => continue,
+                    },
+                    _ => continue,
+                };
+                let smap = crate::subst::make_subst_map(&tparams, &targs);
+                let mut ctxt = crate::context::Context::default();
+                let new_rhs = crate::subst::subst(
+                    &mut self.types,
+                    &mut self.objects,
+                    &smap,
+                    Some(id),
+                    &mut ctxt,
+                    rhs,
+                );
+                if matches!(self.types.get(new_rhs), crate::arena::TypeData::Named(_)) {
+                    continue;
+                }
+                crate::named::set_underlying(&mut self.types, id, new_rhs);
+                changed = true;
+            }
+            if !changed {
+                return;
+            }
+        }
     }
 
     /// Report imported packages that are never referred to.
