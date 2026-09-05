@@ -24302,3 +24302,54 @@ goimports 1）は型検査とは無関係。
 
 golden **230** / fix **230** / reject **14** / workspace **278 スイート** /
 OSS pr tier **8 ターゲット**。
+
+### 2026-09-06（続き 209）— revive `time-equal` は golangci-lint 2.12.2 では**一度も撃てない**。guff が正しいので allowlist に入れた
+
+tailscale の guff-only 4 件（`revive:time-equal`）。全部
+`time.Time` の `==` / `!=` 比較で、**guff の指摘は正しい**。上流が黙る。
+
+#### 原因は rule の 1 行
+
+`rule/time_equal.go` は、revive の 102 ルールで**ここだけ**のガードで始まる:
+
+```go
+w := &lintTimeEqual{file, onFailure}
+if w.file.Pkg.TypeCheck() != nil {
+    return nil
+}
+```
+
+golangci-lint は revive に**ファイル名の配列しか渡さない**
+（`pkg/golinters/revive/revive.go`:
+`revive.Lint([][]string{GetGoFileNames(pass)}, …)`）。revive は自前で
+`importer.Default()` を使ってパッケージを型検査し、それが golangci-lint の
+プロセス内では**エラーを返す**。そしてこのルールだけが、エラーなら
+ファイルごと捨てる。
+
+#### 測った（2026-09-06、golangci-lint 2.12.2 / revive v1.15.0）
+
+- **revive 自身の `testdata/time_equal.go`** —— 4 つの比較に
+  `// MATCH /use t.Equal(u) instead of "==" operator/` と注釈が付いている
+  —— を golangci-lint に掛けて **0 件**。guff はその 4 件ちょうどを出す。
+- ルールは有効で revive まで届いている: `GL_DEBUG=revive` が
+  「Enabled by config rules (1): time-equal」と出し、同じ run で
+  `exported` は撃つ。
+- **型情報が無いわけではない。** 同じ 1 ファイル・同じ run で、型情報を使う
+  が**ガードの無い** `string-of-int` は撃ち、`time-equal` は黙る。
+  `Package.TypeCheck` は検査が失敗しても部分的な `types.Info` を残す
+  （"Remember the typechecking info, even if config.Check failed"）ので、
+  他のルールは型を見られる。
+
+つまり乖離は**上流の統合の問題**であって guff の移植の問題ではない。
+
+#### 判断: guff は撃ち続ける
+
+`compat/allowlists/tailscale.txt` に 4 行。理由と測定はファイルの
+コメントにも書いた（`--update-allowlist` がコメントを落とすので、正典は
+この節）。上流の wrapper が型情報を渡すようになるか revive がガードを
+外したら、上流も撃つようになって差分は自然に閉じる —— そのとき 4 行を消す。
+
+```
+tailscale: unexpected 11 → 7   （guff-only の revive が消えた）
+残り: govet 2（guff-only, printf）/ govet 4 + goimports 1（gcl-only）
+```
