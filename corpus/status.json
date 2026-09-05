@@ -54,7 +54,7 @@
     "caddy": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260905T034301Z",
+      "at": "20260905T042929Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -70,7 +70,7 @@
     "cobra": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260905T034301Z",
+      "at": "20260905T042929Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -171,7 +171,7 @@
     "gin": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260905T034301Z",
+      "at": "20260905T042929Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -187,7 +187,7 @@
     "go-client": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260905T034301Z",
+      "at": "20260905T042929Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -211,7 +211,7 @@
     "helm": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260905T034301Z",
+      "at": "20260905T042929Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -238,7 +238,7 @@
     "k9s": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260905T034301Z",
+      "at": "20260905T042929Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -326,16 +326,16 @@
     "telegraf": {
       "tier": "hunt",
       "state": "open",
-      "at": "20260905T040829Z",
-      "open": 9,
-      "guff_only": 9,
+      "at": "20260905T043138Z",
+      "open": 5,
+      "guff_only": 5,
       "gcl_only": 0,
       "by_linter": {
-        "nolintlint": 5,
         "perfsprint": 1,
         "staticcheck": 1,
         "bodyclose": 1,
-        "sqlclosecheck": 1
+        "sqlclosecheck": 1,
+        "nolintlint": 1
       }
     },
     "thanos": {

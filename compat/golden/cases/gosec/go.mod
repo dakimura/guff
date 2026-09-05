@@ -21,3 +21,9 @@ require (
 replace gopkg.in/yaml.v3 => ./yamlv3
 
 replace github.com/BurntSushi/toml => ./bstoml
+
+// G201's `noIssueQuoted` table names `github.com/lib/pq.QuoteIdentifier`, so
+// the case needs that import path to exist. Stubbed like the three above.
+require github.com/lib/pq v0.0.0
+
+replace github.com/lib/pq => ./libpq

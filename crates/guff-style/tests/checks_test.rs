@@ -266,6 +266,39 @@ fn gosec_g402_names_the_first_cipher_off_the_list() {
     );
 }
 
+/// G201, whose fixture is one function per shape: nine reported, nine silent.
+///
+/// The rule never looks at the query expression it was handed — it demands a
+/// plain identifier, finds the `:=` that declared it in the same file, and
+/// judges *that* right-hand side. So the count is really a count of
+/// declarations, and the nine silent ones fail at nine different points:
+/// `Match`'s node set (a `return` is neither `AssignStmt` nor `ExprStmt`), the
+/// identifier requirement, `token.DEFINE`, the file-local search, the
+/// all-arguments-safe exemption (twice: constants, and `pq.QuoteIdentifier`),
+/// `sqlRegexp`, and `sqlFormatRegexp` (twice: `%d`, and no verb at all).
+///
+/// One of the nine findings comes from a function holding *two* risky database
+/// calls: both arms of `Match` `return` on the first SQL call they recognise,
+/// so an assignment yields at most one finding.
+#[test]
+fn gosec_g201_judges_the_declaration_not_the_query_argument() {
+    let pkg = support::typecheck_fixture("gosec", "example.com/gosec/g201", "g201.go");
+    let messages = support::run_analyzer(gosec(), &pkg);
+    let g201: Vec<&str> = messages
+        .iter()
+        .filter(|m| m.starts_with("G201"))
+        .map(|m| m.as_str())
+        .collect();
+    // Counted: eighteen shapes, nine findings — and every message is the
+    // same string, so the count *is* the assertion. Which lines they land on
+    // is gated by `compat/golden/cases/gosec`.
+    assert_eq!(g201.len(), 9, "{messages:?}");
+    assert!(
+        g201.iter().all(|m| *m == "G201: SQL string formatting"),
+        "{g201:?}"
+    );
+}
+
 /// G122 over a fixture that is about *which callbacks are found*.
 ///
 /// The callback argument is resolved as an SSA value upstream, so a function

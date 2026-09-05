@@ -129,6 +129,16 @@ g123/g123.go:46:4:gosec:high:G123: tls.Config uses VerifyPeerCertificate while s
 g123/g123.go:70:21:gosec:high:G123: tls.Config uses VerifyPeerCertificate while session resumption may remain enabled and VerifyConnection is not set; resumed sessions can bypass custom certificate checks
 g123/g123.go:71:46:gosec:high:G123: tls.Config uses VerifyPeerCertificate while session resumption may remain enabled and VerifyConnection is not set; resumed sessions can bypass custom certificate checks
 g123/g123.go:82:8:gosec:high:G123: tls.Config uses VerifyPeerCertificate while session resumption may remain enabled and VerifyConnection is not set; resumed sessions can bypass custom certificate checks
+g201/g201.go:50:7:gosec:medium:G201: SQL string formatting
+g201/g201.go:62:7:gosec:medium:G201: SQL string formatting
+g201/g201.go:72:7:gosec:medium:G201: SQL string formatting
+g201/g201.go:73:2:gosec:low:G104: Errors unhandled
+g201/g201.go:81:7:gosec:medium:G201: SQL string formatting
+g201/g201.go:91:7:gosec:medium:G201: SQL string formatting
+g201/g201.go:97:7:gosec:medium:G201: SQL string formatting
+g201/g201.go:105:7:gosec:medium:G201: SQL string formatting
+g201/g201.go:112:7:gosec:medium:G201: SQL string formatting
+g201/g201.go:121:8:gosec:medium:G201: SQL string formatting
 g304/g304.go:22:49:gosec:medium:G304: Potential file inclusion via variable
 g304/g304.go:34:58:gosec:medium:G304: Potential file inclusion via variable
 g304/g304.go:46:9:gosec:medium:G304: Potential file inclusion via variable

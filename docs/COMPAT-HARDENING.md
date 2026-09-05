@@ -22776,3 +22776,107 @@ workspace **278 スイート** / OSS pr tier **8 ターゲットすべて P=R=10
 
 telegraf に残るのは **9 件**: nolintlint 5（gosec 4・gocritic 1 の取りこぼしの
 従属）、perfsprint 1、staticcheck 1、bodyclose 1、sqlclosecheck 1。
+
+### 2026-09-05（続き 191）— G201 は渡されたクエリ式を見ない。**その識別子の宣言**を見る
+
+続き 190 で telegraf を 9 件まで詰めた残りのうち **5 件**。nolintlint 4 件と、
+その親である gosec G201 の取りこぼし——guff は G201 を `gosec.rs` 冒頭の
+DEFERRED 行に名前だけ挙げて、**一度も実装していなかった**。
+
+telegraf `plugins/outputs/sql/sql_test.go` の 4 箇所には
+`//nolint:gosec // linter doesnt like due to security; no risk of injection so
+is fine` が付いている。guff が G201 を撃たないので、この 4 行が
+**「使われていない nolint」**に見え、nolintlint がそれぞれ 1 件ずつ報告していた。
+つまり **1 つの穴が 2 つの linter に立っていた**。
+
+**穴であることの証明**（telegraf の checkout を複製し、`sed` で 4 つの
+`//nolint:gosec` だけを剥がして gosec だけを走らせた）:
+
+| | 結果（4 行を消した分だけ行番号がずれている） |
+|---|---|
+| golangci-lint | `G201` を **220:17 / 231:21 / 398:17 / 409:21** |
+| guff（修正前） | **0 件** |
+| guff（修正後） | **同じ 4 件、桁まで一致** |
+
+#### 上流の形
+
+`sqlStrFormat.checkQuery`（gosec v2.27.1 `rules/sql.go`）は**渡されたクエリ式を
+判定しない**。それが素の識別子であることを要求し、**呼び出しを含むファイルの中で**
+その識別子を宣言した `:=` を探し、**そちらの右辺**が危険な `fmt` 呼び出しかを訊く:
+
+```go
+ident, ok := query.(*ast.Ident)
+if !ok { return nil, nil }
+v, ok := ctx.Info.ObjectOf(ident).(*types.Var)
+…
+assign, ok := n.(*ast.AssignStmt)
+if !ok || assign.Tok != token.DEFINE { return true }
+```
+
+だからインラインで組み立てたクエリは報告されず、`var` 宣言のものもされない。
+報告位置は database 呼び出しではなく **`fmt` 呼び出しの先頭**である。
+
+そして `sqlStrFormat.Match` には `sqlStrConcat.Match` に**無い枝**がある:
+SQL 呼び出しが代入された呼び出しの**レシーバ**でもよい。
+
+```go
+if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
+	if sqlCall, ok := sel.X.(*ast.CallExpr); ok && s.ContainsCallExpr(sqlCall, ctx) != nil {
+		return s.checkQuery(sqlCall, ctx)
+	}
+}
+```
+
+telegraf の 4 件はすべて `err := db.QueryRow(q).Scan(&n)` ——まさにこの枝である。
+
+#### 測った形（18 形、報告 9・沈黙 9）
+
+`crates/guff-style/tests/testdata/gosec/g201.go` に**全部**入れた。沈黙 9 件は
+**別々の場所で落ちる**:
+
+| 形 | 落ちる場所 |
+|---|---|
+| `return db.QueryRow(q).Scan(&n)` | `Match` のノード集合（`AssignStmt`/`ExprStmt` のみ） |
+| `db.Query(fmt.Sprintf(…))` | 識別子であることの要求 |
+| `var q = fmt.Sprintf(…)` | `token.DEFINE` |
+| パッケージ変数 | ファイル内探索（`sqlStrConcat` は package まで広げるが `sqlStrFormat` は広げない） |
+| 定数だけの引数 | 「引数が全部安全」免除 |
+| `pq.QuoteIdentifier` だけ | 同上（`noIssueQuoted`） |
+| `"hello %s"` | `sqlRegexp` |
+| `%d` | `sqlFormatRegexp` = `%[^bdoxXfFp]` |
+| 引数なし | 同上（verb が無い） |
+
+報告側では `ConcatString` が `+` と識別子を辿ること（SQL キーワードが呼び出し側に
+現れない変数の中にいてもよい）、`fmtCalls` が 4 つあること（`Sprint` /
+`Sprintln` は verb を解釈しないが、規則は**文字列しか見ない**ので撃つ）、
+`Prepare` も `sqlCallIdents` にいること、免除が**全か無か**であること
+（`pq.QuoteIdentifier(col)` の隣に裸の `table` があれば報告）を固定した。
+
+**1 代入 1 件**も形にした。`Match` の両枝は `return s.checkQuery(...)` で、
+issue の有無に関わらず**最初に見つけた SQL 呼び出しで返る**ので、危険な
+database 呼び出しを 2 つ持つ代入でも findings は 1 件である。
+
+`noIssueQuoted` を測るために `github.com/lib/pq` の stub を足した
+（`stub/github.com/lib/pq/pq.go` と golden case の `libpq.go.mod`）。
+`fmt` stub には `Sprint`/`Sprintln`、`database/sql` stub には `DB.Prepare` を足した。
+
+**`Fprintf` の枝は上流でも到達不能**である。`checkQuery` はクエリ引数（`string`）の
+宣言だけを見るのに `fmt.Fprintf` は `(int, error)` を返すので、`q := fmt.Fprintf(…)`
+は型が合わない。忠実さのため移植はしたが、測れないことをコメントに書いた。
+
+golden の再生成は**キー集合で差分した: 消えたキー 0、追加 10**（G201 9 件と、
+`ExprStmt` の枝に届かせるために裸の文にした `tx.Exec(q)` が呼ぶ G104 1 件）。
+
+```
+telegraf: guff-only 9 → 5
+```
+
+#### ゲート
+
+golden **228**（`gosec` を再生成 —— **消えたキー 0、追加 10**）/ fix **228** /
+reject **14** / isolate **116 ターゲット** / workspace **278 スイート** /
+OSS pr tier **8 ターゲットすべて P=R=100%**。台帳は **39/100**（42 定義、open 3）。
+
+telegraf に残るのは **5 件**: perfsprint 1、staticcheck 1、bodyclose 1、
+sqlclosecheck 1、nolintlint 1（`plugins/serializers/graphite/graphite.go:21` の
+gocritic 取りこぼしの従属）。すべて原因が別である。
