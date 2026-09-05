@@ -132,6 +132,12 @@ impl CtrlFlowResult {
         self.no_return.contains(&obj)
     }
 
+    /// The whole set, for `buildir` to hand to the SSA builder.
+    /// (Go: what `buildssa` passes to `prog.SetNoReturn`.)
+    pub fn no_return_objects(&self) -> &HashSet<ObjectId> {
+        &self.no_return
+    }
+
     /// Whether `call`, appearing as a statement, cannot return — the question
     /// `go/cfg`'s builder asks through `mayReturn`.
     pub fn call_never_returns(&self, info: &Info, call: &CallExpr) -> bool {

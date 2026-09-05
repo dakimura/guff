@@ -677,6 +677,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         pass.files(),
         pass.fset().clone(),
         BuilderMode::NAIVE_FORM,
+        Default::default(),
     )
     .map_err(|e| format!("wastedassign: {e}"))?;
 

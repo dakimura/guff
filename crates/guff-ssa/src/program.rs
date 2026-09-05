@@ -67,6 +67,15 @@ pub struct Program {
     /// emitted (currently empty until `MakeInterface` is fully modeled).
     /// (Go: `Program.makeInterfaceTypes`.)
     pub(crate) make_interface_types: HashSet<TypeId>,
+    /// Function objects that cannot return normally, as the `ctrlflow`
+    /// analysis proved them. `emit_call` puts a `Panic` behind a static call
+    /// to one of these and starts an unreachable block, so the statements
+    /// after `log.Fatal(…)` are gone before any analyzer sees the function.
+    ///
+    /// (Go: `Program.noReturn`, a `func(*types.Func) bool` installed by
+    /// `(*Program).SetNoReturn`; `buildssa` passes `cfgs.NoReturn`. A set is
+    /// enough here because guff's predicate is a fact lookup either way.)
+    no_return: HashSet<ObjectId>,
 }
 
 /// Returns the type of value `v`, interpreted in function `f`'s value-space.
@@ -133,7 +142,20 @@ impl Program {
             object_methods: HashMap::default(),
             pending_builds: Vec::new(),
             make_interface_types: HashSet::default(),
+            no_return: HashSet::default(),
         }
+    }
+
+    /// Installs the "cannot return normally" predicate. Must be called before
+    /// the package is built — `emit_call` reads it as each call is emitted.
+    /// (Go: `(*Program).SetNoReturn`.)
+    pub fn set_no_return(&mut self, no_return: HashSet<ObjectId>) {
+        self.no_return = no_return;
+    }
+
+    /// Whether the function object `obj` cannot return normally.
+    pub fn is_no_return(&self, obj: ObjectId) -> bool {
+        self.no_return.contains(&obj)
     }
 
     /// Reports whether any of `types` contains a free type parameter. (Go:

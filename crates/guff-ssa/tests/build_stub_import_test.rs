@@ -40,6 +40,7 @@ fn build_stub_fixture(dir: &str, dep: (&str, &str)) {
         std::slice::from_ref(&main_file),
         fset,
         BuilderMode::SANITY_CHECK_FUNCTIONS,
+        Default::default(),
     )
     .expect("ssa build");
 

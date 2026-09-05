@@ -94,6 +94,7 @@ nilness/bad/bad.go:195:7:govet::nilness: panic with nil value
 nilness/bad/bad.go:209:12:govet::nilness: nil dereference in field selection
 nilness/bad/bad.go:232:6:govet::nilness: nil dereference in dynamic method call
 nilness/bad/bad.go:278:7:govet::nilness: impossible condition: non-nil == nil
+nilness/noreturn/noreturn.go:22:9:govet::nilness: impossible condition: nil != nil
 printf/argcount/argcount.go:6:17:govet::printf: fmt.Printf format %d reads arg #2, but call has 1 arg
 printf/argcount/argcount.go:7:2:govet::printf: fmt.Printf call needs 1 arg but has 2 args
 printf/bad/bad.go:6:14:govet::printf: fmt.Printf format %z has unknown verb z

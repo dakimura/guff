@@ -944,6 +944,43 @@ fn nilness_reports_every_category_at_upstreams_position() {
     );
 }
 
+/// The IR does not contain the statements after a call that cannot return.
+/// `buildssa` hands go/ssa the `ctrlflow` no-return predicate, `emitCall` puts
+/// a `Panic` behind such a call and starts an unreachable block, and
+/// `deleteUnreachableBlocks` removes the rest — so by the time any analyzer
+/// runs, the join block below has a single live predecessor and `err` is
+/// provably nil in it.
+///
+/// nilness is the visible consequence, so it is what this asserts. The fixture
+/// also holds the two shapes that must stay silent: the same code with a call
+/// that *does* return (an implementation that cut after every call would still
+/// pass without it), and a use after a branch that aborts, which is still
+/// reachable. Measured against golangci-lint 2.12.2: one finding, and this is
+/// it.
+#[test]
+fn nilness_sees_the_ir_cut_after_a_call_that_cannot_return() {
+    let dir = support::testdata("nilness");
+    let stub = dir.join("stub/log/log.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/govet/nilness/noreturn",
+        &dir.join("noreturn.go"),
+        &[("log", &stub)],
+    );
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let got: Vec<(i64, i64, String)> =
+        support::run_analyzer_diagnostics(nilness_analyzer(), &pkg)
+            .into_iter()
+            .map(|d| {
+                let p = fset.position(guff::position::Pos(d.pos as i64));
+                (p.line, p.column, d.message)
+            })
+            .collect();
+    assert_eq!(
+        got,
+        vec![(22, 9, "impossible condition: nil != nil".to_string())],
+    );
+}
+
 #[test]
 fn unreachable_flags_code_after_return() {
     let dir = support::testdata("unreachable");
