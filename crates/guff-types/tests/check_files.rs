@@ -1738,3 +1738,94 @@ fn complementing_a_typed_unsigned_constant_survives_the_round() {
         check.errors.iter().map(|e| &e.msg).collect::<Vec<_>>()
     );
 }
+
+/// `copy` over type parameters, one shape per line, against the verdict the Go
+/// toolchain gives for the same source.
+///
+/// go/types has a **special case** that runs before any core-type question:
+///
+/// ```go
+/// y := args[1]
+/// var special bool
+/// if ok, _ := x.assignableTo(check, NewSlice(universeByte), nil); ok {
+///     special = true
+///     for _, u := range typeset(y.typ) {
+///         if s, _ := u.(*Slice); s != nil && Identical(s.elem, universeByte) {
+///         } else if u != nil && isString(u) {
+///         } else { special = false; break }
+///     }
+/// }
+/// ```
+///
+/// A destination assignable to `[]byte` and a source whose whole type set is
+/// `[]byte`-or-string is accepted outright. guff knew only the concrete
+/// `copy([]byte, string)` form, so fiber's
+/// `func ScrubControls[S ~string | ~[]byte](s S, idx int) []byte` made
+/// `internal/logtemplate` ill-typed — and an ill-typed package is one guff
+/// analyses not at all, which a compat set-diff can only show as a run of
+/// golangci-only rows.
+#[test]
+fn copy_over_type_parameters_matches_the_toolchain() {
+    const PRELUDE: &str = "package p\n\
+         type Str interface{ ~string }\n\
+         type Bytes interface{ ~[]byte }\n\
+         type ByteStr interface{ ~string | ~[]byte }\n\
+         type NotByteStr interface{ ~string | ~[]int }\n\
+         type TwoSlices interface{ ~[]byte | ~[]int }\n";
+
+    // (source, the message the Go toolchain gives, or None when it accepts)
+    let cases: &[(&str, Option<&str>)] = &[
+        // The type set is entirely string-or-[]byte: the special case takes it.
+        (
+            "func f[S ByteStr](s S) []byte { d := make([]byte, len(s)); copy(d, s); return d }",
+            None,
+        ),
+        (
+            "func f[S Str](s S) []byte { d := make([]byte, len(s)); copy(d, s); return d }",
+            None,
+        ),
+        (
+            "func f[S Bytes](s S) []byte { d := make([]byte, len(s)); copy(d, s); return d }",
+            None,
+        ),
+        ("func f(s string) []byte { d := make([]byte, len(s)); copy(d, s); return d }", None),
+        ("func f[S Bytes](d S, src []byte) { copy(d, src) }", None),
+        ("func f[S ByteStr](d []byte, s S) { copy(d, s) }", None),
+        // The destination is not assignable to []byte, so the special case is
+        // off and the general one asks for a slice element the source's whole
+        // type set shares. A string term has none.
+        (
+            "func f[S ByteStr](d []int, s S) { copy(d, s) }",
+            Some("invalid copy: argument must be a slice; have s"),
+        ),
+        // Same, and `allString` is false as well, so the byte fallback does
+        // not apply either.
+        (
+            "func f[S NotByteStr](s S) []byte { d := make([]byte, len(s)); copy(d, s); return d }",
+            Some("invalid copy: argument must be a slice; have s"),
+        ),
+        // Two slice terms with different elements: the special case rejects
+        // `[]int`, and `sliceElem` then has two answers.
+        (
+            "func f[S TwoSlices](d []byte, s S) { copy(d, s) }",
+            Some("invalid copy: mismatched slice element types byte and int in s"),
+        ),
+        // The concrete `copy([]byte, string)` case, with the wrong element.
+        (
+            "func f(d []int, s string) { copy(d, s) }",
+            Some("invalid copy: arguments d and s have different element types int and uint8"),
+        ),
+        ("func f(d int, s []int) { copy(d, s) }", Some("invalid copy: argument must be a slice; have d")),
+    ];
+
+    for (body, want) in cases {
+        let src = format!("{PRELUDE}{body}\n");
+        let check = check_src(&src);
+        let msgs: Vec<String> = check.errors.iter().map(|e| e.msg.clone()).collect();
+        match want {
+            None => assert!(msgs.is_empty(), "{body}\nunexpected: {msgs:?}"),
+            Some(w) => assert_eq!(msgs, vec![w.to_string()], "{body}"),
+        }
+    }
+}
+
