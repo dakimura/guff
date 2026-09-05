@@ -24084,3 +24084,97 @@ tailscale: ill-typed 8 パッケージ → 7、util/mak は 4 errors → 1
 `control/controlclient` と `types/views` は
 「cannot infer type arguments in call」。`types/prefs` の 29 件は未調査。
 それぞれ別のタスク。
+
+### 2026-09-05（続き 206）— **制約の中にしか出てこない型パラメータ**は、制約のメソッドを突き合わせて決まる。`infer` の step 2 に TODO のまま残っていた
+
+続き 203 の ill-typed のうち 4 パッケージ（`types/prefs` / `types/views` /
+`control/controlclient` / `cmd/viewer/tests`）が同じ「cannot infer type
+arguments in call」。tailscale `types/views` の宣言:
+
+```go
+func SliceOfViews[T ViewCloner[T, V], V StructView[T]](x []T) SliceView[T, V]
+```
+
+`V` は**引数の型のどこにも出てこない**。step 1（引数からの unify）では
+永久に決まらない。上流は step 2 で、`T` が決まったあとに
+
+```go
+if tx != nil && !isParameterized(tparams, tx) {
+    constraint := tpar.iface()
+    if !check.hasAllMethods(tx, constraint, true,
+        func(x, y Type) bool { return u.unify(x, y, exact) }, &cause) { … }
+}
+```
+
+を走らせる。`ViewCloner` の `View() V` を、決まった `T`（`*Item`）の
+メソッド集合と突き合わせて **`V` が決まる**。guff の step 2 は core term
+しか見ておらず、この場所に
+
+```rust
+// TODO(chunk-N): hasAllMethods constraint check — needs the
+// chunk-11 deferral lifted.
+```
+
+と書いてあった。
+
+#### `hasAllMethods` は要らなかった
+
+上流のコードには TODO が付いている ——「unification が interface を扱える
+ようになった今、これは `u.unify(tx, tpar.iface(), assign)` に縮められる」。
+guff の unifier には**その枝が既にある**（`unify.rs` の「interface が片側
+だけ」の分岐が、各メソッドを相手の型で lookup して署名を EXACT で unify
+する）。なので step 2 から呼ぶだけで済んだ。
+
+**失敗しても infer は失敗させない。** 上流は「does not satisfy」を出すが、
+制約が本当に破れていれば出口の `verify_targs` が捕まえる。ここで失敗に
+すると、guff の unifier がたまたま合わせられない形（埋め込みやポインタ
+レシーバの lookup 差）が**束縛を 1 つ失う**ではなく**パッケージを丸ごと
+失う**に化ける。
+
+#### 測った形（7 形、1 形 1 パッケージ）
+
+| 形 | Go | guff |
+|---|---|---|
+| 制約がメソッドの**結果**で V を名指す | OK | OK |
+| 制約がメソッドの**引数**で名指す | OK | OK |
+| **ポインタレシーバ**がメソッドを提供 | OK | OK |
+| **埋め込み**型がメソッドを提供 | OK | OK |
+| 2 つの制約が互いを参照（tailscale の形） | OK | OK |
+| メソッドはあるが**署名が違う** | 拒否 | 拒否 |
+| メソッドが**無い** | 拒否 | 拒否 |
+
+拒否側 2 形の文言は違う（上流「T (type Item) does not satisfy Viewer[V]
+(missing method View)」、guff「cannot infer type arguments in call」）。
+どちらも ill-typed になるので compat には出ない。
+
+#### 効果
+
+続き 205（型パラメータの nil 比較）と**独立で、互いに補完的**。
+この変更だけで:
+
+```
+tailscale: ill-typed 8 パッケージ → 5
+  消えた: control/controlclient, ipn/ipnlocal, types/prefs/prefs_example
+  減った: cmd/viewer/tests 13→7, types/views 4→3, types/prefs 29→2
+```
+
+`types/views` に残っていた 3 件は**続き 205 が直す `operator EQL not
+defined`** そのもので、2 つを合わせた数字は下に書く。
+
+続き 205 と合わせた数字:
+
+```
+tailscale: ill-typed 8 パッケージ → 3
+  types/views と util/slicesx は完全に消え、util/mak は 4 errors → 1
+```
+
+残り 3 パッケージ、原因は 3 つとも別:
+`util/mak` は `make(M)`（型パラメータに対する `make`、上流は core type を見る）、
+`types/prefs` は `ViewCloner[...]` の **Clone の署名不一致**、
+`cmd/viewer/tests` は 7 件（うち 1 件は同じ Clone の形）。findings の数は
+動かない —— 取り戻したパッケージは両ツールとも 0 件。
+
+#### ゲート
+
+golden **230** / fix **230** / reject **14** / workspace **278 スイート** /
+OSS pr tier **8 ターゲット**。

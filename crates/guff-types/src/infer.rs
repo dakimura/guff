@@ -617,8 +617,55 @@ pub fn infer(
                     _ => {}
                 }
             }
-            // TODO(chunk-N): hasAllMethods constraint check — needs the
-            // chunk-11 deferral lifted.
+            // Independent of the core term: when the type argument is known,
+            // it must implement the constraint's methods, and **unifying those
+            // signatures can bind further type parameters**. That is the only
+            // way a parameter mentioned solely inside another's constraint is
+            // ever inferred:
+            //
+            //     func SliceOfViews[T ViewCloner[T, V], V StructView[T]](x []T) SliceView[T, V]
+            //
+            // `V` appears in no parameter type, so step 1 cannot see it; it
+            // comes from matching `ViewCloner`'s `View() V` against the method
+            // set of the `T` that step 1 did infer. tailscale's `types/prefs`,
+            // `types/views`, `control/controlclient` and `cmd/viewer/tests`
+            // were all ill-typed for the want of it.
+            //
+            // Upstream runs `hasAllMethods(tx, constraint, true, unify-exact)`
+            // and notes in a TODO that this now reduces to unifying the type
+            // argument with the constraint interface, which is what guff does
+            // here — its unifier already implements the same method-by-method
+            // comparison (`unify.rs`, the single-interface branch).
+            //
+            // A *parameterized* `tx` still mentions type parameters, so its
+            // method set is not final; upstream skips those and so does this.
+            if let Some(tx) = tx {
+                // The single-interface branch of `unify` is what does the
+                // work, and it is gated on interface inference (go1.21). With
+                // the flag off there is nothing to call, and skipping matches
+                // the behaviour this code had before.
+                if enable_interface_inference
+                    && !is_parameterized(type_arena, object_arena, tparams, tx)
+                {
+                    let iface =
+                        crate::typeparam::type_param_iface(type_arena, object_arena, package_arena, tpar);
+                    // Upstream reports "does not satisfy" on failure. guff does
+                    // not: a constraint that is genuinely violated is caught by
+                    // `verify_targs` on the way out, and failing here would turn
+                    // any shape guff's unifier cannot match — an embedded or
+                    // pointer-receiver method it looks up differently — into a
+                    // lost package rather than a lost binding.
+                    let _ = unify(
+                        &mut u,
+                        type_arena,
+                        object_arena,
+                        package_arena,
+                        tx,
+                        iface,
+                        UnifyMode::ASSIGN,
+                    );
+                }
+            }
         }
         if u.unknowns() == unknowns_before {
             break;
