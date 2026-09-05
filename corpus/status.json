@@ -6,9 +6,9 @@
     "`unmeasured` is not `clean`: an absent measurement is a question."
   ],
   "goal": 100,
-  "defined": 42,
+  "defined": 43,
   "clean": 40,
-  "open": 2,
+  "open": 3,
   "unmeasured": 0,
   "targets": {
     "alertmanager": {
@@ -242,6 +242,17 @@
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
+    },
+    "karmada": {
+      "tier": "hunt",
+      "state": "open",
+      "at": "20260905T072802Z",
+      "open": 1,
+      "guff_only": 0,
+      "gcl_only": 1,
+      "by_linter": {
+        "gosec": 1
+      }
     },
     "kubernetes": {
       "tier": "weekly",

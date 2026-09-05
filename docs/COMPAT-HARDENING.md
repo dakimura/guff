@@ -23349,3 +23349,60 @@ gocritic の per-check settings 5 つ / `import-alias-naming` の 2 本の正規
 golden **228**（`staticcheck-sa` を再生成 —— **消えたキー 0、追加 4**）/
 fix **228** / reject **14** / isolate **116 ターゲット** /
 workspace **278 スイート** / OSS pr tier **8 ターゲットすべて P=R=100%**。
+
+### 2026-09-05（続き 197）— `adopt karmada`。ジェネリクスの型推論が **1 パッケージを丸ごと消していた**
+
+telegraf が閉じ、残る open は cri-o（linux 専用）と k6（続き 174 の
+`exhaustive` 待ち）だけになったので、台帳を 100 に近づけるには
+**新しいターゲットを取る**しかない。`corpus/candidates-100.json` の未採用 58 件
+から、`corpus/README.md` の除外表に載っていないもののうち最小の
+**karmada v1.18.2**（84MB）を採った。
+
+```
+karmada: guff=18 golangci=19 both=18 P=100.0% R=94.7%
+  +gcl  pkg/registry/cluster/storage/aggregate.go:255:gosec:G704: SSRF via taint analysis
+```
+
+#### 見つかったもの 1 —— gosec G704 の取りこぼし
+
+`httpClient.Do(simpleRequest)` の URL は `location.Path` を
+`path.Join(location.Path, proxyPath)` で組み立てたもので、`proxyPath` は
+リクエスト由来である。guff の taint engine はこの経路を辿れていない。
+**次のタスク。**
+
+#### 見つかったもの 2 —— **型検査がパッケージを 1 つ落としている**
+
+```
+guff: ill_typed github.com/karmada-io/karmada/test/e2e/suites/base (4 errors):
+  migration_and_rollback_test.go:136:101: cannot use func[T v1.Object](obj T) bool
+    value as func(deployment *v1.Deployment) bool value in argument to call (Type)
+```
+
+Go は代入先の関数型から `T = *v1.Deployment` を推論する。guff はそれをしない。
+`go vet ./test/e2e/suites/base/` は無言で通り、そのパッケージだけを両ツールに
+渡しても typecheck エラーは出ない —— **フルの `./...` でだけ落ちる**。
+
+これは**その 1 パッケージの findings が丸ごと消える**という意味で、
+set-diff には「golangci-only が並ぶ」形でしか現れない
+（`compat/hunt.sh` の ill-typed ゲートはそのために在る）。
+
+#### 同じ場所の欠陥が **4 ターゲットに 4 つ**ある
+
+`health-hunt.json` の `targets` は空で、hunt の全ターゲットが 0 で門番されて
+いる。今その門で落ちているのは 4 つで、**原因は 4 つとも別**である:
+
+| ターゲット | パッケージ | guff の型エラー |
+|---|---|---|
+| karmada | `test/e2e/suites/base` | ジェネリック関数値 → 具体的な関数型の推論 |
+| scaleway-cli | `internal/tasks` | 名前付きジェネリック関数型 `TaskFunc[any, any]` への代入可能性 |
+| ebpf | `pin` | `cannot infer the remaining type arguments (got 1, want 2)` |
+| fiber | `internal/logtemplate` | 型パラメータ（`~[]T \| ~string`）に対する `copy` |
+
+どれも**パッケージ 1 つ分の解析を黙って捨てる**ので、compat の数字には
+「golangci-only の塊」としてしか出ない。baseline 行は足さない ——
+[[absent-baseline-row-means-strictly-zero]] のとおり、0 で門番したまま
+1 つずつ潰すほうが期限を切れる。
+
+```
+台帳: 40/100（43 定義、open 3）
+```
