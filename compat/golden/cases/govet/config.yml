@@ -43,6 +43,7 @@ linters:
         - loopclosure
         - lostcancel
         - nilfunc
+        - nilness
         - printf
         - shift
         - sigchanyzer

@@ -24613,3 +24613,122 @@ CI は **ubuntu-latest** なので、Linux では測れる。cri-o と同じ
 
 open が 2 → 1 に減ったのは進捗ではなく、**数えてはいけない数字を数えるのを
 やめた**ということである。
+
+### 2026-09-06（続き 214）— `govet:nilness` を移植。**28 形で完全一致**、ただしそれには guff-ssa が捨てていた**4 つの位置**が要った
+
+`corpus/status.py next` は `close tailscale (govet 4)`。内訳は
+`nilness` 3 と `inline` 1 で、**nilness は guff に実装が無かった**
+（上流 x/tools v0.44.0 の ~500 行、SSA データフロー）。
+
+#### 移植したもの
+
+`crates/guff-govet/src/nilness.rs`。guff-govet で**初めての SSA 解析器**
+（他の 35 本は AST/型のみ）なので、SSA は `nilnesserr` と同じく共有の
+`buildir` から取る。`nilness` は `cmd/vet` の既定集合に入っていないので、
+`govet.enable-all` か明示 `enable` のときしか走らない ——
+SSA の構築費用はそのときだけ払う。
+
+本体は**支配木**を降りながら「この値は nil / 非 nil」の事実スタックを
+持ち回る walk（CFG ではなく支配木なので、部分木を出るときに pop するだけで
+済む）。上流の報告カテゴリは `nilderef` / `nilpanic` / `cond` /
+`conversionpanic` の 4 つで、最後の 1 つ以外を全部持ってきた。
+
+#### 位置の欠落 4 つ —— これが無いと 3 形が撃てない / 別の場所を指す
+
+fixture を上流と突き合わせて初めて出た。**どれも nilness の問題ではなく
+guff-ssa の欠落**で、うち 1 つはコード中に `DEFERRED` と書いてあった。
+
+| 何 | 上流 | guff（修正前） |
+|---|---|---|
+| `address.load` の位置 | `load.pos = a.pos` | `emit_load` が位置を付けない → **pos 0 で報告が消える** |
+| 識別子の rvalue 読み | `b.addr(fn,e,false).load(fn)`、`address.pos = e.Pos()` | 同上 |
+| 単項 `<-` / `!` / `-` / `^` | `v.setPos(e.OpPos)` | 位置なし |
+| `rangeIndexed` の `&x[i]` | `instr.setPos(x.Pos())` | `s.for_`（**`for` キーワード**）|
+
+`return *p` は「nil dereference in load」が**丸ごと出ず**、`<-c` も同じ。
+`for i, v := range s` は列が 21（`s`）ではなく 3（`for`）を指していた。
+`Value.Pos()` に当たる `program::value_pos` を足して 4 箇所を直した。
+
+#### 事実スタックが死んでいた —— `p == nil` の `nil` が untyped のまま
+
+最初の測定は 19 形中 2 形しか一致しなかった。原因は
+`Const::is_nil()` ではなく**比較のオペランド変換**である。上流の
+`emitCompare` は定数側を相手の型に変換してから `BinOp` を建てるので、
+`nilnessOf` が見る `nil` の型は `*T` で `nillable` が真になる。
+guff の `binary_expr` はその変換を移植していないので `untyped nil` のまま
+届き、`nillable` が偽 → `xnil`/`ynil` が Unknown → **比較から事実が
+一つも積まれない**。`nilness.rs` 側の `nillable` に untyped nil の枝を
+足した（値を持たない untyped nil 定数は nil リテラル以外にならない）。
+`emitCompare` を移植する方が一般形だが、それは SSA を共有する全解析器の
+値同一性を動かすので別タスク。
+
+#### 測定
+
+fixture（`crates/guff-govet/tests/testdata/nilness/bad.go`、278 行）を
+`govet.enable: [nilness]` の golangci-lint 2.12.2 と突き合わせて
+**28 件が行・列・文言すべて一致**。fixture には**黙るべき 10 形**も入れて
+ある —— nil レシーバへの静的メソッド呼び出し（レシーバは callee ではなく
+引数なので撃たない）、nil map/slice/chan の `len`・読み・`append`、
+`panic(構造体のゼロ値)`（値は無いが nillable でないので nil panic ではない）、
+素のインタフェースへの comma-ok（`CoreType` が nil なので `isNillable` が偽）、
+同じフィールドの 2 度目のロード（別の SSA 値）、恒真条件で刈られた枝、
+制約に項が無い型パラメータの `MakeInterface`。
+
+golden の再生成は**キー集合差分で追加 28・削除 0** —— 既存の govet
+findings は 1 件も動いていない（位置の変更が他を巻き込んでいないことの
+確認でもある）。単体テストは `assert_eq!` で 28 タプルを等値比較する。
+
+- workspace: 278 ok / 0 failed
+- golden 230 / fix 230 / reject 14: 変化なし
+- oss `--tier pr` 8 ターゲット: 全部 P=R=100%
+- isolate govet: P=R=100%
+
+#### 出せないもの 1 つ（測った）
+
+`conversionpanic`（`nil slice being cast to an array of len > 0 will
+always panic`）は**guff-ssa が `SliceToArrayPointer` を空のプレース
+ホルダにしている**ので届かない（オペランドも結果型も持たず、
+`result_type()` が `None` を返すのでビルダは一度も emit しない）。
+
+```go
+func conv(s []byte) byte {
+	if s == nil {
+		p := (*[1]byte)(s)   // golangci 1 件 / guff 0 件
+		return p[0]
+	}
+	return 0
+}
+```
+
+閉じるには guff-ssa 側でその命令を建てる必要があり、nilness の話ではない。
+
+#### tailscale の 3 件は閉じない —— 原因が変わった
+
+`hunt tailscale` は **guff=43 golangci=43 both=39** で移植前と同じ。
+残る 3 件はすべて同じ形である:
+
+```go
+v, err := g()
+if err != nil {
+	log.Fatalf("boom: %v", err)   // 返らない
+}
+_ = v
+if err != nil {   // impossible condition: nil != nil
+```
+
+上流の `buildssa` は **`prog.SetNoReturn(cfgs.NoReturn)`** を呼ぶので、
+`emitCall` が no-return な静的呼び出しの後に `Panic` を置いて
+`unreachable.noreturn` ブロックを始める。合流ブロックの生きた先行が
+1 本になるので `err` は nil と確定する。guff には
+`passes/facts/ctrlflow` に no-return 判定そのものはあるが、
+**SSA ビルダが読んでいない**（`emit::emit_call` の DEFERRED）。
+
+最小再現で確認した（`log.Fatalf` 版は golangci 1 件 / guff 0 件、
+`log.Println` 版は両方 0 件）。**nilness のバグではない。**
+その配線は SA5011 と lostcancel の名前ベース中断リストを外すことでも
+あり、ctrlflow の doc 自身が「独自の測定を伴う別タスク」と書いている
+とおり、次のタスクにする。
+
+```
+台帳: 42/100 at zero（45 定義、open 1＝tailscale govet 4、unmeasured 2）
+```

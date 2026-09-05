@@ -632,6 +632,13 @@ impl<'a> Builder<'a> {
         crate::emit::emit_load(self.func_mut(), block, addr, typ)
     }
 
+    /// [`Self::emit_load`] carrying the source position of the syntax that
+    /// denotes the location. (Go: `address.load`'s `load.pos = a.pos`.)
+    pub fn emit_load_at(&mut self, addr: Value, typ: TypeId, pos: Pos) -> Value {
+        let block = self.block.expect("no current block");
+        crate::emit::emit_load_with_pos(self.func_mut(), block, addr, typ, pos)
+    }
+
     /// emit_store emits a store instruction (`*addr = val`) to the current
     /// block at source position `pos`.
     pub fn emit_store(&mut self, addr: Value, val: Value, pos: Pos) {

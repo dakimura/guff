@@ -74,6 +74,7 @@ lostcancel/ok/ok.go                                crates/guff-govet/tests/testd
 lostcancel/paths/paths.go                          crates/guff-govet/tests/testdata/lostcancel/paths.go
 nilfunc/bad/bad.go                                 crates/guff-govet/tests/testdata/nilfunc/bad.go
 nilfunc/ok/ok.go                                   crates/guff-govet/tests/testdata/nilfunc/ok.go
+nilness/bad/bad.go                                 crates/guff-govet/tests/testdata/nilness/bad.go
 printf/argcount/argcount.go                        crates/guff-govet/tests/testdata/printf/argcount.go
 printf/escapes/escapes.go                          crates/guff-govet/tests/testdata/printf/escapes.go
 printf/indexes/indexes.go                          crates/guff-govet/tests/testdata/printf/indexes.go

@@ -23,6 +23,7 @@ mod lockpath;
 mod loopclosure;
 mod lostcancel;
 mod nilfunc;
+mod nilness;
 mod printf;
 mod printf_wrappers;
 mod shift;
@@ -60,6 +61,7 @@ pub use loopclosure::analyzer as loopclosure_analyzer;
 pub use lostcancel::analyzer as lostcancel_analyzer;
 pub use fieldalignment::analyzer as fieldalignment_analyzer;
 pub use nilfunc::analyzer as nilfunc_analyzer;
+pub use nilness::analyzer as nilness_analyzer;
 pub use printf::analyzer as printf_analyzer;
 pub use shift::analyzer as shift_analyzer;
 pub use sigchanyzer::analyzer as sigchanyzer_analyzer;
@@ -101,6 +103,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         lostcancel::analyzer(),
         fieldalignment::analyzer(),
         nilfunc::analyzer(),
+        nilness::analyzer(),
         printf::analyzer(),
         shift::analyzer(),
         sigchanyzer::analyzer(),

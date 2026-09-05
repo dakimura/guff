@@ -66,6 +66,34 @@ lostcancel/paths/paths.go:280:3:govet::lostcancel: this return statement may be 
 lostcancel/paths/paths.go:292:3:govet::lostcancel: the cancel function is not used on all paths (possible context leak)
 lostcancel/paths/paths.go:298:2:govet::lostcancel: this return statement may be reached without using the cancel var defined on line 292
 nilfunc/bad/bad.go:6:6:govet::nilfunc: comparison of function f == nil is always false
+nilness/bad/bad.go:20:7:govet::nilness: tautological condition: nil == nil
+nilness/bad/bad.go:27:7:govet::nilness: tautological condition: non-nil != nil
+nilness/bad/bad.go:34:7:govet::nilness: impossible condition: non-nil == nil
+nilness/bad/bad.go:41:8:govet::nilness: impossible condition: nil != nil
+nilness/bad/bad.go:49:8:govet::nilness: tautological condition: nil == nil
+nilness/bad/bad.go:59:7:govet::nilness: impossible condition: non-nil == nil
+nilness/bad/bad.go:66:7:govet::nilness: impossible condition: non-nil == nil
+nilness/bad/bad.go:75:12:govet::nilness: nil dereference in field selection
+nilness/bad/bad.go:82:10:govet::nilness: nil dereference in load
+nilness/bad/bad.go:89:3:govet::nilness: nil dereference in store
+nilness/bad/bad.go:95:4:govet::nilness: nil dereference in map update
+nilness/bad/bad.go:101:3:govet::nilness: range over nil map
+nilness/bad/bad.go:109:3:govet::nilness: receive from nil channel
+nilness/bad/bad.go:115:5:govet::nilness: send to nil channel
+nilness/bad/bad.go:121:11:govet::nilness: index of nil slice
+nilness/bad/bad.go:128:21:govet::nilness: range of nil slice
+nilness/bad/bad.go:136:11:govet::nilness: nil dereference in array index operation
+nilness/bad/bad.go:143:21:govet::nilness: nil dereference in array index operation
+nilness/bad/bad.go:151:11:govet::nilness: nil dereference in slice operation
+nilness/bad/bad.go:158:12:govet::nilness: nil dereference in type assertion
+nilness/bad/bad.go:165:6:govet::nilness: nil dereference in dynamic method call
+nilness/bad/bad.go:171:4:govet::nilness: nil dereference in dynamic function call
+nilness/bad/bad.go:177:3:govet::nilness: nil dereference in dynamic function call
+nilness/bad/bad.go:178:3:govet::nilness: nil dereference in dynamic function call
+nilness/bad/bad.go:195:7:govet::nilness: panic with nil value
+nilness/bad/bad.go:209:12:govet::nilness: nil dereference in field selection
+nilness/bad/bad.go:232:6:govet::nilness: nil dereference in dynamic method call
+nilness/bad/bad.go:278:7:govet::nilness: impossible condition: non-nil == nil
 printf/argcount/argcount.go:6:17:govet::printf: fmt.Printf format %d reads arg #2, but call has 1 arg
 printf/argcount/argcount.go:7:2:govet::printf: fmt.Printf call needs 1 arg but has 2 args
 printf/bad/bad.go:6:14:govet::printf: fmt.Printf format %z has unknown verb z

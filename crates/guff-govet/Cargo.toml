@@ -17,6 +17,7 @@ memchr = "2"
 guff-analysis = { path = "../guff-analysis" }
 guff-constant = { path = "../guff-constant" }
 guff-types = { path = "../guff-types" }
+guff-ssa = { path = "../guff-ssa" }
 
 [dev-dependencies]
 guff-packages = { path = "../guff-packages" }

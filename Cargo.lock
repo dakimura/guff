@@ -581,6 +581,7 @@ dependencies = [
  "guff-constant",
  "guff-packages",
  "guff-runner",
+ "guff-ssa",
  "guff-types",
  "memchr",
 ]
