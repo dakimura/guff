@@ -129,6 +129,50 @@ const BODYCLOSE_BAD_SHAPES: usize = 25;
 /// outer response, and a shadowing literal followed by a capturing one). Both
 /// halves matter: a fix that simply stopped settling on literals would clear
 /// the four and break the two.
+/// Upstream skips a function whole when one of its results *is* a
+/// `*net/http.Response`:
+///
+/// ```go
+/// FuncLoop:
+/// for _, f := range funcs {
+///     // skip if the function is just referenced
+///     for i := 0; i < f.Signature.Results().Len(); i++ {
+///         if f.Signature.Results().At(i).Type().String() == r.resTyp.String() {
+///             continue FuncLoop
+///         }
+///     }
+/// ```
+///
+/// `resTyp` is `*net/http.Response` and the comparison is on the resolved type.
+/// guff answered it on the syntax — "a result whose type is spelled `Response`"
+/// — and so skipped every function returning any type of that name from any
+/// package. boundary's `internal/clientcache/internal/client` returns
+/// `(*api.Response, error)` from `Get` and `Post`, and lost the leak in both.
+///
+/// Eight shapes. Four must report: a result type named `Response` from another
+/// package, the same body with a result type named anything else, a *local*
+/// type named `Response`, and an `http.Response` returned **by value** (upstream
+/// compares against the pointer). Four must stay silent, and they are the half
+/// that keeps the skip itself honest — upstream drops an unrelated leak in a
+/// function that returns a response, and scans every result position, the second
+/// and the named ones included. A fix that deleted the skip rather than
+/// correcting its predicate would light all four.
+#[test]
+fn bodyclose_skips_a_function_by_result_type_not_by_result_name() {
+    let dir = support::testdata("bodyclose");
+    let pkg = support::typecheck_pkg(
+        "example.com/bodyclose/resultskip",
+        &dir.join("resultskip.go"),
+    );
+    assert!(!pkg.ill_typed, "{:?}", pkg.errors);
+    let messages = support::run_analyzer(bodyclose(), &pkg);
+    assert_eq!(
+        messages.len(),
+        4,
+        "four leaks report, four handovers stay silent: {messages:?}"
+    );
+}
+
 #[test]
 fn bodyclose_a_literal_declaring_the_name_is_not_a_capture() {
     let dir = support::testdata("bodyclose");

@@ -8,5 +8,9 @@ ok/ok.go       crates/guff-context/tests/testdata/bodyclose/ok.go
 # A func literal declaring its own `resp` is not a capture of the outer one:
 # four leaks and two closers, with the columns pinned here.
 shadow/shadow.go   crates/guff-context/tests/testdata/bodyclose/shadow.go
+# Which functions upstream skips whole: the test is on the resolved result
+# type, not on a result whose type is spelled `Response`.
+resultskip/resultskip.go   crates/guff-context/tests/testdata/bodyclose/resultskip.go
+wrap/wrap.go   crates/guff-context/tests/testdata/bodyclose/stub/example.com/bodyclose/wrap/wrap.go
 nohttp/nohttp.go   crates/guff-context/tests/testdata/bodyclose/nohttp.go
 dialer/dialer.go   crates/guff-context/tests/testdata/bodyclose/stub/example.com/bodyclose/dialer/dialer.go

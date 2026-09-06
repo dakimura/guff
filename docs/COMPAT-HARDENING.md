@@ -26626,3 +26626,109 @@ boundary の 16 行はどれも内側で `r, err := http.NewRequest(...)` と
 ```
 台帳: 49/100 at zero（53 定義、open 1＝boundary **17**、unmeasured 3）
 ```
+
+### 2026-09-06（続き 237）— bodyclose の「関数ごと飛ばす」判定が**型名の綴り**だった。`*api.Response` を返す関数が丸ごと沈黙する
+
+続き 236 のあと boundary の bodyclose 残りは gcl-only 2 件で、どちらも
+`internal/clientcache/internal/client` にあった。形は
+
+```go
+resp, err := c.client.Do(req)
+if err != nil { return nil, err }
+return api.NewResponse(resp), nil
+```
+
+`Get` と `Post` が同じ形で、両方とも guff は報告しない。
+
+#### 上流を読む
+
+上流は**関数まるごとスキップする規則**を持っている:
+
+```go
+FuncLoop:
+for _, f := range funcs {
+    // skip if the function is just referenced
+    for i := 0; i < f.Signature.Results().Len(); i++ {
+        if f.Signature.Results().At(i).Type().String() == r.resTyp.String() {
+            continue FuncLoop
+        }
+    }
+```
+
+`resTyp` は `*net/http.Response` で、比較は**解決済みの型**に対して行う。
+guff はこれを**構文**で答えていた —— `type_expr_looks_like_response` は
+`X.Response` / `Response` という**綴り**に一致するだけなので、
+**どのパッケージのものであれ `Response` という名前の型を返す関数は
+すべてスキップ**されていた。boundary の `client.Get` / `client.Post` は
+`(*api.Response, error)` を返すので、2 件とも消えていた。
+
+#### 測った形（8 つ）
+
+| 結果の型 | golangci | 修正前 | 修正後 |
+|---|---|---|---|
+| `*wrap.Response`（別パッケージ・名前が Response） | ✅ | ❌ | ✅ |
+| `*wrap.Wrapper`（**本文は同一**、名前だけ違う） | ✅ | ✅ | ✅ |
+| ローカルの `*Response` | ✅ | ❌ | ✅ |
+| **値**の `http.Response` | ✅ | ❌ | ✅ |
+| 本物の `*http.Response` | ❌ | ❌ | ❌ |
+| 本物を返しつつ**別の response を漏らす** | ❌ | ❌ | ❌ |
+| `*http.Response` が**第 2 結果** | ❌ | ❌ | ❌ |
+| **名前付き結果** `out *http.Response` | ❌ | ❌ | ❌ |
+
+2 行目が決め手で、**本文が同一で型の名前だけが違う**。
+4 行目は上流が `resTyp`（ポインタ）と比べていることの帰結 ——
+値で返してもスキップにはならない。
+
+そして**下 4 行が同じくらい重要**である。上流はこのスキップを
+**シグネチャで**決めており、dataflow では決めていない ——
+だから「本物を返す関数の中の無関係な漏れ」は上流も落とすし、
+第 2 結果も名前付き結果も走査する。スキップ自体を消す方向に直すと
+この 4 つが光ってしまい、それは誤りである。
+
+#### 直したこと
+
+`func_returns_response` を `pass` 付きにして、各結果の型式を
+`type_of` で解決し `is_http_response_ptr` で判定する
+（どちらも同じファイルに既にある）。構文版の
+`type_expr_looks_like_response` は**パラメータ側**
+（`response_closing_funcs`）で今も使われており、そちらは
+上流の別の枝の近似なので触っていない ——
+測った形の 9 つ目（`*api.Response` を取るヘルパに渡す）は
+修正前から両ツール一致だった
+（[[dont-inherit-the-neighbouring-rules-guard]]）。
+
+#### 測定
+
+- **boundary: open 17 → 15**（gcl-only 13 → 11、guff-only 4 は不変）。
+  **bodyclose は R=100.0%** —— guff 65 / golangci 63 / both 63 で、
+  残る 2 件は**取りこぼしではなく過剰報告**（`client_test.go:85` と
+  `proxy_ws_test.go:91`、続き 236 から不変）。
+  残り 15 は staticcheck 13・bodyclose 2。
+- 退行なし。関数ごとのスキップ条件を変えたので広めに測った:
+  **dapr 1555/1555・tailscale 47/43（allowlist 内）・k6 423/423・
+  gitea 1/0（同）・prometheus 20/20・cli 3/3・coredns 3/3・
+  karmada 19/19・pipeline 156/156・rclone 3/3**、
+  oss pr 8 ターゲット P=R=100%。
+- golden **231**（bodyclose を regen、**キー集合で差分して
+  resultskip.go +4・削除 0**）／fix 231／reject 14／
+  workspace 279 バイナリ **3530 ok** 0 failed。
+- テストは 1 本 + fixture 2 ファイル。
+  `resultskip.go`（8 形だけの独立パッケージ）に対する
+  `assert_eq!(messages.len(), 4)` と、
+  `stub/example.com/bodyclose/wrap/wrap.go`（`Response` と `Wrapper` を
+  持つ別パッケージ）。ガードを潰すと **4 → 1** に落ちる。
+  golden の sources にも入れたので**桁まで**突き合わせている。
+- **fixture を書いている途中で 1 つ嘘をついていた** ——
+  「ローカルの Response 型」と書いたコメントの下で構造体を `Local` と
+  名付けており、その形を実は測っていなかった。両ツールに掛けて
+  golangci 4 / guff 1 にならないので気付いた
+  （[[empty-fixture-hides-defects]]）。
+
+#### syncthing について（前回と同じ）
+
+golangci 側が 654 と 656 の間を行き来し続けている（guff は 656 で不変）。
+今回も 656/656 だった。**guff の成果としては数えない。**
+
+```
+台帳: 49/100 at zero（53 定義、open 1＝boundary **15**、unmeasured 3）
+```

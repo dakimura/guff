@@ -190,8 +190,38 @@ fn field_list_has_response(fields: Option<&FieldList>) -> bool {
     false
 }
 
-fn func_returns_response(ty: &FuncType) -> bool {
-    field_list_has_response(ty.results.as_ref())
+/// Whether the function hands a `*net/http.Response` back to its caller, which
+/// upstream takes as reason to skip it whole:
+///
+/// ```go
+/// FuncLoop:
+/// for _, f := range funcs {
+///     // skip if the function is just referenced
+///     for i := 0; i < f.Signature.Results().Len(); i++ {
+///         if f.Signature.Results().At(i).Type().String() == r.resTyp.String() {
+///             continue FuncLoop
+///         }
+///     }
+/// ```
+///
+/// `resTyp` is `*net/http.Response`, and the comparison is on the **resolved
+/// type**. Answering it on the syntax — "a result whose type is spelled
+/// `Response`" — skipped every function returning any type of that name from
+/// any package: boundary's `internal/clientcache/internal/client` returns
+/// `(*api.Response, error)` from `Get` and `Post`, and both leaked responses
+/// went unreported. It also skipped functions returning `http.Response` by
+/// *value*, which upstream does not, because `resTyp` is the pointer.
+fn func_returns_response(pass: &Pass<'_>, ty: &FuncType) -> bool {
+    let Some(results) = ty.results.as_ref() else {
+        return false;
+    };
+    results.list.iter().any(|field| {
+        field
+            .ty
+            .as_ref()
+            .and_then(|t| type_of(pass, t))
+            .is_some_and(|t| is_http_response_ptr(pass, t))
+    })
 }
 
 /// One `*http.Response` a variable held. A variable can hold several at once:
@@ -1568,7 +1598,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             preorder(NodeRef::FuncDecl(top), |n| {
             match n {
                 NodeRef::FuncDecl(fd) => {
-                    if func_returns_response(&fd.ty) {
+                    if func_returns_response(pass, &fd.ty) {
                         return true;
                     }
                     if let Some(body) = &fd.body {
@@ -1584,7 +1614,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                 }
                 NodeRef::FuncLit(fl) => {
-                    if func_returns_response(&fl.ty) {
+                    if func_returns_response(pass, &fl.ty) {
                         return true;
                     }
                     check_body(
