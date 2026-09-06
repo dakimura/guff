@@ -25673,3 +25673,134 @@ SA5011 は「deref した後で nil チェックしている」形を撃つ規�
 ```
 台帳: 46/100 at zero（50 定義、open 1＝cert-manager 10、unmeasured 3）
 ```
+
+### 2026-09-06（続き 227）— `close cert-manager`。**3 つの無関係な欠陥**、そのうち 1 つは「リストに載せ忘れると黙る」仕掛け
+
+続き 226 で開いた 10 件を追った。3 つの独立した原因があり、
+**そのうち 2 つは「guff の過剰報告」ではなく取りこぼしの影**だった。
+
+#### 1. SA5011: `peel_load` が**あらゆる**ポインタから load を剥いでいた
+
+上流の SA5011 は**純粋な値同一性**で、`ir.Value` が一致するかしか見ない。
+guff の SSA は非エスケープの `Alloc` を register に lift しないので、
+`var x *T` の 2 つの出現は別々の load になる —— `peel_load` はその同一性を
+**復元する**ためにある。
+
+ところが剥ぐ対象を選んでいなかった。パラメータ `in **int32` に対して
+`*in` を剥ぐと `in` になり、`in` / `*in` / `**in` が**全部同じ鍵に潰れる**。
+cert-manager の 3 つの converter はそれで撃たれていた:
+
+```go
+func Convert_Pointer_int32_To_int(in **int32, out *int, s conversion.Scope) error {
+	if *in == nil {      // guff はここを報告していた
+		*out = 0
+		return nil
+	}
+	*out = int(**in)     // *in が nil なら到達しない
+	return nil
+}
+```
+
+10 形の最小再現で上流は 3 件、guff は 9 件だった。`peel_load` を
+**ローカル `Alloc` の load だけ**に絞って 3 対 3 に一致。
+既存の SA5011 単体テスト 4 本はそのまま通る。
+
+**沈黙する側が 2 つの理由で沈黙している**ことが大事で、fixture には両方入れた:
+チェックが deref を支配している形（早期 return）と、
+**支配関係では説明できない**形 —— `**in` を先に読んで後から `*in == nil` を
+見る shape も上流は黙る。2 つの load は 2 つの値だからで、
+これは identity でしか説明できない。
+
+#### 2. promlinter: `Namespace: namespace` を読めず、metric ごと捨てていた
+
+`parse_string_value` は文字列リテラルと `+` しか見ておらず、
+`parse_composite_opts` は `?` で全体を諦める。上流の `parseOpts` も
+**最初に読めなかったフィールドで nil を返して metric を丸ごと捨てる**ので、
+中途半端な名前で報告されることはない —— つまり読めないと**黙る**。
+cert-manager は 5 つの metric 全部に `Namespace: namespace` と書いている。
+
+上流の `parseValue` は `ast.Ident.Obj.Decl` を辿って `ValueSpec` の
+第 1 値を読む。**`*ast.AssignStmt` は上流自身の TODO** で解決しないので、
+`shortName := "…"` の metric は両ツールとも黙る。その 1 形を fixture に
+入れてある —— 無いと「識別子を全部解決する」実装でも緑になる。
+
+#### そして本当の原因は promlinter の中ではなかった
+
+`Ident.obj` を埋めるのは parser の object resolution で、
+`TypecheckEnv::skip_object_resolution` がそれを**切る**。切ってよいかは
+`AST_OBJECT_RESOLUTION_ANALYZERS` という**手書きのリスト**で決まっており、
+promlinter は載っていなかった。だから移植した解決コードは動かず、
+`obj` は常に `None` だった。
+
+そのリストの doc comment はこう書いてある:
+
+> **An analyzer missing from this list does not fail — it goes quiet.**
+> `testinggoroutine` was written, tested against the golden tier, and found
+> short by exactly one finding for this reason.
+
+**2 度目である。** 同じ罠に別の analyzer が落ちた。
+
+#### 3. gosmopolitan: golangci が `lookattests` を **true に pin している**
+
+guff は `*_test.go` を飛ばしており、コメントには
+「上流の既定 `LookAtTests: false` に合わせた。golangci-lint はこれを
+設定させない」と書いてあった。**設定させないのは既定を保つからではなく、
+逆に固定しているから**である:
+
+```go
+// Should be managed with `linters.exclusions.rules`.
+"lookattests": true,
+```
+
+`settings` ポインタは `&cfg.Linters.Settings.Gosmopolitan` で
+**nil になり得ない**ので、この pin は常に効く。
+[[golangci-pins-override-user-options]] の 2 例目。
+
+cert-manager の `pkg/util/pki/asn1_util_test.go` の 2 件はこれで消えていた。
+
+#### 測定
+
+fixture は 3 つに分けて足した。SA5011 は `bad.go` に 2 形（`// want`）と
+`ok.go` に 4 形（**黙る**側）。promlinter は unit 用 `consts.go` と
+isolate/golden 共有の `bad.go` に const / var / **短変数宣言**の 4 形。
+gosmopolitan は `bad_test.go` を両方に。
+
+**単体テストの数え方も直した。** `sa5011_or_guard_renames_the_pointer` は
+`bad_messages.len() == 3` とリテラルで書いてあり、fixture に 1 形足した
+瞬間に落ちた。`// want` マーカーを数える `want_markers` に置き換えて、
+`sa_check!` が `!is_empty()` しか見ていない穴も
+`sa5011_reports_exactly_the_marked_derefs` で塞いだ。
+
+**黙る側が本体である。** promlinter の `shortName := "…"`（`*ast.AssignStmt`）
+が無ければ「識別子を全部解決する」実装でも 4 件は揃うし、SA5011 の
+`ok.go` が無ければ「load を一切剥がない」実装でも `// want` は揃う。
+
+golden の regen はキー集合で差分した —— **3 ケースとも消えたキーは 0**:
+
+| case | 前 | 後 | 増えたもの |
+|---|--:|--:|---|
+| `gosmopolitan` | 3 | 4 | Han ×1（test ファイル） |
+| `promlinter` | 10 | 14 | const / var 由来の metric ×4 |
+| `staticcheck-sa` | 352 | 356 | SA5011 ×2 と S1021 ×2 |
+
+S1021 の 2 件は `var x *int32; x = get()` という書き方の副産物で、
+`--fix` tier の期待値が古くなって 1 ケース落ちた。**guff の欠陥ではない**
+ことを先に確かめてある —— 別々のパッケージに同じ原本を置いて両ツールに
+`--fix` を掛け、どちらも `var x *int32 = get()` と書いた
+（[[dont-put-the-pristine-copy-in-the-package]]）。そのうえで
+`./compat/fix/regen.sh staticcheck-sa`（手書きではなく pin 版の
+golangci-lint を回して記録する）で録り直した。
+
+- **cert-manager: guff=10 golangci=0 → guff=0 golangci=0、P=0.0% → 100.0%、
+  unexpected=0。閉じた。**
+- gosmopolitan / promlinter を有効にしている**他のターゲットも測った** ——
+  config を grep して 8 つ（caddy・cert-manager・connect-go・cri-o・fiber・
+  k6・pipeline・thanos）。caddy は `pr` tier で緑、cri-o は linux 専用、
+  残り 5 つを回して **connect-go 37/37・fiber 0/0・k6 423/423・
+  pipeline 156/156・thanos 543/543 で全部 P=R=100%**。退行なし。
+- golden 231／fix 231／reject 14／oss pr 8 ターゲット P=R=100%／
+  workspace 278 バイナリ 3516 ok 0 failed。
+
+```
+台帳: 47/100 at zero（50 定義、open 0、unmeasured 3）
+```

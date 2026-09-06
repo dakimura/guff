@@ -6,8 +6,15 @@
 //!   (default `Han`), and
 //! - usages of `time.Local` (unless `allow-time-local`).
 //!
-//! Test files (`*_test.go`) are skipped, matching upstream's default
-//! `LookAtTests: false` (golangci-lint does not expose a knob for it).
+//! **Test files are looked at.** gosmopolitan's own default is
+//! `LookAtTests: false`, but golangci-lint's wrapper pins the opposite —
+//! `"lookattests": true`, commented "Should be managed with
+//! `linters.exclusions.rules`" (`pkg/golinters/gosmopolitan/gosmopolitan.go`),
+//! and the settings pointer it builds the config from is never nil
+//! (`&cfg.Linters.Settings.Gosmopolitan`). So there is no knob not because the
+//! default is kept but because it is forced on. Skipping `*_test.go` here cost
+//! cert-manager's two `//nolint: gosmopolitan` directives in
+//! `pkg/util/pki/asn1_util_test.go`, which guff then reported as unused.
 //!
 //! DEFERRED (see DEVELOPMENT.md R13/R14): dot-imported `Local` (the
 //! `time.Local` check only matches the `time.Local` selector form).
@@ -108,18 +115,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let fset = pass.fset();
     let mut pending: Vec<(u32, String)> = Vec::new();
 
-    for (i, file) in pass.files().iter().enumerate() {
-        let fallback = fset.position(file.pos()).filename;
-        let filename = pkg
-            .compiled_go_files
-            .get(i)
-            .and_then(|p| p.file_name())
-            .and_then(|s| s.to_str())
-            .unwrap_or(fallback.as_str());
-        if filename.ends_with("_test.go") {
-            continue;
-        }
-
+    for file in pass.files() {
         // Pass 1: string literals containing watched-script runes.
         let mut stack = Vec::new();
         preorder_stack(NodeRef::File(file), &mut stack, |n, _| {

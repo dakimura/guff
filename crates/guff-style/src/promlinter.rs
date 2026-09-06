@@ -13,6 +13,7 @@
 use std::sync::OnceLock;
 
 use guff::ast::{CallExpr, CompositeLit, Expr};
+use guff::scope::ObjDecl;
 use guff::token::Token;
 use guff::walk::{preorder, NodeRef};
 use guff_analysis::passes::inspect;
@@ -89,6 +90,25 @@ fn parse_string_value(expr: &Expr) -> Option<String> {
             Some(x + &y)
         }
         Expr::UnaryExpr(u) => parse_string_value(u.x.as_ref()),
+        // `Namespace: namespace` — a name declared by a `var` / `const`
+        // spec. Upstream's `parseValue` follows `ast.Ident.Obj.Decl` to the
+        // `ValueSpec` and reads its first value, and it reads only that: an
+        // `AssignStmt` (`ns := "x"`) is an explicit TODO there and stays
+        // unresolved, so a metric built from one is dropped by both tools.
+        //
+        // `ast.Object` is the parser's own file-scope resolution, so this
+        // reaches a constant declared in the same file and no further — which
+        // is exactly the reach upstream has. Without it the whole `Opts`
+        // literal failed to parse and the metric was dropped: cert-manager
+        // writes `Namespace: namespace` on all five of its metrics, and guff
+        // reported none of the eight findings golangci-lint does.
+        Expr::Ident(id) => {
+            let obj = id.obj.lock().ok()?.clone()?;
+            let ObjDecl::ValueSpec(spec) = &obj.decl else {
+                return None;
+            };
+            parse_string_value(spec.values.first()?)
+        }
         _ => None,
     }
 }
