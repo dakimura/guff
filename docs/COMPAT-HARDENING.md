@@ -26319,3 +26319,89 @@ import path で引いているので、そこに波及する。**今回はやら
 ```
 台帳: 49/100 at zero（53 定義、open 1＝boundary 44、unmeasured 3）— 変わらず
 ```
+
+### 2026-09-06（続き 234）— `adopt signoz` は**除外**。上流でもリポジトリでもなく、**このホストの Go が古い依存を通さない**
+
+台帳の次の候補は **SigNoz/signoz**（`v0.139.0`、110.6MB、31.9k star）。
+config は `version: "2"` の `.golangci.yml`、`default: none` + 15 linter
+（`bodyclose depguard errcheck forbidigo godot govet iface ineffassign
+misspell nilnil sloglint staticcheck wastedassign unparam unused`）。
+**15 本とも guff にあり**、設定キーも全部通る —— `sloglint` の
+`no-mixed-args` / `attr-only` / `no-global` / `static-msg` /
+`key-naming-case`、`iface.enable: [identical]`、`depguard` の 2 ルール群
+（`errors` と `go.uber.org/zap` の deny）、`forbidigo` の pattern。
+`_new_keys` も空。`go list ./...` は **356 パッケージを問題なく列挙する**。
+
+それでも golangci-lint の報告は **1 件で、しかも `typecheck`** だった。
+
+```
+.../github.com/bytedance/sonic@v1.14.1/internal/rt/stubs.go:33:22: undefined: GoMapIterator (typecheck)
+1 issues:
+* typecheck: 1
+```
+
+#### 「リポジトリが壊れている」ではない —— 3 手で切り分けた
+
+harness/harness と ollama で 2 度踏んだ「1 件の typecheck が報告全体を
+消す」形に見えたが、**あの 2 つは `go list` の時点で落ちる**（embed した
+ビルド生成物が checkout に無い）。ここは `go list` が通る。原因は別である。
+
+1. **依存の build tag を数えた。** `sonic` は `rt.GoMapIterator` を
+   ちょうど 3 ファイルで宣言しており、その tag は
+   `map_legacy.go` が `// +build !go1.24`、
+   `map_nosiwss_go124.go` / `map_siwss_go124.go` が
+   `//go:build go1.24 && !go1.26 && [!]goexperiment.swissmap`。
+   **go1.26 はこの 3 つのどれも選ばない。** sonic v1.14.1 は Go 1.26 より
+   古く、1.26 用のファイルを持っていない。`goexperiment` をどちらに
+   倒しても `!go1.26` で外れるので、環境変数では回避できない。
+2. **どの Go が使われるかを確かめた。** `go.mod` は `go 1.25.7` で
+   `toolchain` 行が無い。`GOTOOLCHAIN=auto` は**上げることしかしない**ので、
+   1.25.7 ≤ 1.26.5 のこのホストでは**ホストの go1.26.5 がそのまま使われる**。
+   go.mod の数字は上限ではなく下限である。
+3. **反証を取った。** `GOTOOLCHAIN=go1.25.7 go build ./...` は
+   **exit 0・出力 0 行**。コードは健全で、落ちているのは
+   「pin された依存 × インストール済みコンパイラ」の組み合わせだけ。
+
+#### なぜ adopt せず除外するか
+
+3 で分かったのは、このターゲットの finding 集合が
+**どの Go が入っているかで変わる**ということである。cri-o / tetragon の
+「darwin では測れない」は OS 由来で恒久だが、これは
+**toolchain バージョン由来**で、Go 1.24/1.25 のホストなら普通に測れるし、
+signoz が sonic を上げれば今のホストでも測れるようになる。
+
+それでも今 adopt はできない。プロトコルの
+「このホストで出せない測定を記録しない」に加えて、
+**エントリのスキーマ（`name/url/ref/packages/tier/timeout[/config][/build_tags]`）に
+`GOTOOLCHAIN` を pin する欄が無い**。欄が無いまま入れれば、
+ホストの Go が上がった日に理由も分からず 1 件の typecheck に潰れる
+ターゲットが 1 つ増えるだけになる。除外表には
+**「sonic v1.14.1 を外れたら再検討」**と再開条件を書いた
+（[[deferral-notes-outlive-their-reasons]] —— 期限の無い保留は腐る）。
+
+#### 測定
+
+- golangci-lint 2.12.2: **1 件、`typecheck`**（356 パッケージ・15 linter が
+  1 件も測られない）。
+- `go build ./...`: `undefined: GoMapIterator`（go1.26.5 darwin/arm64）。
+- `GOTOOLCHAIN=go1.25.7 go build ./...`: **exit 0**。
+- guff 側は **`--no-cache --timeout 40m` で完走しなかった**
+  （`guff: timeout exceeded`、findings 0 行）。同じ木で golangci-lint は
+  **real 4.59s** で 1 件を返して終わる（`/usr/bin/time -p`、exit 1）。
+  ただしこの 4.59s は Go の build cache が完全に温まった後の数字で、
+  guff は型情報をソースから組み直すので**そのまま速度比較にはならない**。
+  「型が通らない木に当たったとき golangci は typecheck 1 件を出して
+  即座に降りるが、guff は 40 分回り続けて何も出さない」という
+  **振る舞いの差**として記録しておく —— 乖離として数えられる
+  finding 集合が両側に無いので、ここでは追わない。別途の入口。
+- 台帳は動かない（adopt していないので定義数も 0 の数も変わらない）。
+  変更は `corpus/README.md` の除外表 1 行と `corpus/status.py` の
+  `EXCLUDED` 1 エントリのみで、**guff の挙動は 1 バイトも変えていない**。
+- ゲートは通した（analyzer の入力は 1 行も変えていないので oss 再測は不要）:
+  **golden 231／fix 231／reject 14／workspace 278 バイナリ 3524 ok 0 failed**。
+  `status.py probe` の差分は sweep 済みターゲットの `at` 更新だけで、
+  state は 1 つも動いていない。
+
+```
+台帳: 49/100 at zero（53 定義、open 1＝boundary 44、unmeasured 3）— 変わらず
+```
