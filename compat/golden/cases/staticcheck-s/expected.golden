@@ -83,7 +83,15 @@ s1023/bad/bad.go:7:3:staticcheck::S1023: redundant break statement
 s1023/bad/bad.go:9:2:staticcheck::S1023: redundant return statement
 s1023/bad/bad.go:14:3:staticcheck::S1023: redundant return statement
 s1024/bad/bad.go:5:44:staticcheck::S1024: should use time.Until instead of t.Sub(time.Now())
-s1025/bad/bad.go:5:34:staticcheck::S1025: the argument is already a string, there's no need to use fmt.Sprintf
+s1025/bad/bad.go:27:60:staticcheck::S1025: should use String() instead of fmt.Sprintf
+s1025/bad/bad.go:30:65:staticcheck::S1025: should use String() instead of fmt.Sprintf
+s1025/bad/bad.go:33:71:staticcheck::S1025: should use String() instead of fmt.Sprintf
+s1025/bad/bad.go:36:57:staticcheck::S1025: should use String() instead of fmt.Sprintf
+s1025/bad/bad.go:40:47:staticcheck::S1025: the argument is already a string, there's no need to use fmt.Sprintf
+s1025/bad/bad.go:42:54:staticcheck::S1025: the argument's underlying type is a string, should use a simple conversion instead of fmt.Sprintf
+s1025/bad/bad.go:44:51:staticcheck::S1025: the argument's underlying type is a slice of bytes, should use a simple conversion instead of fmt.Sprintf
+s1025/bad/bad.go:46:47:staticcheck::S1025: the argument's underlying type is a slice of bytes, should use a simple conversion instead of fmt.Sprintf
+s1025/bad/bad.go:57:67:staticcheck::S1025: should use String() instead of fmt.Sprintf
 s1028/bad/bad.go:5:25:staticcheck::S1028: should use fmt.Errorf(...) instead of errors.New(fmt.Sprintf(...))
 s1028/bad/bad.go:5:36:staticcheck::S1039: unnecessary use of fmt.Sprintf
 s1029/bad/bad.go:4:2:staticcheck::S1029: should range over string, not []rune(string)

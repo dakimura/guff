@@ -26732,3 +26732,113 @@ golangci 側が 654 と 656 の間を行き来し続けている（guff は 656 
 ```
 台帳: 49/100 at zero（53 定義、open 1＝boundary **15**、unmeasured 3）
 ```
+
+### 2026-09-06（続き 238）— S1025 の Stringer 判定が**型名の一致**だった。しかも**単独では直せない**（3 つ同時）
+
+boundary の残り 15 件のうち **6 件が S1025** に集まっていた ——
+gcl-only 5 件が `should use String() instead of fmt.Sprintf`、
+guff-only 1 件が**同じ行で違う文言**
+（`the argument's underlying type is a string, ...`）。
+[[equal-only-counts-mean-a-rendering-diff]] が言う「両側に立つ 1 件」の形である。
+
+#### 上流の分岐順
+
+```go
+if typeutil.IsTypeWithName(typ, "reflect.Value") { continue }
+if isFormatter(typ, &irpkg.Prog.MethodSets) { continue }
+if types.Implements(typ, knowledge.Interfaces["fmt.Stringer"]) { ... }
+else if types.Unalias(typ) == string { ... }
+else if typ.Underlying() == string { ... }
+else if code.IsOfStringConvertibleByteSlice(pass, arg) { ... }
+```
+
+guff は 3 行目を **`type_with_name(pass, typ, "fmt.Stringer")`** ——
+つまり「その型の**名前が** `fmt.Stringer` か」で答えていた。
+これが真になるのは静的型がインタフェースそのもののときだけなので、
+**具体型では Stringer 分岐が一度も発火しない**。boundary の
+`credential.Password` は `string` に `String()` を持つ型なので、
+下の「underlying が string」分岐が代わりに答えていた。
+
+#### 欠陥は 3 つで、1 つだけ直すと壊れる
+
+1. Stringer 分岐が `types.Implements` ではなく名前一致。
+2. `IsOfStringConvertibleByteSlice` 分岐が**丸ごと無い**。
+3. `isFormatter` の skip が**丸ごと無い**。
+
+3 が効く。`Format` と `String` を両方持つ型は**修正前も静かだった** ——
+ただしそれは **Stringer 分岐が発火しなかったからにすぎない**。
+1 だけ直すと、上流が黙るこの形を guff が報告し始める。
+[[an-approximation-can-prop-up-another]] そのもので、**3 つは同時にしか出せない**。
+
+#### 測った形（11）
+
+| 引数の型 | golangci | 修正前 | 修正後 |
+|---|---|---|---|
+| `strStringer`（string + String） | String() | **文言違い**（underlying string） | ✅ |
+| `bytesStringer`（[]byte + String） | String() | ❌ | ✅ |
+| `*structStringer`（struct + String） | String() | ❌ | ✅ |
+| `fmt.Stringer` そのもの | String() | ✅ | ✅ |
+| `plainStr`（string、String 無し） | underlying string | ✅ | ✅ |
+| `string` | already a string | ✅ | ✅ |
+| `plainBytes`（[]byte、String 無し） | **slice of bytes** | ❌ | ✅ |
+| `[]byte` | **slice of bytes** | ❌ | ✅ |
+| `formatter`（Format + String、値） | 報告しない | ✅（偶然） | ✅（skip で） |
+| **`ptrFormatter` を値で渡す**（Format は ptr 受信） | **報告する** | ❌ | ✅ |
+| **`*ptrFormatter`** | 報告しない | ✅ | ✅ |
+
+最後の 2 行が `isFormatter` の実装を決めた ——
+上流は `msCache.MethodSet(T)`、つまり**引数自身の型のメソッドセット**を
+引くので、ポインタ受信の `Format` は値をカバーしない。
+`lookup_field_or_method(..., addressable: false, ...)` である。
+`addressable: true` にすると 10 行目が黙り、**他のどの形も気付かない**。
+
+修正後、実物の Go モジュール 11 形に対して
+**golangci-lint と 1 バイトも違わない出力**になった。
+
+#### fixture が「1 行」だった
+
+`crates/guff-staticcheck/tests/testdata/s1025/bad.go` は
+`func f(s string) string { return fmt.Sprintf("%s", s) }` の 1 行で、
+テストは `assert!(!messages.is_empty())` と
+`assert!(messages.iter().any(|m| m.contains("already a string")))` ——
+[[empty-fixture-hides-defects]] と
+[[one-shape-fixture-hides-the-other-branches]] の両方に該当する。
+**6 分岐のうち 1 つしか通っていなかった。**
+9 形 + ok 側 5 形に置き換え、**分岐ごとの件数**で固定した
+（String() 5 / already 1 / underlying string 1 / slice of bytes 2）。
+
+#### fixture が別の欠陥を掘り当てたので、形の方を変えた
+
+最初の ok.go には「string でも []byte でも Stringer でもない引数」として
+`fmt.Sprintf("%s", anInt)` を、「別の verb」として
+`fmt.Sprintf("%d", aString)` を置いた。どちらも**printf の型エラー**で、
+golden を regen すると **SA5009 が 2 件増え**、
+staticcheck-s の ratchet が missing 2 → 4 に悪化した ——
+つまり **guff の SA5009 がこの 2 形を取りこぼしている**。
+ratchet を緩める（＝新しい取りこぼしを恒久的に許す）のではなく、
+**S1025 の fixture を型の正しい形に差し替えた**:
+`error`（`Error()` を持ち `String()` は持たない、string でも []byte でもない）と
+`%q`。これで ratchet は **missing 2 / extra 0 の元のまま**である。
+**SA5009 の取りこぼしは別件として記録する** —— 再現は
+`fmt.Sprintf("%s", anInt)` の 1 行で、guff は何も言わない。
+
+#### 測定
+
+- **boundary: open 15 → 9**（guff-only 4 → 3、gcl-only 11 → 6）。
+  staticcheck は **R 97.3% → 98.5%**（guff 405 / gcl 410 / both 404）。
+  残り 9 は staticcheck 7（S1011 の append 化 3・「blank への無駄な代入」2・
+  S1040 の同型アサーション 1・S1017 TrimPrefix の guff-only 1）と
+  bodyclose の過剰報告 2。
+- 退行なし: **dapr 1555/1555・k6 423/423・syncthing 656/654（allowlist 内）・
+  tailscale 47/43（同）・prometheus 20/20・cli 3/3・coredns 3/3・
+  karmada 19/19・pipeline 156/156・rclone 3/3・thanos 543/543**、
+  oss pr 8 ターゲット P=R=100%。
+- golden **231**（staticcheck-s を regen、**キー集合で差分して
+  S1025 +8・削除 0**、ratchet は baseline のまま）／
+  fix **231**（staticcheck-s を再録画。上流が書くのは
+  `v.String()` / `v` / `string(v)` で、guff と一致）／reject 14／
+  workspace 279 バイナリ **3530 ok** 0 failed。
+
+```
+台帳: 49/100 at zero（53 定義、open 1＝boundary **9**、unmeasured 3）
+```
