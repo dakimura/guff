@@ -6,8 +6,8 @@
     "`unmeasured` is not `clean`: an absent measurement is a question."
   ],
   "goal": 100,
-  "defined": 48,
-  "clean": 45,
+  "defined": 49,
+  "clean": 46,
   "open": 0,
   "unmeasured": 3,
   "targets": {
@@ -139,6 +139,14 @@
       "tier": "hunt",
       "state": "clean",
       "at": "20260905T031614Z",
+      "open": 0,
+      "guff_only": 0,
+      "gcl_only": 0
+    },
+    "dubbo-go": {
+      "tier": "hunt",
+      "state": "clean",
+      "at": "20260906T010024Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
