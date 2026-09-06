@@ -263,3 +263,50 @@ func okDerefAndCheckInSiblingArms(cond bool) {
 		useAny(c)
 	}
 }
+
+// `*in` and `**in` are two different pointers. SA5011 is pure value identity,
+// so upstream keeps them apart; peeling a load off *any* pointer collapsed both
+// onto `in` and made all three of cert-manager's
+// `internal/apis/config/shared/v1alpha1/conversion.go` converters a finding.
+//
+// Silent for two independent reasons, and both matter: the check guards the
+// deref through an early return, *and* the value it checks is not the value
+// dereferenced.
+func okOuterDerefIsNotTheInnerPointer(in **int32, out *int) {
+	if *in == nil {
+		*out = 0
+		return
+	}
+	*out = int(**in)
+}
+
+// The same two values with the check *after* the deref — upstream is still
+// silent, because `*in` on line one and `*in` on line three are two loads and
+// therefore two values. Dominance cannot explain this one; only identity can.
+func okDerefThenCheckThroughTwoLoads(in **int32, out *int) {
+	*out = int(**in)
+	if *in == nil {
+		return
+	}
+}
+
+// The load whose address is a local alloc still unifies: this is the shape
+// `peel_load` exists for, and it must stay guarded rather than become a
+// finding.
+func okLocalPointerGuarded(get func() *int32) int32 {
+	var x *int32
+	x = get()
+	if x == nil {
+		return 0
+	}
+	return *x
+}
+
+// A pointer parameter dereferenced only after its own nil check.
+func okParamGuardedByEarlyReturn(in *int32, out *int) {
+	if in == nil {
+		*out = 0
+		return
+	}
+	*out = int(*in)
+}

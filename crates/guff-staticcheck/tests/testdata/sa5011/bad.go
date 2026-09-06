@@ -43,3 +43,26 @@ func derefBelowJoinThenCheck(cond bool) {
 		useAny(c)
 	}
 }
+
+// The pointer bound to a local *is* one value once upstream's IR lifts the
+// alloc, so a deref-then-check on it is reported — and so must guff's peeled
+// load be. This is the control for ok.go's `okOuterDerefIsNotTheInnerPointer`:
+// narrowing `peel_load` to loads of a local `Alloc` must not reach here.
+func innerPointerBoundToALocal(in **int32) int32 {
+	p := *in
+	v := *p // want
+	if p == nil {
+		return 0
+	}
+	return v
+}
+
+func varDeclDerefThenCheck(get func() *int32) int32 {
+	var x *int32
+	x = get()
+	v := *x // want
+	if x == nil {
+		return 0
+	}
+	return v
+}

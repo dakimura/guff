@@ -39,6 +39,29 @@ fn is_nil_const_operand(prog: &Program, caller: &Function, value: Value) -> bool
     is_nil_const(prog, caller, value)
 }
 
+/// Whether `v` is a local `Alloc` in this function.
+fn is_local_alloc(func: &Function, v: Value) -> bool {
+    let Value::Instr(iid) = v else {
+        return false;
+    };
+    matches!(func.instrs.get(iid), InstrData::Alloc(_))
+}
+
+/// Peel one load — but only a load of a local `Alloc`.
+///
+/// Upstream's IR lifts a non-escaping `Alloc` into registers, so every read of
+/// `var x *T` is one and the same `ir.Value`. guff keeps the `Alloc` and emits
+/// a fresh load per use, and without peeling those, the two occurrences of `x`
+/// in `if x == nil { … }` and `*x` would never be recognised as the same
+/// pointer. That reconstruction is what this is for.
+///
+/// Peeling any *other* load is not reconstruction — it is erasing a real
+/// dereference. Given `in **T`, `*in` and `**in` are two different pointers,
+/// and upstream, which is pure value identity, keeps them apart. Collapsing
+/// both onto `in` turned cert-manager's
+/// `if *in == nil { return }; **in` into three findings guff reported and
+/// golangci-lint did not, and the same collapse made `p := *in` a deref of
+/// whatever `p` was later checked against.
 fn peel_load(func: &Function, v: Value) -> Value {
     let v = flatten_ssa_value(func, v);
     let Value::Instr(iid) = v else {
@@ -47,7 +70,7 @@ fn peel_load(func: &Function, v: Value) -> Value {
     match func.instrs.get(iid) {
         InstrData::UnOp(UnOp {
             op: Token::MUL, x, ..
-        }) => *x,
+        }) if is_local_alloc(func, *x) => *x,
         _ => v,
     }
 }

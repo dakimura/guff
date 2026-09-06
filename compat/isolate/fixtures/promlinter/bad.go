@@ -60,3 +60,39 @@ func UntypedInName() {
 func TypeNameNotDelimited() {
 	_ = prometheus.NewGauge(prometheus.GaugeOpts{Name: "queuegauge", Help: "n"})
 }
+
+// promlinter resolves `Namespace` / `Subsystem` / `Name` through
+// `ast.Ident.Obj.Decl` when they are given as names rather than literals, and
+// **drops the whole metric** when it cannot (`parseOpts` returns nil on the
+// first field it fails to parse). cert-manager writes `Namespace: namespace`
+// on every one of its metrics, so guff — which read string literals only —
+// reported none of the eight findings golangci-lint does.
+const namespace = "app"
+
+const metricName = "requests_from_const"
+
+var varName = "requests_from_var"
+
+func NamespaceFromConst() {
+	_ = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace,
+		Name:      "requests_ns_const",
+		Help:      "n",
+	})
+}
+
+func NameFromConst() {
+	_ = prometheus.NewCounter(prometheus.CounterOpts{Name: metricName, Help: "n"})
+}
+
+func NameFromVar() {
+	_ = prometheus.NewCounter(prometheus.CounterOpts{Name: varName, Help: "n"})
+}
+
+// `ast.Object.Decl` is an `*ast.AssignStmt` here, which upstream's `parseValue`
+// leaves unresolved on purpose (its own TODO) — so the metric is dropped and
+// neither tool says anything about `requests_from_short_var`.
+func NameFromShortVar() {
+	shortName := "requests_from_short_var"
+	_ = prometheus.NewCounter(prometheus.CounterOpts{Name: shortName, Help: "n"})
+}

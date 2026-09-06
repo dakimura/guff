@@ -394,8 +394,12 @@ impl LintOptions {
 /// of it answers "no". `testinggoroutine` was written, tested against the
 /// golden tier, and found short by exactly one finding for this reason: the one
 /// shape whose region is reached through `Ident.obj` (`fn := func(){…}; go fn()`).
+/// `promlinter` cost eight findings on cert-manager the same way: it resolves
+/// `Namespace: namespace` through `Obj.Decl`, and an unresolved name makes the
+/// whole `Opts` literal unparseable, so the metric is dropped rather than
+/// mis-named.
 const AST_OBJECT_RESOLUTION_ANALYZERS: &[&str] =
-    &["ineffassign", "maintidx", "testinggoroutine"];
+    &["ineffassign", "maintidx", "testinggoroutine", "promlinter"];
 
 fn analyzers_need_ast_object_resolution(analyzers: &[&Analyzer]) -> bool {
     analyzers

@@ -233,6 +233,30 @@
  		}
  	}
  }
+--- a/sa5011/bad/bad.go
++++ b/sa5011/bad/bad.go
+@@ -58,8 +58,7 @@
+ }
+ 
+ func varDeclDerefThenCheck(get func() *int32) int32 {
+-	var x *int32
+-	x = get()
++	var x *int32 = get()
+ 	v := *x // want
+ 	if x == nil {
+ 		return 0
+--- a/sa5011/ok/ok.go
++++ b/sa5011/ok/ok.go
+@@ -294,8 +294,7 @@
+ // `peel_load` exists for, and it must stay guarded rather than become a
+ // finding.
+ func okLocalPointerGuarded(get func() *int32) int32 {
+-	var x *int32
+-	x = get()
++	var x *int32 = get()
+ 	if x == nil {
+ 		return 0
+ 	}
 --- a/sa6005/bad/bad.go
 +++ b/sa6005/bad/bad.go
 @@ -2,10 +2,10 @@

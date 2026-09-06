@@ -1,2 +1,5 @@
 # The isolate fixture, so the two tiers cannot drift.
 bad.go  compat/isolate/fixtures/gosmopolitan/bad.go
+# A test file, because golangci-lint pins gosmopolitan's `lookattests` to
+# true and so looks at one like any other file.
+bad_test.go  compat/isolate/fixtures/gosmopolitan/bad_test.go

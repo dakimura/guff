@@ -16,3 +16,7 @@ bad.go:41:26:promlinter::Metric: queue_gauge Error: metric name should not inclu
 bad.go:46:26:promlinter::Metric: queue_histogram_depth Error: metric name should not include type 'histogram'
 bad.go:51:26:promlinter::Metric: queue_counter_gauge Error: metric name should not include type 'counter'
 bad.go:51:26:promlinter::Metric: queue_counter_gauge Error: metric name should not include type 'gauge'
+bad.go:77:28:promlinter::Metric: app_requests_ns_const Error: counter metrics should have "_total" suffix
+bad.go:77:28:promlinter::Metric: app_requests_ns_const Error: metric names should not contain abbreviated units
+bad.go:85:28:promlinter::Metric: requests_from_const Error: counter metrics should have "_total" suffix
+bad.go:89:28:promlinter::Metric: requests_from_var Error: counter metrics should have "_total" suffix

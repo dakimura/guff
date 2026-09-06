@@ -8795,6 +8795,31 @@ fn gosmopolitan_flags_han_scripts_and_time_local() {
     );
 }
 
+/// Test files are looked at.
+///
+/// gosmopolitan's own default is `LookAtTests: false`, but golangci-lint's
+/// wrapper pins `"lookattests": true` — commented "Should be managed with
+/// `linters.exclusions.rules`" — and the settings pointer it builds that config
+/// from is never nil. So there is no knob not because the default is kept but
+/// because it is forced on. Skipping `*_test.go` cost cert-manager's two
+/// `//nolint: gosmopolitan` directives in `pkg/util/pki/asn1_util_test.go`,
+/// which guff then reported as unused directives — a miss wearing the face of
+/// an over-report.
+#[test]
+fn gosmopolitan_looks_at_test_files() {
+    let pkg = support::typecheck_fixture(
+        "gosmopolitan",
+        "example.com/gosmopolitan",
+        "bad_test.go",
+    );
+    let messages = support::run_analyzer(gosmopolitan(), &pkg);
+    assert_eq!(
+        messages,
+        vec!["string literal contains rune in Han script".to_string()],
+        "{messages:?}"
+    );
+}
+
 #[test]
 fn gosmopolitan_allows_ascii_and_utc() {
     let pkg = support::typecheck_fixture("gosmopolitan", "example.com/gosmopolitan/ok", "ok.go");
@@ -9135,6 +9160,45 @@ fn promlinter_reports_every_type_name_in_a_metric_name() {
             "Metric: queue_counter_gauge Error: metric name should not include type 'gauge'",
             "Metric: queue_gauge Error: metric name should not include type 'gauge'",
             "Metric: queue_histogram_depth Error: metric name should not include type 'histogram'",
+        ],
+        "{messages:?}"
+    );
+}
+
+/// `Namespace` / `Name` given as a *name* rather than a literal.
+///
+/// Upstream's `parseValue` follows `ast.Ident.Obj.Decl` to the `ValueSpec` and
+/// reads its first value; `parseOpts` returns nil on the first field it cannot
+/// parse, so an unresolved name drops the whole metric rather than reporting it
+/// half-named. cert-manager writes `Namespace: namespace` on all five of its
+/// metrics, and guff — reading string literals only — produced none of the
+/// eight findings golangci-lint does.
+///
+/// The last two functions are the point of the fixture: an `*ast.AssignStmt`
+/// decl is an explicit TODO upstream and stays unresolved, so
+/// `requests_from_short_var` must **not** appear. Without it, "resolve every
+/// identifier" would pass just as well.
+///
+/// `Ident.obj` is only filled when parsing resolves objects, which
+/// `TypecheckEnv::skip_object_resolution` turns off unless an enabled analyzer
+/// is on `AST_OBJECT_RESOLUTION_ANALYZERS` — promlinter had to be added there
+/// too, and this test does not cover that wiring (it parses its own fixture).
+#[test]
+fn promlinter_resolves_names_through_ident_obj() {
+    let pkg = support::typecheck_fixture(
+        "promlinter",
+        "example.com/promlinter/consts",
+        "consts.go",
+    );
+    let mut messages = support::run_analyzer(promlinter(), &pkg);
+    messages.sort();
+    assert_eq!(
+        messages,
+        vec![
+            "Metric: app_requests_ns_const Error: counter metrics should have \"_total\" suffix",
+            "Metric: app_requests_ns_const Error: metric names should not contain abbreviated units",
+            "Metric: requests_from_const Error: counter metrics should have \"_total\" suffix",
+            "Metric: requests_from_var Error: counter metrics should have \"_total\" suffix",
         ],
         "{messages:?}"
     );

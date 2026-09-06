@@ -2364,6 +2364,39 @@ fn sa5008_exempts_go_flags_repeated_tags() {
 }
 sa_check!(sa5010, sa5010_flags_impossible_assertion, sa5010_allows_possible_assertion, "type assertion");
 sa_check!(sa5011, sa5011_flags_possible_nil_deref, sa5011_allows_guarded_deref, "possible nil pointer dereference");
+
+/// `*in` and `**in` are two different pointers.
+///
+/// SA5011 is pure value identity, and guff's `peel_load` exists only to
+/// reconstruct the identity upstream's IR gets for free by lifting a
+/// non-escaping `Alloc` into registers. Peeled off *any* pointer it stops being
+/// reconstruction and starts erasing a dereference: `in`, `*in` and `**in` all
+/// collapse onto one key, which made all three converters in cert-manager's
+/// `internal/apis/config/shared/v1alpha1/conversion.go` a finding where
+/// golangci-lint is silent.
+///
+/// `sa_check!` above only asserts bad.go is non-empty, so it would pass with
+/// any subset. This pins the count against the `// want` markers, and ok.go —
+/// which `sa5011_allows_guarded_deref` requires to be **empty** — carries the
+/// two shapes that must not come back plus the local-alloc shape `peel_load` is
+/// still for.
+#[test]
+fn sa5011_reports_exactly_the_marked_derefs() {
+    let pkg = typecheck_rule("sa5011", "bad.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa5011::analyzer(), &pkg);
+    assert_eq!(messages.len(), want_markers("sa5011", "bad.go"), "{messages:?}");
+}
+
+/// How many lines of a rule fixture carry a `// want` marker.
+fn want_markers(rule: &str, file: &str) -> usize {
+    let path = support::testdata(rule).join(file);
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+        .lines()
+        .filter(|l| l.contains("// want"))
+        .count()
+}
 sa_check!(sa6003, sa6003_flags_rune_range, sa6003_allows_string_range, "range over string");
 sa_check!(sa9001, sa9001_flags_defer_in_channel_range, sa9001_allows_defer_outside_range, "defer");
 sa_check!(sa9003, sa9003_flags_empty_branch, sa9003_allows_nonempty_branch, "empty branch");
@@ -2398,11 +2431,15 @@ fn sa5011_or_guard_renames_the_pointer() {
     );
 
     // The single-check spelling of the deref-first shape is still a finding.
+    // Counted against the `// want` markers rather than a literal, so a shape
+    // added to bad.go for another rule change does not read as a regression
+    // here (see `sa5011_reports_exactly_the_marked_derefs`).
     let bad = typecheck_rule("sa5011", "bad.go");
     let bad_messages = support::run_analyzer(sa5011::analyzer(), &bad);
-    assert!(
-        bad_messages.len() == 3,
-        "bad.go keeps all three of its findings: {bad_messages:?}"
+    assert_eq!(
+        bad_messages.len(),
+        want_markers("sa5011", "bad.go"),
+        "bad.go keeps every marked finding: {bad_messages:?}"
     );
 }
 
