@@ -1834,11 +1834,32 @@ fn s1039_allows_ok_patterns() {
 #[test]
 fn s1040_flags_bad_patterns() {
     let dir = support::testdata("s1040");
-    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/s1040");
+    let inner_stub = dir.join("stub/example.com/s1040/inner/inner.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1040",
+        &dir.join("bad.go"),
+        &[("example.com/s1040/inner", &inner_stub)],
+    );
     support::assert_well_typed(&pkg);
-    let messages = support::run_analyzer(s1040::analyzer(), &pkg);
-    assert!(!messages.is_empty(), "{messages:?}");
-    assert!(messages.iter().any(|m| m.contains("type assertion to the same type")));
+    let mut messages = support::run_analyzer(s1040::analyzer(), &pkg);
+    messages.sort();
+
+    // Both halves of the message are `report.Render` upstream — the *source
+    // expressions*, not the resolved types. Rendering the type instead spelled
+    // every named one with its full import path, and the fixture was a single
+    // `i.(interface{})`, the one shape whose two renderings agree.
+    let mut want = vec![
+        "type assertion to the same type: i already has type interface{}",
+        "type assertion to the same type: x already has type msg",
+        "type assertion to the same type: x already has type msg",
+        // `alias` is `= msg`, the way proto.Message is protoreflect.ProtoMessage.
+        // Comparing rendered type strings never matched these two.
+        "type assertion to the same type: x already has type alias",
+        "type assertion to the same type: x already has type inner.Msg",
+        "type assertion to the same type: mk().get() already has type msg",
+    ];
+    want.sort();
+    assert_eq!(messages, want);
 }
 
 #[test]
@@ -1846,8 +1867,11 @@ fn s1040_allows_ok_patterns() {
     let dir = support::testdata("s1040");
     let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/s1040/ok");
     support::assert_well_typed(&pkg);
+    // A different interface, a concrete type (`IsInterface(t1)` is false), and a
+    // type switch (no `expr.Type`, which upstream returns early on).
     assert!(support::run_analyzer(s1040::analyzer(), &pkg).is_empty());
 }
+
 
 #[test]
 fn sa1001_flags_invalid_template() {

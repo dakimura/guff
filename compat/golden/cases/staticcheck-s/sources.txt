@@ -77,5 +77,8 @@ s1038/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1038/bad.go
 s1038/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1038/ok.go
 s1039/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1039/bad.go
 s1039/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1039/ok.go
+# The imported interface the S1040 message has to render as `inner.Msg`
+# rather than with its full import path.
+s1040/inner/inner.go   crates/guff-staticcheck/tests/testdata/s1040/stub/example.com/s1040/inner/inner.go
 s1040/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1040/bad.go
 s1040/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1040/ok.go
