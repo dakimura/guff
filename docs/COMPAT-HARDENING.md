@@ -25394,3 +25394,40 @@ golden ケース `staticcheck-sa1019-package-doc` を足した:
 ```
 台帳: 44/100 at zero（47 定義、open 0、unmeasured 3）
 ```
+
+### 2026-09-06（続き 223）— `adopt kratos`。**33 対 33 で乖離 2 件**、どちらも gosec
+
+台帳が open 0 になったので次の候補 **ory/kratos v26.2.0**（96.1MB、
+identity server）。config は 6 linter（`gosec` / `govet` / `errcheck` /
+`ineffassign` / `staticcheck` / `unused`）と `gosec.excludes`
+（G101 / G117 / G306 / G704 / G705）、`bodyclose` の disable、
+`staticcheck` の `text: "SA1019"` 除外だけで、guff が全部持っている。
+
+darwin でも **113 パッケージが全部 load できる**（`go list` ではなく
+`go build ./...` で確認 —— 続き 217）。ill-typed は 0。
+
+```
+kratos: guff=33 golangci=33 both=32 P=97.0% R=97.0% [UNEXPECTED]
+  +guff  x/redir/secure_redirect.go:177:gosec:G710: Open redirect via taint analysis
+  +gcl   session/handler_test.go:365:gosec:G124: http.Cookie missing or has insecure …
+  guff-only by linter: {'gosec': 1}
+  gcl-only by linter: {'gosec': 1}
+```
+
+**両側 1 件ずつだが同じ finding の位置ずれではない**
+（[[equal-only-counts-mean-a-rendering-diff]] の形ではない）——
+ファイルも規則も違う 2 つの独立した欠陥である。
+
+| 向き | 規則 | 場所 | 形 |
+|---|---|---|---|
+| guff の取りこぼし | G124 | `session/handler_test.go:365` | `[]*http.Cookie{{…}}` の**要素型を省略した**複合リテラル |
+| guff の過剰報告 | G710 | `x/redir/secure_redirect.go:177` | `http.Redirect(w, r, ret.String(), …)`、`ret` はローカル関数の戻り値 |
+
+G124 の側は `check_g124_composite` が
+`let Some(ty) = lit.ty.as_deref() else { return; }` で始まっており、
+配列 / スライス / マップの要素として型を省略した複合リテラル
+（`lit.ty == None`）を**全部見ていない**。次のタスク `close kratos` で追う。
+
+```
+台帳: 44/100 at zero（48 定義、open 1＝kratos 2、unmeasured 3）
+```
