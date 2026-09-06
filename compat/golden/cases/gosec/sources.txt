@@ -11,7 +11,11 @@
 # mostly *silent* cases — see the header there for why those are the ones worth
 # gating), g118/ (context propagation), g123/ (TLS resumption vs
 # VerifyPeerCertificate) and g7xx/ (the taint engine's four rules, which share
-# one analysis and so want one package). The rest share the files below.
+# one analysis and so want one package). g710v/ is the taint engine again, on
+# its own because what it pins is a *loss* — the variadic tail go/ssa packs into
+# an array the callee summary cannot see through — and g124e/ is G124 over the
+# composite literals that elide their element type. The rest share the files
+# below.
 bad/bad.go            crates/guff-style/tests/testdata/gosec/bad.go
 ok/ok.go              crates/guff-style/tests/testdata/gosec/ok.go
 scores/scores.go      crates/guff-style/tests/testdata/gosec/scores.go
@@ -22,6 +26,8 @@ g115/g115.go          crates/guff-style/tests/testdata/gosec/g115.go
 g118/g118.go          crates/guff-style/tests/testdata/gosec/g118.go
 g123/g123.go          crates/guff-style/tests/testdata/gosec/g123.go
 g7xx/g7xx.go          crates/guff-style/tests/testdata/gosec/g7xx.go
+g710v/g710_variadic.go  crates/guff-style/tests/testdata/gosec/g710_variadic.go
+g124e/g124_elided.go  crates/guff-style/tests/testdata/gosec/g124_elided.go
 g117/g117.go          crates/guff-style/tests/testdata/gosec/g117.go
 g304/g304.go          crates/guff-style/tests/testdata/gosec/g304.go
 g122/g122.go          crates/guff-style/tests/testdata/gosec/g122.go

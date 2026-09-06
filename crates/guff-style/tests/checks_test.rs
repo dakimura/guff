@@ -143,6 +143,99 @@ fn gosec_g602_learns_a_bound_from_variadic_calls_and_makeslice() {
     );
 }
 
+/// G124's report set is decided by whether upstream's SSA rule has an
+/// allocation to *name*, not by whether the literal spells out its type.
+///
+/// gosec keys a cookie by the SSA value its field stores are rooted at and
+/// skips any root whose `Pos()` is `token.NoPos`. An element that elides its
+/// type still gets an `Alloc (complit)` at the inner `{` when the element is a
+/// pointer, or when the container is a map; only a slice / array **of values**
+/// roots its stores at an `IndexAddr`, which carries no position. guff read
+/// `lit.ty` instead and so was blind to every elided element — kratos's
+/// `c.Jar.SetCookies(…, []*http.Cookie{{…}})` was the finding that showed it.
+///
+/// Asserted as the **set of report positions**: all 19 findings carry the
+/// identical message, so `any(contains("G124"))` — or a bare count — is true of
+/// any subset. Measured against golangci-lint 2.12.2 (gosec v2.27.1) with
+/// `max-same-issues: 0`, which the default of 3 otherwise hides.
+#[test]
+fn gosec_g124_sees_composite_literals_that_elide_their_element_type() {
+    let pkg = support::typecheck_fixture("gosec", "example.com/gosec/g124elided", "g124_elided.go");
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64)> = support::run_analyzer_diagnostics(gosec(), &pkg)
+        .into_iter()
+        .filter(|d| d.message.contains("G124:"))
+        .map(|d| {
+            let p = fset.position(guff::position::Pos(d.pos as i64));
+            (p.line, p.column)
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            // the five that spell out the type, and always worked
+            (25, 58),
+            (27, 54),
+            (29, 75),
+            (31, 78),
+            (33, 55),
+            // elided element of pointer type: slice, array, map, named slice,
+            // nested slices, a struct field, beside a nil, an array field, an
+            // address-of, a map of slices, a call argument
+            (37, 69),
+            (39, 71),
+            (42, 38),
+            (45, 52),
+            (47, 71),
+            (49, 64),
+            (51, 68),
+            (54, 56),
+            (57, 71),
+            (60, 41),
+            (64, 19),
+            // elided element of value type, but under a map: go/ssa has to
+            // materialise the value before `MapUpdate`, so it gets a position
+            (70, 37),
+            (74, 54),
+            // …and the insecure SameSite, to prove an elided literal is still
+            // read for its fields rather than reported on sight
+            (94, 24),
+        ],
+        "G124 report positions"
+    );
+}
+
+/// The other half of the same table: a slice or array **of values** whose
+/// element type is elided is silent in both tools, because the field stores
+/// are rooted at an `IndexAddr` and `reportInsecureCookies` drops a root with
+/// `allocPos == token.NoPos`. Without this the fix above could be written as
+/// "report every elided cookie literal" and all 19 positions would still line
+/// up — the three silent shapes are the only thing that says otherwise.
+#[test]
+fn gosec_g124_stays_quiet_for_elided_values_in_slices_and_arrays() {
+    let pkg = support::typecheck_fixture("gosec", "example.com/gosec/g124elided", "g124_elided.go");
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let lines: Vec<i64> = support::run_analyzer_diagnostics(gosec(), &pkg)
+        .into_iter()
+        .filter(|d| d.message.contains("G124:"))
+        .map(|d| fset.position(guff::position::Pos(d.pos as i64)).line)
+        .collect();
+    for (line, what) in [
+        (77, "[]http.Cookie{{…}}"),
+        (79, "[1]http.Cookie{{…}}"),
+        (81, "ValJar{{…}} (a named []http.Cookie)"),
+        // and the two secure literals, one elided and one not
+        (86, "elided, all three attributes safe"),
+        (90, "spelled out, all three attributes safe"),
+    ] {
+        assert!(
+            !lines.contains(&line),
+            "G124 fired on line {line} ({what}); upstream is silent there"
+        );
+    }
+}
+
 /// G115 is the other SSA analyzer (gosec `conversion_overflow.go` +
 /// `range_analyzer.go`). The fixture marks every conversion `// FINDING` or
 /// `// silent`, and those marks are gated against golangci-lint 2.12.2 by
@@ -524,6 +617,56 @@ fn gosec_taint_crosses_a_call_only_when_the_caller_is_in_the_call_graph() {
     // Five, not six: `plainRec.plainLog` is the twin of `boxedRec.boxedLog` and
     // its caller is not a node, so its `id` never learns where it came from.
     assert_eq!(g706.len(), 5, "{messages:?}");
+}
+
+/// The one place gosec's taint engine drops a flow it can otherwise see: the
+/// arguments go/ssa packs into a variadic array.
+///
+/// The callee summary (`doTaintedArgsFlowToReturn` → `valueReachableFromParams`)
+/// asks whether a tainted parameter reaches a `return`. Its `*ssa.Alloc` arm
+/// follows direct stores and `FieldAddr` stores and nothing else — not
+/// `IndexAddr`, which is the only way into the `new [N]T (varargs)` go/ssa
+/// builds for a non-spread variadic call. (`isTainted`, the main walk, *does*
+/// follow it; only the summary does not.) guff never builds that array — it
+/// records the spread in `CallCommon::ellipsis` and passes the tail through as
+/// ordinary arguments — so it saw a flow upstream had lost, and reported
+/// kratos's `x/redir/secure_redirect.go:177` where golangci-lint is silent.
+///
+/// Asserted as the **set of report positions**: all three findings carry the
+/// identical message. The two `// fires` shapes are what stops the fix from
+/// being "never look at a variadic call's arguments" — `variadicFixed` puts the
+/// taint in the *fixed* parameter of a variadic function, and upstream reports
+/// it. Measured against golangci-lint 2.12.2 (gosec v2.27.1).
+#[test]
+fn gosec_taint_loses_a_flow_through_a_packed_variadic_tail() {
+    let pkg = support::typecheck_fixture(
+        "gosec",
+        "example.com/gosec/g710variadic",
+        "g710_variadic.go",
+    );
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64)> = support::run_analyzer_diagnostics(gosec(), &pkg)
+        .into_iter()
+        .filter(|d| d.message.contains("G710:"))
+        .map(|d| {
+            let p = fset.position(guff::position::Pos(d.pos as i64));
+            (p.line, p.column)
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            // S1: the tainted string is an ordinary argument of a plain call
+            (95, 64),
+            // S3: variadic callee, but the taint is in the fixed parameter
+            (97, 64),
+            // S7: no helper at all — the request reaches the sink directly
+            (103, 64),
+        ],
+        "G710 report positions; silent are S2 (variadic tail), S4 (spread), \
+         S5 (variadic method), S6 (variadic through an interface invoke)"
+    );
 }
 
 #[test]

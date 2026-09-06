@@ -2396,6 +2396,105 @@ fn cookie_security_from_composite(pass: &Pass<'_>, lit: &CompositeLit) -> Cookie
     sec
 }
 
+/// The type the checker recorded for a composite literal node.
+///
+/// Unlike [`type_name_of`] this takes the literal itself, so it also answers
+/// for one that **elides** its type — `{…}` as an element of an array / slice
+/// / map literal, where `lit.ty` is `None` and the only record of the type is
+/// the checker's.
+fn composite_lit_type_name(pass: &Pass<'_>, lit: &CompositeLit) -> Option<String> {
+    let info = pass.types_info()?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let tav = info.types.get(&lit.id)?;
+    Some(type_string(
+        &artifacts.types,
+        &artifacts.objects,
+        &artifacts.packages,
+        tav.typ,
+        None,
+    ))
+}
+
+/// Whether upstream's SSA G124 has an allocation to name for this literal.
+///
+/// gosec keys a cookie by the SSA value its field stores are rooted at and
+/// drops any root whose `Pos()` is `token.NoPos`. Which literals survive that
+/// is not "the ones that spell out their type":
+///
+/// | literal | root | reported |
+/// |---|---|---|
+/// | `&http.Cookie{…}` / `http.Cookie{…}` | `Alloc (complit)` at the `{` | yes |
+/// | `[]*http.Cookie{{…}}`, `[1]*http.Cookie{{…}}`, `map[K]*http.Cookie{k: {…}}` | `Alloc (complit)` at the inner `{` | yes |
+/// | `map[K]http.Cookie{k: {…}}` | `Alloc (complit)`, materialised for the `MapUpdate` | yes |
+/// | `[]http.Cookie{{…}}`, `[1]http.Cookie{{…}}` | `IndexAddr` into the slicelit — **`NoPos`** | no |
+///
+/// So an elided element is reportable exactly when it is a **pointer**; an
+/// elided *value* is reportable only under a map, and that case is driven from
+/// the parent by [`check_g124_elided_map_values`] (a struct is never a map key
+/// here: `http.Cookie` has a `[]string` field and so is not comparable).
+///
+/// Measured against golangci-lint 2.12.2 / gosec v2.27.1 over 24 shapes; see
+/// the `gosecg124elided` fixture.
+fn g124_lit_allocates_cookie(pass: &Pass<'_>, lit: &CompositeLit) -> bool {
+    match lit.ty.as_deref() {
+        Some(ty) => is_http_cookie_type_expr(pass, ty),
+        None => composite_lit_type_name(pass, lit).as_deref() == Some("*net/http.Cookie"),
+    }
+}
+
+/// The value-typed half of the table in [`g124_lit_allocates_cookie`]: an
+/// elided `{…}` under a **map** literal, which go/ssa materialises into an
+/// allocation positioned at the `{` so it can be handed to `MapUpdate`.
+fn check_g124_elided_map_values(
+    pass: &Pass<'_>,
+    lit: &CompositeLit,
+    enabled: &HashSet<&'static str>,
+    pending: &mut Vec<(u32, u32, String)>,
+) {
+    if !enabled.contains("G124") {
+        return;
+    }
+    if !composite_lit_is_map(pass, lit) {
+        return;
+    }
+    for elt in &lit.elts {
+        let Expr::KeyValueExpr(kv) = elt else {
+            continue;
+        };
+        let Expr::CompositeLit(inner) = kv.value.as_ref() else {
+            continue;
+        };
+        if inner.ty.is_some() {
+            continue; // spelled out: the ordinary path already saw it
+        }
+        if composite_lit_type_name(pass, inner).as_deref() != Some("net/http.Cookie") {
+            continue;
+        }
+        report_g124_lit(pass, inner, pending);
+    }
+}
+
+/// Whether the checker gave `lit` a type whose underlying is a map.
+///
+/// Asked of the literal rather than of `lit.ty` so a map literal that itself
+/// elides its type — `map[string]map[string]http.Cookie{"a": {"b": {…}}}` —
+/// answers the same as one that spells it out.
+fn composite_lit_is_map(pass: &Pass<'_>, lit: &CompositeLit) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(tav) = info.types.get(&lit.id) else {
+        return false;
+    };
+    matches!(
+        artifacts.types.get(tav.typ.underlying(&artifacts.types)),
+        TypeData::Map(_)
+    )
+}
+
 fn check_g124_composite(
     pass: &Pass<'_>,
     lit: &CompositeLit,
@@ -2405,12 +2504,18 @@ fn check_g124_composite(
     if !enabled.contains("G124") {
         return;
     }
-    let Some(ty) = lit.ty.as_deref() else {
-        return;
-    };
-    if !is_http_cookie_type_expr(pass, ty) {
+    if !g124_lit_allocates_cookie(pass, lit) {
         return;
     }
+    report_g124_lit(pass, lit, pending);
+}
+
+/// Report `lit` unless its Secure / HttpOnly / SameSite fields are all safe.
+fn report_g124_lit(
+    pass: &Pass<'_>,
+    lit: &CompositeLit,
+    pending: &mut Vec<(u32, u32, String)>,
+) {
     let mut sec = cookie_security_from_composite(pass, lit);
     if !sec.is_secure() {
         // Upstream SSA G124 folds later field stores on the same allocation
@@ -3854,6 +3959,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     check_g402_composite(pass, lit, &enabled, &mut pending);
                     check_g112_composite(pass, lit, &enabled, &mut pending);
                     check_g124_composite(pass, lit, &enabled, &mut pending);
+                    check_g124_elided_map_values(pass, lit, &enabled, &mut pending);
                 }
                 NodeRef::ExprStmt(stmt) => {
                     // Upstream gosec G104 only visits AssignStmt + ExprStmt
