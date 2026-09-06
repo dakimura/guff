@@ -487,7 +487,22 @@ fn check_for_stmt(pass: &Pass<'_>, for_stmt: &ForStmt, pending: &mut Vec<Pending
             suggested_fixes: vec![SuggestedFix {
                 message: format!("Replace loop with `{replacement}`"),
                 text_edits: vec![TextEdit {
-                    pos: init.tok_pos.0 as u32,
+                    // Upstream replaces `forStmt.Init.Pos() .. forStmt.Post.End()`,
+                    // i.e. from the **start of the init statement**. Starting at
+                    // the `:=` token instead leaves the loop variable standing
+                    // in front of the replacement, and the replacement names it
+                    // again: `for i := 0; i < n; i++` became `for i i := range n`,
+                    // which does not parse.
+                    //
+                    // Nothing caught it because `--fix` never reached this edit.
+                    // modernize's `rangeint` fires on the same loops and its
+                    // (correct) rewrite won every overlap, so the only files
+                    // where this one applies are those modernize skips — and the
+                    // first of those to exist here is the `//go:build go1.18`
+                    // fixture added alongside this fix.
+                    // (`AssignStmt.Pos()` is `Lhs[0].Pos()`; the length is
+                    // already known to be 1.)
+                    pos: init.lhs[0].pos().0 as u32,
                     end,
                     new_text: replacement,
                 }],

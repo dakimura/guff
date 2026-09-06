@@ -123,3 +123,14 @@
  		println("x")
  	}
  }
+--- a/modernize/rangeint_go118.go
++++ b/modernize/rangeint_go118.go
+@@ -13,7 +13,7 @@
+ // `--fix`, which until then had always been overwritten by modernize's and was
+ // writing `for i i := range n`.
+ func rangeIntBelowGo122(n int) {
+-	for i := 0; i < n; i++ {
++	for i := range n {
+ 		_ = i
+ 	}
+ }

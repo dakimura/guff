@@ -912,12 +912,32 @@ pub fn file_go_version(pass: &Pass<'_>, pos: u32) -> String {
     String::new()
 }
 
-/// Effective language version for source at `pos`: file build-tag version, else
-/// the module `go` line (matches go/types `FileVersions` defaulting).
+/// Effective language version for source at `pos` — go/types' `FileVersions`.
+///
+/// With no `//go:build go1.N` line the module's `go` line applies. With one,
+/// go/types uses **`max(fileVersion, go1.21)`**, not the file version as
+/// written (`go/types/check.go`, `initFiles`):
+///
+/// > If the file specifies a version, use max(fileVersion, go1.21). […] Go 1.21
+/// > introduced the feature of setting the go.mod go line to an early version
+/// > of Go and allowing //go:build lines to set the Go version in a given file.
+/// > Versions Go 1.21 and later can be set backwards compatibly as that was the
+/// > first version files with go1.21 or later build tags could be built with.
+///
+/// The clamp is the whole point of the rule: `//go:build go1.7` predates the
+/// feature and is a plain build tag, so it must not drag the language version
+/// down to 1.7. Returning the tag as written cost two `modernize/plusbuild`
+/// findings on syncthing (`cmd/syncthing/traceback.go` is `//go:build go1.7`,
+/// and upstream's plusbuild gate is go1.18) while correctly silencing
+/// `rangeint` on a `//go:build go1.18` file — max(1.18, 1.21) = 1.21, still
+/// below the 1.22 that range-over-int needs. One rule, both answers.
 pub fn effective_file_go_version(pass: &Pass<'_>, pos: u32) -> String {
     let file = file_go_version(pass, pos);
     if file.is_empty() {
-        module_go_version(pass)
+        return module_go_version(pass);
+    }
+    if version_compare(&file, "go1.21") < 0 {
+        "go1.21".to_string()
     } else {
         file
     }

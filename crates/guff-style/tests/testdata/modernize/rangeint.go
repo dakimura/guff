@@ -125,3 +125,8 @@ func assignIndexUnusedInBody(n int) {
 		println("x")
 	}
 }
+
+// A file's own `//go:build go1.N` decides these gates: upstream runs every
+// modernize version check through `analyzerutil.FileUsesGoVersion`, which reads
+// `pass.TypesInfo.FileVersions[file]` and nothing else. See
+// `rangeint_go118.go` for the file that must stay silent.

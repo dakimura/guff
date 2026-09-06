@@ -25886,3 +25886,211 @@ nolintlint の影ではない。config の除外にも該当しない（`exclusi
 ```
 台帳: 48/100 at zero（52 定義、open 1＝flipt 4、unmeasured 3）
 ```
+
+### 2026-09-06（続き 230）— `close flipt`。**「上流が実際に何を 1 単位として見るか」のずれが 3 つ**、そこから**さらに 2 つ**
+
+続き 229 で開いた 4 件（3 linter）を追った。3 つとも独立した原因で、
+**どれも「上流が何を 1 単位として見ているか」を取り違えていた**。
+そして直したあと、ゲートが**さらに 2 つ**引きずり出した ——
+どちらも「別のものが覆っていたので誰も測っていなかった」欠陥である。
+
+#### 1. modernize: ゲートは**そのファイル自身**の go バージョン
+
+`internal/storage/fs/config_fuzz_test.go` は先頭が `//go:build go1.18` で、
+モジュールは `go 1.26.0`。guff は `for i := 0; i < 10; i++` に
+`rangeint`（range over int、**1.22 の言語機能**）を勧めていた ——
+**そのファイルではコンパイルできない構文**である。
+
+上流は modernize の**全ゲート**を
+`analyzerutil.FileUsesGoVersion` に通しており、その中身は
+`pass.TypesInfo.FileVersions[file]` ただ 1 つ。suite に他のバージョン
+ヘルパは無く、これは `reflect.TypeFor` や `slices` のような
+**stdlib 追加**のゲートでも同じである。
+
+guff が呼んでいた `code::stdlib_version` は `max(module, file)` を返す。
+それは**別の問いの正解**で —— `//go:build go1.18` は言語バージョンを
+下げるが新しい stdlib を取り上げはしないので、「どこまで新しい標準
+ライブラリに頼ってよいか」にはこちらが正しい —— modernize の
+28 個のゲート全部で間違いだった。効くのは
+**モジュールより低い build tag** を持つファイルだけである。
+
+（honnef の `code.LanguageVersion` は逆に「ファイルはモジュールより
+**上げ**られる」と書いてある。だから staticcheck 側の `stdlib_version` は
+そのままでよく、変更は modernize に閉じている。）
+
+#### 2. lostcancel: go/cfg は `var (…)` を**spec 1 つずつ**ノードにする
+
+```go
+var (
+    ctx, cancel = context.WithCancel(context.Background())
+    store       = &Store{shutdown: cancel}   // ← ここで使っている
+)
+```
+
+上流 `lostCancelPath` は「定義ブロックの**残り**」に use があれば報告
+しない。そして go/cfg の builder はこう書いてある ——
+**"Treat each var ValueSpec as a separate statement."**
+だから同じ `var (…)` グループの後続 spec は「残り」に入る。
+
+guff は文のリストを歩いており、そこではグループ全体が 1 要素なので
+`stmts[i+1..]` から探し始める。**定義文と使用文が同じ 1 文**である
+この形だけが死角だった。別々の文に分ければ（`separateStatements`）
+前から通っていた。
+
+#### 3. QF1003: `&x` は副作用である
+
+```go
+if pr.Status == &azuregit.PullRequestStatusValues.Abandoned {
+} else if pr.Status == &azuregit.PullRequestStatusValues.Completed {
+}
+```
+
+`findSwitchPairs` はどちらかの被演算子が `MayHaveSideEffects` なら
+その連鎖ごと諦める。上流の `*ast.UnaryExpr` の枝は被演算子に再帰した
+**あとで** `expr.Op == token.ARROW || expr.Op == token.AND` を返す ——
+**アドレス取得とチャネル受信そのものが副作用**という判定である。
+guff は再帰だけして最後の 1 行を落としていたので `&x` を純粋と見ていた。
+
+ついでに上流にあって guff に無かった枝も足した（`BadExpr` /
+`TypeAssertExpr` / `KeyValueExpr` / `CompositeLit` / `Ellipsis` /
+`IndexListExpr`）。**上流は未知の種類で panic する**ので
+「それ以外は純粋」という既定は向こうに無い。
+
+#### 4. SA4014: 条件に副作用があれば「重複」ではない —— fixture の事故から
+
+QF1003 の fixture に `if code == <-ch { } else if code == <-ch { }` と
+**同じチャネルを 2 回**書いたら、golden が落ちた。落とした犯人は
+QF1003 ではなく **SA4014**（「この条件が複数回現れる」）で、guff だけが
+撃っていた。
+
+上流 `collectConds` も
+`code.MayHaveSideEffects(pass, ifstmt.Cond, nil)` で連鎖ごと諦める ——
+receive も call も**評価のたびに違う値になりうる**からである。
+guff の SA4014 が持っていた述語は
+`matches!(expr, Expr::CallExpr(_))` で、**比較の中に埋まった呼び出しすら
+見ていなかった**。
+
+| | golangci | guff（前） |
+|---|---|---|
+| `code == <-ch` ×2 | 黙る | **SA4014** |
+| `code == f()` ×2 | 黙る | **SA4014** |
+| `code == 1` ×2 | SA4014 | SA4014 |
+
+#### 同じ関数の写しが **7 つ**あった
+
+`may_have_side_effects` は `guff-staticcheck` の中に 7 箇所あり、
+**全部が上流の 1 つの関数の代役**で、全部が少しずつ違っていた。
+上流の呼び出し側を 1 つずつ見ると **6 つは `nil` purity**
+（QF1002 / QF1003 / QF1005 / S1009 / SA4014 / SA5002）で、
+そのうち 4 つは同一の写し、SA4014 はさらに粗い写しだった。
+
+**SA4018 だけは `pure`（本物の `purity.Result`）を渡している** ——
+純粋と証明された関数呼び出しは副作用ではない、という別の答えになるので、
+これを一緒にすると受け入れる範囲が黙って変わる。
+[[duplicate-ports-are-not-duplicates]] の警告どおりで、
+**寄せる前に 7 箇所の上流を数えた**。6 つを 1 つの忠実な移植
+（`sideeffects.rs`）に寄せ、SA4018 は理由を書いて残した。
+
+寄せる向きは**必ず静かになる方**なので、一致していた finding を落とす
+ことはない —— 上流が撃つなら上流の述語も false なので、こちらも false。
+golden 231 ケースが完全一致のままだったことがそれを裏づけている。
+
+#### 5. intrange の `--fix` が**壊れた Go を書いていた**
+
+`rangeint_go118.go` を足したら `--fix` tier が落ちた。中身が問題だった:
+
+```
+golangci:  for i := range n {
+guff:      for i i := range n {
+```
+
+上流は `forStmt.Init.Pos() .. forStmt.Post.End()` を置換する。
+guff は **`:=` トークンの位置**から置換していたので、ループ変数が
+置換文字列の前に残り、置換文字列がそれをもう一度名乗る。
+**パースできない Go を書く**。build tag とは無関係で、素のファイルでも同じ。
+
+なぜ今まで誰も気づかなかったか —— modernize の `rangeint` が同じループに
+撃ち、その（正しい）書き換えが重なりを常に勝っていたからである。
+この edit が実際に適用されるのは**modernize が飛ばすファイルだけ**で、
+そんなファイルはこの修正のために足した `//go:build go1.18` の 1 枚が
+最初だった。[[empty-fixture-hides-defects]] の 5 つ目の形:
+**別の linter の fix に覆われていて、一度も適用されていない fix**。
+
+#### そして modernize の直しは**行き過ぎていた** —— go/types の本当の規則
+
+ゲートは全部緑になったが、**build tag を持つターゲットを掃いたら
+syncthing が落ちた**。`+gcl` が 4 件、うち 2 件は
+`modernize:plusbuild` である:
+
+```
++gcl cmd/syncthing/traceback.go:8   //go:build go1.7
++gcl lib/connections/quic_dial.go:8 //go:build go1.15 && !noquic
+```
+
+上流の `plusbuild` も `FileUsesGoVersion(…, Go1_18)` でゲートしている。
+それでも撃つ。つまり **`//go:build go1.7` のファイルのバージョンは
+1.7 ではない**。
+
+`go/types/check.go` の `initFiles` にそう書いてある:
+
+> If the file specifies a version, use **max(fileVersion, go1.21)**.
+> […] Versions Go 1.21 and later can be set backwards compatibly as that was
+> the first version files with go1.21 or later build tags could be built with.
+
+**1 つの規則が両方を説明する**: `go1.7` は max して **1.21** になるので
+plusbuild の 1.18 ゲートを通り、`go1.18` も max して **1.21** なので
+rangeint の 1.22 ゲートは通らない。`//go:build go1.N` は 1.21 より前を
+名乗っても言語バージョンを下げない —— 昔からある build tag であって
+バージョン指定ではないからである。
+
+`effective_file_go_version` は doc に「go/types `FileVersions` に一致」と
+書いてありながらこの clamp を持っていなかった。そこに入れた ——
+modernize だけでなく `govet/inline` も同じ関数を読んでいる。
+
+#### 台帳の掃除で**自分が今日入れた退行**が出た
+
+同じ掃除で syncthing に `+gcl` の SA1019 が 2 件残った
+（`internal/blob/s3/s3.go:15,16`、`aws-sdk-go` の deprecation）。
+**これは今回の変更ではない。** `git stash` して main の binary を建て直し、
+同じ config で測ると**baseline も同じ 2 件を落としている**:
+
+```
+baseline(main)  s3.go:14, 17, 18 を報告、15 と 16 は落とす
+golangci        s3.go:14, 15, 16, 17, 18
+```
+
+犯人は今朝の**続き 222（#308、SA1019 の package doc スキャン）**で、
+syncthing はそれ以降測っていなかった。`credentials.go` の package 節は
+**2061 バイト目**にあり 8 KB prefix の内側なので、続き 222 の prefix 読みが
+原因ではない —— 同じモジュールの `aws` / `service/s3` / `s3manager` は
+拾えているので、**どのファイルを package doc と見なすか**の選び方が疑わしい。
+ここでは直さず、台帳に open 2 として記録する（次のタスク `close syncthing`）。
+
+**測ってから帰属させた**のが要点で、コードを読んだだけなら
+SA1019 を自分の変更のせいにしていたか、逆に plusbuild を
+「元からだろう」と流していた。
+
+#### 測定
+
+- **flipt: guff=4 golangci=0 → guff=0 golangci=0、P=0.0% → 100.0%、
+  unexpected=0。閉じた。**
+- **build tag を持つターゲットを全部洗った。** モジュールの `go` 行より
+  **低い** tag を持つファイルがあるのは 10 ターゲットだけで
+  （tailscale 20 / kubernetes 9 / flipt 5 / dubbo-go 4 / coredns 2 /
+  grafana 2 / syncthing 2 / cli 1 / fiber 1 / prometheus 1）、
+  darwin で回せる hunt の 6 つを測った:
+  **cli 3/3・coredns 3/3・dubbo-go 0/0・fiber 0/0・tailscale 47/43（allowlist 内）**
+  はそのまま、syncthing は clamp 前 4 件 → clamp 後 2 件（上の SA1019）。
+  grafana / kubernetes は nightly / weekly、prometheus は `regress/` なので
+  ここでは回していない。
+- golden 231／fix 231／reject 14／oss pr 8 ターゲット P=R=100%／
+  workspace 278 バイナリ 3520 ok 0 failed。
+- golden の regen はキー集合で差分。`govet` 184 → 184、
+  `staticcheck-qf` 189 → 189（**足したのは全部黙る形**）、
+  `rangeint` 38 → 39 —— 増えた 1 件は modernize ではなく **`intrange`** で、
+  同じファイルの同じループについて 2 つの linter が違う答えを出すことを
+  fixture が並べて固定している。
+
+```
+台帳: 48/100 at zero（52 定義、open 1＝syncthing 2、unmeasured 3）
+```

@@ -2146,6 +2146,33 @@ sa_check_bad_ok!(sa4011, sa4011_flags_bad_cases, sa4011_allows_ok_cases);
 sa_check_bad_ok!(sa4012, sa4012_flags_bad_cases, sa4012_allows_ok_cases);
 sa_check_bad_ok!(sa4013, sa4013_flags_bad_cases, sa4013_allows_ok_cases);
 sa_check_bad_ok!(sa4014, sa4014_flags_bad_cases, sa4014_allows_ok_cases);
+
+/// A repeated condition is only a duplicate when evaluating it twice must give
+/// the same answer.
+///
+/// Upstream's `collectConds` abandons the whole chain when
+/// `code.MayHaveSideEffects(pass, ifstmt.Cond, nil)` is true, so
+/// `if code == <-ch { } else if code == <-ch { }` is not a finding — each
+/// receive can yield a different value — and neither is a repeated call. guff's
+/// local copy of that predicate was `matches!(expr, Expr::CallExpr(_))`, which
+/// does not see a call nested inside a comparison and never looked at `<-` at
+/// all, so it reported both.
+///
+/// `sa4014_allows_ok_cases` requires `ok.go` to be empty; this names why those
+/// two functions are in it. Found by accident: a QF1003 fixture that read the
+/// same channel twice made SA4014 fire and the golden gate caught it.
+#[test]
+fn sa4014_ignores_conditions_with_side_effects() {
+    let dir = support::testdata("sa4014");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/sa4014/ok");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa4014::analyzer(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
+    let src = std::fs::read_to_string(dir.join("ok.go")).expect("fixture readable");
+    for needle in ["sideEffectChannel", "sideEffectCall"] {
+        assert!(src.contains(needle), "ok.go lost {needle}");
+    }
+}
 sa_check_bad_ok!(sa4015, sa4015_flags_bad_cases, sa4015_allows_ok_cases);
 sa_check_bad_ok!(sa4016, sa4016_flags_bad_cases, sa4016_allows_ok_cases);
 sa_check_bad_ok!(sa4017, sa4017_flags_bad_cases, sa4017_allows_ok_cases);
@@ -3684,6 +3711,33 @@ fn qf1003_flags_if_else_chain() {
     assert!(messages.len() >= 3);
     assert!(messages.iter().any(|m| m.contains("tagged switch on x")));
     assert!(messages.iter().any(|m| m.contains("tagged switch on a")));
+}
+
+/// Taking an address is a side effect, and that is what keeps flipt's
+/// `if pr.Status == &…Abandoned { } else if pr.Status == &…Completed { }` out
+/// of QF1003.
+///
+/// `findSwitchPairs` refuses a comparison when either operand
+/// `MayHaveSideEffects`, and upstream's `*ast.UnaryExpr` arm recurses into the
+/// operand **and then** answers `expr.Op == token.ARROW || expr.Op == token.AND`.
+/// Recursing alone called `&x` pure. `ok.go` carries the address on each side
+/// and a channel receive; `qf1003_allows_non_convertible` requires the whole
+/// file to stay empty, and this names why three of its functions are there.
+#[test]
+fn qf1003_treats_address_of_and_receive_as_side_effects() {
+    let dir = support::testdata("qf1003");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/qf1003/ok");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(qf1003::analyzer(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
+    let src = std::fs::read_to_string(dir.join("ok.go")).expect("fixture readable");
+    for needle in [
+        "qfAddressOnTheRight",
+        "qfAddressOnTheLeft",
+        "qfChannelReceive",
+    ] {
+        assert!(src.contains(needle), "ok.go lost {needle}");
+    }
 }
 
 #[test]

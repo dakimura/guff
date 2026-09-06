@@ -6602,6 +6602,31 @@ fn modernize_minmax_matches_the_assignment_above_the_if() {
     assert_eq!(messages.len(), 7, "{got:?}");
 }
 
+/// A file's own `//go:build go1.N` decides every modernize gate.
+///
+/// Upstream runs all of them through `analyzerutil.FileUsesGoVersion`, which
+/// reads `pass.TypesInfo.FileVersions[file]` and compares that alone — the
+/// suite has no other version helper. guff asked `code::stdlib_version`, which
+/// is `max(module, file)`: the right answer for how new the *standard library*
+/// may be (a `//go:build go1.18` line lowers the language version without
+/// taking the newer stdlib away), and the wrong one here. It made every gate
+/// ignore a build tag *below* the module version, and guff offered to rewrite
+/// flipt's `//go:build go1.18` fuzz test with a range over int — a construct
+/// that file cannot compile.
+#[test]
+fn modernize_gates_on_the_files_own_go_version() {
+    let pkg = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/rangeintgo118",
+        "rangeint_go118.go",
+    );
+    let messages = support::run_analyzer(modernize(), &pkg);
+    assert!(
+        messages.is_empty(),
+        "range-over-int is a go1.22 feature and this file is go1.18: {messages:?}"
+    );
+}
+
 #[test]
 fn modernize_rangeint_skips_mutated_limits() {
     let pkg =

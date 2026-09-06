@@ -137,7 +137,7 @@
  }
 --- a/sa4014/ok/ok.go
 +++ b/sa4014/ok/ok.go
-@@ -1,7 +1,9 @@
+@@ -1,9 +1,11 @@
  package main
 +
  func main() {
@@ -151,6 +151,8 @@
 +	case 2:
 +	}
  }
+ 
+ // Upstream bails on the whole chain when `code.MayHaveSideEffects(cond, nil)`
 --- a/sa4023/bad/bad.go
 +++ b/sa4023/bad/bad.go
 @@ -2,8 +2,7 @@

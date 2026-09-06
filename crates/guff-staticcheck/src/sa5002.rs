@@ -11,24 +11,7 @@ use guff_analysis::code::{is_bool_const, predeclared_bool_ident};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
-fn may_have_side_effects(expr: &Expr) -> bool {
-    match expr {
-        Expr::CallExpr(_) => true,
-        Expr::UnaryExpr(u) => may_have_side_effects(&u.x),
-        Expr::BinaryExpr(b) => may_have_side_effects(&b.x) || may_have_side_effects(&b.y),
-        Expr::IndexExpr(i) => may_have_side_effects(&i.x) || may_have_side_effects(&i.index),
-        Expr::SelectorExpr(s) => may_have_side_effects(&s.x),
-        Expr::StarExpr(s) => may_have_side_effects(&s.x),
-        Expr::ParenExpr(p) => may_have_side_effects(&p.x),
-        Expr::SliceExpr(s) => {
-            may_have_side_effects(&s.x)
-                || s.low.as_ref().is_some_and(|e| may_have_side_effects(e))
-                || s.high.as_ref().is_some_and(|e| may_have_side_effects(e))
-                || s.max.as_ref().is_some_and(|e| may_have_side_effects(e))
-        }
-        _ => false,
-    }
-}
+use crate::sideeffects::may_have_side_effects;
 
 fn check_loop(pass: &Pass<'_>, loop_: &ForStmt, pending: &mut Vec<(u32, String)>) {
     if !loop_.body.list.is_empty() || loop_.post.is_some() || loop_.init.is_some() {

@@ -129,8 +129,24 @@ fn stamp_category(pending: &mut [Diagnostic], from: usize, name: &str) {
     }
 }
 
+/// Whether the **file** at `pos` is allowed to use a `want`-or-later feature.
+///
+/// The file's version, not the module's. Every version gate in upstream
+/// modernize runs through `analyzerutil.FileUsesGoVersion`, which reads
+/// `pass.TypesInfo.FileVersions[file]` and compares that alone — the suite has
+/// no other version helper, and that holds for the gates about *stdlib*
+/// additions (`reflect.TypeFor`, `slices`, `maps`) as much as for the ones
+/// about language changes (range-over-int, the 1.22 loop variable).
+///
+/// [`code::stdlib_version`] answers a different question — how new the standard
+/// library may be, which is `max(module, file)` because a `//go:build go1.18`
+/// line lowers the language version without taking the newer stdlib away. Using
+/// it here made every gate ignore a build tag *below* the module version:
+/// flipt's `internal/storage/fs/config_fuzz_test.go` is `//go:build go1.18` in a
+/// `go 1.26.0` module, and guff offered to rewrite its `for i := 0; i < 10; i++`
+/// as a range over int — a construct that file cannot compile.
 fn go_at_least(pass: &Pass<'_>, pos: u32, want: &str) -> bool {
-    code::version_compare(&code::stdlib_version(pass, pos), want) >= 0
+    code::version_compare(&code::effective_file_go_version(pass, pos), want) >= 0
 }
 
 fn ident_name(expr: &Expr) -> Option<&str> {
