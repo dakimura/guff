@@ -303,3 +303,27 @@ func bothArmsClose(x bool) {
 		resp.Body.Close()
 	}
 }
+
+// The capture that must keep working: the literal uses the *outer* resp, so
+// upstream's `MakeClosure` branch settles it however the body is used.
+func literalCapturesTheOuterResponse() {
+	resp, err := http.Get("https://example.com/capture-outer")
+	if err != nil {
+		return
+	}
+	defer func() { resp.Body.Close() }()
+}
+
+// A literal that shadows the name and a later one that captures the outer
+// response: the shadow must not settle it, and the capture must.
+func shadowThenCapture() {
+	resp, err := http.Get("https://example.com/capture-after-shadow")
+	if err != nil {
+		return
+	}
+	_ = func() *http.Request {
+		resp, _ := http.NewRequest(http.MethodGet, "https://example.com/shadow-7", nil)
+		return resp
+	}
+	defer func() { resp.Body.Close() }()
+}

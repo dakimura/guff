@@ -243,3 +243,71 @@ func oneArmCloses(x bool) {
 		return
 	}
 }
+
+// A func literal that declares its *own* `resp` is not a capture of this one:
+// upstream reaches a closure through an `*ssa.MakeClosure` over a free
+// variable, and a variable the literal declares is not free. boundary's
+// `controller_ratelimit_reload_test.go` writes the argument this way sixteen
+// times, and every one went unreported.
+func literalShadowsTheName() {
+	req, _ := http.NewRequest(http.MethodGet, "https://example.com/shadow-0", nil)
+	resp, err := http.DefaultClient.Do(func() *http.Request { // want
+		resp, err := http.NewRequest(http.MethodGet, "https://example.com/shadow-1", nil)
+		if err != nil {
+			return req
+		}
+		return resp
+	}())
+	if err != nil {
+		return
+	}
+	_ = resp.StatusCode
+}
+
+// The same shadow, returning a copy rather than the shadowing name — the
+// suppression fired on *mentioning* the name, so this went unreported too.
+func literalShadowsAndReturnsACopy() {
+	req, _ := http.NewRequest(http.MethodGet, "https://example.com/shadow-2", nil)
+	resp, err := http.DefaultClient.Do(func() *http.Request { // want
+		resp, err := http.NewRequest(http.MethodGet, "https://example.com/shadow-3", nil)
+		if err != nil {
+			return req
+		}
+		out := resp
+		return out
+	}())
+	if err != nil {
+		return
+	}
+	_ = resp.StatusCode
+}
+
+// The shadowing literal need not be the call's argument, or related to the call
+// at all: any literal later in the same function was enough.
+func anUnrelatedLiteralShadowsTheName() {
+	resp, err := http.Get("https://example.com/shadow-4") // want
+	if err != nil {
+		return
+	}
+	f := func() *http.Request {
+		resp, _ := http.NewRequest(http.MethodGet, "https://example.com/shadow-5", nil)
+		return resp
+	}
+	_ = f
+	_ = resp.StatusCode
+}
+
+// A plain block that shadows the name is not a func literal and was always
+// reported. Here so that a fix keying on "declared anywhere inside" cannot pass
+// by silencing this one as well.
+func aBlockShadowsTheName() {
+	resp, err := http.Get("https://example.com/shadow-6") // want
+	if err != nil {
+		return
+	}
+	{
+		resp := "not a response"
+		_ = resp
+	}
+	_ = resp.StatusCode
+}

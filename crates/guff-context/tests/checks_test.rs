@@ -101,11 +101,46 @@ fn bodyclose_flags_missing_close() {
 /// `compat/golden/cases/bodyclose` pins against golangci-lint. Raise it when
 /// the fixture grows; a drop is a shape that stopped reporting.
 ///
-/// Eleven of the twenty-one are the merge shapes: two stores to one variable
+/// Eleven of the twenty-five are the merge shapes: two stores to one variable
 /// are two SSA values, and the second kills the first only when it dominates
 /// it. The ones that merge instead reach a `*ssa.Phi` and a single close
 /// settles them all — those live in `ok.go`.
-const BODYCLOSE_BAD_SHAPES: usize = 21;
+///
+/// Four are the shadow shapes (2026-09-06): a func literal declaring its own
+/// `resp` is not a capture of the outer one. They are pinned per-shape in
+/// `bodyclose_a_literal_declaring_the_name_is_not_a_capture` as well, so a
+/// regression that silences them again cannot be papered over by lowering this
+/// number.
+const BODYCLOSE_BAD_SHAPES: usize = 25;
+
+/// A func literal that declares its own `resp` does not capture the outer one.
+///
+/// Upstream reaches a closure through an `*ssa.MakeClosure` over a *free
+/// variable*, so a variable the literal declares is a different object that
+/// merely shares a name. guff matched on the name alone, so any literal
+/// anywhere in the same function declaring `resp` / `r` silenced the response
+/// — boundary's `internal/cmd/commands/server` lost all sixteen of its
+/// bodyclose findings that way, every one of them written as
+/// `c.Do(func() *http.Request { r, err := http.NewRequest(...); return r }())`.
+///
+/// The fixture holds six shapes: four that must report (the literal returns the
+/// shadowing name, returns a copy of it, shadows from an unrelated literal, and
+/// shadows in a plain block) and two that must stay silent (a literal using the
+/// outer response, and a shadowing literal followed by a capturing one). Both
+/// halves matter: a fix that simply stopped settling on literals would clear
+/// the four and break the two.
+#[test]
+fn bodyclose_a_literal_declaring_the_name_is_not_a_capture() {
+    let dir = support::testdata("bodyclose");
+    let pkg = support::typecheck_pkg("example.com/bodyclose/shadow", &dir.join("shadow.go"));
+    assert!(!pkg.ill_typed, "{:?}", pkg.errors);
+    let messages = support::run_analyzer(bodyclose(), &pkg);
+    assert_eq!(
+        messages.len(),
+        4,
+        "four leaks report, two closers stay silent: {messages:?}"
+    );
+}
 
 #[test]
 fn bodyclose_skips_packages_without_a_direct_net_http_import() {
