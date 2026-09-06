@@ -27039,3 +27039,68 @@ pattern に `Or` を足しただけの 1 行である。`--fix` の側は
 ```
 台帳: 49/100 at zero（53 定義、open 1＝boundary **4**、unmeasured 3）
 ```
+
+### 2026-09-06（続き 241）— S1017 は **else 節そのものを覚えておく**。`else if` を弾くのはそれ
+
+boundary の残り 4 件のうち 1 件が S1017 の**過剰報告**で、
+`internal/cmd/commands/server/server.go:399` ——
+`} else if strings.HasPrefix(clusterId, "dev-") {` の側である。
+
+#### 上流
+
+```go
+ifstmt := node.(*ast.IfStmt)
+if ifstmt.Init != nil { return }
+if ifstmt.Else != nil {
+    seen[ifstmt.Else] = struct{}{}   // ← else 節を覚える
+    return
+}
+if _, ok := seen[ifstmt]; ok { return }   // ← 自分が else 節なら降りない
+```
+
+`else` を持つ `if` を飛ばすだけでなく、**その `Else` ノードを `seen` に
+入れる**。`else if` は自分の `Else` を持たないので前段では弾かれず、
+この後段で弾かれる。
+
+guff にも `seen` はあったが**役割が違った** ——
+報告位置の重複除去（`SliceExpr` 経路が別の位置で報告しうるため）で、
+else 節を覚えてはいなかった。同じ名前で別の仕事をしていたので、
+「ある」ことが「効いている」ことに見えていた。
+
+#### `if / else if / else` は元から安全だった
+
+trailing の `else` は**内側の `if`** に付くので、既存の
+`else_.is_some()` の早期 return が拾う。過剰報告するのは
+**素の `if / else if`** だけである。これは推論ではなく fixture で確かめた ——
+両方置いて走らせると修正前の guff は **1 件**しか出さない。
+
+#### fixture のテストが下限だった
+
+```rust
+assert!(messages.len() >= 2, "{messages:?}");
+assert!(messages.iter().any(|m| m.contains("TrimPrefix")));
+```
+
+**下限は、過剰報告がいくら増えても通る。** この過剰報告が
+このチェックの存在期間ずっと気付かれなかった理由がこれである。
+`assert_eq!(messages.len(), 2)` と `all(...)` に変えた。
+続き 240 の S1005 は同じ位置が既に `assert_eq!` で、
+枝が足りないことは**足した瞬間に落ちて分かった** —— 対照的である。
+
+#### 測定
+
+- **boundary: open 4 → 3**（guff-only 2、gcl-only 1）。
+  guff 577 / golangci 576 / both 575、**P 99.5% → 99.7%**。
+- 退行なし: **dapr 1555/1555・k6 423/423・thanos 543/543・
+  syncthing 656/656・tailscale 47/43（allowlist 内）・prometheus 20/20・
+  cli 3/3・coredns 3/3・karmada 19/19・pipeline 156/156・rclone 3/3**、
+  oss pr 8 ターゲット P=R=100%。
+- golden **231**（staticcheck-s を regen、**キー集合は 125 → 125 で増減なし**
+  —— 足した 3 形はどちらのツールでも何も出さないので当然）／
+  fix **231**／reject 14／workspace 279 バイナリ **3530 ok** 0 failed。
+- negative control: `seen.insert` を外すと ok.go が落ちる。
+  実物の Go モジュールでも golangci と一致。
+
+```
+台帳: 49/100 at zero（53 定義、open 1＝boundary **3**、unmeasured 3）
+```

@@ -69,7 +69,23 @@ fn check_if_has_prefix_slice(
 }
 
 fn check_if(pass: &Pass<'_>, if_: &IfStmt, seen: &mut HashSet<u32>) -> Option<(u32, String)> {
-    if if_.init.is_some() || if_.else_.is_some() {
+    if if_.init.is_some() {
+        return None;
+    }
+    // An `if` that has an `else` is skipped — and upstream *remembers the else
+    // node*, so that an `else if`, which has no else of its own and otherwise
+    // looks exactly like the reportable shape, is skipped too:
+    //
+    //     if ifstmt.Else != nil { seen[ifstmt.Else] = struct{}{}; return }
+    //     if _, ok := seen[ifstmt]; ok { return }
+    //
+    // Without the first half, `else if strings.HasPrefix(s, "dev-") { s =
+    // strings.TrimPrefix(s, "dev-") }` reported on its own — boundary's
+    // internal/cmd/commands/server writes exactly that. `if / else if / else`
+    // was already safe, because the trailing else belongs to the *inner* if and
+    // the early return above catches it; only a bare `if / else if` was wrong.
+    if let Some(else_) = &if_.else_ {
+        seen.insert(else_.pos().0 as u32);
         return None;
     }
     let pos = if_.if_.0 as u32;
