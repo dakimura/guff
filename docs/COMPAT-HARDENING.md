@@ -26224,3 +26224,88 @@ export data も無いまま参照されたときの形である。
 ```
 台帳: 49/100 at zero（53 定義、open 1＝boundary 44、unmeasured 3）
 ```
+
+### 2026-09-06（続き 233）— `close boundary` は**止める**。「seed の dep graph は構造的に非巡回」という不変条件が**偽**である
+
+続き 232 で開いた 44 件を追った。原因は 1 本の back-edge に集約されるが、
+**直すには seed のモデルそのものを変える必要がある**ので、ここでは
+測定と反例だけ残して着手しない。
+
+#### 反例
+
+`seed_variant_rank` の doc（続き 63）はこう書いている:
+
+> seed の dep graph は、この修正のもとでは**構造的に非巡回**である:
+> 同一パッケージの `_test.go` も `package p` なので、Go の import cycle 禁止が
+> そのまま効く（`p` を import するものを `p` のテストは import できない）。
+
+この論証が排除しているのは「**P のテストが、P を import する何かを import する**」
+形だけである。boundary が踏んだのはそれではない:
+
+```
+internal/session          の in-package test → internal/credential/vault
+internal/credential/vault の in-package test → internal/session
+```
+
+`go list` で 4 方向とも測った:
+
+| | production imports | TestImports |
+|---|---|---|
+| `session` → `vault` | **0**（推移も 0） | あり |
+| `vault` → `session` | **0** | あり（XTest も） |
+
+**production はどちらも相手を import していない。** Go は通る ——
+`session` のテストバイナリは `vault` の production を、
+`vault` のテストバイナリは `session` の production をリンクするからで、
+`P [P.test]` と `Q [Q.test]` は別パッケージである。
+
+そして**両方が外部テストパッケージを持つ**（`session_test` 2 ファイル、
+`vault_test` 3 ファイル）ので `paths_with_external_test_package` に両方入り、
+両方が `P [P.test]` を選び、両方がテストの辺を持ち込む。back-edge は 1 本:
+
+```
+guff: seed dep cycle .../internal/session -> .../internal/credential/vault
+```
+
+**「P のテストが Q を、Q のテストが P を import する」形は Go に存在でき、
+不変条件はそれを排除していない。** prometheus の `tsdb ↔ util/teststorage` は
+同じ形で、続き 63 が直したのは*選び方*であって*形*ではなかった。
+
+#### なぜ 1 行では直らないか
+
+要求そのものは矛盾していない:
+
+- `session [session.test]` が要るのは **production `vault`**
+- `vault [vault.test]` が要るのは **production `session`**
+- production 同士は無関係（上の表）
+
+矛盾しているのは **seed が import path 1 つにつきノードを 1 つしか持たない**
+ことで、production と augmented が同じ key に潰れている。
+`paths_with_external_test_package` の doc が言うとおり、
+`P_test` が `export_test.go` の識別子を見るには seed が `P [P.test]` を
+組む必要があり、この要求自体は正しい。
+
+正しいモデルは path ごとに**ノードを 2 つ**持つこと ——
+`P`（production ファイル・production 辺、consumer が依存する側）と
+`P [P.test]`（augmented ファイル・production＋test 辺、`P_test` だけが依存する側）。
+そうすれば `session#test → vault`、`vault#test → session` となり非巡回である。
+
+ただし seed は `waves` / overlay の key / キャッシュキー / merge 順まで
+**一貫して import path で引いている**ので、ノードを割るとその全部に波及する。
+seed は全ターゲットが通る場所で、hunt tier は CI で回っていない ——
+**長いセッションの終わりに触る場所ではない**と判断した。
+
+#### 安い代替案（未測定、次のセッションへの申し送り）
+
+順序は **production の辺だけ**で作り、test の辺は循環を作らないときだけ足す。
+今は back-edge を 1 本落とすだけで `height` のパス 2 が壊れ、
+**無関係なパッケージまで巻き込む**（prometheus では破れた辺 39 本）。
+production だけで順序を作れば、被害は循環に参加した path の
+テストファイルに限定される。正しさの上限は下がるが、
+**壊れる範囲が原因の近傍に閉じる**。
+
+どちらを採るにせよ、seed を触る変更なので**コーパス全体の再測定**が要る。
+
+```
+台帳: 49/100 at zero（53 定義、open 1＝boundary 44、unmeasured 3）— 変わらず
+```
