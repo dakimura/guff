@@ -25547,3 +25547,54 @@ cs[0].SameSite = http.SameSiteStrictMode
 ```
 台帳: 45/100 at zero（48 定義、open 0、unmeasured 3）
 ```
+
+### 2026-09-06（続き 225）— `adopt dubbo-go`。**0 対 0**。「何も測っていない」ではないことを別 config で確かめた
+
+台帳が open 0 になったので次の候補 **apache/dubbo-go**（97.9MB、RPC
+フレームワーク）。候補行の `ref` は `tools/dubbogo-cli/v1.0.1` という
+**サブディレクトリのツールのタグ**で、harness/harness で踏んだ
+「releases API の ref が別のコードベースを指す」形を疑ったが、
+checkout の `go.mod` は本体の `dubbo.apache.org/dubbo-go/v3` だった
+（monorepo の全体タグ）。
+
+darwin で **175 パッケージが全部 load できる**（`go build ./...` で確認、
+stderr 0 行）。config は `default: none` + 6 linter
+（`govet`（`shadow` 付き）/ `ineffassign` / `misspell` / `staticcheck` /
+`unused` / `testifylint`）、exclusion presets 4 つ、`generated: lax`、
+`misspell.ignore-rules`。guff が全部持っており `_new_keys` も空。
+
+```
+dubbo-go: guff=0 golangci=0 both=0 P=100.0% R=100.0% [OK]
+```
+
+#### 0 対 0 は「合格」か「測っていない」か
+
+[[empty-fixture-hides-defects]] の 4 形のうち 2 つがここに刺さりうる。
+まず typecheck の潰れではないことを確かめた —— golangci の JSON の
+`Report.Linters` に `govet` / `ineffassign` / `misspell` / `staticcheck` /
+`testifylint` / `typecheck` / `unused` の 7 本が `Enabled` で並び、
+`Error` は無く、stderr も 0 バイト。ollama や harness/harness のように
+**1 件の typecheck が報告全体を消した**形ではない。
+
+次に「両ツールがそもそもコードを読んでいるか」を、**この config では
+有効でない** 2 本（`goconst` / `gocritic`）を足した config で測った:
+
+```
+guff=2211 / golangci=2260（goconst + gocritic のみを数えた）
+```
+
+**木は本物で、両方とも読んでいる。** dubbo-go は自分の 6 linter config を
+実際に通しているだけである。したがってこのターゲットが検出できるのは
+**guff の過剰報告だけ**で、取りこぼしは検出できない —— `caddy`（`pr` tier、
+同じく 0 対 0）と同じ性質で、175 パッケージ分の precision ゲートとしては
+働く。README の除外表が言う「fail しようのないターゲット」は
+*typecheck が全部消している*場合を指しており、これはそれではない。
+
+なお上の 2211 対 2260 の差（49 件）は**このターゲットの config では
+測っていない**ので乖離としては数えない。ただし同じ木に
+goconst / gocritic の乖離が残っていることの記録にはなる ——
+将来 hunt を広げるときの手掛かり。
+
+```
+台帳: 46/100 at zero（49 定義、open 0、unmeasured 3）
+```
