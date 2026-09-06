@@ -35,6 +35,10 @@ referrers/referrers.go:35:14:bodyclose::response body must be closed
 referrers/referrers.go:61:30:bodyclose::response body must be closed
 referrers/referrers.go:93:28:bodyclose::response body must be closed
 referrers/referrers.go:120:28:bodyclose::response body must be closed
+resultskip/resultskip.go:27:23:bodyclose::response body must be closed
+resultskip/resultskip.go:37:23:bodyclose::response body must be closed
+resultskip/resultskip.go:52:23:bodyclose::response body must be closed
+resultskip/resultskip.go:62:23:bodyclose::response body must be closed
 shadow/shadow.go:16:36:bodyclose::response body must be closed
 shadow/shadow.go:33:36:bodyclose::response body must be closed
 shadow/shadow.go:49:23:bodyclose::response body must be closed
