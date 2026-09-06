@@ -252,12 +252,47 @@
 +func f(t time.Time) time.Duration { return time.Until(t) }
 --- a/s1025/bad/bad.go
 +++ b/s1025/bad/bad.go
-@@ -2,4 +2,4 @@
+@@ -24,26 +24,26 @@
  
- import "fmt"
+ // A named string type with a String method: the Stringer branch, not the
+ // underlying-string one. boundary's credential.Password is this shape.
+-func stringWithStringMethod(v strStringer) string { return fmt.Sprintf("%s", v) }
++func stringWithStringMethod(v strStringer) string { return v.String() }
  
--func f(s string) string { return fmt.Sprintf("%s", s) }
-+func f(s string) string { return s }
+ // A named byte slice with a String method: nothing else reported this at all.
+-func byteSliceWithStringMethod(v bytesStringer) string { return fmt.Sprintf("%s", v) }
++func byteSliceWithStringMethod(v bytesStringer) string { return v.String() }
+ 
+ // A struct pointer with a String method: no other branch could apply.
+-func structPointerWithStringMethod(v *structStringer) string { return fmt.Sprintf("%s", v) }
++func structPointerWithStringMethod(v *structStringer) string { return v.String() }
+ 
+ // The interface itself — the one shape the old name test did catch.
+-func theInterfaceItself(v fmt.Stringer) string { return fmt.Sprintf("%s", v) }
++func theInterfaceItself(v fmt.Stringer) string { return v.String() }
+ 
+ // Below the Stringer branch, in upstream's order.
+ 
+-func alreadyAString(v string) string { return fmt.Sprintf("%s", v) }
++func alreadyAString(v string) string { return v }
+ 
+-func underlyingIsAString(v plainStr) string { return fmt.Sprintf("%s", v) }
++func underlyingIsAString(v plainStr) string { return string(v) }
+ 
+-func namedByteSlice(v plainBytes) string { return fmt.Sprintf("%s", v) }
++func namedByteSlice(v plainBytes) string { return string(v) }
+ 
+-func plainByteSlice(v []byte) string { return fmt.Sprintf("%s", v) }
++func plainByteSlice(v []byte) string { return string(v) }
+ 
+ type ptrFormatter struct{}
+ 
+@@ -54,4 +54,4 @@
+ // not apply and the Stringer branch reports. The pointer form is in ok.go. This
+ // pair is what pins the skip to the argument's own method set rather than to
+ // the addressable one.
+-func formatOnPointerPassedByValue(v ptrFormatter) string { return fmt.Sprintf("%s", v) }
++func formatOnPointerPassedByValue(v ptrFormatter) string { return v.String() }
 --- a/s1028/bad/bad.go
 +++ b/s1028/bad/bad.go
 @@ -1,5 +1,8 @@

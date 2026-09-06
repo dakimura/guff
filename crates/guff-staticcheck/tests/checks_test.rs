@@ -1504,8 +1504,30 @@ fn s1025_flags_bad_patterns() {
     );
     support::assert_well_typed(&pkg);
     let messages = support::run_analyzer(s1025::analyzer(), &pkg);
-    assert!(!messages.is_empty(), "{messages:?}");
-    assert!(messages.iter().any(|m| m.contains("already a string")));
+
+    // Upstream's branch order decides *which* message each call gets, so a
+    // count per branch is the assertion — `any(contains(..))` passes on any
+    // subset, and this fixture used to be a single call on a plain string.
+    let count = |needle: &str| messages.iter().filter(|m| m.contains(needle)).count();
+    assert_eq!(messages.len(), 9, "{messages:?}");
+    assert_eq!(
+        count("should use String() instead of fmt.Sprintf"),
+        5,
+        "Stringer comes first: a named string, a named byte slice, a struct \
+         pointer, the interface itself, and a value whose Format is on the \
+         pointer: {messages:?}"
+    );
+    assert_eq!(count("the argument is already a string"), 1, "{messages:?}");
+    assert_eq!(
+        count("the argument's underlying type is a string"),
+        1,
+        "{messages:?}"
+    );
+    assert_eq!(
+        count("the argument's underlying type is a slice of bytes"),
+        2,
+        "{messages:?}"
+    );
 }
 
 #[test]
@@ -1518,7 +1540,15 @@ fn s1025_allows_ok_patterns() {
         &[("fmt", &fmt_stub)],
     );
     support::assert_well_typed(&pkg);
-    assert!(support::run_analyzer(s1025::analyzer(), &pkg).is_empty());
+    // A type with a two-parameter, no-result `Format` may render %s however it
+    // likes, so it is skipped before any branch — including through a pointer,
+    // whose method set is the one that has it. The rest are the shapes the
+    // check does not match at all: a non-string non-slice argument, another
+    // verb, and more than one argument.
+    assert!(
+        support::run_analyzer(s1025::analyzer(), &pkg).is_empty(),
+        "expected no findings"
+    );
 }
 
 #[test]

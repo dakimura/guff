@@ -14,6 +14,7 @@ use guff_analysis::{
 };
 
 use crate::render::render_node;
+use guff_types::alias::unalias_readonly;
 use guff_types::basic::BasicKind;
 use guff_types::{Basic, TypeData, TypeId};
 
@@ -37,6 +38,126 @@ fn underlying_is_string(pass: &Pass<'_>, typ: TypeId) -> bool {
         return false;
     };
     is_string_type(pass, typ.underlying(&artifacts.types))
+}
+
+/// The type an imported package declares under `name`.
+///
+/// A third local copy of what `qf1010` and `qf1012` each keep — they are the
+/// same six lines, and consolidating them is a separate change from this one.
+fn imported_type(pass: &Pass<'_>, import_path: &str, name: &str) -> Option<TypeId> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let pkg_id = artifacts.packages.find_by_path(import_path)?;
+    let scope = artifacts.packages.get(pkg_id).scope();
+    let obj = guff_types::scope::lookup(&artifacts.scopes, scope, name)?;
+    obj.typ(&artifacts.objects)
+}
+
+/// `types.Implements(typ, knowledge.Interfaces["fmt.Stringer"])`.
+///
+/// Not `IsTypeWithName(typ, "fmt.Stringer")`, which is what this used to ask —
+/// that is true only of a value whose static type *is* the interface, so the
+/// Stringer branch never fired for a concrete type and the branches below it
+/// answered instead. boundary's `credential.Password` is `string` with a
+/// `String` method: upstream says "should use String()", guff said "the
+/// argument's underlying type is a string".
+fn implements_fmt_stringer(pass: &Pass<'_>, typ: TypeId) -> bool {
+    let Some(iface) = imported_type(pass, "fmt", "Stringer") else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let mut types = artifacts.types.clone();
+    guff_types::check_lookup::implements(
+        &mut types,
+        &artifacts.objects,
+        &artifacts.packages,
+        typ,
+        iface,
+        false,
+    )
+    .is_ok()
+}
+
+/// Upstream's `isFormatter`: the type's method set holds a `Format` taking two
+/// parameters and returning nothing.
+///
+/// Deliberately looser than `types.Implements(fmt.Formatter)` — upstream does
+/// not check the parameter types, and says so in a TODO. It is a *skip*: such a
+/// type may render `%s` however it likes, so neither branch below applies.
+///
+/// This skip is why the fix above cannot land alone. Before it, a type with
+/// both `Format` and `String` was silent only because the Stringer branch never
+/// fired; making that branch work would have started reporting it.
+fn is_formatter(pass: &Pass<'_>, typ: TypeId) -> bool {
+    use guff_types::arena::ObjectData;
+    use guff_types::lookup::{lookup_field_or_method, LookupResult};
+    use guff_types::signature::{signature_params, signature_results};
+    use guff_types::tuple::tuple_len;
+
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let mut types = artifacts.types.clone();
+    // `msCache.MethodSet(T)` — the method set of the argument's own type, so a
+    // pointer-receiver `Format` does not count for a value.
+    let found = lookup_field_or_method(
+        &mut types,
+        &artifacts.objects,
+        &artifacts.packages,
+        typ,
+        false,
+        None,
+        "Format",
+    );
+    let LookupResult::Found { obj, .. } = found else {
+        return false;
+    };
+    if !matches!(artifacts.objects.get(obj), ObjectData::Func(_)) {
+        return false;
+    }
+    let Some(sig) = obj.typ(&artifacts.objects) else {
+        return false;
+    };
+    let params = signature_params(&artifacts.types, sig);
+    let results = signature_results(&artifacts.types, sig);
+    tuple_len(&artifacts.types, params) == 2 && tuple_len(&artifacts.types, results) == 0
+}
+
+/// `code.IsOfStringConvertibleByteSlice`.
+///
+/// ```go
+/// typ, ok := pass.TypesInfo.TypeOf(expr).Underlying().(*types.Slice)
+/// if !ok { return false }
+/// elem := types.Unalias(typ.Elem())
+/// if version.Compare(LanguageVersion(pass, expr), "go1.18") >= 0 {
+///     elem = elem.Underlying()
+/// }
+/// return types.Identical(elem, types.Typ[types.Byte])
+/// ```
+///
+/// The go1.18 gate is carried for shape rather than for effect: the effective
+/// file version is `max(fileVersion, go1.21)`, so the unwrapping always
+/// happens. Before Go 1.18 a `[]T` with `type T byte` could not be converted to
+/// string directly (golang/go#23536).
+fn is_string_convertible_byte_slice(pass: &Pass<'_>, expr: &Expr, typ: TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let types = &artifacts.types;
+    let under = typ.underlying(types);
+    let TypeData::Slice(_) = types.get(under) else {
+        return false;
+    };
+    let mut elem = unalias_readonly(types, guff_types::slice::slice_elem(types, under));
+    if code::version_compare(
+        &code::effective_file_go_version(pass, expr.pos().0 as u32),
+        "go1.18",
+    ) >= 0
+    {
+        elem = elem.underlying(types);
+    }
+    matches!(types.get(elem), TypeData::Basic(b) if b.kind() == guff_types::basic::BYTE)
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -63,6 +184,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             return;
         };
         if type_with_name(pass, typ, "reflect.Value") {
+            // printing with %s produces output different from using the String
+            // method
+            return;
+        }
+        if is_formatter(pass, typ) {
+            // the type may choose to handle %s in arbitrary ways
             return;
         }
 
@@ -71,7 +198,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         // `string(x)`.
         let arg = &call.args[1];
         let (msg, fix_msg, replacement): (&str, &str, fn(&str) -> String) =
-            if type_with_name(pass, typ, "fmt.Stringer") {
+            if implements_fmt_stringer(pass, typ) {
                 (
                     "should use String() instead of fmt.Sprintf",
                     "Replace with call to String method",
@@ -86,6 +213,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             } else if underlying_is_string(pass, typ) {
                 (
                     "the argument's underlying type is a string, should use a simple conversion instead of fmt.Sprintf",
+                    "Replace with conversion to string",
+                    |a| format!("string({a})"),
+                )
+            } else if is_string_convertible_byte_slice(pass, arg, typ) {
+                (
+                    "the argument's underlying type is a slice of bytes, should use a simple conversion instead of fmt.Sprintf",
                     "Replace with conversion to string",
                     |a| format!("string({a})"),
                 )
