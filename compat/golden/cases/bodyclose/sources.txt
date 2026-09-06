@@ -5,5 +5,8 @@ bad/bad.go     crates/guff-context/tests/testdata/bodyclose/bad.go
 # not close.
 referrers/referrers.go   crates/guff-context/tests/testdata/bodyclose/referrers.go
 ok/ok.go       crates/guff-context/tests/testdata/bodyclose/ok.go
+# A func literal declaring its own `resp` is not a capture of the outer one:
+# four leaks and two closers, with the columns pinned here.
+shadow/shadow.go   crates/guff-context/tests/testdata/bodyclose/shadow.go
 nohttp/nohttp.go   crates/guff-context/tests/testdata/bodyclose/nohttp.go
 dialer/dialer.go   crates/guff-context/tests/testdata/bodyclose/stub/example.com/bodyclose/dialer/dialer.go

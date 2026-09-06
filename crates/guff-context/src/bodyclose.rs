@@ -566,16 +566,38 @@ fn mark_escaped_arg(
     }
 }
 
-/// Any tracked response a func literal mentions is settled: upstream stops at
-/// the `MakeClosure` and `calledInFunc` answers "not open".
-fn mark_captured_by_closure(lit: &guff::ast::FuncLit, usages: &mut HashMap<String, RespUsage>) {
+/// Any tracked response a func literal **captures** is settled: upstream stops
+/// at the `MakeClosure` and `calledInFunc` answers "not open".
+///
+/// Captures, not mentions. Upstream reaches the closure through an
+/// `*ssa.MakeClosure` over a *free variable*, and a variable the literal
+/// declares itself is not free — it is a different object that happens to share
+/// a name. Matching on the name alone silenced every response whose function
+/// also held a literal declaring a `resp` / `r` of its own, wherever that
+/// literal sat. boundary's `controller_ratelimit_reload_test.go` writes
+///
+/// ```go
+/// r, err := c.Do(func() *http.Request {
+///     r, err := http.NewRequest(http.MethodGet, url, nil)
+///     require.NoError(t, err)
+///     return r
+/// }())
+/// ```
+///
+/// sixteen times, and all sixteen went unreported.
+fn mark_captured_by_closure(
+    pass: &Pass<'_>,
+    lit: &guff::ast::FuncLit,
+    usages: &mut HashMap<String, RespUsage>,
+) {
     if usages.is_empty() {
         return;
     }
+    let span = (lit.ty.func.0 as u32, lit.body.rbrace.0 as u32);
     let mut seen: Vec<String> = Vec::new();
     inspect(NodeRef::BlockStmt(&lit.body), |n| {
         if let Some(NodeRef::Ident(id)) = n {
-            if usages.contains_key(id.name.as_str()) {
+            if usages.contains_key(id.name.as_str()) && !declared_inside(pass, id, span) {
                 seen.push(id.name.clone());
             }
         }
@@ -586,6 +608,35 @@ fn mark_captured_by_closure(lit: &guff::ast::FuncLit, usages: &mut HashMap<Strin
             u.mark_settled();
         }
     }
+}
+
+/// Whether `id` resolves to an object the enclosing literal declares itself,
+/// rather than to one it closes over.
+///
+/// Reads `defs` before `uses` so the declaring occurrence of a `:=` answers
+/// yes on its own, without depending on a later mention.
+///
+/// An identifier that resolves to nothing, or to an object with no position,
+/// answers **no** — settled, the behaviour before this predicate existed. That
+/// is the safe side of the unknown here: settling a response that was not
+/// really captured costs a missed finding, while refusing to settle one that
+/// was costs a false positive on code that does close the body.
+fn declared_inside(pass: &Pass<'_>, id: &guff::ast::Ident, span: (u32, u32)) -> bool {
+    let (Some(info), Some(artifacts)) = (pass.types_info(), pass.pkg().type_artifacts.as_ref())
+    else {
+        return false;
+    };
+    let obj = info
+        .defs
+        .get(&id.id)
+        .copied()
+        .flatten()
+        .or_else(|| info.uses.get(&id.id).copied());
+    let Some(obj) = obj else {
+        return false;
+    };
+    let pos = obj.pos(&artifacts.objects) as u32;
+    pos != 0 && pos >= span.0 && pos <= span.1
 }
 
 /// The functions of this package that close a `*http.Response` parameter's
@@ -740,7 +791,7 @@ fn check_body(
             // that actually closes was recognised here before, so
             // `defer func() { io.Copy(io.Discard, resp.Body) }()` — connect-go's
             // `bench_test.go` — read as a leak.
-            mark_captured_by_closure(lit, &mut usages);
+            mark_captured_by_closure(pass, lit, &mut usages);
             return false;
         }
 

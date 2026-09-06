@@ -26531,3 +26531,98 @@ golangci の出力を動かすことはあり得ないので**この 2 件を成
 ```
 台帳: 49/100 at zero（53 定義、open 1＝boundary **33**、unmeasured 3）
 ```
+
+### 2026-09-06（続き 236）— `close boundary` 続き。**「クロージャが捕獲した」を名前だけで判定していた** —— 16 件が黙って消えていた
+
+続き 235 で boundary の ill-typed を潰したあと、残り 33 件の内訳は
+bodyclose 20（guff-only 2 / gcl-only 18）と staticcheck 13 だった。
+gcl-only 18 件のうち **16 件が 1 ファイルに固まっていた** ——
+`internal/cmd/commands/server/controller_ratelimit_reload_test.go`。
+そこで guff は bodyclose を **1 件も出していない**。
+
+#### 外した仮説 3 つ
+
+1. **呼び出しの形**。この行は
+   `r, err := c.Do(func() *http.Request { ... }())` という即時実行の関数
+   リテラル引数で、`http.Client` が値型。同じ形を書いた最小モジュールでは
+   **両ツールが一致した**（変数の再代入を 3 回繰り返す形でも一致）。
+2. **`net/http` の直接 import ゲート**（[[upstream-linters-gate-on-direct-imports]]）。
+   `server` の production ファイルは `net/http` を直接 import せず、
+   test ファイルだけがする —— しかし boundary には**同じ import プロファイルの
+   パッケージが他に 2 つ**（`internal/tests/cluster/sequential` と
+   `testing/internal/e2e/tests/database`、どちらも production 0 / test 1）
+   あり、そこでは guff も一致している。仮に計装で確かめると
+   `gate=true`・files=8・当該 test ファイル込みだった。**ゲートは通っている。**
+3. **config の除外・上限**。`exclusions.paths` はこのファイルに当たらず、
+   `max-issues-per-linter: 0` / `max-same-issues: 0` で上限も無い。
+
+#### 原因
+
+`check_body` は関数リテラルに出会うと `mark_captured_by_closure` を呼び、
+**リテラル内に現れた識別子の「名前」が追跡中の response と一致したら
+settled にしていた**。上流は `*ssa.MakeClosure` 経由で**自由変数**に
+到達するので、リテラルが自分で宣言した変数は捕獲ではない ——
+名前が同じだけの別オブジェクトである。
+
+boundary の 16 行はどれも内側で `r, err := http.NewRequest(...)` と
+**外側と同じ名前を再宣言**していた。だから 16 件全部が消えた。
+
+#### 測った形（`max-same-issues: 0` を忘れない —— 既定 3 で最初の測定は切られていた）
+
+| 形 | golangci | 修正前 guff | 修正後 |
+|---|---|---|---|
+| リテラルが `r` を再宣言し `return r` | ✅ | ❌ | ✅ |
+| 同じ形・内側の名前が違う | ✅ | ✅ | ✅ |
+| リテラルが `r` を再宣言し **別名のコピーを return** | ✅ | ❌ | ✅ |
+| 呼び出しと無関係な**後続の**リテラルが `r` を再宣言 | ✅ | ❌ | ✅ |
+| ただの**ブロック**が `r` を影にする | ✅ | ✅ | ✅ |
+| 本当に return して手渡す | ❌ | ❌ | ❌ |
+| リテラルが**外側の** `resp` を使う（`defer func(){resp.Body.Close()}()`） | ❌ | ❌ | ❌ |
+| リテラルが body を drain するだけ | ❌ | ❌ | ❌ |
+
+3 番目が要点で、**「言及した」ではなく「宣言した」**が境界である。
+5 番目（ブロック）は、修正が「内側で宣言された名前は全部無視」に
+振れていないことの歯止め。
+
+#### 直したこと
+
+`mark_captured_by_closure` に `declared_inside` を足した ——
+識別子を `defs` → `uses` の順で解決し、そのオブジェクトの宣言位置が
+リテラルの span に入っていれば捕獲ではない。`defs` を先に見るのは
+`:=` の宣言側だけが現れる場合にそれ単独で答えられるようにするため。
+**解決できない識別子は「捕獲」側に倒す** —— 従来の挙動であり、
+外すと body を閉じているコードに誤検出が出る側だから
+（[[a-suppression-guard-hides-the-real-defect]] の逆向きの判断）。
+
+#### 測定
+
+- **boundary: open 33 → 17**（guff-only 4 は不変、gcl-only 29 → 13）。
+  **bodyclose は 47/63 → 63/63**（both 61、両側 2 件ずつのずれのみ）。
+  R 95.0% → 97.7%。ill_typed 0 / panic 0 / seed cycle 0。
+  残り 17 は staticcheck 13・bodyclose 4。
+- 退行なし: **dapr 1555/1555・tailscale 47/43（allowlist 内）・
+  syncthing 656/654（同）・k6 423/423・gitea 1/0（同）・prometheus 20/20**。
+- golden **231**（bodyclose の golden を regen、**キー集合で差分して
+  bad.go +4・shadow.go +4・削除 0**）／fix 231／reject 14／
+  oss pr 8 ターゲット P=R=100%／workspace 279 バイナリ **3529 ok** 0 failed。
+- テストは 2 本足した。`bad.go` に 4 形（`BODYCLOSE_BAD_SHAPES` 21 → 25）と、
+  **6 形だけを持つ独立パッケージ** `shadow.go` に対する
+  `assert_eq!(messages.len(), 4)`。ガードを潰すと後者は **4 → 1**、
+  前者は **25 → 22** に落ちることを確認済み。
+- `shadow.go` は golden の sources にも足したので、**桁まで**上流と
+  突き合わせている（[[golden-tier-is-the-only-column-gate]]）。
+  fixture の stub には `http.DefaultClient` と `http.MethodGet` が
+  無かったので追加した（無いと fixture が ill-typed になり、
+  「緑だが何も測っていない」になるところだった）。
+
+#### 残り（このセッションでは追わない）
+
+`internal/clientcache/internal/client` の gcl-only 2 件は別の欠陥で、
+最小再現も取ってある: `resp, err := c.client.Do(req)` のあと
+**`return api.NewResponse(resp), nil`** —— 他パッケージの呼び出しで
+包んでから返す形。上流は報告し、guff は報告しない。
+なお同じ形でも**同一パッケージ内**のヘルパで包む場合は上流も報告しない。
+
+```
+台帳: 49/100 at zero（53 定義、open 1＝boundary **17**、unmeasured 3）
+```

@@ -40,3 +40,7 @@ func NewRequest(method, url string, body any) (*Request, error) {
 }
 
 const StatusOK = 200
+
+const MethodGet = "GET"
+
+var DefaultClient = &Client{}
