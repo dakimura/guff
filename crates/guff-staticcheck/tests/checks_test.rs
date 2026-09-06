@@ -144,8 +144,11 @@ fn s1017_flags_manual_trimming() {
     );
     support::assert_well_typed(&pkg);
     let messages = support::run_analyzer(s1017::analyzer(), &pkg);
-    assert!(messages.len() >= 2, "{messages:?}");
-    assert!(messages.iter().any(|m| m.contains("TrimPrefix")));
+    // A lower bound passes no matter how much guff over-reports, which is how
+    // it kept reporting an `else if` that upstream skips. Count, and name both
+    // shapes: the TrimPrefix call and the manual slice.
+    assert_eq!(messages.len(), 2, "{messages:?}");
+    assert!(messages.iter().all(|m| m.contains("TrimPrefix")), "{messages:?}");
 }
 
 #[test]
