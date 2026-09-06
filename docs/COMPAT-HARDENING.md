@@ -26163,3 +26163,64 @@ prefix 経路は「export data から読む依存」でしか起きないので 
 ```
 台帳: 49/100 at zero（52 定義、open 0、unmeasured 3）
 ```
+
+### 2026-09-06（続き 232）— `adopt boundary`。**guff が自分のバグを自分で報告した** —— seed 順が topological でなく 11 パッケージが ill-typed
+
+台帳が open 0 になったので次の候補 **hashicorp/boundary v0.21.3**（107.3MB）。
+flipt と同じくマルチモジュール（`api/go.mod` 27・`sdk/go.mod` 31、`go.work` 無し）で、
+root の `./...` が **274 パッケージ**、合計 332 のうち **83%** が測定対象。
+otel-collector の「1 パッケージしか無い」形ではない。
+
+config は 4 linter（`bodyclose` / `errcheck` / `misspell` / `staticcheck`）と
+exclusion presets 4 つ、`ST1005:` / `ST1003:` の除外、そして
+**個別に名指しした SA1019 のメッセージ 20 本**。guff は全部持っている。
+darwin で `go build ./...` は exit 0。
+
+```
+boundary: guff=540 golangci=576 both=536 P=99.3% R=93.1% [UNEXPECTED]
+  guff-only by linter: {'bodyclose': 2, 'staticcheck': 2}
+  gcl-only  by linter: {'staticcheck': 22, 'bodyclose': 18}
+```
+
+#### guff の stderr が原因を名指ししている
+
+```
+guff: seed dep cycle github.com/hashicorp/boundary/internal/session
+      -> github.com/hashicorp/boundary/internal/credential/vault
+guff: seed order is not topological; some packages may be reported ill-typed.
+      This is a guff bug, not a problem with the code being linted.
+```
+
+**ill-typed が 11 パッケージ**（`credential/vault_test`・`credential_test`・
+`daemon/controller/handlers/{credentiallibraries,credentialstores,sessions_test}`・
+`targets/tcp_test`・`target_test`・`target/tcp_test` ほか）。
+型検査が落ちたパッケージは finding を 1 件も出さないので、
+**gcl-only 40 件の大半はこの副作用**とみてよい —— 実際、上の
+`+gcl` は `credential/vault`・`credentialstores`・`targets/tcp`・`session` と
+ill-typed の一覧にきれいに重なる。
+
+エラー本文も一貫している:
+
+```
+expStore.PublicId undefined (type *vault.CredentialStore has no field or method PublicId)
+```
+
+`vault.CredentialStore` が**中身の無い型として見えている** ——
+循環のせいで `vault` が `session` より先に seed されず、
+export data も無いまま参照されたときの形である。
+
+#### health baseline には行を足さない
+
+`hunt.sh` は health gate で落ちる（`health=1`）。ここで
+`compat/baselines/health-hunt.json` に boundary の行を足せばゲートは
+黙るが、**11 の ill-typed を恒久的に許すことになる**
+（[[absent-baseline-row-means-strictly-zero]]）。これは直すべき guff の
+バグなので行は足さない。hunt tier は CI で回っていないので、
+落ちるのは手で回したときだけである。
+
+次のタスク `close boundary` は**まず seed 順**を追う。
+44 件の内訳を linter で切るより、ill-typed を 0 にしてから数え直すほうが早い。
+
+```
+台帳: 49/100 at zero（53 定義、open 1＝boundary 44、unmeasured 3）
+```
