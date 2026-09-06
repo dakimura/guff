@@ -56,6 +56,14 @@
     "timeout": "15m"
   },
   {
+    "name": "cert-manager",
+    "url": "https://github.com/cert-manager/cert-manager.git",
+    "ref": "v1.21.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "20m"
+  },
+  {
     "name": "cli",
     "url": "https://github.com/cli/cli.git",
     "ref": "v2.83.2",

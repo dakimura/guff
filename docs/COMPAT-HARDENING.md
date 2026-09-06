@@ -25598,3 +25598,78 @@ goconst / gocritic の乖離が残っていることの記録にはなる ——
 ```
 台帳: 46/100 at zero（49 定義、open 0、unmeasured 3）
 ```
+
+### 2026-09-06（続き 226）— `adopt cert-manager`。**10 件の guff-only**、うち 7 件は「撃たなかった linter の影」で、**その裏に 10 件の取りこぼし**があった
+
+台帳が open 0 になったので次の候補 **cert-manager v1.21.1**（99.3MB）。
+これまでの 2 つと違って config が厚い —— **58 linter** ＋ formatter 2 本
+（`gci` は `custom-order` と `localmodule` セクション付き、`gofmt`）、
+exclusion presets 4 つ、`staticcheck.checks` に 13 個の `-ST…` / `-QF…`、
+`gosec.excludes` 3 つ、`exclusions.warn-unused: true`。
+**guff は 58 本とも持っている**（`gci` の `custom-order` / `localmodule` も）。
+
+darwin で **216 パッケージが全部 load できる**（`go build ./...`、
+`go list` の stderr 17 行は全部 `go: downloading`）。ill-typed 0。
+
+```
+cert-manager: guff=10 golangci=0 both=0 P=0.0% R=100.0% [UNEXPECTED]
+  guff-only by linter: {'nolintlint': 7, 'staticcheck': 3}
+```
+
+**recall は 100%** —— 上流が出すものは 0 件なので自明に満たしている。
+問題は precision 側の 10 件だが、**これは 2 種類の別ものである**。
+
+#### nolintlint 7 件は影であって、実体は取りこぼし 10 件
+
+```
++guff pkg/metrics/metrics.go:79,99,113,178,188  nolintlint: `//nolint:promlinter` is unused
++guff pkg/util/pki/asn1_util_test.go:222,254    nolintlint: `//nolint: gosmopolitan` is unused
+```
+
+上流の nolintlint はこの 7 本を **used** と判定している ——
+つまり上流の promlinter / gosmopolitan はそこで撃っていて nolint が
+消しており、guff は撃っていない（続き 218 の celestia-node と同じ形、
+[[equal-only-counts-mean-a-rendering-diff]] の親戚）。
+
+**推測で終わらせずに測った。** 該当の `//nolint` を落として両ツールに
+通すと:
+
+| | promlinter | gosmopolitan |
+|---|--:|--:|
+| golangci-lint | **8** | **2** |
+| guff | **0** | **0** |
+
+`promlinter` が 8 で directive が 5 なのは、`_count` 接尾辞の metric が
+1 行で 2 件（`_count` を付けるな／counter は `_total` を付けろ）出るから。
+**つまり nolintlint の 7 件の裏には 10 件の取りこぼしがある。**
+（測定後 `git checkout --` で checkout を戻してある ——
+[[corpus-cache-may-hold-a-previous-repro]]。）
+
+#### staticcheck 3 件は本物の過剰報告
+
+```
+internal/apis/config/shared/v1alpha1/conversion.go:55,70,89
+  staticcheck: possible nil pointer dereference
+```
+
+3 つとも同じ形で、**nil チェックが早期 return で deref を守っている**:
+
+```go
+func Convert_Pointer_int32_To_int(in **int32, out *int, s conversion.Scope) error {
+	if *in == nil {      // ← guff はここを報告する
+		*out = 0
+		return nil
+	}
+	*out = int(**in)     // ← ここには到達しない
+	return nil
+}
+```
+
+SA5011 は「deref した後で nil チェックしている」形を撃つ規則なので、
+**チェックが deref を支配している**この形は撃ってはいけない。上流は黙る。
+
+次のタスク `close cert-manager` で 2 つとも追う。
+
+```
+台帳: 46/100 at zero（50 定義、open 1＝cert-manager 10、unmeasured 3）
+```
