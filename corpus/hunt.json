@@ -160,6 +160,14 @@
     "timeout": "15m"
   },
   {
+    "name": "kratos",
+    "url": "https://github.com/ory/kratos.git",
+    "ref": "v26.2.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
+  },
+  {
     "name": "kubeshark",
     "url": "https://github.com/kubeshark/kubeshark.git",
     "ref": "v53.4.0",
