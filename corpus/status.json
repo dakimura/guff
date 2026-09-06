@@ -7,8 +7,8 @@
   ],
   "goal": 100,
   "defined": 48,
-  "clean": 44,
-  "open": 1,
+  "clean": 45,
+  "open": 0,
   "unmeasured": 3,
   "targets": {
     "alertmanager": {
@@ -60,7 +60,7 @@
     "caddy": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260905T234937Z",
+      "at": "20260906T003843Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -84,7 +84,7 @@
     "cobra": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260905T234937Z",
+      "at": "20260906T003843Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -170,7 +170,7 @@
     "gin": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260905T234937Z",
+      "at": "20260906T003843Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -186,7 +186,7 @@
     "go-client": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260905T234937Z",
+      "at": "20260906T003843Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -210,7 +210,7 @@
     "helm": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260905T234937Z",
+      "at": "20260906T003843Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -234,7 +234,7 @@
     "k9s": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260905T234937Z",
+      "at": "20260906T003843Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -249,14 +249,11 @@
     },
     "kratos": {
       "tier": "hunt",
-      "state": "open",
-      "at": "20260906T000646Z",
-      "open": 2,
-      "guff_only": 1,
-      "gcl_only": 1,
-      "by_linter": {
-        "gosec": 2
-      }
+      "state": "clean",
+      "at": "20260906T004111Z",
+      "open": 0,
+      "guff_only": 0,
+      "gcl_only": 0
     },
     "kubernetes": {
       "tier": "weekly",

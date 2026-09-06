@@ -129,6 +129,25 @@ g123/g123.go:46:4:gosec:high:G123: tls.Config uses VerifyPeerCertificate while s
 g123/g123.go:70:21:gosec:high:G123: tls.Config uses VerifyPeerCertificate while session resumption may remain enabled and VerifyConnection is not set; resumed sessions can bypass custom certificate checks
 g123/g123.go:71:46:gosec:high:G123: tls.Config uses VerifyPeerCertificate while session resumption may remain enabled and VerifyConnection is not set; resumed sessions can bypass custom certificate checks
 g123/g123.go:82:8:gosec:high:G123: tls.Config uses VerifyPeerCertificate while session resumption may remain enabled and VerifyConnection is not set; resumed sessions can bypass custom certificate checks
+g124e/g124_elided.go:25:58:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:27:54:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:29:75:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:31:78:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:33:55:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:37:69:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:39:71:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:42:38:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:45:52:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:47:71:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:49:64:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:51:68:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:54:56:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:57:71:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:60:41:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:64:19:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:70:37:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:74:54:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:94:24:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
 g201/g201.go:50:7:gosec:medium:G201: SQL string formatting
 g201/g201.go:62:7:gosec:medium:G201: SQL string formatting
 g201/g201.go:72:7:gosec:medium:G201: SQL string formatting
@@ -169,6 +188,9 @@ g602v/g602_variadic.go:155:15:gosec:low:G602: slice index out of range
 g602v/g602_variadic.go:166:65:gosec:low:G602: slice index out of range
 g602v/g602_variadic.go:171:59:gosec:low:G602: slice index out of range
 g602v/g602_variadic.go:180:13:gosec:low:G602: slice index out of range
+g710v/g710_variadic.go:95:64:gosec:medium:G710: Open redirect via taint analysis
+g710v/g710_variadic.go:97:64:gosec:medium:G710: Open redirect via taint analysis
+g710v/g710_variadic.go:103:64:gosec:medium:G710: Open redirect via taint analysis
 g7xx/g7xx.go:41:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
 g7xx/g7xx.go:41:18:gosec:high:G702: Command injection via taint analysis
 g7xx/g7xx.go:46:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments

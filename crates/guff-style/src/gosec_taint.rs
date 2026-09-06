@@ -1910,6 +1910,44 @@ impl Taint<'_> {
     }
 
     /// `valueReachableFromParams`: data-derivation inside one function body.
+    /// Where the arguments go/ssa would have packed into a variadic array
+    /// begin, for a call that did not spread a slice (`f(a, b, c)` against
+    /// `func(a T, rest ...T)`). `None` when nothing is packed: a spread call
+    /// (`f(a, xs...)`), a non-variadic callee, or a callee whose signature is
+    /// not available.
+    ///
+    /// guff records the spread in [`CallCommon::ellipsis`] and passes the tail
+    /// through as ordinary arguments rather than building the array, so an
+    /// analyzer that wants go/ssa's *view* of the operands has to subtract the
+    /// tail back out. Only [`Self::value_reachable_from_params`] wants that —
+    /// the main taint walk mirrors `isTainted`, which reaches varargs through
+    /// the `IndexAddr` stores and so needs the whole argument list.
+    fn variadic_tail_start(&self, fid: FuncId, common: &CallCommon) -> Option<usize> {
+        if common.ellipsis {
+            return None;
+        }
+        let sig = match common.method {
+            Some(obj) => obj.typ(&self.prog.object_arena)?,
+            None => value_type_of(self.prog, self.func(fid), common.value),
+        }
+        .underlying(&self.prog.type_arena);
+        let TypeData::Signature(s) = self.prog.type_arena.get(sig) else {
+            return None;
+        };
+        if !s.variadic() {
+            return None;
+        }
+        let n_params = guff_types::tuple::tuple_len(&self.prog.type_arena, s.params());
+        if n_params == 0 {
+            return None;
+        }
+        // `set_call_func` pushes a concrete receiver ahead of the actuals when
+        // it turns a method value into a static call; in interface invoke mode
+        // the receiver rides in `common.value` and the arguments start at 0.
+        let recv_offset = usize::from(common.method.is_none() && s.recv().is_some());
+        Some(recv_offset + n_params - 1)
+    }
+
     fn value_reachable_from_params(
         &self,
         v: Value,
@@ -1948,7 +1986,20 @@ impl Taint<'_> {
                         out
                     }
                     InstrData::Call(c) => {
-                        let mut out = c.call.args.clone();
+                        // Upstream reads `call.Call.Args`, and go/ssa has
+                        // already replaced a non-spread variadic tail with one
+                        // `Slice` of a fresh `Alloc [N]T` — whose elements this
+                        // walk cannot reach, because its `Alloc` arm follows
+                        // only direct and `FieldAddr` stores, never `IndexAddr`
+                        // (`isTainted`'s own `Alloc` arm does follow it; this
+                        // one does not). guff passes the tail through
+                        // individually instead, so reading every argument here
+                        // sees a flow upstream has lost.
+                        let cut = self.variadic_tail_start(fid, &c.call);
+                        let mut out: Vec<Value> = match cut {
+                            Some(k) => c.call.args.iter().take(k).copied().collect(),
+                            None => c.call.args.clone(),
+                        };
                         out.push(c.call.value);
                         out
                     }

@@ -25431,3 +25431,119 @@ G124 の側は `check_g124_composite` が
 ```
 台帳: 44/100 at zero（48 定義、open 1＝kratos 2、unmeasured 3）
 ```
+### 2026-09-06（続き 224）— `close kratos`。**要素型を省略した複合リテラル**と、**go/ssa が可変長引数を詰める配列**
+
+続き 223 で開いた 2 件を追った。両方 gosec だが、**互いに無関係な 2 つの欠陥**である。
+
+#### 1. G124: `lit.ty` を見ていたので、要素型を省略したリテラルが全部見えていなかった
+
+`session/handler_test.go:365` は `c.Jar.SetCookies(…, []*http.Cookie{{…}})`。
+`check_g124_composite` は
+
+```rust
+let Some(ty) = lit.ty.as_deref() else { return; };
+```
+
+で始まっており、配列 / スライス / マップの要素として型を省略した
+リテラル（`lit.ty == None`）を**1 つも見ていなかった**。
+
+**「型を書いてあるものを報告する」が上流の規則ではない。** 上流
+（`analyzers/insecure_cookie.go`）は field store の**根**になった SSA 値で
+cookie を集計し、`Pos()` が `token.NoPos` の根を捨てる:
+
+| リテラル | 根 | 報告 |
+|---|---|---|
+| `&http.Cookie{…}` / `http.Cookie{…}` | `{` の `Alloc (complit)` | する |
+| `[]*http.Cookie{{…}}`、`[1]*http.Cookie{{…}}`、`map[K]*http.Cookie{k: {…}}` | 内側の `{` の `Alloc (complit)` | する |
+| `map[K]http.Cookie{k: {…}}` | `MapUpdate` のために materialise される `Alloc` | する |
+| `[]http.Cookie{{…}}`、`[1]http.Cookie{{…}}` | slicelit への `IndexAddr` —— **`NoPos`** | **しない** |
+
+つまり**省略された要素は「ポインタなら報告」**で、**値は map の下だけ**。
+guff は「型を書いてある 5 形」だけを見て、残り 14 形を落としていた。
+
+#### 上流の既定 `max-same-issues: 3` に 1 時間持っていかれた
+
+24 形を 1 ファイルに並べて両ツールに通したら、上流が**必ず 3 件しか**
+返さない。形を足したり引いたりすると*どの* 3 件かが変わる ——
+分析の非決定性に見えた。`golangci-lint` の `issues.max-same-issues` の
+既定値が **3** で、G124 は 19 件すべてが同一メッセージだったからである。
+corpus の config は `patch_unlimited_issues.py` が潰しているので hunt の
+測定は正しかったが、**手で書いた最小再現には効いていなかった**。
+[[golangci-is-nondeterministic-with-all-linters]] の親戚だが原因は別で、
+**「上流の分析が揺れている」と読んだら、まず自分の config を疑う**。
+
+#### 2. G710: go/ssa が可変長引数を詰める配列は、上流の callee summary からは見えない
+
+`x/redir/secure_redirect.go:177` は
+`http.Redirect(w, r, ret.String(), …)`、`ret` は同一パッケージの
+`SecureRedirectTo(r, …)` の戻り値。最小再現は**1 回目は再現しなかった**
+（ローカル関数経由も、別パッケージ経由も、両ツールとも撃つ）。
+再現したのは**呼び出しが可変長のとき**だけだった:
+
+```go
+u, _ := url.Parse(or("", r.URL.Query().Get("return_to")))   // guff だけが撃つ
+u, _ := url.Parse(firstOf("", r.URL.Query().Get("return_to"))) // 両方撃つ
+```
+
+`SecureRedirectTo` の戻り値は
+`url.Parse(cmp.Or(o.returnTo, source.Query().Get("return_to")))` から来る。
+
+上流の callee summary（`doTaintedArgsFlowToReturn` →
+`valueReachableFromParams`）の `*ssa.Alloc` の枝は、**直接 store と
+`FieldAddr` 経由の store しか辿らない**。非 spread な可変長呼び出しで
+go/ssa が作る `new [N]T (varargs)` に入る唯一の道は `IndexAddr` なので、
+**尾の引数は summary からは見えない**。同じファイルの `isTainted` の
+`Alloc` の枝は `IndexAddr` を辿る（コメントに `e.g., varargs` と書いてある）
+—— **2 つの walk で挙動が違う**。
+
+guff の `value_reachable_from_params` は上流と**同じ枝**を持っていた。
+違うのはその下で、guff の SSA は可変長の尾を配列に詰めず
+`CallCommon::ellipsis` に spread を記録して**引数として素通しする**
+（`builder/call.rs` にそう書いてある）。だから同じ枝が別の答えを出す
+——[[same-branch-different-substrate]] の 2 例目。
+
+`variadic_tail_start` を足して、summary の側だけで尾を引き算した。
+**「可変長呼び出しの引数を見ない」ではない**: 尾ではなく**固定引数**に
+taint がある `prefixed(tainted, "x")` は上流も撃つので、切る位置は
+`n_params - 1`（レシーバを押し込む静的メソッド呼び出しでは +1）。
+
+#### 測定
+
+fixture は 2 つ。`g124_elided.go` は上で表にした 19 形（報告される）＋
+3 形（黙る）＋ secure 2 形、`g710_variadic.go` は
+plain / 尾 / 固定引数 / spread / 可変長メソッド / interface invoke / 素通し
+の 7 形。**両方とも golden case `gosec` に足した**（`g124e/` と `g710v/`）。
+
+単体テストは 3 本で、いずれも**報告位置の集合**で固定してある ——
+G124 の 19 件も G710 の 3 件もメッセージが全部同じなので、
+`any(contains(…))` はどんな部分集合でも通る（[[one-shape-fixture-hides-the-other-branches]]）。
+黙る側の 3 形には**独立したテスト**を当てた: これが無いと
+「省略リテラルを全部報告する」でも 19 件は揃ってしまう。
+
+golden の regen はキー集合で差分した —— **消えたキーは 0**、
+増えたのは `G124 ×19` と `G710 ×3` の 22 件だけ（253 → 275）。
+
+- **kratos: guff=33 golangci=33 both=32 → both=33、P=R=97.0% → 100.0%、unexpected=0。閉じた。**
+- golden 231／fix 231／reject 14／oss pr 8 ターゲット P=R=100%／
+  workspace 278 バイナリ 3513 ok 0 failed。
+
+#### 残っている既知の乖離（測定済み・未着手）
+
+上流は `cs[0].Secure = true` のような**添字経由の field store**を
+1 文ごとに別の根として扱い、3 文なら 3 件報告する（根は `IndexAddr` で、
+その `Pos()` は `[` を指す）。guff はその根を持っていないので、
+
+```go
+cs := []*http.Cookie{{Name: "t"}}
+cs[0].Secure = true
+cs[0].HttpOnly = true
+cs[0].SameSite = http.SameSiteStrictMode
+```
+
+で上流 4 件・guff 1 件になる（この修正の**前**は guff 0 件だったので
+乖離は縮んでいる）。kratos にもゲート済みコーパスにもこの形は無く、
+省略リテラルの分岐でもないので、ここでは足さずに測定だけ残す。
+
+```
+台帳: 45/100 at zero（48 定義、open 0、unmeasured 3）
+```
