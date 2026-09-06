@@ -7,7 +7,7 @@ use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
-use guff_types::predicates::is_interface;
+use guff_types::predicates::{identical, is_interface};
 use guff_types::TypeId;
 use std::sync::OnceLock;
 
@@ -15,15 +15,18 @@ fn expr_type(pass: &Pass<'_>, expr: &Expr) -> Option<TypeId> {
     pass.types_info()?.types.get(&expr.id()).map(|tv| tv.typ)
 }
 
-fn render_type(pass: &Pass<'_>, typ: TypeId) -> Option<String> {
-    let a = pass.pkg().type_artifacts.as_ref()?;
-    Some(guff_types::typestring::type_string(
-        &a.types,
-        &a.objects,
-        &a.packages,
-        typ,
-        None,
-    ))
+/// `types.Identical(t1, t2)`.
+///
+/// Comparing *rendered type strings* instead — which is what this did — makes
+/// an alias a different type from the thing it aliases: boundary asserts to
+/// `proto.Message`, which is an alias of `protoreflect.ProtoMessage`, and the
+/// two strings never matched.
+fn types_identical(pass: &Pass<'_>, a: TypeId, b: TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let mut types = artifacts.types.clone();
+    identical(&mut types, &artifacts.objects, &artifacts.packages, a, b)
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -54,14 +57,23 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
             return;
         };
-        if is_interface(&artifacts.types, t1) && render_type(pass, t1) == render_type(pass, t2) {
+        if is_interface(&artifacts.types, t1) && types_identical(pass, t1, t2) {
             // Upstream names the operand and its type — `i already has type
             // interface{}`, `e already has type error` — and reports the
             // assertion node, whose position is the start of the operand.
+            //
+            // Both halves are `report.Render`, i.e. **the source expressions**
+            // printed back, not the resolved types:
+            //
+            //     fmt.Sprintf("type assertion to the same type: %s already has type %s",
+            //         report.Render(pass, expr.X), report.Render(pass, expr.Type))
+            //
+            // Rendering the *type* instead spelled an imported one with its
+            // full import path — `example.com/inner.Msg` where upstream writes
+            // `inner.Msg` — in every message that named one. No golden case
+            // has an imported type here, so nothing caught it.
             let operand = crate::render::render_expr(&expr.x);
-            let Some(typ) = render_type(pass, t2) else {
-                return;
-            };
+            let typ = crate::render::render_expr(expr.ty.as_ref().unwrap());
             pending.push((
                 expr.x.pos().0 as u32,
                 format!("type assertion to the same type: {operand} already has type {typ}"),

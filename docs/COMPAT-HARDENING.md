@@ -27104,3 +27104,114 @@ assert!(messages.iter().any(|m| m.contains("TrimPrefix")));
 ```
 台帳: 49/100 at zero（53 定義、open 1＝boundary **3**、unmeasured 3）
 ```
+
+### 2026-09-07（続き 242）— S1040 は**型ではなくソースの式**を描画する。alias と、メッセージ全部の型表記
+
+boundary の残り 3 件のうち 1 件が S1040 の取りこぼしで、
+`internal/types/subtypes/attribute_transform.go:87` ——
+`r.Get(stAttrField).Message().Interface().(proto.Message)` である。
+**これで staticcheck は 410/410/410、P=R=100% になった。**
+
+#### 欠陥は 2 つ、隣り合った 2 行にあった
+
+```rust
+if is_interface(&artifacts.types, t1) && render_type(pass, t1) == render_type(pass, t2) {
+    let typ = render_type(pass, t2)  // ← メッセージの型
+```
+
+上流は:
+
+```go
+if types.IsInterface(t1) && types.Identical(t1, t2) {
+    ... report.Render(pass, expr.X), report.Render(pass, expr.Type)
+```
+
+1. **比較が「描画した型文字列」だった。** `proto.Message` は
+   `protoreflect.ProtoMessage` の **alias** なので文字列は一致しない。
+   `types.Identical` は alias を解く。
+2. **メッセージの型が「解決した型」だった。** 上流は
+   `report.Render(pass, expr.Type)` ——
+   **ソースの式**を go/printer に通す。だから `inner.Msg` であって
+   `example.com/s1040/inner.Msg` ではない。
+
+#### 2 番目は「import した型だけ」ではなかった
+
+最初はそう書いたが、fixture を両ツールに掛けると**ローカルの型でも
+違っていた** —— `x already has type bad.msg`（上流は `msg`）。
+つまり **`interface{}` 以外のほぼ全部のメッセージが間違っていた**。
+そして旧 fixture は
+
+```go
+func f(i interface{}) { _ = i.(interface{}) }
+```
+
+の 1 行 —— **2 つの描画が一致する唯一の形**である。
+[[empty-fixture-hides-defects]] の教科書的な例で、
+`assert!(!messages.is_empty())` + `any(contains(…))` が守っていた。
+
+#### そして 1 つ目の修正が 6 番目を壊した
+
+メッセージ集合を**丸ごと**固定するテストにしていたので、
+最初の実装で即座に落ちた:
+
+```
+left:  i already has type <expr>
+right: i already has type interface{}
+```
+
+`render_expr` に `InterfaceType` の枝が無く、
+`<expr>` というプレースホルダを返していた。
+**旧 fixture が持っていた唯一の形が、まさにその枝**である。
+件数だけの assertion なら通っていた。
+空の interface だけを正確に描画する枝を足した ——
+非空の inline interface はメソッド列が要るので
+`"<expr>"` のまま（間違って描画するより落としたままにする）。
+
+#### 測った形（10）
+
+| 形 | golangci | 修正前 | 修正後 |
+|---|---|---|---|
+| `i.(interface{})` | `interface{}` | ✅ | ✅ |
+| ローカル `x.(msg)` 単値 | `msg` | **`bad.msg`** | ✅ |
+| 同 comma-ok | `msg` | **`bad.msg`** | ✅ |
+| **alias `x.(alias)`** | `alias` | ❌ | ✅ |
+| import した `x.(inner.Msg)` | `inner.Msg` | **`…/inner.Msg`** | ✅ |
+| 呼び出し連鎖 `mk().get().(msg)` | `msg` | **`bad.msg`** | ✅ |
+| 別のインタフェース | ❌ | ❌ | ❌ |
+| 具象型（`IsInterface(t1)` が偽） | ❌ | ❌ | ❌ |
+| type switch（`expr.Type` が nil） | ❌ | ❌ | ❌ |
+| ただの使用 | ❌ | ❌ | ❌ |
+
+negative control は 2 本 —— 文字列比較に戻すと **alias の 1 件が消え**、
+型を描画すると**メッセージ集合が壊れる**。
+
+#### 事故: 機械的な編集が無関係なテストを 1 本消した
+
+テスト置換を index 演算で書いたところ、終端の探し方を誤って
+**`sa1001_flags_invalid_template` を巻き込んで削除**していた。
+gate は**全部緑のまま**で、気付いたのは workspace の件数が
+**3530 → 3529** になっていたからだけである。`HEAD` から復元した。
+[[appended-doc-entries-conflict-on-every-merge]] が言う
+「片側を採ると静かに test が消える」と同じ形が、
+merge ではなくスクリプト編集で起きた。**件数を見ていなければ通っていた。**
+
+#### 測定
+
+- **boundary: open 3 → 2**。**gcl-only 0**、guff-only 2（bodyclose のみ）。
+  **staticcheck は 410 / 410 / 410 で P=R=100%**、
+  boundary 全体で **R=100.0%**。
+- 退行なし: **dapr 1555/1555・k6 423/423・thanos 543/543・
+  syncthing 656/654（allowlist 内）・tailscale 47/43（同）・
+  prometheus 20/20・cli 3/3・coredns 3/3・karmada 19/19・
+  pipeline 156/156・rclone 3/3**、oss pr 8 ターゲット P=R=100%。
+- golden **231**（staticcheck-s を regen、**キー集合 125 → 130 で削除 0**。
+  既存の `interface{}` のキーがそのまま残っているのが、
+  描画の変更が「元から正しかった形」を再現している証拠）／
+  fix 231／reject 14／workspace 279 バイナリ **3530 ok** 0 failed。
+- golden の module は `example.com` なので、fixture の import 先も
+  `example.com/s1040/inner` に揃えた（最初 `example.com/staticcheck/…` に
+  していて golden 側が ill-typed になった —— health check が捕まえた）。
+
+```
+台帳: 49/100 at zero（53 定義、open 1＝boundary **2**、unmeasured 3）
+```

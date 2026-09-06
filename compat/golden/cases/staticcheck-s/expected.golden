@@ -128,4 +128,9 @@ s1037/ok/ok.go:25:2:staticcheck::S1000: should use a simple channel send/receive
 s1038/bad/bad.go:5:12:staticcheck::S1038: should use fmt.Printf instead of fmt.Print(fmt.Sprintf(...))
 s1038/bad/bad.go:5:22:staticcheck::S1039: unnecessary use of fmt.Sprintf
 s1039/bad/bad.go:5:16:staticcheck::S1039: unnecessary use of fmt.Sprint
-s1040/bad/bad.go:3:29:staticcheck::S1040: type assertion to the same type: i already has type interface{}
+s1040/bad/bad.go:16:29:staticcheck::S1040: type assertion to the same type: i already has type interface{}
+s1040/bad/bad.go:18:33:staticcheck::S1040: type assertion to the same type: x already has type msg
+s1040/bad/bad.go:21:11:staticcheck::S1040: type assertion to the same type: x already has type msg
+s1040/bad/bad.go:28:11:staticcheck::S1040: type assertion to the same type: x already has type alias
+s1040/bad/bad.go:34:11:staticcheck::S1040: type assertion to the same type: x already has type inner.Msg
+s1040/bad/bad.go:40:11:staticcheck::S1040: type assertion to the same type: mk().get() already has type msg

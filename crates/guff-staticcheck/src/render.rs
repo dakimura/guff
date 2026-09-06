@@ -154,6 +154,12 @@ pub fn render_expr(expr: &Expr) -> String {
             Some(elt) => format!("...{}", render_expr(elt)),
             None => "...".to_string(),
         },
+        // Only the *empty* interface, which is what `x.(interface{})` writes
+        // and the one S1040 shape whose old rendering — through the resolved
+        // type rather than the source — happened to be right. A non-empty
+        // inline interface would need method signatures, so it keeps falling
+        // through to `"<expr>"` as before rather than being rendered wrong.
+        Expr::InterfaceType(i) if i.methods.list.is_empty() => "interface{}".to_string(),
         _ => "<expr>".to_string(),
     }
 }
