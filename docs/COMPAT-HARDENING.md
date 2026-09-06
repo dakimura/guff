@@ -26941,3 +26941,101 @@ negative control も 2 本取った ——
 ```
 台帳: 49/100 at zero（53 定義、open 1＝boundary **6**、unmeasured 3）
 ```
+
+### 2026-09-06（続き 240）— S1005 の pattern が **1 本足りなかった**。上流の tip を読むと「guff が正しい」と結論するところだった
+
+boundary の残り 6 件のうち **2 件が S1005**、どちらも
+`internal/plugin/loopback/storage_test.go` の
+`bucket, _ := mockStorageMapData["object_store"]` である。
+
+#### 危うく逆の結論を出すところだった
+
+`~/projects/src/github.com/dominikh/go-tools` の tip（`v0.7.0-0.dev-122`）を
+読むと、S1005 の第 1 pattern はこうなっている:
+
+```go
+checkUnnecessaryBlankQ1 = pattern.MustParse(`
+    (AssignStmt [_ (Ident "_")] _ (UnaryExpr "<-" _)) `)
+
+// We don't check for 'x, _ = m[k]', which might be used to indicate
+// that one knows that there might be no entry and that one doesn't care.
+```
+
+**map index を意図的に見ないと書いてある。** これを信じれば
+「guff が正しく golangci が過剰報告」という結論になる。
+
+しかし golangci-lint 2.12.2 が pin しているのは **honnef.co/go/tools v0.7.0**
+で、checkout はそれより **122 コミット先**である。tag を読むと:
+
+```go
+(AssignStmt [_ (Ident "_")] _ (Or (IndexExpr _ _) (UnaryExpr "<-" _)))
+```
+
+**`IndexExpr` の枝がある。** その枝は pin の後で削除され、コメントは
+そのときに書かれたものだった。`git -C … show v0.7.0:simple/s1005/s1005.go`
+の 1 コマンドで決着した。[[upstream-checkouts-are-local]] に
+**「枝を消した tip は、枝が最初から無い tip と同じに読める」**として
+今回の実例を追記した（前回の x/tools は tip が枝を*足した*側で、
+今回はその逆向き）。
+
+#### 直したこと
+
+pattern に `Or` を足しただけの 1 行である。`--fix` の側は
+**最初から map index を想定して書かれていた** ——
+`assign.lhs.truncate(1)` の上のコメントが
+「`x, _ = m[k]` becomes `x = m[k]`」と言っている。
+到達できないまま置いてあった。
+
+#### 測った形（7）
+
+| 形 | golangci | 修正前 | 修正後 |
+|---|---|---|---|
+| `v, _ := m["k"]` | ✅ | ❌ | ✅ |
+| `v, _ = m["k"]` | ✅ | ❌ | ✅ |
+| `v, _ := <-ch` | ✅ | ✅ | ✅ |
+| `_ = <-ch` | ✅ | ✅ | ✅ |
+| `for i, _ := range xs` | ✅ | ✅ | ✅ |
+| `for _ = range xs` / `for _, _ = range xs` | ✅ | ✅ | ✅ |
+| `v, _ := x.(int)` | ❌ | ❌ | ❌ |
+| `v, ok := m["k"]` | ❌ | ❌ | ❌ |
+
+型アサーションはどちらの枝にも当たらないので**両ツールとも報告しない**。
+「blank 付きの comma-ok」に広げすぎる修正への歯止めとして ok.go に置いた。
+
+#### 測定
+
+- **boundary: open 6 → 4**（guff-only 3、gcl-only 1）。
+  staticcheck は **R 99.3% → 99.8%**。
+- 退行なし: **dapr 1555/1555・k6 423/423・thanos 543/543・
+  syncthing 656/656・tailscale 47/43（allowlist 内）・prometheus 20/20・
+  cli 3/3・coredns 3/3・karmada 19/19・pipeline 156/156・rclone 3/3**、
+  oss pr 8 ターゲット P=R=100%。
+- golden **231**（staticcheck-s を regen、**キー集合で差分して S1005 +3・
+  削除 0**、ratchet は baseline のまま）／fix **231**（再録画）／reject 14／
+  workspace 279 バイナリ **3530 ok** 0 failed。
+- fixture は 4 形 → 7 形（+ ok 側 2 形）。件数固定は前任者が既に入れており、
+  それが `>= ` ではなく `assert_eq!` だったので**枝が増えたことは
+  はっきり落ちて分かった**。negative control で **7 → 5**。
+- 実物の Go モジュール 8 形で golangci と 1 バイトも違わない。
+
+#### 残り 4 件
+
+- **S1017 の過剰報告 1 件**（測定済み）。上流は
+  `if ifstmt.Else != nil { seen[ifstmt.Else] = …; return }` で
+  **else 節そのものを覚えておき**、`else if` を弾く。guff の `seen` は
+  同名だが役割が違い（報告位置の重複除去）、else を覚えていない。
+  なお `if / else if / else` は既存の `else_.is_some()` で弾けているので、
+  過剰報告は**素の `if / else if` だけ**である。
+- **S1040 の取りこぼし 1 件**（測定済み）。上流は
+  `types.Identical(t1, t2)` だが guff は**描画した型文字列を比較**して
+  いるので、`proto.Message`（`protoreflect.ProtoMessage` の alias）が
+  一致しない。**同時に見つかった別件**として、メッセージの型は
+  上流だと `report.Render(pass, expr.Type)` ——
+  **解決した型ではなくソースの式**なので、guff の
+  `example.com/inner.Msg` は `inner.Msg` であるべき。
+  import した型を持つ golden case が無いので誰も気付いていない。
+- bodyclose の過剰報告 2 件（未着手）。
+
+```
+台帳: 49/100 at zero（53 定義、open 1＝boundary **4**、unmeasured 3）
+```

@@ -173,6 +173,28 @@
  		_ = i
  	}
  }
+@@ -40,18 +40,18 @@
+ // Read the *pinned* v0.7.0 for this: the tip has since dropped the IndexExpr
+ // arm, with a comment arguing that `x, _ = m[k]` may be deliberate.
+ func mapIndexDeclare(m map[string]int) int {
+-	v, _ := m["k"]
++	v := m["k"]
+ 	return v
+ }
+ 
+ func mapIndexAssign(m map[string]int) int {
+ 	var v int
+-	v, _ = m["k"]
++	v = m["k"]
+ 	return v
+ }
+ 
+ // The receive arm in its two-name form; the file only had `_ = <-ch`.
+ func receiveDeclare(ch chan int) int {
+-	v, _ := <-ch
++	v := <-ch
+ 	return v
+ }
 --- a/s1010/bad/bad.go
 +++ b/s1010/bad/bad.go
 @@ -1,3 +1,3 @@

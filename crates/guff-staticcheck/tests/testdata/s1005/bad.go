@@ -28,3 +28,30 @@ func rangeBlankValue(xs []int) {
 		_ = i
 	}
 }
+
+// The other half of upstream's first pattern:
+//
+//	(AssignStmt [_ (Ident "_")] _ (Or (IndexExpr _ _) (UnaryExpr "<-" _)))
+//
+// guff carried only the receive arm, so a map index with a discarded comma-ok
+// went unreported in either assignment token. boundary's
+// internal/plugin/loopback writes two of them.
+//
+// Read the *pinned* v0.7.0 for this: the tip has since dropped the IndexExpr
+// arm, with a comment arguing that `x, _ = m[k]` may be deliberate.
+func mapIndexDeclare(m map[string]int) int {
+	v, _ := m["k"]
+	return v
+}
+
+func mapIndexAssign(m map[string]int) int {
+	var v int
+	v, _ = m["k"]
+	return v
+}
+
+// The receive arm in its two-name form; the file only had `_ = <-ch`.
+func receiveDeclare(ch chan int) int {
+	v, _ := <-ch
+	return v
+}

@@ -38,6 +38,9 @@ s1005/bad/bad.go:4:2:staticcheck::S1005: unnecessary assignment to the blank ide
 s1005/bad/bad.go:15:6:staticcheck::S1005: unnecessary assignment to the blank identifier
 s1005/bad/bad.go:21:6:staticcheck::S1005: unnecessary assignment to the blank identifier
 s1005/bad/bad.go:27:9:staticcheck::S1005: unnecessary assignment to the blank identifier
+s1005/bad/bad.go:43:2:staticcheck::S1005: unnecessary assignment to the blank identifier
+s1005/bad/bad.go:49:2:staticcheck::S1005: unnecessary assignment to the blank identifier
+s1005/bad/bad.go:55:2:staticcheck::S1005: unnecessary assignment to the blank identifier
 s1006/bad/bad.go:4:2:staticcheck::S1006: should use for {} instead of for true {}
 s1006/bad/bad.go:4:2:staticcheck::SA5002: loop condition never changes or has a race condition
 s1006/bad/bad.go:4:2:staticcheck::SA5002: this loop will spin, using 100% CPU
