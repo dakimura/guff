@@ -6,9 +6,9 @@
     "`unmeasured` is not `clean`: an absent measurement is a question."
   ],
   "goal": 100,
-  "defined": 52,
+  "defined": 53,
   "clean": 49,
-  "open": 0,
+  "open": 1,
   "unmeasured": 3,
   "targets": {
     "alertmanager": {
@@ -50,6 +50,18 @@
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
+    },
+    "boundary": {
+      "tier": "hunt",
+      "state": "open",
+      "at": "20260906T044536Z",
+      "open": 44,
+      "guff_only": 4,
+      "gcl_only": 40,
+      "by_linter": {
+        "staticcheck": 24,
+        "bodyclose": 20
+      }
     },
     "buildah": {
       "tier": "hunt",
