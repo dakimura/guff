@@ -924,8 +924,14 @@ fn build_source_seed_inner(
     // (1455 source deps, 13.1s of type-check CPU) this takes the cold seed build
     // from 3.40s to 2.65s. Dropping the barriers entirely would only reach 2.2s
     // — see docs/PERF_TASKS.md §1.8 for why that is not worth its cost.
-    let (order, back_edges) = dep_load_order(&needed, dep_graph, &loadable);
+    let test_only = crate::dedup::import_path_test_only_edges(by_id);
+    let (order, back_edges, declined) = dep_load_order(&needed, dep_graph, &test_only, &loadable);
     report_seed_cycles(&back_edges);
+    if declined > 0 && crate::debug::enabled() {
+        eprintln!(
+            "guff:     seed declined {declined} test-only edge(s) that would close a cycle"
+        );
+    }
     let source_set: HashSet<&str> = order
         .iter()
         .map(String::as_str)
@@ -1352,13 +1358,14 @@ fn report_seed_cycles(back_edges: &[(String, String)]) {
 fn dep_load_order(
     needed: &[String],
     dep_graph: &HashMap<String, Vec<String>>,
+    test_only: &HashMap<String, Vec<String>>,
     loadable: &HashSet<String>,
-) -> (Vec<String>, Vec<(String, String)>) {
+) -> (Vec<String>, Vec<(String, String)>, usize) {
     let mut walk = DepLoadWalk::default();
     for id in needed {
-        walk.visit(id, dep_graph, loadable);
+        walk.visit(id, dep_graph, test_only, loadable);
     }
-    (walk.order, walk.back_edges)
+    (walk.order, walk.back_edges, walk.declined_test_edges)
 }
 
 /// Mutable state of one [`dep_load_order`] walk.
@@ -1369,6 +1376,10 @@ struct DepLoadWalk {
     visiting: Vec<String>,
     order: Vec<String>,
     back_edges: Vec<(String, String)>,
+    /// Test-only edges the walk declined because they would have closed a
+    /// cycle. Unlike `back_edges` these are expected: see
+    /// [`crate::dedup::import_path_test_only_edges`].
+    declined_test_edges: usize,
 }
 
 impl DepLoadWalk {
@@ -1376,16 +1387,18 @@ impl DepLoadWalk {
         &mut self,
         path: &str,
         dep_graph: &HashMap<String, Vec<String>>,
+        test_only: &HashMap<String, Vec<String>>,
         loadable: &HashSet<String>,
     ) {
         if path == "unsafe" || path == "C" || self.done.contains(path) || !loadable.contains(path) {
             return;
         }
         if self.visiting.iter().any(|p| p == path) {
-            // Go has no import cycles, and the seed's edges are read off the
-            // same variant whose files it compiles (`dedup::seed_variant_rank`),
-            // so this is unreachable in a correct graph — see
-            // [`dep_load_order`].
+            // Reached only through a **production** edge now: the test-only
+            // edges are filtered below before they are followed. Production
+            // edges cannot form a cycle — Go forbids import cycles, and an
+            // in-package test importing something that imports its own package
+            // is an import cycle in the test binary — so this stays a guff bug.
             if let Some(from) = self.visiting.last() {
                 self.back_edges.push((from.clone(), path.to_string()));
             }
@@ -1393,10 +1406,30 @@ impl DepLoadWalk {
         }
         self.visiting.push(path.to_string());
         if let Some(deps) = dep_graph.get(path) {
+            let test: &[String] = test_only.get(path).map(Vec::as_slice).unwrap_or(&[]);
+            let is_test_edge = |d: &str| test.iter().any(|t| t == d);
             let mut deps: Vec<&str> = deps.iter().map(String::as_str).collect();
             deps.sort_unstable();
-            for dep in deps {
-                self.visit(dep, dep_graph, loadable);
+            // Production edges first, so a test edge is never the reason a
+            // production dependency is reached late.
+            for dep in deps.iter().copied().filter(|d| !is_test_edge(d)) {
+                self.visit(dep, dep_graph, test_only, loadable);
+            }
+            // Then the test-only ones, declining any that would close a cycle.
+            // `P`'s test importing `Q` while `Q`'s test imports `P` is legal Go
+            // and does happen (boundary's `session` / `credential/vault`,
+            // prometheus' `tsdb` / `util/teststorage`), so this is a shape to
+            // handle rather than a bug to report. Declining the closing edge
+            // costs the *declining* path's test files a merged view of `Q`;
+            // dropping whichever edge the walk arrived on used to cost the
+            // topological order itself, and with it every wave assignment
+            // downstream.
+            for dep in deps.iter().copied().filter(|d| is_test_edge(d)) {
+                if self.visiting.iter().any(|p| p == dep) {
+                    self.declined_test_edges += 1;
+                    continue;
+                }
+                self.visit(dep, dep_graph, test_only, loadable);
             }
         }
         self.visiting.pop();
@@ -1510,6 +1543,12 @@ mod tests {
 
     use guff::ast::Decl;
 
+    /// A graph with no test-only edges: every edge is a production edge, which
+    /// is what a path outside `paths_with_external_test_package` looks like.
+    fn no_test_edges() -> HashMap<String, Vec<String>> {
+        HashMap::default()
+    }
+
     fn graph(edges: &[(&str, &[&str])]) -> HashMap<String, Vec<String>> {
         let mut g: HashMap<String, Vec<String>> = HashMap::default();
         for (from, to) in edges {
@@ -1529,9 +1568,70 @@ mod tests {
             ["a", "b", "c"].iter().map(|s| s.to_string()).collect();
         let needed: Vec<String> = ["a", "b", "c"].iter().map(|s| s.to_string()).collect();
 
-        let (order, back_edges) = dep_load_order(&needed, &g, &loadable);
+        let (order, back_edges, _) = dep_load_order(&needed, &g, &no_test_edges(), &loadable);
         assert_eq!(order, vec!["c", "b", "a"]);
         assert!(back_edges.is_empty(), "clean graph reported {back_edges:?}");
+    }
+
+    /// `P`'s test importing `Q` while `Q`'s test imports `P` is legal Go, and
+    /// the seed must not treat it as a cycle to break arbitrarily.
+    ///
+    /// Both test binaries link the *production* copy of the other package, so
+    /// neither production package imports the other and Go is satisfied. The
+    /// seed keeps one node per import path, so the two test edges meet as a
+    /// cycle — boundary writes it between `internal/session` and
+    /// `internal/credential/vault`, prometheus between `tsdb` and
+    /// `util/teststorage`.
+    ///
+    /// Declining the closing *test* edge keeps the order topological for every
+    /// production edge, which is what the old behaviour lost: dropping
+    /// whichever edge the walk arrived on left `height` reading unfinished
+    /// consumers and took unrelated packages down with it (39 broken edges on
+    /// prometheus, and `promql/promqltest` type-checked against an invalid
+    /// `*promql.Engine`).
+    #[test]
+    fn dep_load_order_declines_a_test_edge_instead_of_breaking_the_order() {
+        // `lib` is production-imported by both; the only edges between `a` and
+        // `b` are their test edges, in both directions.
+        let g = graph(&[
+            ("a", &["lib", "b"]),
+            ("b", &["lib", "a"]),
+            ("lib", &[]),
+        ]);
+        let test_only = graph(&[("a", &["b"]), ("b", &["a"])]);
+        let loadable: HashSet<String> =
+            ["a", "b", "lib"].iter().map(|s| s.to_string()).collect();
+        let needed: Vec<String> = ["a", "b", "lib"].iter().map(|s| s.to_string()).collect();
+
+        let (order, back_edges, declined) =
+            dep_load_order(&needed, &g, &test_only, &loadable);
+
+        // No back edge is reported: this shape is not a guff bug.
+        assert!(back_edges.is_empty(), "reported {back_edges:?}");
+        assert_eq!(declined, 1, "exactly one test edge closes the cycle");
+
+        // And the production edges are still respected — `lib` before both.
+        let pos = |p: &str| order.iter().position(|x| x == p).expect("in order");
+        assert!(pos("lib") < pos("a"), "{order:?}");
+        assert!(pos("lib") < pos("b"), "{order:?}");
+        assert_eq!(order.len(), 3, "{order:?}");
+    }
+
+    /// A production cycle is still a bug and still reported: the test-edge
+    /// handling above must not swallow it.
+    #[test]
+    fn dep_load_order_still_reports_a_production_cycle() {
+        let g = graph(&[("a", &["b"]), ("b", &["a"])]);
+        let test_only = graph(&[("a", &["b"])]); // only a->b is test-only
+        let loadable: HashSet<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
+        let needed: Vec<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
+
+        let (_, back_edges, _) = dep_load_order(&needed, &g, &test_only, &loadable);
+        assert_eq!(
+            back_edges,
+            vec![("b".to_string(), "a".to_string())],
+            "b -> a is a production edge and closes the cycle"
+        );
     }
 
     /// The signal `report_seed_cycles` prints and `compat/health.py` gates on.
@@ -1546,7 +1646,7 @@ mod tests {
         let loadable: HashSet<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
         let needed: Vec<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
 
-        let (order, back_edges) = dep_load_order(&needed, &g, &loadable);
+        let (order, back_edges, _) = dep_load_order(&needed, &g, &no_test_edges(), &loadable);
         assert_eq!(order.len(), 2, "the walk still finishes: {order:?}");
         assert_eq!(back_edges, vec![("b".to_string(), "a".to_string())]);
     }
@@ -1562,7 +1662,7 @@ mod tests {
             .collect();
         let needed: Vec<String> = ["top"].iter().map(|s| s.to_string()).collect();
 
-        let (order, back_edges) = dep_load_order(&needed, &g, &loadable);
+        let (order, back_edges, _) = dep_load_order(&needed, &g, &no_test_edges(), &loadable);
         assert!(back_edges.is_empty(), "diamond reported {back_edges:?}");
         assert_eq!(order.first().map(String::as_str), Some("leaf"));
     }

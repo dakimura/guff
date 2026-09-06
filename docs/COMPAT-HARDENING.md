@@ -26224,3 +26224,98 @@ export data も無いまま参照されたときの形である。
 ```
 台帳: 49/100 at zero（53 定義、open 1＝boundary 44、unmeasured 3）
 ```
+
+### 2026-09-06（続き 233）— 「seed の dep graph は構造的に非巡回」は**偽**。閉じる辺を選べるようにしたが、**boundary は閉じない**
+
+続き 232 で開いた 44 件を追った。back-edge 1 本に集約されるところまでは
+そのとおりだったが、**それを直しても boundary は 1 件も動かない**。
+順に書く。
+
+#### 不変条件が偽である
+
+`seed_variant_rank` の doc（続き 63）はこう書いている:
+
+> seed の dep graph は、この修正のもとでは**構造的に非巡回**である:
+> 同一パッケージの `_test.go` も `package p` なので、Go の import cycle 禁止が
+> そのまま効く（`p` を import するものを `p` のテストは import できない）。
+
+この論証が排除しているのは「**P のテストが、P を import する何かを import する**」
+形だけで、それは確かに Go が禁じる（テストバイナリの中で循環になる）。
+boundary が踏んだのは別の形である:
+
+```
+internal/session          の in-package test → internal/credential/vault
+internal/credential/vault の in-package test → internal/session
+```
+
+`go list` で 4 方向とも測った —— **production はどちらも相手を
+import していない（推移も 0）**。Go は通る。それぞれのテストバイナリが
+相手の **production** の写しをリンクするからで、
+`P [P.test]` と `Q [Q.test]` は別パッケージである。
+そして両方が外部テストパッケージを持つので両方が `P [P.test]` を選び、
+両方がテストの辺を持ち込んで back-edge が 1 本立つ。
+
+**`P` のテストが `Q` を、`Q` のテストが `P` を import する形は Go に存在でき、
+不変条件はそれを排除していない。** prometheus の
+`tsdb ↔ util/teststorage` は同じ形で、続き 63 が直したのは*選び方*であって
+*形*ではなかった。
+
+#### 直したこと —— 落とす辺を選べるようにした
+
+production の辺は循環しない（上の禁止規則がそれを保証する）。
+循環しうるのは test 由来の辺だけである。そこで
+`import_path_test_only_edges` で「seed が in-package test を組むせいで
+生えた辺」を分離し、`dep_load_order` は
+
+1. production の辺を先に辿り、
+2. test の辺は後、しかも**循環を閉じるものは辿らない**（`declined`）、
+3. `visiting` に production の辺で到達したときだけ back-edge として報告する
+
+ようにした。boundary の back-edge は **1 → 0**。
+`guff: seed dep cycle` は「常に guff のバグ」という約束のまま
+`compat/health.py` が無条件に落とす signal なので、
+**合法な Go の形でそれが鳴り続ける状態を消せた**のが実利である。
+
+#### 直らなかったこと —— 数字は 1 つも動かない
+
+```
+前: guff=540 golangci=576 both=536 P=99.3% R=93.1%、ill-typed 11、back-edge 1
+後: guff=540 golangci=576 both=536 P=99.3% R=93.1%、ill-typed 11、back-edge 0
+```
+
+**ill-typed 11 のまま、finding も 1 件も動かない。** 続き 232 で
+「gcl-only 40 件の大半は順序の副作用」と書いたが、**それは外れていた**。
+順序の崩れは症状であって原因ではない。
+
+原因は続き 232 の後半に書いたとおりで、**seed が import path 1 つにつき
+ノードを 1 つしか持たない**ことにある。`session [session.test]` が要るのは
+production `vault`、`vault [vault.test]` が要るのは production `session`、
+production 同士は無関係 —— つまり要求自体は充足可能なのに、
+seed には「production の `vault`」と「augmented の `vault`」を別々に置く
+場所が無い。どちらを先に組んでも、**先に組んだ側のテストファイルは
+相手を見られない**。辺をどう落とそうと変わらない。
+
+正しい形は path ごとに 2 ノード（`P` = production ファイル・production 辺、
+`P [P.test]` = augmented ファイル・全辺、依存するのは `P_test` だけ）。
+seed は `waves` / overlay の key / キャッシュキー / merge 順まで一貫して
+import path で引いているので、そこに波及する。**今回はやらない。**
+
+#### 測定
+
+- **boundary は変わらず open 44。** health gate も ill-typed 11 で落ちたまま
+  （baseline に行は足さない —— 足せば 11 を恒久的に許すことになる）。
+- 退行なし。seed に触る変更なので広めに測った:
+  **prometheus 20/20・cli 3/3・coredns 3/3・k6 423/423・karmada 19/19・
+  pipeline 156/156・tailscale 47/43（allowlist 内）・syncthing 656/654（同）・
+  dapr 1555/1555・rclone 3/3**、**全ターゲットで seed cycle 0 本**。
+  prometheus / dapr / rclone は続き 63 が破れた辺を数えた 3 つである。
+- golden 231／fix 231／reject 14／oss pr 8 ターゲット P=R=100%／
+  workspace 278 バイナリ 3524 ok 0 failed。
+- 単体テストは 2 本。`P` のテストが `Q` を・`Q` のテストが `P` を import する
+  形で **back-edge 0・declined 1・production の順序は保たれる**ことと、
+  **production だけの循環は今も報告される**こと（test 辺の扱いがそれを
+  飲み込まないこと）。
+
+```
+台帳: 49/100 at zero（53 定義、open 1＝boundary 44、unmeasured 3）— 変わらず
+```
