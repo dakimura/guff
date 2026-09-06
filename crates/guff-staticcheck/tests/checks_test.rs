@@ -1288,7 +1288,13 @@ fn s1005_flags_bad_patterns() {
     // just "any": the fixture used to hold the receive alone, and `for i, _ :=
     // range` went unreported because `is_blank` demanded an identifier with no
     // object — which a `:=` blank has.
-    assert_eq!(messages.len(), 4, "{messages:?}");
+    //
+    // Seven since 2026-09-06: the first pattern is
+    // `(Or (IndexExpr _ _) (UnaryExpr "<-" _))` at the pinned v0.7.0, and only
+    // the receive arm had been carried, so `v, _ := m["k"]` reported in neither
+    // assignment token.
+    assert_eq!(messages.len(), 7, "{messages:?}");
+    assert!(messages.iter().all(|m| m.contains("blank identifier")));
     assert!(messages.iter().all(|m| m.contains("blank identifier")));
 }
 
