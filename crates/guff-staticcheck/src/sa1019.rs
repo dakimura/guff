@@ -327,6 +327,25 @@ fn read_prefix(path: &std::path::Path, n: usize) -> Option<Vec<u8>> {
     Some(buf)
 }
 
+/// One past the end of the `package <name>` clause line, or `None` when `src`
+/// does not contain one.
+///
+/// Found the way [`src_has_package_deprecated_doc`] finds the preamble, so the
+/// two agree about where the clause is: a comment line cannot match `\npackage`
+/// because it starts with `//`.
+fn package_clause_end(src: &[u8]) -> Option<usize> {
+    let start = match memchr::memmem::find(src, b"\npackage") {
+        Some(i) => i + 1,
+        None if src.starts_with(b"package") => 0,
+        None => return None,
+    };
+    let rest = &src[start..];
+    Some(match memchr::memchr(b'\n', rest) {
+        Some(i) => start + i + 1,
+        None => src.len(),
+    })
+}
+
 fn src_has_package_deprecated_doc(src: &[u8]) -> bool {
     let preamble = match memchr::memmem::find(src, b"\npackage") {
         Some(i) => &src[..=i],
@@ -605,6 +624,7 @@ fn scan_import_deprecated(
         && imp.source_files.len() == imp.compiled_go_files.len();
     for (idx, path) in paths {
         let owned;
+        let full;
         let src: &[u8] = match imp.source_bytes(idx).filter(|_| in_memory) {
             // A dependency inside the same module is usually one of the root
             // packages guff already type-checked from source, and those keep
@@ -630,6 +650,21 @@ fn scan_import_deprecated(
                 }
             }
         };
+        // A prefix that stops *before* the `package` clause cannot answer
+        // anything: the doc comment runs right up to that clause, so the probe
+        // below and the parse under it both need what was cut off.
+        // aws-sdk-go's `aws/session/doc.go` is 14.7 KB of package doc with the
+        // clause at byte 14677 and the `Deprecated:` line 200 bytes above it —
+        // the whole file is preamble. Pay for the rest rather than guess.
+        let src: &[u8] = if !need_objects && package_clause_end(src).is_none() {
+            full = fs::read(path).ok();
+            match full.as_deref() {
+                Some(bytes) => bytes,
+                None => continue,
+            }
+        } else {
+            src
+        };
         // Package-only: preamble filter so object-level Deprecated: files are
         // skipped cheaply. Object scan: any doc Deprecated: may matter.
         let interesting = if need_objects {
@@ -643,8 +678,30 @@ fn scan_import_deprecated(
         let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
             continue;
         };
+        // For import diagnostics the prefix above is a *truncated* file, and a
+        // truncated Go file does not parse — the read stops in the middle of
+        // whatever declaration happens to straddle 8 KiB, `parse_file` errors,
+        // and the package doc sitting far above it is never extracted. Cutting
+        // at the end of the `package` clause instead hands the parser a
+        // complete file: doc comment plus package clause, nothing after.
+        //
+        // aws-sdk-go is where this showed: guff found the deprecation on `aws`
+        // (doc.go, 2.5 KB), `service/s3` (1.3 KB) and `s3manager` (334 B) and
+        // missed it on `aws/credentials` (credentials.go, 12 KB) and
+        // `aws/session` (doc.go, 14.7 KB) — exactly the two files over the
+        // prefix, though both carry the doc in their first 2 KB.
+        let parse_src = if need_objects {
+            src
+        } else {
+            // The clause is present: the block above re-read the file when the
+            // prefix did not reach it.
+            match package_clause_end(src) {
+                Some(end) => &src[..end],
+                None => continue,
+            }
+        };
         let fset = FileSet::new();
-        let Ok(file) = parse_file(&fset, name, src, parse_mode) else {
+        let Ok(file) = parse_file(&fset, name, parse_src, parse_mode) else {
             continue;
         };
         if out.package.is_none() {
@@ -1131,6 +1188,69 @@ mod tests {
         a = with_imports(a, &[b]);
         let root = with_imports(pkg("example.com/root", &["root.go"]), &[a]);
         assert!(resolve_import(&root, "example.com/nope").is_none());
+    }
+
+    /// A prefix read is only an answer when it reaches the `package` clause.
+    ///
+    /// The scan reads `PACKAGE_DOC_PREFIX` bytes because "the answer lives
+    /// entirely before the `package` clause". Two things follow that the first
+    /// version of it did not do. A prefix that *straddles* a declaration is not
+    /// a parseable Go file, so it has to be cut back to the end of the clause
+    /// before parsing — aws-sdk-go's `aws/credentials/credentials.go` is 12 KB
+    /// with its doc in the first 2 KB, and parsing the raw 8 KB prefix simply
+    /// errored. And a prefix that never reaches the clause cannot answer at
+    /// all — `aws/session/doc.go` is 14.7 KB of package doc with the clause at
+    /// byte 14677, so the `Deprecated:` line is past the prefix too.
+    #[test]
+    fn package_clause_end_bounds_the_text_handed_to_the_parser() {
+        // Cut at the end of the clause line, not at the start of it.
+        let src = b"// Package p is a package.\n//\n// Deprecated: use q.\npackage p\n\nfunc F() {}\n";
+        let end = package_clause_end(src).expect("clause found");
+        assert_eq!(&src[..end], b"// Package p is a package.\n//\n// Deprecated: use q.\npackage p\n");
+
+        // A file that begins with the clause.
+        assert_eq!(package_clause_end(b"package p\n\nfunc F() {}\n"), Some(10));
+
+        // No trailing newline after the clause: the end is the end of input.
+        assert_eq!(package_clause_end(b"// d\npackage p"), Some(14));
+
+        // A comment line mentioning the word cannot match: it starts with `//`.
+        let commented = b"// this package is fine\npackage p\n";
+        let end = package_clause_end(commented).expect("clause found");
+        assert_eq!(&commented[..end], commented);
+
+        // No clause at all — the caller must read more of the file.
+        assert!(package_clause_end(b"// just a comment, no clause yet\n").is_none());
+    }
+
+    /// The cut is what makes the parse succeed: the same bytes, truncated at an
+    /// arbitrary offset, are not a Go file.
+    #[test]
+    fn a_truncated_prefix_does_not_parse_but_the_clause_cut_does() {
+        let mut src = Vec::from(
+            &b"// Package p is a package.\n//\n// Deprecated: use q.\npackage p\n\n"[..],
+        );
+        for i in 0..200 {
+            src.extend_from_slice(format!("func F{i}() int {{ return {i} }}\n").as_bytes());
+        }
+        // An arbitrary cut lands inside a declaration.
+        let chopped = &src[..src.len() - 12];
+        let fset = FileSet::new();
+        assert!(
+            parse_file(&fset, "p.go", chopped, guff::parser::SKIP_OBJECT_RESOLUTION).is_err(),
+            "a truncated file should not parse"
+        );
+
+        let end = package_clause_end(&src).expect("clause found");
+        let fset = FileSet::new();
+        let file = parse_file(&fset, "p.go", &src[..end], guff::parser::SKIP_OBJECT_RESOLUTION)
+            .expect("doc + clause is a complete file");
+        // The trailing space is upstream's: `doc.Text()` ends the paragraph
+        // with one and `strings.Replace(alt, "\\n", " ", -1)` keeps it.
+        assert_eq!(
+            extract_deprecated_message(&file.doc).as_deref(),
+            Some("use q. ")
+        );
     }
 
     /// A package doc is not required to live in `doc.go` or `{basename}.go` —

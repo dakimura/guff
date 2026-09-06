@@ -26094,3 +26094,72 @@ SA1019 を自分の変更のせいにしていたか、逆に plusbuild を
 ```
 台帳: 48/100 at zero（52 定義、open 1＝syncthing 2、unmeasured 3）
 ```
+
+### 2026-09-06（続き 231）— `close syncthing`。**prefix はパース可能な Go ではない**。続き 222 が自分で入れた退行
+
+続き 230 の掃除で見つけた 2 件（`internal/blob/s3/s3.go:15,16` の SA1019）は
+**今朝の続き 222（#308）の退行**で、そこで `git stash` して main の binary を
+建て直し baseline も同じ 2 件を落とすことを確かめてある。原因は
+そのとき入れた `PACKAGE_DOC_PREFIX = 8 KiB` の prefix 読みで、
+**外し方が 2 通りあった**。
+
+#### 数えると 8 KiB の境界にきれいに並ぶ
+
+| package | doc を持つファイル | サイズ | guff（前） |
+|---|---|--:|---|
+| `aws` | doc.go | 2,518 | ✓ |
+| `service/s3` | doc.go | 1,269 | ✓ |
+| `service/s3/s3manager` | doc.go | 334 | ✓ |
+| **`aws/credentials`** | credentials.go | **11,996** | ✗ |
+| **`aws/session`** | doc.go | **14,694** | ✗ |
+
+#### 1. 途中で切った prefix は**パースできない**
+
+`credentials.go` の package 節は**2061 バイト目**にあり、doc は prefix の
+内側に全部入っている。それでも落ちていたのは、8 KiB がたまたま跨いだ
+宣言の途中で終わるからで、`parse_file` がエラーを返して**そのファイルごと
+捨てられていた**。
+
+続き 222 のコメント自身が「import 診断が要る情報は `package` 節より前に
+しか無い」と書いている。ならばパーサに渡すのも**そこまで**でよい ——
+doc コメント＋`package` 節は、それだけで**完全な Go ファイル**である。
+`package_clause_end` を足して切った。
+
+#### 2. `package` 節に**届いていない** prefix は何も答えられない
+
+`aws/session/doc.go` は **14,694 バイトが丸ごと package doc** で、
+`package` 節は **14,677 バイト目**、`Deprecated:` 行はその 200 バイト上。
+prefix には doc も節も入っていない。
+
+最初この fallback を「パースの直前」に置いたが**それでは遅い** ——
+その手前の `src_has_package_deprecated_doc` の安いふるいが先に落とす。
+**prefix が節に届いていないなら prefix は答えではない**ので、
+ふるいより前でファイル全体を読み直すようにした。1 件目は直り
+2 件目が残ったのはこの順序のせいで、順序が仕様である。
+
+#### なぜ続き 222 の golden が素通ししたか
+
+`staticcheck-sa1019-package-doc` は deprecated パッケージを**同一モジュール**に
+置いている。同一モジュールの依存は guff がソースから型検査するので
+`source_files` が埋まり、`in_memory` が真になって**prefix 読みには一度も
+入らない**。つまりあの golden は、続き 222 が変えたコードパスに
+**到達できない**。[[empty-fixture-hides-defects]] の 6 つ目の形:
+**fixture が届かない場所に入れた変更**。
+
+prefix 経路は「export data から読む依存」でしか起きないので golden では
+再現できない。代わりに**単体テストを機構そのものに当てた** ——
+`package_clause_end` の 5 形と、「同じバイト列を任意の位置で切ると
+`parse_file` は `Err`、`package` 節で切ると `Ok` になって
+`Deprecated:` が取れる」ことを 1 本で固定した。
+
+#### 測定
+
+- **syncthing: guff=652 golangci=654 both=650（R=99.4%）→
+  guff=656 golangci=654 both=654、R=100.0%。閉じた。**
+  残る guff-only 2 件は既存の allowlist の中。
+- golden 231／fix 231／reject 14／oss pr 8 ターゲット P=R=100%／
+  workspace 278 バイナリ 3522 ok 0 failed。
+
+```
+台帳: 49/100 at zero（52 定義、open 0、unmeasured 3）
+```
