@@ -182,14 +182,63 @@
 +func f(s []int) []int { return s[1:] }
 --- a/s1011/bad/bad.go
 +++ b/s1011/bad/bad.go
-@@ -1,7 +1,5 @@
- package main
+@@ -13,50 +13,35 @@
  
- func f(x, y []int) {
--	for _, e := range y {
--		x = append(x, e)
+ func plainIdentifier(src []string) []string {
+ 	var dst []string
+-	for _, v := range src {
+-		dst = append(dst, v)
 -	}
-+	x = append(x, y...)
++	dst = append(dst, src...)
+ 	return dst
+ }
+ 
+ func selector(h *holder, src []string) {
+-	for _, v := range src {
+-		h.items = append(h.items, v)
+-	}
++	h.items = append(h.items, src...)
+ }
+ 
+ func index(m map[string][]string, k string, src []string) {
+-	for _, v := range src {
+-		m[k] = append(m[k], v)
+-	}
++	m[k] = append(m[k], src...)
+ }
+ 
+ func indexThroughAParenthesisedDeref(t *tags, k string, src []string) {
+-	for _, v := range src {
+-		(*t)[k] = append((*t)[k], v)
+-	}
++	(*t)[k] = append((*t)[k], src...)
+ }
+ 
+ // A value-based loop evaluates x once, so an impure x is fine here.
+ func rangingOverACall(h *holder) {
+-	for _, v := range makeSrc() {
+-		h.items = append(h.items, v)
+-	}
++	h.items = append(h.items, makeSrc()...)
+ }
+ 
+ // The index-based arm, on a pure operand.
+ func indexBasedLoop(src []string) []string {
+ 	var dst []string
+-	for i := range src {
+-		dst = append(dst, src[i])
+-	}
++	dst = append(dst, src...)
+ 	return dst
+ }
+ 
+ // The index-based arm with the intermediate assignment, and a selector.
+ func indexBasedLoopWithATemporary(src []string, h *holder) {
+-	for i := range src {
+-		v := src[i]
+-		h.items = append(h.items, v)
+-	}
++	h.items = append(h.items, src...)
  }
 --- a/s1012/bad/bad.go
 +++ b/s1012/bad/bad.go

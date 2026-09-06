@@ -1352,8 +1352,22 @@ fn s1011_flags_bad_patterns() {
     let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/s1011");
     support::assert_well_typed(&pkg);
     let messages = support::run_analyzer(s1011::analyzer(), &pkg);
-    assert!(!messages.is_empty(), "{messages:?}");
-    assert!(messages.iter().any(|m| m.contains("x = append(x, y...)")));
+
+    // The destination is whatever expression appears on both sides of the
+    // append, so the assertion is the set of destinations — a `contains` on one
+    // of them passes while the other six are missing, which is how a plain
+    // identifier stayed the only shape this reported.
+    let count = |needle: &str| messages.iter().filter(|m| m.contains(needle)).count();
+    assert_eq!(messages.len(), 7, "{messages:?}");
+    assert_eq!(count("dst = append(dst, src...)"), 2, "{messages:?}");
+    assert_eq!(count("h.items = append(h.items, src...)"), 2, "{messages:?}");
+    assert_eq!(count("m[k] = append(m[k], src...)"), 1, "{messages:?}");
+    assert_eq!(count("(*t)[k] = append((*t)[k], src...)"), 1, "{messages:?}");
+    assert_eq!(
+        count("h.items = append(h.items, makeSrc()...)"),
+        1,
+        "{messages:?}"
+    );
 }
 
 #[test]
@@ -1361,7 +1375,14 @@ fn s1011_allows_ok_patterns() {
     let dir = support::testdata("s1011");
     let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/s1011/ok");
     support::assert_well_typed(&pkg);
-    assert!(support::run_analyzer(s1011::analyzer(), &pkg).is_empty());
+    // Two of these four are silent only because of the purity guards: a
+    // destination that is a call, and an index-based loop whose operand is one.
+    // Both became reachable when the destination stopped having to be an
+    // identifier.
+    assert!(
+        support::run_analyzer(s1011::analyzer(), &pkg).is_empty(),
+        "expected no findings"
+    );
 }
 
 #[test]
