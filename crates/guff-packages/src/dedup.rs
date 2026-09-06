@@ -291,6 +291,80 @@ pub fn seed_variant_for<'a>(
     best.map(|(_, pkg)| pkg)
 }
 
+/// One variant per import path — the one [`seed_variant_rank`] picks.
+///
+/// Shared so the edge graphs built from it can never disagree about which
+/// variant a path's edges came from.
+fn chosen_seed_variants<'a>(
+    by_id: &'a HashMap<String, Arc<Package>>,
+    augmented: &HashSet<String>,
+) -> HashMap<&'a str, ((u8, u8), &'a str)> {
+    let mut chosen: HashMap<&str, ((u8, u8), &str)> = HashMap::default();
+    for pkg in by_id.values() {
+        let path = pkg.pkg_path.as_str();
+        let rank = seed_variant_rank(pkg, path, augmented);
+        let id = pkg.id.as_str();
+        match chosen.get(path) {
+            Some(&(r, cur)) if (r, cur) <= (rank, id) => {}
+            _ => {
+                chosen.insert(path, (rank, id));
+            }
+        }
+    }
+    chosen
+}
+
+/// The edges of each path that exist **only** because the seed compiles that
+/// path's in-package `_test.go` files.
+///
+/// A path in [`paths_with_external_test_package`] is seeded as `P [P.test]`,
+/// whose `deps` are production plus whatever the tests import; the production
+/// half is [`Package::production_deps`], carried over before plain `P` was
+/// dropped. The difference is the test-only half.
+///
+/// Why it has to be separable: production edges cannot form a cycle (Go
+/// forbids import cycles, and an in-package test importing something that
+/// imports its own package is an import cycle in the test binary), but
+/// **test-only edges can** — `P`'s test importing `Q` while `Q`'s test imports
+/// `P` is legal, because each test binary links the other's production copy.
+/// boundary writes exactly that between `internal/session` and
+/// `internal/credential/vault`, and prometheus between `tsdb` and
+/// `util/teststorage`. `dep_load_order` needs to know which edges those are so
+/// it can decline the one that closes a cycle instead of dropping whichever
+/// edge its walk happened to arrive on.
+///
+/// Empty for a path whose production edges are not recoverable (no plain `P`
+/// was ever in the load, so nothing was carried): the caller then treats every
+/// edge as production, which is the behaviour that predates this.
+pub fn import_path_test_only_edges(
+    by_id: &HashMap<String, Arc<Package>>,
+) -> HashMap<String, Vec<String>> {
+    let augmented = paths_with_external_test_package(by_id);
+    let chosen = chosen_seed_variants(by_id, &augmented);
+
+    let mut out: HashMap<String, Vec<String>> = HashMap::default();
+    for (path, (_, id)) in chosen {
+        if !augmented.contains(path) {
+            continue; // seeded production-only; every edge is a production edge
+        }
+        let pkg = &by_id[id];
+        let Some(prod) = pkg.production_deps.as_deref() else {
+            continue;
+        };
+        let prod: HashSet<&str> = prod.iter().map(|d| import_path_of_id(d)).collect();
+        let extra: Vec<String> = seed_edges(pkg, path, &augmented)
+            .iter()
+            .map(|d| import_path_of_id(d))
+            .filter(|d| !prod.contains(d))
+            .map(str::to_string)
+            .collect();
+        if !extra.is_empty() {
+            out.insert(path.to_string(), extra);
+        }
+    }
+    out
+}
+
 /// Import-path → deps graph for hybrid seed ordering.
 ///
 /// Seed waves / `dep_load_order` look up by **import path** (from `Package.deps`
@@ -304,18 +378,7 @@ pub fn seed_variant_for<'a>(
 /// and its seeded edges can never come from different variants.
 pub fn import_path_dep_graph(by_id: &HashMap<String, Arc<Package>>) -> HashMap<String, Vec<String>> {
     let augmented = paths_with_external_test_package(by_id);
-    let mut chosen: HashMap<&str, ((u8, u8), &str)> = HashMap::default();
-    for pkg in by_id.values() {
-        let path = pkg.pkg_path.as_str();
-        let rank = seed_variant_rank(pkg, path, &augmented);
-        let id = pkg.id.as_str();
-        match chosen.get(path) {
-            Some(&(r, cur)) if (r, cur) <= (rank, id) => {}
-            _ => {
-                chosen.insert(path, (rank, id));
-            }
-        }
-    }
+    let chosen = chosen_seed_variants(by_id, &augmented);
 
     let mut dep_graph = HashMap::default();
     for (path, (_, id)) in chosen {
