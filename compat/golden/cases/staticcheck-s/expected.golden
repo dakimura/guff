@@ -62,8 +62,13 @@ s1009/bad/bad.go:13:5:staticcheck::S1009: should omit nil check; len() for nil c
 s1009/ok/ok.go:6:2:staticcheck::SA9003: empty branch
 s1009/ok/ok.go:8:2:staticcheck::SA9003: empty branch
 s1010/bad/bad.go:3:36:staticcheck::S1010: should omit second index in slice, s[a:len(s)] is identical to s[a:]
-s1011/bad/bad.go:4:2:staticcheck::S1011: should replace loop with x = append(x, y...)
-s1011/ok/ok.go:3:22:staticcheck::SA4006: this value of x is never used
+s1011/bad/bad.go:16:2:staticcheck::S1011: should replace loop with dst = append(dst, src...)
+s1011/bad/bad.go:23:2:staticcheck::S1011: should replace loop with h.items = append(h.items, src...)
+s1011/bad/bad.go:29:2:staticcheck::S1011: should replace loop with m[k] = append(m[k], src...)
+s1011/bad/bad.go:35:2:staticcheck::S1011: should replace loop with (*t)[k] = append((*t)[k], src...)
+s1011/bad/bad.go:42:2:staticcheck::S1011: should replace loop with h.items = append(h.items, makeSrc()...)
+s1011/bad/bad.go:50:2:staticcheck::S1011: should replace loop with dst = append(dst, src...)
+s1011/bad/bad.go:58:2:staticcheck::S1011: should replace loop with h.items = append(h.items, src...)
 s1012/bad/bad.go:5:44:staticcheck::S1012: should use time.Since instead of time.Now().Sub
 s1016/bad/bad.go:7:9:staticcheck::S1016: should convert x (type T1) to T2 instead of using struct literal
 s1016/ok/ok.go:13:1:staticcheck::ST1020: comment on exported method Copy should be of the form "Copy ..."

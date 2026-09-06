@@ -9,6 +9,7 @@ use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
 use guff_analysis::code::{is_call_to, object_of, refers_to};
+use crate::sideeffects::may_have_side_effects;
 use guff_analysis::passes::inspect;
 use crate::render::{render_expr, render_node};
 use guff_analysis::code;
@@ -39,10 +40,44 @@ fn same_key(pass: &Pass<'_>, a: &Ident, b: &Ident) -> bool {
     }
 }
 
+/// Whether the two expressions are the *same* expression, structurally.
+///
+/// The append destination appears twice — `lhs = append(lhs, …)` — and upstream
+/// binds it once and recalls it, so the second occurrence goes through
+/// `matchAST`: every field compared, `token.Pos`, `*ast.Object` and comment
+/// groups skipped. Two syntactically identical subtrees are the same value.
+///
+/// This used to fall back to `a.id() == b.id()` for anything but a pair of
+/// identifiers — AST *node* ids, which two occurrences never share. So only a
+/// plain variable could be the destination, and `h.items`, `m[k]` and
+/// `(*t)[k]` were all invisible: boundary writes one of each.
+///
+/// Forms not listed answer `false`. That is a miss rather than a false
+/// positive, and the destination of an `append` is an addressable slice, which
+/// these five forms cover.
 fn same_expr(pass: &Pass<'_>, a: &Expr, b: &Expr) -> bool {
     match (a, b) {
         (Expr::Ident(ia), Expr::Ident(ib)) => same_key(pass, ia, ib),
-        _ => a.id() == b.id(),
+        (Expr::ParenExpr(pa), _) => same_expr(pass, &pa.x, b),
+        (_, Expr::ParenExpr(pb)) => same_expr(pass, a, &pb.x),
+        (Expr::SelectorExpr(sa), Expr::SelectorExpr(sb)) => {
+            sa.sel.name == sb.sel.name && same_expr(pass, &sa.x, &sb.x)
+        }
+        (Expr::IndexExpr(ia), Expr::IndexExpr(ib)) => {
+            same_expr(pass, &ia.x, &ib.x) && same_expr(pass, &ia.index, &ib.index)
+        }
+        (Expr::StarExpr(sa), Expr::StarExpr(sb)) => same_expr(pass, &sa.x, &sb.x),
+        (Expr::BasicLit(la), Expr::BasicLit(lb)) => la.kind == lb.kind && la.value == lb.value,
+        (Expr::CallExpr(ca), Expr::CallExpr(cb)) => {
+            ca.args.len() == cb.args.len()
+                && same_expr(pass, &ca.fun, &cb.fun)
+                && ca
+                    .args
+                    .iter()
+                    .zip(cb.args.iter())
+                    .all(|(x, y)| same_expr(pass, x, y))
+        }
+        _ => false,
     }
 }
 
@@ -166,6 +201,20 @@ fn check_append_loop<'a>(pass: &Pass<'_>, rs: &'a RangeStmt) -> Option<(&'a Expr
         if refers_to(pass, lhs, idx_obj) {
             return None;
         }
+        // "When using an index-based loop, x gets evaluated repeatedly and thus
+        // should be pure. This doesn't matter for value-based loops, because x
+        // only gets evaluated once."
+        if may_have_side_effects(x) {
+            return None;
+        }
+    }
+
+    // "The lhs may be dynamic and return different values on each iteration",
+    // upstream's own example being
+    // `bar()[0] = append(bar()[0], x[i])`. Dead weight while the destination
+    // had to be an identifier; load-bearing now that it need not be.
+    if may_have_side_effects(lhs) {
+        return None;
     }
 
     let src = expr_type(pass, x)?;

@@ -26842,3 +26842,102 @@ ratchet を緩める（＝新しい取りこぼしを恒久的に許す）ので
 ```
 台帳: 49/100 at zero（53 定義、open 1＝boundary **9**、unmeasured 3）
 ```
+
+### 2026-09-06（続き 239）— S1011 の「同じ式か」が **AST ノード id 比較**だった。widen すると上流の純粋性ガード 2 本が効き始める
+
+boundary の残り 9 件のうち **3 件が S1011**（`internal/cmd/base/flags.go` /
+`internal/db/schema/manager.go` / `internal/server/worker_tag.go`）。
+どれも append の宛先が**素の識別子ではない**:
+`newTags[k]` / `dbM.editions` / `(*s.target)[key]`。
+
+#### 原因
+
+`lhs = append(lhs, …)` の 2 つの `lhs` は上流だと**1 回束縛して recall** する
+形なので、2 回目は `matchAST` を通る ——
+**全フィールドを比較し、`token.Pos` と `*ast.Object` と comment group だけ
+飛ばす**構造比較である。
+
+guff の `same_expr` は Ident の対だけ object で比べ、それ以外は
+`a.id() == b.id()` —— **AST のノード id**。同じ式が 2 か所に書かれていれば
+必ず別ノードなので、**宛先は素の識別子しかあり得なかった**。
+
+#### widen だけでは出せない
+
+素の識別子は副作用を持ちようがないので、上流の 2 本のガードは
+guff では**書く必要が無かった**。宛先を広げた瞬間に両方が効き始める:
+
+```go
+if m.State["idx"] != nil && code.MayHaveSideEffects(pass, x, pure) { continue }
+if code.MayHaveSideEffects(pass, lhs, pure) { continue }
+```
+
+上流のコメントが挙げる例がそのまま
+`bar()[0] = append(bar()[0], x[i])` で、これは `same_expr` を構造比較に
+したとたん**両辺が一致する**。index ループの `for i := range makeSrc()` も
+同じ（x が毎周評価される）。[[an-approximation-can-prop-up-another]] の
+3 度目である。
+
+#### 測った形（11）
+
+| 宛先 / ループ | golangci | 修正前 | 修正後 |
+|---|---|---|---|
+| 素の `dst` | ✅ | ✅ | ✅ |
+| `h.items`（selector） | ✅ | ❌ | ✅ |
+| `m[k]`（index） | ✅ | ❌ | ✅ |
+| `(*t)[k]` | ✅ | ❌ | ✅ |
+| selector・range が関数呼び出し | ✅ | ❌ | ✅ |
+| index ループ + 一時変数・selector | ✅ | ❌ | ✅ |
+| index ループ・x は純粋・素の宛先 | ✅ | ✅ | ✅ |
+| append する値がループ変数でない | ❌ | ❌ | ❌ |
+| index も使っている | ❌ | ❌ | ❌ |
+| **`bar()[0] = append(bar()[0], x[i])`** | ❌ | ❌ | ❌（ガードで） |
+| **`for i := range makeSrc()`** | ❌ | ❌ | ❌（ガードで） |
+
+下 2 行は**修正前も静かだったが、それは宛先が識別子でしかあり得なかった
+からにすぎない**。ガードを入れずに widen すると 5 件の取りこぼしを
+2 件の誤検出と交換することになる。
+
+修正後、実物の Go モジュール 11 形で **golangci と 1 バイトも違わない**。
+
+#### fixture がまた 1 形だった
+
+`bad.go` は素の識別子のループ 1 つだけ、テストは
+`assert!(!messages.is_empty())` と
+`any(|m| m.contains("x = append(x, y...)"))`。
+7 形 + ok 側 4 形に置き換え、**宛先ごとの件数**で固定した。
+negative control も 2 本取った ——
+`same_expr` を戻すと bad は **7 → 2**、ガードを外すと ok が**空でなくなる**。
+
+#### 測定
+
+- **boundary: open 9 → 6**（guff-only 3、gcl-only 3）。
+  **guff 576 / golangci 576 で総数が一致**、both 573。
+  staticcheck は **R 98.5% → 99.3%**。
+- 退行なし: **dapr 1555/1555・k6 423/423・thanos 543/543・
+  syncthing 656/654（allowlist 内）・tailscale 47/43（同）・
+  prometheus 20/20・cli 3/3・coredns 3/3・karmada 19/19・
+  pipeline 156/156・rclone 3/3**、oss pr 8 ターゲット P=R=100%。
+- golden **231**（staticcheck-s を regen、**キー集合で差分して
+  S1011 +7・旧 fixture の 2 件が消えただけ**、ratchet は baseline のまま）／
+  fix **231**（staticcheck-s を再録画）／reject 14／
+  workspace 279 バイナリ **3530 ok** 0 failed。
+
+#### 残り 6 件の内訳（測定済み・未着手）
+
+- **S1005 が 2 件**（`storage_test.go`）。`v, _ := m["k"]` という
+  **map index の comma-ok** を guff が取りこぼす。`<-ch` と range の形は
+  通っている。型アサーションの `v, _ := x.(T)` は**両ツールとも報告しない**
+  ので、fixture に歯止めとして入れる価値がある。
+- **S1040 が 1 件**（`attribute_transform.go`）。`proto.Message` は
+  `protoreflect.ProtoMessage` の **alias** で、guff は alias を解かずに
+  比較しているので取りこぼす。**同時に見つかった別件**として、guff は
+  型を**完全な import path で描画**する（`s1017x/inner.Msg`、上流は
+  `inner.Msg`）—— S1040 のメッセージ全部に効くのに、
+  import された型を使う golden case が無くて誰も気付いていない。
+- **S1017 が 1 件（guff の過剰報告）**。guff は `else if` の中まで降りるが
+  上流は降りない。`if` に自前の `else` が付く形は両方とも報告しない。
+- bodyclose の過剰報告 2 件。
+
+```
+台帳: 49/100 at zero（53 定義、open 1＝boundary **6**、unmeasured 3）
+```
