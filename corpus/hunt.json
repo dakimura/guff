@@ -16,6 +16,14 @@
     "timeout": "30m"
   },
   {
+    "name": "argo-rollouts",
+    "url": "https://github.com/argoproj/argo-rollouts.git",
+    "ref": "v1.9.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
+  },
+  {
     "name": "atlas",
     "url": "https://github.com/ariga/atlas.git",
     "ref": "v1.3.0",

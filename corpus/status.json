@@ -6,8 +6,8 @@
     "`unmeasured` is not `clean`: an absent measurement is a question."
   ],
   "goal": 100,
-  "defined": 50,
-  "clean": 47,
+  "defined": 51,
+  "clean": 48,
   "open": 0,
   "unmeasured": 3,
   "targets": {
@@ -23,6 +23,14 @@
       "tier": "hunt",
       "state": "clean",
       "at": "20260905T031614Z",
+      "open": 0,
+      "guff_only": 0,
+      "gcl_only": 0
+    },
+    "argo-rollouts": {
+      "tier": "hunt",
+      "state": "clean",
+      "at": "20260906T022356Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0

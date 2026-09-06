@@ -25804,3 +25804,34 @@ golangci-lint を回して記録する）で録り直した。
 ```
 台帳: 47/100 at zero（50 定義、open 0、unmeasured 3）
 ```
+
+### 2026-09-06（続き 228）— `adopt argo-rollouts`。**9 対 9 で一致**、`run.timeout` は config 側が 10m
+
+台帳が open 0 になったので次の候補 **argo-rollouts v1.9.1**（104.7MB、
+Kubernetes の progressive delivery コントローラ）。config は 5 linter
+（`govet` / `ineffassign` / `misspell` / `unconvert` / `unused`）と
+formatter 2 本（`gofmt` / `goimports` の `local-prefixes`）、
+exclusion presets 4 つ、`run.modules-download-mode: readonly`、
+そして `paths` に**正規表現**（`.*\.pb\.go` と `pkg/client`）——
+生成コードを 2 通りの書き方で外している。guff は全部持っている。
+
+darwin で **131 パッケージが全部 load できる**（`go build ./...` が
+exit 0、`go list` の stderr 38 行は全部 `go: downloading`）。ill-typed 0。
+
+```
+argo-rollouts: guff=9 golangci=9 both=9 P=100.0% R=100.0% [OK]
+  by linter: {'govet': 9}
+```
+
+**両ツールが 9 件で完全一致**したので採用のみ。9 件とも `govet` で、
+`dubbo-go`（0 対 0）と違って**取りこぼしも検出できる**ターゲットである。
+
+config の `run.timeout` は **10m** で、`hunt.json` のエントリは 25m。
+前者は golangci-lint 自身の内部タイムアウト、後者は harness が
+プロセスに掛ける上限で、別のものである —— 今回はどちらも余裕があったが、
+`run.timeout` の短い config を採用するときは**先に効くのは config 側**
+だと覚えておく。
+
+```
+台帳: 48/100 at zero（51 定義、open 0、unmeasured 3）
+```
