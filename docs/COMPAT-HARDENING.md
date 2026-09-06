@@ -25316,3 +25316,81 @@ golden 再生成は**キー集合で削除 0**、追加は 5（うち 3 つは f
 
 残り 1 件は `//nolint:staticcheck` が unused＝**SA1019 の取りこぼし**
 （deprecated な package を import している）。
+
+### 2026-09-06（続き 222）— パッケージの doc は `doc.go` にあるとは限らない。SA1019 が**ファイル名で絞っていた**
+
+`close celestia-node` の最後の 1 件。`nodebuilder/p2p/misc.go:10` の
+
+```go
+"github.com/libp2p/go-libp2p/p2p/host/peerstore/pstoreds" //nolint:staticcheck
+```
+
+に対して guff が `nolintlint`「directive is unused」と言う。**上流はそこで
+SA1019 を撃って nolint が消しているので 0 件**、guff は撃っていない。
+
+#### 最小再現が 1 回目は再現しなかった（2 回目）
+
+同一モジュール内に `// Deprecated:` 付きのパッケージを作って import する
+再現は、**両ツールとも撃った**。続き 220 と同じで「再現しないなら形の
+せいではない」。違いは**第三者依存**であること —— guff は依存の
+ソースを module cache から読み直す（`scan_import_deprecated`）。
+
+現物のパッケージ単体で測ったら出た:
+
+```
+golangci ./nodebuilder/p2p/...  → 0 件
+guff     ./nodebuilder/p2p/...  → nolintlint 1 件
+```
+
+#### 原因: import 診断だけ**ファイル名で絞っていた**
+
+```rust
+// Import diagnostics only need the package doc. Restrict to the
+// conventional homes (`doc.go`, `{basename}.go`) — walking every
+// file of every third-party import dominates prometheus cold ./... wall.
+let base = format!("{}.go", pkg_path.rsplit('/').next().unwrap_or(""));
+paths.retain(|(_, p)| n == "doc.go" || n == base.as_str());
+```
+
+`pstoreds` の deprecation は **`deprecate.go`** にある。Go は
+パッケージ doc の置き場所を決めていない —— `package` の上にコメントを
+書いたファイルが doc を持つ。だから絞ると落ちる。
+
+#### コストは測って畳んだ
+
+`retain` を外すと「deprecation の無いパッケージ（＝ほとんど）」で全ファイルを
+読むことになり、コメントが警告していたのはまさにそれ。ただし
+**import 診断が要る情報は `package` 節より前にしか無い**
+（`src_has_package_deprecated_doc` がそこで切っている）ので、
+メモリに無いファイルは**先頭 8 KB だけ**読むようにした。
+
+prometheus `./...` の cold/warm を 3 回ずつ:
+
+| | 1 回目 | 2 回目 | 3 回目 |
+|---|---|---|---|
+| 前 | 2.89 | 1.53 | 1.52 |
+| 後 | 2.93 | 1.54 | 1.60 |
+
+**差はノイズの中**。コメントの主張は「全ファイルを丸ごと読むなら」正しく、
+prefix 読みなら成り立たない。
+
+#### 測定
+
+golden ケース `staticcheck-sa1019-package-doc` を足した:
+`dep` は doc を **`deprecate.go`** に置き（`doc.go` でも `dep.go` でもない）、
+`live` は deprecation を一切持たない**対照** —— スキャンが最後まで走って
+諦める、コストを払う側の形である。上流は**1 件だけ**報告し、guff も一致。
+
+単体テストは `prefer_package_doc_files` に 2 本（`_test.go` 以外を
+**1 つも落とさない**こと、`doc.go` → `{basename}.go` → 残りの順であること、
+元の index を保つこと）。依存スキャンそのものは単体テストの harness では
+動かない —— harness の依存 Package は `compiled_go_files` を持たないので、
+`sa1019groupdoc` も golden だけで守られている。
+
+- **celestia-node: guff=55 → 54、P=98.2% → 100.0%、R=100.0%、unexpected=0。閉じた。**
+- golden 231／fix 231／reject 14／oss pr 8 ターゲット P=R=100%／
+  workspace 278 ok 0 failed。
+
+```
+台帳: 44/100 at zero（47 定義、open 0、unmeasured 3）
+```

@@ -1,0 +1,12 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# `dep` keeps its package doc in `deprecate.go` — neither `doc.go` nor
+# `dep.go` — which is the whole point of the case. `live` has none at all.
+
+dep/deprecate.go  crates/guff-staticcheck/tests/testdata/sa1019pkgdoc/dep/deprecate.go
+dep/dep.go        crates/guff-staticcheck/tests/testdata/sa1019pkgdoc/dep/dep.go
+dep/other.go      crates/guff-staticcheck/tests/testdata/sa1019pkgdoc/dep/other.go
+live/live.go      crates/guff-staticcheck/tests/testdata/sa1019pkgdoc/live/live.go
+live/extra.go     crates/guff-staticcheck/tests/testdata/sa1019pkgdoc/live/extra.go
+use.go            crates/guff-staticcheck/tests/testdata/sa1019pkgdoc/use.go
