@@ -26405,3 +26405,129 @@ signoz が sonic を上げれば今のホストでも測れるようになる。
 ```
 台帳: 49/100 at zero（53 定義、open 1＝boundary 44、unmeasured 3）— 変わらず
 ```
+
+### 2026-09-06（続き 235）— `close boundary` 前進。続き 233 の「2 ノード必要」は**外れ**、真犯人は**辞退した辺を wave 計算が読み戻していた**こと
+
+続き 232／233 は boundary の ill-typed 11 を「seed が import path 1 つに
+つきノードを 1 つしか持たない」構造的限界に帰し、「path ごとに 2 ノードが
+正しい形だが波及が大きく今回はやらない」と書いて閉じた。**これは外れ**で、
+実際の原因は続き 233 が入れた辺の辞退そのものではなく、
+**その辞退を wave 計算が無視していた**ことだった。
+
+#### 見つけ方 —— 最小再現を 3 ファイルまで落とした
+
+まず `GUFF_DEBUG_ILL_TYPED=1` で 11 個の中身を見ると、**全部が同じ症状**
+だった: `*vault.CredentialStore has no field or method GetPublicId`。
+`vault.CredentialStore` は `*store.CredentialStore`（protobuf）を埋め込んで
+おり、promoted method が丸ごと消えている —— つまり
+**`vault` を組んだときに `vault/store` が見えていない**。
+
+次にパターンを削って再現を縮めた。`./...` は 11 個だが、
+**`./internal/credential/vault ./internal/session` の 2 パッケージで 2 個**
+出る。この 2 つには次の関係がある:
+
+| | 中身 |
+|---|---|
+| `session` の in-package test | `vault` を import |
+| `vault` の in-package test | `session` を import |
+| 両方 | 外部テストパッケージ（`_test` 付き）を持つ |
+
+そこで scratchpad に **3 パッケージ 7 ファイルの Go module** を作った
+（`store` / `vault` / `session`、`vault` と `session` が互いの in-package
+test から相手を import し、両方に外部テストパッケージがある）。
+`go build ./...` も `go vet ./...` も通る **合法な Go** である。
+そして guff は**キャッシュを消せば決定的に落ちる**:
+
+```
+guff:     seed declined 1 test-only edge(s) that would close a cycle
+guff:     seed dep m/session — 1 error(s), first: undefined: testing
+```
+
+`undefined: vault` ではなく **`undefined: testing`** —— これが手掛かりだった。
+辞退した辺（`m/vault → m/session`）の先ではなく、**無関係な `testing` が
+見えていない**。切り分けの行列も取った:
+
+| 形 | 結果 |
+|---|---|
+| A: 上記のまま（循環あり） | 辞退 1・`undefined: testing` |
+| B: `vault` の in-package test から `session` の import を外す | **clean** |
+| C: `session` の外部テストパッケージを消す（augmented でなくなる） | **clean**、辞退 0 |
+
+#### 原因 —— `height` の 1 パスは order が topological である限りしか正しくない
+
+wave 割り当ては `wave(P) = depth - height(P)` で、`height` は
+**`order` を逆順に 1 回舐めるだけ**で求めている。消費者が必ず先に来る
+という前提があるから 1 パスで足りる —— *`order` が topological なら*。
+
+続き 233 は `dep_load_order` に「循環を閉じる **test** 辺は辿らない」を
+入れて `order` を production 辺について topological に戻した。しかし
+**辞退した辺は `dep_graph` に残ったまま**で、`height` はそれを読み戻して
+いた。辞退辺は必ず「`order` で後ろの package → 前の package」を向くので、
+読み戻すと**前の package の `height` を、それが確定として読まれた後に
+持ち上げる**。上の最小例では `m/session` が自分の import 先である
+`testing` と同じ wave に落ち、**並列に型検査されて `testing` が見えない**。
+
+続き 21（2026-08-23）には「これらのパスを DFS が保った辺だけに制限すると
+`promql` は直るが `teststorage` が壊れる」という保留メモがあり、それが
+3 週間この道を塞いでいた。**そのメモは腐っていた** ——
+当時の walk は*到着した辺を無差別に*落としていたので保った辺集合が
+入口順に依存し、production 辺を落とすことがあった。続き 233 以降は
+**落とすのは循環を閉じる test 辺だけ**なので、保った辺集合＝
+「全 production 辺＋循環を閉じない全 test 辺」であり、制限は正しい。
+[[deferral-notes-outlive-their-reasons]] の 5 度目。
+
+#### 直したこと
+
+`DepLoadWalk::declined_test_edges` を `usize` から `Vec<(String, String)>` に
+変え（**どの辺かを数ではなく名前で返す** —— 数では skip できない）、
+`dep_depth` と `height` の 2 パスがその辺を飛ばすようにした。
+`height` は `wave_heights` として関数に切り出し、単体テストから直接叩ける
+ようにした。
+
+#### 測定
+
+- **boundary: open 44 → 33**（guff-only 4 は不変、**gcl-only 40 → 29**）。
+  **ill_typed 11 → 0**、panic 0、seed cycle 0 ——
+  health gate が boundary で通るのは初めて。
+  残り 33 は bodyclose 20 / staticcheck 13 で、型ではなく linter の中身。
+- 退行なし。seed に触るので広めに測った:
+  **prometheus 20/20・cli 3/3・coredns 3/3・k6 423/423・karmada 19/19・
+  pipeline 156/156・tailscale 47/43（allowlist 内）・dapr 1555/1555・
+  rclone 3/3**、**11 ターゲット全部で ill_typed 0・panic 0・seed cycle 0**。
+- golden 231／fix 231／reject 14／oss pr 8 ターゲット P=R=100%／
+  workspace 278 バイナリ **3526 ok** 0 failed。
+- テストは 5 本。単体 3 本 —— 辞退辺を**名前で**返すこと、
+  `wave_heights` が辞退辺を飛ばして「保った辺は必ず
+  `height(dep) > height(consumer)`」を満たすこと、そして
+  **negative control** —— 辞退辺を読み戻すと `a` が自分の import 先
+  `t` より上に来る（＝先の wave に落ちる）こと。3 本目が無いと、
+  1 本目と 2 本目は「たまたま高さが揃うグラフ」でも通る。
+- 結合 2 本（`tests/mutual_test_edges_seed.rs` ＋
+  `tests/testdata/mutualtest/`、4 パッケージ）。boundary の署名を
+  そのまま再現する —— `session.Helper` が `tool.T` を埋め込み、
+  `session` が `tool` を取りこぼすと**import ではなく promoted method が
+  消える**。`vault` 側に
+  `session.Helper.Use undefined (type session.Helper has no field or method Use)`
+  として出る。
+- **この fixture は 3 度作り直した**（[[empty-fixture-hides-defects]]）。
+  ガードを潰して走らせると最初の 2 版は**そのまま通った**:
+  (1) `production_deps` を埋めていなかったので test 辺が 1 本も
+  test 辺と認識されず、辞退が起きなかった。
+  (2) root を 1 つずつ渡していたので、辞退する側の package が
+  **依存として組まれる経路自体が無かった**（`./...` は全 package が
+  root かつ互いの依存になる）。
+  (3) 外部テストファイルが空で、壊れた overlay を**誰も読んでいなかった**。
+  最終版は 2 本ともガードを潰すと落ちることを確認済み。
+
+#### 数えていないもの
+
+syncthing の golangci 側が同じホスト・同じ checkout で
+**654 → 656 → 656** と動いた（guff は 656 で不変）。guff の変更が
+golangci の出力を動かすことはあり得ないので**この 2 件を成果に数えない**。
+ただし syncthing の allowlist にある guff-only 2 件は、
+*guff の乖離ではなく golangci 側の揺れ*を覆っている可能性があり、
+別途検算する価値がある（[[allowlist-rows-are-not-the-defect-count]]）。
+
+```
+台帳: 49/100 at zero（53 定義、open 1＝boundary **33**、unmeasured 3）
+```

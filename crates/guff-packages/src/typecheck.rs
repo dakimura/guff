@@ -927,11 +927,18 @@ fn build_source_seed_inner(
     let test_only = crate::dedup::import_path_test_only_edges(by_id);
     let (order, back_edges, declined) = dep_load_order(&needed, dep_graph, &test_only, &loadable);
     report_seed_cycles(&back_edges);
-    if declined > 0 && crate::debug::enabled() {
+    if !declined.is_empty() && crate::debug::enabled() {
         eprintln!(
-            "guff:     seed declined {declined} test-only edge(s) that would close a cycle"
+            "guff:     seed declined {} test-only edge(s) that would close a cycle",
+            declined.len()
         );
     }
+    // `order` is topological for every edge the walk *kept*, and for those only.
+    // The two passes below read `dep_graph` directly, so without this they walk
+    // the declined edge as well — and a declined edge always points from a
+    // package late in `order` back to one earlier in it, which is precisely the
+    // shape `height`'s single reverse pass cannot absorb.
+    let declined_by = declined_edges_by_source(&declined);
     let source_set: HashSet<&str> = order
         .iter()
         .map(String::as_str)
@@ -951,7 +958,11 @@ fn build_source_seed_inner(
         }
         let mut d_max = 0u32;
         if let Some(deps) = dep_graph.get(p) {
+            let skip = declined_by.get(p.as_str());
             for d in deps {
+                if skip.is_some_and(|s| s.contains(&d.as_str())) {
+                    continue;
+                }
                 if source_set.contains(d.as_str()) {
                     d_max = d_max.max(dep_depth.get(d.as_str()).copied().unwrap_or(0) + 1);
                 }
@@ -966,34 +977,29 @@ fn build_source_seed_inner(
     // `P` before `P` itself, so `height` is final by the time we read it — no
     // reverse graph needed.
     //
-    // KNOWN BROKEN when `dep_graph` has a cycle, which bracket normalization can
-    // manufacture out of an acyclic Go graph: prometheus' `util/teststorage`
-    // test variant depends on `tsdb`, `tsdb`'s test variant depends on
-    // `util/teststorage`, and after dedup drops both plain packages each key
-    // takes its edges from a test variant. `dep_load_order`'s `visiting` guard
-    // then drops an edge to finish the walk, `order` is no longer topological,
-    // and the heights below come out inconsistent — 16 edges violating
-    // `wave(dep) < wave(consumer)` on prometheus `./...`. See
-    // docs/COMPAT-HARDENING.md §4 (2026-08-23, 続き 21) for why the fix belongs
-    // in the loader (the seed compiles production files, so it wants production
-    // edges) and not here: restricting these passes to the edges the DFS kept
-    // reorders `promql` correctly and breaks `teststorage` instead.
-    let mut height: HashMap<&str, u32> = HashMap::default();
-    for p in order.iter().rev() {
-        if !source_set.contains(p.as_str()) {
-            continue;
-        }
-        let h = height.get(p.as_str()).copied().unwrap_or(0);
-        height.insert(p.as_str(), h);
-        if let Some(deps) = dep_graph.get(p) {
-            for d in deps {
-                if source_set.contains(d.as_str()) {
-                    let e = height.entry(d.as_str()).or_insert(0);
-                    *e = (*e).max(h + 1);
-                }
-            }
-        }
-    }
+    // The single reverse pass is only sound while `order` is topological, so it
+    // reads `dep_graph` **minus** `declined_by`. Bracket normalization can
+    // manufacture a cycle out of an acyclic Go graph — prometheus'
+    // `util/teststorage` test variant depends on `tsdb` and `tsdb`'s test
+    // variant depends on `util/teststorage`, boundary's `internal/session` and
+    // `internal/credential/vault` do the same — and `dep_load_order` declines
+    // the test edge that closes it. Reading that edge back here undoes the
+    // decline: a declined edge runs from a package late in `order` to one
+    // earlier in it, so `height` raises the earlier package *after* its own `h`
+    // was already read as final, and it lands in the same wave as its own
+    // consumer. On the two-package repro that is `m/session` sharing a wave
+    // with `testing`, checked in parallel with it, reporting `undefined:
+    // testing`.
+    //
+    // docs/COMPAT-HARDENING.md §4 (2026-08-23, 続き 21) recorded that
+    // "restricting these passes to the edges the DFS kept reorders `promql`
+    // correctly and breaks `teststorage` instead". That was measured when the
+    // walk dropped *whichever* edge it happened to arrive on, so the kept set
+    // depended on entry order and could omit a production edge. Since the walk
+    // declines only the cycle-closing **test** edge, the kept set is every
+    // production edge plus every test edge that does not close a cycle, and
+    // restricting to it is exactly right.
+    let height = wave_heights(&order, dep_graph, &source_set, &declined_by);
 
     let source_count = dep_depth.len();
     if source_count == 0 {
@@ -1360,12 +1366,66 @@ fn dep_load_order(
     dep_graph: &HashMap<String, Vec<String>>,
     test_only: &HashMap<String, Vec<String>>,
     loadable: &HashSet<String>,
-) -> (Vec<String>, Vec<(String, String)>, usize) {
+) -> (Vec<String>, Vec<(String, String)>, Vec<(String, String)>) {
     let mut walk = DepLoadWalk::default();
     for id in needed {
         walk.visit(id, dep_graph, test_only, loadable);
     }
     (walk.order, walk.back_edges, walk.declined_test_edges)
+}
+
+/// `height(P)` = the longest chain of source packages that depends on `P`, used
+/// to place `P` in a wave as late as possible (`wave(P) = depth - height(P)`).
+///
+/// One reverse pass over `order` is enough *because* `order` is topological:
+/// every consumer of `P` is visited before `P`, so `P`'s own height is final by
+/// the time it is read. `declined_by` is what keeps that true — see the comment
+/// at the call site for what reading a declined edge here costs.
+fn wave_heights<'a>(
+    order: &'a [String],
+    dep_graph: &'a HashMap<String, Vec<String>>,
+    source_set: &HashSet<&str>,
+    declined_by: &HashMap<&str, Vec<&str>>,
+) -> HashMap<&'a str, u32> {
+    let mut height: HashMap<&str, u32> = HashMap::default();
+    for p in order.iter().rev() {
+        if !source_set.contains(p.as_str()) {
+            continue;
+        }
+        let h = height.get(p.as_str()).copied().unwrap_or(0);
+        height.insert(p.as_str(), h);
+        if let Some(deps) = dep_graph.get(p) {
+            let skip = declined_by.get(p.as_str());
+            for d in deps {
+                if skip.is_some_and(|s| s.contains(&d.as_str())) {
+                    continue;
+                }
+                if source_set.contains(d.as_str()) {
+                    let e = height.entry(d.as_str()).or_insert(0);
+                    *e = (*e).max(h + 1);
+                }
+            }
+        }
+    }
+    height
+}
+
+/// Index [`dep_load_order`]'s declined edges by their source package, so the
+/// wave passes can skip exactly the edges the walk skipped.
+///
+/// A `Vec` per source rather than a `HashSet` of pairs: a package declines at
+/// most a handful of edges (boundary `./...` declines one), so a linear scan of
+/// a two-element vector beats hashing a `(String, String)` for every edge in a
+/// 1400-package closure.
+fn declined_edges_by_source(declined: &[(String, String)]) -> HashMap<&str, Vec<&str>> {
+    let mut by_source: HashMap<&str, Vec<&str>> = HashMap::default();
+    for (from, to) in declined {
+        by_source
+            .entry(from.as_str())
+            .or_default()
+            .push(to.as_str());
+    }
+    by_source
 }
 
 /// Mutable state of one [`dep_load_order`] walk.
@@ -1376,10 +1436,15 @@ struct DepLoadWalk {
     visiting: Vec<String>,
     order: Vec<String>,
     back_edges: Vec<(String, String)>,
-    /// Test-only edges the walk declined because they would have closed a
-    /// cycle. Unlike `back_edges` these are expected: see
+    /// Test-only edges (`from`, `to`) the walk declined because they would
+    /// have closed a cycle. Unlike `back_edges` these are expected: see
     /// [`crate::dedup::import_path_test_only_edges`].
-    declined_test_edges: usize,
+    ///
+    /// They are returned rather than counted because `order` is topological
+    /// only for the edges the walk *kept*. Every later pass that reads
+    /// `dep_graph` — `dep_depth`, and above all `height` — has to skip these
+    /// same edges, or it reintroduces the cycle the walk just declined.
+    declined_test_edges: Vec<(String, String)>,
 }
 
 impl DepLoadWalk {
@@ -1426,7 +1491,8 @@ impl DepLoadWalk {
             // downstream.
             for dep in deps.iter().copied().filter(|d| is_test_edge(d)) {
                 if self.visiting.iter().any(|p| p == dep) {
-                    self.declined_test_edges += 1;
+                    self.declined_test_edges
+                        .push((path.to_string(), dep.to_string()));
                     continue;
                 }
                 self.visit(dep, dep_graph, test_only, loadable);
@@ -1608,13 +1674,100 @@ mod tests {
 
         // No back edge is reported: this shape is not a guff bug.
         assert!(back_edges.is_empty(), "reported {back_edges:?}");
-        assert_eq!(declined, 1, "exactly one test edge closes the cycle");
+        // The declined edge is *named*, not just counted: `wave_heights` has to
+        // skip the same edge, and a count cannot tell it which.
+        assert_eq!(
+            declined,
+            vec![("b".to_string(), "a".to_string())],
+            "exactly one test edge closes the cycle, and it is b -> a"
+        );
 
         // And the production edges are still respected — `lib` before both.
         let pos = |p: &str| order.iter().position(|x| x == p).expect("in order");
         assert!(pos("lib") < pos("a"), "{order:?}");
         assert!(pos("lib") < pos("b"), "{order:?}");
         assert_eq!(order.len(), 3, "{order:?}");
+    }
+
+    /// The declined edge must not come back in `wave_heights`.
+    ///
+    /// This is the defect behind boundary's 11 ill-typed packages, in the
+    /// smallest graph that shows it. `a` and `b` are two packages whose
+    /// in-package tests import each other; `t` is something only `a`'s test
+    /// needs (`testing`, in the Go shape this came from). The walk visits `a`
+    /// first, declines `b -> a`, and leaves `order = [lib, t, b, a]`.
+    ///
+    /// Reading `b -> a` in the reverse pass raises `height(a)` *after* `a`'s own
+    /// height was read as final, so `a` ends up level with `t` — the package it
+    /// imports — and the two are type-checked in the same wave, in parallel. `a`
+    /// then sees no `t` at all: `undefined: t`.
+    #[test]
+    fn wave_heights_ignores_the_declined_edge() {
+        let g = graph(&[
+            ("a", &["lib", "b", "t"]),
+            ("b", &["lib", "a"]),
+            ("t", &["lib"]),
+            ("lib", &[]),
+        ]);
+        let test_only = graph(&[("a", &["b", "t"]), ("b", &["a"])]);
+        let loadable: HashSet<String> = ["a", "b", "t", "lib"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let needed: Vec<String> = ["a", "b", "t", "lib"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+
+        let (order, _, declined) = dep_load_order(&needed, &g, &test_only, &loadable);
+        let source_set: HashSet<&str> = order.iter().map(String::as_str).collect();
+        let declined_by = declined_edges_by_source(&declined);
+        let height = wave_heights(&order, &g, &source_set, &declined_by);
+
+        // `wave(P) = depth - height(P)`, so a strictly greater height is a
+        // strictly earlier wave. Every edge the walk *kept* must therefore end
+        // at a strictly greater height than it starts from — the dependency is
+        // checked, and merged into the seed, before its consumer reads it.
+        let h = |p: &str| height.get(p).copied().unwrap_or(0);
+        assert!(h("t") > h("a"), "a imports t: {height:?}");
+        assert!(h("b") > h("a"), "a's test imports b, and that edge was kept: {height:?}");
+        assert!(h("lib") > h("a"), "{height:?}");
+        assert!(h("lib") > h("b"), "{height:?}");
+        assert!(h("lib") > h("t"), "{height:?}");
+    }
+
+    /// The same graph with the declined edge fed back in — the behaviour before
+    /// this was fixed. Kept as the negative control: without it, the assertions
+    /// above pass on any graph where the heights happen to work out.
+    #[test]
+    fn wave_heights_collides_when_the_declined_edge_is_read_back() {
+        let g = graph(&[
+            ("a", &["lib", "b", "t"]),
+            ("b", &["lib", "a"]),
+            ("t", &["lib"]),
+            ("lib", &[]),
+        ]);
+        let test_only = graph(&[("a", &["b", "t"]), ("b", &["a"])]);
+        let loadable: HashSet<String> = ["a", "b", "t", "lib"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let needed: Vec<String> = ["a", "b", "t", "lib"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+
+        let (order, _, _) = dep_load_order(&needed, &g, &test_only, &loadable);
+        let source_set: HashSet<&str> = order.iter().map(String::as_str).collect();
+        let none = HashMap::default();
+        let height = wave_heights(&order, &g, &source_set, &none);
+
+        let h = |p: &str| height.get(p).copied().unwrap_or(0);
+        assert!(
+            h("a") > h("t"),
+            "reading b -> a lifts a above the package it imports, so a is \
+             scheduled in an earlier wave than t and sees no t at all: {height:?}"
+        );
     }
 
     /// A production cycle is still a bug and still reported: the test-edge
