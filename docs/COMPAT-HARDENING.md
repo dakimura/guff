@@ -25835,3 +25835,54 @@ config の `run.timeout` は **10m** で、`hunt.json` のエントリは 25m。
 ```
 台帳: 48/100 at zero（51 定義、open 0、unmeasured 3）
 ```
+
+### 2026-09-06（続き 229）— `adopt flipt`。**マルチモジュール**だが root に 87 パッケージある。guff-only 4 件は 3 linter にまたがる
+
+台帳が open 0 になったので次の候補 **flipt v2.11.0**（105.4MB、feature flag
+サーバ）。config はこれまでで一番大きい —— **36 linter を名指し**
+（30 enable / 6 disable、`default: none` が無いので standard preset に足す形）、
+`depguard` の deny、`gosec.excludes` 6 つ、`staticcheck.checks`、
+`modernize.disable`、`usetesting.context-background`、`exclusions.rules` 5 つ、
+除外パス 8 つ。**guff は 36 本とも持っている**。
+
+#### マルチモジュール —— 何が測れないかを先に測った
+
+`build/go.mod` / `core/go.mod` / `errors/go.mod` があり **`go.work` は無い**。
+opentelemetry-collector を除外したのと同じ形なので、
+**採用する前にどれだけ届かないかを数えた**:
+
+| | パッケージ数 |
+|---|--:|
+| root（`./...` が届く） | **87** |
+| `build/` | 15 |
+| `core/` | 1 |
+| `errors/` | 1 |
+
+**104 中 87（84%）が測定対象**である。otel-collector が除外されたのは
+root に**パッケージが 1 つしか無く**「fail しようのないターゲット」に
+なるからで、これはその形ではない。届かない 17 パッケージは
+`corpus` のエントリが 1 回の invocation である限り測れない —— schema に
+モジュールディレクトリの欄が増えたら回収できる。
+
+root は darwin で `go build ./...` が exit 0、ill-typed 0。
+
+```
+flipt: guff=4 golangci=0 both=0 P=0.0% R=100.0% [UNEXPECTED]
+  +guff internal/coss/storage/environments/git/azure/azure.go:230
+        staticcheck: could use tagged switch on pr.Status
+  +guff internal/storage/authn/memory/store.go:66,90
+        govet: lostcancel（2 件で 1 組）
+  +guff internal/storage/fs/config_fuzz_test.go:118
+        modernize: rangeint
+  guff-only by linter: {'govet': 2, 'staticcheck': 1, 'modernize': 1}
+```
+
+**3 つの linter にまたがる 4 件**で、続き 226 の cert-manager と違って
+nolintlint の影ではない。config の除外にも該当しない（`exclusions.paths` は
+`.*pb.go` / `bin` / `_tools` / `dist` / `rpc/flipt` / `ui`、
+`staticcheck.checks` が落とすのは SA1019 / ST1003 / QF1008）。
+次のタスク `close flipt` で 3 つとも追う。
+
+```
+台帳: 48/100 at zero（52 定義、open 1＝flipt 4、unmeasured 3）
+```

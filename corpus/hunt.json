@@ -144,6 +144,14 @@
     "timeout": "15m"
   },
   {
+    "name": "flipt",
+    "url": "https://github.com/flipt-io/flipt.git",
+    "ref": "v2.11.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
+  },
+  {
     "name": "gitea",
     "url": "https://github.com/go-gitea/gitea.git",
     "ref": "v1.27.2",
