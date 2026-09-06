@@ -1447,6 +1447,36 @@ fn lostcancel_reports_uncovered_paths() {
     );
 }
 
+/// go/cfg treats **each `ValueSpec` as its own statement**, so a cancel handed
+/// to a sibling spec of the same `var (…)` group is inside the remainder of the
+/// defining block that upstream scans for a use.
+///
+/// The search here walks the statement list, where the group is one element,
+/// and starts after it — so flipt's
+/// `var ( ctx, cancel = context.WithCancel(…); store = &Store{shutdown: cancel} )`
+/// looked like a cancel that is never used. `ok.go` carries it at one and two
+/// specs' distance, plus the separate-statement spelling that always worked;
+/// `lostcancel_allows_deferred_cancel` requires the file to stay empty, and
+/// this names why those three functions are in it.
+#[test]
+fn lostcancel_sees_a_use_in_a_sibling_var_spec() {
+    let dir = support::testdata("lostcancel");
+    let pkg = support::typecheck_with_deps(
+        "example.com/govet/lostcancel/ok",
+        &dir.join("ok.go"),
+        &[
+            ("context", &dir.join("stub/context/context.go")),
+            ("time", &dir.join("stub/time/time.go")),
+        ],
+    );
+    let messages = support::run_analyzer(lostcancel_analyzer(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
+    let src = std::fs::read_to_string(dir.join("ok.go")).expect("fixture readable");
+    for needle in ["siblingSpecUsesCancel", "twoSpecsLater", "separateStatements"] {
+        assert!(src.contains(needle), "ok.go lost {needle}");
+    }
+}
+
 #[test]
 fn lostcancel_allows_deferred_cancel() {
     let dir = support::testdata("lostcancel");

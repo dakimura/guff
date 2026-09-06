@@ -16,9 +16,7 @@ use guff::walk::NodeRef;
 
 use crate::render::render_expr;
 
-fn may_have_side_effects(expr: &Expr) -> bool {
-    matches!(expr, Expr::CallExpr(_))
-}
+use crate::sideeffects::may_have_side_effects;
 
 fn collect_conds(if_: &IfStmt) -> Option<Vec<&Expr>> {
     if if_.init.is_some() || may_have_side_effects(&if_.cond) { return None; }

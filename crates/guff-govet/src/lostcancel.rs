@@ -213,7 +213,7 @@ fn defs_from_stmt(ctx: &Ctx<'_, '_>, stmt: &Stmt) -> Vec<Def> {
             let Decl::GenDecl(gd) = &ds.decl else {
                 return out;
             };
-            for spec in &gd.specs {
+            for (k, spec) in gd.specs.iter().enumerate() {
                 let Spec::ValueSpec(ValueSpec { names, values, .. }) = spec else {
                     continue;
                 };
@@ -224,7 +224,31 @@ fn defs_from_stmt(ctx: &Ctx<'_, '_>, stmt: &Stmt) -> Vec<Def> {
                     // The ValueSpec, not the DeclStmt: `var ctx, cancel = …`
                     // reports at `ctx`, past the `var` keyword.
                     let spec_pos = names[0].pos().0 as u32;
+                    let before = out.len();
                     push_def(ctx, &names[1], with_name, spec_pos, &mut out);
+                    // go/cfg adds **one node per `ValueSpec`**, not one per
+                    // `DeclStmt` ("Treat each var ValueSpec as a separate
+                    // statement"), so upstream's remainder-of-the-block scan
+                    // sees the later specs of the same `var (…)` group. The
+                    // search here walks the statement list, where the whole
+                    // group is one element, and starts *after* it — so a
+                    // cancel handed to a sibling spec looked unused. flipt's
+                    // `NewStore` writes exactly that:
+                    //
+                    //     var (
+                    //         ctx, cancel = context.WithCancel(…)
+                    //         store       = &Store{shutdown: cancel}
+                    //     )
+                    if let Some(Def::Var(def)) = out.get(before) {
+                        if gd.specs[k + 1..].iter().any(|later| match later {
+                            Spec::ValueSpec(vs) => {
+                                vs.values.iter().any(|v| uses_expr(ctx, def, v))
+                            }
+                            _ => false,
+                        }) {
+                            out.truncate(before);
+                        }
+                    }
                 }
             }
         }

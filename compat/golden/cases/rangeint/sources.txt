@@ -1,4 +1,7 @@
 # The fixtures the Rust tests use, so the two cannot drift.
 modernize/rangeint.go   crates/guff-style/tests/testdata/modernize/rangeint.go
+# A file whose own `//go:build go1.18` puts range-over-int out of reach,
+# however new the module is. Every modernize gate reads the *file* version.
+modernize/rangeint_go118.go   crates/guff-style/tests/testdata/modernize/rangeint_go118.go
 intrange/ok.go          crates/guff-style/tests/testdata/intrange/ok.go
 intrange_bad/bad.go     crates/guff-style/tests/testdata/intrange/bad.go
