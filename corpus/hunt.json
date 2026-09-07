@@ -349,5 +349,13 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "25m"
+  },
+  {
+    "name": "hydra",
+    "url": "https://github.com/ory/hydra.git",
+    "ref": "v26.2.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
   }
 ]

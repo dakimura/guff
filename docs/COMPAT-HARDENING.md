@@ -28235,3 +28235,70 @@ minio  この修正  guff=5 golangci=5 both=5  P=100.0% R=100.0%
 ```
 台帳: 52/100 at zero（55 定義、open 0、unmeasured 3）
 ```
+
+### 2026-09-07（続き 254）— `adopt hydra`。**負の selector だけの `checks` は何も選ばない**、を両方が同じく実装している
+
+minio が閉じたので次の候補 **ory/hydra**（`v26.2.0`、123.2MB、17.5k star）。
+`go build ./...` clean、53 パッケージ、**ill-typed 0**。
+
+```
+hydra: guff=2 golangci=2 both=2 P=100.0% R=100.0% [OK]
+       failures=0 unexpected=0 health=0
+```
+
+**採用した。台帳 52/100 → 53/100 at zero。**
+
+#### この target が測っているものは小さい —— そう書いておく
+
+一致した 2 件は**どちらも govet**（`inline: cannot inline`）で、
+errcheck / ineffassign / staticcheck / unused は 1 件も出していない。
+53 パッケージのリポジトリでそれは妙なので、理由まで確かめた。
+
+hydra の config は実質「standard から SA1019 を引いたもの」に見える:
+
+```yaml
+linters:
+  enable: [errcheck, ineffassign, staticcheck, unused]
+  settings:
+    staticcheck:
+      checks: ["-SA1019"]
+```
+
+ところが `default: standard` で測り直すと **golangci 260 / guff 257** 出る。
+差の内訳は SA1019 が 188 件、残りが staticcheck 70 件と govet 2 件。
+hydra 自身の config では staticcheck が**丸ごと沈黙している**。
+
+理由は `checks: ["-SA1019"]` が**負の selector しか持たない**ことである。
+`checks` を書くと既定リストは置き換えられ、正の selector が 1 つも無いので
+**何も選ばれない**。3 形で測った:
+
+| `staticcheck.checks` | golangci | guff |
+|---|---|---|
+| `["-SA1019"]`（負のみ） | **0** | **0** |
+| `["all", "-SA1019"]` | 2 | 2 |
+| キー無し（既定） | 1 | 1 |
+
+**3 形とも一致する。** hydra を採用して測れるのは「govet を 53 パッケージ」と
+この config 意味論であって、staticcheck の中身ではない。
+[[allowlist-rows-are-not-the-defect-count]] の裏返しで、**clean の 1 行は
+「たくさん測って一致した」を意味しない**。
+
+#### 副産物: `(related information)` を guff は出していない
+
+`default: standard` での 260 対 257 の差は 3 件で、**precision は 100%**
+（guff-only は 0）。欠けている 3 件は全部**二次診断**である:
+
+```
+fosite/authorize_response_writer_test.go:15:2   ST1019(related information): other import of …
+fosite/introspection_request_handler_test.go:19:2  ST1019(related information): other import of …
+fosite/integration/authorize_device_grant_request_test.go:185:5  SA4009(related information): assignment to err
+```
+
+上流の `report.Report(..., report.Related(node, msg))` は追加の診断を生む。
+guff は一次の finding は出しているが related の行を落としている。
+hydra 自身の config では staticcheck が沈黙しているので**この target では
+ゲートされない**。別タスクとして残す。
+
+```
+台帳: 53/100 at zero（56 定義、open 0、unmeasured 3）
+```
