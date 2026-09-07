@@ -12,5 +12,8 @@ shadow/shadow.go   crates/guff-context/tests/testdata/bodyclose/shadow.go
 # type, not on a result whose type is spelled `Response`.
 resultskip/resultskip.go   crates/guff-context/tests/testdata/bodyclose/resultskip.go
 wrap/wrap.go   crates/guff-context/tests/testdata/bodyclose/stub/example.com/bodyclose/wrap/wrap.go
+# Two CallExprs the AST spells and go/ssa does not: a conversion, and a call
+# whose Body is closed in the same expression.
+inplace/inplace.go   crates/guff-context/tests/testdata/bodyclose/inplace.go
 nohttp/nohttp.go   crates/guff-context/tests/testdata/bodyclose/nohttp.go
 dialer/dialer.go   crates/guff-context/tests/testdata/bodyclose/stub/example.com/bodyclose/dialer/dialer.go

@@ -27215,3 +27215,103 @@ merge ではなくスクリプト編集で起きた。**件数を見ていなけ
 ```
 台帳: 49/100 at zero（53 定義、open 1＝boundary **2**、unmeasured 3）
 ```
+
+### 2026-09-07（続き 243）— **AST が呼び出しと呼ぶが go/ssa は呼ばないもの**が 2 つ。boundary が閉じた（44 → 0）
+
+boundary の最後の 2 件はどちらも bodyclose の**過剰報告**だった。
+`internal/clientcache/.../client_test.go:85` と
+`internal/daemon/worker/internal/metric/proxy_ws_test.go:91`。
+**これで boundary は 576/576/576、P=R=100%。**
+
+#### 共通の原因
+
+上流は `*ssa.Call` 命令に対して `getReqCall` を掛ける。
+guff は AST の `CallExpr` に掛ける。**Go の AST が「呼び出し」と呼ぶものの
+うち 2 種類が、go/ssa では呼び出しではない。**
+
+1. **変換 `T(x)`。** go/ssa では `ChangeType` / `Convert` / `MakeInterface`
+   に落ちるので `getReqCall` には決して届かない。届いていたら通っていた ——
+   `getReqCall` の判定は**印字した型の部分文字列**で、
+
+   ```go
+   if !strings.Contains(callType, r.resTyp.String()) ||
+       strings.Contains(callType, "net/http.ResponseController") { return nil, false }
+   ```
+
+   `*net/http.ResponseWriter` は `*net/http.Response` を**含む**。
+   `ResponseController` を名指しで除いてあるのがその証拠である。
+   **部分文字列判定は忠実**で、AST の呼び出しに掛けることが忠実でない。
+2. **同じ式の中で body を閉じている呼び出し。**
+   `w.HttpResponse().Body.Close()` —— 上流はその呼び出しの結果の
+   referrer を辿り、`Body` の `FieldAddr` と `Close` を見つけて
+   「open ではない」と答える。
+
+#### fixture が 1 つ余計に捕まえた
+
+`(*http.ResponseWriter)(nil)` だけ見て「名前が ResponseWriter なら除く」と
+直していたら、**`(*http.Response)(nil)` が残った** ——
+本物の response 型への変換で、一見正しく見える方である。
+boundary は前者しか書いていないので corpus は通っていた。
+fixture に両方置いたので、修正が「変換かどうか」に掛かることが強制される。
+
+#### 機構はあったが、この形が見えていなかった
+
+`body_close_chain` は `<chain>.Body.Close()` を記録していたが、
+`render_chain` が**識別子のドット列しか歩かない**:
+
+```rust
+Expr::Ident(id) => …,
+Expr::SelectorExpr(sel) => …,
+Expr::ParenExpr(p) => …,
+_ => None,          // ← 呼び出しが根だとここに落ちる
+```
+
+なので `w.HttpResponse().Body.Close()` は何も記録せず、閉じている当の
+呼び出しが報告されていた。**同じ連鎖の 2 つ目の呼び出しは別の値**なので
+`w.HttpResponse().StatusCode` は両ツールとも報告する ——
+修正はそれを残さなければならない。
+
+#### 測った形（6）
+
+| 形 | golangci | 修正前 | 修正後 |
+|---|---|---|---|
+| `get().HttpResponse().Body.Close()` | ❌ | **報告** | ❌ |
+| `w.HttpResponse().Body.Close()` | ❌ | **報告** | ❌ |
+| `w.HttpResponse().StatusCode`（2 つ目） | ✅ | ✅ | ✅ |
+| `(*http.ResponseWriter)(nil)` | ❌ | **報告** | ❌ |
+| **`(*http.Response)(nil)`** | ❌ | **報告** | ❌ |
+| 素の未クローズ `http.Get` | ✅ | ✅ | ✅ |
+
+golangci 2 / 修正前 guff 6 / 修正後 2。negative control は 2 本で、
+どちらを外しても **2 → 4** に戻る（それぞれ 2 件ずつ効いている）。
+
+なお `OperandMode::TypeExpr` が `Info.types` に記録されているかは
+事前には分からなかった（workspace で `tv.mode` を読む箇所が皆無だった）。
+**fixture に判定させた** —— 記録されていなければ変換の 2 形が残るので
+数が合わない。1 発で通ったので記録されている。
+
+#### 測定
+
+- **boundary: open 2 → 0、P=R=100%（576/576/576）。**
+  bodyclose 63/63/63、errcheck 103/103/103、staticcheck 410/410/410。
+  **台帳 49 → 50/100 at zero、open 0。**
+- 退行なし: **dapr 1555/1555・k6 423/423・thanos 543/543・
+  syncthing 656/656・tailscale 47/43（allowlist 内）・prometheus 20/20・
+  cli 3/3・coredns 3/3・karmada 19/19・pipeline 156/156・rclone 3/3・
+  gitea 1/0（同）**、oss pr 8 ターゲット P=R=100%。
+- golden **231**（bodyclose を regen、**キー集合 39 → 41 で削除 0**）／
+  fix 231／reject 14／workspace 279 バイナリ **3531 ok** 0 failed。
+
+#### このセッションの boundary（続き 232 → 243）
+
+**44 → 0**。内訳は seed の wave 計算 1 件（ill-typed 11 個を道連れにしていた）、
+bodyclose 4 件、staticcheck 4 件（S1025 / S1011 / S1005 / S1040 / S1017）。
+**そのうち 4 件は「1 つ直すと別の近似が効き始める」形**で、
+ガードを同時に入れなければ取りこぼしを誤検出と交換していた
+（[[an-approximation-can-prop-up-another]]）。
+**fixture は 6 つ書き直した** —— どれも 1 形しか通しておらず、
+`assert!(!is_empty())` か `any(contains(…))` か `len() >= N` で守られていた。
+
+```
+台帳: **50/100 at zero**（53 定義、open 0、unmeasured 3）
+```

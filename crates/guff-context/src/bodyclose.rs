@@ -31,6 +31,7 @@ use guff_analysis::code;
 use guff_analysis::passes::inspect as inspect_pass;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use guff_types::alias::unalias_readonly;
+use guff_types::operand::OperandMode;
 use guff_types::arena::TypeData;
 use guff_types::named::named_obj;
 use guff_types::pointer::pointer_elem;
@@ -803,6 +804,9 @@ fn check_body(
     let mut field_aliases: HashMap<String, String> = HashMap::new();
     // Every `<chain>.Body.Close()` seen anywhere in the body.
     let mut chain_closes: HashSet<String> = HashSet::new();
+    // Calls whose result has its `Body` closed in the very expression the call
+    // appears in — see [`body_close_call_base`].
+    let mut closed_call_results: HashSet<u32> = HashSet::new();
     let mut usages_to_close: Vec<String> = Vec::new();
     // Calls whose result the walk below already accounts for: the right-hand
     // side of an assignment or a `var` spec (tracked by name), and a call
@@ -852,6 +856,9 @@ fn check_body(
                 if let Some(chain) = body_close_chain(call) {
                     chain_closes.insert(chain);
                 }
+                if let Some(base) = body_close_call_base(call) {
+                    closed_call_results.insert(base);
+                }
                 // `getReqCall` accepts *any* call whose result type mentions
                 // `*net/http.Response` — a helper of this package as much as
                 // `client.Do` — and a result nobody binds has no referrers, so
@@ -859,6 +866,8 @@ fn check_body(
                 // `getPingResponse(t, "ping").Uncompressed` (connect-go, four
                 // times) said nothing.
                 if !handled_calls.contains(&call.id)
+                    && !closed_call_results.contains(&call.id)
+                    && !is_conversion(pass, call)
                     && call_result_is_response(pass, call)
                     && !is_httptest_result_call(pass, &Expr::CallExpr(call.clone()))
                 {
@@ -875,7 +884,7 @@ fn check_body(
                 // referrer of such a call is a response value, so `isopen`
                 // proves nothing and reports. cli's `httpmock.ScopesResponder`
                 // returns exactly that.
-                if mentions_response_indirectly(pass, call) {
+                if !is_conversion(pass, call) && mentions_response_indirectly(pass, call) {
                     let msg = if check_consumption {
                         MSG_CLOSE_AND_CONSUME
                     } else {
@@ -1040,6 +1049,66 @@ fn body_close_chain(call: &CallExpr) -> Option<String> {
         return None;
     }
     render_chain(&body_sel.x)
+}
+
+/// The **call** at the base of `<call>.Body.Close()`, as a node id.
+///
+/// [`body_close_chain`] answers the same question for a dotted path of
+/// identifiers, and `render_chain` stops at anything that is not one — so
+/// `w.HttpResponse().Body.Close()` recorded nothing and the very call it closes
+/// was reported. Upstream walks that call's result through its referrers,
+/// finds the `FieldAddr` for `Body` and the `Close` on it, and answers "not
+/// open".
+///
+/// A *second* call in the same chain is a different value and stays reportable:
+/// `w.HttpResponse().StatusCode` after `w.HttpResponse().Body.Close()` is a
+/// finding for both tools.
+fn body_close_call_base(call: &CallExpr) -> Option<u32> {
+    let Expr::SelectorExpr(close_sel) = call.fun.as_ref() else {
+        return None;
+    };
+    if close_sel.sel.name != CLOSE_METHOD {
+        return None;
+    }
+    let Expr::SelectorExpr(body_sel) = close_sel.x.as_ref() else {
+        return None;
+    };
+    if body_sel.sel.name != BODY_FIELD {
+        return None;
+    }
+    fn call_id(e: &Expr) -> Option<u32> {
+        match e {
+            Expr::CallExpr(inner) => Some(inner.id),
+            Expr::ParenExpr(p) => call_id(&p.x),
+            _ => None,
+        }
+    }
+    call_id(&body_sel.x)
+}
+
+/// A conversion `T(x)`, which the AST spells as a `CallExpr` and go/ssa does
+/// not spell as a call at all.
+///
+/// `getReqCall` matches `*ssa.Call`, and a conversion lowers to `ChangeType` /
+/// `Convert` / `MakeInterface`, so upstream never offers one to its test. That
+/// test is a substring over the printed type —
+///
+/// ```go
+/// if !strings.Contains(callType, r.resTyp.String()) ||
+///     strings.Contains(callType, "net/http.ResponseController") { return nil, false }
+/// ```
+///
+/// — and `*net/http.ResponseWriter` *does* contain `*net/http.Response`. The
+/// substring test is faithful; applying it to AST calls is what is not.
+/// boundary's `require.Implements(t, (*http.ResponseWriter)(nil), wrapped)` is
+/// the shape.
+fn is_conversion(pass: &Pass<'_>, call: &CallExpr) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    info.types
+        .get(&call.fun.id())
+        .is_some_and(|tv| tv.mode == OperandMode::TypeExpr)
 }
 
 /// `d.response` → `Some("d.response")`; anything that is not a dotted path of
