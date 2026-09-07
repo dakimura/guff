@@ -322,12 +322,12 @@
     "packer": {
       "tier": "hunt",
       "state": "open",
-      "at": "20260907T055319Z",
-      "open": 4,
-      "guff_only": 2,
-      "gcl_only": 2,
+      "at": "20260907T061128Z",
+      "open": 2,
+      "guff_only": 1,
+      "gcl_only": 1,
       "by_linter": {
-        "staticcheck": 4
+        "staticcheck": 2
       }
     },
     "pipeline": {

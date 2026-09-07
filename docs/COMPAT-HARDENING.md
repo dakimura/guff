@@ -27627,3 +27627,106 @@ packer   after   guff=608 golangci=608 both=606  P=99.7% R=99.7%  open   4
 ```
 台帳: 50/100 at zero（54 定義、open 1＝packer 4、unmeasured 3）
 ```
+
+### 2026-09-07（続き 247）— S1002 のメッセージは**式のソースを描く**。上流は go/printer、guff は 5 分岐の手書きだった
+
+続き 246 で packer が 305 → 4 まで落ちた。残った 4 件のうち 2 件は
+**同じ行に guff-only と gcl-only が 1 件ずつ立つ**形で、
+[[equal-only-counts-mean-a-rendering-diff]] の署名そのものだった:
+
+```
++guff  packer/build.go:418  S1002 ... can be simplified to !<expr>
++gcl   packer/build.go:418  S1002 ... can be simplified to !*corePP.KeepInputArtifact
+```
+
+該当箇所は `if defaultKeep && *corePP.KeepInputArtifact == false && forceOverride`。
+
+#### 上流は `report.Render`、つまり go/printer
+
+```go
+r := op + report.Render(pass, other)
+```
+
+`report.Render` は `format.Node(&buf, pass.Fset, x)` なので、**どんな式でも
+ソースを描ける**。guff の `s1002.rs` にはローカルの `render_expr` があって、
+`Ident` / `ParenExpr` / `UnaryExpr(!)` / `SelectorExpr` / `CallExpr` の 5 分岐しか
+持たず、**それ以外は全部リテラル文字列 `<expr>`** になっていた。
+
+これは装飾の欠落ではない。S1002 のメッセージは**提案**であって、
+`can be simplified to !<expr>` は読み手に何も伝えない。
+
+#### 14 形を 1 行ずつ測った
+
+`crates/guff-staticcheck/tests/testdata/s1002/shapes.go` に演算対象の形を
+1 行 1 形で並べ、両ツールに通した。**6 形が間違っていた**:
+
+| ソース | golangci | guff（修正前） |
+|---|---|---|
+| `b == true` | `b` | `b` |
+| `b == false` | `!b` | `!b` |
+| `!b == true` | `!b` | `!b` |
+| `s.B == true` | `s.B` | `s.B` |
+| `s.M() == true` | `s.M()` | `s.M()` |
+| `g() == false` | `!g()` | `!g()` |
+| `*ptr == false` | `!*ptr` | **`!<expr>`** |
+| `arr[0] == true` | `arr[0]` | **`<expr>`** |
+| `m[k] == false` | `!m[k]` | **`!<expr>`** |
+| `(<-ch) == true` | `(<-ch)` | **`(<expr>)`** |
+| `(b && s.B) == false` | `!(b && s.B)` | **`!(<expr>)`** |
+| `i.(bool) == true` | `i.(bool)` | **`<expr>`** |
+| `(b) == false` | `!(b)` | `!(b)` |
+| `((!b)) == true` | `(!b)` | **`((!b))`** |
+
+最後の 1 行は描画の話で、go/printer が**冗長な外側の括弧を 1 段落とす**。
+`strings.TrimLeft(r, "!")` のパリティ処理はここには効かない（先頭が `(` なので
+1 つも削れない）ので、差は printer そのものから出ている。
+
+#### 直し方 —— 既にある go/printer 経路を使う
+
+`crates/guff-staticcheck/src/render.rs` には既に 2 つある:
+
+- `render_node(pass, expr)` = `format::node`。**これが `report.Render`**。
+- `render_expr(expr)` = 共有の近似。`StarExpr` / `IndexExpr` /
+  `TypeAssertExpr` など、s1002.rs のローカル版が知らなかった形を既に知っている。
+
+S1002 を `render_node`（失敗時のみ共有の `render_expr`）に差し替えた。
+ローカルの 5 分岐は削除。**近似を別の近似に寄せたのではなく、近似を上流の
+実物に置き換えている**（[[duplicate-ports-are-not-duplicates]] の逆向き）。
+
+パリティ処理は `collapse_negations(op, const_val, rendered)` として分けた。
+描画側は `Pass` が要るが、こちらは純粋関数で、`!!x == false` が `!x` に
+なることを `Pass` 無しで固定できる。
+
+#### ゲート
+
+- `cases/staticcheck-s` の `sources.txt` に `s1002/shapes/shapes.go` を追加。
+  golden のキーが **128 → 142**、消えたキーは 0。
+- `compat/fix/expected/staticcheck-s.diff` を再生成（+35 行、削除 0）。
+  S1002 は fix を出すので、`--fix` の書き換えも 14 形すべて上流と一致する。
+- `checks_test.rs` に `s1002_message_renders_every_operand_shape`。
+  `assert_eq!(messages.len(), 14)` のうえで**形ごとに文字列を突き合わせる**。
+  修正前のバイナリでは 7 番目（`!*ptr`）で落ちる。
+- `s1002.rs` のインラインテストは `collapse_negations` に付け替えた。
+  **これは release ビルドでは検出されなかった** —— `#[cfg(test)]` は
+  `cargo build --release` に含まれないので、シグネチャを変えた時点で
+  release は通り `cargo test` だけがコンパイルエラーになる
+  （[[grep-for-FAILED-misses-compile-errors]]、今回は `test result:` 行すら
+  出ずに exit 101）。
+
+#### 測定
+
+```
+packer  before  guff=608 golangci=608 both=606  P=99.7% R=99.7%  open 4
+packer  after   guff=608 golangci=608 both=607  P=99.8% R=99.8%  open 2
+```
+
+残り 2 件は S1002 とは無関係な別々の 2 つの欠陥で、次のタスク:
+
+- `hcl2template/types.packer_config.go:636` の **SA4006**
+  （`this value of moreDiags is never used`）が guff から出ない。
+- `command/build.go:304` に guff だけの
+  `when ok is true, hcperr can't be nil`（SA5011）が立つ。
+
+```
+台帳: 50/100 at zero（54 定義、open 1＝packer 2、unmeasured 3）
+```

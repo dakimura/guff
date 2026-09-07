@@ -19,6 +19,20 @@ s1001/bad/bad.go:65:2:staticcheck::S1001: should use copy(to, from) instead of a
 s1002/bad/bad.go:4:5:staticcheck::S1002: should omit comparison to bool constant, can be simplified to x
 s1002/bad/bad.go:7:5:staticcheck::S1002: should omit comparison to bool constant, can be simplified to !x
 s1002/ok/ok.go:12:1:staticcheck::ST1021: comment on exported type TokenSource should be of the form "TokenSource ..." (with optional leading article)
+s1002/shapes/shapes.go:23:6:staticcheck::S1002: should omit comparison to bool constant, can be simplified to b
+s1002/shapes/shapes.go:24:6:staticcheck::S1002: should omit comparison to bool constant, can be simplified to !b
+s1002/shapes/shapes.go:25:6:staticcheck::S1002: should omit comparison to bool constant, can be simplified to !b
+s1002/shapes/shapes.go:26:6:staticcheck::S1002: should omit comparison to bool constant, can be simplified to s.B
+s1002/shapes/shapes.go:27:6:staticcheck::S1002: should omit comparison to bool constant, can be simplified to s.M()
+s1002/shapes/shapes.go:28:6:staticcheck::S1002: should omit comparison to bool constant, can be simplified to !g()
+s1002/shapes/shapes.go:29:6:staticcheck::S1002: should omit comparison to bool constant, can be simplified to !*ptr
+s1002/shapes/shapes.go:30:6:staticcheck::S1002: should omit comparison to bool constant, can be simplified to arr[0]
+s1002/shapes/shapes.go:31:6:staticcheck::S1002: should omit comparison to bool constant, can be simplified to !m[k]
+s1002/shapes/shapes.go:32:6:staticcheck::S1002: should omit comparison to bool constant, can be simplified to (<-ch)
+s1002/shapes/shapes.go:33:6:staticcheck::S1002: should omit comparison to bool constant, can be simplified to !(b && s.B)
+s1002/shapes/shapes.go:34:6:staticcheck::S1002: should omit comparison to bool constant, can be simplified to i.(bool)
+s1002/shapes/shapes.go:35:6:staticcheck::S1002: should omit comparison to bool constant, can be simplified to !(b)
+s1002/shapes/shapes.go:36:6:staticcheck::S1002: should omit comparison to bool constant, can be simplified to (!b)
 s1003/bad/bad.go:9:2:staticcheck::SA9003: empty branch
 s1003/bad/bad.go:9:5:staticcheck::S1003: should use strings.Contains(s, "x") instead
 s1003/bad/bad.go:11:2:staticcheck::SA9003: empty branch

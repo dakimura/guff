@@ -35,40 +35,42 @@ fn expr_is_bool(pass: &Pass<'_>, expr: &Expr) -> bool {
     )
 }
 
-fn render_expr(expr: &Expr) -> String {
-    match expr {
-        Expr::Ident(id) => id.name.clone(),
-        Expr::ParenExpr(p) => format!("({})", render_expr(&p.x)),
-        Expr::UnaryExpr(u) if u.op == Token::NOT => format!("!{}", render_expr(&u.x)),
-        Expr::SelectorExpr(s) => format!("{}.{}", render_expr(&s.x), s.sel.name),
-        Expr::CallExpr(c) => {
-            let mut s = render_expr(&c.fun);
-            s.push('(');
-            for (i, arg) in c.args.iter().enumerate() {
-                if i > 0 {
-                    s.push_str(", ");
-                }
-                s.push_str(&render_expr(arg));
-            }
-            s.push(')');
-            s
-        }
-        _ => "<expr>".to_string(),
-    }
+/// `op + report.Render(pass, other)`, then upstream's parity trim.
+///
+/// Upstream renders the operand with go/printer, so *whatever* the expression
+/// is, the message quotes its source. guff had a five-arm printer here —
+/// `Ident`, `ParenExpr`, `UnaryExpr(!)`, `SelectorExpr`, `CallExpr` — and
+/// everything else came out as the literal string `<expr>`. That is not a
+/// cosmetic loss: the message is a *suggestion*, and `can be simplified to
+/// !<expr>` tells the reader nothing. On hashicorp/packer,
+/// `*corePP.KeepInputArtifact == false` was reported by both tools on the same
+/// line and counted as a divergence on both sides, because guff wrote
+/// `!<expr>` where upstream wrote `!*corePP.KeepInputArtifact`.
+///
+/// `crate::render::render_node` is the go/printer path (`format::node`), which
+/// is what `report.Render` is. The shared `render::render_expr` approximation
+/// is the fallback for the case the printer itself fails, and it already knows
+/// the shapes this file did not (`StarExpr`, `IndexExpr`, `TypeAssertExpr`, …).
+fn simplified_condition(pass: &Pass<'_>, op: Token, const_val: bool, other: &Expr) -> String {
+    let rendered = crate::render::render_node(pass, other)
+        .unwrap_or_else(|| crate::render::render_expr(other));
+    collapse_negations(op, const_val, &rendered)
 }
 
-fn simplified_condition(op: Token, const_val: bool, other: &Expr) -> String {
+/// `op + rendered`, with upstream's parity trim on the leading `!`s.
+///
+/// `strings.TrimLeft(r, "!")` then re-prefixes one `!` when an odd number came
+/// off, so `!!x == false` reads `!x` rather than `!!!x`. Split out from
+/// [`simplified_condition`] because the rendering half needs a `Pass` and this
+/// half is pure.
+fn collapse_negations(op: Token, const_val: bool, rendered: &str) -> String {
     let negate = matches!(
         (op, const_val),
         (Token::EQL, false) | (Token::NEQ, true)
     );
-    let rendered = format!(
-        "{}{}",
-        if negate { "!" } else { "" },
-        render_expr(other)
-    );
-    let orig_len = rendered.len();
-    let trimmed = rendered.trim_start_matches('!');
+    let with_op = format!("{}{}", if negate { "!" } else { "" }, rendered);
+    let orig_len = with_op.len();
+    let trimmed = with_op.trim_start_matches('!');
     let leading_bangs = orig_len - trimmed.len();
     if leading_bangs % 2 == 1 {
         format!("!{trimmed}")
@@ -97,7 +99,7 @@ fn check_binary(pass: &Pass<'_>, expr: &BinaryExpr) -> Option<(u32, String, Text
     if !expr_is_bool(pass, other) {
         return None;
     }
-    let simplified = simplified_condition(expr.op, val, other);
+    let simplified = simplified_condition(pass, expr.op, val, other);
     // `edit.ReplaceWithString(expr, r)` where `r` is the same string the
     // message quotes — the whole comparison goes and the simplified condition
     // takes its place.
@@ -187,21 +189,21 @@ mod tests {
         assert!(validate(&[analyzer()]).is_ok());
     }
 
+    /// The parity trim, on the four (op, constant) combinations and on an
+    /// operand that already carries `!`s. The rendering half is asserted
+    /// per-shape against golangci-lint in
+    /// `tests/checks_test.rs::s1002_message_renders_every_operand_shape`.
     #[test]
-    fn simplified_condition_examples() {
-        use guff::ast::Ident;
-        let x = Expr::Ident(Ident::new_ident("x"));
-        assert_eq!(
-            simplified_condition(Token::EQL, true, &x),
-            "x"
-        );
-        assert_eq!(
-            simplified_condition(Token::EQL, false, &x),
-            "!x"
-        );
-        assert_eq!(
-            simplified_condition(Token::NEQ, true, &x),
-            "!x"
-        );
+    fn collapse_negations_examples() {
+        assert_eq!(collapse_negations(Token::EQL, true, "x"), "x");
+        assert_eq!(collapse_negations(Token::EQL, false, "x"), "!x");
+        assert_eq!(collapse_negations(Token::NEQ, true, "x"), "!x");
+        assert_eq!(collapse_negations(Token::NEQ, false, "x"), "x");
+        // `!x == false` is `!!x` before the trim: two bangs, so none survive.
+        assert_eq!(collapse_negations(Token::EQL, false, "!x"), "x");
+        // `!!x == false` is `!!!x`: three, so one survives.
+        assert_eq!(collapse_negations(Token::EQL, false, "!!x"), "!x");
+        // A `!` that is not leading is not the operator's, and stays put.
+        assert_eq!(collapse_negations(Token::EQL, false, "(!x)"), "!(!x)");
     }
 }
