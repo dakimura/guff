@@ -45,6 +45,14 @@ GOAL = 100
 EXCLUDED = {
     "pulumi": "declares module plugins; a stock golangci-lint refuses to start "
     "(compat/reject/cases/custom-module-plugin-missing)",
+    "lnd": "declares a `ll` module plugin (a custom line-length linter whose source is in "
+    "tools/linters/ll.go and whose binary the Makefile builds with `golangci-lint custom`); "
+    "a stock golangci-lint refuses to start, and guff refuses with the same message — the "
+    "parity compat/reject/cases/custom-module-plugin-missing pins. Same shape as pulumi. "
+    "With the custom block removed by hand ./build/... gives golangci 10 / guff 10 / both 10, "
+    "so the repository is measurable and this is reachable if patch_unlimited_issues.py ever "
+    "strips type: module entries the way it strips .so goplugins. Measured 2026-09-08 at "
+    "v0.21.2-beta",
     "moby": "public tree has no root go.mod",
     "hugo": "no .golangci.yml on the default branch",
     "etcd": "no .golangci.yml on the default branch",

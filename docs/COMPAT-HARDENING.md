@@ -28503,3 +28503,71 @@ unit test は両方を数えている（`assert_eq!` で件数、`from_linter` �
 ```
 台帳: 54/100 at zero（57 定義、open 0、unmeasured 3）
 ```
+
+### 2026-09-08（続き 257）— `adopt lnd`。**両方が同じ理由で起動を拒む**ので除外。pulumi と同じ形
+
+`adopt lnd`（v0.21.2-beta, 127.8MB）。config は `version: "2"`、337 行、
+`default: all` + 大きな disable 表。ここまでは理想的な候補に見える。
+
+素の golangci-lint 2.12.2 は**起動しない**:
+
+```
+$ golangci-lint run ./build/...
+Error: build linters: plugin(ll): plugin "ll" not found        (rc=3)
+```
+
+**guff も同じ文言で拒む**（rc=2）:
+
+```
+$ guff run -c .golangci.yml ./build/...
+guff: build linters: plugin(ll): plugin "ll" not found
+```
+
+`ll` は `linters.settings.custom` の `type: module` プラグイン ——
+`S` 付きログ行を除外する lnd 独自の行長 linter で、**ソースはリポジトリの中に
+ある**（`tools/linters/ll.go`）。パッケージングの事故ではなく、Makefile が
+専用バイナリを建てる前提になっている:
+
+```make
+build-native-linter:
+	cd tools && CGO_ENABLED=0 $(GOCC) tool $(GOLINT_PKG) custom
+lint-native: check-go-version lint-config-check build-native-linter
+	GOWORK=off ./tools/custom-gcl run -v $(LINT_WORKERS) \
+	  --new-from-rev=$$(git merge-base HEAD master)
+```
+
+つまり lnd を測るには**両側に custom ビルドのバイナリが要る**。
+pulumi（続き 4 相当、除外表参照）とまったく同じ形なので、同じく除外する。
+
+**この拒否は乖離ではなく一致**である。文言は
+`compat/reject/cases/custom-module-plugin-missing` が既に固定していて、
+guff は正しくそこを通っている。今回 guff に直すところは無い。
+
+#### 「リポジトリ自体は測れるか」を測っておく
+
+除外の理由が**プラグイン 1 個だけ**なのか、それとも他にも壊れているのかは、
+将来この判断を検算する人に必要な情報なので測った。`custom:` ブロックを手で
+落として `./build/...` を両方に通すと:
+
+```
+golangci 10 / guff 10 / both 10   （完全一致）
+```
+
+つまり**塞いでいるのはプラグインだけ**。`corpus/patch_unlimited_issues.py` が
+`type: module` の項目も落とすようにすれば adopt できる —— ただし現在の
+ガードは `has_path and not is_module` で、module 型を**意図的に外している**。
+そこを変えるのは別のタスクなので、ここでは測定だけ残す
+（ollama の除外行と同じ扱い）。
+
+#### ついでに測れた 2 つ
+
+- `issues.new-from-rev: 03eab4db…` が指す commit は `--depth 1` clone に**無い**。
+  golangci はそれで**エラーにならず、黙って全部報告する** —— Diff プロセッサが
+  失敗ではなく no-op になる。将来 adopt するならここは別途決める必要がある。
+- ツリーは multi-module（`go.mod` が 13 個）。root module の `go list ./...` は
+  159 パッケージで、`./tor/...` は root から名指しできない
+  （`directory prefix tor does not contain main module`）。
+
+```
+台帳: 54/100 at zero（57 定義、open 0、unmeasured 3）—— 変化なし。除外表が 1 行増えた
+```
