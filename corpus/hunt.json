@@ -365,5 +365,13 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "25m"
+  },
+  {
+    "name": "go-elasticsearch",
+    "url": "https://github.com/elastic/go-elasticsearch.git",
+    "ref": "v9.5.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
   }
 ]
