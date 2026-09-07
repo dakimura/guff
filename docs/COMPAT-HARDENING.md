@@ -28017,3 +28017,79 @@ SA4017（`mk doesn't have side effects and its return value is ignored`）にも
 ```
 台帳: 51/100 at zero（54 定義、open 0、unmeasured 3）
 ```
+
+### 2026-09-07（続き 251）— 型パラメータ越しの `*p` は**型集合を歩く**。`adopt minio` は 2 つの欠陥で止まる
+
+packer が閉じたので次の候補 **minio/minio**（`RELEASE.2025-10-15T17-29-55Z`、
+122.3MB、61.4k star）。`corpus/hunt.json` に足して測ると、
+**health ゲートで落ちた** —— finding の差ではなく guff 自身の不具合が 2 つ:
+
+```
+minio: 1 worker panic(s): crates/guff-types/src/array.rs:53:18
+minio: ill-typed packages 1 > baseline 0; github.com/minio/minio/internal/config
+  internal/config/config.go:70:9: invalid indirect of pt (Type)
+minio: guff=12 golangci=5 both=5 P=41.7% R=100.0%
+```
+
+このエントリはそのうち **ill-typed の 1 件**を直す。**minio はまだ採用しない**
+（残り 2 つが片付くまで `hunt.json` には入れない —— 入れれば CI が赤になる）。
+
+#### 型パラメータは `Underlying()` では見えない
+
+```go
+func Error[T ErrorConfig, PT interface {
+	*T
+	setMsg(string)
+}](format string, vals ...any) T {
+	pt := PT(new(T))
+	pt.setMsg(fmt.Sprintf(format, vals...))
+	return *pt          // ← ここ
+}
+```
+
+go/types の `*ast.StarExpr` は `underIs(x.typ, …)` で**型集合を歩き**、
+各項が Pointer であること、かつ base が全部同一であることを要求する。
+guff は `is_pointer(&self.types, typ)` を型そのものに訊いていた。
+`pt` の型は型パラメータ `PT` なので答えは no で、パッケージが丸ごと
+ill-typed になる —— そして [[buildssa-srcfuncs-cannot-see-var-initializers]]
+と同じで、**型に依存する analyzer が全部黙る**。
+
+`under_is`（＝`underIs`）は `crates/guff-types/src/under.rs` に既にあった。
+indirection の枝がそれを使っていなかっただけである。
+
+`identical` は `&mut TypeArena` と object/package arena を要求し、
+`under_is` が歩いているあいだそれを握っているので、**歩きでは項を集めるだけ**に
+して、Pointer 判定と base の同一性はそのあとで見る。go/types は最初に
+食い違った項で報告するが、エラー・コード・位置は同じ。
+
+#### 5 形を `go build` に対して測った
+
+| 形 | go build | guff（修正前） | guff（修正後） |
+|---|---|---|---|
+| `interface{ *T; setMsg(string) }`（minio） | 通る | **ill-typed** | 通る |
+| `interface{ *A }` 単項 | 通る | **ill-typed** | 通る |
+| `interface{ *A \| A }`（Pointer でない項） | `cannot indirect` | 拒否 | 拒否 |
+| `interface{ *A \| *B }`（base 不一致） | `must have identical base types` | 拒否 | 拒否 |
+| 素の `*p` / `*n`（int）/ `(*A).M` | 通る / 拒否 / 通る | 同じ | 同じ |
+
+`crates/guff-types/tests/generic_ops.rs` に 5 本。修正前のバイナリでは
+受理側 2 本が落ちる。
+
+#### minio に残っている 2 つ（次のタスク）
+
+- **S1035 の過剰報告 7 件。** `cmd/postpolicyform_test.go` で
+  `(cmd.formValues).Set` を `net/http.Header` の `Set` と同一視している。
+  上流は receiver が `net/http.Header` のときだけ報告する。
+- **`array.rs:53` の panic**（`expected Array, got Discriminant(11)`）。
+  release ビルドなので backtrace が省略されていて、debug ビルドで
+  取り直す必要がある。ill-typed が消えても**残る**ので、別原因。
+
+#### 副産物: 制約の重複項を guff は検出しない
+
+`interface{ *A | *A }` を `go build` は
+`overlapping terms *A and *A` で拒否するが、guff は通す。
+この修正とは無関係の別の gap で、測っただけで直していない。
+
+```
+台帳: 51/100 at zero（54 定義、open 0、unmeasured 3）—— minio は未採用のまま
+```

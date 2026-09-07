@@ -324,7 +324,49 @@ impl Checker {
             return;
         }
         let typ = x.typ.unwrap_or_else(|| self.invalid_type());
-        if !is_pointer(&self.types, typ) {
+        // go/types walks the *type set*, not the type: `underIs(x.typ, …)`.
+        // For an ordinary type that is one call with its underlying type, but
+        // for a **type parameter** it is one call per term, and each has to be
+        // a pointer with the same base. That is how the constraint
+        //
+        //     func Error[T ErrorConfig, PT interface{ *T; setMsg(string) }](…) T {
+        //         pt := PT(new(T))
+        //         …
+        //         return *pt
+        //     }
+        //
+        // type-checks: `pt` is a `PT`, whose only term is `*T`. Asking
+        // `is_pointer` about the type parameter itself answers no, and
+        // minio's `internal/config` was one ill-typed package because of it.
+        // The bases are collected first and compared afterwards: `identical`
+        // needs the object and package arenas alongside a `&mut TypeArena`,
+        // which `under_is` is already holding for the duration of the walk.
+        // go/types reports at the first mismatching term; the walk here is
+        // total, and the error, its code and its position are the same.
+        // The walk only collects; the checks run after it. `under_is` holds
+        // `&mut TypeArena` for its duration, and `is_pointer` / `pointer_elem`
+        // / `identical` all need the arenas too.
+        let mut terms: Vec<Option<TypeId>> = Vec::new();
+        crate::under::under_is(
+            &mut self.types,
+            &self.objects,
+            &self.packages,
+            typ,
+            |u| {
+                terms.push(u);
+                true
+            },
+        );
+        let mut bases: Vec<TypeId> = Vec::new();
+        let every_term_is_a_pointer = !terms.is_empty()
+            && terms.iter().all(|u| match u {
+                Some(u) if is_pointer(&self.types, *u) => {
+                    bases.push(pointer_elem(&self.types, *u));
+                    true
+                }
+                _ => false,
+            });
+        if !every_term_is_a_pointer {
             let xs = self.operand_str(x);
             self.error(
                 e.star.0 as u32,
@@ -334,6 +376,21 @@ impl Checker {
             x.mode = OperandMode::Invalid;
             return;
         }
+        let base = bases.first().copied();
+        if let Some(first) = base {
+            for &other in &bases[1..] {
+                if !identical(&mut self.types, &self.objects, &self.packages, first, other) {
+                    let xs = self.operand_str(x);
+                    self.error(
+                        e.star.0 as u32,
+                        Code::InvalidIndirection,
+                        format!("pointers of {} must have identical base types", xs),
+                    );
+                    x.mode = OperandMode::Invalid;
+                    return;
+                }
+            }
+        }
         // A pointer indirection is addressable **whatever the pointer
         // expression was** — the spec lists it alongside "a variable" and "a
         // slice indexing operation", and go/types sets `x.mode = variable`
@@ -342,7 +399,7 @@ impl Checker {
         // `*getPtrFunc(app) = …` (deref of a call result), which are five
         // ill-typed packages across thanos, argo-cd and cli.
         x.mode = OperandMode::Variable;
-        x.typ = Some(pointer_elem(&self.types, typ));
+        x.typ = Some(base.unwrap_or_else(|| pointer_elem(&self.types, typ)));
     }
 
     /// Type-check a basic literal (int/float/imag/char/string).
