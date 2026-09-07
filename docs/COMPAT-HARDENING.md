@@ -28163,3 +28163,75 @@ errchkjson は作らずに `(*encoding/json.Encoder).Encode` を全部落とし�
 ```
 台帳: 51/100 at zero（54 定義、open 0、unmeasured 3）—— minio は panic が残るので未採用
 ```
+
+### 2026-09-07（続き 253）— `range` は**名前つき配列へのポインタ**で panic していた。`adopt minio` 完了、52/100
+
+続き 251/252 で minio に残っていた最後の 1 つ、**`array.rs:53` の panic**。
+
+release ビルドでは backtrace が省略されるので debug ビルドを建てて取り直した:
+
+```
+guff_types::array::as_array            array.rs:53
+guff_types::array::array_elem          array.rs:47
+guff_ssa::builder::stmt::range_indexed_value   stmt.rs:554
+guff_ssa::builder::stmt::range_indexed         stmt.rs:351
+guff_ssa::builder::stmt::range_stmt            stmt.rs:241
+```
+
+SSA ビルダの `range` である。3 行で再現する:
+
+```go
+type Key [32]byte
+
+func f(p *Key) {
+	for i, b := range p { … }   // expected Array, got Discriminant(11)
+}
+```
+
+Discriminant 11 は **`Named`**。`*[N]T` を range するとき、`pointer_elem` が
+返すのは**書かれたとおりの型**なので、配列型に名前が付いていれば `Named` で
+届く。`array_elem` は `underlying` を取らないので、そこで panic する。
+
+`typeset.rs` の `index_elem` は**同じ質問を正しくしていた** ——
+`elem.underlying(arena)` してから Array か確かめる。range の経路だけが
+していなかった。同じ形にした。
+
+#### 長さも間違っていた（名前が無い場合も）
+
+`for range p` の長さは、`p *[N]T` なら**定数 N** である。Go は型から読むだけで
+ポインタをロードしない。guff は `_ => self.emit_len(x, pos)` に落ちていて、
+`*[N]T` に対して `len` 呼び出しを出していた。**名前の付いていない
+`*[4]byte` でも同じ**で、こちらは panic しないぶん誰も気づいていなかった。
+`range_test.rs` に足した 2 本のうち、名前なし側は `len(` を含まないという
+主張で落ちる。
+
+#### panic は「差分に出ない失敗」である
+
+worker が 1 つ死ぬだけなので、finding 集合の比較には**何も現れない**。
+health ゲートだけがそれを見ている（[[empty-fixture-hides-defects]] の
+4 形目に近い）。
+
+#### 測定 —— `adopt minio` 完了
+
+```
+minio  最初      guff=12 golangci=5 both=5  P=41.7%  R=100.0%
+                 panic 1、ill-typed 1（health=1 で不合格）
+minio  続き 251  ill-typed が消える（generic の `*pt`）。panic は残る
+minio  続き 252  S1035 の過剰報告 7 件が消える
+minio  この修正  guff=5 golangci=5 both=5  P=100.0% R=100.0%
+                 failures=0 unexpected=0 **health=0**
+```
+
+**採用した。台帳 51/100 → 52/100 at zero（55 定義、open 0）。**
+
+- `crates/guff-ssa/tests/range_test.rs` に 2 本（名前つき／名前なし）。
+  修正前は前者が panic し、後者は `len(` の主張で落ちる。
+- golden `cases/staticcheck-sa` に `sa4006/range_ptr.go` ——
+  **findings がその loop を通って出ること**を上流に対して確かめる
+  （panic しないことの確認では足りない）。364 → 367 キー、消失 0。
+  `step` にはパッケージ変数のインクリメントを付けてある（続き 250 と同じく、
+  無いと SA4017 の別の gap を巻き込む）。
+
+```
+台帳: 52/100 at zero（55 定義、open 0、unmeasured 3）
+```

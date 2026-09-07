@@ -341,5 +341,13 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "15m"
+  },
+  {
+    "name": "minio",
+    "url": "https://github.com/minio/minio.git",
+    "ref": "RELEASE.2025-10-15T17-29-55Z",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
   }
 ]
