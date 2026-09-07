@@ -357,5 +357,13 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "25m"
+  },
+  {
+    "name": "woodpecker",
+    "url": "https://github.com/woodpecker-ci/woodpecker.git",
+    "ref": "v3.18.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
   }
 ]

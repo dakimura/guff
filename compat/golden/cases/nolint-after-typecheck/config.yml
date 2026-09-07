@@ -1,0 +1,33 @@
+# Golden case: one typecheck error silences nolintlint too.
+#
+# golangci's `InvalidIssue` processor returns *only* the typecheck issues when
+# the run produced any, and it sits ahead of `NolintFilter`. nolintlint is an
+# ordinary linter upstream, so its findings — the directive-shape ones and the
+# `is unused` ones alike — already exist when `InvalidIssue` runs, and die
+# there with everything else. A run with a broken package reports the
+# typecheck error and nothing else.
+#
+# guff had the same filter in the same place, but nolintlint's findings are not
+# born until the nolint processor, one step later, so they walked straight past
+# it — and past it with every finding they would have been matched against
+# already deleted, which made each directive look unused.
+#
+# Measured on woodpecker v3.18.0, whose `web` package does not build from a
+# clean checkout: upstream 1 finding, guff 61.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - gochecknoinits
+    - nolintlint
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

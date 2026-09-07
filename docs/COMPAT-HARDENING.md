@@ -28381,3 +28381,125 @@ related 側にそれを clone すると **`--fix` が同じ編集を 2 度当て
 ```
 台帳: 53/100 at zero（56 定義、open 0、unmeasured 3）—— 変化なし
 ```
+
+### 2026-09-08（続き 256）— **typecheck エラーは nolintlint も黙らせる**。`adopt woodpecker` 完了、54/100
+
+`adopt woodpecker`（v3.18.0, 123.9MB）の初回測定:
+
+```
+woodpecker: guff=61 golangci=1 both=1 P=1.6% R=100.0% [UNEXPECTED]
+```
+
+golangci はリポジトリ全体で **1 件**しか出さない —— `web/web.go` の
+
+```
+pattern all:dist/*: no matching files found (typecheck)
+```
+
+`//go:embed all:dist/*` が要求する `web/dist/` はフロントエンドのビルド生成物で、
+clone 直後には存在しない。**このリポジトリは素の checkout ではビルドできない。**
+
+guff の 61 件は、同じ typecheck 1 件＋ **nolintlint の
+`directive ... is unused` 60 件**だった。名指しされた linter は 13 種:
+
+| 19 mnd | 15 contextcheck | 6 forbidigo | 4 staticcheck | 3 godot | 3 gocritic |
+|---|---|---|---|---|---|
+| 2 usetesting | 2 govet | 2 gochecknoinits | 1 misspell | 1 revive | 1 unparam | 1 depguard |
+
+13 個の recall 欠陥に見える。**違った。原因は 1 つで、しかも linter 側ではない。**
+
+#### 切り分け
+
+パッケージを絞ると消える:
+
+```
+guff --config <woodpecker の config> ./cli/exec/...   → 0 件（上流と一致）
+guff --config <woodpecker の config> ./cli/...        → 6 件、dummy.go の報告なし
+guff --config <woodpecker の config> ./...            → 61 件、dummy.go:21 が unused
+```
+
+`web/dist/` を作って `./...` を測り直すと **61 → 13 件**に落ちる。
+壊れたパッケージが 1 つあるかどうかだけで決まっていた（A/B/A の 3 回で再現）。
+
+#### 上流の処理順
+
+`Runner.Run` のプロセッサ列は
+
+```
+PathAbsoluter → Cgo → FilenameUnadjuster → InvalidIssue → PathRelativity
+→ ExclusionPaths → GeneratedFileFilter → ExclusionRules → NolintFilter → …
+```
+
+`InvalidIssue` は名前に反して、まず**これ**をやる:
+
+```go
+tcIssues := filterIssuesUnsafe(issues, func(i *result.Issue) bool {
+    return i.FromLinter == typeCheckName
+})
+if len(tcIssues) > 0 {
+    return tcIssues, nil
+}
+```
+
+typecheck が 1 件でもあれば、**その run の他の指摘は全部消える**。
+そして上流の nolintlint は**ただの linter** なので、その指摘（`ExpectNoLint`
+の未使用候補も、書式指摘も）は `InvalidIssue` の時点で既に存在しており、
+一緒に消える。だから上流は 0 件になる。
+
+guff は `keep_only_typecheck` を**同じ位置に持っている**。
+問題は nolintlint の指摘が**そこで生まれていない**ことだった ——
+`NolintIndex::filter_issues` の中、フィルタの 1 つ後ろで生まれるので、
+比較対象を全部消された状態でフィルタを素通りする。
+「全部消された」がそのまま「どの directive も何も抑制していない」に化ける。
+
+これは §4 続き 250 で塞いだ穴（exclusions が nolintlint の指摘を見られない）
+と**同じ穴の 1 段手前**。あちらは exclusions を後段で流し直して塞いだ。
+こちらは後段でやると `//nolint:typecheck` が typecheck 指摘を抑制した場合に
+判定が崩れるので、**前段で立てたフラグを後段で使う**:
+
+```rust
+let had_typecheck = issues.iter().any(|i| i.from_linter == "typecheck");
+crate::typecheck::keep_only_typecheck(&mut issues);
+...
+issues = idx.filter_issues(issues, report_unused);
+if had_typecheck {
+    issues.retain(|issue| issue.from_linter == "typecheck");
+}
+```
+
+#### 最小再現
+
+Go 13 行・3 ファイル（`compat/golden/cases/nolint-after-typecheck/`）。
+`broken/` は woodpecker の `web` を 4 行に縮めたもの、`good/` は directive が
+実際に指摘を抑えているパッケージ。
+
+```
+golangci: broken/broken.go:12:12: pattern all:dist/*: no matching files found (typecheck)   … 計 1 件
+guff (修正前): 同じ 1 件 + good/good.go の nolintlint            … 計 2 件
+guff (修正後): 同じ 1 件                                          … 計 1 件
+```
+
+形は 3 つ測った。`is unused`、`should be written without leading space`、
+`should mention specific linter` —— **書式指摘も同じ穴を通る**ので、
+unit test は両方を数えている（`assert_eq!` で件数、`from_linter` で種別）。
+
+#### 測り方の落とし穴を 1 つ
+
+最小再現の 1 回目は `default: none` + `gochecknoinits` + `nolintlint` だけで
+書いた。**上流は 0 件、guff も 0 件**で、再現しなかった。
+型情報を要る linter が 1 つも有効でないと golangci は syntax だけ load し、
+**typecheck 指摘そのものが生まれない**。`errcheck` を足して初めて出る。
+「上流が何も言わない」は「上流が同じ判断をした」とは限らない。
+
+#### 記録（このセッションでは直していない）
+
+- guff は `//nolint:typecheck` を**未知の linter**として警告し（上流は内部
+  linter として登録済みなので警告しない）、かつ typecheck 指摘を**抑制する**。
+  上流は同じ位置の directive で抑制しなかった。woodpecker には該当 directive が
+  無いので測定には出ない。
+- woodpecker の `web` が壊れているのは環境ではなくリポジトリ側の性質なので、
+  この target は「壊れたパッケージがある状態」を測る target として有効。
+
+```
+台帳: 54/100 at zero（57 定義、open 0、unmeasured 3）
+```

@@ -462,6 +462,11 @@ impl IssueFilter {
         // typecheck issue reports *only* those. It is here, ahead of every
         // exclusion, because that is where upstream puts it — an exclude rule
         // cannot bring the silenced findings back.
+        //
+        // Remember that it fired: nolintlint's own findings are not born until
+        // `filter_issues` below, long after this point, so they have to be
+        // silenced there by hand — see the `had_typecheck` guard.
+        let had_typecheck = issues.iter().any(|i| i.from_linter == "typecheck");
         crate::typecheck::keep_only_typecheck(&mut issues);
 
         issues.retain(|issue| !self.is_excluded_by_path(issue));
@@ -500,6 +505,24 @@ impl IssueFilter {
                 .as_ref()
                 .is_some_and(|s| s.report_unused);
             issues = idx.filter_issues(issues, report_unused);
+
+            // Upstream's `InvalidIssue` returns *only* the typecheck issues
+            // when the run has one, and it runs before `NolintFilter` — so a
+            // run with a typecheck error reports no nolintlint finding at all.
+            // guff's `keep_only_typecheck` above sits in the same place, but
+            // nolintlint's findings did not exist yet when it ran: they are
+            // born one line up, so they walked straight past it.
+            //
+            // Measured on woodpecker v3.18.0, whose `web` package fails to
+            // build from a clean checkout (`//go:embed all:dist/*` wants a
+            // frontend bundle that is not checked in). Upstream reported one
+            // issue for the whole repo — that typecheck error. guff reported
+            // 61: the same typecheck error plus 60 `directive is unused`,
+            // naming 13 different linters, because every finding those linters
+            // produced had already been deleted here.
+            if had_typecheck {
+                issues.retain(|issue| issue.from_linter == "typecheck");
+            }
 
             // `filter_issues` is where nolintlint's own findings are born, and
             // that is *after* the three exclusion filters above already ran —
@@ -1466,6 +1489,108 @@ linters:
             &[],
         );
         assert_eq!(kept.len(), 1, "the pattern is used verbatim");
+    }
+
+    /// golangci's `InvalidIssue` processor returns *only* the typecheck
+    /// issues when the run produced any, and it sits ahead of `NolintFilter`.
+    /// nolintlint is an ordinary linter upstream, so its findings already
+    /// exist by then and die there with everything else — a run with a broken
+    /// package reports the typecheck error and nothing else.
+    ///
+    /// guff's copy of that filter is in the same place, but nolintlint's
+    /// findings are not born until the nolint processor one step later, so
+    /// they walked straight past it — and every finding they would have been
+    /// matched against had already been deleted, which made each surviving
+    /// directive look unused.
+    ///
+    /// Measured on woodpecker v3.18.0, whose `web` package does not build from
+    /// a clean checkout (`//go:embed all:dist/*` wants a frontend bundle that
+    /// is not checked in): upstream reported 1 issue for the whole repo, guff
+    /// reported 61 — the same typecheck error plus 60 `directive ... is
+    /// unused` naming 13 different linters.
+    #[test]
+    fn a_typecheck_issue_silences_unused_nolintlint_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let good = dir.path().join("good.go");
+        std::fs::write(&good, "package p\n\nvar x int //nolint:errcheck\n").unwrap();
+        let pkg = Arc::new(Package {
+            compiled_go_files: vec![good.clone()],
+            ..Package::default()
+        });
+
+        let mut filter = IssueFilter::from_config(
+            &IssuesConfig {
+                exclude_use_default: false,
+                max_issues_per_linter: 0,
+                max_same_issues: 0,
+                ..IssuesConfig::default()
+            },
+            &SeverityConfig::default(),
+        );
+        filter.nolintlint = Some(crate::nolintlint::NolintlintStyle {
+            report_unused: true,
+            ..crate::nolintlint::NolintlintStyle::default()
+        });
+        filter.enabled_linters = ["nolintlint".into(), "errcheck".into()].into_iter().collect();
+
+        // Control: no typecheck issue, so the directive is reported unused.
+        let kept = filter.apply(Vec::new(), std::slice::from_ref(&pkg));
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert_eq!(kept[0].from_linter, "nolintlint");
+
+        // With one, the run reports that and nothing else.
+        let kept = filter.apply(
+            vec![issue("typecheck", "/tmp/broken/broken.go", "undefined: x")],
+            std::slice::from_ref(&pkg),
+        );
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert_eq!(kept[0].from_linter, "typecheck");
+    }
+
+    /// The `is unused` findings are not the only ones born late: the
+    /// directive-shape ones are too, and upstream drops them at the same
+    /// point. Both shapes measured against golangci-lint 2.12.2 on a two
+    /// package module whose second package fails to build.
+    #[test]
+    fn a_typecheck_issue_silences_nolintlint_style_findings_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let good = dir.path().join("good.go");
+        std::fs::write(
+            &good,
+            "package p\n\nvar x int // nolint:errcheck\n\nvar y int //nolint\n",
+        )
+        .unwrap();
+        let pkg = Arc::new(Package {
+            compiled_go_files: vec![good.clone()],
+            ..Package::default()
+        });
+
+        let mut filter = IssueFilter::from_config(
+            &IssuesConfig {
+                exclude_use_default: false,
+                max_issues_per_linter: 0,
+                max_same_issues: 0,
+                ..IssuesConfig::default()
+            },
+            &SeverityConfig::default(),
+        );
+        filter.nolintlint = Some(crate::nolintlint::NolintlintStyle {
+            require_specific: true,
+            ..crate::nolintlint::NolintlintStyle::default()
+        });
+        filter.enabled_linters = ["nolintlint".into(), "errcheck".into()].into_iter().collect();
+
+        // Control: the leading space and the bare `//nolint`, one each.
+        let kept = filter.apply(Vec::new(), std::slice::from_ref(&pkg));
+        assert_eq!(kept.len(), 2, "{kept:?}");
+        assert!(kept.iter().all(|i| i.from_linter == "nolintlint"), "{kept:?}");
+
+        let kept = filter.apply(
+            vec![issue("typecheck", "/tmp/broken/broken.go", "undefined: x")],
+            std::slice::from_ref(&pkg),
+        );
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert_eq!(kept[0].from_linter, "typecheck");
     }
 
     #[test]
