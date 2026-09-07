@@ -27480,3 +27480,150 @@ golangci が `../../../..//Users/...` の相対パス、guff がリポジトリ�
 ```
 台帳: 50/100 at zero（54 定義、open 1＝packer 305、unmeasured 3）
 ```
+
+### 2026-09-07（続き 246）— `version: 2` は**引用符が無いと整数**で、guff はそれを v1 として読んでいた。packer が 305 → 4
+
+続き 245 は packer の open 305 を「全部 config の扱い」まで詰めて、
+**素の v2 config なら errcheck は 287 対 287 で集合一致する**ところまで確かめた。
+残った `93 → 4` は「どのブロック単独にも帰属できない」として未解明で終わっている。
+その未解明の正体が本体だった。
+
+#### `version: 2` は YAML の整数で、`is_v2` は文字列しか見ていなかった
+
+packer の `.golangci.yml` の 1 行目は **`version: 2`**（引用符なし）。
+guff の判定はこうだった:
+
+```rust
+raw.get("version").and_then(|v| v.as_str()).is_some_and(|v| v == "2")
+```
+
+`as_str()` は YAML の整数に対して `None` を返す。つまり guff にとって
+packer の config は**バージョン行が無い＝v1** で、
+`linters.disable-all` も `issues.exclude-rules` も `run.skip-files` も
+`linters-settings` も**全部 v1 として honour していた**。
+続き 245 の「素の config に v1 キーを足す」実験が `exclude-rules` しか
+動かさなかったのは、実験用の config が `version: "2"` と**引用符付き**で
+書かれていたからで、実物とは別の経路を測っていた。
+
+上流は viper 経由で decode する。viper の `defaultDecoderConfig` は
+`WeaklyTypedInput: true` なので、mapstructure が数値を `string` に変換してから
+`Loader.checkConfigurationVersion` が `"2"` と比較する。4 形とも測った:
+
+| `version:` | golangci | guff（修正前） | guff（修正後） |
+|---|---|---|---|
+| `"2"` | v2（2 件） | v2（2 件） | v2（2 件） |
+| `'2'` | v2（2 件） | v2（2 件） | v2（2 件） |
+| `2` | v2（2 件） | **v1（1 件）** | v2（2 件） |
+| `2.0` | v2（2 件） | **v1（1 件）** | v2（2 件） |
+| `two` / `1` / `"1"` | 起動拒否 | v1 | v1 |
+
+`2.0` が `"2"` になるのは mapstructure が
+`strconv.FormatFloat(_, 'f', -1, 64)` で整形するため（末尾の 0 が落ちる）。
+`2.5` は `"2.5"` になって拒否されるので、判定は「2 で始まる」ではなく
+**2 と等しい**にした。`two` / `1` を上流は起動拒否するが、
+guff は v1 config を意図的にサポートしているのでこれまで通り v1 として読む。
+
+#### v2 として読んだあとにも v1 キーが 1 段残っていた
+
+バージョン判定を直すだけでは足りない。`issues` と `output` の 2 セクションは
+**v1 と v2 で同じ Rust の struct を共有している**ので、v2 として読んでも
+serde が v1 のキーを拾ってしまう。上流はこの 2 つを別の struct
+（`config.Issues` / `config.Output`）で持っていて、しかも viper は
+`ErrorUnused` を付けずに decode するので、**知らないキーは黙って捨てる**。
+
+1 形ずつ両ツールに通して測った（fixture は 5 件出る 3 パッケージ）:
+
+| v2 file の中の v1 キー | golangci | guff（修正前） |
+|---|---|---|
+| （キー無し） | 5 | 5 |
+| `issues.exclude-rules` | 5 | **3** |
+| `issues.exclude` | 5 | **2** |
+| `issues.exclude-dirs` | 5 | **4** |
+| `issues.exclude-files` | 5 | **3** |
+| `issues.include` / `exclude-use-default` / `exclude-case-sensitive` / `exclude-dirs-use-default` | 5 | 5 |
+| `output.print-issued-lines` / `print-linter-name` | 描画同じ | **ソース行・linter 名が消える** |
+| `output.format: tab` | 描画同じ | **tab で出る** |
+| `output.formats.colored-line-number` | 描画同じ | **ANSI が付く** |
+| `linters.disable-all` / `fast` / `presets` | 5 | 5 |
+| top-level `linters-settings` | 5 | 5 |
+| `run.skip-files` / `skip-dirs-use-default` | 5 | 5 |
+
+最後の 3 行が既に一致しているのは、`LintersV2` に `disable-all` が無く、
+`ConfigV2` に `linters-settings` が無く、`RunConfig` に `skip-files` が
+無いから —— serde が mapstructure と同じ理由で落としている。
+**共有している 2 つだけが漏れていた。**
+
+直し方は blacklist ではなく **whitelist** にした。mapstructure が
+「知らないキー」に対してすることがそれで、上流の struct をそのまま写せる:
+
+- `config.Issues`（9 キー）
+- `config.Output`（5 キー）
+- `config.Formats` の 9 つの format 名（v1 の `colored-line-number` /
+  `line-number` / `colored-tab` / `github-actions` はここに無い）
+
+#### 測定
+
+```
+packer   before  guff=307 golangci=608 both=305  P=99.3% R=50.2%  open 305
+packer   after   guff=608 golangci=608 both=606  P=99.7% R=99.7%  open   4
+```
+
+残り 4 件は config とは無関係な 2 つの欠陥で、どちらも staticcheck:
+
+- `packer/build.go:418` の S1002 が **`!<expr>` と描画されている**
+  （上流は `!*corePP.KeepInputArtifact`）。guff-only と gcl-only が
+  同じ行に 1 件ずつ立つ、文言差の署名。
+- `hcl2template/types.packer_config.go:636` の SA4006
+  （`this value of moreDiags is never used`）が guff から出ず、
+  `command/build.go:304` に guff だけの
+  `when ok is true, hcperr can't be nil` が立つ。
+
+#### ゲート
+
+- `compat/golden/cases/v1-keys-in-v2-config` を追加。
+  `cases/exclusions` と**同じ fixture・同じ v2 の中身**に、
+  読まれたら必ず findings が減る v1 キーを全部足したもの。
+  expected.golden は `cases/exclusions/expected.golden` と**バイト一致**する
+  —— それがこの case の主張。修正前のバイナリでは 24 件中 21 件落ちる。
+- `crates/guff-lint/tests/config_test.rs` に 5 本。
+  バージョンの 4 形 + 拒否する 4 形、v2 での v1 キー脱落、
+  **同じ本文を v1 file として読ませたときは全部効くこと**（whitelist が
+  効きすぎていたら、これだけが気付く）、v2 の `linters.exclusions` が
+  `effective_issues` まで届くこと、`linters` / `linters-settings` / `run` は
+  whitelist 無しで既に落ちていること。
+- 既存の fixture 2 つが**間違った前提で書かれていた**ので書き直した。
+  `v2_full_issues.yml` と `v2_exclude_errcheck_bad.yml` は `version: "2"` の
+  下に `issues.exclude-rules` を書いていて、**上流が読まない config で
+  guff を測っていた**。v2 の `linters.exclusions` に移した。
+  `output_print_flags_parse_into_printer_options` の config は
+  `version:` 行を外して v1 file にした（`print-issued-lines` /
+  `print-linter-name` は v1 の綴りで、v2 では `output.formats.text` の下）。
+
+#### 出していないもの（測ったが移植しない）
+
+- **`output.formats` が map でないとき上流は起動を拒む。**
+  `formats: tab`（文字列）も `- {format, path}`（配列）も
+  `'output.formats' expected a map, got 'string'` で落ちる。
+  これは validation ではなく **viper の decode エラー**で、
+  `compat/reject` は理由を verbatim で比べる tier なので、
+  guff が `can't unmarshal config by viper` と名乗らない限り通せない。
+  そして mapstructure の型不一致はこの 1 形ではなく**クラス**なので、
+  1 つだけ移植するのは「1 形しか通さない fixture」と同じ失敗になる。
+  corpus に該当する config は 1 つも無い（v2 の `formats` を書く 9 ターゲットは
+  全部 map）。
+- **v2 の `output.formats.text.print-linter-name` / `print-issued-lines` /
+  `colors` を guff は読んでいない。** 上流の既定はどれも `true`
+  （`flagsets.go` の `AddFlagAndBind`）なので、`false` と明示した config だけが
+  乖離する。corpus の 2 つ（otel-collector / telegraf）はどちらも `true` と
+  書いているので現時点で差は出ない。`PrinterOptions` を format ごとに持たせる
+  改修が要るので別タスク。
+- **`guff migrate` は v1 の `issues.exclude*` を `linters.exclusions` に
+  移していない**（`migrate_v1_to_v2` は `issues` をそのままコピーする）。
+  この変更の前は移行後のファイルでも guff だけが v1 キーを honour していたので
+  「動いて見えて上流とは食い違う」状態、後は「両方とも読まない」状態になる。
+  上流の `migrate_linters_exclusions.go` は preset の既定・`(?i)` 前置・
+  linter ごとの test 除外まで含む別物なので、丸ごと移植する別タスク。
+
+```
+台帳: 50/100 at zero（54 定義、open 1＝packer 4、unmeasured 3）
+```

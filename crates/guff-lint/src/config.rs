@@ -856,14 +856,116 @@ pub fn load_config(path: &Path) -> Result<ConfigFile, ConfigError> {
 
 /// Parse configuration YAML from a string.
 pub fn parse_config_str(contents: &str) -> Result<ConfigFile, ConfigError> {
-    let raw: serde_yaml::Value = serde_yaml::from_str(contents)?;
+    let mut raw: serde_yaml::Value = serde_yaml::from_str(contents)?;
     if is_v2(&raw) {
+        // `version` is `Option<String>` on ConfigV2 and the file may spell it as
+        // a number; upstream's decoder coerces, serde does not.
+        if let Some(version) = raw.get_mut("version") {
+            *version = serde_yaml::Value::String("2".to_string());
+        }
+        drop_v1_only_keys(&mut raw);
         let cfg: ConfigV2 = serde_yaml::from_value(raw)?;
         Ok(ConfigFile::V2(cfg))
     } else {
         let cfg: ConfigV1 = serde_yaml::from_str(contents)?;
         Ok(ConfigFile::V1(cfg))
     }
+}
+
+// ---------------------------------------------------------------------------
+// v1 keys inside a v2 file
+// ---------------------------------------------------------------------------
+//
+// golangci-lint decodes the config with viper/mapstructure and no `ErrorUnused`
+// (`config.BaseLoader.parseConfig` -> `viper.Unmarshal`), so a key the v2 structs
+// do not declare is **silently dropped**. `version: "2"` is the only thing it
+// checks (`Loader.checkConfigurationVersion`); it never asks whether the body
+// underneath is actually v2.
+//
+// That makes "a v1 config with `version: 2` pasted on top" a config golangci-lint
+// runs happily *with almost none of it in effect* — and there are real ones:
+// hashicorp/packer v1.16.0 is a whole v1 file behind a v2 version line, and
+// upstream ignores its `issues.exclude-rules`, its `linters.disable-all`, its
+// `linters-settings`, its `run.skip-files` and its `output.formats.colored-line-number`.
+//
+// Most of those already fall out of guff's own structs: `LintersV2` has no
+// `disable-all`/`fast`/`presets`, `ConfigV2` has no top-level `linters-settings`,
+// and `RunConfig` has no `skip-files`/`skip-dirs`, so serde drops them for the
+// same reason mapstructure does. Two sections are *shared* between the v1 and v2
+// config structs, though — `issues` and `output` — and there guff was reading v1
+// keys that upstream cannot see. On packer that suppressed 283 of the 287
+// errcheck findings golangci-lint reports.
+//
+// So: before deserializing a v2 file, keep only the keys upstream's v2 structs
+// declare in the two shared sections. A whitelist rather than a v1 blacklist,
+// because that is what mapstructure does with a key it has never heard of.
+
+/// Keys `config.Issues` declares in v2 (`pkg/config/issues.go`).
+///
+/// Everything else under `issues:` is v1 — `exclude`, `exclude-rules`,
+/// `exclude-dirs`, `exclude-files`, `exclude-use-default`, `include`, … — and v2
+/// moved the exclusion half of it to `linters.exclusions`.
+const V2_ISSUES_KEYS: &[&str] = &[
+    "max-issues-per-linter",
+    "max-same-issues",
+    "uniq-by-line",
+    "new-from-rev",
+    "new-from-merge-base",
+    "new-from-patch",
+    "whole-files",
+    "new",
+    "fix",
+];
+
+/// Keys `config.Output` declares in v2 (`pkg/config/output.go`).
+///
+/// v1's `print-issued-lines` / `print-linter-name` moved into
+/// `output.formats.text`, and the deprecated single-string `output.format`
+/// is gone entirely.
+const V2_OUTPUT_KEYS: &[&str] = &[
+    "formats",
+    "sort-order",
+    "show-stats",
+    "path-prefix",
+    "path-mode",
+];
+
+/// Format names `config.Formats` declares in v2 (`pkg/config/output_formats.go`).
+///
+/// The v1 spellings (`colored-line-number`, `line-number`, `colored-tab`,
+/// `github-actions`) are not among them: under v2 they name nothing, and the run
+/// falls back to the default text output.
+const V2_FORMAT_NAMES: &[&str] = &[
+    "text",
+    "json",
+    "tab",
+    "html",
+    "checkstyle",
+    "code-climate",
+    "junit-xml",
+    "teamcity",
+    "sarif",
+];
+
+/// Drop the keys a v2 config file cannot carry, in place.
+///
+/// Only the sections whose Rust struct is shared with v1 need this; the rest
+/// already have no field to land in. See the module comment above.
+fn drop_v1_only_keys(raw: &mut serde_yaml::Value) {
+    retain_keys(raw.get_mut("issues"), V2_ISSUES_KEYS);
+    if let Some(output) = raw.get_mut("output") {
+        retain_keys(Some(output), V2_OUTPUT_KEYS);
+        // `formats` survives the line above; its *inner* names are the v1 ones.
+        retain_keys(output.get_mut("formats"), V2_FORMAT_NAMES);
+    }
+}
+
+/// Keep only `allowed` keys of a YAML mapping. No-op for anything else.
+fn retain_keys(section: Option<&mut serde_yaml::Value>, allowed: &[&str]) {
+    let Some(serde_yaml::Value::Mapping(map)) = section else {
+        return;
+    };
+    map.retain(|k, _| k.as_str().is_some_and(|k| allowed.contains(&k)));
 }
 
 /// Loaded configuration (v1 or v2).
@@ -1279,10 +1381,33 @@ pub fn normalize_linter_name(name: &str) -> &str {
     }
 }
 
+/// Is this file a v2 config?
+///
+/// `Config.Version` is a Go `string`, but viper decodes with
+/// `WeaklyTypedInput: true` (`viper.defaultDecoderConfig`), so mapstructure
+/// converts a YAML scalar to it before `Loader.checkConfigurationVersion`
+/// compares it to `"2"`. All four of these are version 2 upstream:
+///
+/// ```text
+/// version: "2"      version: '2'      version: 2      version: 2.0
+/// ```
+///
+/// The unquoted integer is not a corner case: hashicorp/packer v1.16.0 writes
+/// `version: 2`, and reading that as "no version key" made guff parse the whole
+/// file as v1 — honouring an `issues.exclude-rules` block upstream never sees.
+/// That one missing quote was 283 of the 287 errcheck findings golangci-lint
+/// reports on packer.
+///
+/// `2.0` reaches `"2"` because mapstructure formats a float with
+/// `strconv.FormatFloat(_, 'f', -1, 64)`, which drops the trailing zero;
+/// `2.5` would render as `"2.5"` and be rejected, so the test is equality with
+/// 2 rather than "starts with 2".
 fn is_v2(raw: &serde_yaml::Value) -> bool {
-    raw.get("version")
-        .and_then(|v| v.as_str())
-        .is_some_and(|v| v == "2")
+    match raw.get("version") {
+        Some(serde_yaml::Value::String(s)) => s == "2",
+        Some(serde_yaml::Value::Number(n)) => n.as_f64() == Some(2.0),
+        _ => false,
+    }
 }
 
 /// Fold v2 `linters.exclusions` into an [`IssuesConfig`] for the post-process filter.
