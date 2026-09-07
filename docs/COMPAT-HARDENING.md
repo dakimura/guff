@@ -27812,3 +27812,115 @@ guff-ssa は残す）。同じ原因かどうかは未確認で、それが次�
 ```
 台帳: 50/100 at zero（54 定義、open 1＝packer 1、unmeasured 3）
 ```
+
+### 2026-09-07（続き 249）— ループの**逆辺が届く読みだけ**が値を生かす。抑制ガードが SA4006 を 1 件隠していた
+
+続き 248 の残り 1 件は SA4006 の取りこぼしだった。
+
+```
++gcl   hcl2template/types.packer_config.go:636:staticcheck:this value of moreDiags is never used
+```
+
+**`cases/staticcheck-s` の ratchet が記録しているクラスではなかった。**
+あちらは「空の `if` 本体が条件への参照を落とす IR 最適化」で、こちらは別物。
+
+#### 上流には AST の層が無い
+
+上流の SA4006 は `hasUse` で IR を歩くだけで、referrer が Phi と DebugRef
+しか無い値は死んでいる、と答える。guff は hybrid SSA が一部の load を落とす
+ぶんを `ssa_unused_but_ast_read` で補っていて、その中の
+`read_in_enclosing_loop` が
+
+> 囲っているループの中に読みが 1 つでもあれば値は生きている
+
+と言っていた。**逆辺が届く読みに限れば**正しいが、そうでない場合がある:
+
+```go
+for … {
+    pp, moreDiags := start(i)          // ← ここで先に定義し直す
+    diags = append(diags, moreDiags…)  // ← なのでこの読みは今回の値
+    if moreDiags.HasErrors() { continue }
+    flat, moreDiags := decode(pp)      // ← この値は誰も読まない
+}
+```
+
+本体の先頭の `:=` が先に上書きするので、そのあとの読みは
+**前の反復の値ではない**。packer の `types.packer_config.go:636` がこれ。
+
+「定義し直す」は**必ず走るもの**に限る —— 宣言か `:=`（キー `0`）、
+またはループ本体そのものの文リストに直接ある代入。入れ子の `if` の中の代入は
+走るとは限らないので逆辺を切らない。`first_redef_after` が既にしている区別と
+同じものを使った。
+
+#### 7 形を測った
+
+| 形 | golangci | guff（修正前） |
+|---|---|---|
+| 1. ループ、先頭で `:=` してから読む | 報告 | **黙る** |
+| 2. 同じ形をループ無しで | 報告 | 報告 |
+| 3. ループ、読みが定義し直しより前 | 黙る | 黙る |
+| 4. ループ、定義し直しが入れ子の `if` の中 | 黙る | 黙る |
+| 5. range ループ、1 と同じ | 報告 | **黙る** |
+| 6. ループ後に読まれる | 黙る | 黙る |
+| 7. 定数の dead store | 黙る（`*ir.Const` は skip） | 黙る |
+
+3・4・6 は**ガードが元々そのために足された形**で、黙ったままである必要がある
+（3 は prometheus `tsdb/chunks/chunks.go:190` の偽陽性が理由）。
+
+#### この修正では packer は閉じない —— 原因は**別にあった**
+
+```
+packer  before  guff=607 golangci=608 both=607  P=100.0% R=99.8%  open 1
+packer  after   guff=607 golangci=608 both=607  P=100.0% R=99.8%  open 1  （動かず）
+```
+
+最小再現（平坦な関数のループ）は直ったのに、**packer の現物は直らなかった**。
+形のせいではない、ということなので現物を削っていくと、効いていたのは
+ループでも入れ子でも `break` でもなく、**関数がメソッドであること**だった:
+
+```go
+func plainOverwrite(n int) int {          // gcl 1 / guff 1
+	x := start2(n)
+	x = start2(n + 1)
+	return x
+}
+
+func (c *Cfg) methodOverwrite(n int) int { // gcl 1 / guff **0**
+	x := start2(n)
+	x = start2(n + 1)
+	return x
+}
+```
+
+**SA4006 はメソッドの中では 1 件も発火しない。** ポインタ受信・値受信の
+どちらでも同じ。ループは無関係で、教科書どおりの上書きですら黙る。
+
+原因は SA4006 の中ではなく、その下にある。`BuildIrResult::expr_values` は
+`self.src_funcs` の上に張られていて、その `src_funcs` は既定で
+**メンバのみ（メソッド抜き）**である。`buildir.rs` のコメントが理由を書いている
+—— 正しさのためではなく、**メソッド本体が見えると SA5011 が過剰報告する**から。
+`src_funcs_with_methods()` は既にあり、contextcheck だけがそれを使っている。
+
+つまり **SA5011 の precision ガードが SA4006 の recall を丸ごと払っている**
+（[[a-suppression-guard-hides-the-real-defect]] /
+[[dont-inherit-the-neighbouring-rules-guard]]）。直し方は
+「SA4006 用にメソッド込みの expr-value インデックスを別に張る」で、
+SA5011 の設定には触らない。**それが次のタスク。**
+
+このエントリの修正自体は独立した実在の欠陥で、上の 7 形で測って入っている。
+
+- golden `cases/staticcheck-sa`: 356 → 359 キー、消失 0。ratchet は
+  `missing 3 / extra 1` のまま動かず。
+- `cases/staticcheck-s` の ratchet（`missing: 2`）も動かない。**その `why` は
+  検算した**（[[deferral-notes-outlive-their-reasons]]）—— 欠けている 2 件は
+  `s1017/ok/ok.go:7:3`（`if` の中の `s = s`）と
+  `s1020/ok/ok.go:3:28`（`if _, ok := i.(int); ok {}` の**空の本体**）で、
+  **どちらもメソッドではなく平坦な関数**である。上のメソッド盲点とは別クラスで、
+  ratchet の書いている理由（空の `if` 本体が条件への参照を落とす IR 最適化）は
+  少なくとも s1020 の側にそのまま当てはまる。
+- `checks_test.rs` の `sa4006_loop_back_edge_shapes` は行・列を固定する。
+  修正前のバイナリでは 3 件中 2 件が消えて落ちる。
+
+```
+台帳: 50/100 at zero（54 定義、open 1＝packer 1、unmeasured 3）
+```

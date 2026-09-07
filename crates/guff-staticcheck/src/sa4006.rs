@@ -194,7 +194,31 @@ impl IdentIndex {
         idx
     }
 
-    /// Whether `obj` is read anywhere inside a loop body that contains `pos`.
+    /// Whether the back edge of an enclosing loop can carry the value assigned
+    /// at `pos` to a read of `obj`.
+    ///
+    /// The read has to come *before* the iteration redefines `obj`. A read that
+    /// a `:=` at the top of the body already overwrote is reading this
+    /// iteration's value, not the one the back edge brought in:
+    ///
+    /// ```ignore
+    /// for … {
+    ///     pp, moreDiags := start(i)          // redefines first …
+    ///     diags = append(diags, moreDiags…)  // … so this read is not the back edge's
+    ///     flat, moreDiags := decode(pp)      // and this value is dead
+    /// }
+    /// ```
+    ///
+    /// Taking the first read in the body without asking what precedes it made
+    /// every such value look live. That is hashicorp/packer's
+    /// `hcl2template/types.packer_config.go:636`, which upstream reports and
+    /// guff did not.
+    ///
+    /// "Redefines" means a redefinition that is guaranteed to run: a
+    /// declaration or `:=` (key `0`), or a plain assignment sitting directly in
+    /// the loop body's own statement list. One inside a nested `if` may not run,
+    /// so it does not break the back edge — the same distinction
+    /// [`Self::first_redef_after`] makes.
     fn read_in_enclosing_loop(&self, obj: ObjectId, pos: u32) -> bool {
         let Some(uses) = self.uses.get(&obj) else {
             return false;
@@ -203,9 +227,20 @@ impl IdentIndex {
             .iter()
             .filter(|(start, end)| *start <= pos && pos <= *end)
             .any(|(start, end)| {
-                uses[uses.partition_point(|&p| p < *start)..]
-                    .first()
-                    .is_some_and(|&p| p <= *end)
+                let Some(&first_use) = uses[uses.partition_point(|&p| p < *start)..].first()
+                else {
+                    return false;
+                };
+                if first_use > *end {
+                    return false;
+                }
+                let first_redef = self.defs.get(&obj).and_then(|defs| {
+                    defs[defs.partition_point(|&(p, _)| p < *start)..]
+                        .iter()
+                        .find(|(p, key)| *p <= *end && (*key == 0 || key == start))
+                        .map(|(p, _)| *p)
+                });
+                first_redef.is_none_or(|d| first_use < d)
             })
     }
 

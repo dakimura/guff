@@ -99,6 +99,9 @@ sa4004/ok/ok.go                              crates/guff-staticcheck/tests/testd
 sa4005/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa4005/bad.go
 sa4005/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa4005/ok.go
 sa4006/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa4006/bad.go
+# What a loop's back edge carries. guff has an AST guard upstream does not,
+# and it used to treat any read inside an enclosing loop as proof of liveness.
+sa4006/loops/loops.go                        crates/guff-staticcheck/tests/testdata/sa4006/loops.go
 sa4006/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa4006/ok.go
 sa4008/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa4008/bad.go
 sa4008/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa4008/ok.go
