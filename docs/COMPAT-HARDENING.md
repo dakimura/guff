@@ -27396,3 +27396,87 @@ cri-o / tetragon と同じ platform 由来である。
 ```
 台帳: 50/100 at zero（53 定義、open 0、unmeasured 3）— 変わらず
 ```
+
+### 2026-09-07（続き 245）— `adopt packer`。**open 305 は全部 config の扱い**。errcheck 自体は素の v2 config で完全一致する
+
+boundary が閉じたので次の候補 **hashicorp/packer**（`v1.16.0`、117.3MB、
+15.8k star）。`go build ./...` は clean、78 パッケージ、
+golangci-lint は **608 件**を出す —— typecheck に潰れる形ではない。
+**採用した。**
+
+```
+packer: guff=307 golangci=608 both=305 P=99.3% R=50.2%
+  errcheck    guff 4   / gcl 287 / both 4   —— R **1.4%**
+  staticcheck guff 301 / gcl 319 / both 299
+  unused      guff 2   / gcl 2   / both 2
+```
+
+#### この config は `version: 2` と書いた **v1 スキーマ**である
+
+`linters.disable-all` / `linters.fast` / `issues.exclude-rules` /
+`linters-settings` / `run.skip-dirs-use-default` / `run.skip-files` /
+`output.formats.colored-line-number` —— 中身は丸ごと v1 で、
+先頭だけ `version: 2`。
+
+golangci-lint 2.12.2 は**これを受け付けて起動し、v1 キーを黙って無視する**。
+証拠は 2 つあって、どちらも「無視した結果」しか説明しない:
+
+- config は `SA(1006|1019|…)` を除外しろと言っているのに
+  **SA1019 が 9 件報告される**
+- config は `errcheck` を `.*_test.go` で除外しろと言っているのに
+  **errcheck 287 件のうち 194 件が `_test.go`**
+
+#### errcheck 自体は正しい —— 素の v2 config で**完全一致**する
+
+`default: none` / `enable: [errcheck]` / `max-*: 0` だけの config で
+`./...` を測ると:
+
+```
+guff 287 / golangci 287 —— file:line:col の集合が完全一致
+```
+
+単一パッケージ（`./builder/file/...`）でも 2 対 2。
+**errcheck に欠陥は無い。** 305 件の差は**全部 config の扱い**である。
+
+素の config に v1 のキーを 1 つずつ足して測ると:
+
+| 足したもの | guff の errcheck |
+|---|---|
+| 素の v2 | **287**（＝golangci、集合まで一致） |
+| ＋ `issues.exclude-rules`（errcheck を `_test.go` で除外） | **93** |
+| ＋ `run`（`skip-files` / `skip-dirs-use-default` など） | 287 |
+| ＋ `output.uniq-by-line: true` | 287 |
+| ＋ `linters-settings.errcheck.ignore` | 287 |
+| ＋ 実物の `linters` ブロック（`disable-all` / `fast`） | 287 |
+
+**効くのは `issues.exclude-rules` だけ**で、287 → 93（`_test.go` の 194 件）。
+実物の config 全体では 4 まで落ちるが、**93 → 4 の分は上のどのブロック単独
+にも帰属できていない**（`issues`＋`run` を同時に足しても 93 のまま）。
+そこは**未解明として残す**。
+
+#### 前の版の記述は誤りだった（訂正）
+
+このエントリの初稿では「原因は 2 つ」「残りは `./...` 規模でしか出ない
+errcheck の取りこぼしで boundary の seed 欠陥と同じ署名」と書いた。**誤り。**
+`exclude-rules` だけを取り除いて 69 という数字を「config の影響を除いた残差」
+と読んだが、**残りの v1 キーが効いたままの数字**だった。
+config を*引き算*するのではなく、**素の config から足し算**して測り直すと
+287 対 287 で一致する。
+
+なお最初の集合比較は「only-gcl 287 / only-guff 287」と出た ——
+golangci が `../../../..//Users/...` の相対パス、guff がリポジトリ相対で、
+**1 件も重ならないように見えた**（[[grep-on-tool-output-drops-absolute-paths]]）。
+正規化して一致を確認している。
+
+#### 測定
+
+- **packer: open 305**（guff-only 2、gcl-only 303）。health 0（panic・ill-typed・
+  seed cycle いずれも 0）。
+- **素の v2 config では errcheck 287 対 287、集合一致。**
+- 台帳: **54 定義、50 clean、open 1**。50/100 at zero は変わらず。
+- guff の挙動は**何も変えていない**。変更は `corpus/hunt.json` に 8 行と
+  `corpus/status.json` の probe 結果のみ。
+
+```
+台帳: 50/100 at zero（54 定義、open 1＝packer 305、unmeasured 3）
+```
