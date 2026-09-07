@@ -53,8 +53,16 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             }
             let mut related = Vec::new();
             for other in &specs[1..] {
+                // `report.Related(imp, …)` takes the whole `*ast.ImportSpec`,
+                // so the related position is the spec's start — the local name
+                // when there is one, exactly as for `first` above. Pointing at
+                // the path literal put `f2 "fmt"` a column late.
                 related.push(RelatedInformation {
-                    pos: other.path.value_pos.0 as u32,
+                    pos: other
+                        .name
+                        .as_ref()
+                        .map(|n| n.pos().0 as u32)
+                        .unwrap_or(other.path.value_pos.0 as u32),
                     end: other.path.end().0 as u32,
                     message: format!("other import of {path}"),
                 });
