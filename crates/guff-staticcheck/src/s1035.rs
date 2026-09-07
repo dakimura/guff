@@ -22,26 +22,47 @@ use guff_analysis::{
 
 use crate::render::render_node;
 
-const HEADER_METHODS: &[&str] = &["Add", "Del", "Get", "Set"];
+/// The four methods upstream's pattern names, as `(Symbol …)` spells them.
+///
+/// Upstream matches the **callee object**, not the selector's spelling:
+///
+/// ```text
+/// (Symbol callName@(Or
+///     "(net/http.Header).Add" "(net/http.Header).Del"
+///     "(net/http.Header).Get" "(net/http.Header).Set"))
+/// ```
+///
+/// Matching on the name `Set` alone is a different check. minio's
+/// `cmd/postpolicyform_test.go` has
+///
+/// ```ignore
+/// type formValues struct{ http.Header }
+/// func (f formValues) Set(key, value string) formValues { … }
+/// ```
+///
+/// — an embedded `http.Header` whose `Set` is **shadowed** by the outer type's
+/// own method. The call is `(cmd.formValues).Set`, upstream says nothing, and
+/// guff reported it seven times. A type with a `Set` method and no relation to
+/// `net/http` at all was reported too.
+///
+/// The same object is what the message names. For a **promoted** method the
+/// callee really is `net/http.Header`'s, and upstream prints
+/// `(net/http.Header).Del` where guff printed the receiver expression's own
+/// type — the right finding under the wrong name.
+const HEADER_METHODS: &[&str] = &[
+    "(net/http.Header).Add",
+    "(net/http.Header).Del",
+    "(net/http.Header).Get",
+    "(net/http.Header).Set",
+];
 
-fn is_canonical_header_key_arg(arg: &Expr) -> bool {
+/// `(CallExpr (Symbol "net/http.CanonicalHeaderKey") _)` — the symbol, not any
+/// selector that happens to end in `CanonicalHeaderKey`.
+fn is_canonical_header_key_arg(pass: &Pass<'_>, arg: &Expr) -> bool {
     let Expr::CallExpr(call) = unparen(arg) else {
         return false;
     };
-    matches!(
-        unparen(&call.fun),
-        Expr::SelectorExpr(SelectorExpr { sel, .. }) if sel.name == "CanonicalHeaderKey"
-    )
-}
-
-/// Fully-qualified type of a method call's receiver expression
-/// (`net/http.Header`), as upstream prints it inside `(…)`.
-fn recv_type_string(pass: &Pass<'_>, x: &Expr) -> Option<String> {
-    let typ = pass.types_info()?.types.get(&x.id())?.typ;
-    let a = pass.pkg().type_artifacts.as_ref()?;
-    Some(guff_types::typestring::type_string(
-        &a.types, &a.objects, &a.packages, typ, None,
-    ))
+    code::call_name(pass, &call.fun).as_deref() == Some("net/http.CanonicalHeaderKey")
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -55,16 +76,16 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let NodeRef::CallExpr(call) = node else {
             return;
         };
-        let Expr::SelectorExpr(SelectorExpr { x, sel, .. }) = unparen(&call.fun) else {
+        let Some(callee) = code::callee_full_name(pass, call) else {
             return;
         };
-        if !HEADER_METHODS.contains(&sel.name.as_str()) {
+        if !HEADER_METHODS.contains(&callee.as_str()) {
             return;
         }
         let Some(arg) = call.args.first() else {
             return;
         };
-        if !is_canonical_header_key_arg(arg) {
+        if !is_canonical_header_key_arg(pass, arg) {
             return;
         }
         // Upstream quotes the parameter name and names the method it belongs
@@ -72,9 +93,6 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         // the redundant argument, not the enclosing call. Verified against
         // golangci-lint 2.12.2 for Add / Get / Set, including
         // `r.Header.Get(...)`.
-        let Some(recv) = recv_type_string(pass, x) else {
-            return;
-        };
         // `edit.ReplaceWithNode(fset, arg, arg.Args[0])`: the canonicalizing
         // call goes and its own argument takes its place, over the same
         // unparenthesized span the report uses. Upstream's pattern spells the
@@ -98,8 +116,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             // reported at `canon`, one column in from `(`.
             inner.pos().0 as u32,
             format!(
-                "calling net/http.CanonicalHeaderKey on the 'key' argument of ({recv}).{} is redundant",
-                sel.name
+                "calling net/http.CanonicalHeaderKey on the 'key' argument of {callee} is redundant"
             ),
             edit,
         ));

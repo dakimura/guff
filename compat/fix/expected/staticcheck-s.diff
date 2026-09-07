@@ -460,6 +460,29 @@
  
 -func f(h http.Header) { h.Set(http.CanonicalHeaderKey("X"), "v") }
 +func f(h http.Header) { h.Set("X", "v") }
+--- a/s1035/receivers/receivers.go
++++ b/s1035/receivers/receivers.go
+@@ -43,15 +43,15 @@
+ 
+ // reported as (net/http.Header).Del: the callee is the promoted method
+ func promoted(w wrapper) {
+-	w.Del(http.CanonicalHeaderKey("X-Foo"))
++	w.Del("X-Foo")
+ }
+ 
+ // reported, all four
+ func direct(h http.Header) {
+-	h.Set(http.CanonicalHeaderKey("X-Foo"), "v")
+-	h.Add(http.CanonicalHeaderKey("X-Foo"), "v")
+-	_ = h.Get(http.CanonicalHeaderKey("X-Foo"))
+-	h.Del(http.CanonicalHeaderKey("X-Foo"))
++	h.Set("X-Foo", "v")
++	h.Add("X-Foo", "v")
++	_ = h.Get("X-Foo")
++	h.Del("X-Foo")
+ }
+ 
+ // silent: nothing to do with net/http
 --- a/s1036/bad/bad.go
 +++ b/s1036/bad/bad.go
 @@ -1,11 +1,7 @@

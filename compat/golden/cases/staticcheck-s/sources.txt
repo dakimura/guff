@@ -76,6 +76,9 @@ s1033/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1033/ok.go
 s1034/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1034/bad.go
 s1034/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1034/ok.go
 s1035/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1035/bad.go
+# Which method the call resolves to. A shadowing `Set` on a type that embeds
+# http.Header is not (net/http.Header).Set, and a promoted one is.
+s1035/receivers/receivers.go  crates/guff-staticcheck/tests/testdata/s1035/receivers.go
 s1035/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1035/ok.go
 s1036/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1036/bad.go
 s1036/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1036/ok.go
