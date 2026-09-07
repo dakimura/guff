@@ -340,7 +340,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         return Ok(None);
     };
 
-    let exprs = ir.expr_values();
+    // Methods included. `expr_values()` follows `buildir_src_methods`, which is
+    // off outside contextcheck runs to keep SA5011 from over-reporting — and an
+    // expression in a method body then resolves to nothing, so SA4006 never
+    // fired inside a method at all. See `BuildIrResult::expr_values_with_methods`.
+    let exprs = ir.expr_values_with_methods();
     // Only candidates that SSA already believes are unused consult it, and most
     // packages have none — build the walk-wide index on the first question.
     let idents: OnceCell<IdentIndex> = OnceCell::new();

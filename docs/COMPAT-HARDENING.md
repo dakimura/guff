@@ -27924,3 +27924,96 @@ SA5011 の設定には触らない。**それが次のタスク。**
 ```
 台帳: 50/100 at zero（54 定義、open 1＝packer 1、unmeasured 3）
 ```
+
+### 2026-09-07（続き 250）— SA4006 は**メソッドの中で 1 件も発火していなかった**。packer が閉じて 51/100
+
+続き 249 で、packer の最後の 1 件が「ループの形」ではなく
+**関数がメソッドであること**で決まっていた、と分かった。そのままの続き。
+
+```go
+func plainOverwrite(n int) int {           // gcl 1 / guff 1
+	x := mk(n)
+	x = mk(n + 1)
+	return x
+}
+
+func (r *Recv) ptrOverwrite(n int) int {   // gcl 1 / guff **0**
+	x := mk(n)
+	x = mk(n + 1)
+	return x
+}
+```
+
+ポインタ受信・値受信のどちらでも、ループの有無に関係なく、
+**メソッド本体では 1 件も出ない**。教科書どおりの上書きですら黙る。
+
+#### 原因は SA4006 の中ではなく 1 段下にある
+
+上流の `SrcFuncs` は `buildssa` / `buildir` の定義そのままで、
+**パッケージが宣言した名前つき関数すべて（メソッド込み）**である。
+
+guff の `BuildIrResult::expr_values` は `self.src_funcs` の上に張られていて、
+その `src_funcs` は設定 `buildir_src_methods` に従う。そして
+`buildir_src_methods` は contextcheck を含む実行以外では **off** である。
+理由は `cli.rs` のコメントが書いている —— コストの話ではなく、
+**メソッド本体が見えると SA5011 が prometheus で 6 件の偽陽性を出す**から
+（guff-ssa は go/ssa 移植で σ ノードが無く、SA5011 は IR の値同一性を見る）。
+
+つまり AST を歩いて「この式の値は何か」を訊く analyzer にとって、
+その既定は**パッケージ中のメソッド全部が見えない**ということだった。
+`SA5011 の precision ガードを SA4006 が丸ごと払っていた`
+（[[a-suppression-guard-hides-the-real-defect]] /
+[[dont-inherit-the-neighbouring-rules-guard]]）。
+
+#### 直し方 —— 既にある逃げ道を 1 段上にも作る
+
+`src_funcs_with_methods()` は既にあり、「上流の SrcFuncs が要るが SA5011 の
+欠点は持たない check はこれを使え」と `buildir.rs` のコメントが指示している。
+足りなかったのはその式インデックス版なので、`expr_values_with_methods()` を
+足して SA4006 だけがそれを使う。**SA5011 の設定には触っていない。**
+
+SSA は再構築しない。エントリは `expr_values` の**上位集合**で、共通部分の
+答えは同じ —— 式はちょうど 1 つの関数に属するので、メソッドを足しても
+「今まで無かった答えが埋まる」以上のことは起きない。
+
+#### 測定
+
+```
+packer  before  guff=607 golangci=608 both=607  P=100.0% R=99.8%   open 1
+packer  after   guff=608 golangci=608 both=608  P=100.0% R=100.0%  open 0  ← 閉じた
+```
+
+**`close packer` 完了。台帳は 50/100 → 51/100 at zero。**
+
+過剰報告が入っていないことの確認:
+
+- golden 232 件一致。`cases/staticcheck-sa` は 359 → 369 キー（SA4006 5 件と、
+  `checks: [all]` の巻き添えで SA4017 5 件）、消失 0。ratchet は
+  `missing 3 / extra 1` のまま**動かない**。
+- `cases/staticcheck-s` の ratchet（`missing: 2`）も動かない —— 続き 249 で
+  確かめたとおり、あの 2 件は平坦な関数で別クラス。
+- OSS `pr` tier 8/8。とくに **k9s が 636 対 636** で、
+  メソッドだらけの実リポジトリで新しい誤報が 1 件も出ていない。
+
+fixture `sa4006/methods.go` は 5 形（平坦・ポインタ受信・値受信・
+メソッド内のループ・メソッド内のクロージャ）を 1 本ずつ持ち、
+`sa4006_reports_inside_methods` が行・列・文言で固定する。
+
+#### 副産物: **SA4017 の取りこぼしを 5 件見つけた**（この PR では直さない）
+
+fixture の `mk` を最初は副作用なしで書いた。すると死んだ代入 5 つがそのまま
+SA4017（`mk doesn't have side effects and its return value is ignored`）にも
+なり、**guff はその 5 件を 1 つも出さなかった** —— `checks: [all]` の
+`cases/staticcheck-sa` が巻き添えで拾ってくれた（golden の ratchet が
+`missing 3` → `missing 8` で落ちた）。
+
+5 件のうち 1 件は**平坦な関数**の中なので、これはメソッド盲点ではなく
+**SA4017 自身の recall gap** である。SA4006 の fixture がよその check の
+欠陥を ratchet に持ち込むのは筋が違うので、`mk` にパッケージ変数への
+インクリメントを足して SA4017 が正しく黙るようにした
+（[[empty-fixture-hides-defects]] の逆をやらないよう、SA4006 側の 5 形は
+そのまま残してある）。**SA4017 の 5 件は別タスク。**
+
+```
+台帳: 51/100 at zero（54 定義、open 0、unmeasured 3）
+```

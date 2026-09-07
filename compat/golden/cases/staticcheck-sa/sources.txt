@@ -102,6 +102,9 @@ sa4006/bad/bad.go                            crates/guff-staticcheck/tests/testd
 # What a loop's back edge carries. guff has an AST guard upstream does not,
 # and it used to treat any read inside an enclosing loop as proof of liveness.
 sa4006/loops/loops.go                        crates/guff-staticcheck/tests/testdata/sa4006/loops.go
+# The same shapes with a receiver on them. `expr_values` used to follow
+# `buildir_src_methods`, so SA4006 fired in no method body at all.
+sa4006/methods/methods.go                    crates/guff-staticcheck/tests/testdata/sa4006/methods.go
 sa4006/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa4006/ok.go
 sa4008/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa4008/bad.go
 sa4008/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa4008/ok.go
