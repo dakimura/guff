@@ -33,6 +33,8 @@ pub struct BuildIrResult {
     expr_values: OnceLock<ExprValueIndex>,
     /// Built on first use — see [`Self::src_funcs_with_methods`].
     src_funcs_all: OnceLock<Vec<FuncId>>,
+    /// Built on first use — see [`Self::expr_values_with_methods`].
+    expr_values_all: OnceLock<ExprValueIndex>,
     /// Built on first use — see [`Self::call_target_names`].
     call_target_names: OnceLock<HashSet<String>>,
 }
@@ -51,6 +53,7 @@ impl BuildIrResult {
             src_funcs,
             expr_values: OnceLock::new(),
             src_funcs_all: OnceLock::new(),
+            expr_values_all: OnceLock::new(),
             call_target_names: OnceLock::new(),
         }
     }
@@ -79,6 +82,30 @@ impl BuildIrResult {
     pub fn expr_values(&self) -> &ExprValueIndex {
         self.expr_values
             .get_or_init(|| ExprValueIndex::build(&self.prog, &self.src_funcs))
+    }
+
+    /// [`Self::expr_values`] over [`Self::src_funcs_with_methods`].
+    ///
+    /// `expr_values` inherits whatever `buildir_src_methods` left in
+    /// `src_funcs`, and outside a contextcheck run that is members only — so an
+    /// expression inside a method body resolves to nothing at all. For an
+    /// analyzer that walks the AST and asks "what value is this expression?",
+    /// that is not a cost knob, it is a blind spot the size of every method in
+    /// the package: SA4006 reported `x := f(); x = g(); return x` in a function
+    /// and stayed silent on the identical body with a receiver on it.
+    ///
+    /// This is the same escape hatch [`Self::src_funcs_with_methods`] is, one
+    /// level up, and it exists for the same reason: the members-only default is
+    /// there to keep **SA5011** from over-reporting (guff-ssa has no σ-nodes),
+    /// and no other check should be paying for that.
+    ///
+    /// No SSA is rebuilt. The entries are a superset of `expr_values`', and the
+    /// ones they share resolve to the same value: an expression belongs to
+    /// exactly one function, so adding methods can only fill in answers that
+    /// were previously absent.
+    pub fn expr_values_with_methods(&self) -> &ExprValueIndex {
+        self.expr_values_all
+            .get_or_init(|| ExprValueIndex::build(&self.prog, self.src_funcs_with_methods()))
     }
 
     /// The set of call-target names this package uses, built once on first ask.

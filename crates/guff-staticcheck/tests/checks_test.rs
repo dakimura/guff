@@ -2295,6 +2295,42 @@ fn sa4006_loop_back_edge_shapes() {
     );
 }
 
+/// SA4006 inside a method body.
+///
+/// Upstream's `SrcFuncs` is every named function in the package, methods
+/// included. guff's `expr_values` index followed `buildir_src_methods`, which
+/// is off outside contextcheck runs so **SA5011** does not over-report — and an
+/// expression in a method body then resolved to no SSA value, so SA4006 fired
+/// in no method at all. The three bodies here are identical apart from the
+/// receiver; only `plainOverwrite` used to be reported.
+#[test]
+fn sa4006_reports_inside_methods() {
+    let pkg = typecheck_rule("sa4006", "methods.go");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64, String)> =
+        support::run_analyzer_diagnostics(sa4006::analyzer(), &pkg)
+            .into_iter()
+            .map(|d| {
+                let p = fset.position(guff::position::Pos(d.pos as i64));
+                (p.line, p.column, d.message)
+            })
+            .collect();
+    got.sort();
+    let never = |v: &str| format!("this value of {v} is never used");
+    assert_eq!(
+        got,
+        vec![
+            (33, 2, never("x")),  // plain function
+            (40, 2, never("x")),  // pointer receiver
+            (47, 2, never("x")),  // value receiver
+            (59, 3, never("v")),  // a loop inside a method
+            (67, 3, never("x")),  // a closure inside a method
+        ],
+        "{got:?}"
+    );
+}
+
 #[test]
 fn sa4006_allows_ok_cases() {
     let pkg = typecheck_rule("sa4006", "ok.go");
