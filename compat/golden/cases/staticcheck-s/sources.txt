@@ -12,6 +12,10 @@ s1000/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1000/ok.go
 s1001/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1001/bad.go
 s1001/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1001/ok.go
 s1002/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1002/bad.go
+# Every operand shape S1002's message has to render. Upstream prints the node
+# with go/printer, so the suggestion always quotes real source; six of these
+# fourteen used to come out of guff as `<expr>`.
+s1002/shapes/shapes.go  crates/guff-staticcheck/tests/testdata/s1002/shapes.go
 s1002/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1002/ok.go
 s1003/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1003/bad.go
 s1003/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1003/ok.go

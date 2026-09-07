@@ -1,6 +1,6 @@
 mod support;
 
-use guff_staticcheck::{sa4000, sa4001, sa4003, sa4004, sa4005, sa4006, sa4008, sa4009, sa4010, sa4011, sa4012, sa4013, sa4014, sa4015, sa4016, sa4017, sa4018, sa4019, sa4020, sa4021, sa4022, sa4023, sa4024, sa4025, sa4026, sa4027, sa4028, sa4029, sa4030, sa4031, sa4032, sa1000, sa1001, sa1002, sa1003, sa1004, sa1005, sa1006, sa1007, sa1008, sa1010, sa1011, sa1012, sa1013, sa1014, sa1015, sa1016, sa1017, sa1018, sa1019, sa1020, sa1021, sa1023, sa1024, sa1025, sa1026, sa1027, sa1028, sa1029, sa1030, sa1031, sa1032, sa2000, sa2001, sa2002, sa2003, sa3000, sa3001, sa5000, sa5001, sa5002, sa5003, sa5004, sa5005, sa5007, sa5008, sa5009, sa5010, sa5011, sa5012, sa6000, sa6001, sa6002, sa6003, sa6005, sa6006, sa9001, sa9002, sa9003, sa9004, sa9005, sa9006, sa9007, sa9008, sa9009, s1000, s1001, s1003, s1004, s1005, s1006, s1007, s1008, s1009, s1010, s1011, s1012, s1016, s1017, s1018, s1019, s1020, s1021, s1023, s1024, s1025, s1028, s1029, s1030, s1031, s1032, s1033, s1034, s1035, s1036, s1037, s1038, s1039, s1040, st1000, st1001, st1003, st1005, st1006, st1008, st1011, st1012, st1013, st1015, st1016, st1017, st1018, st1019, st1020, st1021, st1022, st1023, qf1001, qf1002, qf1003, qf1004, qf1005, qf1006, qf1007, qf1008, qf1009, qf1010, qf1011, qf1012};
+use guff_staticcheck::{sa4000, sa4001, sa4003, sa4004, sa4005, sa4006, sa4008, sa4009, sa4010, sa4011, sa4012, sa4013, sa4014, sa4015, sa4016, sa4017, sa4018, sa4019, sa4020, sa4021, sa4022, sa4023, sa4024, sa4025, sa4026, sa4027, sa4028, sa4029, sa4030, sa4031, sa4032, sa1000, sa1001, sa1002, sa1003, sa1004, sa1005, sa1006, sa1007, sa1008, sa1010, sa1011, sa1012, sa1013, sa1014, sa1015, sa1016, sa1017, sa1018, sa1019, sa1020, sa1021, sa1023, sa1024, sa1025, sa1026, sa1027, sa1028, sa1029, sa1030, sa1031, sa1032, sa2000, sa2001, sa2002, sa2003, sa3000, sa3001, sa5000, sa5001, sa5002, sa5003, sa5004, sa5005, sa5007, sa5008, sa5009, sa5010, sa5011, sa5012, sa6000, sa6001, sa6002, sa6003, sa6005, sa6006, sa9001, sa9002, sa9003, sa9004, sa9005, sa9006, sa9007, sa9008, sa9009, s1000, s1001, s1002, s1003, s1004, s1005, s1006, s1007, s1008, s1009, s1010, s1011, s1012, s1016, s1017, s1018, s1019, s1020, s1021, s1023, s1024, s1025, s1028, s1029, s1030, s1031, s1032, s1033, s1034, s1035, s1036, s1037, s1038, s1039, s1040, st1000, st1001, st1003, st1005, st1006, st1008, st1011, st1012, st1013, st1015, st1016, st1017, st1018, st1019, st1020, st1021, st1022, st1023, qf1001, qf1002, qf1003, qf1004, qf1005, qf1006, qf1007, qf1008, qf1009, qf1010, qf1011, qf1012};
 use guff_types::sizes_for;
 
 #[test]
@@ -3911,4 +3911,49 @@ fn sa4010_allows_converter_style_returned_append() {
         messages.is_empty(),
         "SA4010 FP on converter-style returned append: {messages:?}"
     );
+}
+
+/// S1002's message quotes the operand's *source*, for every operand shape.
+///
+/// Upstream builds it as `op + report.Render(pass, other)` — go/printer over
+/// the node — so there is no shape it cannot name. guff had a five-arm printer
+/// (`Ident`, `ParenExpr`, `UnaryExpr(!)`, `SelectorExpr`, `CallExpr`) and wrote
+/// the literal `<expr>` for everything else. Six of the fourteen shapes below
+/// were wrong, and one of them is real code: `*corePP.KeepInputArtifact ==
+/// false` in hashicorp/packer, where guff said `!<expr>`.
+///
+/// Every expected string here was read off golangci-lint 2.12.2 running the
+/// same file, one line at a time.
+#[test]
+fn s1002_message_renders_every_operand_shape() {
+    let dir = support::testdata("s1002");
+    let pkg = support::typecheck_file(&dir, "shapes.go", "example.com/staticcheck/s1002/shapes");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(s1002::analyzer(), &pkg);
+
+    let expected = [
+        "b",
+        "!b",
+        "!b",
+        "s.B",
+        "s.M()",
+        "!g()",
+        "!*ptr",
+        "arr[0]",
+        "!m[k]",
+        "(<-ch)",
+        "!(b && s.B)",
+        "i.(bool)",
+        "!(b)",
+        // go/printer drops the redundant outer parentheses of `((!b))`, and the
+        // parity trim leaves the inner ones alone: the `!` is not leading.
+        "(!b)",
+    ];
+    assert_eq!(messages.len(), expected.len(), "{messages:?}");
+    for (got, want) in messages.iter().zip(expected) {
+        assert_eq!(
+            got.as_str(),
+            format!("should omit comparison to bool constant, can be simplified to {want}"),
+        );
+    }
 }

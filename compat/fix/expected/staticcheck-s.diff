@@ -98,6 +98,41 @@
  		_ = x
  	}
  }
+--- a/s1002/shapes/shapes.go
++++ b/s1002/shapes/shapes.go
+@@ -20,18 +20,18 @@
+ )
+ 
+ func shapes(s S, b bool, ptr *bool, k string) {
+-	_ = b == true
+-	_ = b == false
+-	_ = !b == true
+-	_ = s.B == true
+-	_ = s.M() == true
+-	_ = g() == false
+-	_ = *ptr == false
+-	_ = arr[0] == true
+-	_ = m[k] == false
+-	_ = (<-ch) == true
+-	_ = (b && s.B) == false
+-	_ = i.(bool) == true
+-	_ = (b) == false
+-	_ = ((!b)) == true
++	_ = b
++	_ = !b
++	_ = !b
++	_ = s.B
++	_ = s.M()
++	_ = !g()
++	_ = !*ptr
++	_ = arr[0]
++	_ = !m[k]
++	_ = (<-ch)
++	_ = !(b && s.B)
++	_ = i.(bool)
++	_ = !(b)
++	_ = (!b)
+ }
 --- a/s1003/bad/bad.go
 +++ b/s1003/bad/bad.go
 @@ -6,12 +6,12 @@
