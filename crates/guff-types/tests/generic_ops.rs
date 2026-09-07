@@ -397,3 +397,85 @@ fn an_untyped_constant_still_infers_through_its_default_type() {
     let c = check_src(src);
     assert!(c.errors.is_empty(), "unexpected errors: {:?}", c.errors);
 }
+
+// ----------------------------------------------------------------------------
+// Pointer indirection through a type parameter — Go's `underIs` branch of
+// `*ast.StarExpr`.
+//
+// `isPointer` stops at `Underlying()` too, so `*p` where `p` is a type
+// parameter whose only term is `*T` was rejected with "invalid indirect".
+// minio's `internal/config` is one ill-typed package on exactly that shape:
+//
+//     func Error[T ErrorConfig, PT interface{ *T; setMsg(string) }](…) T {
+//         pt := PT(new(T))
+//         pt.setMsg(…)
+//         return *pt
+//     }
+//
+// Ground truth is `go build` on the same five shapes.
+
+const PTR_DECLS: &str = "\
+type A struct{ n int }\n\
+type B struct{ n int }\n\
+func (a *A) setMsg(string) {}\n";
+
+#[track_caller]
+fn ptr_accepts(decl: &str) {
+    let c = check_src(&format!("package p\n{}{}\n", PTR_DECLS, decl));
+    assert!(
+        c.errors.is_empty(),
+        "{decl}\n  unexpected errors: {:?}",
+        c.errors
+    );
+}
+
+#[track_caller]
+fn ptr_rejects(decl: &str) {
+    let c = check_src(&format!("package p\n{}{}\n", PTR_DECLS, decl));
+    assert!(
+        !c.errors.is_empty(),
+        "{decl}\n  expected an error, got none"
+    );
+}
+
+/// The minio shape: a second type parameter constrained to `*T` plus a method.
+#[test]
+fn indirect_through_pointer_constrained_type_param() {
+    ptr_accepts(
+        "func Make[T A, PT interface{ *T; setMsg(string) }](s string) T {\n\
+           pt := PT(new(T))\n\
+           pt.setMsg(s)\n\
+           return *pt\n\
+         }",
+    );
+}
+
+/// A single-term pointer constraint, without the method.
+#[test]
+fn indirect_through_single_pointer_term() {
+    ptr_accepts("func Deref[P interface{ *A }](p P) A { return *p }");
+}
+
+/// Every term has to be a pointer: `*A | A` is
+/// "cannot indirect p (variable of type P constrained by interface{*A | A})".
+#[test]
+fn indirect_rejects_type_param_with_a_non_pointer_term() {
+    ptr_rejects("func Deref[P interface{ *A | A }](p P) any { return *p }");
+}
+
+/// And the bases have to agree: `*A | *B` is
+/// "pointers of p … must have identical base types".
+#[test]
+fn indirect_rejects_type_param_with_mismatched_bases() {
+    ptr_rejects("func Deref[P interface{ *A | *B }](p P) any { return *p }");
+}
+
+/// The ordinary cases still behave: a plain pointer dereferences, a non-pointer
+/// does not, and `*A` as a *type* is still the pointer type (method
+/// expressions are spelled that way).
+#[test]
+fn indirect_on_ordinary_types_is_unchanged() {
+    ptr_accepts("func Plain(p *A) A { return *p }");
+    ptr_rejects("func Bad(n int) int { return *n }");
+    ptr_accepts("func (a *A) M() int { return a.n }\nvar _ = (*A).M");
+}
