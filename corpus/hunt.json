@@ -224,6 +224,14 @@
     "timeout": "20m"
   },
   {
+    "name": "packer",
+    "url": "https://github.com/hashicorp/packer.git",
+    "ref": "v1.16.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
+  },
+  {
     "name": "pipeline",
     "url": "https://github.com/tektoncd/pipeline.git",
     "ref": "v1.15.0",
