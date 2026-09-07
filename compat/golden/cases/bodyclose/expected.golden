@@ -31,6 +31,8 @@ bad/bad.go:254:36:bodyclose::response body must be closed
 bad/bad.go:271:36:bodyclose::response body must be closed
 bad/bad.go:288:23:bodyclose::response body must be closed
 bad/bad.go:304:23:bodyclose::response body must be closed
+inplace/inplace.go:31:23:bodyclose::response body must be closed
+inplace/inplace.go:50:21:bodyclose::response body must be closed
 referrers/referrers.go:35:14:bodyclose::response body must be closed
 referrers/referrers.go:61:30:bodyclose::response body must be closed
 referrers/referrers.go:93:28:bodyclose::response body must be closed

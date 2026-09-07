@@ -186,6 +186,35 @@ fn bodyclose_a_literal_declaring_the_name_is_not_a_capture() {
     );
 }
 
+/// A `CallExpr` the AST spells but go/ssa does not.
+///
+/// Upstream matches `*ssa.Call` instructions, so it is never offered a
+/// conversion — `(*http.ResponseWriter)(nil)` lowers to a `ChangeType`, not a
+/// call — and a call whose result has its `Body` closed in the same expression
+/// is settled by the referrer walk, which finds the `FieldAddr` for `Body` and
+/// the `Close` on it.
+///
+/// guff reported four things here that upstream does not. Note the two
+/// conversions: keying the fix on the *name* `ResponseWriter` — the shape
+/// boundary happens to write — would leave `(*http.Response)(nil)` reporting,
+/// and that one looks correct at a glance.
+///
+/// Two shapes must survive: a *second* call in the same chain is a second
+/// value, still unclosed, and an ordinary leak keeps the file from passing by
+/// being silent.
+#[test]
+fn bodyclose_ignores_conversions_and_calls_closed_in_place() {
+    let dir = support::testdata("bodyclose");
+    let pkg = support::typecheck_pkg("example.com/bodyclose/inplace", &dir.join("inplace.go"));
+    assert!(!pkg.ill_typed, "{:?}", pkg.errors);
+    let messages = support::run_analyzer(bodyclose(), &pkg);
+    assert_eq!(
+        messages.len(),
+        2,
+        "two leaks report, two conversions and one in-place close stay silent: {messages:?}"
+    );
+}
+
 #[test]
 fn bodyclose_skips_packages_without_a_direct_net_http_import() {
     // Upstream's first act is

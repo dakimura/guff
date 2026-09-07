@@ -41,6 +41,14 @@ func NewRequest(method, url string, body any) (*Request, error) {
 
 const StatusOK = 200
 
+// ResponseWriter's printed type contains `*net/http.Response`, which is what
+// upstream's substring test asks about. It is here so a conversion to it can be
+// written in a fixture.
+type ResponseWriter interface {
+	Header() Header
+	Write(b []byte) (int, error)
+}
+
 const MethodGet = "GET"
 
 var DefaultClient = &Client{}
