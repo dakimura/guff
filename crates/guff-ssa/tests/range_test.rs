@@ -150,3 +150,70 @@ func sum(n int) int {
         "expected integer range loop:\n{asm}"
     );
 }
+
+/// `range p` over a pointer to a **named** array type.
+///
+/// The pointee is the type as *written*, so `*Key` where `type Key [32]byte`
+/// hands the builder a `Named`, and `array_elem` — which does not unwrap —
+/// panicked on it: `expected Array, got Discriminant(11)`. It killed an
+/// analysis worker on minio, and a killed worker is not a finding-set
+/// difference, so nothing downstream showed it.
+///
+/// `typeset.rs`'s `index_elem` already unwrapped before asking; this path did
+/// not. The length is the constant N for a pointer-to-array too — Go reads it
+/// off the type and never loads the pointer.
+#[test]
+fn test_range_over_pointer_to_named_array() {
+    const SRC: &str = "\
+package p
+
+type Key [4]byte
+
+func first(p *Key) byte {
+	var out byte
+	for i, b := range p {
+		if i == 0 {
+			out = b
+		}
+	}
+	return out
+}
+";
+    let asm = build(SRC, "first");
+    assert!(
+        asm.contains("rangeindex"),
+        "expected an indexed range loop:\n{asm}"
+    );
+    assert!(
+        !asm.contains("len("),
+        "the length of a *[N]T range is the constant N, not a len call:\n{asm}"
+    );
+}
+
+/// The same over a pointer to an *unnamed* array — the shape that already
+/// worked, kept beside it so a future unwrap that goes too far is visible.
+#[test]
+fn test_range_over_pointer_to_unnamed_array() {
+    const SRC: &str = "\
+package p
+
+func firstUnnamed(p *[4]byte) byte {
+	var out byte
+	for i, b := range p {
+		if i == 0 {
+			out = b
+		}
+	}
+	return out
+}
+";
+    let asm = build(SRC, "firstUnnamed");
+    assert!(
+        asm.contains("rangeindex"),
+        "expected an indexed range loop:\n{asm}"
+    );
+    assert!(
+        !asm.contains("len("),
+        "the length of a *[N]T range is the constant N, not a len call:\n{asm}"
+    );
+}

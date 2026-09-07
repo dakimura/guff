@@ -221,6 +221,9 @@ sa4006/methods/methods.go:40:2:staticcheck::SA4006: this value of x is never use
 sa4006/methods/methods.go:47:2:staticcheck::SA4006: this value of x is never used
 sa4006/methods/methods.go:59:3:staticcheck::SA4006: this value of v is never used
 sa4006/methods/methods.go:67:3:staticcheck::SA4006: this value of x is never used
+sa4006/range_ptr/range_ptr.go:28:3:staticcheck::SA4006: this value of v is never used
+sa4006/range_ptr/range_ptr.go:38:3:staticcheck::SA4006: this value of v is never used
+sa4006/range_ptr/range_ptr.go:48:3:staticcheck::SA4006: this value of v is never used
 sa4008/bad/bad.go:5:15:staticcheck::SA4008: variable in loop condition never changes
 sa4009/bad/bad.go:3:8:staticcheck::SA4009: argument arg is overwritten before first use
 sa4009/bad/bad.go:8:18:staticcheck::SA4009: argument ctx is overwritten before first use

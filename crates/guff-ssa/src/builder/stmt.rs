@@ -306,6 +306,19 @@ impl<'a> Builder<'a> {
         let core = x_ty.underlying(&self.prog.type_arena);
         let length = match self.prog.type_arena.get(core) {
             TypeData::Array(_) => self.int_const(array_len(&self.prog.type_arena, core)),
+            // `len(p)` for `p *[N]T` is the constant N — Go computes it from the
+            // type, and the pointer is never loaded. Same unwrap as the value
+            // arm below: the pointee may be a named array type.
+            TypeData::Pointer(_) => {
+                let arr =
+                    pointer_elem(&self.prog.type_arena, core).underlying(&self.prog.type_arena);
+                match self.prog.type_arena.get(arr) {
+                    TypeData::Array(_) => {
+                        self.int_const(array_len(&self.prog.type_arena, arr))
+                    }
+                    _ => self.emit_len(x, pos),
+                }
+            }
             _ => self.emit_len(x, pos),
         };
 
@@ -549,8 +562,21 @@ impl<'a> Builder<'a> {
                     crate::emit::emit_index_addr(self.prog, self.func_id, block, x, index, ptr_ty, x_pos);
                 self.emit_load(iaddr, elem)
             }
+            // `range p` over a `*[N]T`. The pointee is the type as *written*,
+            // so a named array type arrives as `Named` and `array_elem` — which
+            // does not unwrap — panicked on it:
+            //
+            //     type Key [32]byte
+            //     func f(p *Key) { for i, b := range p { … } }
+            //
+            // minio has one (`expected Array, got Discriminant(11)`), and the
+            // panic took a whole analysis worker with it. `typeset.rs`'s
+            // `index_elem` already does this correctly; this path did not.
             TypeData::Pointer(_) => {
-                let arr = pointer_elem(&self.prog.type_arena, core);
+                let arr = pointer_elem(&self.prog.type_arena, core).underlying(&self.prog.type_arena);
+                if !matches!(self.prog.type_arena.get(arr), TypeData::Array(_)) {
+                    return self.invalid_zero();
+                }
                 let elem = array_elem(&self.prog.type_arena, arr);
                 let ptr_ty = guff_types::new_pointer(&mut self.prog.type_arena, elem);
                 let iaddr =
