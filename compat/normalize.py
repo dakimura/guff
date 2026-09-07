@@ -166,19 +166,59 @@ def issue_key(issue: dict, root: str) -> str:
     return f"{path}:{pos['Line']}:{linter}:{msg}"
 
 
-def is_related_information(issue: dict) -> bool:
-    """True for golangci secondary related-info rows (not primary findings).
+# Checks whose `report.Related` output guff does not yet reproduce.
+#
+# golangci-lint turns every `analysis.Diagnostic.Related` entry into its own
+# issue (`goanalysis.buildIssues`), text `"<Analyzer>(related information): …"`.
+# Until 2026-09-08 this module dropped **every** such row, from both tools, in
+# every tier — so the whole class was invisible: 39 rows across four golden
+# cases, 32 of them in `staticcheck-sa` alone. guff built RelatedInformation in
+# three checks and emitted none of it, and nothing could see that.
+#
+# The rows are compared now. These are the checks still excluded, each for a
+# measured reason (COMPAT-HARDENING §4, 2026-09-08):
+#
+#   * `SA4031` / `SA5011` — guff *does* emit, at the wrong column. The position
+#     comes from a guff-ssa instruction, which records the `(` of the call or
+#     the `==` of the comparison where go/ssa records the expression's start.
+#     Fixing it is an SSA position-fidelity change, not a choice of AST node.
+#   * `S1034` / `SA2002` / `SA4023` / `SA9007` / `SA9008` / `grouper` — no
+#     related information is built at all; each needs its own port.
+#
+# This set only shrinks. A check that starts matching comes out of it, and one
+# that never modelled related info was never in the comparison to begin with —
+# so removing a name here is a tightening, and adding one needs a measurement
+# in §4 saying why.
+RELATED_NOT_MODELLED = frozenset(
+    {
+        "S1034",
+        "SA2002",
+        "SA4023",
+        "SA4031",
+        "SA5011",
+        "SA9007",
+        "SA9008",
+        "grouper",
+    }
+)
 
-    golangci-lint sometimes emits RelatedInformation as separate Issues with
-    text like ``SA5011(related information): …``. guff attaches related info
-    on the primary diagnostic only, so those rows must not enter the set-diff.
-    """
-    text = issue.get("Text") or ""
-    return "(related information)" in text
+_RELATED_RE = re.compile(r"^(\S+)\(related information\)")
+
+
+def related_information_check(issue: dict) -> str | None:
+    """The check a `…(related information): …` row belongs to, else None."""
+    m = _RELATED_RE.match(issue.get("Text") or "")
+    return m.group(1) if m else None
+
+
+def is_unmodelled_related(issue: dict) -> bool:
+    """True for a related row from a check guff does not model yet."""
+    name = related_information_check(issue)
+    return name is not None and name in RELATED_NOT_MODELLED
 
 
 def issue_keys(issues: Iterable[dict], root: str) -> set[str]:
-    return {issue_key(i, root) for i in issues if not is_related_information(i)}
+    return {issue_key(i, root) for i in issues if not is_unmodelled_related(i)}
 
 
 def confirm(runs: list[set[str]], confirmations: int) -> int | None:

@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Iterable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from normalize import is_related_information, load_issues, normalize_path  # noqa: E402
+from normalize import is_unmodelled_related, load_issues, normalize_path  # noqa: E402
 
 
 def escape(text: str) -> str:
@@ -61,7 +61,7 @@ def sort_key(key: str) -> tuple:
 
 
 def issue_keys(issues: Iterable[dict], root: str) -> list[str]:
-    keys = [issue_key(i, root) for i in issues if not is_related_information(i)]
+    keys = [issue_key(i, root) for i in issues if not is_unmodelled_related(i)]
     return sorted(keys, key=sort_key)
 
 

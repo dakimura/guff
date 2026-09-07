@@ -28302,3 +28302,82 @@ hydra 自身の config では staticcheck が沈黙しているので**この ta
 ```
 台帳: 53/100 at zero（56 定義、open 0、unmeasured 3）
 ```
+
+### 2026-09-08（続き 255）— `(related information)` は**全 tier・両側で捨てられていた**。クラスごと見えていなかった
+
+続き 254 で hydra を測ったとき、`default: standard` での 3 件の差が全部
+`(related information)` だった。追うと、欠陥は check ではなく**ハーネス**にあった。
+
+#### `compat/normalize.py` が両側から落としていた
+
+```python
+def is_related_information(issue) -> bool:
+    """golangci sometimes emits RelatedInformation as separate Issues …
+    guff attaches related info on the primary diagnostic only, so those
+    rows must not enter the set-diff."""
+    return "(related information)" in (issue.get("Text") or "")
+```
+
+`issue_keys` と `golden.py` の両方がこれで濾していたので、**golden / hunt /
+oss のどの tier でも、guff 側も golangci 側も related の行は 1 つも比較されて
+いなかった**。フィルタを外すと golden 4 case に **39 行**が現れる
+（`staticcheck-sa` だけで 32 行）。docstring の前提「guff は primary にしか
+付けない」は**書かれた当時は正しかった**が、誰も検算しないまま残っていた
+（[[deferral-notes-outlive-their-reasons]]）。
+
+#### golangci は related を「別の issue」にする
+
+`goanalysis.buildIssues`:
+
+```go
+for _, info := range diag.Related {
+    relatedPos := diag.Pkg.Fset.Position(info.Pos)
+    if relatedPos.Filename != diag.Position.Filename {
+        relatedPos = diag.Position
+    }
+    issues = append(issues, &result.Issue{
+        FromLinter: linterName,
+        Text: fmt.Sprintf("%s(related information): %s", diag.Analyzer.Name, info.Message),
+        Pos: relatedPos, Pkg: diag.Pkg,
+    })
+}
+```
+
+前に付く名前は **analyzer 名**（`ST1019`）であって linter 名ではない。
+別ファイルの related は**primary の位置**に丸められる。fix は付かない。
+
+guff の `IssueFilter::collect_issues` はこれの対応物なのに `diag.related` を
+一度も見ていなかった —— ST1019 / SA4031 / SA5011 が `RelatedInformation` を
+組み立てて、**そのまま捨てられていた**。
+
+移植で 1 つ注意が要る: guff の `Issue` は `Diagnostic` を丸ごと抱えるので、
+related 側にそれを clone すると **`--fix` が同じ編集を 2 度当てる**。
+上流は `FromLinter`/`Text`/`Pos`/`Pkg` だけで作るので、fix は空にする。
+`compat/fix` は変化なしで通る。
+
+#### 見えるようにして測った結果
+
+| check | 状態 |
+|---|---|
+| **ST1019** | 位置が違った（path リテラル。上流は `*ast.ImportSpec` 全体＝ローカル名があればそれ）→ **直した** |
+| **SA4009** | related を**組み立てていなかった**（walk が bool を返していて指す節点が無い）。上流の `ast.Inspect` と同じく最初の代入の位置を返すようにした → **直した** |
+| SA4031 / SA5011 | 出してはいるが**列がずれる**。位置が guff-ssa の命令由来で、呼び出しの `(` や比較の `==` を指す（go/ssa は式の先頭）。SSA の位置忠実度の話で、AST 節点の選び直しでは済まない |
+| S1034 / SA2002 / SA4023 / SA9007 / SA9008 / grouper | related を**まったく組み立てていない**。各々が個別の移植 |
+
+#### フィルタは check 単位の allowlist に置き換えた
+
+全部捨てるのをやめ、`RELATED_NOT_MODELLED` に**まだ出せない check の名前**を
+書く形にした。効果:
+
+- **ST1019 の 4 行と SA4009 の 3 行が golden で比較されるようになり、guff は
+  7 行すべて一致する。** `staticcheck-st` は 202 → 206 キー、
+  `staticcheck-sa` は 367 → 370 キーで、ratchet はどちらも動かない
+  （st: missing 10、sa: missing 3 / extra 1）。
+- 残りは**名前で数えられる**状態になった。集合は縮む方向にしか動かさない ——
+  名前を消すのは締めることで、足すには §4 の測定が要る。
+
+これは緩和ではない。**比較対象が 0 行から 7 行に増えている。**
+
+```
+台帳: 53/100 at zero（56 定義、open 0、unmeasured 3）—— 変化なし
+```

@@ -18,64 +18,77 @@ use guff::node_mask;
 use guff::walk::{preorder, stmt_ref, NodeRef};
 use guff_analysis::code::{object_of, refers_to};
 use guff_analysis::passes::{buildir, inspect};
-use guff_analysis::{has_non_debug_referrer, referrers, AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_analysis::{
+    has_non_debug_referrer, referrers, AnalysisResult, Analyzer, Diagnostic, Pass,
+    RelatedInformation, RunError, RunFn,
+};
 use guff_ssa::value::Value;
 use guff_types::ObjectId;
 
-/// True if `body` contains an assignment whose LHS is `obj` (upstream's
+/// Position of the first assignment whose LHS is `obj` (upstream's
 /// `ast.Inspect` over AssignStmt).
-fn body_assigns_to(pass: &Pass<'_>, body: &[Stmt], obj: ObjectId) -> bool {
-    body.iter().any(|s| stmt_assigns_to(pass, s, obj))
+/// Position of the first assignment to `obj`, in walk order.
+///
+/// Upstream keeps the node, not a yes/no: `report.Related(assignment, …)`
+/// attaches "assignment to x" to the `*ast.AssignStmt` it found first
+/// (`ast.Inspect`, stopping at the first hit). guff answered the question as a
+/// bool and so had nothing to point at, and the related diagnostic was missing
+/// entirely.
+fn body_assigns_to(pass: &Pass<'_>, body: &[Stmt], obj: ObjectId) -> Option<u32> {
+    body.iter().find_map(|s| stmt_assigns_to(pass, s, obj))
 }
 
-fn stmt_assigns_to(pass: &Pass<'_>, stmt: &Stmt, obj: ObjectId) -> bool {
+fn stmt_assigns_to(pass: &Pass<'_>, stmt: &Stmt, obj: ObjectId) -> Option<u32> {
     match stmt {
-        Stmt::AssignStmt(a) => a.lhs.iter().any(|e| {
-            matches!(e, Expr::Ident(id) if object_of(pass, id) == Some(obj))
-        }),
+        Stmt::AssignStmt(a) => a
+            .lhs
+            .iter()
+            .any(|e| matches!(e, Expr::Ident(id) if object_of(pass, id) == Some(obj)))
+            // `AssignStmt.Pos()` is `Lhs[0].Pos()`.
+            .then(|| a.lhs.first().map_or(a.tok_pos.0 as u32, |e| e.pos().0 as u32)),
         Stmt::BlockStmt(b) => body_assigns_to(pass, &b.list, obj),
-        Stmt::IfStmt(i) => {
-            i.init
-                .as_ref()
-                .is_some_and(|s| stmt_assigns_to(pass, s, obj))
-                || body_assigns_to(pass, &i.body.list, obj)
-                || i.else_
+        Stmt::IfStmt(i) => i
+            .init
+            .as_ref()
+            .and_then(|s| stmt_assigns_to(pass, s, obj))
+            .or_else(|| body_assigns_to(pass, &i.body.list, obj))
+            .or_else(|| {
+                i.else_
                     .as_ref()
-                    .is_some_and(|e| stmt_assigns_to(pass, e, obj))
-        }
-        Stmt::ForStmt(f) => {
-            f.init
-                .as_ref()
-                .is_some_and(|s| stmt_assigns_to(pass, s, obj))
-                || f.post
-                    .as_ref()
-                    .is_some_and(|s| stmt_assigns_to(pass, s, obj))
-                || body_assigns_to(pass, &f.body.list, obj)
-        }
+                    .and_then(|e| stmt_assigns_to(pass, e, obj))
+            }),
+        Stmt::ForStmt(f) => f
+            .init
+            .as_ref()
+            .and_then(|s| stmt_assigns_to(pass, s, obj))
+            .or_else(|| f.post.as_ref().and_then(|s| stmt_assigns_to(pass, s, obj)))
+            .or_else(|| body_assigns_to(pass, &f.body.list, obj)),
         Stmt::RangeStmt(r) => body_assigns_to(pass, &r.body.list, obj),
-        Stmt::SwitchStmt(s) => s.body.list.iter().any(|c| {
-            matches!(c, Stmt::CaseClause(cc) if body_assigns_to(pass, &cc.body, obj))
+        Stmt::SwitchStmt(s) => s.body.list.iter().find_map(|c| match c {
+            Stmt::CaseClause(cc) => body_assigns_to(pass, &cc.body, obj),
+            _ => None,
         }),
-        Stmt::TypeSwitchStmt(s) => {
-            s.init
-                .as_ref()
-                .is_some_and(|i| stmt_assigns_to(pass, i, obj))
-                || stmt_assigns_to(pass, &s.assign, obj)
-                || s.body.list.iter().any(|c| {
-                    matches!(c, Stmt::CaseClause(cc) if body_assigns_to(pass, &cc.body, obj))
+        Stmt::TypeSwitchStmt(s) => s
+            .init
+            .as_ref()
+            .and_then(|i| stmt_assigns_to(pass, i, obj))
+            .or_else(|| stmt_assigns_to(pass, &s.assign, obj))
+            .or_else(|| {
+                s.body.list.iter().find_map(|c| match c {
+                    Stmt::CaseClause(cc) => body_assigns_to(pass, &cc.body, obj),
+                    _ => None,
                 })
-        }
-        Stmt::SelectStmt(s) => s.body.list.iter().any(|c| match c {
-            Stmt::CommClause(cc) => {
-                cc.comm
-                    .as_ref()
-                    .is_some_and(|comm| stmt_assigns_to(pass, comm, obj))
-                    || body_assigns_to(pass, &cc.body, obj)
-            }
-            _ => false,
+            }),
+        Stmt::SelectStmt(s) => s.body.list.iter().find_map(|c| match c {
+            Stmt::CommClause(cc) => cc
+                .comm
+                .as_ref()
+                .and_then(|comm| stmt_assigns_to(pass, comm, obj))
+                .or_else(|| body_assigns_to(pass, &cc.body, obj)),
+            _ => None,
         }),
         Stmt::LabeledStmt(l) => stmt_assigns_to(pass, &l.stmt, obj),
-        _ => false,
+        _ => None,
     }
 }
 
@@ -202,17 +215,30 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     continue;
                 }
 
-                if body_assigns_to(pass, body, obj) {
+                if let Some(assign_pos) = body_assigns_to(pass, body, obj) {
                     pending.push((
                         arg.name_pos.0 as u32,
                         format!("argument {} is overwritten before first use", arg.name),
+                        assign_pos,
+                        format!("assignment to {}", arg.name),
                     ));
                 }
             }
         }
     });
-    for (pos, msg) in pending {
-        pass.reportf(pos, msg);
+    for (pos, msg, related_pos, related_msg) in pending {
+        // `report.Related(assignment, "assignment to x")` — golangci renders it
+        // as a second issue, `SA4009(related information): …`.
+        pass.report(Diagnostic {
+            pos,
+            message: msg,
+            related: vec![RelatedInformation {
+                pos: related_pos,
+                end: related_pos,
+                message: related_msg,
+            }],
+            ..Default::default()
+        });
     }
     Ok(None)
 }

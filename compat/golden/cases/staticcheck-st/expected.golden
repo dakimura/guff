@@ -121,8 +121,12 @@ st1018/bad/bad.go:12:6:staticcheck::ST1018: string literal contains Unicode form
 st1018/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
 st1019/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
 st1019/bad/bad.go:4:2:staticcheck::ST1019: package "fmt" is being imported more than once
+st1019/bad/bad.go:5:2:staticcheck::ST1019(related information): other import of "fmt"
+st1019/bad/bad.go:6:2:staticcheck::ST1019(related information): other import of "fmt"
 st1019/bad/bad.go:8:2:staticcheck::ST1019: package "os" is being imported more than once
+st1019/bad/bad.go:9:2:staticcheck::ST1019(related information): other import of "os"
 st1019/bad/bad.go:15:2:staticcheck::ST1019: package "strconv" is being imported more than once
+st1019/bad/bad.go:16:2:staticcheck::ST1019(related information): other import of "strconv"
 st1019/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
 st1020/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
 st1020/bad/bad.go:9:1:staticcheck::ST1020: comment on exported function Bar should be of the form "Bar ..."

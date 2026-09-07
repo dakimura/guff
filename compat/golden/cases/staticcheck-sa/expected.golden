@@ -85,6 +85,7 @@ sa1007/bad/bad.go:15:12:staticcheck::SA1007: "http://us er@host/" is not a valid
 sa1007/bad/bad.go:18:12:staticcheck::SA1007: "http://example.com/\\x7f\\xff" is not a valid URL: parse "http://example.com/\\x7f\\xff": net/url: invalid control character in URL
 sa1008/bad/bad.go:10:9:staticcheck::SA1008: keys in http.Header are canonicalized, "host" is not canonical; fix the constant or use http.CanonicalHeaderKey
 sa1008/bad/bad.go:18:38:staticcheck::SA4009: argument v is overwritten before first use
+sa1008/bad/bad.go:19:2:staticcheck::SA4009(related information): assignment to v
 sa1008/bad/bad.go:19:6:staticcheck::SA1008: keys in http.Header are canonicalized, "host" is not canonical; fix the constant or use http.CanonicalHeaderKey
 sa1008/bad/bad.go:25:6:staticcheck::SA1008: keys in http.Header are canonicalized, "foo" is not canonical; fix the constant or use http.CanonicalHeaderKey
 sa1008/bad/bad.go:27:6:staticcheck::SA1008: keys in http.Header are canonicalized, "etag" is not canonical; fix the constant or use http.CanonicalHeaderKey
@@ -226,7 +227,9 @@ sa4006/range_ptr/range_ptr.go:38:3:staticcheck::SA4006: this value of v is never
 sa4006/range_ptr/range_ptr.go:48:3:staticcheck::SA4006: this value of v is never used
 sa4008/bad/bad.go:5:15:staticcheck::SA4008: variable in loop condition never changes
 sa4009/bad/bad.go:3:8:staticcheck::SA4009: argument arg is overwritten before first use
+sa4009/bad/bad.go:4:2:staticcheck::SA4009(related information): assignment to arg
 sa4009/bad/bad.go:8:18:staticcheck::SA4009: argument ctx is overwritten before first use
+sa4009/bad/bad.go:9:2:staticcheck::SA4009(related information): assignment to ctx
 sa4009/ok/ok.go:25:1:staticcheck::ST1021: comment on exported type Logger should be of the form "Logger ..." (with optional leading article)
 sa4010/bad/bad.go:18:11:staticcheck::SA4010: this result of append is never used, except maybe in other appends
 sa4010/converter_fp/converter_fp.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment

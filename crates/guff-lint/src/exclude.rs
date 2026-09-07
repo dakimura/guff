@@ -334,16 +334,66 @@ impl IssueFilter {
             // name, prefix Text (`inline: …`, `SA1004: …`, category for suites).
             let text = format_issue_text(&from_linter, &analyzer, &diag.category, &diag.message);
             out.push(Issue {
-                from_linter,
-                analyzer,
+                from_linter: from_linter.clone(),
+                analyzer: analyzer.clone(),
                 text,
                 severity: diag.severity.clone(),
-                filename,
+                filename: filename.clone(),
                 line,
                 column,
                 source_line,
                 diagnostic: diag.clone(),
             });
+            // `analysis.Diagnostic.Related` becomes one **extra issue** per
+            // entry, not a decoration on the first one
+            // (`goanalysis.buildIssues`):
+            //
+            //     Text: fmt.Sprintf("%s(related information): %s",
+            //                       diag.Analyzer.Name, info.Message)
+            //
+            // The name in front is the *analyzer's* (`ST1019`), not the
+            // linter's, and the issue carries no suggested fixes. guff built
+            // `RelatedInformation` in ST1019, SA4031 and SA5011 and then never
+            // emitted any of it: on ory/hydra that was 3 findings golangci
+            // reports and guff does not, with guff-only at 0.
+            for info in &diag.related {
+                let (rel_file, rel_line, rel_col) = if info.pos != 0 {
+                    let pos = fset.position(guff::Pos(info.pos as i64));
+                    (pos.filename, pos.line, pos.column)
+                } else {
+                    (String::new(), 0, 0)
+                };
+                // "if relatedPos.Filename != diag.Position.Filename { relatedPos
+                // = diag.Position }" — a related node in another file is
+                // reported at the primary's position, not at its own.
+                let (rel_file, rel_line, rel_col) = if rel_file == filename {
+                    (rel_file, rel_line, rel_col)
+                } else {
+                    (filename.clone(), line, column)
+                };
+                out.push(Issue {
+                    from_linter: from_linter.clone(),
+                    analyzer: analyzer.clone(),
+                    text: format!("{analyzer}(related information): {}", info.message),
+                    severity: diag.severity.clone(),
+                    filename: rel_file,
+                    line: rel_line,
+                    column: rel_col,
+                    source_line: None,
+                    // No fixes: upstream builds this issue with only
+                    // FromLinter/Text/Pos/Pkg. Cloning the primary's
+                    // `suggested_fixes` here would hand `--fix` the same edits
+                    // a second time.
+                    diagnostic: Diagnostic {
+                        pos: info.pos,
+                        end: info.end,
+                        message: info.message.clone(),
+                        suggested_fixes: Vec::new(),
+                        related: Vec::new(),
+                        ..diag.clone()
+                    },
+                });
+            }
         }
         out
     }
