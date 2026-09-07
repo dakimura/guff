@@ -27315,3 +27315,84 @@ bodyclose 4 件、staticcheck 4 件（S1025 / S1011 / S1005 / S1040 / S1017）�
 ```
 台帳: **50/100 at zero**（53 定義、open 0、unmeasured 3）
 ```
+
+### 2026-09-07（続き 244）— `adopt inspektor-gadget` は**除外**（platform）。`go list ./...` は「壊れているパッケージ」を列挙しない
+
+boundary が閉じたので次の候補 **inspektor-gadget/inspektor-gadget**
+（`v0.55.1`、114.1MB、2.9k star）。config は申し分ない ——
+`version: "2"`・`default: none`・linter は `errorlint` と
+`staticcheck (checks: all)` の 2 本だけ・設定も全部通る・`_new_keys` は空・
+`go list -tags docs ./...` は **252 パッケージ**を列挙する。
+
+それでも golangci-lint の報告は **1 件で、しかも `typecheck`**:
+
+```
+pkg/process-helpers/processhelpers.go:28:2: could not import
+  .../pkg/utils/host (-: build constraints exclude all Go files in pkg/utils/host) (typecheck)
+1 issues:
+* typecheck: 1
+```
+
+#### 原因は linux 専用パッケージ
+
+`pkg/utils/host`（3 ファイル）と `pkg/symbolizer/symtab`（2 ファイル）は
+**全ファイルが `//go:build linux`**。darwin では `go list` が
+`GoFiles=0 / IgnoredGoFiles=3`（および `0/2`）を返し、
+**33 ファイルが前者を直接 import している**。eBPF と containerd の
+プロジェクトなので darwin は元より対象外である。
+
+guff は別の 1 件（`docs/api/_golang/grpc/main.go` の gofumpt）を出すので、
+対にすると **guff 1 / golangci 1 / both 0 —— P=0%, R=0%**。
+「252 パッケージ・2 linter」が答えであるべきターゲットで、
+**どちらの数字も意味していない**。
+
+#### scope して逃げられない
+
+harness/harness には `./registry/...`（159 パッケージ・94 findings）という
+逃げ道があった。ここには無い ——
+**`./pkg/...` も同じ 1 件の typecheck に潰れる**。
+`pkg/process-helpers` が `pkg/` の中にあるからである。
+252 のうち **128 が汚染**（上の 2 つ＋ linux 専用の
+`gadgets/*/test/**` 79 個＋そこへ到達する全部）、**124 が clean** だが、
+6 つのトップレベルディレクトリに散っており、
+`packages` フィールドはパターン 1 つで 124 個の列挙ではない。
+
+#### 数え方の罠 —— `go list ./...` は壊れたパッケージを列挙しない
+
+最初に汚染を数えたとき **173 clean** と出た。**間違い**である。
+`go list ./...` は**全ファイルが build constraint で外れたパッケージを
+そもそも列挙しない**ので、`pkg/utils/host` と `pkg/symbolizer/symtab` は
+グラフに存在せず、それを import している側が全部 clean に数えられていた。
+2 つを import path で種として足して歩き直すと **124**。
+**「このプラットフォームで何が壊れるか」を `go list ./...` の出力だけからは
+答えられない —— 壊れるパッケージは、まさにそれが落とすものだから。**
+
+（同じ回に、build constraint を `head -6` で探して見つけられなかった。
+Apache ヘッダの下、**15 行目**にある。`go list -f '{{len .GoFiles}}'` が
+確実な訊き方である。）
+
+#### 分類
+
+「報告が 1 件の typecheck に潰れる」形はこれで 3 種類目になり、
+**直し方が違う**ので分けて書いておく:
+
+| ターゲット | 原因 | 直る条件 |
+|---|---|---|
+| harness / ollama | 未ビルドのフロントエンドを `//go:embed` —— `go list` の時点で落ちる | schema に `prepare` フックが生えれば |
+| signoz | pin した依存にホストの Go 用のファイルが無い —— build で落ちる | 依存の bump、または Go 1.24/1.25 のホスト |
+| **inspektor-gadget** | 2 パッケージの全ファイルが `//go:build linux` | **Linux ホスト（このホストでは恒久）** |
+
+cri-o / tetragon と同じ platform 由来である。
+
+#### 測定
+
+- golangci-lint 2.12.2: **1 件、`typecheck`**。guff: **1 件、gofumpt**。
+  both **0**。
+- `./pkg/...`: **同じ 1 件の typecheck**。
+- 252 パッケージ中 **tainted 128 / clean 124**。
+- guff の挙動は**何も変えていない**。変更は `corpus/README.md` の
+  除外表 1 行と `corpus/status.py` の `EXCLUDED` 1 エントリのみ。
+
+```
+台帳: 50/100 at zero（53 定義、open 0、unmeasured 3）— 変わらず
+```
