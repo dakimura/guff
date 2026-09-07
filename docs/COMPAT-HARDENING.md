@@ -28093,3 +28093,73 @@ indirection の枝がそれを使っていなかっただけである。
 ```
 台帳: 51/100 at zero（54 定義、open 0、unmeasured 3）—— minio は未採用のまま
 ```
+
+### 2026-09-07（続き 252）— S1035 は**呼ばれたメソッドそのもの**を見る。セレクタの綴りではない
+
+続き 251 で minio に残した 2 つのうち、**S1035 の過剰報告 7 件**。
+
+minio の `cmd/postpolicyform_test.go` はこう書いている:
+
+```go
+type formValues struct {
+	http.Header
+}
+
+func (f formValues) Set(key, value string) formValues {
+	f.Header.Set(key, value)
+	return f
+}
+```
+
+`http.Header` を埋め込みつつ、**`Set` を自前のメソッドで覆っている**。
+呼ばれるのは `(cmd.formValues).Set` であって `net/http.Header` のものではない。
+上流は黙り、guff は 7 件報告していた。
+
+#### 上流は Symbol を照合する
+
+```
+(CallExpr
+    (Symbol callName@(Or
+        "(net/http.Header).Add" "(net/http.Header).Del"
+        "(net/http.Header).Get" "(net/http.Header).Set"))
+    arg@(CallExpr (Symbol "net/http.CanonicalHeaderKey") _):_)
+```
+
+`Symbol` は**解決されたオブジェクト**である。guff は
+`HEADER_METHODS.contains(&sel.name)` —— つまり `Set` / `Add` / `Get` / `Del`
+という**名前だけ**を見ていて、メッセージには `recv_type_string`、つまり
+**レシーバ式の型**を刷っていた。3 方向に間違う:
+
+| 形 | golangci | guff（修正前） |
+|---|---|---|
+| 埋め込み + `Set` を覆う（minio） | 黙る | **報告する** |
+| 埋め込み + 覆わない（`Del` は昇格） | `(net/http.Header).Del` | **`(a.wrapper).Del`**（所見は正しく名前が違う） |
+| 素の `http.Header` の 4 メソッド | 報告 | 報告 |
+| `net/http` と無関係な `Set` | 黙る | **報告する** |
+
+引数側も同じで、`CanonicalHeaderKey` という名前のセレクタなら何でも通していた。
+
+#### 直し方 —— `callee_full_name` は既にある
+
+`guff-analysis/src/code.rs` の `callee_full_name` が
+`(net/http.Header).Set` の形をそのまま返す。**その doc コメント自体が**
+「メソッド呼び出しを認識したい移植はこれを各自で作り直してきた」と列挙していて
+（`noctx` / errcheck / `musttag` / `waitgroup` / SA2000、そして
+errchkjson は作らずに `(*encoding/json.Encoder).Encode` を全部落とした）、
+**S1035 もその一つだった**。名前照合をやめて `callee_full_name` を
+そのままキーにし、メッセージにもそれを使う。引数側は `call_name` で
+`net/http.CanonicalHeaderKey` を要求する。
+
+#### ゲート
+
+- fixture `s1035/receivers.go` に 4 形。stub の `net/http` は
+  `Set` しか持っていなかったので `Add` / `Del` / `Get` を足した
+  （[[empty-fixture-hides-defects]]：3 つは**一度も走っていなかった**）。
+- golden `cases/staticcheck-s`: 146 → 151 キー、消失 0。
+- `s1035_matches_the_callee_not_the_selector_name` が行・列・文言を固定する。
+  修正前は 7 件出て 2 件の名前が違う。既存のテストは
+  `any(|m| m.contains("CanonicalHeaderKey"))` で、そのすべてを通していた。
+
+```
+台帳: 51/100 at zero（54 定義、open 0、unmeasured 3）—— minio は panic が残るので未採用
+```

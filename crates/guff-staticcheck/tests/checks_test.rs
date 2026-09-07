@@ -1753,6 +1753,56 @@ fn s1035_flags_bad_patterns() {
     assert!(messages.iter().any(|m| m.contains("CanonicalHeaderKey")));
 }
 
+/// Which method the call resolves to, and what the message calls it.
+///
+/// Upstream matches the callee object — `(Symbol "(net/http.Header).Set")` —
+/// not the selector's spelling. guff matched the bare name `Set`/`Add`/`Get`/
+/// `Del` and printed the receiver expression's type, which was wrong three
+/// ways: a shadowing method on a type that embeds `http.Header` was reported
+/// (minio's `cmd/postpolicyform_test.go`, seven findings), an unrelated `Set`
+/// was reported, and a promoted method was reported under the outer type's
+/// name. The old test was `messages.iter().any(|m| m.contains(…))` over a
+/// one-line fixture and stayed green through all of it.
+#[test]
+fn s1035_matches_the_callee_not_the_selector_name() {
+    let dir = support::testdata("s1035");
+    let net_http_stub = dir.join("stub/net/http/http.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1035/receivers",
+        &dir.join("receivers.go"),
+        &[("net/http", &net_http_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64, String)> =
+        support::run_analyzer_diagnostics(s1035::analyzer(), &pkg)
+            .into_iter()
+            .map(|d| {
+                let p = fset.position(guff::position::Pos(d.pos as i64));
+                (p.line, p.column, d.message)
+            })
+            .collect();
+    got.sort();
+    let msg = |m: &str| {
+        format!("calling net/http.CanonicalHeaderKey on the 'key' argument of {m} is redundant")
+    };
+    assert_eq!(
+        got,
+        vec![
+            // the promoted method — named for where it is declared, not for
+            // the type the call went through
+            (46, 8, msg("(net/http.Header).Del")),
+            (51, 8, msg("(net/http.Header).Set")),
+            (52, 8, msg("(net/http.Header).Add")),
+            (53, 12, msg("(net/http.Header).Get")),
+            (54, 8, msg("(net/http.Header).Del")),
+        ],
+        "{got:?}"
+    );
+    // The shadowing `Set` (line 40) and the unrelated `Set` (line 59) are
+    // absent above, and that is the assertion for them.
+}
+
 #[test]
 fn s1035_allows_ok_patterns() {
     let dir = support::testdata("s1035");
