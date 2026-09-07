@@ -2258,6 +2258,43 @@ fn sa4006_flags_bad_cases() {
     assert_eq!(messages.len(), 4, "{messages:?}");
 }
 
+/// What a loop's back edge can and cannot carry.
+///
+/// guff's `read_in_enclosing_loop` guard exists because hybrid SSA drops some
+/// loads that upstream's IR keeps; it used to treat *any* read inside an
+/// enclosing loop as proof the value is live. A `:=` at the top of the body
+/// redefines the variable first, so the reads that follow it belong to this
+/// iteration and the value assigned below them is dead — which is
+/// hashicorp/packer's `hcl2template/types.packer_config.go:636`.
+///
+/// Shapes 3, 4 and 6 are the ones the guard is *for*, and they have to stay
+/// silent: reading before any redefinition (3), a redefinition inside a nested
+/// `if` that may not run (4), and a value read after the loop (6).
+#[test]
+fn sa4006_loop_back_edge_shapes() {
+    let pkg = typecheck_rule("sa4006", "loops.go");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64)> = support::run_analyzer_diagnostics(sa4006::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| {
+            assert_eq!(d.message, "this value of moreDiags is never used");
+            let p = fset.position(guff::position::Pos(d.pos as i64));
+            (p.line, p.column)
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            (32, 3), // 1. loop, redefined at the top of the body then read
+            (43, 2), // 2. the same shape with no loop
+            (77, 3), // 5. range loop, same as 1
+        ],
+        "{got:?}"
+    );
+}
+
 #[test]
 fn sa4006_allows_ok_cases() {
     let pkg = typecheck_rule("sa4006", "ok.go");
