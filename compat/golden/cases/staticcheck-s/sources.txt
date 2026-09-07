@@ -48,6 +48,10 @@ s1018/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1018/ok.go
 s1019/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1019/bad.go
 s1019/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1019/ok.go
 s1020/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1020/bad.go
+# Both S1020 forms plus the four near-misses. The nested form is reported on
+# the *inner* `if`, and an `else` on either `if` takes the shape out of the
+# pattern — guff used to report two of these four.
+s1020/shapes/shapes.go  crates/guff-staticcheck/tests/testdata/s1020/shapes.go
 s1020/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1020/ok.go
 s1021/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1021/bad.go
 s1021/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1021/ok.go
