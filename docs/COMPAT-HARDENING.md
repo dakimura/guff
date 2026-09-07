@@ -27730,3 +27730,85 @@ packer  after   guff=608 golangci=608 both=607  P=99.8% R=99.8%  open 2
 ```
 台帳: 50/100 at zero（54 定義、open 1＝packer 2、unmeasured 3）
 ```
+
+### 2026-09-07（続き 248）— S1020 の入れ子形は**内側の `if` に報告する**。`else` があれば黙る。packer が 2 → 1
+
+続き 247 の残り 2 件のうち 1 件が S1020 の過剰報告だった。
+
+```
++guff  command/build.go:304:staticcheck:when ok is true, hcperr can't be nil
+```
+
+上流の `checkAssertNotNilFn2Q` は入れ子形をこう書いている:
+
+```
+(IfStmt
+    nil                                       ← 外側に init は無い
+    (BinaryExpr lhs "!=" (Builtin "nil"))
+    [                                         ← 外側の body は 1 要素
+        ifstmt@(IfStmt
+            (AssignStmt [(Ident "_") ok] _ [(TypeAssertExpr lhs _)])
+            ok
+            _
+            nil)                              ← 内側に else は無い
+    ]
+    nil)                                      ← 外側にも else は無い
+```
+
+そして報告先は `report.Report(pass, ifstmt, ...)` —— **パターンが束縛した
+内側の `if`** であって、走査が当たった外側ではない。
+
+guff の `check_nested_if` は 4 つの条件のうち **2 つを見ていなかった**:
+内側の `else` と外側の `else`。報告位置も外側だった。
+
+#### 8 形を測った
+
+| 形 | golangci | guff（修正前） |
+|---|---|---|
+| 1. `ok && i != nil`（平坦） | 26:2 | 26:2 |
+| 2. `i != nil && ok`（左右逆） | 33:2 | 33:2 |
+| 3. 入れ子、どちらも裸 | **41:3**（内側） | **40:2**（外側） |
+| 4. 入れ子、**内側に else** | 黙る | **報告する** |
+| 5. 入れ子、**外側に else** | 黙る | **報告する** |
+| 6. 入れ子、外側の body が 2 文 | 黙る | 黙る |
+| 7. 入れ子、外側に init | 黙る | 黙る |
+| 8. 平坦、`ok` の名前が違う | 91:2 `yes` | 91:2 `yes` |
+
+`else` がある形で黙るのには理由がある。メッセージ通りに書き換えると
+**else 節ごと消える**ので、その nil チェックは冗長ではない。packer の
+`command/build.go:304` はまさにそれで、else 側が `hcperr.Error()` を呼ぶ。
+
+#### 既存のテストは 1 形しか通していなかった
+
+`tests/testdata/s1020/bad.go` は 1 行:
+
+```go
+if _, ok := i.(int); ok && i != nil {}
+```
+
+そしてテストは `assert!(messages.iter().any(|m| m.contains("can't be nil")))`。
+**入れ子形は一度も走っていない**し、位置も件数も見ていない
+（[[one-shape-fixture-hides-the-other-branches]]）。8 形の `shapes.go` に
+置き換え、`assert_eq!` で行・列・文言を突き合わせた。修正前のバイナリでは
+6 件・位置違いで落ちる。
+
+#### 測定
+
+```
+packer  before  guff=608 golangci=608 both=606  P=99.7% R=99.7%  open 4   （続き 247 の前）
+packer  after   guff=607 golangci=608 both=607  P=100.0% R=99.8%  open 1
+```
+
+**precision 100%** —— guff が上流の出さないものを出すことは無くなった。
+残り 1 件は `hcl2template/types.packer_config.go:636` の **SA4006**
+（`this value of moreDiags is never used`）の取りこぼしで、
+`cases/staticcheck-s` の ratchet が既に `missing: 2` で記録している
+クラス（空の `if` 本体が条件への参照を落とす IR 最適化を上流は通り、
+guff-ssa は残す）。同じ原因かどうかは未確認で、それが次のタスク。
+
+- golden `cases/staticcheck-s`: 142 → 146 キー、消失 0。
+- `checks_test.rs` の `s1020_matches_upstream_on_every_nesting_shape`。
+
+```
+台帳: 50/100 at zero（54 定義、open 1＝packer 1、unmeasured 3）
+```

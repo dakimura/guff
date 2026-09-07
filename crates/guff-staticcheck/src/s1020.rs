@@ -81,8 +81,30 @@ fn check_if(pass: &Pass<'_>, ifs: &IfStmt) -> Option<(String, String)> {
     Some((ok.name.clone(), render_expr(&ta.x)))
 }
 
-fn check_nested_if(pass: &Pass<'_>, ifs: &IfStmt) -> Option<(String, String)> {
-    if ifs.init.is_some() {
+/// The nested form, `checkAssertNotNilFn2Q`.
+///
+/// Returns the position to report at as well as the two names: upstream reports
+/// this one on the **inner** `if` (`report.Report(pass, ifstmt, …)`, where
+/// `ifstmt` is the pattern's own binding), not on the outer one it matched from.
+/// guff reported the outer `if`, one line and one column early.
+///
+/// Both `else` branches have to be absent. The pattern spells the outer body as
+/// the one-element list `[ifstmt@(IfStmt … nil)]` and the outer `else` as the
+/// trailing `nil`, so:
+///
+/// ```text
+/// (IfStmt nil (BinaryExpr lhs "!=" nil) [ifstmt@(IfStmt (AssignStmt …) ok _ nil)] nil)
+///                                                                             ^^^  ^^^
+///                                                                    inner else    outer else
+/// ```
+///
+/// guff checked neither, and hashicorp/packer has the shape that catches it:
+/// `command/build.go:304` wraps `if _, ok := hcperr.(*registry.NotAHCPArtifactError); ok`
+/// in an `if hcperr != nil`, and the inner `if` has an `else`. Rewriting it the
+/// way the message suggests would drop the `else`'s reference to `hcperr` — the
+/// nil check is not redundant there, which is why upstream stays quiet.
+fn check_nested_if(pass: &Pass<'_>, ifs: &IfStmt) -> Option<(u32, String, String)> {
+    if ifs.init.is_some() || ifs.else_.is_some() {
         return None;
     }
     let Expr::BinaryExpr(BinaryExpr { x, op, y, .. }) = unparen(&ifs.cond) else {
@@ -100,6 +122,9 @@ fn check_nested_if(pass: &Pass<'_>, ifs: &IfStmt) -> Option<(String, String)> {
     let Stmt::IfStmt(inner) = &ifs.body.list[0] else {
         return None;
     };
+    if inner.else_.is_some() {
+        return None;
+    }
     let (ok, ta) = inner.init.as_deref().and_then(type_assert_init)?;
     if ta.x.id() != lhs.id() && !matches!((unparen(&ta.x), unparen(x)), (Expr::Ident(a), Expr::Ident(b)) if a.name == b.name) {
         return None;
@@ -107,7 +132,11 @@ fn check_nested_if(pass: &Pass<'_>, ifs: &IfStmt) -> Option<(String, String)> {
     if !matches!(unparen(&inner.cond), Expr::Ident(id) if id.name == ok.name) {
         return None;
     }
-    Some((ok.name.clone(), render_expr(&ta.x)))
+    Some((
+        match_pos(NodeRef::IfStmt(inner)),
+        ok.name.clone(),
+        render_expr(&ta.x),
+    ))
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -122,11 +151,14 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             return;
         };
         // Upstream names the asserted expression rather than describing it.
-        if let Some((ok, value)) = check_if(pass, ifs).or_else(|| check_nested_if(pass, ifs)) {
-            pending.push((
-                match_pos(node),
-                format!("when {ok} is true, {value} can't be nil"),
-            ));
+        // The two forms report at different nodes — the flat one at the `if`
+        // that matched, the nested one at the inner `if` — so the position
+        // comes back from the check rather than from `node`.
+        let found = check_if(pass, ifs)
+            .map(|(ok, value)| (match_pos(node), ok, value))
+            .or_else(|| check_nested_if(pass, ifs));
+        if let Some((pos, ok, value)) = found {
+            pending.push((pos, format!("when {ok} is true, {value} can't be nil")));
         }
     });
     for (pos, message) in pending {

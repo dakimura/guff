@@ -1487,6 +1487,51 @@ fn s1020_flags_bad_patterns() {
     assert!(messages.iter().any(|m| m.contains("can't be nil")));
 }
 
+/// Both S1020 forms, the four near-misses, and the position of each report.
+///
+/// The old fixture held one line — the flat `ok && i != nil` — and the old test
+/// was `messages.iter().any(|m| m.contains("can't be nil"))`, which stays green
+/// while every other branch is wrong. Three were: the nested form reported on
+/// the outer `if` where upstream reports on the inner one, and neither `else`
+/// branch was checked, so guff reported two shapes upstream is silent on.
+///
+/// Every line/column below was read off golangci-lint 2.12.2 on this file.
+#[test]
+fn s1020_matches_upstream_on_every_nesting_shape() {
+    let dir = support::testdata("s1020");
+    let pkg =
+        support::typecheck_file(&dir, "shapes.go", "example.com/staticcheck/s1020/shapes");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+
+    let mut got: Vec<(i64, i64, String)> =
+        support::run_analyzer_diagnostics(s1020::analyzer(), &pkg)
+            .into_iter()
+            .map(|d| {
+                let p = fset.position(guff::position::Pos(d.pos as i64));
+                (p.line, p.column, d.message)
+            })
+            .collect();
+    got.sort();
+
+    assert_eq!(
+        got,
+        vec![
+            // 1. flat, `ok && i != nil` — reported on the `if` itself
+            (26, 2, "when ok is true, i can't be nil".to_string()),
+            // 2. flat, operands swapped
+            (33, 2, "when ok is true, i can't be nil".to_string()),
+            // 3. nested — reported on the **inner** `if`, line 41 not line 40
+            (41, 3, "when ok is true, i can't be nil".to_string()),
+            // 8. flat, `ok` renamed: upstream prints the object's own name
+            (91, 2, "when yes is true, i can't be nil".to_string()),
+        ],
+        "{got:?}"
+    );
+    // 4 (inner else), 5 (outer else), 6 (two statements), 7 (outer init) are
+    // absent above, and that is the assertion for them.
+}
+
 #[test]
 fn s1020_allows_ok_patterns() {
     let dir = support::testdata("s1020");

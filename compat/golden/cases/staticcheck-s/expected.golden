@@ -100,6 +100,10 @@ s1020/bad/bad.go:4:2:staticcheck::S1020: when ok is true, i can't be nil
 s1020/bad/bad.go:4:2:staticcheck::SA9003: empty branch
 s1020/ok/ok.go:3:25:staticcheck::SA9003: empty branch
 s1020/ok/ok.go:3:28:staticcheck::SA4006: this value of ok is never used
+s1020/shapes/shapes.go:26:2:staticcheck::S1020: when ok is true, i can't be nil
+s1020/shapes/shapes.go:33:2:staticcheck::S1020: when ok is true, i can't be nil
+s1020/shapes/shapes.go:41:3:staticcheck::S1020: when ok is true, i can't be nil
+s1020/shapes/shapes.go:91:2:staticcheck::S1020: when yes is true, i can't be nil
 s1021/bad/bad.go:4:2:staticcheck::S1021: should merge variable declaration with assignment on next line
 s1023/bad/bad.go:7:3:staticcheck::S1023: redundant break statement
 s1023/bad/bad.go:9:2:staticcheck::S1023: redundant return statement
