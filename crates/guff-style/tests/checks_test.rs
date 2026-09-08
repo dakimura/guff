@@ -8602,6 +8602,38 @@ fn unparam_sees_a_zero_variable_and_a_written_zero_as_one_constant() {
     );
 }
 
+/// Call sites inside a package-level variable initialiser count too.
+///
+/// Upstream collects them with `ssautil.AllFunctions`, which reaches the
+/// synthesized package `init` and the `func` literals under it. guff read
+/// `src_funcs_with_methods()`, a list built from *named* functions, so every
+/// call written inside `var _ = ...` was invisible — and because
+/// `alwaysReceivedConst` gives up below four call sites, the miss was silent.
+///
+/// podman v6.1.0 is the case: its machine e2e suite is
+/// `var _ = Describe("...", func() { It("...", func() { ... }) })` with eight
+/// `setTimeout(time.Minute * 10)` calls inside. What surfaced was not a
+/// missing unparam finding but a nolintlint one, `//nolint: unparam` reported
+/// as unused.
+///
+/// `outsideInit` is the control: the same method with the same four call
+/// sites, written in an ordinary function, which guff already reported.
+#[test]
+fn unparam_counts_call_sites_in_a_package_var_initialiser() {
+    let pkg = support::typecheck_fixture("unparam", "example.com/unparam/varinit", "varinit.go");
+    let messages = support::run_analyzer(unparam(), &pkg);
+    let mut got: Vec<&str> = messages.iter().map(|m| m.as_str()).collect();
+    got.sort_unstable();
+    assert_eq!(
+        got,
+        vec![
+            "(*builder).insideInit - timeout always receives 600",
+            "(*builder).outsideInit - timeout always receives 600",
+        ],
+        "{messages:?}"
+    );
+}
+
 /// "always receives" compares constant *values*, not their printed form.
 ///
 /// `constant.Value.String()` is "a short, quoted (human-readable) form … for

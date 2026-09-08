@@ -29300,3 +29300,83 @@ return seenStr
 ```
 台帳: 58/100 at zero（62 定義、open 1、unmeasured 3）
 ```
+
+### 2026-09-08（続き 267）— unparam の呼び出し箇所収集が**package 変数の初期化子を見ていなかった**。`close podman` 完了、59/100
+
+続き 266 で「材料が 1 つ未特定」と書いた件。見つかった。
+
+#### 材料は**呼び出しを囲んでいるもの**
+
+podman の呼び出し 8 箇所はすべて
+
+```go
+var _ = Describe("podman machine init", func() {
+	It("...", func() {
+		ssession, err := mb.setCmd(s).setTimeout(time.Minute * 10).run()
+```
+
+—— つまり **package レベルの `var` 初期化子**の中にある。最小再現で
+`Describe`/`It` を自前の 5 行に置き換えると:
+
+```
+上流: (*builder).setTimeout - timeout always receives time.Minute * 10 (600000000000)
+guff: 何も出ない
+```
+
+同じ呼び出しを普通の関数に移すと guff も報告する（control）。§4 続き 266 で
+振った 6 つの変数（関数/メソッド、3/4 箇所、単一/複数ファイル、通常/`_test.go`、
+interface の有無、結果の使用）が**全部外れ**だったのはこのため。
+
+#### 原因
+
+`CallSites::build` は `src_funcs_with_methods()` を歩いていた。この一覧は
+**名前つき関数から作る**ので、合成された package `init` とその配下 ——
+`var _ = ...` の中の `func` リテラル —— が丸ごと落ちる。上流は
+`ssautil.AllFunctions` で拾い、`init$1` と名付ける。
+
+**同じことが 3 行下のコメントに既に書いてあった**（リテラル名の対応表を作る
+ところ）:
+
+> Walking `prog.functions` rather than `src_funcs_with_methods()` is
+> deliberate: that list starts from named functions, so it omits the
+> synthesized package `init` and everything under it, and a literal in a
+> package-level `var` initializer lives exactly there. Upstream reaches it
+> (`ssautil.AllFunctions`) and names it `init$1`.
+
+名前の対応表は直っていて、**呼び出し箇所の収集が直っていなかった**。
+§4 続き 252 / 253 / 260 / 261 と同じ形。
+
+そして落ち方が静かだった: `alwaysReceivedConst` は呼び出し 4 箇所未満で
+黙って諦めるので、0 箇所も 3 箇所も同じ「無言」。表に出たのは unparam の
+欠落ではなく **nolintlint の「directive が未使用」**だった。
+woodpecker（続き 256）と同じく、**nolintlint は症状**。
+
+#### 結果
+
+```
+podman: guff=1 golangci=0 both=0   →   guff=0 golangci=0 both=0  P=R=100.0%
+failures=0 unexpected=0 health=0
+```
+
+golden 233 件・fix・reject・oss pr tier はすべて変化なし。呼び出し箇所を
+増やす変更なので `check_unused_results` にも効くが、**コーパスに新しい乖離は
+出ていない**。
+
+#### 記録（測定済み・未修正）
+
+両方が報告する形では、まだ**文言が違う**:
+
+```
+上流: timeout always receives time.Minute * 10 (600000000000)
+guff: timeout always receives 600000000000
+```
+
+guff には対応するコード（`orig != repr` なら `"{orig} ({repr})"`）が既に
+あるのに `seen_orig` が空になる —— `call_by_pos` は呼び出しの `(` の位置で
+引くのに、SSA 命令の位置がそれと一致していないらしい。**この修正の前から
+ある欠陥**で、リテラル（`7`）では両者が一致するので見えない。コーパスの
+どの target にも今は出ていないので、別タスクにして測定だけ残す。
+
+```
+台帳: 59/100 at zero（62 定義、open 0、unmeasured 3）
+```
