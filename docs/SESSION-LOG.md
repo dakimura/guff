@@ -5,6 +5,7 @@
 
 | 日付 | 内容 |
 |------|------|
+| 2026-09-08 | `adopt cluster-api`（v1.14.0）は 4 対 0。gocritic 3 原因 —— `dupOption` と `offBy1` の取りこぼし（どちらも nolintlint の未使用 directive として表に出た。4 度目）と `badCond` の偽陽性。directive を外す実験を sed で雑にやって行末を壊し「上流も黙る」と一度読み違えた。open 4 |
 | 2026-09-08 | `adopt tempo` は guff が終わらず失敗（25m timeout、golangci は 44s）。サイズでも vendoring でもなく依存 1 つ —— `github.com/bytedance/sonic` を import する 5 行のモジュールで golangci 0s / guff >180s、linter 1 つなので費用は load/型検査側。sonic を go.mod に持つ gin・woodpecker・traefik・celestia-node は解析グラフに 0 個なので通っていた（tempo は 26 個）。guff の欠陥として除外表に測定つきで記録 |
 | 2026-09-08 | `adopt gatekeeper`（v3.23.0）は 659 対 658。guff の gofumpt が v0.10.0 の `effectiveEnd`（末尾インラインコメントを前の宣言の一部とみなす）を実装していて、`} // comment` の次のコメントの前に空行を入れていた。golangci-lint 2.12.2 が pin する v0.9.2 は入れない（3 実装で測定）。同じファイルの 3 行上に同じ pin の注意書きがあった —— 6 度目。61/100 |
 | 2026-09-08 | gocritic 2 件。`dupBranchBody` は `go`/`defer` を `go f(...);` と描いて引数を落としていたので、引数だけ違う 2 枝が「同じ body」になっていた。`ifElseChain` は visited を walk の前に全部塗っていたので、init 文を持つ head が鎖ごと飲み込んでいた（上流は諦める前に塗らないので最初の `else if` から数え直す）。`close cometbft` 完了、60/100 |
