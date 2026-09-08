@@ -5,6 +5,7 @@
 
 | 日付 | 内容 |
 |------|------|
+| 2026-09-08 | `adopt podman`（v6.1.0、build tags は podman 自身の `remote,containers_image_openpgp`）は 1 対 0。症状は nolintlint の unused directive、原因は unparam の取りこぼし（directive を外すと上流だけが `always receives time.Minute * 10` を出す）。構造の変数を 6 つ振ってもどれも guff は正しく報告するので、材料が 1 つ未特定。上流の「呼び出し 4 箇所未満は諦める」条件と、`always receives` の文言差（ソース表記＋値）も測定した。open 1 |
 | 2026-09-08 | `adopt argo-workflows`（v4.1.2）。`ui/embed.go` の未ビルド frontend で `go list ./...` が rc=1、golangci は typecheck 1 件に潰れる。汚れているのは `cmd` と `server` の 2 木だけなので clean な 8 木 140 パッケージへ scope し、8 対 8 の完全一致。58/100 |
 | 2026-09-08 | x/exp の `//go:fix inline` 表はバージョンについての主張なので、vendor があるときは `<module>/vendor/<import path>` の宣言を実際に読んで判断する（表は「開く価値のあるパッケージの短縮リスト」に格下げ）。vendor していない古い x/exp は表のままで、測定だけ残した。`close lazygit` 完了、57/100 |
 | 2026-09-08 | `adopt lazygit`（v0.64.1）は 26 対 12、R=100%。guff だけの 14 件は全部 `govet:inline` の「type parameter inference」で、原因は `golang.org/x/exp/{maps,slices}` のジェネリック `//go:fix inline` 関数をハードコードした表。directive が x/exp に入ったのは 2025-02-10 頃で、lazygit が vendor しているのはそれ以前。open 14 |
