@@ -397,5 +397,17 @@
     "packages": "./api/... ./config/... ./errors/... ./persist/... ./pkg/... ./test/... ./util/... ./workflow/...",
     "tier": "hunt",
     "timeout": "25m"
+  },
+  {
+    "name": "podman",
+    "url": "https://github.com/podman-container-tools/podman.git",
+    "ref": "v6.1.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m",
+    "build_tags": [
+      "remote",
+      "containers_image_openpgp"
+    ]
   }
 ]

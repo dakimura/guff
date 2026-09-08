@@ -29188,3 +29188,115 @@ failures=0 unexpected=0 health=0
 ```
 台帳: 58/100 at zero（61 定義、open 0、unmeasured 3）
 ```
+
+### 2026-09-08（続き 266）— `adopt podman`。open 1、症状は nolintlint、原因は unparam。**再現の材料が 1 つ足りない**
+
+`adopt podman`（v6.1.0, 180.9MB）。44 linter、`govet.enable-all: true`
+（fieldalignment / shadow を除く）、forbidigo に `pkg:` と `analyze-types`、
+staticcheck all。`_new_keys` は空。
+
+#### build tags はリポジトリ自身のものを使う
+
+素の `go build ./...` は cgo の `gpgme` が無くて落ちる（skopeo と同じ形）。
+podman の `hack/golangci-lint.sh` は darwin をこう lint する:
+
+```bash
+windows | darwin)
+    # For Darwin and Windows, only "remote" linting is possible and required.
+    TAGS="remote,containers_image_openpgp"
+```
+
+なので `build_tags` はこれ。141 パッケージ、`go build` は無言。
+
+#### 測定
+
+```
+podman: guff=1 golangci=0 both=0 P=0.0% R=100.0% [UNEXPECTED]
+failures=0 unexpected=1 health=0
+
++guff  pkg/machine/e2e/config_test.go:154:nolintlint:
+       directive `//nolint: unparam` is unused for linter "unparam"
+```
+
+golangci が 0 件なのは潰れているからではない —— 141 パッケージが load され
+44 linter が走った上で、podman が自分の darwin lint で clean だから。
+
+#### 仮説を 2 つ立てて 2 つとも測定に否定された
+
+1. **コロンの後ろの空白**（`//nolint: unparam`）。最小再現に 4 形
+   （空白あり / なし / 2 linter / 実際に抑制される場合）を書いたら
+   **両ツールが完全一致**。形のせいではない。
+2. **near-miss なインターフェース**。`config_test.go:39` の
+   `MachineTestBuilder` は `setTimeout(...) *MachineTestBuilder` を宣言して
+   いて、実装は `*machineTestBuilder` を返すので満たさない。これも再現せず
+   （しかもこの interface はどこからも使われていない）。
+
+#### 本当の原因は unparam の取りこぼし
+
+directive を外して測ると:
+
+```
+golangci: pkg/machine/e2e/config_test.go:154:41:
+          (*machineTestBuilder).setTimeout - timeout always receives time.Minute * 10 (600000000000)
+guff:     0 件
+```
+
+nolintlint は**症状**で、原因は unparam。woodpecker（続き 256）と同じ形。
+
+#### 再現の途中で分かった上流の条件
+
+`alwaysReceivedConst` は**呼び出し箇所が 4 未満なら諦める**:
+
+```go
+if len(callSites) < 4 {
+	// We can't possibly receive the same constant value enough
+	// times, hence a potential false positive.
+	return ""
+}
+```
+
+最初の 3 つの最小再現が**両側とも無言**だったのはこれ。呼び出しを 4 箇所に
+すると両方が報告する。podman の `setTimeout` は 8 箇所。
+
+#### それでも podman は再現していない
+
+構造の変数を 6 つ振ったが、**どれも guff は正しく報告する**:
+
+| 振った変数 | guff |
+|---|---|
+| 関数 / メソッド（レシーバあり） | 両方報告 |
+| 呼び出し 3 箇所 / 4 箇所 | 閾値も一致 |
+| 同一ファイル / 複数ファイルに分散 | 両方報告 |
+| 通常ファイル / `_test.go` | 両方報告 |
+| interface 無し / near-miss interface | 両方報告 |
+| 結果を捨てる / チェーンで使う | 両方報告 |
+
+つまり podman 側にもう 1 つ材料がある。**推測で埋めずに `close podman` に
+渡す。**
+
+#### ついでに見つかった別の乖離（未修正）
+
+再現の過程で、両方が報告する形での**文言の違い**が出た:
+
+```
+上流: timeout always receives time.Minute * 10 (600000000000)
+guff: timeout always receives 600000000000
+```
+
+上流は引数の**ソース表記**を出し、定数値と異なるときだけ括弧で値を添える:
+
+```go
+seenStr := constValueString(seen)
+if seenOrig != "" && seenStr != seenOrig {
+	return fmt.Sprintf("%s (%s)", seenOrig, seenStr)
+}
+return seenStr
+```
+
+`7` のようなリテラルでは両者が一致するので**今まで見えていなかった**。
+`time.Minute * 10` のような式で初めて出る。これは podman の 1 件とは独立した
+欠陥で、別途直す。
+
+```
+台帳: 58/100 at zero（62 定義、open 1、unmeasured 3）
+```
