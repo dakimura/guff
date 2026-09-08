@@ -5,6 +5,7 @@
 
 | 日付 | 内容 |
 |------|------|
+| 2026-09-08 | gocritic 2 件。`dupBranchBody` は `go`/`defer` を `go f(...);` と描いて引数を落としていたので、引数だけ違う 2 枝が「同じ body」になっていた。`ifElseChain` は visited を walk の前に全部塗っていたので、init 文を持つ head が鎖ごと飲み込んでいた（上流は諦める前に塗らないので最初の `else if` から数え直す）。`close cometbft` 完了、60/100 |
 | 2026-09-08 | `adopt cometbft`（v0.40.0）は 35 対 33、R=100%。guff だけの 2 件はどちらも gocritic で、`dupBranchBody` の偽陽性（引数の違う 2 枝を「同じ」と言う）と `ifElseChain` の偽陰性（directive を外すと上流だけが出す）。後者は nolintlint の未使用として表に出ていた —— 3 度目。open 2 |
 | 2026-09-08 | unparam の `CallSites::build` が `src_funcs_with_methods()`（名前つき関数由来）を歩いていて、合成 package `init` 配下 —— `var _ = Describe(...)` の中の `func` リテラル —— の呼び出しを 1 つも見ていなかった。上流は `ssautil.AllFunctions`。3 行下のコメントが同じことを既に書いていた。`alwaysReceivedConst` が 4 箇所未満で黙るため症状は nolintlint に化けていた。`close podman` 完了、59/100 |
 | 2026-09-08 | `adopt podman`（v6.1.0、build tags は podman 自身の `remote,containers_image_openpgp`）は 1 対 0。症状は nolintlint の unused directive、原因は unparam の取りこぼし（directive を外すと上流だけが `always receives time.Minute * 10` を出す）。構造の変数を 6 つ振ってもどれも guff は正しく報告するので、材料が 1 つ未特定。上流の「呼び出し 4 箇所未満は諦める」条件と、`always receives` の文言差（ソース表記＋値）も測定した。open 1 |

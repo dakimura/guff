@@ -1314,24 +1314,53 @@ fn exit_after_defer_walk(
     }
 }
 
-fn count_if_else_len(stmt: &IfStmt) -> i32 {
-    if stmt.init.is_some() {
-        return 0;
-    }
+/// upstream `countIfelseLen`, **including where it marks nodes visited**.
+///
+/// ```go
+/// for {
+///     if stmt.Init != nil {
+///         return 0 // Give up
+///     }
+///     switch e := stmt.Else.(type) {
+///     case *ast.IfStmt:
+///         stmt = e; count++; c.visited[e] = true
+/// ```
+///
+/// The marking happens *inside* the walk, after the `Init` test, so giving up
+/// on a chain head leaves the rest of the chain unvisited — and the walker
+/// then reaches the first `else if` on its own and counts from there.
+///
+/// guff marked every nested `else if` visited up front, before asking, so a
+/// head with an init statement swallowed its whole chain. cometbft
+/// `consensus/state.go` is that shape:
+///
+/// ```go
+/// if voteErr, ok := err.(*types.ErrVoteConflictingVotes); ok {   // init: give up
+/// } else if errors.Is(err, …) {                                  // upstream warns here
+/// } else if errors.Is(err, …) {
+/// } else {
+/// }
+/// ```
+///
+/// Upstream reports at the first `else if`; guff reported nothing, and what
+/// surfaced was nolintlint calling the file's `//nolint: gocritic` unused.
+fn count_if_else_len(stmt: &IfStmt, visited: &mut HashSet<u32>) -> i32 {
     let mut count = 0;
     let mut cur = stmt;
     loop {
+        if cur.init.is_some() {
+            return 0; // Give up — and mark nothing further.
+        }
         match cur.else_.as_deref() {
             Some(Stmt::IfStmt(next)) => {
-                if next.init.is_some() {
-                    return 0;
-                }
                 count += 1;
+                if next.id != 0 {
+                    visited.insert(next.id);
+                }
                 cur = next;
             }
             Some(Stmt::BlockStmt(_)) => return count + 1,
-            None => return count,
-            _ => return 0,
+            _ => return count,
         }
     }
 }
@@ -1345,16 +1374,11 @@ fn check_if_else_chain(
     if !visited.insert(stmt.id) && stmt.id != 0 {
         return;
     }
-    // Mark nested else-ifs visited.
-    let mut cur = stmt;
-    while let Some(Stmt::IfStmt(next)) = cur.else_.as_deref() {
-        if next.id != 0 {
-            visited.insert(next.id);
-        }
-        cur = next;
-    }
+    // `count_if_else_len` marks the chain visited as it walks, exactly where
+    // upstream does — see its doc comment.
+    //
     // `count_if_else_len` is non-negative by construction (0 on give-up).
-    if usize::try_from(count_if_else_len(stmt)).unwrap_or(0) >= min_threshold {
+    if usize::try_from(count_if_else_len(stmt, visited)).unwrap_or(0) >= min_threshold {
         report(
             pending,
             stmt.if_.0 as u32,
@@ -1713,16 +1737,36 @@ fn stmt_text(stmt: &Stmt) -> Option<String> {
                 None => Some(format!("if {init}{cond} {body}")),
             }
         }
-        Stmt::DeferStmt(d) => call_qualified_name(&d.call)
-            .or_else(|| expr_text(&d.call.fun))
-            .map(|n| format!("defer {n}(...);")),
-        Stmt::GoStmt(g) => call_qualified_name(&g.call)
-            .or_else(|| expr_text(&g.call.fun))
-            .map(|n| format!("go {n}(...);")),
+        // The whole call, arguments included. These used to render as
+        // `go f(...);`, eliding every argument, so two branches calling the
+        // same function with *different* arguments compared equal and
+        // `dupBranchBody` reported them. cometbft
+        // `consensus/byzantine_test.go:512` broadcasts `proposal1` in one
+        // branch and `proposal2` in the other:
+        //
+        //     if i < len(peers)/2 {
+        //         go sendProposalAndParts(height, round, cs, peer, proposal1, …)
+        //     } else {
+        //         go sendProposalAndParts(height, round, cs, peer, proposal2, …)
+        //     }
+        //
+        // Upstream compares with `astequal.Stmt`, which is structural, so the
+        // arguments have always counted there.
+        Stmt::DeferStmt(d) => Some(format!("defer {};", call_syntax_text(&d.call)?)),
+        Stmt::GoStmt(g) => Some(format!("go {};", call_syntax_text(&g.call)?)),
         Stmt::BranchStmt(b) => Some(format!("{};", b.tok.as_str())),
         Stmt::EmptyStmt(_) => Some(";".into()),
         _ => None,
     }
+}
+
+/// A call rendered the way [`expr_text`] renders `Expr::CallExpr`, for the
+/// statement forms that hold a `CallExpr` directly (`go`, `defer`).
+fn call_syntax_text(call: &CallExpr) -> Option<String> {
+    let fun = expr_text(&call.fun)?;
+    let args: Option<Vec<_>> = call.args.iter().map(expr_text).collect();
+    let ellipsis = if call.ellipsis.is_valid() { "..." } else { "" };
+    Some(format!("{fun}({}{ellipsis})", args?.join(", ")))
 }
 
 fn block_text(body: &BlockStmt) -> Option<String> {

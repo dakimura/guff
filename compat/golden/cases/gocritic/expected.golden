@@ -257,39 +257,42 @@ extras.go:698:12:gocritic::evalOrder: may want to evaluate evalOrderMutate(&x) b
 extras.go:702:1:gocritic::unlabelStmt: label label1 is redundant
 extras.go:709:4:gocritic::unlabelStmt: change `continue outer` to `break`
 extras.go:716:14:gocritic::returnAfterHttpError: Possibly return is missed after the http.Error call
-extras.go:721:2:gocritic::commentedOutCode: may want to remove commented-out code
-extras.go:740:2:gocritic::commentedOutCode: may want to remove commented-out code
-extras.go:746:2:gocritic::commentedOutCode: may want to remove commented-out code
-extras.go:753:2:gocritic::commentedOutCode: may want to remove commented-out code
-extras.go:779:2:gocritic::commentedOutCode: may want to remove commented-out code
-extras.go:797:1:gocritic::exposedSyncMutex: don't embed sync.Mutex
-extras.go:802:1:gocritic::exposedSyncMutex: don't embed *sync.RWMutex
-extras.go:808:2:gocritic::badLock: defer is missing, mutex is unlocked immediately
-extras.go:812:2:gocritic::badLock: defer is missing, mutex is unlocked immediately
-extras.go:816:8:gocritic::badLock: suspicious unlock, maybe Unlock was intended?
-extras.go:820:8:gocritic::badLock: suspicious unlock, maybe RUnlock was intended?
-extras.go:824:8:gocritic::badLock: maybe defer rw.Unlock() was intended?
-extras.go:828:8:gocritic::badLock: maybe defer rw.RUnlock() was intended?
-extras.go:833:2:gocritic::externalErrorReassign: suspicious reassignment of error from another package
-extras.go:838:5:gocritic::uncheckedInlineErr: err error is unchecked, maybe intended to check it instead of err2
-extras.go:844:6:gocritic::boolExprSimplify: can simplify `!!x` to `x`
-extras.go:845:6:gocritic::boolExprSimplify: can simplify `!(a >= b)` to `a < b`
-extras.go:846:6:gocritic::boolExprSimplify: can simplify `!x == !y` to `x == y`
-extras.go:847:6:gocritic::boolExprSimplify: can simplify `a > b || a == b` to `a >= b`
-extras.go:849:6:gocritic::boolExprSimplify: can simplify `a < b+1` to `a <= b`
-extras.go:850:6:gocritic::boolExprSimplify: can simplify `a+1 > b` to `a >= b`
-extras.go:851:6:gocritic::boolExprSimplify: can simplify `a >= b+1` to `a > b`
-extras.go:852:6:gocritic::boolExprSimplify: can simplify `!(a >= b+1)` to `a <= b`
-extras.go:854:6:gocritic::boolExprSimplify: can simplify `a > 10 && a < 12` to `a == 11`
-extras.go:855:6:gocritic::boolExprSimplify: can simplify `a < 11 || a > 11` to `a != 11`
-extras.go:866:5:gocritic::boolExprSimplify: can simplify `a+1 > b && x` to `a >= b && x`
-extras.go:872:6:gocritic::unlambda: replace `func(s string) string { return strings.TrimSpace(s) }` with `strings.TrimSpace`
-extras.go:895:3:gocritic::mapKey: suspicious duplicate mapKeyNamedString(mapKeyIdent) key
-extras.go:901:4:gocritic::mapKey: suspicious duplicate mapKeyIdent key
-extras.go:915:3:gocritic::mapKey: suspicious duplicate mapKeyIdent key
-extras.go:940:6:gocritic::stringXbytes: suggestion: len(b)
-extras.go:941:6:gocritic::stringXbytes: suggestion: len(b) == 0
-extras.go:942:6:gocritic::stringXbytes: suggestion: bytes.Equal(b, c)
+extras.go:726:1:gocritic::paramTypeCombine: func(n int, p1, p2, h1, h2 int) could be replaced with func(n, p1, p2, h1, h2 int)
+extras.go:742:2:gocritic::dupBranchBody: both branches in if statement have same body
+extras.go:761:9:gocritic::ifElseChain: rewrite if-else to switch statement
+extras.go:773:2:gocritic::commentedOutCode: may want to remove commented-out code
+extras.go:792:2:gocritic::commentedOutCode: may want to remove commented-out code
+extras.go:798:2:gocritic::commentedOutCode: may want to remove commented-out code
+extras.go:805:2:gocritic::commentedOutCode: may want to remove commented-out code
+extras.go:831:2:gocritic::commentedOutCode: may want to remove commented-out code
+extras.go:849:1:gocritic::exposedSyncMutex: don't embed sync.Mutex
+extras.go:854:1:gocritic::exposedSyncMutex: don't embed *sync.RWMutex
+extras.go:860:2:gocritic::badLock: defer is missing, mutex is unlocked immediately
+extras.go:864:2:gocritic::badLock: defer is missing, mutex is unlocked immediately
+extras.go:868:8:gocritic::badLock: suspicious unlock, maybe Unlock was intended?
+extras.go:872:8:gocritic::badLock: suspicious unlock, maybe RUnlock was intended?
+extras.go:876:8:gocritic::badLock: maybe defer rw.Unlock() was intended?
+extras.go:880:8:gocritic::badLock: maybe defer rw.RUnlock() was intended?
+extras.go:885:2:gocritic::externalErrorReassign: suspicious reassignment of error from another package
+extras.go:890:5:gocritic::uncheckedInlineErr: err error is unchecked, maybe intended to check it instead of err2
+extras.go:896:6:gocritic::boolExprSimplify: can simplify `!!x` to `x`
+extras.go:897:6:gocritic::boolExprSimplify: can simplify `!(a >= b)` to `a < b`
+extras.go:898:6:gocritic::boolExprSimplify: can simplify `!x == !y` to `x == y`
+extras.go:899:6:gocritic::boolExprSimplify: can simplify `a > b || a == b` to `a >= b`
+extras.go:901:6:gocritic::boolExprSimplify: can simplify `a < b+1` to `a <= b`
+extras.go:902:6:gocritic::boolExprSimplify: can simplify `a+1 > b` to `a >= b`
+extras.go:903:6:gocritic::boolExprSimplify: can simplify `a >= b+1` to `a > b`
+extras.go:904:6:gocritic::boolExprSimplify: can simplify `!(a >= b+1)` to `a <= b`
+extras.go:906:6:gocritic::boolExprSimplify: can simplify `a > 10 && a < 12` to `a == 11`
+extras.go:907:6:gocritic::boolExprSimplify: can simplify `a < 11 || a > 11` to `a != 11`
+extras.go:918:5:gocritic::boolExprSimplify: can simplify `a+1 > b && x` to `a >= b && x`
+extras.go:924:6:gocritic::unlambda: replace `func(s string) string { return strings.TrimSpace(s) }` with `strings.TrimSpace`
+extras.go:947:3:gocritic::mapKey: suspicious duplicate mapKeyNamedString(mapKeyIdent) key
+extras.go:953:4:gocritic::mapKey: suspicious duplicate mapKeyIdent key
+extras.go:967:3:gocritic::mapKey: suspicious duplicate mapKeyIdent key
+extras.go:992:6:gocritic::stringXbytes: suggestion: len(b)
+extras.go:993:6:gocritic::stringXbytes: suggestion: len(b) == 0
+extras.go:994:6:gocritic::stringXbytes: suggestion: bytes.Equal(b, c)
 testfuncs.go:36:2:gocritic::rangeValCopy: each iteration copies 200 bytes (consider pointers or indexing)
 testfuncs.go:44:2:gocritic::rangeValCopy: each iteration copies 200 bytes (consider pointers or indexing)
 testfuncs.go:53:2:gocritic::rangeValCopy: each iteration copies 200 bytes (consider pointers or indexing)
