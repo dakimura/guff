@@ -389,5 +389,13 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "25m"
+  },
+  {
+    "name": "argo-workflows",
+    "url": "https://github.com/argoproj/argo-workflows.git",
+    "ref": "v4.1.2",
+    "packages": "./api/... ./config/... ./errors/... ./persist/... ./pkg/... ./test/... ./util/... ./workflow/...",
+    "tier": "hunt",
+    "timeout": "25m"
   }
 ]
