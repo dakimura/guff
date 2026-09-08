@@ -6,9 +6,9 @@
     "`unmeasured` is not `clean`: an absent measurement is a question."
   ],
   "goal": 100,
-  "defined": 58,
+  "defined": 59,
   "clean": 55,
-  "open": 0,
+  "open": 1,
   "unmeasured": 3,
   "targets": {
     "alertmanager": {
@@ -270,6 +270,18 @@
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
+    },
+    "ingress-nginx": {
+      "tier": "hunt",
+      "state": "open",
+      "at": "20260908T002526Z",
+      "open": 4,
+      "guff_only": 3,
+      "gcl_only": 1,
+      "by_linter": {
+        "gocritic": 3,
+        "revive": 1
+      }
     },
     "jaeger": {
       "tier": "hunt",

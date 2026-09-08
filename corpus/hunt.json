@@ -373,5 +373,13 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "25m"
+  },
+  {
+    "name": "ingress-nginx",
+    "url": "https://github.com/kubernetes/ingress-nginx.git",
+    "ref": "controller-v1.15.1",
+    "packages": "./cmd/... ./internal/... ./pkg/... ./magefiles/... ./version/...",
+    "tier": "hunt",
+    "timeout": "25m"
   }
 ]
