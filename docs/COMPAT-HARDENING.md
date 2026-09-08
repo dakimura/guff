@@ -29661,3 +29661,52 @@ gin 0 / woodpecker 0 / traefik 0 / celestia-node 0 / tempo 26
 ```
 台帳: 61/100 at zero（64 定義、open 0、unmeasured 3）—— 変化なし
 ```
+
+### 2026-09-08（続き 272）— `adopt cluster-api`。gocritic 3 原因（`dupOption` / `offBy1` の取りこぼし、`badCond` の偽陽性）。open 4
+
+`adopt cluster-api`（v1.14.0, 232.4MB, 169 パッケージ）。`default: none` から
+30 以上の linter、`run.build-tags: [tools, e2e]`、gocritic は
+`enabled-tags: [diagnostic, experimental, performance]` に 16 個の
+`disabled-checks`。sonic は解析グラフに 0 個（続き 271 の形は踏まない）。
+
+```
+cluster-api: guff=4 golangci=0 both=0 P=0.0% R=100.0% [UNEXPECTED]
+failures=0 unexpected=1 health=0
+```
+
+上流は**リポジトリ全体で 0 件**。guff だけの 4 件は 3 原因、全部 gocritic:
+
+| 件 | 場所 | 原因 |
+|---|---|---|
+| nolintlint ×2 | `util/collections/machine_filters_test.go:59,77` | gocritic **`dupOption`** の取りこぼし |
+| nolintlint ×1 | `core/reconcilers/topology/cluster/patches/variables/value.go:146` | gocritic **`offBy1`** の取りこぼし |
+| gocritic ×1 | `util/version/version.go:77` | **`badCond`** の偽陽性 |
+
+directive を外して測ると上流はこう言う:
+
+```
+machine_filters_test.go:59:40: dupOption: function argument `trueFilter` is duplicated
+machine_filters_test.go:77:40: dupOption: function argument `falseFilter` is duplicated
+value.go:146:10: offBy1: Index() can return -1; maybe you wanted to do Index()+1
+```
+
+nolintlint はまた**症状**だった —— woodpecker（256）/ podman（267）/
+cometbft（268）に続いて 4 度目。
+
+`dupOption` は guff も実装していて（`("dupOption", &["diagnostic", "experimental"])`）
+このタグ集合なら有効になるはずなので、**登録の話ではなく検出の話**。
+
+#### 測り方でもう一度転んだ
+
+directive を外す実験を最初 `sed 's|//nolint:gocritic$||'` でやって、
+「上流も何も出さない」と読んだ。**行末が壊れていて上流の finding が消えて
+いただけ**だった。Python で `" //nolint:gocritic\n"` → `"\n"` と厳密に置換し
+直したら上流は `dupOption` を 2 件出した。
+
+§4 続き 265 の 2 件（`2>&1 >/dev/null` と zsh の単語分割）と同じ種類 ——
+**測定用の編集そのものが壊れていないかを、まず確かめる。**
+置換したら置換後の行を必ず表示する。
+
+```
+台帳: 61/100 at zero（65 定義、open 4、unmeasured 3）
+```
