@@ -5,6 +5,7 @@
 
 | 日付 | 内容 |
 |------|------|
+| 2026-09-08 | `adopt go-ethereum`（v1.17.5）は 2 対 0。govet `tests` が `_test.go` 以外のファイルも見ていて（さらに桁が `func` ではなく関数名を指す。hunt は桁を見ないので隠れていた）、`inline` は続き 271 で「vendor していない古い x/exp は残る」と書いた穴に当たった。open 2 |
 | 2026-09-08 | gocritic 3 件。`dupOption` は option 型判定が `Underlying()` を取らず名前つき関数型を見落とし、`offBy1` は `strings.Index`/`bytes.Index` の slice 形 4 規則が丸ごと無く、`badCond` は `typep.SideEffectFree`（`CallExpr` は型変換のときだけ可）を訊いていなかった —— その述語は同じファイルに既にあり別の check が使っていた（7 度目）。`close cluster-api` 完了、62/100 |
 | 2026-09-08 | `adopt cluster-api`（v1.14.0）は 4 対 0。gocritic 3 原因 —— `dupOption` と `offBy1` の取りこぼし（どちらも nolintlint の未使用 directive として表に出た。4 度目）と `badCond` の偽陽性。directive を外す実験を sed で雑にやって行末を壊し「上流も黙る」と一度読み違えた。open 4 |
 | 2026-09-08 | `adopt tempo` は guff が終わらず失敗（25m timeout、golangci は 44s）。サイズでも vendoring でもなく依存 1 つ —— `github.com/bytedance/sonic` を import する 5 行のモジュールで golangci 0s / guff >180s、linter 1 つなので費用は load/型検査側。sonic を go.mod に持つ gin・woodpecker・traefik・celestia-node は解析グラフに 0 個なので通っていた（tempo は 26 個）。guff の欠陥として除外表に測定つきで記録 |

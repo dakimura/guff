@@ -29788,3 +29788,48 @@ golden は `gocritic-clusterapi` を新設（6 キー）—— `dupOption` は e
 ```
 台帳: 62/100 at zero（65 定義、open 0、unmeasured 3）
 ```
+
+### 2026-09-08（続き 274）— `adopt go-ethereum`。govet `tests` が **_test.go 以外も見ている**、`inline` は続き 271 で残した穴。open 2
+
+`adopt go-ethereum`（v1.17.5, 233.5MB, 204 パッケージ）。`default: none` に
+15 linter、`staticcheck.checks: [-QF1*]`（ワイルドカード否定）、revive は
+`enable-all-rules: false` に個別 rule。sonic は解析グラフに 0 個。
+
+```
+go-ethereum: guff=2 golangci=0 both=0 P=0.0% R=100.0% [UNEXPECTED]
++guff  metrics/internal/sampledata.go:29:govet:tests: ExampleMetrics should return nothing
++guff  triedb/pathdb/database_test.go:353:govet:inline: cannot inline: type parameter inference is not yet supported
+```
+
+#### 1. `tests` —— ファイルの種類を見ていない。ついでに桁も違う
+
+`metrics/internal/sampledata.go` は **`_test.go` ではない**。上流の `tests`
+analyzer は `_test.go` のファイルしか見ないので `ExampleMetrics` の署名規則は
+適用されない。最小再現:
+
+```
+上流: sample_test.go:4:1: tests: ExampleThing should return nothing
+guff: sample.go:5:6:      tests: ExampleMetrics should return nothing
+      sample_test.go:4:6: tests: ExampleThing should return nothing
+```
+
+**桁も違う** —— 上流は `4:1`（`func` キーワード＝`FuncDecl.Pos()`）、guff は
+`4:6`（関数名）。hunt は桁を見ないので**この 1 件は「一致」に見えていた**。
+§4 続き 217 の「golden tier だけが桁を見る」がそのまま出た形なので、
+`close` では golden case を足す。
+
+#### 2. `inline` —— 続き 271 で「残す」と書いた穴に当たった
+
+`triedb/pathdb/database_test.go:353` は `maps.Copy(...)` で、
+`golang.org/x/exp/maps` のハードコード表に入っている。go-ethereum は
+
+- **vendor していない**
+- x/exp が `v0.0.0-20230626212559`（directive が入る 2025-02-10 より**前**）
+
+続き 271 の修正は「vendor があるときだけ宣言を読む」なので、この組み合わせは
+表のまま＝過剰報告になる。**そこに書いた「vendor していない古い x/exp は
+直らない」が、実際の target で費用になった。**
+
+```
+台帳: 62/100 at zero（66 定義、open 2、unmeasured 3）
+```

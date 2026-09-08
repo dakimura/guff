@@ -433,5 +433,13 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "25m"
+  },
+  {
+    "name": "go-ethereum",
+    "url": "https://github.com/ethereum/go-ethereum.git",
+    "ref": "v1.17.5",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
   }
 ]
