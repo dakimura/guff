@@ -28986,3 +28986,80 @@ golden `gocritic` は commentedOutCode が 1 → 5 件（消失ゼロ）。
 ```
 台帳: 56/100 at zero（59 定義、open 0、unmeasured 3）
 ```
+
+### 2026-09-08（続き 263）— `adopt lazygit`。**ハードコードした `//go:fix inline` 表がバージョンに依存していた**。open 14
+
+`adopt lazygit`（v0.64.1, 153.3MB, 86 パッケージ）:
+
+```
+lazygit: guff=26 golangci=12 both=12 P=46.2% R=100.0% [UNEXPECTED]
+failures=0 unexpected=1 health=0
+```
+
+**recall は 100%**（上流の 12 件は全部出ている）。guff だけの 14 件は
+すべて同じ 1 文:
+
+```
+govet:inline: cannot inline: type parameter inference is not yet supported
+```
+
+#### 最小再現は「逆」を示した
+
+scratchpad に `//go:fix inline` 付きのジェネリック関数と呼び出しを書くと:
+
+```
+golangci: 3 件（"should be inlined" 2 件 + "cannot inline: type parameter…" 1 件）
+guff:     0 件
+```
+
+**上流はその文言を出すし、guff は出さない。** 同一パッケージでも別パッケージでも
+同じ。つまり乖離は「文言を抑制するかどうか」ではなく「どの呼び出しで出すか」。
+
+#### 原因
+
+guff の `inline.rs` は `golang.org/x/exp/{maps,slices}` のジェネリック
+`//go:fix inline` 関数を**名前で列挙**している:
+
+```rust
+/// Generic `//go:fix inline` funcs in `golang.org/x/exp/{maps,slices}`.
+fn is_known_generic_gofix_inline(pkg_path: &str, name: &str) -> bool {
+    match pkg_path {
+        "golang.org/x/exp/slices" => matches!(name, "Sort" | … | "Contains" | …),
+```
+
+lazygit は確かに `golang.org/x/exp/slices` を import している（`pkg/utils/slice.go`）
+ので、パッケージ判定は正しい。**間違っているのは前提のほう** ——
+
+```
+$ grep -rn "go:fix inline" corpus/cache/lazygit/vendor/golang.org/x/exp/
+（何も出ない）
+```
+
+lazygit が vendor しているのは `v0.0.0-20240719175910`。module cache を
+並べると、この directive が x/exp に入ったのは **2025-02-10 前後**:
+
+| x/exp バージョン | `slices/` の `go:fix inline` |
+|---|---|
+| 20231110 / 20240719 / 20241108 | **0 ファイル** |
+| 20250210 / 20250218 | 1 ファイル |
+| 20250408 | 2 ファイル |
+
+上流は宣言を読むのでバージョンごとに正しく振る舞う。guff は表を**無条件に**
+適用するので、directive の無いバージョンを vendor しているリポジトリで
+14 件を発明した。
+
+表そのものは新しい x/exp に対しては正しい。コーパスの多くの target は
+2025-02-10 以降を使っているが、`containerd` は `20241108`（directive 無し）
+なので同じ形を踏みうる —— nightly tier なので今回の測定には出ていない。
+
+#### 直し方は「表を消す」ではない
+
+directive の有無は**依存パッケージのソース**にしか無く、export data には
+入らない（表がある理由がそれ）。表を消すと新しい x/exp で recall を失う。
+必要なのは「その呼び出し先の宣言に directive が実際に付いているか」を
+vendor / module cache のソースから確かめることで、これは `close lazygit`
+側の仕事にする。**測っただけで直していない。**
+
+```
+台帳: 56/100 at zero（60 定義、open 14、unmeasured 3）
+```
