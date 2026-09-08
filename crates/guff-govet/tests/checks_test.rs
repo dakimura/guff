@@ -444,6 +444,50 @@ fn inline_exp_gate_reads_the_vendored_declaration() {
     }
 }
 
+/// …and when there is no vendor directory, `go list` is asked instead.
+///
+/// The vendor-only gate above left a hole that `adopt go-ethereum` walked into:
+/// go-ethereum v1.17.5 does not vendor and pins x/exp at
+/// `v0.0.0-20230626212559` — before the directives — so the table still decided
+/// and `maps.Copy` was reported by guff alone. consul and vault do not vendor
+/// either but are on 2025-05 / 2025-08 x/exp, so the lookup has to keep saying
+/// *yes* there: both directions are below.
+///
+/// Each fixture is a module with a filesystem `replace` onto a sibling
+/// directory, so `go list -f {{.Dir}}` answers offline. A host without `go`
+/// falls back to the table and would see 1/1 rather than 0/1, which is why the
+/// test declares the dependency (CI runs the ignored tests with Go installed).
+#[test]
+#[ignore = "requires go on PATH; run with cargo test -p guff-govet -- --ignored"]
+fn inline_exp_gate_reads_the_module_cache_declaration() {
+    // Skipping is only ever right on a contributor's machine. On CI — which
+    // installs Go and runs the ignored tests — a silent skip would be one of
+    // the "green but measuring nothing" shapes, so fail there instead.
+    if !guff_packages::go_available() {
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "go is not on PATH, but CI installs it: this test measured nothing"
+        );
+        eprintln!("skipping: go not found on PATH");
+        return;
+    }
+    for (fixture, want) in [("inline_exp_modcache_old", 0), ("inline_exp_modcache_new", 1)] {
+        let dir = support::testdata(fixture);
+        let stub = dir.join("exp/maps/maps.go");
+        let pkg = support::typecheck_with_deps(
+            "example.com/govet/inlineexpmodcache",
+            &dir.join("bad.go"),
+            &[("golang.org/x/exp/maps", &stub)],
+        );
+        let messages = support::run_analyzer(inline_analyzer(), &pkg);
+        assert_eq!(
+            messages.len(),
+            want,
+            "{fixture}: expected {want} finding(s), got {messages:?}"
+        );
+    }
+}
+
 #[test]
 fn inline_flags_exp_maps_clone_type_param_gap() {
     let dir = support::testdata("inline_exp");
@@ -1284,17 +1328,63 @@ fn stdmethods_allows_correct_unwrap() {
     assert!(support::run_analyzer(stdmethods_analyzer(), &pkg).is_empty());
 }
 
+/// Two different report positions live in one analyzer, and the messages do
+/// not say which is which: `checkExampleName` uses `pass.Reportf(fn.Pos(), …)`
+/// — the `func` keyword — while `checkTest`'s malformed-name finding uses
+/// `pass.ReportRangef(fn.Name, …)` and lands on the identifier. guff used the
+/// identifier for both. The hunt tier does not compare columns, so on
+/// go-ethereum the wrong column read as a *match*; only the golden tier and
+/// this test look at it. So pin `(line, column)` and the **count**.
 #[test]
-fn tests_flags_malformed_name() {
+fn tests_reports_example_signature_at_the_func_keyword() {
     let dir = support::testdata("tests");
     let pkg = support::typecheck_with_deps(
         "example.com/govet/tests",
         &dir.join("bad_test.go"),
         &[("testing", &dir.join("stub/testing/testing.go"))],
     );
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64, String)> = support::run_analyzer_diagnostics(tests_analyzer(), &pkg)
+        .into_iter()
+        .map(|d| {
+            let p = fset.position(guff::position::Pos(d.pos as i64));
+            (p.line, p.column, d.message)
+        })
+        .collect();
+    got.sort();
+
+    assert_eq!(
+        got,
+        vec![
+            // `ReportRangef(fn.Name, …)`: column 6, the identifier.
+            (
+                5,
+                6,
+                "Testbad has malformed name: first letter after 'Test' must not be lowercase"
+                    .to_string(),
+            ),
+            // `Reportf(fn.Pos(), …)`: column 1, the `func` keyword.
+            (18, 1, "Example should return nothing".to_string()),
+            (20, 1, "Example_suffix should be niladic".to_string()),
+        ],
+        "tests findings"
+    );
+}
+
+/// Upstream's `run` skips each file whose own name does not end in `_test.go`.
+/// guff asked whether *any* file in the package was a test file, so an ordinary
+/// file sitting next to a test got the Example rules applied to it —
+/// go-ethereum's `metrics/internal/sampledata.go` declares
+/// `func ExampleMetrics() metrics.Registry` and is not a test file at all.
+///
+/// The fixture holds the same two shapes as `bad_test.go`, so this is the
+/// control for the test above: reported there, silent here.
+#[test]
+fn tests_ignores_a_file_that_is_not_a_test_file() {
+    let dir = support::testdata("tests_nontest");
+    let pkg = support::typecheck_pkg("example.com/govet/tests_nontest", &dir.join("example.go"));
     let messages = support::run_analyzer(tests_analyzer(), &pkg);
-    assert!(!messages.is_empty(), "{messages:?}");
-    assert!(messages.iter().any(|m| m.contains("malformed name")));
+    assert!(messages.is_empty(), "{messages:?}");
 }
 
 #[test]

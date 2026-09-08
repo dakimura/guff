@@ -10,11 +10,15 @@ use guff_types::tuple::tuple_len;
 
 use crate::govet_util::{is_method_named, is_testing_type, tuple_type_at};
 
-fn is_test_file(pass: &Pass<'_>, _f: &guff::ast::File) -> bool {
-    pass.pkg()
-        .go_files
-        .iter()
-        .any(|p| p.to_string_lossy().ends_with("_test.go"))
+/// upstream: `strings.HasSuffix(pass.Fset.File(f.FileStart).Name(), "_test.go")`
+///
+/// The question is about **this** file, not the package. Asking whether *any*
+/// file in the package is a test file means every ordinary file in a package
+/// that happens to have tests gets the `Example`/`Test` signature rules applied
+/// to it — go-ethereum's `metrics/internal/sampledata.go` declares
+/// `func ExampleMetrics() metrics.Registry` and is not a test file at all.
+fn is_test_file(path: Option<&std::path::Path>) -> bool {
+    path.is_some_and(|p| p.to_string_lossy().ends_with("_test.go"))
 }
 
 fn is_test_param(ty: &Expr, want: &str) -> bool {
@@ -55,14 +59,18 @@ fn check_test(pass: &Pass<'_>, fn_: &FuncDecl, prefix: &str) -> Option<String> {
     None
 }
 
+/// upstream `checkExample`, whose reports are all at `fn.Pos()` — the `func`
+/// keyword — while `checkTest`'s malformed-name report is
+/// `ReportRangef(fn.Name, …)`, the name. guff used the name for both; only
+/// this half was wrong, and the `govet` golden is what said so.
 fn check_example(pass: &Pass<'_>, fn_: &FuncDecl) -> Vec<(u32, String)> {
     let mut out = Vec::new();
     let name = &fn_.name.name;
     if fn_.ty.params.as_ref().is_some_and(|p| !p.list.is_empty()) {
-        out.push((fn_.name.pos().0 as u32, format!("{name} should be niladic")));
+        out.push((fn_.ty.pos().0 as u32, format!("{name} should be niladic")));
     }
     if fn_.ty.results.as_ref().is_some_and(|r| !r.list.is_empty()) {
-        out.push((fn_.name.pos().0 as u32, format!("{name} should return nothing")));
+        out.push((fn_.ty.pos().0 as u32, format!("{name} should return nothing")));
     }
     out
 }
@@ -201,8 +209,14 @@ fn walk_stmts(stmts: &[guff::ast::Stmt], f: &mut dyn FnMut(&CallExpr)) {
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let mut pending = Vec::new();
-    for file in pass.files() {
-        if !is_test_file(pass, file) {
+    for (i, file) in pass.files().iter().enumerate() {
+        let path = pass
+            .pkg()
+            .compiled_go_files
+            .get(i)
+            .or_else(|| pass.pkg().go_files.get(i))
+            .map(|p| p.as_path());
+        if !is_test_file(path) {
             continue;
         }
         for decl in &file.decls {

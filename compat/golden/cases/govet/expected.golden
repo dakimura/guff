@@ -172,6 +172,8 @@ testinggoroutine/bad_test/bad_test.go:27:3:govet::testinggoroutine: call to (*te
 testinggoroutine/bad_test/bad_test.go:28:3:govet::testinggoroutine: call to (*testing.T).SkipNow from a non-test goroutine
 testinggoroutine/bad_test/bad_test.go:37:2:govet::testinggoroutine: call to (*testing.B).Fatal from a non-test goroutine
 tests/bad_test/bad_test.go:5:6:govet::tests: Testbad has malformed name: first letter after 'Test' must not be lowercase
+tests/bad_test/bad_test.go:18:1:govet::tests: Example should return nothing
+tests/bad_test/bad_test.go:20:1:govet::tests: Example_suffix should be niladic
 timeformat/bad/bad.go:6:21:govet::timeformat: 2006-02-01 should be 2006-01-02
 unmarshal/bad/bad.go:7:16:govet::unmarshal: call of Unmarshal passes non-pointer as second argument
 unreachable/bad/bad.go:5:2:govet::unreachable: unreachable code
