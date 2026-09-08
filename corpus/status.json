@@ -7,8 +7,8 @@
   ],
   "goal": 100,
   "defined": 59,
-  "clean": 55,
-  "open": 1,
+  "clean": 56,
+  "open": 0,
   "unmeasured": 3,
   "targets": {
     "alertmanager": {
@@ -76,7 +76,7 @@
     "caddy": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260908T050527Z",
+      "at": "20260908T052624Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -108,7 +108,7 @@
     "cobra": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260908T050527Z",
+      "at": "20260908T052624Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -210,7 +210,7 @@
     "gin": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260908T050527Z",
+      "at": "20260908T052624Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -226,7 +226,7 @@
     "go-client": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260908T050527Z",
+      "at": "20260908T052624Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -258,7 +258,7 @@
     "helm": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260908T050527Z",
+      "at": "20260908T052624Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -273,14 +273,11 @@
     },
     "ingress-nginx": {
       "tier": "hunt",
-      "state": "open",
-      "at": "20260908T012003Z",
-      "open": 1,
+      "state": "clean",
+      "at": "20260908T053115Z",
+      "open": 0,
       "guff_only": 0,
-      "gcl_only": 1,
-      "by_linter": {
-        "gocritic": 1
-      }
+      "gcl_only": 0
     },
     "jaeger": {
       "tier": "hunt",
@@ -301,7 +298,7 @@
     "k9s": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260908T050527Z",
+      "at": "20260908T052624Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0

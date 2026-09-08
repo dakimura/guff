@@ -5,6 +5,7 @@
 
 | 日付 | 内容 |
 |------|------|
+| 2026-09-08 | gocritic `commentedOutCode` の許可リストは `strparse.Stmt` が「ちょうど 1 文」を返したときにしか効かず、2 文以上はブロック再解析に落ちて解析が通れば警告する（単独なら許可される `type` 宣言 2 つが決め手）。guff は全文を許可リストに掛けて落としていた。`close ingress-nginx` 完了、56/100 |
 | 2026-09-08 | revive `var-declaration` の上流の門は `!validType(lhsTyp) \|\| !validType(rhsTyp)` で、guff は右辺しか訊いていなかった。線は「型がどこにあるか」ではなく「どう綴られているか」—— `qual.T` と dot import は黙り、ローカル alias は報告する（1 形から読み違えて golden に拾われた）。ingress-nginx 2 → 1 |
 | 2026-09-08 | gocritic `regexpSimplify` は `allChars`（全部 `OpChar`）が成り立つときだけ `x\|y` を `[xy]` にまとめ、`factorPrefixSuffix` も `concatLiteral` 経由で同じ条件を要求する。guff は「リテラルか」しか見ずデコード済み文字を書いていたので、`\r\|\n` を生の CR/LF の class にし、`fo\.\|fo\.x` を **意味の違う** `fo.x?` に書き換えていた。ingress-nginx 4 → 2 |
 | 2026-09-08 | `adopt ingress-nginx`。`test/e2e/cgroups` が darwin で型付けできず（`pkg/util/runtime` の linux 専用関数を無条件に呼ぶ）、`./...` は 121 パッケージ 48 linter で findings 1 件に潰れる。壊れているのは 121 個中 1 個だけなので非 test の 94 パッケージへ scope して測定 —— 462 対 460、乖離 4 件（gocritic 3 / revive 1）。open 4 |
