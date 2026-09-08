@@ -3415,7 +3415,32 @@ fn check_commented_out_code(file: &File, pending: &mut Pending) {
         let Some(stmts) = parsed_commented_out_code_stmts(&text) else {
             continue;
         };
-        if stmts.iter().all(is_commented_out_code_permitted_stmt) {
+        // Upstream asks two different questions, and the permitted-statement
+        // filter answers only the first.
+        //
+        //     stmt := strparse.Stmt(s)          // BadStmt unless *exactly one*
+        //     if c.isPermittedStmt(stmt) { return }
+        //     if stmt != strparse.BadStmt { c.warn(cg); return }
+        //     ...
+        //     stmt = strparse.Stmt(fmt.Sprintf("{ %s }", s))
+        //     if stmt, ok := stmt.(*ast.BlockStmt); ok && len(stmt.List) != 0 {
+        //         c.warn(cg)                    // no filter here
+        //     }
+        //
+        // `strparse.Stmt` wraps the text in a function body and returns
+        // `BadStmt` when the body does not hold exactly one statement, so a
+        // two-statement comment never reaches `isPermittedStmt` at all — it
+        // falls through to the block fallback, which warns on anything that
+        // parses. guff ran the filter over *every* statement and skipped when
+        // they were all permitted, so a comment holding two permitted
+        // statements was silently dropped.
+        //
+        // ingress-nginx's `magefiles/steps/release.go:270` is the pair
+        // `// dependency_updates` / `// all_updates`: two bare identifiers,
+        // each permitted on its own, warned about together. The sharpest case
+        // is two `type` declarations — `isPermittedStmt` returns true for a
+        // lone `type aaaa int`, and upstream still warns for two of them.
+        if stmts.len() == 1 && is_commented_out_code_permitted_stmt(&stmts[0]) {
             continue;
         }
         report(

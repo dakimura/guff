@@ -28902,3 +28902,87 @@ golden `revive` は 423 → 425 キー（消失ゼロ、追加 2）、ratchet �
 ```
 台帳: 55/100 at zero（59 定義、open 1、unmeasured 3）
 ```
+
+### 2026-09-08（続き 262）— `commentedOutCode` の**ブロック再解析には許可リストが掛からない**。ingress-nginx 完了、56/100
+
+`close ingress-nginx` の 3 本目、最後の 1 件。上流だけが出していた:
+
+```
+magefiles/steps/release.go:270:gocritic:commentedOutCode: may want to remove commented-out code
+```
+
+対象は
+
+```go
+	// dependency_updates
+	// all_updates
+	var allUpdates []string
+```
+
+#### 上流のアルゴリズムは 2 段で、許可リストは 1 段目にしか効かない
+
+```go
+stmt := strparse.Stmt(s)              // 「ちょうど 1 文」でなければ BadStmt
+if c.isPermittedStmt(stmt) { return }
+if stmt != strparse.BadStmt { c.warn(cg); return }
+...
+stmt = strparse.Stmt(fmt.Sprintf("{ %s }", s))
+if stmt, ok := stmt.(*ast.BlockStmt); ok && len(stmt.List) != 0 {
+	c.warn(cg)                        // ここに許可リストは無い
+}
+```
+
+`strparse.Stmt` は `package main;func main() {` + s + `}` を解析して
+**本体がちょうど 1 文でなければ `BadStmt` を返す**（go-toolsmith/strparse）。
+なので 2 文のコメントは `isPermittedStmt` に**一度も届かず**、ブロック再解析へ
+落ちて、**解析さえ通れば警告**になる。
+
+guff は 1 段で書いていて、`parsed_commented_out_code_stmts` が返した文を
+**全部**許可リストに掛け、全部許可なら黙っていた。だから「単独なら許可される
+文が 2 つ」並んだコメントを落としていた。
+
+いちばん効く形は **`type` 宣言 2 つ**: `isPermittedStmt` は単独の
+`type aaaa int` に true を返すのに、2 つ並ぶと上流は警告する。
+「許可リストを広げる」話ではなく「掛からない」話だと分かる行。
+
+#### 測定（18 形）
+
+| コメント | 上流 |
+|---|---|
+| `dependency_updates` / `all_updates` | 警告 |
+| `somepkg.Thing` / `other.Thing` | 警告 |
+| `type aaaa int` / `type bbbb int` | 警告 |
+| `alphabetagamma` / `deltaepsilon` | 警告 |
+| `dependency_updates_and_more`（単独） | 黙る（許可された式） |
+| `somepkg.SomeLongThing`（単独） | 黙る |
+| `type aaaaaaaaaaaaaaaa int`（単独） | 黙る |
+| `somepkg.SomeLongThing()`（単独） | 警告（CallExpr は非許可） |
+| `alpha` / `beta` | 黙る（15 runes 未満） |
+| 散文 1 行・2 行 | 黙る（解析できない） |
+
+#### 測り方で 2 度転んだ
+
+1. **最小再現の 1 回目が再現しなかった。** 説明用のコメント行を試験対象の
+   直上に置いたため、**同じ comment group に畳み込まれて**解析対象の文字列が
+   変わっていた。fixture でも同じことをやって golden が 2 件しか増えず気付いた
+   —— group を切るのは**空行**。fixture では試験対象を必ず単独 group にした。
+
+2. **`max-same-issues` の既定 3 に切られていた。** `commentedOutCode` の文言は
+   全件同一なので、自分で書いた最小 config（`issues:` 節なし）では 4 件目以降が
+   消え、「アンダースコアの有無で分かれる」という**存在しない規則**を読み
+   かけた。hunt が `patch_unlimited_issues.py` で `max-issues-per-linter: 0` /
+   `max-same-issues: 0` を必ず入れているのはこのため。
+   **最小 config を手で書くときは同じ 2 行を入れる。**
+
+#### 結果
+
+```
+ingress-nginx: guff=460 golangci=460 both=460 P=100.0% R=100.0% [OK]
+failures=0 unexpected=0 health=0
+```
+
+golden `gocritic` は commentedOutCode が 1 → 5 件（消失ゼロ）。
+
+```
+台帳: 56/100 at zero（59 定義、open 0、unmeasured 3）
+```

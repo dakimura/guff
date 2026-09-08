@@ -723,6 +723,77 @@ func commentedOutCodeExtra() {
 	// e.g. fmt.Println("documentation example")
 }
 
+// `strparse.Stmt` returns `BadStmt` unless the comment holds *exactly one*
+// statement, so a two-statement comment never reaches `isPermittedStmt` — it
+// falls through to the `{ %s }` block fallback, which warns on anything that
+// parses at all. guff filtered every statement and skipped when all of them
+// were permitted.
+//
+// ingress-nginx's `magefiles/steps/release.go:270` is the two-identifier pair.
+//
+// Each comment under test stands in its own group: a blank line is what ends a
+// comment group, and prose folded into the same group changes the text being
+// parsed.
+func commentedOutCodePairsExtra() {
+	// two bare identifiers, each of them permitted on its own
+
+	// dependency_updates
+	// all_updates
+	a := 1
+
+	// two selectors, likewise permitted alone
+
+	// somepkg.Thing
+	// other.Thing
+	b := 2
+
+	// two type declarations: a lone one is permitted, so this pair is what
+	// shows the filter is skipped rather than widened
+
+	// type aaaa int
+	// type bbbb int
+	c := 3
+
+	_, _, _ = a, b, c
+}
+
+// The single-statement side of the same gate, which has to keep working.
+func commentedOutCodeSinglesExtra() {
+	// a lone identifier is a permitted expression
+
+	// dependency_updates_and_more
+	a := 1
+
+	// so is a lone selector
+
+	// somepkg.SomeLongThing
+	b := 2
+
+	// and a lone type declaration
+
+	// type aaaaaaaaaaaaaaaa int
+	c := 3
+
+	// a call is not permitted, so this one warns
+
+	// somepkg.SomeLongThing()
+	d := 4
+
+	// under fifteen runes: skipped before anything is parsed
+
+	// alpha
+	// beta
+	e := 5
+
+	// prose does not parse, so the block fallback finds nothing
+
+	// this is a sentence about the code
+	// and here is another sentence
+	f := 6
+
+	_, _, _, _, _, _ = a, b, c, d, e, f
+}
+
 type ExposedMutexExtra struct {
 	sync.Mutex
 	Port int
