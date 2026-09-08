@@ -237,6 +237,49 @@ func regexpSimplifyExtra() {
 	regexp.MustCompile(`a\<\>\:\;\/\,\=b`)
 }
 
+// `walkAlt` merges `x|y|z` into `[xyz]` only when `allChars` holds — every
+// alternative an `OpChar`. An escape is a literal but a different op, so one
+// of them anywhere in the alternation stops the merge. ingress-nginx
+// (controller-v1.15.1) has two that guff used to rewrite and upstream leaves
+// alone, and guff wrote the *decoded* character into the class, so `\r|\n`
+// came out holding a real CR and LF.
+func regexpSimplifyAltEscapes() {
+	// Plain characters: merged by both.
+	regexp.MustCompile(`a|b`)
+	regexp.MustCompile(`a|b|c`)
+	regexp.MustCompile(`("|')`)
+	regexp.MustCompile(`(a|b)x`)
+	regexp.MustCompile(`("|')(?P<X>.*)`)
+	// One escaped alternative, whatever kind: no merge.
+	regexp.MustCompile(`\r|\n`)
+	regexp.MustCompile(`\t|\n`)
+	regexp.MustCompile(`\.|a`)
+	regexp.MustCompile(`\+|\-`)
+	regexp.MustCompile(`\x41|b`)
+	regexp.MustCompile(`("|\')`)
+	regexp.MustCompile(`("|\')(?P<X>.*)`)
+	// ingress-nginx's two, verbatim.
+	regexp.MustCompile(`("|\')(?P<TestDescription>.*)("|\')`)
+}
+
+// `factorPrefixSuffix` reads its two operands through `concatLiteral`, which
+// wants an `OpConcat` whose args are all `OpChar`. A lone character is not a
+// concat, and an escape is not an `OpChar`. guff enforced neither and worked
+// from decoded characters, so it turned `fo\.|fo\.x` into `fo.x?` — a
+// literal dot rewritten as "any character".
+func regexpSimplifyFactorEscapes() {
+	// Upstream's own two examples.
+	regexp.MustCompile(`http|https`)
+	regexp.MustCompile(`xfoo|foo`)
+	// A single character is not a concat.
+	regexp.MustCompile(`a|ab`)
+	regexp.MustCompile(`ba|a`)
+	// An escape is not an OpChar.
+	regexp.MustCompile(`fo\.|fo\.x`)
+	regexp.MustCompile(`x\.foo|\.foo`)
+	regexp.MustCompile(`fo\t|fo\tx`)
+}
+
 func sortSliceExtra() {
 	var xs []int
 	var ys []int

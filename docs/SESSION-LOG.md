@@ -5,6 +5,7 @@
 
 | 日付 | 内容 |
 |------|------|
+| 2026-09-08 | gocritic `regexpSimplify` は `allChars`（全部 `OpChar`）が成り立つときだけ `x\|y` を `[xy]` にまとめ、`factorPrefixSuffix` も `concatLiteral` 経由で同じ条件を要求する。guff は「リテラルか」しか見ずデコード済み文字を書いていたので、`\r\|\n` を生の CR/LF の class にし、`fo\.\|fo\.x` を **意味の違う** `fo.x?` に書き換えていた。ingress-nginx 4 → 2 |
 | 2026-09-08 | `adopt ingress-nginx`。`test/e2e/cgroups` が darwin で型付けできず（`pkg/util/runtime` の linux 専用関数を無条件に呼ぶ）、`./...` は 121 パッケージ 48 linter で findings 1 件に潰れる。壊れているのは 121 個中 1 個だけなので非 test の 94 パッケージへ scope して測定 —— 462 対 460、乖離 4 件（gocritic 3 / revive 1）。open 4 |
 | 2026-09-08 | `adopt go-elasticsearch`（v9.5.1）は 92 対 92 の完全一致で clean。998 パッケージ中 990 が生成 `typedapi/` で config が除外しており、その 2 行を抜くと 108 件（うち 16 件が typedapi 配下）—— 空集合同士の一致ではないことを確認した。55/100 |
 | 2026-09-08 | `adopt lnd` は除外。config が `type: module` の custom プラグイン `ll` を宣言していて、素の golangci-lint も guff も同じ文言で起動を拒む（pulumi と同じ形、`compat/reject/cases/custom-module-plugin-missing` が固定済み）。custom ブロックを外すと `./build/...` は 10/10/10 で一致するので、塞いでいるのはプラグインだけ |

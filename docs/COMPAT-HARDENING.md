@@ -28712,3 +28712,109 @@ prealloc 12 / gosec 9 / …）、**「フィルタで空になった集合の一
 ```
 台帳: 55/100 at zero（59 定義、open 4、unmeasured 3）
 ```
+
+### 2026-09-08（続き 260）— `regexpSimplify` は**素の文字の並びしか**まとめない。ingress-nginx 4 → 2
+
+`close ingress-nginx` の 1 本目。gocritic `regexpSimplify` の guff だけが出す
+2 件:
+
+```
+internal/ingress/annotations/parser/validators.go:84  `\r|\n` を `[\r\n]` に
+magefiles/utils/e2edocs.go:48  `("|\')(?P<TestDescription>.*)("|\')` を `(["'])…` に
+```
+
+golangci の stderr に `regexpSimplify` の警告は無い（`enabled-checks` の
+「もう有効」警告は 35 個出るが、この check は含まれない）ので、**上流は有効に
+した上で報告していない**。
+
+#### 11 形で線を引いた
+
+```go
+altPlain      = regexp.MustCompile(`a|b`)             // 両方
+altEscape     = regexp.MustCompile(`\r|\n`)           // guff だけ
+altMeta       = regexp.MustCompile(`\.|a`)            // guff だけ
+altHex        = regexp.MustCompile(`\x41|b`)          // guff だけ
+quotesPlain   = regexp.MustCompile(`("|')`)           // 両方
+quotesEscaped = regexp.MustCompile(`("|\')`)          // guff だけ
+namedPlain    = regexp.MustCompile(`("|')(?P<X>.*)`)  // 両方
+prefixPlain   = regexp.MustCompile(`http|https`)      // 両方
+prefixEscape  = regexp.MustCompile(`fo\.|fo\.x`)      // guff だけ
+prefixOneChar = regexp.MustCompile(`a|ab`)            // guff だけ
+suffixOneChar = regexp.MustCompile(`ba|a`)            // guff だけ
+```
+
+**エスケープが 1 つでも混ざると上流はまとめない。** 名前つきグループは無関係
+だった（`("|')(?P<X>.*)` は両方が報告する）—— ingress-nginx の 2 件目は
+`(?P<…>)` のせいに見えるが、効いていたのは `\'` の方。
+
+#### 上流
+
+```go
+func (c *regexpSimplifyChecker) walkAlt(alt syntax.Expr) {
+	// `x|y|z` -> `[xyz]`.
+	if c.allChars(alt) { … c.out.WriteString(e.Value) … }
+```
+```go
+func (c *regexpSimplifyChecker) allChars(e syntax.Expr) bool {
+	for _, a := range e.Args {
+		if a.Op != syntax.OpChar { return false }
+	}
+	return true
+}
+```
+
+`\r` は `OpEscapeChar`、`\.` は `OpEscapeMeta`、`\x41` は `OpEscapeHex` ——
+**どれも `OpChar` ではない**。guff の guard は
+
+```rust
+fn is_single_char_literal(e: &Ast) -> bool { matches!(e, Ast::Literal(_)) }
+```
+
+で、「リテラルか」しか訊いていなかった（名前に反して長さも見ていない）。
+エスケープもリテラルなので全部通る。しかも中身は `lit.c` ——
+**デコード済みの文字**を書いていたので、`\r|\n` は本物の CR/LF を含む class
+になり、テキスト出力では `[ ]` に見えた。上流は `e.Value`＝**元の綴り**を書く。
+
+**正しい述語は同じファイルの 40 行上に既にあった** ——
+`is_plain_char`（char range 側が使っている）。§4 続き 252 / 253 と同じ形で、
+「機械はあるのに check が使っていない」。
+
+#### `factorPrefixSuffix` にも同じ穴があり、そちらは**意味を変えていた**
+
+```go
+func (c *regexpSimplifyChecker) concatLiteral(e syntax.Expr) string {
+	if e.Op == syntax.OpConcat && c.allChars(e) { return e.Value }
+	return ""
+}
+```
+
+条件は 2 つ（`OpConcat` であること、全部 `OpChar` であること）で、guff の
+`concat_literal_str` は**どちらも見ていなかった**。結果:
+
+| pattern | guff（修正前） | 上流 |
+|---|---|---|
+| `a\|ab` | `ab?` | 何も言わない（`a` は concat ではない） |
+| `ba\|a` | `b?a` | 同上 |
+| `fo\.\|fo\.x` | **`fo.x?`** | 何も言わない |
+| `x\.foo\|\.foo` | **`x?.foo`** | 同上 |
+
+`fo\.|fo\.x` → `fo.x?` は**リテラルのドットを「任意の 1 文字」に変えている**。
+提案どおり書き換えると別の正規表現になる。
+
+#### 結果
+
+```
+ingress-nginx: guff=462 golangci=460 both=459   →   guff=460 golangci=460 both=459
+open 4 → 2（残りは revive var-declaration 1 と gocritic commentedOutCode 1）
+```
+
+golden `gocritic` は **278 → 285 キー**（キーの消失ゼロ、追加 7 ——
+上流が報告する 7 形だけが増え、上流が黙る 13 形は guff も黙るので増えない）。
+`compat/fix` の `gocritic.diff` は**内容行 16 行が 1 バイトも変わらず**、
+ずれたのは hunk 見出しだけ（fixture を 43 行足したため）。
+
+単体テストは 20 形を `assert_eq!` で固定した。guard を戻すと 2 本とも落ちる。
+
+```
+台帳: 55/100 at zero（59 定義、open 2、unmeasured 3）
+```
