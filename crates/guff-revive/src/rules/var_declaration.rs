@@ -111,6 +111,29 @@ fn check_value_spec(pass: &Pass<'_>, vs: &ValueSpec, failures: &mut Vec<Failure>
     if rhs_refers_to_other_package(pass, rhs) {
         return;
     }
+    // The same gate, on the *left* operand. Upstream's line is
+    // `if !validType(lhsTyp) || !validType(rhsTyp)` — quoted in full above —
+    // and guff only ever asked the right half, so every
+    // `var x pkg.T = <local expr>` was reported where upstream is silent.
+    // ingress-nginx's `internal/ingress/controller/location.go:74`
+    // (`var el ingress.Location = *location`) is one.
+    //
+    // Measured with the right-hand side held constant at a plain local
+    // identifier, in both package and function scope: `qual.Case`,
+    // dot-imported `Case` and `bytes.Buffer` are silent; `type a = qual.Case`,
+    // `type a = bytes.Buffer`, `type o qual.Case` and a wholly local type are
+    // all **reported**. So the line is drawn at the spelling, not at where the
+    // type lives — which is the same question, and the same helper, as the
+    // right-hand side.
+    //
+    // Syntactic, like the right-hand side's: the question is whether the type
+    // expression *names* another package, not whether the type it denotes
+    // lives there. A local alias is a local name — `type aliasStdlib =
+    // bytes.Buffer` is reported by upstream, `bytes.Buffer` written out is
+    // not — so unaliasing here would silence findings upstream makes.
+    if rhs_refers_to_other_package(pass, ty) {
+        return;
+    }
     // Upstream has exactly one gate here: `IsUntypedConst(rhs)` re-evaluates the
     // right-hand side *outside* assignment context, and the finding is dropped
     // only when the declared type is not the constant's default type. So

@@ -28818,3 +28818,87 @@ golden `gocritic` は **278 → 285 キー**（キーの消失ゼロ、追加 7 
 ```
 台帳: 55/100 at zero（59 定義、open 2、unmeasured 3）
 ```
+
+### 2026-09-08（続き 261）— `var-declaration` は**左辺にも**同じ門がある。ingress-nginx 2 → 1
+
+`close ingress-nginx` の 2 本目。guff だけが出していた revive の 1 件:
+
+```
+internal/ingress/controller/location.go:74
+  var-declaration: should omit type ingress.Location from declaration of var el
+```
+
+対象は `var el ingress.Location = *location`。
+
+#### 上流の門は 2 つある
+
+```go
+if !validType(lhsTyp) || !validType(rhsTyp) {
+	// Type checking failed (often due to missing imports).
+	return
+}
+```
+
+guff は**右辺しか訊いていなかった**。`rhs_refers_to_other_package` は §4 続き
+（2026-08-30、velero の dot import 28 件）で足したもので、その doc コメントには
+上流が別パッケージを解決できない理由まで書いてある —— **同じ質問を左辺に
+していなかっただけ**。§4 続き 252 / 253 / 260 と同じ形。
+
+#### 線は「型がどこにあるか」ではなく「どう綴られているか」
+
+ここで 1 度間違えた。最初 `bytes.Buffer` への alias を 1 形だけ測って
+「alias も別パッケージの型だから黙る」と読み、`unalias` してから所属を訊く
+実装にした。**golden が落ちて分かった** —— 上流は alias を報告する。
+
+右辺を「素のローカル識別子」に固定して、パッケージ直下と関数本体の両方で
+測り直した:
+
+| 宣言された型 | 上流 |
+|---|---|
+| `qual.Case`（修飾子つき） | 黙る |
+| `Case`（dot import） | 黙る |
+| `bytes.Buffer` | 黙る |
+| `type a = qual.Case` の `a` | **報告する** |
+| `type a = bytes.Buffer` の `a` | **報告する** |
+| `type o qual.Case` の `o` | **報告する** |
+| 完全にローカルな型 | **報告する** |
+
+alias はローカルな**名前**なので報告される。スコープは無関係だった。
+つまり左辺の述語は右辺とまったく同じ構文的な walk でよく、
+`rhs_refers_to_other_package(pass, ty)` を足すだけで済む。
+
+**1 形から線を引くな、は 3 度目**（§4 続き 251 / 259）。今回は golden が
+拾ってくれたが、fixture に control 行（`lhsAliasVar`）を残して固定した ——
+「unalias して所属を訊く」書き方に戻すと、その行が落ちる。
+
+#### 残した乖離（測定済み・未解明）
+
+左辺が**ローカル alias**で、右辺が**インポートされた型へのポインタの deref**
+のときだけ、まだ食い違う:
+
+```go
+type aliasStdlib = bytes.Buffer
+var p *bytes.Buffer
+var v aliasStdlib = *p     // guff は報告、上流は黙る
+var w aliasStdlib = someAlias  // 両方が報告する
+```
+
+右辺を素の識別子にすると一致するので、効いているのは右辺の**型**が別
+パッケージに届くことらしいが、上流のどの行がそう振る舞うのかは特定できて
+いない。**修正前の guff はこの形も、上に挙げた 7 形も全部報告していた**ので、
+乖離は増えていない。ingress-nginx には現れない形。
+
+#### 結果
+
+```
+ingress-nginx: guff=460 golangci=460 both=459  →  guff=459 golangci=460 both=459
+P=100.0% R=99.8%、open 2 → 1（残りは gocritic commentedOutCode 1 件）
+```
+
+golden `revive` は 423 → 425 キー（消失ゼロ、追加 2）、ratchet は baseline の
+まま（missing 1, extra 4）。単体テストは報告 3 形・沈黙 3 形を `assert_eq!` で
+数えている（guard を外すと 7 対 3 で落ちる）。
+
+```
+台帳: 55/100 at zero（59 定義、open 1、unmeasured 3）
+```
