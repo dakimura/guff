@@ -29380,3 +29380,53 @@ guff には対応するコード（`orig != repr` なら `"{orig} ({repr})"`）�
 ```
 台帳: 59/100 at zero（62 定義、open 0、unmeasured 3）
 ```
+
+### 2026-09-08（続き 268）— `adopt cometbft`。gocritic の**偽陽性 1 と偽陰性 1**。open 2
+
+`adopt cometbft`（v0.40.0, 186.8MB, 166 パッケージ）。14 linter、depguard の
+allow 表が 2 つ（main / test）、`issues.max-same-issues: 50`（patcher が 0 に
+する）。
+
+なお config の `revive` 設定（`enable-all-rules` ＋ 18 個の disabled）は
+**効いていない** —— `revive` は enable 表に無く、`default` 未指定の standard
+preset にも入らない。両ツールとも同じく無視するので乖離にはならない。
+
+```
+cometbft: guff=35 golangci=33 both=33 P=94.3% R=100.0% [UNEXPECTED]
+failures=0 unexpected=1 health=0
+```
+
+recall は 100%。guff だけの 2 件は**どちらも gocritic**だが、別々の check:
+
+#### 1. `dupBranchBody` の偽陽性
+
+```go
+// consensus/byzantine_test.go:512
+if i < len(peers)/2 {
+	go sendProposalAndParts(height, round, cs, peer, proposal1, block1Hash, blockParts1)
+} else {
+	go sendProposalAndParts(height, round, cs, peer, proposal2, block2Hash, blockParts2)
+}
+```
+
+**枝の中身は違う**（`proposal1/block1Hash/blockParts1` と `proposal2/…`）のに
+guff は「同じ」と言う。呼び出す関数名だけを見て引数を見ていないか、比較が
+識別子まで降りていないかのどちらか。
+
+#### 2. `ifElseChain` の偽陰性
+
+`consensus/state.go:2126` の `//nolint: gocritic` を外して測ると:
+
+```
+上流: consensus/state.go:2151:10: ifElseChain: rewrite if-else to switch statement
+guff: 何も出ない
+```
+
+directive が付いているので上流は黙り、guff は「抑制するものが無い」ので
+**nolintlint の未使用**を出す —— woodpecker（続き 256）/ podman（続き 267）と
+同じ、**nolintlint は症状**の形。3 回目なので書いておく:
+`//nolint` が「未使用」と出たら、まずその linter の recall を疑う。
+
+```
+台帳: 59/100 at zero（63 定義、open 2、unmeasured 3）
+```
