@@ -29590,3 +29590,74 @@ gate を外すと pin 側が落ちる。
 ```
 台帳: 61/100 at zero（64 定義、open 0、unmeasured 3）
 ```
+
+### 2026-09-08（続き 271）— `adopt tempo` は**guff が終わらない**。原因は依存 1 つ（`bytedance/sonic`）
+
+`adopt tempo`（v3.0.3, 207.6MB, 134 パッケージ）。hunt は **guff の timeout で
+失敗**した（25m）。乖離ではなく failure。
+
+```
+guff FAILED — guff: timeout exceeded
+failures=1 unexpected=0 health=0
+```
+
+golangci はリポジトリ全体を **44 秒**で終える（461 行の出力）。
+
+#### 「大きいから」でも「vendor しているから」でもない
+
+| 測ったこと | 結果 |
+|---|---|
+| golangci 全体 | 44s |
+| guff 全体（unparam を外しても） | 20m 超で timeout |
+| `./tempodb/...`（19 pkg） / `./modules/...`（48 pkg） | どちらも 4m で timeout |
+| `./pkg/tempopb/...`（337KB の生成ファイル入り） | **1s** |
+| `vendor/` を退避して再測定 | やはり timeout |
+| gatekeeper（採用済み・clean、最大 1622 依存） | 完走する |
+
+つまりサイズでも vendoring でもない。
+
+#### 依存 1 つに絞れた
+
+速い `./tempodb/backend/instrumentation`（237 依存, 1s）と遅い
+`./tempodb/backend/local`（679 依存, 180s 超）の依存差に
+`github.com/bytedance/sonic` がいる。**5 行のモジュール**で再現する:
+
+```go
+package son
+
+import "github.com/bytedance/sonic"
+
+func Marshal(v any) ([]byte, error) { return sonic.Marshal(v) }
+```
+
+```
+golangci: 0s
+guff:     >180s（timeout）
+```
+
+有効な linter は `ineffassign` **1 つだけ**なので、**費用は load / 型検査に
+あって analyzer には無い**。v1.15.0 と v1.15.1 のどちらでも同じ。
+
+#### なぜ他の target は通っているのか
+
+`gin` / `woodpecker` / `traefik` / `celestia-node` も go.mod に sonic を
+持つが、**解析対象のグラフには 1 つも入っていない**（`go list -deps ./...`
+で 0 個）。gin は `sonic` build tag の下でしか import しない。tempo は 26 個。
+
+```
+gin 0 / woodpecker 0 / traefik 0 / celestia-node 0 / tempo 26
+```
+
+#### 台帳の扱い
+
+**環境のせいではなく guff の欠陥**なので、`hunt.json` には入れず、
+`corpus/README.md` の除外表と `status.py` の `EXCLUDED` に**測定つきで**書いた
+（失敗する target を入れると corpus ゲートが常時赤になる）。
+**loader の費用が直った瞬間に再採用できる** —— tempo 自体には何も問題がない。
+
+直すのは load / 型検査の性能そのもので、adopt タスクの範囲を超える。
+**測って止める。**
+
+```
+台帳: 61/100 at zero（64 定義、open 0、unmeasured 3）—— 変化なし
+```
