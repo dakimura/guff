@@ -1,0 +1,14 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh gocritic-clusterapi
+# Produced by running golangci-lint on compat/golden/cases/gocritic-clusterapi/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+clusterapi/clusterapi.go:16:69:gocritic::dupOption: function argument `trueFilter` is duplicated
+clusterapi/clusterapi.go:19:78:gocritic::dupOption: function argument `f` is duplicated
+clusterapi/clusterapi.go:37:9:gocritic::offBy1: Index() can return -1; maybe you wanted to do Index()+1
+clusterapi/clusterapi.go:41:9:gocritic::offBy1: Index() can return -1; maybe you wanted to do Index()+1
+clusterapi/clusterapi.go:61:5:gocritic::badCond: `i == a && i == b` condition is suspicious
+clusterapi/clusterapi.go:69:5:gocritic::badCond: `i == int(a) && i == int(b)` condition is suspicious

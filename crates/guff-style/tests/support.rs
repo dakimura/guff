@@ -239,6 +239,30 @@ pub fn run_analyzer_diagnostics(
     result.diagnostics().into_iter().map(|(_, d)| d).collect()
 }
 
+/// Like [`run_analyzer_diagnostics`], but with runner options — for a checker
+/// that only runs under non-default settings (gocritic's opt-in tags).
+pub fn run_analyzer_diagnostics_with_settings(
+    analyzer: &'static guff_analysis::Analyzer,
+    pkg: &Arc<Package>,
+    options: &RunnerOptions,
+) -> Vec<guff_analysis::Diagnostic> {
+    let result = run_on_packages(
+        &[analyzer],
+        std::slice::from_ref(pkg),
+        &RunnerOptions {
+            sequential: true,
+            ..options.clone()
+        },
+    )
+    .expect("run analyzer");
+    for action in result.graph.all_actions() {
+        if let Some(err) = action.error() {
+            panic!("analyzer {} failed: {err}", action.string_id());
+        }
+    }
+    result.diagnostics().into_iter().map(|(_, d)| d).collect()
+}
+
 pub fn run_analyzer_with_settings(
     analyzer: &'static guff_analysis::Analyzer,
     pkg: &Arc<Package>,
