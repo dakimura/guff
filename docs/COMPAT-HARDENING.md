@@ -29710,3 +29710,81 @@ directive を外す実験を最初 `sed 's|//nolint:gocritic$||'` でやって�
 ```
 台帳: 61/100 at zero（65 定義、open 4、unmeasured 3）
 ```
+
+### 2026-09-08（続き 273）— gocritic 3 件: **underlying を訊かない / 規則が 4 つ足りない / 述語を呼んでいない**。`close cluster-api` 完了、62/100
+
+#### 1. `dupOption` —— option 型の判定が `Underlying()` を取っていない
+
+上流:
+
+```go
+func (c *dupOptionChecker) isOptionType(typeInfo types.Type) bool {
+	typeInfo = typeInfo.Underlying()
+	sign, ok := typeInfo.(*types.Signature)
+	...
+```
+
+guff の `signature_of` は unalias はするが **`Named` で止まる**ので、
+可変長引数の要素が**名前つき関数型**だと option 型に見えない。
+cluster-api の `func And(filters ...Func) Func` がそれ。
+無名の `...func(int) bool` は通っていたので、形としては届いているように
+見えていた。
+
+#### 2. `offBy1` —— slice 形の 4 規則が無かった
+
+```go
+m.Match(
+	`$s[strings.Index($s, $_):]`,
+	`$s[:strings.Index($s, $_)]`,
+	`$s[bytes.Index($s, $_):]`,
+	`$s[:bytes.Index($s, $_)]`).
+	Report(`Index() can return -1; maybe you wanted to do Index()+1`)
+```
+
+guff は `$x[len($x)]`（`IndexExpr`）だけを実装していた。上の 4 つは
+`SliceExpr` で、丸ごと無い。cluster-api の
+`segment[:strings.Index(segment, leftArrayDelim)]` がこれ。
+
+#### 3. `badCond` —— 副作用なし判定を訊いていない
+
+```go
+func (c *badCondChecker) equalToBoth(lhs, rhs *ast.BinaryExpr) bool {
+	return lhs.Op == token.EQL && rhs.Op == token.EQL &&
+		astequal.Expr(lhs.X, rhs.X) &&
+		typep.SideEffectFree(c.ctx.TypesInfo, lhs.Y) &&
+		typep.SideEffectFree(c.ctx.TypesInfo, rhs.Y)
+}
+```
+
+`typep.SideEffectFree` は `CallExpr` を**型変換のときだけ**副作用なしと数える:
+
+```go
+case *ast.CallExpr:
+	return IsTypeExpr(info, expr.Fun) && SideEffectFreeList(info, expr.Args)
+```
+
+`len(v)` は builtin 呼び出しで型変換ではないので、
+`i == len(v) && i == len(o)` は**上流では出ない**。guff はこの条件を持たず
+1 件出していた（cluster-api `util/version/version.go:77`）。
+
+**`side_effect_free` は同じファイルに既にあり**、`typep.SideEffectFree` の
+正確な移植で、`CallExpr` の型変換規則まで入っている。別の check（1992 行）が
+使っていて、badCond が使っていなかっただけ。§4 続き 252 / 253 / 260 / 261 /
+267 / 270 と同じ形で **7 度目**。
+
+#### 結果
+
+```
+cluster-api: guff=4 golangci=0 both=0  →  guff=0 golangci=0 both=0  P=R=100.0%
+failures=0 unexpected=0 health=0
+```
+
+golden は `gocritic-clusterapi` を新設（6 キー）—— `dupOption` は experimental
+タグなので、タグを立てた config でないと 1 つも走らない。既存 `gocritic` は
+292 キーのまま。単体テストは 6 件の位置と、黙るべき 5 形（`len()` の badCond、
+被写体が違う slice、option 型でない可変長 3 形）を固定する。3 つのどれを
+戻しても落ちる。
+
+```
+台帳: 62/100 at zero（65 定義、open 0、unmeasured 3）
+```

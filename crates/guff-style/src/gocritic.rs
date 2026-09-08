@@ -2035,6 +2035,53 @@ fn check_off_by1(index: &IndexExpr, pending: &mut Pending) {
     );
 }
 
+/// upstream `offBy1`'s fourth rule, on **slice** expressions:
+///
+/// ```text
+/// m.Match(
+///     `$s[strings.Index($s, $_):]`,
+///     `$s[:strings.Index($s, $_)]`,
+///     `$s[bytes.Index($s, $_):]`,
+///     `$s[:bytes.Index($s, $_)]`).
+///     Report(`Index() can return -1; maybe you wanted to do Index()+1`)
+/// ```
+///
+/// The sliced expression and `Index`'s first argument have to be the same
+/// text. guff implemented only the `$x[len($x)]` rule, which is an
+/// `IndexExpr`; these four are `SliceExpr` and were simply absent.
+/// cluster-api's `segment[:strings.Index(segment, leftArrayDelim)]` is one,
+/// and it surfaced as nolintlint calling its `//nolint:gocritic` unused.
+fn check_off_by1_slice(slice: &guff::ast::SliceExpr, pending: &mut Pending) {
+    if slice.slice3 {
+        return;
+    }
+    // Exactly one of low/high, matching the four patterns above.
+    let bound = match (slice.low.as_deref(), slice.high.as_deref()) {
+        (Some(low), None) => low,
+        (None, Some(high)) => high,
+        _ => return,
+    };
+    let Expr::CallExpr(call) = unparen(bound) else {
+        return;
+    };
+    if call.args.len() != 2 {
+        return;
+    }
+    let name = call_qualified_name_of_expr(&call.fun);
+    if !matches!(name.as_deref(), Some("strings.Index") | Some("bytes.Index")) {
+        return;
+    }
+    if !exprs_equal(&slice.x, &call.args[0]) {
+        return;
+    }
+    report(
+        pending,
+        slice.x.pos().0 as u32,
+        "offBy1",
+        "Index() can return -1; maybe you wanted to do Index()+1".to_string(),
+    );
+}
+
 fn type_assert_matches(assert: &TypeAssertExpr, want_x: &Expr, want_ty: &Expr) -> bool {
     assert.ty.as_ref().is_some_and(|t| exprs_equal(t, want_ty)) && exprs_equal(&assert.x, want_x)
 }
@@ -2104,7 +2151,7 @@ fn unparen(expr: &Expr) -> &Expr {
     }
 }
 
-fn check_bad_cond_expr(bin: &BinaryExpr, pending: &mut Pending) {
+fn check_bad_cond_expr(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Pending) {
     if bin.op != Token::LAND {
         return;
     }
@@ -2115,7 +2162,26 @@ fn check_bad_cond_expr(bin: &BinaryExpr, pending: &mut Pending) {
         return;
     };
     // `x == a && x == b`
-    if lhs.op == Token::EQL && rhs.op == Token::EQL && exprs_equal(&lhs.x, &rhs.x) {
+    //
+    // Upstream's `equalToBoth` asks for one more thing than the shape:
+    //
+    //     return lhs.Op == token.EQL && rhs.Op == token.EQL &&
+    //         astequal.Expr(lhs.X, rhs.X) &&
+    //         typep.SideEffectFree(c.ctx.TypesInfo, lhs.Y) &&
+    //         typep.SideEffectFree(c.ctx.TypesInfo, rhs.Y)
+    //
+    // and `typep.SideEffectFree` counts a `CallExpr` as free **only when it is
+    // a type conversion** (`IsTypeExpr(expr.Fun)`). `len(v)` is a builtin call,
+    // not a conversion, so `i == len(v) && i == len(o)` is not reported —
+    // cluster-api `util/version/version.go:77` is exactly that, and guff
+    // reported it alone. [`side_effect_free`] is already the port of that
+    // predicate; this check simply was not asking it.
+    if lhs.op == Token::EQL
+        && rhs.op == Token::EQL
+        && exprs_equal(&lhs.x, &rhs.x)
+        && side_effect_free(pass, &lhs.y)
+        && side_effect_free(pass, &rhs.y)
+    {
         let text = expr_text(&Expr::BinaryExpr(bin.clone())).unwrap_or_else(|| "cond".into());
         report(
             pending,
@@ -4302,7 +4368,18 @@ fn signature_of(pass: &Pass<'_>, typ: TypeId) -> Option<TypeId> {
     }
 }
 
+/// upstream `isOptionType`, which starts with `typeInfo.Underlying()`.
+///
+/// [`signature_of`] unaliases but stops at a `Named`, so a variadic parameter
+/// declared over a *named* func type — `func And(filters ...Func) Func`, which
+/// is how cluster-api's `util/collections` spells it — never looked like an
+/// option type and `dupOption` stayed silent. An unnamed `...func(int) bool`
+/// element worked, which is what made the shape look unreachable at first.
 fn is_option_func_type(pass: &Pass<'_>, typ: TypeId) -> bool {
+    let Some(artifacts0) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts0.types, typ).underlying(&artifacts0.types);
     let Some(sig) = signature_of(pass, typ) else {
         return false;
     };
@@ -9482,7 +9559,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         check_dup_sub_expr(b, &mut pending);
                     }
                     if enabled(&set, "badCond") {
-                        check_bad_cond_expr(b, &mut pending);
+                        check_bad_cond_expr(pass, b, &mut pending);
                     }
                     if enabled(&set, "emptyStringTest") {
                         check_empty_string_test(pass, b, &mut pending);
@@ -9542,8 +9619,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 NodeRef::GenDecl(g) if enabled(&set, "emptyDecl") => {
                     check_empty_decl(g, &mut pending);
                 }
-                NodeRef::SliceExpr(s) if enabled(&set, "unslice") => {
-                    check_unslice(pass, s, &mut pending);
+                NodeRef::SliceExpr(s) => {
+                    if enabled(&set, "unslice") {
+                        check_unslice(pass, s, &mut pending);
+                    }
+                    if enabled(&set, "offBy1") {
+                        check_off_by1_slice(s, &mut pending);
+                    }
                 }
                 NodeRef::IndexExpr(ix) => {
                     if enabled(&set, "offBy1") {

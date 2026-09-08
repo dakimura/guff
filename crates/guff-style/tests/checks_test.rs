@@ -7679,6 +7679,100 @@ fn gocritic_dup_arg_covers_the_method_form_and_every_call_pattern() {
     );
 }
 
+/// cluster-api v1.14.0's three gocritic shapes, by position.
+///
+/// **`dupOption`**: upstream's `isOptionType` starts with
+/// `typeInfo.Underlying()`, so a variadic parameter over a *named* func type
+/// still qualifies. guff stopped at the `Named` and stayed silent —
+/// cluster-api's `func And(filters ...Func) Func` is that shape, while an
+/// unnamed `...func(int) bool` element worked all along.
+///
+/// **`offBy1`**: upstream has four slice forms over `strings.Index` /
+/// `bytes.Index`; guff had only the `x[len(x)]` index form.
+///
+/// **`badCond`**: `x == a && x == b` also requires both right-hand sides to be
+/// side-effect free, and `typep.SideEffectFree` counts a call only when it is a
+/// type conversion — so `i == len(v) && i == len(o)` is *not* reported. guff
+/// omitted that condition and reported it alone.
+///
+/// Every line measured against golangci-lint 2.12.2.
+#[test]
+fn gocritic_cluster_api_dup_option_off_by1_and_bad_cond() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::GocriticOptions;
+
+    // `typecheck_fixture` collects every stub under `testdata/gocritic/stub`,
+    // which is where `example.com/gocritic/opts` lives alongside `strings`.
+    let pkg = support::typecheck_fixture(
+        "gocritic",
+        "example.com/gocritic/clusterapi",
+        "clusterapi.go",
+    );
+    // `dupOption` is tagged experimental, so it is off by default. cluster-api
+    // turns on diagnostic/experimental/performance; the first two are what
+    // these three checks need.
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "gocritic",
+        GocriticOptions {
+            enabled_tags: vec!["diagnostic".into(), "experimental".into()],
+            ..GocriticOptions::default()
+        },
+    );
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, String)> = support::run_analyzer_diagnostics_with_settings(
+        gocritic(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    )
+        .into_iter()
+        .filter(|d| {
+            d.message.starts_with("dupOption:")
+                || d.message.starts_with("offBy1:")
+                || d.message.starts_with("badCond:")
+        })
+        .map(|d| {
+            let pos = fset.position(guff::position::Pos(d.pos as i64));
+            (pos.line, d.message.clone())
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            // opts.And(trueFilter, trueFilter) — named element type
+            (16, "dupOption: function argument `trueFilter` is duplicated".to_string()),
+            // localAnd(f, f) — unnamed element type, the control
+            (19, "dupOption: function argument `f` is duplicated".to_string()),
+            // segment[:strings.Index(segment, delim)]
+            (
+                37,
+                "offBy1: Index() can return -1; maybe you wanted to do Index()+1".to_string()
+            ),
+            // segment[strings.Index(segment, delim):]
+            (
+                41,
+                "offBy1: Index() can return -1; maybe you wanted to do Index()+1".to_string()
+            ),
+            // i == a && i == b — plain identifiers are side-effect free
+            (61, "badCond: `i == a && i == b` condition is suspicious".to_string()),
+            // i == int(a) && i == int(b) — a conversion is side-effect free
+            (
+                69,
+                "badCond: `i == int(a) && i == int(b)` condition is suspicious".to_string()
+            ),
+        ],
+        "the len() badCond, the differing-subject slice and the three non-option \
+         variadic calls must all stay silent"
+    );
+}
+
 /// cometbft v0.40.0's two gocritic shapes, by position.
 ///
 /// **`dupBranchBody`**: upstream compares branch bodies with `astequal.Stmt`,
