@@ -214,8 +214,46 @@ impl Fumpter {
 
         for (pos0, end, multi) in infos {
             let mut pos = pos0;
+            // v0.9.2, which is what golangci-lint 2.12.2 pins:
+            //
+            //     comments := f.commentsBetween(lastEnd, pos)
+            //     if len(comments) > 0 {
+            //         pos = comments[0].Pos()
+            //     }
+            //     if multi && lastMulti && f.Line(lastEnd)+1 == f.Line(pos) {
+            //         f.addNewline(lastEnd)
+            //     }
+            //
+            // v0.10.0 rewrote this to carry an `effectiveEnd`: a trailing
+            // *inline* comment on `lastEnd`'s line belongs to the previous
+            // declaration and extends its end, and the newline is added there.
+            // guff had that newer form unconditionally, while declining
+            // v0.10.0's other new rule three lines up for being newer than the
+            // pin — the same pin rules out both. It is gated on
+            // `omit_v010_rules` (set from `match_golangci`, which the linter
+            // turns on by default) rather than deleted, so `guff fmt` can still
+            // behave like current gofumpt.
+            //
+            // The two differ exactly when a declaration ends with a trailing
+            // comment and another comment follows on the next line. gatekeeper
+            // v3.23.0 `pkg/controller/webhookconfig/webhookconfig_controller.go`
+            // is that shape:
+            //
+            //     } // +kubebuilder:rbac:groups=admissionregistration.k8s.io,…
+            //     // +kubebuilder:rbac:groups=templates.gatekeeper.sh,…
+            //
+            // v0.9.2 takes `pos` from the *inline* comment, which shares the
+            // line with `}`, so `Line(lastEnd)+1 == Line(pos)` is false and no
+            // blank line goes in. Measured three ways: gofumpt v0.9.2 reports
+            // the file as formatted, v0.10.0 wants the blank line, and guff
+            // wanted it too.
             let mut effective_end = last_end;
-            if last_end.is_valid() {
+            if self.opts.omit_v010_rules {
+                let comments = self.comments_between(last_end, pos0);
+                if let Some(first) = comments.first() {
+                    pos = first.pos();
+                }
+            } else if last_end.is_valid() {
                 let last_end_line = self.line(last_end);
                 for cg in self.comments_between(last_end, pos0) {
                     if self.line(cg.pos()) != last_end_line {

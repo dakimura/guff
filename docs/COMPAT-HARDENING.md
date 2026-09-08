@@ -29512,3 +29512,81 @@ ifElseChain が 2 → 1 件）。
 ```
 台帳: 60/100 at zero（63 定義、open 0、unmeasured 3）
 ```
+
+### 2026-09-08（続き 270）— gofumpt の **v0.10.0 の規則がもう 1 つ混ざっていた**。`adopt gatekeeper` 完了、61/100
+
+`adopt gatekeeper`（v3.23.0, 200.1MB, 121 パッケージ）。17 linter、
+`default: none`、`gocritic.enabled-tags: [performance]`、
+`importas.no-unaliased: true`。
+
+```
+gatekeeper: guff=659 golangci=658 both=658 P=99.8% R=100.0% [UNEXPECTED]
++guff  pkg/controller/webhookconfig/webhookconfig_controller.go:227:gofumpt:File is not properly formatted
+```
+
+#### 3 つの実装で測った
+
+対象の形:
+
+```go
+	dirtyTemplates map[string]*v1beta1.ConstraintTemplate
+} // +kubebuilder:rbac:groups=admissionregistration.k8s.io,…
+// +kubebuilder:rbac:groups=templates.gatekeeper.sh,…
+```
+
+guff は `}` の行と次のコメントの間に**空行を 1 つ入れたがる**。
+
+| 実装 | 結果 |
+|---|---|
+| **gofumpt v0.9.2**（golangci-lint 2.12.2 が pin） | 差分なし（整形済み） |
+| gofumpt v0.10.0 | 空行を入れる（＋別の差分も 1 つ） |
+| guff | 空行を入れる |
+
+つまり guff は**pin より新しい gofumpt の振る舞い**を実装していた。
+
+#### 規則
+
+v0.9.2:
+
+```go
+comments := f.commentsBetween(lastEnd, pos)
+if len(comments) > 0 {
+	pos = comments[0].Pos()
+}
+if multi && lastMulti && f.Line(lastEnd)+1 == f.Line(pos) {
+	f.addNewline(lastEnd)
+}
+```
+
+v0.10.0 はここに `effectiveEnd` を入れた —— **末尾のインラインコメントは
+前の宣言のもの**として扱い、その終端に空行を足す。
+
+v0.9.2 は `pos` を**インラインコメント自身**から取る。それは `}` と同じ行
+なので `Line(lastEnd)+1 == Line(pos)` が偽になり、何も入らない。
+
+#### 同じファイルの 3 行上に、同じ pin の話が書いてあった
+
+```rust
+// gofumpt v0.10.0 also counts a single-source-line func whose printed form
+// exceeds 100 bytes as multi-line … golangci-lint 2.12.2 pins **v0.9.2**,
+// which does not … Restore this when the pin moves.
+```
+
+v0.10.0 の**片方の規則は pin を理由に見送られていて、隣の規則は入っていた**。
+§4 続き 252 / 253 / 260 / 261 / 267 と同じ形で、6 度目。
+
+削除ではなく `omit_v010_rules`（`match_golangci` 由来、linter は既定で on）
+で**分岐**にした —— 既に `match_golangci` を持つ設計に合わせ、`guff fmt`
+単体では現行 gofumpt のままにするため。
+
+```
+gatekeeper: guff=659 → guff=658 golangci=658 both=658  P=R=100.0%
+failures=0 unexpected=0 health=0
+```
+
+単体テストは両側を見る: pin 側は入力をそのまま返し、非 pin 側は空行を入れる。
+gate を外すと pin 側が落ちる。
+
+```
+台帳: 61/100 at zero（64 定義、open 0、unmeasured 3）
+```

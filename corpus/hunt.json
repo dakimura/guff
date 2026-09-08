@@ -417,5 +417,13 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "25m"
+  },
+  {
+    "name": "gatekeeper",
+    "url": "https://github.com/open-policy-agent/gatekeeper.git",
+    "ref": "v3.23.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
   }
 ]

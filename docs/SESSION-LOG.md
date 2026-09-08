@@ -5,6 +5,7 @@
 
 | 日付 | 内容 |
 |------|------|
+| 2026-09-08 | `adopt gatekeeper`（v3.23.0）は 659 対 658。guff の gofumpt が v0.10.0 の `effectiveEnd`（末尾インラインコメントを前の宣言の一部とみなす）を実装していて、`} // comment` の次のコメントの前に空行を入れていた。golangci-lint 2.12.2 が pin する v0.9.2 は入れない（3 実装で測定）。同じファイルの 3 行上に同じ pin の注意書きがあった —— 6 度目。61/100 |
 | 2026-09-08 | gocritic 2 件。`dupBranchBody` は `go`/`defer` を `go f(...);` と描いて引数を落としていたので、引数だけ違う 2 枝が「同じ body」になっていた。`ifElseChain` は visited を walk の前に全部塗っていたので、init 文を持つ head が鎖ごと飲み込んでいた（上流は諦める前に塗らないので最初の `else if` から数え直す）。`close cometbft` 完了、60/100 |
 | 2026-09-08 | `adopt cometbft`（v0.40.0）は 35 対 33、R=100%。guff だけの 2 件はどちらも gocritic で、`dupBranchBody` の偽陽性（引数の違う 2 枝を「同じ」と言う）と `ifElseChain` の偽陰性（directive を外すと上流だけが出す）。後者は nolintlint の未使用として表に出ていた —— 3 度目。open 2 |
 | 2026-09-08 | unparam の `CallSites::build` が `src_funcs_with_methods()`（名前つき関数由来）を歩いていて、合成 package `init` 配下 —— `var _ = Describe(...)` の中の `func` リテラル —— の呼び出しを 1 つも見ていなかった。上流は `ssautil.AllFunctions`。3 行下のコメントが同じことを既に書いていた。`alwaysReceivedConst` が 4 箇所未満で黙るため症状は nolintlint に化けていた。`close podman` 完了、59/100 |
