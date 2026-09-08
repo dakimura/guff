@@ -112,6 +112,7 @@ testinggoroutine/bad_test/bad_test.go              crates/guff-govet/tests/testd
 testinggoroutine/ok_test/ok_test.go                crates/guff-govet/tests/testdata/testinggoroutine/ok_test.go
 tests/bad_test/bad_test.go                         crates/guff-govet/tests/testdata/tests/bad_test.go
 tests/ok_test/ok_test.go                           crates/guff-govet/tests/testdata/tests/ok_test.go
+tests_nontest/example.go                           crates/guff-govet/tests/testdata/tests_nontest/example.go
 timeformat/bad/bad.go                              crates/guff-govet/tests/testdata/timeformat/bad.go
 timeformat/ok/ok.go                                crates/guff-govet/tests/testdata/timeformat/ok.go
 unmarshal/bad/bad.go                               crates/guff-govet/tests/testdata/unmarshal/bad.go

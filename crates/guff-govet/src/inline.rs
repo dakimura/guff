@@ -387,16 +387,67 @@ fn check_exp_gofix_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending)
 /// declaration, so it is right for every version; guff applied the table
 /// unconditionally and invented fourteen findings there.
 ///
-/// A vendor directory is the one place the dependency's source is at a path
-/// that needs no module-version resolution: `<module>/vendor/<import path>`.
-/// When it is there the question is answered from the source, and the table is
-/// reduced to a shortlist of which packages are worth opening. When it is not
-/// (no vendoring), the table still decides — so a repository that neither
-/// vendors nor is on current x/exp is still over-reported. consul and vault,
-/// which are on 2025-08 x/exp, keep the nine findings they match upstream on.
+/// The source is read wherever this host can find it — a vendor directory
+/// first, then the module cache via `go list` (see [`dependency_dir`]) — and
+/// the table is reduced to a shortlist of which packages are worth opening.
+/// Only when neither can be read does the table decide, which is the old
+/// behaviour and keeps an offline run working.
+///
+/// go-ethereum v1.17.5 is why the module-cache half exists: it does not vendor
+/// and pins x/exp at `v0.0.0-20230626212559`, so `maps.Copy` was reported by
+/// guff alone. consul and vault do not vendor either, but are on 2025-05 and
+/// 2025-08 x/exp, and keep the nine findings they match upstream on.
 fn vendored_has_gofix_inline(pass: &Pass<'_>, pkg_path: &str, name: &str) -> Option<bool> {
-    let vendor = nearest_vendored_dir(&pass.pkg().dir, pkg_path)?;
-    Some(dir_declares_gofix_inline(&vendor, name))
+    let dir = dependency_dir(&pass.pkg().dir, pkg_path)?;
+    Some(dir_declares_gofix_inline(&dir, name))
+}
+
+/// Where the dependency's source is, if it is anywhere this host can read.
+///
+/// A vendor directory answers without asking anything: `<module>/vendor/<path>`
+/// needs no version resolution. Without one the version does matter — the
+/// directives entered x/exp around 2025-02-10, so consul and vault (2025-05 and
+/// 2025-08) really do carry them while go-ethereum (`v0.0.0-20230626212559`)
+/// does not — and `go list` is the authority on which version this module
+/// selected, `replace` directives and workspaces included.
+///
+/// A failure is not a wrong answer: `None` means "could not look", and the
+/// caller then falls back to the table, which is what guff did everywhere
+/// before. That keeps an offline or sandboxed run behaving as it used to.
+///
+/// One subprocess per import path per process, memoised — the caller only ever
+/// asks about `golang.org/x/exp/maps` and `golang.org/x/exp/slices`.
+fn dependency_dir(from: &std::path::Path, pkg_path: &str) -> Option<std::path::PathBuf> {
+    if let Some(vendor) = nearest_vendored_dir(from, pkg_path) {
+        return Some(vendor);
+    }
+
+    type Cache = std::collections::HashMap<(std::path::PathBuf, String), Option<std::path::PathBuf>>;
+    static DIRS: OnceLock<std::sync::Mutex<Cache>> = OnceLock::new();
+    let cache = DIRS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    let key = (from.to_path_buf(), pkg_path.to_string());
+    if let Ok(map) = cache.lock() {
+        if let Some(hit) = map.get(&key) {
+            return hit.clone();
+        }
+    }
+
+    let found = std::process::Command::new("go")
+        .args(["list", "-f", "{{.Dir}}", "--", pkg_path])
+        .current_dir(from)
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .and_then(|out| {
+            let dir = String::from_utf8(out.stdout).ok()?;
+            let dir = std::path::PathBuf::from(dir.trim());
+            dir.is_dir().then_some(dir)
+        });
+
+    if let Ok(mut map) = cache.lock() {
+        map.insert(key, found.clone());
+    }
+    found
 }
 
 /// Walk up from a package directory to the `vendor/<import path>` Go would

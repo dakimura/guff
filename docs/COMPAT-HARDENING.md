@@ -29789,7 +29789,7 @@ golden は `gocritic-clusterapi` を新設（6 キー）—— `dupOption` は e
 台帳: 62/100 at zero（65 定義、open 0、unmeasured 3）
 ```
 
-### 2026-09-08（続き 274）— `adopt go-ethereum`。govet `tests` が **_test.go 以外も見ている**、`inline` は続き 271 で残した穴。open 2
+### 2026-09-08（続き 274）— `adopt go-ethereum`。govet `tests` が **_test.go 以外も見ている**、`inline` は続き 264 で残した穴。open 2
 
 `adopt go-ethereum`（v1.17.5, 233.5MB, 204 パッケージ）。`default: none` に
 15 linter、`staticcheck.checks: [-QF1*]`（ワイルドカード否定）、revive は
@@ -29815,10 +29815,10 @@ guff: sample.go:5:6:      tests: ExampleMetrics should return nothing
 
 **桁も違う** —— 上流は `4:1`（`func` キーワード＝`FuncDecl.Pos()`）、guff は
 `4:6`（関数名）。hunt は桁を見ないので**この 1 件は「一致」に見えていた**。
-§4 続き 217 の「golden tier だけが桁を見る」がそのまま出た形なので、
+§4 続き 26 の「桁を見るゲートを作らないと永久に見えない」がそのまま出た形なので、
 `close` では golden case を足す。
 
-#### 2. `inline` —— 続き 271 で「残す」と書いた穴に当たった
+#### 2. `inline` —— 続き 264 で「残す」と書いた穴に当たった
 
 `triedb/pathdb/database_test.go:353` は `maps.Copy(...)` で、
 `golang.org/x/exp/maps` のハードコード表に入っている。go-ethereum は
@@ -29826,10 +29826,130 @@ guff: sample.go:5:6:      tests: ExampleMetrics should return nothing
 - **vendor していない**
 - x/exp が `v0.0.0-20230626212559`（directive が入る 2025-02-10 より**前**）
 
-続き 271 の修正は「vendor があるときだけ宣言を読む」なので、この組み合わせは
+続き 264 の修正は「vendor があるときだけ宣言を読む」なので、この組み合わせは
 表のまま＝過剰報告になる。**そこに書いた「vendor していない古い x/exp は
 直らない」が、実際の target で費用になった。**
 
 ```
 台帳: 62/100 at zero（66 定義、open 2、unmeasured 3）
 ```
+
+### 2026-09-08（続き 275）— `tests` の判定は**ファイル 1 枚ごと**、報告位置は 1 つの analyzer に 2 種類。`inline` は `go list` まで訊く。`close go-ethereum` 完了、63/100
+
+続き 274 の 2 件を両方閉じた。`go-ethereum: guff=0 golangci=0 both=0
+P=100.0% R=100.0% [OK]`。
+
+#### 1. `tests` —— `_test.go` かどうかは**パッケージではなくファイル**の性質
+
+上流の `run` は 1 ファイルずつ回して
+
+```go
+if !strings.HasSuffix(pass.Fset.File(f.FileStart).Name(), "_test.go") { continue }
+```
+
+で弾く。guff は
+
+```rust
+pass.pkg().go_files.iter().any(|p| p.to_string_lossy().ends_with("_test.go"))
+```
+
+——**パッケージに 1 枚でもテストがあるか**を訊いていた。だからテストと同居して
+いる普通のファイルが全部 `Example`/`Test` の署名規則の対象になる。
+go-ethereum の `metrics/internal/sampledata.go` はまさにそれで、
+`func ExampleMetrics() metrics.Registry` を宣言した**テストではないファイル**。
+
+`pass.files()` は AST しか持たないので、パスは同じ添字の
+`compiled_go_files`（無ければ `go_files`）から引く。
+
+#### 2. 同じ analyzer の中に報告位置が 2 種類ある
+
+続き 274 で「上流は `func` キーワード、guff は関数名」と測ったので、
+`tests` の報告位置を**全部** `fn.Pos()` に寄せた。`govet` golden が落ちた。
+上流を読み直すと 1 つの analyzer の中で 2 通り使い分けている:
+
+| 検査 | 上流 | 桁 |
+|---|---|---|
+| `checkExampleName`（niladic / return nothing / type params / 各 suffix） | `pass.Reportf(fn.Pos(), …)` | `func` キーワード |
+| `checkTest` の malformed name | `pass.ReportRangef(fn.Name, …)` | 関数名 |
+
+`fn.Pos()` は `FuncDecl.Pos()`＝`func` キーワード（guff では
+`fn_.ty.pos()`。`FuncType::pos()` が `self.func`、無ければ
+`params.pos()` を返す）。**直したのは `checkExample` の側だけ**で、
+`checkTest` は元から正しかった。§4 の「隣の枝の guard を継承しない」
+と同じ形が、guard ではなく**位置**で出た。1 形（go-ethereum の 1 件）から
+analyzer 全体の規則を推したのが誤り。
+
+#### 3. hunt では見えない。golden case を足した
+
+hunt tier は桁を比較しないので、この 1 件は**「一致」に見えていた**（続き 26
+「桁を見るゲートを作らないと永久に見えない」）。`compat/golden/cases/govet` に
+
+- `tests/bad_test/bad_test.go` に `Example`（値を返す）と `Example_suffix`
+  （引数を取る）を追加 —— どちらも `checkExampleName` の**識別子解決に入る前に
+  返る**形（裸の `Example` は短絡、小文字 suffix は正当）を選んだ。guff が実装
+  していない `refers to unknown identifier` に依存せずに桁だけを釘付けにできる。
+- `tests_nontest/example.go` —— **同じ 2 形**を `_test.go` でないファイルに置いた
+  対照。上流は無言。
+
+上流 golangci-lint 2.12.2 の答え（regen した実測）:
+
+```
+tests/bad_test/bad_test.go:5:6:  tests: Testbad has malformed name: …   ← 関数名
+tests/bad_test/bad_test.go:18:1: tests: Example should return nothing   ← func
+tests/bad_test/bad_test.go:20:1: tests: Example_suffix should be niladic ← func
+tests_nontest/example.go:        （何も出ない）
+```
+
+`govet` は 184 → 186 件で `missing=0 extra=0`。既存 184 件のメッセージキーは 1
+つも消えていない。
+
+#### 4. `inline` —— vendor が無ければ `go list` に訊く
+
+続き 264 の gate は「vendor があるときだけ宣言を読む」で、無ければ x/exp の
+ハードコード表がそのまま決めていた。go-ethereum は vendor せず x/exp が
+`v0.0.0-20230626212559`（directive が入る 2025-02-10 より前）なので、表が
+`maps.Copy` を 1 件でっち上げていた。
+
+`dependency_dir` を足して vendor → `go list -f '{{.Dir}}' -- <import path>` の順に
+探す。`go list` は**このモジュールが実際に選んだバージョン**の答えで、`replace`
+も workspace も込みで正しい。import path ごとに 1 回だけ叩いて memo 化する
+（呼び手が訊くのは `golang.org/x/exp/{maps,slices}` の 2 つだけ）。
+
+**失敗は誤答ではない**。`None` は「見に行けなかった」で、そのとき表に落ちる
+＝続き 264 以前の挙動。オフライン／サンドボックス実行が今まで通り動く。
+
+#### 5. 測定
+
+| target | vendor | x/exp | 前 | 後 | 上流 |
+|---|---|---|---|---|---|
+| go-ethereum v1.17.5 | しない | 2023-06-26 | inline 1 件 | **0** | 0 |
+| consul | しない | 2025-08 | 一致 | **一致** | 一致 |
+| lazygit v0.64.1 | する | 2024-07-19 | 0 | **0** | 0 |
+
+```
+go-ethereum: guff=0   golangci=0   both=0   P=100.0% R=100.0% [OK]
+consul:      guff=257 golangci=255 both=255 P=99.2%  R=100.0% [OK]  ← 差分 2 は既存 allowlist
+lazygit:     guff=12  golangci=12  both=12  P=100.0% R=100.0% [OK]
+```
+
+consul の recall が 100% のままなのが要点 —— 表が稼いでいた findings は
+`go list` 経由でも同じだけ出ている。
+
+#### 6. ユニットテストは `go` を要るが、黙って skip はしない
+
+`inline_exp_modcache_{old,new}` は `replace golang.org/x/exp => ./exp` の
+**ファイルシステム replace** を持つモジュールなので、`go list` がネットワーク
+なしで答える。`#[ignore = "requires go on PATH"]` は CI が
+`--tests -- --ignored` で回すので実際に走る。ただし `go_available()` が false の
+ときに黙って return すると §4 続き 30「緑だが何も測っていない」の 3 番目
+（開発機にだけの外部バイナリ）そのものなので、`CI` が立っていたら
+`assert!` で落とす。
+
+弁別も確認した: `replace` の行き先を存在しないディレクトリに変えると
+`go list` が失敗し、`inline_exp_modcache_old` が表に落ちて 1 件報告して
+テストが落ちる。
+
+```
+台帳: 63/100 at zero（66 定義、open 0、unmeasured 3）
+```
+
