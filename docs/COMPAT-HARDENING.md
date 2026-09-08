@@ -29063,3 +29063,65 @@ vendor / module cache のソースから確かめることで、これは `close
 ```
 台帳: 56/100 at zero（60 定義、open 14、unmeasured 3）
 ```
+
+### 2026-09-08（続き 264）— vendor があるなら**表ではなく宣言を読む**。`close lazygit` 完了、57/100
+
+続き 263 の続き。`golang.org/x/exp/{maps,slices}` のジェネリック
+`//go:fix inline` 関数をハードコードした表は、**x/exp のバージョンについての
+主張**であって、2025-02-10 より前には成り立たない。
+
+表を消せない理由は 263 に書いたとおり —— directive は依存パッケージの
+ソースにしか無く、export data には入らない。実際 `consul` と `vault` では
+この表が **9 件を上流と一致させている**（どちらも 2025-08 の x/exp）:
+
+```
+compat/results/20260812T232029Z/consul.golangci.json: 9
+compat/results/20260812T232029Z/consul.guff.json:     9
+```
+
+#### 直し方: 見えるときは見る
+
+vendor しているリポジトリでは、依存のソースが**バージョン解決の要らない
+一意なパス**にある —— `<module>/vendor/<import path>`。そこにあるなら
+directive の有無を実際に読み、無ければ黙る:
+
+```rust
+if !is_known_generic_gofix_inline(pkg, func) {
+    return;
+}
+if vendored_has_gofix_inline(pass, pkg, func) == Some(false) {
+    return;
+}
+```
+
+`vendored_has_gofix_inline` はパッケージのディレクトリから上へ辿って
+`vendor/<import path>` を探し、**`go.mod` を持つ祖先（module root）で止まる**
+ので、無関係な上のツリーへ迷い込まない。見つけたディレクトリの非 test の
+`.go` を `go:fix inline` で 1 度 memchr してから `PARSE_COMMENTS` で再解析
+する（ローカル走査と同じ安い前段フィルタ）。
+
+これで表は「**どのパッケージを開く価値があるかの短縮リスト**」に格下げされ、
+答えそのものはソースが出す。
+
+#### 残り（測定済み・未修正）
+
+**vendor していない**リポジトリでは依存のパスに module バージョンの解決が
+要るので、そこは表のまま。つまり「vendor せず、かつ 2025-02-10 より前の
+x/exp」を使うリポジトリは今も過剰報告する。コーパスでは `containerd`
+（`20241108`, nightly tier）が該当しうる。module cache まで解決する案は
+lister への依存を analyzer に持ち込むので、**別タスクにして測定だけ残す**。
+
+#### 結果
+
+```
+lazygit: guff=26 golangci=12 both=12   →   guff=12 golangci=12 both=12
+P=46.2% → 100.0%、R は元から 100.0%
+failures=0 unexpected=0 health=0
+```
+
+単体テストは vendor の 2 形を数える —— directive の無い x/exp を vendor した
+fixture で 0 件、ある fixture で 1 件。gate を外すと前者が落ちる。
+
+```
+台帳: 57/100 at zero（60 定義、open 0、unmeasured 3）
+```

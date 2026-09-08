@@ -411,6 +411,39 @@ fn inline_allows_reflect_pointer() {
     assert!(support::run_analyzer(inline_analyzer(), &pkg).is_empty());
 }
 
+/// The x/exp `//go:fix inline` table is a claim about a *version*, so when the
+/// dependency's source is vendored the declaration decides instead.
+///
+/// The directives entered x/exp around 2025-02-10. lazygit v0.64.1 vendors
+/// `v0.0.0-20240719175910`, whose `slices`/`maps` carry none, and guff invented
+/// fourteen findings there; consul and vault are on 2025-08 x/exp and match
+/// upstream on nine. Both fixtures below vendor a `maps.Clone` — one with the
+/// directive, one without — and nothing else about them differs.
+#[test]
+fn inline_exp_gate_reads_the_vendored_declaration() {
+    for (fixture, want) in [("inline_exp_vendor_old", 0), ("inline_exp_vendor_new", 1)] {
+        let dir = support::testdata(fixture);
+        let stub = dir.join("vendor/golang.org/x/exp/maps/maps.go");
+        let pkg = support::typecheck_with_deps(
+            "example.com/govet/inlineexpvendor",
+            &dir.join("bad.go"),
+            &[("golang.org/x/exp/maps", &stub)],
+        );
+        let messages = support::run_analyzer(inline_analyzer(), &pkg);
+        assert_eq!(
+            messages.len(),
+            want,
+            "{fixture}: expected {want} finding(s), got {messages:?}"
+        );
+        if want == 1 {
+            assert_eq!(
+                messages[0],
+                "cannot inline: type parameter inference is not yet supported"
+            );
+        }
+    }
+}
+
 #[test]
 fn inline_flags_exp_maps_clone_type_param_gap() {
     let dir = support::testdata("inline_exp");

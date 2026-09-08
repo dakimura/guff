@@ -5,6 +5,7 @@
 
 | 日付 | 内容 |
 |------|------|
+| 2026-09-08 | x/exp の `//go:fix inline` 表はバージョンについての主張なので、vendor があるときは `<module>/vendor/<import path>` の宣言を実際に読んで判断する（表は「開く価値のあるパッケージの短縮リスト」に格下げ）。vendor していない古い x/exp は表のままで、測定だけ残した。`close lazygit` 完了、57/100 |
 | 2026-09-08 | `adopt lazygit`（v0.64.1）は 26 対 12、R=100%。guff だけの 14 件は全部 `govet:inline` の「type parameter inference」で、原因は `golang.org/x/exp/{maps,slices}` のジェネリック `//go:fix inline` 関数をハードコードした表。directive が x/exp に入ったのは 2025-02-10 頃で、lazygit が vendor しているのはそれ以前。open 14 |
 | 2026-09-08 | gocritic `commentedOutCode` の許可リストは `strparse.Stmt` が「ちょうど 1 文」を返したときにしか効かず、2 文以上はブロック再解析に落ちて解析が通れば警告する（単独なら許可される `type` 宣言 2 つが決め手）。guff は全文を許可リストに掛けて落としていた。`close ingress-nginx` 完了、56/100 |
 | 2026-09-08 | revive `var-declaration` の上流の門は `!validType(lhsTyp) \|\| !validType(rhsTyp)` で、guff は右辺しか訊いていなかった。線は「型がどこにあるか」ではなく「どう綴られているか」—— `qual.T` と dot import は黙り、ローカル alias は報告する（1 形から読み違えて golden に拾われた）。ingress-nginx 2 → 1 |
