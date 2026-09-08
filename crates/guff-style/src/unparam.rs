@@ -1070,7 +1070,35 @@ impl CallSites {
         use guff_ssa::value::Value;
 
         let mut sites: std::collections::HashMap<_, Vec<_>> = std::collections::HashMap::new();
-        for &caller in ir.src_funcs_with_methods() {
+        // Every function of this package, the way upstream's
+        // `ssautil.AllFunctions` does — **not** `src_funcs_with_methods()`.
+        //
+        // That list starts from *named* functions, so it omits the synthesized
+        // package `init` and everything under it, and a `func` literal in a
+        // package-level `var` initializer lives exactly there (upstream calls
+        // it `init$1`). The comment on `lit_names` below has said so since the
+        // literal-naming map was written; the call-site collection was still
+        // reading the narrow list.
+        //
+        // The cost was silent. podman v6.1.0 puts its Ginkgo suites in
+        // `var _ = Describe("...", func() { It("...", func() { ... }) })`, so
+        // all eight `(*machineTestBuilder).setTimeout` call sites sit under
+        // `init`; guff saw none, and `alwaysReceivedConst`'s "fewer than four
+        // call sites" guard then returned without a word. What surfaced was
+        // not a missing unparam finding but a nolintlint one — `//nolint:
+        // unparam` reported as unused, because nothing had been suppressed.
+        //
+        // Sorted by name so the site order is stable across runs; `sites` is
+        // keyed by callee and read in order by the always-receives check.
+        let mut callers: Vec<_> = ir
+            .prog
+            .functions
+            .iter()
+            .filter(|(_, f)| f.pkg == Some(ir.pkg) && !f.blocks.is_empty())
+            .map(|(fid, f)| (f.name.clone(), fid))
+            .collect();
+        callers.sort_by(|a, b| a.0.cmp(&b.0));
+        for (_, caller) in callers {
             let func = ir.prog.functions.get(caller);
             for (_, block) in func.live_blocks() {
                 for &iid in &block.instrs {

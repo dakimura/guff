@@ -5,6 +5,7 @@
 
 | 日付 | 内容 |
 |------|------|
+| 2026-09-08 | unparam の `CallSites::build` が `src_funcs_with_methods()`（名前つき関数由来）を歩いていて、合成 package `init` 配下 —— `var _ = Describe(...)` の中の `func` リテラル —— の呼び出しを 1 つも見ていなかった。上流は `ssautil.AllFunctions`。3 行下のコメントが同じことを既に書いていた。`alwaysReceivedConst` が 4 箇所未満で黙るため症状は nolintlint に化けていた。`close podman` 完了、59/100 |
 | 2026-09-08 | `adopt podman`（v6.1.0、build tags は podman 自身の `remote,containers_image_openpgp`）は 1 対 0。症状は nolintlint の unused directive、原因は unparam の取りこぼし（directive を外すと上流だけが `always receives time.Minute * 10` を出す）。構造の変数を 6 つ振ってもどれも guff は正しく報告するので、材料が 1 つ未特定。上流の「呼び出し 4 箇所未満は諦める」条件と、`always receives` の文言差（ソース表記＋値）も測定した。open 1 |
 | 2026-09-08 | `adopt argo-workflows`（v4.1.2）。`ui/embed.go` の未ビルド frontend で `go list ./...` が rc=1、golangci は typecheck 1 件に潰れる。汚れているのは `cmd` と `server` の 2 木だけなので clean な 8 木 140 パッケージへ scope し、8 対 8 の完全一致。58/100 |
 | 2026-09-08 | x/exp の `//go:fix inline` 表はバージョンについての主張なので、vendor があるときは `<module>/vendor/<import path>` の宣言を実際に読んで判断する（表は「開く価値のあるパッケージの短縮リスト」に格下げ）。vendor していない古い x/exp は表のままで、測定だけ残した。`close lazygit` 完了、57/100 |
