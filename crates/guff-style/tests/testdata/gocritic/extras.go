@@ -717,6 +717,58 @@ func returnAfterHttpErrorExtra(w http.ResponseWriter, err error) {
 	}
 }
 
+// `dupBranchBody` compares the branch bodies structurally upstream
+// (`astequal.Stmt`), so a `go`/`defer` statement's *arguments* count. guff
+// rendered those two forms as `go f(...);`, eliding every argument, and then
+// called two branches the same when only the arguments differed — cometbft
+// `consensus/byzantine_test.go:512` broadcasts `proposal1` in one branch and
+// `proposal2` in the other.
+func dupBranchGoArgsExtra(n int, p1, p2, h1, h2 int) {
+	// silent: the arguments differ
+	if n < 2 {
+		go dupBranchSendExtra(p1, h1)
+	} else {
+		go dupBranchSendExtra(p2, h2)
+	}
+
+	// silent: likewise for defer
+	if n < 3 {
+		defer dupBranchSendExtra(p1, h1)
+	} else {
+		defer dupBranchSendExtra(p2, h2)
+	}
+
+	// reported: genuinely the same body
+	if n < 4 {
+		go dupBranchSendExtra(p1, h1)
+	} else {
+		go dupBranchSendExtra(p1, h1)
+	}
+}
+
+func dupBranchSendExtra(a, b int) {}
+
+// `countIfelseLen` gives up on an `if` carrying an init statement, but it
+// marks the chain visited only *as it walks* — so giving up at the head leaves
+// the rest unvisited and the walker counts again from the first `else if`.
+// guff marked the whole chain up front, so a head with an init swallowed it.
+// cometbft `consensus/state.go` is exactly this shape.
+func ifElseChainInitExtra(err error, n int) string {
+	// reported at the first `else if`, not here
+	if v, ok := ifElseChainAssertExtra(err); ok {
+		_ = v
+		return "assert"
+	} else if n == 1 {
+		return "one"
+	} else if n == 2 {
+		return "two"
+	} else {
+		return "other"
+	}
+}
+
+func ifElseChainAssertExtra(err error) (int, bool) { return 0, err != nil }
+
 func commentedOutCodeExtra() {
 	// fmt.Println("debugging hard")
 	fmt.Println("live")

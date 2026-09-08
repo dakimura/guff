@@ -29430,3 +29430,85 @@ directive が付いているので上流は黙り、guff は「抑制するも�
 ```
 台帳: 59/100 at zero（63 定義、open 2、unmeasured 3）
 ```
+
+### 2026-09-08（続き 269）— gocritic 2 件: **引数を省いた比較**と**先に visited を塗る walk**。`close cometbft` 完了、60/100
+
+#### 1. `dupBranchBody` —— `go` / `defer` の引数が消えていた
+
+`stmt_text` は `go` と `defer` を
+
+```rust
+Stmt::GoStmt(g) => call_qualified_name(&g.call).map(|n| format!("go {n}(...);")),
+```
+
+と描いていた。**`(...)` は本当に `(...)` で、引数が 1 つも入らない。**
+なので
+
+```go
+if i < len(peers)/2 {
+	go sendProposalAndParts(height, round, cs, peer, proposal1, block1Hash, blockParts1)
+} else {
+	go sendProposalAndParts(height, round, cs, peer, proposal2, block2Hash, blockParts2)
+}
+```
+
+の 2 枝が同じ文字列になり、「同じ body」と報告された（cometbft
+`consensus/byzantine_test.go:512`）。上流は `astequal.Stmt`＝構造比較なので
+引数は最初から効いている。呼び出し全体を `expr_text` と同じ形で描くように
+した（`...` の省略記号も含む）。
+
+#### 2. `ifElseChain` —— visited を**歩く前に**塗っていた
+
+上流:
+
+```go
+for {
+	if stmt.Init != nil {
+		return 0 // Give up
+	}
+	switch e := stmt.Else.(type) {
+	case *ast.IfStmt:
+		stmt = e; count++; c.visited[e] = true
+```
+
+**印を付けるのは walk の中**で、しかも `Init` を見て諦めるのは**その前**。
+だから head で諦めたとき、後続の `else if` は未訪問のまま残り、walker が
+自力でそこに到達して数え直す。
+
+guff は `check_if_else_chain` の冒頭で
+
+```rust
+// Mark nested else-ifs visited.
+while let Some(Stmt::IfStmt(next)) = cur.else_.as_deref() { visited.insert(next.id); … }
+```
+
+と**先に全部塗って**いた。結果、init 付きの head が鎖ごと飲み込んで何も
+出さない。cometbft `consensus/state.go`:
+
+```go
+if voteErr, ok := err.(*types.ErrVoteConflictingVotes); ok {   // init → 諦める
+} else if errors.Is(err, …) {                                  // 上流はここで警告
+} else if errors.Is(err, …) {
+} else {
+}
+```
+
+上流は最初の `else if` の位置で報告する。guff は無言 —— そして表に出たのは
+**nolintlint の未使用 directive**（続き 268）。
+
+#### 結果
+
+```
+cometbft: guff=35 golangci=33 both=33  →  guff=33 golangci=33 both=33  P=R=100.0%
+failures=0 unexpected=0 health=0
+```
+
+golden `gocritic` は 289 → 292 キー（消失ゼロ）。単体テストは 3 形の位置を
+`assert_eq!` で固定する —— 引数の違う `go`/`defer` の 2 組は黙り、本当に
+同じ 1 組だけが出て、init 付きの鎖は**最初の `else if`** の行で出る。
+どちらの修正を戻しても落ちる（戻すと dupBranchBody が 1 → 3 件、
+ifElseChain が 2 → 1 件）。
+
+```
+台帳: 60/100 at zero（63 定義、open 0、unmeasured 3）
+```

@@ -7679,6 +7679,62 @@ fn gocritic_dup_arg_covers_the_method_form_and_every_call_pattern() {
     );
 }
 
+/// cometbft v0.40.0's two gocritic shapes, by position.
+///
+/// **`dupBranchBody`**: upstream compares branch bodies with `astequal.Stmt`,
+/// so a `go`/`defer` statement's arguments count. guff rendered both forms as
+/// `go f(...);`, eliding every argument, and called two branches identical
+/// when only the arguments differed.
+///
+/// **`ifElseChain`**: `countIfelseLen` gives up on an `if` carrying an init
+/// statement, but marks the chain visited only *as it walks* — so giving up at
+/// the head leaves the rest unvisited and the walker counts again from the
+/// first `else if`. guff marked the whole chain up front, so a head with an
+/// init swallowed it and reported nothing at all.
+///
+/// Positions matter here: the init-statement chain is reported at its first
+/// `else if`, not at the `if`. Both were measured against golangci-lint
+/// 2.12.2.
+#[test]
+fn gocritic_cometbft_dup_branch_args_and_if_else_chain_with_init() {
+    let pkg = support::typecheck_fixture("gocritic", "example.com/gocritic", "cometbft.go");
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, String)> = support::run_analyzer_diagnostics(gocritic(), &pkg)
+        .into_iter()
+        .filter(|d| {
+            d.message.starts_with("dupBranchBody:") || d.message.starts_with("ifElseChain:")
+        })
+        .map(|d| {
+            let pos = fset.position(guff::position::Pos(d.pos as i64));
+            (pos.line, d.message.clone())
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            // `if n < 4` — the branch pair that really is duplicated
+            (
+                31,
+                "dupBranchBody: both branches in if statement have same body".to_string()
+            ),
+            // `} else if n == 1 {` — the init-statement chain reports here,
+            // not at the `if` that carries the init
+            (
+                48,
+                "ifElseChain: rewrite if-else to switch statement".to_string()
+            ),
+            // `if a {` — the control chain, reported at its head
+            (
+                59,
+                "ifElseChain: rewrite if-else to switch statement".to_string()
+            ),
+        ],
+        "the two go/defer branch pairs with differing arguments must stay silent, \
+         and the init-statement chain must report at its first `else if`"
+    );
+}
+
 /// `exitAfterDefer` walks the function body **generically** — upstream is
 /// `astutil.Apply`, not a switch over statement kinds. guff enumerated the
 /// kinds it recursed into and so missed every construct nobody had added:
