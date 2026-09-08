@@ -359,13 +359,107 @@ fn check_exp_gofix_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending)
         Some((p, f)) => (p, f),
         None => return,
     };
-    if is_known_generic_gofix_inline(pkg, func) {
-        pending.push((
-            call.lparen.0 as u32,
-            "cannot inline: type parameter inference is not yet supported".into(),
-            Vec::new(),
-        ));
+    if !is_known_generic_gofix_inline(pkg, func) {
+        return;
     }
+    // The table above is a claim about a *version* of x/exp, and it is only
+    // true from 2025-02-10 on. When the dependency's source is on disk, ask it
+    // instead of believing the table — see `vendored_has_gofix_inline`.
+    if vendored_has_gofix_inline(pass, pkg, func) == Some(false) {
+        return;
+    }
+    pending.push((
+        call.lparen.0 as u32,
+        "cannot inline: type parameter inference is not yet supported".into(),
+        Vec::new(),
+    ));
+}
+
+/// Does the **vendored** copy of `pkg_path` really carry `//go:fix inline` on
+/// `name`? `None` when there is no vendored copy to read.
+///
+/// [`is_known_generic_gofix_inline`] hardcodes the generic `//go:fix inline`
+/// functions of `golang.org/x/exp/{maps,slices}` because a dependency loaded
+/// from export data has no doc comments to discover them in. That list is
+/// correct for current x/exp and **wrong for older ones**: the directives were
+/// added around 2025-02-10, and lazygit v0.64.1 vendors
+/// `v0.0.0-20240719175910`, whose `slices` carries none. Upstream reads the
+/// declaration, so it is right for every version; guff applied the table
+/// unconditionally and invented fourteen findings there.
+///
+/// A vendor directory is the one place the dependency's source is at a path
+/// that needs no module-version resolution: `<module>/vendor/<import path>`.
+/// When it is there the question is answered from the source, and the table is
+/// reduced to a shortlist of which packages are worth opening. When it is not
+/// (no vendoring), the table still decides — so a repository that neither
+/// vendors nor is on current x/exp is still over-reported. consul and vault,
+/// which are on 2025-08 x/exp, keep the nine findings they match upstream on.
+fn vendored_has_gofix_inline(pass: &Pass<'_>, pkg_path: &str, name: &str) -> Option<bool> {
+    let vendor = nearest_vendored_dir(&pass.pkg().dir, pkg_path)?;
+    Some(dir_declares_gofix_inline(&vendor, name))
+}
+
+/// Walk up from a package directory to the `vendor/<import path>` Go would
+/// have resolved the import to, if the module vendors.
+///
+/// The walk stops at the module root — the first ancestor holding a `go.mod`,
+/// checked for `vendor/` itself before stopping — so it cannot wander into an
+/// unrelated tree above the module.
+fn nearest_vendored_dir(from: &std::path::Path, pkg_path: &str) -> Option<std::path::PathBuf> {
+    let mut cur = Some(from);
+    while let Some(dir) = cur {
+        let candidate = dir.join("vendor").join(pkg_path);
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+        if dir.join("go.mod").is_file() {
+            return None;
+        }
+        cur = dir.parent();
+    }
+    None
+}
+
+/// Scan one directory's non-test Go files for `func <name>` carrying
+/// `//go:fix inline`.
+fn dir_declares_gofix_inline(dir: &std::path::Path, name: &str) -> bool {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("go") {
+            continue;
+        }
+        let Some(file_name) = path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if file_name.ends_with("_test.go") {
+            continue;
+        }
+        let Ok(src) = fs::read(&path) else {
+            continue;
+        };
+        // Same cheap filter as the local scan: almost no file carries the
+        // directive, and a full PARSE_COMMENTS reparse is not worth paying for
+        // the ones that do not.
+        if memchr::memmem::find(&src, b"go:fix inline").is_none() {
+            continue;
+        }
+        let fset = FileSet::new();
+        let Ok(parsed) = parse_file(&fset, file_name, &src, PARSE_COMMENTS) else {
+            continue;
+        };
+        for decl in &parsed.decls {
+            let Decl::FuncDecl(f) = decl else {
+                continue;
+            };
+            if f.name.name == name && has_fix_inline(&f.doc) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Report when inlining an `io/ioutil` go:fix wrapper would pull a newer
