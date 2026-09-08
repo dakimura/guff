@@ -381,5 +381,13 @@
     "packages": "./cmd/... ./internal/... ./pkg/... ./magefiles/... ./version/...",
     "tier": "hunt",
     "timeout": "25m"
+  },
+  {
+    "name": "lazygit",
+    "url": "https://github.com/jesseduffield/lazygit.git",
+    "ref": "v0.64.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
   }
 ]

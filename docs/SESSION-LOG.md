@@ -5,6 +5,7 @@
 
 | 日付 | 内容 |
 |------|------|
+| 2026-09-08 | `adopt lazygit`（v0.64.1）は 26 対 12、R=100%。guff だけの 14 件は全部 `govet:inline` の「type parameter inference」で、原因は `golang.org/x/exp/{maps,slices}` のジェネリック `//go:fix inline` 関数をハードコードした表。directive が x/exp に入ったのは 2025-02-10 頃で、lazygit が vendor しているのはそれ以前。open 14 |
 | 2026-09-08 | gocritic `commentedOutCode` の許可リストは `strparse.Stmt` が「ちょうど 1 文」を返したときにしか効かず、2 文以上はブロック再解析に落ちて解析が通れば警告する（単独なら許可される `type` 宣言 2 つが決め手）。guff は全文を許可リストに掛けて落としていた。`close ingress-nginx` 完了、56/100 |
 | 2026-09-08 | revive `var-declaration` の上流の門は `!validType(lhsTyp) \|\| !validType(rhsTyp)` で、guff は右辺しか訊いていなかった。線は「型がどこにあるか」ではなく「どう綴られているか」—— `qual.T` と dot import は黙り、ローカル alias は報告する（1 形から読み違えて golden に拾われた）。ingress-nginx 2 → 1 |
 | 2026-09-08 | gocritic `regexpSimplify` は `allChars`（全部 `OpChar`）が成り立つときだけ `x\|y` を `[xy]` にまとめ、`factorPrefixSuffix` も `concatLiteral` 経由で同じ条件を要求する。guff は「リテラルか」しか見ずデコード済み文字を書いていたので、`\r\|\n` を生の CR/LF の class にし、`fo\.\|fo\.x` を **意味の違う** `fo.x?` に書き換えていた。ingress-nginx 4 → 2 |
