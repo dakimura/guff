@@ -6,9 +6,9 @@
     "`unmeasured` is not `clean`: an absent measurement is a question."
   ],
   "goal": 100,
-  "defined": 66,
+  "defined": 67,
   "clean": 63,
-  "open": 0,
+  "open": 1,
   "unmeasured": 3,
   "targets": {
     "alertmanager": {
@@ -148,7 +148,7 @@
     "consul": {
       "tier": "nightly",
       "state": "clean",
-      "at": "20260830T082654Z",
+      "at": "20260908T135927Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -182,6 +182,26 @@
       "needs_platform": "linux",
       "state": "unmeasured",
       "skipped_on": "darwin"
+    },
+    "dagger": {
+      "tier": "hunt",
+      "state": "open",
+      "at": "20260908T142138Z",
+      "open": 209,
+      "guff_only": 203,
+      "gcl_only": 6,
+      "by_linter": {
+        "goimports": 160,
+        "gofmt": 12,
+        "govet": 8,
+        "unused": 6,
+        "typecheck": 6,
+        "staticcheck": 5,
+        "nolintlint": 5,
+        "whitespace": 4,
+        "dupl": 2,
+        "unconvert": 1
+      }
     },
     "dapr": {
       "tier": "hunt",
@@ -378,7 +398,7 @@
     "lazygit": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260908T074913Z",
+      "at": "20260908T140144Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0

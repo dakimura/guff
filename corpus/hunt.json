@@ -441,5 +441,13 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "25m"
+  },
+  {
+    "name": "dagger",
+    "url": "https://github.com/dagger/dagger.git",
+    "ref": "v0.21.9",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
   }
 ]

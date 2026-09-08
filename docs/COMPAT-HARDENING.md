@@ -29953,3 +29953,142 @@ consul の recall が 100% のままなのが要点 —— 表が稼いでいた
 台帳: 63/100 at zero（66 定義、open 0、unmeasured 3）
 ```
 
+### 2026-09-08（続き 276）— `adopt dagger`。上流のレポートは**typecheck 6 件で全消し**、guff は 203 件。原因は「型エラーを typecheck issue にしない」という**続き 151/162 の意図的な境界**。open 2
+
+`adopt dagger`（v0.21.9, 238.6MB, 481 パッケージ）。`default: none` に 24
+linter、formatter は gofmt/goimports、`issues.max-issues-per-linter: 0` /
+`max-same-issues: 0` / `uniq-by-line: false`、`run.relative-path-mode: wd`。
+
+```
+dagger: 3 worker panic(s): crates/guff-ssa/src/builder/stmt.rs:1527:9
+dagger: ill-typed packages 186 > baseline 0
+dagger: guff=203 golangci=6 both=0 P=0.0% R=0.0% [UNEXPECTED]
+  guff-only by linter: {'goimports': 160, 'gofmt': 12, 'govet': 8, 'unused': 6,
+                        'staticcheck': 5, 'nolintlint': 5, 'whitespace': 4,
+                        'dupl': 2, 'unconvert': 1}
+  gcl-only by linter:  {'typecheck': 6}
+```
+
+**両ツールが「同意していない」のではない。** 上流の 6 件は**全部 typecheck**
+で、`InvalidIssue` が typecheck があるとき他を全部消すので、golangci の
+レポートは空になっている。guff は typecheck issue を 1 件も出さないので
+`keep_only_typecheck` が発火せず、203 件がそのまま残った。**同じ木を見て、
+片方だけが黙っている。**
+
+#### 1. guff は型エラーを typecheck issue にしない —— 意図的な境界だが、根拠が切れている
+
+`crates/guff-lint/src/typecheck.rs` の doc comment に書いてある:
+
+> `packages.Error` は `go list` が言ったことと型チェッカが言ったことの両方を
+> 運ぶ。このモジュールは**前者**（`ErrorKind::List`）だけを出す。……型エラーは
+> *guff の*文言を運び、2026-08-11 の測定では 9 形のうち 2 形が `go build` と
+> 違っていた。出せば上流の文言を当てずっぽうで書くことになる。
+>
+> そして corpus 上ではその後半は**そもそも観測できない**: 4 target 771
+> パッケージで `go list -e` のエラーは 1 件だけ、guff 自身の ill-typed 集合は
+> どこでも空である。
+
+**dagger がその「観測できない」を破った最初の target である。** ill-typed 186
+パッケージ。
+
+続き 162（skopeo）で同じ境界に当たったとき、この note を検算して
+**腐っていなかった**と書いた。当時は本当にそうだった —— corpus に ill-typed な
+target が 1 つも無かったからである。dagger がその前提を消した。§4「deferral
+note の理由は腐る」の、**理由の側が後から腐る**形。
+
+最小再現（11 行のモジュール、`undefined: dag` 1 つと崩した import 1 つ）:
+
+```
+$ go build ./...
+bad/main.go:10:2: undefined: dag
+
+$ golangci-lint run
+bad/main.go:1: : # example.com/tcrepro/bad
+bad/main.go:10:2: undefined: dag (typecheck)     ← 1 件。gofmt は消えている
+
+$ guff run
+bad/main.go:5:1: File is not properly formatted (gofmt)   ← typecheck 0 件
+```
+
+`GUFF_NATIVE_LIST=0` でも同じ。dagger の `could not import
+dagger/my-module/internal/dagger`（import 解決の失敗＝`go list` 側の誤り）も
+guff は出さないので、**lister の差ではなく 2 つ別々の穴**である:
+
+| 上流が出すもの | guff | 
+|---|---|
+| 解決できない import（`could not import …`） | 出さない |
+| 型エラー（`undefined: dag`） | 出さない（意図的） |
+
+#### 2. SSA builder が ill-typed な keyed composite literal で panic する
+
+`struct_field_index` は名前で直接フィールドを線形探索し、**見つからなければ
+`panic!`** する。型チェッカが検証済みである前提だが、ill-typed なパッケージは
+その前提を満たさない。
+
+最小再現（7 行 + `gosec` を有効化）:
+
+```go
+package bad
+
+type T struct{ Age int }
+
+func F() T {
+	return T{Name: "x", Age: 1}   // go build: unknown field Name in struct literal of type T
+}
+```
+
+```
+$ guff run --config <gosec だけ>
+thread '<unnamed>' panicked at crates/guff-ssa/src/builder/stmt.rs:1527:9:
+struct field "Name" not found
+$ echo $?
+0
+```
+
+**exit code は 0 のまま。** worker が 1 つ死んでそのパッケージの findings が
+黙って消えるだけで、run は成功したように見える。撃ったのは 6 linter のうち
+`gosec` だけ（staticcheck / unused / unparam / nilerr / bodyclose は撃たない）。
+
+dagger の 3 件の内訳は 2 形:
+
+* `struct field "Name" not found` —— `docs/**/snippets/documentation/go/object.go`
+  の `MyModule{Name: …, Age: …}`。**どのプラットフォームでも ill-typed**。
+* `struct field "Pdeathsig" not found` —— `core/git_remote.go:756` の
+  `&unix.SysProcAttr{Setpgid: true, Pdeathsig: unix.SIGTERM}`。このファイルには
+  build tag が無く、darwin の `unix.SysProcAttr` に `Pdeathsig` は無い。
+
+#### 3. darwin では 481 中 244（51%）が build できない —— ただし大半は**どの host でも**
+
+パッケージごとに `go build` を回した実測:
+
+| | 数 | 性質 |
+|---|---|---|
+| docs 配下 | 228 | `dagger/my-module/internal/dagger` など**存在しない module path** を import する doc 断片。**どの platform でも ill-typed** |
+| docs 以外 | 16 | 全部 linux 専用 |
+| 合計 | 244 / 481 | |
+
+16 の内訳: `unix.OpenTree` / `syscall.Mount` / `Pdeathsig`（`engine/engineutil`,
+`network/netinst`, `util/llbtodagger`）、containerd の overlay snapshotter が
+`build constraints exclude all Go files`（`cmd/engine`, `engine/server`）、
+そして **`util/layercopy` 1 つが 8 パッケージを道連れにしている** ——
+`cleanRel` は `dest_linux.go`（`//go:build linux`）にあるのに `filter.go` には
+build tag が無いので、darwin では `undefined: cleanRel` になる。
+
+つまり **PLATFORM_BOUND ではない**。tetragon（続き 217）は「Linux でしか測れ
+ない」だったが、dagger の支配的な原因（228 の doc 断片と、そこから出る
+typecheck の全消し）は **host に依存しない**。11 行の最小再現が darwin で
+そのまま出ることがその証拠である。16 パッケージ分の findings だけが darwin
+では見えないので、**原因 1 と 2 を直した後の残差**は darwin では決着しない。
+
+#### 4. health baseline に行は足さない
+
+`compat/baselines/health-hunt.json` は「Panics are never baselined — they always
+fail」「Targets absent here are gated strictly at 0」と書いてある。186 を
+baseline に書けば恒久的に許すことになる（§4「health baseline は 0 を書かず行を
+消す」）。open な target が hunt を赤にしたままなのは正しい状態なので、行は
+足さない。
+
+```
+台帳: 63/100 at zero（67 定義、open 1、unmeasured 3）
+```
+

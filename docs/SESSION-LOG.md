@@ -5,6 +5,7 @@
 
 | 日付 | 内容 |
 |------|------|
+| 2026-09-08 | `adopt dagger`（v0.21.9, 481 パッケージ）は `guff=203 golangci=6`。**上流の 6 件は全部 typecheck** で `InvalidIssue` がレポートを空にしており、guff は typecheck issue を 1 件も出さないので 203 件が残った。`typecheck.rs` が「型エラーは出さない」と決めた根拠（corpus 上では ill-typed が観測できない）を dagger が破った最初の target —— 続き 162 で検算したときは本当に腐っていなかった。ほかに SSA builder が ill-typed な keyed composite literal で panic し **exit code は 0 のまま** worker が消える。darwin で 481 中 244 が build できないが、うち 228 は doc 断片で host 非依存。open 2 |
 | 2026-09-08 | `close go-ethereum` 完了、63/100。govet `tests` は `_test.go` かどうかを**パッケージ単位**で訊いていた（テストと同居する普通のファイルが全部 `Example` 規則の対象）。報告位置は 1 つの analyzer に 2 種類あり、`checkExampleName` だけが `fn.Pos()`＝`func` キーワード、`checkTest` は `ReportRangef(fn.Name)` で正しかった —— 全部寄せて golden が落ちた。hunt は桁を見ないので golden case を追加。`inline` は vendor が無いとき `go list` で module cache まで解決（go-ethereum 1→0、consul の recall 100% は維持） |
 | 2026-09-08 | `adopt go-ethereum`（v1.17.5）は 2 対 0。govet `tests` が `_test.go` 以外のファイルも見ていて（さらに桁が `func` ではなく関数名を指す。hunt は桁を見ないので隠れていた）、`inline` は続き 264 で「vendor していない古い x/exp は残る」と書いた穴に当たった。open 2 |
 | 2026-09-08 | gocritic 3 件。`dupOption` は option 型判定が `Underlying()` を取らず名前つき関数型を見落とし、`offBy1` は `strings.Index`/`bytes.Index` の slice 形 4 規則が丸ごと無く、`badCond` は `typep.SideEffectFree`（`CallExpr` は型変換のときだけ可）を訊いていなかった —— その述語は同じファイルに既にあり別の check が使っていた（7 度目）。`close cluster-api` 完了、62/100 |
