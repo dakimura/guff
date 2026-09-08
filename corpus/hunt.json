@@ -409,5 +409,13 @@
       "remote",
       "containers_image_openpgp"
     ]
+  },
+  {
+    "name": "cometbft",
+    "url": "https://github.com/cometbft/cometbft.git",
+    "ref": "v0.40.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
   }
 ]

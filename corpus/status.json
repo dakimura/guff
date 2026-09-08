@@ -6,9 +6,9 @@
     "`unmeasured` is not `clean`: an absent measurement is a question."
   ],
   "goal": 100,
-  "defined": 62,
+  "defined": 63,
   "clean": 59,
-  "open": 0,
+  "open": 1,
   "unmeasured": 3,
   "targets": {
     "alertmanager": {
@@ -120,6 +120,18 @@
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
+    },
+    "cometbft": {
+      "tier": "hunt",
+      "state": "open",
+      "at": "20260908T092625Z",
+      "open": 2,
+      "guff_only": 2,
+      "gcl_only": 0,
+      "by_linter": {
+        "gocritic": 1,
+        "nolintlint": 1
+      }
     },
     "connect-go": {
       "tier": "hunt",
