@@ -489,12 +489,54 @@ impl Ctx {
         }
     }
 
+    /// upstream `allChars`: **every** argument is an `OpChar`.
+    ///
+    /// Not "every argument is a literal". An escape is a literal too, and it
+    /// is a different op — `\r` is `OpEscapeChar`, `\.` is `OpEscapeMeta`,
+    /// `\x41` is `OpEscapeHex` — so upstream refuses to merge any alternation
+    /// containing one. [`Self::is_plain_char`] is the same question the char
+    /// range code already asks; this used to ask `matches!(e, Ast::Literal(_))`
+    /// instead, which every escape passed.
+    fn all_chars(&self, args: &[Ast]) -> bool {
+        args.iter()
+            .all(|a| matches!(a, Ast::Literal(lit) if self.is_plain_char(lit)))
+    }
+
+    /// upstream `concatLiteral`:
+    ///
+    /// ```go
+    /// if e.Op == syntax.OpConcat && c.allChars(e) {
+    ///     return e.Value
+    /// }
+    /// return ""
+    /// ```
+    ///
+    /// Two conditions, and guff enforced neither. A lone character is not an
+    /// `OpConcat`, so `a|ab` is not factored upstream; and an escape is not an
+    /// `OpChar`, so `fo\.|fo\.x` is not either. guff answered both with the
+    /// decoded characters, which made it rewrite `fo\.|fo\.x` to `fo.x?` —
+    /// a literal dot turned into "any character".
+    fn concat_literal(&self, e: &Ast) -> Option<String> {
+        let Ast::Concat(c) = e else {
+            return None;
+        };
+        if !self.all_chars(&c.asts) {
+            return None;
+        }
+        Some(c.asts.iter().filter_map(|a| match a {
+            Ast::Literal(lit) => Some(lit.c),
+            _ => None,
+        }).collect())
+    }
+
     fn walk_alt(&mut self, alts: &[Ast]) {
-        if !alts.is_empty() && alts.iter().all(is_single_char_literal) {
+        if !alts.is_empty() && self.all_chars(alts) {
             self.score += 1;
             self.out.push('[');
             for a in alts {
                 if let Ast::Literal(lit) = a {
+                    // Plain characters only, so this is `e.Value` — upstream
+                    // writes the source text back, never a decoded byte.
                     self.out.push(lit.c);
                 }
             }
@@ -516,10 +558,10 @@ impl Ctx {
         if alts.len() != 2 {
             return false;
         }
-        let Some(mut x) = concat_literal_str(&alts[0]) else {
+        let Some(mut x) = self.concat_literal(&alts[0]) else {
             return false;
         };
-        let Some(mut y) = concat_literal_str(&alts[1]) else {
+        let Some(mut y) = self.concat_literal(&alts[1]) else {
             return false;
         };
         if x == y {
@@ -594,27 +636,6 @@ impl Ctx {
 
 fn rune_count(s: &str) -> usize {
     s.chars().count()
-}
-
-fn is_single_char_literal(e: &Ast) -> bool {
-    matches!(e, Ast::Literal(_))
-}
-
-fn concat_literal_str(e: &Ast) -> Option<String> {
-    match e {
-        Ast::Literal(lit) => Some(lit.c.to_string()),
-        Ast::Concat(c) => {
-            let mut s = String::new();
-            for a in &c.asts {
-                let Ast::Literal(lit) = a else {
-                    return None;
-                };
-                s.push(lit.c);
-            }
-            Some(s)
-        }
-        _ => None,
-    }
 }
 
 fn fingerprint(e: &Ast) -> String {
@@ -838,6 +859,75 @@ fn is_meta_outside(c: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::simplify;
+
+    /// `x|y|z` -> `[xyz]` merges **plain characters only**.
+    ///
+    /// Upstream's `walkAlt` guards the merge with `allChars`, which demands
+    /// every alternative be an `OpChar`. An escape is a literal but a
+    /// different op — `\r` is `OpEscapeChar`, `\.` is `OpEscapeMeta`, `\x41`
+    /// is `OpEscapeHex` — so upstream leaves those alternations alone. guff
+    /// asked only "is it a literal", merged all of them, and wrote the
+    /// **decoded** character into the class, so `\r|\n` came out as a class
+    /// holding a real CR and LF.
+    ///
+    /// Found on ingress-nginx (controller-v1.15.1), which has two of these:
+    /// `\r|\n` and `("|\')(?P<TestDescription>.*)("|\')`. Every line below was
+    /// measured against golangci-lint 2.12.2.
+    #[test]
+    fn an_alternation_merges_only_plain_characters() {
+        let cases: &[(&str, Option<&str>)] = &[
+            // Plain characters: both tools merge.
+            (r"a|b", Some("[ab]")),
+            (r"a|b|c", Some("[abc]")),
+            (r#"("|')"#, Some(r#"(["'])"#)),
+            (r"(a|b)x", Some("([ab])x")),
+            (r#"("|')(?P<X>.*)"#, Some(r#"(["'])(?P<X>.*)"#)),
+            // WAS WRONG (false positives): one escaped alternative is enough
+            // to stop the merge, whatever kind of escape it is.
+            (r"\r|\n", None),
+            (r"\t|\n", None),
+            (r"\.|a", None),
+            (r"\+|\-", None),
+            (r"\x41|b", None),
+            (r#"("|\')"#, None),
+            (r#"("|\')(?P<X>.*)"#, None),
+            // ingress-nginx's two, verbatim.
+            (r#"("|\')(?P<TestDescription>.*)("|\')"#, None),
+        ];
+        for (pat, want) in cases {
+            assert_eq!(simplify(pat).as_deref(), *want, "pattern {pat}");
+        }
+    }
+
+    /// `http|https` -> `https?` factors **a concat of plain characters only**.
+    ///
+    /// Upstream's `concatLiteral` returns the empty string unless the operand
+    /// is an `OpConcat` *and* `allChars` holds, and `factorPrefixSuffix` bails
+    /// on an empty string. So a lone character never factors (`a|ab`), and
+    /// neither does anything containing an escape.
+    ///
+    /// guff enforced neither condition and worked from decoded characters, so
+    /// it rewrote `fo\.|fo\.x` to `fo.x?` — a literal dot turned into "any
+    /// character". Measured against golangci-lint 2.12.2.
+    #[test]
+    fn prefix_suffix_factoring_needs_a_concat_of_plain_characters() {
+        let cases: &[(&str, Option<&str>)] = &[
+            // Upstream's own two examples.
+            (r"http|https", Some("https?")),
+            (r"xfoo|foo", Some("x?foo")),
+            // WAS WRONG (false positives): a single character is not a concat.
+            (r"a|ab", None),
+            (r"ba|a", None),
+            // WAS WRONG (false positives, and meaning-changing): an escape is
+            // not an OpChar. `fo.x?` matches what `fo\.|fo\.x` does not.
+            (r"fo\.|fo\.x", None),
+            (r"x\.foo|\.foo", None),
+            (r"fo\t|fo\tx", None),
+        ];
+        for (pat, want) in cases {
+            assert_eq!(simplify(pat).as_deref(), *want, "pattern {pat}");
+        }
+    }
 
     /// A `-` inside a character class, as exact answers.
     ///
