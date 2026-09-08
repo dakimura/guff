@@ -29125,3 +29125,66 @@ fixture で 0 件、ある fixture で 1 件。gate を外すと前者が落ち�
 ```
 台帳: 57/100 at zero（60 定義、open 0、unmeasured 3）
 ```
+
+### 2026-09-08（続き 265）— `adopt argo-workflows`。`./...` は測れないが**汚れているのは 2 木だけ**。58/100
+
+`adopt argo-workflows`（v4.1.2, 179.9MB）。config は 40 linter、revive は
+約 40 rule（`datarace` / `early-return` / `identical-*` / `use-waitgroup-go` /
+`package-directory-mismatch` など）、govet は明示 enable 表、forbidigo に
+`path-except`、gosec に includes/excludes。`_new_keys` は空。
+
+#### `./...` は起動すらしない
+
+```
+$ go list ./...
+ui/embed.go:9:12: pattern dist/app: no matching files found   （rc=1、stdout 0 行）
+$ golangci-lint run -c .golangci.yml ./...
+1 issue: typecheck
+```
+
+`ui/embed.go` が `dist/app`（ビルドされていないフロントエンド）を embed して
+いる。harness / ollama / woodpecker / ingress-nginx と同じ形で、
+**40 linter が何も測らない**。
+
+なお config は `exclusions.paths` に `ui` を持っているが、それでも
+typecheck 1 件は残る —— §4 続き 256 のとおり `InvalidIssue` は exclusions の
+**前**に走るので、除外は「消された後」には効かない。
+
+#### 逃げ場: 汚れているのは `cmd` と `server` だけ
+
+```
+api 1  config 1  errors 1  persist 2  pkg 29  test 4  util 53  workflow 49   → rc=0
+cmd 18  server 26                                                            → rc=1（ui を import）
+```
+
+clean な 8 木で **140 パッケージ**。ingress-nginx と同じ複数パターンの
+`packages` で測る:
+
+```json
+"packages": "./api/... ./config/... ./errors/... ./persist/... ./pkg/... ./test/... ./util/... ./workflow/..."
+```
+
+#### 測定
+
+```
+argo-workflows: guff=8 golangci=8 both=8 P=100.0% R=100.0% [OK]
+failures=0 unexpected=0 health=0
+```
+
+内訳は modernize 4 / govet 2 / unused 2。40 linter・140 パッケージで 8 件は
+少ないが、helm（5 件）や go-client（1 件）と同じ桁で、**空集合同士の一致では
+ない**。
+
+#### 測り方で 2 回転んだ（どちらも自分の probe のバグ）
+
+1. 木ごとの健全性を `go list ./$d/... 2>&1 >/dev/null | head -1` で見た。
+   これは**stderr を元の stdout に向ける**ので、エラーではなくパッケージ名が
+   出て「全部 clean」に見えた。`2>file` に直して測り直した。
+2. `PKGS="./a/... ./b/..."` を `go list $PKGS` に渡して 0 パッケージ。
+   **zsh は クォートしない変数を単語分割しない**。`compat/hunt.sh` は bash
+   なので `$packages` は分割される（ingress-nginx の hunt が実地で証明済み）。
+   手元の確認シェルとハーネスのシェルが違う、という話。
+
+```
+台帳: 58/100 at zero（61 定義、open 0、unmeasured 3）
+```
