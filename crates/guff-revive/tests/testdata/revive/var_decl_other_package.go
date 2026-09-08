@@ -40,3 +40,37 @@ var (
 // Declared here, so the rule reports. This is the row that keeps the gate from
 // silencing everything.
 var localCall string = localFunc()
+
+// The same gate on the *left* operand. Upstream's line is
+// `if !validType(lhsTyp) || !validType(rhsTyp)`, and guff only ever asked the
+// right half, so `var x pkg.T = <local expr>` was reported by guff alone —
+// ingress-nginx's `internal/ingress/controller/location.go:74` is
+// `var el ingress.Location = *location`.
+
+type ownCase qual.Case // defined *here*, underlying from another package
+
+type aliasCase = qual.Case // an alias: a bare identifier for an imported type
+
+var (
+	localCase  Case
+	localOwn   ownCase
+	localAlias aliasCase
+	casePtr    = &localCase
+)
+
+// Declared type reaches another package: silent, whatever the right-hand side.
+var (
+	lhsQualDeref qual.Case = *casePtr
+	lhsQualVar   qual.Case = localCase
+	lhsDotVar    Case      = localCase
+)
+
+// A local alias is a local *name*, so upstream reports it even though the type
+// it denotes lives in another package. This row is the control that keeps the
+// gate above from being written as "unalias and ask where the type lives",
+// which would silence it.
+var lhsAliasVar aliasCase = localAlias
+
+// Declared here, so the rule reports — the underlying type living in another
+// package makes no difference, because `ownCase` itself does not.
+var lhsOwnVar ownCase = localOwn

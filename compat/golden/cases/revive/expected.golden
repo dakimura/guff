@@ -421,6 +421,8 @@ vardeclcross/vardeclotherpkg/var_decl_other_package.go:13:1:revive:warning:file-
 vardeclcross/vardeclotherpkg/var_decl_other_package.go:16:2:revive:warning:dot-imports: should not use dot imports
 vardeclcross/vardeclotherpkg/var_decl_other_package.go:18:2:revive:warning:duplicated-imports: Package "example.com/revive/vardeclother" already imported
 vardeclcross/vardeclotherpkg/var_decl_other_package.go:42:15:revive:warning:var-declaration: should omit type string from declaration of var localCall; it will be inferred from the right-hand side
+vardeclcross/vardeclotherpkg/var_decl_other_package.go:72:17:revive:warning:var-declaration: should omit type aliasCase from declaration of var lhsAliasVar; it will be inferred from the right-hand side
+vardeclcross/vardeclotherpkg/var_decl_other_package.go:76:15:revive:warning:var-declaration: should omit type ownCase from declaration of var lhsOwnVar; it will be inferred from the right-hand side
 vardeclother/vardeclother.go:4:1:revive:warning:file-header: the file doesn't have an appropriate header
 vardeclother/vardeclother.go:6:6:revive:warning:exported: exported type Case should have comment or be unexported
 vardeclother/vardeclother.go:8:6:revive:warning:exported: exported type Box should have comment or be unexported

@@ -76,7 +76,7 @@
     "caddy": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260908T005240Z",
+      "at": "20260908T050527Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -108,7 +108,7 @@
     "cobra": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260908T005240Z",
+      "at": "20260908T050527Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -210,7 +210,7 @@
     "gin": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260908T005240Z",
+      "at": "20260908T050527Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -226,7 +226,7 @@
     "go-client": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260908T005240Z",
+      "at": "20260908T050527Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -258,7 +258,7 @@
     "helm": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260908T005240Z",
+      "at": "20260908T050527Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -274,12 +274,11 @@
     "ingress-nginx": {
       "tier": "hunt",
       "state": "open",
-      "at": "20260908T005620Z",
-      "open": 2,
-      "guff_only": 1,
+      "at": "20260908T012003Z",
+      "open": 1,
+      "guff_only": 0,
       "gcl_only": 1,
       "by_linter": {
-        "revive": 1,
         "gocritic": 1
       }
     },
@@ -302,7 +301,7 @@
     "k9s": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260908T005240Z",
+      "at": "20260908T050527Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0

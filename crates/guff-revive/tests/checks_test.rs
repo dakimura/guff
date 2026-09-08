@@ -415,6 +415,57 @@ fn revive_var_declaration_reports_untyped_constant_defaults() {
     }
 }
 
+/// `var-declaration` asks upstream's question of **both** operands.
+///
+/// Upstream's gate is `if !validType(lhsTyp) || !validType(rhsTyp) { return }`.
+/// guff asked only the right half, so every `var x pkg.T = <local expr>` was
+/// reported by guff alone; ingress-nginx (controller-v1.15.1) has
+/// `var el ingress.Location = *location`.
+///
+/// The line is drawn at the **spelling**, not at where the type lives.
+/// Measured against golangci-lint 2.12.2 with the right-hand side held
+/// constant at a plain local identifier, in package and function scope alike:
+/// `qual.Case`, a dot-imported `Case` and `bytes.Buffer` are silent, while
+/// `type a = qual.Case`, `type a = bytes.Buffer`, `type o qual.Case` and a
+/// wholly local type are all reported. `lhsAliasVar` below is the control for
+/// that: writing the gate as "unalias, then ask where the type lives" would
+/// silence a finding upstream makes.
+#[test]
+fn revive_var_declaration_gates_on_the_declared_type_too() {
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/vardeclotherpkg",
+        "var_decl_other_package.go",
+    );
+    let messages = support::run_analyzer(revive(), &pkg);
+    let decls: Vec<&String> = messages
+        .iter()
+        .filter(|m| m.contains("var-declaration:"))
+        .collect();
+
+    assert_eq!(
+        decls.len(),
+        3,
+        "expected exactly localCall, lhsAliasVar and lhsOwnVar: {decls:?}"
+    );
+    for want in ["var localCall", "var lhsAliasVar", "var lhsOwnVar"] {
+        assert_eq!(
+            decls.iter().filter(|m| m.contains(want)).count(),
+            1,
+            "{want} should be reported once: {decls:?}"
+        );
+    }
+    // Written as `pkg.T` or reached through a dot import: both name another
+    // package, whatever the right-hand side is.
+    for skip in ["var lhsQualDeref", "var lhsQualVar", "var lhsDotVar"] {
+        assert_eq!(
+            decls.iter().filter(|m| m.contains(skip)).count(),
+            0,
+            "{skip}'s declared type names another package: {decls:?}"
+        );
+    }
+}
+
 #[test]
 fn revive_exported_names_generic_receivers_like_upstream() {
     let pkg = support::typecheck_fixture(
