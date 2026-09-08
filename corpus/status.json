@@ -6,8 +6,8 @@
     "`unmeasured` is not `clean`: an absent measurement is a question."
   ],
   "goal": 100,
-  "defined": 63,
-  "clean": 60,
+  "defined": 64,
+  "clean": 61,
   "open": 0,
   "unmeasured": 3,
   "targets": {
@@ -84,7 +84,7 @@
     "caddy": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260908T095136Z",
+      "at": "20260908T102401Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -116,7 +116,7 @@
     "cobra": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260908T095136Z",
+      "at": "20260908T102401Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -223,10 +223,18 @@
       "guff_only": 0,
       "gcl_only": 0
     },
+    "gatekeeper": {
+      "tier": "hunt",
+      "state": "clean",
+      "at": "20260908T102612Z",
+      "open": 0,
+      "guff_only": 0,
+      "gcl_only": 0
+    },
     "gin": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260908T095136Z",
+      "at": "20260908T102401Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -242,7 +250,7 @@
     "go-client": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260908T095136Z",
+      "at": "20260908T102401Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -274,7 +282,7 @@
     "helm": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260908T095136Z",
+      "at": "20260908T102401Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -314,7 +322,7 @@
     "k9s": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260908T095136Z",
+      "at": "20260908T102401Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0

@@ -270,6 +270,56 @@ func (f *Fake) WithActorExists(fn func(string, string) bool) *Fake { f.fn = fn; 
         );
     }
 
+    /// v0.10.0 treats a trailing inline comment as extending the previous
+    /// declaration, so a comment on the next line starts a new "decl position"
+    /// and gets a blank line before it. **golangci-lint 2.12.2 pins v0.9.2**,
+    /// which takes the position from the inline comment itself — same line as
+    /// the `}` — and so adds nothing.
+    ///
+    /// gatekeeper v3.23.0
+    /// `pkg/controller/webhookconfig/webhookconfig_controller.go` is the shape:
+    /// a struct closed by `} // +kubebuilder:…` with a second `// +kubebuilder:`
+    /// on the next line. Measured three ways — gofumpt v0.9.2 reports the file
+    /// as formatted, v0.10.0 wants the blank line, and guff wanted it too.
+    #[test]
+    fn match_golangci_keeps_a_comment_after_a_trailing_comment() {
+        let src = b"package p
+
+type T struct {
+	a int
+	b int
+} // +kubebuilder:one
+// +kubebuilder:two
+
+func f(x int) int {
+	y := x
+	return y
+}
+";
+        let pinned = Gofumpt::new(GofumptOptions {
+            match_golangci: true,
+            ..Default::default()
+        });
+        let out = pinned.format("p.go", src).expect("gofumpt match_golangci");
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            String::from_utf8(src.to_vec()).unwrap(),
+            "the pinned gofumpt leaves this alone"
+        );
+
+        // Current gofumpt does insert the blank line, and `guff fmt` keeps
+        // that behaviour when it is not matching golangci-lint.
+        let latest = Gofumpt::new(GofumptOptions::default());
+        let out = latest.format("p.go", src).expect("gofumpt latest");
+        let s = String::from_utf8(out).unwrap();
+        assert!(
+            s.contains("} // +kubebuilder:one
+
+// +kubebuilder:two"),
+            "latest should separate the comments, got:\n{s}"
+        );
+    }
+
     #[test]
     fn native_extra_rules_clothes_naked_return() {
         let fmt = Gofumpt::new(GofumptOptions {
