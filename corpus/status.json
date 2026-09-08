@@ -6,9 +6,9 @@
     "`unmeasured` is not `clean`: an absent measurement is a question."
   ],
   "goal": 100,
-  "defined": 65,
+  "defined": 66,
   "clean": 62,
-  "open": 0,
+  "open": 1,
   "unmeasured": 3,
   "targets": {
     "alertmanager": {
@@ -270,6 +270,17 @@
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
+    },
+    "go-ethereum": {
+      "tier": "hunt",
+      "state": "open",
+      "at": "20260908T131339Z",
+      "open": 2,
+      "guff_only": 2,
+      "gcl_only": 0,
+      "by_linter": {
+        "govet": 2
+      }
     },
     "go-redis": {
       "tier": "hunt",
