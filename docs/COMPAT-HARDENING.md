@@ -28632,3 +28632,83 @@ analyzer を通っていて、フィルタは後段の findings に掛かって�
 ```
 台帳: 55/100 at zero（58 定義、open 0、unmeasured 3）
 ```
+
+### 2026-09-08（続き 259）— `adopt ingress-nginx`。**1 パッケージのために `./...` が測れない**ので範囲を絞った。open 4
+
+`adopt ingress-nginx`（controller-v1.15.1, 147.8MB）。config は 48 linter を
+`default: none` から enable し、gocritic の `enabled-checks` は 100 個以上、
+`nolintlint` は `require-specific: true` / `allow-unused: false`。
+`_new_keys` は空。
+
+#### まず `./...` が測れないことを測った
+
+```
+$ golangci-lint run -c .golangci.yml ./...
+test/e2e/cgroups/cgroups.go:1: : # k8s.io/ingress-nginx/test/e2e/cgroups
+test/e2e/cgroups/cgroups.go:76:42: undefined: runtime.GetCgroupVersion (typecheck)
+1 issues:
+* typecheck: 1
+```
+
+**121 パッケージ・48 linter で findings が 1 件**。原因は
+`pkg/util/runtime` が
+
+| ファイル | build tag | 提供する関数 |
+|---|---|---|
+| `cpu_linux.go` | `//go:build linux` | `NumCPU`, `NumCPUWithCustomPath`, `GetCgroupVersion`, … |
+| `cpu_notlinux.go` | `//go:build !linux` | `NumCPU` **のみ** |
+
+で、`test/e2e/cgroups` が linux 側にしか無い 2 つを無条件に呼んでいること。
+darwin ではこの 1 パッケージだけが型付けに失敗し、続き 256 で確認した
+`InvalidIssue` の規則（typecheck が 1 件でもあれば他は全部消える）で
+**レポート全体が消える**。harness / ollama / inspektor-gadget と同じ形。
+
+#### ただし今回は**逃げ場がある**
+
+inspektor-gadget は 124 個の健全パッケージが 6 つの top-level に散っていて
+scope できなかった。ingress-nginx は違う:
+
+```
+$ go build $(go list ./... | grep -v '/test/')     # rc=0
+$ go build ./test/...
+# k8s.io/ingress-nginx/test/e2e/cgroups            ← 壊れているのはここだけ
+```
+
+壊れているのは **121 個中 1 個**、しかも `./test/` の下だけ。非 test の 94
+パッケージは cmd 20 / internal 62 / magefiles 2 / pkg 9 / version 1 に収まる。
+`packages` は hunt.sh の 4 箇所すべてで**クォートされずに**展開されるので
+（`go list $packages` / golangci / guff）、空白区切りで複数パターンを書ける。
+traefik が `./pkg/...` で先に使っている枠組みの拡張:
+
+```json
+"packages": "./cmd/... ./internal/... ./pkg/... ./magefiles/... ./version/..."
+```
+
+#### 測定
+
+```
+ingress-nginx: guff=462 golangci=460 both=459 P=99.4% R=99.8% [UNEXPECTED]
+failures=0 unexpected=1 health=0
+```
+
+ill-typed パッケージ 0、worker panic 0。12 linter が findings を出していて
+（goconst 279 / staticcheck 97 / gocritic 22-23 / errcheck 17 / revive 12-13 /
+prealloc 12 / gosec 9 / …）、**「フィルタで空になった集合の一致」ではない**。
+
+乖離は 4 件・3 原因:
+
+| 側 | 場所 | check | 中身 |
+|---|---|---|---|
+| guff のみ | `internal/ingress/annotations/parser/validators.go:84` | gocritic `regexpSimplify` | `` `\r|\n` `` を `[\r\n]` に、と言う。上流は**何も言わない** |
+| guff のみ | `magefiles/utils/e2edocs.go:48` | gocritic `regexpSimplify` | `` `("|\')(?P<TestDescription>.*)("|\')` `` を `(["'])…` に。上流は**何も言わない** |
+| guff のみ | `internal/ingress/controller/location.go:74` | revive `var-declaration` | `var el ingress.Location = *location` の型を省け、と言う。上流は**何も言わない** |
+| 上流のみ | `magefiles/steps/release.go:270` | gocritic `commentedOutCode` | `// dependency_updates` / `// all_updates` を guff が**見落とす** |
+
+`regexpSimplify` の 2 件は JSON で見ると **メッセージに生の制御文字が入って
+いる**（`'[\r\n]'` の `\r` `\n` がエスケープではなく CR/LF そのもの）ので、
+テキスト出力では `[ ]` に見える。ただし上流はそもそも 2 件とも報告しないので、
+**過剰報告が主で、描画はその上に乗っている**。原因の切り分けは `close` 側で。
+
+```
+台帳: 55/100 at zero（59 定義、open 4、unmeasured 3）
+```
