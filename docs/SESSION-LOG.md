@@ -5,6 +5,7 @@
 
 | 日付 | 内容 |
 |------|------|
+| 2026-09-08 | `adopt go-elasticsearch`（v9.5.1）は 92 対 92 の完全一致で clean。998 パッケージ中 990 が生成 `typedapi/` で config が除外しており、その 2 行を抜くと 108 件（うち 16 件が typedapi 配下）—— 空集合同士の一致ではないことを確認した。55/100 |
 | 2026-09-08 | `adopt lnd` は除外。config が `type: module` の custom プラグイン `ll` を宣言していて、素の golangci-lint も guff も同じ文言で起動を拒む（pulumi と同じ形、`compat/reject/cases/custom-module-plugin-missing` が固定済み）。custom ブロックを外すと `./build/...` は 10/10/10 で一致するので、塞いでいるのはプラグインだけ |
 | 2026-09-08 | typecheck エラーが 1 件でもある run では nolintlint も黙る（上流 `InvalidIssue`）。guff は nolintlint の指摘をそのフィルタの後で生んでいたため素通りしていた。`adopt woodpecker` 完了、54/100 |
 | 2026-09-08 | **`(related information)` は全 tier・両側で捨てられていた**（[COMPAT-HARDENING](COMPAT-HARDENING.md) 2026-09-08 続き 255）。`compat/normalize.py::is_related_information` が golden / hunt / oss のどこでも両ツールの related 行を set-diff から除外していて、**クラスごと 1 行も比較されていなかった** —— 外すと golden 4 case に 39 行現れる（`staticcheck-sa` だけで 32）。docstring の前提「guff は primary にしか付けない」は書かれた当時は正しく、誰も検算していなかった。golangci は `goanalysis.buildIssues` で related を**別 issue**にし、名前は **analyzer 名**、別ファイルなら primary の位置に丸める。guff の `collect_issues` は `diag.related` を見ておらず、ST1019/SA4031/SA5011 が組み立てた related を捨てていた（`Issue` が `Diagnostic` を抱えるので clone すると **`--fix` が同じ編集を 2 度当てる** —— fix は空にする）。**ST1019 は位置ずれ（path リテラル→`ImportSpec`）、SA4009 は related 未構築（walk が bool を返していた）を修正**。フィルタは check 単位の `RELATED_NOT_MODELLED` に置換し、**ST1019 4 行と SA4009 3 行が初めて golden で比較され、7 行とも一致**（st 202→206、sa 367→370、ratchet 不動）。残る SA4031/SA5011 は列ずれ（SSA 由来）、S1034/SA2002/SA4023/SA9007/SA9008/grouper は未実装として名前で記録 |

@@ -28571,3 +28571,64 @@ golangci 10 / guff 10 / both 10   （完全一致）
 ```
 台帳: 54/100 at zero（57 定義、open 0、unmeasured 3）—— 変化なし。除外表が 1 行増えた
 ```
+
+### 2026-09-08（続き 258）— `adopt go-elasticsearch`。92 対 92 の完全一致、55/100
+
+`adopt go-elasticsearch`（v9.5.1, 129.2MB）:
+
+```
+go-elasticsearch: guff=92 golangci=92 both=92 P=100.0% R=100.0% [OK]
+failures=0 unexpected=0 health=0
+```
+
+config は素直: `version: "2"`、`default` 無し（＝ `standard`）＋ 7 個の enable
+（goconst / gocritic / gocyclo / gosec / govet / revive / unconvert）、
+`govet.enable: [shadow]`、`gocyclo.min-complexity: 20`、preset 4 つ。
+`_new_keys` は空で、guff が読めない key は無い。
+
+内訳は staticcheck 86 / goconst 4 / gocyclo 1 / gosec 1。
+
+#### 「何も測っていない」ではないことの確認
+
+`go list ./...` は **998 パッケージ**を返すが、そのうち **990 が `typedapi/`
+配下** —— 生成された API 表面である。config は
+
+```yaml
+    paths:
+      - esapi/api\..*\.go$
+      - esapi/test/.*
+      - typedapi/.*
+```
+
+でそこを落としている。「998 パッケージのうち 8 個しか見ていないのでは」を
+確かめるために、`typedapi` の 2 行を抜いた config で guff を回した:
+
+```
+108 findings（errcheck 1 / goconst 9 / gocritic 2 / gocyclo 1 / gosec 4 /
+              revive 1 / staticcheck 90）、うち 16 件が typedapi/ 配下
+```
+
+つまり **exclusions.paths は実際に 16 件を落としており、両ツールがそれを
+同じく落として 92 で一致している**。パッケージ自体は 998 個とも load されて
+analyzer を通っていて、フィルタは後段の findings に掛かっているだけ。
+「フィルタで空になった集合を突き合わせて緑」ではない。
+
+#### 測り方の落とし穴を 2 つ（どちらも自分で踏んだ）
+
+1. **golangci は config ファイルのあるディレクトリを基準にパスを描く。**
+   hunt を待つ間に scratchpad へ patch 済み config を置いて予行したところ、
+   golangci 側だけ `../../../../../..elasticsearch.go` になり、素朴にキーを
+   突き合わせると **92 対 92 で共通 0** に見えた。乖離ゼロが乖離 92 に化ける。
+   `relative-path-mode` の既定が config ディレクトリで、hunt は patch 済み
+   config を `compat/results/` に置くので本番では揃う。**予行は予行であって
+   測定ではない**（プロンプトが「ターゲット自身の patched config で」と言うのは
+   これ）。
+
+2. `'/typedapi/' in filename` で数えて **0 件**が出た。パスは repo 相対
+   (`typedapi/esql/query/helpers.go`) で先頭に `/` が無いだけだった。
+   正しくは 16 件。§4 続き 251 と同じ形 —— **ツール出力をパス断片で数えると、
+   パスの綴り方の違いで静かに 0 になる。**
+
+```
+台帳: 55/100 at zero（58 定義、open 0、unmeasured 3）
+```

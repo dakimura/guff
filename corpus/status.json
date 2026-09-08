@@ -6,8 +6,8 @@
     "`unmeasured` is not `clean`: an absent measurement is a question."
   ],
   "goal": 100,
-  "defined": 57,
-  "clean": 54,
+  "defined": 58,
+  "clean": 55,
   "open": 0,
   "unmeasured": 3,
   "targets": {
@@ -227,6 +227,14 @@
       "tier": "pr",
       "state": "clean",
       "at": "20260907T224256Z",
+      "open": 0,
+      "guff_only": 0,
+      "gcl_only": 0
+    },
+    "go-elasticsearch": {
+      "tier": "hunt",
+      "state": "clean",
+      "at": "20260907T232738Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
