@@ -24,10 +24,44 @@
 //! issue **deletes every other issue in the run** (see
 //! [`keep_only_typecheck`]), one spurious one empties the whole report.
 //!
-//! On the corpus the second half is currently unobservable anyway: across four
-//! targets and 771 packages, `go list -e` reported exactly one error, and
-//! guff's own ill-typed set is empty everywhere (`compat/baselines/health.json`
-//! has no rows, and an absent row means strictly zero).
+//! # There is no set to match once more than one package is ill-typed
+//!
+//! The note above used to add that the second half was unobservable on the
+//! corpus anyway. That clause died with dagger (2026-09-08, 186 ill-typed
+//! packages of 481). What replaced it is a stronger reason to stay out.
+//!
+//! `loadingPackage.analyze` runs a package's actions in an `errgroup`, and an
+//! ill-typed package makes every one of them fail with `IllTypedError`. On the
+//! first such failure it calls the **run-wide** `cancel()`, and every package
+//! that has not started yet returns at `case <-ctx.Done()`. So the typecheck
+//! issues upstream prints are the ones from whichever ill-typed packages happen
+//! to win the race, and nothing else in the run survives `keep_only_typecheck`.
+//!
+//! Measured 2026-09-10 — twelve packages importing a module that does not
+//! exist, plus one clean package with two staticcheck findings, eight
+//! consecutive runs of golangci-lint 2.12.2:
+//!
+//! ```text
+//! run1: {bad8}         run3: {bad1 bad11}   run5: {bad6 bad8}   run7: {bad6}
+//! run2: {bad1}         run4: {bad2}         run6: {bad4 bad6}   run8: {bad2 bad5 bad6}
+//! ```
+//!
+//! Eight runs, eight different sets, one typecheck issue per package that made
+//! it, and the clean package's two findings deleted every time.
+//! `--concurrency=1` does not settle it either (four runs: `bad9 bad9 bad7
+//! bad10`) — it is the iteration order of the package set, not the parallelism.
+//! dagger behaves the same way at scale: four `./...` runs gave 2, 4, 2 and 8
+//! issues over file sets with almost nothing in common. **A tool cannot be compatible with a
+//! reference that is not a function of the tree**, so the target was excluded
+//! (`corpus/README.md`) rather than chased. Emitting type errors here would not
+//! close such a target; it would only trade guff's findings for a different
+//! coin flip.
+//!
+//! The line is at *two*: with exactly one ill-typed package the same repro
+//! prints the same single issue six times out of six (and still deletes the
+//! clean package's findings). That is why harness, ollama, signoz and
+//! inspektor-gadget could be excluded on a *stated* "the whole report is one
+//! typecheck finding" — each of them collapses at one point. dagger has 186.
 //!
 //! # Why this is inert on a default run today
 //!

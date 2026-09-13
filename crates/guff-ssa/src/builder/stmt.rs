@@ -1474,16 +1474,25 @@ impl<'a> Builder<'a> {
         }
 
         for (i, elt) in cl.elts.iter().enumerate() {
-            let (field_index, value_expr, pos): (usize, &Expr, guff::Pos) = match elt {
-                Expr::KeyValueExpr(kv) => {
-                    let fname = match kv.key.as_ref() {
-                        Expr::Ident(id) => id.name.clone(),
-                        other => panic!("struct literal key is not an identifier: {other:?}"),
-                    };
-                    let idx = self.struct_field_index(u_struct, &fname);
-                    (idx, kv.value.as_ref(), kv.colon)
-                }
-                _ => (i, elt, elt.pos()),
+            // Every `None` below is a shape the type checker rejects, so on a
+            // well-typed package none of them is reachable: a struct key is an
+            // identifier naming a direct field, and a positional literal has
+            // exactly `nfields` elements. An ill-typed package reaches all
+            // three, and skipping the element keeps the rest of the package's
+            // SSA (see `comp_lit`, which skips the same way).
+            let element = match elt {
+                Expr::KeyValueExpr(kv) => match kv.key.as_ref() {
+                    Expr::Ident(id) => self
+                        .struct_field_index(u_struct, &id.name)
+                        .map(|idx| (idx, kv.value.as_ref(), kv.colon)),
+                    // `T{"Age": 1}` / `T{pkg.X: 1}`: not a field name at all.
+                    _ => None,
+                },
+                // `T{1, 2, 3}` for a one-field `T`: more values than fields.
+                _ => (i < nfields).then(|| (i, elt, elt.pos())),
+            };
+            let Some((field_index, value_expr, pos)) = element else {
+                continue;
             };
 
             let fld = guff_types::struct_field(&self.prog.type_arena, u_struct, field_index);
@@ -1516,15 +1525,16 @@ impl<'a> Builder<'a> {
     /// in the struct whose underlying type is `u_struct`. (Go: the field index
     /// from `types.LookupFieldOrMethod`, which for a composite-literal key is a
     /// direct, non-promoted field.)
-    fn struct_field_index(&self, u_struct: guff_types::TypeId, name: &str) -> usize {
+    ///
+    /// `None` only for an ill-typed literal such as `T{Nope: 1}`, which the
+    /// type checker rejects before any well-typed package gets here.
+    fn struct_field_index(&self, u_struct: guff_types::TypeId, name: &str) -> Option<usize> {
         let n = guff_types::struct_num_fields(&self.prog.type_arena, u_struct);
-        for i in 0..n {
-            let fld = guff_types::struct_field(&self.prog.type_arena, u_struct, i);
-            if fld.name(&self.prog.object_arena) == name {
-                return i;
-            }
-        }
-        panic!("struct field {name:?} not found");
+        (0..n).find(|&i| {
+            guff_types::struct_field(&self.prog.type_arena, u_struct, i)
+                .name(&self.prog.object_arena)
+                == name
+        })
     }
 
     /// comp_lit_array_slice handles the array and slice cases of [`comp_lit`].
