@@ -30092,3 +30092,210 @@ baseline に書けば恒久的に許すことになる（§4「health baseline �
 台帳: 63/100 at zero（67 定義、open 1、unmeasured 3）
 ```
 
+
+### 2026-09-10（続き 277）— dagger の上流レポートは**木の関数ではない**。8 回走って 8 通り。`close dagger` は除外で決着、SSA の panic を 3 か所
+
+続き 276 は `adopt dagger` を「上流の 6 件は全部 typecheck、guff は 203 件」で
+残した。次の一手は「guff にも typecheck issue を出させる」に見える。**それは
+閉じない。** 上流の 6 件は dagger の木から決まる集合ではなく、**レースの出目**
+だからである。
+
+#### 1. 上流は ill-typed を 1 つ見つけた瞬間に run 全体を cancel する
+
+`pkg/goanalysis/runner_loadingpackage.go`:
+
+```go
+func (lp *loadingPackage) analyze(ctx context.Context, cancel context.CancelFunc, ...) {
+	select {
+	case <-ctx.Done():
+		return                      // ← ここで大半のパッケージが降りる
+	case loadSem <- struct{}{}:
+	...
+	actsWg, ctxGroup := errgroup.WithContext(ctx)
+	for _, act := range lp.actions {
+		actsWg.Go(func() error {
+			...
+			act.analyzeSafe()
+			return act.Err          // ← IllTyped なら IllTypedError
+		})
+	}
+	err := actsWg.Wait()
+	if err != nil {
+		cancel()                    // ← run 全体の context
+	}
+```
+
+`cancel` は `lp.analyze` に渡ってきた **run 全体の** cancel である
+(`runner_checker.go:175` が `act.Package.IllTyped` で `IllTypedError` を返す)。
+つまり **最初に解析を終えた ill-typed パッケージが run を止める**。出てくる
+typecheck issue は「そのとき間に合っていたパッケージ」の分だけで、
+`keep_only_typecheck` が残り全部を消す。
+
+#### 2. 最小再現 —— 12 パッケージ、8 回走って 8 通り
+
+存在しない module path を import する `bad1`..`bad12` と、staticcheck が 2 件
+出る `good` 1 つ。golangci-lint 2.12.2、同じ木、連続 8 回:
+
+```
+run1: 1 issue   {bad8}          run5: 2 issues  {bad6 bad8}
+run2: 1 issue   {bad1}          run6: 2 issues  {bad4 bad6}
+run3: 2 issues  {bad1 bad11}    run7: 1 issue   {bad6}
+run4: 1 issue   {bad2}          run8: 3 issues  {bad2 bad5 bad6}
+```
+
+8 回で 8 通り。1 パッケージにつき typecheck 1 件で、`good` の staticcheck 2 件は
+毎回消えている。`--concurrency=1` でも落ち着かない（4 回で
+`bad9 bad9 bad7 bad10`）。`--concurrency` が効くのは `loadSem` の幅だけで、
+起動そのものは `runner.analyze` の
+
+```go
+ctx, cancel := context.WithCancel(context.Background())   // ← ここの cancel が下まで渡る
+...
+for _, lp := range loadingPackages {          // ← map の反復
+	if lp.isInitial {
+		wg.Go(func() { lp.analyzeRecursive(ctx, cancel, ...) })
+	}
+}
+```
+
+で、**初期パッケージ全部が goroutine として map の反復順に投げられる**。
+並列度を絞っても順序は決まらない。
+
+**境界は「2 つ」にある。** ill-typed を 1 つに減らすと同じ再現が
+**6 回中 6 回**同じ 1 件を出す（`good` の 2 件はやはり毎回消える）。harness /
+ollama / signoz / inspektor-gadget を「レポート全体が typecheck 1 件になる」と
+**言い切って**除外できたのはそのためで、あれらは崩れる点が 1 つしかない。
+dagger は 186 ある。
+
+#### 3. dagger 本体でも同じ —— 4 回で 2 / 4 / 2 / 8 件
+
+`./...`、続き 276 と同じ patched config:
+
+| run | issues | ファイル |
+|---|--:|---|
+| 続き 276 の記録 | 6 | `.../current_docs/.../terminal-container/go`, `.../custom-types/go`, `.../version-0.21.4/.../chaining/go` |
+| 1 | 2 | `.../version-0.21.4/.../expose-dagger-services-to-host/go` |
+| 2 | 4 | `.../current_docs/.../export-file-dir/go`, `.../version-0.21.4/.../terminal-container/go` |
+| 3 | 2 | `.../version-0.21.4/.../expose-dagger-services-to-host/go` |
+| 4（本セッションの hunt） | 8 | `.../current_docs/.../chaining/go`, `.../version-0.21.4/.../env-use-directories/go`, `.../version-0.21.4/.../terminal-container/go` |
+
+run 1〜3 に**共通するファイルは 1 つも無い**。続き 276 が「上流の答え」として
+記録した 6 件は、あの 1 回の出目だった。
+
+#### 4. だから dagger は除外する —— darwin では scoping も効かない
+
+「証明されるまでは全部 guff の欠陥」で始めたが、これは証明された上流側の性質で
+ある。**参照が木の関数でない target には合わせようがない。** guff が typecheck
+issue を出せるようになっても、203 件を別のコイン投げと取り替えるだけになる。
+
+docs を外して測れないかも見た。ill-typed の内訳（実測）:
+
+| | 数 | |
+|---|--:|---|
+| `docs/**` | 228 | `dagger/my-module/internal/dagger` を import する doc 断片。**どの platform でも** ill-typed |
+| それ以外 | 16 | 全部 linux 専用（`util/layercopy` の `cleanRel` が `dest_linux.go` にあって `filter.go` に build tag が無い、`engine/engineutil` の `unix.OpenTree`、`network/netinst` の `syscall.Mount`/`Pdeathsig`、containerd overlay snapshotter を引く `cmd/engine`・`engine/server`） |
+
+内訳の数（228 / 16）は続き 276 のパッケージごとの `go build` 実測で、今回
+docs を除いた 237 パッケージをまとめて `go build` して先頭の 5 つ
+（`util/layercopy` / `engine/engineutil` / `network/netinst` / `cmd/engine` /
+`engine/server`）を確認した —— `go build` は "too many errors" で降りるので、
+残りの依存先まではこの回し方では出ない。
+
+つまり **darwin では docs を外しても残り 16 が ill-typed** なので、この host に
+scoping の逃げ道は無い。Linux なら docs を外した `packages` パターンで測れる
+はずで、エントリの schema にはその欄がある —— そこで再採用できる。
+
+`corpus/README.md` の除外表と `corpus/status.py` の `EXCLUDED` に上を書き、
+`corpus/hunt.json` から落とした。
+
+#### 5. SSA builder は ill-typed な composite literal で panic する —— 10 形測って 9 形
+
+続き 276 が見つけた panic は、除外とは独立に直す価値がある。上流は ill-typed な
+パッケージに analyzer を掛けないが、**guff は掛ける**ので、builder は型チェッカ
+が通していない木を受け取る。`go vet` の診断つきで 10 形を測った:
+
+| 形 | `go vet` | 修正前 |
+|---|---|---|
+| `T{Name: "x", Age: 1}` | unknown field Name | panic `stmt.rs:1527` |
+| `Inner{A: 1, B: 2}`（入れ子） | unknown field B | panic `stmt.rs:1527` |
+| `&T{Bad: 1}` | unknown field Bad | panic `stmt.rs:1527` |
+| `[]T{{Bad: 1}}` | unknown field Bad | panic `stmt.rs:1527` |
+| `map[string]T{"k": {Bad: 1}}` | unknown field Bad | panic `stmt.rs:1527` |
+| `var V = T{Name: 1}` | unknown field Name | panic `stmt.rs:1527` |
+| `T{"Age": 1}` | invalid field name "Age" | panic `stmt.rs:1481` |
+| `T{strings.Title: 1}` | invalid field name strings.Title | panic `stmt.rs:1481` |
+| `T{1, 2, 3}`（1 フィールド） | too many values | panic `guff-types/struct.rs:46`（index out of bounds） |
+| `[2]int{1, 2, 3}` | index 2 is out of bounds | 落ちない |
+
+配列だけが助かっているのは範囲を見ているからではない ——
+`comp_lit_array_slice` は範囲外の添字でも `IndexAddr` を 1 つ積むだけで、
+arena を添字で引かないので落ちようがない（そのまま `G602: slice index out of
+range` を 1 件出す。上流はそのパッケージを解析しないので、これは誰とも
+比べられない findings である）。struct の 3 か所はどれも「型チェッカが検証済み」
+という前提で arena を引くか `panic!` するかしていて、ill-typed はその前提を
+満たさない。**exit code は 0 のまま**で、worker が 1 つ消えて
+そのパッケージの findings が黙って落ちるだけなので、run は成功して見える。
+
+直しは、隣の `comp_lit` が `Invalid` に対して既にやっていることに揃えた ——
+**要素を 1 つ飛ばして、パッケージは残す**:
+
+```rust
+let element = match elt {
+    Expr::KeyValueExpr(kv) => match kv.key.as_ref() {
+        Expr::Ident(id) => self
+            .struct_field_index(u_struct, &id.name)
+            .map(|idx| (idx, kv.value.as_ref(), kv.colon)),
+        _ => None,                              // T{"Age": 1} / T{pkg.X: 1}
+    },
+    _ => (i < nfields).then(|| (i, elt, elt.pos())),  // T{1, 2, 3}
+};
+let Some((field_index, value_expr, pos)) = element else { continue };
+```
+
+**壊れた要素だけを落とし、同じリテラルの正しい要素は書く。** `T{Name: "x",
+Age: 1}` は `Age`（#0）に 1 を store して終わる —— リテラルごと捨てると
+SSA を読む linter 全部の見えるものが変わってしまう。型チェッカを通った
+パッケージでは 3 つの `None` はどれも到達不能なので、well-typed 側の挙動は
+1 命令も変わらない。
+
+`crates/guff-ssa/tests/complit_illtyped_test.rs` に上の 10 形を全部入れて、
+`assert_eq!(asm.matches("[#").count(), N)` で**何フィールド書いたか**まで
+固定した（`func … did not build` だけだと、リテラルごと捨てても緑になる）。
+ヘルパは `assert!(!check.errors.is_empty())` を持っていて、将来 source が
+静かに型チェックを通り始めたら落ちる —— 通ってしまえば ill-typed の枝を
+測るのをやめただけになる。
+
+#### 6. `typecheck.rs` の deferral note は理由を差し替えた
+
+続き 276 が「腐った」と書いたのは後半、「corpus 上では ill-typed が観測できない」
+の部分である（dagger が 186 で破った）。前半（型エラーの文言は guff のもので、
+9 形中 2 形が `go build` と違う）はそのままで、そこに **§1–§3 のほうが強い理由**
+として置いた: ill-typed が 2 つ以上あるとき、上流の typecheck 集合は木の関数では
+ない。§4「deferral note の理由は腐る」の逆で、**腐った理由を捨てて、測った理由に
+差し替える**形。
+
+#### 7. 直したあとの実測 —— panic 0、そして 5 つ目の出目
+
+修正した release バイナリで `./compat/hunt.sh --name dagger`（`--no-cache` 相当の
+新しい results dir）:
+
+```
+dagger: ill-typed packages 186 > baseline 0
+dagger: guff=203 golangci=8 both=0 P=0.0% R=0.0% [UNEXPECTED]
+```
+
+**worker panic は 3 → 0。** guff 側の 203 は動いていない（panic していた 3
+パッケージには findings が無かった）。golangci 側は 6 → **8**、しかも上の表の
+とおりまた別の集合である。§1–§3 の主張が、除外を決めた当の run でもう一度
+出た形になる。
+
+```
+台帳: 62/100 at zero（66 定義、open 1、unmeasured 3）
+```
+
+dagger を落として 67 → 66 定義。open 1 は **dagger ではなく grafana** で、これは
+本セッションの変更とは無関係:
+`pkg/storage/unified/search/disk_cleanup.go:456` の `G304` が guff-only 1 件、
+測ったのは 2026-09-08T23:30:59Z（前セッションの調査）で、台帳に入らないまま
+残っていたのを今回の `probe` が拾った。grafana に ill-typed パッケージは無いので
+§5 の修正は届かない。次のタスクはこれ（`close grafana`）。
