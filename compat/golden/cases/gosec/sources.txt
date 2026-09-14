@@ -35,6 +35,15 @@ g102/g102.go          crates/guff-style/tests/testdata/gosec/g102.go
 g402/g402.go          crates/guff-style/tests/testdata/gosec/g402.go
 g201/g201.go          crates/guff-style/tests/testdata/gosec/g201.go
 
+# The three dot-import fixtures. A dot-imported call is an `*ast.Ident`, which
+# `GetCallInfo` answers for with the analysed package's own name, so no
+# `ContainsPkgCallExpr` rule matches it. They are three packages rather than one
+# because dot imports collide: `net.Pipe` against `io.Pipe`, and `gzip.Reader`
+# against `io.Reader`.
+dotos/dotimport_os.go   crates/guff-style/tests/testdata/gosec/dotimport_os.go
+dotnet/dotimport_net.go  crates/guff-style/tests/testdata/gosec/dotimport_net.go
+dotio/dotimport_io.go   crates/guff-style/tests/testdata/gosec/dotimport_io.go
+
 # The stub `golang.org/x/crypto` module (see the replace in go.mod). Its go.mod
 # is case scaffolding and so lives in the case directory; the packages under it
 # are the same stubs the Rust tests load.

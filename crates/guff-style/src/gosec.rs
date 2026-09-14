@@ -1440,6 +1440,17 @@ fn resolve_pkg_qualified_call(pass: &Pass<'_>, call: &CallExpr) -> Option<(Strin
     Some((path, sel.sel.name.clone()))
 }
 
+/// Resolve `(declaring_package_path, name)` for a call — the *callee's* package,
+/// which is what upstream's **SSA** analyzers ask for (`callee.Pkg.Pkg.Path()`)
+/// and what `CallList.ContainsCallExpr` falls back to.
+///
+/// This is the wrong question for every `ContainsPkgCallExpr` rule: those match
+/// the receiver's *syntax*, so `root.Open(p)` on an `*os.Root` is not `os.Open`
+/// and a dot-imported `Open(p)` is not `os.Open` either. Use
+/// [`resolve_pkg_qualified_call`] there. The rules still asking this question
+/// are G122 (upstream `analyzers/walk_symlink_race.go` is SSA and reads
+/// `callee.Pkg.Pkg.Path()`) and G104's whitelist (upstream `ContainsCallExpr`,
+/// whose keys are type strings — `bytes.Buffer`, `hash.Hash`, `io.PipeWriter`).
 fn resolve_pkg_call(pass: &Pass<'_>, call: &CallExpr) -> Option<(String, String)> {
     if let Some(fq) = code::call_name(pass, &call.fun) {
         if let Some((pkg, name)) = split_fq_name(&fq) {
@@ -2712,7 +2723,8 @@ fn find_temp_dir_args(pass: &Pass<'_>, suspect: &Expr) -> bool {
         return g303_tmp_pattern().is_match(&s);
     }
     if let Expr::CallExpr(call) = suspect {
-        if let Some((pkg, name)) = resolve_pkg_call(pass, call) {
+        // `argCalls` / `nestedCalls` are `ContainsPkgCallExpr` upstream.
+        if let Some((pkg, name)) = resolve_pkg_qualified_call(pass, call) {
             if pkg == "os" && name == "TempDir" {
                 return true;
             }
@@ -2766,7 +2778,8 @@ fn check_g109_assign(
         let Expr::CallExpr(call) = expr else {
             continue;
         };
-        let Some((pkg, name)) = resolve_pkg_call(pass, call) else {
+        // `integer_overflow`'s `calls` list is `ContainsPkgCallExpr` upstream.
+        let Some((pkg, name)) = resolve_pkg_qualified_call(pass, call) else {
             continue;
         };
         if pkg != G109_ATOI.0 || name != G109_ATOI.1 {
@@ -3046,8 +3059,11 @@ impl G304Join {
     }
 }
 
+/// G304's three lists — the read calls, `Join`, and `Clean`/`Rel`/`EvalSymlinks`
+/// — are all `ContainsPkgCallExpr` upstream, so the receiver has to be the
+/// package identifier itself. See [`resolve_pkg_qualified_call`].
 fn g304_call_is(pass: &Pass<'_>, call: &CallExpr, list: &[(&str, &str)]) -> bool {
-    match resolve_pkg_call(pass, call) {
+    match resolve_pkg_qualified_call(pass, call) {
         Some((pkg, name)) => list.iter().any(|(p, n)| *p == pkg && *n == name),
         None => false,
     }
@@ -3178,7 +3194,8 @@ fn check_g102_call(
     call: &CallExpr,
     pending: &mut Vec<(u32, u32, String)>,
 ) {
-    let Some((pkg, name)) = resolve_pkg_call(pass, call) else {
+    // `bind`'s `calls` list is `ContainsPkgCallExpr` upstream.
+    let Some((pkg, name)) = resolve_pkg_qualified_call(pass, call) else {
         return;
     };
     if !G102_CALLS.iter().any(|(p, n)| *p == pkg && *n == name) {
@@ -3452,7 +3469,8 @@ fn check_g204_call(
     call: &CallExpr,
     pending: &mut Vec<(u32, u32, String)>,
 ) {
-    let Some((pkg, name)) = resolve_pkg_call(pass, call) else {
+    // `subproc`'s `calls` list is `ContainsPkgCallExpr` upstream.
+    let Some((pkg, name)) = resolve_pkg_qualified_call(pass, call) else {
         return;
     };
     if !G204_CALLS.iter().any(|(p, n)| *p == pkg && *n == name) {
@@ -3517,7 +3535,7 @@ fn check_g204_call(
 }
 
 fn is_g110_reader_call(pass: &Pass<'_>, call: &CallExpr) -> bool {
-    if resolve_pkg_call(pass, call).is_some_and(|(pkg, name)| {
+    if resolve_pkg_qualified_call(pass, call).is_some_and(|(pkg, name)| {
         G110_READER_CALLS
             .iter()
             .any(|(p, n)| *p == pkg && *n == name)
@@ -3566,11 +3584,12 @@ fn check_g110(pass: &Pass<'_>, enabled: &HashSet<&'static str>, pending: &mut Ve
                     }
                 }
                 NodeRef::CallExpr(call) => {
-                    let is_copy = resolve_pkg_call(pass, call).is_some_and(|(pkg, name)| {
-                        G110_COPY_CALLS
-                            .iter()
-                            .any(|(p, n)| *p == pkg && *n == name)
-                    });
+                    let is_copy =
+                        resolve_pkg_qualified_call(pass, call).is_some_and(|(pkg, name)| {
+                            G110_COPY_CALLS
+                                .iter()
+                                .any(|(p, n)| *p == pkg && *n == name)
+                        });
                     if is_copy {
                         if let Some(Expr::Ident(src)) = call.args.get(1) {
                             if object_of(pass, src)

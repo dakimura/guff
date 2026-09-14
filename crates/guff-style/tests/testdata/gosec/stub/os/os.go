@@ -38,6 +38,17 @@ func StartProcess(name string, argv []string, attr interface{}) (*Process, error
 	return nil, nil
 }
 
+// Root is `os.Root` (Go 1.24+). Its methods are declared in package `os` and
+// share four names with the package-level functions above, which is what makes
+// it the shape G304 gets wrong when a port resolves the *callee's* package
+// instead of the receiver: `root.Open(p)` is not `os.Open(p)`.
+type Root struct{}
+
+func (r *Root) Open(name string) (*File, error)                              { return nil, nil }
+func (r *Root) Create(name string) (*File, error)                            { return nil, nil }
+func (r *Root) OpenFile(name string, flag int, perm FileMode) (*File, error) { return nil, nil }
+func (r *Root) ReadFile(name string) ([]byte, error)                         { return nil, nil }
+
 type Process struct{}
 
 // Args is a *source* for every taint rule: the key is "os.Args", matched on the

@@ -66,6 +66,18 @@ bad/bad.go:156:14:gosec:medium:G304: Potential file inclusion via variable
 bad/bad.go:161:21:gosec:high:G703: Path traversal via taint analysis
 bad/bad.go:172:15:gosec:medium:G304: Potential file inclusion via variable
 bad/bad.go:179:21:gosec:high:G703: Path traversal via taint analysis
+dotio/dotimport_io.go:26:14:gosec:high:G115: integer overflow conversion int -> int32
+dotio/dotimport_io.go:33:9:gosec:high:G109: Potential Integer overflow made by strconv.Atoi result conversion to int16/32
+dotio/dotimport_io.go:33:14:gosec:high:G115: integer overflow conversion int -> int32
+dotio/dotimport_io.go:46:9:gosec:medium:G110: Potential DoS vulnerability via decompression bomb
+dotnet/dotimport_net.go:17:55:gosec:medium:G102: Binds to all network interfaces
+dotos/dotimport_os.go:31:57:gosec:medium:G304: Potential file inclusion via variable
+dotos/dotimport_os.go:33:59:gosec:medium:G304: Potential file inclusion via variable
+dotos/dotimport_os.go:35:61:gosec:medium:G304: Potential file inclusion via variable
+dotos/dotimport_os.go:37:59:gosec:medium:G304: Potential file inclusion via variable
+dotos/dotimport_os.go:43:60:gosec:medium:G304: Potential file inclusion via variable
+dotos/dotimport_os.go:47:9:gosec:medium:G303: File creation in shared tmp directory without using ioutil.Tempfile
+dotos/dotimport_os.go:47:9:gosec:medium:G304: Potential file inclusion via variable
 entropy/entropy.go:12:2:gosec:high:G101: Potential hardcoded credentials
 entropy/entropy.go:13:2:gosec:high:G101: Potential hardcoded credentials
 entropy/entropy.go:14:2:gosec:high:G101: Potential hardcoded credentials

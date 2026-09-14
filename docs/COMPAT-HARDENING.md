@@ -30299,3 +30299,170 @@ dagger を落として 67 → 66 定義。open 1 は **dagger ではなく grafa
 測ったのは 2026-09-08T23:30:59Z（前セッションの調査）で、台帳に入らないまま
 残っていたのを今回の `probe` が拾った。grafana に ill-typed パッケージは無いので
 §5 の修正は届かない。次のタスクはこれ（`close grafana`）。
+
+### 2026-09-14（続き 278）— gosec は**受け側の綴りで**照合する。`resolve_pkg_qualified_call` が 7 か所に届いていなかった。`close grafana` 完了、63/100
+
+grafana の唯一の open は
+`pkg/storage/unified/search/disk_cleanup.go:456` の
+
+```go
+f, err := root.Open(rel)      // root は *os.Root
+```
+
+に対する `G304: Potential file inclusion via variable` 1 件（guff-only）である。
+
+#### 1. 上流は callee の所属パッケージを訊いていない
+
+gosec の call-list 規則は `CallList.ContainsPkgCallExpr` を通る（v2.27.1
+`rules/readfile.go` の 3 つのリスト —— 読み出し / `Join` / `Clean` —— は全部
+これ）。その中身は **`GetCallInfo` が返す構文** である:
+
+```go
+case *ast.Ident:
+    if expr.Obj != nil && expr.Obj.Kind == ast.Var {
+        t := ctx.Info.TypeOf(expr)
+        if t != nil {
+            return t.String(), fn.Sel.Name, nil   // ← "*os.Root"
+        }
+    }
+    return expr.Name, fn.Sel.Name, nil            // ← "os"（import 名）
+```
+
+```go
+if !strings.ContainsRune(selector, '.') {
+    path, ok := GetImportPath(selector, ctx)      // ← import 名 → import path
+    ...
+}
+if !c.Contains(selector, ident) { return nil }
+```
+
+受け側が **パッケージ識別子のときだけ** import path に解決され、それ以外は
+受け側の型文字列がそのままキーになる。`*os.Root` はどの規則も登録していない
+キーなので、`(*os.Root).Open` は `os.Open` ではない。
+
+guff 側の `resolve_pkg_call` は逆に **callee の宣言パッケージ**を答える —— その
+先頭で呼ぶ `code::call_name` が `func_name`（パッケージパス + オブジェクト名）
+で終わるので、メソッドも `os.Open` という Go が決して作らない名前になって返る。
+
+`resolve_pkg_qualified_call` はこの線を引くために既にある —— d9bcee88
+（"Match gosec's call rules by syntax, the way gosec does (G404)"、2026-08-18）
+が `check_call`（`RULES` 表）をこれに切り替えた。根拠は coredns の G404 4 件で、
+`plugin/pkg/rand` の `*rand.Rand` ラッパーのメソッドが全部 findings になって
+いた。
+
+**残り 7 か所が古い述語のままだった。** 直した規則の隣が、同じ上流の matcher を
+使っているのに古い述語のままになる —— 共有ヘルパを片方の呼び出し側だけ差し替え
+たときの定番の残り方である。
+
+#### 2. 測った形 —— 11 件の guff-only、3 つの scratch モジュール
+
+`.golangci.yml` は `gosec` だけ、golangci-lint 2.12.2 と release ビルドを同じ木に
+掛けた。左が修正前、右が上流:
+
+| 形 | 修正前の guff | golangci |
+|---|---|---|
+| `root.Open(p)` / `root.Create(p)` / `root.OpenFile(p, …)` / `root.ReadFile(p)`（`*os.Root`） | G304 ×4 | 0 |
+| `h.root.Open(p)` / `h.root.OpenFile(p, …)`（フィールド受け） | G304 ×2 | 0 |
+| `import . "os"` の `Open(p)` | G304 | 0 |
+| `import . "net"` の `Listen("tcp", ":8080")` | G102 | 0 |
+| `import . "strconv"` の `Atoi(s)` → `int32(n)` | G109 | 0（G115 のみ） |
+| `import . "io"` の `Copy(w, zr)`（`zr` は `gzip.NewReader`） | G110 | 0 |
+| `os.Open` / `net.Listen` / `strconv.Atoi` / `io.Copy` / `os.Create("/tmp/…")`（全部 package 修飾） | 一致 | 一致 |
+
+`*os.Root` の 4 つが特に悪い: **G122 が「代わりに使え」と名指ししている API**
+そのものである（`G122_WHAT` の "consider root-scoped APIs (e.g. os.Root)"）。
+修正を findings に変えていた。
+
+dot import 側は `GetCallInfo` の `*ast.Ident` 腕で、`ctx.Pkg.Name()`（解析中の
+パッケージ名）が返り `GetImportPath` が外すので、上流はどの規則にも当たらない。
+
+#### 3. 直した 7 か所と、**直さない 3 か所**
+
+上流が `ContainsPkgCallExpr` の site を `resolve_pkg_qualified_call` に寄せた:
+
+| guff | 上流 |
+|---|---|
+| `g304_call_is`（G304 の 3 リスト） | `rules/readfile.go` |
+| `find_temp_dir_args`（G303 の argCalls / nestedCalls） | `rules/tempfiles.go` |
+| `check_g102_call` | `rules/bind.go` |
+| `check_g109_assign` | `rules/integer_overflow.go` |
+| `check_g204_call` | `rules/subproc.go` |
+| `is_g110_reader_call` / G110 の copy リスト | `rules/decompression_bomb.go` |
+
+残した 3 か所は**上流が別のことを訊いているから**である:
+
+- `g122_sink_pos` と G122 の walk 呼び出し —— 上流は SSA
+  (`analyzers/walk_symlink_race.go`) で、`callee.Pkg.Pkg.Path()` を読む。
+  つまり宣言パッケージが正しい。
+- `g104_whitelisted` —— 上流は `ContainsCallExpr` で、こちらは
+  **型文字列**でも当たる（whitelist のキーが `bytes.Buffer` / `hash.Hash` /
+  `io.PipeWriter` と型で書かれている）。`ContainsPkgCallExpr` に寄せると
+  `buf.WriteString(…)` の抑制が消える。別の移植が要る。
+
+`resolve_pkg_call` の doc にこの 3 つを書いた —— 次に触る人が「全部寄せる」を
+やらないための線である。
+
+#### 4. fixture は 11 形全部、Rust から位置で数える
+
+`g304.go` に `*os.Root` の 6 形（ident 受け 4 + フィールド受け 2）を足し、
+dot import 用に 3 パッケージ（`dotimport_os.go` / `dotimport_net.go` /
+`dotimport_io.go`）を新設した。3 つに割れているのは dot import が衝突するから
+で、`net.Pipe` と `io.Pipe`、`gzip.Reader` と `io.Reader` は同じファイルに置け
+ない。stub の `os` には `Root` とその 4 メソッドを足した。
+
+各 fixture は dot 形ごとに **package 修飾の対**を持っている。「当たらなくなった」
+だけの修正なら、対の側が落ちる。
+
+Rust 側は `assert_eq!` で **報告位置の集合**を固定した（`contains` だと他の形が
+全部黙っても通る）:
+
+- `gosec_g304_matches_the_receiver_not_the_callee_package` —— `g304.go` の G304
+  10 件の (line, col)。fixture は 22 → 28 関数に増えて件数は動かない。
+- `gosec_dot_imported_calls_match_no_package_rule` —— 3 fixture の G304 / G303 /
+  G102 / G109 / G110 をそれぞれ位置集合で。
+
+golden は `compat/golden/cases/gosec` に 3 ディレクトリ追加。キー集合の差分は
+**消えたキー 0、増えたキー 12**（新 fixture の package 修飾側だけ）で、
+`g304/g304.go` の 10 件は 1 つも動いていない。
+
+#### 5. ゲート
+
+```
+golden        234 case すべて一致
+fix           234 case（67 が書き換え、4 が意図的乖離）
+reject        14 case すべて同じ理由で拒否
+cargo test    --workspace --locked 緑（280 スイート）
+compat/run.sh --oss --tier pr     8 target すべて OK
+grafana       guff=0 golangci=0（patched config、`./pkg/... ./apps/advisor/...`）
+
+台帳: 63/100 at zero（66 定義、open 0、unmeasured 3）
+```
+
+#### 6. 測定の落とし穴 —— `--no-cache` は seed キャッシュを切らない
+
+この回の最初の 1 時間は、`*http.Request` を参照するだけのパッケージで guff が
+`guff-types/src/tuple.rs:91` の `expected Tuple, got Discriminant(3)` で panic
+するのを追っていた。原因は木でもコードでもなく **`~/Library/Caches/guff/seed`
+に残っていた古いビルドの overlay** である。
+
+`seed_cache.rs` のキーは `(import path, self_hash, base_fp, SEED_OVERLAY_SCHEMA)`
+で、`SEED_OVERLAY_SCHEMA` は手で上げる `u32`（現在 5）。型の符号化が変わっても
+schema を上げ忘れれば、**古い blob が新しい arena に復号されて TypeId が別物を
+指す**。`--no-cache` は issues cache だけを切るのでここには届かず、
+`GUFF_CACHE` を空の一時ディレクトリに向けると消える:
+
+| 実行 | panic |
+|---|--:|
+| `guff run --no-cache -c … ./modules/caddyhttp/`（caddy） | 3 |
+| 同じコマンドに `GUFF_CACHE=$(mktemp -d)` | 0 |
+
+`compat/run.sh` は毎回 `mktemp -d` を `GUFF_CACHE` に渡している（`run.sh:243`）
+ので、**ハーネス経由の測定は無傷**である。壊れるのは手で `guff run` を叩いた
+ときだけ。キャッシュには 8/17 からの 105,839 ファイル・3.3 GB が残っていた。
+
+panic した worker はそのパッケージの findings を落として **exit code 0** で
+終わるので、手元の「上流と一致した」は黙って嘘になりうる。続き 277 §5 と同じ
+形の失敗である。**次のタスク候補**: seed overlay のキーにビルド識別子を混ぜる
+（バージョン文字列は dev ビルドを区別しない —— issues cache の salt と同じ穴で、
+あちらは `--no-cache` という逃げ道がある分まだ軽い）。この回は測定を
+`GUFF_CACHE` で回避しただけで、直していない。
