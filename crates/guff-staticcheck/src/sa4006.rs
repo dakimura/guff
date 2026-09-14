@@ -111,15 +111,15 @@ struct IdentIndex {
     /// `(start, end)` of every loop body, so a value that is read earlier in
     /// the same loop can be recognised as live across the back edge.
     loops: Vec<(u32, u32)>,
-    /// Ends of assignments that a `return` follows in their own statement list.
+    /// For an assignment that a `return` follows in its own statement list: the
+    /// position of that `return`.
     ///
-    /// The veto this index implements exists because guff's SSA loses a use in
-    /// two shapes (a read on the redefining statement's own right-hand side, a
-    /// loop back edge) — both of which reach the value through a *later*
-    /// execution. When the statement list returns after the assignment there is
-    /// no later execution: control leaves the function, so a read further down
-    /// the source can never observe this value and `has_use` saying "no
-    /// referrers" is the whole answer.
+    /// Read together with [`Self::loops`]: a read that appears *above* the
+    /// assignment can only be reached by coming round the loop again, and a
+    /// `return` in the assignment's own statement list means that never
+    /// happens. This does **not** say the value is dead — a read *below* the
+    /// assignment is still a read, which is what `value_is_read_before_redef`
+    /// answers.
     ///
     /// opentofu `internal/legacy/tofu/state.go:442` is the shape —
     ///
@@ -134,7 +134,7 @@ struct IdentIndex {
     /// — where the only read of `is` is the `range` header *above* the
     /// assignment, which the position index reads as a read inside an
     /// enclosing loop.
-    returns_after: HashSet<u32>,
+    returns_after: HashMap<u32, u32>,
 }
 
 impl IdentIndex {
@@ -176,11 +176,11 @@ impl IdentIndex {
                     for (i, stmt) in list.iter().enumerate() {
                         if let Stmt::AssignStmt(assign) = stmt {
                             let end = assign_end(assign);
-                            if list[i + 1..]
-                                .iter()
-                                .any(|s| matches!(s, Stmt::ReturnStmt(_)))
-                            {
-                                idx.returns_after.insert(end);
+                            if let Some(ret) = list[i + 1..].iter().find_map(|s| match s {
+                                Stmt::ReturnStmt(r) => Some(r.return_.0 as u32),
+                                _ => None,
+                            }) {
+                                idx.returns_after.insert(end, ret);
                             }
                             for lhs in &assign.lhs {
                                 if let Expr::Ident(id) = unparen_expr(lhs) {
@@ -315,11 +315,21 @@ impl IdentIndex {
     ///
     /// is not an overwrite. Treating it as one flagged four live values across
     /// caddy and helm.
-    fn value_is_read_before_redef(&self, obj: ObjectId, after_pos: u32, block: Option<u32>) -> bool {
-        match (
-            self.first_use_after(obj, after_pos),
-            self.first_redef_after(obj, after_pos, block),
-        ) {
+    /// `until` bounds the question: a read past the `return` that follows the
+    /// assignment in its own statement list is in code this value never
+    /// reaches. Without the bound, `if a > 0 { x = a + 1; return 0 }; return x`
+    /// looks live because of the second `return`.
+    fn value_is_read_before_redef(
+        &self,
+        obj: ObjectId,
+        after_pos: u32,
+        block: Option<u32>,
+        until: Option<u32>,
+    ) -> bool {
+        let use_after = self
+            .first_use_after(obj, after_pos)
+            .filter(|u| until.is_none_or(|stop| *u < stop));
+        match (use_after, self.first_redef_after(obj, after_pos, block)) {
             (Some(u), Some(d)) => u < d,
             (Some(_), None) => true,
             _ => false,
@@ -339,11 +349,6 @@ fn ssa_unused_but_ast_read(
     let Some(obj) = object_of(pass, id) else {
         return false;
     };
-    // Control leaves the function before anything below can run — see
-    // `IdentIndex::returns_after`.
-    if idents.returns_after.contains(&assign_pos) {
-        return false;
-    }
     let block = idents.blocks.get(&(id.name_pos.0 as u32)).copied();
     // A loop back edge carries the value to reads that appear *earlier* in the
     // source, which position ordering alone cannot see:
@@ -359,10 +364,17 @@ fn ssa_unused_but_ast_read(
     // Any read of the object anywhere inside an enclosing loop means the value
     // is live. Without this, prometheus' `tsdb/chunks/chunks.go:190` was a
     // false positive.
-    if idents.read_in_enclosing_loop(obj, assign_pos) {
+    // …but only while the loop can come back round. A `return` after the
+    // assignment in its own statement list ends the iteration *and* the
+    // function, so a read that sits above the assignment is not reachable from
+    // it — see `IdentIndex::returns_after`. The reads *below* it are still
+    // reads, which is why this guards only the loop arm: `x := f(); _ = x; …;
+    // return nil` has a live value however many returns follow.
+    let returns_at = idents.returns_after.get(&assign_pos).copied();
+    if returns_at.is_none() && idents.read_in_enclosing_loop(obj, assign_pos) {
         return true;
     }
-    idents.value_is_read_before_redef(obj, assign_pos, block)
+    idents.value_is_read_before_redef(obj, assign_pos, block, returns_at)
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {

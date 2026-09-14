@@ -123,6 +123,44 @@ pub fn default_exclude_patterns() -> &'static [DefaultExcludePattern] {
     PATTERNS
 }
 
+/// The position an issue is reported at, with a `//line` directive's filename
+/// mapped back to the file that actually holds the code.
+///
+/// Port of golangci-lint's `FilenameUnadjuster` processor, whose own comment is
+/// the reason it exists:
+///
+/// > A lot of linters use `fset.Position(f.Pos())` to get filename, and they
+/// > return adjusted filename (e.g. `*.qtpl`) for an issue. We need restore
+/// > real `.go` filename to properly output it, parse it, etc.
+///
+/// quicktemplate, goyacc and ragel all emit `//line` directives, and every
+/// finding in the generated file then carries the *template's* name. Upstream
+/// maps it back before anything else looks at the issue — which is also what
+/// makes `exclusions.generated` work there, since the "Code generated … DO NOT
+/// EDIT." header is in the `.go` file and not in the template. guff reported
+/// `app/vmalert/app/vmalert/web.qtpl:194` on VictoriaMetrics where upstream
+/// reports nothing at all.
+///
+/// Upstream registers the mapping per *file*, keyed on the filename the file's
+/// own `Pos()` (its `package` clause) resolves to; this asks the same question
+/// per issue instead, which needs no AST at the point issues are built. The two
+/// differ only for a file whose first `//line` comes *after* the package
+/// clause — upstream would leave those issues on the adjusted name. Every
+/// generator seen so far (quicktemplate, goyacc) writes the directive above the
+/// package clause.
+///
+/// The `.go` suffix guard is upstream's, and it is what keeps cgo's
+/// `/caches/cgo-…` files from replacing a real path.
+fn unadjusted_position(fset: &FileSet, pos: guff::Pos) -> guff::position::Position {
+    let adjusted = fset.position(pos);
+    let raw = fset.position_for(pos, false);
+    if raw.filename == adjusted.filename || !raw.filename.ends_with(".go") {
+        return adjusted;
+    }
+    raw
+}
+
+
 /// A normalized issue for filtering and output.
 #[derive(Debug, Clone)]
 pub struct Issue {
@@ -323,7 +361,7 @@ impl IssueFilter {
                 .to_string();
             let from_linter = linter_name_for_analyzer(&analyzer).to_string();
             let (filename, line, column) = if diag.pos != 0 {
-                let pos = fset.position(guff::Pos(diag.pos as i64));
+                let pos = unadjusted_position(fset, guff::Pos(diag.pos as i64));
                 (pos.filename, pos.line, pos.column)
             } else {
                 (String::new(), 0, 0)

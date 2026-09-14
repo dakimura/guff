@@ -6,9 +6,9 @@
     "`unmeasured` is not `clean`: an absent measurement is a question."
   ],
   "goal": 100,
-  "defined": 68,
+  "defined": 69,
   "clean": 65,
-  "open": 0,
+  "open": 1,
   "unmeasured": 3,
   "targets": {
     "alertmanager": {
@@ -84,7 +84,7 @@
     "caddy": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260914T055812Z",
+      "at": "20260914T073909Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -124,7 +124,7 @@
     "cobra": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260914T055812Z",
+      "at": "20260914T073909Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -242,7 +242,7 @@
     "gin": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260914T055812Z",
+      "at": "20260914T073909Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -258,7 +258,7 @@
     "go-client": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260914T055812Z",
+      "at": "20260914T073909Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -298,7 +298,7 @@
     "helm": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260914T055812Z",
+      "at": "20260914T073909Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -338,7 +338,7 @@
     "k9s": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260914T055812Z",
+      "at": "20260914T073909Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -402,7 +402,7 @@
     "opentofu": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260914T054944Z",
+      "at": "20260914T070639Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -540,6 +540,17 @@
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
+    },
+    "victoriametrics": {
+      "tier": "hunt",
+      "state": "open",
+      "at": "20260914T072100Z",
+      "open": 1,
+      "guff_only": 1,
+      "gcl_only": 0,
+      "by_linter": {
+        "staticcheck": 1
+      }
     },
     "woodpecker": {
       "tier": "hunt",
