@@ -6,9 +6,9 @@
     "`unmeasured` is not `clean`: an absent measurement is a question."
   ],
   "goal": 100,
-  "defined": 66,
+  "defined": 67,
   "clean": 63,
-  "open": 0,
+  "open": 1,
   "unmeasured": 3,
   "targets": {
     "alertmanager": {
@@ -430,6 +430,20 @@
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
+    },
+    "pyroscope": {
+      "tier": "hunt",
+      "state": "open",
+      "at": "20260914T015056Z",
+      "open": 49,
+      "guff_only": 43,
+      "gcl_only": 6,
+      "by_linter": {
+        "goconst": 16,
+        "govet": 16,
+        "staticcheck": 16,
+        "unparam": 1
+      }
     },
     "rclone": {
       "tier": "hunt",
