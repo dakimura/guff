@@ -31322,3 +31322,74 @@ func mincore(ptr *byte) bool {
 ```
 台帳: 65/100 at zero（69 定義、open 1、unmeasured 3）
 ```
+
+### 2026-09-14（続き 285）— `close victoriametrics`。SA4006 は**消えたブロックの中の代入**を見ていた。66/100
+
+続き 284 が 1 件残した `lib/fs/reader_at.go:312` の原因は、拒否権でも
+`go/cfg` でもなく **IR に残っているかどうか**だった。
+
+#### 1. 何が起きていたか
+
+darwin では
+
+```go
+//go:build !linux
+
+func mincore(ptr *byte) bool {
+	panic(fmt.Errorf("BUG: unexpected call"))
+}
+```
+
+なので、`if !mincore(&mr.mmapData[off]) {` の呼び出しは「返らない」。guff の
+SSA は go/ssa と同じく、その直後に `Panic` を置いて残りを
+`unreachable.noreturn` ブロックに落とし、`blockopt::delete_unreachable_blocks`
+が消す（`emit::emit_no_return_panic`）。honnef の IR も同じことをする
+（`go/ir/emit.go` の `fn.Prog.noReturn(callee.object)`、`buildir.go` が
+`SetNoReturn(cfgs.NoReturn)` で配線している）。
+
+違いは**その後**である。SA4006 は AST を歩くので、
+
+```rust
+inspect.preorder_typed(node_mask!(AssignStmt), pass.files(), |node| {
+```
+
+消えたブロックの中にある `word = wordPtr.Load()` も訪問し、その値に
+「referrer が無い」と答えてしまう。上流はそもそもその**命令を持っていない**
+ので、何も言わない。
+
+直しは 1 つの述語である —— 値を作った命令が生きたブロックに居ること:
+
+```rust
+fn value_is_live(func: &Function, v: Value) -> bool {
+    let Value::Instr(iid) = v else { return true };
+    func.live_blocks().any(|(_, b)| b.instrs.contains(&iid))
+}
+```
+
+#### 2. 続き 284 の「戻した直し」は問いが違っていた
+
+adopt の回に `ctrlflow` の `DeadCode` で代入を飛ばす形を書いて、効かないので
+戻している。`DeadCode` が答えるのは「`go/cfg` の liveness がここを死んだと
+言うか」で、`go/cfg` が切るのは**文として書かれた** no-return 呼び出しだけ
+である。ここでは呼び出しは `if` の**条件**にあるので、`DeadCode` は何も
+知らない。IR に訊けば 1 行で済んだ。**測って効かなかったものを残さなかった
+のは正しかったが、問いの立て方が違っただけだった。**
+
+#### 3. fixture
+
+`sa4006/terminated.go` に `behindANoReturnCall` を足した。`mustPanic` を
+`panic(…)` から `return` する関数に変えると finding が戻るので、「消えた
+ブロックだから黙る」と「そもそも死んでいない」が取り違えられない。
+
+#### 4. 実測
+
+```
+victoriametrics  guff=0 golangci=0 both=0 P=100.0% R=100.0% [OK]
+opentofu         guff=222 golangci=222 both=222（続き 284 の SA4006 変更のあとも不変）
+golden           234 case すべて一致（キーの増減なし）
+fix / reject     234 / 14
+cargo test       --workspace --locked 緑
+compat/run.sh    --oss --tier pr   8 target すべて OK
+
+台帳: 66/100 at zero（69 定義、open 0、unmeasured 3）
+```

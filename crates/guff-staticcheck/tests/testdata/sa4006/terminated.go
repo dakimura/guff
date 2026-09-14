@@ -64,6 +64,31 @@ func storeReadThenReturn(a int) int {
 	return x
 }
 
+// silent — everything after a call that cannot return is a block upstream's IR
+// never builds, so the assignment it holds is not an assignment either. This is
+// VictoriaMetrics `lib/fs/reader_at.go:312`, where the CAS loop sits behind
+// `if !mincore(…)` and `mincore` is `panic(…)` on every non-linux build. Turn
+// `mustPanic` into something that returns and the finding comes back — which is
+// what the `reported` twin below pins.
+func behindANoReturnCall(xs []int, v int) int {
+	n := 0
+	for _, e := range xs {
+		if mustPanic(e) {
+			return 0
+		}
+
+		if e == v {
+			n = e
+
+			return 1
+		}
+	}
+
+	return n
+}
+
+func mustPanic(int) bool { panic("BUG: unexpected call") }
+
 type dec struct{ n int }
 
 func (d dec) Skip(string) dec { return d }

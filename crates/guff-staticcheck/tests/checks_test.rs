@@ -2389,7 +2389,9 @@ fn sa4006_ignores_later_reads_when_the_list_returns() {
             (19, 5), // removeFromLists
             (32, 3), // storeThenReturn
         ],
-        "storeReadThenReturn, readOnOwnRhs and readAcrossBackEdge stay silent"
+        "silent: storeReadBeforeTheReturn (a read between the assignment and \
+         the return), behindANoReturnCall (a block upstream's IR never builds), \
+         storeReadThenReturn, readOnOwnRhs and readAcrossBackEdge"
     );
 }
 
