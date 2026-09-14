@@ -30810,3 +30810,145 @@ go-ethereum   guff=0 golangci=0（SSA の変更が広いので hunt を 1 本追
 
 台帳: 64/100 at zero（67 定義、open 0、unmeasured 3）
 ```
+
+### 2026-09-14（続き 281）— `adopt opentofu`。`unused` の「実装している」辺が**両方向に**ずれていて、`init` という名前のメソッドは上流では使われている
+
+`corpus/hunt.json` に opentofu v1.12.6（`./...`、25m）を足して測った:
+
+```
+opentofu: guff=223 golangci=222 both=215 P=96.4% R=96.8%
+  guff-only 8 {unused: 8}
+  gcl-only  7 {unused: 5, staticcheck: 2}
+```
+
+15 件のうち **13 件が `unused` 1 つ**で、しかも**両方向**に出ている。
+原因は 4 つ、全部 30 行以下の最小再現で確定した。
+
+（pin は `go version -m $(which golangci-lint)` で確認: honnef.co/go/tools
+**v0.7.0**。手元の checkout は `v0.7.0-0.dev-122` なので、下の引用は
+`git show v0.7.0:` で読み直したもの。続き 279 §0 と同じ罠。）
+
+#### 1. インスタンス化されたジェネリックインタフェースに「実装している」辺が張られない（guff-only 7 件）
+
+opentofu の `internal/engine/internal/execgraph/result.go` は封印インタフェースの
+定番で書かれている:
+
+```go
+type ResultRef[T any] interface {
+	resultPlaceholderSigil(T)
+	AnyResultRef
+}
+
+var _ ResultRef[cty.Value] = valueResultRef{}
+
+func (v valueResultRef) resultPlaceholderSigil(cty.Value) {}
+```
+
+最小再現（30 行）:
+
+| 形 | golangci | 修正前の guff |
+|---|---|---|
+| `sigil(string)` —— **ジェネリック** `Ref[string]` を実装 | 黙る | **`func valueRef.sigil is unused`** |
+| `anySigil()` —— 非ジェネリック `AnyRef` を実装 | 黙る | 黙る |
+| `plainSigil()` —— 非ジェネリック `PlainRef` を実装 | 黙る | 黙る |
+
+`var _ Ref[string] = valueRef{}` の変換は**インスタンス化された**インタフェース
+なので、そこで張られるはずの辺が張られていない。7 件のうち 6 件が
+`resultPlaceholderSigil`、1 件が `internal/lang/eval/internal/configgraph` の
+`KnownValue[T].maybeImpl` で、どちらも同じ形。
+
+#### 2. export されたメソッドは**根ではなく辺**である（gcl-only 5 件）
+
+`internal/legacy/tofu/context_components.go` の `basicComponentFactory` は
+`contextComponentFactory` を実装しているが、**どこからも参照されていない**
+（`var _` も無い、構築もされない）。上流は型もメソッド 4 つも unused と言い、
+guff は 5 件とも黙る。
+
+最初これを「実装しているだけの型」の問題だと読んだが、**測ると違った**。
+インタフェースは関係ない —— 効いているのは**メソッドが export されているか**
+である:
+
+| 形 | golangci | guff |
+|---|---|---|
+| `lonely`（メソッド無し・未参照） | 型 1 件 | 型 1 件 |
+| `withUnexported` + `only()`（未参照） | 型 + メソッド | 型 + メソッド |
+| `withExported` + `Only()`（未参照） | **型 + メソッド** | **どちらも黙る** |
+| `UsedType` + `Only()`（参照あり） | 黙る | 黙る |
+
+上流の規則（v0.7.0 `unused/unused.go:552`）:
+
+```go
+if g.opts.ExportedIsUsed {
+	for m := range ms.Methods() {
+		if token.IsExported(m.Obj().Name()) {
+			// (2.1) named types use exported methods
+			g.readSelection(m, named)
+		}
+	}
+}
+```
+
+`readSelection(m, named)` は **`named` から `m` への辺**である。「型が使われて
+いれば、その export されたメソッドも使われている」であって、「export された
+メソッドは常に使われている」ではない。guff は後者に実装していて、メソッドが
+**根**になり、メソッド → レシーバ型の辺が型まで生き返らせていた。
+
+**この読み違いは上流の doc コメントのほうに書いてある。** 同じファイルの
+規則一覧 (8.1) はこう言う:
+
+> Exported methods on concrete types are always marked as used.
+
+コードは `g.readSelection(m, named)` で条件付きにしている。§4 の「上流は
+コメントよりコードを信じる」がまた出た形である。
+
+#### 3. `init` という名前の**メソッド**は上流では使われている（guff-only 1 件）
+
+`internal/legacy/tofu/diff.go:226` の `func (d *Diff) init()` は、どこからも
+呼ばれていない。guff は unused と言い、上流は黙る。**上流が正しくない**のでは
+なく、上流の規則がそう書いてある（v0.7.0 `unused/unused.go:1166`）:
+
+```go
+if token.IsExported(decl.Name.Name) && g.opts.ExportedIsUsed {
+	if decl.Recv == nil {
+		// (1.2) packages use exported functions
+		g.use(obj, nil)
+	}
+} else if decl.Name.Name == "init" {
+	// (1.5) packages use init functions
+	g.use(obj, nil)
+} else if decl.Name.Name == "main" && g.pkg.Name() == "main" {
+```
+
+**`decl.Recv == nil` のガードは 1 つ上の枝にしか無い。** `init` の枝は
+`*ast.FuncDecl` の名前だけを見るので、`func (d *Diff) init()` という**メソッド**も
+「パッケージが使う init」になる。`main` の枝も同じ形をしている。
+
+しかも**生きるのは本人だけではない**。最小再現で測ると:
+
+| 形 | golangci | guff |
+|---|---|---|
+| `func (d *Diff) init()`（誰も呼ばない） | 黙る | 出る |
+| `func (m *ModuleDiff) reset()`（`init` からだけ呼ばれる） | 黙る | 出る |
+| `func (d *Diff) initNever()`（同じ形、名前が違うだけ） | 出る | 出る |
+
+`init` が使われている扱いになるので、**そこから到達できるものが全部生きる**。
+opentofu で guff-only が 1 件で済んでいるのは、`(*Diff).init` が呼ぶ
+`(*ModuleDiff).init` も `(*ResourceDiff).init` も、やはり `init` という名前で
+それ自体が生きているからである。
+
+#### 4. staticcheck 2 件（gcl-only）
+
+- `internal/legacy/helper/schema/resource_timeout.go:144` —— SA4004
+  「the surrounding loop is unconditionally terminated」。`for _,
+  timeoutValues := range rawTimeouts` の本体が `return nil` で終わっている。
+- `internal/legacy/tofu/state.go:442` —— SA4006「this value of is is never
+  used」。`is, is[len(is)-1] = append(is[:i], is[i+1:]...), nil` で、`is` は
+  **range 変数**。書いた直後に `return` する。
+
+どちらも guff が黙っている側で、最小再現は `close` でつくる。
+
+```
+台帳: 64/100 at zero（68 定義、open 1、unmeasured 3）
+```
+
+次のタスクは `close opentofu`。
