@@ -506,5 +506,11 @@ fn clone_func_with_type(oarena: &mut ObjectArena, f: ObjectId, new_typ: TypeId) 
     if let Some(pkg) = f.pkg(oarena) {
         id.set_pkg(oarena, pkg);
     }
+    // `copy.origin = f.Origin()` — the chain is flattened, so a method cloned
+    // twice still names the method the source declares.
+    let origin = crate::object::func::func_origin(oarena, f);
+    if let ObjectData::Func(made) = oarena.get_mut(id) {
+        made.set_origin(origin);
+    }
     id
 }

@@ -9,6 +9,7 @@ use guff_analysis::passes::buildir;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 use guff_ssa::instr::{InstrData, TypeAssert};
 use guff_types::arena::TypeData;
+use guff_types::object::func::func_origin;
 use guff_types::signature::{signature_params, signature_results};
 use guff_types::tuple::tuple_at;
 
@@ -45,6 +46,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         continue;
                     };
                     let mut wrong = Vec::new();
+                    let mut generic = false;
                     for i in 0..right_iface.num_explicit_methods() {
                         let mr = right_iface.explicit_method(i);
                         let mr_name = mr.name(&ir.prog.object_arena);
@@ -54,6 +56,25 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         else {
                             continue;
                         };
+                        // ```go
+                        // if ml.Origin() != ml || mr.Origin() != mr {
+                        //     // Give up when we see generics.
+                        //     continue instrLoop
+                        // }
+                        // ```
+                        // A method that instantiation cloned is not the method
+                        // the source declares, and upstream abandons the whole
+                        // assertion rather than the one method — so this is a
+                        // `break` out to the next instruction, not a `continue`.
+                        // Note the test is the *method*, not the type: it fires
+                        // for `Merge[int, string]` too, where no type parameter
+                        // is free and `ifaceassert` still reports.
+                        if func_origin(&ir.prog.object_arena, ml) != ml
+                            || func_origin(&ir.prog.object_arena, mr) != mr
+                        {
+                            generic = true;
+                            break;
+                        }
                         let ml_sig = ml.typ(&ir.prog.object_arena).unwrap();
                         let mr_sig = mr.typ(&ir.prog.object_arena).unwrap();
                         if !signatures_assignable(
@@ -66,7 +87,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                             wrong.push((ml, mr));
                         }
                     }
-                    if wrong.is_empty() {
+                    if generic || wrong.is_empty() {
                         continue;
                     }
                     // The two interface names are rendered with

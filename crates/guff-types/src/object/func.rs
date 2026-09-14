@@ -20,6 +20,16 @@ pub struct Func {
     name: String,
     typ: Option<TypeId>,
     pub(crate) meta: ObjectMeta,
+    /// The method this one was cloned from when a generic type was
+    /// instantiated, or `None` for a method that was declared as written.
+    ///
+    /// Equivalent to `types2.Func.origin`, which `cloneFunc` fills in during
+    /// substitution; [`func_origin`] is `Func.Origin()`. Asking "is this the
+    /// method the source declares, or a copy made by instantiation?" is the
+    /// only way to spot generics from a method object alone, and staticcheck's
+    /// SA5010 gates on exactly that.
+    #[serde(default)]
+    origin: Option<ObjectId>,
 }
 
 impl Func {
@@ -27,6 +37,9 @@ impl Func {
     pub(crate) fn remap_ids(&mut self, r: &crate::merge::Remapper) {
         self.typ = r.ty_opt(self.typ);
         self.meta.remap_ids(r);
+        if let Some(o) = self.origin {
+            self.origin = Some(r.obj(o));
+        }
     }
 }
 
@@ -43,6 +56,15 @@ impl Func {
 
     pub fn set_typ(&mut self, typ: TypeId) {
         self.typ = Some(typ);
+    }
+
+    /// The method this one was cloned from during instantiation, if any.
+    pub fn origin(&self) -> Option<ObjectId> {
+        self.origin
+    }
+
+    pub(crate) fn set_origin(&mut self, origin: ObjectId) {
+        self.origin = Some(origin);
     }
 }
 
@@ -94,5 +116,17 @@ pub fn new_func(arena: &mut ObjectArena, name: impl Into<String>, sig: Option<Ty
         name: name.into(),
         typ: sig,
         meta: ObjectMeta::default(),
+        origin: None,
     }))
+}
+
+/// `types2.Func.Origin()`: the method as the source declares it.
+///
+/// A method that was never cloned is its own origin, so this returns `id`
+/// unchanged for everything outside instantiation.
+pub fn func_origin(arena: &ObjectArena, id: ObjectId) -> ObjectId {
+    match arena.get(id) {
+        ObjectData::Func(f) => f.origin().unwrap_or(id),
+        _ => id,
+    }
 }

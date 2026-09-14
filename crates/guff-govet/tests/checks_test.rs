@@ -1196,6 +1196,39 @@ fn ifaceassert_allows_compatible_interfaces() {
     assert!(support::run_analyzer(ifaceassert_analyzer(), &pkg).is_empty());
 }
 
+/// A free type parameter means there is no conclusion to draw.
+///
+/// `assertableTo` opens with `if free.Has(V) || free.Has(T) { return nil }`
+/// (x/tools v0.44.0, `passes/ifaceassert/ifaceassert.go`), so an interface
+/// instantiated with the enclosing function's own type parameters is never
+/// compared against anything. `Concrete` is the other half: instantiate both
+/// sides and nothing is free, so the real conflict is still reported.
+///
+/// Measured against golangci-lint 2.12.2 on all three shapes.
+#[test]
+fn ifaceassert_skips_free_type_parameters() {
+    let dir = support::testdata("ifaceassert");
+    let pkg = support::typecheck_pkg(
+        "example.com/govet/ifaceassert/generic",
+        &dir.join("generic.go"),
+    );
+    let mut messages = support::run_analyzer(ifaceassert_analyzer(), &pkg);
+    messages.sort();
+    assert_eq!(
+        messages.len(),
+        2,
+        "only Concrete and NestedConcrete are findings: {messages:?}"
+    );
+    assert!(
+        messages[0].contains("Merge[int, string]") && messages[0].contains("Merge[string, int]"),
+        "{messages:?}"
+    );
+    assert!(
+        messages[1].contains("map[string][]int"),
+        "{messages:?}"
+    );
+}
+
 #[test]
 fn loopclosure_flags_captured_loop_var() {
     let dir = support::testdata("loopclosure");

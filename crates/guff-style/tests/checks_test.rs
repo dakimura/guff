@@ -3833,6 +3833,34 @@ fn goconst_flags_strings_in_call_composite_lit() {
     );
 }
 
+/// goconst measures and groups by the string `strconv.Unquote` produces.
+///
+/// Two shapes fall out of that, and a hand-rolled unquote gets both wrong:
+/// `"\xc5"` is one rune (under the default `min-len` of 3) rather than four
+/// characters, and `"\x61bc"` is the same string as `"abc"` rather than a
+/// second one.
+///
+/// Measured against golangci-lint 2.12.2 (goconst v1.10.0) on all three
+/// shapes; `compat/golden/cases/goconst` gates the same file.
+#[test]
+fn goconst_measures_the_unquoted_value() {
+    let pkg = support::typecheck_fixture(
+        "goconst/escapes",
+        "example.com/goconst/escapes",
+        "bad.go",
+    );
+    let mut messages = support::run_analyzer(goconst(), &pkg);
+    messages.sort();
+    assert_eq!(
+        messages,
+        vec![
+            "string `a\tb` has 3 occurrences, make it a constant".to_string(),
+            "string `abc` has 6 occurrences, make it a constant".to_string(),
+        ],
+        "`\\xc5` is one rune and stays silent; `\\x61bc` and `abc` are one string"
+    );
+}
+
 #[test]
 fn goconst_ignores_direct_call_string_args_by_default() {
     let pkg = support::typecheck_fixture(

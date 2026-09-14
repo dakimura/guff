@@ -2642,6 +2642,45 @@ fn sa5008_exempts_go_flags_repeated_tags() {
     );
 }
 sa_check!(sa5010, sa5010_flags_impossible_assertion, sa5010_allows_possible_assertion, "type assertion");
+
+/// SA5010 gives up on any method that instantiation produced.
+///
+/// ```go
+/// if ml.Origin() != ml || mr.Origin() != mr {
+///     // Give up when we see generics.
+///     continue instrLoop
+/// }
+/// ```
+///
+/// The test is the method's `Origin()`, which makes it *wider* than
+/// `ifaceassert`'s `free.Has`: `gConcrete` asserts between two fully
+/// instantiated interfaces — nothing is free — and govet reports it while
+/// staticcheck does not. Both answers are in
+/// `compat/golden/cases/{govet,staticcheck}`.
+///
+/// Measured against golangci-lint 2.12.2 (honnef.co/go/tools v0.7.0) on all
+/// four shapes.
+#[test]
+fn sa5010_gives_up_on_instantiated_methods() {
+    let pkg = typecheck_rule("sa5010", "generic.go");
+    support::assert_well_typed(&pkg);
+    let mut messages = support::run_analyzer(sa5010::analyzer(), &pkg);
+    messages.sort();
+    assert_eq!(
+        messages.len(),
+        2,
+        "the non-generic pair and the anonymous interface are findings; the \
+         three `gMerge` shapes are not: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("gPlainA and gPlainB contradict each other")),
+        "{messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("map[string][]T")),
+        "an anonymous interface's methods are not clones: {messages:?}"
+    );
+}
 sa_check!(sa5011, sa5011_flags_possible_nil_deref, sa5011_allows_guarded_deref, "possible nil pointer dereference");
 
 /// `*in` and `**in` are two different pointers.

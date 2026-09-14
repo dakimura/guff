@@ -28,6 +28,21 @@ struct ConstEntry {
     pos: u32,
 }
 
+/// The literal's *value*, the way upstream gets it:
+///
+/// ```go
+/// if unquotedStr, err = strconv.Unquote(str); err != nil {
+///     // If unquoting fails, manually strip quotes
+///     unquotedStr = str[1 : len(str)-1]
+/// }
+/// ```
+///
+/// Both halves matter. `min-len` is `utf8.RuneCountInString` of *this* string,
+/// so a hand-rolled unquote that leaves `\xc5` as four characters reports a
+/// three-occurrence literal that upstream measures as one rune and drops
+/// (pyroscope `pkg/validation/validate_test.go:71`). And the value is the map
+/// key, so `"\x61bc"` and `"abc"` are one string with six occurrences upstream
+/// and two strings with three each here.
 fn unquote_lit(lit: &BasicLit) -> Option<String> {
     let v = &lit.value;
     if v.len() < 2 {
@@ -37,29 +52,10 @@ fn unquote_lit(lit: &BasicLit) -> Option<String> {
     if (quote != b'"' && quote != b'`') || v.as_bytes()[v.len() - 1] != quote {
         return None;
     }
-    if quote == b'`' {
-        return Some(v[1..v.len() - 1].to_string());
+    match guff_gostd::strconv::unquote(v) {
+        Ok(s) => Some(s),
+        Err(_) => Some(v[1..v.len() - 1].to_string()),
     }
-    let mut out = String::with_capacity(v.len());
-    let mut chars = v[1..v.len() - 1].chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '\\' {
-            match chars.next()? {
-                'n' => out.push('\n'),
-                't' => out.push('\t'),
-                'r' => out.push('\r'),
-                '\\' => out.push('\\'),
-                '"' => out.push('"'),
-                other => {
-                    out.push('\\');
-                    out.push(other);
-                }
-            }
-        } else {
-            out.push(c);
-        }
-    }
-    Some(out)
 }
 
 fn literal_key(lit: &BasicLit) -> Option<String> {

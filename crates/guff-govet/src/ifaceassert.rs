@@ -19,6 +19,15 @@ fn iface_conflict(pass: &Pass<'_>, v: guff_types::TypeId, t: guff_types::TypeId)
         return None;
     }
     let mut types = artifacts.types.clone();
+    // `free.Has(V) || free.Has(T)`: with a type parameter still free on either
+    // side there is no conclusion to draw, and `Merge[Res, Req]` would
+    // otherwise contradict every instantiation of itself.
+    let mut free = guff_types::typeparams::Free::new();
+    if free.has(&mut types, &artifacts.objects, &artifacts.packages, v)
+        || free.has(&mut types, &artifacts.objects, &artifacts.packages, t)
+    {
+        return None;
+    }
     let mm = missing_method(
         &mut types,
         &artifacts.objects,

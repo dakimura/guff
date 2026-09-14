@@ -452,3 +452,65 @@ fn test_variant_keeps_the_packages_ignored_files() {
 
     let _ = fs::remove_dir_all(&tmp);
 }
+
+/// `./...` does not match a directory whose base name starts with `.` or `_`,
+/// nor one named `testdata` — but naming it explicitly still resolves it.
+///
+/// `go list`'s own rule (`cmd/go/internal/search`, `MatchPackages`):
+///
+/// ```go
+/// if !top && (strings.HasPrefix(elem, ".") || strings.HasPrefix(elem, "_") || elem == "testdata") {
+///     return filepath.SkipDir
+/// }
+/// ```
+///
+/// The `_` half was missing here, so `./...` on pyroscope reached
+/// `examples/_templates` — a package upstream's `./...` never sees, and
+/// therefore one with nothing to compare guff's three goconst findings
+/// against. Measured against `go list` 1.26.5 on the same layout: `./...`
+/// returns `keep` only, `./_skip/` returns the package.
+#[test]
+fn wildcard_skips_underscore_dot_and_testdata_dirs() {
+    let tmp = std::env::temp_dir().join(format!(
+        "guff-golist-wildcard-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = fs::remove_dir_all(&tmp);
+    fs::create_dir_all(&tmp).unwrap();
+
+    let main = tmp.join("main");
+    write(&main.join("go.mod"), "module example.com/app\n\ngo 1.22\n");
+    for dir in ["keep", "_skip", ".hidden", "testdata", "vendored"] {
+        write(
+            &main.join(dir).join("a.go"),
+            &format!("package {}\n\nconst V = 1\n", dir.trim_start_matches(['_', '.'])),
+        );
+    }
+
+    let cfg = ListConfig {
+        dir: main.clone(),
+        ..ListConfig::default()
+    };
+    let resp = list_packages(&cfg, &["./...".to_string()]).expect("list");
+    let mut roots = resp.roots.clone();
+    roots.sort();
+    assert_eq!(
+        roots,
+        vec![
+            "example.com/app/keep".to_string(),
+            "example.com/app/vendored".to_string()
+        ],
+        "`./...` must skip _skip, .hidden and testdata"
+    );
+
+    // Named explicitly, the same directory is an ordinary package — this is
+    // the half a blanket "never walk into `_`" would break.
+    let resp = list_packages(&cfg, &["./_skip/".to_string()]).expect("list _skip");
+    assert_eq!(resp.roots, vec!["example.com/app/_skip".to_string()]);
+
+    let _ = fs::remove_dir_all(&tmp);
+}
