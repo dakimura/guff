@@ -7,8 +7,8 @@
   ],
   "goal": 100,
   "defined": 67,
-  "clean": 63,
-  "open": 1,
+  "clean": 64,
+  "open": 0,
   "unmeasured": 3,
   "targets": {
     "alertmanager": {
@@ -84,7 +84,7 @@
     "caddy": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260913T233842Z",
+      "at": "20260914T043818Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -124,7 +124,7 @@
     "cobra": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260913T233842Z",
+      "at": "20260914T043818Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -242,7 +242,7 @@
     "gin": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260913T233842Z",
+      "at": "20260914T043818Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -258,7 +258,7 @@
     "go-client": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260913T233842Z",
+      "at": "20260914T043818Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -274,7 +274,7 @@
     "go-ethereum": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260908T135801Z",
+      "at": "20260914T044038Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -298,7 +298,7 @@
     "helm": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260913T233842Z",
+      "at": "20260914T043818Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -338,7 +338,7 @@
     "k9s": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260913T233842Z",
+      "at": "20260914T043818Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -433,17 +433,11 @@
     },
     "pyroscope": {
       "tier": "hunt",
-      "state": "open",
-      "at": "20260914T015056Z",
-      "open": 49,
-      "guff_only": 43,
-      "gcl_only": 6,
-      "by_linter": {
-        "goconst": 16,
-        "govet": 16,
-        "staticcheck": 16,
-        "unparam": 1
-      }
+      "state": "clean",
+      "at": "20260914T042738Z",
+      "open": 0,
+      "guff_only": 0,
+      "gcl_only": 0
     },
     "rclone": {
       "tier": "hunt",

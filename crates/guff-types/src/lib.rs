@@ -88,6 +88,7 @@ pub mod type_;
 pub mod typelists;
 pub mod typeparam;
 pub mod typeset;
+pub mod typeparams;
 pub mod typestring;
 pub mod typeterm;
 pub mod typexpr;

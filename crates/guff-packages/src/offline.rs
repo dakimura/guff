@@ -328,7 +328,14 @@ fn walk_packages(ctxt: &Context, root: &Path, out: &mut Vec<PathBuf>) -> Result<
     while let Some(dir) = stack.pop() {
         // Skip common non-package trees.
         if let Some(name) = dir.file_name().and_then(|s| s.to_str()) {
-            if name == "vendor" || name == "testdata" || name == "node_modules" || name.starts_with('.')
+            // Same list as `guff_golist::walk_packages` and `walk_go_files`:
+            // `...` does not match a directory whose base name starts with `.`
+            // or `_`, nor `testdata`.
+            if name == "vendor"
+                || name == "testdata"
+                || name == "node_modules"
+                || name.starts_with('.')
+                || name.starts_with('_')
             {
                 if dir != root {
                     continue;

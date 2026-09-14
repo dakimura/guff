@@ -36,6 +36,8 @@ httpresponse/bad/bad.go:30:9:govet::httpresponse: using resp before checking for
 httpresponse/bad/bad.go:38:9:govet::httpresponse: using resp before checking for errors
 httpresponse/bad/bad.go:51:8:govet::httpresponse: using h before checking for errors
 ifaceassert/bad/bad.go:12:9:govet::ifaceassert: impossible type assertion: no type can implement both example.com/govet/ifaceassert/bad.I and example.com/govet/ifaceassert/bad.J (conflicting types for M method)
+ifaceassert/generic/generic.go:42:9:govet::ifaceassert: impossible type assertion: no type can implement both example.com/govet/ifaceassert/generic.Merge[int, string] and example.com/govet/ifaceassert/generic.Merge[string, int] (conflicting types for Receive method)
+ifaceassert/generic/generic.go:56:9:govet::ifaceassert: impossible type assertion: no type can implement both interface{Get() map[string][]int} and interface{Get() int} (conflicting types for Get method)
 inline/bad/bad.go:6:21:govet::inline: Constant reflect.Ptr should be inlined
 inline_alias/bad/bad.go:39:15:govet::inline: Type alias Ord should be inlined
 inline_alias/bad/bad.go:41:19:govet::inline: Type alias Grouped should be inlined

@@ -63,6 +63,7 @@ hostport/bad/bad.go                                crates/guff-govet/tests/testd
 hostport/ok/ok.go                                  crates/guff-govet/tests/testdata/hostport/ok.go
 ifaceassert/bad/bad.go                             crates/guff-govet/tests/testdata/ifaceassert/bad.go
 ifaceassert/ok/ok.go                               crates/guff-govet/tests/testdata/ifaceassert/ok.go
+ifaceassert/generic/generic.go                     crates/guff-govet/tests/testdata/ifaceassert/generic.go
 inline_local/bad/bad.go                            crates/guff-govet/tests/testdata/inline_local/bad.go
 inline_local/ok/ok.go                              crates/guff-govet/tests/testdata/inline_local/ok.go
 inline/bad/bad.go                                  crates/guff-govet/tests/testdata/inline/bad.go

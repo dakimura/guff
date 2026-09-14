@@ -9,3 +9,5 @@
 bad.go:6:7:goconst::string `repeated` has 3 occurrences, make it a constant
 bad.go:10:13:goconst::string `nested` has 3 occurrences, make it a constant
 bad.go:19:7:goconst::string `another` has 3 occurrences, make it a constant
+escapes/bad.go:26:18:goconst::string `abc` has 6 occurrences, make it a constant
+escapes/bad.go:31:18:goconst::string `a	b` has 3 occurrences, make it a constant

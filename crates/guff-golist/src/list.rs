@@ -1102,7 +1102,18 @@ fn walk_packages(ctxt: &Context, root: &Path, out: &mut Vec<PathBuf>) -> Result<
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
         if let Some(name) = dir.file_name().and_then(|s| s.to_str()) {
-            if (name == "vendor" || name == "testdata" || name == "node_modules" || name.starts_with('.'))
+            // `go list`'s own rule (`search.MatchPackages`): a directory whose
+            // base name starts with `.` or `_`, or is named `testdata`, is not
+            // matched by `...`. The `_` half was missing here and in
+            // `offline::walk_packages`, so `examples/_templates` — a package
+            // `go list ./examples/_templates/` resolves happily when named, and
+            // `./...` never reaches — was linted, with nothing upstream to
+            // compare against (pyroscope, 3 goconst findings).
+            if (name == "vendor"
+                || name == "testdata"
+                || name == "node_modules"
+                || name.starts_with('.')
+                || name.starts_with('_'))
                 && dir != root
             {
                 continue;

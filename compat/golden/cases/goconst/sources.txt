@@ -1,2 +1,8 @@
 # The isolate fixture, so the two tiers cannot drift.
 bad.go  compat/isolate/fixtures/goconst/bad.go
+
+# The escape-handling fixture, which is a unit-test one: goconst measures and
+# groups by the string `strconv.Unquote` produces, and the shapes that show it
+# (`"\xc5"`, `"\x61bc"` beside `"abc"`) need a package of their own so the
+# counts above stay readable.
+escapes/bad.go  crates/guff-style/tests/testdata/goconst/escapes/bad.go

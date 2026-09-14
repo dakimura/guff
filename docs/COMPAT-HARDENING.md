@@ -10232,6 +10232,8 @@ guff は 4 件を返した。**これを穴と呼ぶ前に**、同じソース�
 
 | telegraf | 3 | `plugins/inputs/vsphere/endpoint.go:1200` / `plugins/outputs/logzio/logzio_test.go:118` / `plugins/processors/dedup/dedup.go:56` revive time-equal | §6 の「revive の importer 盲目には追従しない」そのもので、jaeger の 2 行と同じ機構。`time-equal` は型を要るので revive が**自分のファイルを型検査**し（`if w.file.Pkg.TypeCheck() != nil { return nil }`）、その `importer.Default()` が `$build.Default.GOROOT/bin/go list -export` を叩く。golangci-lint の `Env.Discover` が**値レシーバ**（`pkg/goutil/env.go`）なので `build.Default.GOROOT` はバイナリのビルド時 GOROOT のまま残り、この開発機ではそれが消えた Homebrew の go1.26.2 を指している（現在の toolchain は 1.26.5）。**規則ごと nil を返す**のでパッケージ全体が黙る。**キャッシュを毎回捨てて測ると、`GOROOT` を export した golangci-lint は guff と同じ 3 件を撃つ**。測定は §4 の 2026-09-05（続き 190）、全文は `compat/allowlists/telegraf.txt` | 2026-09-05 |
 
+| pyroscope | 12 | `pkg/test/integration/*_test.go` の goconst 6 件、**両側** | **上流の答えがコイン投げ**。同じ 6 件の finding を両ツールが同じ位置で出し、違うのは「既にある定数」の名前だけ（guff `profileTypeProcessCPU` / 上流 `processCPUProfileTypeID`。同じ値の定数が同じパッケージの `_test.go` に 2 つある）。golangci-lint 2.12.2 が埋め込む goconst は **v1.10.0**（`go version -m`。checkout も golangci-lint の checkout の go.mod も新しい版を指しているので当てにならない）で、パッケージのファイルを `runtime.NumCPU()` の goroutine で並行に walk し、**最初に届いた 1 つだけ**を残したうえで読み出しに**ソートが無い**。pyroscope 本体でキャッシュを毎回捨てて 4 回走らせて A/B/A/B、2 ファイルの最小再現でも 6 回に 1 回ひっくり返る。guff は決定的に (file, pos) で並べて非 test を優先する —— これは v1.10.2 がこの非決定性を直したときの規則で、v1.10.0 と違いうるのは v1.10.0 が未定義な場合だけ。どちらの出目でも緑になるよう**両側 6 行ずつ**入れてある。測定は §4 の 2026-09-14（続き 279 §4 / 続き 280 §5）、全文は `compat/allowlists/pyroscope.txt` | 2026-09-14 |
+
 これ以外の allowlist ファイルは**すべてヘッダのみ（0 件）**。記録するのは
 `oss-nightly` / weekly を CI ゲートにするため — 恒久的に赤いゲートは次の劣化に
 日付を付けられない。**残りを消すのが Phase 3 の残タスク**であり、
@@ -30635,3 +30637,176 @@ nil`。配列は nil になれないので**文言からして成立していな
 
 次のタスクは `close pyroscope`。§1–§3 と §5 の 37 件が guff の欠陥、§4 の 12 件は
 上流の出目。
+
+### 2026-09-14（続き 280）— `close pyroscope`。ジェネリクスの逃げ道 2 種類、`_` ディレクトリ、unquote、配列のスライス。残り 12 件は allowlist、64/100
+
+続き 279 が挙げた 5 原因のうち **4 つは guff の欠陥**で、直した。5 つ目は上流の
+コイン投げなので allowlist に置いた。
+
+#### 1. ジェネリクスの逃げ道は **2 種類あって、互いに違う**（32 件）
+
+`ifaceassert` と SA5010 は同じ「不可能な型アサーション」を見ているが、
+ジェネリクスの降り方が別である。
+
+**x/tools（v0.44.0）は自由な型パラメータ**:
+
+```go
+// Mitigations for interface comparisons and generics.
+if free.Has(V) || free.Has(T) {
+	return nil
+}
+```
+
+**staticcheck（v0.7.0）はメソッドの `Origin()`**:
+
+```go
+if ml.Origin() != ml || mr.Origin() != mr {
+	// Give up when we see generics.
+	continue instrLoop
+}
+```
+
+この 2 つが**同じ木で違う答えを出す**ことは測って確かめた。4 形を両ツールに通し、
+guff も同じ答えになった:
+
+| 形 | ifaceassert | SA5010 |
+|---|---|---|
+| `I1` → `I2`（ジェネリクス無し） | 出る | 出る |
+| `Merge[Res, Req]` → `Merge[int, string]`（型パラメータが自由） | 黙る | 黙る |
+| `Merge[int, string]` → `Merge[string, int]`（両方インスタンス化済み） | **出る** | **黙る** |
+| `interface{ Get() map[string][]T }` → `interface{ Get() int }` | **黙る** | **出る** |
+
+3 行目は自由な型パラメータが 1 つも無いので `free.Has` は false、しかしメソッドは
+インスタンス化の複製なので `Origin()` が違う。4 行目は逆で、匿名インタフェースの
+メソッドは複製ではない（`Origin()` は自分自身）が、`T` は署名の中に自由に居る。
+**片方の述語をもう片方に流用すると 2 行とも落ちる。**
+
+移植は 2 つ:
+
+- `guff-types/src/typeparams.rs` —— `typeparams.Free` の移植。`seen` マップが
+  メモ化と循環検出を兼ねるところまで上流どおりで、Alias / Named の
+  「`tparams.Len() > targs.Len()` なら未インスタンス化」も含む。fixture の
+  `Nested` は `Signature → Tuple → Map → Slice → TypeParam` の 4 段で、
+  Named の型引数しか見ない移植だとここで落ちる。
+- `Func.origin` —— `types2.Func.origin` と `cloneFunc` の移植。guff の
+  `subst_func` は署名が変わったときだけ `clone_func_with_type` で新しい Func を
+  作るので、そこで `origin` を引き継ぐ。**`SEED_OVERLAY_SCHEMA` を 5 → 6 に
+  上げた**: `Func` は seed overlay に載る型なので、上げないと古い blob が
+  新しい arena に復号される（続き 279 §6 で 1 時間溶かした panic の作り方
+  そのもの）。
+
+#### 2. `./...` が `_` 始まりのディレクトリを拾っていた（3 件）
+
+`go list` の規則（`search.MatchPackages`）:
+
+```go
+if !top && (strings.HasPrefix(elem, ".") || strings.HasPrefix(elem, "_") || elem == "testdata") {
+	return filepath.SkipDir
+}
+```
+
+guff には 3 つの walker があり、**`walk_go_files` だけが `_` を持っていて**、
+パッケージを列挙する `guff_golist::walk_packages` と
+`guff_packages::offline::walk_packages` が落としていた。`walk_go_files` の
+コメントは "also mirrored in offline::walk_packages" と書いてある —— 書いてある
+のに揃っていない、が 2 回目である（続き 278 の `resolve_pkg_qualified_call`）。
+
+`./_skip/` と名指しすれば今までどおり解決する（`go list` もそうする）ので、
+テストは**両方向**を見る。
+
+#### 3. goconst の値は `strconv.Unquote` の結果（1 件）
+
+```go
+if unquotedStr, err = strconv.Unquote(str); err != nil {
+	unquotedStr = str[1 : len(str)-1]
+}
+if len(unquotedStr) == 0 || utf8.RuneCountInString(unquotedStr) < v.p.minLength {
+	return
+}
+```
+
+guff の `unquote_lit` は `\n \t \r \\ \"` だけを解いて、残りは書かれたまま
+残していた。効くのは 2 か所で、**どちらも観測できる**:
+
+| 形 | 上流 | 修正前の guff |
+|---|---|---|
+| `"\xc5"` ×3 | 1 ルーン < min-len 3 → 黙る | 4 文字 → 出る |
+| `"\x61bc"` ×3 + `"abc"` ×3 | 同じ文字列 6 件 | 別々の 3 件ずつ → **どちらも出ない** |
+
+`guff-gostd` に `strconv::unquote` の移植が既にあったので、それに差し替えて
+失敗時は上流と同じくクォートだけ剥がす。2 つ目の形は「狭めると消える」ではなく
+**「正しくすると出る」**側の差で、fixture に両方入れた。
+
+#### 4. 配列のスライスはアドレスを取る —— SSA の欠落（1 件）
+
+```go
+switch typeparams.CoreType(xtyp).(type) {
+case *types.Array:
+	// Potentially escaping.
+	x = b.addr(fn, e.X, true).address(fn)
+case *types.Basic, *types.Slice, *types.Pointer: // *array
+	x = b.expr(fn, e.X)
+}
+```
+
+guff の `slice_expr` は無条件に `self.expr(&e.x)` だった。配列を**値として**
+スライスすると、ローカルはレジスタのままになり、スライス経由の書き込みが
+全部消える:
+
+```go
+func traceIDFromLabels(...) [16]byte {
+	var id [16]byte
+	if _, err := hex.Decode(id[:], util.YoloBuf(s)); err == nil {
+		return id          // ← 修正前はここも
+	}
+	return id              // ← ここも「ゼロ定数」だった
+}
+```
+
+だから unparam が `result 0 ([16]byte) is always nil` と言った —— 配列は nil に
+なれないので**文言からして成立していない**のが、SSA を疑う合図だった。
+影響は unparam だけではない: **SSA を読む check 全部**が同じ消えた store を
+見ていた。
+
+境界も測った。`p[:]`（`*[4]int`）・`s[1:]`（slice）・`s[1:]`（string）は値のまま
+で、spill されるのは addressable な配列だけ。`crates/guff-ssa/tests/slice_of_array_test.rs`
+が 5 形を逆アセンブルで固定する。
+
+#### 5. 「既にある定数」は allowlist —— 12 行、両側
+
+続き 279 §4 の測定（4 回で A/B/A/B）のとおり、goconst v1.10.0 の
+`MatchingConst` は並行 walk の出目である。guff は**決定的**で、候補を
+(file, pos) で並べて非 test を優先する —— これは goconst **v1.10.2** が
+この非決定性を直したときの規則である。v1.10.0 と違いうるのは
+「同じ値の定数が 2 つ以上」＝v1.10.0 が未定義な場合だけなので、直った側に
+合わせても他所では 1 件も動かない。
+
+allowlist は**両側 6 行ずつ**入れた。コインが A なら 12 行とも未使用、B なら
+guff-only 6 と gcl-only 6 が両方当たる。`apply_allowlist` は集合の積なので
+未使用行は無害である。理由は §5 の表にも 1 行足した。
+
+#### 6. 実測
+
+修正後の `./compat/hunt.sh --name pyroscope`:
+
+```
+pyroscope: guff=1222 golangci=1222 both=1222 P=100.0% R=100.0% [OK]
+```
+
+この回は**コインが A（guff の答え）に落ちた**ので 12 行は未使用のまま緑である。
+B に落ちた回でも allowlist が受け止める。
+
+```
+golden        234 case すべて一致（goconst / govet / staticcheck-sa は
+              キー 2 件ずつ増、0 件減）
+fix           234 case
+reject        14 case
+cargo test    --workspace --locked 緑
+compat/run.sh --oss --tier pr   8 target すべて OK
+go-ethereum   guff=0 golangci=0（SSA の変更が広いので hunt を 1 本追加。
+              ただし config が何も出さない target なので証拠としては弱い ——
+              強いのは pyroscope の 1222 件のほうで、unparam / staticcheck /
+              revive が全部 SSA を読んでいる）
+
+台帳: 64/100 at zero（67 定義、open 0、unmeasured 3）
+```

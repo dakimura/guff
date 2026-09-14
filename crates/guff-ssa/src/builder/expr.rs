@@ -605,7 +605,31 @@ impl<'a> Builder<'a> {
     }
 
     fn slice_expr(&mut self, e: &SliceExpr) -> Value {
-        let x = self.expr(&e.x);
+        // ```go
+        // switch typeparams.CoreType(xtyp).(type) {
+        // case *types.Array:
+        //     // Potentially escaping.
+        //     x = b.addr(fn, e.X, true).address(fn)
+        // case *types.Basic, *types.Slice, *types.Pointer: // *array
+        //     x = b.expr(fn, e.X)
+        // ```
+        //
+        // Slicing an *array* slices its storage, so the operand has to be the
+        // array's address — which is also what forces the local out of a
+        // register and into an `Alloc`. Reading it as a value instead made
+        // `var id [16]byte; hex.Decode(id[:], …); return id` a function whose
+        // every return is the zero constant, and unparam said "result 0
+        // ([16]byte) is always nil" (pyroscope `pkg/pprof/pprof.go:1166`).
+        // Every SSA check reading that function saw the same lost store.
+        let x_core = self.type_of(e.x.id()).underlying(&self.prog.type_arena);
+        let x = if matches!(
+            self.prog.type_arena.get(x_core),
+            guff_types::arena::TypeData::Array(_)
+        ) {
+            self.address(&e.x, true).address(self)
+        } else {
+            self.expr(&e.x)
+        };
         let low = e.low.as_ref().map(|l| self.expr(l));
         let high = e.high.as_ref().map(|h| self.expr(h));
         let max = e.max.as_ref().map(|m| self.expr(m));
