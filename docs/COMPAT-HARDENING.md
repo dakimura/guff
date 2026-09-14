@@ -31101,3 +31101,93 @@ compat/run.sh --oss --tier pr   8 target すべて OK
 
 台帳: 65/100 at zero（68 定義、open 0、unmeasured 3）
 ```
+
+### 2026-09-14（続き 283）— `adopt milvus` は**除外**。cgo が milvus 自身の C++ コアを要求し、残るレポートはまた**レース**
+
+`corpus/hunt.json` に milvus v3.0.0（`./...`、25m、13 linter）を足して測った:
+
+```
+milvus: ill-typed packages 24 > baseline 0
+milvus: guff=20 golangci=2 both=0 P=0.0% R=0.0% [UNEXPECTED]
+```
+
+#### 1. 崩れる場所は 1 行
+
+```go
+package cgo
+
+/*
+#cgo pkg-config: milvus_core
+...
+*/
+import "C"
+```
+
+`internal/util/cgo/errors.go` の 4 行目で、**build tag は付いていない**。
+`milvus_core.pc` は milvus の `internal/core` を CMake でビルドすると出てくる
+もので、パッケージマネージャには無い。この host では
+
+```
+$ pkg-config --cflags milvus_core
+Package milvus_core was not found in the pkg-config search path.
+```
+
+で、root module 347 パッケージのうち **24 が ill-typed** になる —— cgo
+バインディング（`analyzecgowrapper` / `segcore` / `indexcgowrapper` /
+`initcore` / `cgoconverter` / `util/cgo` 本体）と、それを import する側
+（`internal/proxy`、`internal/querynodev2` と 3 つのサブパッケージ、
+`internal/datanode/index`、`cmd/tools/migration/*`）。
+
+#### 2. 残る 2 件は**毎回違う** —— 続き 277 の境界の再現
+
+`typecheck` issue は run の他の issue を全部消すので、上流のレポートは
+typecheck 数件になる。そして ill-typed が 2 つ以上あるので、**どれが出るかは
+`loadingPackage.analyze` の cancel レース**である。キャッシュを毎回捨てて 3 回:
+
+| run | 出た集合 |
+|---|---|
+| a | `{util/cgo/logging/logging_benchmark_test.go:1}` |
+| b | `{util/cgo/errors.go:9, util/cgo/futures.go:28}` |
+| c | `{util/cgo/logging/logging_benchmark_test.go:1}` |
+
+adopt の回（hunt）は b を記録していた。dagger（続き 277）と同じで、
+**参照が木の関数でない**。
+
+なお最初の 5 回は「同じ 2 件」に見えていた。数え方が悪く、golangci の複数行
+メッセージを行数で数えていたためで、JSON にして key 集合で比べたら割れた。
+§4 の「grep でツール出力を数え比べるとパス形式で騙される」と同じ穴を、
+複数行メッセージで踏んだ形である。
+
+#### 3. scope で逃げられない
+
+milvus は 3 モジュール（root / `pkg/` / `client/`）で、root からの `./...` は
+入れ子モジュールを含まない:
+
+```
+$ go list ./pkg/...
+pattern ./pkg/...: main module (github.com/milvus-io/milvus) does not contain package …
+```
+
+ハーネスのエントリにはサブディレクトリ欄が無い（`prepare.sh` が出す TSV の
+`dir` はクローン先そのもの）ので、`pkg/` を測るにはハーネス側の変更が要る。
+cgo に汚染された 24 パッケージは `internal/` に散っていて、`./internal/...` を
+外すという逃げ方もできない。
+
+#### 4. guff 側の 20 件
+
+guff は ill-typed なパッケージにも analyzer を掛けるので（続き 151/162 の
+意図的な境界）、gosec 11 / govet 4 / staticcheck 3 / revive 2 が出る。
+`internal/proxy/management.go` の G705（XSS taint）10 件が最大で、**上流は
+そのパッケージを解析していない**ので誰とも比べられない findings である。
+
+#### 5. 判断
+
+`corpus/status.py` の `EXCLUDED` と `corpus/README.md` の除外表に上を書き、
+`corpus/hunt.json` から落とした。SigNoz のような toolchain 依存でも cri-o の
+ような platform 依存でもなく、**dependency 依存**（プロジェクト自身の C++ コア
+を先にビルドする必要がある）である。milvus の CI はそれをやっているので、
+そこでは測れる。
+
+```
+台帳: 65/100 at zero（68 定義、open 0、unmeasured 3）
+```

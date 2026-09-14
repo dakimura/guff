@@ -64,6 +64,22 @@ EXCLUDED = {
     "require sonic and stay clean because it is absent from their analysed graph "
     "(0 packages each); tempo has 26. Re-adopt the moment that loader cost is fixed — "
     "nothing about tempo itself blocks it. Measured 2026-09-08 at v3.0.3",
+    "milvus": "**cgo needs milvus's own C++ core, and upstream's report is a race.** "
+    "internal/util/cgo/errors.go opens with `#cgo pkg-config: milvus_core` under no "
+    "build tag, and milvus_core.pc comes from building internal/core with CMake — not "
+    "from any package manager — so `pkg-config --cflags milvus_core` fails here and 24 "
+    "of the root module's 347 packages are ill-typed (every cgo binding plus its "
+    "dependents: analyzecgowrapper, segcore, indexcgowrapper, initcore, proxy, "
+    "querynodev2, …). golangci-lint's whole report collapses to typecheck, and because "
+    "more than one package is ill-typed it collapses to a *different* set each time — "
+    "three runs with a fresh cache gave {cgo/logging/logging_benchmark_test.go:1}, "
+    "{cgo/errors.go:9, cgo/futures.go:28} and {cgo/logging/logging_benchmark_test.go:1}. "
+    "Same shape as dagger: there is no reference set to be compatible with. guff "
+    "analyses the ill-typed packages and reports 20 findings nothing can be compared "
+    "against (guff 20 / golangci 2 / both 0). Not scopable either — pkg/ and client/ are "
+    "separate modules, so `./...` from the root does not reach them and `./pkg/...` is "
+    "\"main module does not contain package\". Re-adoptable on a machine where milvus's "
+    "core is built and installed (their own CI does that). Measured 2026-09-14 at v3.0.0",
     "moby": "public tree has no root go.mod",
     "hugo": "no .golangci.yml on the default branch",
     "etcd": "no .golangci.yml on the default branch",
