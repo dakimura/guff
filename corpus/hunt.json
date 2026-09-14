@@ -457,5 +457,13 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "25m"
+  },
+  {
+    "name": "victoriametrics",
+    "url": "https://github.com/VictoriaMetrics/VictoriaMetrics.git",
+    "ref": "v1.150.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
   }
 ]

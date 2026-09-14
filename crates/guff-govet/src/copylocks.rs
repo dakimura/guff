@@ -168,13 +168,42 @@ fn collect_call(
     out
 }
 
+/// The builtins whose argument is used only for its type, so nothing is copied.
+///
+/// ```go
+/// if fun, ok := pass.TypesInfo.Uses[id].(*types.Builtin); ok {
+///     switch fun.Name() {
+///     case "len", "cap", "Sizeof", "Offsetof", "Alignof":
+///         return
+/// ```
+///
+/// `fun.Name()` is the *builtin's* name — `Sizeof`, never `unsafe.Sizeof`.
+/// Spelling the qualified form here matched nothing, so the three `unsafe`
+/// entries were dead and `unsafe.Sizeof(*lc)` on a struct holding a
+/// `sync.Mutex` or an `atomic.Uint64` was a finding (VictoriaMetrics
+/// `lib/promutil/labelscompressor.go:26`). Asking the object rather than the
+/// spelling also keeps a package function of the same name out of it.
 fn is_sizeof_family(pass: &Pass<'_>, fun: &Expr) -> bool {
-    let Some(name) = guff_analysis::code::call_name(pass, fun) else {
+    let id = match unparen(fun) {
+        Expr::Ident(id) => id,
+        Expr::SelectorExpr(sel) => &sel.sel,
+        _ => return false,
+    };
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(&obj) = info.uses.get(&id.id) else {
+        return false;
+    };
+    let guff_types::arena::ObjectData::Builtin(b) = artifacts.objects.get(obj) else {
         return false;
     };
     matches!(
-        name.as_str(),
-        "len" | "cap" | "unsafe.Sizeof" | "unsafe.Offsetof" | "unsafe.Alignof"
+        b.name(),
+        "len" | "cap" | "Sizeof" | "Offsetof" | "Alignof"
     )
 }
 

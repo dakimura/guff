@@ -37,6 +37,20 @@ func storeThenReturn(a int) int {
 	return x
 }
 
+// silent — the read sits *between* the assignment and the `return` that ends
+// the statement list. The first version of this rule dropped the veto on the
+// strength of the `return` alone and made VictoriaMetrics'
+// `app/vmselect/graphite/tags_api.go:94` — `deadline := …` followed by
+// `_ = deadline // TODO` and, much later, a `return` — a finding.
+func storeReadBeforeTheReturn(n int) error {
+	deadline := compute(n)
+	_ = deadline // TODO: use it
+
+	return nil
+}
+
+func compute(n int) int { return n }
+
 // silent — the assignment is read before the return.
 func storeReadThenReturn(a int) int {
 	x := a

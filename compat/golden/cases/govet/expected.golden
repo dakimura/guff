@@ -20,6 +20,7 @@ composites/bad/bad.go:6:6:govet::composites: example.com/govet/composites/other.
 copylocks/bad/bad.go:5:12:govet::copylocks: bad passes lock by value: sync.Mutex
 copylocks/bad/bad.go:6:6:govet::copylocks: assignment copies lock value to _: sync.Mutex
 copylocks/bad/bad.go:15:9:govet::copylocks: return copies lock value: example.com/govet/copylocks/bad.Gen contains sync.Mutex
+copylocks/sizeof/sizeof.go:39:49:govet::copylocks: return copies lock value: example.com/govet/copylocks/sizeof.withMutex contains sync.Mutex
 defers/bad/bad.go:7:8:govet::defers: call to time.Since is not deferred
 directive/after_package/after_package.go:7:1:govet::directive: //go:debug directive only valid before package declaration
 directive/bad/bad.go:1:1:govet::directive: //go:debug directive only valid in package main or test

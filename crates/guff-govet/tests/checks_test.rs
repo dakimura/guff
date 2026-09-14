@@ -85,6 +85,33 @@ fn copylocks_flags_value_param() {
     );
 }
 
+/// `unsafe.Sizeof` and friends do not evaluate their operand.
+///
+/// Upstream asks the *object*: `pass.TypesInfo.Uses[id].(*types.Builtin)`, then
+/// switches on `fun.Name()` — which is `Sizeof`, never `unsafe.Sizeof`.
+/// Matching the qualified spelling left those three entries dead and made
+/// `unsafe.Sizeof(*lc)` on a struct holding a lock a finding (VictoriaMetrics
+/// `lib/promutil/labelscompressor.go:26`). `copyDeref` is the control: the same
+/// dereference, actually copied.
+///
+/// Measured against golangci-lint 2.12.2 on all five shapes.
+#[test]
+fn copylocks_ignores_sizeof_family() {
+    let dir = support::testdata("copylocks");
+    let stub = dir.join("stub/sync/mutex.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/govet/copylocks/sizeof",
+        &dir.join("sizeof.go"),
+        &[("sync", &stub)],
+    );
+    let messages = support::run_analyzer(copylocks_analyzer(), &pkg);
+    assert_eq!(
+        messages,
+        vec!["return copies lock value: withMutex contains sync.Mutex"],
+        "only copyDeref copies: {messages:?}"
+    );
+}
+
 #[test]
 fn copylocks_allows_pointer_param() {
     let dir = support::testdata("copylocks");

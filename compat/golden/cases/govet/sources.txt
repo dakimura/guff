@@ -46,6 +46,7 @@ composites/bad/bad.go                              crates/guff-govet/tests/testd
 composites/ok/ok.go                                crates/guff-govet/tests/testdata/composites/ok.go
 copylocks/bad/bad.go                               crates/guff-govet/tests/testdata/copylocks/bad.go
 copylocks/ok/ok.go                                 crates/guff-govet/tests/testdata/copylocks/ok.go
+copylocks/sizeof/sizeof.go                         crates/guff-govet/tests/testdata/copylocks/sizeof.go
 defers/bad/bad.go                                  crates/guff-govet/tests/testdata/defers/bad.go
 defers/ok/ok.go                                    crates/guff-govet/tests/testdata/defers/ok.go
 directive/after_package/after_package.go           crates/guff-govet/tests/testdata/directive/after_package.go
