@@ -208,6 +208,10 @@ sa4003/literal/literal.go:43:11:staticcheck::SA4000: identical expressions on th
 sa4003/literal/literal.go:48:6:staticcheck::SA4024: builtin function len does not return negative values
 sa4003/literal/literal.go:54:6:staticcheck::SA4028: x % 1 is always zero
 sa4004/bad/bad.go:8:3:staticcheck::SA4004: the surrounding loop is unconditionally terminated
+sa4004/nested/nested.go:25:4:staticcheck::SA4004: the surrounding loop is unconditionally terminated
+sa4004/nested/nested.go:40:4:staticcheck::SA4004: the surrounding loop is unconditionally terminated
+sa4004/nested/nested.go:54:3:staticcheck::SA4004: the surrounding loop is unconditionally terminated
+sa4004/nested/nested.go:99:4:staticcheck::SA4004: the surrounding loop is unconditionally terminated
 sa4005/bad/bad.go:6:2:staticcheck::SA4005: ineffective assignment to field T.X
 sa4006/bad/bad.go:11:2:staticcheck::SA4006: this value of n is never used
 sa4006/bad/bad.go:17:2:staticcheck::SA4006: this value of f is never used
@@ -225,6 +229,8 @@ sa4006/methods/methods.go:67:3:staticcheck::SA4006: this value of x is never use
 sa4006/range_ptr/range_ptr.go:28:3:staticcheck::SA4006: this value of v is never used
 sa4006/range_ptr/range_ptr.go:38:3:staticcheck::SA4006: this value of v is never used
 sa4006/range_ptr/range_ptr.go:48:3:staticcheck::SA4006: this value of v is never used
+sa4006/terminated/terminated.go:19:5:staticcheck::SA4006: this value of is is never used
+sa4006/terminated/terminated.go:32:3:staticcheck::SA4006: this value of x is never used
 sa4008/bad/bad.go:5:15:staticcheck::SA4008: variable in loop condition never changes
 sa4009/bad/bad.go:3:8:staticcheck::SA4009: argument arg is overwritten before first use
 sa4009/bad/bad.go:4:2:staticcheck::SA4009(related information): assignment to arg

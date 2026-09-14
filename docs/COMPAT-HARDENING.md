@@ -30952,3 +30952,152 @@ opentofu で guff-only が 1 件で済んでいるのは、`(*Diff).init` が呼
 ```
 
 次のタスクは `close opentofu`。
+
+### 2026-09-14（続き 282）— `close opentofu`。`unused` の「実装している」は `types.Implements` **ではない**。SA4004 は関数の直下しか見ていなかった。65/100
+
+続き 281 の 4 原因を全部直した。15 件 → 0 件。
+
+#### 1. `unused` の `implements` は上流の自前実装で、**型パラメータを 1 段だけ**束縛する
+
+続き 281 は「インスタンス化されたジェネリックインタフェースへの辺が無い」と
+書いた。**辺の集合の問題ではなかった。** 上流は `types.Implements` を使って
+いない —— `unused/implements.go` に自前の関係を持っている:
+
+```go
+func (c *methodsChecker) typeIsCompatible(implType, interfaceType types.Type) bool {
+	if types.Identical(implType, interfaceType) {
+		return true
+	}
+	// We only support trivial use of type parameters. This isn't fully compatible with compiler type checking yet.
+	tp, ok := interfaceType.(*types.TypeParam)
+	if !ok {
+		return false
+	}
+	…
+	if c.typeParams[tp] == nil {
+		if !satisfiesConstraint(implType, tp) {
+			return false
+		}
+		c.typeParams[tp] = implType
+		return true
+	}
+	return types.Identical(c.typeParams[tp], implType)
+}
+```
+
+"trivial" の一語が 2 つのコーパスを分けている:
+
+| 上流 | 宣言 | 具象 | 結果 |
+|---|---|---|---|
+| opentofu | `ResultRef[T any]` の `sigil(T)` | `sigil(cty.Value)` | `T` は**裸**なので束縛できる → **使われている** |
+| dapr | `streamer[T item]` の `list() ([]T, error)` | `list() ([]int, error)` | `[]T` は TypeParam ではない → **findings**（40 件） |
+
+**メソッド名は両方とも同じ**なので、名前で照合している限りどちらかを必ず外す。
+guff はジェネリックインタフェースの宣言を「上流も辺を張らないから」と丸ごと
+飛ばしていた（`generic_iface.go` の dapr fixture がその根拠）—— 根拠の半分は
+正しく、規則が違っていた。
+
+`crates/guff-unused/src/lenient_implements.rs` に `methodsChecker` を移植し、
+ジェネリックなインタフェース宣言と `Info.Instances` 経由のインスタンス化を
+**署名で**照合するようにした。名前ベースの集合は非ジェネリックのまま残して
+ある（そちらはコーパスが長く通している）。
+
+なお、探す前に 1 度**間違った直し方**をしている: インスタンス化された
+インタフェースのメソッド**名**を集合に足す、というもの。opentofu は直るが
+dapr の golden が 2 件落ちた（`(*comps).list` / `closeIt`）。名前では分けられ
+ないことを、gate が先に教えてくれた形である。
+
+#### 2. export されたメソッドは**根ではなく辺**（gcl-only 5 件）
+
+続き 281 §2 のとおり。`guff-unused` は
+
+```rust
+if f.name.name == "_" || is_exported(&f.name.name) {
+    roots.insert(*obj);          // ← メソッドでも根
+}
+```
+
+としていた。上流は `g.readSelection(m, named)`、つまり**型 → メソッド**の辺で
+ある。メソッドを根にすると、メソッド → レシーバ型の辺が型まで生き返らせて
+しまい、**誰も参照しない型がメソッドごとレポートから消える**。
+
+直しは、export されたメソッドを candidate にして、既にある不動点の
+「レシーバ型が使われていれば」の枝に乗せるだけ:
+
+```rust
+if known && (is_exported(name) || iface_method_names.contains(name)) {
+    queue.push(*method);
+}
+```
+
+#### 3. `init` / `main` という名前のメソッドは根（guff-only 1 件）
+
+続き 281 §3 のとおり、上流の `decl.Recv == nil` ガードは export の枝にしか
+無い。guff も同じ形に揃えた。**`init` から到達できるものが全部生きる**ので、
+fixture には「`init` からだけ呼ばれる `reset`」も入れてある —— メソッド本体
+だけを根にする直しだと、そこが落ちる。
+
+#### 4. SA4004 は**関数の直下しか見ていなかった**（gcl-only 1 件）
+
+上流は `ast.Inspect(body, …)` で本体全体を歩く。guff は
+
+```rust
+for stmt in body {        // ← 関数本体のトップレベル文だけ
+```
+
+だったので、`if raw, ok := c.Config[TimeoutsConfigKey]; ok {` の中にある
+ループ対（opentofu `resource_timeout.go:144`）は一度も検査されていない。
+最小化すると **`{ }` だけでも**落ちる:
+
+| 形 | golangci | 修正前の guff |
+|---|---|---|
+| ループ対が関数直下 | 出る | 出る |
+| 同じものを `if` で包む | 出る | **黙る** |
+| 同じものを裸のブロックで包む | 出る | **黙る** |
+| 内側ループが無い | 黙る | 黙る |
+
+歩き方を `preorder_prune`（= `ast.Inspect`。false で**その部分木だけ**を飛ばす）
+に直し、ついでにラベルも移植した —— 上流の判定は
+`stmt.Label == nil || labels[ObjectOf(stmt.Label)] == loop` で、**このループを
+名指す** `break outer` は無条件脱出、`continue outer` は「このループの
+continue」である。ラベル付き break は測って guff-only の欠落だった（1 形）。
+
+#### 5. SA4006 の AST 拒否権は、文リストが `return` するなら降りる（gcl-only 1 件）
+
+guff の SA4006 は IR に「参照が無い」と訊いたあと、**ソースで後ろに読みがある
+なら取り消す**という拒否権を持っている。拒否権が要る理由は 2 つで、どちらも
+「値が*あとで*読まれる」形である（再定義文自身の右辺での読み、ループの
+バックエッジ）。
+
+`return` がその文リストで後ろに来るなら**あとが無い**。opentofu
+`internal/legacy/tofu/state.go:442` がその形で、
+
+```go
+for _, is := range lists {
+    for i, instance := range is {
+        if instance == v {
+            is, is[len(is)-1] = append(is[:i], is[i+1:]...), nil
+            return
+```
+
+`is` の他の出現は代入より**上**の range ヘッダだけなのに、拒否権は
+「囲むループの中に読みがある」と答えていた。fixture には拒否権が守っている
+2 形も入れてあるので、拒否権ごと消す直しは通らない。
+
+#### 6. 実測
+
+```
+opentofu      guff=222 golangci=222 both=222 P=100.0% R=100.0% [OK]
+dapr          guff=1555 golangci=1555 both=1555 P=100.0% R=100.0%
+              （§1 の変更が当たる target。40 件の findings は動いていない）
+cluster-api   guff=0 golangci=0（§2 の面積が広いので 1 本追加したが、この config は
+              何も出さない target なので証拠としては弱い。効いているのは dapr の
+              1555 件と pr tier の k9s 636 / cobra 157 のほう）
+golden        234 case すべて一致（unused +7 / staticcheck-sa +6 キー、0 減）
+fix           234 case
+reject        14 case
+cargo test    --workspace --locked 緑
+compat/run.sh --oss --tier pr   8 target すべて OK
+
+台帳: 65/100 at zero（68 定義、open 0、unmeasured 3）
+```

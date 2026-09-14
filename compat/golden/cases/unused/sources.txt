@@ -5,6 +5,9 @@ genericmethod/generic_method_bad.go   crates/guff-unused/tests/testdata/basic/ge
 bad/method_bad.go                     crates/guff-unused/tests/testdata/basic/method_bad.go
 iface/iface_ok.go                     crates/guff-unused/tests/testdata/basic/iface_ok.go
 genericiface/generic_iface.go         crates/guff-unused/tests/testdata/basic/generic_iface.go
+ifaceinstance/iface_instance.go       crates/guff-unused/tests/testdata/basic/iface_instance.go
+exportedmethod/exported_method.go     crates/guff-unused/tests/testdata/basic/exported_method.go
+initmethod/init_method.go             crates/guff-unused/tests/testdata/basic/init_method.go
 lintignore/lint_ignore.go             crates/guff-unused/tests/testdata/basic/lint_ignore.go
 deadcycle/dead_cycle.go               crates/guff-unused/tests/testdata/basic/dead_cycle.go
 # Two files, one package: the directive is in the first, the methods of the
