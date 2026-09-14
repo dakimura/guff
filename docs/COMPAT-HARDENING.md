@@ -30466,3 +30466,172 @@ panic した worker はそのパッケージの findings を落として **exit 
 （バージョン文字列は dev ビルドを区別しない —— issues cache の salt と同じ穴で、
 あちらは `--no-cache` という逃げ道がある分まだ軽い）。この回は測定を
 `GUFF_CACHE` で回避しただけで、直していない。
+
+### 2026-09-14（続き 279）— `adopt pyroscope`。原因 5 つのうち 1 つは**上流のコイン投げ**、そして pin は `go version -m` が答える
+
+`corpus/hunt.json` に pyroscope v2.3.0（`./...`、25m）を足して測った:
+
+```
+pyroscope: guff=1259 golangci=1222 both=1216 P=96.6% R=99.5%
+  guff-only 43 {govet: 16, staticcheck: 16, goconst: 10, unparam: 1}
+  gcl-only   6 {goconst: 6}
+```
+
+#### 0. まず pin を間違えた —— checkout は 2.12.2 の pin ではない
+
+goconst の乖離を追って `jgautheron/goconst` の checkout（v1.10.2）を読み、
+「上流は候補の定数を位置でソートして最初を採る」という規則を導いた。**その規則
+では測定値が説明できない。** 手元の golangci-lint 2.12.2 が埋め込んでいるのは
+v1.10.**0** で、そこには**ソートが無い**。
+
+```
+$ go version -m $(which golangci-lint) | grep -E 'gosec|goconst|x/tools'
+    dep  github.com/jgautheron/goconst  v1.10.0
+    dep  github.com/securego/gosec/v2   v2.26.1
+    dep  golang.org/x/tools             v0.44.0
+```
+
+golangci-lint の checkout（`v2.12.2-65-ga67e6050`）の `go.mod` は goconst
+v1.10.2 / gosec v2.27.1 を指していて、**どちらもタグ v2.12.2 の pin ではない**。
+`git show v2.12.2:go.mod` なら正しく v1.10.0 / v2.26.1 が出る。バイナリに訊く
+`go version -m` が一番短い。
+
+続き 278 の G304 については、`readfile.go` / `call_list.go` / `helpers.go` の
+該当箇所が v2.26.1 と v2.27.1 で**同一**であることを確認した（`ContainsPkgCallExpr`
+の 3 リスト、`getCallInfo` の `*ast.Ident` 腕、selector に `.` があるかの分岐）。
+結論は動かない。
+
+ただし `"v2.27.1"` という文字列は `gosec.rs` / `gosec_g117.rs` / gosec の fixture
+と本書の過去エントリに計 18 か所ある。**一括置換はしない** —— どの主張がどの版で
+測られたかを 1 件ずつ確認していないので、sed は「確認した」という嘘を足すだけに
+なる。過去エントリは当時の記録として残す。`crates/` 側のラベルを 1 つずつ
+v2.26.1 に対して読み直すのは独立したタスクである（`gosec` の 41 規則ぶん）。
+
+#### 1. ifaceassert / SA5010 —— ジェネリクスの逃げ道が 2 種類とも無い（32 件）
+
+`pkg/querier/select_merge.go` と `pkg/phlaredb/filter_profiles_bidi.go` は、
+型パラメータを持つインタフェースに対する type switch である:
+
+```go
+switch s := BidiServerMerge[Res, Req](stream).(type) {
+case BidiServerMerge[*ingestv1.MergeProfilesStacktracesResponse, *ingestv1.MergeProfilesStacktracesRequest]:
+```
+
+guff は 1 つの case につき govet `ifaceassert` と staticcheck の 2 件を出す。
+上流はどちらも黙る —— **別々の逃げ道**で:
+
+```go
+// x/tools ifaceassert: 自由な型パラメータを含むなら判定しない
+if free.Has(V) || free.Has(T) {
+	return nil
+}
+```
+
+```go
+// staticcheck sa5010: インスタンス化されたメソッドを見たら降りる
+if ml.Origin() != ml || mr.Origin() != mr {
+	// Give up when we see generics.
+	continue instrLoop
+}
+```
+
+guff にはどちらの述語も無い。16 + 16 = 32 件、この 1 原因で guff-only の 74%。
+
+#### 2. `_` で始まるディレクトリを `./...` が拾っている（3 件）
+
+`examples/_templates/sync_test.go` の goconst 3 件は **上流がそのパッケージを
+見ていない**。Go のツールは `./...` の展開で `_` / `.` 始まりのディレクトリを
+飛ばす:
+
+```
+$ go list ./... | grep -c _templates      # 0
+$ go list ./examples/_templates/          # github.com/grafana/pyroscope/v2/examples/_templates
+```
+
+名指しすれば解決する（パッケージとしては正当）が、ワイルドカードには入らない。
+最小再現 —— `_skip/` `.hidden/` `testdata/` に同じ重複文字列を置く:
+
+| ディレクトリ | `go list ./...` | golangci | guff |
+|---|---|---|---|
+| `normal/` | あり | 1 件 | 1 件 |
+| `_skip/` | **無し** | 0 | **1 件** |
+| `.hidden/` | 無し | 0 | 0 |
+| `testdata/` | 無し | 0 | 0 |
+
+`.` と `testdata` は既に飛ばしているので、`_` だけが抜けている。
+
+#### 3. goconst の最小長は**クォートを外した値**のルーン数（1 件）
+
+`pkg/validation/validate_test.go` の `"\xc5"` は 3 回出てくる。上流の
+`addString` は
+
+```go
+unquotedStr, err = strconv.Unquote(str)
+if len(unquotedStr) == 0 || utf8.RuneCountInString(unquotedStr) < v.p.minLength {
+	return
+}
+```
+
+で、`"\xc5"` をほどくと 1 バイト（不正な UTF-8 でも 1 ルーン）なので
+`min-len` の既定 3 に届かない。guff は書かれたままの 4 文字で測っている。
+閾値の近くでしか出ない差だが、差である。
+
+#### 4. 「既にある定数」の名前は**上流のコイン投げ**（guff-only 6 + gcl-only 6）
+
+同じ 6 件の finding が両側に立つ形。guff-only と gcl-only が同数なのは「実装が
+無い」ではなく「位置か文言がずれている」の署名で、ここは文言 —— 差は定数名
+だけである。guff は `profileTypeProcessCPU`、上流は
+`processCPUProfileTypeID` を名指す。値は同じ文字列で、どちらも同じパッケージの
+`_test.go` にある（前者は関数ローカル、後者はパッケージレベル）。
+
+**上流は決まっていない。** goconst v1.10.0 は 1 パッケージのファイルを
+`maxConcurrency = runtime.NumCPU()` の goroutine で**並行に**walk し、
+
+```go
+// track this const if this is a new const, or if we are searching for duplicate consts
+if _, ok := v.p.consts[internedVal]; !ok || v.p.findDuplicates {
+```
+
+で**最初に届いた 1 つだけ**を残す。読み出し側（v1.10.0 の `api.go`）は
+`matchingConst = csts[0].Name` で、**ソートが無い**。つまり勝者はスケジューラが
+決める。pyroscope 本体で、キャッシュを毎回捨てて 4 回:
+
+| run | 名指された定数 |
+|---|---|
+| 1 | `profileTypeProcessCPU`（= guff の答え） |
+| 2 | `processCPUProfileTypeID` |
+| 3 | `profileTypeProcessCPU` |
+| 4 | `processCPUProfileTypeID` |
+
+2 ファイル・5 出現の最小再現でも 6 回中 1 回ひっくり返る。**guff の答えは
+上流の出目の片方**であって、間違いではない。`close pyroscope` ではここを
+allowlist に置く（続き 277 の dagger と同じ判断を、レポート全体ではなく
+メッセージの 1 フィールドに適用する形）。
+
+なお v1.10.2 は**この非決定性を直している** —— 候補を位置でソートし、
+`_test.go` 以外の定数を優先する。guff が合わせるべきは golangci-lint 2.12.2 が
+埋め込んでいる v1.10.0 のほうである。
+
+#### 5. unparam が `[16]byte` を「always nil」と言う（1 件）
+
+```go
+func traceIDFromLabels(labelIdx int64, stringTable []string, labels []*profilev1.Label) [16]byte {
+	var id [16]byte
+	...
+		if _, err := hex.Decode(id[:], util.YoloBuf(s)); err == nil {
+			return id
+		}
+	return id
+}
+```
+
+`pkg/pprof/pprof.go:1166` に `traceIDFromLabels - result 0 ([16]byte) is always
+nil`。配列は nil になれないので**文言からして成立していない**し、`id` は
+`id[:]` 経由で `hex.Decode` に書き換えられる。guff-only 1 件。
+
+```
+台帳: 63/100 at zero（67 定義、open 1、unmeasured 3）
+```
+
+次のタスクは `close pyroscope`。§1–§3 と §5 の 37 件が guff の欠陥、§4 の 12 件は
+上流の出目。

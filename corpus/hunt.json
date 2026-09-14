@@ -441,5 +441,13 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "25m"
+  },
+  {
+    "name": "pyroscope",
+    "url": "https://github.com/grafana/pyroscope.git",
+    "ref": "v2.3.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
   }
 ]
