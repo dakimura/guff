@@ -377,6 +377,27 @@ fn ssa_unused_but_ast_read(
     idents.value_is_read_before_redef(obj, assign_pos, block, returns_at)
 }
 
+/// Whether the instruction that produced `v` is still in the function.
+///
+/// A call to a function `ctrlflow` proved cannot return is followed by a
+/// `Panic`, and everything after it becomes an unreachable block that
+/// `blockopt::delete_unreachable_blocks` removes — upstream's IR does the same
+/// (`go/ir/emit.go`'s `fn.Prog.noReturn(callee.object)` arm). The check walks
+/// the *AST*, though, so it still visits assignments whose instructions are
+/// gone, and then reads "no referrers" off a value nothing can refer to any
+/// more.
+///
+/// VictoriaMetrics `lib/fs/reader_at.go:312` is that shape: the CAS loop sits
+/// behind `if !mincore(…)`, and on every non-linux build `mincore` is
+/// `panic("BUG: unexpected call")`. Replace the panic with a `return` in a
+/// repro and the finding disappears from guff as well.
+fn value_is_live(func: &guff_ssa::function::Function, v: Value) -> bool {
+    let Value::Instr(iid) = v else {
+        return true;
+    };
+    func.live_blocks().any(|(_, b)| b.instrs.contains(&iid))
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let inspect = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
@@ -436,6 +457,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                 if matches!(lhs, Expr::Ident(Ident { name, .. }) if name == "_") {
                                     continue;
                                 }
+                                if !value_is_live(func, Value::Instr(rid)) {
+                                    continue;
+                                }
                                 if !has_use(func, Value::Instr(rid)) {
                                     if ssa_unused_but_ast_read(
                                         pass,
@@ -491,6 +515,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         }
                     }
                     if matches!(v, Value::Const(_)) {
+                        continue;
+                    }
+                    if !value_is_live(func, v) {
                         continue;
                     }
                     if !has_use(func, v) {
