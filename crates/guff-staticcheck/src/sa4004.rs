@@ -2,6 +2,7 @@
 //!
 //! Port of `honnef.co/go/tools/staticcheck/sa4004`.
 
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use guff::ast::{BranchStmt, Expr, ReturnStmt, Stmt};
@@ -30,6 +31,28 @@ fn range_x_is_flaggable(pass: &Pass<'_>, x: &Expr) -> bool {
     }
 }
 
+/// The `for` keyword's position, used as the loop's identity when a labelled
+/// `break` / `continue` has to be matched against *this* loop.
+fn loop_key(stmt: &Stmt) -> Option<u32> {
+    match stmt {
+        Stmt::ForStmt(f) => Some(f.for_.0 as u32),
+        Stmt::RangeStmt(r) => Some(r.for_.0 as u32),
+        _ => None,
+    }
+}
+
+/// Does this branch statement refer to the loop identified by `loop_key`?
+///
+/// Upstream: `stmt.Label == nil || labels[pass.TypesInfo.ObjectOf(stmt.Label)] == loop`.
+/// Labels are function-scoped in Go, and the walk is per function, so matching
+/// on the name is the same relation as matching on the object.
+fn targets_loop(label: Option<&guff::ast::Ident>, labels: &HashMap<String, u32>, key: u32) -> bool {
+    match label {
+        None => true,
+        Some(id) => labels.get(&id.name).copied() == Some(key),
+    }
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let inspect = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
@@ -37,46 +60,72 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let mut pending: Vec<(u32, String)> = Vec::new();
     inspect.preorder_typed(node_mask!(FuncDecl, FuncLit), pass.files(), |node| {
         let body = match node {
-            NodeRef::FuncDecl(f) => f.body.as_ref().map(|b| &b.list),
-            NodeRef::FuncLit(f) => Some(&f.body.list),
+            NodeRef::FuncDecl(f) => f.body.as_ref(),
+            NodeRef::FuncLit(f) => Some(&f.body),
             _ => None,
         };
         let Some(body) = body else {
             return;
         };
-        for stmt in body {
-            let loop_body = match stmt {
-                Stmt::ForStmt(f) => &f.body.list,
-                Stmt::RangeStmt(r) => {
-                    if !range_x_is_flaggable(pass, &r.x) {
-                        continue;
-                    }
-                    &r.body.list
+
+        // `labels[pass.TypesInfo.ObjectOf(label.Label)] = label.Stmt`, kept for
+        // loops only: a label on anything else can never equal `loop`.
+        let mut labels: HashMap<String, u32> = HashMap::new();
+        walk::preorder_prune(NodeRef::BlockStmt(body), |n| {
+            if let NodeRef::LabeledStmt(l) = n {
+                if let Some(key) = loop_key(&l.stmt) {
+                    labels.insert(l.label.name.clone(), key);
                 }
-                _ => continue,
+            }
+            true
+        });
+
+        // Upstream walks the whole body with `ast.Inspect`, so a loop nested in
+        // an `if` — or in any block at all — is examined like a top-level one.
+        // Looking only at the function body's own statements missed opentofu's
+        // `internal/legacy/helper/schema/resource_timeout.go:144`, where the
+        // loop pair sits inside `if raw, ok := c.Config[…]; ok {`.
+        walk::preorder_prune(NodeRef::BlockStmt(body), |n| {
+            let (key, loop_body) = match n {
+                NodeRef::ForStmt(f) => (f.for_.0 as u32, &f.body.list),
+                NodeRef::RangeStmt(r) => {
+                    if !range_x_is_flaggable(pass, &r.x) {
+                        return true;
+                    }
+                    (r.for_.0 as u32, &r.body.list)
+                }
+                _ => return true,
             };
             if loop_body.len() < 2 {
-                continue;
+                // Upstream keeps descending here: the one-statement range loop
+                // that grabs the first element is not a finding, but a loop
+                // *inside* it may be.
+                return true;
             }
             let mut unconditional: Option<u32> = None;
             let mut has_branching = false;
-            let mut give_up = false;
             for s in loop_body {
                 match s {
                     Stmt::BranchStmt(BranchStmt {
                         tok: Token::BREAK,
-                        label: None,
+                        label,
                         tok_pos,
                         ..
-                    }) => unconditional = Some(tok_pos.0 as u32),
+                    }) => {
+                        if targets_loop(label.as_ref(), &labels, key) {
+                            unconditional = Some(tok_pos.0 as u32);
+                        }
+                    }
                     Stmt::BranchStmt(BranchStmt {
                         tok: Token::CONTINUE,
-                        label: None,
+                        label,
                         ..
                     }) => {
-                        // Top-level continue: loop is not unconditionally terminated.
-                        give_up = true;
-                        break;
+                        if targets_loop(label.as_ref(), &labels, key) {
+                            // The loop is not unconditionally terminated, and
+                            // upstream stops descending here.
+                            return false;
+                        }
                     }
                     Stmt::ReturnStmt(ReturnStmt { return_, .. }) => {
                         unconditional = Some(return_.0 as u32)
@@ -91,36 +140,42 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     _ => {}
                 }
             }
-            if give_up || unconditional.is_none() || !has_branching {
-                continue;
+            if unconditional.is_none() || !has_branching {
+                return false;
             }
-            // Upstream second pass: nested goto / continue cancels the finding.
-            let mut nested_cancels = false;
+            // Upstream second pass: a `goto` anywhere, or a `continue` that is
+            // unlabelled or names this loop, cancels the finding — "even if it
+            // is in another loop or closure".
+            let mut cancelled = false;
             for s in loop_body {
                 walk::preorder(walk::stmt_ref(s), |n| {
-                    if nested_cancels {
+                    if cancelled {
                         return false;
                     }
                     if let NodeRef::BranchStmt(b) = n {
                         match b.tok {
-                            Token::GOTO => nested_cancels = true,
-                            Token::CONTINUE if b.label.is_none() => nested_cancels = true,
+                            Token::GOTO => cancelled = true,
+                            Token::CONTINUE => {
+                                if targets_loop(b.label.as_ref(), &labels, key) {
+                                    cancelled = true;
+                                }
+                            }
                             _ => {}
                         }
                     }
                     true
                 });
             }
-            if nested_cancels {
-                continue;
+            if !cancelled {
+                if let Some(pos) = unconditional {
+                    pending.push((
+                        pos,
+                        "the surrounding loop is unconditionally terminated".into(),
+                    ));
+                }
             }
-            if let Some(pos) = unconditional {
-                pending.push((
-                    pos,
-                    "the surrounding loop is unconditionally terminated".into(),
-                ));
-            }
-        }
+            true
+        });
     });
     for (pos, msg) in pending {
         pass.reportf(pos, msg);

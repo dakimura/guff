@@ -160,6 +160,79 @@ fn unused_keeps_interface_impl_methods() {
     assert!(messages[0].contains("trulyUnused is unused"));
 }
 
+/// A generic sealing interface keeps its implementations alive — and the
+/// neighbouring fixture's does not.
+///
+/// `unused` carries its own `implements` (unused/implements.go), in which an
+/// interface method's **bare** type parameter binds to whatever the concrete
+/// method uses (consistently, across the interface), while a type parameter
+/// *inside* another type matches nothing. So `sigil(T)` is satisfied by both
+/// `sigil(string)` and `sigil(int)`, and `generic_iface.go`'s
+/// `list() ([]T, error)` is satisfied by no concrete `list`.
+///
+/// Matching interface methods by name cannot separate the two — the names are
+/// the same on both sides — which is why guff resolves generic interfaces by
+/// signature. Measured against golangci-lint 2.12.2 on both fixtures; the
+/// golden gates them side by side.
+#[test]
+fn unused_resolves_generic_interfaces_by_signature() {
+    let dir = support::testdata("basic");
+    let pkg = support::typecheck_pkg(
+        "example.com/unused/ifaceinstance",
+        &dir.join("iface_instance.go"),
+    );
+    let mut messages = support::run_analyzer(analyzer(), &pkg);
+    messages.sort();
+    assert_eq!(
+        messages,
+        vec!["field index is unused", "field index is unused"],
+        "both `sigil` methods implement ResultRef[T] and stay: {messages:?}"
+    );
+}
+
+/// (2.1) "named types use exported methods" is an *edge from the type*.
+///
+/// `g.readSelection(m, named)` keeps an exported method alive only while its
+/// receiver type is alive. Treating the method as a root instead let it
+/// resurrect the type, so a type nothing references vanished from the report
+/// together with its methods — five findings on opentofu's
+/// `basicComponentFactory`.
+#[test]
+fn unused_reports_exported_methods_of_unused_types() {
+    let dir = support::testdata("basic");
+    let pkg = support::typecheck_pkg(
+        "example.com/unused/exportedmethod",
+        &dir.join("exported_method.go"),
+    );
+    let mut messages = support::run_analyzer(analyzer(), &pkg);
+    messages.sort();
+    assert_eq!(
+        messages,
+        vec![
+            "func (*withExported).Only is unused",
+            "func (*withUnexported).only is unused",
+            "type withExported is unused",
+            "type withUnexported is unused",
+        ],
+        "the used type keeps its exported method: {messages:?}"
+    );
+}
+
+/// (1.5) "packages use init functions" has no receiver guard, so a *method*
+/// named `init` is a root — and its callees ride along.
+#[test]
+fn unused_treats_a_method_named_init_as_a_root() {
+    let dir = support::testdata("basic");
+    let pkg =
+        support::typecheck_pkg("example.com/unused/initmethod", &dir.join("init_method.go"));
+    let messages = support::run_analyzer(analyzer(), &pkg);
+    assert_eq!(
+        messages,
+        vec!["func (*Diff).initNever is unused"],
+        "`init` and the `reset` it calls are both alive: {messages:?}"
+    );
+}
+
 /// The struct-field half of `unused`, which guff did not model at all.
 ///
 /// honnef makes a named struct type *own* its fields (`edgeKindOwn`): they are

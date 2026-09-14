@@ -96,6 +96,7 @@ sa4003/literal/literal.go                    crates/guff-staticcheck/tests/testd
 sa4003/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa4003/ok.go
 sa4004/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa4004/bad.go
 sa4004/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa4004/ok.go
+sa4004/nested/nested.go                      crates/guff-staticcheck/tests/testdata/sa4004/nested.go
 sa4005/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa4005/bad.go
 sa4005/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa4005/ok.go
 sa4006/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa4006/bad.go
@@ -108,6 +109,7 @@ sa4006/methods/methods.go                    crates/guff-staticcheck/tests/testd
 # A finding flowing through a `range` over a pointer to a (named) array — the
 # shape whose SSA lowering panicked on minio.
 sa4006/range_ptr/range_ptr.go                crates/guff-staticcheck/tests/testdata/sa4006/range_ptr.go
+sa4006/terminated/terminated.go              crates/guff-staticcheck/tests/testdata/sa4006/terminated.go
 sa4006/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa4006/ok.go
 sa4008/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa4008/bad.go
 sa4008/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa4008/ok.go

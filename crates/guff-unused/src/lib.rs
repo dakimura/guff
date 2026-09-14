@@ -10,6 +10,8 @@
 //! and not three. guff has no second edge kind: fields are their own candidate
 //! set, reported only when their owner type came out used.
 
+mod lenient_implements;
+
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
@@ -19,6 +21,8 @@ use guff_analysis::code::is_generated_at;
 use guff_analysis::passes::facts::generated;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use guff_types::arena::{ObjectArena, ObjectData, ObjectId, TypeArena, TypeData, TypeId};
+use guff_types::interface::{interface_method, interface_num_methods};
+use guff_types::named::named_obj;
 use guff_types::unalias_readonly;
 use guff_types::{pointer_elem, signature_recv};
 
@@ -560,6 +564,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let mut method_recv_type: HashMap<ObjectId, ObjectId> = HashMap::new();
     let mut method_display: HashMap<ObjectId, String> = HashMap::new();
     let mut iface_method_names: HashSet<String> = HashSet::new();
+    // Interface types whose methods have to be compared by signature rather
+    // than by name: the generic declarations in this package, and the
+    // instantiations of them the source writes. Upstream's `allInterfaces`
+    // holds both (`g.interfaceTypes` plus `g.info.Instances`).
+    let mut generic_ifaces: Vec<TypeId> = Vec::new();
 
     // Every method name any interface *type* mentions — including an anonymous
     // one written inline, which is how a package keeps a method private to
@@ -590,6 +599,15 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 if spec.type_params.is_some()
                     && matches!(spec.ty, guff::ast::Expr::InterfaceType(_))
                 {
+                    // Not a hole: the *signatures* decide, and they are asked
+                    // below through `lenient_implements`. Adding these method
+                    // names to the flat set would silence dapr's ten
+                    // `streamer[T]` implementations, which upstream reports.
+                    if let Some(Some(obj)) = info.defs.get(&spec.name.id) {
+                        if let Some(t) = obj.typ(&artifacts.objects) {
+                            generic_ifaces.push(t);
+                        }
+                    }
                     return false;
                 }
             }
@@ -603,6 +621,64 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             true
         });
     }
+
+    // The other half of `allInterfaces`, and the reason the skip above is a
+    // skip rather than a hole:
+    //
+    //     for _, ins := range g.info.Instances {
+    //         if typ, ok := ins.Type.(*types.Named); ok && typ.Obj().Pkg() == g.pkg {
+    //             if iface, ok := typ.Underlying().(*types.Interface); ok {
+    //                 allInterfaces[iface] = struct{}{}
+    //
+    // A generic interface *declaration* never matches a concrete method set —
+    // its signatures still mention `T` — so upstream builds no edge from it,
+    // which is why dapr's ten `streamer[T]` implementations are findings. An
+    // *instantiation* written in the package (`var _ ResultRef[cty.Value] =
+    // valueResultRef{}`) is a different type whose signatures are concrete, and
+    // that one does match. Keying on `Info.Instances`, as upstream does, keeps
+    // the two apart: dapr instantiates the generic *function*, opentofu names
+    // the instantiated *interface*.
+    for inst in info.instances.values() {
+        let named = unalias_readonly(&artifacts.types, inst.typ);
+        if !matches!(artifacts.types.get(named), TypeData::Named(_)) {
+            continue;
+        }
+        let in_this_package = named_obj(&artifacts.types, named)
+            .pkg(&artifacts.objects)
+            .is_some_and(|p| p == artifacts.type_pkg);
+        if !in_this_package {
+            continue;
+        }
+        if matches!(
+            artifacts.types.get(named.underlying(&artifacts.types)),
+            TypeData::Interface(_)
+        ) {
+            generic_ifaces.push(named);
+        }
+    }
+
+    // `(interface, [(method name, method signature)])`, resolved once.
+    let iface_methods: Vec<(TypeId, Vec<(String, TypeId)>)> = {
+        let mut types = artifacts.types.clone();
+        let mut out = Vec::new();
+        for &iface in &generic_ifaces {
+            let under = iface.underlying(&types);
+            let n =
+                interface_num_methods(&mut types, &artifacts.objects, &artifacts.packages, under);
+            let mut methods = Vec::with_capacity(n);
+            for i in 0..n {
+                let m =
+                    interface_method(&mut types, &artifacts.objects, &artifacts.packages, under, i);
+                if let Some(sig) = m.typ(&artifacts.objects) {
+                    methods.push((m.name(&artifacts.objects).to_string(), sig));
+                }
+            }
+            if !methods.is_empty() {
+                out.push((iface, methods));
+            }
+        }
+        out
+    };
 
     for file in pass.files() {
         if is_generated_at(pass, file.file_start.0 as u32) {
@@ -678,9 +754,38 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                 }
                             }
                         }
-                        if f.name.name == "_" || is_exported(&f.name.name) {
+                        // A *method* named `init` (or `main`, in package
+                        // main) is used, receiver and all:
+                        //
+                        //     } else if decl.Name.Name == "init" {
+                        //         // (1.5) packages use init functions
+                        //         g.use(obj, nil)
+                        //     } else if decl.Name.Name == "main" && g.pkg.Name() == "main" {
+                        //
+                        // The `decl.Recv == nil` guard sits on the *exported*
+                        // branch above those two and on no other, so upstream
+                        // cannot tell `func init()` from `func (d *Diff)
+                        // init()` — and everything the method calls rides along
+                        // (opentofu `internal/legacy/tofu/diff.go:226`).
+                        if f.name.name == "_"
+                            || f.name.name == "init"
+                            || (f.name.name == "main" && pkg_name == "main")
+                        {
                             roots.insert(*obj);
                         } else {
+                            // (2.1) named types use exported methods — an
+                            // *edge* from the type, `g.readSelection(m,
+                            // named)`, not a root. A type nothing references is
+                            // unused together with its exported methods, which
+                            // is how upstream reports opentofu's
+                            // `basicComponentFactory` and its four. The
+                            // fixed-point loop below queues the method once its
+                            // receiver type is reached.
+                            //
+                            // Upstream's own rule list says the opposite —
+                            // "(8.1) Exported methods on concrete types are
+                            // always marked as used" — and the code is what
+                            // runs.
                             candidates.insert(*obj);
                         }
                         continue;
@@ -1074,8 +1179,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     // Calls through an *instantiated* generic receiver (`streamer[T].nextBatch`)
     // record the substituted method copy in `Uses`, which is a different
-    // ObjectId from the declaration. `Func` has no `Origin()` to map it back
-    // (R18 DEFERRED), so remember (receiver type name, method name) too.
+    // ObjectId from the declaration, so remember (receiver type name, method
+    // name) too. `guff_types::object::func::func_origin` now maps a clone back
+    // to the method the source declares (added for SA5010, COMPAT-HARDENING
+    // 続き 280) and would do this more precisely; the name pair is what the
+    // corpus has been gated on, so swapping it is its own measured change.
     let mut used_methods: HashSet<(String, String)> = HashSet::new();
     // Names that reachability can never retract: everything used that is not a
     // package-level declaration of this package — imported objects, locals,
@@ -1186,9 +1294,44 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             let known =
                 used_type_names.contains(recv_name) || foreign_used_names.contains(recv_name);
             let name = method.name(&artifacts.objects);
-            if known && iface_method_names.contains(name) {
+            // (2.1) named types use exported methods, and (8.2) a used type
+            // uses the methods that implement an interface. Both are edges out
+            // of the *type*, so both need `known`.
+            if known && (is_exported(name) || iface_method_names.contains(name)) {
                 queue.push(*method);
                 continue;
+            }
+            // The generic half of `allInterfaces`, which has to be asked by
+            // *signature*. `streamer[T]`'s `list() ([]T, error)` and
+            // `ResultRef[T]`'s `sigil(T)` declare methods the concrete types
+            // also declare, under the same names; only the second is
+            // compatible, because upstream's checker binds a **bare** type
+            // parameter and nothing else (see `lenient_implements`). Names
+            // alone cannot tell the two apart.
+            if known && !iface_methods.is_empty() {
+                if let Some(recv_typ) = recv_ty.typ(&artifacts.objects) {
+                    let implements_one =
+                        iface_methods.iter().any(|(iface, methods)| {
+                            if !methods.iter().any(|(n, _)| n == name) {
+                                return false;
+                            }
+                            let mut types = artifacts.types.clone();
+                            lenient_implements::lenient_implements(
+                                &mut types,
+                                &artifacts.objects,
+                                &artifacts.packages,
+                                artifacts.type_pkg,
+                                recv_typ,
+                                *iface,
+                                methods,
+                            )
+                            .is_some()
+                        });
+                    if implements_one {
+                        queue.push(*method);
+                        continue;
+                    }
+                }
             }
             let key = (recv_name.to_string(), name.to_string());
             if used_methods.contains(&key) {

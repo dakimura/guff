@@ -111,6 +111,30 @@ struct IdentIndex {
     /// `(start, end)` of every loop body, so a value that is read earlier in
     /// the same loop can be recognised as live across the back edge.
     loops: Vec<(u32, u32)>,
+    /// Ends of assignments that a `return` follows in their own statement list.
+    ///
+    /// The veto this index implements exists because guff's SSA loses a use in
+    /// two shapes (a read on the redefining statement's own right-hand side, a
+    /// loop back edge) — both of which reach the value through a *later*
+    /// execution. When the statement list returns after the assignment there is
+    /// no later execution: control leaves the function, so a read further down
+    /// the source can never observe this value and `has_use` saying "no
+    /// referrers" is the whole answer.
+    ///
+    /// opentofu `internal/legacy/tofu/state.go:442` is the shape —
+    ///
+    /// ```ignore
+    /// for _, is := range lists {
+    ///     for i, instance := range is {
+    ///         if instance == v {
+    ///             is, is[len(is)-1] = append(is[:i], is[i+1:]...), nil
+    ///             return
+    /// ```
+    ///
+    /// — where the only read of `is` is the `range` header *above* the
+    /// assignment, which the position index reads as a read inside an
+    /// enclosing loop.
+    returns_after: HashSet<u32>,
 }
 
 impl IdentIndex {
@@ -149,9 +173,15 @@ impl IdentIndex {
                     _ => None,
                 };
                 if let Some((key, list)) = list {
-                    for stmt in list {
+                    for (i, stmt) in list.iter().enumerate() {
                         if let Stmt::AssignStmt(assign) = stmt {
                             let end = assign_end(assign);
+                            if list[i + 1..]
+                                .iter()
+                                .any(|s| matches!(s, Stmt::ReturnStmt(_)))
+                            {
+                                idx.returns_after.insert(end);
+                            }
                             for lhs in &assign.lhs {
                                 if let Expr::Ident(id) = unparen_expr(lhs) {
                                     idx.blocks.insert(id.name_pos.0 as u32, key);
@@ -309,6 +339,11 @@ fn ssa_unused_but_ast_read(
     let Some(obj) = object_of(pass, id) else {
         return false;
     };
+    // Control leaves the function before anything below can run — see
+    // `IdentIndex::returns_after`.
+    if idents.returns_after.contains(&assign_pos) {
+        return false;
+    }
     let block = idents.blocks.get(&(id.name_pos.0 as u32)).copied();
     // A loop back edge carries the value to reads that appear *earlier* in the
     // source, which position ordering alone cannot see:

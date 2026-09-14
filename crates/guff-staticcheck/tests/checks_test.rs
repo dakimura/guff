@@ -2299,6 +2299,44 @@ sa_check_bad_ok!(sa4000, sa4000_flags_bad_cases, sa4000_allows_ok_cases);
 sa_check_bad_ok!(sa4001, sa4001_flags_bad_cases, sa4001_allows_ok_cases);
 sa_check_bad_ok!(sa4003, sa4003_flags_bad_cases, sa4003_allows_ok_cases);
 sa_check_bad_ok!(sa4004, sa4004_flags_bad_cases, sa4004_allows_ok_cases);
+
+/// SA4004 walks the whole function body, and matches labelled branches against
+/// the loop they name.
+///
+/// Upstream is `ast.Inspect(body, …)`, so a loop nested in an `if` — or in any
+/// block — is examined like a top-level one; guff read only the function
+/// body's own statements and missed opentofu's
+/// `internal/legacy/helper/schema/resource_timeout.go:144`. The labelled
+/// shapes pin the other half: `stmt.Label == nil || labels[…] == loop` makes
+/// `break outer` on this loop an unconditional exit, and `continue outer` on
+/// this loop a reason not to report.
+///
+/// Positions, not a count: five of the six functions differ only in where the
+/// finding lands. Measured against golangci-lint 2.12.2.
+#[test]
+fn sa4004_examines_loops_at_any_depth() {
+    let pkg = typecheck_rule("sa4004", "nested.go");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64)> = support::run_analyzer_diagnostics(sa4004::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| {
+            let p = fset.position(guff::position::Pos(d.pos as i64));
+            (p.line, p.column)
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            (25, 4), // insideIf
+            (40, 4), // insideBareBlock
+            (54, 3), // labelledBreak
+            (99, 4), // nestedLoopInsideASilentOne — the *inner* loop
+        ],
+        "labelledContinueOuter and gotoCancels are silent"
+    );
+}
 sa_check_bad_ok!(sa4005, sa4005_flags_bad_cases, sa4005_allows_ok_cases);
 #[test]
 fn sa4006_flags_bad_cases() {
@@ -2320,6 +2358,41 @@ fn sa4006_flags_bad_cases() {
 /// Shapes 3, 4 and 6 are the ones the guard is *for*, and they have to stay
 /// silent: reading before any redefinition (3), a redefinition inside a nested
 /// `if` that may not run (4), and a value read after the loop (6).
+/// The AST veto over the IR stands down when the statement list returns.
+///
+/// guff keeps a value alive when the source reads the object further down,
+/// because its SSA loses a use in two shapes — a read on the redefining
+/// statement's own right-hand side, and a loop back edge. Both reach the value
+/// through a *later* execution, and a `return` in the same statement list
+/// means there is none: opentofu's `internal/legacy/tofu/state.go:442` assigns
+/// to the `range` variable and returns, and the only other mention of it is
+/// the range header above.
+///
+/// The last two functions are the shapes the veto exists for, kept here so a
+/// fix that simply deletes it fails.
+#[test]
+fn sa4006_ignores_later_reads_when_the_list_returns() {
+    let pkg = typecheck_rule("sa4006", "terminated.go");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64)> = support::run_analyzer_diagnostics(sa4006::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| {
+            let p = fset.position(guff::position::Pos(d.pos as i64));
+            (p.line, p.column)
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            (19, 5), // removeFromLists
+            (32, 3), // storeThenReturn
+        ],
+        "storeReadThenReturn, readOnOwnRhs and readAcrossBackEdge stay silent"
+    );
+}
+
 #[test]
 fn sa4006_loop_back_edge_shapes() {
     let pkg = typecheck_rule("sa4006", "loops.go");
