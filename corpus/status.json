@@ -6,9 +6,9 @@
     "`unmeasured` is not `clean`: an absent measurement is a question."
   ],
   "goal": 100,
-  "defined": 67,
+  "defined": 66,
   "clean": 63,
-  "open": 1,
+  "open": 0,
   "unmeasured": 3,
   "targets": {
     "alertmanager": {
@@ -84,7 +84,7 @@
     "caddy": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260908T135546Z",
+      "at": "20260913T233842Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -124,7 +124,7 @@
     "cobra": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260908T135546Z",
+      "at": "20260913T233842Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -148,7 +148,7 @@
     "consul": {
       "tier": "nightly",
       "state": "clean",
-      "at": "20260908T135927Z",
+      "at": "20260908T233059Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -156,7 +156,7 @@
     "containerd": {
       "tier": "nightly",
       "state": "clean",
-      "at": "20260830T082654Z",
+      "at": "20260908T233059Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -182,26 +182,6 @@
       "needs_platform": "linux",
       "state": "unmeasured",
       "skipped_on": "darwin"
-    },
-    "dagger": {
-      "tier": "hunt",
-      "state": "open",
-      "at": "20260908T142138Z",
-      "open": 209,
-      "guff_only": 203,
-      "gcl_only": 6,
-      "by_linter": {
-        "goimports": 160,
-        "gofmt": 12,
-        "govet": 8,
-        "unused": 6,
-        "typecheck": 6,
-        "staticcheck": 5,
-        "nolintlint": 5,
-        "whitespace": 4,
-        "dupl": 2,
-        "unconvert": 1
-      }
     },
     "dapr": {
       "tier": "hunt",
@@ -262,7 +242,7 @@
     "gin": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260908T135546Z",
+      "at": "20260913T233842Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -278,7 +258,7 @@
     "go-client": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260908T135546Z",
+      "at": "20260913T233842Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -310,7 +290,7 @@
     "grafana": {
       "tier": "nightly",
       "state": "clean",
-      "at": "20260830T082654Z",
+      "at": "20260913T234113Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -318,7 +298,7 @@
     "helm": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260908T135546Z",
+      "at": "20260913T233842Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -358,7 +338,7 @@
     "k9s": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260908T135546Z",
+      "at": "20260913T233842Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0

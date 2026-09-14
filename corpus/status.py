@@ -84,6 +84,25 @@ EXCLUDED = {
     "prepare step. Measured 2026-09-06 at v0.33.1",
     "signoz": "the host toolchain cannot build it. go.mod says go 1.25.7 with no toolchain line, so GOTOOLCHAIN=auto (which only upgrades) runs the host's go1.26.5 — and github.com/bytedance/sonic v1.14.1 declares rt.GoMapIterator in three files that are all excluded on go1.26 (!go1.24, and two go1.24 && !go1.26). go build ./... fails with \"undefined: GoMapIterator\" and golangci-lint's whole report collapses to 1 typecheck finding, so 15 linters over 356 packages measure nothing. GOTOOLCHAIN=go1.25.7 go build ./... exits 0, so this is toolchain-version-bound, not platform-bound like cri-o: measurable on a Go 1.24/1.25 host, and re-checkable when signoz bumps sonic. Measured 2026-09-06 at v0.139.0",
     "inspektor-gadget": "Linux only. pkg/utils/host and pkg/symbolizer/symtab are //go:build linux on every file, so go list reports GoFiles=0 for both on darwin and 33 files import the first directly. golangci-lint's whole report collapses to 1 typecheck finding, guff reports 1 gofumpt finding, and the two do not overlap: guff 1 / golangci 1 / both 0. 128 of 252 packages are tainted and the 124 clean ones are scattered across six top-level directories — ./pkg/... collapses the same way because pkg/process-helpers is inside it, so there is no subtree to scope to. Platform-bound like cri-o and tetragon, not toolchain-bound like signoz. Measured 2026-09-07 at v0.55.1",
+    "dagger": "**upstream's report is a race, not a set.** 228 doc snippets under "
+    "docs/ import dagger/my-module/internal/dagger, a module path that exists on no "
+    "platform, so 244 of 481 packages are ill-typed on darwin (228 of them everywhere). "
+    "golangci-lint's loadingPackage.analyze calls the run-wide cancel() the moment one "
+    "package's actions fail with IllTypedError, so the typecheck issues it prints are "
+    "whichever ill-typed packages won the race — and a typecheck issue deletes every "
+    "other issue in the run. Four ./... runs gave 2, 4, 2 and 8 issues (the adoption run "
+    "recorded a fifth set of 6) and the four smaller sets share no file at all; a "
+    "12-package minimal repro gave 8 different sets in 8 runs, and --concurrency=1 does "
+    "not settle it. With exactly one ill-typed package the same repro is stable 6 times "
+    "out of 6 — the line is at two, and dagger has 186. "
+    "A tool cannot be compatible with a reference that is not a function of the tree. "
+    "Scoping away from docs/ does not rescue it on this host: the other 16 ill-typed "
+    "packages are all linux-only (util/layercopy's cleanRel lives in a //go:build linux "
+    "file while its caller filter.go carries no tag, engine/engineutil wants "
+    "unix.OpenTree, network/netinst wants syscall.Mount, and cmd/engine + engine/server "
+    "pull containerd's overlay snapshotter). On Linux a docs-free packages pattern would "
+    "measure, and the entry schema has that field, so this is re-adoptable there. "
+    "Measured 2026-09-08 and 2026-09-10 at v0.21.9",
     "opentelemetry-collector": "100 go.mod files and no go.work: ./... at the "
     "checkout root reaches exactly one package (internal/statusutil), and a "
     "submodule cannot be named from there (go list ./pdata/... -> \"directory "

@@ -424,9 +424,132 @@ fn gosec_g304_trusts_cleaned_and_constant_paths() {
     let pkg = support::typecheck_fixture("gosec", "example.com/gosec/g304", "g304.go");
     let messages = support::run_analyzer(gosec(), &pkg);
     let g304 = messages.iter().filter(|m| m.starts_with("G304: ")).count();
-    // Counted: 22 functions, one call each, and 10 of them are findings.
-    // `any(contains(…))` passes with all 22 reported.
+    // Counted: 28 functions, one call each, and 10 of them are findings.
+    // `any(contains(…))` passes with all 28 reported.
     assert_eq!(g304, 10, "{messages:?}");
+}
+
+/// gosec matches a call by its **receiver**, not by the callee's declaring
+/// package — and G304 is the rule where the difference has a name.
+///
+/// `CallList.ContainsPkgCallExpr` asks `GetCallInfo` (helpers.go) for a
+/// `(selector, ident)` pair: an identifier bound to a package resolves through
+/// the file's imports, and anything else — a variable, a field, a nested
+/// selector — contributes the receiver's *type string*, which contains a `.`
+/// and is looked up verbatim. `(*os.Root).Open` is therefore never `os.Open`,
+/// however plainly it is package `os`'s `Open`.
+///
+/// The six shapes at the end of the fixture are the root-scoped API gosec's own
+/// G122 message recommends ("consider root-scoped APIs (e.g. os.Root)"), so
+/// resolving the callee's package turned the fix into the finding. grafana
+/// `pkg/storage/unified/search/disk_cleanup.go:456` is one of them and was the
+/// corpus's last open divergence. Measured against golangci-lint 2.12.2
+/// (gosec v2.27.1): upstream reports none of the six.
+#[test]
+fn gosec_g304_matches_the_receiver_not_the_callee_package() {
+    let pkg = support::typecheck_fixture("gosec", "example.com/gosec/g304", "g304.go");
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64)> = support::run_analyzer_diagnostics(gosec(), &pkg)
+        .into_iter()
+        .filter(|d| d.message.starts_with("G304: "))
+        .map(|d| {
+            let p = fset.position(guff::position::Pos(d.pos as i64));
+            (p.line, p.column)
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            (22, 49),  // VarPath
+            (34, 58),  // Joined
+            (46, 9),   // JoinedVar
+            (57, 53),  // Concat
+            (63, 50),  // Create
+            (65, 52),  // OpenFile
+            (86, 52),  // IoutilRead
+            (89, 60),  // PathJoin
+            (109, 12), // UseBeforeClean
+            (124, 9),  // JoinLiteralVar
+        ],
+        "G304 report positions; the six *os.Root calls from line 140 on \
+         (RootOpen / RootCreate / RootOpenFile / RootReadFile and the two \
+         field-receiver spellings) are methods declared in package os, not \
+         os.Open"
+    );
+}
+
+/// The same property from the other side: a **dot-imported** call names no
+/// package at all.
+///
+/// `GetCallInfo`'s `*ast.Ident` arm answers with `ctx.Pkg.Name()` — the package
+/// being analysed — and `GetImportPath` finds no import by that name, so
+/// `ContainsPkgCallExpr` matches nothing. Every list converted with G304's is
+/// exercised here: G304 and G303's argument list (`dotimport_os.go`), G102
+/// (`dotimport_net.go`), G109 and G110 (`dotimport_io.go`). Each fixture pairs
+/// every dot-imported call with the package-qualified spelling, so a port that
+/// stops matching altogether fails too.
+///
+/// Measured against golangci-lint 2.12.2 (gosec v2.27.1): upstream reports the
+/// qualified halves and nothing else.
+#[test]
+fn gosec_dot_imported_calls_match_no_package_rule() {
+    let positions = |pkg_id: &str, file: &str, prefix: &str| -> Vec<(i64, i64)> {
+        let pkg = support::typecheck_fixture("gosec", pkg_id, file);
+        let fset = pkg.fset.clone().expect("fixture has a FileSet");
+        let mut got: Vec<(i64, i64)> = support::run_analyzer_diagnostics(gosec(), &pkg)
+            .into_iter()
+            .filter(|d| d.message.starts_with(prefix))
+            .map(|d| {
+                let p = fset.position(guff::position::Pos(d.pos as i64));
+                (p.line, p.column)
+            })
+            .collect();
+        got.sort();
+        got
+    };
+
+    let os_g304 = positions("example.com/gosec/dotimportos", "dotimport_os.go", "G304: ");
+    assert_eq!(
+        os_g304,
+        vec![
+            (31, 57), // QualifiedOpen
+            (33, 59), // QualifiedCreate
+            (35, 61), // QualifiedOpenFile
+            (37, 59), // QualifiedReadFile
+            (43, 60), // DotTempDirArg — os.Create is qualified; only its argument is not
+            (47, 9),  // QualifiedTempDirArg
+        ],
+        "G304: the four dot-imported reads are silent"
+    );
+    let os_g303 = positions("example.com/gosec/dotimportos", "dotimport_os.go", "G303: ");
+    assert_eq!(
+        os_g303,
+        vec![(47, 9)],
+        "G303: `os.Create(TempDir() + …)` is silent — findTempDirArgs has to \
+         recognise the *argument* call as os.TempDir, and a dot-imported one \
+         is not that call"
+    );
+
+    let net_g102 = positions("example.com/gosec/dotimportnet", "dotimport_net.go", "G102: ");
+    assert_eq!(
+        net_g102,
+        vec![(17, 55)],
+        "G102: only the package-qualified net.Listen binds to all interfaces"
+    );
+
+    let io_g109 = positions("example.com/gosec/dotimportio", "dotimport_io.go", "G109: ");
+    assert_eq!(
+        io_g109,
+        vec![(33, 9)],
+        "G109: the dot-imported Atoi never enters the tracked set"
+    );
+    let io_g110 = positions("example.com/gosec/dotimportio", "dotimport_io.go", "G110: ");
+    assert_eq!(
+        io_g110,
+        vec![(46, 9)],
+        "G110: the dot-imported Copy is not on the copy list"
+    );
 }
 
 /// G117 over one fixture whose every function is one marshal call, marked

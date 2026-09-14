@@ -123,3 +123,34 @@ func JoinLiteralVar(name string) (*os.File, error) {
 
 	return os.Open(p)
 }
+
+// The rest of the file is the other half of the rule: *which call* is on the
+// list at all. gosec's `CallList.ContainsPkgCallExpr` names the receiver by
+// syntax — an identifier bound to a package resolves through the file's
+// imports, anything else contributes its own *type string* — so `os.Open` is
+// the only spelling of `os.Open`. Resolving the callee's declaring package
+// instead reported all six of these, and one of them on grafana
+// (`pkg/storage/unified/search/disk_cleanup.go:456`, an `*os.Root`).
+
+type rootHolder struct{ root *os.Root }
+
+// silent — `(*os.Root).Open` is a method declared in package `os`, not
+// `os.Open`. Every method below is the root-scoped API gosec *recommends*
+// (G122's own message points at it), so reporting them inverts the rule.
+func RootOpen(root *os.Root, p string) (*os.File, error) { return root.Open(p) }
+
+func RootCreate(root *os.Root, p string) (*os.File, error) { return root.Create(p) }
+
+func RootOpenFile(root *os.Root, p string) (*os.File, error) {
+	return root.OpenFile(p, os.O_RDONLY, 0o600)
+}
+
+func RootReadFile(root *os.Root, p string) ([]byte, error) { return root.ReadFile(p) }
+
+// silent — a field selector receiver is the same case with a different
+// `GetCallInfo` arm: the type string is `*os.Root`, which is not a rule key.
+func RootFieldOpen(h rootHolder, p string) (*os.File, error) { return h.root.Open(p) }
+
+func RootFieldOpenFile(h rootHolder, p string) (*os.File, error) {
+	return h.root.OpenFile(p, os.O_RDONLY, 0o600)
+}
