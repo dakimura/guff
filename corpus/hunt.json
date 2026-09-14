@@ -449,5 +449,13 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "25m"
+  },
+  {
+    "name": "opentofu",
+    "url": "https://github.com/opentofu/opentofu.git",
+    "ref": "v1.12.6",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
   }
 ]
