@@ -49,6 +49,7 @@ bad.go:223:6:gocritic::badCond: `x == a && x == b` condition is suspicious
 bad.go:231:9:gocritic::regexpMust: for const patterns like "abc", use regexp.MustCompile
 bad.go:235:6:gocritic::wrapperFunc: use strings.Split method in `strings.SplitN(s, ",", -1)`
 bad.go:240:6:gocritic::argOrder: "#" and s arguments order looks reversed
+bad.go:248:6:gocritic::argOrder: "#prefix" and s+"/" arguments order looks reversed
 deprecated.go:19:2:gocritic::deprecatedComment: `Deprecated: ` notices should be in a dedicated paragraph, separated from the rest
 deprecated.go:26:1:gocritic::deprecatedComment: `Deprecated: ` notices should be in a dedicated paragraph, separated from the rest
 deprecated.go:31:2:gocritic::deprecatedComment: `Deprecated: ` notices should be in a dedicated paragraph, separated from the rest

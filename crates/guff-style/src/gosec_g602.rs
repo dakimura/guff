@@ -168,11 +168,21 @@ fn collect_reports(
                         }
                     }
                     InstrData::MakeSlice(ms) => {
-                        let Some(len_v) = ms.len else {
+                        // The capacity is the **cap** argument when there is
+                        // one, and the length only when there is not:
+                        // `make([]float64, 0, n)` has capacity `n`, not 0.
+                        // Reading the length here made every index into a
+                        // `make([]T, 0, cap)` slice a finding — photoprism's
+                        // `pkg/vector/alg/json_importer.go`, where upstream is
+                        // silent. Measured: `make([]byte, 2, 4)` reports `s[5]`
+                        // on both sides (5 is past the cap), `make([]float64,
+                        // 0, 8)` reports `g[0]` on neither (0 is inside it),
+                        // and a non-constant cap is not tracked at all.
+                        let Some(size_v) = ms.cap.or(ms.len) else {
                             continue;
                         };
                         let Some(slice_cap) =
-                            extract_const_int(prog, func, SsaValue::new(len_v)).map(|n| n as i32)
+                            extract_const_int(prog, func, SsaValue::new(size_v)).map(|n| n as i32)
                         else {
                             continue;
                         };

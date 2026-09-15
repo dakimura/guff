@@ -31861,3 +31861,92 @@ milvus / dagger と同じ形で、**比較対象が存在しない**。
 `EXCLUDED` に置いた（`corpus/hunt.json` には入れない）。
 
 台帳は 68/100 のまま。**測れない理由を測って書くのも結果である。**
+
+### 2026-09-15（続き 290）— `adopt photoprism`。C ライブラリ 2 つを入れて初めて**比較になった**。残った 11 件は 4 つの別々の欠陥。69/100
+
+`status.py next` が出した候補。まず**測れる状態にする**ところから。
+
+#### 1. cgo が 2 つ足りない
+
+`./...` は 28/113 パッケージが型検査できず、上流のレポートは 3 件の
+typecheck に潰れ、潰れない guff が 447 件出す —— `guff 447 / golangci 3 /
+both 0`、つまり**比較対象が無い**（milvus / dagger / kubevirt と同じ形）。
+原因は `#include "tensorflow/c/c_api.h"` と `pkg-config: vips` の 2 つで、
+どちらも Homebrew にある。ユーザに確認して `libtensorflow` と `vips`
+（依存 28 個）を入れた。
+
+入れただけでは足りない。macOS の clang は `/opt/homebrew/include` を既定で
+探さないので `CGO_CFLAGS` / `CGO_LDFLAGS` が要る。これを**シェルに書くと
+次に誰かが素で `hunt.sh --name photoprism` を回したときに潰れた答えを測って
+しまう**ので、`corpus/hunt.json` の target に `env` を持たせ、`hunt.sh` が
+両方のツールと module warm に適用するようにした。素のシェルから回して
+452/452/452 になることを確認してある。
+
+#### 2. revive `increment-decrement` —— 左辺を**描画する**
+
+```go
+fmt.Sprintf("should replace %s with %s%s", file.Render(as),
+    file.Render(as.Lhs[0]), suffix)
+```
+
+上流は左辺が何であっても描画する。guff は `Ident` だけを受けていたので、
+`m.LinkViews += 1` は finding にならなかった —— **メソッドが自分の状態を
+更新する形は必ず左辺がセレクタ**なので、`+= 1` が実際に書かれる場所の
+ほとんどが抜けていたことになる。8 形（フィールド / 入れ子 / 添字 /
+map 添字 / 括弧付き deref …）を測って一致。
+
+#### 3. revive `exported` —— 台帳は**ファイル単位**
+
+`genDeclMissingComments` は「この GenDecl の doc 欠落はもう報告した」を
+覚える map で、上流は `Apply` の中で作る。`Apply` は**ファイルごと**に走る。
+guff は checker に 1 つ持ち、`gd.tok_pos` を鍵にしていた —— その位置は
+`PARSE_COMMENTS` の**ファイル別**再パース由来なので、2 つのファイルの
+`var` が同じオフセットに来ると同じ鍵になり、後のファイルの finding が
+静かに消える。photoprism の `internal/entity` はこれで 4 件失っていた
+（`FileSyncNew` / `FolderFixtures` / `PasswordFixtures` / `DialectSQLite3`）。
+**どの宣言にも変わったところは無く、ただ衝突していただけ**だったので、
+1 ファイルの再現では永遠に出ない。fixture は 2 ファイルを `var` まで
+バイト単位で同一にしてある。
+
+#### 4. gosec G602 —— 容量は cap であって len ではない
+
+上流が大きさを学ぶのは固定長配列の `Alloc` だけで、それは go/ssa が
+`make([]T, constN)` に対して建てるもの。guff は `MakeSlice` を出すので
+そこから定数を読んで橋渡ししていたが、読んでいたのが **len** だった。
+`make([]float64, 0, cap)` の容量は `cap` であって 0 ではないので、
+そういうスライスへの添字が全部 finding になっていた。測った 3 形:
+
+| 形 | 上流 |
+|---|---|
+| `make([]byte, 2, 4)` → `s[5]` | **報告**（5 は cap の外） |
+| `make([]float64, 0, 8)` → `g[0]` | 黙る（0 は cap の中） |
+| `make([]float64, 0, n)` → `g[0]` | 黙る（cap が定数でない） |
+
+#### 5. gocritic `argOrder` —— ruleguard は**ソースを引用する**
+
+`Report("$lit and $s arguments order looks reversed")` は ruleguard の
+テンプレートで、捕捉したノードは `nodeText` が描画する:
+
+```go
+from := rr.ctx.Fset.Position(n.Pos()).Offset
+to := rr.ctx.Fset.Position(n.End()).Offset
+return src[from:to]
+```
+
+**書かれたままのバイト列**である（範囲外のときだけ `go/printer` に落ちる）。
+guff は再描画していたので `cookiePath+"/"` が `cookiePath + "/"` になり、
+空白 2 つ分だけ上流と違う文字列になっていた。こういう食い違いは
+**guff-only と gcl-only に 1 件ずつ**立つ。手書きの checker は `astfmt`＝
+`go/printer` なので、ソースを引用するのは ruleguard のテンプレートだけ。
+
+#### 6. 実測
+
+```
+photoprism  guff=452 golangci=452 both=452 P=100.0% R=100.0% [OK]（ill-typed 0）
+golden      234 case 一致（revive +28 / gocritic +1 / gosec +1、欠落 0）
+fix / reject  234 / 14
+cargo test  --workspace --locked 緑
+compat/run.sh --oss --tier pr  8 target すべて OK
+
+台帳: 69/100 at zero（72 定義、open 0、unmeasured 3）
+```

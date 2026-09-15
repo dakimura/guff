@@ -238,4 +238,12 @@ func wrapperFunc(s string, wg *sync.WaitGroup) {
 
 func argOrder(s string) {
 	_ = strings.HasPrefix("#", s)
+	// `Report("$lit and $s arguments order looks reversed")` is a ruleguard
+	// template, and ruleguard renders a captured node with `nodeText` —
+	// `src[n.Pos():n.End()]`, the bytes **as written**. Re-printing the node
+	// instead put spaces around the `+` that are not in the file, and the
+	// message stopped matching upstream's (photoprism
+	// `internal/auth/oidc/redirect_url_test.go:47`). Do not reformat this
+	// call: the missing spaces are the fixture.
+	_ = strings.HasPrefix("#prefix", s+"/")
 }

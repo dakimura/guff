@@ -90,3 +90,13 @@ emptyblockrange/empty_block_range.go   crates/guff-revive/tests/testdata/revive/
 # "no receiver", so a bare call to the package function of the same name is not
 # recursion.
 uncondrecursion/recursion.go   crates/guff-revive/tests/testdata/revive/uncond_recursion/recursion.go
+
+# `increment-decrement` over every left-hand side: upstream renders the LHS,
+# guff accepted only a bare identifier.
+incdec/incdec.go                            crates/guff-revive/tests/testdata/revive/incdec.go
+
+# Two files whose `var` keyword lands at the same byte offset. `exported`
+# remembers reported GenDecls per *file*; guff kept one map for the package,
+# keyed by a per-file position.
+collide/alpha.go                            crates/guff-revive/tests/testdata/revive/exported_collide/alpha.go
+collide/beta.go                             crates/guff-revive/tests/testdata/revive/exported_collide/beta.go

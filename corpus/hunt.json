@@ -481,5 +481,17 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "25m"
+  },
+  {
+    "name": "photoprism",
+    "url": "https://github.com/photoprism/photoprism.git",
+    "ref": "260728-bbde8f452",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m",
+    "env": {
+      "CGO_CFLAGS": "-I/opt/homebrew/include",
+      "CGO_LDFLAGS": "-L/opt/homebrew/lib"
+    }
   }
 ]

@@ -162,6 +162,16 @@ impl<'a> Checker<'a> {
             .get(fi)
             .is_some_and(|p| p.to_string_lossy().ends_with("_test.go"));
         self.comments = None;
+        // `genDeclMissingComments` is created fresh in every `Apply`, and
+        // `Apply` runs once per file. guff kept one map for the whole package
+        // and keyed it by `gd.tok_pos` — positions that come from the
+        // *per-file* `PARSE_COMMENTS` reparse below, so two files' `var`
+        // tokens at the same offset are the same key. The second file's
+        // finding was then silently dropped: photoprism's `internal/entity`
+        // lost four `exported` findings that way (`FileSyncNew`,
+        // `FolderFixtures`, `PasswordFixtures`, `DialectSQLite3`), and nothing
+        // about any of those declarations is unusual — they only collided.
+        self.gen_decl_missing.clear();
         if self.skip_file {
             return;
         }

@@ -133,6 +133,9 @@ for r in repos:
         r["name"], r["url"], r["ref"], r.get("packages") or "./...",
         r.get("timeout") or "15m", r.get("config") or "-",
         ",".join(r.get("build_tags") or []) or "-",
+        # A target that needs C libraries to type-check says so here, so a
+        # bare run cannot quietly measure the collapsed answer instead.
+        " ".join(f"{k}={v}" for k, v in (r.get("env") or {}).items()) or "-",
     ]))
     n += 1
 if n == 0:
@@ -143,10 +146,11 @@ then
   die "no hunt targets selected"
 fi
 
-while IFS=$'\t' read -r name url ref packages timeout config_override build_tags; do
+while IFS=$'\t' read -r name url ref packages timeout config_override build_tags target_env; do
   [[ -z "${name:-}" ]] && continue
   [[ "$config_override" == "-" ]] && config_override=""
   [[ "$build_tags" == "-" ]] && build_tags=""
+  [[ "${target_env:-}" == "-" ]] && target_env=""
   dir="$CACHE/$name"
   echo "=== prepare $name ($ref) ==="
   if [[ -d "$dir/.git" ]]; then
@@ -165,13 +169,17 @@ while IFS=$'\t' read -r name url ref packages timeout config_override build_tags
   is_v2_config "$config" || die "$name config is not golangci-lint v2: $config"
   echo "  config: $config"
 
+  if [[ -n "${target_env:-}" ]]; then
+    echo "  env: $target_env"
+  fi
+
   if [[ "$WARM" -eq 1 ]]; then
     echo "  warming modules..."
-    (cd "$dir" && go mod download >/dev/null 2>&1 || true)
+    (cd "$dir" && env $target_env go mod download >/dev/null 2>&1 || true)
     if [[ -n "${build_tags:-}" ]]; then
-      (cd "$dir" && go list -tags "$build_tags" $packages >/dev/null 2>&1 || true)
+      (cd "$dir" && env $target_env go list -tags "$build_tags" $packages >/dev/null 2>&1 || true)
     else
-      (cd "$dir" && go list $packages >/dev/null 2>&1 || true)
+      (cd "$dir" && env $target_env go list $packages >/dev/null 2>&1 || true)
     fi
   fi
 
@@ -233,7 +241,7 @@ PY
   # shellcheck disable=SC2086
   if ! (
     cd "$dir"
-    env "GUFF_CACHE=$guff_cache" "GOLANGCI_LINT_CACHE=$guff_cache" \
+    env $target_env "GUFF_CACHE=$guff_cache" "GOLANGCI_LINT_CACHE=$guff_cache" \
       "GUFF_DEBUG_ILL_TYPED=1" \
       "$GUFF" run -c "$run_config" --out-format json --issues-exit-code 0 \
       $tag_flag --timeout "$timeout" --no-cache $packages
@@ -248,7 +256,7 @@ PY
   # shellcheck disable=SC2086
   if ! (
     cd "$dir"
-    env "GOLANGCI_LINT_CACHE=$gcl_cache" "GUFF_CACHE=$gcl_cache" \
+    env $target_env "GOLANGCI_LINT_CACHE=$gcl_cache" "GUFF_CACHE=$gcl_cache" \
       "$GOLANGCI" run -c "$run_config" --output.json.path=stdout --path-mode abs \
       $tag_flag --issues-exit-code 0 --timeout="$timeout" \
       --max-issues-per-linter=0 --max-same-issues=0 --allow-parallel-runners $packages

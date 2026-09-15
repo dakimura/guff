@@ -81,7 +81,13 @@ fn gosec_g602_tracks_bounds_through_reslices() {
         .iter()
         .filter(|m| m.contains("G602: slice index out of range"))
         .count();
-    assert_eq!((bounds, index), (1, 2), "{messages:?}");
+    // The `make` cases at the end of the fixture pin where the capacity comes
+    // from: `make([]byte, 2, 4)` is a finding at `s[5]` (past the **cap**),
+    // while `make([]float64, 0, 8)` and `make([]float64, 0, n)` are not —
+    // guff read the *length* off its `MakeSlice`, so every index into a
+    // `make([]T, 0, cap)` slice was reported (photoprism
+    // `pkg/vector/alg/json_importer.go`).
+    assert_eq!((bounds, index), (1, 3), "{messages:?}");
 }
 
 /// Where G602 gets a capacity from when guff's SSA does not spell the slice the
@@ -10130,5 +10136,32 @@ fn gosec_honours_the_directive_spelling_without_the_tag() {
             .count(),
         2,
         "only `plain` and the G102-directive case: {messages:?}"
+    );
+}
+
+/// A gocritic message that quotes a captured node quotes the **source**.
+///
+/// Every `Report("… $x …")` in `checkers/rules/rules.go` goes through
+/// ruleguard's `nodeText`, which is `src[n.Pos():n.End()]` — the bytes as
+/// written, with `go/printer` only as a fallback for out-of-range offsets.
+/// guff re-printed the node, so `s+"/"` came back as `s + "/"` and the message
+/// differed from upstream's by two spaces: photoprism's
+/// `internal/auth/oidc/redirect_url_test.go:47` showed up as one finding on
+/// each side rather than as a match.
+#[test]
+fn gocritic_argorder_quotes_the_source_not_a_reprint() {
+    let pkg = support::typecheck_fixture("gocritic", "example.com/gocritic", "bad.go");
+    let mut found: Vec<String> = support::run_analyzer(gocritic(), &pkg)
+        .into_iter()
+        .filter(|m| m.starts_with("argOrder:"))
+        .collect();
+    found.sort();
+    assert_eq!(
+        found,
+        vec![
+            "argOrder: \"#\" and s arguments order looks reversed",
+            "argOrder: \"#prefix\" and s+\"/\" arguments order looks reversed",
+        ],
+        "{found:?}"
     );
 }

@@ -464,7 +464,59 @@ use guff_analysis::code::{node_text, stmt_text as node_text_stmt};
 /// [`node_text`] for a call the checker only holds as a `&CallExpr`. This is
 /// what the ruleguard rules spell `$$` when the matched pattern is a call.
 fn call_text(pass: &Pass<'_>, call: &CallExpr) -> Option<String> {
-    node_text(pass, &Expr::CallExpr(call.clone()))
+    rule_text(pass, &Expr::CallExpr(call.clone()))
+}
+
+/// ruleguard's `nodeText` (`ruleguard/runner.go`): `src[n.Pos():n.End()]` —
+/// the bytes **as written**, with `go/printer` only as a fallback when the
+/// offsets fall outside the file.
+///
+/// Every `Report("… $x …")` template in `checkers/rules/rules.go` is rendered
+/// this way, so a gocritic message carrying a captured node has to quote the
+/// source rather than re-print it. guff printed `cookiePath + "/"` where the
+/// file says `cookiePath+"/"` (photoprism
+/// `internal/auth/oidc/redirect_url_test.go:47`), which reads as one finding
+/// on each side instead of a match.
+///
+/// The hand-written checkers are *not* this: they use `astfmt`, which is
+/// `go/printer`. Only the ruleguard templates quote source.
+fn rule_text(pass: &Pass<'_>, e: &Expr) -> Option<String> {
+    let fset = pass.fset();
+    let (start, end) = (fset.position(e.pos()), fset.position(e.end()));
+    if start.filename == end.filename && end.offset >= start.offset {
+        for (i, f) in pass.files().iter().enumerate() {
+            if fset.position(f.pos()).filename != start.filename {
+                continue;
+            }
+            // `source_bytes` is populated by the real loader; the unit-test
+            // harness type-checks from paths, so fall back to the file the way
+            // `scan_comments` does rather than silently re-printing there.
+            let owned;
+            let src: Option<&[u8]> = match pass.pkg().source_bytes(i) {
+                Some(b) => Some(b),
+                None => match pass.pkg().compiled_go_files.get(i) {
+                    Some(path) => match std::fs::read(path) {
+                        Ok(b) => {
+                            owned = b;
+                            Some(&owned)
+                        }
+                        Err(_) => None,
+                    },
+                    None => None,
+                },
+            };
+            if let Some(src) = src {
+                let (from, to) = (start.offset as usize, end.offset as usize);
+                if to <= src.len() {
+                    if let Ok(s) = std::str::from_utf8(&src[from..to]) {
+                        return Some(s.to_string());
+                    }
+                }
+            }
+            break;
+        }
+    }
+    node_text(pass, e)
 }
 
 fn expr_text(expr: &Expr) -> Option<String> {
@@ -2807,10 +2859,18 @@ fn check_arg_order(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
     if s_const {
         return;
     }
-    let Some(lit_t) = expr_text(lit) else {
+    // `Report("$lit and $s arguments order looks reversed")` — a ruleguard
+    // template, and ruleguard renders a captured node with `nodeText`, which is
+    // `src[n.Pos():n.End()]`: **the bytes as written**, falling back to
+    // `go/printer` only when the offsets are out of range. `expr_text` is a
+    // re-render, so `cookiePath+"/"` came back as `cookiePath + "/"` and the
+    // message differed from upstream's by two spaces (photoprism's
+    // `internal/auth/oidc/redirect_url_test.go:47`, which showed up as one
+    // finding on each side rather than as a match).
+    let Some(lit_t) = rule_text(pass, lit) else {
         return;
     };
-    let Some(s_t) = expr_text(s) else {
+    let Some(s_t) = rule_text(pass, s) else {
         return;
     };
     report(

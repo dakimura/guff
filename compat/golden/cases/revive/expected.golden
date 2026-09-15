@@ -63,6 +63,11 @@ blankgroupbad/blank_group_bad.go:6:2:revive:warning:imports-blocklist: should no
 blankgroupok/blank_group_ok.go:2:1:revive:warning:file-header: the file doesn't have an appropriate header
 blankgroupok/blank_group_ok.go:5:0:revive:warning:line-length-limit: line is 82 characters, out of limit 80
 blankgroupok/blank_group_ok.go:7:2:revive:warning:imports-blocklist: should not use the following blocklisted import: "os"
+collide/alpha.go:5:1:revive:warning:file-header: the file doesn't have an appropriate header
+collide/alpha.go:5:1:revive:warning:package-comments: should have a package comment
+collide/alpha.go:7:5:revive:warning:exported: exported var AlphaValue should have comment or be unexported
+collide/beta.go:5:1:revive:warning:file-header: the file doesn't have an appropriate header
+collide/beta.go:7:5:revive:warning:exported: exported var BetaValue should have comment or be unexported
 commentsdensity/comments_density_edge.go:6:1:revive:warning:comments-density: the file has a comment density of  8% (5 comment lines for 56 code lines) but expected a minimum of 10%
 commentsdensity/comments_density_edge.go:6:1:revive:warning:file-header: the file doesn't have an appropriate header
 commentsdensity/comments_density_edge.go:8:29:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
@@ -333,6 +338,29 @@ footest/stutter_bad.go:4:6:revive:warning:exported: func name will be used as fo
 funclen/function_length_bad.go:7:1:revive:warning:file-header: the file doesn't have an appropriate header
 funclen/function_length_bad.go:9:1:revive:warning:function-length: maximum number of statements per function exceeded; max 50 but got 53
 funclen/function_length_bad.go:10:7:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+incdec/incdec.go:13:1:revive:warning:file-header: the file doesn't have an appropriate header
+incdec/incdec.go:15:6:revive:warning:exported: exported type M should have comment or be unexported
+incdec/incdec.go:21:1:revive:warning:exported: exported method M.Bump should have comment or be unexported
+incdec/incdec.go:22:7:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+incdec/incdec.go:23:2:revive:warning:increment-decrement: should replace n += 1 with n++
+incdec/incdec.go:23:7:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+incdec/incdec.go:24:2:revive:warning:increment-decrement: should replace m.Views += 1 with m.Views++
+incdec/incdec.go:24:13:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+incdec/incdec.go:25:2:revive:warning:increment-decrement: should replace m.Sub.Views += 1 with m.Sub.Views++
+incdec/incdec.go:25:17:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+incdec/incdec.go:26:2:revive:warning:increment-decrement: should replace xs[i] += 1 with xs[i]++
+incdec/incdec.go:26:11:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+incdec/incdec.go:27:2:revive:warning:increment-decrement: should replace m.Xs[0] -= 1 with m.Xs[0]--
+incdec/incdec.go:27:7:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+incdec/incdec.go:27:13:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+incdec/incdec.go:28:2:revive:warning:increment-decrement: should replace mm["k"] += 1 with mm["k"]++
+incdec/incdec.go:28:13:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+incdec/incdec.go:29:2:revive:warning:increment-decrement: should replace (*m).Views += 1 with (*m).Views++
+incdec/incdec.go:29:16:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+incdec/incdec.go:30:2:revive:warning:increment-decrement: should replace n -= 1 with n--
+incdec/incdec.go:30:7:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+incdec/incdec.go:31:7:revive:warning:add-constant: avoid magic numbers like '2', create a named constant for it
+incdec/incdec.go:32:18:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
 istest/istest.go:5:1:revive:warning:file-header: the file doesn't have an appropriate header
 istest/istest.go:8:18:revive:warning:unsecure-url-scheme: prefer secure protocol https over http in "http://example.com/v1"
 istest/istest_test.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
