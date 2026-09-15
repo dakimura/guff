@@ -63,3 +63,6 @@ libpq/go.mod                    compat/golden/cases/gosec/libpq.go.mod
 libpq/pq.go                     crates/guff-style/tests/testdata/gosec/stub/github.com/lib/pq/pq.go
 entropy/entropy.go    crates/guff-style/tests/testdata/gosec/entropy.go
 nosec/nosec.go        crates/guff-style/tests/testdata/gosec/nosec.go
+# gosec's other suppression spelling, in a file that contains the tag
+# spelling nowhere — the byte screen in front of the comment reparse.
+directiveonly/directive_only.go  crates/guff-style/tests/testdata/gosec/directive_only.go

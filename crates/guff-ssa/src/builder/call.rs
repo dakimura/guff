@@ -2,7 +2,7 @@
 //!
 //! Port of go/ssa's `builder.go` (call part).
 
-use crate::builder::{unparen, Builder};
+use crate::builder::{unparen, value_type, Builder};
 use crate::methods::recv_type;
 use crate::value::Value;
 use crate::instr::{Call, CallCommon, InstrData, MakeChan, MakeMap, MakeSlice, Panic};
@@ -53,9 +53,30 @@ impl<'a> Builder<'a> {
         if matches!(c.value, Value::Builtin(_)) {
             return None;
         }
-        let raw = self.prog.info.types.get(&unparen(&e.fun).id())?.typ;
-        let sig = self.typ_type(raw);
-        let u = sig.underlying(&self.prog.type_arena);
+        if let Some(tv) = self.prog.info.types.get(&unparen(&e.fun).id()) {
+            let sig = self.typ_type(tv.typ);
+            let u = sig.underlying(&self.prog.type_arena);
+            if matches!(self.prog.type_arena.get(u), TypeData::Signature(_)) {
+                return Some(u);
+            }
+        }
+        // Fall back to the callee *value*'s own type.
+        //
+        // An explicitly instantiated generic function is an `IndexExpr`
+        // (`f[int](x)`), and guff's checker records no `Types` entry for that
+        // node — so there was no signature, no argument was converted, and
+        // `f[int](&impl{})` never got its `MakeInterface`. unparam builds
+        // `typesImplementing` out of exactly those instructions, so `*impl`
+        // stopped counting as an implementation of the interface and every
+        // method it only has to satisfy became reportable: grafana/tempo's
+        // three `(*rowIterator).peekNextID - result 1 (error) is always nil`,
+        // whose only conversion site is `newBookmark[parquet.Row](iter)`.
+        let t = match c.method {
+            // Invoke mode: the callee is the interface method itself.
+            Some(m) => m.typ(&self.prog.object_arena)?,
+            None => value_type(self.prog, self.func_id, c.value),
+        };
+        let u = t.underlying(&self.prog.type_arena);
         matches!(self.prog.type_arena.get(u), TypeData::Signature(_)).then_some(u)
     }
 
@@ -145,6 +166,13 @@ impl<'a> Builder<'a> {
         };
 
         if let Expr::SelectorExpr(sel) = m {
+            if std::env::var_os("GUFF_DBG_CALLFUNC").is_some() {
+                eprintln!(
+                    "DBG set_call_func sel={} selection={:?}",
+                    sel.sel.name,
+                    self.selection(sel).map(|s| format!("{:?}", s.kind()))
+                );
+            }
             if let Some(selection) = self.selection(sel) {
                 if selection.kind() == SelectionKind::MethodVal {
                     let obj = selection.obj();
@@ -157,6 +185,9 @@ impl<'a> Builder<'a> {
                             guff_types::signature::signature_recv(&self.prog.type_arena, sig)
                         })
                         .is_some();
+                    if std::env::var_os("GUFF_DBG_CALLFUNC").is_some() {
+                        eprintln!("DBG   is_method={is_method} recv_t={:?}", recv_type(self.prog, obj).is_some());
+                    }
                     if is_method {
                         let Some(recv_t) = recv_type(self.prog, obj) else {
                             // Defensive: signature_recv said method but type missing.

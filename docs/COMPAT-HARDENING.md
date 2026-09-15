@@ -31588,3 +31588,133 @@ findings を出さないが、上流も 0 なのでそれが見えない。閉�
 `revive-enable-all-rules` の golden は regen が 5 キーを**落とした**ので
 捨てた。全ルール有効の revive は上流が自分自身と一致しないことがある
 （`--regen` は一致するまで繰り返すが、2 回とも空なら一致してしまう）。
+
+### 2026-09-15（続き 287）— `close tempo`。構造体タグは**unquote していなかった**、`T[A](x)` は静かに invalid になっていた、可変長引数は go/ssa では**詰められている**。68/100
+
+続き 286 が tempo を 25m timeout から **398 / 398 / 393** に戻したところから。
+残り 10 件は 5 つの別々の欠陥で、うち 2 つは**型チェッカ**にあった。
+
+#### 1. 構造体タグの identity —— `strconv.Unquote` であって「外側の引用符を剥ぐ」ではない
+
+`modules/frontend` が 1 パッケージ丸ごと ill-typed だった:
+
+```
+mcp_tools_test.go:550:11: cannot use struct{Name string "json:\\\"name\\\""; …}
+  value as mcp.CallToolParams value in struct literal
+```
+
+上流の `Checker.tag` は
+
+```go
+if val, err := strconv.Unquote(t.Value); err == nil { return val }
+```
+
+で、guff の `unquote_tag` は外側の 1 文字ずつを落とすだけだった。
+
+```go
+Name string `json:"name"`      // raw       → json:"name"
+Name string "json:\"name\""    // 剥ぐだけ → json:\"name\"
+```
+
+タグは構造体の**同一性の一部**なので、この 2 つは別の構造体になる。Go は
+後者で書いた無名構造体を前者で書いた名前付き型に代入させる —— mcp-go の
+`CallToolParams` はまさにその形である。20 行の再現で出る。
+デコードは `guff-constant` の文字列リテラルパーサ（定数式と同じもの）に
+渡した。タグはバイト列で guff は `String` に持つので、不正な UTF-8 エスケープ
+だけは lossy になる —— 唯一ずれる場所で、構造体タグが到達する形ではない。
+
+ここで直ったのは gcl-only 3 件（De Morgan / ifElseChain / captLocal）で、
+どれも ill-typed パッケージの中にあった。**ill-typed は findings を「出さない」
+ので、上流だけが出す形として現れる。**
+
+#### 2. `T[A](x)` は変換であって invalid ではない
+
+`index_expr` にこれがあった:
+
+```rust
+OperandMode::TypeExpr => {
+    // Type instantiation `T[int]` — DEFERRED (generics).
+    x.mode = OperandMode::Invalid;
+    x.typ = Some(self.invalid_type());
+    return false;
+}
+```
+
+**エラーを出さずに** invalid にする。だからパッケージは「型が付いた」まま、
+変換の結果だけが型を失う。あとは静かに崩れる —— セレクタが `Selections` に
+記録されず、SSA ビルダは `p.Apply` を「修飾識別子」と見なして
+`ident_rvalue(Apply)` を返し（`selector_expr` の `None` 腕）、`p` は referrer
+ゼロになり、SA4006 が「死んだ代入」と言う。tempo の
+`modules/frontend/pipeline/pipeline.go:152` がその形
+（`asyncPipeline := AsyncMiddlewareFunc[…](…)` を 21 行下で `.Wrap` している）。
+
+型の側（`typexpr.rs` の `IndexExpr` 腕）は `instantiated_type` を持っていて、
+`T[A, B](v)` の**複数引数形**は jaeger の `iter.Seq2[[]T, error](fn)` の回に
+既にそこへ回されていた。単一引数形だけが取り残されていた。
+
+測った形: `Vec[int](xs)` / `Fn[int](g)` は invalid、`Pair[K,V](m)`
+（IndexListExpr）と `var p Fn[int]` と `func f(p Fn[int])` は正常。
+**1 つの形で規則を決めていたら「generics が壊れている」と書いて終わっていた。**
+
+#### 3. 可変長引数は go/ssa では詰められている（G118）
+
+`m.cancels = append(m.cancels, cancel)` を上流は「cancel は呼ばれていない」と
+言う。`isUsedInCall` は `common.Args` に入っていれば真なのに、である。理由は
+go/ssa が非 spread の可変長呼び出しの**末尾を新しいスライスに詰める**から:
+`Alloc` + 要素ごとの `IndexAddr`/`Store` + `Slice`。cancel の referrer は
+**Store** であって呼び出しではない。`append` も可変長なので同じ。
+
+guff は可変長引数を個別に渡し、spread だけ `CallCommon::ellipsis` に記録する
+（`instr.rs` にそう書いてある）。なので go/ssa 前提の解析はここで末尾を落とす
+必要がある。測った 20 形のうち分かれたのは 4 つで、
+`useVar(cancel)`（普通の可変長関数）と `use(cancel)`（固定引数）の差が
+「append が特別」ではなく「可変長が特別」だと決めた。
+
+#### 4. `//gosec:disable` に `nosec` は含まれていない
+
+```rust
+if !src.windows(5).any(|w| w == b"nosec") { continue; }
+```
+
+コメント再パースの前に置いた安いフィルタ。上流は `#nosec` タグと
+`//gosec:disable` 指示子の**両方**を受ける（`analyzer.go` の
+`findNoSecDirective`）。`gosec:disable` に `nosec` は無いので、指示子だけを
+使うファイルは 1 度も再パースされず、そこにある抑制は全部無視される。
+tempo の `live_store_background.go:270` は
+
+```go
+delay := time.Duration(rand.Int64N(10_000) * …) //gosec:disable G404 — It doesn't require strong randomness
+```
+
+の 1 行だけを持つ。fixture は**タグの 5 バイトをどこにも含まない**ように
+書いてある（最初の版はパッケージ名が `nosec` で、フィルタが別の理由で通って
+しまい何も測っていなかった）。各ケースを別の関数にしたのは、トップレベルの
+`const` に付けた指示子が**ファイル全体**を黙らせるのを測ったからである。
+
+#### 5. 明示インスタンス化した呼び出しには `Info.Types` が無い（unparam）
+
+`(*rowIterator).peekNextID - result 1 (error) is always nil` が 3 件
+（vparquet3/4/5）。上流は「インタフェースを満たすために必要なメソッド」を
+飛ばし、その台帳 `typesImplementing` は IR の `MakeInterface` から作る。
+tempo で `*rowIterator` が箱に入るのは `newBookmark[parquet.Row](iter)` の
+1 箇所だけ —— **ジェネリック関数の明示インスタンス化**である。
+
+guff の `call_signature` は `Info.Types[e.Fun]` を読む。`f[int]` は `IndexExpr`
+で、そこに記録は**無い**。署名が無ければ引数は変換されず、`MakeInterface` は
+出ず、台帳は空になる。呼び出し先の値そのものの型に fallback した。
+
+#### 6. 実測
+
+```
+tempo (v3.0.3)   guff=398 golangci=398 both=398 P=100.0% R=100.0% [OK]（ill-typed 0）
+golden           234 case 一致（gosec +7 / staticcheck-sa +1 / unparam +1、欠落 0）
+fix / reject     234 / 14
+cargo test       --workspace --locked 緑
+compat/run.sh    --oss --tier pr   8 target すべて OK
+
+台帳: 68/100 at zero（71 定義、open 0、unmeasured 3）
+```
+
+seed overlay schema は 6 → 7。形は変わっていないが**値が型の同一性に効く**
+2 つの変更（タグの unquote、`T[A]` の instantiate）が入っているので、
+古い blob を読むと別の型として振る舞う。

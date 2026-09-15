@@ -2353,3 +2353,113 @@ fn a_constraint_is_verified_against_the_instances_own_methods() {
         }
     }
 }
+
+/// `Checker.tag` is `strconv.Unquote`, not "strip the outer quotes".
+///
+/// A struct tag is part of the struct's identity, so the same tag written as a
+/// raw string and as an interpreted one with escaped quotes has to produce the
+/// same value — otherwise an unnamed struct cannot be assigned to a named type
+/// that spelled its tags the other way. grafana/tempo's
+/// `modules/frontend/mcp_tools_test.go:550` is exactly that assignment; guff
+/// kept the backslashes, rejected it, and took the whole package ill-typed
+/// (three findings lost).
+#[test]
+fn struct_tags_are_unquoted_like_strconv() {
+    let check = check_src(
+        "package p\n\
+         type Meta struct{ N int }\n\
+         type P struct {\n\
+         \tName string `json:\"name\"`\n\
+         \tArgs any    `json:\"args,omitempty\"`\n\
+         \tMeta *Meta  `json:\"_meta,omitempty\"`\n\
+         }\n\
+         type R struct{ Params P }\n\
+         func f(a any) R {\n\
+         \treturn R{Params: struct {\n\
+         \t\tName string \"json:\\\"name\\\"\"\n\
+         \t\tArgs any    \"json:\\\"args,omitempty\\\"\"\n\
+         \t\tMeta *Meta  \"json:\\\"_meta,omitempty\\\"\"\n\
+         \t}{Args: a}}\n\
+         }\n",
+    );
+    assert!(
+        check.errors.is_empty(),
+        "unexpected errors: {:?}",
+        check.errors
+    );
+}
+
+/// The other escapes `strconv.Unquote` processes, and the two ways of writing
+/// an empty tag.
+///
+/// The raw tag below holds a real tab, two backslashes and a quote; the
+/// interpreted one spells all three as escapes. `go build` accepts the
+/// assignment, so the two tags are one string and the two structs are
+/// identical. An absent tag and `""` are both `""` in go/types, which is what
+/// the second field pins.
+#[test]
+fn struct_tag_escapes_and_empty_tags_agree() {
+    let check = check_src(
+        "package p\n\
+         \n\
+         type A struct {\n\
+         \tX int `a\tb\\\\c\"d`\n\
+         \tY int\n\
+         }\n\
+         \n\
+         func f() A {\n\
+         \treturn struct {\n\
+         \t\tX int \"a\\tb\\\\\\\\c\\\"d\"\n\
+         \t\tY int \"\"\n\
+         \t}{}\n\
+         }\n",
+    );
+    assert!(
+        check.errors.is_empty(),
+        "unexpected errors: {:?}",
+        check.errors
+    );
+}
+
+/// `T[A](x)` in expression position is a conversion to an instantiated generic
+/// type, and the operand it produces has to carry that type.
+///
+/// `index_expr` had a `DEFERRED (generics)` arm that set the operand invalid
+/// and returned — with **no error**, so the package still counted as
+/// well-typed while the converted value had no type at all. Everything
+/// downstream then went quiet: the selector on it recorded no `Selections`
+/// entry, the SSA builder read `p.Apply` as a bare identifier, `p` had no
+/// referrers, and SA4006 called it a dead store (grafana/tempo
+/// `modules/frontend/pipeline/pipeline.go:152`).
+#[test]
+fn single_argument_type_instantiation_in_call_position_is_a_conversion() {
+    let check = check_src(
+        "package p\n\
+         type Vec[T any] []T\n\
+         func (v Vec[T]) Len() int { return len(v) }\n\
+         type Fn[T any] func(T) T\n\
+         func (f Fn[T]) Apply(x T) T { return f(x) }\n\
+         func viaSlice(xs []int) int {\n\
+         \tp := Vec[int](xs)\n\
+         \treturn p.Len()\n\
+         }\n\
+         func viaFunc(g func(int) int) int {\n\
+         \tp := Fn[int](g)\n\
+         \treturn p.Apply(1)\n\
+         }\n",
+    );
+    assert!(
+        check.errors.is_empty(),
+        "unexpected errors: {:?}",
+        check.errors
+    );
+
+    // The point of the regression: the conversions recorded a real type, and
+    // the method selectors on their results recorded a selection. Without
+    // either, the package above still type-checks "successfully".
+    assert_eq!(
+        check.info.selections.len(),
+        2,
+        "both `p.Len` and `p.Apply` must be recorded selections"
+    );
+}

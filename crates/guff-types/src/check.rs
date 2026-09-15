@@ -252,7 +252,15 @@ pub struct WorkerOverlays {
 /// changes in a way that would make old bytes misinterpreted rather than
 /// cleanly fail to decode; callers should treat a schema mismatch as a cache
 /// miss and fall back to rebuilding from source.
-pub const SEED_OVERLAY_SCHEMA: u32 = 6;
+///
+/// Bump it for a change in the *values* too when those values are part of a
+/// type's identity. 6 → 7 covers two: `Checker.tag` learning to
+/// `strconv.Unquote` — a cached overlay written before it carries
+/// `json:\"name\"` where a freshly checked package now has `json:"name"`, two
+/// structs that no longer compare identical — and `index_expr` learning to
+/// instantiate `T[A]` in expression position, which turns a cached `invalid`
+/// into a real type.
+pub const SEED_OVERLAY_SCHEMA: u32 = 7;
 
 /// On-disk envelope wrapping a [`WorkerOverlays`] payload with a schema tag,
 /// so [`WorkerOverlays::decode`] can reject stale/foreign blobs up front

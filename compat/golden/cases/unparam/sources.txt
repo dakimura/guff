@@ -11,3 +11,7 @@ zeroconst/zeroconst.go   crates/guff-style/tests/testdata/unparam/zeroconst.go
 
 # Which type an interface method belongs to.
 ifacename/ifacename.go   crates/guff-style/tests/testdata/unparam/ifacename.go
+
+# The conversion that records an implementation can happen at a call to a
+# generic function, whose callee has no `Info.Types` entry.
+genericiface/genericiface.go   crates/guff-style/tests/testdata/unparam/genericiface.go

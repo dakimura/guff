@@ -110,6 +110,9 @@ sa4006/methods/methods.go                    crates/guff-staticcheck/tests/testd
 # shape whose SSA lowering panicked on minio.
 sa4006/range_ptr/range_ptr.go                crates/guff-staticcheck/tests/testdata/sa4006/range_ptr.go
 sa4006/terminated/terminated.go              crates/guff-staticcheck/tests/testdata/sa4006/terminated.go
+# A conversion to an instantiated generic type is a conversion, not an
+# invalid operand — the value it produces has referrers.
+sa4006/generic_conv/generic_conv.go          crates/guff-staticcheck/tests/testdata/sa4006/generic_conv.go
 sa4006/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa4006/ok.go
 sa4008/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa4008/bad.go
 sa4008/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa4008/ok.go

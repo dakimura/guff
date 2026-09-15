@@ -298,9 +298,24 @@ impl Checker {
                 return false;
             }
             OperandMode::TypeExpr => {
-                // Type instantiation `T[int]` — DEFERRED (generics).
-                x.mode = OperandMode::Invalid;
-                x.typ = Some(self.invalid_type());
+                // Type instantiation `T[int]`, which is what the callee of a
+                // conversion to an instantiated generic type looks like:
+                // `Vec[int](xs)`, `F[int](fn)`. The type path already knows how
+                // to build it (`typexpr.rs`'s `IndexExpr` arm), and the
+                // multi-argument form `T[A, B](v)` has been routed there since
+                // jaeger's `iter.Seq2[[]T, error](fn)`.
+                //
+                // Leaving the operand invalid here dropped the conversion
+                // *silently* — no error, so the package still counted as
+                // well-typed, but the converted value had no type and every
+                // selector on it lost its `Selections` entry. The SSA builder
+                // then read `p.Apply` as a bare identifier, `p` had no
+                // referrers, and SA4006 called it dead: grafana/tempo's
+                // `modules/frontend/pipeline/pipeline.go:152`.
+                let args = std::slice::from_ref(e.index.as_ref());
+                let t = self.instantiated_type(&e.x, args, e.x.pos().0 as u32);
+                x.mode = OperandMode::TypeExpr;
+                x.typ = Some(t);
                 return false;
             }
             OperandMode::Value => {

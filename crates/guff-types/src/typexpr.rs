@@ -410,7 +410,7 @@ impl Checker {
     /// Constraint *satisfaction* (`Checker.verify`) is checked via
     /// [`Checker::verify_targs`] (chunk 35b). `recordInstance` populates
     /// `Info.Instances` (chunk 53); `mono.recordInstance` remains a no-op.
-    fn instantiated_type(&mut self, x: &Expr, xlist: &[Expr], pos: u32) -> TypeId {
+    pub(crate) fn instantiated_type(&mut self, x: &Expr, xlist: &[Expr], pos: u32) -> TypeId {
         let gtyp = self.generic_type(x);
         if !is_valid(&self.types, gtyp) {
             return gtyp; // error already reported
