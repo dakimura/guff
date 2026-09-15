@@ -1509,6 +1509,31 @@ fn parse_v2_gosec_settings() {
     assert_eq!(opts.excludes, vec!["G103".to_string()]);
 }
 
+/// A list item written as a bare `-` is YAML null, and it used to take the
+/// whole `linters.settings.gosec` block down with it.
+///
+/// `string_or_seq` deserialised into `Vec<String>`, so the untagged enum
+/// matched neither variant; `parse_settings` reports that and falls back to the
+/// linter's defaults — meaning *every* excluded rule came back. cosmos-sdk
+/// v0.55.0 has exactly one such entry in its `gosec.excludes`, which is why
+/// guff reported G404 across the repo while golangci-lint reported nothing.
+/// mapstructure's `WeaklyTypedInput` turns the null into `""`, an id no rule
+/// carries, so the entry is inert on both sides.
+#[test]
+fn parse_v2_gosec_excludes_tolerates_a_null_item() {
+    let contents = fs::read_to_string(testdata_config("v2_gosec_null_exclude.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(
+        settings.gosec.excludes,
+        vec!["G101".to_string(), String::new(), "G404".to_string()]
+    );
+    // The point of the regression: the rest of the block survives.
+    assert_eq!(settings.gosec.confidence, "medium");
+    // A key with nothing under it is an empty list, not a parse failure.
+    assert!(settings.gosec.includes.is_empty());
+}
+
 #[test]
 fn parse_v2_gosec_severity_and_g101_config() {
     let contents = fs::read_to_string(testdata_config("v2_gosec_severity_settings.yml")).unwrap();

@@ -53,17 +53,6 @@ EXCLUDED = {
     "so the repository is measurable and this is reachable if patch_unlimited_issues.py ever "
     "strips type: module entries the way it strips .so goplugins. Measured 2026-09-08 at "
     "v0.21.2-beta",
-    "tempo": "**guff's own defect, not the environment.** guff does not finish: the "
-    "hunt timed out at 25m where golangci-lint takes 44s for the whole repo (461 "
-    "findings). It is not size and not vendoring — with vendor/ moved aside it still "
-    "times out, and gatekeeper (1622 max transitive deps) is adopted and clean. It is "
-    "one dependency: a five-line module whose only requirement is "
-    "github.com/bytedance/sonic takes golangci 0s and guff >180s, with a single "
-    "trivial linter, so the cost is in loading/type-checking rather than any analyzer. "
-    "Both v1.15.0 and v1.15.1 hang. gin, woodpecker, traefik and celestia-node also "
-    "require sonic and stay clean because it is absent from their analysed graph "
-    "(0 packages each); tempo has 26. Re-adopt the moment that loader cost is fixed — "
-    "nothing about tempo itself blocks it. Measured 2026-09-08 at v3.0.3",
     "milvus": "**cgo needs milvus's own C++ core, and upstream's report is a race.** "
     "internal/util/cgo/errors.go opens with `#cgo pkg-config: milvus_core` under no "
     "build tag, and milvus_core.pc comes from building internal/core with CMake — not "

@@ -6,9 +6,9 @@
     "`unmeasured` is not `clean`: an absent measurement is a question."
   ],
   "goal": 100,
-  "defined": 69,
-  "clean": 66,
-  "open": 0,
+  "defined": 71,
+  "clean": 67,
+  "open": 1,
   "unmeasured": 3,
   "targets": {
     "alertmanager": {
@@ -84,7 +84,7 @@
     "caddy": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260914T080656Z",
+      "at": "20260915T011512Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -124,7 +124,7 @@
     "cobra": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260914T080656Z",
+      "at": "20260915T011512Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -173,6 +173,14 @@
       "tier": "hunt",
       "state": "clean",
       "at": "20260907T012059Z",
+      "open": 0,
+      "guff_only": 0,
+      "gcl_only": 0
+    },
+    "cosmos-sdk": {
+      "tier": "hunt",
+      "state": "clean",
+      "at": "20260915T005919Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -242,7 +250,7 @@
     "gin": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260914T080656Z",
+      "at": "20260915T011512Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -258,7 +266,7 @@
     "go-client": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260914T080656Z",
+      "at": "20260915T011512Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -298,7 +306,7 @@
     "helm": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260914T080656Z",
+      "at": "20260915T011512Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -338,7 +346,7 @@
     "k9s": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260914T080656Z",
+      "at": "20260915T011512Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -502,6 +510,20 @@
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
+    },
+    "tempo": {
+      "tier": "hunt",
+      "state": "open",
+      "at": "20260915T005604Z",
+      "open": 10,
+      "guff_only": 5,
+      "gcl_only": 5,
+      "by_linter": {
+        "gosec": 3,
+        "unparam": 3,
+        "staticcheck": 2,
+        "gocritic": 2
+      }
     },
     "tetragon": {
       "tier": "hunt",

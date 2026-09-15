@@ -2255,7 +2255,8 @@ fn gocritic_param_bool(settings: &serde_yaml::Value, check: &str, param: &str) -
     v.as_bool().or_else(|| v.as_str()?.trim().parse().ok())
 }
 
-/// Accept either a bare string or a list of strings.
+/// Accept either a bare string or a list of strings, and tolerate `null`
+/// wherever a string could stand.
 ///
 /// golangci-lint decodes its config with mapstructure's `WeaklyTypedInput`, so
 /// `ignore-string-values: foo.+` and `ignore-string-values: [foo.+]` are the
@@ -2263,6 +2264,25 @@ fn gocritic_param_bool(settings: &serde_yaml::Value, check: &str, param: &str) -
 /// (via [`parse_settings`]) discards *every* setting for that linter — the
 /// visible symptom is unrelated options like `ignore-calls` reverting to their
 /// defaults.
+///
+/// The `null` cases are the same failure with a different cause. A list item
+/// written as a bare `-` decodes to YAML null, which Go turns into `""`; the
+/// rejected element used to take the whole settings block down with it.
+/// cosmos-sdk v0.55.0 has one:
+///
+/// ```yaml
+/// gosec:
+///   excludes:
+///     - G101
+///     - G107
+///     - G118
+///     -
+///     - G404
+/// ```
+///
+/// guff dropped `linters.settings.gosec` entirely and reported every excluded
+/// rule. An empty entry matches no rule id, which is exactly what upstream does
+/// with it.
 pub(crate) fn string_or_seq<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -2273,12 +2293,14 @@ where
     #[serde(untagged)]
     enum OneOrMany {
         One(String),
-        Many(Vec<String>),
+        Many(Vec<Option<String>>),
     }
 
-    Ok(match OneOrMany::deserialize(deserializer)? {
-        OneOrMany::One(s) => vec![s],
-        OneOrMany::Many(v) => v,
+    Ok(match Option::<OneOrMany>::deserialize(deserializer)? {
+        // `excludes:` with nothing under it is an empty list, not an error.
+        None => Vec::new(),
+        Some(OneOrMany::One(s)) => vec![s],
+        Some(OneOrMany::Many(v)) => v.into_iter().map(Option::unwrap_or_default).collect(),
     })
 }
 

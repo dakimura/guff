@@ -96,6 +96,22 @@ duparg.go:99:6:gocritic::dupArg: suspicious duplicated args in bytes.ReplaceAll(
 duparg.go:100:6:gocritic::dupArg: suspicious duplicated args in gotypes.Identical(t, t)
 duparg.go:101:6:gocritic::dupArg: suspicious duplicated args in gotypes.IdenticalIgnoreTags(t, t)
 duparg.go:105:2:gocritic::dupArg: suspicious duplicated args in draw.Draw(dst, r, dst, p, draw.Src)
+duparg.go:139:6:gocritic::dupArg: suspicious method call with the same argument and receiver
+duparg.go:140:6:gocritic::dupArg: suspicious method call with the same argument and receiver
+duparg.go:141:6:gocritic::dupArg: suspicious method call with the same argument and receiver
+duparg.go:142:6:gocritic::dupArg: suspicious method call with the same argument and receiver
+duparg.go:144:6:gocritic::dupArg: suspicious method call with the same argument and receiver
+dupsubexpr.go:33:6:gocritic::dupSubExpr: suspicious identical LHS and RHS for `==` operator
+dupsubexpr.go:34:6:gocritic::dupSubExpr: suspicious identical LHS and RHS for `==` operator
+dupsubexpr.go:35:6:gocritic::dupSubExpr: suspicious identical LHS and RHS for `==` operator
+dupsubexpr.go:36:6:gocritic::dupSubExpr: suspicious identical LHS and RHS for `==` operator
+dupsubexpr.go:37:6:gocritic::dupSubExpr: suspicious identical LHS and RHS for `==` operator
+dupsubexpr.go:38:6:gocritic::dupSubExpr: suspicious identical LHS and RHS for `==` operator
+dupsubexpr.go:39:6:gocritic::dupSubExpr: suspicious identical LHS and RHS for `==` operator
+dupsubexpr.go:42:6:gocritic::dupSubExpr: suspicious identical LHS and RHS for `/` operator
+dupsubexpr.go:43:6:gocritic::dupSubExpr: suspicious identical LHS and RHS for `==` operator
+dupsubexpr.go:45:6:gocritic::dupSubExpr: suspicious identical LHS and RHS for `<` operator
+dupsubexpr.go:47:6:gocritic::dupSubExpr: suspicious identical LHS and RHS for `==` operator
 exitafterdefer.go:24:5:gocritic::exitAfterDefer: log.Fatal will exit, and `defer log.Println("bye")` will not run
 exitafterdefer.go:36:3:gocritic::exitAfterDefer: log.Fatal will exit, and `defer log.Println("bye")` will not run
 exitafterdefer.go:44:3:gocritic::exitAfterDefer: log.Fatal will exit, and `defer log.Println("bye")` will not run

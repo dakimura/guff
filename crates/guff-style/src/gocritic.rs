@@ -554,11 +554,10 @@ fn exprs_equal(a: &Expr, b: &Expr) -> bool {
                     .zip(y.args.iter())
                     .all(|(a, b)| exprs_equal(a, b))
         }
-        (Expr::UnaryExpr(x), Expr::UnaryExpr(y)) => {
-            matches!(x.op, Token::NOT | Token::AND | Token::MUL | Token::SUB)
-                && x.op == y.op
-                && exprs_equal(&x.x, &y.x)
-        }
+        // `astUnaryExprEq` compares the operator and the operand, and nothing
+        // else: an operator whitelist here made `+a == +a` and `^a == ^a`
+        // unequal, so `dupSubExpr` stayed quiet on both.
+        (Expr::UnaryExpr(x), Expr::UnaryExpr(y)) => x.op == y.op && exprs_equal(&x.x, &y.x),
         (Expr::BinaryExpr(x), Expr::BinaryExpr(y)) => {
             x.op == y.op && exprs_equal(&x.x, &y.x) && exprs_equal(&x.y, &y.y)
         }
@@ -570,8 +569,55 @@ fn exprs_equal(a: &Expr, b: &Expr) -> bool {
                     _ => false,
                 }
         }
+        (Expr::CompositeLit(x), Expr::CompositeLit(y)) => {
+            opt_exprs_equal(x.ty.as_deref(), y.ty.as_deref()) && expr_slices_equal(&x.elts, &y.elts)
+        }
+        (Expr::KeyValueExpr(x), Expr::KeyValueExpr(y)) => {
+            exprs_equal(&x.key, &y.key) && exprs_equal(&x.value, &y.value)
+        }
+        (Expr::SliceExpr(x), Expr::SliceExpr(y)) => {
+            exprs_equal(&x.x, &y.x)
+                && opt_exprs_equal(x.low.as_deref(), y.low.as_deref())
+                && opt_exprs_equal(x.high.as_deref(), y.high.as_deref())
+                && opt_exprs_equal(x.max.as_deref(), y.max.as_deref())
+        }
+        (Expr::IndexListExpr(x), Expr::IndexListExpr(y)) => {
+            exprs_equal(&x.x, &y.x) && expr_slices_equal(&x.indices, &y.indices)
+        }
+        (Expr::Ellipsis(x), Expr::Ellipsis(y)) => {
+            opt_exprs_equal(x.elt.as_deref(), y.elt.as_deref())
+        }
+        (Expr::ArrayType(x), Expr::ArrayType(y)) => {
+            opt_exprs_equal(x.len.as_deref(), y.len.as_deref()) && exprs_equal(&x.elt, &y.elt)
+        }
+        (Expr::MapType(x), Expr::MapType(y)) => {
+            exprs_equal(&x.key, &y.key) && exprs_equal(&x.value, &y.value)
+        }
+        (Expr::ChanType(x), Expr::ChanType(y)) => {
+            x.dir == y.dir && exprs_equal(&x.value, &y.value)
+        }
+        // `astFuncLitEq` / `astStructTypeEq` / `astInterfaceTypeEq` /
+        // `astFuncTypeEq` compare a `FieldList` (and, for a literal, a whole
+        // `BlockStmt`); guff has no statement comparator here, so those four
+        // stay unequal — the conservative side, and the side guff was already
+        // on for every arm above.
         _ => false,
     }
+}
+
+/// `astExprEq` with `x == nil || y == nil { return x == y }` in front: two
+/// absent sub-expressions are equal, one absent one is not.
+fn opt_exprs_equal(a: Option<&Expr>, b: Option<&Expr>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(x), Some(y)) => exprs_equal(x, y),
+        _ => false,
+    }
+}
+
+/// `astExprSliceEq`.
+fn expr_slices_equal(a: &[Expr], b: &[Expr]) -> bool {
+    a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| exprs_equal(x, y))
 }
 
 fn is_true_lit(expr: &Expr) -> bool {
@@ -1794,7 +1840,27 @@ fn check_dup_branch_body(stmt: &IfStmt, pending: &mut Pending) {
     }
 }
 
-fn check_dup_sub_expr(bin: &BinaryExpr, pending: &mut Pending) {
+/// `resultIsFloat`: `c.ctx.TypeOf(expr).(*types.Basic)` carrying `IsFloat`.
+///
+/// A **type assertion**, so neither `Underlying()` nor `Unalias()`: measured,
+/// upstream reports both `mf/mf` for a defined `type MyF float64` and
+/// `af == af` for an alias `type AF = float64`, because neither type is a
+/// `*types.Basic`. Only a spelled-out `float32`/`float64` (or `complex`)
+/// silences the six float-sensitive operators.
+fn result_is_float(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    let TypeData::Basic(b) = artifacts.types.get(typ) else {
+        return false;
+    };
+    b.info().contains(IS_FLOAT)
+}
+
+fn check_dup_sub_expr(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Pending) {
     let watch = matches!(
         bin.op,
         Token::LOR
@@ -1813,11 +1879,31 @@ fn check_dup_sub_expr(bin: &BinaryExpr, pending: &mut Pending) {
             | Token::QUO
             | Token::SUB
     );
-    if !watch || !exprs_equal(&bin.x, &bin.y) {
+    if !watch {
         return;
     }
-    // Skip trivial literals like `1 == 1` — still suspicious but less useful;
-    // upstream skips floats with side-effect-free check; we keep AST equality.
+    // `if c.resultIsFloat(expr.X) && c.floatOpsSet[expr.Op] { return }`. The six
+    // operators below are the ones where two equal float operands can still be
+    // meaningful — `f == f` is the NaN test, `f - f` normalises a signed zero —
+    // so upstream stays quiet on them. guff reported both.
+    let float_op = matches!(
+        bin.op,
+        Token::EQL | Token::NEQ | Token::LEQ | Token::GEQ | Token::QUO | Token::SUB
+    );
+    if float_op && result_is_float(pass, &bin.x) {
+        return;
+    }
+    // `typep.SideEffectFree(c.ctx.TypesInfo, expr)` on the whole binary
+    // expression, which is that predicate on both operands (its `BinaryExpr`
+    // arm, and a binary operator is never `<-`). guff checked AST equality
+    // alone, so `rand.Int() == rand.Int()` and `(<-ch) == (<-ch)` were
+    // findings — two calls, or two receives, are not the same value.
+    if !side_effect_free(pass, &bin.x) || !side_effect_free(pass, &bin.y) {
+        return;
+    }
+    if !exprs_equal(&bin.x, &bin.y) {
+        return;
+    }
     report(
         pending,
         bin.x.pos().0 as u32,
@@ -9556,7 +9642,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         check_sloppy_len(b, &mut pending);
                     }
                     if enabled(&set, "dupSubExpr") {
-                        check_dup_sub_expr(b, &mut pending);
+                        check_dup_sub_expr(pass, b, &mut pending);
                     }
                     if enabled(&set, "badCond") {
                         check_bad_cond_expr(pass, b, &mut pending);

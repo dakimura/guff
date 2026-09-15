@@ -7797,7 +7797,7 @@ fn gocritic_dup_arg_covers_the_method_form_and_every_call_pattern() {
         .iter()
         .filter(|m| *m == "dupArg: suspicious method call with the same argument and receiver")
         .count();
-    assert_eq!(method, 10, "{messages:?}");
+    assert_eq!(method, 15, "{messages:?}");
 
     let mut calls: Vec<&str> = messages
         .iter()
@@ -10051,5 +10051,37 @@ fn exhaustive_reads_an_imported_packages_enum() {
                 .to_string(),
         ],
         "foreign-enum shapes"
+    );
+}
+
+/// dupSubExpr's two guards, by count.
+///
+/// `dupSubExpr` had no unit fixture at all, and guff's checker had neither of
+/// upstream's guards: `resultIsFloat` (six operators where two equal float
+/// operands are meaningful — `f == f` is the NaN test) and `SideEffectFree`
+/// (two calls, or two channel receives, are not one value). Both were found
+/// while closing cosmos-sdk; the `<-ch` one only became visible once
+/// `exprs_equal` stopped applying an operator whitelist upstream has no trace
+/// of, which had been suppressing it by accident.
+///
+/// Counted, not `any(contains(…))`: every finding of this checker carries the
+/// same message modulo the operator.
+#[test]
+fn gocritic_dup_sub_expr_skips_floats_and_impure_operands() {
+    let pkg = support::typecheck_fixture("gocritic", "example.com/gocritic", "dupsubexpr.go");
+    let messages = support::run_analyzer(gocritic(), &pkg);
+    let mut found: Vec<&str> = messages
+        .iter()
+        .filter(|m| m.starts_with("dupSubExpr: "))
+        .map(String::as_str)
+        .collect();
+    found.sort_unstable();
+    let eq = "dupSubExpr: suspicious identical LHS and RHS for `==` operator";
+    let lss = "dupSubExpr: suspicious identical LHS and RHS for `<` operator";
+    let quo = "dupSubExpr: suspicious identical LHS and RHS for `/` operator";
+    assert_eq!(
+        found,
+        vec![quo, lss, eq, eq, eq, eq, eq, eq, eq, eq, eq],
+        "{messages:?}"
     );
 }
