@@ -6,8 +6,8 @@
     "`unmeasured` is not `clean`: an absent measurement is a question."
   ],
   "goal": 100,
-  "defined": 72,
-  "clean": 69,
+  "defined": 73,
+  "clean": 70,
   "open": 0,
   "unmeasured": 3,
   "targets": {
@@ -173,6 +173,14 @@
       "tier": "hunt",
       "state": "clean",
       "at": "20260907T012059Z",
+      "open": 0,
+      "guff_only": 0,
+      "gcl_only": 0
+    },
+    "cortex": {
+      "tier": "hunt",
+      "state": "clean",
+      "at": "20260915T085714Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
