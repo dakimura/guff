@@ -36,6 +36,19 @@ moby/moby is excluded: public tree has no root `go.mod` (Docker-image builds onl
 - Upstream CI pin need not be exactly v2.12.2 — we always run v2.12.2.
 - prometheus stays in [`regress/`](../regress/).
 
+### Host requirements beyond the Go toolchain
+
+Most targets need only Go and `golangci-lint`. One does not, and a target that
+needs more says so in its own `corpus/hunt.json` entry through an `env` map,
+which `compat/hunt.sh` applies to **both** tools and to the module warm-up. The
+point of putting it there rather than in a shell is that a bare
+`./compat/hunt.sh --name <target>` cannot quietly measure the collapsed answer
+and have it read as a regression.
+
+| target | needs | why |
+|---|---|---|
+| photoprism/photoprism | `brew install libtensorflow vips` | `github.com/wamuir/graft/tensorflow` `#include`s `tensorflow/c/c_api.h`, and `github.com/davidbyttow/govips/v2/vips` asks pkg-config for `vips`. Without them 28 of 113 packages do not type-check, golangci-lint's whole report collapses to 3 typecheck findings, and guff — which does not collapse — reports 447: `guff 447 / golangci 3 / both 0`, a comparison of nothing. The entry's `env` carries `CGO_CFLAGS=-I/opt/homebrew/include` and `CGO_LDFLAGS=-L/opt/homebrew/lib`, because clang on macOS does not search Homebrew's include directory by default. `go build ./...` exits 0 with them and fails without. `compat/run.sh` has no `env` support, so promoting this target out of the hunt tier needs that first. |
+
 ### Excluded targets
 
 One reason per repository. The old shared "no confirmed v2" note covered

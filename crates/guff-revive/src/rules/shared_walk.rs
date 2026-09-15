@@ -79,7 +79,7 @@ struct SharedFileRules<'a> {
     if_return: Option<if_return::Checker<'a>>,
     import_alias_naming: Option<import_alias_naming::Checker>,
     imports_blocklist: Option<imports_blocklist::Checker>,
-    increment_decrement: Option<increment_decrement::Checker>,
+    increment_decrement: Option<increment_decrement::Checker<'a>>,
     inefficient_map_lookup: Option<inefficient_map_lookup::Checker<'a>>,
     modifies_parameter: Option<modifies_parameter::Checker>,
     modifies_value_receiver: Option<modifies_value_receiver::Checker<'a>>,
@@ -204,7 +204,7 @@ impl<'a> SharedFileRules<'a> {
                 .then(|| imports_blocklist::Checker::try_new(pass))
                 .flatten(),
             increment_decrement: enabled("increment-decrement")
-                .then(increment_decrement::Checker::new),
+                .then(|| increment_decrement::Checker::new(pass)),
             inefficient_map_lookup: enabled("inefficient-map-lookup")
                 .then(|| inefficient_map_lookup::Checker::new(pass)),
             modifies_parameter: enabled("modifies-parameter")

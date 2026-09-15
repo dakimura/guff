@@ -6,23 +6,25 @@ use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
 use crate::failure::Failure;
+use crate::util::render_node;
 
-pub struct Checker {
+pub struct Checker<'a> {
+    pass: &'a Pass<'a>,
     failures: Vec<Failure>,
 }
 
-impl Checker {
-    pub fn new() -> Self {
+impl<'a> Checker<'a> {
+    pub fn new(pass: &'a Pass<'a>) -> Self {
         Self {
+            pass,
             failures: Vec::new(),
         }
     }
 
     pub fn visit(&mut self, n: NodeRef<'_>) {
-            
-                    if let NodeRef::AssignStmt(assign) = n {
-                        check_assign(assign, &mut self.failures);
-                    }
+        if let NodeRef::AssignStmt(assign) = n {
+            check_assign(self.pass, assign, &mut self.failures);
+        }
     }
 
     pub fn into_failures(self) -> Vec<Failure> {
@@ -31,7 +33,7 @@ impl Checker {
 }
 
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut c = Checker::new();
+    let mut c = Checker::new(pass);
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
             if let Some(n) = n {
@@ -55,7 +57,7 @@ fn is_one(expr: &Expr) -> bool {
     )
 }
 
-fn check_assign(assign: &AssignStmt, failures: &mut Vec<Failure>) {
+fn check_assign(pass: &Pass<'_>, assign: &AssignStmt, failures: &mut Vec<Failure>) {
     if assign.lhs.len() != 1 || assign.rhs.len() != 1 {
         return;
     }
@@ -67,10 +69,16 @@ fn check_assign(assign: &AssignStmt, failures: &mut Vec<Failure>) {
         Some(Token::SubAssign) => ("-= 1", "--"),
         _ => return,
     };
-    let lhs = match &assign.lhs[0] {
-        Expr::Ident(id) => id.name.clone(),
-        _ => return,
-    };
+    // `fmt.Sprintf("should replace %s with %s%s", w.file.Render(as),
+    // w.file.Render(as.Lhs[0]), suffix)` — upstream renders whatever the
+    // left-hand side is. guff accepted an `Ident` and nothing else, so a field
+    // (`m.LinkViews += 1`) or an index was silently not a finding: three of
+    // photoprism's `internal/entity` findings, and the rule never fires on a
+    // method's own state, which is most of where `+= 1` is written.
+    let lhs = render_node(pass, &assign.lhs[0]);
+    if lhs.is_empty() {
+        return;
+    }
     failures.push(Failure {
         rule: "increment-decrement",
         // Upstream's node is the `*ast.AssignStmt`, which starts at its LHS.

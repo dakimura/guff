@@ -2150,3 +2150,63 @@ fn revive_asks_for_object_resolution_only_when_method_call_can_fire() {
         }
     ]))));
 }
+
+/// `increment-decrement` renders whatever the left-hand side is.
+///
+/// Upstream's message is built from `file.Render(as)` and
+/// `file.Render(as.Lhs[0])`; guff matched an `Ident` and nothing else, so a
+/// field, an index, a map index and a parenthesised deref were all silently not
+/// findings — and with them most of where `+= 1` gets written, since a method
+/// updating its own state cannot use a bare identifier. Asserted as the exact
+/// sorted list, because the two silent cases at the end differ from the
+/// findings only in the operand.
+#[test]
+fn revive_increment_decrement_renders_any_lhs() {
+    let pkg = support::typecheck_fixture("revive", "example.com/revive/incdec", "incdec.go");
+    let mut found: Vec<String> = support::run_analyzer(revive(), &pkg)
+        .into_iter()
+        .filter(|m| m.starts_with("increment-decrement:"))
+        .collect();
+    found.sort();
+    assert_eq!(
+        found,
+        vec![
+            "increment-decrement: should replace (*m).Views += 1 with (*m).Views++",
+            "increment-decrement: should replace m.Sub.Views += 1 with m.Sub.Views++",
+            "increment-decrement: should replace m.Views += 1 with m.Views++",
+            "increment-decrement: should replace m.Xs[0] -= 1 with m.Xs[0]--",
+            "increment-decrement: should replace mm[\"k\"] += 1 with mm[\"k\"]++",
+            "increment-decrement: should replace n += 1 with n++",
+            "increment-decrement: should replace n -= 1 with n--",
+            "increment-decrement: should replace xs[i] += 1 with xs[i]++",
+        ],
+        "{found:?}"
+    );
+}
+
+/// `exported` remembers reported `GenDecl`s per **file**, not per package.
+///
+/// Upstream builds `genDeclMissingComments` inside `Apply`, which runs once per
+/// file. guff kept one map on the checker and keyed it by the `var` token's
+/// position — and those positions come from the per-file `PARSE_COMMENTS`
+/// reparse, so two files with the keyword at the same byte offset shared a key
+/// and the second file's finding was dropped. The fixture's two files are
+/// byte-identical up to that keyword on purpose; photoprism's `internal/entity`
+/// lost four findings to accidental collisions.
+#[test]
+fn revive_exported_reports_each_file_separately() {
+    let pkg = support::typecheck_fixture_dir("revive", "exported_collide", "example.com/revive/collide");
+    let mut found: Vec<String> = support::run_analyzer(revive(), &pkg)
+        .into_iter()
+        .filter(|m| m.starts_with("exported:"))
+        .collect();
+    found.sort();
+    assert_eq!(
+        found,
+        vec![
+            "exported: exported var AlphaValue should have comment or be unexported",
+            "exported: exported var BetaValue should have comment or be unexported",
+        ],
+        "{found:?}"
+    );
+}
