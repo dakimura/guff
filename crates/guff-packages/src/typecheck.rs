@@ -1489,8 +1489,32 @@ impl DepLoadWalk {
             // dropping whichever edge the walk arrived on used to cost the
             // topological order itself, and with it every wave assignment
             // downstream.
+            //
+            // "Would close a cycle" is not only "the target is on the stack
+            // right now", and it is not only about `path` either. cosmos-sdk's
+            // ring is four edges long and lands on a frame further up:
+            //
+            //   client/tx --test--> types/module/testutil --> x/auth/tx
+            //             --test--> x/auth/client --> client/tx
+            //
+            // Both test edges are legitimate and neither target is on the stack
+            // when it is taken; the ring only shows up at the bottom, where a
+            // **production** edge lands back on `client/tx`. That is the edge
+            // the walk used to blame — reported as a guff bug, and leaving
+            // `order` non-topological for an edge it kept. So the question has
+            // to be asked before descending, against the whole stack: can `dep`
+            // get back to anything we are still inside, without another test
+            // edge to help it?
             for dep in deps.iter().copied().filter(|d| is_test_edge(d)) {
-                if self.visiting.iter().any(|p| p == dep) {
+                if self.visiting.iter().any(|p| p == dep)
+                    || production_reaches_stack(
+                        dep,
+                        &self.visiting,
+                        dep_graph,
+                        test_only,
+                        loadable,
+                    )
+                {
                     self.declined_test_edges
                         .push((path.to_string(), dep.to_string()));
                     continue;
@@ -1503,6 +1527,52 @@ impl DepLoadWalk {
             self.order.push(path.to_string());
         }
     }
+}
+
+/// Can `from` reach anything in `open` following **production** edges only?
+///
+/// `open` is the walk's `visiting` stack: every package the recursion is still
+/// inside. Production edges cannot cycle — Go forbids import cycles — so this
+/// walk always terminates, and a `true` answer means descending into `from`
+/// would come back round to a frame that is not finished yet.
+///
+/// Test edges are excluded from the search on purpose: they are what the caller
+/// is deciding about, and a ring that needs a *second* one to close is the
+/// legal `P`-test-imports-`Q`-whose-test-imports-`P` shape, which the walk
+/// handles by declining whichever of the two it reaches second.
+fn production_reaches_stack(
+    from: &str,
+    open: &[String],
+    dep_graph: &HashMap<String, Vec<String>>,
+    test_only: &HashMap<String, Vec<String>>,
+    loadable: &HashSet<String>,
+) -> bool {
+    let open: HashSet<&str> = open.iter().map(String::as_str).collect();
+    let mut stack: Vec<&str> = vec![from];
+    let mut seen: HashSet<&str> = HashSet::default();
+    while let Some(p) = stack.pop() {
+        if open.contains(p) {
+            return true;
+        }
+        if !seen.insert(p) {
+            continue;
+        }
+        let Some(deps) = dep_graph.get(p) else {
+            continue;
+        };
+        let test: &[String] = test_only.get(p).map(Vec::as_slice).unwrap_or(&[]);
+        for d in deps {
+            let d = d.as_str();
+            if d == "unsafe" || d == "C" || !loadable.contains(d) {
+                continue;
+            }
+            if test.iter().any(|t| t == d) {
+                continue;
+            }
+            stack.push(d);
+        }
+    }
+    false
 }
 
 /// Read a dependency's `compiled_go_files` once, in listed order. Files that
@@ -1689,6 +1759,52 @@ mod tests {
         assert_eq!(order.len(), 3, "{order:?}");
     }
 
+    /// A ring that closes **below** the frame the test edge came from.
+    ///
+    /// cosmos-sdk's, in the smallest graph that shows it:
+    ///
+    ///   tx --test--> testutil --> authtx --test--> authclient --> tx
+    ///
+    /// Neither test edge's target is on the stack when the walk takes it, and
+    /// the ring only appears at the bottom — where a **production** edge lands
+    /// back on `tx`. Blaming that edge is wrong twice over: it is reported as a
+    /// guff bug (a production cycle is impossible in valid Go), and `order` is
+    /// left non-topological for an edge the walk kept.
+    #[test]
+    fn dep_load_order_declines_a_test_edge_that_closes_a_ring_further_down() {
+        let g = graph(&[
+            ("tx", &["lib", "testutil"]),
+            ("testutil", &["authtx"]),
+            ("authtx", &["lib", "authclient"]),
+            ("authclient", &["tx"]),
+            ("lib", &[]),
+        ]);
+        let test_only = graph(&[("tx", &["testutil"]), ("authtx", &["authclient"])]);
+        let names = ["tx", "testutil", "authtx", "authclient", "lib"];
+        let loadable: HashSet<String> = names.iter().map(|s| s.to_string()).collect();
+        // `tx` first, so the walk descends the test edge before anything else
+        // has ordered `authclient`.
+        let needed: Vec<String> = names.iter().map(|s| s.to_string()).collect();
+
+        let (order, back_edges, declined) =
+            dep_load_order(&needed, &g, &test_only, &loadable);
+
+        assert!(back_edges.is_empty(), "reported {back_edges:?}");
+        assert_eq!(
+            declined,
+            vec![("authtx".to_string(), "authclient".to_string())],
+            "the second test edge is the one that closes the ring"
+        );
+
+        // Every kept edge is still leaves-first, the production ones included.
+        let pos = |p: &str| order.iter().position(|x| x == p).expect("in order");
+        assert!(pos("lib") < pos("tx"), "{order:?}");
+        assert!(pos("tx") < pos("authclient"), "{order:?}");
+        assert!(pos("authtx") < pos("testutil"), "{order:?}");
+        assert!(pos("testutil") < pos("tx"), "{order:?}");
+        assert_eq!(order.len(), 5, "{order:?}");
+    }
+
     /// The declined edge must not come back in `wave_heights`.
     ///
     /// This is the defect behind boundary's 11 ill-typed packages, in the
@@ -1770,21 +1886,32 @@ mod tests {
         );
     }
 
-    /// A production cycle is still a bug and still reported: the test-edge
-    /// handling above must not swallow it.
+    /// One test edge and one production edge is **not** a production cycle.
+    ///
+    /// This is cosmos-sdk's shape with the middle taken out: `a`'s *external
+    /// test* imports `b`, and `b` imports `a`. `go vet` and `go test` accept
+    /// it — `a_test` is a separate package, so nothing in the production graph
+    /// points both ways (measured on a two-package module).
+    ///
+    /// The walk used to blame `b -> a` for it, which was wrong twice: it is
+    /// reported as a guff bug, and the order it produced (`[b, a]`) is not
+    /// topological for that very edge. Declining the test edge gives `[a, b]`,
+    /// which is.
+    ///
+    /// A cycle made only of production edges is still a bug and still reported
+    /// — `dep_load_order_reports_the_back_edge_it_had_to_drop`.
     #[test]
-    fn dep_load_order_still_reports_a_production_cycle() {
+    fn dep_load_order_declines_the_test_edge_rather_than_blaming_production() {
         let g = graph(&[("a", &["b"]), ("b", &["a"])]);
         let test_only = graph(&[("a", &["b"])]); // only a->b is test-only
         let loadable: HashSet<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
         let needed: Vec<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
 
-        let (_, back_edges, _) = dep_load_order(&needed, &g, &test_only, &loadable);
-        assert_eq!(
-            back_edges,
-            vec![("b".to_string(), "a".to_string())],
-            "b -> a is a production edge and closes the cycle"
-        );
+        let (order, back_edges, declined) =
+            dep_load_order(&needed, &g, &test_only, &loadable);
+        assert!(back_edges.is_empty(), "reported {back_edges:?}");
+        assert_eq!(declined, vec![("a".to_string(), "b".to_string())]);
+        assert_eq!(order, vec!["a", "b"], "topological for the kept edge b -> a");
     }
 
     /// The signal `report_seed_cycles` prints and `compat/health.py` gates on.

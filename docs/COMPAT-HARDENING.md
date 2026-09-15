@@ -31718,3 +31718,89 @@ compat/run.sh    --oss --tier pr   8 target すべて OK
 seed overlay schema は 6 → 7。形は変わっていないが**値が型の同一性に効く**
 2 つの変更（タグの unquote、`T[A]` の instantiate）が入っているので、
 古い blob を読むと別の型として振る舞う。
+
+### 2026-09-15（続き 288）— seed の依存グラフが**偽の閉路**を報告していた。環は 4 辺で、うち test 辺が 2 本
+
+続き 286 で cosmos-sdk を採用したとき、findings は 0 対 0 で一致したのに
+health だけが落ちていた:
+
+```
+guff: seed dep cycle github.com/cosmos/cosmos-sdk/x/auth/client -> .../client/tx
+guff: seed order is not topological; some packages may be reported ill-typed.
+      This is a guff bug, not a problem with the code being linted.
+```
+
+自分で「guff のバグ」と書く signal である。`compat/health.py` は
+baseline を持たない（行が無い＝厳密に 0）ので、これは締めるしかない。
+
+#### 1. 閉路の実体
+
+デバッグ出力に stack を出して初めて分かった:
+
+```
+client/tx --test--> types/module/testutil --(prod)--> x/auth/tx
+          --test--> x/auth/client --(prod)--> client/tx
+```
+
+**test 辺が 2 本**あり、どちらも取る時点では相手が stack に載っていない。
+環が見えるのは一番下で、そこは**本体の辺**である。`DepLoadWalk` はそこで
+back edge を記録していた —— 二重に間違っている:
+
+- 本体だけの閉路は Go では作れないので、「guff のバグ」として報告される。
+- そして `order` は、walk が**採用したまま**の辺について
+  topological でなくなる。2 ノード版で見ると分かりやすい:
+  `a` の外部テストが `b` を import し、`b` が `a` を import する形で、
+  古い挙動の order は `[b, a]`。採用した `b -> a` に対して逆である。
+
+この 2 ノード版が Go として正しいことは測った（`go vet` / `go test` 緑）。
+`a_test` は別パッケージなので、本体のグラフはどちらにも向いていない。
+
+#### 2. 直し
+
+test 辺を降りる**前に**訊く: `dep` は、別の test 辺の助けを借りずに、
+いま walk が中に居るフレームのどれかへ戻れるか。
+
+```rust
+if self.visiting.iter().any(|p| p == dep)
+    || production_reaches_stack(dep, &self.visiting, dep_graph, test_only, loadable)
+{
+    self.declined_test_edges.push((path.to_string(), dep.to_string()));
+    continue;
+}
+```
+
+`path` ではなく **stack 全体**に対して訊くのが要点である。最初に
+`production_reaches(dep, path)` だけを実装して cosmos-sdk で測ったら
+**何も変わらなかった** —— 環が閉じるのは `client/tx` の 1 つ下の
+フレームではなく、`x/auth/tx` から取った 2 本目の test 辺の先だったからで、
+`x/auth/client` が戻る先は stack の**根に近い方**だった。
+**1 段だけ深く見る直しは、1 段だけ深い形にしか効かない。**
+
+本体の辺だけを辿るので探索は必ず終わる（Go が閉路を禁じている）。
+test 辺を探索から外すのは意図的で、**2 本目の test 辺を要する環**は
+「P のテストが Q を、Q のテストが P を import する」合法な形であり、
+walk は後から来た方を辞退することで既に扱っている。
+
+#### 3. 実測
+
+```
+cosmos-sdk  seed dep cycle 1 → 0、declined 3 → 4、findings 0/0/0 不変、health 1 → 0
+tempo       398/398/398 不変
+boundary    576/576/576 不変（health 0）  ← コード内コメントが名指ししている test 辺の閉路
+prometheus   20/ 20/ 20 不変（health 0）  ← 同上
+seed dep check  cosmos-sdk 0.93s → 1.45s / tempo 0.95s → 1.01s
+                kubernetes ./pkg/kubelet/...（1695 source deps）0.75s
+golden / fix / reject   234 / 234 / 14
+cargo test  --workspace --locked 緑
+compat/run.sh --oss --tier pr  8 target すべて OK
+```
+
+cosmos-sdk の +0.5s は test 辺 1 本ごとの DFS の分である。全体が分単位の
+実行に対して 0.3% で、先に最適化する理由が無い。
+
+#### 4. これで cosmos-sdk の 0 対 0 が意味を持つ
+
+続き 286 に「除外が厚くて golangci も 0 件なので、この一致は
+**閉路で ill-typed になったパッケージが黙っているのと見分けが付かない**」と
+書いた。health が 0 になったということは ill-typed が 1 つも無いという
+ことで、いま初めて「両方とも本当に 0 件」と言える。
