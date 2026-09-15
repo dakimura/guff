@@ -4,7 +4,12 @@
 1. Sets top-level:
      issues.max-issues-per-linter: 0
      issues.max-same-issues: 0
-   so identical-message truncation cannot rotate keys.
+     issues.fix: false
+   so identical-message truncation cannot rotate keys, and so neither tool
+   rewrites the checkout. ``fix: true`` is not a reporting option: golangci-lint
+   applies the fix and then omits the issue, so a config that sets it turns the
+   finding set into a function of what happened to be fixable. It also leaves
+   the tree dirty, which silently changes what the *next* run measures.
 
    ``--uniq-by-line false`` additionally sets ``issues.uniq-by-line: false``.
    That key is ON by default and keeps **one** finding per (file, line) across
@@ -60,6 +65,12 @@ def patch_issue_caps(text: str, uniq_by_line: bool | None = None) -> str:
     keys = {
         "max-issues-per-linter": "  max-issues-per-linter: 0\n",
         "max-same-issues": "  max-same-issues: 0\n",
+        # `issues.fix: true` makes golangci-lint *rewrite the checkout* and
+        # then not report what it fixed, so the two tools are no longer being
+        # asked the same question — and the next run measures different source.
+        # grafana/loki sets it: golangci fixed 7 files and dropped 10 findings
+        # guff still reported, which reads as a guff defect and is not one.
+        "fix": "  fix: false\n",
     }
     if uniq_by_line is not None:
         keys["uniq-by-line"] = f"  uniq-by-line: {str(uniq_by_line).lower()}\n"

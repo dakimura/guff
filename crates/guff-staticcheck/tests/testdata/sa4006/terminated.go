@@ -112,3 +112,46 @@ func readAcrossBackEdge(xs []int) int {
 
 	return acc
 }
+
+// A func literal assigned to a captured variable after a call that does not
+// return.
+//
+// `value_is_live` asks whether the value's own instruction survived block
+// deletion, which covers a register. A func literal with no free variables is
+// a `Value::Function` **constant** and has no instruction at all, so the guard
+// waved it through and the check read "no referrers" off a store the IR had
+// already dropped — grafana/loki's
+// `pkg/querytee/proxy_endpoint_test.go:534`, where the assignment follows
+// `t.Skip`. Measured: `t.Fatal` behaves the same, and a plain `return` does
+// not, which is what says the trigger is a no-return call rather than
+// unreachable code in general.
+
+func mustStop() { panic("BUG: unexpected call") }
+
+func capturedAfterNoReturn() {
+	var h func(int)
+	read := func(n int) { h(n) }
+	_ = read
+
+	mustStop()
+	h = func(int) {} // silent: the store went with the deleted block
+}
+
+func capturedAfterNoReturnReadBack() {
+	var h func(int)
+	read := func(n int) { h(n) }
+	_ = read
+
+	mustStop()
+	h = func(int) {}
+	h(1) // silent for the same reason
+}
+
+func capturedLive() {
+	var h func(int)
+	read := func(n int) { h(n) }
+	_ = read
+
+	h = func(int) {} // silent: a store to a captured cell is a use
+	h = func(int) {}
+}

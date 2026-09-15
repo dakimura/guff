@@ -208,6 +208,15 @@ pub struct IssuesConfig {
     pub max_same_issues: i32,
     #[serde(default, rename = "uniq-by-line")]
     pub uniq_by_line: Option<bool>,
+    /// `issues.fix` — apply suggested fixes and omit what was fixed from the
+    /// report, exactly as `--fix` does.
+    ///
+    /// The key was already in `V2_ISSUES_KEYS`, so a config setting it drew no
+    /// "unknown key" warning while guff went on reporting what golangci-lint
+    /// had quietly rewritten. grafana/loki sets it: golangci fixed 7 files and
+    /// dropped 10 findings guff still reported.
+    #[serde(default)]
+    pub fix: bool,
     /// Show only issues in the git working-tree diff (`--new`).
     #[serde(default)]
     pub new: bool,
@@ -245,6 +254,7 @@ impl Default for IssuesConfig {
             max_issues_per_linter: 50,
             max_same_issues: 3,
             uniq_by_line: None,
+            fix: false,
             new: false,
             new_from_rev: None,
             new_from_merge_base: None,

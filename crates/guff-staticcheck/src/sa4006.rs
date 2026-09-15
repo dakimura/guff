@@ -391,11 +391,31 @@ fn ssa_unused_but_ast_read(
 /// behind `if !mincore(…)`, and on every non-linux build `mincore` is
 /// `panic("BUG: unexpected call")`. Replace the panic with a `return` in a
 /// repro and the finding disappears from guff as well.
-fn value_is_live(func: &guff_ssa::function::Function, v: Value) -> bool {
-    let Value::Instr(iid) = v else {
-        return true;
-    };
-    func.live_blocks().any(|(_, b)| b.instrs.contains(&iid))
+///
+/// A register covers most of it, but not all: a func literal with no free
+/// variables is a `Value::Function` **constant**, so it has no instruction to
+/// ask about and the guard passed it straight through. What the IR deleted
+/// there is the *store*, so for a non-register value the question has to be
+/// asked about the assignment's own position range. grafana/loki's
+/// `pkg/querytee/proxy_endpoint_test.go:534` assigns a handler to a captured
+/// variable after `t.Skip`, and `t.Skip` does not return. Measured: `t.Fatal`
+/// behaves the same and a plain `return` does not, which is what says the
+/// trigger is a no-return call and not "unreachable code" in general.
+fn value_is_live(
+    func: &guff_ssa::function::Function,
+    v: Value,
+    assign_range: (u32, u32),
+) -> bool {
+    if let Value::Instr(iid) = v {
+        return func.live_blocks().any(|(_, b)| b.instrs.contains(&iid));
+    }
+    let (lo, hi) = assign_range;
+    func.live_blocks().any(|(_, b)| {
+        b.instrs.iter().any(|&iid| {
+            let p = func.pos(iid).0 as u32;
+            p >= lo && p <= hi
+        })
+    })
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -457,7 +477,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                 if matches!(lhs, Expr::Ident(Ident { name, .. }) if name == "_") {
                                     continue;
                                 }
-                                if !value_is_live(func, Value::Instr(rid)) {
+                                if !value_is_live(func, Value::Instr(rid), (0, 0)) {
                                     continue;
                                 }
                                 if !has_use(func, Value::Instr(rid)) {
@@ -517,7 +537,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if matches!(v, Value::Const(_)) {
                         continue;
                     }
-                    if !value_is_live(func, v) {
+                    if !value_is_live(func, v, (assign_pos(assign), assign_end(assign))) {
                         continue;
                     }
                     if !has_use(func, v) {

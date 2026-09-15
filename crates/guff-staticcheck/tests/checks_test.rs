@@ -2391,7 +2391,10 @@ fn sa4006_ignores_later_reads_when_the_list_returns() {
         ],
         "silent: storeReadBeforeTheReturn (a read between the assignment and \
          the return), behindANoReturnCall (a block upstream's IR never builds), \
-         storeReadThenReturn, readOnOwnRhs and readAcrossBackEdge"
+         storeReadThenReturn, readOnOwnRhs, readAcrossBackEdge, and the three \
+         captured-variable shapes at the end — a func literal with no free \
+         variables is a `Value::Function` constant, so the liveness guard has \
+         to ask about the assignment rather than the value"
     );
 }
 
@@ -4265,5 +4268,67 @@ fn sa4006_is_quiet_after_a_generic_type_conversion() {
         got,
         vec![(58, 2, "this value of p is never used".to_string())],
         "only `genericDead`"
+    );
+}
+
+/// Where `Add` has to be, and where the `go` may be (SA2000).
+///
+/// Upstream is one pattern: the `Add` must be the **first** statement of the
+/// `go func(){…}` body, descending through a leading block, and `code.Matches`
+/// finds the `go` anywhere in the file. guff scanned the whole body with a
+/// hand-rolled statement walk that entered neither `switch`/`select` cases nor
+/// function literals — so it reported a correct `Add` that merely sat inside an
+/// enclosing goroutine and missed genuinely misplaced ones.
+///
+/// Positions, not a count: every finding carries the same message modulo the
+/// receiver, so a count is true of any subset.
+#[test]
+fn sa2000_first_statement_and_goroutines_anywhere() {
+    let pkg = typecheck_rule("sa2000", "shapes.go");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64)> = support::run_analyzer_diagnostics(sa2000::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| {
+            let p = fset.position(guff::position::Pos(d.pos as i64));
+            (p.line, p.column)
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            (26, 3),  // addFirst
+            (56, 4),  // addInLeadingBlock
+            (68, 5),  // addInDoubleLeadingBlock
+            (103, 4), // goInsideSwitch
+            (115, 4), // goInsideSelect
+            (146, 4), // badInsideAnotherGoroutine
+            (157, 3), // withArgs
+            (164, 3), // (holder).pointerField
+        ],
+        "silent: addSecond, addInsideIf, addInBlockButSecond, stmtThenBlock, \
+         goInsideAnotherGoroutine and namedFuncValue"
+    );
+}
+
+/// A bare type parameter never subsumes a later case clause (SA4020).
+///
+/// Upstream's `subsumes` opens with `if typeparams.IsTypeParam(T) { return
+/// false }`. Without it, `case T:` in a generic function looks like an
+/// interface everything implements, and every later clause reads as
+/// unreachable — three of grafana/loki's.
+#[test]
+fn sa4020_ignores_type_parameter_cases() {
+    let pkg = typecheck_rule("sa4020", "typeparam.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa4020::analyzer(), &pkg);
+    assert_eq!(
+        messages,
+        vec![
+            "unreachable case clause: io.Reader will always match before reader",
+            "unreachable case clause: io.Reader will always match before io.ReadCloser",
+        ],
+        "silent: both type-parameter shapes and the nil clause"
     );
 }
