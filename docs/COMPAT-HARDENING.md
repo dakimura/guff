@@ -31804,3 +31804,60 @@ cosmos-sdk の +0.5s は test 辺 1 本ごとの DFS の分である。全体が
 **閉路で ill-typed になったパッケージが黙っているのと見分けが付かない**」と
 書いた。health が 0 になったということは ill-typed が 1 つも無いという
 ことで、いま初めて「両方とも本当に 0 件」と言える。
+
+### 2026-09-15（続き 289）— `adopt kubevirt` は**除外**。`./...` はそもそも始まらず、lint 対象 105 パスのうち 39 が darwin で建たない
+
+`status.py next` が出した次の候補。**測れないことを測った**回である。
+
+#### 1. `./...` が `go list` の段階で落ちる
+
+```
+package kubevirt.io/kubevirt/cmd/container-disk-v2alpha:
+  C source files not allowed when not using cgo or SWIG: main.c
+```
+
+このディレクトリには `main.c` と `_test.go` しか無い（Bazel が建てる C の
+プログラムに Go のテストを被せてある）。**`CGO_ENABLED=1` でこうなる**ので
+ホストの設定ではなくリポジトリの性質である。golangci-lint も同じ理由で
+非ゼロ終了する。
+
+kubevirt 自身も `./...` では回していない。`hack/golangci-lint.sh` は
+`hack/linter/lint-paths.txt` の **105 パス**を読んで並べる。corpus には
+既に前例があり（traefik / ingress-nginx / argo-workflows）、リポジトリ自身の
+回し方に合わせるのが規約なので、そこへ差し替えて測り直した。
+
+#### 2. その 105 パスのうち 39 が建たない
+
+```
+39 / 105 パス、166 パッケージ中 85 が `go build` に失敗（darwin）
+```
+
+`cmd/virt-api` / `cmd/virt-controller` / `cmd/virt-operator`（本体のバイナリ）、
+`pkg/instancetype`、`pkg/network/driver/netlink`、`tests/` 6 つが含まれる。
+代表的な原因は 2 つ:
+
+- `vendor/github.com/containernetworking/plugins/pkg/ns` は `ns_linux.go`
+  しか持たない → *build constraints exclude all Go files*
+- `pkg/safepath` が `syscall.Getxattr` / `touchat` / `mknodat` を使う
+
+#### 3. 上流のレポートは 1 件に潰れる
+
+```
+kubevirt: guff=130 golangci=1 both=0 P=0.0% R=0.0%
+  guff-only by linter: {'mnd': 130}
+  gcl-only by linter: {'typecheck': 1}
+  ill-typed packages 8 > baseline 0
+```
+
+golangci は最初の `IllTypedError` で run 全体を cancel するので、30 linter
+× 166 パッケージが**何も測っていない**。guff は潰れずに 130 件出す。
+milvus / dagger と同じ形で、**比較対象が存在しない**。
+
+#### 4. 部分集合に逃げない
+
+建つ 66 パスは `cmd/` `pkg/` `tests/` に散っていて、まとめて指せる部分木が
+無い。任意の 66 パスを選べば数字は出るが、それは**リポジトリも上流も使って
+いないパッケージ集合**の数字である。inspektor-gadget と同じ判断で
+`EXCLUDED` に置いた（`corpus/hunt.json` には入れない）。
+
+台帳は 68/100 のまま。**測れない理由を測って書くのも結果である。**
