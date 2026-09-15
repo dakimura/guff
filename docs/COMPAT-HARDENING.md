@@ -31393,3 +31393,198 @@ compat/run.sh    --oss --tier pr   8 target すべて OK
 
 台帳: 66/100 at zero（69 定義、open 0、unmeasured 3）
 ```
+
+### 2026-09-15（続き 286）— `adopt cosmos-sdk`。`go/build` のヘッダ走査が**バッククォートの import パス**で無限ループしていた。tempo の除外理由はこれだった
+
+cosmos-sdk は guff が**終わらない**ところから始まった。golangci-lint が
+リポジトリ全体を **70.67s** で見るのに対し、guff は 1 コアを 100% で回したまま
+**10 時間以上（636 CPU 分）**、RSS は 45MB のまま動かない。増えないメモリと
+動かない RSS は「重い」ではなく「回っている」の形である。
+
+#### 1. どこで回っていたか
+
+`target/profiling/guff` を建ててサンプリングすると、スタックはいつも同じだった:
+
+```
+guff_golist::list::list_packages            (list.rs:215)
+  guff_build::import_dir::import_dir_with   (import_dir.rs:42)
+    load_package_files                      (import_dir.rs:115)
+      guff_build::go_source::parse_go_file_info (go_source.rs:64)
+        parse_import_path_spec              (go_source.rs:158)
+          skip_space_and_comments           (go_source.rs:98–124)
+```
+
+パッケージを 1 つずつ削る二分で `./types` → 19 個の外部 import → 
+`cosmossdk.io/log/v2` → **`github.com/bytedance/sonic` 単体**まで落ちた
+（golangci は同じプローブを 0s）。sonic のどのファイルかは、`go_source.rs` を
+`include!` しただけの 10 行の rustc バイナリに sonic の 382 ファイルを
+1 つずつ流し、**止まる直前に出たファイル名**で分かる:
+
+```
+internal/native/avx2/f32toa_subr.go
+```
+
+中身はこうだった:
+
+```go
+package avx2
+
+import (
+	`github.com/bytedance/sonic/loader`
+)
+```
+
+**バッククォートの import パス**である。asm2asm の生成器がそう書く。
+
+#### 2. 上流は raw string を受ける
+
+`go/build` の `importReader.readString` は最初の 1 バイトで分岐し、
+`` ` `` なら次の `` ` `` まで、`"` なら `"` までを読む。guff の移植は `"` の
+枝しか持っていなかったので、`parse_import_path_spec` は None を返し、
+`skip_import_spec` は「名前でも `.` でも `"` でもない」として **渡された
+スライスをそのまま返す**。`data` が 1 バイトも進まないまま `import (` の
+ループが回り続ける —— 遅いのではなく、終わらない。
+
+直しは 2 つ。`read_quoted` が両方のクォートを受けること、そして
+**進まなかったら抜ける**こと:
+
+```rust
+let rest = skip_import_spec(data);
+if rest.len() == data.len() {
+    break;
+}
+```
+
+後者は防御であって本体ではないが、この関数が**同じ失敗で 2 度目**だから
+入れてある（1 度目は `importCmd` を `import` キーワードと誤認した cli の
+OOM。`parse_import_alias_starting_with_import` がその回帰）。上流は構文
+エラーで import 走査を打ち切るので、意味も合っている。
+
+測った形は 6 つ、すべて `go list` で確認した:
+
+| 形 | `go list` |
+|---|---|
+| ``import `fmt` `` | `imports=[fmt]` |
+| ``import f `fmt` `` | `imports=[fmt]` |
+| ``import . `strings` `` | `imports=[strings]` |
+| ``import ( _ `embed`; `os` )`` | `imports=[embed os]` |
+| 混在（`` `fmt` `` / `"os"` / ``e `errors` ``） | `imports=[errors fmt os]` |
+| ``import `C` `` | `CgoFiles=[x.go]` —— **cgo になる** |
+
+15 行の再現（`example.com/m` が ``import (`example.com/m/a`)`` で errcheck 1 件）
+は、直す前の guff が 25s でも終わらず、直したあとは golangci と同じ 1 件を
+0.66s で出す。
+
+#### 3. tempo の除外理由（続き 271）は**これだった**
+
+「guff が終わらない。原因は依存 1 つ（`bytedance/sonic`）。ローダの費用が
+直った瞬間に再採用できる」と書いてあった。費用ではなく無限ループだった。
+5 行の sonic プローブは **guff 0.30s / golangci 0.24s**（同一 finding）に
+なり、tempo は 25m のタイムアウトではなく **398 / 398 / 393** を返す。
+`corpus/status.py` の EXCLUDED から外し、`corpus/hunt.json` に戻した。
+
+**「なぜ出来ないか」を書いた注記は、その理由ごと腐る。** 1 週間前の自分の
+計測が「費用」と言っていたので、誰も `parse_go_file_info` を疑わなかった。
+
+#### 4. `gosec.excludes` の裸の `-`
+
+cosmos-sdk の設定にはこれが 1 つある:
+
+```yaml
+gosec:
+  excludes:
+    - G101
+    -
+    - G404
+```
+
+裸の `-` は YAML null である。`string_or_seq` は `Vec<String>` に落として
+いたので untagged enum のどの variant にも当たらず、`parse_settings` は
+**`linters.settings.gosec` を丸ごと捨てて既定値に戻す**。症状は null とは
+何の関係もない場所に出る —— 除外したはずの G404 がリポジトリ中で鳴る。
+mapstructure の `WeaklyTypedInput` は null を `""` にするだけで、どの規則 id
+とも一致しない。`Vec<Option<String>>` にして `unwrap_or_default` を通す。
+キーの下に何も無い（`includes:` だけ）も空リストであって失敗ではない。
+
+#### 5. gocritic —— 式の同値が `astequal.Expr` に足りていなかった
+
+残った 3 件は `types/address_test.go` の `//nolint:gocritic` が**未使用**だと
+いう nolintlint の指摘だった。つまり本体の gocritic が鳴っていない:
+
+```go
+s.Require().True(types.AccAddress{}.Equals(types.AccAddress{})) //nolint:gocritic
+```
+
+`dupArg` の第 1 の規則は `$x.Equal($x)` 系 4 つを `Where(m["x"].Pure)` で
+絞ったもので、gogrep の `$x` 2 回は `astequal.Expr` で比べられる。guff の
+`exprs_equal` には `CompositeLit` の腕が**無かった**ので、`A{}` と `A{}` は
+等しくない。ついでに `KeyValueExpr` / `SliceExpr` / `Ellipsis` / `ArrayType` /
+`MapType` / `ChanType` / `IndexListExpr` も無かった。`FuncLit` と 3 つの型
+リテラルは `FieldList`（と `BlockStmt`）の比較が要るので今回も不等のまま
+——— これまで全部の腕がそうだったのと同じ、安全側である。
+
+`UnaryExpr` の腕には上流に影も形も無い演算子の白リスト
+（`!` `&` `*` `-`）が付いていて、これが `+a == +a` と `^a == ^a` を隠して
+いた。外すと `dupSubExpr` が `(<-ch) == (<-ch)` を報告しはじめる ——
+**抑制 guard が別の欠陥を隠していた**形である。
+
+`dupSubExpr` の上流はこうだ:
+
+```go
+if !c.opSet[expr.Op] { return }
+if c.resultIsFloat(expr.X) && c.floatOpsSet[expr.Op] { return }
+if typep.SideEffectFree(c.ctx.TypesInfo, expr) && c.opSet[expr.Op] &&
+	astequal.Expr(expr.X, expr.Y) { c.warn(expr) }
+```
+
+guff は演算子集合と AST 同値だけで、**guard が 2 つとも無かった**。
+`f == f`（NaN 判定）、`f - f`（符号付きゼロの正規化）、
+`rand.Int() == rand.Int()` を鳴らしていた（`check_dup_sub_expr` は `pass` すら
+受け取っていない）。
+
+`resultIsFloat` は `ctx.TypeOf(expr).(*types.Basic)` の**型アサーション**で
+あって `Underlying()` でも `Unalias()` でもない。測ると、
+`type MyF float64` の `mf/mf` も `type AF = float64` の `af == af` も上流は
+**報告する**。綴られた `float32`/`float64` だけが 6 つの演算子を黙らせる。
+
+#### 6. まだ開いているもの
+
+cosmos-sdk には seed の依存グラフに**偽の閉路**が 1 本残っている:
+
+```
+guff: seed dep cycle github.com/cosmos/cosmos-sdk/x/auth/client -> .../client/tx
+```
+
+`client/tx` の**外部テストパッケージ**が `x/bank` を import し、`x/bank` は
+（本体側で）`x/auth/client` へ届き、`x/auth/client` は本体で `client/tx` を
+import する。Go では `client/tx_test` は別パッケージなので閉路ではない。
+`DepLoadWalk` は test-only 辺が**直に**閉じる場合だけ辞退するので、数段
+下で閉じるこの形は辞退されず、底の**本体の辺**が back edge として報告される。
+tempo にも別口で ill-typed が 1 パッケージ（`modules/frontend`）残っており、
+gcl-only 5 件のうち 3 件がその中にある。どちらも次のタスク。
+
+#### 7. 実測
+
+```
+sonic 5 行プローブ    直す前 guff >180s（続き 271）→ 0.30s / golangci 0.24s（同一 finding）
+raw import 15 行再現  直す前 25s でも終わらず → guff 1 件 = golangci 1 件
+gocritic 4 形 20 件   guff と golangci が完全一致（dupArg 受け手 / dupSubExpr の 2 guard）
+tempo (v3.0.3)        25m timeout → guff=398 golangci=398 both=393（ill-typed 1）
+cosmos-sdk (v0.55.0)  終わらない → guff=0 golangci=0 both=0 P=100.0% R=100.0% [OK]
+golden                234 case 一致（gocritic に +16 キー: dupArg 5 / dupSubExpr 11、欠落 0）
+fix / reject          234 / 14
+cargo test            --workspace --locked 緑（282 スイート）
+compat/run.sh         --oss --tier pr   8 target すべて OK
+
+台帳: 67/100 at zero（71 定義、open 1 = tempo の 10 件、unmeasured 3）
+```
+
+cosmos-sdk の config は除外が厚く、golangci も 0 件である。**0 対 0 の一致は
+「何も測れていない」と見分けが付かない**ので、この採用は §6 の seed 閉路を
+直すまで半分しか信用できない —— 閉路で ill-typed になったパッケージは
+findings を出さないが、上流も 0 なのでそれが見えない。閉路の修正が次のタスク
+であるのはそのためでもある。
+
+`revive-enable-all-rules` の golden は regen が 5 キーを**落とした**ので
+捨てた。全ルール有効の revive は上流が自分自身と一致しないことがある
+（`--regen` は一致するまで繰り返すが、2 回とも空なら一致してしまう）。

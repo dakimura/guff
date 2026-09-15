@@ -119,3 +119,41 @@ func dupArgCallsOK(s string, n int) {
 	// ruleguard's `isPure`, which every `Where(… .Pure)` is written against.
 	_ = strings.Contains(s[:1], s[:1])
 }
+
+// A composite-literal receiver. `astequal.Expr` compares a `*ast.CompositeLit`
+// by its type and its elements; guff's expression equality had no arm for one
+// at all, so every shape below was silently unequal and the four findings were
+// missing. cosmos-sdk v0.55.0's `types/address_test.go` is this shape — and
+// there the miss also cost three *nolintlint* findings, because a
+// `//nolint:gocritic` whose finding never arrives reads as unused.
+type dupArgList []byte
+
+func (l dupArgList) Equal(o dupArgList) bool { return true }
+
+type dupArgPair struct{ X int }
+
+func (p dupArgPair) Equal(o dupArgPair) bool { return true }
+func (p *dupArgPair) Cmp(o *dupArgPair) int  { return 0 }
+
+func dupArgLitBad(v dupArgList) {
+	_ = dupArgList{}.Equal(dupArgList{})
+	_ = dupArgList{1}.Equal(dupArgList{1})
+	_ = dupArgList{v[0]}.Equal(dupArgList{v[0]})
+	_ = dupArgPair{1}.Equal(dupArgPair{1})
+	// A conversion is the one call `isPure` accepts.
+	_ = dupArgList(nil).Equal(dupArgList(nil))
+}
+
+func dupArgLitOK(v dupArgList) {
+	// Different elements.
+	_ = dupArgList{1}.Equal(dupArgList{2})
+	// A keyed element is an `*ast.KeyValueExpr`, which `isPure` rejects.
+	_ = dupArgPair{X: 1}.Equal(dupArgPair{X: 1})
+	// The receiver is parenthesised and the argument is not, so the two `$x`
+	// captures are not `astequal.Expr`-equal.
+	_ = (&dupArgPair{}).Cmp(&dupArgPair{})
+	// An impure element.
+	_ = dupArgList{dupArgByte()}.Equal(dupArgList{dupArgByte()})
+}
+
+func dupArgByte() byte { return 1 }

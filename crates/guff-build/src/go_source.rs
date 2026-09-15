@@ -67,7 +67,14 @@ pub fn parse_go_file_info(content: &[u8]) -> Result<GoFileInfo, String> {
                     }
                     imports.push(path.to_string());
                 }
-                data = skip_import_spec(data);
+                let rest = skip_import_spec(data);
+                // A spec shape we cannot parse leaves `data` untouched; without
+                // this guard the loop spins forever on it. go/build stops the
+                // import scan at a syntax error, so stop here too.
+                if rest.len() == data.len() {
+                    break;
+                }
+                data = rest;
             }
         } else if let Some(path) = parse_import_path_spec(data) {
             if path == "C" {
@@ -143,20 +150,36 @@ fn parse_word(data: &[u8]) -> Option<(&[u8], &[u8])> {
     Some((&data[..end], &data[end..]))
 }
 
-fn parse_import_path(data: &[u8]) -> Option<&str> {
-    let data = skip_space_and_comments(data);
-    if data.first() != Some(&b'"') {
+/// True for the two quote bytes that can open an import path.
+fn is_quote(b: Option<&u8>) -> bool {
+    matches!(b, Some(&b'"') | Some(&b'`'))
+}
+
+/// Reads a quoted import path at the start of `data`, returning the path and
+/// the number of bytes it occupies (quotes included).
+///
+/// `importReader.readString` (go/build) accepts an interpreted string (`"p"`)
+/// *and* a raw string literal (`` `p` ``); asm2asm-generated files write the
+/// backquoted form.
+fn read_quoted(data: &[u8]) -> Option<(&str, usize)> {
+    let quote = *data.first()?;
+    if quote != b'"' && quote != b'`' {
         return None;
     }
     let rest = &data[1..];
-    let end = rest.iter().position(|&b| b == b'"')?;
-    std::str::from_utf8(&rest[..end]).ok()
+    let end = rest.iter().position(|&b| b == quote)?;
+    Some((std::str::from_utf8(&rest[..end]).ok()?, end + 2))
+}
+
+fn parse_import_path(data: &[u8]) -> Option<&str> {
+    let data = skip_space_and_comments(data);
+    read_quoted(data).map(|(path, _)| path)
 }
 
 /// Parses an import spec path, allowing an optional identifier alias before the string.
 fn parse_import_path_spec(data: &[u8]) -> Option<&str> {
     let data = skip_space_and_comments(data);
-    if data.first() == Some(&b'"') {
+    if is_quote(data.first()) {
         return parse_import_path(data);
     }
     // Optional name / `.` / `_` before the path string.
@@ -176,11 +199,11 @@ fn skip_import_spec(mut data: &[u8]) -> &[u8] {
     // as the `import` keyword — that failed to advance and spun forever while
     // `parse_go_file_info` pushed the same path on every iteration (cli
     // `pkg/cmd/alias` OOM).
-    if data.first() == Some(&b'"') {
-        if let Some(i) = data[1..].iter().position(|&b| b == b'"') {
-            return &data[i + 2..];
-        }
-        return &[];
+    if is_quote(data.first()) {
+        return match read_quoted(data) {
+            Some((_, len)) => &data[len..],
+            None => &[],
+        };
     }
     // Skip optional name / `.` / `_` before path.
     let after_name = if data.first() == Some(&b'.') {
@@ -191,11 +214,11 @@ fn skip_import_spec(mut data: &[u8]) -> &[u8] {
         return data;
     };
     let rest = skip_space_and_comments(after_name);
-    if rest.first() == Some(&b'"') {
-        if let Some(i) = rest[1..].iter().position(|&b| b == b'"') {
-            return &rest[i + 2..];
-        }
-        return &[];
+    if is_quote(rest.first()) {
+        return match read_quoted(rest) {
+            Some((_, len)) => &rest[len..],
+            None => &[],
+        };
     }
     data
 }

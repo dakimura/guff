@@ -465,5 +465,21 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "25m"
+  },
+  {
+    "name": "cosmos-sdk",
+    "url": "https://github.com/cosmos/cosmos-sdk.git",
+    "ref": "v0.55.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
+  },
+  {
+    "name": "tempo",
+    "url": "https://github.com/grafana/tempo.git",
+    "ref": "v3.0.3",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
   }
 ]

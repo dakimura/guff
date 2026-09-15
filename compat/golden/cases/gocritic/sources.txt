@@ -13,3 +13,6 @@ duparg.go  crates/guff-style/tests/testdata/gocritic/duparg.go
 # exitAfterDefer over every construct that can hold a call — the walk is
 # generic upstream, and guff used to enumerate statement kinds by hand.
 exitafterdefer.go  crates/guff-style/tests/testdata/gocritic/exitafterdefer.go
+# dupSubExpr's two guards (resultIsFloat / SideEffectFree) and the composite,
+# slice and unary shapes its AST comparison had no arm for.
+dupsubexpr.go  crates/guff-style/tests/testdata/gocritic/dupsubexpr.go
