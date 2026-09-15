@@ -32076,3 +32076,80 @@ compat/run.sh --oss --tier pr  8 target すべて OK
 
 台帳: 70/100 at zero（74 定義、open 1 = loki の 4 件、unmeasured 3）
 ```
+
+### 2026-09-15（続き 292）— `close loki` は**止める**。`inline` の関数形は診断そのものがインライナの実行結果に依存する
+
+loki に残った 4 件は全部同じ形:
+
+```
+clients/pkg/logentry/stages/template.go:40  inline: Call of sha3.Sum256 should be inlined
+clients/pkg/promtail/promtail.go:134        inline: Call of sha3.Sum256 should be inlined
+pkg/ruler/base/mapper.go:151                inline: Call of sha3.New256 should be inlined
+pkg/ruler/base/mapper.go:152                inline: Call of sha3.New256 should be inlined
+```
+
+`golang.org/x/crypto/sha3` の `New256` / `Sum256` は `//go:fix inline` が付いた
+薄いラッパで、stdlib の `crypto/sha3` に転送するだけである。guff の
+`inline.rs` は冒頭に「Full function/alias inlining is omitted」と書いてあり、
+**定数の形だけ**を実装している。
+
+#### 1. ファクトを運ぶだけでは足りない
+
+上流は確かにファクトで運ぶ:
+
+```go
+FactTypes: []analysis.Fact{ (*goFixInlineFuncFact)(nil), … }
+a.pass.ExportObjectFact(fn, &goFixInlineFuncFact{callee})
+```
+
+guff にはファクト機構（`ObjectFact` / `PackageFact` / `FactStore`）があるので、
+ここまでは作れる。問題はその先で、**診断を出すかどうかも、何と出すかも、
+インライナを実際に走らせた結果で決まる**（`passes/inline/inline.go`）:
+
+```go
+res, err := inline.Inline(caller, callee, &inline.Options{Logf: discard})
+if err != nil {
+    a.pass.Reportf(call.Lparen, "%v", err)   // ← エラー文面がそのまま診断になる
+    return
+}
+if res.Literalized { return }                 // ← 黙る
+if res.BindingDecl && !allowBindingDecl { return } // ← 黙る
+…
+Message: fmt.Sprintf("Call of %v should be inlined", callee)
+```
+
+`lazyEdits` は analyzer flag で既定 false、golangci-lint は設定しないので、
+この経路は毎回通る。
+
+測った 4 形（`//go:fix inline` を付けた依存パッケージと、それを呼ぶ側）:
+
+| 呼び出し | 上流 |
+|---|---|
+| `dep.Sum256([]byte("x"))` | `Call of dep.Sum256 should be inlined` |
+| `dep.New256()`（本体が非公開の `newImpl` を参照） | **別の文面**: `cannot inline call to dep.New256 because body refers to non-exported newImpl` |
+| `dep.NotAnnotated()` | 黙る |
+| `dep.Twice(…)` / `dep.Plain(…)` / `dep.Variadic(…)` | すべて `Call of … should be inlined` |
+
+2 行目が要点である。**インライナのエラー文字列が診断文になる**ので、
+「呼び出しを見つけて報告する」では上流と一致しない。
+
+#### 2. 要る部品の大きさ
+
+`golang.org/x/tools/internal/refactor/inline` は `inline.go` だけで 3,546 行、
+パッケージ全体で 9,222 行。`err` / `Literalized` / `BindingDecl` はどれも
+置換解析そのものの出力なので、この 3 つだけを安く近似する道は無い。
+
+#### 3. だから allowlist にも入れない
+
+`compat/allowlists/` は「上流に対して測った根拠のある意図的な乖離」の置き場で、
+pyroscope（goconst のレース＝**上流に安定した答が無い**）がその典型である。
+ここは違う —— 上流の答は安定していて、guff が出せないだけである。
+allowlist に入れれば loki は clean になり台帳は 71 になるが、それは
+**ユーザが受け取る findings を guff が実際に落としている**事実を隠すことになる。
+loki は open 4 のまま、台帳は 70/100 のままにする。
+
+#### 4. 状態
+
+guff の過剰報告はゼロ（続き 291 で P=100.0%）。残っているのは recall だけで、
+それは checker の欠陥ではなく**未実装の機能**である。着手するなら
+`inline` の関数形単独のタスクとして、インライナの移植範囲を先に決めること。
