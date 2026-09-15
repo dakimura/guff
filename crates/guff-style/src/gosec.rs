@@ -2003,7 +2003,14 @@ impl NosecRanges {
             };
             // Cheap filter: almost no file carries a directive, and the
             // reparse below is the expensive part.
-            if !src.windows(5).any(|w| w == b"nosec") {
+            //
+            // Both spellings, because `gosec:disable` does **not** contain
+            // `nosec`. Screening on `nosec` alone made a file whose only
+            // suppression is the directive form invisible — grafana/tempo's
+            // `modules/livestore/live_store_background.go:270` carries
+            // `//gosec:disable G404 — It doesn't require strong randomness`
+            // and nothing else, and guff reported the G404 anyway.
+            if !contains_bytes(src, b"nosec") && !contains_bytes(src, b"gosec:disable") {
                 continue;
             }
             let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
@@ -2147,6 +2154,11 @@ fn directive_suppresses(args: &str, rule: &str) -> bool {
     // `#nosec somethingElse` names no rule at all, and upstream falls back to
     // "all rules" (`if len(ignores) == 0`).
     !found_any
+}
+
+/// `bytes.Contains`, for the directive screen above.
+fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack.len() >= needle.len() && haystack.windows(needle.len()).any(|w| w == needle)
 }
 
 const NOSEC_TAG: &str = "#nosec";

@@ -66,6 +66,8 @@ bad/bad.go:156:14:gosec:medium:G304: Potential file inclusion via variable
 bad/bad.go:161:21:gosec:high:G703: Path traversal via taint analysis
 bad/bad.go:172:15:gosec:medium:G304: Potential file inclusion via variable
 bad/bad.go:179:21:gosec:high:G703: Path traversal via taint analysis
+directiveonly/directive_only.go:21:2:gosec:high:G101: Potential hardcoded credentials
+directiveonly/directive_only.go:38:2:gosec:high:G101: Potential hardcoded credentials
 dotio/dotimport_io.go:26:14:gosec:high:G115: integer overflow conversion int -> int32
 dotio/dotimport_io.go:33:9:gosec:high:G109: Potential Integer overflow made by strconv.Atoi result conversion to int16/32
 dotio/dotimport_io.go:33:14:gosec:high:G115: integer overflow conversion int -> int32
@@ -125,6 +127,11 @@ g118/g118.go:136:33:gosec:medium:G118: context cancellation function returned by
 g118/g118.go:147:2:gosec:high:G118: Goroutine uses context.Background/TODO while request-scoped context is available
 g118/g118.go:151:2:gosec:high:G118: Goroutine uses context.Background/TODO while request-scoped context is available
 g118/g118.go:176:13:gosec:high:G118: Long-running loop performs calls without a ctx.Done() cancellation guard
+g118/g118.go:231:34:gosec:medium:G118: context cancellation function returned by WithCancel/WithTimeout/WithDeadline is not called
+g118/g118.go:242:33:gosec:medium:G118: context cancellation function returned by WithCancel/WithTimeout/WithDeadline is not called
+g118/g118.go:248:33:gosec:medium:G118: context cancellation function returned by WithCancel/WithTimeout/WithDeadline is not called
+g118/g118.go:254:33:gosec:medium:G118: context cancellation function returned by WithCancel/WithTimeout/WithDeadline is not called
+g118/g118.go:261:33:gosec:medium:G118: context cancellation function returned by WithCancel/WithTimeout/WithDeadline is not called
 g122/g122.go:21:10:gosec:medium:G304: Potential file inclusion via variable
 g122/g122.go:21:21:gosec:high:G122: Filesystem operation in filepath.Walk/WalkDir callback uses race-prone path; consider root-scoped APIs (e.g. os.Root) to prevent symlink TOCTOU traversal
 g122/g122.go:30:9:gosec:medium:G304: Potential file inclusion via variable

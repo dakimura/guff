@@ -52,6 +52,7 @@ use guff_ssa::instr::{CallCommon, InstrData};
 use guff_ssa::program::{value_type_of, Program};
 use guff_ssa::value::Value;
 use guff_types::arena::TypeData;
+use guff_types::signature::{signature_params, signature_variadic};
 use guff_types::tuple::{tuple_at, tuple_len};
 use guff_types::TypeId;
 
@@ -731,8 +732,55 @@ fn is_cancel_func_type(prog: &Program, t: TypeId) -> bool {
     tuple_len(&prog.type_arena, s.params()) == 0 && tuple_len(&prog.type_arena, s.results()) == 0
 }
 
-fn is_used_in_call(common: &CallCommon, target: Value) -> bool {
-    common.value == target || common.args.contains(&target)
+fn is_used_in_call(prog: &Program, func: &Function, common: &CallCommon, target: Value) -> bool {
+    if common.value == target {
+        return true;
+    }
+    let unpacked = unpacked_arg_count(prog, func, common);
+    common.args[..unpacked].contains(&target)
+}
+
+/// How many of `common.args` go/ssa would still hand to the call itself.
+///
+/// go/ssa packs the variadic tail of a non-spread call into a fresh slice —
+/// `f(a, b, c)` on `func f(int, ...int)` becomes an `Alloc`, an `IndexAddr` and
+/// a `Store` per element, a `Slice`, and a call whose operands are `a` and that
+/// slice. So `b` and `c` are referred to by a *`Store`*, never by the call, and
+/// `isUsedInCall` does not see them. guff passes variadic arguments through
+/// individually and records only the spread form in `CallCommon::ellipsis`
+/// (`instr.rs`), so an analyzer ported from go/ssa has to drop the tail here.
+///
+/// Measured on the three shapes that made this visible — `useVar(cancel)`,
+/// `s = append(s, cancel)` and `m.cancels = append(m.cancels, cancel)` are all
+/// G118 findings upstream and were all silent in guff, while the non-variadic
+/// `use(cancel)` is silent on both sides. grafana/tempo
+/// `modules/querier/worker/processor_manager.go:68` is the append form.
+fn unpacked_arg_count(prog: &Program, func: &Function, common: &CallCommon) -> usize {
+    let n = common.args.len();
+    if common.ellipsis {
+        // `f(a, xs...)` hands over the slice itself; nothing is packed.
+        return n;
+    }
+    if let Value::Builtin(b) = common.value {
+        // The variadic builtins. `append`'s first argument is the slice it
+        // appends to, and go/ssa passes that one directly.
+        return match prog.builtins.get(b).name.as_str() {
+            "append" => 1,
+            "print" | "println" => 0,
+            _ => n,
+        }
+        .min(n);
+    }
+    let sig = match common.method {
+        Some(m) => m.typ(&prog.object_arena),
+        None => Some(value_type_of(prog, func, common.value)),
+    };
+    let Some(sig) = sig else { return n };
+    if !signature_variadic(&prog.type_arena, sig) {
+        return n;
+    }
+    let params = signature_params(&prog.type_arena, sig);
+    tuple_len(&prog.type_arena, params).saturating_sub(1).min(n)
 }
 
 /// `isCancelCalled`: a breadth-first walk of everywhere the cancel value flows,
@@ -751,7 +799,7 @@ fn is_cancel_called(ctx: &Ctx<'_>, start_fn: FuncId, start: Value) -> bool {
         for &rid in go_referrers(prog, func, current) {
             let instr = func.instrs.get(rid);
             if let Some(common) = call_common(instr) {
-                if is_used_in_call(common, current) {
+                if is_used_in_call(prog, func, common, current) {
                     return true;
                 }
                 continue;
@@ -964,7 +1012,7 @@ fn is_loaded_value_called(prog: &Program, func: &Function, start: Value) -> bool
         for &rid in go_referrers(prog, func, cur) {
             let instr = func.instrs.get(rid);
             if let Some(common) = call_common(instr) {
-                if is_used_in_call(common, cur) {
+                if is_used_in_call(prog, func, common, cur) {
                     return true;
                 }
                 continue;
@@ -992,7 +1040,7 @@ fn is_value_called(prog: &Program, fid: FuncId, start: Value) -> bool {
         for &rid in go_referrers(prog, func, cur) {
             let instr = func.instrs.get(rid);
             if let Some(common) = call_common(instr) {
-                if is_used_in_call(common, cur) {
+                if is_used_in_call(prog, func, common, cur) {
                     return true;
                 }
                 continue;

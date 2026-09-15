@@ -206,3 +206,68 @@ func spinNoBlocking(ctx context.Context) {
 		_ = n
 	}
 }
+
+// --- lost cancel: the variadic tail ------------------------------------------
+//
+// go/ssa packs the variadic arguments of a non-spread call into a fresh slice
+// (`Alloc`, one `IndexAddr`+`Store` per element, `Slice`), so the cancel's
+// referrer there is a *store*, never the call — `isUsedInCall` does not see it
+// and the cancel counts as lost. guff hands variadic arguments to the call
+// individually, which made every shape below silent. grafana/tempo's
+// `modules/querier/worker/processor_manager.go:68` is the `append` form.
+
+type cancelHolder struct {
+	ctx     context.Context
+	cancels []context.CancelFunc
+	fns     []func()
+}
+
+func takesOne(f func()) {}
+
+func takesMany(fs ...func()) {}
+
+func (h *cancelHolder) appendToField(n int) {
+	for len(h.cancels) < n {
+		_, cancel := context.WithCancel(h.ctx) // FINDING
+		h.cancels = append(h.cancels, cancel)
+	}
+	for len(h.cancels) > n {
+		// Calling it through the slice is not a use of the value either.
+		h.cancels[0]()
+		h.cancels = h.cancels[1:]
+	}
+}
+
+func (h *cancelHolder) appendToPlainFuncField() {
+	_, cancel := context.WithCancel(h.ctx) // FINDING
+	h.fns = append(h.fns, cancel)
+}
+
+func (h *cancelHolder) appendToLocal() {
+	var s []context.CancelFunc
+	_, cancel := context.WithCancel(h.ctx) // FINDING
+	s = append(s, cancel)
+	s[0]()
+}
+
+func (h *cancelHolder) spreadAppend() {
+	_, cancel := context.WithCancel(h.ctx) // FINDING
+	// `xs...` passes the slice itself, so nothing is packed — but the cancel is
+	// inside a composite literal, which the walk does not track either.
+	h.cancels = append(h.cancels, []context.CancelFunc{cancel}...)
+}
+
+func (h *cancelHolder) variadicArg() {
+	_, cancel := context.WithCancel(h.ctx) // FINDING
+	takesMany(cancel)
+}
+
+func (h *cancelHolder) plainArg() {
+	_, cancel := context.WithCancel(h.ctx) // silent: a fixed parameter is a real operand of the call
+	takesOne(cancel)
+}
+
+func (h *cancelHolder) goStatement() {
+	_, cancel := context.WithCancel(h.ctx) // silent: `go cancel()` calls it
+	go cancel()
+}

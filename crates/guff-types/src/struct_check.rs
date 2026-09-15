@@ -15,8 +15,6 @@
 //!   `InvalidPtrEmbed`/`MisplacedTypeParam`) is now implemented in
 //!   [`Checker::check_embedded_field`].
 //! - `Info` recording (`recordDef`) is a no-op.
-//! - tag unquoting is minimal (strips matching outer quotes/backticks; no
-//!   escape processing).
 
 use guff::ast::{Expr, StructType};
 use guff_types_errors::Code;
@@ -245,14 +243,35 @@ fn embedded_field_ident(e: &Expr) -> Option<&guff::ast::Ident> {
     }
 }
 
-/// Strip matching outer quotes/backticks from a struct tag literal.
+/// `Checker.tag`: `strconv.Unquote(t.Value)`, and `""` when that fails.
+///
+/// Stripping the outer quotes is not enough, because the tag is part of the
+/// struct's **identity**. The two literals
+///
+/// ```go
+/// Name string `json:"name"`
+/// Name string "json:\"name\""
+/// ```
+///
+/// are the same field, and Go lets an unnamed struct written the second way be
+/// assigned to a named type written the first way. Keeping the backslashes made
+/// the two tags differ, so the structs were not identical and the assignment
+/// was rejected — grafana/tempo `modules/frontend/mcp_tools_test.go:550`
+/// (`cannot use struct{…} value as mcp.CallToolParams value`), which took the
+/// whole package ill-typed and cost three findings.
+///
+/// The decoding is `guff-constant`'s string-literal parser, the same one
+/// constant expressions use. A tag is a Go `string`, i.e. bytes; guff stores it
+/// as a `String`, so an invalid UTF-8 escape (`"\xff"`) is decoded lossily —
+/// the only place the two representations can disagree, and not one a struct
+/// tag reaches in practice.
 fn unquote_tag(lit: &str) -> String {
-    let bytes = lit.as_bytes();
-    if bytes.len() >= 2 {
-        let (first, last) = (bytes[0], bytes[bytes.len() - 1]);
-        if (first == b'"' && last == b'"') || (first == b'`' && last == b'`') {
-            return lit[1..lit.len() - 1].to_string();
-        }
+    let v = guff_constant::literal::make_from_literal(lit, guff::token::Token::STRING, 0);
+    if matches!(v, guff_constant::Value::Unknown) {
+        // go/types reports `incorrect tag syntax` here. It cannot be reached
+        // from a parsed file — the scanner rejects a bad escape first — so
+        // this is the value, not the diagnostic, that matters.
+        return String::new();
     }
-    lit.to_string()
+    guff_constant::string_val_lossy(&v)
 }

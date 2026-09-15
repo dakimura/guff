@@ -4239,3 +4239,31 @@ fn s1002_message_renders_every_operand_shape() {
         );
     }
 }
+
+/// A conversion to an instantiated generic type is a conversion.
+///
+/// `index_expr`'s `DEFERRED (generics)` arm made `T[A]` in expression position
+/// an invalid operand without reporting anything, so `p := Fn[int](g)` produced
+/// an untyped value, `p.Apply` recorded no selection, and the SSA builder read
+/// `Apply` as a bare identifier — leaving `p` with no referrers and SA4006
+/// calling it dead. Only the genuinely dead store may be reported.
+#[test]
+fn sa4006_is_quiet_after_a_generic_type_conversion() {
+    let pkg = typecheck_rule("sa4006", "generic_conv.go");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64, String)> =
+        support::run_analyzer_diagnostics(sa4006::analyzer(), &pkg)
+            .into_iter()
+            .map(|d| {
+                let p = fset.position(guff::position::Pos(d.pos as i64));
+                (p.line, p.column, d.message)
+            })
+            .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![(58, 2, "this value of p is never used".to_string())],
+        "only `genericDead`"
+    );
+}

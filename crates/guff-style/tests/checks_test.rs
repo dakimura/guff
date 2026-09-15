@@ -290,14 +290,14 @@ fn gosec_g118_reports_only_uncalled_cancels_and_detached_goroutines() {
             ),
             count("G118: Long-running loop performs calls without a ctx.Done() cancellation guard"),
         ),
-        (6, 2, 1),
+        (11, 2, 1),
         "{messages:?}"
     );
     // Nothing else: every other case in the fixture is one of the escapes the
     // walk has to recognise, and the `// silent` marks say which.
     assert_eq!(
         messages.iter().filter(|m| m.starts_with("G118:")).count(),
-        9,
+        14,
         "{messages:?}"
     );
 }
@@ -10083,5 +10083,52 @@ fn gocritic_dup_sub_expr_skips_floats_and_impure_operands() {
         found,
         vec![quo, lss, eq, eq, eq, eq, eq, eq, eq, eq, eq],
         "{messages:?}"
+    );
+}
+
+/// The `MakeInterface` that records an implementation can come from a call to a
+/// *generic* function.
+///
+/// guff read the callee's signature out of `Info.Types[e.Fun]`, and the
+/// `IndexExpr` of an explicit instantiation (`f[int](x)`) has no entry there —
+/// so no argument was converted to its parameter type, no `MakeInterface` was
+/// emitted, and `typesImplementing` lost the type. Counted, because the two
+/// silent halves of the fixture differ only in how the value is boxed.
+#[test]
+fn unparam_skips_methods_boxed_at_a_generic_call() {
+    let pkg = support::typecheck_fixture(
+        "unparam",
+        "example.com/unparam/genericiface",
+        "genericiface.go",
+    );
+    let messages = support::run_analyzer(unparam(), &pkg);
+    assert_eq!(
+        messages,
+        vec!["(*lone).solo - result 1 (error) is always nil"],
+        "{messages:?}"
+    );
+}
+
+/// gosec's `//gosec:disable` spelling, in a file that contains the `#`-tag
+/// spelling nowhere.
+///
+/// The byte screen in front of the comment reparse looked only for the tag, so
+/// a file suppressing with the directive alone was never reparsed and every
+/// directive in it was ignored.
+#[test]
+fn gosec_honours_the_directive_spelling_without_the_tag() {
+    let pkg = support::typecheck_fixture(
+        "gosec",
+        "example.com/gosec/directiveonly",
+        "directive_only.go",
+    );
+    let messages = support::run_analyzer(gosec(), &pkg);
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m.starts_with("G101:"))
+            .count(),
+        2,
+        "only `plain` and the G102-directive case: {messages:?}"
     );
 }
