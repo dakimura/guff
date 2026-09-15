@@ -501,5 +501,13 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "40m"
+  },
+  {
+    "name": "loki",
+    "url": "https://github.com/grafana/loki.git",
+    "ref": "v3.7.6",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "40m"
   }
 ]

@@ -188,6 +188,15 @@ sa1031/bad/bad.go:34:14:staticcheck::SA1031: overlapping dst and src
 sa1031/bad/bad.go:43:14:staticcheck::SA1031: overlapping dst and src
 sa1032/bad/bad.go:10:2:staticcheck::SA1032: arguments have the wrong order
 sa2000/bad/bad.go:8:3:staticcheck::SA2000: should call wg.Add(1) before starting the goroutine to avoid a race
+sa2000/shapes/shapes.go:26:3:staticcheck::SA2000: should call wg.Add(1) before starting the goroutine to avoid a race
+sa2000/shapes/shapes.go:56:4:staticcheck::SA2000: should call wg.Add(1) before starting the goroutine to avoid a race
+sa2000/shapes/shapes.go:68:5:staticcheck::SA2000: should call wg.Add(1) before starting the goroutine to avoid a race
+sa2000/shapes/shapes.go:103:4:staticcheck::SA2000: should call wg.Add(1) before starting the goroutine to avoid a race
+sa2000/shapes/shapes.go:112:2:staticcheck::S1000: should use a simple channel send/receive instead of select with a single case
+sa2000/shapes/shapes.go:115:4:staticcheck::SA2000: should call wg.Add(1) before starting the goroutine to avoid a race
+sa2000/shapes/shapes.go:146:4:staticcheck::SA2000: should call inner.Add(1) before starting the goroutine to avoid a race
+sa2000/shapes/shapes.go:157:3:staticcheck::SA2000: should call wg.Add(n) before starting the goroutine to avoid a race
+sa2000/shapes/shapes.go:164:3:staticcheck::SA2000: should call h.wg.Add(1) before starting the goroutine to avoid a race
 sa2001/bad/bad.go:8:2:staticcheck::SA2001: empty critical section
 sa2002/bad/bad.go:6:2:staticcheck::SA2002: the goroutine calls T.Fatal, which must be called in the same goroutine as the test
 sa2003/bad/bad.go:8:2:staticcheck::SA2003: deferring Lock right after having locked already; did you mean to defer Unlock?
@@ -268,6 +277,8 @@ sa4017/bad/bad.go:24:2:staticcheck::SA4017: norm doesn't have side effects and i
 sa4018/bad/bad.go:2:23:staticcheck::SA4018: self-assignment of x to x
 sa4019/bad/bad.go:4:1:staticcheck::SA4019: identical build constraints "!plan9" and "!plan9"
 sa4020/bad/bad.go:9:2:staticcheck::SA4020: unreachable case clause: any will always match before example.com/sa4020/bad.T
+sa4020/typeparam/typeparam.go:49:2:staticcheck::SA4020: unreachable case clause: io.Reader will always match before example.com/sa4020/typeparam.reader
+sa4020/typeparam/typeparam.go:59:2:staticcheck::SA4020: unreachable case clause: io.Reader will always match before io.ReadCloser
 sa4021/bad/bad.go:4:5:staticcheck::SA4006: this value of s is never used
 sa4021/bad/bad.go:4:9:staticcheck::SA4021: x = append(y) is equivalent to x = y
 sa4021/ok/ok.go:4:5:staticcheck::SA4006: this value of s is never used

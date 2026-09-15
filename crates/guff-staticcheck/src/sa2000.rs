@@ -4,9 +4,12 @@
 
 use std::sync::OnceLock;
 
-use guff::ast::{CallExpr, Decl, Expr, FuncDecl, FuncLit, SelectorExpr, Stmt};
+use guff::ast::{CallExpr, Expr, SelectorExpr, Stmt};
+use guff::node_mask;
+use guff::walk::NodeRef;
 use guff_analysis::code::{is_call_to, is_of_type_with_name};
-use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::passes::inspect;
+use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
 use crate::render::render_expr;
 
@@ -24,25 +27,32 @@ fn is_waitgroup_add(pass: &Pass<'_>, call: &CallExpr) -> bool {
         || is_of_type_with_name(pass, x, "*sync.WaitGroup")
 }
 
-fn find_waitgroup_add_in_body<'a>(
-    pass: &Pass<'_>,
-    body: &'a [Stmt],
-) -> Option<&'a CallExpr> {
-    for stmt in body {
-        if let Stmt::ExprStmt(es) = stmt {
-            if let Expr::CallExpr(call) = unparen_expr(&es.x) {
-                if is_waitgroup_add(pass, call) {
-                    return Some(call);
-                }
-            }
-        }
-        if let Stmt::BlockStmt(block) = stmt {
-            if let Some(call) = find_waitgroup_add_in_body(pass, &block.list) {
-                return Some(call);
-            }
-        }
+/// The **first** statement of the body, unwrapping a leading block.
+///
+/// Upstream is a single pattern and the list is matched head-first:
+///
+/// ```text
+/// (GoStmt (CallExpr (FuncLit _ call@(CallExpr (Symbol "(*sync.WaitGroup).Add") _):_) _))
+/// ```
+///
+/// `call@(…):_` is head:tail, so only the body's first statement can match —
+/// and a leading `BlockStmt` is matched as its own statement list, so
+/// `go func() { { wg.Add(1) } }()` still does. Measured, all four ways round:
+/// `{ defer wg.Done(); wg.Add(1) }` is silent (second inside the block),
+/// `{ { wg.Add(1) } }` reports, and `_ = 1; { wg.Add(1) }` is silent.
+///
+/// guff scanned the whole body instead, so it reported a correct
+/// `wg.Add(1)` that merely happened to sit inside some enclosing goroutine —
+/// grafana/loki's `wire_http2_test.go:318`.
+fn first_waitgroup_add<'a>(pass: &Pass<'_>, body: &'a [Stmt]) -> Option<&'a CallExpr> {
+    match body.first()? {
+        Stmt::ExprStmt(es) => match unparen_expr(&es.x) {
+            Expr::CallExpr(call) if is_waitgroup_add(pass, call) => Some(call),
+            _ => None,
+        },
+        Stmt::BlockStmt(block) => first_waitgroup_add(pass, &block.list),
+        _ => None,
     }
-    None
 }
 
 fn check_go_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
@@ -50,7 +60,7 @@ fn check_go_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, Strin
         return;
     };
     let body = &lit.body;
-    let Some(add_call) = find_waitgroup_add_in_body(pass, &body.list) else {
+    let Some(add_call) = first_waitgroup_add(pass, &body.list) else {
         return;
     };
     // Upstream renders the whole `Add` call and reports the call node, not the
@@ -63,38 +73,6 @@ fn check_go_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, Strin
     ));
 }
 
-fn walk_stmts(pass: &Pass<'_>, stmts: &[Stmt], pending: &mut Vec<(u32, String)>) {
-    for stmt in stmts {
-        match stmt {
-            Stmt::GoStmt(g) => check_go_call(pass, &g.call, pending),
-            Stmt::BlockStmt(b) => walk_stmts(pass, &b.list, pending),
-            Stmt::IfStmt(i) => {
-                if let Some(init) = &i.init {
-                    walk_stmts(pass, std::slice::from_ref(init), pending);
-                }
-                walk_stmts(pass, &i.body.list, pending);
-                if let Some(else_) = &i.else_ {
-                    walk_stmts(pass, std::slice::from_ref(else_), pending);
-                }
-            }
-            Stmt::ForStmt(f) => {
-                if let Some(init) = &f.init {
-                    walk_stmts(pass, std::slice::from_ref(init), pending);
-                }
-                walk_stmts(pass, &f.body.list, pending);
-            }
-            Stmt::RangeStmt(r) => walk_stmts(pass, &r.body.list, pending),
-            _ => {}
-        }
-    }
-}
-
-fn walk_func(pass: &Pass<'_>, decl: &FuncDecl, pending: &mut Vec<(u32, String)>) {
-    if let Some(body) = &decl.body {
-        walk_stmts(pass, &body.list, pending);
-    }
-}
-
 fn unparen_expr(expr: &Expr) -> &Expr {
     match expr {
         Expr::ParenExpr(p) => unparen_expr(&p.x),
@@ -103,14 +81,23 @@ fn unparen_expr(expr: &Expr) -> &Expr {
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
+    // `code.Matches` walks the whole file, so a `go` statement counts wherever
+    // it is written. The hand-rolled statement walk this replaces enumerated
+    // statement kinds and knew about neither `switch`/`select` cases nor
+    // function literals, so `go func(){ wg.Add(1) }()` inside any of them was
+    // never looked at — two of grafana/loki's, and the one inside another
+    // goroutine that made the rule report the wrong line.
+    let inspect = pass
+        .result_of::<inspect::InspectResult>(inspect::analyzer())
+        .ok_or_else(|| "SA2000 requires inspect analyzer".to_string())?
+        .clone();
     let mut pending: Vec<(u32, String)> = Vec::new();
-    for file in pass.files() {
-        for decl in &file.decls {
-            if let Decl::FuncDecl(f) = decl {
-                walk_func(pass, f, &mut pending);
-            }
-        }
-    }
+    inspect.preorder_typed(node_mask!(GoStmt), pass.files(), |node| {
+        let NodeRef::GoStmt(g) = node else {
+            return;
+        };
+        check_go_call(pass, &g.call, &mut pending);
+    });
 
     for (pos, message) in pending {
         pass.reportf(pos, message);
@@ -125,7 +112,7 @@ fn sa2000_analyzer_impl() -> Analyzer {
         url: "https://staticcheck.dev/docs/checks/#SA2000",
         run: run as RunFn,
         run_despite_errors: false,
-        requires: vec![],
+        requires: vec![inspect::analyzer()],
         fact_types: vec![],
     }
 }

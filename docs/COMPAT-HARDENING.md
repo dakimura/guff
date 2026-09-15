@@ -31950,3 +31950,129 @@ compat/run.sh --oss --tier pr  8 target すべて OK
 
 台帳: 69/100 at zero（72 定義、open 0、unmeasured 3）
 ```
+
+### 2026-09-15（続き 291）— `adopt loki`。`issues.fix: true` は**チェックアウトを書き換える**。残りは staticcheck 3 つの欠陥
+
+loki は最初の測定が `guff=157 golangci=142`、guff-only 15 件だった。
+そのうち 10 件は**guff の欠陥ではない**。
+
+#### 1. `issues.fix: true` —— 比較の前提が崩れる
+
+loki の config はこれを持っている。golangci-lint は素直に従って
+**ファイルを書き換え、直した分を報告しない**。1 回目の hunt のあと
+`corpus/cache/loki` は 7 ファイルが modified になっていた。
+
+15 行の再現:
+
+```
+golangci (issues.fix: true):  0 issues,  file changed? YES
+guff     (issues.fix: true):  1 finding, file changed? no
+```
+
+2 つの問題が重なっている。
+
+**(a) ハーネス。** `fix` は報告オプションではない。これが立っていると
+finding 集合が「たまたま直せたかどうか」の関数になり、しかも**次の実行が
+measure する対象が変わる**。`corpus/patch_unlimited_issues.py` が
+`max-issues-per-linter` と並べて `fix: false` を固定するようにした。
+
+**(b) guff。** `fix` は `V2_ISSUES_KEYS` に入っているので「知らないキー」の
+警告は出ず、そして **`IssuesConfig` にフィールドが無かった** —— つまり黙って
+無視していた。`--fix` と同じスイッチとして配線した。両ツールが
+`reflect.Ptr` → `reflect.Pointer` の**同一の書き換え**を出し、どちらも
+報告しないところまで一致する。
+
+**ハーネスで正規化して終わりにしなかったのは、(b) が実ユーザに効く乖離
+だから。** 設定に `fix: true` と書いた人には、golangci は直し、guff は
+直さない。
+
+#### 2. SA4020 —— 上流の 1 行目が無かった
+
+```go
+subsumes := func(T, V types.Type) bool {
+    if typeparams.IsTypeParam(T) {
+        return false
+    }
+```
+
+型パラメータの underlying は**制約のインタフェース**なので、guard が無いと
+ジェネリック関数の `case T:` が「何でも実装しているインタフェース」に見え、
+後続の節が全部 unreachable になる。実際には T はインスタンス化ごとに 1 つの
+具体型で、`*pqueue[T]` は別物である。loki の `scopeItems[T any]` が 3 回。
+5 形測って、本物の 2 件はそのまま出る。
+
+#### 3. SA2000 —— 両方向に間違っていた
+
+上流はパターン 1 つだけ:
+
+```
+(GoStmt (CallExpr (FuncLit _ call@(CallExpr (Symbol "(*sync.WaitGroup).Add") _):_) _))
+```
+
+`call@(…):_` は head:tail なので、`Add` は func literal の body の
+**先頭の文**でなければならない（先頭が `BlockStmt` ならその中の先頭へ降りる）。
+そして `code.Matches` はファイル全体を歩くので `go` 文はどこにあってもよい。
+
+guff は body 全体を走査し、しかも文の種類を手で並べた walk を使っていて
+`switch` / `select` の case にも**関数リテラルの中にも入らなかった**。結果、
+「たまたま外側の goroutine の中にある正しい `Add`」を報告し、本当に位置が
+おかしいものを見逃していた —— loki の `wire_http2_test.go:318`。
+
+規則を決めた 4 形（測定）:
+
+| 形 | 上流 |
+|---|---|
+| `{ defer wg.Done(); wg.Add(1) }` | 黙る（ブロックの中で 2 番目） |
+| `{ { wg.Add(1) } }` | **報告**（先頭を降りる） |
+| `_ = 1; { wg.Add(1) }` | 黙る（ブロック以外が先） |
+| `go f()`（f は変数） | 黙る（呼び出し位置にリテラルが要る） |
+
+14 形、8 件で一致。
+
+#### 4. SA4006 —— 「値が生きているか」では足りない
+
+続き 285 で入れた `value_is_live` は**値を作った命令**が生きたブロックに
+居るかを訊く。レジスタならそれでいいが、**自由変数を持たない関数リテラルは
+`Value::Function` 定数**で、そもそも命令が無い。guard は素通りし、IR が既に
+捨てた store に対して「referrer が無い」と答えていた。
+
+loki の `pkg/querytee/proxy_endpoint_test.go:534` は `t.Skip` の**後**で
+捕捉変数にハンドラを代入する。測ると `t.Fatal` も同じで、素の `return` では
+起きない —— つまり引き金は「到達不能コード」一般ではなく**返らない呼び出し**
+である。
+
+**最初の仮説は外れた。** 「`t.Skip` のせいだ」と思って書いた再現は両ツールとも
+黙り、何も分からなかった。終端の 4 形を別々に測って初めて線が引けた。
+非レジスタ値のときは代入の位置範囲に生きた命令があるかを訊くようにした。
+
+#### 5. 残り: `inline: Call of X should be inlined`（4 件）
+
+`golang.org/x/crypto/sha3` の `Sum256` / `New256` は `//go:fix inline` が
+付いた薄いラッパで、上流はそれを**ファクト**で運ぶ:
+
+```go
+FactTypes: []analysis.Fact{ (*goFixInlineFuncFact)(nil), … }
+a.pass.ExportObjectFact(fn, &goFixInlineFuncFact{callee})
+```
+
+guff の `inline.rs` は冒頭に「Full function/alias inlining is omitted」と
+書いてあるとおり**定数の形だけ**を実装している。guff にファクト機構はあるので
+作れないわけではないが、これは「移植し忘れた guard」ではなく**機能**で、
+fixture も別に要る。`close loki` として次のタスクに回す。
+
+#### 6. 実測
+
+```
+loki (v3.7.6, 374 パッケージ, vendored)
+  初回          guff=157 golangci=142 both=142  ← fix: true で 7 ファイルが書き換わっていた
+  fix: false 後  guff=157 golangci=156 both=152  guff-only 5 / gcl-only 4
+  最終           guff=152 golangci=156 both=152  P=100.0% R=97.4%  health=0
+                 guff の過剰報告はゼロ。残りは上の 4 件だけ
+
+golden        234 case 一致（staticcheck-sa +11、欠落 0）
+fix / reject  234 / 14
+cargo test    --workspace --locked 緑
+compat/run.sh --oss --tier pr  8 target すべて OK
+
+台帳: 70/100 at zero（74 定義、open 1 = loki の 4 件、unmeasured 3）
+```

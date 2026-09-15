@@ -544,3 +544,24 @@ run:
     assert!(cfg.linter_settings_raw().is_null());
     assert_eq!(cfg.run().build_tags.len(), 0);
 }
+
+/// `issues.fix` is the config spelling of `--fix`, and it was parsed and then
+/// ignored.
+///
+/// The key is in `V2_ISSUES_KEYS`, so a config setting it drew no "unknown
+/// key" warning — while golangci-lint acted on it, rewriting the tree and
+/// omitting what it fixed. grafana/loki sets it: golangci changed 7 files and
+/// reported 10 findings fewer than guff, which reads as a guff defect and is
+/// the opposite of one.
+#[test]
+fn parse_v2_issues_fix() {
+    let cfg = parse_config_str(
+        "version: \"2\"\nlinters:\n  default: none\n  enable:\n    - govet\nissues:\n  fix: true\n",
+    )
+    .unwrap();
+    assert!(cfg.effective_issues().fix);
+
+    // Absent means false, not "inherit --fix".
+    let off = parse_config_str("version: \"2\"\nlinters:\n  default: none\n").unwrap();
+    assert!(!off.effective_issues().fix);
+}

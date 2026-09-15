@@ -75,6 +75,8 @@ sa1032/bad/bad.go                            crates/guff-staticcheck/tests/testd
 sa1032/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa1032/ok.go
 sa2000/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa2000/bad.go
 sa2000/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa2000/ok.go
+# Where the `Add` has to be, and where the `go` may be.
+sa2000/shapes/shapes.go                      crates/guff-staticcheck/tests/testdata/sa2000/shapes.go
 sa2001/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa2001/bad.go
 sa2001/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa2001/ok.go
 sa2002/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa2002/bad.go
@@ -142,6 +144,8 @@ sa4019/bad/bad.go                            crates/guff-staticcheck/tests/testd
 sa4019/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa4019/ok.go
 sa4020/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa4020/bad.go
 sa4020/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa4020/ok.go
+# A bare type parameter never subsumes a later case clause.
+sa4020/typeparam/typeparam.go                crates/guff-staticcheck/tests/testdata/sa4020/typeparam.go
 sa4021/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa4021/bad.go
 sa4021/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa4021/ok.go
 sa4022/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa4022/bad.go

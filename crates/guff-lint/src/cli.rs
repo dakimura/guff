@@ -398,11 +398,14 @@ fn run_cmd(args: RunArgs, startup: Instant) -> Result<i32, RunError> {
         resolve_out_formats(&args.out_format).map_err(RunError::Message)?
     };
 
+    // `--fix` and `issues.fix` are the same switch; upstream ORs them.
+    let fix = args.fix || loaded.issues_fix;
+
     let formatters = build_formatter_run_config(
         &loaded.formatters,
         loaded.go_version.as_deref(),
         &args.patterns,
-        args.fix,
+        fix,
         !args.no_cache,
         loaded.tests,
         build_tags.clone(),
@@ -458,7 +461,7 @@ fn run_cmd(args: RunArgs, startup: Instant) -> Result<i32, RunError> {
         printer: loaded.printer,
         use_cache: !args.no_cache,
         cache_dir: None,
-        fix: args.fix,
+        fix,
         formatters,
         path_mode,
         path_prefix: loaded.path_prefix,
@@ -606,6 +609,14 @@ struct LoadedRun {
     go_version: Option<String>,
     path_mode: crate::PathMode,
     path_prefix: Option<String>,
+    /// `issues.fix` — the config spelling of `--fix`.
+    ///
+    /// golangci-lint applies the fix and then omits the issue, so a config
+    /// setting this rewrites the tree and reports less. guff parsed the key as
+    /// known (it is in `V2_ISSUES_KEYS`) and then ignored it, which is how
+    /// grafana/loki came out 10 findings apart from golangci-lint with no
+    /// warning on either side.
+    issues_fix: bool,
 }
 
 /// The first module plugin `linters.settings.custom` declares that this binary
@@ -811,6 +822,7 @@ fn load_run_config(
         go_version,
         path_mode,
         path_prefix: output.path_prefix.clone(),
+        issues_fix: issues.fix,
     })
 }
 

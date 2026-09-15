@@ -18,6 +18,17 @@ fn subsumes_safe(pass: &Pass<'_>, iface: guff_types::TypeId, concrete: guff_type
     let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
         return false;
     };
+    // `if typeparams.IsTypeParam(T) { return false }`, upstream's first line.
+    //
+    // A bare type parameter's underlying type *is* its constraint's interface,
+    // so without this `case T:` in a generic function looks like an interface
+    // that everything implements and every later clause reads as unreachable.
+    // It is not: at any instantiation `T` is one concrete type, and
+    // `*pqueue[T]` is a different one. grafana/loki's `scopeItems[T any]`
+    // switches on exactly that shape three times.
+    if guff_types::predicates::is_type_param(&artifacts.types, iface) {
+        return false;
+    }
     let iface_u = iface.underlying(&artifacts.types);
     if !matches!(artifacts.types.get(iface_u), TypeData::Interface(_)) {
         return false;
