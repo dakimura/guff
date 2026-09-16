@@ -1,0 +1,4 @@
+# The unit fixture, so the two tiers cannot drift. The caller and the package
+# declaring the directive are separate packages, which is the whole point.
+ptr/ptr.go  crates/guff-govet/tests/testdata/inline_gofix_local/ptr/ptr.go
+bad.go      crates/guff-govet/tests/testdata/inline_gofix_local/bad.go

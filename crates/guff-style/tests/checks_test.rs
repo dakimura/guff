@@ -7410,6 +7410,11 @@ fn modernize_omitzero_is_off_for_a_kubebuilder_package() {
     );
 }
 
+/// Exact list, not `any(contains(…))`: eight of the nine rows differ only in a
+/// name, and eight *more* shapes in the same file must stay silent — the
+/// `synctest.Test` wrapper vitess writes its subtests with, a literal at
+/// argument index 0, a blank context, a shadowed `t`. A single-shape fixture
+/// with a `contains` assertion is what let all of them through.
 #[test]
 fn modernize_flags_testingcontext() {
     let pkg = support::typecheck_fixture(
@@ -7417,9 +7422,25 @@ fn modernize_flags_testingcontext() {
         "example.com/modernize/testingcontext",
         "testingcontext.go",
     );
-    let messages = support::run_analyzer(modernize(), &pkg);
-    assert!(
-        messages.iter().any(|m| m.contains("t.Context")),
+    let mut messages: Vec<String> = support::run_analyzer(modernize(), &pkg)
+        .into_iter()
+        .filter(|m| m.contains(".Context"))
+        .collect();
+    messages.sort();
+    assert_eq!(
+        messages,
+        vec![
+            "context.WithCancel can be modernized using b.Context",
+            "context.WithCancel can be modernized using sub.Context",
+            // TestPlain, TestSubtest, TestTODO, TestNestedBlock, TestForBody,
+            // TestSwitchCase.
+            "context.WithCancel can be modernized using t.Context",
+            "context.WithCancel can be modernized using t.Context",
+            "context.WithCancel can be modernized using t.Context",
+            "context.WithCancel can be modernized using t.Context",
+            "context.WithCancel can be modernized using t.Context",
+            "context.WithCancel can be modernized using t.Context",
+        ],
         "{messages:?}"
     );
 }

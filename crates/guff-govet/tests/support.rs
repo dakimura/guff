@@ -102,10 +102,25 @@ pub fn typecheck_with_config_and_other_files(
             imports.insert(path, Arc::new(Package::default()));
         }
     }
-    for (import_path, _) in deps {
-        imports
-            .entry((*import_path).to_string())
-            .or_insert_with(|| Arc::new(Package::default()));
+    for (import_path, dep_path) in deps {
+        // A real `Package` carries where its source is, and `inline` reads it:
+        // a `//go:fix inline` directive on a sibling package's declaration is
+        // discovered by opening that package's files. A `Package::default()`
+        // has an empty `dir`, which makes the scan look in the working
+        // directory and find nothing.
+        let dep_pkg = Package {
+            pkg_path: (*import_path).to_string(),
+            dir: dep_path
+                .parent()
+                .unwrap_or(dep_path)
+                .to_path_buf(),
+            compiled_go_files: vec![dep_path.to_path_buf()],
+            go_files: vec![dep_path.to_path_buf()],
+            ..Package::default()
+        };
+        // Overwrite, not `or_insert_with`: the loop above already put a
+        // bare `Package::default()` under this path from the import spec.
+        imports.insert((*import_path).to_string(), Arc::new(dep_pkg));
     }
 
     Arc::new(Package {

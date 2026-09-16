@@ -464,14 +464,84 @@
  }
 --- a/testingcontext/testingcontext.go
 +++ b/testingcontext/testingcontext.go
-@@ -8,7 +8,6 @@
- )
+@@ -22,16 +22,14 @@
  
- func TestWithCancel(t *testing.T) {
+ // Reported: the plain test function.
+ func TestPlain(t *testing.T) {
 -	ctx, cancel := context.WithCancel(context.Background())
 -	defer cancel()
 +	ctx := t.Context()
  	_ = ctx
+ }
+ 
+ // Reported: a `t.Run` subtest — the literal is argument index 1 of `T.Run`.
+ func TestSubtest(t *testing.T) {
+ 	t.Run("x", func(t *testing.T) {
+-		ctx, cancel := context.WithCancel(context.Background())
+-		defer cancel()
++		ctx := t.Context()
+ 		_ = ctx
+ 	})
+ }
+@@ -92,8 +90,7 @@
+ // Reported: `B.Run` counts as well as `T.Run`, and the message names `b`.
+ func BenchmarkSub(b *testing.B) {
+ 	b.Run("x", func(b *testing.B) {
+-		ctx, cancel := context.WithCancel(context.Background())
+-		defer cancel()
++		ctx := b.Context()
+ 		_ = ctx
+ 	})
+ }
+@@ -109,8 +106,7 @@
+ 
+ // Reported: `context.TODO` is the other accepted parent.
+ func TestTODO(t *testing.T) {
+-	ctx, cancel := context.WithCancel(context.TODO())
+-	defer cancel()
++	ctx := t.Context()
+ 	_ = ctx
+ }
+ 
+@@ -128,8 +124,7 @@
+ // Reported: a bare block is still inside the test function.
+ func TestNestedBlock(t *testing.T) {
+ 	{
+-		ctx, cancel := context.WithCancel(context.Background())
+-		defer cancel()
++		ctx := t.Context()
+ 		_ = ctx
+ 	}
+ }
+@@ -137,8 +132,7 @@
+ // Reported: so is a `for` body.
+ func TestForBody(t *testing.T) {
+ 	for range 1 {
+-		ctx, cancel := context.WithCancel(context.Background())
+-		defer cancel()
++		ctx := t.Context()
+ 		_ = ctx
+ 	}
+ }
+@@ -147,8 +141,7 @@
+ func TestSwitchCase(t *testing.T) {
+ 	switch 1 {
+ 	case 1:
+-		ctx, cancel := context.WithCancel(context.Background())
+-		defer cancel()
++		ctx := t.Context()
+ 		_ = ctx
+ 	}
+ }
+@@ -156,8 +149,7 @@
+ // Reported: the message names whatever the parameter is called.
+ func TestRenamedParam(t *testing.T) {
+ 	t.Run("x", func(sub *testing.T) {
+-		ctx, cancel := context.WithCancel(context.Background())
+-		defer cancel()
++		ctx := sub.Context()
+ 		_ = ctx
+ 	})
  }
 --- a/unsafefuncs/unsafefuncs.go
 +++ b/unsafefuncs/unsafefuncs.go

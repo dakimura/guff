@@ -13,6 +13,11 @@ bad.go:128:27:sqlclosecheck::Rows/Stmt/NamedStmt was not closed
 bad.go:137:27:sqlclosecheck::Rows/Stmt/NamedStmt was not closed
 bad.go:146:27:sqlclosecheck::Rows/Stmt/NamedStmt was not closed
 bad.go:156:27:sqlclosecheck::Rows/Stmt/NamedStmt was not closed
+bad.go:173:20:sqlclosecheck::Rows/Stmt/NamedStmt was not closed
+bad.go:196:17:sqlclosecheck::Rows/Stmt/NamedStmt was not closed
+bad.go:202:23:sqlclosecheck::Rows/Stmt/NamedStmt was not closed
+bad.go:255:23:sqlclosecheck::Rows/Stmt/NamedStmt was not closed
+bad.go:266:23:sqlclosecheck::Rows/Stmt/NamedStmt was not closed
 branches.go:34:23:sqlclosecheck::Rows/Stmt/NamedStmt was not closed
 branches.go:36:23:sqlclosecheck::Rows/Stmt/NamedStmt was not closed
 branches.go:45:23:sqlclosecheck::Rows/Stmt/NamedStmt was not closed

@@ -58,7 +58,14 @@ stringsseq/stringsseq.go:11:23:modernize::stringsseq: Ranging over SplitSeq is m
 stringsseq/stringsseq.go:17:23:modernize::stringsseq: Ranging over FieldsSeq is more efficient
 stringsseq/stringsseq.go:27:23:modernize::stringsseq: Ranging over SplitSeq is more efficient
 stringsseq/stringsseq.go:33:20:modernize::stringsseq: Ranging over FieldsSeq is more efficient
-testingcontext/testingcontext.go:11:17:modernize::testingcontext: context.WithCancel can be modernized using t.Context
+testingcontext/testingcontext.go:25:17:modernize::testingcontext: context.WithCancel can be modernized using t.Context
+testingcontext/testingcontext.go:33:18:modernize::testingcontext: context.WithCancel can be modernized using t.Context
+testingcontext/testingcontext.go:95:18:modernize::testingcontext: context.WithCancel can be modernized using b.Context
+testingcontext/testingcontext.go:112:17:modernize::testingcontext: context.WithCancel can be modernized using t.Context
+testingcontext/testingcontext.go:131:18:modernize::testingcontext: context.WithCancel can be modernized using t.Context
+testingcontext/testingcontext.go:140:18:modernize::testingcontext: context.WithCancel can be modernized using t.Context
+testingcontext/testingcontext.go:150:18:modernize::testingcontext: context.WithCancel can be modernized using t.Context
+testingcontext/testingcontext.go:159:18:modernize::testingcontext: context.WithCancel can be modernized using sub.Context
 unsafefuncs/unsafefuncs.go:6:24:modernize::unsafefuncs: pointer + integer can be simplified using unsafe.Add
 unsafefuncs/unsafefuncs.go:10:24:modernize::unsafefuncs: pointer + integer can be simplified using unsafe.Add
 unsafefuncs/unsafefuncs.go:16:12:modernize::unsafefuncs: pointer + integer can be simplified using unsafe.Add

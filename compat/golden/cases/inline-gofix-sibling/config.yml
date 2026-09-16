@@ -1,0 +1,31 @@
+# Golden case: govet `inline` across a package boundary.
+#
+# `ptr.Of` and `ptr.Pair` carry `//go:fix inline` and are generic; a call that
+# does not spell out their type arguments draws
+# `cannot inline: type parameter inference is not yet supported`. guff had a
+# hard-coded table of the `golang.org/x/exp` names and so reported nothing for
+# a module's own helper — vitess calls its `ptr.Of` from sixteen places.
+#
+# The golden also records the two "should be inlined" findings for the calls
+# that *can* be inlined (`ptr.Pair[int, string]`, `ptr.Plain`): guff does not
+# have the inliner and does not produce them, so this case is the one place
+# that gap is written down rather than argued about.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+  settings:
+    govet:
+      enable:
+        - inline
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

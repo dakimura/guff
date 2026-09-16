@@ -113,6 +113,32 @@ fn bodyclose_flags_missing_close() {
 /// number.
 const BODYCLOSE_BAD_SHAPES: usize = 25;
 
+/// `isClosureCalled` counts an `*ssa.Call` or `*ssa.Defer` referrer of the
+/// `MakeClosure` — never an `*ssa.Go`. With `called == false` every arm of
+/// `calledInFunc` ends in `!called`, so a response a goroutine touches is open
+/// whatever the closure does and whatever the caller writes afterwards.
+///
+/// Counted at eight, with seven silent shapes in the same file: a called
+/// literal, a deferred one, a called one that closes nothing, a literal passed
+/// as an argument (to `run` and to `t.Cleanup`), one held in a local, and a
+/// goroutine that only sees the body. vitess's `streamQuerylog` defers the
+/// close and then reads the body from a goroutine — a real use-after-close
+/// that guff called handled.
+#[test]
+fn bodyclose_a_goroutine_closure_is_never_called() {
+    let dir = support::testdata("bodyclose");
+    let pkg = support::typecheck_pkg("example.com/bodyclose/goescape", &dir.join("goescape.go"));
+    let messages = support::run_analyzer(bodyclose(), &pkg);
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m.contains("response body must be closed"))
+            .count(),
+        8,
+        "{messages:?}"
+    );
+}
+
 /// A func literal that declares its own `resp` does not capture the outer one.
 ///
 /// Upstream reaches a closure through an `*ssa.MakeClosure` over a *free
@@ -349,7 +375,14 @@ fn sqlclosecheck_flags_missing_and_non_defer() {
 /// Every "was not closed" shape in `compat/isolate/fixtures/sqlclosecheck/bad.go`
 /// — the same keys `compat/golden/cases/sqlclosecheck` pins against
 /// golangci-lint. A drop is a shape that stopped reporting.
-const SQLCLOSE_NOT_CLOSED: usize = 6;
+///
+/// 6 → 11 with vitess's five: the blank destination (`_, err := db.Query(…)`),
+/// the two `return`s under a `defer`, and the slice and map literals beside the
+/// struct literals that settle. The bare `db.Query(…)` statement, the
+/// defer-free `return` and the three struct-literal shapes are silent and are
+/// in the same file, so a gate that stopped distinguishing them would move this
+/// number too.
+const SQLCLOSE_NOT_CLOSED: usize = 11;
 
 #[test]
 fn sqlclosecheck_settles_a_phi_and_a_close_inside_a_returned_literal() {

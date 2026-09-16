@@ -1,0 +1,14 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh inline-gofix-sibling
+# Produced by running golangci-lint on compat/golden/cases/inline-gofix-sibling/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad.go:22:30:govet::inline: cannot inline: type parameter inference is not yet supported
+bad.go:29:33:govet::inline: Call of ptr.Pair should be inlined
+bad.go:32:41:govet::inline: cannot inline: type parameter inference is not yet supported
+bad.go:35:46:govet::inline: cannot inline: type parameter inference is not yet supported
+bad.go:40:23:govet::inline: Call of ptr.Plain should be inlined
+bad.go:46:32:govet::inline: cannot inline: type parameter inference is not yet supported

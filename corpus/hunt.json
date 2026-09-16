@@ -517,5 +517,13 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "40m"
+  },
+  {
+    "name": "vitess",
+    "url": "https://github.com/vitessio/vitess.git",
+    "ref": "v24.0.2",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "40m"
   }
 ]

@@ -2299,6 +2299,22 @@ sa_check!(sa1023, sa1023_flags_writer_buffer_modified, sa1023_allows_readonly_wr
 sa_check!(sa1025, sa1025_flags_timer_reset_return, sa1025_allows_timer_reset_without_drain, "Reset's return value");
 
 sa_check_bad_ok!(sa4000, sa4000_flags_bad_cases, sa4000_allows_ok_cases);
+
+/// The `math/rand` exemption is a closed list of 58 names, not the prefix
+/// `math/rand.`: `math/rand/v2` is a different import path, and vitess's
+/// `rand.IntN(100) - rand.IntN(100)` was a finding upstream does not have.
+///
+/// Counted, and the count is one: six rand shapes are silent and only
+/// `plainSub` reports, so a regression that dropped the v2 half would raise
+/// this to four rather than merely changing a message.
+#[test]
+fn sa4000_exempts_math_rand_v2() {
+    let pkg = typecheck_rule("sa4000", "randfuncs.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa4000::analyzer(), &pkg);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].contains("'-' operator"), "{messages:?}");
+}
 sa_check_bad_ok!(sa4001, sa4001_flags_bad_cases, sa4001_allows_ok_cases);
 sa_check_bad_ok!(sa4003, sa4003_flags_bad_cases, sa4003_allows_ok_cases);
 sa_check_bad_ok!(sa4004, sa4004_flags_bad_cases, sa4004_allows_ok_cases);

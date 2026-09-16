@@ -1,0 +1,6 @@
+# Two packages: only one of them names database/sql. The unit-test harness
+# type-checks a single package, so this boundary can only be measured here.
+driver/driver.go  crates/guff-context/tests/testdata/sqlclosecheck/importgate/driver/driver.go
+caller/caller.go  crates/guff-context/tests/testdata/sqlclosecheck/importgate/caller/caller.go
+# The positive control: same leak, but this package names database/sql.
+direct/direct.go  crates/guff-context/tests/testdata/sqlclosecheck/importgate/direct/direct.go
