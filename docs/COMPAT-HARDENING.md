@@ -32388,3 +32388,164 @@ compat/run.sh --oss --tier pr  8 target すべて OK
 
 台帳: 71/100 at zero（75 定義、open 1 = loki 4（deferred）、unmeasured 3）
 ```
+
+### 2026-09-17（続き 295）— `adopt vitess`。「呼ばれていないクロージャ」「直接 import していないパッケージ」「囲んでいる関数」—— 5 つの欠陥はどれも**文脈の取り違え**だった
+
+初回 `guff=1407 golangci=1419 both=1399`、食い違い 28 件。5 つの原因に割れて、
+5 つとも「どこを見るか」を間違えていた。形そのものは合っていた。
+
+#### 1. modernize `testingcontext` —— 上流は**呼び出し**から外へ歩く
+
+上流は `context.WithCancel` の呼び出しを起点に、囲んでいる関数まで外へ歩く。
+`*ast.FuncLit` が数に入るのは **`testing.{T,B}.Run` の第 2 引数**のときだけ:
+
+```go
+if ek, idx := curFunc.ParentEdge(); ek == edge.CallExpr_Args && idx == 1 {
+    obj := typeutil.Callee(info, curFunc.Parent().Node().(*ast.CallExpr))
+    if (typesinternal.IsMethodNamed(obj, "testing", "T", "Run") ||
+        typesinternal.IsMethodNamed(obj, "testing", "B", "Run")) &&
+        len(n.Type.Params.List[0].Names) == 1 {
+        testObj = info.Defs[n.Type.Params.List[0].Names[0]]
+    }
+}
+```
+
+vitess はサブテストを `synctest.Test(t, func(t *testing.T) { … })` で包む。
+**同じ形・同じ引数位置**で、呼ばれている関数だけが違う。guff は「`*testing.T`
+を取る literal」を上から探して降りていたので 5 件を発明した。
+
+同じ取り違えが逆向きにも出る。上流は呼び出しが起点なので、対が**素のブロック**
+にも `for` の本体にも `case` 節にも置ける。guff は関数と literal の本体しか
+見ておらず、3 形を落としていた。
+
+18 形測って一致。`_` に受ける形（`_, cancel := …`）は名前が無いので上流は
+書き換えを諦める、`t` が影になっている位置では `t.Context()` と書けない、
+など、黙る側が 8 形ある。fixture は 1 つ、golden は 1 case、単体テストは
+件数を固定する —— 1 形だけの fixture に `any(contains(…))` が付いていたのが
+そもそもの入口だった。
+
+#### 2. sqlclosecheck —— 4 つ、全部「どこから始めるか」
+
+| 形 | 上流 | guff（旧） |
+|---|---|---|
+| `database/sql` を直接 import しないパッケージ | 丸ごと skip | 報告 |
+| `_, err := db.Query(…)` | 報告 | 黙る |
+| `db.Query(…)`（文として） | 黙る | 報告 |
+| `defer` のある関数が rows を return | 報告 | 黙る |
+
+直接 import のゲートは bodyclose と同じ根で、`getTargetTypes` が
+`pssa.Pkg.Prog.ImportedPackage(sqlPkg)` を引き、`buildssa` は
+`pass.Pkg.Imports()` —— **直接**の import だけ —— に SSA パッケージを作る。
+vitess の `test/client/client.go` は `vitessdriver` 経由で `*sql.DB` を持つ。
+
+`_` と素の文が逆だったのは、両方とも「捨てている」ように見えて SSA では
+別物だから。`_` には extract が立ち、その extract を誰も参照しないので
+`checkClosed` は空のリストを歩いて報告する。文にはそもそも extract が無いので
+`getTargetTypesValues` が何も返さない。
+
+`defer` の効きは測って初めて分かった。`return db.Query(…)` は黙るのに、
+`defer fmt.Println("x")` を 1 行足すと報告する:
+
+| 形 | 結果 |
+|---|---|
+| `return db.Query(…)` | 黙る |
+| 直前に非 defer の呼び出し | 黙る |
+| `defer` あり + `return db.Query(…)` | **報告** |
+| `defer` あり + 名前に受けて return | **報告** |
+| `defer` が**入れ子の literal の中だけ** | 黙る |
+| `defer` あり + `defer rows.Close()` | 黙る |
+
+`defer` があると go/ssa は結果をメモリに置くので、値の参照元が store になり
+`getAction` の `*ssa.Return` の枝に届かない。vitess の
+`VTGateProxy.ShowTablets` は `defer span.Finish()` の下で rows を呼び出し側に
+渡していて、**だから `//nolint:sqlclosecheck` が要る**。guff はそれを
+「未使用の指示子」と言っていた。
+
+構造体の複合リテラル（`&T{rows: rows}` / `T{rows: rows}` / `T{nil, rows}`）は
+`FieldAddr` 越しの store なので settled、slice と map のリテラルは違う ——
+5 形測った。
+
+#### 3. SA4000 —— `math/rand` の除外は 58 名の**閉じた表**
+
+```go
+// We special case functions from the math/rand package. […]
+case "math/rand.Intn", …, "math/rand/v2.IntN", …
+```
+
+guff は接頭辞 `math/rand.` で見ていた。`math/rand/v2` は別の import path
+なので、vitess の `rand.IntN(100) - rand.IntN(100)` が finding になり、
+その上の `//nolint:staticcheck` が未使用に見えていた（上流側の nolintlint
+として現れる —— **どちらの nolintlint も、相手側の linter の欠陥の影**）。
+
+`isFloat` も型の**項集合**に対する問いで、配列と構造体に再帰する。
+`[2]float64` 同士の `==` も `struct{ f float64 }` 同士の `==` も、
+項を持たない型パラメータも上流は黙る（"no terms, so floats are a
+possibility"）。guff は基本型の float しか見ておらず 3 形を報告していた。
+
+#### 4. govet `inline` —— `//go:fix inline` は隣のパッケージのソースに書いてある
+
+vitess は自分で持っている:
+
+```go
+// Of returns a pointer to the given value
+//
+//go:fix inline
+func Of[T any](x T) *T
+```
+
+`vitess.io/vitess/go/ptr` の `Of` を 5 パッケージ 16 箇所から呼ぶ。上流は
+どれにも `cannot inline: type parameter inference is not yet supported` を出す。
+guff は `golang.org/x/exp/{maps,slices}` の名前を**表**で持っていただけなので
+1 件も出していなかった。
+
+旧い注記はこう書いていた —— 「`//go:fix` の発見はパッケージ境界で止まる。
+上流はファクトで運ぶから」。alias と const の枝についてはその通りで、
+宣言の右辺が要る。だがこの診断に要るのは**名前と指示子だけ**で、import した
+パッケージのソースはそこにある（`pass.pkg().imports` が `Package` を持つ）。
+
+判定は上流の 1 行そのまま: `len(typeArgs) != len(callee.TypeParams)`。
+8 形測って、型引数を書いた呼び出し・全部書いた 2 引数・非ジェネリック・
+指示子なしの 4 形は黙る。`Call of X should be inlined` の側はインライナ本体
+（9,222 行）が要るので **golden の ratchet に 2 件として書いた** —— 同じ
+fixture に両方入れてあるので、境界が散文ではなく差分になっている。
+
+#### 5. bodyclose —— `go` で起動したクロージャは「呼ばれていない」
+
+レスポンスがクロージャに捕まった時点で、上流は**クロージャの中だけ**で決める:
+
+```go
+called := r.isClosureCalled(c)
+return r.calledInFunc(f, called)
+```
+
+そして `isClosureCalled` が数えるのは `MakeClosure` の `*ssa.Call` と
+`*ssa.Defer` の参照元だけ —— `*ssa.Go` はどちらでもない。`called == false`
+だと `calledInFunc` のどの枝も `!called` で終わるので、クロージャが body を
+どう扱おうと、呼び出し側が何を書こうと open のまま。
+
+vitess の `examples/demo/demo.go:235` がそれで、`defer resp.Body.Close()` の
+あとに goroutine が body を読む —— **実際に use-after-close**。guff は
+`defer` を数えて黙っていた。
+
+19 形測った。黙る側が 7 形ある（即時呼び出し、`defer func(){…}()`、
+何も閉じない即時呼び出し、`run(func(){…})`、`t.Cleanup(func(){…})`、
+ローカルに入れてから呼ぶ、body だけを goroutine に渡す）。`go` の側は
+7 形とも報告 —— 中で閉じていても、`go` に渡した名前付き関数でも、
+`go run(func(){…})` のように literal が**引数**でも。
+
+#### 6. 実測
+
+```
+vitess (v24.0.2)
+  初回   guff=1407 golangci=1419 both=1399  P=99.4%  R=98.6%   unexpected=28
+  中間   guff=1418 golangci=1419 both=1418  P=100.0% R=99.9%   unexpected=1  （§5 の前）
+  最終   guff=1419 golangci=1419 both=1419  P=100.0% R=100.0%  unexpected=0
+```
+
+golden 238 case 一致（新 case 2: `sqlclosecheck-imports` と `inline-gofix-sibling`。
+既存の `bodyclose` / `sqlclosecheck` / `modernize` / `staticcheck-sa` は fixture が
+伸びたぶんを再生成し、キー集合で差分した —— 落ちたキーは無い）。
+fix 238 / reject 14 / `cargo test --workspace --locked` 3,611 件緑。
+`compat/run.sh --oss --tier pr` 8 target すべて OK。
+
+台帳: 71 → **72/100 at zero**（76 定義、open 1 = loki 4（deferred）、unmeasured 3）

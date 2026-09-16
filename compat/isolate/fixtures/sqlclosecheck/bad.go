@@ -161,3 +161,113 @@ func (k *keeper) CopiedToAnotherLocal() {
 	y = stmt
 	_ = y
 }
+
+// `_, err := db.Query(…)` — the extract exists and nothing refers to it, so
+// `checkClosed` walks an empty list. A bare `db.Query(…)` statement is the
+// opposite: with no destination there is no extract, the call has no referrer
+// of a target type, and upstream never starts. Both measured against
+// golangci-lint 2.12.2; guff had them exactly the wrong way round.
+
+// Reported: the rows are discarded into the blank identifier.
+func BlankRows(db *sql.DB) error {
+	_, err := db.Query("select 1")
+	return err
+}
+
+// Silent: nothing names the result at all.
+func DiscardedEntirely(db *sql.DB) {
+	db.Query("select 1")
+}
+
+// A `defer` anywhere in the function's **own** body stops `return` from
+// settling the rows: go/ssa materialises the results, so the value's referrer
+// is a store and `getAction` never reaches its `*ssa.Return` arm. vitess's
+// `VTGateProxy.ShowTablets` hands its rows to the caller under
+// `defer span.Finish()` and carries a `//nolint:sqlclosecheck` for it.
+
+// Silent: returned, and the function defers nothing.
+func ReturnedNoDefer(db *sql.DB) (*sql.Rows, error) {
+	return db.Query("select 1")
+}
+
+// Reported: returned, but the function defers.
+func ReturnedWithDefer(db *sql.DB) (*sql.Rows, error) {
+	defer noop()
+	return db.Query("select 1")
+}
+
+// Reported: named first, returned second, still under a defer.
+func ReturnedNamedWithDefer(db *sql.DB) (*sql.Rows, error) {
+	defer noop()
+	rows, err := db.Query("select 1")
+	return rows, err
+}
+
+// Silent: the only defer is inside a nested literal, which is a function of
+// its own.
+func DeferOnlyInLiteral(db *sql.DB) (*sql.Rows, error) {
+	func() { defer noop() }()
+	return db.Query("select 1")
+}
+
+// Silent: deferred close, defer present — the control for the three above.
+func ClosedUnderDefer(db *sql.DB) error {
+	defer noop()
+	rows, err := db.Query("select 1")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	return nil
+}
+
+func noop() {}
+
+// A **struct** composite literal builds its field through a `FieldAddr`, so it
+// settles the value exactly as `x.f = rows` does. A slice or map literal does
+// not.
+
+// Silent: pointer to a struct literal.
+func IntoStructLitPtr(db *sql.DB) error {
+	rows, err := db.Query("select 1")
+	if err != nil {
+		return err
+	}
+	s := &stored{rows: rows}
+	_ = s
+	return nil
+}
+
+// Silent: a value struct literal, and the positional spelling of one.
+func IntoStructLitValue(db *sql.DB) error {
+	rows, err := db.Query("select 1")
+	if err != nil {
+		return err
+	}
+	s := stored{rows: rows}
+	t := stored{nil, rows}
+	_, _ = s, t
+	return nil
+}
+
+// Reported: a slice literal is not a struct.
+func IntoSliceLit(db *sql.DB) error {
+	rows, err := db.Query("select 1")
+	if err != nil {
+		return err
+	}
+	s := []*sql.Rows{rows}
+	_ = s
+	return nil
+}
+
+// Reported: nor is a map literal.
+func IntoMapLit(db *sql.DB) error {
+	rows, err := db.Query("select 1")
+	if err != nil {
+		return err
+	}
+	m := map[string]*sql.Rows{"a": rows}
+	_ = m
+	return nil
+}

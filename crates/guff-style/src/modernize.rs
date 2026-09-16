@@ -3839,17 +3839,117 @@ fn count_ident_uses(pass: &Pass<'_>, body: &BlockStmt, obj: ObjectId) -> usize {
     n
 }
 
-fn check_testingcontext_block(
+/// The `testing.{T,B,F}` parameter that governs a statement list, as upstream's
+/// `testingContext` computes it from the *enclosing function* of the call.
+struct TestFn<'a> {
+    name: &'a str,
+    obj: ObjectId,
+    body: &'a BlockStmt,
+}
+
+/// x/tools `testingcontext.go`: walk out to the nearest enclosing function and
+/// ask whether it is a test.
+///
+/// A `*ast.FuncLit` only counts when it is the **second argument of a call to
+/// `testing.{T,B}.Run`**. vitess writes its subtests as
+///
+/// ```go
+/// synctest.Test(t, func(t *testing.T) { ctx, cancel := … })
+/// ```
+///
+/// which has the same shape — a literal taking a `*testing.T`, at argument
+/// index 1 — and upstream still declines, because the callee is not `Run`.
+/// guff accepted any literal with a `testing` parameter and reported five
+/// findings vitess does not have; `f.Fuzz(func(t *testing.T, s string))` is the
+/// same mistake at argument index 0.
+fn enclosing_test_fn<'a>(pass: &Pass<'_>, stack: &[NodeRef<'a>]) -> Option<TestFn<'a>> {
+    for i in (0..stack.len()).rev() {
+        match stack[i] {
+            NodeRef::FuncLit(fl) => {
+                let NodeRef::CallExpr(call) = *stack.get(i.checked_sub(1)?)? else {
+                    return None;
+                };
+                if call.args.len() < 2 {
+                    return None;
+                }
+                let Expr::FuncLit(arg1) = &call.args[1] else {
+                    return None;
+                };
+                if arg1.id != fl.id {
+                    return None;
+                }
+                let Expr::SelectorExpr(sel) = call.fun.as_ref() else {
+                    return None;
+                };
+                if sel.sel.name != "Run"
+                    || !(code::is_of_pointer_to_type_with_name(pass, &sel.x, "testing.T")
+                        || code::is_of_pointer_to_type_with_name(pass, &sel.x, "testing.B"))
+                {
+                    return None;
+                }
+                let field = fl.ty.params.as_ref()?.list.first()?;
+                if field.names.len() != 1 || field.names[0].name == "_" {
+                    return None;
+                }
+                return Some(TestFn {
+                    name: field.names[0].name.as_str(),
+                    obj: ident_obj(pass, &field.names[0])?,
+                    body: &fl.body,
+                });
+            }
+            NodeRef::FuncDecl(fd) => {
+                let name = testing_param_name(fd)?;
+                let field = fd.ty.params.as_ref()?.list.first()?;
+                return Some(TestFn {
+                    name,
+                    obj: ident_obj(pass, &field.names[0])?,
+                    body: fd.body.as_ref()?,
+                });
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// `lhs[0].Parent().LookupParent(testObj.Name(), lhs[0].Pos()) == testObj` —
+/// the fix writes `t.Context()`, so `t` has to still mean the test at that
+/// point. Without this a plain
+///
+/// ```go
+/// func TestX(t *testing.T) { { t := 1; _ = t; ctx, cancel := … } }
+/// ```
+///
+/// would be rewritten to call `Context` on an `int`.
+fn test_param_in_scope(pass: &Pass<'_>, file: &File, tf: &TestFn<'_>, pos: u32) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(file_scope) = info.scopes.get(&file.id).copied() else {
+        return false;
+    };
+    let Some(scope) = guff_types::scope::innermost(&artifacts.scopes, file_scope, pos) else {
+        return false;
+    };
+    guff_types::scope::lookup_parent(&artifacts.scopes, &artifacts.objects, scope, tf.name, pos)
+        .is_some_and(|(_, obj)| obj == tf.obj)
+}
+
+fn check_testingcontext_list(
     pass: &Pass<'_>,
-    body: &BlockStmt,
-    test_name: &str,
+    file: &File,
+    list: &[Stmt],
+    tf: &TestFn<'_>,
     pending: &mut Vec<Diagnostic>,
 ) {
-    for i in 0..body.list.len().saturating_sub(1) {
-        let Stmt::AssignStmt(assign) = &body.list[i] else {
+    for i in 0..list.len().saturating_sub(1) {
+        let Stmt::AssignStmt(assign) = &list[i] else {
             continue;
         };
-        let Stmt::DeferStmt(defr) = &body.list[i + 1] else {
+        let Stmt::DeferStmt(defr) = &list[i + 1] else {
             continue;
         };
         if assign.tok != Some(Token::DEFINE) || assign.lhs.len() != 2 || assign.rhs.len() != 1 {
@@ -3872,13 +3972,16 @@ fn check_testingcontext_block(
         if !go_at_least(pass, pos, "go1.24") {
             continue;
         }
-        let Some(ctx_name) = ident_name(&assign.lhs[0]) else {
+        // `obj, ok := info.Defs[id]; if !ok { continue calls }` for *both*
+        // names: `_, cancel := context.WithCancel(…)` declares no context to
+        // rename, and upstream skips it rather than writing `_ := t.Context()`.
+        let Expr::Ident(ctx_id) = &assign.lhs[0] else {
             continue;
         };
         let Expr::Ident(cancel_id) = &assign.lhs[1] else {
             continue;
         };
-        if cancel_id.name == "_" {
+        if ctx_id.name == "_" || cancel_id.name == "_" {
             continue;
         }
         let Some(cancel_obj) = ident_obj(pass, cancel_id) else {
@@ -3891,9 +3994,14 @@ fn check_testingcontext_block(
         if ident_obj(pass, defer_fun) != Some(cancel_obj) || !defr.call.args.is_empty() {
             continue;
         }
-        if count_ident_uses(pass, body, cancel_obj) != 2 {
+        if count_ident_uses(pass, tf.body, cancel_obj) != 2 {
             continue;
         }
+        if !test_param_in_scope(pass, file, tf, ctx_id.pos().0 as u32) {
+            continue;
+        }
+        let test_name = tf.name;
+        let ctx_name = ctx_id.name.as_str();
         pending.push(Diagnostic {
             pos,
             end: with_cancel.fun.end().0 as u32,
@@ -3915,50 +4023,25 @@ fn check_testingcontext_block(
     }
 }
 
+/// Upstream keys off the *call*, not off the function body, so the pair can sit
+/// in any statement list — a bare block, a `for` body, a `case` clause. guff
+/// only scanned function and literal bodies and missed all three.
 fn check_testingcontext(pass: &Pass<'_>, file: &File, pending: &mut Vec<Diagnostic>) {
-    for decl in &file.decls {
-        let guff::ast::Decl::FuncDecl(fd) = decl else {
-            continue;
+    let mut stack: Vec<NodeRef<'_>> = Vec::new();
+    walk::preorder_stack(NodeRef::File(file), &mut stack, |n, stack| {
+        let list: &[Stmt] = match n {
+            NodeRef::BlockStmt(b) => b.list.as_slice(),
+            NodeRef::CaseClause(c) => c.body.as_slice(),
+            NodeRef::CommClause(c) => c.body.as_slice(),
+            _ => return true,
         };
-        let Some(t_name) = testing_param_name(fd) else {
-            continue;
-        };
-        let Some(body) = fd.body.as_ref() else {
-            continue;
-        };
-        check_testingcontext_block(pass, body, t_name, pending);
-        // Also scan nested t.Run(..., func(t *testing.T) { ... }) bodies.
-        walk::inspect(NodeRef::BlockStmt(body), |n| {
-            let Some(n) = n else {
-                return true;
-            };
-            if let NodeRef::FuncLit(fl) = n {
-                if let Some(field) = fl.ty.params.as_ref().and_then(|p| p.list.first()) {
-                    if field.names.len() == 1 && field.names[0].name != "_" {
-                        if let Some(ty) = field.ty.as_ref() {
-                            if let Expr::StarExpr(star) = ty {
-                                if let Expr::SelectorExpr(sel) = star.x.as_ref() {
-                                    if let Expr::Ident(pkg) = sel.x.as_ref() {
-                                        if pkg.name == "testing"
-                                            && matches!(sel.sel.name.as_str(), "T" | "B" | "F")
-                                        {
-                                            check_testingcontext_block(
-                                                pass,
-                                                &fl.body,
-                                                field.names[0].name.as_str(),
-                                                pending,
-                                            );
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+        if list.len() >= 2 {
+            if let Some(tf) = enclosing_test_fn(pass, stack) {
+                check_testingcontext_list(pass, file, list, &tf, pending);
             }
-            true
-        });
-    }
+        }
+        true
+    });
 }
 
 /// Port of modernize `bloop`: `for … b.N …` → `for b.Loop()` (Go 1.24+).

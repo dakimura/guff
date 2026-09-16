@@ -350,6 +350,163 @@ fn is_known_ioutil_gofix_inline(name: &str) -> bool {
     )
 }
 
+/// How many type arguments the *call site* spells out.
+///
+/// `st.typeArguments(caller.Call)` — `f(x)` spells none, `f[int](x)` one,
+/// `f[int, string](x)` two.
+fn explicit_type_args(call: &CallExpr) -> usize {
+    match unparen(&call.fun) {
+        Expr::IndexExpr(_) => 1,
+        Expr::IndexListExpr(il) => il.indices.len(),
+        _ => 0,
+    }
+}
+
+/// The callee's own type parameters, if it is a generic function.
+fn callee_type_param_count(pass: &Pass<'_>, obj: ObjectId) -> Option<usize> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    if !matches!(artifacts.objects.get(obj), ObjectData::Func(_)) {
+        return None;
+    }
+    let typ = obj.typ(&artifacts.objects)?;
+    let tps = guff_types::signature::signature_type_params(&artifacts.types, typ)?;
+    Some(tps.len())
+}
+
+/// The generic `//go:fix inline` functions a directly-imported package
+/// declares, read from its own source and memoised per directory.
+///
+/// [`is_known_generic_gofix_inline`] is a table of x/exp names because a
+/// dependency loaded from export data has no doc comments. A package in the
+/// **same module** has its source right there — `pass.pkg().imports` carries
+/// the `Package`, `dir` and all — so the directive can simply be read.
+///
+/// vitess declares its own:
+///
+/// ```go
+/// // Of returns a pointer to the given value
+/// //
+/// //go:fix inline
+/// func Of[T any](x T) *T { return &x }
+/// ```
+///
+/// in `vitess.io/vitess/go/ptr`, and calls it from sixteen places across five
+/// packages. Upstream reports every one of them; guff had only the x/exp table
+/// and reported none. The old note said `//go:fix` discovery stops at the
+/// package boundary because upstream uses a fact — true for the *alias* and
+/// *const* arms, which need the declaration's right-hand side, but this
+/// diagnostic needs only the name and the directive.
+fn dir_gofix_inline_funcs(dir: &std::path::Path) -> std::sync::Arc<HashSet<String>> {
+    type Cache = std::collections::HashMap<std::path::PathBuf, std::sync::Arc<HashSet<String>>>;
+    static FUNCS: OnceLock<std::sync::Mutex<Cache>> = OnceLock::new();
+    let cache = FUNCS.get_or_init(|| std::sync::Mutex::new(Cache::new()));
+    if let Ok(map) = cache.lock() {
+        if let Some(hit) = map.get(dir) {
+            return std::sync::Arc::clone(hit);
+        }
+    }
+
+    let mut names: HashSet<String> = HashSet::new();
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("go") {
+                continue;
+            }
+            let Some(file_name) = path.file_name().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            let Ok(src) = fs::read(&path) else {
+                continue;
+            };
+            // Same cheap screen as everywhere else: almost no file carries the
+            // directive, and a PARSE_COMMENTS reparse is not worth paying for
+            // the ones that do not.
+            if memchr::memmem::find(&src, b"go:fix inline").is_none() {
+                continue;
+            }
+            let fset = FileSet::new();
+            let Ok(parsed) = parse_file(&fset, file_name, &src, PARSE_COMMENTS) else {
+                continue;
+            };
+            for decl in &parsed.decls {
+                let Decl::FuncDecl(f) = decl else {
+                    continue;
+                };
+                if has_fix_inline(&f.doc) {
+                    names.insert(f.name.name.clone());
+                }
+            }
+        }
+    }
+    let arc = std::sync::Arc::new(names);
+    if let Ok(mut map) = cache.lock() {
+        map.insert(dir.to_path_buf(), std::sync::Arc::clone(&arc));
+    }
+    arc
+}
+
+/// A call to a generic `//go:fix inline` function declared in a package this
+/// one imports, whose type arguments the call site does not spell out:
+///
+/// ```go
+/// typeArgs := st.typeArguments(caller.Call)
+/// if len(typeArgs) != len(callee.TypeParams) {
+///     return nil, fmt.Errorf("cannot inline: type parameter inference is not yet supported")
+/// }
+/// ```
+///
+/// Only generic callees are looked up, so the source scan runs for the handful
+/// of packages that actually declare one.
+fn check_local_gofix_generic_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
+    let Expr::SelectorExpr(sel) = unparen(call_fun_base(&call.fun)) else {
+        return;
+    };
+    let Some(info) = pass.types_info() else {
+        return;
+    };
+    let Some(obj) = info.uses.get(&sel.sel.id).copied() else {
+        return;
+    };
+    let Some(n_params) = callee_type_param_count(pass, obj) else {
+        return;
+    };
+    if n_params == 0 || explicit_type_args(call) == n_params {
+        return;
+    }
+    let Some(pkg_path) = object_pkg_path(pass, obj) else {
+        return;
+    };
+    // Already covered by the x/exp table and its version check.
+    if matches!(
+        pkg_path.as_str(),
+        "golang.org/x/exp/maps" | "golang.org/x/exp/slices"
+    ) {
+        return;
+    }
+    let Some(dep) = pass.pkg().imports.get(&pkg_path) else {
+        return;
+    };
+    if !dir_gofix_inline_funcs(&dep.dir).contains(sel.sel.name.as_str()) {
+        return;
+    }
+    pending.push((
+        call.lparen.0 as u32,
+        "cannot inline: type parameter inference is not yet supported".into(),
+        Vec::new(),
+    ));
+}
+
+/// The selector under any explicit instantiation: `pkg.F` in both `pkg.F(x)`
+/// and `pkg.F[int](x)`.
+fn call_fun_base(fun: &Expr) -> &Expr {
+    match unparen(fun) {
+        Expr::IndexExpr(ix) => &ix.x,
+        Expr::IndexListExpr(il) => &il.x,
+        other => other,
+    }
+}
+
 fn check_exp_gofix_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
     let Some(name) = call_name(pass, &call.fun) else {
         return;
@@ -1002,17 +1159,18 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         });
     }
 
-    let mask = if visit_calls {
-        node_mask!(CallExpr, SelectorExpr, Ident)
-    } else {
-        node_mask!(SelectorExpr, Ident)
-    };
+    // `check_local_gofix_generic_call` needs every call, whatever this package
+    // imports: the declaring package is found from the callee, not from a
+    // table of known paths.
+    let _ = visit_calls;
+    let mask = node_mask!(CallExpr, SelectorExpr, Ident);
     inspect.preorder_typed(mask, pass.files(), |n| {
         match n {
             NodeRef::CallExpr(call) => {
                 if visit_exp {
                     check_exp_gofix_call(pass, call, &mut pending);
                 }
+                check_local_gofix_generic_call(pass, call, &mut pending);
                 if visit_ioutil {
                     check_ioutil_go_version(pass, call, &stmt_calls, &mut pending);
                 }

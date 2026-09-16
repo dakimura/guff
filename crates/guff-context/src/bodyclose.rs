@@ -248,6 +248,9 @@ struct RespUsage {
     /// Branch path of the assignment that last wrote this variable, so the
     /// next one can tell "kills it" from "merges with it".
     path: Vec<(u32, u16)>,
+    /// The response reached a closure upstream calls *not called*, and nothing
+    /// written in this function can settle it. See [`RespUsage::mark_go_escape`].
+    forced_open: bool,
 }
 
 impl RespUsage {
@@ -260,6 +263,7 @@ impl RespUsage {
                 merged_depth: None,
             }],
             path,
+            forced_open: false,
         }
     }
 
@@ -282,6 +286,31 @@ impl RespUsage {
         }
     }
 
+    /// A `go` statement, or a closure this function only returns.
+    ///
+    /// Once the response is captured, upstream decides inside the closure and
+    /// never looks at the enclosing function again:
+    ///
+    /// ```go
+    /// called := r.isClosureCalled(c)
+    /// return r.calledInFunc(f, called)
+    /// ```
+    ///
+    /// and `isClosureCalled` counts only `*ssa.Call` and `*ssa.Defer`
+    /// referrers of the `MakeClosure` — an `*ssa.Go` is neither. With
+    /// `called == false` every arm of `calledInFunc` ends in `!called`, so the
+    /// response is open whatever the closure does with it and whatever the
+    /// caller does after. vitess's `streamQuerylog` writes
+    /// `defer resp.Body.Close()` and then reads the body from a goroutine;
+    /// upstream reports it and guff called the `defer` enough.
+    ///
+    /// Separate from `mark_settled` because the two race: the closure that
+    /// captures the response is visited *after* the `go` that launches it, and
+    /// settling must not undo this.
+    fn mark_go_escape(&mut self) {
+        self.forced_open = true;
+    }
+
     /// Ownership left this function — passed to a call, captured by a closure,
     /// returned, stored in a field. Nothing downstream is a phi question.
     fn mark_settled(&mut self) {
@@ -292,12 +321,14 @@ impl RespUsage {
     }
 
     fn report(self, check_consumption: bool, pending: &mut Vec<(u32, String)>) {
+        let forced_open = self.forced_open;
         for e in self.entries {
-            let ok = if check_consumption {
-                e.closed && e.consumed
-            } else {
-                e.closed
-            };
+            let ok = !forced_open
+                && if check_consumption {
+                    e.closed && e.consumed
+                } else {
+                    e.closed
+                };
             if !ok {
                 let msg = if check_consumption {
                     MSG_CLOSE_AND_CONSUME
@@ -616,6 +647,29 @@ fn mark_escaped_arg(
 /// ```
 ///
 /// sixteen times, and all sixteen went unreported.
+/// Tracked responses mentioned anywhere inside `node`, excluding names the
+/// subtree declares itself.
+fn tracked_names_in(
+    pass: &Pass<'_>,
+    node: NodeRef<'_>,
+    span: (u32, u32),
+    usages: &HashMap<String, RespUsage>,
+) -> Vec<String> {
+    let mut seen: Vec<String> = Vec::new();
+    if usages.is_empty() {
+        return seen;
+    }
+    inspect(node, |n| {
+        if let Some(NodeRef::Ident(id)) = n {
+            if usages.contains_key(id.name.as_str()) && !declared_inside(pass, id, span) {
+                seen.push(id.name.clone());
+            }
+        }
+        true
+    });
+    seen
+}
+
 fn mark_captured_by_closure(
     pass: &Pass<'_>,
     lit: &guff::ast::FuncLit,
@@ -817,6 +871,20 @@ fn check_body(
         let Some(n) = n else {
             return true;
         };
+        if let NodeRef::GoStmt(go) = n {
+            // Everything a `go` statement mentions escapes on a goroutine, and
+            // upstream's `isClosureCalled` does not count an `*ssa.Go` as a
+            // call. Both spellings land here: the literal that captures the
+            // response, and `go sink(resp)`, whose value reaches an
+            // `*ssa.Go` that none of `isopen`'s arms match.
+            let span = (go.go_.0 as u32, go.call.rparen.0 as u32);
+            for name in tracked_names_in(pass, NodeRef::CallExpr(&go.call), span, &usages) {
+                if let Some(u) = usages.get_mut(&name) {
+                    u.mark_go_escape();
+                }
+            }
+            return true;
+        }
         if let NodeRef::FuncLit(lit) = n {
             // A response captured by a func literal is upstream's `*ssa.Store`
             // -> `*ssa.MakeClosure` branch, and `calledInFunc` answers "not
@@ -906,6 +974,30 @@ fn check_body(
             }
             NodeRef::ReturnStmt(ret) => {
                 mark_returned_body(ret, &mut usages);
+                // A closure this function only *returns* has no `*ssa.Call`
+                // or `*ssa.Defer` referrer either —
+                // `return func() { resp.Body.Close() }` is reported, while the
+                // same literal handed to `t.Cleanup` is not, because there the
+                // argument makes the call a referrer.
+                //
+                // Folded into this arm rather than intercepting `ReturnStmt`
+                // before the match: an early `return true` here skipped
+                // `mark_returned_body`, and `return resp.Body, nil` — which
+                // upstream treats as handing the close to the caller — became a
+                // finding. The isolate tier caught it; nothing else did.
+                for result in &ret.results {
+                    let Expr::FuncLit(lit) = result else {
+                        continue;
+                    };
+                    let span = (lit.ty.func.0 as u32, lit.body.rbrace.0 as u32);
+                    for name in
+                        tracked_names_in(pass, NodeRef::BlockStmt(&lit.body), span, &usages)
+                    {
+                        if let Some(u) = usages.get_mut(&name) {
+                            u.mark_go_escape();
+                        }
+                    }
+                }
             }
             NodeRef::DeferStmt(d) => {
                 let depth = shape.loop_depth(d.defer_.0 as u32);

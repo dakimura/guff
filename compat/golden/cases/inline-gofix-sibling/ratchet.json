@@ -1,0 +1,6 @@
+{
+  "missing": 2,
+  "extra": 0,
+  "why": "The inliner itself, deferred and measured. `inline` reports a call it *can* rewrite as \"Call of X should be inlined\", and decides the wording by running x/tools' `internal/refactor/inline` (9,222 lines) over the callee: the error it returns becomes the diagnostic text, and a result that literalizes or binds is suppressed instead of reported. guff ports the one answer the inliner reaches before any of that — `len(typeArgs) != len(callee.TypeParams)`, which is a property of the call site and the declaration — and has no inliner, so `ptr.Pair[int, string](1, \"a\")` and `ptr.Plain(1)` draw nothing. Both halves are in the same fixture on purpose: the four keys guff does produce would not prove the boundary without the two it does not. Same gap as loki's four `//go:fix inline` function calls, docs/COMPAT-HARDENING.md §4 continuation 292.",
+  "target": "These 2 close when the inliner is ported, not before. A *new* diff in this case is a bug."
+}

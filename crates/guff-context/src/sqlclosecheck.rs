@@ -61,6 +61,37 @@ fn cut_vendor(path: &str) -> &str {
     }
 }
 
+/// Whether the package being analysed lists a SQL package among its **own**
+/// imports.
+///
+/// `getTargetTypes` asks the SSA program for each package by name:
+///
+/// ```go
+/// pkg := pssa.Pkg.Prog.ImportedPackage(sqlPkg)
+/// if pkg == nil {
+///     // the SQL package being checked isn't imported
+///     continue
+/// }
+/// ```
+///
+/// and `buildssa` only creates SSA packages for `pass.Pkg.Imports()` — the
+/// **direct** imports. With no target types the analyzer returns before it
+/// looks at a single instruction, so a package that reaches `*sql.Rows` only
+/// through a dependency is skipped whole. vitess's `test/client/client.go`
+/// opens its database through `vitessdriver` and never names `database/sql`;
+/// upstream is silent there and guff reported both of its unclosed `rows`.
+///
+/// The same gate as `bodyclose`'s `imports_net_http`, which arrived for the
+/// same reason.
+fn imports_sql_package(pass: &Pass<'_>) -> bool {
+    pass.files().iter().any(|file| {
+        file.imports.iter().any(|spec| {
+            let path = spec.path.value.trim_matches('"');
+            SQL_PACKAGES.contains(&cut_vendor(path))
+        })
+    })
+}
+
 fn type_of(pass: &Pass<'_>, expr: &Expr) -> Option<TypeId> {
     let info = pass.types_info()?;
     Some(info.types.get(&expr.id())?.typ)
@@ -95,6 +126,26 @@ fn is_target_type(pass: &Pass<'_>, typ: TypeId) -> bool {
 
 fn expr_is_target(pass: &Pass<'_>, expr: &Expr) -> bool {
     type_of(pass, expr).is_some_and(|t| is_target_type(pass, t))
+}
+
+/// Whether a call's result — a lone value or any element of its tuple — is one
+/// of the target types.
+fn call_result_is_target(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    if matches!(artifacts.types.get(typ), TypeData::Tuple(_)) {
+        return (0..tuple_len(&artifacts.types, Some(typ))).any(|i| {
+            tuple_at(&artifacts.types, typ, i)
+                .typ(&artifacts.objects)
+                .is_some_and(|t| is_target_type(pass, t))
+        });
+    }
+    is_target_type(pass, typ)
 }
 
 fn rhs_result_is_target(pass: &Pass<'_>, assign: &AssignStmt, lhs_index: usize) -> bool {
@@ -157,6 +208,36 @@ fn is_struct_field(pass: &Pass<'_>, expr: &Expr) -> bool {
     info.selections
         .get(&sel.id)
         .is_some_and(|s| s.kind() == SelectionKind::FieldVal)
+}
+
+/// A **struct** composite literal hands whatever it is given to whoever owns
+/// the struct, exactly as `x.f = rows` does:
+///
+/// ```go
+/// case *ssa.Store:
+///     // A Row/Stmt is stored in a struct, which may be closed later
+///     // by a different flow.
+///     if _, ok := instr.Addr.(*ssa.FieldAddr); ok {
+///         return actionReturned
+///     }
+/// ```
+///
+/// `&T{rows: rows}`, `T{rows: rows}` and the positional `T{rows}` all build the
+/// field through a `FieldAddr`. A slice or map literal does not, and stays a
+/// finding — measured on all five.
+fn composite_lit_is_struct(pass: &Pass<'_>, lit_id: u32) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(typ) = info.types.get(&lit_id).map(|tv| tv.typ) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    let under = typ.underlying(&artifacts.types);
+    matches!(artifacts.types.get(under), TypeData::Struct(_))
 }
 
 fn ident_name(expr: &Expr) -> Option<&str> {
@@ -365,7 +446,45 @@ fn mark_closed_in_closure(lit: &guff::ast::FuncLit, usages: &mut HashMap<String,
     }
 }
 
+/// Whether the function's **own** body defers anything (a literal nested inside
+/// it does not count).
+///
+/// With a `defer` in the function, go/ssa stops handing the call's tuple
+/// straight to `return` and materialises the results, so the value's referrer
+/// is a store rather than an `*ssa.Return` and `getAction` never reaches
+///
+/// ```go
+/// case *ssa.Return:
+///     … return actionReturned
+/// ```
+///
+/// Measured as the rule, not inferred: `return db.Query(…)` is silent, and the
+/// same function with a `defer fmt.Println("x")` anywhere in it — including
+/// inside an `if` — is a finding, while a `defer` that only appears in a nested
+/// literal leaves it silent again. vitess's `VTGateProxy.ShowTablets` hands the
+/// rows to its caller and carries `defer span.Finish()`, which is why it needs
+/// the `//nolint:sqlclosecheck` that guff called unused.
+fn body_has_own_defer(body: &BlockStmt) -> bool {
+    let mut found = false;
+    preorder(NodeRef::BlockStmt(body), |n| {
+        if found {
+            return false;
+        }
+        match n {
+            NodeRef::FuncLit(_) => return false,
+            NodeRef::DeferStmt(_) => {
+                found = true;
+                return false;
+            }
+            _ => {}
+        }
+        true
+    });
+    found
+}
+
 fn check_body(pass: &Pass<'_>, body: &BlockStmt, pending: &mut Vec<(u32, String)>) {
+    let has_defer = body_has_own_defer(body);
     let mut usages: HashMap<String, SqlUsage> = HashMap::new();
     let assign_blocks = assign_block_ids(body);
 
@@ -399,39 +518,43 @@ fn check_body(pass: &Pass<'_>, body: &BlockStmt, pending: &mut Vec<(u32, String)
                 mark_close(call, false, &mut usages);
                 mark_passed_args(call, &mut usages);
             }
+            NodeRef::CompositeLit(lit) => {
+                if composite_lit_is_struct(pass, lit.id) {
+                    for elt in &lit.elts {
+                        let value = match elt {
+                            Expr::KeyValueExpr(kv) => kv.value.as_ref(),
+                            other => other,
+                        };
+                        if let Some(name) = ident_name(value) {
+                            if let Some(u) = usages.get_mut(name) {
+                                u.passed = true;
+                            }
+                        }
+                    }
+                }
+            }
             NodeRef::DeferStmt(d) => {
                 handle_defer_close(&d.call, &mut usages);
             }
             NodeRef::ReturnStmt(ret) => {
+                if has_defer {
+                    // Nothing is transferred: with the results in memory the
+                    // value's referrer is a store, and a call written straight
+                    // into the `return` is a finding of its own — nothing
+                    // names it, so it is reported here rather than tracked.
+                    for result in &ret.results {
+                        if let Expr::CallExpr(call) = result {
+                            if is_tracking_call(result) && call_result_is_target(pass, result) {
+                                pending.push((call.lparen.0 as u32, MSG_NOT_CLOSED.to_string()));
+                            }
+                        }
+                    }
+                    return true;
+                }
                 // Returning a tracked value clears it (ownership transferred).
                 for result in &ret.results {
                     if let Some(name) = ident_name(result) {
                         usages.remove(name);
-                    }
-                }
-            }
-            NodeRef::ExprStmt(es) => {
-                // Discarded target from a bare call: report immediately.
-                if let Expr::CallExpr(call) = &es.x {
-                    if let Some(typ) = type_of(pass, &es.x) {
-                        let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
-                            return true;
-                        };
-                        let typ = unalias_readonly(&artifacts.types, typ);
-                        let is_tgt = if matches!(artifacts.types.get(typ), TypeData::Tuple(_)) {
-                            (0..tuple_len(&artifacts.types, Some(typ))).any(|i| {
-                                let elem = tuple_at(&artifacts.types, typ, i);
-                                elem.typ(&artifacts.objects)
-                                    .is_some_and(|t| is_target_type(pass, t))
-                            })
-                        } else {
-                            is_target_type(pass, typ)
-                        };
-                        if is_tgt {
-                            // go/ssa call position: the `(`. See
-                            // `assign_report_pos`.
-                            pending.push((call.lparen.0 as u32, MSG_NOT_CLOSED.to_string()));
-                        }
                     }
                 }
             }
@@ -478,6 +601,20 @@ fn handle_assign(
             continue;
         };
         if name == "_" {
+            // `_, err := db.Query(…)`. The extract still exists — it is the
+            // call's referrer that `getTargetTypesValues` picks up — and
+            // nothing refers to *it*, so `checkClosed` walks an empty list and
+            // reports. Nothing can close it later either, there being no name,
+            // so the finding is emitted here rather than tracked.
+            //
+            // A bare `db.Query(…)` statement is the opposite case and must stay
+            // silent: no destination means no extract, so the call has no
+            // referrer of a target type and upstream never starts.
+            if rhs_for_index(assign, i).is_some_and(is_tracking_call)
+                && rhs_result_is_target(pass, assign, i)
+            {
+                pending.push((assign_report_pos(assign, i), MSG_NOT_CLOSED.to_string()));
+            }
             continue;
         }
 
@@ -607,6 +744,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .result_of::<inspect_pass::InspectResult>(inspect_pass::analyzer())
         .ok_or_else(|| "sqlclosecheck requires inspect analyzer".to_string())?;
 
+    if !imports_sql_package(pass) {
+        return Ok(None);
+    }
+
     let mut pending: Vec<(u32, String)> = Vec::new();
     for file in pass.files() {
         // Rooted at each `FuncDecl`, not at the file: `buildssa` builds
@@ -617,15 +758,19 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             preorder(NodeRef::FuncDecl(top), |n| {
             match n {
                 NodeRef::FuncDecl(fd) => {
-                    if func_returns_target(&fd.ty) {
-                        return true;
-                    }
                     if let Some(body) = &fd.body {
+                        // The "it returns rows, someone else closes them" skip
+                        // only holds while `getAction` can reach its
+                        // `*ssa.Return` arm; a `defer` in the body puts the
+                        // results in memory and it cannot.
+                        if func_returns_target(&fd.ty) && !body_has_own_defer(body) {
+                            return true;
+                        }
                         check_body(pass, body, &mut pending);
                     }
                 }
                 NodeRef::FuncLit(fl) => {
-                    if func_returns_target(&fl.ty) {
+                    if func_returns_target(&fl.ty) && !body_has_own_defer(&fl.body) {
                         return true;
                     }
                     check_body(pass, &fl.body, &mut pending);

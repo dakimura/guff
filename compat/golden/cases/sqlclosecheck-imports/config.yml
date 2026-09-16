@@ -1,0 +1,21 @@
+# Golden case: sqlclosecheck's direct-import gate.
+#
+# `caller` leaks two `*sql.Rows` and is silent, because it does not import
+# database/sql itself; `direct` leaks one the same way and is reported, because
+# it does. `driver` imports it and leaks nothing. The one expected key is the
+# whole case: guff used to report all three.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - sqlclosecheck
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

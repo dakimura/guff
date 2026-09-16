@@ -471,6 +471,39 @@ fn inline_exp_gate_reads_the_vendored_declaration() {
     }
 }
 
+/// A generic `//go:fix inline` function declared in a **sibling package** of
+/// the same module.
+///
+/// The old note said `//go:fix` discovery stops at the package boundary
+/// because upstream carries it in a fact. That is true of the *alias* and
+/// *const* arms, which need the declaration's right-hand side; this diagnostic
+/// needs only the name and the directive, and the imported package's source is
+/// on disk. vitess declares `ptr.Of` and calls it from sixteen places.
+///
+/// Counted, not `any(contains(…))`: all four messages are identical, and four
+/// more calls in the same file must stay silent — a spelled-out type argument,
+/// a fully instantiated two-parameter call, a non-generic callee and an
+/// unmarked one.
+#[test]
+fn inline_reads_a_sibling_packages_gofix_directive() {
+    let dir = support::testdata("inline_gofix_local");
+    let dep = dir.join("ptr/ptr.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/govet/inlinegofixlocal",
+        &dir.join("bad.go"),
+        &[("example.com/govet/inlinegofixlocal/ptr", &dep)],
+    );
+    let messages = support::run_analyzer(inline_analyzer(), &pkg);
+    assert_eq!(
+        messages,
+        vec![
+            "cannot inline: type parameter inference is not yet supported";
+            4
+        ],
+        "{messages:?}"
+    );
+}
+
 /// …and when there is no vendor directory, `go list` is asked instead.
 ///
 /// The vendor-only gate above left a hole that `adopt go-ethereum` walked into:

@@ -57,10 +57,3 @@ func passedToHelper() {
 func closeRows(rows *sql.Rows) {
 	_ = rows.Close()
 }
-
-func blankRows() {
-	_, err := db.Query("select 1")
-	if err != nil {
-		return
-	}
-}
