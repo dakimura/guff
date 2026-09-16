@@ -32153,3 +32153,120 @@ loki は open 4 のまま、台帳は 70/100 のままにする。
 guff の過剰報告はゼロ（続き 291 で P=100.0%）。残っているのは recall だけで、
 それは checker の欠陥ではなく**未実装の機能**である。着手するなら
 `inline` の関数形単独のタスクとして、インライナの移植範囲を先に決めること。
+
+### 2026-09-16（続き 293）— `adopt avalanchego`。tagalign の `strict` は**キーで**揃える、SA1026 の map キーが型パラメータなら見ない
+
+初回 `guff=234 golangci=230`、guff-only 4 件。3 件は欠陥、1 件は未実装の設定。
+
+#### 1. tagalign `strict` —— 位置ではなくキーで列を作る
+
+avalanchego は `align: true / sort: true / strict: true` を設定している。
+strict の上流は、グループの**キーの集合**を列にして、タグと列を同時に歩く:
+
+```go
+if tagMaxLens[n].Key == tag.Key {
+    format = alignFormat(tagMaxLens[n].Len + 1)   // 一致 → タグを詰める
+    newTagBuilder.WriteString(fmt.Sprintf(format, tag.String())); i++; n++
+} else {
+    format = alignFormat(tagMaxLens[n].Len + 1)   // 欠け → 空白の列
+    newTagBuilder.WriteString(fmt.Sprintf(format, "")); n++
+}
+```
+
+つまり `tag1` を持たないフィールドも `tag2` の列から始まる。
+`vms/platformvm/state/metadata_validator.go` の `validatorMetadata` は
+`v1:"true"` を `v0:"true"` の列幅ぶん字下げしてあり、guff は位置で揃える
+既定の経路しか持っていなかったので「揃っていない、`v1:"true"` にせよ」と
+言っていた。
+
+guff の注記はこうだった:
+
+```
+DEFERRED: StrictStyle missing-key column padding; … No fixture reaches it.
+```
+
+**コーパスが到達した。** 「まだ誰も踏んでいない」は「踏まれない」ではない。
+
+strict は `align` と `sort` の両方が立っていないと無視される
+（`if h.style == StrictStyle && (!h.align || !h.sort) { h.style = DefaultStyle }`）。
+4 通りの設定で測って一致:
+
+| 設定 | 結果 |
+|---|---|
+| strict | 2 件一致 |
+| 既定 | 4 件一致 |
+| strict + `sort: false` | 既定に落ちる、5 件一致 |
+| strict + `align: false` | sort のみの経路、0 件一致 |
+
+fixture は 1 つで、golden を 2 case（`tagalign` / `tagalign-strict`）が同じ
+ファイルを読む。`compat/fix` の記録がそのまま 2 つのスタイルの差になっていて、
+散文よりよく説明している —— strict は欠けた列を足し、既定はそれを剥がして
+後続のタグを左へ寄せる。
+
+#### 2. SA1026 —— map のキーが型パラメータなら判定しない
+
+```go
+func (enc *encoder) newMapEncoder(t fakereflect.TypeAndCanAddr, stack string) *UnsupportedTypeError {
+	if typeparams.IsTypeParam(t.Key().Type) {
+		// We don't know enough about the concrete instantiation to say much about the key. […]
+		// the key might implement TextMarshaler.
+		return enc.newTypeEncoder(t.Elem(), stack+"[k]")
+	}
+```
+
+`utils/bimap/bimap.go` の `json.Marshal(m.keyToValue)`（`map[K]V`）がそれ。
+guff はキー検査を走らせていたので finding になっていた。6 形測って、具体型の
+悪いキーと `chan` フィールドはそのまま出る。
+
+#### 3. 残り 1 件は nolintlint ではなく `linters.settings.unused`
+
+```
+codec/codectest/codectest.go:653  directive `//nolint:revive,unused` is unused for linter "unused"
+```
+
+avalanchego は既定でない `unused` の設定を 3 つ持っている:
+
+```yaml
+unused:
+  field-writes-are-uses: false
+  post-statements-are-reads: true
+  local-variables-are-used: false
+```
+
+`field-writes-are-uses: false` は「書いただけのフィールドは使っていない」に
+する。653 行の `unexportedField` は複合リテラルで書かれるだけなので上流では
+finding になり、**だから `//nolint:…,unused` が使われている**。guff は
+`linters.settings.unused` を実装していない（`field-writes-are-uses` は
+config コーパスの fixture 以外どこにも出てこない）ので `unused` が黙り、
+nolintlint が「この指示子は使われていない」と言う。
+
+直接測ると:
+
+```
+field-writes-are-uses: false  → golangci 2 件 (`field unexported is unused`) / guff 0 件
+```
+
+#### 4. なぜここで止めるか
+
+上流のこの 3 つは `unused` のグラフのオプションで、実際の分岐は 4 箇所しか
+無い（`CompositeLit` / `SelectorExpr` の write 側 / `seeScope` / `IncDecStmt`）。
+しかし guff の `guff-unused` は冒頭に **"Simplified port"** と書いてあり、
+honnef の `read` / `write` / `use` / `own` のエッジを持たない ——
+「フィールドへの**書き込み**」という概念が無いので、オプションを足す前に
+グラフの形を変える必要がある。`unused` はコーパス全体の findings を動かすので、
+2 つの狭い修正と同じ PR に混ぜるものではない。avalanchego は open 1 のまま。
+
+#### 5. 実測
+
+```
+avalanchego (v1.14.2, 387 パッケージ)
+  初回   guff=234 golangci=230 both=230  guff-only: tagalign 2 / nolintlint 1 / staticcheck 1
+  最終   guff=231 golangci=230 both=230  P=99.6% R=100.0%  health=0
+
+golden        235 case 一致（tagalign +4 / tagalign-strict 新規 2、欠落 0）
+fix / reject  235 / 14（tagalign 2 case を再記録）
+cargo test    --workspace --locked 緑
+compat/run.sh --oss --tier pr  8 target すべて OK
+
+台帳: 70/100 at zero（75 定義、open 2 = avalanchego 1 + loki 4、unmeasured 3）
+```

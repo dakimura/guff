@@ -1,2 +1,6 @@
 # The isolate fixture, so the two tiers cannot drift.
 bad.go  compat/isolate/fixtures/tagalign/bad.go
+# The key-aligned (`strict`) shapes, read here under the *default* style so
+# the same file measures both — `compat/golden/cases/tagalign-strict` runs it
+# with `strict: true`.
+tagalign/strict.go  crates/guff-style/tests/testdata/tagalign/strict.go

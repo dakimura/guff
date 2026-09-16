@@ -116,7 +116,10 @@ fn sa1026_flags_unmarshalable_types() {
             "trying to marshal unsupported type map[PlainKey][]int, via x.M",
             "trying to marshal unsupported type map[PtrTextKey][]int",
         ],
-        "{messages:?}"
+        "the three type-parameter map shapes at the end of the fixture are \
+         silent: upstream skips the key check entirely when the key is a type \
+         parameter, because the concrete instantiation might implement \
+         TextMarshaler — {messages:?}"
     );
 }
 

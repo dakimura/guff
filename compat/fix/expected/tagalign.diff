@@ -21,3 +21,31 @@
 +	Bar int `json:"bar" yaml:"bar"`
 +	Baz int `json:"baz" xml:"baz"  yaml:"baz"`
  }
+--- a/tagalign/strict.go
++++ b/tagalign/strict.go
+@@ -21,12 +21,12 @@
+ type AlignedStrict struct {
+ 	BothTags   string `tag1:"true" tag2:"true"`
+ 	SingleTag1 string `tag1:"true"`
+-	SingleTag2 string `            tag2:"true"`
++	SingleTag2 string `tag2:"true"`
+ }
+ 
+ // The same group with the padding missing.
+ type UnpaddedStrict struct {
+-	BothTags   string `tag1:"true"  tag2:"true"`
++	BothTags   string `tag1:"true" tag2:"true"`
+ 	SingleTag1 string `tag1:"true"`
+ 	SingleTag2 string `tag2:"true"`
+ }
+@@ -34,8 +34,8 @@
+ // A missing *middle* column — positional alignment gets this wrong in the
+ // other direction, pulling `ccc` left into the `bb` column.
+ type MiddleMissing struct {
+-	All  string `a:"1" bb:"2" ccc:"3"`
+-	NoBB string `a:"1"        ccc:"3"`
++	All  string `a:"1" bb:"2"  ccc:"3"`
++	NoBB string `a:"1" ccc:"3"`
+ }
+ 
+ // A key only one field has.

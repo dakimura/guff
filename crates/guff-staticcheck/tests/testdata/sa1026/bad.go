@@ -56,3 +56,32 @@ func reported(a PtrJSONer, b map[PlainKey][]int, c map[PtrTextKey][]int, d wraps
 	// this one reads `map[PlainKey][]int, via x.M`.
 	json.Marshal(d)
 }
+
+// A map key that is a *type parameter* is not checked at all.
+//
+//	if typeparams.IsTypeParam(t.Key().Type) {
+//		// We don't know enough about the concrete instantiation to say much
+//		// about the key. […] the key might implement TextMarshaler.
+//		return enc.newTypeEncoder(t.Elem(), stack+"[k]")
+//	}
+//
+// guff ran the key check anyway, so `json.Marshal` of a `map[K]V` field was a
+// finding — ava-labs/avalanchego's `BiMap.MarshalJSON`.
+
+type BiMap[K comparable, V any] struct{ keyToValue map[K]V }
+
+func (m *BiMap[K, V]) MarshalJSON() ([]byte, error) {
+	// silent: K is a type parameter, so the key is not judged; V's underlying
+	// type is its constraint's interface, which `newTypeEncoder` accepts.
+	return json.Marshal(m.keyToValue)
+}
+
+type keyedByParam[K comparable] struct{ m map[K]int }
+
+func (k *keyedByParam[K]) Marshal() ([]byte, error) {
+	return json.Marshal(k.m) // silent, same reason
+}
+
+func typeParamElem[V any](m map[string]V) ([]byte, error) {
+	return json.Marshal(m) // silent: a concrete key, and V is a type parameter
+}

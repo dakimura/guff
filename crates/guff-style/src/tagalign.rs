@@ -9,10 +9,16 @@
 //! `unquoteTag` in the message (`tagalign.go:298`), so the replacement is the
 //! message's tail in backticks — a string golden already validates.
 //!
-//! DEFERRED: StrictStyle missing-key column padding; the no-op fix upstream
-//! emits on a malformed tag (`replaceStr` is `field.Tag.Value`, the tag
-//! replaced by itself, which still makes upstream rewrite and gofmt the file —
-//! the `extras.go` mechanism of 続き 71). No fixture reaches it.
+//! `strict` aligns by **key**, not by position: the group's keys are collected,
+//! sorted the same way the tags are, and a field missing one of them emits a
+//! column of spaces in its place. ava-labs/avalanchego configures it, and its
+//! `validatorMetadata` is exactly that shape — a `v1:"true"` tag padded out to
+//! the width of the `v0:"true"` column above it.
+//!
+//! DEFERRED: the no-op fix upstream emits on a malformed tag (`replaceStr` is
+//! `field.Tag.Value`, the tag replaced by itself, which still makes upstream
+//! rewrite and gofmt the file — the `extras.go` mechanism of 続き 71). No
+//! fixture reaches it.
 
 use std::sync::OnceLock;
 
@@ -114,6 +120,20 @@ fn sort_tags(tags: &mut [Tag], order: &[String]) {
     });
 }
 
+/// `sortKeys` — the same comparator `sort_tags` uses, over bare key names.
+fn sort_keys(keys: &mut [String], order: &[String]) {
+    keys.sort_by(|a, b| {
+        let oi = order.iter().position(|o| o == a);
+        let oj = order.iter().position(|o| o == b);
+        match (oi, oj) {
+            (None, None) => a.cmp(b),
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (Some(x), Some(y)) => x.cmp(&y),
+        }
+    });
+}
+
 fn align_format(width: usize, s: &str) -> String {
     format!("{s:<width$}")
 }
@@ -199,11 +219,41 @@ fn process_group(fields: &[&Field], options: &TagalignOptions, pending: &mut Pen
         return;
     }
 
-    let max_tag_num = tags_group.iter().map(|t| t.len()).max().unwrap_or(0);
-    let mut max_lens = vec![0usize; max_tag_num];
+    // `if h.style == StrictStyle && (!h.align || !h.sort) { h.style = DefaultStyle }`
+    // — strict is ignored unless both are on.
+    let strict = options.strict && options.align && options.sort;
+
+    // Strict aligns by key: the columns are the group's distinct keys, in the
+    // same order the tags themselves are sorted into.
+    let mut unique_keys: Vec<String> = Vec::new();
     for tags in &tags_group {
-        for (j, tag) in tags.iter().enumerate() {
-            max_lens[j] = max_lens[j].max(tag.raw.len());
+        for tag in tags {
+            if !unique_keys.iter().any(|k| k == &tag.key) {
+                unique_keys.push(tag.key.clone());
+            }
+        }
+    }
+    if strict {
+        sort_keys(&mut unique_keys, &options.order);
+    }
+
+    let max_tag_num = if strict {
+        unique_keys.len()
+    } else {
+        tags_group.iter().map(|t| t.len()).max().unwrap_or(0)
+    };
+    let mut max_lens = vec![0usize; max_tag_num];
+    for j in 0..max_tag_num {
+        for tags in &tags_group {
+            let len = if strict {
+                tags.iter()
+                    .find(|t| t.key == unique_keys[j])
+                    .map(|t| t.raw.len())
+                    .unwrap_or(0)
+            } else {
+                tags.get(j).map(|t| t.raw.len()).unwrap_or(0)
+            };
+            max_lens[j] = max_lens[j].max(len);
         }
     }
 
@@ -211,8 +261,24 @@ fn process_group(fields: &[&Field], options: &TagalignOptions, pending: &mut Pen
         let tags = &tags_group[i];
         let new_tag = if options.align {
             let mut parts = Vec::new();
-            for (j, tag) in tags.iter().enumerate() {
-                parts.push(align_format(max_lens[j] + 1, &tag.raw));
+            if strict {
+                // Upstream walks the tags and the columns together: a match
+                // writes the tag padded to the column, a miss writes the column
+                // as spaces and only advances the column.
+                let (mut i, mut n) = (0usize, 0usize);
+                while i < tags.len() && n < max_lens.len() {
+                    if unique_keys[n] == tags[i].key {
+                        parts.push(align_format(max_lens[n] + 1, &tags[i].raw));
+                        i += 1;
+                    } else {
+                        parts.push(align_format(max_lens[n] + 1, ""));
+                    }
+                    n += 1;
+                }
+            } else {
+                for (j, tag) in tags.iter().enumerate() {
+                    parts.push(align_format(max_lens[j] + 1, &tag.raw));
+                }
             }
             parts.join("").trim_end().to_string()
         } else {

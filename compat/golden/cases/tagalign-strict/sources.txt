@@ -1,0 +1,2 @@
+# The same fixture compat/golden/cases/tagalign reads under the default style.
+tagalign/strict.go  crates/guff-style/tests/testdata/tagalign/strict.go
