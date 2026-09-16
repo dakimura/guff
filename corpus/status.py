@@ -126,6 +126,26 @@ EXCLUDED = {
 # **70 of its 219 packages** cannot be loaded at all (2026-09-06 続き 217).
 PLATFORM_BOUND = {"cri-o": "linux", "buildah": "linux", "tetragon": "linux"}
 
+# Targets whose remaining open findings are a scoped-out **feature**, not a
+# defect to chase. `next` skips them so the queue does not hand the same
+# already-answered task to every session; `report` still shows the open count,
+# because the findings are really missing and hiding that would overstate
+# compatibility.
+#
+# This is not `compat/allowlists/`. An allowlist entry says "the divergence is
+# accepted and the target counts as clean"; a row here stays **open** and keeps
+# the ledger honest. Only put a target here with the measurement written down in
+# docs/COMPAT-HARDENING.md §4, and take it out the moment the feature lands.
+DEFERRED_OPEN = {
+    "loki": "the 4 remaining findings are `//go:fix inline` on a *function*, and "
+    "upstream decides both whether to report and what to report by running the "
+    "inliner (`passes/inline/inline.go`: the error string becomes the diagnostic; "
+    "`Literalized` / `BindingDecl` mean silence). That is "
+    "golang.org/x/tools/internal/refactor/inline, 9,222 lines, and none of the "
+    "three answers can be approximated without the substitution analysis itself. "
+    "Measured 2026-09-15 at v3.7.6 — see docs/COMPAT-HARDENING.md §4 (続き 292)"
+}
+
 
 def defined_targets() -> dict[str, dict]:
     out: dict[str, dict] = {}
@@ -263,7 +283,7 @@ def next_task(ledger: dict) -> tuple[str, str]:
     open_rows = [
         (r.get("open", 0), n)
         for n, r in rows.items()
-        if r["state"] == "open" and "needs_platform" not in r
+        if r["state"] == "open" and "needs_platform" not in r and n not in DEFERRED_OPEN
     ]
     if open_rows:
         count, name = min(open_rows)
@@ -315,6 +335,8 @@ def report(ledger: dict) -> str:
     for name, r in sorted(rows.items(), key=lambda kv: (kv[1]["state"], kv[0])):
         linters = ", ".join(f"{k}={v}" for k, v in (r.get("by_linter") or {}).items())
         note = f" ({r['needs_platform']} only)" if "needs_platform" in r else ""
+        if name in DEFERRED_OPEN:
+            note += " (deferred)"
         out.append(
             f"| {name}{note} | {r['tier']} | {r['state']} | "
             f"{r.get('open', '')} | {linters} | {r.get('at', '—')} |"
