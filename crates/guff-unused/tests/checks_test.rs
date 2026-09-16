@@ -289,3 +289,102 @@ fn unused_reports_struct_fields() {
         "{messages:?}"
     );
 }
+
+/// `linters.settings.unused`. avalanchego turns `field-writes-are-uses` off and
+/// `post-statements-are-reads` on; guff read neither, so every field the repo
+/// only ever writes to stayed silent and the `//nolint:unused` over one of them
+/// became an unused directive (COMPAT-HARDENING §4).
+///
+/// With both options at their defaults nothing here is reported: a write is a
+/// use, which is what makes the fixture a control as well as a subject.
+#[test]
+fn unused_settings_default_reports_no_write_only_field() {
+    let dir = support::testdata("fieldwrites");
+    let pkg = support::typecheck_pkg(
+        "example.com/unused/fieldwrites",
+        &dir.join("fieldwrites.go"),
+    );
+    let messages = support::run_analyzer(analyzer(), &pkg);
+    assert_eq!(messages, Vec::<String>::new(), "{messages:?}");
+}
+
+/// `field-writes-are-uses: false`. Exact list, not `any(contains(…))`: seven of
+/// the eleven rows differ in nothing at all, so a count is the only thing that
+/// distinguishes "every shape reported" from "one shape reported seven times".
+#[test]
+fn unused_settings_field_writes_are_uses_false() {
+    let dir = support::testdata("fieldwrites");
+    let pkg = support::typecheck_pkg(
+        "example.com/unused/fieldwrites",
+        &dir.join("fieldwrites.go"),
+    );
+    let mut messages = support::run_analyzer_with_settings(
+        analyzer(),
+        &pkg,
+        "unused",
+        guff_unused::Options {
+            field_writes_are_uses: false,
+            ..guff_unused::Options::default()
+        },
+    );
+    messages.sort();
+    assert_eq!(
+        messages,
+        vec![
+            // `v.a.b = "x"` — `a` is read as part of `node.X`, `b` is not.
+            "field b is unused",
+            // `v.n++`, which `post-statements-are-reads` would spare.
+            "field n is unused",
+            // A promoted write reads only `v`.
+            "field pin is unused",
+            // keyed literal, unkeyed literal, `=`, `++`'s neighbour `+=`,
+            // multi-assign, `(*v).written =`, `for v.written = range`.
+            "field written is unused",
+            "field written is unused",
+            "field written is unused",
+            "field written is unused",
+            "field written is unused",
+            "field written is unused",
+            "field written is unused",
+            "type pin is unused",
+        ],
+        "{messages:?}"
+    );
+}
+
+/// `post-statements-are-reads: true` on top, which is the pair avalanchego
+/// sets. It changes exactly one row: `v.n++` becomes a read as well as a write.
+#[test]
+fn unused_settings_post_statements_are_reads() {
+    let dir = support::testdata("fieldwrites");
+    let pkg = support::typecheck_pkg(
+        "example.com/unused/fieldwrites",
+        &dir.join("fieldwrites.go"),
+    );
+    let mut messages = support::run_analyzer_with_settings(
+        analyzer(),
+        &pkg,
+        "unused",
+        guff_unused::Options {
+            field_writes_are_uses: false,
+            post_statements_are_reads: true,
+        },
+    );
+    messages.sort();
+    assert_eq!(
+        messages,
+        vec![
+            "field b is unused",
+            "field pin is unused",
+            "field written is unused",
+            "field written is unused",
+            "field written is unused",
+            "field written is unused",
+            "field written is unused",
+            "field written is unused",
+            "field written is unused",
+            "type pin is unused",
+        ],
+        "{messages:?}"
+    );
+}

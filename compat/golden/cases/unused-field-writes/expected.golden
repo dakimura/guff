@@ -1,0 +1,18 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh unused-field-writes
+# Produced by running golangci-lint on compat/golden/cases/unused-field-writes/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+fieldwrites.go:17:2:unused::field written is unused
+fieldwrites.go:27:2:unused::field written is unused
+fieldwrites.go:37:2:unused::field written is unused
+fieldwrites.go:73:2:unused::field written is unused
+fieldwrites.go:96:20:unused::field b is unused
+fieldwrites.go:125:2:unused::field written is unused
+fieldwrites.go:137:6:unused::type pin is unused
+fieldwrites.go:141:2:unused::field pin is unused
+fieldwrites.go:154:2:unused::field written is unused
+fieldwrites.go:166:2:unused::field written is unused

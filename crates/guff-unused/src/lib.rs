@@ -345,6 +345,88 @@ fn struct_field_owners<'a>(
     Some(out)
 }
 
+/// `linters.settings.unused`.
+///
+/// Only the two options that change *field* usedness are honoured.
+/// `local-variables-are-used` makes locals candidates, and guff's unused is
+/// package-level declarations and fields — that one is a scope change, not a
+/// flag, and is left unimplemented.
+#[derive(Debug, Clone, Copy)]
+pub struct Options {
+    /// Upstream's `FieldWritesAreUses`, default true: writing a field counts as
+    /// using it. With it off, a field that is only ever written is unused.
+    pub field_writes_are_uses: bool,
+    /// Upstream's `PostStatementsAreReads`, default false: `x.f++` is a write
+    /// only. With it on, it is a read as well.
+    pub post_statements_are_reads: bool,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            field_writes_are_uses: true,
+            post_statements_are_reads: false,
+        }
+    }
+}
+
+/// Node ids of the selector expressions that sit in a **write** position.
+///
+/// honnef reaches these through `g.write`, which its assignment and increment
+/// arms call instead of `g.read`: `x.f = v` writes `f` and only reads `x`, and
+/// every `AssignStmt` left-hand side is a write — `x.f += 1` included, since
+/// the token is never examined. guff attributes field uses from a flat walk,
+/// so the write positions are collected once up front and consulted there.
+fn collect_write_positions(files: &[guff::ast::File], opts: &Options) -> HashSet<u32> {
+    let mut out = HashSet::new();
+    // Every consumer of this set is a `FieldWritesAreUses` branch, and with the
+    // option on upstream never takes one: `g.write(sel)` is `readSelectorExpr`,
+    // the same thing a read does. Returning nothing keeps the default path
+    // provably untouched.
+    if opts.field_writes_are_uses {
+        return out;
+    }
+    // `g.write`: only `*ast.ParenExpr` recurses. A write through `a[i]` or
+    // `*p` reads the operand and stops, so those do not mark anything.
+    fn note(e: &Expr, out: &mut HashSet<u32>) {
+        match e {
+            Expr::ParenExpr(p) => note(&p.x, out),
+            Expr::SelectorExpr(sel) => {
+                out.insert(sel.sel.id);
+            }
+            _ => {}
+        }
+    }
+    for file in files {
+        guff::walk::preorder(guff::walk::NodeRef::File(file), |n| {
+            match n {
+                guff::walk::NodeRef::AssignStmt(a) => {
+                    // Every LHS, whatever the token: upstream never looks at
+                    // it, so `v.written += "b"` is as much a pure write as
+                    // `v.written = "b"` is.
+                    for lhs in &a.lhs {
+                        note(lhs, &mut out);
+                    }
+                }
+                guff::walk::NodeRef::RangeStmt(r) => {
+                    if let Some(k) = r.key.as_ref() {
+                        note(k, &mut out);
+                    }
+                    if let Some(v) = r.value.as_ref() {
+                        note(v, &mut out);
+                    }
+                }
+                guff::walk::NodeRef::IncDecStmt(inc) if !opts.post_statements_are_reads => {
+                    note(&inc.x, &mut out);
+                }
+                _ => {}
+            }
+            true
+        });
+    }
+    out
+}
+
 fn attribute_field_uses(
     info: &guff_types::api::Info,
     types: &TypeArena,
@@ -353,6 +435,8 @@ fn attribute_field_uses(
     owners: &[ObjectId],
     fields: &FieldModel,
     edges: &mut HashMap<ObjectId, HashSet<ObjectId>>,
+    opts: &Options,
+    writes: &HashSet<u32>,
 ) {
     let use_field = |edges: &mut HashMap<ObjectId, HashSet<ObjectId>>, f: ObjectId| {
         for owner in owners {
@@ -396,8 +480,18 @@ fn attribute_field_uses(
                         &idx[..idx.len().saturating_sub(1)]
                     }
                 };
+                // `else { g.read(node.X, by); g.write(node.Sel, by) }`: with
+                // `field-writes-are-uses: false` a write selector is not read
+                // at all — neither the field it names nor the embedded fields
+                // the path crosses to reach it. Only `node.X` is read, and the
+                // walk reaches that on its own if it is a selector too, which
+                // is why `v.a.b = "x"` still uses `a` and a write to a
+                // *promoted* field uses nothing.
+                if writes.contains(&sel.sel.id) {
+                    return true;
+                }
                 let mut cur = selection.recv();
-                for step in steps {
+                for step in steps.iter() {
                     let Some(ty_obj) = named_origin_obj(types, cur) else {
                         break;
                     };
@@ -432,7 +526,9 @@ fn attribute_field_uses(
                         .elts
                         .iter()
                         .any(|e| matches!(e, Expr::KeyValueExpr(_)));
-                if unkeyed {
+                // `if g.opts.FieldWritesAreUses && unkeyed { use every field }`
+                // — with the option off an unkeyed literal uses none of them.
+                if unkeyed && opts.field_writes_are_uses {
                     use_all(edges, owners, tv.typ);
                 }
                 // A keyed literal's keys are plain `Ident`s that `Info.Uses`
@@ -445,7 +541,11 @@ fn attribute_field_uses(
                             if let Expr::Ident(key) = kv.key.as_ref() {
                                 if let Some(&i) = fields.by_name.get(&(ty_obj, key.name.clone())) {
                                     if let Some(&f) = fields.by_index.get(&(ty_obj, i)) {
-                                        use_field(edges, f);
+                                        // `g.write(kv.Key, by)` — the key of a
+                                        // keyed literal is a write.
+                                        if opts.field_writes_are_uses {
+                                            use_field(edges, f);
+                                        }
                                     }
                                 }
                             }
@@ -523,6 +623,7 @@ fn attribute_uses(
     local: &HashSet<ObjectId>,
     edges: &mut HashMap<ObjectId, HashSet<ObjectId>>,
     attributed: &mut HashSet<u32>,
+    writes: &HashSet<u32>,
 ) {
     guff::walk::preorder(node, |n| {
         if let guff::walk::NodeRef::Ident(id) = n {
@@ -531,6 +632,13 @@ fn attribute_uses(
                 // root" fallback must key on whether the *walk* saw it, not on
                 // what it pointed at.
                 attributed.insert(id.id);
+                // The `Sel` of a write selector under
+                // `field-writes-are-uses: false`. `attribute_field_uses`
+                // declines the same node; the ident reaches the field object a
+                // second way and has to decline too, or the gate does nothing.
+                if writes.contains(&id.id) {
+                    return true;
+                }
                 // Only a package-level declaration of this package can be
                 // reached-or-not; an import, a local, a field is decided
                 // elsewhere and storing it would grow the graph by an order of
@@ -1033,6 +1141,14 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     // honnef's `by` argument to `g.use`. An `*ast.Ident` the walk does not
     // reach falls back to the old unconditional treatment: a lost edge would be
     // a false positive, while a spurious root only costs a missed report.
+    // `linters.settings.unused`. With the defaults (`field-writes-are-uses:
+    // true`) no edge below is skipped, so the settings are inert unless the
+    // target's config turns one off.
+    let opts = pass
+        .settings::<Options>("unused")
+        .copied()
+        .unwrap_or_default();
+    let writes = collect_write_positions(pass.files(), &opts);
     let mut edges: HashMap<ObjectId, HashSet<ObjectId>> = HashMap::new();
     for (type_obj, field) in field_exempt {
         edges.entry(type_obj).or_default().insert(field);
@@ -1063,6 +1179,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         &local,
                         &mut edges,
                         &mut attributed,
+                        &writes,
                     );
                     attribute_field_uses(
                         info,
@@ -1072,6 +1189,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         &[*obj],
                         &fields,
                         &mut edges,
+                        &opts,
+                        &writes,
                     );
                 }
                 Decl::GenDecl(GenDecl { tok, specs, .. }) => {
@@ -1107,6 +1226,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                             &local,
                                             &mut edges,
                                             &mut attributed,
+                                            &writes,
                                         );
                                         attribute_field_uses(
                                             info,
@@ -1116,6 +1236,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                             &owners,
                                             &fields,
                                             &mut edges,
+                                            &opts,
+                                            &writes,
                                         );
                                     }
                                     continue;
@@ -1127,6 +1249,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                     &local,
                                     &mut edges,
                                     &mut attributed,
+                                    &writes,
                                 );
                                 attribute_field_uses(
                                     info,
@@ -1136,6 +1259,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                     &[*obj],
                                     &fields,
                                     &mut edges,
+                                    &opts,
+                                    &writes,
                                 );
                             }
                             Spec::ValueSpec(vs) => {
@@ -1157,6 +1282,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                     &local,
                                     &mut edges,
                                     &mut attributed,
+                                    &writes,
                                 );
                                 attribute_field_uses(
                                     info,
@@ -1166,6 +1292,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                     &owners,
                                     &fields,
                                     &mut edges,
+                                    &opts,
+                                    &writes,
                                 );
                             }
                             _ => {}

@@ -106,3 +106,36 @@ pub fn run_analyzer(
         .map(|(_, d)| d.message)
         .collect()
 }
+
+/// Same, with a `linters.settings.<key>` value in the bag. `unused` is the one
+/// analyzer here that reads settings, and its two options only ever *remove*
+/// edges, so a test that wants them has to say so.
+pub fn run_analyzer_with_settings(
+    analyzer: &'static guff_analysis::Analyzer,
+    pkg: &Arc<Package>,
+    key: &str,
+    value: guff_unused::Options,
+) -> Vec<String> {
+    let mut bag = guff_analysis::SettingsBag::new();
+    bag.insert(key, value);
+    let result = run_on_packages(
+        &[analyzer],
+        std::slice::from_ref(pkg),
+        &RunnerOptions {
+            sequential: true,
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    )
+    .expect("run analyzer");
+    for action in result.graph.all_actions() {
+        if let Some(err) = action.error() {
+            panic!("analyzer {} failed: {err}", action.string_id());
+        }
+    }
+    result
+        .diagnostics()
+        .into_iter()
+        .map(|(_, d)| d.message)
+        .collect()
+}

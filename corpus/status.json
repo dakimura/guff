@@ -7,8 +7,8 @@
   ],
   "goal": 100,
   "defined": 75,
-  "clean": 70,
-  "open": 2,
+  "clean": 71,
+  "open": 1,
   "unmeasured": 3,
   "targets": {
     "alertmanager": {
@@ -22,7 +22,7 @@
     "argo-cd": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260905T031614Z",
+      "at": "20260916T205706Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -61,14 +61,11 @@
     },
     "avalanchego": {
       "tier": "hunt",
-      "state": "open",
-      "at": "20260916T003705Z",
-      "open": 1,
-      "guff_only": 1,
-      "gcl_only": 0,
-      "by_linter": {
-        "nolintlint": 1
-      }
+      "state": "clean",
+      "at": "20260916T205622Z",
+      "open": 0,
+      "guff_only": 0,
+      "gcl_only": 0
     },
     "boundary": {
       "tier": "hunt",
@@ -95,7 +92,7 @@
     "caddy": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260916T201501Z",
+      "at": "20260916T210328Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -135,7 +132,7 @@
     "cobra": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260916T201501Z",
+      "at": "20260916T210328Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -245,7 +242,7 @@
     "fiber": {
       "tier": "hunt",
       "state": "clean",
-      "at": "20260906T033916Z",
+      "at": "20260916T205529Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -269,7 +266,7 @@
     "gin": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260916T201501Z",
+      "at": "20260916T210328Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -285,7 +282,7 @@
     "go-client": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260916T201501Z",
+      "at": "20260916T210328Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -325,7 +322,7 @@
     "helm": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260916T201501Z",
+      "at": "20260916T210328Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -365,7 +362,7 @@
     "k9s": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260916T201501Z",
+      "at": "20260916T210328Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0

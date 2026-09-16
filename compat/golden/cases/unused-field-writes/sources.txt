@@ -1,0 +1,3 @@
+# The fixture crates/guff-unused/tests/checks_test.rs counts under three
+# settings combinations; this case measures one of them end to end.
+fieldwrites.go  crates/guff-unused/tests/testdata/fieldwrites/fieldwrites.go
