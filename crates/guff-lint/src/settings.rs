@@ -19,6 +19,7 @@ pub struct LinterSettings {
     pub revive: ReviveSettings,
     pub dupl: DuplSettings,
     pub misspell: MisspellSettings,
+    pub unused: UnusedSettings,
     pub gocyclo: GocycloSettings,
     pub maintidx: MaintidxSettings,
     pub gocognit: GocognitSettings,
@@ -271,6 +272,23 @@ pub struct MisspellSettings {
 pub struct MisspellExtraWordSetting {
     pub typo: String,
     pub correction: String,
+}
+
+/// `linters.settings.unused` / `linters-settings.unused`.
+///
+/// Only the two keys guff honours are read. `exported-fields-are-used`,
+/// `parameters-are-used`, `local-variables-are-used` and `generated-is-used`
+/// select candidate sets guff's simplified port does not build (parameters and
+/// locals are not candidates at all), so accepting them here would claim a
+/// behaviour change that does not happen.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct UnusedSettings {
+    /// Upstream default `true`: a write to a struct field keeps it alive.
+    #[serde(default, rename = "field-writes-are-uses")]
+    pub field_writes_are_uses: Option<bool>,
+    /// Upstream default `false`: `x.n++` is a write only.
+    #[serde(default, rename = "post-statements-are-reads")]
+    pub post_statements_are_reads: Option<bool>,
 }
 
 /// `linters.settings.gocyclo` / `linters-settings.gocyclo`.
@@ -2342,6 +2360,11 @@ impl LinterSettings {
                 out.dupl = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("unused".into())) {
+            if let Some(s) = parse_settings::<UnusedSettings>("unused", v) {
+                out.unused = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("misspell".into())) {
             if let Some(s) = parse_settings::<MisspellSettings>("misspell", v) {
                 out.misspell = s;
@@ -2769,6 +2792,7 @@ impl LinterSettings {
         bag.insert("revive", self.revive.to_guff_revive());
         bag.insert("dupl", self.dupl.to_guff_dupl());
         bag.insert("misspell", self.misspell.to_guff_misspell());
+        bag.insert("unused", self.unused.to_guff_unused());
         bag.insert("gocyclo", self.gocyclo.to_guff_gocyclo());
         bag.insert("maintidx", self.maintidx.to_guff_maintidx());
         bag.insert("gocognit", self.gocognit.to_guff_gocognit());
@@ -3211,6 +3235,20 @@ impl DuplSettings {
     pub fn to_guff_dupl(&self) -> guff_dupl::Options {
         guff_dupl::Options {
             threshold: self.threshold.unwrap_or(guff_dupl::DEFAULT_THRESHOLD),
+        }
+    }
+}
+
+impl UnusedSettings {
+    pub fn to_guff_unused(&self) -> guff_unused::Options {
+        let defaults = guff_unused::Options::default();
+        guff_unused::Options {
+            field_writes_are_uses: self
+                .field_writes_are_uses
+                .unwrap_or(defaults.field_writes_are_uses),
+            post_statements_are_reads: self
+                .post_statements_are_reads
+                .unwrap_or(defaults.post_statements_are_reads),
         }
     }
 }

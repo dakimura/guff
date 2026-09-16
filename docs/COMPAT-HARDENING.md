@@ -32270,3 +32270,121 @@ compat/run.sh --oss --tier pr  8 target すべて OK
 
 台帳: 70/100 at zero（75 定義、open 2 = avalanchego 1 + loki 4、unmeasured 3）
 ```
+
+### 2026-09-17（続き 294）— `close avalanchego`。`linters.settings.unused` の 2 つ —— 「書き込みは使用か」と「`x.n++` は読みか」
+
+前回（293 §4）はここで止めた:
+
+> guff の `guff-unused` は冒頭に **"Simplified port"** と書いてあり、honnef の
+> `read` / `write` / `use` / `own` のエッジを持たない ——「フィールドへの
+> **書き込み**」という概念が無いので、オプションを足す前にグラフの形を
+> 変える必要がある。
+
+グラフの形を変える必要は無かった。上流の 2 つのオプションが見るのは
+`g.write` が**セレクタに当たる位置**だけで、その位置は AST から先に
+一度集めれば足りる。read/write の一般的な分離（`edgeKind` の追加）は
+別の話で、今回はしていない。
+
+#### 1. 上流の分岐
+
+```go
+case *ast.SelectorExpr:
+    if g.opts.FieldWritesAreUses {
+        g.readSelectorExpr(node, by)          // 既定: 書き込みも使用
+    } else {
+        g.read(node.X, by)                    // 受け手だけ読む
+        g.write(node.Sel, by)                 // ident の write は何もしない
+    }
+```
+
+```go
+case *ast.IncDecStmt:
+    if g.opts.PostStatementsAreReads {
+        g.read(stmt.X, by); g.write(stmt.X, by)
+    } else {
+        g.write(stmt.X, by)
+    }
+```
+
+`CompositeLit` 側も 3 つの枝が `FieldWritesAreUses` を見る —— キー無し
+リテラルの「全フィールドを使う」、要素を read するか key を write するか、
+そしてキー付きリテラルの**経路の前半**。
+
+`g.write` が再帰するのは `*ast.ParenExpr` **だけ**で、`a[i]` と `*p` は
+被演算子を read して止まる。だから `v.f[0] = "x"` は `f` の使用になる。
+
+#### 2. guff 側
+
+`collect_write_positions` が `AssignStmt` の全 LHS・`RangeStmt` の Key/Value・
+（`post-statements-are-reads` が立っていなければ）`IncDecStmt` の X を歩き、
+そこに立つセレクタの **`Sel` の node id** を集める。`field-writes-are-uses`
+が既定の `true` なら**空集合を返して即座に抜ける** —— 既定の経路が変わって
+いないことを、測定ではなくコードで保証するため。
+
+止める場所は 2 つある。フィールド経路を歩く `attribute_field_uses` と、
+`Info.Uses` 経由で同じフィールドに届く `attribute_uses` の ident 側。
+片方だけ塞いだ最初の版は**出力が 1 件も変わらなかった** —— 同じ使用が
+2 通りの道で記録されていた。
+
+書き込みセレクタは経路ごと降りる。上流が読むのは `node.X` だけで、
+`v.a.b = "x"` の `v.a` は walk が別のノードとして踏むので `a` は使用に
+なり、**昇格フィールド**への書き込み（`node.X` が ident）は何も使わない。
+
+#### 3. 測った形（14 形 × 3 設定、golangci-lint 2.12.2 と完全一致）
+
+| 形 | 既定 | `field-writes-are-uses: false` |
+|---|---|---|
+| `T{Exported: "a", written: "b"}` | — | `field written is unused` |
+| `T{"a", "b"}`（キー無し） | — | 同上 |
+| `v.written = "b"` | — | 同上 |
+| `v.written = "b"` + 読み戻し | — | — |
+| `v.n++` | — | `field n is unused`（`post-statements-are-reads` で消える） |
+| `v.written += "b"` | — | `field written is unused`（トークンは見ない） |
+| `v.written = v.written + "b"` | — | —（右辺が読み） |
+| `v.a.b = "x"` | — | `field b is unused`（`a` は使用） |
+| `p := &v.written` | — | —（アドレス取得は読み） |
+| `v.written, v.Exported = …` | — | `field written is unused` |
+| 昇格フィールドへの書き込み | — | `type pin` と `field pin`（`hidden` は owner が finding なので黙る） |
+| `(*v).written = "x"` | — | `field written is unused` |
+| `for v.written = range xs` | — | 同上 |
+| `v.written[0] = "x"` | — | —（`g.write(IndexExpr)` は read） |
+
+fixture は 1 つ（`crates/guff-unused/tests/testdata/fieldwrites/fieldwrites.go`）で、
+Rust の単体テスト 3 本が 3 設定の**件数**を固定する（0 / 11 / 10）。
+11 件のうち 7 件は文言が完全に同じなので、`any(contains(…))` では
+「全部出た」と「1 つが 7 回出た」が区別できない。golden の新 case
+`unused-field-writes` が**桁**を押さえる（`96:20` は
+`type inner struct{ b string }` の中のフィールド）。
+
+#### 4. 実装しないもの
+
+`local-variables-are-used` / `parameters-are-used` / `exported-fields-are-used`
+/ `generated-is-used` は候補集合そのものを変える。guff の unused の候補は
+パッケージレベルの宣言とフィールドで、ローカル変数と引数は**候補になって
+いない** —— これはフラグではなくスコープの変更なので入れていない。
+avalanchego は `local-variables-are-used: false` を設定しているが、上流も
+このリポジトリでは unused なローカルを 1 件も報告していない（実測：
+golangci-only = 0）。cosmos-sdk もこのキーだけを設定しているので、
+今回の変更で振る舞いは変わらない。
+
+`field-writes-are-uses: false` を設定しているコーパスの target は
+avalanchego と argo-cd の 2 つで、**両方測った**。fiber は
+`field-writes-are-uses: true`（既定）を明示しているだけ。
+
+#### 5. 実測
+
+```
+avalanchego (v1.14.2, 387 パッケージ)
+  前回   guff=231 golangci=230 both=230  guff-only: nolintlint 1
+  今回   guff=230 golangci=230 both=230  P=100.0% R=100.0%  health=0
+
+argo-cd (v3.5.1)   guff=3 golangci=3 both=3   （設定を読むようになっても不変）
+fiber   (v3.5.0)   guff=0 golangci=0 both=0
+
+golden        236 case 一致（unused-field-writes 新規 10、欠落 0）
+fix / reject  236 / 14
+cargo test    --workspace --locked 緑
+compat/run.sh --oss --tier pr  8 target すべて OK
+
+台帳: 71/100 at zero（75 定義、open 1 = loki 4（deferred）、unmeasured 3）
+```
