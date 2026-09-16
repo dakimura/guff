@@ -885,26 +885,6 @@ fn check_body(
             }
             return true;
         }
-        if let NodeRef::ReturnStmt(ret) = n {
-            // A closure this function only *returns* has no `*ssa.Call` or
-            // `*ssa.Defer` referrer either — `return func() { resp.Body.Close() }`
-            // is reported, while the same literal handed to `t.Cleanup` is not,
-            // because there the argument makes the call a referrer.
-            for result in &ret.results {
-                let Expr::FuncLit(lit) = result else {
-                    continue;
-                };
-                let span = (lit.ty.func.0 as u32, lit.body.rbrace.0 as u32);
-                for name in
-                    tracked_names_in(pass, NodeRef::BlockStmt(&lit.body), span, &usages)
-                {
-                    if let Some(u) = usages.get_mut(&name) {
-                        u.mark_go_escape();
-                    }
-                }
-            }
-            return true;
-        }
         if let NodeRef::FuncLit(lit) = n {
             // A response captured by a func literal is upstream's `*ssa.Store`
             // -> `*ssa.MakeClosure` branch, and `calledInFunc` answers "not
@@ -994,6 +974,30 @@ fn check_body(
             }
             NodeRef::ReturnStmt(ret) => {
                 mark_returned_body(ret, &mut usages);
+                // A closure this function only *returns* has no `*ssa.Call`
+                // or `*ssa.Defer` referrer either —
+                // `return func() { resp.Body.Close() }` is reported, while the
+                // same literal handed to `t.Cleanup` is not, because there the
+                // argument makes the call a referrer.
+                //
+                // Folded into this arm rather than intercepting `ReturnStmt`
+                // before the match: an early `return true` here skipped
+                // `mark_returned_body`, and `return resp.Body, nil` — which
+                // upstream treats as handing the close to the caller — became a
+                // finding. The isolate tier caught it; nothing else did.
+                for result in &ret.results {
+                    let Expr::FuncLit(lit) = result else {
+                        continue;
+                    };
+                    let span = (lit.ty.func.0 as u32, lit.body.rbrace.0 as u32);
+                    for name in
+                        tracked_names_in(pass, NodeRef::BlockStmt(&lit.body), span, &usages)
+                    {
+                        if let Some(u) = usages.get_mut(&name) {
+                            u.mark_go_escape();
+                        }
+                    }
+                }
             }
             NodeRef::DeferStmt(d) => {
                 let depth = shape.loop_depth(d.defer_.0 as u32);
