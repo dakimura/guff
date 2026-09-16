@@ -9,3 +9,7 @@
 bad.go:4:10:tagalign::tag is not aligned, should be: json:"foo" yaml:"foo"
 bad.go:5:10:tagalign::tag is not aligned, should be: json:"bar" yaml:"bar"
 bad.go:6:10:tagalign::tag is not aligned, should be: json:"baz" xml:"baz"  yaml:"baz"
+tagalign/strict.go:24:20:tagalign::tag is not aligned, should be: tag2:"true"
+tagalign/strict.go:29:20:tagalign::tag is not aligned, should be: tag1:"true" tag2:"true"
+tagalign/strict.go:37:14:tagalign::tag is not aligned, should be: a:"1" bb:"2"  ccc:"3"
+tagalign/strict.go:38:14:tagalign::tag is not aligned, should be: a:"1" ccc:"3"

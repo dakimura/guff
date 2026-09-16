@@ -1,0 +1,31 @@
+# Golden case: tagalign with `strict: true`.
+#
+# Strict aligns by **key** rather than by position: the group's distinct keys
+# become the columns, and a field missing one of them emits that column as
+# spaces. ava-labs/avalanchego configures it, and guff had only the positional
+# path — its own note said "DEFERRED: StrictStyle missing-key column padding …
+# No fixture reaches it".
+#
+# The fixture is the one the Rust unit tests use, and `compat/golden/cases/
+# tagalign` reads the same file under the default style, so one file measures
+# both and they cannot drift apart.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - tagalign
+  settings:
+    tagalign:
+      align: true
+      sort: true
+      strict: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

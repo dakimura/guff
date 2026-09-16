@@ -509,5 +509,13 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "40m"
+  },
+  {
+    "name": "avalanchego",
+    "url": "https://github.com/ava-labs/avalanchego.git",
+    "ref": "v1.14.2",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "40m"
   }
 ]

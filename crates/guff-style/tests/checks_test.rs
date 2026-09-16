@@ -10165,3 +10165,50 @@ fn gocritic_argorder_quotes_the_source_not_a_reprint() {
         "{found:?}"
     );
 }
+
+/// `strict` aligns tags by **key**, not by position.
+///
+/// Upstream collects the group's distinct keys, sorts them the way it sorts the
+/// tags, then walks tags and columns together — a match writes the tag padded to
+/// the column, a miss writes the column as spaces and only advances the column.
+/// guff had the positional path only, so a field missing one of the keys was
+/// reported as misaligned when it was padded exactly right, and a missing
+/// *middle* column pulled the later tags left. ava-labs/avalanchego configures
+/// `strict: true` and its `validatorMetadata` is that shape.
+///
+/// Counted as the exact list: every finding here carries the same message
+/// modulo the tag text.
+#[test]
+fn tagalign_strict_aligns_by_key() {
+    use guff_style::TagalignOptions;
+
+    let pkg = support::typecheck_fixture("tagalign", "example.com/tagalign", "strict.go");
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "tagalign",
+        TagalignOptions {
+            align: true,
+            sort: true,
+            order: Vec::new(),
+            strict: true,
+        },
+    );
+    let mut found = support::run_analyzer_with_settings(
+        tagalign(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    found.sort();
+    assert_eq!(
+        found,
+        vec![
+            "tag is not aligned, should be:             tag2:\"true\"",
+            "tag is not aligned, should be: tag1:\"true\" tag2:\"true\"",
+        ],
+        "AlignedStrict is padded correctly, MiddleMissing and ExtraKey are already \
+         key-aligned; only UnpaddedStrict is a finding: {found:?}"
+    );
+}

@@ -138,7 +138,15 @@ impl Encoder {
                 None
             }
             TypeData::Map(m) => {
-                if !map_key_ok(arena, lookup, m.key()) {
+                // `if typeparams.IsTypeParam(t.Key().Type)` — upstream skips
+                // the key check entirely and walks straight to the element.
+                // Its own comment says why: nothing is known about the concrete
+                // instantiation, and the key might well implement
+                // TextMarshaler. `json.Marshal(m.keyToValue)` on a
+                // `map[K]V` field is ava-labs/avalanchego's `BiMap`.
+                if !guff_types::predicates::is_type_param(arena, m.key())
+                    && !map_key_ok(arena, lookup, m.key())
+                {
                     return Some(UnsupportedTypeError { typ, path });
                 }
                 // `Elem()` of a map is explicitly `canAddr: false`.
