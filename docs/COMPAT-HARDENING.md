@@ -32549,3 +32549,133 @@ fix 238 / reject 14 / `cargo test --workspace --locked` 3,611 件緑。
 `compat/run.sh --oss --tier pr` 8 target すべて OK。
 
 台帳: 71 → **72/100 at zero**（76 定義、open 1 = loki 4（deferred）、unmeasured 3）
+
+### 2026-09-20（続き 296）— `adopt beats`。**左結合の連鎖は長さぶんの深さ**を持つ。生成された Go の 24,711 項が型検査器のスタックを使い切っていた
+
+`./compat/hunt.sh --name beats` の 1 回目は**比較にすらならなかった**:
+
+```
+thread '<unknown>' has overflowed its stack
+fatal runtime error: stack overflow, aborting
+```
+
+finding は 0 件、guff の出力は空、ユーザに見えるのはこの 2 行だけである。
+
+#### 1. 切り分け —— linter ではなく共有の型付け側
+
+| 範囲 | 結果 |
+|---|---|
+| `./...` | abort |
+| 上位 14 ディレクトリを個別に | `./x-pack/...` **だけ** abort |
+| `x-pack` の 10 ディレクトリ | `filebeat` / `libbeat` / `metricbeat` / `otel` / `packetbeat` の 5 つ |
+| `x-pack/otel` の 13 パッケージ | **`./x-pack/otel/oteltestcol` 1 つ**（deps 3,529） |
+| linter を 1 つだけ有効にする | asciicheck / bodyclose / depguard —— **どれでも落ちる** |
+
+「asciicheck 単独でも落ちる」で analyzer の線は消える。`run.tests: false` でも落ちるので、
+続き 243 の「テスト変種を畳んでできた**循環**」でもない。
+
+`--profile profiling`（`strip = false`）で建て直して macOS の crash report を
+symbolicate すると、答えは 1 行だった:
+
+```
+guff_types::expr::…::binary
+guff_types::expr::…::expr_internal
+guff_types::expr::…::raw_expr
+guff_types::expr::…::expr
+guff_types::expr::…::binary          ← 以下くり返し
+…
+guff_types::decl::…::const_decl
+```
+
+**定数宣言の中の二項式**である。`a + b + c` は左結合に入れ子になるので、
+**連鎖の深さは項数そのもの**で、1 項あたり 4 フレーム。
+
+#### 2. 原因 —— protobuf の descriptor は 1 つの `const` の 24,711 項
+
+`oteltestcol` は OTel collector 一式を引き、その先に
+`cloud.google.com/go/compute/apiv1/computepb` がある:
+
+```go
+const file_google_cloud_compute_v1_compute_proto_rawDesc = "" +
+	"\n\x1egoogle/cloud/compute/v1/…" +
+	…                                   // ← 24,711 項
+```
+
+Go の型検査器は同じ形で再帰するが、**goroutine スタックは伸びる**ので通る。
+guff の lint ワーカーは固定 8 MiB で、最小再現で測った境界はこうだった:
+
+| 項数 | guff（修正前） | go vet / golangci-lint |
+|---|---|---|
+| 10,000 | 通る | 通る |
+| 12,000 | **abort** | 通る |
+| 25,000 | **abort** | 通る |
+
+1 項あたり約 760 B。`compute.pb.go` の 24,711 項には 19 MiB 要る。
+
+#### 3. 直し方 —— 深くなりうる唯一の位置だけ平坦化する
+
+`Checker::binary` が左スパインを `Vec` に集めてから畳み上げる。再帰版が
+外へ出るときにやっていたこと（`x.expr` の差し替え・`record`・`single_value`）は
+ループの各段でそのまま行う。右オペランドと外側のノードは今までどおり。
+
+#### 4. 7 形測って、1 形だけ残した
+
+| 形 | 上流 | guff（修正後） |
+|---|---|---|
+| `const S = "" + "x" + …`（25,000） | 通る | 通る |
+| `const N = 0 + 1 + …`（25,000） | 通る | 通る |
+| `var S = "" + "x" + …` | 通る | 通る |
+| 関数内の `const` | 通る | 通る |
+| 非定数 `v + "x" + …` | 通る | 通る |
+| 先頭に比較 `0 + 1 + … > 5` | 通る | 通る |
+| **`("x" + ("x" + (… )))`（25,000 段の括弧）** | 通る | **abort（未修正）** |
+
+右ネストは `binary` → `expr`(y) → `expr_internal`(Paren) → `raw_expr` →
+`binary` という別の経路で、平坦化するには式ディスパッチ全体を明示スタックに
+書き換えることになる。**生成された Go はこの形を作らない**（左結合の連鎖しか出ない）
+のと、パーサの入れ子上限（上流と同じ `maxNestLev = 1e5`）がそもそもの上限を
+与えるので、ここでは止めた。実際に踏むターゲットが出たら、そのときに測って直す。
+
+ついでに測った境界をもう 1 つ: 項数 100,000 は**両ツールとも**
+`exceeded max nesting depth` になる（Go の `parseBinaryExpr` は左結合のループでも
+`nestLev` を 1 ずつ上げる）。ただし上流はそれを `typecheck` の finding として出し、
+guff は `ill_typed` として内部に持つだけで finding にしない —— コーパスにこの深さの
+ファイルは無いので、ここには記録だけ残す。
+
+#### 5. 単体テストは**パーサを通さない**
+
+`cargo test` で固定したかったが、debug ビルドでは**パースのほうが 1 項あたり高い**:
+8 MiB スタックで**約 2,300 項**でパース自身が落ちる（`stamp_expr_ids` の walk も
+25,000 段で落ちる）。つまりソースから駆動するテストは、
+**型検査器が犠牲者になる深さに到達できない**。
+
+そこで `crates/guff-types/tests/deep_binary_chain.rs` は AST を直接組み立て
+（node id も自前の連番で振る）、`Checker::expr` を **8 MiB = 本番と同じ**スレッドで
+呼ぶ。6 形 + パーサ経由 1 形（1,000 項）で、値も固定する:
+
+- 0 / 1 / 2 / 3 / 100 / 25,000 項の連結 → `"x" * n` に畳まれること
+- 整数の連鎖 → 和が `n` であること
+- 非定数の連鎖 → `Value` であって定数値を持たないこと
+- 先頭の比較 → untyped bool の `true`
+- 途中の 1 項が未定義 / 型不一致 → **エラーはちょうど 1 件**（畳み込みで増えない）
+
+**修正を revert するとこのテストは落ちる**ことを確認してある（7 件中 1 件目で abort）。
+
+#### 6. 実測
+
+```
+beats (v9.5.2)
+  1 回目  guff が abort、比較不能
+  2 回目  guff=7078 golangci=7554 both=7048  P=99.6%  R=93.3%  unexpected=536
+```
+
+残る食い違いは guff-only 30 / gcl-only 506 で、大きいのは
+`modernize:newexpr` 305・`govet:inline` 63・`modernize:any` 43・
+`modernize:reflecttypefor` 16。`beats` は **open のまま**次のタスク（`close beats`）に回す。
+
+golden 238 case 一致（fixture は増えていない —— この修正は型検査器の再帰の形だけで、
+どの linter の判定も変えない）。fix 238 / reject 14 /
+`cargo test --workspace --locked` 3,618 件緑（新規 7 件）。
+`compat/run.sh --oss --tier pr` 8 target すべて P=R=100%。
+
+台帳: 72 → **72/100 at zero**（77 定義、open 2 = loki 4（deferred）+ beats 536、unmeasured 3）

@@ -631,9 +631,47 @@ impl Checker {
     ///
     /// Equivalent to `Checker.binary`. Comparison and shift are delegated;
     /// constant operands are folded.
+    ///
+    /// The left operand is *not* reached by recursing into [`Checker::expr`]:
+    /// `a + b + c + …` parses left-associatively, so the chain's depth is the
+    /// number of terms, and one link of the recursive form costs four frames
+    /// (`binary` → `expr` → `raw_expr` → `expr_internal`). Go's checker has the
+    /// same shape but runs on a goroutine stack that grows; guff's lint worker
+    /// has a fixed 8 MiB, which measured out at ~11,000 terms — and generated
+    /// Go goes far past that. `cloud.google.com/go/compute/apiv1/computepb`
+    /// holds its 24,711-term descriptor as one `const … = "" + "\x..." + …`,
+    /// and every package that reaches it (elastic/beats `./x-pack/...`, via the
+    /// OTel collector) aborted the whole run with "has overflowed its stack" —
+    /// no findings, no message a user could act on. So walk the spine into a
+    /// vector first and fold it back up, which keeps the stack flat in the one
+    /// operand position that can be arbitrarily deep.
     fn binary<'a>(&mut self, x: &mut Operand<'a>, e: &'a BinaryExpr) {
+        // The inner nodes of the left spine, outermost first. `e` itself is
+        // handled by the caller's `raw_expr`, so it is not in here.
+        let mut spine: Vec<(&'a Expr, &'a BinaryExpr)> = Vec::new();
+        let mut deepest = e;
+        while let Expr::BinaryExpr(inner) = deepest.x.as_ref() {
+            spine.push((deepest.x.as_ref(), inner));
+            deepest = inner;
+        }
+        self.expr(x, &deepest.x);
+        for (node, bin) in spine.iter().rev() {
+            self.binary_rhs(x, bin);
+            // What `raw_expr` and `expr` would have done on the way out of
+            // this node: stamp the operand with the full source expression,
+            // record it, and reject a tuple in a single-value context.
+            x.expr = Some(node);
+            self.record(x, node);
+            self.single_value(x);
+        }
+        self.binary_rhs(x, e);
+    }
+
+    /// The rest of [`Checker::binary`] once the left operand is in `x`:
+    /// check `e.y`, then combine. Split out so the left spine can be folded
+    /// iteratively — see the note on `binary`.
+    fn binary_rhs<'a>(&mut self, x: &mut Operand<'a>, e: &'a BinaryExpr) {
         let mut y = Operand::invalid();
-        self.expr(x, &e.x);
         self.expr(&mut y, &e.y);
 
         if x.mode == OperandMode::Invalid {
