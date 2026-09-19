@@ -32679,3 +32679,110 @@ golden 238 case 一致（fixture は増えていない —— この修正は型
 `compat/run.sh --oss --tier pr` 8 target すべて P=R=100%。
 
 台帳: 72 → **72/100 at zero**（77 定義、open 2 = loki 4（deferred）+ beats 536、unmeasured 3）
+
+### 2026-09-20（続き 297）— `close beats`（1）。cgo パッケージの**テスト変種が本体のファイル一覧を渡されていた**。in-package の `_test.go` は 1 行も読まれていない
+
+beats の食い違い 536 件のうち、**311 件が 1 パッケージに集中**していた。
+
+#### 1. 「どの linter が弱いか」ではなく「どのファイルが読まれていないか」
+
+linter 別に数えると `modernize:newexpr` 305・`govet:inline` 63・`modernize:any` 43 …
+と散らばって見える。だが**ファイル**で数えると像が変わる:
+
+| 数え方 | 結果 |
+|---|---|
+| gcl-only を linter 別 | 13 linter に分散 |
+| gcl-only の 386 件（modernize）のうち `_test.go` | **355 件** |
+| 「gcl にテスト findings があり guff は 0 件」のパッケージ | **1 つだけ** |
+
+その 1 つが `auditbeat/module/file_integrity` で、**311 件**（modernize 296 /
+testifylint 9 / noctx 3 / forbidigo 2 / staticcheck 1）。guff は同じパッケージの
+本体ファイルには 25 件出している —— つまりパッケージは読めていて、
+**その test variant だけが空**だった。
+
+**数え方の落とし穴を 1 つ踏んだ**: 最初に集計したとき「guff が 0 のパッケージが
+319 個、5,374 件」と出た。guff は絶対パス・golangci は相対パスで出しており、
+`os.path.dirname` のキーが 1 つも一致していなかっただけである（既知の罠、
+「grep でツール出力を数え比べるとパス形式で騙される」）。正規化したら **1 個**だった。
+
+#### 2. 最初の仮説は外れた —— cgo は**テスト側**ではなく**本体側**にあった
+
+`grep -l '"C"'` が `event_test.go` に当たったので「テストファイルが cgo を
+import する形」だと読んだ。最小再現を書いたら**逆の結果**になった ——
+その形は上流が `use of cgo in test pkg/a_test.go not supported (typecheck)` で
+拒み、guff のほうが両方報告する。`event_test.go` の `"C"` は
+`assert.Equal(t, "C", value)` の**文字列リテラル**だった。
+
+本体（`fileorigin_darwin.go`）が cgo を使う形で書き直したら再現した。
+
+#### 3. 原因 —— `go list -compiled` に `-test` が無い
+
+cgo/SWIG パッケージは `CompiledGoFiles` が `GoFiles` から導けない（生成物が
+GOCACHE にある）ので、guff は 2 回目の `go list -compiled=true` をその集合に
+限って撃つ。この呼び出しに `-test` が無かった:
+
+```
+$ go list -e -json=ImportPath,CompiledGoFiles -compiled=true ./pkg
+  ImportPath: "cgo2/pkg"                      ← これだけ
+
+$ go list -e -json=ImportPath,CompiledGoFiles -compiled=true -test ./pkg
+  ImportPath: "cgo2/pkg"
+  ImportPath: "cgo2/pkg [cgo2/pkg.test]"      ← CompiledGoFiles に a_test.go
+  ImportPath: "cgo2/pkg.test"
+```
+
+`attach_compiled_files` は id で引いて**無ければ `pkg_path` に落とす**ので、
+変種 `pkg [pkg.test]` は本体の一覧（`_test.go` 抜き）を受け取っていた。
+その一覧で型検査するので、テストファイルは構文木にすら入らない。
+
+**findings の差分にはこれを指す信号が無い。**「ファイルが読まれていない」は
+ill-typed にもならず（本体だけで型は付く）、panic もしない。
+見え方は「相手側の誤検出が多い」である。
+
+#### 4. 5 形測った
+
+| 形 | 上流 | guff（修正前） | guff（修正後） |
+|---|---|---|---|
+| cgo 本体 + in-package test | 2 件 | **1 件**（本体のみ） | 2 件 |
+| cgo 本体 + external test のみ | 2 件 | 2 件 | 2 件 |
+| cgo 本体 + 両方のテスト | 3 件 | **2 件** | 3 件 |
+| cgo なし + test | 2 件 | 2 件 | 2 件 |
+| cgo 本体 + テスト無し | 1 件 | 1 件 | 1 件 |
+
+external test package（`package p_test`）が無事なのは、それが**自分では cgo を
+使わない別パッケージ**だから。落ちるのは in-package の半分だけである。
+
+直しは `-test` を足すことと、キャッシュ版の `compiled-files-v1` → `v2`
+（v1 のエントリには変種のキーが無い）。
+
+#### 5. テスト
+
+- `crates/guff-packages/src/golist.rs` の inline テスト 3 本（`go` 不要）——
+  変種が**自分の**エントリを取ること、id が無いときだけ `pkg_path` に落ちること、
+  クエリの argv に `-test` / `-compiled=true` / `-e` が入り、パスが `--` の後に
+  来ること。
+- `crates/guff-packages/tests/cgo_test_variant_files.rs`（`#[ignore]`、CI は
+  `--tests -- --ignored` の段で回している）—— 実際に cgo の testdata module を
+  load して、変種の `compiled_go_files` に `p_test.go` と GOCACHE の生成物が
+  両方あることを固定する。`p.go` は**名前では出ない**（cgo が書き換えるので
+  GOCACHE 側になる）——この 2 回目のクエリが存在する理由そのもの。
+- `-test` を外すと inline の 1 本と end-to-end が落ちることを確認した。
+
+#### 6. 実測
+
+```
+beats (v9.5.2)
+  前   guff=7078 golangci=7554 both=7048  P=99.6%  R=93.3%  unexpected=536
+  後   guff=7308 golangci=7554 both=7278  P=99.6%  R=96.3%  unexpected=306
+```
+
+**閉じたのは 230 件、新しく出た食い違いは 0 件**（guff-only は 30 のまま）。
+`file_integrity` の gcl-only は 311 → 2。残る gcl-only 276 の大きいものは
+`modernize:newexpr` 138・`govet:inline` 63・`modernize:reflecttypefor` 16。
+
+golden 238 case 一致（fixture は増えていない —— 変わるのは「どのファイルを読むか」で、
+どの linter の判定でもない）。fix 238 / reject 14 /
+`cargo test --workspace --locked` 3,621 件緑（新規 3 件）＋ `--tests -- --ignored` も緑。
+`compat/run.sh --oss --tier pr` 8 target すべて P=R=100%。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
