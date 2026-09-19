@@ -589,7 +589,8 @@ fn fetch_package_exports(
 }
 
 /// Bump when the on-disk shape of the compiled-files cache changes.
-const COMPILED_FILES_CACHE_VERSION: &str = "compiled-files-v1";
+// v2: the query gained `-test`, so a cached v1 map has no test-variant keys.
+const COMPILED_FILES_CACHE_VERSION: &str = "compiled-files-v2";
 
 fn compiled_files_cache_path(cfg: &Config, paths: &[String]) -> Option<PathBuf> {
     let dir = guff_cache_dir()?;
@@ -688,13 +689,44 @@ fn peek_compiled_files_cache(
     load_compiled_files_cache(&path)
 }
 
-/// Second `go list -compiled=true`, restricted to the cgo/SWIG packages.
+/// Second `go list -compiled=true -test`, restricted to the cgo/SWIG packages.
 ///
 /// `CompiledGoFiles` mixes two kinds of path: the package's own sources come
 /// back as bare file names relative to `Dir`, while the cgo-generated ones are
 /// absolute GOCACHE paths. `Dir` is requested so both can be stored absolute —
 /// the cache validates entries by testing that every file still exists, and a
 /// bare name would fail that test from any working directory.
+///
+/// `-test` is what makes the answer cover the *test variant*. Without it
+/// `go list` answers only for `pkg`, and since [`attach_compiled_files`] falls
+/// back to `pkg_path` when an id has no entry, the variant `pkg [pkg.test]`
+/// was handed the production file list — which does not contain the package's
+/// own `_test.go` files. The whole in-package test half of every cgo package
+/// then went unanalysed: elastic/beats `auditbeat/module/file_integrity` alone
+/// accounted for 311 golangci-only findings (measured 2026-09-20). With
+/// `-test` the response also carries `pkg [pkg.test]`, `pkg.test` and
+/// `pkg_test [pkg.test]`, each keyed by its own ImportPath, so `attach` hits
+/// the variant by id. External test packages were never affected: they are a
+/// separate package with no cgo of their own.
+/// The argv for one chunk of [`fetch_compiled_files`]'s `go list` call.
+///
+/// Split out so a unit test can assert the flags without a `go` toolchain —
+/// `-test` in particular, which is the whole reason the test variant of a cgo
+/// package gets a file list of its own.
+fn compiled_files_args(chunk: &[String], build_flags: &[String]) -> Vec<String> {
+    let mut args = vec![
+        "list".to_string(),
+        "-e".to_string(),
+        "-json=ImportPath,Dir,CompiledGoFiles".to_string(),
+        "-compiled=true".to_string(),
+        "-test".to_string(),
+    ];
+    args.extend(build_flags.iter().cloned());
+    args.push("--".to_string());
+    args.extend(chunk.iter().cloned());
+    args
+}
+
 fn fetch_compiled_files(
     cfg: &Config,
     paths: &[String],
@@ -705,15 +737,7 @@ fn fetch_compiled_files(
     const BATCH: usize = 200;
     let mut map = HashMap::default();
     for chunk in paths.chunks(BATCH) {
-        let mut args = vec![
-            "list".to_string(),
-            "-e".to_string(),
-            "-json=ImportPath,Dir,CompiledGoFiles".to_string(),
-            "-compiled=true".to_string(),
-        ];
-        args.extend(cfg.build_flags.clone());
-        args.push("--".to_string());
-        args.extend(chunk.iter().cloned());
+        let args = compiled_files_args(chunk, &cfg.build_flags);
         let stdout = invoke_go(cfg, &args)?;
         let stream = serde_json::Deserializer::from_str(&stdout).into_iter::<JsonCompiled>();
         for item in stream {
@@ -2192,6 +2216,96 @@ mod tests {
     #[test]
     fn normalize_pattern_keeps_dot_relative() {
         assert_eq!(normalize_pattern("./foo"), "./foo");
+    }
+
+    /// A package with a test variant, as `go list -test` reports the pair.
+    fn cgo_pair() -> (Vec<Arc<Package>>, HashMap<String, Vec<String>>) {
+        let mk = |id: &str| {
+            Arc::new(Package {
+                id: id.to_string(),
+                pkg_path: "example.com/p".to_string(),
+                ..Package::default()
+            })
+        };
+        let packages = vec![mk("example.com/p"), mk("example.com/p [example.com/p.test]")];
+        let mut compiled: HashMap<String, Vec<String>> = HashMap::default();
+        compiled.insert(
+            "example.com/p".to_string(),
+            vec!["/tmp/a.go".to_string(), "/tmp/_cgo_gotypes.go".to_string()],
+        );
+        compiled.insert(
+            "example.com/p [example.com/p.test]".to_string(),
+            vec![
+                "/tmp/a.go".to_string(),
+                "/tmp/a_test.go".to_string(),
+                "/tmp/_cgo_gotypes.go".to_string(),
+            ],
+        );
+        (packages, compiled)
+    }
+
+    /// The variant must take its own entry, not the production one. `pkg_path`
+    /// is equal for both, so matching on it first would hand `p [p.test]` a
+    /// file list with no `_test.go` in it — which is what silently dropped the
+    /// in-package test half of every cgo package (beats, 2026-09-20).
+    #[test]
+    fn a_test_variant_takes_its_own_compiled_files() {
+        let (mut packages, compiled) = cgo_pair();
+        assert_eq!(attach_compiled_files(&mut packages, &compiled), 2);
+        let variant = packages
+            .iter()
+            .find(|p| p.id.contains(".test]"))
+            .expect("the variant");
+        assert!(
+            variant
+                .compiled_go_files
+                .iter()
+                .any(|f| f.file_name().is_some_and(|n| n == "a_test.go")),
+            "variant files: {:?}",
+            variant.compiled_go_files
+        );
+        let production = packages
+            .iter()
+            .find(|p| !p.id.contains(".test]"))
+            .expect("the production package");
+        assert!(
+            production
+                .compiled_go_files
+                .iter()
+                .all(|f| f.file_name().is_some_and(|n| n != "a_test.go")),
+            "production files: {:?}",
+            production.compiled_go_files
+        );
+    }
+
+    /// The `pkg_path` fallback stays for ids the query did not answer for —
+    /// that is how a package whose id is not its import path gets anything at
+    /// all — but it must only fire when the id is absent.
+    #[test]
+    fn the_pkg_path_fallback_only_fires_without_an_id_entry() {
+        let (mut packages, mut compiled) = cgo_pair();
+        compiled.remove("example.com/p [example.com/p.test]");
+        assert_eq!(attach_compiled_files(&mut packages, &compiled), 2);
+        let variant = packages
+            .iter()
+            .find(|p| p.id.contains(".test]"))
+            .expect("the variant");
+        assert_eq!(variant.compiled_go_files.len(), 2, "fell back to production");
+    }
+
+    /// The query that fills that map has to ask for the variant. Without
+    /// `-test`, `go list` answers for `example.com/p` alone and the map above
+    /// can never have the key the first test relies on.
+    #[test]
+    fn the_compiled_files_query_asks_for_test_variants() {
+        let args = compiled_files_args(&["example.com/p".to_string()], &[]);
+        assert!(args.contains(&"-test".to_string()), "args: {args:?}");
+        assert!(args.contains(&"-compiled=true".to_string()), "args: {args:?}");
+        assert!(args.contains(&"-e".to_string()), "args: {args:?}");
+        // The paths come last, after `--`, so a path starting with `-` cannot
+        // be read as a flag.
+        assert_eq!(args[args.len() - 2], "--");
+        assert_eq!(args[args.len() - 1], "example.com/p");
     }
 
     /// Extract the `#[serde(rename = "…")]` names of one struct in this file.
