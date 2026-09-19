@@ -6,9 +6,9 @@
     "`unmeasured` is not `clean`: an absent measurement is a question."
   ],
   "goal": 100,
-  "defined": 76,
+  "defined": 77,
   "clean": 72,
-  "open": 1,
+  "open": 2,
   "unmeasured": 3,
   "targets": {
     "alertmanager": {
@@ -67,6 +67,29 @@
       "guff_only": 0,
       "gcl_only": 0
     },
+    "beats": {
+      "tier": "hunt",
+      "state": "open",
+      "at": "20260919T224300Z",
+      "open": 536,
+      "guff_only": 30,
+      "gcl_only": 506,
+      "by_linter": {
+        "modernize": 388,
+        "govet": 71,
+        "staticcheck": 29,
+        "gosec": 14,
+        "testifylint": 9,
+        "nolintlint": 7,
+        "wastedassign": 6,
+        "noctx": 3,
+        "gomodguard_v2": 2,
+        "goimports": 2,
+        "forbidigo": 2,
+        "unused": 2,
+        "bodyclose": 1
+      }
+    },
     "boundary": {
       "tier": "hunt",
       "state": "clean",
@@ -92,7 +115,7 @@
     "caddy": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260916T230621Z",
+      "at": "20260919T225717Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -132,7 +155,7 @@
     "cobra": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260916T230621Z",
+      "at": "20260919T225717Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -266,7 +289,7 @@
     "gin": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260916T230621Z",
+      "at": "20260919T225717Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -282,7 +305,7 @@
     "go-client": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260916T230621Z",
+      "at": "20260919T225717Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -322,7 +345,7 @@
     "helm": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260916T230621Z",
+      "at": "20260919T225717Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -362,7 +385,7 @@
     "k9s": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260916T230621Z",
+      "at": "20260919T225717Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
