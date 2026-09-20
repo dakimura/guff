@@ -7558,6 +7558,81 @@ fn modernize_flags_newexpr() {
     );
 }
 
+/// The constant-argument shapes of the `call of F(x)` arm.
+///
+/// `new(expr)` gives a constant its **default** type, so the rewrite is only
+/// offered when that default *is* the wrapper's element type. The type checker
+/// cannot be asked directly: it records the converted type for an untyped
+/// constant in an argument position, so `int64Of(1)` has `int64` on the `1`
+/// even though `new(1)` is a `*int` (go.dev/issue/70638; upstream re-runs
+/// `types.CheckExpr` on the argument alone, guff reads the shape).
+///
+/// Counted per shape rather than `any(contains(…))`: the previous test asserted
+/// that *some* `call of varOf(x)` was reported, and stayed green while every
+/// `boolPtr(true)` in the corpus went missing — `true` is an `Ident`, not a
+/// literal, and the old matcher only looked at literals. On elastic/beats that
+/// was 138 golangci-only findings.
+#[test]
+fn modernize_newexpr_uses_the_constants_default_type() {
+    let pkg = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/newexprshapes",
+        "newexpr_shapes.go",
+    );
+    let messages = support::run_analyzer(modernize(), &pkg);
+    let calls: Vec<&String> = messages
+        .iter()
+        .filter(|m| m.contains("can be simplified to new(x)"))
+        .collect();
+    let count = |name: &str| {
+        calls
+            .iter()
+            .filter(|m| m.contains(&format!("call of {name}(x)")))
+            .count()
+    };
+
+    // 8 wrappers are declared; each is reported once as new-like.
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m.contains("can be an inlinable wrapper around new(expr)"))
+            .count(),
+        8,
+        "{messages:?}"
+    );
+
+    // anyOf: 2 typed operands + 11 untyped constants + 10 constant
+    // expressions + 3 conversions. `anyOf[int64](1)` is not among them.
+    assert_eq!(count("anyOf"), 26, "{calls:?}");
+    // intOf: the plain literal, `len("abc")` and `int(untypedInt)`. The four
+    // calls in `localConstants` are not here — see below.
+    assert_eq!(count("intOf"), 3, "{calls:?}");
+    assert_eq!(count("stringOf"), 1, "{calls:?}");
+    // int64Of: only the *typed* package-level int64 constant. `int64Of(1)` and
+    // `int64Of(untypedInt)` default to int, so `new(x)` would change the type.
+    assert_eq!(count("int64Of"), 1, "{calls:?}");
+    // complexOf(1i): untyped imaginary defaults to complex128.
+    assert_eq!(count("complexOf"), 1, "{calls:?}");
+    // float32Of(1.5) and myIntOf(1) are silent for the same reason: float64
+    // and int are not float32 and myInt.
+    assert_eq!(count("float32Of"), 0, "{calls:?}");
+    assert_eq!(count("myIntOf"), 0, "{calls:?}");
+    // math.MaxInt8 / math.Pi: a qualified name lives in the *file* scope, and
+    // upstream evaluates the argument in the package scope alone.
+    assert_eq!(count("float64Of"), 0, "{calls:?}");
+
+    // `localConstants` holds four calls whose argument is a local constant,
+    // directly or through an expression or a conversion. None of them is
+    // reported: the same package-scope rule. This is the assertion that keeps
+    // the shape-reading from being *more* capable than upstream.
+    assert!(
+        !calls.iter().any(|m| m.contains("localConstants")),
+        "{calls:?}"
+    );
+
+    assert_eq!(calls.len(), 32, "{calls:?}");
+}
+
 #[test]
 fn modernize_flags_errorsastype() {
     let pkg = support::typecheck_fixture(

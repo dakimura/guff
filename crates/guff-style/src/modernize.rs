@@ -4707,20 +4707,181 @@ fn call_callee_object(pass: &Pass<'_>, fun: &Expr) -> Option<ObjectId> {
 /// BasicLit defaults must match the pointer element type name, otherwise skip
 /// (avoids false positives like `int64Var(123)` where TypesInfo already shows
 /// the converted type).
-fn untyped_lit_matches_elem(pass: &Pass<'_>, arg: &Expr, elem: TypeId) -> bool {
-    let Expr::BasicLit(lit) = arg else {
-        // DEFERRED: re-typecheck complex constant expressions via CheckExpr.
-        return false;
-    };
-    let Some(elem_name) = type_name_of(pass, elem) else {
-        return false;
-    };
-    match lit.kind {
-        Some(Token::INT) => elem_name == "int",
-        Some(Token::STRING) => elem_name == "string",
-        Some(Token::FLOAT) => elem_name == "float64",
-        Some(Token::CHAR) => elem_name == "rune" || elem_name == "int32",
+/// Whether every name in the constant expression `e` would resolve in the
+/// **package** scope.
+///
+/// This is not a refinement of guff's own; it is upstream's evaluation
+/// environment. `newexpr` re-checks a constant argument with
+/// `types.CheckExpr(fset, pass.Pkg, token.NoPos, arg, info2)` and `continue`s
+/// on any error, and an invalid position means go/types resolves against the
+/// package scope alone (go/types/eval.go). So a **local** constant never
+/// resolves, and neither does a qualified one — import names live in *file*
+/// scope, not package scope. Upstream is silent for all of them, however
+/// obviously correct the rewrite would be:
+///
+/// ```go
+/// const k = 1
+/// _ = intOf(k)            // silent: k is local
+/// _ = intOf(math.MaxInt8) // silent: math is a file-scope name
+/// _ = intOf(len("abc"))   // reported: len is in the universe
+/// ```
+///
+/// Measured against golangci-lint 2.12.2 on 2026-09-20. Without this gate the
+/// shape-reading below reports five findings upstream does not have — it is
+/// strictly more capable than upstream here, which is the wrong kind of
+/// correct for a compatibility target.
+fn const_resolves_in_package_scope(pass: &Pass<'_>, e: &Expr) -> bool {
+    match e {
+        Expr::BasicLit(_) => true,
+        Expr::ParenExpr(p) => const_resolves_in_package_scope(pass, &p.x),
+        Expr::UnaryExpr(u) => const_resolves_in_package_scope(pass, &u.x),
+        Expr::BinaryExpr(b) => {
+            const_resolves_in_package_scope(pass, &b.x)
+                && const_resolves_in_package_scope(pass, &b.y)
+        }
+        // Conversions and `len(…)`: the callee is a name too, and the
+        // arguments are walked for the same reason — `intOf(int(k))` is as
+        // unresolvable as `intOf(k)`.
+        Expr::CallExpr(c) => {
+            const_resolves_in_package_scope(pass, &c.fun)
+                && c.args
+                    .iter()
+                    .all(|a| const_resolves_in_package_scope(pass, a))
+        }
+        Expr::Ident(id) => {
+            let Some(info) = pass.types_info() else {
+                return false;
+            };
+            let Some(obj) = info.uses.get(&id.id).copied() else {
+                return false;
+            };
+            let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+                return false;
+            };
+            match obj.pkg(&artifacts.objects) {
+                // No package means the universe scope: `true`, `int`, `len`.
+                None => true,
+                // Anything else has to be declared at package level *in this
+                // package*; a dot-imported name is file-scoped like a
+                // qualified one.
+                Some(obj_pkg) => {
+                    obj_pkg == artifacts.type_pkg && is_package_level_obj(pass, obj)
+                }
+            }
+        }
+        // A qualified identifier (`math.Pi`) needs the file scope.
         _ => false,
+    }
+}
+
+/// The [`BasicKind`] an *untyped* constant expression takes when nothing
+/// converts it — the type `new(expr)` would give it.
+///
+/// `None` means "not untyped as written", which includes every form this does
+/// not model (conversions, calls, selectors); the caller then compares the
+/// recorded type, which for those is already the right one.
+///
+/// This exists because `Info.Types` cannot answer the question. The type
+/// checker records the *converted* type for an untyped constant in an argument
+/// position, so `ptr64(1)` records `int64` for the `1` — which is exactly the
+/// case where the rewrite is wrong, because `new(1)` is a `*int`. Upstream
+/// works around it by re-running `types.CheckExpr` on the argument alone
+/// (go.dev/issue/70638); guff reads the shape instead.
+fn untyped_const_kind(pass: &Pass<'_>, arg: &Expr) -> Option<BasicKind> {
+    match arg {
+        Expr::BasicLit(lit) => match lit.kind {
+            Some(Token::INT) => Some(BasicKind::Int),
+            Some(Token::FLOAT) => Some(BasicKind::Float64),
+            Some(Token::IMAG) => Some(BasicKind::Complex128),
+            // An untyped rune constant defaults to `rune`, which *is* `int32`.
+            Some(Token::CHAR) => Some(BasicKind::Int32),
+            Some(Token::STRING) => Some(BasicKind::String),
+            _ => None,
+        },
+        Expr::ParenExpr(p) => untyped_const_kind(pass, &p.x),
+        // `true` and `false` are untyped bool constants in the universe scope,
+        // and they are `Ident`s, not literals — which is why every
+        // `boolPtr(true)` in the corpus went unreported.
+        Expr::Ident(id) => {
+            let info = pass.types_info()?;
+            let obj = info.uses.get(&id.id).copied()?;
+            let artifacts = pass.pkg().type_artifacts.as_ref()?;
+            let typ = obj.typ(&artifacts.objects)?;
+            let typ = unalias_readonly(&artifacts.types, typ);
+            let TypeData::Basic(b) = artifacts.types.get(typ) else {
+                return None;
+            };
+            untyped_default_kind(b.kind())
+        }
+        Expr::UnaryExpr(u) => match u.op {
+            Token::NOT => Some(BasicKind::Bool),
+            Token::ADD | Token::SUB | Token::XOR => untyped_const_kind(pass, &u.x),
+            _ => None,
+        },
+        Expr::BinaryExpr(b) => {
+            match b.op {
+                // A constant comparison is an untyped bool whatever its
+                // operands were, and so is a logical operator.
+                Token::EQL
+                | Token::NEQ
+                | Token::LSS
+                | Token::LEQ
+                | Token::GTR
+                | Token::GEQ
+                | Token::LAND
+                | Token::LOR => Some(BasicKind::Bool),
+                // A shift takes the kind of its left operand: `'a' << 1` is
+                // a `*rune` and `1 << 2` a `*int`, both measured.
+                //
+                // Go also says a *constant* shift is an integer operation, so
+                // `1.0 << 2` is an untyped int and upstream reports it as
+                // `*int`. That is not modelled here because guff never gets
+                // this far for it: a shift with a float-literal or
+                // untyped-float-constant left operand arrives without a
+                // constant value, so the fall-through below compares an
+                // untyped float against `int` and declines. The miss is in the
+                // checker's constant folding, one level down, and writing the
+                // mapping here would be a rule with no way to reach it.
+                Token::SHL | Token::SHR => untyped_const_kind(pass, &b.x),
+                _ => {
+                    let x = untyped_const_kind(pass, &b.x)?;
+                    let y = untyped_const_kind(pass, &b.y)?;
+                    wider_untyped_kind(x, y)
+                }
+            }
+        }
+        _ => None,
+    }
+}
+
+/// The default kind of an untyped basic, or `None` for a typed one.
+fn untyped_default_kind(kind: BasicKind) -> Option<BasicKind> {
+    match kind {
+        BasicKind::UntypedBool => Some(BasicKind::Bool),
+        BasicKind::UntypedInt => Some(BasicKind::Int),
+        BasicKind::UntypedRune => Some(BasicKind::Int32),
+        BasicKind::UntypedFloat => Some(BasicKind::Float64),
+        BasicKind::UntypedComplex => Some(BasicKind::Complex128),
+        BasicKind::UntypedString => Some(BasicKind::String),
+        _ => None,
+    }
+}
+
+/// Go's rule for a binary operation on two untyped constants: the result takes
+/// the kind that appears later in `int < rune < float < complex`. Bool and
+/// string only combine with themselves.
+fn wider_untyped_kind(x: BasicKind, y: BasicKind) -> Option<BasicKind> {
+    let rank = |k: BasicKind| match k {
+        BasicKind::Int => Some(0),
+        BasicKind::Int32 => Some(1),
+        BasicKind::Float64 => Some(2),
+        BasicKind::Complex128 => Some(3),
+        _ => None,
+    };
+    match (rank(x), rank(y)) {
+        (Some(a), Some(b)) => Some(if a >= b { x } else { y }),
+        _ if x == y => Some(x),
+        _ => None,
     }
 }
 
@@ -4739,8 +4900,15 @@ fn newexpr_arg_ok(pass: &Pass<'_>, arg: &Expr, call_typ: TypeId) -> bool {
     let Some(tav) = info.types.get(&arg.id()) else {
         return false;
     };
+    // A constant argument is judged on the type it would have *on its own*,
+    // not on the type the call converted it to — see `untyped_const_kind`.
     if tav.val.is_some() {
-        return untyped_lit_matches_elem(pass, arg, elem);
+        if !const_resolves_in_package_scope(pass, arg) {
+            return false;
+        }
+        if let Some(kind) = untyped_const_kind(pass, arg) {
+            return is_basic_kind(pass, elem, kind);
+        }
     }
     types_identical(pass, tav.typ, elem)
 }

@@ -32786,3 +32786,141 @@ golden 238 case 一致（fixture は増えていない —— 変わるのは「
 `compat/run.sh --oss --tier pr` 8 target すべて P=R=100%。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-20（続き 298）— `close beats`（2）。`new(expr)` は定数に**既定の型**を与える。そして上流はその判定を**パッケージスコープ**でやり直す
+
+beats に残る gcl-only 276 件のうち **modernize `newexpr` の呼び出し側が 138 件**。
+guff の newexpr は宣言側 24/24 一致、呼び出し側が 268 対 409 だった。
+
+#### 1. 上限を外さないと線が見えない（両側で）
+
+最初の測定で「上流は 3 件しか出さない」と読んで 2 度間違えかけた。
+golangci-lint の既定は `max-same-issues: 3` で、`pointer(x)` が 3 件で止まっていた。
+**guff にも同じ既定がある** ので、`--max-same-issues=0` を上流に渡しただけでは
+今度は guff 側が 3 件で止まる。hunt は `patch_unlimited_issues.py` で両側の上限を
+外している —— 手で測るときは config に `issues.max-same-issues: 0` を書くこと。
+
+#### 2. 欠陥その 1 —— `Expr::BasicLit` しか見ていなかった
+
+```rust
+fn untyped_lit_matches_elem(pass, arg, elem) -> bool {
+    let Expr::BasicLit(lit) = arg else {
+        // DEFERRED: re-typecheck complex constant expressions via CheckExpr.
+        return false;
+    };
+    …
+}
+```
+
+`true` / `false` は `Expr::Ident` なので即 false。コーパスに溢れている
+`boolPtr(true)` はここで全部落ちていた。名前付き定数も定数式も同じ。
+
+上流（x/tools v0.44.0 `newexpr.go` 150-178）は**既定の型**で判定する:
+
+```go
+if tvarg.Value != nil {
+    types.CheckExpr(token.NewFileSet(), pass.Pkg, token.NoPos, arg, info2)
+    tvarg = info2.Types[arg]
+}
+targ = types.Default(tvarg.Type)
+if !types.Identical(types.NewPointer(targ), info.TypeOf(call)) { continue }
+```
+
+`Info.Types` は引数位置の untyped 定数に**変換後の型**を記録してしまう
+（go.dev/issue/70638）ので、上流はそれを避けるために撃ち直している。
+**「既定の型で比べる」が意味の本体**である: `func ptr64(v int64) *int64` に
+`ptr64(1)` と書いた形は上流も黙る —— `new(1)` は `*int` になってしまうから。
+
+guff は撃ち直す代わりに**式の形を読む**: リテラルの種別、`true`/`false`、
+名前付き定数の宣言された型、単項・二項（比較と論理は bool、シフトは左辺、
+それ以外は `int < rune < float < complex` の広いほう）。
+
+#### 3. 欠陥その 2 —— 形を読むだけでは**上流より賢くなってしまう**
+
+ここで並行セッションから指摘が入り、自分でも測って裏を取った。
+上流が渡すのは `token.NoPos` で、go/types はそれを「**パッケージスコープで
+評価せよ**」と読む（go/types/eval.go）。だから:
+
+| 形 | 上流 | guff（形を読むだけ） |
+|---|---|---|
+| `intOf(pkgConst)` | 報告 | 報告 |
+| `intOf(len("abc"))` | 報告 | 報告 |
+| **ローカル** `const k = 1` → `intOf(k)` | **黙る** | 報告 |
+| `intOf(1 + k)` / `intOf(int(k))` | **黙る** | 報告 |
+| `intOf(math.MaxInt8)` / `f64Of(math.Pi)` | **黙る** | 報告 |
+
+import 名は**ファイルスコープ**にあるので修飾識別子も解決できない。
+つまり上流は「どう見ても正しい書き換え」でも黙る。`const_resolves_in_package_scope`
+が引数を歩いて、**universe か、このパッケージのパッケージレベルか**でなければ
+定数の枝ごと諦める。conversion の中まで歩く（`int(k)` も駄目だから）。
+
+**これを入れなければ FP を 5 件出荷していた。** 互換性のターゲットに対して
+「上流より賢い」は正しさではない。
+
+#### 4. 32 形測って、1 形だけ残した
+
+`newexpr_shapes.go` に 32 形（リテラル 5 種・`true`/`false`・名前付き定数の
+untyped と typed・定数式 10 形・conversion 3 形・既定型が合わない 5 形・
+ローカル定数 4 形・修飾識別子 2 形）。**40 件が位置まで一致**。
+
+残した 1 形: `intOf(1.0 << 2)`。Go では定数シフトは整数演算なので上流は
+`*int` として報告するが、guff は黙る。**modernize の問題ではない** ——
+左辺が float リテラル（およびパッケージレベルの untyped float 定数）の
+シフトは、guff の型検査器から**定数値を持たないまま**降りてくるので、
+`untyped_const_kind` に届く前に fall-through が untyped float と `int` を
+比べて諦める。到達できない写像を書くのは規則ではないので入れていない。
+欠陥は定数畳み込みの側にあり、別タスクとして開けておく。
+
+#### 5. golden には載せられなかった（fix tier が同じ case を読む）
+
+この fixture は上流と 40/40 一致するので golden に入れたかったが、
+`compat/fix/run.sh` は `compat/golden/cases` を**共有**していて、そちらが落ちた:
+**golangci-lint 2.12.2 は newexpr の 40 件を報告して、その fix を 1 つも適用しない**。
+guff は適用する（宣言側に `//go:fix inline` と `return new(i)` を書く）。
+上流の x/tools 側には `SuggestedFixes` があるので、適用しないのは golangci-lint の側。
+これは finding の乖離ではなく `--fix` の乖離で、**別の欠陥として測定つきで開けておく**
+（`compat/fix/divergent/` は「guff が**少なく**書く」ための枠なので、ここには使えない）。
+よって fixture は Rust の単体テスト専用にし、`sources.txt` にその理由を書いた。
+
+なお newexpr.go が golden に無い理由は元から別にある —— **上流が crash する**。
+x/tools v0.44.0 `newexpr.go:152` が `call.Args[0]` を長さ検査なしで引くので、
+`variadic[int]()`（引数 0 個）で `index out of range [0] with length 0` になる。
+再現を確認した。guff は `call.args.len() != 1` で弾いている。
+
+#### 6. 単体テストは `any(contains(…))` をやめて件数で固定した
+
+旧テストは「`call of varOf(x)` がどれか 1 件ある」と言っていただけで、
+`boolPtr(true)` が全滅しても緑だった。新しいテストはラッパごとの件数と総数、
+それに「`localConstants` の 4 件が**出ないこと**」を固定する ——
+最後のものが「上流より賢くならない」を守る。修正を revert すると赤になる
+（`anyOf` が 26 → 6）。
+
+#### 7. 残る 42 件は**別の欠陥**で、in-run-set では直せない
+
+138 件の内訳は `pointer` 65 / `boolPtr` 23 / `ptrTo` 8 = **96 件が同一パッケージ**の
+ラッパ（この修正の対象）と、`Ptr` 40（azcore `to.Ptr`）/ `NewBool` 2（govmomi）=
+**42 件が外部モジュールの**ラッパ。後者は run set に入らないので、
+新規ラッパのファクトが届かない。guff は解析対象のパッケージを解析して残りは
+import するので、**外部オブジェクトのファクトは原理的に存在しない** ——
+`exhaustive.rs:248-264` が同じ問題を自分の言葉で記録しており、あちらは
+`enum_members_from_scope` という別経路で回避している。
+loki のような DEFERRED_OPEN とは違って要る部品は小さい（署名は export data に
+あり、足りないのは「本体が `return &x` 一文か」だけ、かつ guff は依存の
+`Dir` と `CompiledGoFiles` を既に持っている）が、この回では開けたままにする。
+
+#### 8. 実測
+
+```
+beats (v9.5.2)
+  前   guff=7308 golangci=7554 both=7278  P=99.6%  R=96.3%  unexpected=306
+  後   guff=7404 golangci=7554 both=7374  P=99.6%  R=97.6%  unexpected=210
+```
+
+golden 238 / fix 238 / reject 14 / isolate 114 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 3,622 件緑（新規 1 件）。
+
+**閉じたのは 96 件、新しく出た食い違いは 0 件**（guff-only は 30 のまま）。
+残る gcl-only 180 の内訳は `govet:inline` 63・`modernize:newexpr` **42**（§7 の外部モジュール分、
+予測どおり 1 件も減っていない）・`modernize:reflecttypefor` 16。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
