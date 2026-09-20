@@ -11,6 +11,18 @@
 # *crashes* on it — "goanalysis_metalinter: newexpr: index out of range [0] with
 # length 0" — so there is no upstream answer to record. `run.sh` refuses to write
 # a golden it could not reproduce, which is the behaviour we want.
+#
+# The crash is `call.Args[0]` with no length check (x/tools v0.44.0
+# newexpr.go:152), and the only call in newexpr.go that reaches it with no
+# arguments is `variadic[int]()`. newexpr_shapes.go has no such call and *can*
+# be measured — 40 findings, position for position — but it is not here either,
+# for a third reason: this list is also the fix tier's (`compat/fix/run.sh`
+# reads `compat/golden/cases`), and golangci-lint 2.12.2 reports those 40 and
+# then applies **none** of their fixes, while guff applies them. That gap is
+# real and measured (COMPAT-HARDENING 続き 298) but it is not the finding-set
+# gap, and putting the file here would trade a findings gate for a fix-tier
+# failure. The Rust test `modernize_newexpr_uses_the_constants_default_type`
+# counts the 40 instead.
 bad/bad.go                          crates/guff-style/tests/testdata/modernize/bad.go
 ok/ok.go                            crates/guff-style/tests/testdata/modernize/ok.go
 stringsseq/stringsseq.go            crates/guff-style/tests/testdata/modernize/stringsseq.go
