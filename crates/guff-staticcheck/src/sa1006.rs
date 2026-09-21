@@ -7,7 +7,6 @@ use std::sync::OnceLock;
 use guff::ast::{CallExpr, Expr};
 use guff::node_mask;
 use guff::walk::NodeRef;
-use guff_analysis::code::{is_call_to, is_call_to_any};
 use guff_analysis::passes::inspect;
 use guff_analysis::code;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass, Diagnostic, SuggestedFix, TextEdit};
@@ -82,12 +81,20 @@ fn check_printf_call(
     call: &CallExpr,
     pending: &mut Vec<(u32, String, Option<TextEdit>)>,
 ) {
-    let format = if is_call_to(pass, call, "fmt.Fprintf") {
+    // `(Symbol "…")` resolves the callee *object*, so the eight method rows in
+    // the list above are spelled the way `typeutil.FuncName` spells them.
+    // `is_call_to` cannot answer that: it ends in package path plus object
+    // name, so `t.Errorf(…)` came back as `testing.Errorf` and matched none of
+    // them — more than half the list was unreachable, silently, and the golden
+    // fixture only ever called `fmt.Printf`.
+    let name = code::callee_full_name(pass, call);
+    let name = name.as_deref();
+    let format = if name == Some("fmt.Fprintf") {
         if call.args.len() != 2 {
             return;
         }
         &call.args[1]
-    } else if is_call_to_any(pass, call, PRINTF_ONE_ARG) {
+    } else if name.is_some_and(|n| PRINTF_ONE_ARG.contains(&n)) {
         if call.args.len() != 1 {
             return;
         }
@@ -104,7 +111,7 @@ fn check_printf_call(
     // `alt` is the rendered callee with its final byte removed — upstream's
     // comment notes the callee can be an arbitrary selector like
     // `foo.bar[0].Printf`, and dropping the trailing `f` works for all of them.
-    let alt = if is_call_to(pass, call, "fmt.Errorf") {
+    let alt = if name == Some("fmt.Errorf") {
         Some("errors.New".to_string())
     } else {
         render_node(pass, &call.fun).and_then(|mut t| {

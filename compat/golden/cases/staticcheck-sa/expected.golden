@@ -72,7 +72,22 @@ sa1003/bad/bad.go:21:25:staticcheck::SA1003: value of type example.com/sa1003/ba
 sa1004/bad/bad.go:6:13:staticcheck::SA1004: sleeping for 1 nanoseconds is probably a bug; be explicit if it isn't
 sa1004/bad/bad.go:7:13:staticcheck::SA1004: sleeping for 42 nanoseconds is probably a bug; be explicit if it isn't
 sa1005/bad/bad.go:6:15:staticcheck::SA1005: first argument to exec.Command looks like a shell command, but a program name or path are expected
-sa1006/bad/bad.go:6:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:11:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:25:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:26:6:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:27:6:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:28:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:29:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:30:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:31:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:35:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:36:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:37:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:38:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:39:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:40:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:41:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:42:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
 sa1007/bad/bad.go:7:12:staticcheck::SA1007: ":" is not a valid URL: parse ":": missing protocol scheme
 sa1007/bad/bad.go:8:12:staticcheck::SA1007: "cache_object:foo/bar" is not a valid URL: parse "cache_object:foo/bar": first path segment in URL cannot contain colon
 sa1007/bad/bad.go:9:12:staticcheck::SA1007: "http://host:port/" is not a valid URL: parse "http://host:port/": invalid port ":port" after host

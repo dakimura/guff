@@ -10,8 +10,8 @@
 
 --- a/sa1006/bad/bad.go
 +++ b/sa1006/bad/bad.go
-@@ -3,7 +3,7 @@
- import "fmt"
+@@ -8,7 +8,7 @@
+ )
  
  func fn(s string) {
 -	fmt.Printf(s)
@@ -19,6 +19,46 @@
  }
  
  func main() { fn("x") }
+@@ -22,24 +22,24 @@
+ type svc struct{ logger *log.Logger }
+ 
+ func pkgFuncs(s string, w *os.File) {
+-	fmt.Printf(s)
+-	_ = fmt.Sprintf(s)
+-	_ = fmt.Errorf(s)
+-	log.Printf(s)
+-	log.Fatalf(s)
+-	log.Panicf(s)
+-	fmt.Fprintf(w, s)
++	fmt.Print(s)
++	_ = fmt.Sprint(s)
++	_ = errors.New(s)
++	log.Print(s)
++	log.Fatal(s)
++	log.Panic(s)
++	fmt.Fprint(w, s)
+ }
+ 
+ func methods(l *log.Logger, t *testing.T, tb testing.TB, sv svc, s string) {
+-	l.Printf(s)
+-	t.Errorf(s)
+-	t.Fatalf(s)
+-	t.Logf(s)
+-	t.Skipf(s)
+-	tb.Errorf(s)
+-	tb.Logf(s)
+-	sv.logger.Printf(s)
++	l.Print(s)
++	t.Error(s)
++	t.Fatal(s)
++	t.Log(s)
++	t.Skip(s)
++	tb.Error(s)
++	tb.Log(s)
++	sv.logger.Print(s)
+ }
+ 
+ func silent(s string, n int, w *os.File) {
 --- a/sa1008/bad/bad.go
 +++ b/sa1008/bad/bad.go
 @@ -7,7 +7,7 @@
