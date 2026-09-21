@@ -18,6 +18,7 @@ guff-gostd = { path = "../guff-gostd" }
 guff-ssa = { path = "../guff-ssa" }
 guff-types = { path = "../guff-types" }
 guff-constant = { path = "../guff-constant" }
+memchr = "2"
 regex = "1"
 regex-syntax = "0.8"
 serde_json = "1"

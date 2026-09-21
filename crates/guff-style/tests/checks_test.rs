@@ -7722,6 +7722,52 @@ fn modernize_flags_newexpr() {
     );
 }
 
+/// The `call of F(x)` arm when `F` was declared in a package guff did not
+/// analyse.
+///
+/// Upstream exports a `newLike` fact from the declaring package and
+/// golangci-lint runs the analyzer over dependencies, so a wrapper in another
+/// module arrives as a fact. guff imports dependencies from export data, so
+/// the fact never comes — and azcore's `to.Ptr` plus govmomi's `NewBool` were
+/// 42 of beats' golangci-only rows on that alone.
+///
+/// The three silent shapes are the predicate: a body that takes the address of
+/// a *copy*, a second parameter, and an address that is not the parameter's.
+#[test]
+fn modernize_newexpr_reads_a_wrapper_declared_in_a_dependency() {
+    let dir = support::testdata("modernize");
+    let dep = dir.join("stub/dep/to/to.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/modernize/newexprdep",
+        &dir.join("newexpr_dep.go"),
+        &[("example.com/dep/to", &dep)],
+    );
+    let messages = support::run_analyzer(modernize(), &pkg);
+    let calls: Vec<&String> = messages
+        .iter()
+        .filter(|m| m.contains("can be simplified to new(x)"))
+        .collect();
+    assert_eq!(
+        calls.len(),
+        2,
+        "only the two `to.Ptr` calls: {messages:?}"
+    );
+    assert!(
+        calls
+            .iter()
+            .all(|m| m.contains("call of Ptr(x) can be simplified to new(x)")),
+        "{calls:?}"
+    );
+    // The declaration arm belongs to the package that declares it, which guff
+    // is not analysing here.
+    assert!(
+        !messages
+            .iter()
+            .any(|m| m.contains("can be an inlinable wrapper")),
+        "{messages:?}"
+    );
+}
+
 /// The constant-argument shapes of the `call of F(x)` arm.
 ///
 /// `new(expr)` gives a constant its **default** type, so the rewrite is only
