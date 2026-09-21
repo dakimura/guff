@@ -87,10 +87,24 @@ pub struct GomoddirectivesOptions {
 /// (`prefix` / `regex`).
 #[derive(Clone, Debug, Default)]
 pub struct GomodguardOptions {
-    /// Blocked module paths (exact / prefix of import module) with reason text.
-    pub blocked_modules: Vec<(String, String)>,
+    /// Blocked module entries (exact / prefix of the import's module).
+    pub blocked_modules: Vec<BlockedModule>,
     /// When true, imports of modules with a local `replace` are blocked.
     pub local_replace_directives: bool,
+}
+
+/// One `gomodguard.blocked[]` entry (`blocked.modules[]` in the v1 shape).
+///
+/// `recommendations` and `reason` both feed `BlockedModule.BlockReason`, which
+/// spells them as separate sentences; see `gomodguard::block_reason`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BlockedModule {
+    /// Module path, matched against the import's module.
+    pub module: String,
+    /// Modules to use instead.
+    pub recommendations: Vec<String>,
+    /// Free text appended as its own sentence.
+    pub reason: String,
 }
 
 /// `linters.settings.importas` / `linters-settings.importas`.

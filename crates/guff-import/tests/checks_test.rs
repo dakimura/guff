@@ -177,6 +177,106 @@ fn gomodguard_flags_blocked_module_import() {
     );
 }
 
+/// The message `BlockedModule.BlockReason` builds, and the second `Sprintf`
+/// that runs over it.
+///
+/// gomodguard assembles `"%s %s"` from a constant carrying the `%s` for the
+/// package name and the per-module reason, and then — in
+/// `isBlockedPackageFromModFile` — runs `fmt.Sprintf(blockReason, packageName)`
+/// over the *whole* thing. So any verb the user wrote in `reason` meets Go's
+/// formatter with no argument left: beats blocks `github.com/pkg/errors` with
+/// "use `fmt.Errorf` with `%w` instead" and golangci-lint prints
+/// `%!w(MISSING)`.
+///
+/// guff had none of this: no recommendation clause, no second `Sprintf`, no
+/// `TrimRight(reason, ".")`, and an empty reason rendered as a bare `.`. All
+/// five shapes below were measured against golangci-lint 2.12.2 and all five
+/// differed.
+#[test]
+fn gomodguard_renders_every_block_reason_shape() {
+    let pkg = support::typecheck_fixture(
+        "gomodguard/messages",
+        "example.com/gomodguard/messages",
+        "main.go",
+    );
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "gomodguard",
+        GomodguardOptions {
+            blocked_modules: vec![
+                guff_import::BlockedModule {
+                    module: "example.com/bare".into(),
+                    recommendations: Vec::new(),
+                    reason: String::new(),
+                },
+                guff_import::BlockedModule {
+                    module: "example.com/onerec".into(),
+                    recommendations: vec!["errors".into()],
+                    reason: "This package is deprecated, use `errors.Join` instead".into(),
+                },
+                guff_import::BlockedModule {
+                    module: "example.com/tworecs".into(),
+                    recommendations: vec!["errors".into(), "fmt".into()],
+                    reason: "This package is deprecated, use `fmt.Errorf` with `%w` instead"
+                        .into(),
+                },
+                guff_import::BlockedModule {
+                    module: "example.com/threerecs".into(),
+                    recommendations: vec!["a".into(), "b".into(), "c".into()],
+                    reason: "Three recommendations, and a trailing dot.".into(),
+                },
+                guff_import::BlockedModule {
+                    module: "example.com/verbs".into(),
+                    recommendations: Vec::new(),
+                    reason: "No recommendations at all, with a %s and a %%literal".into(),
+                },
+            ],
+            local_replace_directives: false,
+        },
+    );
+    let mut messages = support::run_analyzer_with_settings(
+        gomodguard(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    messages.sort();
+
+    const LIST: &str = "is blocked because the module is in the blocked modules list.";
+    assert_eq!(
+        messages,
+        vec![
+            // No recommendations and no reason: upstream still joins with a
+            // space, and the trailing space is what the text printer trims.
+            format!("import of package `example.com/bare` {LIST} "),
+            // One recommendation reads "is a recommended module".
+            format!(
+                "import of package `example.com/onerec` {LIST} `errors` is a recommended \
+                 module. This package is deprecated, use `errors.Join` instead."
+            ),
+            // Three: a comma after the first, a bare space after the second.
+            format!(
+                "import of package `example.com/threerecs` {LIST} `a`, `b` and `c` are \
+                 recommended modules. Three recommendations, and a trailing dot."
+            ),
+            // Two: no comma at all, and the reason's `%w` has no argument left.
+            format!(
+                "import of package `example.com/tworecs` {LIST} `errors` and `fmt` are \
+                 recommended modules. This package is deprecated, use `fmt.Errorf` with \
+                 `%!w(MISSING)` instead."
+            ),
+            // `%s` is the second verb, so it is MISSING too; `%%` is a literal.
+            format!(
+                "import of package `example.com/verbs` {LIST} No recommendations at all, \
+                 with a %!s(MISSING) and a %literal."
+            ),
+        ],
+        "{messages:?}"
+    );
+}
+
 #[test]
 fn gomodguard_flags_blocked_via_settings() {
     let pkg = support::typecheck_fixture(
@@ -188,10 +288,11 @@ fn gomodguard_flags_blocked_via_settings() {
     bag.insert(
         "gomodguard",
         GomodguardOptions {
-            blocked_modules: vec![(
-                "github.com/sirupsen/logrus".into(),
-                "use log/slog".into(),
-            )],
+            blocked_modules: vec![guff_import::BlockedModule {
+                module: "github.com/sirupsen/logrus".into(),
+                recommendations: vec!["log/slog".into()],
+                reason: "use log/slog".into(),
+            }],
             local_replace_directives: false,
         },
     );

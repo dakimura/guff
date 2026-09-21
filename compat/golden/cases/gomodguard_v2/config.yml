@@ -14,6 +14,30 @@ linters:
       blocked:
       - module: github.com/sirupsen/logrus
         reason: use log/slog
+      # Neither clause: upstream still joins with a space, so the message ends
+      # in one and the text printer trims it.
+      - module: example.com/bare
+      # One recommendation reads "is a recommended module"; two read "`a` and
+      # `b` are recommended modules"; three put a comma after the first only.
+      - module: example.com/onerec
+        recommendations:
+          - errors
+        reason: This package is deprecated, use `errors.Join` instead
+      # The reason's `%w` meets the second Sprintf with no argument left.
+      - module: example.com/tworecs
+        recommendations:
+          - errors
+          - fmt
+        reason: This package is deprecated, use `fmt.Errorf` with `%w` instead
+      # TrimRight(reason, ".") — a reason that already ends in a dot keeps one.
+      - module: example.com/threerecs
+        recommendations:
+          - a
+          - b
+          - c
+        reason: Three recommendations, and a trailing dot.
+      - module: example.com/verbs
+        reason: No recommendations at all, with a %s and a %%literal
 
 issues:
   max-issues-per-linter: 0

@@ -6,4 +6,4 @@
 
 # golangci-lint: 2.12.2
 
-bad.go:3:8:gomodguard::import of package `github.com/sirupsen/logrus` is blocked because the module is in the blocked modules list. use log/slog.
+bad.go:3:8:gomodguard::import of package `github.com/sirupsen/logrus` is blocked because the module is in the blocked modules list. `log/slog` is a recommended module. use log/slog.

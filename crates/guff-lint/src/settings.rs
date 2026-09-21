@@ -2215,7 +2215,7 @@ pub struct GomoddirectivesSettings {
 /// Allowed modules/domains, version constraints, and `match-type` remain DEFERRED.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GomodguardSettings {
-    pub blocked_modules: Vec<(String, String)>,
+    pub blocked_modules: Vec<guff_import::BlockedModule>,
     pub local_replace_directives: bool,
 }
 
@@ -4121,15 +4121,30 @@ fn merge_gomodguard_v1(out: &mut GomodguardSettings, value: &serde_yaml::Value) 
                         let Some(name) = k.as_str() else {
                             continue;
                         };
-                        let reason = v
-                            .as_mapping()
+                        let entry_body = v.as_mapping();
+                        let reason = entry_body
                             .and_then(|m| {
                                 m.get(serde_yaml::Value::String("reason".into()))
                                     .and_then(|r| r.as_str())
                             })
                             .unwrap_or("")
                             .to_string();
-                        out.blocked_modules.push((name.to_string(), reason));
+                        let recommendations = entry_body
+                            .and_then(|m| {
+                                m.get(serde_yaml::Value::String("recommendations".into()))
+                                    .and_then(|r| r.as_sequence())
+                            })
+                            .map(|seq| {
+                                seq.iter()
+                                    .filter_map(|r| r.as_str().map(str::to_string))
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        out.blocked_modules.push(guff_import::BlockedModule {
+                            module: name.to_string(),
+                            recommendations,
+                            reason,
+                        });
                     }
                 }
             }
@@ -4183,8 +4198,20 @@ fn merge_gomodguard_v2(out: &mut GomodguardSettings, value: &serde_yaml::Value) 
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            out.blocked_modules
-                .push((module.to_string(), reason));
+            let recommendations = entry_map
+                .get(serde_yaml::Value::String("recommendations".into()))
+                .and_then(|v| v.as_sequence())
+                .map(|seq| {
+                    seq.iter()
+                        .filter_map(|r| r.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            out.blocked_modules.push(guff_import::BlockedModule {
+                module: module.to_string(),
+                recommendations,
+                reason,
+            });
         }
     }
 }

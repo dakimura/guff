@@ -959,12 +959,12 @@ fn parse_v2_import_settings() {
         .gomodguard
         .blocked_modules
         .iter()
-        .any(|(m, r)| m == "github.com/sirupsen/logrus" && r.contains("log/slog")));
+        .any(|b| b.module == "github.com/sirupsen/logrus" && b.reason.contains("log/slog")));
     assert!(settings
         .gomodguard
         .blocked_modules
         .iter()
-        .any(|(m, r)| m == "github.com/pkg/errors" && r.contains("std errors")));
+        .any(|b| b.module == "github.com/pkg/errors" && b.reason.contains("std errors")));
 
     let bag = settings.to_bag();
     let dep = bag

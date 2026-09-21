@@ -4,3 +4,18 @@ bad.go            compat/isolate/fixtures/gomodguard_v2/bad.go
 # The stub module, replaced in so `./...` never lints it.
 logrus/go.mod     compat/golden/cases/gomodguard_v2/logrus.go.mod
 logrus/logrus.go  compat/golden/cases/gomodguard_v2/logrus.go.txt
+
+# One stub module per message shape `BlockedModule.BlockReason` can produce.
+# The reasons and recommendation lists live in config.yml; messages.go is only
+# the import site.
+messages.go        compat/golden/cases/gomodguard_v2/messages.go.txt
+bare/go.mod        compat/golden/cases/gomodguard_v2/bare.go.mod
+bare/bare.go       compat/golden/cases/gomodguard_v2/bare.go.txt
+onerec/go.mod      compat/golden/cases/gomodguard_v2/onerec.go.mod
+onerec/onerec.go   compat/golden/cases/gomodguard_v2/onerec.go.txt
+tworecs/go.mod     compat/golden/cases/gomodguard_v2/tworecs.go.mod
+tworecs/tworecs.go  compat/golden/cases/gomodguard_v2/tworecs.go.txt
+threerecs/go.mod   compat/golden/cases/gomodguard_v2/threerecs.go.mod
+threerecs/threerecs.go   compat/golden/cases/gomodguard_v2/threerecs.go.txt
+verbs/go.mod       compat/golden/cases/gomodguard_v2/verbs.go.mod
+verbs/verbs.go     compat/golden/cases/gomodguard_v2/verbs.go.txt

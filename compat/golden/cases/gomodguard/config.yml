@@ -13,7 +13,12 @@ linters:
     gomodguard:
       blocked:
         modules:
+        # The v1 shape nests the entry under the module name, and carries the
+        # same `recommendations` list as v2 — so the clause is gated on both
+        # parsers, not just the one beats uses.
         - github.com/sirupsen/logrus:
+            recommendations:
+              - log/slog
             reason: use log/slog
 
 issues:

@@ -1,0 +1,3 @@
+// Stub for a module gomodguard blocks. The linter reads go.mod and the import,
+// never the package body — this one exists so the message shape can be gated.
+package verbs

@@ -34237,3 +34237,80 @@ golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 緑（284 スイート）。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-21（続き 313）— `close beats`（16）: gomodguard のメッセージは**2 回 Sprintf される**。だから利用者が書いた `%w` が `%!w(MISSING)` になる
+
+beats の gomodguard_v2 は guff-only 1・gcl-only 1 —— **同じ行の文言違い**
+（続き 226 以来の「両側に 1 件ずつ立つ署名」）。
+
+```
+guff  … blocked modules list. This package is deprecated, use `fmt.Errorf` with `%w` instead.
+gcl   … blocked modules list. `errors` and `fmt` are recommended modules. This package is deprecated, use `fmt.Errorf` with `%!w(MISSING)` instead.
+```
+
+#### 1. 組み立ては 2 段
+
+`processor.go` は
+
+```go
+blockReasonInBlockedList = "import of package `%s` is blocked because the module is in the blocked modules list."
+...
+fmt.Sprintf("%s %s", blockReasonInBlockedList, matchedBlockRule.BlockReason(ver))   // (1)
+...
+fmt.Sprintf(blockReason, packageName)                                              // (2)
+```
+
+(1) で**利用者の `reason` を含んだ 1 本の文字列**ができ、(2) がそれを
+**もう一度フォーマット文字列として**走らせる。引数は 1 つしか無いので、
+最初の動詞（定数の `%s`）がパッケージ名を取り、**その後ろの動詞は全部
+`%!<verb>(MISSING)`** になる。beats の reason に書いてある `%w` がまさにそれ。
+
+#### 2. 最小再現で 6 形測ったら **6 形とも違った**
+
+golangci-lint 2.12.2 に対して:
+
+| 形 | 上流 | guff（直す前） |
+|----|------|----------------|
+| recommendations 2 + `%w` | `` `errors` and `fmt` are recommended modules.`` / `%!w(MISSING)` | 節ごと無し / `%w` のまま |
+| recommendations 1 | `` `log/slog` is a recommended module.`` | 無し |
+| recommendations 3 | `` `a`, `b` and `c` are recommended modules.`` | 無し |
+| reason 末尾に `.` | `…dot.`（`TrimRight(reason, ".")`） | `…dot..` |
+| reason も recommendations も無し | `…list. `（末尾の空白は printer が trim） | `…list. .` |
+| reason に `%s` と `%%` | `%!s(MISSING)` と `%` | そのまま |
+
+つまり beats に出ていた 1 件は**4 つの欠陥の重なり**だった。
+
+#### 3. fixture を足したら**桁**の欠陥が出た
+
+`messages.go` は形を並べるためにブランク import（`_ "example.com/bare"`）で
+書いた。すると golden が
+
+```
+  +gcl    messages.go:7:2 …
+  +guff   messages.go:7:4 …
+```
+
+上流は `imports[n].Pos()` で報告し、`ast.ImportSpec.Pos()` は
+**名前があればその名前の位置**を返す。guff は `path.value_pos` を使っていた
+ので、ブランク import では 2 桁ずれていた。isolate の fixture にも
+ブランク import を 1 本足して両 tier で締めた（続き 261 の
+「golden tier だけが桁を見る」の 2 例目）。
+
+#### 4. v1 の parser も同じ節を持っている
+
+`recommendations` は v1（`blocked.modules[]` の入れ子）にもある。guff の
+parser は v1 / v2 のどちらも `reason` しか読んでいなかったので両方直し、
+golden も両方に節を足して締めた。
+
+```
+beats (v9.5.2)
+  前   guff=7544 golangci=7554 both=7532  P=99.8%  R=99.7%  unexpected=34
+  後   guff=7544 golangci=7554 both=7533  P=99.9%  R=99.7%  unexpected=32
+```
+
+**閉じたのは 2 件（1 行の両側）、新規 0 件。**
+
+golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 緑。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
