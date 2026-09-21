@@ -1,0 +1,4 @@
+// Stub for the `local-prefixes` import group.
+package local
+
+const Name = "local"

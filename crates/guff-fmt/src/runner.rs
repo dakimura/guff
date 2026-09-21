@@ -989,9 +989,19 @@ fn first_changed_lines<'a>(diff: &TextDiff<'a, 'a, 'a, str>) -> Vec<i64> {
             }
             ChangeTag::Insert => {
                 if !in_change {
-                    // Insertion between two original lines: attribute to the next
-                    // original line (at least 1).
-                    lines.push((old_line + 1).max(1));
+                    // `hunkChangesParser.handleAddedOnlyLines`: an addition with
+                    // no deletion in front of it is *merged into the last
+                    // original line* (`From = To = lastOriginalLine`), so
+                    // upstream reports at the line above the insertion, not at
+                    // the line the insertion pushes down. With no original line
+                    // yet — an insertion at the top of the file — upstream holds
+                    // the lines in `replacementLinesToPrepend` and attaches them
+                    // to the next original or deleted line, which is line 1.
+                    // beats' `x-pack/osquerybeat/.../artifact_test.go` needs a
+                    // blank line between the third-party and the `local-prefixes`
+                    // import group: golangci-lint reports the `semver` line above
+                    // it, guff reported the `config` line below.
+                    lines.push(old_line.max(1));
                     in_change = true;
                 }
             }
@@ -1109,6 +1119,47 @@ mod tests {
         // formatter walk — argo-cd's vendored `gitops-engine`.
         assert_eq!(names, vec!["pkg/a.go".to_string()], "{names:?}");
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Where golangci-lint anchors each kind of change.
+    ///
+    /// `pkg/goformatters/internal/diff.go`'s `hunkChangesParser` builds one
+    /// `Change{From, To}` per group and `toDiagnostic` reports at `From`:
+    ///
+    /// * deletions (with or without additions after them) —
+    ///   `handleDeletedLines` uses the **first deleted** line;
+    /// * additions with no deletion in front of them —
+    ///   `handleAddedOnlyLines` *merges them into the last original line*, so
+    ///   the report lands **above** the insertion;
+    /// * additions before any original line — `replacementLinesToPrepend` holds
+    ///   them until the next original or deleted line, so line 1.
+    ///
+    /// guff reported every insertion at the line below it, which is right only
+    /// for the third case. beats' `x-pack/osquerybeat/.../artifact_test.go`
+    /// wants a blank line between the third-party and the `local-prefixes`
+    /// import group: golangci-lint reports the `semver` line above it, guff
+    /// reported the `config` line below.
+    fn changed_lines(old: &str, new: &str) -> Vec<i64> {
+        first_changed_lines(&TextDiff::from_lines(old, new))
+    }
+
+    #[test]
+    fn formatter_change_lines_follow_golangci_anchoring() {
+        // Insertion between two original lines: the line *above* it.
+        assert_eq!(changed_lines("a\nb\nc\n", "a\nb\nX\nc\n"), vec![2]);
+        // Insertion before anything: line 1.
+        assert_eq!(changed_lines("a\nb\n", "X\na\nb\n"), vec![1]);
+        // Deletion: the first deleted line.
+        assert_eq!(changed_lines("a\nb\nc\n", "a\nc\n"), vec![2]);
+        // Deletion plus addition is one change, at the first deleted line.
+        assert_eq!(changed_lines("a\nb\nc\n", "a\nX\nY\nc\n"), vec![2]);
+        // Two groups, each anchored on its own.
+        assert_eq!(
+            changed_lines("a\nb\nc\nd\ne\n", "a\nb\nX\nc\nd\nY\ne\n"),
+            vec![2, 4]
+        );
+        // An insertion at the end of the file still anchors above itself.
+        assert_eq!(changed_lines("a\nb\n", "a\nb\nX\n"), vec![2]);
     }
 
     fn gofumpt_available() -> bool {

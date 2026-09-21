@@ -1,0 +1,10 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh goimports
+# Produced by running golangci-lint on compat/golden/cases/goimports/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+blanks/blanks.go:8:1:goimports::File is not properly formatted
+groups/groups.go:16:1:goimports::File is not properly formatted
