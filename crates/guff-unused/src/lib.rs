@@ -427,6 +427,26 @@ fn collect_write_positions(files: &[guff::ast::File], opts: &Options) -> HashSet
     out
 }
 
+/// A declaration whose references belong to *it*, not to the function the walk
+/// started from.
+///
+/// honnef threads an owner (`by`) through every statement, and
+/// `g.decl(stmt.Decl, by)` charges a local `type`/`const` spec's body to the
+/// object the spec declares. Charging it to the enclosing function instead
+/// keeps everything the declaration mentions alive even when the declaration
+/// is not — `type holder struct{ l leaf }` inside a live function would make
+/// `leaf` look used, where upstream reports both.
+fn skip_spec(n: guff::walk::NodeRef<'_>, skip: &HashSet<u32>) -> bool {
+    if skip.is_empty() {
+        return false;
+    }
+    match n {
+        guff::walk::NodeRef::TypeSpec(ts) => skip.contains(&ts.name.id),
+        guff::walk::NodeRef::ValueSpec(vs) => vs.names.iter().any(|id| skip.contains(&id.id)),
+        _ => false,
+    }
+}
+
 fn attribute_field_uses(
     info: &guff_types::api::Info,
     types: &TypeArena,
@@ -437,6 +457,7 @@ fn attribute_field_uses(
     edges: &mut HashMap<ObjectId, HashSet<ObjectId>>,
     opts: &Options,
     writes: &HashSet<u32>,
+    skip: &HashSet<u32>,
 ) {
     let use_field = |edges: &mut HashMap<ObjectId, HashSet<ObjectId>>, f: ObjectId| {
         for owner in owners {
@@ -460,7 +481,14 @@ fn attribute_field_uses(
             }
         }
     };
-    guff::walk::preorder(node, |n| {
+    // `preorder` stops the *whole* traversal on `false`; pruning one subtree is
+    // `preorder_prune`. Using the wrong one here meant the first local `type`
+    // declaration in a body ended the walk, so every composite literal after it
+    // lost its field writes and the type's fields were all reported.
+    guff::walk::preorder_prune(node, |n| {
+        if skip_spec(n, skip) {
+            return false;
+        }
         match n {
             guff::walk::NodeRef::SelectorExpr(sel) => {
                 let Some(selection) = info.selections.get(&sel.id) else {
@@ -624,8 +652,12 @@ fn attribute_uses(
     edges: &mut HashMap<ObjectId, HashSet<ObjectId>>,
     attributed: &mut HashSet<u32>,
     writes: &HashSet<u32>,
+    skip: &HashSet<u32>,
 ) {
-    guff::walk::preorder(node, |n| {
+    guff::walk::preorder_prune(node, |n| {
+        if skip_spec(n, skip) {
+            return false;
+        }
         if let guff::walk::NodeRef::Ident(id) = n {
             if let Some(target) = info.uses.get(&id.id) {
                 // Mark it attributed either way: the "unreached ident is a
@@ -994,6 +1026,104 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
     }
 
+    // ---- function-local `type` and `const` declarations --------------------
+    //
+    // honnef's `seeScope` sees every object in every scope, and `g.stmt`'s
+    // `*ast.DeclStmt` arm calls the same `g.decl` the package level uses — so a
+    // type or constant declared inside a function body is a candidate like any
+    // other. Only *variables* are exempt: `LocalVariablesAreUsed` (on by
+    // default) marks every non-field `*types.Var` used. The exported-is-used
+    // rule is gated on `isGlobal`, so an exported *name* on a local declaration
+    // does not save it — measured, `type Exported struct{}` inside a function
+    // is reported.
+    //
+    // The owner is the enclosing function: when that function is itself unused
+    // it is the finding, and `colorAndQuieten` marks everything it owns quiet.
+    // beats declares `type io struct{}` inside a live test function in
+    // `libbeat/reader/readjson/json_test.go` and never mentions it again, and
+    // `type fields struct{…}` the same way in
+    // `x-pack/metricbeat/module/prometheus/collector/counter_test.go`.
+    let mut local_owner: HashMap<ObjectId, ObjectId> = HashMap::new();
+    let mut local_spec_skip: HashSet<u32> = HashSet::new();
+    let no_skip: HashSet<u32> = HashSet::new();
+    for file in pass.files() {
+        if is_generated_at(pass, file.file_start.0 as u32) {
+            continue;
+        }
+        for decl in &file.decls {
+            let Decl::FuncDecl(f) = decl else {
+                continue;
+            };
+            let Some(Some(fn_obj)) = info.defs.get(&f.name.id) else {
+                continue;
+            };
+            let fn_obj = *fn_obj;
+            guff::walk::preorder(guff::walk::NodeRef::FuncDecl(f), |n| {
+                let guff::walk::NodeRef::DeclStmt(ds) = n else {
+                    return true;
+                };
+                let Decl::GenDecl(GenDecl { tok, specs, .. }) = &ds.decl else {
+                    return true;
+                };
+                if !matches!(tok, Some(Token::TYPE | Token::CONST)) {
+                    return true;
+                }
+                // Same `astutil.GroupSpecs` adjacency as the package level: a
+                // spec joins the previous group only when it starts on the line
+                // right after the previous one ends.
+                let mut decl_group: Vec<ObjectId> = Vec::new();
+                let mut prev_end_line: Option<i64> = None;
+                for spec in specs {
+                    if *tok == Some(Token::CONST) {
+                        let start_line = fset.position_for(spec.pos(), false).line;
+                        let adjacent = prev_end_line == Some(start_line - 1);
+                        if !adjacent && decl_group.len() > 1 {
+                            const_groups.push(std::mem::take(&mut decl_group));
+                        } else if !adjacent {
+                            decl_group.clear();
+                        }
+                        prev_end_line = Some(fset.position_for(spec.end(), false).line);
+                    }
+                    match spec {
+                        Spec::TypeSpec(TypeSpec { name, .. }) => {
+                            let Some(Some(obj)) = info.defs.get(&name.id) else {
+                                continue;
+                            };
+                            local_spec_skip.insert(name.id);
+                            if name.name == "_" {
+                                // (9.9) objects named the blank identifier are used.
+                                roots.insert(*obj);
+                                continue;
+                            }
+                            candidates.insert(*obj);
+                            local_owner.insert(*obj, fn_obj);
+                        }
+                        Spec::ValueSpec(ValueSpec { names, .. }) => {
+                            for id in names {
+                                let Some(Some(obj)) = info.defs.get(&id.id) else {
+                                    continue;
+                                };
+                                local_spec_skip.insert(id.id);
+                                if id.name == "_" {
+                                    roots.insert(*obj);
+                                    continue;
+                                }
+                                candidates.insert(*obj);
+                                local_owner.insert(*obj, fn_obj);
+                                decl_group.push(*obj);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if *tok == Some(Token::CONST) && decl_group.len() > 1 {
+                    const_groups.push(decl_group);
+                }
+                true
+            });
+        }
+    }
+
     // ---- struct fields ---------------------------------------------------
     //
     // honnef models a named struct type as *owning* its fields
@@ -1180,6 +1310,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         &mut edges,
                         &mut attributed,
                         &writes,
+                        &local_spec_skip,
                     );
                     attribute_field_uses(
                         info,
@@ -1191,7 +1322,118 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         &mut edges,
                         &opts,
                         &writes,
+                        &local_spec_skip,
                     );
+                    // The walk above skipped every local `type`/`const` spec;
+                    // charge each one to the object it declares, exactly as the
+                    // package-level arm below does. Without this their idents
+                    // are never attributed and the "unreached ident is a root"
+                    // fallback would resurrect whatever they mention.
+                    guff::walk::preorder(guff::walk::NodeRef::FuncDecl(f), |n| {
+                        let guff::walk::NodeRef::DeclStmt(ds) = n else {
+                            return true;
+                        };
+                        let Decl::GenDecl(GenDecl { tok, specs, .. }) = &ds.decl else {
+                            return true;
+                        };
+                        if !matches!(tok, Some(Token::TYPE | Token::CONST)) {
+                            return true;
+                        }
+                        for spec in specs {
+                            match spec {
+                                Spec::TypeSpec(ts) => {
+                                    let Some(Some(obj)) = info.defs.get(&ts.name.id) else {
+                                        continue;
+                                    };
+                                    if let Some(field_owners) =
+                                        struct_field_owners(ts, &fields, *obj)
+                                    {
+                                        for (node, owners) in field_owners {
+                                            attribute_uses(
+                                                info,
+                                                node,
+                                                &owners,
+                                                &local,
+                                                &mut edges,
+                                                &mut attributed,
+                                                &writes,
+                                                &no_skip,
+                                            );
+                                            attribute_field_uses(
+                                                info,
+                                                &artifacts.types,
+                                                &artifacts.objects,
+                                                node,
+                                                &owners,
+                                                &fields,
+                                                &mut edges,
+                                                &opts,
+                                                &writes,
+                                                &no_skip,
+                                            );
+                                        }
+                                        continue;
+                                    }
+                                    attribute_uses(
+                                        info,
+                                        guff::walk::NodeRef::TypeSpec(ts),
+                                        &[*obj],
+                                        &local,
+                                        &mut edges,
+                                        &mut attributed,
+                                        &writes,
+                                        &no_skip,
+                                    );
+                                    attribute_field_uses(
+                                        info,
+                                        &artifacts.types,
+                                        &artifacts.objects,
+                                        guff::walk::NodeRef::TypeSpec(ts),
+                                        &[*obj],
+                                        &fields,
+                                        &mut edges,
+                                        &opts,
+                                        &writes,
+                                        &no_skip,
+                                    );
+                                }
+                                Spec::ValueSpec(vs) => {
+                                    let owners: Vec<ObjectId> = vs
+                                        .names
+                                        .iter()
+                                        .filter_map(|id| info.defs.get(&id.id).copied().flatten())
+                                        .collect();
+                                    if owners.is_empty() {
+                                        continue;
+                                    }
+                                    attribute_uses(
+                                        info,
+                                        guff::walk::NodeRef::ValueSpec(vs),
+                                        &owners,
+                                        &local,
+                                        &mut edges,
+                                        &mut attributed,
+                                        &writes,
+                                        &no_skip,
+                                    );
+                                    attribute_field_uses(
+                                        info,
+                                        &artifacts.types,
+                                        &artifacts.objects,
+                                        guff::walk::NodeRef::ValueSpec(vs),
+                                        &owners,
+                                        &fields,
+                                        &mut edges,
+                                        &opts,
+                                        &writes,
+                                        &no_skip,
+                                    );
+                                }
+                                _ => {}
+                            }
+                        }
+                        true
+                    });
                 }
                 Decl::GenDecl(GenDecl { tok, specs, .. }) => {
                     if !matches!(tok, Some(Token::VAR | Token::CONST | Token::TYPE)) {
@@ -1227,6 +1469,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                             &mut edges,
                                             &mut attributed,
                                             &writes,
+                                            &no_skip,
                                         );
                                         attribute_field_uses(
                                             info,
@@ -1238,6 +1481,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                             &mut edges,
                                             &opts,
                                             &writes,
+                                            &no_skip,
                                         );
                                     }
                                     continue;
@@ -1250,6 +1494,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                     &mut edges,
                                     &mut attributed,
                                     &writes,
+                                    &no_skip,
                                 );
                                 attribute_field_uses(
                                     info,
@@ -1261,6 +1506,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                     &mut edges,
                                     &opts,
                                     &writes,
+                                    &no_skip,
                                 );
                             }
                             Spec::ValueSpec(vs) => {
@@ -1283,6 +1529,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                     &mut edges,
                                     &mut attributed,
                                     &writes,
+                                    &no_skip,
                                 );
                                 attribute_field_uses(
                                     info,
@@ -1294,6 +1541,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                     &mut edges,
                                     &opts,
                                     &writes,
+                                    &no_skip,
                                 );
                             }
                             _ => {}
@@ -1476,6 +1724,15 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     for obj in candidates {
         if used.contains(&obj) {
             continue;
+        }
+        // A function-local declaration is owned by its function. When the
+        // function itself is unused it is the finding and `colorAndQuieten`
+        // marks everything it owns quiet — measured, an unused `func deadFunc`
+        // that declares a `type`/`const` yields one finding, not three.
+        if let Some(owner) = local_owner.get(&obj) {
+            if !used.contains(owner) {
+                continue;
+            }
         }
         let name = obj.name(&artifacts.objects);
         let pos = obj.pos(&artifacts.objects);
@@ -1665,6 +1922,34 @@ fn next_decl_line(
             }
         }
     }
+    // Statements too. Upstream keys on `dir.Node.Pos()`, and `ast.NewCommentMap`
+    // associates a directive inside a function body with the *statement* below
+    // it — so a `//lint:ignore U1000` over a local `type` declaration has to
+    // land on that declaration, not reach past the end of the function to the
+    // next top-level one. It used to: in a fixture where the next top-level
+    // declaration was an unused type with a method, the stray ignore made both
+    // of them look used.
+    guff::walk::preorder(guff::walk::NodeRef::File(file), |n| {
+        match n {
+            guff::walk::NodeRef::BlockStmt(b) => {
+                for stmt in &b.list {
+                    consider(stmt.pos());
+                }
+            }
+            guff::walk::NodeRef::CaseClause(c) => {
+                for stmt in &c.body {
+                    consider(stmt.pos());
+                }
+            }
+            guff::walk::NodeRef::CommClause(c) => {
+                for stmt in &c.body {
+                    consider(stmt.pos());
+                }
+            }
+            _ => {}
+        }
+        true
+    });
     best.map(|p| fset.position_for(p, false).line)
 }
 

@@ -483,6 +483,14 @@ impl Checker {
                     let obj = new_type_name(&mut self.objects, ts.name.name.clone(), None);
                     obj.set_pkg(&mut self.objects, self.pkg);
                     obj.set_pos(&mut self.objects, ts.name.pos().0 as u32);
+                    // Record the defining identifier, as the `const` and `var`
+                    // arms above do and as go/types' `declare` does for all
+                    // three. Without it `Info.Defs` has no entry for a **local**
+                    // type, so an analyzer that starts from `Defs` cannot see
+                    // one that is never mentioned again — and a local type that
+                    // is never mentioned is exactly what `unused` reports
+                    // (beats' `json_test.go` `type io struct{}`).
+                    self.record_def(&ts.name, Some(obj));
                     // spec: the scope of a local type identifier begins at the
                     // identifier in the TypeSpec.
                     let scope_pos = ts.name.pos().0 as u32;

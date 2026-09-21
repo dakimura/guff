@@ -10,6 +10,7 @@ exportedmethod/exported_method.go     crates/guff-unused/tests/testdata/basic/ex
 initmethod/init_method.go             crates/guff-unused/tests/testdata/basic/init_method.go
 lintignore/lint_ignore.go             crates/guff-unused/tests/testdata/basic/lint_ignore.go
 deadcycle/dead_cycle.go               crates/guff-unused/tests/testdata/basic/dead_cycle.go
+locals/locals.go                      crates/guff-unused/tests/testdata/basic/locals.go
 # Two files, one package: the directive is in the first, the methods of the
 # type it covers are in the second (nats-server's jetstream_helpers_test.go).
 fileignore/types.go                   crates/guff-unused/tests/testdata/fileignore/types.go

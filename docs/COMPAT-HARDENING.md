@@ -34446,3 +34446,74 @@ golden 239 / fix 239 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 緑。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-21（続き 316）— `close beats`（19）: `unused` は**関数の中の宣言を 1 つも見ていなかった**。型検査器が local type の `Info.Defs` を記録していなかったから
+
+beats の `unused` の gcl-only 2 件は、どちらも**関数の中で宣言された型**:
+
+```go
+func TestMergeJSONFields(t *testing.T) {
+	type io struct {          // libbeat/reader/readjson/json_test.go:210
+	}
+	...
+func Test_CounterCache(t *testing.T) {
+	type fields struct {      // x-pack/.../collector/counter_test.go:15
+		ints *common.Cache
+		...
+```
+
+#### 1. 上流は scope ごと見ている
+
+honnef の `seeScope` は**すべての scope のすべてのオブジェクト**を `g.see`
+し、`g.stmt` の `*ast.DeclStmt` 腕は package level と**同じ `g.decl`** を呼ぶ。
+除外されるのは**変数だけ** —— `LocalVariablesAreUsed`（既定 on）が
+field でない `*types.Var` を `g.use` する。`exported は used` の規則は
+`isGlobal(obj)` で門番されているので、**ローカルに大文字の名前を付けても
+救われない**（実測: 関数の中の `type Exported struct{}` は報告される）。
+
+所有者は囲む関数で、その関数自体が unused なら `colorAndQuieten` が
+**中の宣言を quiet** にする（実測: 死んだ関数 1 件、中の型と定数は 0 件）。
+
+#### 2. 前提が無かった: `Info.Defs` に local type が入っていない
+
+guff の `decl_stmt` は `const` と `var` の腕では `record_def` を呼ぶのに
+（前者には「varnamelen が気づいた」とコメントまである）、**`type` の腕だけ
+呼んでいなかった**。`declare` 側は `// DEFERRED: recordDef`。
+`Defs` から始める解析器は「一度も言及されないローカル型」を**名指しできない**
+—— そして一度も言及されないことこそが `unused` の報告条件。
+
+#### 3. 途中で踏んだ 2 つ
+
+- **`preorder` は `false` で走査全体を止める**（部分木を剪定するのは
+  `preorder_prune`）。ローカル宣言の部分木を「その宣言自身に付け替える」ため
+  に skip を入れたら、**body の最初のローカル型で走査が終わって**いた ——
+  その後ろの複合リテラルの field write が全部消え、ローカル構造体の
+  フィールドが軒並み報告された。
+- **`//lint:ignore` が関数の外まで届いていた**。上流は
+  `ast.NewCommentMap` が結び付けた**ノードの位置**で鍵を作るので、body の中の
+  directive は**その下の文**に付く。guff の `next_decl_line` は
+  **トップレベルの宣言しか見ていなかった**ので、関数の中の
+  `//lint:ignore U1000` が関数を飛び越えて次のトップレベル宣言（未使用の型と
+  そのメソッド）を黙らせていた。文（block / case / comm の本体）も見るように
+  した。
+
+#### 4. fixture
+
+ローカル宣言は golden にも unit にも**1 つも無かった**。18 行の fixture を
+足して（報告 18・沈黙 6: 死んだ関数が所有する 2・blank 名・const group の
+生存側 2・`//lint:ignore`）、行の集合ごと単体テストで固定し、golden で
+golangci-lint 2.12.2 と突き合わせた。
+
+```
+beats (v9.5.2)
+  前   guff=7548 golangci=7554 both=7538  P=99.9%  R=99.8%  unexpected=26
+  後   guff=7550 golangci=7554 both=7540  P=99.9%  R=99.8%  unexpected=24
+```
+
+**閉じたのは 2 件、新規 0 件。** 型検査器に触る変更なので影響範囲は広いが、
+golden 239 / fix 239 / reject 14 / isolate 116 / `--oss --tier pr` 8 target の
+どこにも新しい差は出ていない。
+
+`cargo test --workspace --locked` 緑。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
