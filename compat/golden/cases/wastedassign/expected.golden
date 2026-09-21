@@ -6,22 +6,31 @@
 
 # golangci-lint: 2.12.2
 
-bad.go:4:2:wastedassign::assigned to n, but reassigned without using the value
-bad.go:6:3:wastedassign::assigned to n, but reassigned without using the value
-bad.go:51:5:wastedassign::assigned to line, but never used afterwards
-bad.go:101:6:wastedassign::assigned to n, but reassigned without using the value
-bad.go:175:2:wastedassign::assigned to x, but reassigned without using the value
-bad.go:202:7:wastedassign::assigned to exists, but reassigned without using the value
-bad.go:215:2:wastedassign::assigned to v, but reassigned without using the value
-bad.go:215:5:wastedassign::assigned to ok, but reassigned without using the value
-bad.go:230:2:wastedassign::assigned to name, but never used afterwards
-bad.go:236:2:wastedassign::assigned to s, but never used afterwards
-bad.go:242:2:wastedassign::assigned to s, but reassigned without using the value
-bad.go:262:2:wastedassign::assigned to x, but reassigned without using the value
-bad.go:268:2:wastedassign::assigned to x, but reassigned without using the value
-bad.go:276:7:wastedassign::assigned to exists, but reassigned without using the value
-bad.go:327:12:wastedassign::assigned to s, but reassigned without using the value
-bad.go:337:21:wastedassign::assigned to m, but reassigned without using the value
-bad.go:349:2:wastedassign::assigned to p, but reassigned without using the value
+bad.go:6:2:wastedassign::assigned to n, but reassigned without using the value
+bad.go:8:3:wastedassign::assigned to n, but reassigned without using the value
+bad.go:53:5:wastedassign::assigned to line, but never used afterwards
+bad.go:103:6:wastedassign::assigned to n, but reassigned without using the value
+bad.go:177:2:wastedassign::assigned to x, but reassigned without using the value
+bad.go:204:7:wastedassign::assigned to exists, but reassigned without using the value
+bad.go:217:2:wastedassign::assigned to v, but reassigned without using the value
+bad.go:217:5:wastedassign::assigned to ok, but reassigned without using the value
+bad.go:232:2:wastedassign::assigned to name, but never used afterwards
+bad.go:238:2:wastedassign::assigned to s, but never used afterwards
+bad.go:244:2:wastedassign::assigned to s, but reassigned without using the value
+bad.go:264:2:wastedassign::assigned to x, but reassigned without using the value
+bad.go:270:2:wastedassign::assigned to x, but reassigned without using the value
+bad.go:278:7:wastedassign::assigned to exists, but reassigned without using the value
+bad.go:329:12:wastedassign::assigned to s, but reassigned without using the value
+bad.go:339:21:wastedassign::assigned to m, but reassigned without using the value
+bad.go:351:2:wastedassign::assigned to p, but reassigned without using the value
+bad.go:371:3:wastedassign::assigned to c, but reassigned without using the value
+bad.go:372:3:wastedassign::assigned to c, but reassigned without using the value
+bad.go:380:6:wastedassign::assigned to err, but reassigned without using the value
+bad.go:392:4:wastedassign::assigned to offset, but never used afterwards
+bad.go:402:3:wastedassign::assigned to mid, but reassigned without using the value
+bad.go:403:3:wastedassign::assigned to mid, but reassigned without using the value
+bad.go:439:4:wastedassign::assigned to offset, but never used afterwards
+bad.go:449:3:wastedassign::assigned to offset, but never used afterwards
+bad.go:461:4:wastedassign::assigned to offset, but never used afterwards
 blank/blank.go:75:2:wastedassign::assigned to v, but reassigned without using the value
 blank/blank.go:77:7:wastedassign::assigned to v, but reassigned without using the value

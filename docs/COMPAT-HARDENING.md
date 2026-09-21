@@ -34314,3 +34314,74 @@ golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 緑。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-21（続き 314）— `close beats`（17）: `wastedassign` は**関数リテラルの中を 1 件も見ていなかった**。抑制 guard が「free」ではなく「全部」を集めていた
+
+beats に残っていた `wastedassign` の gcl-only 4 件は**全部**関数リテラルの中:
+
+| 位置 | 形 |
+|------|-----|
+| `transptest/testing_test.go:99,102` | `testServer(func(…))` の中の `client := <-await` と `client = nil` |
+| `registered_domain_test.go:105` | `t.Run(func(…))` の中の `p, err := …` |
+| `libbeat/reader/debug/debug.go:128` | 返り値のリテラルの**仮引数** `offset` への複合代入 |
+
+#### 1. guard が「free」ではなかった
+
+```rust
+/// Locals free in a `FuncLit` … — stores look unused in the enclosing
+/// function's NaiveForm SSA, but the closure reads them later
+fn objs_captured_by_func_lits(…) {
+    preorder(fl.body, |id| {
+        if info.uses.contains_key(&id.id) { out.insert(object_of(id)); }
+    });
+}
+```
+
+doc は **free**（外側で宣言され、リテラルが読むもの）と書いてあるのに、
+実装は body の中の `uses` を**全部**入れていた。リテラルの中で宣言した
+ローカルも、`x := 1; x = 2` の 2 行目で `uses` に入る —— そして
+**無駄な代入には必ず「後でもう一度出てくる」が伴う**ので、
+**リテラルのローカルは例外なく抑制されていた**。上流は `AnonFuncs` を
+`srcFuncs` に足して中を見ているので、丸ごと差分になる。
+
+直し方は doc のとおりにするだけ: リテラルごとに「そのリテラルが宣言した
+もの」（仮引数・結果・body の `defs` 全部）を先に集め、`uses` のうち
+**そこに無いもの**だけを free として入れる。入れ子も自然に通る ——
+外側リテラルのローカルを内側リテラルだけが読むなら、それは
+**内側リテラルの回**で free として入る。
+
+#### 2. 4 件目は閉じなかった —— 別の欠陥だった
+
+3 件は閉じたが `debug.go:128` が残った。最小再現を作ると
+**クロージャは関係なかった**:
+
+```go
+if len(buf) < len(pattern) {
+	offset += int64(len(buf))   // ここ
+	return false
+}
+fmt.Print(offset + 1)           // 位置は後ろ、でも到達しない
+```
+
+トップレベルの関数でも、ローカルでも、同じように出なかった。犯人は
+AST の fallback `ast_value_is_read_before_redef` —— **位置だけ**を見るので、
+`return` で終わるブロックの**外**にある読みを「後で読んでいる」と数えていた。
+
+`return` を最後に持つ**囲みブロック**があれば、そのブロックの終わりから先は
+到達しない（いちばん内側の切れ目が勝つ）。`break` / `continue` は
+ループを出るだけで**関数には残る**ので対象外、`goto` は生きたラベルに飛ぶ。
+4 形の control（break・continue・外側ブロックの return・ブロック内の読み）
+を測って、上流と一致することを確認した。
+
+```
+beats (v9.5.2)
+  前   guff=7544 golangci=7554 both=7533  P=99.9%  R=99.7%  unexpected=32
+  後   guff=7548 golangci=7554 both=7537  P=99.9%  R=99.8%  unexpected=28
+```
+
+**閉じたのは 4 件、新規 0 件。** beats の `wastedassign` は 0 になった。
+
+golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 緑。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）

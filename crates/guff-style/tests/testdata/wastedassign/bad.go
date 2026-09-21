@@ -194,3 +194,105 @@ func pointerToLiteralInit(c bool) *elem {
 	}
 	return p
 }
+
+// Inside a func literal. `srcFuncs` adds every `AnonFuncs` entry, so upstream
+// looks in here — but guff's "captured by a func literal" guard collected every
+// `uses` entry in a literal's body, which includes the literal's *own* locals:
+// a wasted store always has a later mention of the variable, so every local of
+// every literal was suppressed and nothing in a closure was ever reported.
+// beats' four remaining rows were all of this shape.
+func run(f func()) { f() }
+
+func chanInitInLit(await chan *int) {
+	run(func() {
+		c := <-await
+		c = nil
+		c = <-await
+		fmt.Print(c)
+	})
+}
+
+func errChainInLit() {
+	run(func() {
+		p, err := two()
+		fmt.Print(p)
+		p, err = two()
+		fmt.Print(p, err)
+	})
+}
+
+func two() (int, error) { return 0, nil }
+
+// A *parameter* of the literal, compound-assigned and then thrown away — beats'
+// `libbeat/reader/debug` makeNullCheck.
+func litParamCompoundAssign() func(int64, []byte) bool {
+	return func(offset int64, buf []byte) bool {
+		if len(buf) == 0 {
+			offset += int64(len(buf))
+			return false
+		}
+		return true
+	}
+}
+
+// A local of the *outer* literal, wasted there. The inner literal's own pass
+// must not claim it (it declares nothing), and the outer literal's pass must
+// not excuse it just because the body mentions it again.
+func nestedLitLocal(n int) func() int {
+	return func() int {
+		mid := 0
+		mid = n
+		mid = n * 2
+		return mid
+	}
+}
+
+// A read that cannot be reached from the store. The AST fallback is positional,
+// and a position says nothing about reachability: beats'
+// `libbeat/reader/debug` makeNullCheck writes the store inside a block that
+// ends in `return`, and the `offset` on the line *after* that block made the
+// fallback call the store live. Nothing can get there. Three spellings, because
+// the shape has nothing to do with the closure it happens to sit in.
+func nullCheckInLit(pattern []byte) func(int64, []byte) bool {
+	return func(offset int64, buf []byte) bool {
+		if len(buf) < len(pattern) {
+			offset += int64(len(buf))
+			return false
+		}
+		fmt.Print(offset + 1)
+		return true
+	}
+}
+
+func nullCheckParam(pattern []byte, offset int64, buf []byte) bool {
+	if len(buf) < len(pattern) {
+		offset += int64(len(buf))
+		return false
+	}
+	fmt.Print(offset + 1)
+	return true
+}
+
+func nullCheckLocal(buf []byte) bool {
+	var offset int64
+	if len(buf) == 0 {
+		offset += int64(len(buf))
+		return false
+	}
+	fmt.Print(offset + 1)
+	return true
+}
+
+// The `return` is in an *outer* block: everything past that block is still
+// unreachable from the store.
+func returnInOuterBlock(xs []int, c bool) int {
+	offset := 0
+	if c {
+		if len(xs) > 0 {
+			offset += 1
+		}
+		return 0
+	}
+	fmt.Print(offset)
+	return offset
+}

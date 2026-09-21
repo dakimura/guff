@@ -1,5 +1,7 @@
 package p
 
+import "fmt"
+
 func Bad(cond bool) int {
 	n := 1
 	if cond {
@@ -353,4 +355,135 @@ func PointerToLiteralInit(c bool) *Elem {
 		p = nil
 	}
 	return p
+}
+
+// Inside a func literal. `srcFuncs` adds every `AnonFuncs` entry, so upstream
+// looks in here — but guff's "captured by a func literal" guard collected every
+// `uses` entry in a literal's body, which includes the literal's *own* locals:
+// a wasted store always mentions its variable again, so every local of every
+// literal was suppressed and nothing in a closure was ever reported.
+func Run(f func()) { f() }
+
+func Two() (int, error) { return 0, nil }
+
+func ChanInitInLit(await chan *int) {
+	Run(func() {
+		c := <-await
+		c = nil
+		c = <-await
+		fmt.Print(c)
+	})
+}
+
+func ErrChainInLit() {
+	Run(func() {
+		p, err := Two()
+		fmt.Print(p)
+		p, err = Two()
+		fmt.Print(p, err)
+	})
+}
+
+// A *parameter* of the literal, compound-assigned and then thrown away — beats'
+// `libbeat/reader/debug` makeNullCheck.
+func LitParamCompoundAssign() func(int64, []byte) bool {
+	return func(offset int64, buf []byte) bool {
+		if len(buf) == 0 {
+			offset += int64(len(buf))
+			return false
+		}
+		return true
+	}
+}
+
+// A local of the *outer* literal, wasted there.
+func NestedLitLocal(n int) func() int {
+	return func() int {
+		mid := 0
+		mid = n
+		mid = n * 2
+		return mid
+	}
+}
+
+// Controls: a local that is *free* in the literal. The store looks dead in the
+// enclosing function's NaiveForm SSA because only the closure reads it — the
+// shape the capture guard exists for (traefik's `bodySize`).
+func OkFreeInLit(n int) func() int {
+	size := 0
+	size = n
+	return func() int { return size }
+}
+
+func OkFreeInGo(n int) {
+	size := 0
+	size = n
+	go func() { _ = size }()
+}
+
+func OkFreeInNestedLit(n int) func() func() int {
+	return func() func() int {
+		mid := 0
+		mid = n
+		return func() int { return mid }
+	}
+}
+
+// A read the store cannot reach. The AST fallback is positional, and a position
+// says nothing about reachability: beats' `libbeat/reader/debug` makeNullCheck
+// puts the store in a block that ends in `return`, and the `offset` on the line
+// after that block made the fallback call the store live.
+func NullCheckInLit(pattern []byte) func(int64, []byte) bool {
+	return func(offset int64, buf []byte) bool {
+		if len(buf) < len(pattern) {
+			offset += int64(len(buf))
+			return false
+		}
+		fmt.Print(offset + 1)
+		return true
+	}
+}
+
+func NullCheckParam(pattern []byte, offset int64, buf []byte) bool {
+	if len(buf) < len(pattern) {
+		offset += int64(len(buf))
+		return false
+	}
+	fmt.Print(offset + 1)
+	return true
+}
+
+// The `return` one block out still cuts the function off.
+func ReturnInOuterBlock(xs []int, c bool) int {
+	offset := 0
+	if c {
+		if len(xs) > 0 {
+			offset += 1
+		}
+		return 0
+	}
+	fmt.Print(offset)
+	return offset
+}
+
+// Controls: `break` and `continue` leave a loop but stay in the function, so
+// the read after the loop is reachable — only `return` cuts it off.
+func OkBreakThenRead(xs []int) int {
+	offset := 0
+	for _, x := range xs {
+		if x == 0 {
+			offset += 1
+			break
+		}
+	}
+	return offset
+}
+
+func OkReadInsideBeforeReturn(buf []byte) int64 {
+	var offset int64
+	if len(buf) == 0 {
+		offset += int64(len(buf))
+		return offset
+	}
+	return 0
 }

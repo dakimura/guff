@@ -233,9 +233,24 @@ fn collect_used_objs(pass: &Pass<'_>, expr: &Expr, out: &mut HashSet<ObjectId>) 
     });
 }
 
-/// Locals free in a `FuncLit` / go-routine / defer body — stores look unused in
-/// the enclosing function's NaiveForm SSA, but the closure reads them later
+/// Locals **free** in a `FuncLit` / go-routine / defer body — stores look unused
+/// in the enclosing function's NaiveForm SSA, but the closure reads them later
 /// (traefik `bodySize = …; h.ServeHTTP` with `for range bodySize` in `next`).
+///
+/// "Free" is the whole point and it used to be missing: the walk collected
+/// every `uses` entry in the literal's body, which includes the literal's *own*
+/// locals — `x := 1; x = 2` inside a closure puts `x` in `uses` at the second
+/// assignment. Since a wasted store always has a later mention of the variable,
+/// that meant every local of every func literal was suppressed and
+/// `wastedassign` reported nothing inside a closure at all. beats' four
+/// remaining rows were all of them: a `client := <-await` and its `client = nil`
+/// in a `testServer(func(…))`, a `p, err := …` in a `t.Run(func(…))`, and an
+/// `offset += …` on a *parameter* of a returned literal.
+///
+/// A variable is free in literal `L` when its declaration is not inside `L` —
+/// which covers the nesting case too: a local of an outer literal that only an
+/// inner literal reads is free in the inner one, and the inner one's own pass
+/// puts it in the set.
 fn objs_captured_by_func_lits(pass: &Pass<'_>) -> HashSet<ObjectId> {
     let mut out = HashSet::new();
     let Some(info) = pass.types_info() else {
@@ -248,14 +263,52 @@ fn objs_captured_by_func_lits(pass: &Pass<'_>) -> HashSet<ObjectId> {
         let NodeRef::FuncLit(fl) = n else {
             return;
         };
+        // Everything the literal declares: its parameters and results, and
+        // every `defs` entry anywhere in its body (nested literals included,
+        // which is what keeps an inner literal's locals out of the outer
+        // literal's free set).
+        let mut declared_inside: HashSet<ObjectId> = HashSet::new();
+        let mut note_def = |id: &guff::ast::Ident| {
+            if let Some(Some(obj)) = info.defs.get(&id.id) {
+                declared_inside.insert(*obj);
+            }
+        };
+        for field in fl
+            .ty
+            .params
+            .as_ref()
+            .map(|f| f.list.as_slice())
+            .unwrap_or_default()
+            .iter()
+            .chain(
+                fl.ty
+                    .results
+                    .as_ref()
+                    .map(|f| f.list.as_slice())
+                    .unwrap_or_default()
+                    .iter(),
+            )
+        {
+            for name in &field.names {
+                note_def(name);
+            }
+        }
+        preorder(NodeRef::BlockStmt(&fl.body), |n| {
+            if let NodeRef::Ident(id) = n {
+                note_def(id);
+            }
+            true
+        });
+
         preorder(NodeRef::BlockStmt(&fl.body), |n| {
             let NodeRef::Ident(id) = n else {
                 return true;
             };
-            // Uses of outer locals (not defs introduced inside the lit).
             if info.uses.contains_key(&id.id) {
                 if let Some(obj) = object_of(pass, id) {
-                    out.insert(obj);
+                    if !declared_inside.contains(&obj) {
+                        out.insert(obj);
+                    }
                 }
             }
             true
@@ -272,10 +325,54 @@ fn objs_captured_by_func_lits(pass: &Pass<'_>) -> HashSet<ObjectId> {
 /// Assignments that live in the sibling branch of an `if`/`else` that also
 /// contains `after_pos` are not redefinitions (caddy `stor, err = …` / `else {
 /// stor = … }` then shared use after the merge).
+/// The position past which no read can be reached from a store at `after_pos`.
+///
+/// The AST fallback below is positional, and a position says nothing about
+/// reachability. beats' `libbeat/reader/debug` makeNullCheck writes
+///
+/// ```go
+/// if idx <= 0 {
+///     offset += int64(len(buf))
+///     return false
+/// }
+/// fmt.Println(offset + int64(idx))
+/// ```
+///
+/// — the `offset` on the last line sits *after* the store, so the fallback
+/// called the store live, but nothing can get there from inside a block that
+/// ends in `return`. Any enclosing block whose last statement is a `return`
+/// placed after the store cuts the function off at that block's end, and the
+/// tightest such cut wins. Only `return` qualifies: `break` and `continue`
+/// leave a loop but stay in the function, and `goto` jumps to a live label.
+fn unreachable_use_cutoff(pass: &Pass<'_>, after_pos: u32) -> Option<u32> {
+    let mut cutoff: Option<u32> = None;
+    for file in pass.files() {
+        preorder(NodeRef::File(file), |n| {
+            let NodeRef::BlockStmt(b) = n else {
+                return true;
+            };
+            let (start, end) = (b.pos().0 as u32, b.end().0 as u32);
+            if after_pos < start || after_pos >= end {
+                return true;
+            }
+            let Some(Stmt::ReturnStmt(r)) = b.list.last() else {
+                return true;
+            };
+            if (r.return_.0 as u32) <= after_pos {
+                return true;
+            }
+            cutoff = Some(cutoff.map_or(end, |c: u32| c.min(end)));
+            true
+        });
+    }
+    cutoff
+}
+
 fn ast_value_is_read_before_redef(pass: &Pass<'_>, obj: ObjectId, after_pos: u32) -> bool {
     let Some(info) = pass.types_info() else {
         return false;
     };
+    let unreachable_after = unreachable_use_cutoff(pass, after_pos);
     let sibling_defs = sibling_branch_assign_positions(pass, obj, after_pos);
     let mut next_use: Option<u32> = None;
     let mut next_def: Option<u32> = None;
@@ -295,7 +392,7 @@ fn ast_value_is_read_before_redef(pass: &Pass<'_>, obj: ObjectId, after_pos: u32
         }
     };
     let note_use = |pos: u32, next_use: &mut Option<u32>| {
-        if pos > after_pos {
+        if pos > after_pos && !unreachable_after.is_some_and(|c| pos >= c) {
             *next_use = Some(next_use.map_or(pos, |u| u.min(pos)));
         }
     };

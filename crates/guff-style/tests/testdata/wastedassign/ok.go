@@ -207,3 +207,82 @@ func okLoopCarriedWhile(n int, out []int) []int {
 	}
 	return out
 }
+
+// A local that is *free* in a func literal: the store looks dead in the
+// enclosing function's NaiveForm SSA because only the closure reads it. This
+// is the shape the capture guard exists for (traefik's `bodySize = …` read by
+// `for range bodySize` inside `next`), and narrowing the guard to free
+// variables must keep all four arms silent.
+func okFreeInLit(n int) func() int {
+	size := 0
+	size = n
+	return func() int { return size }
+}
+
+func okFreeInGo(n int) {
+	size := 0
+	size = n
+	go func() { _ = size }()
+}
+
+func okFreeInDefer(n int) {
+	size := 0
+	size = n
+	defer func() { _ = size }()
+}
+
+// `mid` belongs to the outer literal and only the inner one reads it, so it is
+// free in the inner literal — which is the pass that must put it in the set.
+func okFreeInNestedLit(n int) func() func() int {
+	return func() func() int {
+		mid := 0
+		mid = n
+		return func() int { return mid }
+	}
+}
+
+// A literal-local that is read inside the same literal, next to an outer local
+// the literal writes: neither is wasted.
+func okLitLocalRead(n int, f func(func())) int {
+	outer := 0
+	f(func() {
+		inner := n
+		outer = inner
+	})
+	return outer
+}
+
+// `break` and `continue` leave a loop but stay in the function, so a read after
+// the loop *is* reachable — only `return` cuts the function off.
+func okBreakThenRead(xs []int) int {
+	offset := 0
+	for _, x := range xs {
+		if x == 0 {
+			offset += 1
+			break
+		}
+	}
+	return offset
+}
+
+func okContinueThenRead(xs []int) int {
+	offset := 0
+	for _, x := range xs {
+		if x == 0 {
+			offset += 1
+			continue
+		}
+		offset += 2
+	}
+	return offset
+}
+
+// The read sits inside the returning block, before the `return`.
+func okReadInsideBeforeReturn(buf []byte) int64 {
+	var offset int64
+	if len(buf) == 0 {
+		offset += int64(len(buf))
+		return offset
+	}
+	return 0
+}

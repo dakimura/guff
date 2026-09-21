@@ -10069,6 +10069,31 @@ fn wastedassign_flags_unused_local_assignments() {
             (167, "assigned to s, but reassigned without using the value".to_string()),
             (177, "assigned to m, but reassigned without using the value".to_string()),
             (189, "assigned to p, but reassigned without using the value".to_string()),
+            // Inside a func literal. `srcFuncs` adds every `AnonFuncs` entry,
+            // so upstream looks in here — but the capture guard collected every
+            // `uses` entry in a literal's body, which includes the literal's
+            // *own* locals, and a wasted store always mentions its variable
+            // again. Every local of every literal was suppressed, so nothing in
+            // a closure was reported at all; beats' four remaining wastedassign
+            // rows were all of this shape.
+            (208, "assigned to c, but reassigned without using the value".to_string()),
+            (209, "assigned to c, but reassigned without using the value".to_string()),
+            (217, "assigned to err, but reassigned without using the value".to_string()),
+            // A *parameter* of the literal (beats' `libbeat/reader/debug`).
+            (231, "assigned to offset, but never used afterwards".to_string()),
+            // A local of the outer literal, wasted there: the inner literal
+            // declares nothing, so its pass must not claim it.
+            (243, "assigned to mid, but reassigned without using the value".to_string()),
+            (244, "assigned to mid, but reassigned without using the value".to_string()),
+            // A read the store cannot reach: the block ends in `return`, so the
+            // mention of the variable on the next line is dead. The AST
+            // fallback is positional and called the store live. Three
+            // spellings, because it has nothing to do with the closure beats
+            // happens to write it in, plus the `return` one block out.
+            (259, "assigned to offset, but never used afterwards".to_string()),
+            (269, "assigned to offset, but never used afterwards".to_string()),
+            (279, "assigned to offset, but never used afterwards".to_string()),
+            (292, "assigned to offset, but never used afterwards".to_string()),
         ],
         "{got:?}"
     );
