@@ -16,6 +16,7 @@ guff-ast = { path = "../guff-ast" }
 memchr = "2"
 guff-analysis = { path = "../guff-analysis" }
 guff-constant = { path = "../guff-constant" }
+guff-gostd = { path = "../guff-gostd" }
 guff-types = { path = "../guff-types" }
 guff-ssa = { path = "../guff-ssa" }
 

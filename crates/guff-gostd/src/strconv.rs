@@ -37,6 +37,54 @@ pub fn quote(s: &str) -> String {
     quote_bytes(s.as_bytes())
 }
 
+/// Mirrors `strconv.CanBackquote`: whether `s` is a single line with no
+/// backquote, no control character other than tab, no `U+007F` and no BOM —
+/// i.e. whether `` `s` `` reads back as `s` unchanged.
+///
+/// A multibyte rune is assumed printable without consulting [`is_print`]. That
+/// is upstream's own shortcut, not an approximation of it: the only multibyte
+/// rune it rejects is the BOM, because a BOM is invisible. (Note that the order
+/// matters there — upstream takes the multibyte arm *before* its
+/// `utf8.RuneError` test, so a string holding a real `U+FFFD` can be
+/// backquoted.)
+///
+/// Upstream's remaining arm, `RuneError` at width 1, is invalid UTF-8, which a
+/// Rust `&str` cannot hold; the callers here decode from source through
+/// [`unquote`], so there is nothing to reject.
+pub fn can_backquote(s: &str) -> bool {
+    for r in s.chars() {
+        if r.len_utf8() > 1 {
+            if r == '\u{feff}' {
+                return false;
+            }
+            continue;
+        }
+        if (r < ' ' && r != '\t') || r == '`' || r == '\u{7f}' {
+            return false;
+        }
+    }
+    true
+}
+
+/// Mirrors `fmt`'s `%#q`: a backquoted string when that reads back unchanged,
+/// otherwise [`quote`].
+///
+/// `fmt.fmtQ` takes the backquote arm on `f.sharp && strconv.CanBackquote(s)`
+/// and falls through to `strconv.AppendQuote` otherwise. The verb is rare —
+/// `govet`'s `structtag` uses it for the tag it could not parse — but the
+/// difference is visible on nearly every value it is handed, because almost
+/// every struct tag can be backquoted.
+pub fn quote_sharp(s: &str) -> String {
+    if can_backquote(s) {
+        let mut buf = String::with_capacity(s.len() + 2);
+        buf.push('`');
+        buf.push_str(s);
+        buf.push('`');
+        return buf;
+    }
+    quote(s)
+}
+
 /// [`quote`] over raw bytes. A byte that does not start a valid UTF-8 sequence
 /// becomes `\xNN`, as `strconv.Quote` does for `utf8.RuneError` of width 1 —
 /// `net/url` can hand back such a string after unescaping `%FF` in a host.
@@ -738,5 +786,63 @@ mod dupword_contract_tests {
         // then does *not* re-quote. It only needs `unquote` to say no.
         assert!(unquote(r#""the the \x""#).is_err());
         assert!(unquote(r#""unterminated"#).is_err());
+    }
+}
+
+#[cfg(test)]
+mod structtag_contract_tests {
+    //! `can_backquote` / `quote_sharp` as `govet`'s `structtag` uses them.
+    //!
+    //! Measured against `go vet` on a fixture holding each shape
+    //! (`crates/guff-govet/tests/testdata/structtag/bad.go`, and
+    //! `compat/golden/cases/govet` gates the rendering end to end). Pinned here
+    //! too so a failure names the function rather than the linter.
+
+    use super::{can_backquote, quote_sharp};
+
+    #[test]
+    fn printable_single_line_text_can_be_backquoted() {
+        assert!(can_backquote("bson:_id"));
+        assert!(can_backquote("bson: _id"));
+        // A tab is the one control character a backquoted string may hold.
+        assert!(can_backquote("bson:\t_id"));
+        // A double quote needs no escape in there, and neither does a
+        // backslash: a backquoted string has no escapes at all.
+        assert!(can_backquote("bson:\"_id"));
+        assert!(can_backquote(r"bson:\_id"));
+        // Multibyte runes are assumed printable without consulting is_print.
+        assert!(can_backquote("bson:_idé"));
+        assert!(can_backquote("私"));
+        assert!(can_backquote(""));
+    }
+
+    #[test]
+    fn a_backquote_a_control_char_del_or_a_bom_cannot() {
+        assert!(!can_backquote("bson:`_id"));
+        assert!(!can_backquote("bson:\n_id"));
+        assert!(!can_backquote("bson:\r_id"));
+        assert!(!can_backquote("bson:\u{0}_id"));
+        assert!(!can_backquote("bson:\u{7f}_id"));
+        assert!(!can_backquote("bson:\u{feff}_id"));
+    }
+
+    #[test]
+    fn upstream_takes_the_multibyte_arm_before_the_rune_error_test() {
+        // A real U+FFFD is three bytes wide, so `CanBackquote` treats it as an
+        // ordinary multibyte rune and says yes. Only *invalid* UTF-8 decodes to
+        // RuneError at width 1, and a &str cannot hold that.
+        assert!(can_backquote("bson:\u{fffd}_id"));
+    }
+
+    #[test]
+    fn quote_sharp_prefers_backquotes_and_falls_back_to_quote() {
+        assert_eq!(quote_sharp("bson:_id"), "`bson:_id`");
+        assert_eq!(quote_sharp("bson:\t_id"), "`bson:\t_id`");
+        assert_eq!(quote_sharp("bson:\"_id"), "`bson:\"_id`");
+        assert_eq!(quote_sharp(""), "``");
+        // The fallback is plain `Quote`, which escapes what it must.
+        assert_eq!(quote_sharp("bson:`_id"), "\"bson:`_id\"");
+        assert_eq!(quote_sharp("bson:\n_id"), r#""bson:\n_id""#);
+        assert_eq!(quote_sharp("bson:\u{7f}_id"), r#""bson:\x7f_id""#);
     }
 }
