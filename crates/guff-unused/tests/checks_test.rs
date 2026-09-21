@@ -31,6 +31,52 @@ fn unused_honours_lint_ignore() {
     );
 }
 
+/// Function-local `type` and `const` declarations.
+///
+/// honnef's `seeScope` sees every object in every scope and `g.stmt`'s
+/// `*ast.DeclStmt` arm calls the same `g.decl` the package level uses, so a
+/// type or constant declared inside a function body is a candidate like any
+/// other — only *variables* are exempt (`LocalVariablesAreUsed`). guff's
+/// `unused` was package-level-only and reported none of these.
+///
+/// The row list is pinned in full rather than by `any(contains(…))`: the
+/// interesting half of this fixture is what stays *silent* (a declaration owned
+/// by an unused function, a blank-named type, a const group one member keeps
+/// alive, a `//lint:ignore`d one), and a spot check cannot see those.
+/// `compat/golden/cases/unused` gates the same file against golangci-lint
+/// 2.12.2.
+#[test]
+fn unused_reports_function_local_types_and_constants() {
+    let dir = support::testdata("basic");
+    let pkg = support::typecheck_pkg("example.com/unused/locals", &dir.join("locals.go"));
+    let mut messages = support::run_analyzer(analyzer(), &pkg);
+    messages.sort();
+    assert_eq!(
+        messages,
+        vec![
+            "const c is unused".to_string(),
+            "const four is unused".to_string(),
+            "const three is unused".to_string(),
+            "field unusedField is unused".to_string(),
+            "func localTypeUnused is unused".to_string(),
+            "func recv.M is unused".to_string(),
+            "type Exported is unused".to_string(),
+            "type alias is unused".to_string(),
+            "type box is unused".to_string(),
+            "type deep is unused".to_string(),
+            "type holder is unused".to_string(),
+            "type iface is unused".to_string(),
+            "type inCase is unused".to_string(),
+            "type inFunc is unused".to_string(),
+            "type inIf is unused".to_string(),
+            "type io is unused".to_string(),
+            "type leaf is unused".to_string(),
+            "type recv is unused".to_string(),
+        ],
+        "{messages:?}"
+    );
+}
+
 /// `//lint:file-ignore U1000` covers the *file* it is written in, but upstream
 /// does not stop at the file: an ignored `*types.TypeName` is marked used and
 /// then every method of the named type is too, wherever it was declared
