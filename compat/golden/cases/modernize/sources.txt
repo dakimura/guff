@@ -31,6 +31,7 @@ fmtappendf/fmtappendf.go            crates/guff-style/tests/testdata/modernize/f
 minmax/minmax.go                    crates/guff-style/tests/testdata/modernize/minmax.go
 minmaxuser/minmaxuser.go            crates/guff-style/tests/testdata/modernize/minmaxuser.go
 minmaxfloat/minmaxfloat.go          crates/guff-style/tests/testdata/modernize/minmaxfloat.go
+minmaxshadow/minmaxshadow.go        crates/guff-style/tests/testdata/modernize/minmaxshadow.go
 bloop/bloop.go                      crates/guff-style/tests/testdata/modernize/bloop.go
 errorsastype/errorsastype.go        crates/guff-style/tests/testdata/modernize/errorsastype.go
 importcomment/importcomment.go      crates/guff-style/tests/testdata/modernize/importcomment.go

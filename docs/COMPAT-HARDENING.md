@@ -34762,3 +34762,60 @@ golden 239 / fix 239 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 緑。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-21（続き 321）— `close beats`（24）: `min` を書き換えるなら、その場所で `min` が**まだ組み込みを指している**必要がある
+
+beats の modernize の guff-only 1 件:
+
+```
+x-pack/filebeat/input/awss3/s3_objects_test.go:517  minmax: if statement can be modernized using min
+```
+
+#### 1. 最小再現が通ってしまった（2 度目）
+
+その行をそのまま写した 5 形（素のまま・クロージャの中・`len()` 付き・
+`<` と `>` 両方）は**全部一致**。パッケージごと走らせると出る。
+
+差はパッケージの**別のファイル**にあった:
+
+```
+x-pack/filebeat/input/awss3/interfaces.go:136  minmax: user-defined min function is
+                                               equivalent to built-in min and can be removed
+```
+
+このパッケージは**自前の `min` を宣言している**。だから `min(a, b)` に
+書き換えたらその関数を呼ぶことになり、上流は書き換えを拒む:
+
+```go
+if !is[*types.Builtin](lookup(pass.TypesInfo, curIfStmt, sym)) {
+	return // min/max function is shadowed
+}
+```
+
+guff にはこの guard が無かった。実測で「パッケージに `func min` があると
+`min` の書き換えは全部消え、`max` は出続ける」ことを確認した。
+
+#### 2. ローカルの shadow も数える
+
+上流の testdata は `hour, min := 3600, 60` —— **ローカル変数**でも隠れる。
+なので lookup は**いちばん内側の scope**から始める（guff の
+`scope::innermost` + `lookup_parent`）。
+
+fixture は 6 形（宣言そのもの＝別の腕の finding、パッケージ level の shadow
+で沈黙する `if` と `if/else`、shadow されていない `max` 2 つ、ローカルの
+`max` で沈黙する 1 つ）。**新しい fixture を足したので `compat/fix` の
+ベースラインも撮り直した**（続き 308 と同じ）。
+
+```
+beats (v9.5.2)
+  前   guff=7556 golangci=7554 both=7547  P=99.9%  R=99.9%  unexpected=16
+  後   guff=7555 golangci=7554 both=7547  P=99.9%  R=99.9%  unexpected=15
+```
+
+**閉じたのは 1 件、新規 0 件。** beats の modernize の guff-only は 0 に
+なった。
+
+golden 239 / fix 239 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 緑。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
