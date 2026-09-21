@@ -3632,11 +3632,42 @@ fn st1016_flags_inconsistent_receiver_names() {
     let dir = support::testdata("st1016");
     let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/st1016");
     support::assert_well_typed(&pkg);
-    let messages = support::run_analyzer(st1016::analyzer(), &pkg);
-    assert_eq!(messages.len(), 2, "{messages:?}");
-    assert!(messages
-        .iter()
-        .all(|m| m.contains("same receiver name")));
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64, String)> =
+        support::run_analyzer_diagnostics(st1016::analyzer(), &pkg)
+            .into_iter()
+            .map(|d| {
+                let p = fset.position(guff::position::Pos(d.pos as i64));
+                (p.line, p.column, d.message)
+            })
+            .collect();
+    got.sort();
+    let at = |line: i64, col: i64, seen: &str| {
+        (
+            line,
+            col,
+            format!("methods on the same type should have the same receiver name (seen {seen})"),
+        )
+    };
+    // The position is `firstFn`: the first entry of `IntuitiveMethodSet`, which
+    // is ordered by `obj.Id()` and not by source position. Every row below is a
+    // method that is *not* its type's first in the file — except T1's, which is
+    // both, and which is why this used to pass while reporting source order.
+    assert_eq!(
+        got,
+        vec![
+            at(5, 13, r#"1x "self", 1x "y", 2x "x""#), // T1.Fn1, alphabetically first too
+            at(14, 15, r#"1x "bar", 1x "meow""#),      // T3.Fn2, ditto
+            at(28, 18, r#"1x "a", 1x "m", 1x "z""#),   // Ordered.Apex, written second
+            at(37, 29, r#"1x "b", 1x "c""#),           // …Apex, whose receiver is unnamed
+            at(44, 36, r#"1x "u", 1x "v""#),           // …Apex, whose receiver is `_`
+            at(52, 26, r#"1x "e", 1x "f""#),           // Zeta: `Id` puts `apex` after it
+            at(59, 26, r#"1x "m", 1x "n", 1x "o""#),   // Apex, on a pointer receiver
+        ],
+    );
+    // The eighth shape — a method set spread over two files — needs a
+    // multi-file package, which this helper does not build.
+    // `compat/golden/cases/staticcheck-st` carries it as `st1016/bad/bad_more.go`.
 }
 
 #[test]
