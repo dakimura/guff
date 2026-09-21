@@ -29,8 +29,8 @@ pub use gomodguard::analyzer_block_logrus;
 pub use gomodguard::analyzer_local_replace;
 pub use importas::analyzer as importas;
 pub use options::{
-    DenyEntry, DepguardOptions, DepguardRule, GomoddirectivesOptions, GomodguardOptions,
-    ImportasAlias, ImportasOptions, ListMode,
+    BlockedModule, DenyEntry, DepguardOptions, DepguardRule, GomoddirectivesOptions,
+    GomodguardOptions, ImportasAlias, ImportasOptions, ListMode,
 };
 
 use guff_analysis::Analyzer;

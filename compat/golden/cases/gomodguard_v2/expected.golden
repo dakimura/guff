@@ -6,4 +6,10 @@
 
 # golangci-lint: 2.12.2
 
-bad.go:3:8:gomodguard_v2::import of package `github.com/sirupsen/logrus` is blocked because the module is in the blocked modules list. use log/slog.
+bad.go:7:2:gomodguard_v2::import of package `github.com/sirupsen/logrus` is blocked because the module is in the blocked modules list. use log/slog.
+bad.go:9:2:gomodguard_v2::import of package `github.com/sirupsen/logrus` is blocked because the module is in the blocked modules list. use log/slog.
+messages.go:7:2:gomodguard_v2::import of package `example.com/bare` is blocked because the module is in the blocked modules list. 
+messages.go:8:2:gomodguard_v2::import of package `example.com/onerec` is blocked because the module is in the blocked modules list. `errors` is a recommended module. This package is deprecated, use `errors.Join` instead.
+messages.go:9:2:gomodguard_v2::import of package `example.com/threerecs` is blocked because the module is in the blocked modules list. `a`, `b` and `c` are recommended modules. Three recommendations, and a trailing dot.
+messages.go:10:2:gomodguard_v2::import of package `example.com/tworecs` is blocked because the module is in the blocked modules list. `errors` and `fmt` are recommended modules. This package is deprecated, use `fmt.Errorf` with `%!w(MISSING)` instead.
+messages.go:11:2:gomodguard_v2::import of package `example.com/verbs` is blocked because the module is in the blocked modules list. No recommendations at all, with a %!s(MISSING) and a %literal.

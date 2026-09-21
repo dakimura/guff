@@ -114,7 +114,7 @@
 | isolate-clickhouselint | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-arangolint | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-nolintlint | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
-| isolate-gomodguard_v2 | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
+| isolate-gomodguard_v2 | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-wsl_v5 | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
 | isolate-golines | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-swaggo | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
@@ -797,7 +797,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| gomodguard_v2 | 1 | 1 | 1 | 100.0% | 100.0% |
+| gomodguard_v2 | 2 | 2 | 2 | 100.0% | 100.0% |
 
 ## isolate-wsl_v5
 
