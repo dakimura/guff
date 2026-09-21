@@ -34644,3 +34644,59 @@ golden 239 / fix 239 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 緑。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-21（続き 319）— `close beats`（22）: SA9009 は**ライセンスヘッダのあるファイルを 1 つも見ていなかった**
+
+beats の staticcheck の gcl-only 最後の 1 件:
+
+```
+filebeat/input/net/manager.go:40:1  ineffectual compiler directive due to
+extraneous space: "// go:generate moq -out inputmock_test.go . Input"
+```
+
+#### 1. 最小再現が通ってしまった
+
+同じ行を書いた 8 形の repro は**全部一致**。ところが beats のパッケージを
+そのまま走らせると出ない。ファイルのバイトを見ても ASCII・LF で異常なし。
+
+違いは**ファイルの先頭**だった。SA9009 は純粋に字句的な規則（上流はコメントの
+文字列と桁しか見ない）だが、本番の parse は `PARSE_COMMENTS` 無しで、
+**先頭のコメントグループだけは残る**。guff はソース走査を
+「そのファイルにコメントが 1 つも無いとき」に限っていたので、
+
+- repro のファイル（`package p` で始まる）→ コメント 0 → 走査する → 出る
+- beats のファイル（ライセンスヘッダ）→ コメント 1 → 走査しない → **出ない**
+
+**ライセンスヘッダのあるファイルは 1 つも見ていなかった**、つまり beats も
+kubernetes も含め現実のコードのほぼ全部。`sa9009/bad.go` がこれを
+見つけられなかったのは、**その fixture の directive 自身が先頭のコメント
+グループだから**。
+
+#### 2. 直し方
+
+ソースが読めるなら**常に**ソースを走査し、AST は「ディスクに無いファイル」
+のためだけの fallback にした。ついでに 2 つ直した:
+
+- パスは `compiled_go_files[file_idx]` ではなく**名前で突き合わせ**る
+  （2 つのリストが同じ順とは限らない）。型検査器が持っているバイト列を
+  使うので読み直しも無い。
+- 行の走査を `lines()` から `split_inclusive('\n')` に変えた（CRLF で
+  オフセットがずれない）。
+
+fixture は「ヘッダの下の directive」＋上流の filter の残り 6 形
+（ブロックコメント・字下げ・空白無しの正しい形・コロンの後ろに空白 2 つ・
+コロンの後ろが大文字・`go:` だけ）。
+
+```
+beats (v9.5.2)
+  前   guff=7553 golangci=7554 both=7543  P=99.9%  R=99.9%  unexpected=21
+  後   guff=7554 golangci=7554 both=7544  P=99.9%  R=99.9%  unexpected=20
+```
+
+**閉じたのは 1 件、新規 0 件。** beats の staticcheck の gcl-only は 0 になり、
+**件数が上流と同数（7554）**になった。
+
+golden 239 / fix 239 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 緑。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）

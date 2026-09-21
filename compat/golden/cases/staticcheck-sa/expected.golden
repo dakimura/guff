@@ -419,3 +419,5 @@ sa9007/bad/bad.go:3:12:staticcheck::SA9007: this call to os.RemoveAll deletes th
 sa9008/bad/bad.go:10:20:staticcheck::SA9008: x refers to the result of a failed type assertion and is a zero value, not the value that was being type-asserted
 sa9008/bad/bad.go:23:28:staticcheck::SA9008: err refers to the result of a failed type assertion and is a zero value, not the value that was being type-asserted
 sa9009/bad/bad.go:1:1:staticcheck::SA9009: ineffectual compiler directive due to extraneous space: "//  go:noinline"
+sa9009/header/header.go:14:1:staticcheck::SA9009: ineffectual compiler directive due to extraneous space: "// go:generate under a header"
+sa9009/header/header.go:35:1:staticcheck::SA9009: ineffectual compiler directive due to extraneous space: "// go:build ignore"

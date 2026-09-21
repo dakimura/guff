@@ -230,4 +230,5 @@ sa9007/ok/ok.go                              crates/guff-staticcheck/tests/testd
 sa9008/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa9008/bad.go
 sa9008/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa9008/ok.go
 sa9009/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa9009/bad.go
+sa9009/header/header.go                      crates/guff-staticcheck/tests/testdata/sa9009/header.go
 sa9009/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa9009/ok.go
