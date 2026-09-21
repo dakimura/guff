@@ -34590,3 +34590,57 @@ golden 239 / fix 239 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 緑。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-21（続き 318）— `close beats`（21）: S1009 は「定数か」と「ゼロか」の**2 つの問い**を 1 つの `Option<bool>` に畳んでいた
+
+beats の `metricbeat/module/jolokia/jmx/config.go:210`:
+
+```go
+if (prop == nil) || (len(prop) < 3) {
+```
+
+上流は報告し、guff は黙る。括弧のせいだと思ったが、括弧を外しても
+`s == nil || len(s) < 3` が黙る —— **境界が 0 でない形が全部**落ちていた。
+
+#### 1. 上流の `isConstZero` は 2 値を返す
+
+```go
+isConstZero := func(expr ast.Expr) (isConst bool, isZero bool) {
+	_, ok := expr.(*ast.BasicLit)
+	if ok {
+		return true, code.IsIntegerLiteral(pass, expr, constant.MakeInt64(0))
+	}
+	...
+}
+```
+
+**リテラルは常に定数**で、ゼロかどうかは**別の問い** —— そして後者だけが
+「どの比較演算子なら報告するか」を決める（`x == nil || len(x) < N` は
+N != 0 で報告、`… == N` は N == 0 でだけ報告）。
+
+guff は 2 つを `Option<bool>` 1 つに畳み、`None` を「定数ではない」に使った。
+リテラル腕は `is_integer_literal(expr, 0)` が false のとき `None` に落ちるので、
+**0 以外のリテラルは演算子の表に届く前に捨てられていた**。
+
+#### 2. 既存の fixture は境界が全部 `0` だった
+
+`s1009/bad.go` の 4 形は `== 0` / `!= 0` / `> 0` / `<= 0`。欠陥はこの 4 形を
+1 つも壊さない —— 「1 形しか通さない fixture」（続き 31 以来）のちょうど裏側で、
+**テーブルの片方の列だけが空だった**。
+
+比較表を 24 行 + 型 2 + 括弧 4 + 副作用 1 の fixture にして、上流と
+突き合わせた（報告 18・沈黙 13）。単体テストは**行番号の集合**で固定
+（`any(contains(…))` ではこの欠陥は見えない）。
+
+```
+beats (v9.5.2)
+  前   guff=7552 golangci=7554 both=7542  P=99.9%  R=99.8%  unexpected=22
+  後   guff=7553 golangci=7554 both=7543  P=99.9%  R=99.9%  unexpected=21
+```
+
+**閉じたのは 1 件、新規 0 件。**
+
+golden 239 / fix 239 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 緑。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）

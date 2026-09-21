@@ -23,11 +23,22 @@ use guff_types::arena::{ObjectData, TypeData};
 
 use crate::sideeffects::may_have_side_effects;
 
+/// `isConstZero`: upstream answers **two** questions — is `k` a constant at
+/// all, and is it zero. A literal is always a constant; whether it is zero
+/// decides only which comparison operators keep the finding
+/// (`x == nil || len(x) < N` fires for N != 0, `… len(x) == N` only for N == 0).
+///
+/// `None` here means "not a constant", and the literal arm used to fall through
+/// to it for every literal that was not `0` — so `if (prop == nil) ||
+/// (len(prop) < 3)` was dropped before the operator table was ever consulted.
+/// beats' `metricbeat/module/jolokia/jmx/config.go:210` is that line, and every
+/// non-zero bound in the suite went with it.
 fn is_const_zero(pass: &Pass<'_>, expr: &Expr) -> Option<bool> {
-    if is_integer_literal(pass, expr, 0) {
-        return Some(true);
+    let expr = unparen(expr);
+    if matches!(expr, Expr::BasicLit(_)) {
+        return Some(is_integer_literal(pass, expr, 0));
     }
-    let Expr::Ident(ident) = unparen(expr) else {
+    let Expr::Ident(ident) = expr else {
         return None;
     };
     let info = pass.types_info()?;
