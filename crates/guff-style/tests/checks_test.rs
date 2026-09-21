@@ -9867,6 +9867,31 @@ fn wastedassign_flags_unused_local_assignments() {
             // `reassignedSoon`, not `notWasted`.
             (50, "assigned to x, but reassigned without using the value".to_string()),
             (54, "assigned to x, but reassigned without using the value".to_string()),
+            // The declaration above the loop. The `if`-init store at line 66 is
+            // excused (NaiveForm does not Load what the condition reads), and
+            // excusing it *by object* used to cover this one too.
+            (63, "assigned to exists, but reassigned without using the value".to_string()),
+            // A right-hand side that mentions the variable is evaluated before
+            // the store, so it is not a later read. Line 93 is the control: the
+            // same shape where the value really is read afterwards.
+            (79, "assigned to name, but never used afterwards".to_string()),
+            (85, "assigned to s, but reassigned without using the value".to_string()),
+            // Methods. `srcFuncs` is every named function in the package's AST,
+            // and a members-only list leaves every one of these out — the same
+            // blind spot `collect_src_funcs_with_methods` was written for.
+            (102, "assigned to x, but reassigned without using the value".to_string()),
+            (108, "assigned to x, but reassigned without using the value".to_string()),
+            // The beats shape: a method, whose `if`-init condition reads the
+            // variable, whose declaration above the loop is the wasted store.
+            (116, "assigned to exists, but reassigned without using the value".to_string()),
+            // Composite-literal initialisers. A struct or array literal is
+            // written into the address, so there is no store to report at all
+            // (lines 145 and 156 stay silent); a slice or map literal is built
+            // and stored, and `&elem{}` is a UnaryExpr around one, so all three
+            // of these do report.
+            (167, "assigned to s, but reassigned without using the value".to_string()),
+            (177, "assigned to m, but reassigned without using the value".to_string()),
+            (189, "assigned to p, but reassigned without using the value".to_string()),
         ],
         "{got:?}"
     );

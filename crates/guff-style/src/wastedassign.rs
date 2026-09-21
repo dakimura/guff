@@ -11,16 +11,16 @@ use guff::ast::{AssignStmt, Expr, Stmt};
 use guff::node_mask;
 use guff::walk::{expr_ref, preorder, NodeRef};
 use guff_analysis::code::object_of;
+use guff_analysis::passes::buildir::collect_src_funcs_with_methods;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Diagnostic, RunError, RunFn, Pass};
 use guff_ssa::function::Function;
-use guff_ssa::ids::{BlockId, FuncId, InstrId, PackageId};
+use guff_ssa::ids::{BlockId, InstrId};
 use guff_ssa::instr::{Alloc, InstrData};
-use guff_ssa::member::MemberData;
 use guff_ssa::mode::BuilderMode;
-use guff_ssa::program::Program;
 use guff_ssa::ssautil::build_package_for_analysis;
 use guff_ssa::value::Value;
+use guff_types::arena::TypeData;
 use guff_types::ObjectId;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -42,34 +42,6 @@ fn format_reason(reason: WastedReason, comment: &str) -> Option<String> {
     }
 }
 
-fn collect_src_funcs(prog: &Program, pkg: PackageId) -> Vec<FuncId> {
-    let mut funcs = Vec::new();
-    let ssa_pkg = prog.packages.get(pkg);
-    // Sort by member name so FxHash map order cannot reorder analyzer walks
-    // (PERF_TASKS_V2 §0-12 / §A-1).
-    let mut top: Vec<(&str, FuncId)> = ssa_pkg
-        .members
-        .iter()
-        .filter_map(|(name, m)| match m {
-            MemberData::Function(fid) => Some((name.as_str(), *fid)),
-            _ => None,
-        })
-        .collect();
-    top.sort_by(|(a, _), (b, _)| a.cmp(b));
-    for (_, fid) in top {
-        funcs.push(fid);
-        collect_anon_funcs(prog, fid, &mut funcs);
-    }
-    funcs
-}
-
-fn collect_anon_funcs(prog: &Program, fid: FuncId, out: &mut Vec<FuncId>) {
-    let anon = prog.functions.get(fid).anon_funcs.clone();
-    for child in anon {
-        out.push(child);
-        collect_anon_funcs(prog, child, out);
-    }
-}
 
 fn collect_type_switch_lines(pass: &Pass<'_>) -> HashSet<i64> {
     let mut lines = HashSet::new();
@@ -90,7 +62,26 @@ fn collect_type_switch_lines(pass: &Pass<'_>) -> HashSet<i64> {
 ///
 /// NaiveForm often keeps the Extract value in a register for the condition and
 /// never Loads the spilled local — SSA then looks like a wasted store.
-fn if_init_objs_used_in_cond(pass: &Pass<'_>) -> HashSet<ObjectId> {
+/// The stores an `if` init performs whose value its condition then reads.
+///
+/// NaiveForm does not Load a local that the condition reads through a
+/// register-lifted Extract, so `is_next_operation_to_op_is_store` calls those
+/// stores wasted and this set excuses them. go/ssa emits the Load and upstream
+/// never sees the question.
+///
+/// Positions, not objects. Keyed on the object, the set excused *every* store
+/// to that variable in the function — so in
+///
+/// ```go
+/// dir, exists := tree, false        // ← upstream reports this one
+/// for _, item := range components {
+///     if dir, exists = dir[item]; !exists { … }
+/// }
+/// ```
+///
+/// the earlier store, which has nothing to do with the `if`, went unreported
+/// too (beats `auditbeat/.../filetree.go:117`, and three more like it).
+fn if_init_cond_read_stores(pass: &Pass<'_>) -> HashSet<u32> {
     let mut out = HashSet::new();
     let Some(inspect) = pass.result_of::<inspect::InspectResult>(inspect::analyzer()) else {
         return out;
@@ -99,17 +90,17 @@ fn if_init_objs_used_in_cond(pass: &Pass<'_>) -> HashSet<ObjectId> {
         let NodeRef::IfStmt(ifs) = n else {
             return;
         };
-        let Some(init) = ifs.init.as_deref() else {
+        let Some(Stmt::AssignStmt(init)) = ifs.init.as_deref() else {
             return;
         };
-        let assigned = objs_assigned_in_stmt(pass, init);
-        if assigned.is_empty() {
-            return;
-        }
         let mut used = HashSet::new();
         collect_used_objs(pass, &ifs.cond, &mut used);
-        for obj in assigned.intersection(&used) {
-            out.insert(*obj);
+        for lhs in &init.lhs {
+            if let Expr::Ident(id) = lhs {
+                if object_of(pass, id).is_some_and(|obj| used.contains(&obj)) {
+                    out.insert(id.name_pos.0 as u32);
+                }
+            }
         }
     });
     out
@@ -288,6 +279,15 @@ fn ast_value_is_read_before_redef(pass: &Pass<'_>, obj: ObjectId, after_pos: u32
     let sibling_defs = sibling_branch_assign_positions(pass, obj, after_pos);
     let mut next_use: Option<u32> = None;
     let mut next_def: Option<u32> = None;
+    // The right-hand side of the assignment being reported is evaluated
+    // *before* its store, so a mention of the variable there is not a later
+    // read. Positions alone cannot tell: in `s = strings.TrimSpace(s)` the
+    // operand sits to the right of the store's own position, and counting it
+    // silenced every self-referencing assignment — a parameter normalised on
+    // entry and then unused (beats `libbeat/kibana/index_pattern_generator.go:39`)
+    // among them. go/ssa orders the Load before the Store and upstream never
+    // has to ask.
+    let mut own_rhs: Option<(u32, u32)> = None;
 
     let note_def = |pos: u32, next_def: &mut Option<u32>| {
         if pos > after_pos && !sibling_defs.contains(&pos) {
@@ -304,6 +304,15 @@ fn ast_value_is_read_before_redef(pass: &Pass<'_>, obj: ObjectId, after_pos: u32
         preorder(NodeRef::File(file), |n| {
             match n {
                 NodeRef::AssignStmt(a) => {
+                    if own_rhs.is_none()
+                        && a.lhs.iter().any(|e| {
+                            matches!(e, Expr::Ident(id) if id.name_pos.0 as u32 == after_pos)
+                        })
+                    {
+                        if let (Some(first), Some(last)) = (a.rhs.first(), a.rhs.last()) {
+                            own_rhs = Some((first.pos().0 as u32, last.end().0 as u32));
+                        }
+                    }
                     for lhs in &a.lhs {
                         if let Expr::Ident(id) = lhs {
                             if object_of(pass, id) == Some(obj) {
@@ -325,6 +334,9 @@ fn ast_value_is_read_before_redef(pass: &Pass<'_>, obj: ObjectId, after_pos: u32
                 NodeRef::Ident(id) => {
                     let pos = id.name_pos.0 as u32;
                     if pos <= after_pos || object_of(pass, id) != Some(obj) {
+                        return true;
+                    }
+                    if own_rhs.is_some_and(|(start, end)| pos >= start && pos < end) {
                         return true;
                     }
                     if info.defs.get(&id.id).and_then(|d| *d) == Some(obj) {
@@ -584,10 +596,73 @@ fn is_next_operation_to_op_is_store(
     WastedReason::NoUseUntilReturn
 }
 
+
+/// What go/ssa does with `x = <composite literal>`, which decides whether there
+/// is a store to report and where it sits.
+///
+/// `compLit` writes an array or struct literal *into the address* elementwise,
+/// so no `Store` exists and upstream's `opInLocals` loop never sees one. A
+/// slice or map literal is built as a value first and then stored, and that
+/// `Store` carries the literal's `Lbrace` — not the assignment's `=`.
+///
+/// Measured on 2026-09-21: `x := []int{1}` reports at the `{` in column 12,
+/// `x := map[string]int{"a": 1}` at the `{` in column 21, and `x := [3]int{…}`
+/// and `x := E{}` report nothing at all.
+enum CompositeRhs {
+    /// Written into the address: there is no `Store`.
+    NoStore,
+    /// Stored, at the literal's `Lbrace`.
+    StoredAt(u32),
+}
+
+/// The composite-literal right-hand side of the assignment whose store sits at
+/// `after`, if that is what it is.
+fn composite_lit_rhs(pass: &Pass<'_>, after: u32) -> Option<CompositeRhs> {
+    let info = pass.types_info()?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let mut found = None;
+    for file in pass.files() {
+        preorder(NodeRef::File(file), |n| {
+            if found.is_some() {
+                return false;
+            }
+            let NodeRef::AssignStmt(a) = n else {
+                return true;
+            };
+            // Only a 1:1 assignment pairs an LHS name with an RHS expression; a
+            // multi-value call has one RHS for several names.
+            if a.lhs.len() != a.rhs.len() {
+                return true;
+            }
+            let Some(i) = a.lhs.iter().position(|e| {
+                matches!(e, Expr::Ident(id) if id.name_pos.0 as u32 == after)
+            }) else {
+                return true;
+            };
+            let Expr::CompositeLit(lit) = unparen(&a.rhs[i]) else {
+                return false;
+            };
+            let Some(tav) = info.types.get(&lit.id) else {
+                return false;
+            };
+            let under = tav.typ.underlying(&artifacts.types);
+            found = Some(match artifacts.types.get(under) {
+                TypeData::Struct(_) | TypeData::Array(_) => CompositeRhs::NoStore,
+                _ => CompositeRhs::StoredAt(lit.lbrace.0 as u32),
+            });
+            false
+        });
+        if found.is_some() {
+            break;
+        }
+    }
+    found
+}
+
 fn check_func(
     func: &Function,
     type_switch_lines: &HashSet<i64>,
-    if_init_used: &HashSet<ObjectId>,
+    if_init_cond_reads: &HashSet<u32>,
     captured: &HashSet<ObjectId>,
     loop_incdec_lines: &HashSet<i64>,
     pass: &Pass<'_>,
@@ -651,12 +726,19 @@ fn check_func(
             }
             // AST fallback: NaiveForm often never Loads locals used via register-
             // lifted Extracts (if-init cond, type-assert receivers, etc.).
-            if if_init_used.contains(&obj) || ast_value_is_read_before_redef(pass, obj, after) {
+            if if_init_cond_reads.contains(&after)
+                || ast_value_is_read_before_redef(pass, obj, after)
+            {
                 continue;
             }
 
+            let report_at = match composite_lit_rhs(pass, after) {
+                Some(CompositeRhs::NoStore) => continue,
+                Some(CompositeRhs::StoredAt(lbrace)) => lbrace,
+                None => after,
+            };
             if let Some(msg) = format_reason(reason, comment) {
-                out.push((after, msg));
+                out.push((report_at, msg));
             }
         }
     }
@@ -682,17 +764,25 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     .map_err(|e| format!("wastedassign: {e}"))?;
 
     let type_switch_lines = collect_type_switch_lines(pass);
-    let if_init_used = if_init_objs_used_in_cond(pass);
+    let if_init_cond_reads = if_init_cond_read_stores(pass);
     let captured = objs_captured_by_func_lits(pass);
     let loop_incdec_lines = for_loop_var_body_incdec_lines(pass);
     let mut reports = Vec::new();
-    let src_funcs = collect_src_funcs(&built.prog, built.pkg);
+    // Upstream's `srcFuncs` is every named function in the package's AST —
+    // package-level *and* methods. Members alone leave out every method in the
+    // package, which is the blind spot `collect_src_funcs_with_methods` was
+    // written for (SA4006 once reported `x := f(); x = g(); return x` in a
+    // function and stayed silent on the identical body with a receiver on it).
+    // wastedassign carried its own members-only copy and had the same hole:
+    // beats' `(FileTree).getByComponents` is a method, so none of its stores
+    // were ever looked at.
+    let src_funcs = collect_src_funcs_with_methods(&built.prog, built.pkg);
     for fid in src_funcs {
         let func = built.prog.functions.get(fid);
         check_func(
             func,
             &type_switch_lines,
-            &if_init_used,
+            &if_init_cond_reads,
             &captured,
             &loop_incdec_lines,
             pass,
