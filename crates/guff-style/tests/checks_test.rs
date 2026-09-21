@@ -6823,6 +6823,55 @@ fn modernize_minmax_matches_the_assignment_above_the_if() {
     assert_eq!(messages.len(), 7, "{got:?}");
 }
 
+/// minmax's *other* arm: a package-level `func min`/`func max` the built-in
+/// already does.
+///
+/// Eight shapes across two packages, three findings. The silent five are a
+/// *method* named `min` (the lookup is in the package scope), a three-parameter
+/// `min3`, a body whose direction spells `max` under the name `min`, and — in
+/// the second package, because only one `min` can be declared in one — a
+/// float-parameter `min`, which `maybeNaN` refuses.
+#[test]
+fn modernize_minmax_flags_a_user_defined_min_or_max() {
+    let user = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/minmaxuser",
+        "minmaxuser.go",
+    );
+    let mut got: Vec<String> = support::run_analyzer(modernize(), &user)
+        .into_iter()
+        .filter(|m| m.starts_with("user-defined"))
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            "user-defined max function is equivalent to built-in max and can be removed"
+                .to_string(),
+            "user-defined min function is equivalent to built-in min and can be removed"
+                .to_string(),
+        ],
+    );
+
+    let float = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/minmaxfloat",
+        "minmaxfloat.go",
+    );
+    let got: Vec<String> = support::run_analyzer(modernize(), &float)
+        .into_iter()
+        .filter(|m| m.starts_with("user-defined"))
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            "user-defined max function is equivalent to built-in max and can be removed"
+                .to_string()
+        ],
+        "the float-parameter min must stay silent",
+    );
+}
+
 /// A file's own `//go:build go1.N` decides every modernize gate.
 ///
 /// Upstream runs all of them through `analyzerutil.FileUsesGoVersion`, which

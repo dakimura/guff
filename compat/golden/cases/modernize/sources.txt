@@ -28,6 +28,8 @@ ok/ok.go                            crates/guff-style/tests/testdata/modernize/o
 stringsseq/stringsseq.go            crates/guff-style/tests/testdata/modernize/stringsseq.go
 mapsloop/mapsloop.go                crates/guff-style/tests/testdata/modernize/mapsloop.go
 minmax/minmax.go                    crates/guff-style/tests/testdata/modernize/minmax.go
+minmaxuser/minmaxuser.go            crates/guff-style/tests/testdata/modernize/minmaxuser.go
+minmaxfloat/minmaxfloat.go          crates/guff-style/tests/testdata/modernize/minmaxfloat.go
 bloop/bloop.go                      crates/guff-style/tests/testdata/modernize/bloop.go
 errorsastype/errorsastype.go        crates/guff-style/tests/testdata/modernize/errorsastype.go
 importcomment/importcomment.go      crates/guff-style/tests/testdata/modernize/importcomment.go

@@ -33743,3 +33743,66 @@ golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 3,629 件緑。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-21（続き 307）— `close beats`（11）。`minmax` には**もう 1 本の腕**があった —— 組み込みと同じことをする `func min` / `func max` の宣言そのもの
+
+beats に残っていた `modernize` の小さいルールのうち、`minmax` の 3 件は
+guff が持っている腕（`if/else` → `min`/`max`）とは**別の文言**だった:
+
+```
+minmax: user-defined min function is equivalent to built-in min and can be removed
+```
+
+`minmax.go` の `Analyzer` は 2 つの関数を呼ぶ。guff は 1 つ目しか移植して
+いなかった。
+
+#### 1. ルール
+
+```go
+for _, funcName := range []string{"min", "max"} {
+    if fn, ok := pass.Pkg.Scope().Lookup(funcName).(*types.Func); ok {
+```
+
+**パッケージスコープの lookup** なので、`min` という名前のメソッドも
+ローカルも対象外。そのうえで:
+
+- 引数ちょうど 2 つ（*"only the most common case"*）、結果 1 つ
+- どちらの引数も `maybeNaN` でない（float は `min(NaN, x)` が組み込みと
+  食い違うので除外）
+- 本体が 2 形のどちらか: `if/else` 1 つ、または `if` のあと `return`
+- その `if` の 2 つの結果が**比較の被演算子そのもの**で（順不同）、
+  向きが関数名を綴ること
+
+最後の条件が `checkMinMaxPattern` で、guff の `if/else` 腕と**同じ
+`isInequality` / `EqualSyntax` の組み合わせ**。既にある道具でそのまま書けた。
+
+#### 2. fixture が 2 つ要る
+
+1 つのパッケージに `min` は 1 つしか宣言できないので、NaN の除外を測るには
+**別のパッケージ**が要る。`minmaxuser.go`（int の `min` と int64 の `max`、
+それにメソッド・3 引数・向きの違う本体の 3 つの沈黙）と
+`minmaxfloat.go`（float の `min` は沈黙、被演算子を逆順に返す `max` は報告）
+に分けた。8 形で 3 件。
+
+#### 3. 実測
+
+```
+beats (v9.5.2)
+  前   guff=7487 golangci=7554 both=7473  P=99.8%  R=98.9%  unexpected=95
+  後   guff=7490 golangci=7554 both=7476  P=99.8%  R=99.0%  unexpected=92
+  modernize  前 guff=4273 gcl=4332 both=4272  P=100.0% R=98.6%
+             後 guff=4276 gcl=4332 both=4275  P=100.0% R=98.7%
+```
+
+**閉じたのは 3 件、新規 0 件。** golden の regen は**消えたキー 0 /
+増えたキー 3**、fix tier は再録なしで通った（上流も `--fix` でこの関数を
+消さない —— 呼ばれている関数を消せばビルドが壊れるため）。
+
+残る modernize の gcl-only 57 は `newexpr` 42（続き 298 の外部モジュール分）
+と小さいルール 15（`waitgroupgo` 5 / `stringscut` 3 / `slicescontains` 2 /
+`rangeint` 2 / `fmtappendf` 2 / `stringsbuilder` 1）。
+
+golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 3,630 件緑。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
