@@ -93,7 +93,7 @@ use guff_types::api_predicates::{api_identical, api_implements};
 use guff_types::arena::{ObjectData, TypeData};
 use guff_types::basic::BasicKind;
 use guff_types::map::{map_elem, map_key};
-use guff_types::named::named_obj;
+use guff_types::named::{named_obj, named_type_args};
 use guff_types::object::var::VarKind;
 use guff_types::pointer::pointer_elem;
 use guff_types::predicates::{is_float, is_integer, is_interface, is_string};
@@ -3346,15 +3346,29 @@ fn format_type(pass: &Pass<'_>, typ: TypeId) -> Option<String> {
     ))
 }
 
+/// Port of `modernize.isComplicatedType`: would spelling this type out
+/// duplicate an unnamed struct, interface or signature?
+///
+/// The order of the arms is the whole rule. Upstream tests
+/// `typesinternal.NamedOrAlias` *first*, so a named type or an alias answers
+/// "no" without anyone looking at what it stands for — and `any` is an alias.
+/// An earlier revision unaliased up front, which turned `any` into an unnamed
+/// `interface{}` and made `map[string]any` complicated. beats writes
+/// `reflect.TypeOf(map[string]any(nil))` and upstream rewrites it.
+///
+/// The `NamedOrAlias` arm is not a dead end: upstream descends into the type
+/// arguments, so `List[struct{}]` is complicated even though `List` is named.
 fn is_complicated_type(pass: &Pass<'_>, typ: TypeId) -> bool {
     let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
         return true;
     };
-    let typ = unalias_readonly(&artifacts.types, typ);
     match artifacts.types.get(typ) {
-        TypeData::Named(_) | TypeData::Alias(_) | TypeData::Basic(_) | TypeData::TypeParam(_) => {
-            false
-        }
+        TypeData::Named(_) => named_type_args(&artifacts.types, typ)
+            .is_some_and(|args| args.list().iter().any(|&a| is_complicated_type(pass, a))),
+        TypeData::Alias(a) => a
+            .type_args()
+            .is_some_and(|args| args.list().iter().any(|&a| is_complicated_type(pass, a))),
+        TypeData::Basic(_) | TypeData::TypeParam(_) => false,
         TypeData::Pointer(p) => is_complicated_type(pass, p.elem()),
         TypeData::Slice(s) => is_complicated_type(pass, s.elem()),
         TypeData::Array(a) => is_complicated_type(pass, a.elem()),
@@ -3362,50 +3376,99 @@ fn is_complicated_type(pass: &Pass<'_>, typ: TypeId) -> bool {
         TypeData::Map(m) => {
             is_complicated_type(pass, m.key()) || is_complicated_type(pass, m.elem())
         }
-        TypeData::Struct(_) | TypeData::Interface(_) | TypeData::Signature(_) => true,
+        // Struct, Interface and Signature are the point of the predicate;
+        // everything else (Union, Tuple, …) upstream treats as complicated too.
         _ => true,
     }
 }
 
+/// Port of `typesinternal.NoEffects`, negated.
+///
+/// Upstream walks the whole expression with `ast.Inspect` and flips a flag, so
+/// the shapes below are not "this node is safe" — they are "this node adds no
+/// effect of its own", and the walk keeps going into its children. An earlier
+/// revision matched only the outermost node and answered "no effects" for
+/// `hold().s` and `holder{s: effectful()}`, whose effects are one level down.
+///
+/// The other half of the same defect was a list that was too short. Upstream
+/// accepts `BinaryExpr`, `SliceExpr`, `TypeAssertExpr` and `IndexListExpr`, and
+/// — through `CallsPureBuiltin` — a call of `len`, `cap`, `complex`, `imag`,
+/// `real`, `make`, `new`, `max` or `min`. The last one is why
+/// `reflect.TypeOf(*new(string))` is a diagnostic: `*new(T)` is upstream's own
+/// spelling for a zero value, and beats' cassandra marshaller writes eleven of
+/// them in a row.
+///
+/// Type syntax and a `FuncLit` have no effects *and* prune the descent, which
+/// matters: a `func() { launchMissiles() }` literal is a value, not a call.
 fn expr_has_effects(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let any = |list: &[Expr]| list.iter().any(|e| expr_has_effects(pass, e));
+    let opt = |e: &Option<Box<Expr>>| e.as_deref().is_some_and(|e| expr_has_effects(pass, e));
     match expr {
-        Expr::Ident(_) | Expr::BasicLit(_) | Expr::SelectorExpr(_) | Expr::CompositeLit(_) => false,
+        Expr::Ident(_) | Expr::BasicLit(_) => false,
+        Expr::Ellipsis(e) => opt(&e.elt),
         Expr::ParenExpr(p) => expr_has_effects(pass, &p.x),
-        Expr::UnaryExpr(u) => {
-            // Channel receive (`<-ch`) has side effects.
-            if u.op == Token::ARROW {
-                return true;
-            }
-            expr_has_effects(pass, &u.x)
-        }
-        Expr::StarExpr(s) => expr_has_effects(pass, &s.x),
+        Expr::SelectorExpr(sel) => expr_has_effects(pass, &sel.x),
         Expr::IndexExpr(ix) => expr_has_effects(pass, &ix.x) || expr_has_effects(pass, &ix.index),
+        Expr::IndexListExpr(ix) => expr_has_effects(pass, &ix.x) || any(&ix.indices),
+        Expr::SliceExpr(sl) => {
+            expr_has_effects(pass, &sl.x) || opt(&sl.low) || opt(&sl.high) || opt(&sl.max)
+        }
+        Expr::TypeAssertExpr(ta) => expr_has_effects(pass, &ta.x) || opt(&ta.ty),
+        Expr::StarExpr(st) => expr_has_effects(pass, &st.x),
+        Expr::BinaryExpr(b) => expr_has_effects(pass, &b.x) || expr_has_effects(pass, &b.y),
+        Expr::KeyValueExpr(kv) => {
+            expr_has_effects(pass, &kv.key) || expr_has_effects(pass, &kv.value)
+        }
+        Expr::CompositeLit(c) => opt(&c.ty) || any(&c.elts),
+        // Channel receive (`<-ch`) has effects.
+        Expr::UnaryExpr(u) => u.op == Token::ARROW || expr_has_effects(pass, &u.x),
         Expr::CallExpr(call) => {
-            // Type conversion T(x) is effect-free if x is.
-            let info = pass.types_info();
-            let is_conv = info
+            let is_conversion = pass
+                .types_info()
                 .and_then(|i| i.types.get(&call.fun.id()))
                 .is_some_and(|tav| tav.mode == OperandMode::TypeExpr);
-            if is_conv && call.args.len() == 1 {
-                return expr_has_effects(pass, &call.args[0]);
+            if !is_conversion && !calls_pure_builtin(pass, call) {
+                return true;
             }
-            true
+            // The call itself is pure; its operands still might not be.
+            expr_has_effects(pass, &call.fun) || any(&call.args)
         }
-        _ => true,
+        // Type syntax: no effects, and the descent stops here.
+        Expr::ArrayType(_)
+        | Expr::StructType(_)
+        | Expr::FuncType(_)
+        | Expr::InterfaceType(_)
+        | Expr::MapType(_)
+        | Expr::ChanType(_) => false,
+        // A FuncLit is a value; upstream does not descend into its body.
+        Expr::FuncLit(_) => false,
+        Expr::BadExpr(_) => true,
     }
 }
 
-fn is_nil_typed_conversion(pass: &Pass<'_>, expr: &Expr) -> bool {
-    let Expr::CallExpr(call) = expr else {
+/// `typesinternal.CallsPureBuiltin`: a built-in that is a pure computation over
+/// its operands. Not `append`, `clear`, `close`, `copy`, `delete`, `panic`,
+/// `print`, `println` or `recover`.
+fn calls_pure_builtin(pass: &Pass<'_>, call: &CallExpr) -> bool {
+    let Expr::Ident(id) = unparen_expr(&call.fun) else {
         return false;
     };
-    if call.args.len() != 1 || !code::is_nil(pass, &call.args[0]) {
+    let (Some(info), Some(artifacts)) = (pass.types_info(), pass.pkg().type_artifacts.as_ref())
+    else {
         return false;
-    }
-    pass.types_info()
-        .and_then(|i| i.types.get(&call.fun.id()))
-        .is_some_and(|tav| tav.mode == OperandMode::TypeExpr)
+    };
+    let Some(obj) = info.uses.get(&id.id).copied() else {
+        return false;
+    };
+    let ObjectData::Builtin(b) = artifacts.objects.get(obj) else {
+        return false;
+    };
+    matches!(
+        b.name(),
+        "len" | "cap" | "complex" | "imag" | "real" | "make" | "new" | "max" | "min"
+    )
 }
+
 
 /// Like [`is_named_pkg_type`] but does **not** unwrap pointers — needed so
 /// `*reflect.Value` is not treated as `reflect.Value` (upstream leaves those alone).
@@ -3599,18 +3662,39 @@ fn sole_var_decl_span(file: &File, def_id: u32) -> Option<(u32, u32)> {
     found
 }
 
+/// Upstream declines the rewrite when spelling the type out is "too long":
+/// more than three times the operand's own length, and at least 16 characters
+/// (so a 3x blow-up of something very short is still worth doing).
+///
+/// Both arms need it. The `.Elem()` arm did not have it, which is why guff
+/// reported `reflect.TypeOf(resp).Elem()` in beats' awss3 input where upstream
+/// is silent: the operand is four characters and the element's type name is
+/// eighteen.
+fn too_long_to_spell(tstr: &str, operand: &Expr) -> bool {
+    let old_len = (operand.end().0 - operand.pos().0).max(1) as usize;
+    tstr.len() >= 16 && tstr.len() > 3 * old_len
+}
+
 fn check_reflecttypefor(
     pass: &Pass<'_>,
     file: &File,
     call: &CallExpr,
+    claimed: &HashSet<u32>,
     pending: &mut Vec<Diagnostic>,
 ) {
     if !code::is_call_to(pass, call, "reflect.TypeOf") || call.args.len() != 1 {
         return;
     }
-    // Skip `TypeOf((*T)(nil))` / `TypeOf([]T(nil))` — usually paired with `.Elem()`
-    // (handled by `check_reflecttypefor_elem`). Reporting both would duplicate.
-    if is_nil_typed_conversion(pass, &call.args[0]) {
+    // Upstream is one loop over `reflect.TypeOf` calls, with `.Elem()` handled
+    // as a branch inside it; this port is two functions over the same nodes, so
+    // the `.Elem()` one claims its inner call and this one steps aside. The
+    // walk is preorder, so the enclosing `.Elem()` call has already been seen.
+    //
+    // An earlier revision stepped aside for `TypeOf((*T)(nil))` instead, on the
+    // theory that such an argument is "usually paired with `.Elem()`". When it
+    // is not — `reflect.TypeOf((*Short)(nil))` standing alone — upstream reports
+    // it as `TypeFor[*Short]`, and guff said nothing.
+    if claimed.contains(&call.id) {
         return;
     }
     let pos = call.fun.pos().0 as u32;
@@ -3651,11 +3735,8 @@ fn check_reflecttypefor(
     let Some(tstr) = format_type(pass, arg_ty) else {
         return;
     };
-    if tstr.len() >= 16 {
-        let old_len = (call.args[0].end().0 - call.args[0].pos().0).max(1) as usize;
-        if tstr.len() > 3 * old_len {
-            return;
-        }
+    if too_long_to_spell(&tstr, &call.args[0]) {
+        return;
     }
     let Expr::SelectorExpr(sel) = call.fun.as_ref() else {
         return; // e.g. dot-import
@@ -3692,7 +3773,12 @@ fn check_reflecttypefor(
     });
 }
 
-fn check_reflecttypefor_elem(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagnostic>) {
+fn check_reflecttypefor_elem(
+    pass: &Pass<'_>,
+    call: &CallExpr,
+    claimed: &mut HashSet<u32>,
+    pending: &mut Vec<Diagnostic>,
+) {
     // Match reflect.TypeOf(expr).Elem()
     let Expr::SelectorExpr(sel) = call.fun.as_ref() else {
         return;
@@ -3706,6 +3792,11 @@ fn check_reflecttypefor_elem(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec
     if !code::is_call_to(pass, typeof_call, "reflect.TypeOf") || typeof_call.args.len() != 1 {
         return;
     }
+    // Claimed whether or not this arm ends up reporting: upstream decides both
+    // answers in one pass over the same call, so when the `.Elem()` branch
+    // declines (an interface element, a type too long to spell) the plain arm
+    // must not step in behind it.
+    claimed.insert(typeof_call.id);
     let pos = typeof_call.fun.pos().0 as u32;
     if !go_at_least(pass, pos, "go1.22") {
         return;
@@ -3734,6 +3825,9 @@ fn check_reflecttypefor_elem(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec
     let Some(tstr) = format_type(pass, elem) else {
         return;
     };
+    if too_long_to_spell(&tstr, &typeof_call.args[0]) {
+        return;
+    }
     let Expr::SelectorExpr(typeof_sel) = typeof_call.fun.as_ref() else {
         return;
     };
@@ -7039,6 +7133,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .unwrap_or_default();
 
     let mut pending = Vec::new();
+    // `reflect.TypeOf` calls the `.Elem()` arm has already answered for.
+    let mut reflect_elem_claimed: HashSet<u32> = HashSet::new();
     if enabled(&options, "newexpr") {
         let cands = collect_newexpr_decls(pass);
         export_newexpr_decls(pass, cands, &mut pending);
@@ -7197,8 +7293,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         let _before = pending.len();
                         // Prefer Elem() special-case; plain TypeOf is handled when
                         // this call is not itself the X of a `.Elem()` selector.
-                        check_reflecttypefor_elem(pass, c, &mut pending);
-                        check_reflecttypefor(pass, file, c, &mut pending);
+                        check_reflecttypefor_elem(pass, c, &mut reflect_elem_claimed, &mut pending);
+                        check_reflecttypefor(pass, file, c, &reflect_elem_claimed, &mut pending);
                         stamp_category(&mut pending, _before, "reflecttypefor");
                     }
                     if enabled(&options, "unsafefuncs") {

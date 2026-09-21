@@ -33278,3 +33278,112 @@ golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 3,627 件緑。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-21（続き 302）— `close beats`（6）。`reflecttypefor` の 17 件。`NoEffects` は**木を歩く**述語で、`*new(T)` は上流にとって純粋。そして `any` は**エイリアス**なので unalias してはいけない
+
+beats に残っていた `modernize:reflecttypefor` は gcl-only 16・guff-only 1。
+14 形 + 4 形 + 6 形を測って、**4 つの別々の欠陥**が出た。
+
+#### 1. `NoEffects` は最外ノードだけを見る述語ではない
+
+上流は `typesinternal.NoEffects` を `ast.Inspect` で**木全体**に掛けてフラグを
+倒す。guff の `expr_has_effects` は最外ノードを 1 つ見て答えていたので、
+
+```go
+reflect.TypeOf(hold().s)              // selector の下に呼び出し
+reflect.TypeOf(holder{s: effectful()}) // 複合リテラルの下に呼び出し
+```
+
+の 2 形を「副作用なし」と答えて**過剰報告**していた。
+
+#### 2. 受け付ける形が足りない（こちらは取りこぼし）
+
+上流の一覧には `BinaryExpr` / `SliceExpr` / `TypeAssertExpr` /
+`IndexListExpr` があり、さらに `CallsPureBuiltin` で
+**`len` `cap` `complex` `imag` `real` `make` `new` `max` `min`** の呼び出しを
+通す（`append` `clear` `close` `copy` `delete` `panic` `print` `println`
+`recover` は通さない）。
+
+最後の `new` が効く。`*new(T)` は上流自身のゼロ値の書き方で、beats の
+cassandra マーシャラは**これを 11 個並べている**:
+
+```go
+case TypeVarchar, TypeASCII, TypeInet, TypeText:
+    return reflect.TypeOf(*new(string))
+case TypeBigInt, TypeCounter:
+    return reflect.TypeOf(*new(int64))
+…
+```
+
+`FuncLit` と型構文は「副作用なし、かつ**降りない**」—— `func() { launch() }`
+は値であって呼び出しではない。
+
+#### 3. `.Elem()` の腕に長さ規則が無かった
+
+```go
+if newLen >= 16 && newLen > 3*oldLen { continue }
+```
+
+`reflect.TypeOf(resp).Elem()`（beats awss3）はオペランドが 4 文字、要素の型名が
+18 文字なので**上流は黙る**。guff の平の腕にはこの規則があり、`.Elem()` の腕には
+無かった。共有のヘルパに切り出した。
+
+#### 4. `any` は**エイリアス**
+
+`isComplicatedType` は **`NamedOrAlias` を最初に**見る。だから名前付き型と
+エイリアスは「中身を見ずに」complicated ではない、と答える —— そして `any` は
+エイリアス。guff は先頭で `unalias_readonly` していたので `any` が無名の
+`interface{}` になり、`map[string]any` が complicated 扱いになっていた。
+beats は `reflect.TypeOf(map[string]any(nil))` と書いていて、上流は書き換える。
+
+ついでに、`NamedOrAlias` の腕は行き止まりではなく**型引数に降りる**ので
+`List[struct{…}]` は complicated。6 形測って確認した
+（`List[int]` と `List[Expr]` は出る、`List[struct{…}]` と
+`List[interface{…}]` は黙る。`map[string]Expr` は complicated ではないが
+**長さ規則**で黙る —— 16 文字ちょうど）。
+
+#### 5. `(*T)(nil)` を「`.Elem()` と対で使われるはず」で捨てていた
+
+上流は `reflect.TypeOf` の呼び出しを回す**1 つのループ**で、`.Elem()` は
+その中の分岐。guff は 2 つの関数なので重複を避ける必要があり、
+「引数が `(*T)(nil)` なら平の腕は降りる」という近似を置いていた。
+`reflect.TypeOf((*Short)(nil))` が**単独で**書かれたとき、上流は
+`TypeFor[*Short]` と言い、guff は何も言わない。
+
+`.Elem()` の腕が内側の呼び出しを**id で claim** して、平の腕はそれを見る形に
+変えた。走査は preorder なので外側の `.Elem()` が先に来る。claim は
+「報告したかどうか」ではなく「見たかどうか」で置く —— `.Elem()` の腕が
+（要素が interface、型名が長すぎる、で）降りたときに平の腕が代わりに出ては
+いけない。
+
+#### 6. fixture は 3 形しか無かった
+
+`crates/guff-style/tests/testdata/modernize/reflecttypefor.go` は
+変数 1 形・`.Elem()` 1 形・interface 引数 1 形の 3 行で、単体テストは
+`hits.len() == 2`。**4 つの欠陥が全部この 2 という数字の下を通っていた。**
+測った 24 形のうち fixture に載るものを全部足して、golden を regen
+（消えたキー 0 / 増えたキー 17）、`compat/fix/expected/modernize.diff` も
+再録（削除行 0 の純追加＝上流の `--fix` と 1 バイトも違わない）。
+単体テストは `(行, 列)` の 14 行を丸ごと固定し、黙るべき行もコメントで
+名前を付けた。
+
+`expr_has_effects` は `slicesdelete` も使っている（上流でも同じ
+`NoEffects`）。golden / fix / isolate / `--oss --tier pr` は全部緑のまま。
+
+#### 7. 実測
+
+```
+beats (v9.5.2)
+  前   guff=7467 golangci=7554 both=7447  P=99.7%  R=98.6%  unexpected=127
+  後   guff=7482 golangci=7554 both=7463  P=99.7%  R=98.8%  unexpected=110
+  modernize  前 guff=4258 gcl=4332 both=4256  P=100.0% R=98.2%
+             後 guff=4273 gcl=4332 both=4272  P=100.0% R=98.6%
+```
+
+guff-only 20 → 19、gcl-only 107 → 91。**閉じたのは 17 件、新規 0 件。**
+`reflecttypefor` は beats から消えた。
+
+golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 3,627 件緑。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）

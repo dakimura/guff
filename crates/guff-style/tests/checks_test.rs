@@ -6947,6 +6947,13 @@ fn modernize_flags_slicesbackward() {
     );
 }
 
+/// Every `reflecttypefor` call site in the fixture, by line.
+///
+/// The message carries no operand, so counting it is the only way to tell the
+/// shapes apart — and the count alone is why the old assertion (`hits.len() ==
+/// 2`) survived three separate defects: `NoEffects` matched only the outermost
+/// node and knew nothing of the pure builtins, and the `.Elem()` arm had no
+/// length rule.
 #[test]
 fn modernize_flags_reflecttypefor() {
     let pkg = support::typecheck_fixture(
@@ -6954,13 +6961,42 @@ fn modernize_flags_reflecttypefor() {
         "example.com/modernize/reflecttypefor",
         "reflecttypefor.go",
     );
-    let messages = support::run_analyzer(modernize(), &pkg);
-    let hits: Vec<_> = messages.iter().filter(|m| m.contains("TypeFor")).collect();
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64)> = support::run_analyzer_diagnostics(modernize(), &pkg)
+        .into_iter()
+        .filter(|d| d.message.contains("TypeFor"))
+        .map(|d| {
+            let p = fset.position(guff::position::Pos(d.pos as i64));
+            (p.line, p.column)
+        })
+        .collect();
+    got.sort();
     assert_eq!(
-        hits.len(),
-        2,
-        "expected 2 TypeFor hits (concrete + Elem; interface arg skipped), got {} {messages:?}",
-        hits.len()
+        got,
+        vec![
+            (13, 9), // a plain variable
+            (17, 9), // TypeOf((*T)(nil)).Elem()
+            (38, 3), // *new(string) — `new` is a pure builtin
+            (39, 3), // *new(int64)
+            (40, 3), // *new([]byte)
+            (49, 3), // len(s)
+            (50, 3), // make([]int, 3)
+            (51, 3), // min(1, 2)
+            (58, 3), // a + b
+            (59, 3), // s[1:2]
+            (60, 3), // x.(MyStruct)
+            (61, 3), // m[k]
+            (80, 3),  // TypeOf(q).Elem() — "MyStruct" is short enough to spell
+            (86, 9),  // TypeOf((*T)(nil)) with no .Elem() after it
+            (97, 3),  // map[string]any(nil) — `any` is an alias, not an unnamed interface
+            (98, 3),  // []int(nil)
+            (99, 3),  // map[string]int(nil)
+            (112, 3), // List[int]
+            (114, 3), // List[Expr] — a *named* interface type argument
+        ],
+        "lines 22 (interface), 69-71 (effects one level down), 79 (element type \
+         too long) and 113/115 (a List of an unnamed struct, of an unnamed \
+         interface) must stay silent",
     );
 }
 

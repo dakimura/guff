@@ -156,6 +156,92 @@
  }
  
  // Interface-typed args are dynamic; must not suggest TypeFor.
+@@ -35,9 +34,9 @@
+ // writes eleven of these in a row.
+ func starNew() []reflect.Type {
+ 	return []reflect.Type{
+-		reflect.TypeOf(*new(string)),
+-		reflect.TypeOf(*new(int64)),
+-		reflect.TypeOf(*new([]byte)),
++		reflect.TypeFor[string](),
++		reflect.TypeFor[int64](),
++		reflect.TypeFor[[]byte](),
+ 	}
+ }
+ 
+@@ -46,19 +45,19 @@
+ // println or recover.
+ func pureBuiltins(s []int) []reflect.Type {
+ 	return []reflect.Type{
+-		reflect.TypeOf(len(s)),
+-		reflect.TypeOf(make([]int, 3)),
+-		reflect.TypeOf(min(1, 2)),
++		reflect.TypeFor[int](),
++		reflect.TypeFor[[]int](),
++		reflect.TypeFor[int](),
+ 	}
+ }
+ 
+ // Operand shapes `NoEffects` accepts that an outermost-node-only check missed.
+ func operandShapes(a, b int, s []int, x any, m map[string]int, k string) []reflect.Type {
+ 	return []reflect.Type{
+-		reflect.TypeOf(a + b),
+-		reflect.TypeOf(s[1:2]),
+-		reflect.TypeOf(x.(MyStruct)),
+-		reflect.TypeOf(m[k]),
++		reflect.TypeFor[int](),
++		reflect.TypeFor[[]int](),
++		reflect.TypeFor[MyStruct](),
++		reflect.TypeFor[int](),
+ 	}
+ }
+ 
+@@ -77,13 +76,13 @@
+ func elemTooLong(p *AVeryLongTypeNameIndeed, q *MyStruct) []reflect.Type {
+ 	return []reflect.Type{
+ 		reflect.TypeOf(p).Elem(),
+-		reflect.TypeOf(q).Elem(),
++		reflect.TypeFor[MyStruct](),
+ 	}
+ }
+ 
+ // `TypeOf((*T)(nil))` standing alone, with no `.Elem()` after it.
+ func nilConversionWithoutElem() reflect.Type {
+-	return reflect.TypeOf((*MyStruct)(nil))
++	return reflect.TypeFor[*MyStruct]()
+ }
+ 
+ type List[T any] struct{ items []T }
+@@ -94,9 +93,9 @@
+ // is not "complicated" the way an unnamed `interface{}` would be.
+ func nilConversions() []reflect.Type {
+ 	return []reflect.Type{
+-		reflect.TypeOf(map[string]any(nil)),
+-		reflect.TypeOf([]int(nil)),
+-		reflect.TypeOf(map[string]int(nil)),
++		reflect.TypeFor[map[string]any](),
++		reflect.TypeFor[[]int](),
++		reflect.TypeFor[map[string]int](),
+ 	}
+ }
+ 
+@@ -104,14 +103,12 @@
+ // arguments, so a named generic instantiated with an unnamed struct or an
+ // unnamed interface is still complicated.
+ func generics() []reflect.Type {
+-	var a List[int]
+ 	var b List[struct{ N int }]
+-	var c List[Expr]
+ 	var d List[interface{ Bar() }]
+ 	return []reflect.Type{
+-		reflect.TypeOf(a),
++		reflect.TypeFor[List[int]](),
+ 		reflect.TypeOf(b),
+-		reflect.TypeOf(c),
++		reflect.TypeFor[List[Expr]](),
+ 		reflect.TypeOf(d),
+ 	}
+ }
 --- a/slicesbackward/slicesbackward.go
 +++ b/slicesbackward/slicesbackward.go
 @@ -2,10 +2,12 @@
