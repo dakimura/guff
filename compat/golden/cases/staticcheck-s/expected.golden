@@ -78,6 +78,24 @@ s1009/bad/bad.go:13:2:staticcheck::SA9003: empty branch
 s1009/bad/bad.go:13:5:staticcheck::S1009: should omit nil check; len() for nil channels is defined as zero
 s1009/ok/ok.go:6:2:staticcheck::SA9003: empty branch
 s1009/ok/ok.go:8:2:staticcheck::SA9003: empty branch
+s1009/table/table.go:22:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/table/table.go:24:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/table/table.go:26:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/table/table.go:27:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/table/table.go:28:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/table/table.go:30:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/table/table.go:36:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/table/table.go:39:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/table/table.go:40:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/table/table.go:41:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/table/table.go:42:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/table/table.go:44:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/table/table.go:53:3:staticcheck::S1009: should omit nil check; len() for nil maps is defined as zero
+s1009/table/table.go:54:3:staticcheck::S1009: should omit nil check; len() for nil channels is defined as zero
+s1009/table/table.go:63:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/table/table.go:64:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/table/table.go:65:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/table/table.go:66:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
 s1010/bad/bad.go:3:36:staticcheck::S1010: should omit second index in slice, s[a:len(s)] is identical to s[a:]
 s1011/bad/bad.go:16:2:staticcheck::S1011: should replace loop with dst = append(dst, src...)
 s1011/bad/bad.go:23:2:staticcheck::S1011: should replace loop with h.items = append(h.items, src...)

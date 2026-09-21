@@ -32,6 +32,7 @@ s1007/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1007/ok.go
 s1008/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1008/bad.go
 s1008/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1008/ok.go
 s1009/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1009/bad.go
+s1009/table/table.go  crates/guff-staticcheck/tests/testdata/s1009/table.go
 s1009/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1009/ok.go
 s1010/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1010/bad.go
 s1010/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1010/ok.go

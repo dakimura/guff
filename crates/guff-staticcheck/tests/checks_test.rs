@@ -295,6 +295,40 @@ fn s1009_flags_redundant_nil_checks() {
     assert!(messages.iter().any(|m| m.contains("nil channels")));
 }
 
+/// The whole comparison table, with the bound pinned by *line* rather than by
+/// `any(contains(…))`.
+///
+/// Upstream's `isConstZero` answers two questions — is the bound a constant,
+/// and is it zero — and only the second picks which operator keeps the
+/// finding. guff's port folded both into `Option<bool>` where `None` meant
+/// "not a constant", so every literal other than `0` was dropped before the
+/// operator table was consulted. `bad.go` could not see it: all four of its
+/// bounds are `0`.
+#[test]
+fn s1009_covers_the_whole_comparison_table() {
+    let dir = support::testdata("s1009");
+    let pkg = support::typecheck_file(&dir, "table.go", "example.com/staticcheck/s1009/table");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<i64> = support::run_analyzer_diagnostics(s1009::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| fset.position(guff::position::Pos(d.pos as i64)).line)
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            // `x == nil || …`: `== 0`, `== zero`, `<= 0`, `<= 3`, `< 3`, `< three`
+            22, 24, 26, 27, 28, 30, //
+            // `x != nil && …`: `!= 0`, `== 3`, `== three`, `> 0`, `> 3`, `>= 3`
+            36, 39, 40, 41, 42, 44, //
+            53, 54, // a map and a channel, for the message
+            63, 64, 65, 66, // the four parenthesised spellings
+        ],
+        "{got:?}"
+    );
+}
+
 #[test]
 fn s1009_allows_needed_nil_checks() {
     let dir = support::testdata("s1009");
