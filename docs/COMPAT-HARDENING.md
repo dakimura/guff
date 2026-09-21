@@ -33182,3 +33182,99 @@ golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 3,627 件緑（新規 5 件）。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-21（続き 301）— `close beats`（5）。ST1016 の報告位置は**ソース順の最初のメソッド**ではない。`types.MethodSet` の順＝`obj.Id()` 順の最初
+
+beats の staticcheck に残っていた 6 件も、続き 300 と同じ**両側に立つ**形だった ——
+ただし今回は文言ではなく**位置**:
+
+```
+guff  libbeat/opt/opt.go:53:  methods on the same type should have the same receiver name (seen 1x "in", 3x "opt")
+gcl   libbeat/opt/opt.go:58:  （同じ文言）
+```
+
+#### 1. 上流は `firstFn`
+
+```go
+ms := typeutil.IntuitiveMethodSet(T.Type(), nil)
+for _, sel := range ms {
+    …
+    if firstFn == nil { firstFn = fn }
+    if recv.Name() != "" && recv.Name() != "_" { names[recv.Name()]++ }
+}
+…
+report.Report(pass, firstFn, …)
+```
+
+`IntuitiveMethodSet` の doc は *"The order of the result is as for
+types.MethodSet(T)"* と書いてあり、`NewMethodSet` は
+
+```go
+sort.Slice(list, func(i, j int) bool { return list[i].obj.Id() < list[j].obj.Id() })
+```
+
+—— **`Id()` 順**。`Id` は exported ならメソッド名そのもの、unexported なら
+`pkgpath + "." + name`。ソース順ではない。
+
+opt.go がそれをそのまま見せている: `Int` のメソッドは
+`IsZero`(53) / `Exists`(58) / `ValueOr`(65) / `Fold`(73) の順に書かれていて、
+上流は **`Exists`**（58）で報告する。guff は AST を走査した順＝53 を使っていた。
+
+#### 2. もう 1 つ —— `firstFn` は**受け手の名前を見る前に**決まる
+
+```go
+if firstFn == nil { firstFn = fn }          // ← ここ
+if recv.Name() != "" && recv.Name() != "_" { … }   // ← 名前を見るのはこの後
+```
+
+つまり `func (T) Apex()` や `func (_ T) Apex()` は **`seen` に 1 も足さないのに
+診断を背負える**。guff は無名／`_` の受け手を持つメソッドで早期 return して
+いたので、候補にすら入っていなかった。
+
+#### 3. 6 形測った
+
+1 パッケージ（+ 2 ファイル目）に並べて両ツールに通した:
+
+| 形 | 上流の報告位置 |
+|---|---|
+| ソース順 `Zeta` / `Apex` / `Middle` | `Apex`（2 番目） |
+| 一番若い `Id` のメソッドが**無名の受け手** | その無名のメソッド |
+| 同じく `_` の受け手 | その `_` のメソッド |
+| `Zeta`（exported）と `apex`（unexported） | **`Zeta`** —— `Id` は `<pkgpath>.apex` なので裸の名前とは逆 |
+| 値レシーバと**ポインタレシーバ**が混在 | 同じく `Id` 順の最初 |
+| メソッド集合が**2 ファイルにまたがる** | ファイル順でもない |
+
+`Id` の形は「裸の名前で並べる」実装と答えが変わるので、規則を 1 つに絞れる。
+
+#### 4. 既存の fixture は**この欠陥を通していた**
+
+`crates/guff-staticcheck/tests/testdata/st1016/bad.go` の `T1` は
+`Fn1`…`Fn6` の順で、**ソース順の最初が `Id` 順の最初でもある**。golden の
+行（`5:13`）はどちらの実装でも同じで、単体テストは `len == 2` と
+`all(contains("same receiver name"))` だった —— 続き 253 の
+「1 形しか通さない fixture は他の枝を隠す」。
+
+6 形を fixture の**末尾**に足し（既存の行番号は動かさない）、
+2 ファイル目 `bad_more.go` を `compat/golden/cases/staticcheck-st/sources.txt`
+に登録した。regen はキー集合で差分して**消えたキー 0 / 増えたキー 8**。
+case の ratchet（`missing 10` は SA4017 のクロスパッケージ純粋性推論）は
+動いていない。単体テストは `(行, 列, メッセージ)` で 7 行を丸ごと固定した
+（8 形目の「2 ファイルにまたがる」は `typecheck_file` が 1 ファイルしか
+読まないので golden 側が持つ、とテストに書いた）。
+
+#### 5. 実測
+
+```
+beats (v9.5.2)
+  前   guff=7467 golangci=7554 both=7441  P=99.7%  R=98.5%  unexpected=139
+  後   guff=7467 golangci=7554 both=7447  P=99.7%  R=98.6%  unexpected=127
+  staticcheck  前 guff=527 gcl=533 both=516  P=97.9% R=96.8%
+               後 guff=527 gcl=533 both=522  P=99.1% R=97.9%
+```
+
+guff-only 26 → 20、gcl-only 113 → 107。**閉じたのは 6 件（両側 12 行）、新規 0 件。**
+
+golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 3,627 件緑。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）

@@ -92,6 +92,14 @@ st1016/bad/bad.go:5:13:staticcheck::ST1016: methods on the same type should have
 st1016/bad/bad.go:9:7:staticcheck::ST1006: receiver name should not be an underscore, omit the name if it is unused
 st1016/bad/bad.go:10:7:staticcheck::ST1006: receiver name should be a reflection of its identity; don't use generic names such as "this" or "self"
 st1016/bad/bad.go:14:15:staticcheck::ST1016: methods on the same type should have the same receiver name (seen 1x "bar", 1x "meow")
+st1016/bad/bad.go:28:18:staticcheck::ST1016: methods on the same type should have the same receiver name (seen 1x "a", 1x "m", 1x "z")
+st1016/bad/bad.go:37:29:staticcheck::ST1016: methods on the same type should have the same receiver name (seen 1x "b", 1x "c")
+st1016/bad/bad.go:44:7:staticcheck::ST1006: receiver name should not be an underscore, omit the name if it is unused
+st1016/bad/bad.go:44:36:staticcheck::ST1016: methods on the same type should have the same receiver name (seen 1x "u", 1x "v")
+st1016/bad/bad.go:52:26:staticcheck::ST1016: methods on the same type should have the same receiver name (seen 1x "e", 1x "f")
+st1016/bad/bad.go:59:26:staticcheck::ST1016: methods on the same type should have the same receiver name (seen 1x "m", 1x "n", 1x "o")
+st1016/bad/bad_more.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1016/bad/bad_more.go:9:22:staticcheck::ST1016: methods on the same type should have the same receiver name (seen 1x "a", 1x "z")
 st1016/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
 st1016/ok/ok.go:8:7:staticcheck::ST1006: receiver name should not be an underscore, omit the name if it is unused
 st1017/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
