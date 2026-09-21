@@ -88,6 +88,8 @@ stringsbuilder/stringsbuilder.go:38:3:modernize::stringsbuilder: using string +=
 stringsbuilder/stringsbuilder.go:54:7:modernize::rangeint: for loop can be modernized using range over int
 stringsbuilder/stringsbuilder.go:65:6:modernize::rangeint: for loop can be modernized using range over int
 stringsbuilder/stringsbuilder.go:77:6:modernize::rangeint: for loop can be modernized using range over int
+stringsbuildertest/sb_test.go:14:3:modernize::stringsbuilder: using string += string in a loop is inefficient
+stringsbuildertest/sb_test.go:25:3:modernize::stringsbuilder: using string += string in a loop is inefficient
 stringscutprefix/stringscutprefix.go:9:5:modernize::stringscutprefix: TrimPrefix can be simplified to CutPrefix
 stringscutprefix/stringscutprefix.go:16:5:modernize::stringscutprefix: TrimSuffix can be simplified to CutSuffix
 stringscutprefix/stringscutprefix.go:23:5:modernize::stringscutprefix: HasPrefix + TrimPrefix can be simplified to CutPrefix
