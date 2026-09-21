@@ -3746,6 +3746,52 @@ fn st1023_isolates_the_right_hand_side() {
     assert_eq!(count("int"), 7, "{messages:?}");
 }
 
+/// The cgo exception, the one generator the shared body names:
+///
+/// ```go
+/// gen, _ := code.Generator(pass, decl.Pos())
+/// if gen == generated.Cgo {
+///     // TODO(dh): remove this exception once we can use UsesCgo
+///     return
+/// }
+/// ```
+///
+/// It matters because cgo's preamble writes `var _cgo0 *_Ctype_char = cPath`
+/// and the positions map back onto the call in the *original* file, so the
+/// findings escape the generated-file exclusion and land on a hand-written
+/// line — beats' `auditbeat/module/file_integrity/fileorigin_darwin.go:95`
+/// collected three guff-only rows pointing at one `C.getxattr(…)`.
+///
+/// The fixture needs no cgo: `code.Generator` reads the header comment.
+/// `compat/golden/cases/staticcheck-cgo` runs both tools over the same two
+/// files with the generated-file exclusion turned off.
+#[test]
+fn qf1011_skips_a_cgo_generated_declaration() {
+    let dir = support::testdata("qf1011");
+    let cgo = support::typecheck_file(&dir, "cgo.go", "example.com/staticcheck/qf1011/cgo");
+    support::assert_well_typed(&cgo);
+    assert!(
+        support::run_analyzer(qf1011::analyzer(), &cgo).is_empty(),
+        "a cgo-generated declaration must be skipped"
+    );
+    assert!(
+        support::run_analyzer(st1023::analyzer(), &cgo).is_empty(),
+        "ST1023 shares the body and the exception"
+    );
+
+    // The control: the identical declaration in a file nothing generated.
+    let plain =
+        support::typecheck_file(&dir, "notcgo.go", "example.com/staticcheck/qf1011/notcgo");
+    support::assert_well_typed(&plain);
+    assert_eq!(
+        support::run_analyzer(qf1011::analyzer(), &plain),
+        vec![
+            "could omit type *int from declaration; it will be inferred from the right-hand side"
+                .to_string()
+        ],
+    );
+}
+
 #[test]
 fn qf1011_isolates_the_right_hand_side() {
     let dir = support::testdata("qf1011");
