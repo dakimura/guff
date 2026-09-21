@@ -783,6 +783,7 @@ dependencies = [
  "guff-runner",
  "guff-ssa",
  "guff-types",
+ "memchr",
  "regex",
  "regex-syntax",
  "serde_json",

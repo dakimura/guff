@@ -128,10 +128,22 @@ pub fn typecheck_with_deps_ignored(
             imports.insert(path, Arc::new(Package::default()));
         }
     }
-    for (import_path, _) in deps {
-        imports
-            .entry((*import_path).to_string())
-            .or_insert_with(|| Arc::new(Package::default()));
+    // A dependency passed here carries its **source path**, not just a key.
+    // An analyzer that reads a dependency's own sources — `modernize`'s
+    // `newexpr` asks whether a wrapper in another module has the body
+    // `return &x`, and SA1019 scans third-party packages for `Deprecated:` —
+    // has no other way to be reached from a fixture. Same rationale as
+    // `typecheck_with_deps_ignored`.
+    for (import_path, dep_path) in deps {
+        imports.insert(
+            (*import_path).to_string(),
+            Arc::new(Package {
+                pkg_path: (*import_path).to_string(),
+                compiled_go_files: vec![dep_path.to_path_buf()],
+                go_files: vec![dep_path.to_path_buf()],
+                ..Package::default()
+            }),
+        );
     }
 
     Arc::new(Package {

@@ -5410,6 +5410,142 @@ fn export_newexpr_decls(
     }
 }
 
+/// Is this callee a new-like wrapper declared in a package guff did not
+/// analyse?
+///
+/// Upstream exports a `newLike` fact while analysing the declaring package,
+/// and golangci-lint runs the analyzer over dependencies, so a wrapper in
+/// another module arrives as a fact. guff analyses the run set and imports the
+/// rest from export data, so no fact ever comes — and azcore's
+/// `func Ptr[T any](v T) *T { return &v }` plus govmomi's `NewBool` are 42 of
+/// beats' diffs on their own.
+///
+/// Everything the predicate needs is already on hand. The signature is in
+/// export data (the caller checks it before asking), and the one remaining
+/// question — is the body exactly `return &x`, where `x` is the parameter — is
+/// syntax, so the dependency's own sources answer it without type-checking
+/// them.
+///
+/// Three filters keep this off the cold wall: the caller only asks about a
+/// callee whose *signature* already matches, which is rare; the import has to
+/// resolve to a package carrying files; and each file is rejected by a
+/// substring search for `func <name>` before anything is parsed. The answer is
+/// memoised per (package path, name) for the process.
+fn dep_is_new_like(pass: &Pass<'_>, pkg_path: &str, name: &str) -> bool {
+    type Cache = HashMap<(String, String), bool>;
+    static STORE: OnceLock<std::sync::Mutex<Cache>> = OnceLock::new();
+    let store = STORE.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    let key = (pkg_path.to_string(), name.to_string());
+    if let Ok(g) = store.lock() {
+        if let Some(hit) = g.get(&key) {
+            return *hit;
+        }
+    }
+    let answer = scan_dep_for_new_like(pass, pkg_path, name);
+    if let Ok(mut g) = store.lock() {
+        g.insert(key, answer);
+    }
+    answer
+}
+
+fn scan_dep_for_new_like(pass: &Pass<'_>, pkg_path: &str, name: &str) -> bool {
+    let Some(imp) = pass.pkg().imports.get(pkg_path) else {
+        return false;
+    };
+    let files = if !imp.compiled_go_files.is_empty() {
+        &imp.compiled_go_files
+    } else {
+        &imp.go_files
+    };
+    let needle = format!("func {name}");
+    for path in files {
+        let Some(file_name) = path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if file_name.ends_with("_test.go") {
+            continue;
+        }
+        let Ok(src) = fs::read(path) else {
+            continue;
+        };
+        // `memmem` rather than `windows().any()`: the same search vectorized,
+        // and this probe rejects nearly every file it reads.
+        if memchr::memmem::find(&src, needle.as_bytes()).is_none() {
+            continue;
+        }
+        let fset = FileSet::new();
+        let Ok(parsed) = parse_file(&fset, file_name, &src, guff::parser::Mode::NONE) else {
+            continue;
+        };
+        for decl in &parsed.decls {
+            let Decl::FuncDecl(fd) = decl else {
+                continue;
+            };
+            if fd.name.name != name || fd.recv.is_some() {
+                continue;
+            }
+            let Some(body) = fd.body.as_ref() else {
+                continue;
+            };
+            let Some(unary) = newlike_unary(body) else {
+                continue;
+            };
+            let Expr::Ident(returned) = unary.x.as_ref() else {
+                continue;
+            };
+            // `sig.Params().At(0) == v`: the returned variable *is* the
+            // parameter. Syntactically that is "the sole parameter's sole
+            // name", which is all this scan can see and all it needs — the
+            // caller has already checked the arity from export data.
+            let Some(params) = fd.ty.params.as_ref() else {
+                continue;
+            };
+            let names: Vec<&str> = params
+                .list
+                .iter()
+                .flat_map(|f| f.names.iter().map(|n| n.name.as_str()))
+                .collect();
+            if names.len() == 1 && names[0] == returned.name {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// The callee's signature, as export data has it: exactly one parameter, one
+/// pointer result, not variadic.
+///
+/// This is the cheap half of upstream's predicate and the gate that keeps
+/// [`dep_is_new_like`] from ever looking at a dependency's sources for an
+/// ordinary call.
+fn newexpr_signature_shape_ok(pass: &Pass<'_>, fn_obj: ObjectId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(sig) = fn_obj.typ(&artifacts.objects) else {
+        return false;
+    };
+    if signature_variadic(&artifacts.types, sig) {
+        return false;
+    }
+    let (Some(params), Some(results)) = (
+        signature_params(&artifacts.types, sig),
+        signature_results(&artifacts.types, sig),
+    ) else {
+        return false;
+    };
+    if tuple_len(&artifacts.types, Some(params)) != 1
+        || tuple_len(&artifacts.types, Some(results)) != 1
+    {
+        return false;
+    }
+    let result = tuple_at(&artifacts.types, results, 0);
+    result
+        .typ(&artifacts.objects)
+        .is_some_and(|t| is_pointer_type(pass, t))
+}
+
 fn check_newexpr_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagnostic>) {
     if call.args.len() != 1 {
         return;
@@ -5423,7 +5559,25 @@ fn check_newexpr_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagno
     };
     let mut fact = NewLikeFact;
     if !pass.import_object_fact(fn_obj, &mut fact) {
-        return;
+        // No fact: either the callee is not new-like, or it was declared in a
+        // package guff did not analyse. Ask the dependency's sources, behind
+        // the signature gate.
+        if !newexpr_signature_shape_ok(pass, fn_obj) {
+            return;
+        }
+        let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+            return;
+        };
+        let Some(pkg_path) = code::object_pkg_path(pass, fn_obj) else {
+            return;
+        };
+        if pkg_path == pass.pkg().pkg_path {
+            return; // same package: the fact is authoritative
+        }
+        let name = fn_obj.name(&artifacts.objects).to_string();
+        if !dep_is_new_like(pass, &pkg_path, &name) {
+            return;
+        }
     }
     let Some(info) = pass.types_info() else {
         return;

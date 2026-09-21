@@ -33948,3 +33948,81 @@ golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 3,630 件緑。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-21（続き 310）— `close beats`（14）。`newexpr` のファクトは**依存のソースから作れる**。続き 298 が「要る部品は小さい」と書いたとおりだった —— 42 件
+
+beats に残っていた `modernize` の 47 件のうち **42 件**が `newexpr` の
+`call of Ptr(x)` / `call of NewBool(x)`。続き 298 §7 が「**外部モジュールの
+ラッパ**なのでファクトが届かない」と開けたまま残した分。
+
+#### 1. なぜ届かないか
+
+上流は宣言側のパッケージを解析するときに `newLike` ファクトを
+`ExportObjectFact` し、golangci-lint は**依存にも解析器を走らせる**ので
+別モジュールのラッパでもファクトが来る。guff は run set を解析して残りは
+export data から import するだけなので、**ファクトは原理的に来ない**。
+
+#### 2. 足りないのは 1 つだけだった
+
+上流の述語は
+
+```go
+if sig.Results().Len() == 1 && is[*types.Pointer](sig.Results().At(0).Type()) &&
+   sig.Params().Len() == 1 && sig.Params().At(0) == v { … }   // v は `return &v` の v
+```
+
+**シグネチャは export data にある**。足りないのは「本体が `return &x` の
+一文で、その `x` が引数か」だけで、これは**構文**なので依存を型検査しなくても
+答えが出る。そして依存のソースは既にディスクにある
+（`pass.pkg().imports[path].compiled_go_files`）。
+
+azcore の `func Ptr[T any](v T) *T { return &v }` がまさにその形。
+
+#### 3. 冷たい壁に出さない 3 つの門
+
+1. **呼び出し側でシグネチャを先に見る** —— 引数 1・結果 1・結果がポインタ・
+   可変長でない。export data だけで答えられて、普通の呼び出しはここで落ちる。
+2. import が**ファイルを持つパッケージに解決できること**。
+3. ファイルごとに `func <name>` を `memmem` で探してから初めて parse する
+   （`windows().any()` ではなく —— sa1019 が同じ注意を書いている）。
+
+答えは `(パッケージパス, 名前)` でプロセス内にメモ化。実測で
+`--oss --tier pr` は 2:44 → 2:47、beats の hunt は 4:50 → 4:48。**壁は動いて
+いない。**
+
+#### 4. fixture のために harness を 1 箇所直した
+
+`typecheck_with_deps` は依存を `Package::default()`（**ファイルパス無し**）で
+imports に入れていた。**依存のソースを読む解析器は fixture から到達できない**
+——`newexpr` のこの腕も、SA1019 の third-party スキャンもそう。
+`typecheck_with_deps_ignored` が同じ理由で書かれているので、そこに合わせて
+依存の `go_files` / `compiled_go_files` / `pkg_path` を入れるようにした。
+
+単体テストは stub の依存に 4 形を置いた: `Ptr`（出る）、
+`NotNewLike`（コピーのアドレス）、`TwoParams`（引数 2）、
+`Shared`（パッケージ変数のアドレス）。実モジュール（azcore v1.22.0）と
+local replace の 2 通りでも測って一致を確認した。
+
+#### 5. 実測
+
+```
+beats (v9.5.2)
+  前   guff=7500 golangci=7554 both=7486  P=99.8%  R=99.1%  unexpected=82
+  後   guff=7542 golangci=7554 both=7528  P=99.8%  R=99.7%  unexpected=40
+  modernize  前 guff=4286 gcl=4332 both=4285  P=100.0% R=98.9%
+             後 guff=4328 gcl=4332 both=4327  P=100.0% R=99.9%
+```
+
+**閉じたのは 42 件、新規 0 件。** modernize の gcl-only は 5 件
+（`stringscut` 3・`stringsbuilder` 1・`slicescontains` 1）まで落ちた。
+**beats は 210 → 40**（このセッションの開始時点から）。
+
+golden には載せられない: `newexpr.go` は元から
+`compat/golden/cases/modernize/sources.txt` に無く、理由は
+**golangci-lint 2.12.2 がこの fixture で crash する**こと（同ファイルの
+コメントに記録がある）。守るのは単体テスト側。
+
+golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 3,631 件緑。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
