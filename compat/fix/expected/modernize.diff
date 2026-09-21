@@ -213,6 +213,48 @@
  var (
  	_ = min(1.0, 2.0)
  	_ = max(1, 2)
+--- a/minmaxshadow/minmaxshadow.go
++++ b/minmaxshadow/minmaxshadow.go
+@@ -14,15 +14,6 @@
+ // A local shadow counts too (upstream's own testdata has `hour, min := 3600,
+ // 60`), which is why the lookup starts at the innermost scope.
+ package minmax
+-
+-// This declaration is itself a finding — the other arm of the rule — and it is
+-// what shadows `min` for everything below.
+-func min(a, b int) int {
+-	if a < b {
+-		return a
+-	}
+-	return b
+-}
+ 
+ // silent: `min` is this package's function, not the builtin.
+ func shadowedIf(a, b int) int {
+@@ -46,21 +37,14 @@
+ 
+ // FINDING: nothing shadows `max`.
+ func maxIf(a, b int) int {
+-	x := a
+-	if x < b {
+-		x = b
+-	}
++	x := max(a, b)
+ 	return x
+ }
+ 
+ // FINDING: the if/else arm of `max`.
+ func maxIfElse(a, b int) int {
+ 	var x int
+-	if a < b {
+-		x = b
+-	} else {
+-		x = a
+-	}
++	x = max(a, b)
+ 	return x
+ }
+ 
 --- a/minmaxuser/minmaxuser.go
 +++ b/minmaxuser/minmaxuser.go
 @@ -12,23 +12,6 @@

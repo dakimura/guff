@@ -6911,6 +6911,43 @@ fn modernize_minmax_flags_a_user_defined_min_or_max() {
     );
 }
 
+/// The rewrite writes `min(a, b)`, so `min` has to still mean the builtin.
+///
+/// `!is[*types.Builtin](lookup(pass.TypesInfo, curIfStmt, sym))` is the guard
+/// upstream puts in front of both arms, and guff had neither. beats'
+/// `x-pack/filebeat/input/awss3` declares its own package-level `min`, so every
+/// `min` rewrite in that package is silent upstream and `max` still fires —
+/// guff reported `s3_objects_test.go:517` on its own.
+///
+/// Six shapes, three findings: the declaration itself (the other arm of the
+/// rule), and the two `max` rewrites that nothing shadows. Silent are the two
+/// `min` rewrites under the package-level declaration and one `max` rewrite
+/// under a *local* `max`, which is why the lookup starts at the innermost
+/// scope rather than at the package.
+#[test]
+fn modernize_minmax_declines_a_shadowed_builtin() {
+    let pkg = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/minmaxshadow",
+        "minmaxshadow.go",
+    );
+    let mut got: Vec<String> = support::run_analyzer(modernize(), &pkg)
+        .into_iter()
+        .filter(|m| m.contains("min") || m.contains("max"))
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            "if statement can be modernized using max".to_string(),
+            "if/else statement can be modernized using max".to_string(),
+            "user-defined min function is equivalent to built-in min and can be removed"
+                .to_string(),
+        ],
+        "{got:?}"
+    );
+}
+
 /// A file's own `//go:build go1.N` decides every modernize gate.
 ///
 /// Upstream runs all of them through `analyzerutil.FileUsesGoVersion`, which

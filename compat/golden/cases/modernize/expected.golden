@@ -39,6 +39,9 @@ minmax/minmax.go:85:5:modernize::minmax: if statement can be modernized using mi
 minmax/minmax.go:96:5:modernize::minmax: if statement can be modernized using min
 minmax/minmax.go:110:5:modernize::minmax: if statement can be modernized using max
 minmaxfloat/minmaxfloat.go:18:1:modernize::minmax: user-defined max function is equivalent to built-in max and can be removed
+minmaxshadow/minmaxshadow.go:20:1:modernize::minmax: user-defined min function is equivalent to built-in min and can be removed
+minmaxshadow/minmaxshadow.go:50:5:modernize::minmax: if statement can be modernized using max
+minmaxshadow/minmaxshadow.go:59:5:modernize::minmax: if/else statement can be modernized using max
 minmaxuser/minmaxuser.go:17:1:modernize::minmax: user-defined min function is equivalent to built-in min and can be removed
 minmaxuser/minmaxuser.go:26:1:modernize::minmax: user-defined max function is equivalent to built-in max and can be removed
 plusbuild/plusbuild.go:6:1:modernize::plusbuild: +build line is no longer needed

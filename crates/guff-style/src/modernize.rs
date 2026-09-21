@@ -830,6 +830,33 @@ fn expr_uses_loop_vars(pass: &Pass<'_>, expr: &Expr, key: &Expr, value: &Expr) -
     used
 }
 
+/// `!is[*types.Builtin](lookup(pass.TypesInfo, curIfStmt, sym))` — the rewrite
+/// writes `min(a, b)`, so `min` has to still *mean* the builtin at that point.
+///
+/// beats' `x-pack/filebeat/input/awss3` declares its own package-level `min`
+/// (which modernize reports separately, as a user-defined one equivalent to the
+/// builtin), and while it is there every `min` rewrite in the package is silent
+/// upstream — `max`, which nothing shadows, still fires. A local `hour, min :=
+/// 3600, 60` shadows it the same way, which is why the lookup starts at the
+/// innermost scope rather than at the package.
+fn minmax_symbol_is_builtin(pass: &Pass<'_>, sym: &str, pos: u32) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        // No scope information: keep the behaviour the rest of the rule has
+        // without types rather than going quiet.
+        return true;
+    };
+    let pkg_scope = artifacts.packages.get(artifacts.type_pkg).scope();
+    let scope =
+        guff_types::scope::innermost(&artifacts.scopes, pkg_scope, pos).unwrap_or(pkg_scope);
+    match guff_types::scope::lookup_parent(&artifacts.scopes, &artifacts.objects, scope, sym, pos) {
+        Some((_, obj)) => matches!(
+            artifacts.objects.get(obj),
+            guff_types::arena::ObjectData::Builtin(_)
+        ),
+        None => false,
+    }
+}
+
 fn is_float_expr(pass: &Pass<'_>, expr: &Expr) -> bool {
     let Some(info) = pass.types_info() else {
         return false;
@@ -1038,6 +1065,9 @@ fn check_minmax_block(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<Diag
             b = rhs0;
         }
         let sym = if sign < 0 { "min" } else { "max" };
+        if !minmax_symbol_is_builtin(pass, sym, if_stmt.if_.0 as u32) {
+            continue; // min/max function is shadowed
+        }
         let (Some(lhs_text), Some(a_text), Some(b_text)) = (
             expr_text_src(pass, lhs),
             expr_text_src(pass, a),
@@ -1359,6 +1389,9 @@ fn check_minmax(pass: &Pass<'_>, if_stmt: &IfStmt, pending: &mut Vec<Diagnostic>
         return;
     }
     let sym = if sign < 0 { "min" } else { "max" };
+    if !minmax_symbol_is_builtin(pass, sym, if_stmt.if_.0 as u32) {
+        return; // min/max function is shadowed
+    }
     let Some(lhs_text) = expr_text_src(pass, &tassign.lhs[0]) else {
         return;
     };
