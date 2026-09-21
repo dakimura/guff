@@ -32,13 +32,15 @@ pub(crate) fn check_ssa_analyzers(
     let want_g602 = enabled.contains("G602");
     let want_g115 = enabled.contains("G115");
     let want_g118 = enabled.contains("G118");
+    let want_g119 = enabled.contains("G119");
     let want_g123 = enabled.contains("G123");
     let taint_rules: Vec<&'static crate::gosec_taint::TaintRule> = crate::gosec_taint::TAINT_RULES
         .iter()
         .copied()
         .filter(|r| enabled.contains(r.id))
         .collect();
-    if !want_g602 && !want_g115 && !want_g118 && !want_g123 && taint_rules.is_empty() {
+    if !want_g602 && !want_g115 && !want_g118 && !want_g119 && !want_g123 && taint_rules.is_empty()
+    {
         return;
     }
     let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
@@ -82,6 +84,9 @@ pub(crate) fn check_ssa_analyzers(
     }
     if want_g115 {
         crate::gosec_g115::collect_g115(prog, &src_funcs, pending);
+    }
+    if want_g119 {
+        crate::gosec_g119::collect_g119(prog, &src_funcs, pending);
     }
     if want_g123 {
         crate::gosec_g123::collect_g123(prog, &src_funcs, pending);

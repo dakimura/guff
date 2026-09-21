@@ -311,6 +311,42 @@ fn gosec_g118_reports_only_uncalled_cancels_and_detached_goroutines() {
     );
 }
 
+/// G119: a `*http.Request` parameter plus a `[]*http.Request` parameter makes a
+/// function a redirect policy, whatever it is called.
+///
+/// Two messages with different confidences, so the counts are pinned
+/// separately: five header *copies* (a literal assigned to `CheckRedirect`, a
+/// named function, a method, the parameters swapped, and extra parameters
+/// around them) and five *re-adds* (the three sensitive names case-insensitively
+/// plus one through a local). The silent half is what the rule has to leave
+/// alone: a name that is not sensitive, a name that is not a constant, `Del`,
+/// a function with no `via`, one with no request, a store into a non-header
+/// field, and a header that does not come from `req`.
+///
+/// Gated against golangci-lint 2.12.2 by `compat/golden/cases/gosec`, which
+/// also pins the severity (`high` for both).
+#[test]
+fn gosec_g119_reports_redirect_policies_that_carry_headers() {
+    let pkg = support::typecheck_fixture("gosec", "example.com/gosec/g119", "g119.go");
+    let messages = support::run_analyzer(gosec(), &pkg);
+    let count = |needle: &str| messages.iter().filter(|m| m.as_str() == needle).count();
+    assert_eq!(
+        (
+            count(
+                "G119: Unsafe redirect policy may propagate sensitive headers across origins"
+            ),
+            count("G119: Sensitive headers should not be re-added in redirect policy callbacks"),
+        ),
+        (5, 5),
+        "{messages:?}"
+    );
+    assert_eq!(
+        messages.iter().filter(|m| m.starts_with("G119:")).count(),
+        10,
+        "{messages:?}"
+    );
+}
+
 /// G123 is the fourth SSA analyzer: an inventory of `tls.Config` field stores
 /// rather than a dataflow. The fixture marks every config `// FINDING` or
 /// `// silent`, gated by `compat/golden/cases/gosec`.

@@ -135,6 +135,7 @@ mod gosec;
 mod gosec_g115;
 mod gosec_g117;
 mod gosec_g118;
+mod gosec_g119;
 mod gosec_g123;
 mod gosec_g602;
 mod gosec_ssa;

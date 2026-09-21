@@ -115,7 +115,7 @@ pub(crate) fn collect_g123(
 /// `collectAnalyzerFunctions`: the source functions plus everything they make a
 /// closure of or statically call, transitively. Cross-package callees come back
 /// with no blocks, so they cost a lookup and contribute nothing.
-fn collect_analyzer_functions(prog: &Program, src_funcs: &[FuncId]) -> Vec<FuncId> {
+pub(crate) fn collect_analyzer_functions(prog: &Program, src_funcs: &[FuncId]) -> Vec<FuncId> {
     if src_funcs.is_empty() {
         return Vec::new();
     }
