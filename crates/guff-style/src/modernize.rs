@@ -6518,10 +6518,12 @@ fn check_stringsbuilder(pass: &Pass<'_>, file: &File, pending: &mut Vec<Diagnost
     {
         return;
     }
-    let filename = pass.fset().position(file.pos()).filename;
-    if filename.ends_with("_test.go") {
-        return;
-    }
+    // Upstream's only gate is `within(pass, "strings", "runtime")` — the two
+    // packages where the fix would make an import cycle. guff also skipped
+    // every `_test.go` file, from the rule's first commit and with no reason
+    // recorded; nothing in `stringsbuilder.go` (or anywhere else in modernize)
+    // looks at the file name. beats accumulates a status string in a loop in
+    // `heartbeat/monitors/wrappers/summarizer/summarizer_test.go:173`.
 
     // Candidates: local string vars on the LHS of some `+=`.
     let mut candidates: HashSet<ObjectId> = HashSet::new();

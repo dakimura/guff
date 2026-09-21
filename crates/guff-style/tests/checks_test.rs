@@ -7970,6 +7970,32 @@ fn modernize_flags_stringsbuilder() {
     );
 }
 
+/// A `_test.go` file is not an exception.
+///
+/// Upstream's only gate is `within(pass, "strings", "runtime")` — the two
+/// packages where the fix would make an import cycle. Nothing in
+/// `stringsbuilder.go`, or anywhere else in modernize, looks at the file name.
+/// guff skipped every test file from the rule's first commit with no reason
+/// recorded, and beats accumulates a status string in a loop in
+/// `heartbeat/monitors/wrappers/summarizer/summarizer_test.go:173`.
+#[test]
+fn modernize_stringsbuilder_also_looks_at_test_files() {
+    let pkg = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/stringsbuildertest",
+        "stringsbuilder_test.go",
+    );
+    let messages = support::run_analyzer(modernize(), &pkg);
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m.contains("using string += string in a loop is inefficient"))
+            .count(),
+        2,
+        "{messages:?}"
+    );
+}
+
 #[test]
 fn modernize_flags_slicesdelete() {
     let pkg = support::typecheck_fixture(

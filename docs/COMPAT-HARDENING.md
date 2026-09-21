@@ -34932,3 +34932,52 @@ golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 緑。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-21（続き 324）— `close beats`（27）: `stringsbuilder` が `_test.go` を丸ごと飛ばしていた
+
+beats の modernize の gcl-only:
+
+```
+heartbeat/monitors/wrappers/summarizer/summarizer_test.go:173
+  stringsbuilder: using string += string in a loop is inefficient
+```
+
+#### 1. 最小再現を 9 形書いて全部一致した
+
+その行の形（2 本の累算・`if/else` 腕・入れ子ループ・裸の `for {}`・クロージャの
+中・累算 3 本で「最初の 1 本だけ報告される」選別）を 9 形測って、**全部一致**。
+パッケージごと走らせると再現する —— つまり行の外に原因がある（続き 321 と
+同じ）。
+
+犯人はファイル名だった:
+
+```rust
+let filename = pass.fset().position(file.pos()).filename;
+if filename.ends_with("_test.go") {
+    return;
+}
+```
+
+上流の門は `within(pass, "strings", "runtime")` の 1 つだけ —— fix が import
+サイクルを作る 2 パッケージ —— で、`stringsbuilder.go` にも modernize の
+どこにも**ファイル名を見る行は無い**。この skip は規則の最初のコミットから
+入っていて、理由は記録されていなかった。
+
+#### 2. fixture の名前そのものが形
+
+`_test.go` で終わる fixture を足した（golden は宛先名を自由に決められるので
+`stringsbuildertest/sb_test.go` として材料化）。2 行報告され、上流と一致。
+`--fix` のベースラインも撮り直した（`strings.Builder` への書き換えが入る）。
+
+```
+beats (v9.5.2)
+  前   guff=7554 golangci=7554 both=7548  P=99.9%  R=99.9%  unexpected=12
+  後   guff=7555 golangci=7554 both=7549  P=99.9%  R=99.9%  unexpected=11
+```
+
+**閉じたのは 1 件、新規 0 件。**
+
+golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 緑。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）

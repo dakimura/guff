@@ -656,6 +656,43 @@
  		str += "!"
  	}
  	println(str, after)
+--- a/stringsbuildertest/sb_test.go
++++ b/stringsbuildertest/sb_test.go
+@@ -8,26 +8,28 @@
+ // beats accumulates a status string in a loop in
+ // `heartbeat/monitors/wrappers/summarizer/summarizer_test.go:173`.
+ 
++import "strings"
++
+ func builderInTestFile(xs []string) string {
+-	s := ""
++	var s strings.Builder
+ 	for _, x := range xs {
+-		s += x // FINDING
++		s.WriteString(x) // FINDING
+ 	}
+-	return s
++	return s.String()
+ }
+ 
+ // The same selection rule as in a non-test file: only the first candidate of a
+ // loop nest is reported.
+ func builderTwoInOneLoop(xs []string) (string, string) {
+-	a := ""
++	var a strings.Builder
+ 	b := ""
+ 	for _, x := range xs {
+-		a += x // FINDING
++		a.WriteString(x) // FINDING
+ 		if x != "" {
+ 			b += x
+ 		} else {
+ 			b += "_"
+ 		}
+ 	}
+-	return a, b
++	return a.String(), b
+ }
 --- a/stringscutprefix/stringscutprefix.go
 +++ b/stringscutprefix/stringscutprefix.go
 @@ -6,29 +6,29 @@

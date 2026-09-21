@@ -42,6 +42,7 @@ slicescontains/slicescontains.go    crates/guff-style/tests/testdata/modernize/s
 slicesdelete/slicesdelete.go        crates/guff-style/tests/testdata/modernize/slicesdelete.go
 stditerators/stditerators.go        crates/guff-style/tests/testdata/modernize/stditerators.go
 stringsbuilder/stringsbuilder.go    crates/guff-style/tests/testdata/modernize/stringsbuilder.go
+stringsbuildertest/sb_test.go       crates/guff-style/tests/testdata/modernize/stringsbuilder_test.go
 stringscut/stringscut.go            crates/guff-style/tests/testdata/modernize/stringscut.go
 stringscutprefix/stringscutprefix.go  crates/guff-style/tests/testdata/modernize/stringscutprefix.go
 testingcontext/testingcontext.go    crates/guff-style/tests/testdata/modernize/testingcontext.go
