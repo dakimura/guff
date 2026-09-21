@@ -33806,3 +33806,72 @@ golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 3,630 件緑。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-21（続き 308）— `close beats`（12）。`waitgroupgo` の *「または末尾の `wg.Done()`」*。ついでに、続き 307 の fix tier の「緑」が**古いベースラインのせい**だったことが分かった
+
+beats の `modernize` の小ルールで一番大きい塊が `waitgroupgo` 5 件。
+上流のコメントが規則をそのまま書いている:
+
+```go
+// Body must start with "defer wg.Done()" or end with "wg.Done()".
+```
+
+guff は 1 つ目しか持っていなかった。beats の `synthexec.go` は 2 つ目を
+**3 つ続けて**書いていて、goroutine が自分でエラーをログに書く形なら
+自然にそうなる:
+
+```go
+wg.Add(1)
+go func() {
+    err := scanToSynthEvents(…)
+    if err != nil { logp.L().Warn(…) }
+    wg.Done()
+}()
+```
+
+11 形測って、受け手が `wgs[0]` でも `s.wg` でも（`Add` と同じ構文なら）出る
+こと、`Done` が真ん中なら出ないこと、`Add(2)`・戻り値のある func リテラル・
+`go` が次の文でない・受け手が別の WaitGroup、がすべて沈黙することを確認した。
+
+#### 続き 307 の fix tier は**測っていなかった**
+
+`minmax` の user-defined 腕を入れた回（続き 307）で `./compat/fix/run.sh` は
+緑だった。今回 fixture を足してベースラインを撮り直したら**落ちた** ——
+上流の `--fix` は **その関数を消す**（doc コメントごと）のに、guff は
+`suggested_fixes` を空で出していた。
+
+緑だった理由は単純で、**`compat/fix/expected/modernize.diff` が古かった**。
+ベースラインは「materialize したツリーに `--fix` をかけた差分」で、
+新しい fixture ファイルの hunk はまだ入っていない。guff もそこに何も書かない
+ので、**両方に hunk が無いまま一致していた**。続き 224 の「緑だが何も
+測っていない」の新しい形: *fixture を足したら fix のベースラインも撮り直す*。
+
+直すと `FuncDecl.doc` が使えないことが分かった —— 本番の型検査は
+`PARSE_COMMENTS` 無しでパースするので（`funlen` が同じことを書いている）
+doc は常に `None`。`astutil.DocComment` と同じ範囲をソース文字列から
+遡って求める `doc_comment_start` を書いた（`//` の連続のみ。`/* */` の doc は
+残ってしまうが、`func min` の上にそれを書くターゲットは無い）。
+消した関数の呼び出しは**組み込みに解決される**ので、ツリーは壊れない
+（fix tier が `0 of those trees no longer build` で確認している）。
+
+#### 実測
+
+```
+beats (v9.5.2)
+  前   guff=7490 golangci=7554 both=7476  P=99.8%  R=99.0%  unexpected=92
+  後   guff=7495 golangci=7554 both=7481  P=99.8%  R=99.0%  unexpected=87
+  modernize  前 guff=4276 gcl=4332 both=4275  P=100.0% R=98.7%
+             後 guff=4281 gcl=4332 both=4280  P=100.0% R=98.8%
+```
+
+**閉じたのは 5 件、新規 0 件。** golden の regen は消えたキー 0 / 増えたキー 3
+（fixture の 11 形のうち報告は 3 増）。
+
+残る modernize の gcl-only 52 は `newexpr` 42 と
+`stringscut` 3 / `slicescontains` 2 / `rangeint` 2 / `fmtappendf` 2 /
+`stringsbuilder` 1。
+
+golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 3,630 件緑。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）

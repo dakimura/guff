@@ -1085,6 +1085,55 @@ fn inequality_sign(op: Token) -> Option<i32> {
     }
 }
 
+/// Where `astutil.DocComment(decl)` starts, found in the source text.
+///
+/// The production typecheck parses without `PARSE_COMMENTS`, so `FuncDecl.doc`
+/// is always `None` here (see `funlen`'s note). Go's parser attaches a doc
+/// comment only when it ends on the line immediately above the declaration,
+/// which is the run this walks back over.
+///
+/// Only `//` runs. A `/* … */` doc comment would be left behind by the fix;
+/// no corpus target writes one over a `func min`.
+fn doc_comment_start(file: &File, src: Option<&[u8]>, decl_pos: u32) -> u32 {
+    let Some(src) = src else {
+        return decl_pos;
+    };
+    let base = file.file_start.0;
+    let Ok(mut off) = usize::try_from(i64::from(decl_pos) - base) else {
+        return decl_pos;
+    };
+    if off > src.len() {
+        return decl_pos;
+    }
+    loop {
+        // Start of the line holding `off`.
+        let line_start = src[..off].iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
+        if line_start == 0 {
+            break;
+        }
+        // The line above it.
+        let prev_end = line_start - 1;
+        let prev_start = src[..prev_end]
+            .iter()
+            .rposition(|&b| b == b'\n')
+            .map_or(0, |i| i + 1);
+        let line = &src[prev_start..prev_end];
+        let trimmed = {
+            let mut i = 0;
+            while i < line.len() && (line[i] == b' ' || line[i] == b'\t') {
+                i += 1;
+            }
+            &line[i..]
+        };
+        if !trimmed.starts_with(b"//") {
+            break;
+        }
+        off = prev_start;
+    }
+    let line_start = src[..off].iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
+    u32::try_from(base + line_start as i64).unwrap_or(decl_pos)
+}
+
 /// `maybeNaN`, conservatively.
 ///
 /// Upstream takes the *core type* and fails safe when there is none, so a type
@@ -1223,16 +1272,26 @@ fn check_user_defined_minmax(pass: &Pass<'_>, pending: &mut Vec<Diagnostic>) {
             if !minmax_body_is(body, name) {
                 continue;
             }
+            // The fix deletes the declaration, doc comment and all — which is
+            // safe precisely because the calls then resolve to the built-in.
+            // `compat/fix/` confirms the tree still builds afterwards.
+            let decl_end = fd.body.as_ref().map_or(pos, |b| b.rbrace.0 as u32 + 1);
+            let src = refactor::file_source(pass, file);
+            let doc_pos = doc_comment_start(file, src, pos);
+            let edits = refactor::delete_with_line(file, src, doc_pos, decl_end);
             pending.push(Diagnostic {
-                // `Pos: decl.Pos()` — the `func` keyword. The *fix* starts at
-                // the doc comment, which the golden does not see.
+                // `Pos: decl.Pos()` — the `func` keyword, *not* the doc comment
+                // the fix starts at.
                 pos,
-                end: fd.body.as_ref().map_or(pos, |b| b.rbrace.0 as u32 + 1),
+                end: decl_end,
                 category: String::new(),
                 message: format!(
                     "user-defined {name} function is equivalent to built-in {name} and can be removed"
                 ),
-                suggested_fixes: Vec::new(),
+                suggested_fixes: vec![SuggestedFix {
+                    message: format!("Remove user-defined {name} function"),
+                    text_edits: edits,
+                }],
                 related: Vec::new(),
                 url: String::new(),
                 severity: String::new(),
@@ -3156,6 +3215,38 @@ fn waitgroup_recv(call: &CallExpr) -> Option<&Expr> {
     }
 }
 
+/// The span of the `wg.Done()` statement upstream pairs with a `wg.Add(1)`,
+/// if the literal's body has one.
+///
+/// Two shapes, and the order of the test is upstream's: a leading
+/// `defer wg.Done()` wins over a trailing `wg.Done()` when a body has both.
+/// The receiver has to be the same one the `Add` was called on — a
+/// `go func(){ b.Done() }()` after `a.Add(1)` is not a pair.
+fn waitgroupgo_done_span(
+    pass: &Pass<'_>,
+    body: &BlockStmt,
+    add_recv: &Expr,
+) -> Option<(u32, u32)> {
+    let matches_recv = |call: &CallExpr| {
+        is_waitgroup_method(pass, call, "Done")
+            && waitgroup_recv(call)
+                .is_some_and(|recv| code::same_non_dynamic(pass, add_recv, recv))
+    };
+    if let Some(Stmt::DeferStmt(defer_stmt)) = body.list.first() {
+        if matches_recv(&defer_stmt.call) {
+            return Some((defer_stmt.defer_.0 as u32, defer_stmt.call.end().0 as u32));
+        }
+    }
+    if let Some(Stmt::ExprStmt(last)) = body.list.last() {
+        if let Expr::CallExpr(done_call) = &last.x {
+            if matches_recv(done_call) {
+                return Some((last.x.pos().0 as u32, last.x.end().0 as u32));
+            }
+        }
+    }
+    None
+}
+
 fn check_waitgroupgo(
     pass: &Pass<'_>,
     file: &File,
@@ -3193,18 +3284,15 @@ fn check_waitgroupgo(
         if lit.body.list.is_empty() {
             continue;
         }
-        let Stmt::DeferStmt(defer_stmt) = &lit.body.list[0] else {
+        // "Body must start with `defer wg.Done()` or end with `wg.Done()`."
+        //
+        // guff had only the first. beats' synthexec writes the second three
+        // times in a row, and it is the shape a goroutine that does its own
+        // error logging naturally takes.
+        let done_span = waitgroupgo_done_span(pass, &lit.body, add_recv);
+        let Some((done_pos, done_end)) = done_span else {
             continue;
         };
-        if !is_waitgroup_method(pass, &defer_stmt.call, "Done") {
-            continue;
-        }
-        let Some(done_recv) = waitgroup_recv(&defer_stmt.call) else {
-            continue;
-        };
-        if !code::same_non_dynamic(pass, add_recv, done_recv) {
-            continue;
-        }
         let pos = go_.0 as u32;
         if !go_at_least(pass, pos, "go1.25") {
             continue;
@@ -3236,12 +3324,7 @@ fn check_waitgroupgo(
                         end: go_call.pos().0 as u32,
                         new_text: format!("{recv_text}.Go("),
                     });
-                    edits.extend(refactor::delete_with_line(
-                        file,
-                        src,
-                        defer_stmt.defer_.0 as u32,
-                        defer_stmt.call.end().0 as u32,
-                    ));
+                    edits.extend(refactor::delete_with_line(file, src, done_pos, done_end));
                     // ... }()
                     //      -
                     // ... } )

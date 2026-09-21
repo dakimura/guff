@@ -90,3 +90,6 @@ unsafefuncs/unsafefuncs.go:6:24:modernize::unsafefuncs: pointer + integer can be
 unsafefuncs/unsafefuncs.go:10:24:modernize::unsafefuncs: pointer + integer can be simplified using unsafe.Add
 unsafefuncs/unsafefuncs.go:16:12:modernize::unsafefuncs: pointer + integer can be simplified using unsafe.Add
 waitgroupgo/waitgroupgo.go:9:2:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
+waitgroupgo/waitgroupgo.go:23:2:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
+waitgroupgo/waitgroupgo.go:32:2:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
+waitgroupgo/waitgroupgo.go:40:2:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
