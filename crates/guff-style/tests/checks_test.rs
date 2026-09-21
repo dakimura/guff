@@ -398,6 +398,30 @@ fn gosec_g201_judges_the_declaration_not_the_query_argument() {
     );
 }
 
+/// G202's identifier branch: the query is built up in a variable before the
+/// call.
+///
+/// Every message is the same string, so the count is the assertion; which
+/// lines they land on is gated by `compat/golden/cases/gosec`. Ten shapes,
+/// seven findings — the three silent ones are a declaration whose operands all
+/// resolve to constants, a declaration with no SQL pattern (so the later
+/// mutation is never looked at), and a mutation that is itself constant.
+#[test]
+fn gosec_g202_follows_a_query_built_in_a_variable() {
+    let pkg = support::typecheck_fixture("gosec", "example.com/gosec/g202", "g202.go");
+    let messages = support::run_analyzer(gosec(), &pkg);
+    let g202: Vec<&str> = messages
+        .iter()
+        .filter(|m| m.starts_with("G202"))
+        .map(|m| m.as_str())
+        .collect();
+    assert_eq!(g202.len(), 7, "{messages:?}");
+    assert!(
+        g202.iter().all(|m| *m == "G202: SQL string concatenation"),
+        "{g202:?}"
+    );
+}
+
 /// G122 over a fixture that is about *which callbacks are found*.
 ///
 /// The callback argument is resolved as an SSA value upstream, so a function
