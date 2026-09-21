@@ -25,6 +25,9 @@ minmax/minmax.go:71:5:modernize::minmax: if/else statement can be modernized usi
 minmax/minmax.go:85:5:modernize::minmax: if statement can be modernized using min
 minmax/minmax.go:96:5:modernize::minmax: if statement can be modernized using min
 minmax/minmax.go:110:5:modernize::minmax: if statement can be modernized using max
+minmaxfloat/minmaxfloat.go:18:1:modernize::minmax: user-defined max function is equivalent to built-in max and can be removed
+minmaxuser/minmaxuser.go:17:1:modernize::minmax: user-defined min function is equivalent to built-in min and can be removed
+minmaxuser/minmaxuser.go:26:1:modernize::minmax: user-defined max function is equivalent to built-in max and can be removed
 plusbuild/plusbuild.go:6:1:modernize::plusbuild: +build line is no longer needed
 reflecttypefor/reflecttypefor.go:13:9:modernize::reflecttypefor: reflect.TypeOf call can be simplified using TypeFor
 reflecttypefor/reflecttypefor.go:17:9:modernize::reflecttypefor: reflect.TypeOf call can be simplified using TypeFor

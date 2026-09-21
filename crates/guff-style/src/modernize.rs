@@ -1085,6 +1085,163 @@ fn inequality_sign(op: Token) -> Option<i32> {
     }
 }
 
+/// `maybeNaN`, conservatively.
+///
+/// Upstream takes the *core type* and fails safe when there is none, so a type
+/// parameter whose terms disagree is treated as possibly-NaN. This treats every
+/// type parameter that way, which can only make guff report less: a generic
+/// `min[T constraints.Integer]` is the one shape it declines and upstream does
+/// not, and no corpus target writes one.
+fn minmax_maybe_nan(pass: &Pass<'_>, typ: TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return true;
+    };
+    let resolved = unalias_readonly(&artifacts.types, typ);
+    if matches!(artifacts.types.get(resolved), TypeData::TypeParam(_)) {
+        return true;
+    }
+    is_float(&artifacts.types, resolved.underlying(&artifacts.types))
+}
+
+/// `checkMinMaxPattern`: an `if cmp { return t }` whose "false" result is `f`,
+/// where `{t, f}` are the comparison's operands and the direction spells
+/// `funcName`.
+fn minmax_pattern_is(if_stmt: &IfStmt, false_result: &Expr, func_name: &str) -> bool {
+    let Expr::BinaryExpr(cmp) = &if_stmt.cond else {
+        return false;
+    };
+    if if_stmt.body.list.len() != 1 {
+        return false;
+    }
+    let Stmt::ReturnStmt(then_ret) = &if_stmt.body.list[0] else {
+        return false;
+    };
+    if then_ret.results.len() != 1 {
+        return false;
+    }
+    let Some(mut sign) = inequality_sign(cmp.op) else {
+        return false;
+    };
+    let t = &then_ret.results[0];
+    let f = false_result;
+    let x = cmp.x.as_ref();
+    let y = cmp.y.as_ref();
+    if code::equal_syntax(t, x) && code::equal_syntax(f, y) {
+        // keep sign
+    } else if code::equal_syntax(t, y) && code::equal_syntax(f, x) {
+        sign = -sign;
+    } else {
+        return false;
+    }
+    let spells = if sign < 0 { "min" } else { "max" };
+    spells == func_name
+}
+
+/// `hasMinMaxLogic`: one `if/else`, or an `if` followed by a `return`.
+fn minmax_body_is(body: &BlockStmt, func_name: &str) -> bool {
+    if body.list.len() == 1 {
+        if let Stmt::IfStmt(if_stmt) = &body.list[0] {
+            if let Some(Stmt::BlockStmt(else_block)) = if_stmt.else_.as_deref() {
+                if else_block.list.len() == 1 {
+                    if let Stmt::ReturnStmt(else_ret) = &else_block.list[0] {
+                        if else_ret.results.len() == 1 {
+                            return minmax_pattern_is(if_stmt, &else_ret.results[0], func_name);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if body.list.len() == 2 {
+        if let (Stmt::IfStmt(if_stmt), Stmt::ReturnStmt(ret)) = (&body.list[0], &body.list[1]) {
+            if if_stmt.else_.is_none() && ret.results.len() == 1 {
+                return minmax_pattern_is(if_stmt, &ret.results[0], func_name);
+            }
+        }
+    }
+    false
+}
+
+/// minmax's *other* arm: a package-level `func min`/`func max` that the
+/// built-in already does.
+///
+/// `checkUserDefinedMinMax` looks the name up in the **package scope**, so a
+/// method or a local named `min` is not it, and reports the whole declaration.
+/// guff had only the if/else arm, and beats writes three of these.
+fn check_user_defined_minmax(pass: &Pass<'_>, pending: &mut Vec<Diagnostic>) {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return;
+    };
+    for file in pass.files() {
+        for decl in &file.decls {
+            let Decl::FuncDecl(fd) = decl else {
+                continue;
+            };
+            // Package scope: a method is not in it.
+            if fd.recv.is_some() {
+                continue;
+            }
+            let name = fd.name.name.as_str();
+            if name != "min" && name != "max" {
+                continue;
+            }
+            let Some(body) = fd.body.as_ref() else {
+                continue;
+            };
+            let pos = fd.ty.func.0 as u32;
+            if !go_at_least(pass, pos, "go1.21") {
+                continue;
+            }
+            let Some(obj) = code::object_of(pass, &fd.name) else {
+                continue;
+            };
+            let Some(sig) = obj.typ(&artifacts.objects) else {
+                continue;
+            };
+            let params = signature_params(&artifacts.types, sig);
+            let results = signature_results(&artifacts.types, sig);
+            // "Only consider the most common case: exactly 2 parameters."
+            if tuple_len(&artifacts.types, params) != 2
+                || tuple_len(&artifacts.types, results) != 1
+            {
+                continue;
+            }
+            let Some(params) = params else {
+                continue;
+            };
+            let mut nan = false;
+            for i in 0..2 {
+                let var = tuple_at(&artifacts.types, params, i);
+                match var.typ(&artifacts.objects) {
+                    Some(t) => nan |= minmax_maybe_nan(pass, t),
+                    None => nan = true,
+                }
+            }
+            if nan {
+                continue;
+            }
+            if !minmax_body_is(body, name) {
+                continue;
+            }
+            pending.push(Diagnostic {
+                // `Pos: decl.Pos()` — the `func` keyword. The *fix* starts at
+                // the doc comment, which the golden does not see.
+                pos,
+                end: fd.body.as_ref().map_or(pos, |b| b.rbrace.0 as u32 + 1),
+                category: String::new(),
+                message: format!(
+                    "user-defined {name} function is equivalent to built-in {name} and can be removed"
+                ),
+                suggested_fixes: Vec::new(),
+                related: Vec::new(),
+                url: String::new(),
+                severity: String::new(),
+                ..Diagnostic::default()
+            });
+        }
+    }
+}
+
 fn check_minmax(pass: &Pass<'_>, if_stmt: &IfStmt, pending: &mut Vec<Diagnostic>) {
     if if_stmt.init.is_some() {
         return;
@@ -7138,6 +7295,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     if enabled(&options, "newexpr") {
         let cands = collect_newexpr_decls(pass);
         export_newexpr_decls(pass, cands, &mut pending);
+    }
+    if enabled(&options, "minmax") {
+        let _before = pending.len();
+        check_user_defined_minmax(pass, &mut pending);
+        stamp_category(&mut pending, _before, "minmax");
     }
     if enabled(&options, "atomictypes") {
         let _before = pending.len();
