@@ -34107,3 +34107,133 @@ golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 3,631 件緑。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-21（続き 312）— `for t := range ch` の反復変数が**宣言されていなかった**。store 先は nil アドレスで、読みは全部 `*nil`
+
+beats の gosec の guff-only 4 件のうち 2 件が
+`packetbeat/protos/thrift/thrift.go:1113` と `:1118`。どちらも
+**上限チェックで守られている**変換を guff だけが報告していた:
+
+```go
+for t := range thrift.publishQueue {      // chan *thriftTransaction
+	...
+	if t.bytesIn > math.MaxInt64 {
+		pbf.Source.Bytes = math.MaxInt64
+	} else {
+		pbf.Source.Bytes = int64(t.bytesIn)   // guff だけが報告
+	}
+```
+
+#### 1. 最小再現が 3 回とも再現しなかった
+
+最初に測ったのは「守られた変換」5 形（else 腕・then 腕・フィールド代入・
+ローカル代入・無防備）。**無防備の 1 つだけが両方に出て、守られた 4 つは
+両方とも沈黙**。次に「for range チャネル + ポインタ経由のフィールド代入」を
+足しても同じ。3 回目でようやく分かれた —— 分岐したのは
+
+| 形 | 結果 |
+|----|------|
+| `for t := range ch`（`chan *rec`） | **guff だけ報告** |
+| `for t := range ch`（`chan rec`） | 両方沈黙 |
+| `for i := 0; …` の中でポインタ引数 | 両方沈黙 |
+| `t := <-ch`（ループの中でも外でも） | 両方沈黙 |
+| `for _, t := range []*rec` | 両方沈黙 |
+| `t := mk()`（ループの中でも外でも） | 両方沈黙 |
+
+**チャネルの range だけ**。`isSameOrRelated` / `getRealValueFromOperation` を
+上流と 1 行ずつ突き合わせても違いが無かったので、SSA を出した。
+
+#### 2. `*nil`
+
+```
+2:                                        rangechan.body
+	t2 = extract t0 #0                          *rec
+	*nil = t2                   ← store 先が無い
+	t3 = *nil                   ← 読むたびに別の load
+	t4 = &t3.bytesIn [#0]
+	...
+5:                                        if.else
+	t10 = *nil                  ← こちらも別の load
+	t11 = &t10.bytesIn [#0]
+```
+
+go/ssa の `rangeStmt` は `:=` の反復変数を**どの range 種別でも**宣言する
+（`rangeChan` は受信した key を返すだけで、宣言は呼び出し側の `createVars`）。
+guff はその宣言を各 range 腕にインライン展開していて、**`range_chan` だけが
+落としていた** —— `range_int` / `range_indexed` / `range_iter` /
+`range_func` / `range_soft_skip` の 5 箇所にはある。`address(key)` は
+ローカルを見つけられず nil アドレスを返し、**エラーにはならない**。
+
+これで 2 つの読みが**別々の値**になり、`isSameOrRelated` が
+`FieldAddr.X` を比べたところで一致しなくなる → 上限チェックが変換を
+守っていないことになる。
+
+#### 3. 値型のほうが**もっと**壊れていた（沈黙していたので気づかなかった）
+
+`chan rec`（値要素）では load の型が `*invalid type` になる:
+
+```
+	t8 = *nil                                       *invalid type
+	t9 = convert int64 <- *invalid type (t8)               int64
+```
+
+`GetIntTypeInfo` が被演算子を受け付けないので、**変換を見にすら行かない**。
+つまり値要素のチャネル range では G115 が**丸ごと沈黙**していた —— 
+「両方沈黙」に見えていた形の半分は、guff 側が**何も測っていなかった**。
+beats にこの形が無かったので乖離としては出ていない。
+
+#### 4. 直す前と後を同じ木で測る
+
+直した binary と直していない binary を両方作り、チャネル range を
+13 形置いた probe を `default: all` で測った:
+
+```
+          guff  golangci   乖離
+直す前      48      52       6
+直した後    49      52       3
+```
+
+閉じた 3 件:
+
+- `G115` の**見落とし** 1（値要素・無防備）
+- `G115` の**過剰報告** 1（ポインタ要素・上限チェック付き＝thrift の形）
+- `SA4006` の**見落とし** 1（`s := t.name; s = "other"` —— `wastedassign`
+  は同じ行を**直す前から**報告していた。基盤が違う）
+
+残る 3 件は**チャネル range とは無関係の既存の乖離**で、この PR には入れない:
+
+- `SA5009`（`fmt.Printf("%d", s)`）—— 引数がチャネル key でも slice range でも
+  受信でも**ただの string 引数でも**出ない。形の問題ではない。
+- `SA5011` ×2 —— チャネル range と slice range で**見落とし**、引数と
+  `t := <-ch` で**過剰報告**。両方向に出ているので別の家族。
+
+#### 5. 既存のテストが素通りしていた理由
+
+`crates/guff-ssa/tests/range_test.rs` の `test_range_over_channel` は
+
+```go
+for range ch {
+}
+```
+
+—— **反復変数が無い**。「緑だが何も測っていない」の教科書的な形。key 有りを
+4 形足した（値要素・ポインタ要素・クロージャに捕まる形・`:=` でない `=`）。
+
+golden にも形が 1 つも無かったので、gosec の g115 fixture に 6 形、
+`sa4006/loops.go` に 2 形足した（golangci-lint 2.12.2 の答えで regen、
+gosec +4 行 / staticcheck-sa +2 行、いずれも新しい行だけ）。
+
+```
+beats (v9.5.2)
+  前   guff=7546 golangci=7554 both=7532  P=99.8%  R=99.7%  unexpected=36
+  後   guff=7544 golangci=7554 both=7532  P=99.8%  R=99.7%  unexpected=34
+```
+
+**閉じたのは 2 件（beats）、新規 0 件。** SSA ビルダの修正なので影響範囲は
+SSA を使う linter 全部だが、`--oss --tier pr` 8 target・isolate 116 target・
+golden 238 case のどこにも新しい差は出ていない。
+
+golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 緑（284 スイート）。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
