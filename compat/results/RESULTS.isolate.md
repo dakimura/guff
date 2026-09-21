@@ -38,7 +38,7 @@
 | isolate-perfsprint | 7 | 7 | 7 | 100.0% | 100.0% | 0 |
 | isolate-tagalign | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-modernize | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
-| isolate-wastedassign | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
+| isolate-wastedassign | 5 | 5 | 5 | 100.0% | 100.0% | 0 |
 | isolate-decorder | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-funlen | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-maintidx | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
@@ -52,7 +52,7 @@
 | isolate-containedctx | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-iotamixing | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-asasalint | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
-| isolate-exhaustive | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
+| isolate-exhaustive | 8 | 8 | 8 | 100.0% | 100.0% | 0 |
 | isolate-exhaustruct | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | isolate-funcorder | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
 | isolate-embeddedstructfieldcheck | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
@@ -69,16 +69,16 @@
 | isolate-musttag | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-reassign | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-tagliatelle | 31 | 31 | 31 | 100.0% | 100.0% | 0 |
-| isolate-canonicalheader | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
+| isolate-canonicalheader | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
 | isolate-ireturn | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-iface | 5 | 5 | 5 | 100.0% | 100.0% | 0 |
 | isolate-varnamelen | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
 | isolate-godoclint | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
-| isolate-nilnesserr | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
+| isolate-nilnesserr | 5 | 5 | 5 | 100.0% | 100.0% | 0 |
 | isolate-errchkjson | 5 | 5 | 5 | 100.0% | 100.0% | 0 |
 | isolate-bodyclose | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-rowserrcheck | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
-| isolate-sqlclosecheck | 7 | 7 | 7 | 100.0% | 100.0% | 0 |
+| isolate-sqlclosecheck | 16 | 16 | 16 | 100.0% | 100.0% | 0 |
 | isolate-contextcheck | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-wsl | 7 | 7 | 7 | 100.0% | 100.0% | 0 |
 | isolate-gocritic | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
@@ -96,7 +96,7 @@
 | isolate-usetesting | 7 | 7 | 7 | 100.0% | 100.0% | 0 |
 | isolate-gocheckcompilerdirectives | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-gochecksumtype | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
-| isolate-gosmopolitan | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
+| isolate-gosmopolitan | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | isolate-unqueryvet | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | isolate-testableexamples | 5 | 5 | 5 | 100.0% | 100.0% | 0 |
 | isolate-gomoddirectives | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
@@ -109,7 +109,7 @@
 | isolate-exptostd | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | isolate-zerologlint | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-spancheck | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
-| isolate-promlinter | 5 | 5 | 5 | 100.0% | 100.0% | 0 |
+| isolate-promlinter | 14 | 14 | 14 | 100.0% | 100.0% | 0 |
 | isolate-ginkgolinter | 8 | 8 | 8 | 100.0% | 100.0% | 0 |
 | isolate-clickhouselint | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-arangolint | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
@@ -341,7 +341,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| wastedassign | 4 | 4 | 4 | 100.0% | 100.0% |
+| wastedassign | 5 | 5 | 5 | 100.0% | 100.0% |
 
 ## isolate-decorder
 
@@ -425,7 +425,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| exhaustive | 3 | 3 | 3 | 100.0% | 100.0% |
+| exhaustive | 8 | 8 | 8 | 100.0% | 100.0% |
 
 ## isolate-exhaustruct
 
@@ -527,7 +527,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| canonicalheader | 4 | 4 | 4 | 100.0% | 100.0% |
+| canonicalheader | 6 | 6 | 6 | 100.0% | 100.0% |
 
 ## isolate-ireturn
 
@@ -557,7 +557,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| nilnesserr | 2 | 2 | 2 | 100.0% | 100.0% |
+| nilnesserr | 5 | 5 | 5 | 100.0% | 100.0% |
 
 ## isolate-errchkjson
 
@@ -581,7 +581,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| sqlclosecheck | 7 | 7 | 7 | 100.0% | 100.0% |
+| sqlclosecheck | 16 | 16 | 16 | 100.0% | 100.0% |
 
 ## isolate-contextcheck
 
@@ -689,7 +689,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| gosmopolitan | 3 | 3 | 3 | 100.0% | 100.0% |
+| gosmopolitan | 4 | 4 | 4 | 100.0% | 100.0% |
 
 ## isolate-unqueryvet
 
@@ -767,7 +767,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| promlinter | 5 | 5 | 5 | 100.0% | 100.0% |
+| promlinter | 14 | 14 | 14 | 100.0% | 100.0% |
 
 ## isolate-ginkgolinter
 

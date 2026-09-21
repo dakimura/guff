@@ -29,7 +29,7 @@ type Pending = Vec<(u32, String, Vec<TextEdit>)>;
 use std::fs;
 use std::sync::OnceLock;
 
-use guff::ast::{CallExpr, CommentGroup, Decl, Expr, ExprStmt, GenDecl, Spec, ValueSpec};
+use guff::ast::{CallExpr, CommentGroup, Decl, Expr, GenDecl, Spec, ValueSpec};
 use guff::parse_directive;
 use guff::parser::{parse_file, PARSE_COMMENTS};
 use guff::position::FileSet;
@@ -670,44 +670,65 @@ fn dir_declares_gofix_inline(dir: &std::path::Path, name: &str) -> bool {
     false
 }
 
+/// The `io/ioutil` `//go:fix inline` wrapper this call targets, and the name
+/// upstream prints for it.
+///
+/// Both arms below start here, and both take the callee from the *object*
+/// rather than from the syntax, because upstream does: it reaches the callee
+/// with `typeutil.StaticCallee`, so an aliased import (`iou.ReadFile(p)`) and
+/// a dot import (`ReadFile(p)`) name the same callee as `ioutil.ReadFile(p)`,
+/// and all three are reported. The printed name comes from the same object —
+/// `fmt.Sprintf("%s.%s", fn.Pkg().Name(), fn.Name())` in `AnalyzeCallee` — so
+/// all three render `ioutil.ReadFile`: never the alias, never a bare
+/// `ReadFile`. Rendering the source expression instead (what an earlier
+/// revision did) printed `iou.ReadFile` and missed the dot import entirely,
+/// which is two diffs on a shape a corpus target can reach.
+///
+/// A use that is not a call of the wrapper is not a call site: `ioutil.ReadFile`
+/// as a value, `f := ioutil.ReadFile; f(p)` (the callee is `f`), and
+/// `ioutil.Discard` (a var). `ioutil.ReadDir` carries no directive — its result
+/// type differs from `os.ReadDir`'s, so it is not a forwarder — and so is not
+/// in the table.
+fn ioutil_gofix_callee(pass: &Pass<'_>, call: &CallExpr) -> Option<String> {
+    let ident = match unparen(&call.fun) {
+        Expr::SelectorExpr(sel) => sel.sel.id,
+        Expr::Ident(id) => id.id,
+        _ => return None,
+    };
+    let obj = pass.types_info()?.uses.get(&ident).copied()?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let pkg = artifacts.packages.get(obj.pkg(&artifacts.objects)?);
+    if pkg.path() != "io/ioutil" {
+        return None;
+    }
+    let name = obj.name(&artifacts.objects);
+    if !is_known_ioutil_gofix_inline(name) {
+        return None;
+    }
+    Some(format!("{}.{}", pkg.name(), name))
+}
+
 /// Report when inlining an `io/ioutil` go:fix wrapper would pull a newer
 /// dialect into an older caller file (upstream #75726 stopgap).
 ///
-/// Skips call-as-statement sites (`ioutil.WriteFile(...);` with discarded
-/// results): golangci's inliner does not emit the version diagnostic there
-/// (vault `pkcs7/sign_test.go`), while assigned calls are reported.
-fn check_ioutil_go_version(
-    pass: &Pass<'_>,
-    call: &CallExpr,
-    stmt_calls: &HashSet<i64>,
-    pending: &mut Pending,
-) {
-    if stmt_calls.contains(&call.lparen.0) {
-        return;
-    }
-    let fun = unparen(&call.fun);
-    let Expr::SelectorExpr(sel) = fun else {
-        return;
-    };
-    let Some(info) = pass.types_info() else {
-        return;
-    };
-    let Some(obj) = info.uses.get(&sel.sel.id).copied() else {
+/// The comparison is `versions.Before(callerFileVersion, callee.GoVersion)`,
+/// made at the top of `inline.Inline` before it looks at the call's context at
+/// all — which is why every call site is reported, including one whose results
+/// are discarded.
+///
+/// An earlier revision skipped call-as-statement sites, on the evidence that
+/// golangci-lint was silent at vault `helper/pkcs7/sign_test.go:119`
+/// (`ioutil.WriteFile(...)`, error dropped). That was a property of the
+/// comparison config of the day, not of upstream: `issues.uniq-by-line` was
+/// still on, it keeps one finding per (file, line) across all linters, and
+/// `errcheck` — which sorts before `govet` — owns exactly the lines where an
+/// error is dropped. Measured again with the key off, upstream reports the
+/// statement sites too; with it on, both tools drop them. The guard never
+/// matched a rule of upstream's; it only hid guff's own findings.
+fn check_ioutil_go_version(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
+    let Some(display) = ioutil_gofix_callee(pass, call) else {
         return;
     };
-    let Some(pkg_path) = object_pkg_path(pass, obj) else {
-        return;
-    };
-    if pkg_path != "io/ioutil" {
-        return;
-    }
-    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
-        return;
-    };
-    let name = obj.name(&artifacts.objects);
-    if !is_known_ioutil_gofix_inline(name) {
-        return;
-    }
     let pos = call.lparen.0 as u32;
     let caller = effective_file_go_version(pass, pos);
     let callee = toolchain_go_version();
@@ -718,10 +739,61 @@ fn check_ioutil_go_version(
     if version_compare(&caller, &callee) >= 0 {
         return;
     }
-    let display = format_expr_name(&Expr::SelectorExpr(sel.clone()));
     pending.push((
         pos,
         format!("cannot inline call to {display} (declared using {callee}) into a file using {caller}"),
+        Vec::new(),
+    ));
+}
+
+/// `Call of ioutil.X should be inlined` — the other side of the version gate.
+///
+/// Upstream decides this arm by *running* the inliner (`inline.Inline`) and
+/// reporting unless the result is `Literalized` or carries a `BindingDecl`.
+/// guff has no inliner, which is why the function arm is deferred in general
+/// (`compat/golden/cases/inline-gofix-sibling/ratchet.json`).
+///
+/// The `io/ioutil` wrappers are the one class where the answer does not need
+/// one. They are a closed set of six, already written down here because their
+/// directive cannot be read from export data, and each body is a single
+/// forwarding call whose parameters are passed straight through
+/// (`func ReadFile(name string) ([]byte, error) { return os.ReadFile(name) }`).
+/// Nothing in that shape can literalize or bind, and 22 measured shapes agree:
+/// upstream reports every call of all six, in expression, statement, `defer`
+/// and `go` position, nested in another call, through a parenthesized callee,
+/// inside a closure or a composite literal, whether or not the caller imports
+/// the forwarded-to package, and even when the caller shadows it.
+///
+/// The position is the call's, not its `Lparen`: upstream's two arms differ
+/// there (`Pos: call.Pos()` here, `Reportf(call.Lparen, …)` for the error), and
+/// `(ioutil.ReadFile)(p)` shows the difference — `call.Pos()` is the `(`.
+///
+/// Not ported: `withinTestOf`, which suppresses a call inside the callee's own
+/// `TestX`/`ExampleX`/`BenchX`. It first requires the caller's package path to
+/// equal the callee's, so for these six it can only fire inside GOROOT's
+/// `io/ioutil` tests, which no target lints.
+///
+/// The version test is the same one [`check_ioutil_go_version`] uses, so the
+/// two arms are complementary and never both fire. It inherits that function's
+/// approximation of the callee's version — the running toolchain rather than
+/// the Go that built golangci-lint's own binary, which on this machine reads
+/// go1.26.2 against a go1.26.5 toolchain. `compat/normalize.py` drops the patch
+/// component for exactly this reason; a caller pinned *between* the two is the
+/// one window where guff picks the wrong arm, measured on 2026-09-21 and left
+/// alone, because narrowing it belongs to the arm that owns the comparison.
+fn check_ioutil_should_be_inlined(pass: &Pass<'_>, call: &CallExpr, pending: &mut Pending) {
+    let Some(display) = ioutil_gofix_callee(pass, call) else {
+        return;
+    };
+    // The version arm owns this call site when the caller's file is older.
+    let caller = effective_file_go_version(pass, call.lparen.0 as u32);
+    let callee = toolchain_go_version();
+    if !caller.is_empty() && !callee.is_empty() && version_compare(&caller, &callee) < 0 {
+        return;
+    }
+    pending.push((
+        call.pos().0 as u32,
+        format!("Call of {display} should be inlined"),
         Vec::new(),
     ));
 }
@@ -1147,18 +1219,6 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let visit_ioutil = package_imports_ioutil(pass);
     let visit_calls = visit_exp || visit_ioutil;
 
-    // CallExprs used as statements (results discarded).
-    let mut stmt_calls = HashSet::new();
-    if visit_ioutil {
-        inspect.preorder_typed(node_mask!(ExprStmt), pass.files(), |n| {
-            if let NodeRef::ExprStmt(ExprStmt { x, .. }) = n {
-                if let Expr::CallExpr(call) = unparen(x) {
-                    stmt_calls.insert(call.lparen.0);
-                }
-            }
-        });
-    }
-
     // `check_local_gofix_generic_call` needs every call, whatever this package
     // imports: the declaring package is found from the callee, not from a
     // table of known paths.
@@ -1172,7 +1232,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 }
                 check_local_gofix_generic_call(pass, call, &mut pending);
                 if visit_ioutil {
-                    check_ioutil_go_version(pass, call, &stmt_calls, &mut pending);
+                    check_ioutil_go_version(pass, call, &mut pending);
+                    check_ioutil_should_be_inlined(pass, call, &mut pending);
                 }
             }
             NodeRef::SelectorExpr(sel) => {
