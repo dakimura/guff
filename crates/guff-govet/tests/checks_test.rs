@@ -623,10 +623,57 @@ fn inline_flags_go_fix_type_aliases() {
     );
 }
 
-#[test]
-fn inline_flags_ioutil_go_version_mismatch() {
+/// Every call site in `inline_ioutil/bad.go`, as (line, column, name), in the
+/// order the analyzer reports them.
+///
+/// The two arms report the *same* 16 sites and differ only in position and
+/// wording, so one table drives both tests: `Pos: call.Pos()` for "should be
+/// inlined" (the `(` for a parenthesized callee, line 42), `call.Lparen` for
+/// the version error. Measured against golangci-lint 2.12.2 on this fixture,
+/// both columns, on 2026-09-21.
+const IOUTIL_CALL_SITES: &[(i64, i64, i64, &str)] = &[
+    // (line, Pos column, Lparen column, callee)
+    (13, 9, 23, "TempDir"),    // expression position, six wrappers
+    (14, 9, 24, "ReadFile"),
+    (15, 6, 22, "WriteFile"),
+    (16, 9, 23, "ReadAll"),
+    (17, 6, 22, "NopCloser"),
+    (18, 9, 24, "TempFile"),
+    (24, 2, 18, "WriteFile"),  // statement position, results discarded
+    (28, 8, 24, "WriteFile"),  // defer
+    (32, 5, 21, "WriteFile"),  // go
+    (37, 9, 25, "NopCloser"),  // nested in another call's arguments
+    (42, 9, 26, "ReadFile"),   // parenthesized callee
+    (46, 41, 56, "ReadFile"),  // inside a closure
+    (50, 25, 41, "NopCloser"), // inside a composite literal
+    (56, 9, 21, "ReadFile"),   // aliased import, still rendered `ioutil.`
+    (61, 9, 17, "ReadFile"),   // dot import, no selector at all
+    (69, 9, 24, "ReadFile"),   // caller shadows the forwarded-to package
+];
+
+fn ioutil_diagnostics(caller: &str) -> Vec<(i64, i64, String)> {
     let dir = support::testdata("inline_ioutil");
     let stub = dir.join("stub/io/ioutil/ioutil.go");
+    let pkg = support::with_go_version(
+        support::typecheck_with_deps(
+            "example.com/govet/inline_ioutil",
+            &dir.join("bad.go"),
+            &[("io/ioutil", &stub)],
+        ),
+        caller,
+    );
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    support::run_analyzer_diagnostics(inline_analyzer(), &pkg)
+        .into_iter()
+        .map(|d| {
+            let p = fset.position(guff::position::Pos(d.pos as i64));
+            (p.line, p.column, d.message)
+        })
+        .collect()
+}
+
+#[test]
+fn inline_flags_ioutil_go_version_mismatch() {
     // The callee side of this comparison is the *host toolchain* version, and
     // `version_compare` only reads major.minor. A literal caller version made
     // the test a function of which Go the machine had: on go1.24.x a "1.24.3"
@@ -635,44 +682,44 @@ fn inline_flags_ioutil_go_version_mismatch() {
     // any Go.
     let toolchain = guff_analysis::code::toolchain_go_version();
     let caller = one_minor_below(&toolchain);
-    let pkg = support::with_go_version(
-        support::typecheck_with_deps(
-            "example.com/govet/inline_ioutil",
-            &dir.join("bad.go"),
-            &[("io/ioutil", &stub)],
-        ),
-        &caller,
-    );
-    let messages = support::run_analyzer(inline_analyzer(), &pkg);
-    assert_eq!(messages.len(), 1, "{messages:?}");
-    assert!(
-        messages[0].starts_with("cannot inline call to ioutil.TempDir (declared using go"),
-        "{messages:?}"
-    );
-    assert!(
-        messages[0].contains(&format!("into a file using go{caller}")),
-        "{messages:?}"
-    );
+    let want: Vec<(i64, i64, String)> = IOUTIL_CALL_SITES
+        .iter()
+        .map(|&(line, _, lparen, name)| {
+            (
+                line,
+                lparen,
+                format!(
+                    "cannot inline call to ioutil.{name} (declared using {toolchain}) \
+                     into a file using go{caller}"
+                ),
+            )
+        })
+        .collect();
+    // Every site, not "at least one": an earlier revision skipped the three
+    // statement-position calls (lines 24/28/32) and an `any(starts_with(…))`
+    // would have passed anyway. None of them draws "should be inlined" — in an
+    // older file the two arms are complementary.
+    assert_eq!(ioutil_diagnostics(&caller), want);
 }
 
 /// Upstream gates on `versions.Before(caller, callee)`, so a caller at the
 /// toolchain's own version is *not* a mismatch. Without this the check could
 /// start firing on every `io/ioutil` call and nothing in the suite would say so.
 #[test]
-fn inline_allows_ioutil_at_the_toolchain_version() {
-    let dir = support::testdata("inline_ioutil");
-    let stub = dir.join("stub/io/ioutil/ioutil.go");
-    let pkg = support::with_go_version(
-        support::typecheck_with_deps(
-            "example.com/govet/inline_ioutil",
-            &dir.join("bad.go"),
-            &[("io/ioutil", &stub)],
-        ),
-        &guff_analysis::code::toolchain_go_version(),
-    );
-    assert!(
-        support::run_analyzer(inline_analyzer(), &pkg).is_empty(),
-        "caller at the toolchain version must not be reported"
+fn inline_flags_ioutil_calls_at_the_toolchain_version() {
+    let want: Vec<(i64, i64, String)> = IOUTIL_CALL_SITES
+        .iter()
+        .map(|&(line, pos, _, name)| {
+            (line, pos, format!("Call of ioutil.{name} should be inlined"))
+        })
+        .collect();
+    // 16 sites and nothing else: the shapes that must stay silent are in the
+    // same fixture (`ioutil.ReadDir`, which carries no directive; `ReadFile`
+    // and `Discard` as values; a call through a variable), so a rule that
+    // reported a use rather than a call would show up as an extra row here.
+    assert_eq!(
+        ioutil_diagnostics(&guff_analysis::code::toolchain_go_version()),
+        want
     );
 }
 

@@ -32924,3 +32924,160 @@ golden 238 / fix 238 / reject 14 / isolate 114 / `--oss --tier pr` 8 target、
 予測どおり 1 件も減っていない）・`modernize:reflecttypefor` 16。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-21（続き 299）— `close beats`（3）。`io/ioutil` の 6 つは**インライナを持たなくても答えられる唯一の類**。ついでに、上流の規則ではなく**当時の比較設定**に合わせて書かれた抑制ガードを 1 つ外した
+
+beats に残っていた gcl-only の govet 67 件のうち **63 件**が
+`inline: Call of ioutil.X should be inlined` だった（ReadFile 50 / ReadAll 8 /
+NopCloser 4 / TempFile 1）。
+
+#### 1. なぜ guff はこの腕を持っていなかったか
+
+上流 (`x/tools/go/analysis/passes/inline`) の呼び出し腕は、判定のために
+**インライナを実際に走らせる**:
+
+```go
+res, err := inline.Inline(caller, callee, &inline.Options{Logf: discard})
+if err != nil { a.pass.Reportf(call.Lparen, "%v", err); return }   // ← guff が持っていた腕
+if res.Literalized { return }
+if res.BindingDecl && !allowBindingDecl { return }
+a.pass.Report(… Pos: call.Pos(), "Call of %v should be inlined" …)  // ← 無かった腕
+```
+
+`inline.Inline` は別物のサイズなので、関数の腕は一般には DEFERRED にしてある
+(`compat/golden/cases/inline-gofix-sibling/ratchet.json`)。
+
+`io/ioutil` だけは走らせなくても答えが出る。GOROOT の `//go:fix inline` は
+**6 つで閉じており**（`ReadAll` / `ReadFile` / `WriteFile` / `NopCloser` /
+`TempFile` / `TempDir`。`ReadDir` は結果型が `os.ReadDir` と違うので
+ディレクティブが無い）、どれも本体が引数をそのまま渡す 1 文の転送
+(`func ReadFile(name string) ([]byte, error) { return os.ReadFile(name) }`)。
+この形は `Literalized` にも `BindingDecl` にもならない。そして 6 つの名前は
+**export data に載らないディレクティブ**なので guff は既に表として持っていた
+—— 足りなかったのは腕そのものだけ。
+
+#### 2. 22 形測って、16 形が出る
+
+1 モジュール 1 ファイルに 22 形を並べ、`go.mod` の `go` 行を
+`1.26.5`（＝呼び出し側が新しい：関数の腕）と `1.25`（＝古い：バージョンの腕）の
+2 通りで両ツールに通した。出るのは 16 形:
+
+| 出る | 黙る |
+|---|---|
+| 式の位置（6 つ全部） | `ioutil.ReadDir(...)`（ディレクティブが無い） |
+| 文の位置（結果を捨てる） | `ioutil.ReadFile` を**値**として返す |
+| `defer` / `go` | `ioutil.Discard`（変数） |
+| 他の呼び出しの引数に入れ子 | `f := ioutil.ReadFile; f(p)`（callee が `f`） |
+| 括弧付き callee `(ioutil.ReadFile)(p)` | |
+| クロージャの中 / 複合リテラルの中 | |
+| **別名 import** `iou.ReadFile(p)` | |
+| **ドット import** `ReadFile(p)` | |
+| 転送先パッケージを shadow している呼び出し側 | |
+
+最後の 3 つが書きかけの実装の欠陥をそのまま出した。上流は callee を
+`typeutil.StaticCallee` で**オブジェクトとして**取るので、構文は関係ない:
+
+- **ドット import は selector が無い**。`Expr::SelectorExpr` しか見ていない実装は
+  丸ごと落とす（gcl-only 1 件）。
+- **表示名も同じオブジェクトから来る**。`AnalyzeCallee` は
+  `fmt.Sprintf("%s.%s", fn.Pkg().Name(), fn.Name())` なので、別名で import しても
+  印字は `ioutil.ReadFile`。ソース式を書き出す実装は `iou.ReadFile` と出して
+  **両側に 1 件ずつ**立てる（続き 291 の「guff-only と gcl-only が同数なら
+  位置か文言の差」の署名）。
+
+どちらも `ioutil_gofix_callee()` に寄せて、2 つの腕が同じ入口を通るようにした。
+
+#### 3. ついでに落ちた抑制ガード —— 上流の規則ではなく**当時の `uniq-by-line`** に合わせてあった
+
+既存のバージョン腕には
+
+```rust
+if stmt_calls.contains(&call.lparen.0) { return; }   // call-as-statement は出さない
+```
+
+があり、コメントは *「golangci の inliner は文の位置では出さない
+（vault `pkcs7/sign_test.go`）」* と書いてあった。22 形を測ると**出る**。
+
+上流のコードを読むと出ない理由が無い —— バージョン比較は `inline.Inline` の
+**先頭**、呼び出しの文脈を見るより前にある:
+
+```go
+callerGoVersion := caller.Info.FileVersions[caller.File]
+if callerGoVersion != "" && callee.GoVersion != "" && versions.Before(callerGoVersion, callee.GoVersion) {
+    return nil, fmt.Errorf("cannot inline call to %s (declared using %s) into a file using %s", …)
+}
+```
+
+vault の観測のほうが環境の性質だった。`issues.uniq-by-line` は既定で **on** で、
+(file, line) ごとに linter 横断で 1 件しか残さない。そして `errcheck` は
+`govet` より前に並ぶ。`ioutil.WriteFile(...)` を文として書けば error を捨てるので、
+**errcheck が必ずその行を取る**。同じ fixture で鍵だけ切り替えて測ると:
+
+```
+uniq-by-line: true   14 行目（代入）だけ govet。22/28/32 行目は errcheck が勝つ
+uniq-by-line: false  14/22/28/32 行目すべてに govet が出る
+```
+
+比較ハーネスは（`corpus/patch_unlimited_issues.py` の導入で）今は
+`uniq-by-line: false` を書く。つまりこのガードは、**外した瞬間から guff 自身の
+findings を隠すだけのもの**になっていた。外した。
+
+#### 4. 移植しなかったもの
+
+`withinTestOf`（callee 自身の `TestX`/`ExampleX`/`BenchX` の中の呼び出しを抑制）は
+入れていない。最初の条件が
+`strings.TrimSuffix(pass.Pkg.Path(), "_test") == target.Pkg().Path()` なので、
+この 6 つでは **GOROOT の `io/ioutil` 自身のテストの中**でしか発火しない。
+どのターゲットもそこは lint しない。関数の doc コメントに理由を書いた。
+
+callee のバージョン文字列は相変わらず近似のまま: 上流は **golangci-lint の
+バイナリを建てた Go**（`go1.26.2`）を出し、guff は PATH の toolchain（`go1.26.5`）を
+出す。`compat/normalize.py` が patch を落としているのはこのためで、
+食い違いになるのは呼び出し側が**その 2 つの間**に pin されている窓だけ。
+今回も測って（22 形 × 2 バージョン）そのまま残した。
+
+#### 5. fixture と単体テスト
+
+測った 22 形を**全部** `crates/guff-govet/tests/testdata/inline_ioutil/bad.go` に入れた
+（同じファイルが `"io/ioutil"` と `iou "io/ioutil"` と `. "io/ioutil"` を同時に
+import する。`os` は import しない ——「転送先を import していない呼び出し側」も
+ただで測れる）。stub 側には 6 つの転送と、`ReadDir`（ディレクティブ無し）、
+`Discard`（変数）を足した。
+
+このケースは golden に載せられない: メッセージに Go バージョンが埋まるので
+CI の Go と golangci-lint の Go が一致しない（`compat/golden/cases/govet/sources.txt`
+に既に理由が書いてある）。だから守るのは単体テスト側で、
+
+```rust
+const IOUTIL_CALL_SITES: &[(i64, i64, i64, &str)] = &[ /* (行, Pos 列, Lparen 列, callee) × 16 */ ];
+```
+
+を 1 つ置いて **2 つの腕が同じ 16 箇所を指すこと**を `assert_eq!` で丸ごと固定した
+（腕ごとに列が違う: 関数の腕は `call.Pos()`、バージョンの腕は `call.Lparen`。
+`(ioutil.ReadFile)(p)` がその差を見せる）。`any(starts_with(…))` のままなら、
+外したばかりの文の位置 3 件が落ちていても緑で通る。
+
+#### 6. 実測
+
+```
+beats (v9.5.2)
+  前   guff=7404 golangci=7554 both=7374  P=99.6%  R=97.6%  unexpected=210
+  後   guff=7467 golangci=7554 both=7437  P=99.6%  R=98.5%  unexpected=147
+  govet  前 guff=14 gcl=77 both=10  P=71.4% R=13.0%
+         後 guff=77 gcl=77 both=73  P=94.8% R=94.8%
+```
+
+golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 3,622 件緑。
+
+**閉じたのは 63 件、新しく出た食い違いは 0 件**（guff-only は 30 のまま）。
+govet に残る 4/4 は `structtag` の**引用符の差**（guff が `"bson:_id"`、
+gcl が `` `bson:_id` ``）——1 件の食い違いが両側に立つ形で、次の回の候補。
+
+`compat/results/RESULTS.isolate.md` も同時に更新した。isolate の fixture が
+続き 290 前後で増えたときにスナップショットを撮り直していなかっただけで、
+7 行（wastedassign / exhaustive / canonicalheader / nilnesserr / sqlclosecheck /
+gosmopolitan / promlinter）が古い件数のまま残っていた。すべて 100%/100%、
+unexpected 0 のまま。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
