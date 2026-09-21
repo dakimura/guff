@@ -701,6 +701,17 @@ impl<'a> Builder<'a> {
         self.emit_if(ok_cond, body, done);
 
         self.set_block(Some(body));
+
+        // go/ssa's `rangeStmt` creates the `:=` locals for *every* range kind —
+        // `rangeChan` returns the received key and the caller declares `k`. The
+        // four other arms here do that; this one did not, so `self.address(key)`
+        // found no local and handed back a nil address: the body read
+        // `t = *nil` for every use of the range variable. A channel range takes
+        // one iteration variable, never a value.
+        if s.tok == Some(Token::DEFINE) {
+            self.range_create_vars(s, want_key, false);
+        }
+
         if want_key {
             let k = self.emit_extract(ko, 0);
             if let Some(key) = &s.key {

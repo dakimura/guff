@@ -214,3 +214,72 @@ func newType() *int32 { return new(int32) } // silent — the argument is a type
 func newConverted(i int) *uint32 { return new(uint32(i)) } // FINDING int -> uint32
 
 func newWidened(u uint32) *uint64 { return new(uint64(u)) } // silent
+
+// --- the iteration variable of a channel range ------------------------------
+//
+// `for t := range ch` is the one range form whose `:=` variable guff's SSA
+// builder never declared: the store went to a nil address and every read of
+// `t` came back as a load from nil. With a value element the load's type came
+// out `*invalid type`, so `GetIntTypeInfo` refused the operand and the
+// conversion was never examined at all — `chanValueUnguarded` below was
+// *silent* in guff and a finding in golangci-lint. With a pointer element the
+// type survived, but the guard and the conversion read two different nil
+// loads, so `isSameOrRelated` could not match them and the bounds check stopped
+// counting — beats' packetbeat/protos/thrift reports both of its guarded
+// conversions that way.
+
+type chanRec struct{ bytesIn uint64 }
+
+func chanValueUnguarded(ch chan chanRec) int64 {
+	for t := range ch {
+		return int64(t.bytesIn) // FINDING uint64 -> int64
+	}
+	return 0
+}
+
+func chanPointerUnguarded(ch chan *chanRec) int64 {
+	for t := range ch {
+		return int64(t.bytesIn) // FINDING uint64 -> int64
+	}
+	return 0
+}
+
+func chanValueGuarded(ch chan chanRec) int64 {
+	for t := range ch {
+		if t.bytesIn > 9223372036854775807 {
+			return 9223372036854775807
+		}
+		return int64(t.bytesIn) // silent
+	}
+	return 0
+}
+
+func chanPointerGuarded(ch chan *chanRec) int64 {
+	for t := range ch {
+		if t.bytesIn > 9223372036854775807 {
+			return 9223372036854775807
+		}
+		return int64(t.bytesIn) // silent
+	}
+	return 0
+}
+
+// The same variable through a closure, which keeps the `Alloc` instead of
+// lifting it to a register.
+func chanCaptured(ch chan chanRec) func() int64 {
+	var f func() int64
+	for t := range ch {
+		f = func() int64 { return int64(t.bytesIn) } // FINDING uint64 -> int64
+	}
+	return f
+}
+
+// `for t = range ch` assigns a variable that is already in scope, so this arm
+// never needed the declaration — it is here so the fixture measures both.
+func chanAssigned(ch chan chanRec) int64 {
+	var t chanRec
+	for t = range ch {
+		_ = t
+	}
+	return int64(t.bytesIn) // FINDING uint64 -> int64
+}

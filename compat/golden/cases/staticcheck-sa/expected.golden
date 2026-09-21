@@ -249,6 +249,8 @@ sa4006/generic_conv/generic_conv.go:58:2:staticcheck::SA4006: this value of p is
 sa4006/loops/loops.go:32:3:staticcheck::SA4006: this value of moreDiags is never used
 sa4006/loops/loops.go:43:2:staticcheck::SA4006: this value of moreDiags is never used
 sa4006/loops/loops.go:77:3:staticcheck::SA4006: this value of moreDiags is never used
+sa4006/loops/loops.go:104:3:staticcheck::SA4006: this value of moreDiags is never used
+sa4006/loops/loops.go:117:3:staticcheck::SA4006: this value of moreDiags is never used
 sa4006/methods/methods.go:33:2:staticcheck::SA4006: this value of x is never used
 sa4006/methods/methods.go:40:2:staticcheck::SA4006: this value of x is never used
 sa4006/methods/methods.go:47:2:staticcheck::SA4006: this value of x is never used

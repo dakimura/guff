@@ -261,15 +261,18 @@ fn gosec_g115_reports_only_unbounded_conversions() {
             count("G115: integer overflow conversion int -> uint8"),
             count("G115: integer overflow conversion int -> uint32"),
             count("G115: integer overflow conversion uint64 -> int"),
+            // The channel-range arm: two unguarded reads, one through a
+            // closure, one after the loop — and the two guarded ones silent.
+            count("G115: integer overflow conversion uint64 -> int64"),
         ),
-        (4, 2, 6, 2, 1),
+        (4, 2, 6, 2, 1, 4),
         "{messages:?}"
     );
     // Nothing else: every other conversion in the fixture is bounded, and the
     // fixture's `// silent` marks say which.
     assert_eq!(
         messages.iter().filter(|m| m.starts_with("G115:")).count(),
-        15,
+        19,
         "{messages:?}"
     );
 }

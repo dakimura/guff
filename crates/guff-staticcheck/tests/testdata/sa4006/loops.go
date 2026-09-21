@@ -90,3 +90,32 @@ func loopPlainRedef(n int) {
 	}
 	use(acc)
 }
+
+// 7. reported: a channel range is the same shape as 5, and the one range form
+// whose `:=` variable guff's SSA builder never declared. The store went to a
+// nil address, so every read of `t` was a load from nil — and with a value
+// element that load came out `*invalid type`, which was enough for SA4006 to
+// lose the assignment below entirely.
+func rangeChanValue(ch chan int) Diags {
+	var diags Diags
+	for t := range ch {
+		pp, moreDiags := start(t)
+		diags = append(diags, moreDiags...)
+		flat, moreDiags := decode(pp)
+		use(flat)
+	}
+	return diags
+}
+
+// 8. reported: the pointer element, where the load kept its type and only the
+// value identity was lost.
+func rangeChanPointer(ch chan *int) Diags {
+	var diags Diags
+	for t := range ch {
+		pp, moreDiags := start(*t)
+		diags = append(diags, moreDiags...)
+		flat, moreDiags := decode(pp)
+		use(flat)
+	}
+	return diags
+}

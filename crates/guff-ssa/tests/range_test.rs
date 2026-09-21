@@ -99,6 +99,156 @@ func endless(ch <-chan int) {
     );
 }
 
+/// The base register of every `= &<base>.n [#0]` line, in order.
+fn field_bases(asm: &str) -> Vec<&str> {
+    asm.lines()
+        .filter_map(|l| {
+            let rest = l.split_once("= &")?.1;
+            rest.split_once(".n [#0]").map(|(base, _)| base)
+        })
+        .collect()
+}
+
+#[test]
+fn test_range_over_channel_defines_the_key_variable() {
+    // go/ssa's `rangeStmt` declares the `:=` iteration variables for *every*
+    // range kind; `rangeChan` only returns the received key. guff inlines the
+    // declaration into each range arm, and this one used to skip it — so
+    // `address(key)` found no local and handed back a nil address. The body
+    // then read `t = *nil` for every use of `t`, and with a value element the
+    // load's type came out `*invalid type`, which silently switched off every
+    // analyzer that keys on the operand's type (gosec G115 stopped seeing the
+    // conversion at all).
+    const SRC: &str = "\
+package p
+
+type rec struct{ n uint64 }
+
+func f(ch chan rec) uint64 {
+	var total uint64
+	for t := range ch {
+		total += t.n
+	}
+	return total
+}
+";
+    let asm = build(SRC, "f");
+    assert!(
+        !asm.contains("*nil"),
+        "channel range key must have a real address:\n{asm}"
+    );
+    assert!(
+        !asm.contains("invalid type"),
+        "channel range key must keep its element type:\n{asm}"
+    );
+    // A struct is an aggregate, so the local is not lifted and stays visible.
+    assert!(
+        asm.contains("local rec (t)"),
+        "expected a local for the received key:\n{asm}"
+    );
+    assert_eq!(
+        field_bases(&asm).len(),
+        1,
+        "expected one field address off the key:\n{asm}"
+    );
+}
+
+#[test]
+fn test_range_over_channel_of_pointers_defines_the_key_variable() {
+    // The pointer element is the shape beats' packetbeat/protos/thrift writes
+    // (`chan *thriftTransaction`). Here the broken load still carried the right
+    // type, so nothing looked wrong — but the two reads of `t.n` came off two
+    // *different* `*nil` loads, and gosec's `isSameOrRelated` could no longer
+    // tell that the bounds check guarded the conversion below it.
+    const SRC: &str = "\
+package p
+
+type rec struct{ n uint64 }
+
+func f(ch chan *rec) uint64 {
+	var total uint64
+	for t := range ch {
+		if t.n < 10 {
+			total += t.n
+		}
+	}
+	return total
+}
+";
+    let asm = build(SRC, "f");
+    assert!(
+        !asm.contains("*nil"),
+        "channel range key must have a real address:\n{asm}"
+    );
+    let bases = field_bases(&asm);
+    assert_eq!(bases.len(), 2, "expected two field addresses:\n{asm}");
+    assert_eq!(
+        bases[0], bases[1],
+        "both reads of t.n must come off the same received key:\n{asm}"
+    );
+    let key = asm
+        .lines()
+        .find(|l| l.contains("= extract") && l.trim_end().ends_with("*rec"))
+        .and_then(|l| l.trim().split_once(" = "))
+        .map(|(reg, _)| reg.to_string())
+        .unwrap_or_default();
+    assert_eq!(
+        bases[0], key,
+        "the field addresses must come off the received key itself:\n{asm}"
+    );
+}
+
+#[test]
+fn test_range_over_channel_key_captured_by_a_closure() {
+    // An escaping key keeps its `Alloc` instead of being lifted, so this pins
+    // that the *declaration* — not just the lifted register — is what used to
+    // be missing.
+    const SRC: &str = "\
+package p
+
+func f(ch chan int) []func() int {
+	var out []func() int
+	for t := range ch {
+		out = append(out, func() int { return t })
+	}
+	return out
+}
+";
+    let asm = build(SRC, "f");
+    assert!(
+        !asm.contains("*nil"),
+        "captured channel range key must have a real address:\n{asm}"
+    );
+    assert!(
+        asm.contains("new int (t)"),
+        "expected a heap cell for the captured key:\n{asm}"
+    );
+}
+
+#[test]
+fn test_range_over_channel_assigns_an_existing_variable() {
+    // `for t = range ch` (no `:=`) must *not* declare anything: the store goes
+    // to the variable already in scope, which is why the missing declaration
+    // never showed up in this arm.
+    const SRC: &str = "\
+package p
+
+func f(ch chan int) int {
+	var t int
+	sum := 0
+	for t = range ch {
+		sum += t
+	}
+	return sum + t
+}
+";
+    let asm = build(SRC, "f");
+    assert!(
+        !asm.contains("*nil"),
+        "assigned channel range key must have a real address:\n{asm}"
+    );
+}
+
 #[test]
 fn test_range_over_map() {
     const SRC: &str = "\

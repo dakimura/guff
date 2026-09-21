@@ -2545,7 +2545,9 @@ fn sa4006_loop_back_edge_shapes() {
         vec![
             (32, 3), // 1. loop, redefined at the top of the body then read
             (43, 2), // 2. the same shape with no loop
-            (77, 3), // 5. range loop, same as 1
+            (77, 3),  // 5. range loop, same as 1
+            (104, 3), // 7. channel range, value element
+            (117, 3), // 8. channel range, pointer element
         ],
         "{got:?}"
     );
