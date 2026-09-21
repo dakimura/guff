@@ -129,6 +129,50 @@
  
  	return es[globIdx]
  }
+--- a/minmaxfloat/minmaxfloat.go
++++ b/minmaxfloat/minmaxfloat.go
+@@ -13,15 +13,6 @@
+ 	return b
+ }
+ 
+-// Reported: the comparison's operands are returned in the *other* order, which
+-// flips the sign back to `max`.
+-func max(a, b int) int {
+-	if b > a {
+-		return b
+-	}
+-	return a
+-}
+-
+ var (
+ 	_ = min(1.0, 2.0)
+ 	_ = max(1, 2)
+--- a/minmaxuser/minmaxuser.go
++++ b/minmaxuser/minmaxuser.go
+@@ -12,23 +12,6 @@
+ // expressions to be the comparison's own operands, in either order, with the
+ // direction spelling the function's name.
+ package minmax
+-
+-// Pattern 1: one if/else.
+-func min(a, b int) int {
+-	if a < b {
+-		return a
+-	} else {
+-		return b
+-	}
+-}
+-
+-// Pattern 2: an if, then a return.
+-func max(a, b int64) int64 {
+-	if a > b {
+-		return a
+-	}
+-	return b
+-}
+ 
+ type holder struct{}
+ 
 --- a/plusbuild/plusbuild.go
 +++ b/plusbuild/plusbuild.go
 @@ -3,7 +3,6 @@
@@ -654,7 +698,7 @@
  type namedUP unsafe.Pointer
 --- a/waitgroupgo/waitgroupgo.go
 +++ b/waitgroupgo/waitgroupgo.go
-@@ -5,9 +5,7 @@
+@@ -5,11 +5,9 @@
  import "sync"
  
  func spawn(wg *sync.WaitGroup) {
@@ -666,3 +710,40 @@
 -	}()
 +	})
  }
+ 
+ // "Body must start with `defer wg.Done()` or end with `wg.Done()`." guff had
+@@ -19,28 +17,22 @@
+ type wgHolder struct{ wg sync.WaitGroup }
+ 
+ func spawnTrailingDone(wg *sync.WaitGroup) {
+-	wg.Add(1)
+-	go func() {
++	wg.Go(func() {
+ 		work()
+-		wg.Done()
+-	}()
++	})
+ }
+ 
+ // The receiver only has to be the same *syntax* the `Add` used.
+ func spawnIndexedReceiver(wgs []sync.WaitGroup) {
+-	wgs[0].Add(1)
+-	go func() {
++	wgs[0].Go(func() {
+ 		work()
+-		wgs[0].Done()
+-	}()
++	})
+ }
+ 
+ func spawnFieldReceiver(h *wgHolder) {
+-	h.wg.Add(1)
+-	go func() {
++	h.wg.Go(func() {
+ 		work()
+-		h.wg.Done()
+-	}()
++	})
+ }
+ 
+ // Silent: `Done` is neither first-and-deferred nor last.

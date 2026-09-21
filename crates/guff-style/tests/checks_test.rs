@@ -7268,7 +7268,9 @@ fn modernize_waitgroupgo_fix_removes_the_goroutine_call_parens() {
         );
         checked += 1;
     }
-    assert_eq!(checked, 1, "one goroutine in the fixture");
+    // The `defer wg.Done()` goroutine and the three that end with a bare
+    // `wg.Done()` — the edits are the same shape for both arms.
+    assert_eq!(checked, 4, "four reported goroutines in the fixture");
 }
 
 /// An index the body never reads must not survive into the range clause.
