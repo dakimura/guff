@@ -130,3 +130,26 @@ func assignIndexUnusedInBody(n int) {
 // modernize version check through `analyzerutil.FileUsesGoVersion`, which reads
 // `pass.TypesInfo.FileVersions[file]` and nothing else. See
 // `rangeint_go118.go` for the file that must stay silent.
+
+// `isScalarLvalue` is resolved by *object*. An inner loop that shadows the
+// index with an `i` of its own is a different variable, and the outer loop is
+// still a range-over-int.
+func nestedShadowedIndex(n, m int) int {
+	t := 0
+	for i := 0; i < n; i++ {
+		for i := 0; i < m; i++ {
+			t += i
+		}
+	}
+	return t
+}
+
+// Silent: this one really does assign its own index.
+func assignsItsOwnIndex(n int) int {
+	t := 0
+	for i := 0; i < n; i++ {
+		i = i + 1
+		t += i
+	}
+	return t
+}

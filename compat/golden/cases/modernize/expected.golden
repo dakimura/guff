@@ -16,6 +16,19 @@ bad/bad.go:43:5:modernize::stringscutprefix: HasPrefix + TrimPrefix can be simpl
 bad/bad.go:50:2:modernize::slicescontains: Loop can be simplified using slices.Contains
 bad/bad.go:59:24:modernize::omitzero: Omitempty has no effect on nested struct fields
 bloop/bloop.go:93:6:modernize::rangeint: for loop can be modernized using range over int
+fmtappendf/fmtappendf.go:15:44:modernize::fmtappendf: Replace []byte(fmt.Sprintf...) with fmt.Appendf
+fmtappendf/fmtappendf.go:18:44:modernize::fmtappendf: Replace []byte(fmt.Sprintf...) with fmt.Appendf
+fmtappendf/fmtappendf.go:27:45:modernize::fmtappendf: Replace []byte(fmt.Sprintf...) with fmt.Appendf
+fmtappendf/fmtappendf.go:32:45:modernize::fmtappendf: Replace []byte(fmt.Sprintf...) with fmt.Appendf
+fmtappendf/fmtappendf.go:33:45:modernize::fmtappendf: Replace []byte(fmt.Sprintf...) with fmt.Appendf
+fmtappendf/fmtappendf.go:36:45:modernize::fmtappendf: Replace []byte(fmt.Sprintf...) with fmt.Appendf
+fmtappendf/fmtappendf.go:38:45:modernize::fmtappendf: Replace []byte(fmt.Sprintf...) with fmt.Appendf
+fmtappendf/fmtappendf.go:39:45:modernize::fmtappendf: Replace []byte(fmt.Sprintf...) with fmt.Appendf
+fmtappendf/fmtappendf.go:41:45:modernize::fmtappendf: Replace []byte(fmt.Sprintf...) with fmt.Appendf
+fmtappendf/fmtappendf.go:45:41:modernize::fmtappendf: Replace []byte(fmt.Sprint...) with fmt.Append
+fmtappendf/fmtappendf.go:48:41:modernize::fmtappendf: Replace []byte(fmt.Sprintln...) with fmt.Appendln
+fmtappendf/fmtappendf.go:55:10:modernize::fmtappendf: Replace []byte(fmt.Sprintf...) with fmt.Appendf
+fmtappendf/fmtappendf.go:59:10:modernize::fmtappendf: Replace []byte(fmt.Sprintf...) with fmt.Appendf
 mapsloop/mapsloop.go:7:3:modernize::mapsloop: Replace m[k]=v loop with maps.Copy
 mapsloop/mapsloop.go:22:3:modernize::mapsloop: Replace m[k]=v loop with maps.Copy
 minmax/minmax.go:8:5:modernize::minmax: if statement can be modernized using min
@@ -56,6 +69,8 @@ slicescontains/slicescontains.go:32:2:modernize::slicescontains: Loop can be sim
 slicescontains/slicescontains.go:42:2:modernize::slicescontains: Loop can be simplified using slices.Contains
 slicescontains/slicescontains.go:125:2:modernize::slicescontains: Loop can be simplified using slices.ContainsFunc
 slicescontains/slicescontains.go:135:2:modernize::slicescontains: Loop can be simplified using slices.ContainsFunc
+slicescontains/slicescontains.go:147:2:modernize::slicescontains: Loop can be simplified using slices.Contains
+slicescontains/slicescontains.go:159:2:modernize::slicescontains: Loop can be simplified using slices.Contains
 stditerators/stditerators.go:9:2:modernize::stditerators: NumFields/Field loop can simplified using Struct.Fields iteration
 stditerators/stditerators.go:16:11:modernize::stditerators: NumFields/Field loop can simplified using Struct.Fields iteration
 stditerators/stditerators.go:23:2:modernize::stditerators: Len/At loop can simplified using Tuple.Variables iteration

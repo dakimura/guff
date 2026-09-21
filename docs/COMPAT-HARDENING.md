@@ -33875,3 +33875,76 @@ golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 3,630 件緑。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-21（続き 309）— `close beats`（13）。小さい modernize 3 つ。**名前で照合する述語と、失敗しうるレンダリング**という同じ家族の欠陥
+
+beats の modernize の小ルールを 1 つずつ測った。3 つが直り、2 つは形を書き
+残して置いた。**3 つとも「上流はオブジェクトで解決し、ソースを切り貼りする」
+のに guff が「名前で照合し、自前で描画する」ことが原因**だった。
+
+#### 1. `fmtappendf` —— 描画が失敗すると**診断ごと消えていた**
+
+```rust
+let args: Option<Vec<String>> = inner.args.iter().map(expr_text).collect();
+let Some(args) = args else { return; };   // ← 診断も出ない
+```
+
+`expr_text` は CallExpr を**引数がちょうど 1 つのときだけ**描画する。
+beats の cel テストは `[]byte(fmt.Sprintf("unexpected UA: %s", r.UserAgent()))`
+—— 引数 0 のメソッド呼び出し —— なので `None` になり、**finding が消えた**。
+上流は `astutil.Format` でソース範囲を切り出すので、失敗しうる描画が無い。
+`expr_text_src`（ソースへフォールバックする方）に替えた。
+
+#### 2. `slicescontains` —— 上流に無い純粋性ガード
+
+guff は needle に `expr_may_have_effects` を掛けていた。上流が needle に
+掛けるのは `usesRangeVar` **だけ**。`slices.Contains(s, strings.ToLower(k))`
+は needle を 1 回しか評価しない（ループは要素ごとに評価していた）が、上流は
+それでも書き換える。呼び出しと比較する形が全部黙っていた
+（packetbeat の `isSecretParameter` など）。needle の描画も §1 と同じ罠。
+
+#### 3. `rangeint` —— `isScalarLvalue` が**名前**で照合していた
+
+```rust
+NodeRef::IncDecStmt(inc) if ident_name(&inc.x) == Some(index_name) => { found = true; }
+```
+
+内側の `for i := 0; i < m; i++` は**別の変数**なのに、名前が同じというだけで
+外側のループが「自分のインデックスを書き換えている」と判定されていた。
+上流は `info.Uses[id] == v` で辿る。同じファイルの
+`index_used_in_body` は既にオブジェクトで解決していて、この 1 つだけが
+名前のままだった。
+
+#### 4. 残した 2 つ（測って書き残す）
+
+- **`stringscut` 3 件** —— 上流の `stringscut.go` は 726 行で、規則は
+  `strings.Index`/`IndexByte` → `Cut`。guff が実装しているのは
+  `Split(N)(…)[0]` → `Cut` という**別の形**で、既定で off。移植は独立した回。
+- **`slicescontains` の残り 1 件**（`decode_cef.go:230`）—— range の対象が
+  **型スイッチの case 変数**（`case []string:` が束縛する `v`）で、
+  `type_kind` がスライスと答えない。型スイッチの暗黙オブジェクトの型解決で、
+  これも別件。
+- `stringsbuilder` 1 件は未調査。
+
+#### 5. 実測
+
+```
+beats (v9.5.2)
+  前   guff=7495 golangci=7554 both=7481  P=99.8%  R=99.0%  unexpected=87
+  後   guff=7500 golangci=7554 both=7486  P=99.8%  R=99.1%  unexpected=82
+  modernize  前 guff=4281 gcl=4332 both=4280  P=100.0% R=98.8%
+             後 guff=4286 gcl=4332 both=4285  P=100.0% R=98.9%
+```
+
+**閉じたのは 5 件、新規 0 件**（`rangeint` 2・`fmtappendf` 2・
+`slicescontains` 1）。
+
+golden に `fmtappendf` の case が**1 つも無かった**ので
+`compat/golden/cases/modernize/sources.txt` に登録した（既存の fixture の分も
+含めて 13 キー増、消えたキー 0）。`rangeint` は独立した case を持っていて、
+そちらも regen した。
+
+golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 3,630 件緑。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）

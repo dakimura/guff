@@ -634,7 +634,28 @@ fn index_used_in_body(pass: &Pass<'_>, body: &guff::ast::BlockStmt, index: &Expr
     used
 }
 
-fn index_is_scalar_lvalue_in(body: &guff::ast::BlockStmt, index_name: &str) -> bool {
+/// Upstream's `isScalarLvalue` over the loop body: is the loop variable
+/// assigned, incremented or address-taken anywhere in it?
+///
+/// By **object**, not by name. Upstream reaches each occurrence through
+/// `info.Uses[id] == v`, and guff compared `ident_name`, so an inner
+/// `for i := 0; i < m; i++` — a different `i` entirely — made the outer loop
+/// look like it assigned its own index. Two of beats' tests nest exactly that
+/// way.
+fn index_is_scalar_lvalue_in(
+    pass: &Pass<'_>,
+    body: &guff::ast::BlockStmt,
+    index: &Expr,
+) -> bool {
+    let Expr::Ident(index_id) = index else {
+        return true;
+    };
+    let (Some(index_obj), Some(info)) = (ident_obj(pass, index_id), pass.types_info()) else {
+        return true;
+    };
+    let is_index = |e: &Expr| {
+        matches!(e, Expr::Ident(id) if info.uses.get(&id.id).copied() == Some(index_obj))
+    };
     let mut found = false;
     walk::inspect(NodeRef::BlockStmt(body), |n| {
         let Some(n) = n else {
@@ -642,27 +663,19 @@ fn index_is_scalar_lvalue_in(body: &guff::ast::BlockStmt, index_name: &str) -> b
         };
         match n {
             NodeRef::AssignStmt(a) if a.tok != Some(Token::DEFINE) => {
-                if a.lhs.iter().any(|e| ident_name(e) == Some(index_name)) {
+                if a.lhs.iter().any(&is_index) {
                     found = true;
                 }
             }
-            NodeRef::IncDecStmt(inc) if ident_name(&inc.x) == Some(index_name) => {
+            NodeRef::IncDecStmt(inc) if is_index(&inc.x) => {
                 found = true;
             }
-            NodeRef::UnaryExpr(u)
-                if u.op == Token::AND && ident_name(&u.x) == Some(index_name) =>
-            {
+            NodeRef::UnaryExpr(u) if u.op == Token::AND && is_index(&u.x) => {
                 found = true;
             }
             NodeRef::RangeStmt(rs) if rs.tok == Some(Token::ASSIGN) => {
-                if rs
-                    .key
-                    .as_ref()
-                    .is_some_and(|k| ident_name(k) == Some(index_name))
-                    || rs
-                        .value
-                        .as_ref()
-                        .is_some_and(|v| ident_name(v) == Some(index_name))
+                if rs.key.as_ref().is_some_and(&is_index)
+                    || rs.value.as_ref().is_some_and(&is_index)
                 {
                     found = true;
                 }
@@ -874,7 +887,7 @@ fn check_rangeint(pass: &Pass<'_>, for_stmt: &ForStmt, pending: &mut Vec<Diagnos
     }
     // Upstream: reject if the loop index is assigned or address-taken in the body
     // (`for range int` ignores such assignments).
-    if index_is_scalar_lvalue_in(&for_stmt.body, index_name) {
+    if index_is_scalar_lvalue_in(pass, &for_stmt.body, &init.lhs[0]) {
         return;
     }
     // Upstream: for `for i = 0; …` (ASSIGN), skip if `i` is used after the loop.
@@ -1558,7 +1571,16 @@ fn check_fmtappendf(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagnost
             }
         }
     }
-    let args: Option<Vec<String>> = inner.args.iter().map(expr_text).collect();
+    // `expr_text_src`, not `expr_text`: the latter renders a call only when it
+    // has exactly one argument, so `fmt.Sprintf("x: %s", r.UserAgent())` came
+    // back `None` and the *diagnostic* went with it. Upstream splices source
+    // ranges and never has a rendering that can fail. Two of beats' cel tests
+    // are exactly that shape.
+    let args: Option<Vec<String>> = inner
+        .args
+        .iter()
+        .map(|a| expr_text_src(pass, a))
+        .collect();
     let Some(args) = args else {
         return;
     };
@@ -2483,10 +2505,18 @@ fn slicescontains_cond(
             if !types_identical(pass, elem_ty, needle_ty) {
                 return None;
             }
-            if expr_may_have_effects(needle) || expr_uses_range_vars(pass, needle, rng) {
+            // `usesRangeVar(arg2)` is upstream's only test on the needle.
+            // There is no purity check: `slices.Contains(s, strings.ToLower(k))`
+            // evaluates the needle once where the loop evaluated it per
+            // element, and upstream rewrites it anyway. The invented guard
+            // silenced every comparison against a call — beats' packetbeat
+            // `isSecretParameter` and its decode_cef twin among them.
+            if expr_uses_range_vars(pass, needle, rng) {
                 return None;
             }
-            let needle_text = expr_text(needle)?;
+            // `astutil.Format(fset, arg2)`: source text, which cannot fail.
+            // `expr_text` renders a call only when it has exactly one argument.
+            let needle_text = expr_text_src(pass, needle)?;
             Some(("Contains", needle_text))
         }
         Expr::CallExpr(call) if call.args.len() == 1 && !call.ellipsis.is_valid() => {

@@ -46,3 +46,22 @@ func sprintVar(x int) []byte   { return []byte(fmt.Sprint(x)) }
 func sprintEmpty() []byte      { return []byte(fmt.Sprint("")) }
 func sprintNoArgs() []byte     { return []byte(fmt.Sprint()) }
 func sprintlnVar(x int) []byte { return []byte(fmt.Sprintln(x)) }
+
+// The rendering of the fix must not decide the diagnostic. `expr_text` renders
+// a call only when it has exactly one argument, so a `fmt.Sprintf` whose
+// operand is a no-argument method call came back `None` and the *finding* went
+// with it. Upstream splices source ranges and has no rendering that can fail.
+func appendfCallOperand(w writer, r request) {
+	w.Write([]byte(fmt.Sprintf("unexpected UA: %s", r.UserAgent())))
+}
+
+func appendfTwoArgCallOperand(w writer, r request) {
+	w.Write([]byte(fmt.Sprintf("%s %s", r.Header("a", "b"), r.UserAgent())))
+}
+
+type writer interface{ Write(p []byte) (int, error) }
+
+type request interface {
+	UserAgent() string
+	Header(a, b string) string
+}

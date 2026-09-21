@@ -19,6 +19,72 @@
  		go poster()
  	}
  	wg.Wait()
+--- a/fmtappendf/fmtappendf.go
++++ b/fmtappendf/fmtappendf.go
+@@ -12,10 +12,10 @@
+ // The conversion has to be to `[]byte` itself. `types.Identical` is what
+ // upstream asks, so a *named* byte slice keeps its own methods and its own
+ // nil-vs-empty contract and is left alone; an alias still qualifies.
+-func plain(x int) []byte          { return []byte(fmt.Sprintf("%d", x)) }
++func plain(x int) []byte          { return fmt.Appendf(nil, "%d", x) }
+ func named(x int) json.RawMessage { return json.RawMessage(fmt.Sprintf("%d", x)) }
+ func localNamed(x int) myBytes    { return myBytes(fmt.Sprintf("%d", x)) }
+-func alias(x int) aliasBytes      { return aliasBytes(fmt.Sprintf("%d", x)) }
++func alias(x int) aliasBytes      { return fmt.Appendf(nil, "%d", x) }
+ func toString(x int) string       { return string(fmt.Sprintf("%d", x)) }
+ 
+ // `[]byte(fmt.Sprintf(""))` is an empty but non-nil slice while
+@@ -24,39 +24,39 @@
+ // one of `s v x X`. Any other verb, or one byte of literal text, and the
+ // rewrite is offered. `Sprintln` always writes a newline and is never skipped.
+ func fEmpty() []byte               { return []byte(fmt.Sprintf("")) }
+-func fD(x int) []byte              { return []byte(fmt.Sprintf("%d", x)) }
++func fD(x int) []byte              { return fmt.Appendf(nil, "%d", x) }
+ func fS(x string) []byte           { return []byte(fmt.Sprintf("%s", x)) }
+ func fV(x any) []byte              { return []byte(fmt.Sprintf("%v", x)) }
+ func fLowerX(x string) []byte      { return []byte(fmt.Sprintf("%x", x)) }
+ func fUpperX(x string) []byte      { return []byte(fmt.Sprintf("%X", x)) }
+-func fQ(x string) []byte           { return []byte(fmt.Sprintf("%q", x)) }
+-func fLeadingText(x string) []byte { return []byte(fmt.Sprintf("a%s", x)) }
++func fQ(x string) []byte           { return fmt.Appendf(nil, "%q", x) }
++func fLeadingText(x string) []byte { return fmt.Appendf(nil, "a%s", x) }
+ func fTwoS(x, y string) []byte     { return []byte(fmt.Sprintf("%s%s", x, y)) }
+ func fPrecS(x string) []byte       { return []byte(fmt.Sprintf("%.5s", x)) }
+-func fPrecD(x int) []byte          { return []byte(fmt.Sprintf("%.5d", x)) }
++func fPrecD(x int) []byte          { return fmt.Appendf(nil, "%.5d", x) }
+ func fWidthS(x string) []byte      { return []byte(fmt.Sprintf("%10s", x)) }
+-func fNoVerb() []byte              { return []byte(fmt.Sprintf("plain")) }
+-func fPercent(x string) []byte     { return []byte(fmt.Sprintf("%%%s", x)) }
++func fNoVerb() []byte              { return fmt.Appendf(nil, "plain") }
++func fPercent(x string) []byte     { return fmt.Appendf(nil, "%%%s", x) }
+ func fIndexed(x string) []byte     { return []byte(fmt.Sprintf("%[1]s", x)) }
+-func fMixed(x int) []byte          { return []byte(fmt.Sprintf("%v%d", x, x)) }
++func fMixed(x int) []byte          { return fmt.Appendf(nil, "%v%d", x, x) }
+ 
+ // `Sprint` has no format string of its own; the guard only bites when the first
+ // argument is a constant.
+-func sprintVar(x int) []byte   { return []byte(fmt.Sprint(x)) }
++func sprintVar(x int) []byte   { return fmt.Append(nil, x) }
+ func sprintEmpty() []byte      { return []byte(fmt.Sprint("")) }
+ func sprintNoArgs() []byte     { return []byte(fmt.Sprint()) }
+-func sprintlnVar(x int) []byte { return []byte(fmt.Sprintln(x)) }
++func sprintlnVar(x int) []byte { return fmt.Appendln(nil, x) }
+ 
+ // The rendering of the fix must not decide the diagnostic. `expr_text` renders
+ // a call only when it has exactly one argument, so a `fmt.Sprintf` whose
+ // operand is a no-argument method call came back `None` and the *finding* went
+ // with it. Upstream splices source ranges and has no rendering that can fail.
+ func appendfCallOperand(w writer, r request) {
+-	w.Write([]byte(fmt.Sprintf("unexpected UA: %s", r.UserAgent())))
++	w.Write(fmt.Appendf(nil, "unexpected UA: %s", r.UserAgent()))
+ }
+ 
+ func appendfTwoArgCallOperand(w writer, r request) {
+-	w.Write([]byte(fmt.Sprintf("%s %s", r.Header("a", "b"), r.UserAgent())))
++	w.Write(fmt.Appendf(nil, "%s %s", r.Header("a", "b"), r.UserAgent()))
+ }
+ 
+ type writer interface{ Write(p []byte) (int, error) }
 --- a/mapsloop/mapsloop.go
 +++ b/mapsloop/mapsloop.go
 @@ -2,10 +2,10 @@
@@ -364,7 +430,7 @@
  	return found
  }
  
-@@ -122,20 +100,10 @@
+@@ -122,46 +100,26 @@
  
  // Reported: the parameter type is the element type.
  func containsFuncIdenticalParam(stack []*obj) bool {
@@ -387,6 +453,34 @@
 -	return false
 +	return slices.ContainsFunc(stack, ifacePred)
  }
+ 
+ // Upstream's only test on the needle is `usesRangeVar`. There is no purity
+ // check: `slices.Contains(s, strings.ToLower(k))` evaluates the needle once
+ // where the loop evaluated it per element, and upstream rewrites it anyway.
+ func containsCallNeedle(hide []string, key string) bool {
+-	for _, k := range hide {
+-		if lower(key) == k {
+-			return true
+-		}
+-	}
+-	return false
++	return slices.Contains(hide, lower(key))
+ }
+ 
+ type hider struct{ hide []string }
+ 
+ // The same with the slice behind a selector, which is how beats writes it.
+ func (h *hider) containsCallNeedleField(key string) bool {
+-	for _, k := range h.hide {
+-		if lower(key) == k {
+-			return true
+-		}
+-	}
+-	return false
++	return slices.Contains(h.hide, lower(key))
+ }
+ 
+ // Silent: the needle reads the range variable.
 --- a/stditerators/stditerators.go
 +++ b/stditerators/stditerators.go
 @@ -6,22 +6,22 @@

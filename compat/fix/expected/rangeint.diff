@@ -123,6 +123,17 @@
  		println("x")
  	}
  }
+@@ -136,8 +136,8 @@
+ // still a range-over-int.
+ func nestedShadowedIndex(n, m int) int {
+ 	t := 0
+-	for i := 0; i < n; i++ {
+-		for i := 0; i < m; i++ {
++	for range n {
++		for i := range m {
+ 			t += i
+ 		}
+ 	}
 --- a/modernize/rangeint_go118.go
 +++ b/modernize/rangeint_go118.go
 @@ -13,7 +13,7 @@
