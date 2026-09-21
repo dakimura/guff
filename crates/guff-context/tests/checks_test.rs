@@ -241,6 +241,32 @@ fn bodyclose_ignores_conversions_and_calls_closed_in_place() {
     );
 }
 
+/// bodyclose's `isCloseCall` `*ssa.ChangeInterface` arm.
+///
+/// `defer closing(resp.Body, tag)` converts the body to `io.Closer`, and
+/// upstream walks *that* value's referrers for a `*ssa.Defer` whose callee
+/// contains a call to `(io.Closer).Close`. beats writes it in
+/// `libbeat/esleg/eslegclient/connection.go:512`, and guff reported the
+/// response as leaked.
+///
+/// The four that still report are what keeps the arm from swallowing
+/// everything: a non-deferred call (the referrer is a `Call`, not a `Defer`,
+/// and upstream reports it too — measured), an `io.ReadCloser` parameter and an
+/// `any` parameter (no conversion to `io.Closer` happens), and a callee that
+/// takes an `io.Closer` and does not close it.
+#[test]
+fn bodyclose_settles_a_body_deferred_to_an_io_closer() {
+    let dir = support::testdata("bodyclose");
+    let pkg = support::typecheck_pkg("example.com/bodyclose/closerarg", &dir.join("closerarg.go"));
+    assert!(!pkg.ill_typed, "{:?}", pkg.errors);
+    let messages = support::run_analyzer(bodyclose(), &pkg);
+    assert_eq!(
+        messages.len(),
+        4,
+        "three deferred closers stay silent, four shapes still report: {messages:?}"
+    );
+}
+
 #[test]
 fn bodyclose_skips_packages_without_a_direct_net_http_import() {
     // Upstream's first act is

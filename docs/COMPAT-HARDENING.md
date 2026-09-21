@@ -34981,3 +34981,52 @@ golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 緑。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-21（続き 325）— `close beats`（28）: `defer closing(resp.Body)` は「閉じた」—— ただし **defer のときだけ**
+
+beats の bodyclose の guff-only:
+
+```
+libbeat/esleg/eslegclient/connection.go:509  response body must be closed
+```
+
+512 行目に `defer closing(resp.Body, conn.log)` と書いてある —— body は
+**ヘルパ関数**に渡されて閉じられる。
+
+#### 1. 上流の `ChangeInterface` の腕
+
+`closing(c io.Closer, …)` に `resp.Body`（`io.ReadCloser`）を渡すと
+**`io.Closer` への変換**（`*ssa.ChangeInterface`）が挟まる。`isCloseCall` は
+その値の referrer を辿り、**`*ssa.Defer`** で、その呼び先が
+`(io.Closer).Close` を呼んでいれば「閉じた」と答える。
+
+**`defer` でないと当たらない** —— 直接呼びの referrer は `*ssa.Call` なので
+腕を通らない。実測で確認した: `closing(resp.Body)` は両方が報告し、
+`defer closing(resp.Body)` は両方が沈黙する。上流の癖をそのまま写す。
+
+guff の bodyclose は AST 移植で、モジュール doc に
+「DEFERRED: … `io.Closer` ChangeInterface parity」と**書いてあった**腕。
+
+#### 2. 移植
+
+パッケージの関数のうち「`io.Closer` の引数を取り、それを `Close()` する」
+ものを表にして（引数位置ごとに「そこが `io.Closer` か」のフラグを持つ）、
+`defer f(…)` の引数に `<resp>.Body` が `io.Closer` の位置で現れたら閉じた
+ことにする。メソッドも `call_target_object` で同じに通る。
+
+fixture は 7 形（`defer` 3 つが沈黙、非 defer・`io.ReadCloser` 引数・`any`
+引数・閉じないヘルパの 4 つが報告）。`io.ReadCloser` と `any` は**変換が
+起きない**ので腕を通らない —— そこが「全部飲み込む」guard にならない理由。
+
+```
+beats (v9.5.2)
+  前   guff=7555 golangci=7554 both=7549  P=99.9%  R=99.9%  unexpected=11
+  後   guff=7554 golangci=7554 both=7549  P=99.9%  R=99.9%  unexpected=10
+```
+
+**閉じたのは 1 件、新規 0 件。**
+
+golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 緑。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）

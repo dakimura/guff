@@ -15,6 +15,7 @@ wrap/wrap.go   crates/guff-context/tests/testdata/bodyclose/stub/example.com/bod
 # Two CallExprs the AST spells and go/ssa does not: a conversion, and a call
 # whose Body is closed in the same expression.
 inplace/inplace.go   crates/guff-context/tests/testdata/bodyclose/inplace.go
+closerarg/closerarg.go   crates/guff-context/tests/testdata/bodyclose/closerarg.go
 nohttp/nohttp.go   crates/guff-context/tests/testdata/bodyclose/nohttp.go
 dialer/dialer.go   crates/guff-context/tests/testdata/bodyclose/stub/example.com/bodyclose/dialer/dialer.go
 # `isClosureCalled`: a closure launched with `go`, or only returned, is not

@@ -839,6 +839,137 @@ fn handle_defer_close(call: &CallExpr, depth: u32, usages: &mut HashMap<String, 
     }
 }
 
+/// bodyclose's `isCloseCall` `*ssa.ChangeInterface` arm, as a table of the
+/// package's functions that take an `io.Closer` and close it.
+///
+/// `defer closing(resp.Body, log)` converts the body to `io.Closer` — an
+/// `*ssa.ChangeInterface` — and upstream then walks *that* value's referrers
+/// looking for a `*ssa.Defer` whose callee contains a call to
+/// `(io.Closer).Close`. beats' `libbeat/esleg/eslegclient/connection.go:512`
+/// writes exactly that.
+///
+/// A plain, non-deferred call never reaches the arm: the referrer is an
+/// `*ssa.Call`, not a `*ssa.Defer`. Measured side by side — both tools report
+/// `closing(resp.Body)` without the `defer` and neither reports it with one.
+///
+/// The value is one flag per parameter position: whether that parameter is
+/// exactly `io.Closer`, which is what makes the conversion happen.
+fn io_closer_closing_funcs(
+    pass: &Pass<'_>,
+) -> HashMap<guff_types::arena::ObjectId, Vec<bool>> {
+    let mut out = HashMap::new();
+    let Some(info) = pass.types_info() else {
+        return out;
+    };
+    for file in pass.files() {
+        for decl in &file.decls {
+            let guff::ast::Decl::FuncDecl(fd) = decl else {
+                continue;
+            };
+            let Some(body) = &fd.body else {
+                continue;
+            };
+            // One flag per parameter *position* — a field can name several.
+            let mut flags: Vec<bool> = Vec::new();
+            let mut closer_params: HashSet<&str> = HashSet::new();
+            if let Some(list) = fd.ty.params.as_ref() {
+                for field in &list.list {
+                    let is_closer = field
+                        .ty
+                        .as_ref()
+                        .is_some_and(|t| is_io_closer_type(pass, t));
+                    let n = field.names.len().max(1);
+                    for _ in 0..n {
+                        flags.push(is_closer);
+                    }
+                    if is_closer {
+                        for name in &field.names {
+                            closer_params.insert(name.name.as_str());
+                        }
+                    }
+                }
+            }
+            if closer_params.is_empty() {
+                continue;
+            }
+            // Upstream asks whether the callee calls `(io.Closer).Close` at
+            // all; asking that it be one of *these* parameters is narrower and
+            // never says yes where upstream says no.
+            let mut closes = false;
+            inspect(NodeRef::BlockStmt(body), |n| {
+                let Some(NodeRef::CallExpr(c)) = n else {
+                    return true;
+                };
+                if let Expr::SelectorExpr(sel) = c.fun.as_ref() {
+                    if sel.sel.name == "Close" {
+                        if let Some(name) = ident_name(&sel.x) {
+                            if closer_params.contains(name) {
+                                closes = true;
+                            }
+                        }
+                    }
+                }
+                true
+            });
+            if closes {
+                if let Some(Some(obj)) = info.defs.get(&fd.name.id) {
+                    out.insert(*obj, flags);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Exactly `io.Closer` — the type the conversion upstream keys on produces.
+fn is_io_closer_type(pass: &Pass<'_>, ty: &Expr) -> bool {
+    let Some(typ) = type_of(pass, ty) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let TypeData::Named(n) = artifacts.types.get(typ) else {
+        return false;
+    };
+    let obj = n.obj();
+    obj.name(&artifacts.objects) == "Closer"
+        && obj
+            .pkg(&artifacts.objects)
+            .is_some_and(|p| artifacts.packages.get(p).path() == "io")
+}
+
+/// `defer f(resp.Body, …)` where `f` closes the `io.Closer` it is handed.
+fn mark_deferred_closer_arg(
+    pass: &Pass<'_>,
+    call: &CallExpr,
+    io_closers: &HashMap<guff_types::arena::ObjectId, Vec<bool>>,
+    usages: &mut HashMap<String, RespUsage>,
+) {
+    if io_closers.is_empty() {
+        return;
+    }
+    let Some(obj) = code::call_target_object(pass, &call.fun) else {
+        return;
+    };
+    let Some(flags) = io_closers.get(&obj) else {
+        return;
+    };
+    for (i, arg) in call.args.iter().enumerate() {
+        if !flags.get(i).copied().unwrap_or(false) {
+            continue;
+        }
+        let Some(name) = body_field_var(arg) else {
+            continue;
+        };
+        if let Some(u) = usages.get_mut(name) {
+            for e in &mut u.entries {
+                e.closed = true;
+            }
+        }
+    }
+}
+
 fn check_body(
     pass: &Pass<'_>,
     body: &BlockStmt,
@@ -847,6 +978,7 @@ fn check_body(
     func_start: u32,
     closure_reassigned: &ClosureStores,
     closers: &HashSet<guff_types::arena::ObjectId>,
+    io_closers: &HashMap<guff_types::arena::ObjectId, Vec<bool>>,
     check_consumption: bool,
     pending: &mut Vec<(u32, String)>,
 ) {
@@ -1002,6 +1134,7 @@ fn check_body(
             NodeRef::DeferStmt(d) => {
                 let depth = shape.loop_depth(d.defer_.0 as u32);
                 handle_defer_close(&d.call, depth, &mut usages);
+                mark_deferred_closer_arg(pass, &d.call, io_closers, &mut usages);
                 if check_consumption {
                     // defer io.Copy(...) is unusual; still scan nested calls.
                     if let Expr::FuncLit(fun) = d.call.fun.as_ref() {
@@ -1750,6 +1883,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let mut pending: Vec<(u32, String)> = Vec::new();
     let closure_reassigned = collect_closure_reassigned(pass);
     let closers = response_closing_funcs(pass);
+    let io_closers = io_closer_closing_funcs(pass);
     for file in pass.files() {
         // Rooted at each `FuncDecl`, not at the file: `buildssa` builds
         // `SrcFuncs` from those alone, so a literal in a package-level `var`
@@ -1769,6 +1903,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                             fd.ty.func.0 as u32,
                             &closure_reassigned,
                             &closers,
+                            &io_closers,
                             check_consumption,
                             &mut pending,
                         );
@@ -1784,6 +1919,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         fl.ty.func.0 as u32,
                         &closure_reassigned,
                         &closers,
+                        &io_closers,
                         check_consumption,
                         &mut pending,
                     );
