@@ -1,0 +1,15 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces)
+#
+# The fixtures the guff-fmt unit tests use, so the two cannot drift. Each file
+# is its own package directory.
+groups/groups.go  crates/guff-fmt/testdata/goimports/groups.go
+blanks/blanks.go  crates/guff-fmt/testdata/goimports/blanks.go
+ok/ok.go          crates/guff-fmt/testdata/goimports/ok.go
+
+# The stub modules, replaced in so `./...` never lints them and no network is
+# needed.
+third/go.mod      compat/golden/cases/goimports/third.go.mod
+third/pkg/pkg.go  compat/golden/cases/goimports/third.go.txt
+zlocal/go.mod     compat/golden/cases/goimports/zlocal.go.mod
+zlocal/local/local.go  compat/golden/cases/goimports/zlocal.go.txt

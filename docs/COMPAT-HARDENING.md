@@ -34385,3 +34385,64 @@ golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 緑。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-21（続き 315）— `close beats`（18）: フォーマッタの「挿入だけ」の変更は**挿入した行の上**に報告される
+
+beats の `goimports` は guff-only 1・gcl-only 1 で、**同じファイルの 1 行違い**:
+
+```
+gcl   x-pack/osquerybeat/…/artifact_test.go:24:1  File is not properly formatted
+guff  x-pack/osquerybeat/…/artifact_test.go:25:1  File is not properly formatted
+```
+
+24 行目は `github.com/Masterminds/semver`、25 行目は
+`github.com/elastic/…`。`local-prefixes: github.com/elastic` なので直しは
+**その間に空行を 1 本入れるだけ** —— 削除も置換も無い。
+
+#### 1. 上流は「最後の original 行」に寄せる
+
+`pkg/goformatters/internal/diff.go` の `hunkChangesParser` は hunk を
+`Change{From, To}` に畳み、`toDiagnostic` が `From` に報告する。3 つの腕:
+
+| 形 | 上流 | 位置 |
+|----|------|------|
+| 削除（後ろに追加があっても） | `handleDeletedLines` | **最初の削除行** |
+| 追加だけ（前に削除が無い） | `handleAddedOnlyLines` | **直前の original 行**（追加をその行に**併合**する） |
+| 先頭への追加 | `replacementLinesToPrepend` | 次の original / 削除行 = 1 行目 |
+
+guff の `first_changed_lines` は挿入を**常に次の original 行**に付けていた ——
+3 つ目の腕でだけ正しい。`old_line + 1` を `old_line.max(1)` にするだけで
+3 腕とも合う。
+
+#### 2. golden に goimports の case が**1 つも無かった**
+
+しかもフォーマッタ tier の既存 case（gofumpt / golines）は**削除か置換**しか
+持っていないので、「挿入だけ」の腕は**一度も測られていなかった**
+（「緑だが何も測っていない」の 5 つ目の形）。case を新設した:
+
+- `groups.go` —— 空行 1 本の挿入。**paths の並びは既に gofmt 順**にしてある
+  （そうしないと gofmt が 2 行を入れ替えて「置換」になり、測りたい腕を通らない）
+- `blanks.go` —— 未使用 import の削除（既に正しかった腕の control）
+- `ok.go` —— 既に正しい並び（沈黙の control）
+
+third-party と local の stub module を `replace` で入れてあるのでネットワーク
+不要。`local-prefixes` は third-party より**後ろに並ぶ**文字列を選んだ。
+
+アルゴリズム自体は `first_changed_lines` の単体テストで 6 形固定した
+（中間挿入・先頭挿入・削除・削除+追加・2 グループ・末尾挿入）。
+
+新しい case を足したので **`compat/fix` のベースラインも撮り直した**
+（続き 308 と同じ手順）。
+
+```
+beats (v9.5.2)
+  前   guff=7548 golangci=7554 both=7537  P=99.9%  R=99.8%  unexpected=28
+  後   guff=7548 golangci=7554 both=7538  P=99.9%  R=99.8%  unexpected=26
+```
+
+**閉じたのは 2 件（1 行の両側）、新規 0 件。**
+
+golden 239 / fix 239 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 緑。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
