@@ -139,3 +139,39 @@ func containsFuncIfaceElem(stack []value) bool {
 	}
 	return false
 }
+
+// Upstream's only test on the needle is `usesRangeVar`. There is no purity
+// check: `slices.Contains(s, strings.ToLower(k))` evaluates the needle once
+// where the loop evaluated it per element, and upstream rewrites it anyway.
+func containsCallNeedle(hide []string, key string) bool {
+	for _, k := range hide {
+		if lower(key) == k {
+			return true
+		}
+	}
+	return false
+}
+
+type hider struct{ hide []string }
+
+// The same with the slice behind a selector, which is how beats writes it.
+func (h *hider) containsCallNeedleField(key string) bool {
+	for _, k := range h.hide {
+		if lower(key) == k {
+			return true
+		}
+	}
+	return false
+}
+
+// Silent: the needle reads the range variable.
+func needleUsesRangeVar(hide []string) bool {
+	for _, k := range hide {
+		if lower(k) == k {
+			return true
+		}
+	}
+	return false
+}
+
+func lower(s string) string { return s }

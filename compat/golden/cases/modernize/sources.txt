@@ -27,6 +27,7 @@ bad/bad.go                          crates/guff-style/tests/testdata/modernize/b
 ok/ok.go                            crates/guff-style/tests/testdata/modernize/ok.go
 stringsseq/stringsseq.go            crates/guff-style/tests/testdata/modernize/stringsseq.go
 mapsloop/mapsloop.go                crates/guff-style/tests/testdata/modernize/mapsloop.go
+fmtappendf/fmtappendf.go            crates/guff-style/tests/testdata/modernize/fmtappendf.go
 minmax/minmax.go                    crates/guff-style/tests/testdata/modernize/minmax.go
 minmaxuser/minmaxuser.go            crates/guff-style/tests/testdata/modernize/minmaxuser.go
 minmaxfloat/minmaxfloat.go          crates/guff-style/tests/testdata/modernize/minmaxfloat.go

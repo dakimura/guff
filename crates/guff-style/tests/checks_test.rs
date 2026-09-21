@@ -6912,10 +6912,13 @@ fn modernize_rangeint_skips_mutated_limits() {
     // Then three whose *body* never reads the index: two `:=` (the fix drops
     // the declaration) and one `=` (it does not). Whether the index survives is
     // a property of the fix, not of the finding — all nine report identically.
+    // Plus `nestedShadowedIndex`, whose inner loop shadows the index with an
+    // `i` of its own — both loops report, because `isScalarLvalue` resolves by
+    // object and the inner `i++` is a different variable.
     assert_eq!(
         hits.len(),
-        9,
-        "expected 9 rangeint hits, got {} {messages:?}",
+        11,
+        "expected 11 rangeint hits, got {} {messages:?}",
         hits.len()
     );
     for bad in ["k", "incLimit", "addrLimit", "chks", "outer"] {
@@ -7006,6 +7009,11 @@ fn modernize_fmtappendf_wants_exactly_a_byte_slice_and_a_format_that_cannot_be_e
             41, // %v%d
             45, // fmt.Sprint of a non-constant
             48, // fmt.Sprintln is never skipped
+            // Operands that are calls. `expr_text` renders a call only when it
+            // has exactly one argument, and a rendering that fails used to take
+            // the *diagnostic* with it.
+            55, // r.UserAgent() — no arguments
+            59, // r.Header("a", "b") — two
         ],
         "{got:?}"
     );
@@ -7296,11 +7304,12 @@ fn modernize_rangeint_drops_an_index_the_body_never_reads() {
         headers.push(edit.new_text.clone());
     }
 
-    // `indexUnused` and `indexShadowedInBody`. The second is why resolution is
-    // by object: the inner `i := "inner"` would read as a use by name.
+    // `indexUnused`, `indexShadowedInBody` and `nestedShadowedIndex`'s outer
+    // loop. All three are why resolution is by object: an inner `i` — a
+    // declaration or another loop's index — would read as a use by name.
     assert_eq!(
         headers.iter().filter(|h| *h == "for range n").count(),
-        2,
+        3,
         "{headers:?}"
     );
     // `for i = 0` has no declaration to drop, so `assignIndexUnusedInBody`
@@ -7352,6 +7361,10 @@ fn modernize_slicescontains_reads_the_predicate_signature() {
             42,  // the bool accumulator
             125, // a predicate whose parameter *is* the element type
             135, // …and one where the element type is the interface
+            // A needle that is a *call*. Upstream's only test on it is
+            // `usesRangeVar`; there is no purity check.
+            147, // a local slice
+            159, // the same behind a selector
         ],
         "{got:?}"
     );
