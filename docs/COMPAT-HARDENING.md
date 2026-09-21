@@ -33482,3 +33482,94 @@ golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 3,627 件緑。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-21（続き 304）— `close beats`（8）。wastedassign は**メソッドを 1 つも見ていなかった**。そして緩めた途端に、前から隠れていた誤検出が出てきた
+
+beats の `wastedassign` は gcl-only 6・guff-only 0。31 形測って**3 つの欠陥**が出た
+—— うち 1 つは、前の 2 つを直して初めて見えるようになったもの。
+
+#### 1. `if` の init を**オブジェクトで**免除していた
+
+NaiveForm は条件が register-lifted な Extract 越しに読むローカルを Load しない
+ので、`is_next_operation_to_op_is_store` はその store を wasted と呼ぶ。guff は
+それを免除する集合を持っていたが、**キーがオブジェクト**だった。つまり
+
+```go
+dir, exists := tree, false        // ← 上流はここを報告する
+for _, item := range components {
+    if dir, exists = dir[item]; !exists { … }
+}
+```
+
+の**ループの手前の宣言**まで免除されていた。`if` とは何の関係もない store で、
+beats の `filetree.go:117` がこれ。**位置**で持つように変えた。
+
+#### 2. 代入の**右辺**は「後の読み」ではない
+
+`ast_value_is_read_before_redef` は「store の位置より後ろにある同じ変数の ident」
+を後の読みとして数える。`s = trim(s)` の `s` は store の位置より**右**にあるので、
+**自己参照する代入が全部黙っていた**（引数を入口で正規化してそのまま使わない
+`index_pattern_generator.go:39` がこれ）。go/ssa は Load を Store の前に並べるので
+上流はこの問題を持たない。報告している代入自身の右辺の範囲を除外した。
+
+#### 3. `srcFuncs` に**メソッドが入っていなかった**
+
+1 と 2 を直しても `filetree.go:117` は出なかった。形を削って行くと、残ったのは
+**メソッドであること**だった:
+
+```go
+func plainFunc() int { x := 1; x = 2; return x }   // 出る
+func (s S) method() int { x := 1; x = 2; return x } // 出ない
+```
+
+`collect_src_funcs` が `Package.members` だけを歩いていた —— そして
+**メソッドは members に入っていない**。`guff-analysis` の
+`collect_src_funcs_with_methods` は同じ穴のために書かれたもので、その doc に
+「SA4006 が関数では `x := f(); x = g(); return x` を報告し、レシーバを付けただけの
+同じ本体では黙った」と書いてある。wastedassign は自前の members-only の複製を
+持っていて、同じ穴が開いていた。共有のほうに寄せた（`pub` にしただけ）。
+
+#### 4. 緩めたら誤検出が 1 件出た —— 複合リテラルの store
+
+メソッドを見るようにした計測で、beats に**新しい guff-only が 1 件**出た:
+`x-pack/metricbeat/module/aws/billing/billing.go:209` の `event := mb.Event{}`。
+
+go/ssa の `compLit` は**配列と構造体**のリテラルをアドレスに直接書くので
+`Store` が存在せず、上流の `opInLocals` ループは何も見ない。スライスと map の
+リテラルは値として作ってから store し、その `Store` は代入の `=` ではなく
+**リテラルの `Lbrace`** を持つ。測ると:
+
+| 右辺 | 上流 |
+|---|---|
+| `x := E{}` / `x := [3]int{1,2,3}` | 報告しない |
+| `x := []int{1}` | 報告する。列は `{` の 12 |
+| `x := map[string]int{"a": 1}` | 報告する。列は `{` の 21 |
+| `x := &E{}`（UnaryExpr）| 報告する。列は `=` の 2 |
+
+この食い違いは**前からあった**（関数の中でも起きる）。メソッドの死角が
+beats での露出を隠していただけで、緩めた瞬間に出てきた。同じ回で直した。
+
+#### 5. 実測
+
+```
+beats (v9.5.2)
+  前   guff=7483 golangci=7554 both=7466  P=99.8%  R=98.8%  unexpected=105
+  後   guff=7485 golangci=7554 both=7468  P=99.8%  R=98.9%  unexpected=103
+  wastedassign  前 guff=20 gcl=26 both=20  P=100.0% R=76.9%
+                後 guff=22 gcl=26 both=22  P=100.0% R=84.6%
+```
+
+**閉じたのは 2 件、新規 0 件**（途中で出た 1 件は §4 で閉じた）。
+
+残る gcl-only 4 件はこの回で測った 31 形には無い形: `client := <-await`
+（チャネル受信の初期化、`testing_test.go:99/102`）、`err` の連鎖
+（`registered_domain_test.go:105`）、クロージャの**引数**への複合代入
+（`debug.go:128` の `offset += int64(len(buf))`）。次の回の候補として書き残す。
+
+fixture は isolate と単体テストの両方に足した（golden は isolate fixture を読む）。
+`gofmt` は**追加したブロックだけ**が整形されたことを削除行 0 で確認している。
+
+golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 3,627 件緑。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）

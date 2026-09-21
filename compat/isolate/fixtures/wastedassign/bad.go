@@ -193,3 +193,164 @@ func ElemStore() []int {
 	s[0] = 2
 	return s
 }
+
+// The `if`-init store whose value the condition reads is excused because
+// NaiveForm does not Load it. Keyed on the *object* rather than the store,
+// that excuse also covered the declaration above the loop, which has nothing
+// to do with the `if` (beats `auditbeat/.../filetree.go:117`).
+func IfInitCondRead(tree map[string]map[string]int, components []string) int {
+	dir, exists := tree, false
+	for _, item := range components {
+		var sub map[string]int
+		if sub, exists = dir[item]; !exists {
+			return 0
+		}
+		_ = sub
+	}
+	return 1
+}
+
+// The same shape without the loop, so the two stores are adjacent.
+func IfInitTwoStores(m map[string]int) bool {
+	v, ok := 0, false
+	if v, ok = m["x"]; !ok {
+		return false
+	}
+	return v > 0
+}
+
+func trim(s string) string { return s }
+
+// An assignment whose right-hand side mentions the variable: the operands are
+// evaluated *before* the store, so that mention is not a later read. Counting
+// it by position silenced every self-referencing assignment, a parameter
+// normalised on entry among them (beats
+// `libbeat/kibana/index_pattern_generator.go:39`).
+func SelfReferencingParam(name string) string {
+	name = trim(name)
+	return "x"
+}
+
+func SelfReferencingLocal() string {
+	s := "q"
+	s = trim(s)
+	return "x"
+}
+
+func SelfReferencingThenReassigned() string {
+	s := "q"
+	s = trim(s)
+	s = "z"
+	return s
+}
+
+// The control: a *later* assignment's right-hand side really does read the
+// value, so the first store is live.
+func SelfReferenceIsARealRead() string {
+	s := "q"
+	s = trim(s)
+	return s
+}
+
+// Upstream's `srcFuncs` is every named function in the package's AST, methods
+// included. A members-only list leaves out every method in the package —
+// beats' `(FileTree).getByComponents` is one, which is why the `if`-init store
+// above it went unreported even after the excuse was narrowed.
+type Tree map[string]Tree
+
+func (t Tree) MethodWastedStore() int {
+	x := 1
+	x = 2
+	return x
+}
+
+func (t *Tree) PointerMethodWastedStore() int {
+	x := 1
+	x = 2
+	return x
+}
+
+// The beats shape itself: a method, an `if`-init whose condition reads the
+// variable, and a declaration above the loop that has nothing to do with it.
+func (t Tree) GetByComponents(components []string) (Tree, error) {
+	dir, exists := t, false
+	for _, item := range components {
+		if len(item) != 0 {
+			if dir == nil {
+				return nil, nil
+			}
+			if dir, exists = dir[item]; !exists {
+				return nil, nil
+			}
+		}
+	}
+	return dir, nil
+}
+
+// `compLit` writes an array or struct literal *into the address*, so no `Store`
+// exists and there is nothing to report. A slice or map literal is built as a
+// value and then stored, and that `Store` carries the literal's `Lbrace` — not
+// the assignment's `=`. Reporting every one of them at the `=` put a finding on
+// beats' `x-pack/metricbeat/module/aws/billing/billing.go:209` (`event :=
+// mb.Event{}`) that upstream does not make.
+type Elem struct{ N int }
+
+func mkElem() Elem          { return Elem{} }
+func mkSlice() []int        { return nil }
+func mkMap() map[string]int { return nil }
+func mkArray() [3]int       { return [3]int{} }
+
+// Silent: a struct literal.
+func StructLiteralInit(c bool) Elem {
+	e := Elem{}
+	if c {
+		e = mkElem()
+	} else {
+		e = mkElem()
+	}
+	return e
+}
+
+// Silent: an array literal, elements and all.
+func ArrayLiteralInit(c bool) [3]int {
+	a := [3]int{1, 2, 3}
+	if c {
+		a = mkArray()
+	} else {
+		a = mkArray()
+	}
+	return a
+}
+
+// Reported, at the `{`.
+func SliceLiteralInit(c bool) []int {
+	s := []int{1}
+	if c {
+		s = mkSlice()
+	} else {
+		s = mkSlice()
+	}
+	return s
+}
+
+func MapLiteralInit(c bool) map[string]int {
+	m := map[string]int{"a": 1}
+	if c {
+		m = mkMap()
+	} else {
+		m = mkMap()
+	}
+	return m
+}
+
+// `&Elem{}` is a UnaryExpr around the literal, not a literal: an ordinary
+// store at the `=`.
+func PointerToLiteralInit(c bool) *Elem {
+	p := &Elem{}
+	if c {
+		p = nil
+	} else {
+		p = nil
+	}
+	return p
+}

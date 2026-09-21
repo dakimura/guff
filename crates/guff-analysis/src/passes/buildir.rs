@@ -177,7 +177,7 @@ fn collect_src_funcs_members_only(prog: &Program, pkg: PackageId) -> Vec<FuncId>
 /// named function declared in the package's AST (package-level *and* methods).
 /// Methods are absent from `Package.members`, so this is required for
 /// contextcheck on receivers like `(*ReadyChecker).IsReady` (helm).
-fn collect_src_funcs_with_methods(prog: &Program, pkg: PackageId) -> Vec<FuncId> {
+pub fn collect_src_funcs_with_methods(prog: &Program, pkg: PackageId) -> Vec<FuncId> {
     use std::collections::HashSet;
 
     let mut seen = HashSet::new();
