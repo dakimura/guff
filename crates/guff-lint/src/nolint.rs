@@ -166,11 +166,24 @@ impl NolintIndex {
     }
 
     /// Restrict unused-directive reporting to these enabled linter names.
+    ///
+    /// `typecheck` joins them whatever the config says. golangci's pseudo-linter
+    /// for compile errors cannot be disabled — `dedupe_normalized` and the v1
+    /// migration both strip it out of the *enable* list precisely because it is
+    /// not something a user turns on — so a `//nolint:typecheck` over code that
+    /// compiles is an unused directive. beats writes one in
+    /// `x-pack/metricbeat/module/gcp/carbon/carbon.go:16`, and guff stayed
+    /// silent there because `typecheck` was neither known nor enabled.
     pub fn set_enabled_linters<I>(&mut self, names: I)
     where
         I: IntoIterator<Item = String>,
     {
         self.enabled_linters = names.into_iter().collect();
+        // An *empty* set means "no restriction" a few lines down, so it must
+        // stay empty; a real list gains `typecheck`.
+        if !self.enabled_linters.is_empty() {
+            self.enabled_linters.insert(TYPECHECK_NAME.to_string());
+        }
     }
 
     fn add_file(&mut self, path: &Path) {
@@ -729,8 +742,13 @@ fn extract_range(
     Some(build(linters))
 }
 
+/// golangci's pseudo-linter for compile errors. It is always on and never
+/// appears in the registry, so every list has to name it explicitly.
+const TYPECHECK_NAME: &str = "typecheck";
+
 fn is_known_nolint_target(name: &str) -> bool {
     name == NOLINTLINT_NAME
+        || name == TYPECHECK_NAME
         || analyzers_for_linter(name).is_some()
         // Formatters are not analysis linters but are valid //nolint targets
         // (golangci treats gofumpt/gofmt/… the same as linters for nolint).

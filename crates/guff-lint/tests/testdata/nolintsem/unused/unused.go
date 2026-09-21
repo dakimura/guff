@@ -42,3 +42,14 @@ func Malformed() {
 	//nolint :errcheck // reported as malformed only — no unused candidate
 	_ = 1
 }
+
+// `typecheck` is golangci's pseudo-linter for compile errors. It is always on
+// and cannot be turned off, so `dedupe_normalized` and the v1 migration both
+// strip it out of the *enable* list — and guff then knew neither that the name
+// was valid (it went into "unknown linters in //nolint directives") nor that it
+// was enabled, so a directive naming it produced nothing at all. beats writes
+// one in `x-pack/metricbeat/module/gcp/carbon/carbon.go:16`.
+func Typecheck() {
+	//nolint:typecheck // reported: this package compiles, so nothing was suppressed
+	_ = 1
+}
