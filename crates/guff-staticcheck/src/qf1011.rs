@@ -11,6 +11,7 @@ use std::sync::OnceLock;
 use guff::ast::Decl;
 use guff::node_mask;
 use guff::walk::NodeRef;
+use guff_analysis::passes::facts::generated;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
@@ -44,7 +45,8 @@ fn qf1011_analyzer_impl() -> Analyzer {
         url: "https://staticcheck.dev/docs/checks/#QF1011",
         run: run as RunFn,
         run_despite_errors: false,
-        requires: vec![inspect::analyzer()],
+        // `code.Generator` — the shared body skips a cgo-generated `var`.
+        requires: vec![inspect::analyzer(), generated::analyzer()],
         fact_types: vec![],
     }
 }

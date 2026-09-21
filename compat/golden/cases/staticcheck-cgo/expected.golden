@@ -1,0 +1,10 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh staticcheck-cgo
+# Produced by running golangci-lint on compat/golden/cases/staticcheck-cgo/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+cgo/notcgo.go:5:8:staticcheck::QF1011: could omit type *int from declaration; it will be inferred from the right-hand side
+cgo/notcgo.go:5:8:staticcheck::ST1023: should omit type *int from declaration; it will be inferred from the right-hand side

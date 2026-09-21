@@ -328,6 +328,28 @@ pub fn is_integer_literal(pass: &Pass<'_>, expr: &Expr, value: i64) -> bool {
     is_literal_shape(expr) && expr_to_int(pass, expr) == Some(value)
 }
 
+/// Which generator produced the file `pos` lies in, if any.
+///
+/// `code.Generator`. Most callers only need the boolean
+/// [`is_generated_at`], but a check that treats cgo differently from every
+/// other generator has to ask which one: honnef's
+/// `RedundantTypeInDeclarationChecker` skips `generated.Cgo` declarations and
+/// no others.
+pub fn generator_at(pass: &Pass<'_>, pos: u32) -> Option<crate::passes::facts::generated::Generator> {
+    let pos = Pos(pos as i64);
+    for (i, file) in pass.files().iter().enumerate() {
+        if file.file_start.0 > pos.0 || pos.0 > file.file_end.0 {
+            continue;
+        }
+        let result = pass.result_of::<crate::passes::facts::generated::GeneratedResult>(
+            crate::passes::facts::generated::analyzer(),
+        )?;
+        let path = pass.pkg().compiled_go_files.get(i)?;
+        return result.files.get(path.to_string_lossy().as_ref()).copied();
+    }
+    None
+}
+
 /// Reports whether `pos` lies in a generated file (`// Code generated ... DO NOT EDIT.`).
 pub fn is_generated_at(pass: &Pass<'_>, pos: u32) -> bool {
     let pos = Pos(pos as i64);

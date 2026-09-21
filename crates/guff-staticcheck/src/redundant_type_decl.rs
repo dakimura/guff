@@ -256,6 +256,26 @@ pub(crate) fn check_gen_decl(
     if gen.tok != Some(Token::VAR) {
         return;
     }
+    // ```go
+    // gen, _ := code.Generator(pass, decl.Pos())
+    // if gen == generated.Cgo {
+    //     // TODO(dh): remove this exception once we can use UsesCgo
+    //     return
+    // }
+    // ```
+    //
+    // *Only* cgo — every other generator's declarations are checked like any
+    // other. The cgo preamble writes `var _cgo0 *_Ctype_char = cPath`, and the
+    // positions map back onto the call in the original file, so beats'
+    // `auditbeat/module/file_integrity/fileorigin_darwin.go:95` collected three
+    // guff-only QF1011 rows pointing at one `C.getxattr(…)` line. (ST1023 is
+    // additionally off in any package that imports `syscall` or `unsafe`, which
+    // is why only the QF half showed up.)
+    if guff_analysis::code::generator_at(pass, gen.tok_pos.0 as u32)
+        == Some(guff_analysis::passes::facts::generated::Generator::Cgo)
+    {
+        return;
+    }
     'spec: for spec in &gen.specs {
         let Spec::ValueSpec(vs) = spec else {
             continue;
