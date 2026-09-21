@@ -33081,3 +33081,104 @@ gosmopolitan / promlinter）が古い件数のまま残っていた。すべて 
 unexpected 0 のまま。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-21（続き 300）— `close beats`（4）。`structtag` の 4 件は**両側に立っていた**。レンダリングが `%#q` ではなかったのと、その下で**タグの値そのもの**がバックスラッシュを落としていたのと
+
+続き 299 のあと beats の govet に残っていたのは 4/4 —— guff-only 4・gcl-only 4 で
+位置も件数も同じ。続き 291 で書いた「同数なら位置か文言の差」の署名そのもの。
+
+```
+guff  metricbeat/.../replstatus_integration_test.go:137: struct field tag "bson:_id" not compatible …
+gcl   metricbeat/.../replstatus_integration_test.go:137: struct field tag `bson:_id` not compatible …
+```
+
+#### 1. 上流は `%#q`
+
+```go
+Message: fmt.Sprintf("struct field tag %#q not compatible with reflect.StructTag.Get: %s", tag, err),
+```
+
+`fmt` の `fmtQ` は `f.sharp && strconv.CanBackquote(s)` でバッククォート版を選び、
+駄目なら `strconv.Quote` に落ちる。guff は Rust の `{:?}` を使っていた ——
+**素の ASCII でだけ Go と一致する**書式。struct tag はほぼ全部バッククォート可能
+なので、この行は出るたびに食い違っていた。
+
+隣の「repeats」の行は `%q`（バッククォート版を持たない）で、こちらも `{:?}`。
+
+#### 2. その下にもう 1 つ —— 値が壊れていた
+
+15 形測って分かった、もっと深いほう。guff の `unquote_tag` は
+
+```rust
+// Preserve the escaped character (Go `strconv.Unquote` / reflect tags).
+let Some(escaped) = chars.next() else { return None };
+out.push(escaped);
+```
+
+つまり「バックスラッシュを落として次の文字を残す」。`\"` と `\\` には正しく、
+**それ以外の全部のエスケープに間違っている**:
+
+| ソースのタグ | 上流が読む値 | guff が読んでいた値 |
+|---|---|---|
+| `"bson:\t_id"` | `bson:<TAB>_id` | `bson:t_id` |
+| `"bson:\n_id"` | `bson:<LF>_id` | `bson:n_id` |
+| `"bson:\x7f_id"` | `bson:<DEL>_id` | `bson:x7f_id` |
+| `"bson:\ufeff_id"` | `bson:<BOM>_id` | `bson:ufeff_id` |
+
+これはメッセージだけの話ではない。同じ関数が `key:"value"` の**値の側**にも
+使われていて（`validate_struct_tag` と `tag_get_raw`）、`json:"dup\tw"` の
+重複判定もこの値で回っていた。誰も気付かなかったのは、実際に書かれるタグが
+`\"` しか使わないから。
+
+上流はそもそも文字列リテラルを読み直さない: `structtag` は `types.Struct` を
+歩き、`Tag(i)` は型検査器が `strconv.Unquote(lit.Value)` で入れたもの
+（失敗したら空文字列）。guff は AST を歩く移植なのでここで unquote する ——
+**同じ関数を移植して**。`guff-gostd` に `strconv.Unquote`/`Quote` の移植が
+既にあり（続き 61 で `dupword` のために置かれた）、`can_backquote` と
+`quote_sharp`（＝`%#q`）を足して `guff-govet` から使うようにした。
+`guff-gostd` は依存ゼロのクレートなので循環は無い。
+
+#### 3. golden には 1 行も無かった
+
+`compat/golden/cases/govet` の structtag は 4 行で、**その 4 行すべてが
+「not exported」と「repeats」**。`not compatible with reflect.StructTag.Get`
+という文字列は golden に一度も現れていない —— つまり `%#q` の腕は
+**一度も測られていなかった**。続き 224 の「緑だが何も測っていない」の 1 形
+（0 件の golden）そのもの。
+
+fixture の**末尾に**（既存の行番号をずらさないため）2 つの型を足した:
+`%#q` の両方の腕を通る 10 形と、`%q` の側の 4 形。regen してキー集合で差分:
+
+```
+消えたキー: 0
+増えたキー: 14
+```
+
+golden は golangci-lint の出力そのものなので、この 14 行は列も severity も
+含めて上流のバイト列。`gofmt -w` はかけず、別ファイルに複写して `gofmt -l` が
+黙ることだけ確かめた（BOM の形は生の U+FEFF を書くと Go が
+"illegal byte order mark" で弾くので、エスケープのまま貼る）。
+
+単体テストは 2 層:
+`guff-gostd` に `can_backquote`/`quote_sharp` の契約（BOM は駄目だが
+**本物の U+FFFD は通る** —— 上流は幅 1 の `RuneError` 判定より前に
+マルチバイトの腕に入る）、`guff-govet` に fixture の全 18 行を
+`(行, メッセージ)` で丸ごと固定。`any(contains("not compatible"))` は
+**間違ったレンダリングでも通る**。
+
+#### 4. 実測
+
+```
+beats (v9.5.2)
+  前   guff=7467 golangci=7554 both=7437  P=99.6%  R=98.5%  unexpected=147
+  後   guff=7467 golangci=7554 both=7441  P=99.7%  R=98.5%  unexpected=139
+  govet  前 guff=77 gcl=77 both=73  P=94.8% R=94.8%
+         後 guff=77 gcl=77 both=77  P=100.0% R=100.0%
+```
+
+guff-only 30 → 26、gcl-only 117 → 113。**beats の govet は閉じた。**
+
+golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 3,627 件緑（新規 5 件）。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）

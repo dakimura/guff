@@ -950,7 +950,8 @@ fn structtag_flags_unexported_json() {
     let dir = support::testdata("structtag");
     let pkg = support::typecheck_pkg("example.com/govet/structtag", &dir.join("bad.go"));
     let messages = support::run_analyzer(structtag_analyzer(), &pkg);
-    assert_eq!(messages.len(), 4, "{messages:?}");
+    // The whole set is pinned by `structtag_renders_tags_the_way_fmt_does`;
+    // what follows says why each of these four rows is the way it is.
     assert!(messages.iter().any(|m| m.contains("not exported")), "{messages:?}");
     // Tag options are not part of the name, so `a,omitempty` collides with `a`.
     assert!(
@@ -970,6 +971,84 @@ fn structtag_flags_unexported_json() {
     assert!(
         !messages.iter().any(|m| m.contains("ticketing-milestone")),
         "{messages:?}"
+    );
+}
+
+/// Every `structtag` finding on the fixture, as (line, message).
+///
+/// Upstream renders the tag it could not parse with `%#q` and the repeated
+/// encoding name with `%q`, and both used to come out of Rust's `{:?}`, which
+/// agrees with Go on plain ASCII and on nothing else. Underneath them the tag
+/// value itself was unquoted by hand — "drop the backslash, keep the next
+/// character" — which is right for `\"` and `\\` and wrong for every other
+/// escape, so `"bson:\t_id"` was read as `bson:t_id`.
+///
+/// Pinned whole rather than with `any(contains(…))`: a wrong rendering is still
+/// a message that contains "not compatible with reflect.StructTag.Get".
+#[test]
+fn structtag_renders_tags_the_way_fmt_does() {
+    let dir = support::testdata("structtag");
+    let pkg = support::typecheck_pkg("example.com/govet/structtag", &dir.join("bad.go"));
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let got: Vec<(i64, String)> = support::run_analyzer_diagnostics(structtag_analyzer(), &pkg)
+        .into_iter()
+        .map(|d| {
+            (
+                fset.position(guff::position::Pos(d.pos as i64)).line,
+                d.message,
+            )
+        })
+        .collect();
+    let at = |line: i64, msg: &str| (line, msg.to_string());
+    let bad_syntax = "not compatible with reflect.StructTag.Get: bad syntax for struct tag value";
+    assert_eq!(
+        got,
+        vec![
+            at(4, "struct field x has json tag but is not exported"),
+            at(11, r#"struct field A2 repeats json tag "a" also at bad.go:10"#),
+            at(
+                24,
+                r#"struct field Kind2 repeats xml attribute tag "kind" also at bad.go:23"#
+            ),
+            at(39, "struct field hidden has json tag but is not exported"),
+            // `%#q` takes the backquote arm: plain, with a space, with a tab,
+            // with a double quote, with a multibyte rune, and with a backslash
+            // that a backquoted *literal* kept verbatim.
+            at(52, &format!("struct field tag `bson:_id` {bad_syntax}")),
+            at(53, &format!("struct field tag `bson: _id` {bad_syntax}")),
+            at(54, &format!("struct field tag `bson:\t_id` {bad_syntax}")),
+            at(55, &format!("struct field tag `bson:\"_id` {bad_syntax}")),
+            at(56, &format!("struct field tag `bson:_idé` {bad_syntax}")),
+            at(59, &format!(r"struct field tag `bson:\_id` {bad_syntax}")),
+            // …and falls back to `strconv.Quote` for a backquote, a control
+            // character, U+007F and a BOM. Each of these also proves the value:
+            // the old unquoting turned `\n` into the letter `n`.
+            at(63, &format!("struct field tag \"bson:`_id\" {bad_syntax}")),
+            at(64, &format!(r#"struct field tag "bson:\n_id" {bad_syntax}"#)),
+            at(65, &format!(r#"struct field tag "bson:\x7f_id" {bad_syntax}"#)),
+            at(
+                66,
+                &format!(r#"struct field tag "bson:\ufeff_id" {bad_syntax}"#)
+            ),
+            // The repeats arm is plain `%q` — no backquote form even when the
+            // value could take one.
+            at(
+                73,
+                r#"struct field Apostrophe2 repeats json tag "dup'x" also at bad.go:72"#
+            ),
+            at(
+                75,
+                "struct field Backquote2 repeats json tag \"dup`y\" also at bad.go:74"
+            ),
+            at(
+                77,
+                r#"struct field Del2 repeats json tag "dup\x7fz" also at bad.go:76"#
+            ),
+            at(
+                79,
+                r#"struct field Tab2 repeats json tag "dup\tw" also at bad.go:78"#
+            ),
+        ],
     );
 }
 

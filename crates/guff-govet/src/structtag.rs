@@ -10,6 +10,7 @@ use guff::position::Pos;
 use guff::walk::NodeRef;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_gostd::strconv;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct TagKey {
@@ -18,34 +19,24 @@ struct TagKey {
     level: i32,
 }
 
+/// The tag's value, as `go/types` records it.
+///
+/// Upstream does not re-read the literal at all: `structtag` walks
+/// `types.Struct`, whose `Tag(i)` the type checker filled in with
+/// `strconv.Unquote(lit.Value)` (and left empty when that failed). This port
+/// walks the AST, so it unquotes here — with the same function, ported.
+///
+/// An earlier revision hand-rolled it as "drop the backslash, keep the next
+/// character". That is right for `\"` and `\\`, which is every tag anyone
+/// writes, and wrong for every other escape: `"json:\t"` came out as `json:t`,
+/// so the *value* — not only its rendering — was wrong wherever a tag was
+/// written as an interpreted string literal with a real escape in it.
+///
+/// Returning `None` where `strconv.Unquote` errors matches the checker's own
+/// fallback: the tag becomes `""`, and `validate_struct_tag("")` has nothing to
+/// report.
 fn raw_tag_value(raw: &str) -> Option<String> {
-    if raw.len() >= 2 && raw.starts_with('`') && raw.ends_with('`') {
-        return Some(raw[1..raw.len() - 1].to_string());
-    }
-    unquote_tag(raw)
-}
-
-fn unquote_tag(raw: &str) -> Option<String> {
-    if raw.len() < 2 || !raw.starts_with('"') || !raw.ends_with('"') {
-        return None;
-    }
-    let inner = &raw[1..raw.len() - 1];
-    let mut out = String::new();
-    let mut chars = inner.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '\\' {
-            // Preserve the escaped character (Go `strconv.Unquote` / reflect tags).
-            // Dropping it turned `form:\"idx\"` into `form:idx` and false-flagged
-            // interpreted struct-tag string literals (gin binding_test.go).
-            let Some(escaped) = chars.next() else {
-                return None;
-            };
-            out.push(escaped);
-            continue;
-        }
-        out.push(c);
-    }
-    Some(out)
+    strconv::unquote(raw).ok()
 }
 
 fn quoted_value_end(s: &str) -> Option<usize> {
@@ -89,7 +80,7 @@ fn tag_get_raw(tag: &str, key: &str) -> Option<String> {
         }
         rest = rest[colon + 1..].trim_start();
         let end = quoted_value_end(rest)?;
-        return unquote_tag(&rest[..end]);
+        return strconv::unquote(&rest[..end]).ok();
     }
     None
 }
@@ -126,7 +117,7 @@ fn validate_struct_tag(tag: &str) -> Option<&'static str> {
             return Some("bad syntax for struct tag value");
         };
         let q = &rest[..end];
-        let Some(value) = unquote_tag(q) else {
+        let Ok(value) = strconv::unquote(q) else {
             return Some("bad syntax for struct tag value");
         };
         if let Some(err) = check_tag_spaces(key, &value) {
@@ -250,8 +241,10 @@ fn check_field(
         pending.push((
             field.pos().0 as u32,
             format!(
-                "struct field tag {:?} not compatible with reflect.StructTag.Get: {err}",
-                tag
+                "struct field tag {} not compatible with reflect.StructTag.Get: {err}",
+                // `%#q`, not `%q`: upstream prefers a backquoted rendering, and
+                // a struct tag nearly always can be backquoted.
+                strconv::quote_sharp(&tag)
             ),
         ));
     }
@@ -301,7 +294,9 @@ fn check_field(
             pending.push((
                 pos,
                 format!(
-                    "struct field {who} repeats {tag_kind} tag {name:?} also at {}",
+                    "struct field {who} repeats {tag_kind} tag {} also at {}",
+                    // Plain `%q` here — this arm has no backquote form.
+                    strconv::quote(&name),
                     also_at(pass, pos, earlier)
                 ),
             ));

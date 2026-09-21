@@ -166,6 +166,20 @@ structtag/bad/bad.go:4:2:govet::structtag: struct field x has json tag but is no
 structtag/bad/bad.go:11:2:govet::structtag: struct field A2 repeats json tag "a" also at bad.go:10
 structtag/bad/bad.go:24:2:govet::structtag: struct field Kind2 repeats xml attribute tag "kind" also at bad.go:23
 structtag/bad/bad.go:39:2:govet::structtag: struct field hidden has json tag but is not exported
+structtag/bad/bad.go:52:2:govet::structtag: struct field tag `bson:_id` not compatible with reflect.StructTag.Get: bad syntax for struct tag value
+structtag/bad/bad.go:53:2:govet::structtag: struct field tag `bson: _id` not compatible with reflect.StructTag.Get: bad syntax for struct tag value
+structtag/bad/bad.go:54:2:govet::structtag: struct field tag `bson:	_id` not compatible with reflect.StructTag.Get: bad syntax for struct tag value
+structtag/bad/bad.go:55:2:govet::structtag: struct field tag `bson:"_id` not compatible with reflect.StructTag.Get: bad syntax for struct tag value
+structtag/bad/bad.go:56:2:govet::structtag: struct field tag `bson:_idé` not compatible with reflect.StructTag.Get: bad syntax for struct tag value
+structtag/bad/bad.go:59:2:govet::structtag: struct field tag `bson:\\_id` not compatible with reflect.StructTag.Get: bad syntax for struct tag value
+structtag/bad/bad.go:63:2:govet::structtag: struct field tag "bson:`_id" not compatible with reflect.StructTag.Get: bad syntax for struct tag value
+structtag/bad/bad.go:64:2:govet::structtag: struct field tag "bson:\\n_id" not compatible with reflect.StructTag.Get: bad syntax for struct tag value
+structtag/bad/bad.go:65:2:govet::structtag: struct field tag "bson:\\x7f_id" not compatible with reflect.StructTag.Get: bad syntax for struct tag value
+structtag/bad/bad.go:66:2:govet::structtag: struct field tag "bson:\\ufeff_id" not compatible with reflect.StructTag.Get: bad syntax for struct tag value
+structtag/bad/bad.go:73:2:govet::structtag: struct field Apostrophe2 repeats json tag "dup'x" also at bad.go:72
+structtag/bad/bad.go:75:2:govet::structtag: struct field Backquote2 repeats json tag "dup`y" also at bad.go:74
+structtag/bad/bad.go:77:2:govet::structtag: struct field Del2 repeats json tag "dup\\x7fz" also at bad.go:76
+structtag/bad/bad.go:79:2:govet::structtag: struct field Tab2 repeats json tag "dup\\tw" also at bad.go:78
 testinggoroutine/bad_test/bad_test.go:7:2:govet::testinggoroutine: call to (*testing.T).Fatal from a non-test goroutine
 testinggoroutine/bad_test/bad_test.go:11:3:govet::testinggoroutine: call to (*testing.T).Fatalf from a non-test goroutine
 testinggoroutine/bad_test/bad_test.go:19:2:govet::testinggoroutine: call to (*testing.T).FailNow from a non-test goroutine (fn calls (*testing.T).FailNow)
