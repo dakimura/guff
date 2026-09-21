@@ -177,6 +177,13 @@ g201/g201.go:97:7:gosec:medium:G201: SQL string formatting
 g201/g201.go:105:7:gosec:medium:G201: SQL string formatting
 g201/g201.go:112:7:gosec:medium:G201: SQL string formatting
 g201/g201.go:121:8:gosec:medium:G201: SQL string formatting
+g202/g202.go:34:7:gosec:medium:G202: SQL string concatenation
+g202/g202.go:42:7:gosec:medium:G202: SQL string concatenation
+g202/g202.go:49:7:gosec:medium:G202: SQL string concatenation
+g202/g202.go:57:7:gosec:medium:G202: SQL string concatenation
+g202/g202.go:64:7:gosec:medium:G202: SQL string concatenation
+g202/g202.go:74:2:gosec:medium:G202: SQL string concatenation
+g202/g202.go:82:2:gosec:medium:G202: SQL string concatenation
 g304/g304.go:22:49:gosec:medium:G304: Potential file inclusion via variable
 g304/g304.go:34:58:gosec:medium:G304: Potential file inclusion via variable
 g304/g304.go:46:9:gosec:medium:G304: Potential file inclusion via variable

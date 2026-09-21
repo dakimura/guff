@@ -1281,11 +1281,171 @@ fn check_g201_call(
     true
 }
 
+/// `GetStringRecursive`: a chain of string literals joined by `+`, with every
+/// other leaf contributing the empty string.
+///
+/// That last part is the load-bearing half: `"SELECT a FROM t WHERE " + where`
+/// reduces to `"SELECT a FROM t WHERE "`, which is what makes the SQL pattern
+/// match on a query whose tainted part is unknowable.
+fn g202_string_recursive(expr: &Expr) -> String {
+    match expr {
+        Expr::ParenExpr(inner) => g202_string_recursive(&inner.x),
+        Expr::BinaryExpr(b) => {
+            let mut out = g202_string_recursive(&b.x);
+            out.push_str(&g202_string_recursive(&b.y));
+            out
+        }
+        other => string_lit_from_expr(other).unwrap_or_default(),
+    }
+}
+
+/// The file whose byte range holds `pos`.
+fn g202_file_at<'a>(files: &'a [File], pos: u32) -> Option<&'a File> {
+    files
+        .iter()
+        .find(|f| pos >= f.file_start.0 as u32 && pos <= f.file_end.0 as u32)
+}
+
+/// G202's identifier branch: the query is built up in a variable before the
+/// call (`q := "SELECT …" + tainted`, or `q := "SELECT …"` then `q += tainted`).
+///
+/// This was deferred, and the whole of beats' browserhistory extension is in
+/// it: three queries assembled as `` `SELECT …WHERE 1=1` + where + `ORDER BY…` ``
+/// and handed to `QueryContext`. The direct branch could not see them because
+/// the call's argument is an `*ast.Ident`.
+///
+/// Upstream's order matters and is not the obvious one:
+///
+///  1. a risky concatenation *in the declaration* reports straight away, with
+///     no SQL-pattern test — the call is already a SQL sink;
+///  2. only then does `hasSQLPattern` gate the search for a later mutation;
+///  3. that search accepts `q += tainted` and `q = q + tainted`, and nothing
+///     else.
+fn check_g202_ident_query(
+    pass: &Pass<'_>,
+    files: &[File],
+    file: &File,
+    call: &CallExpr,
+    pending: &mut Vec<(u32, u32, String)>,
+) {
+    let Some(query) = g202_query_arg(pass, file, call) else {
+        return;
+    };
+    let Expr::Ident(id) = query else {
+        return;
+    };
+    let Some(obj) = code::object_of(pass, id) else {
+        return;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return;
+    };
+    if !matches!(artifacts.objects.get(obj), ObjectData::Var(_)) {
+        return;
+    }
+    let decl_pos = obj.pos(&artifacts.objects);
+    // `filesToSearch` is the package for a package-level variable and the
+    // call's own file otherwise; the declaration is looked for in whichever
+    // file holds it.
+    let Some(decl_file) = g202_file_at(files, decl_pos) else {
+        return;
+    };
+    let rhs: &[Expr] = match g202_find_decl(decl_file, decl_pos) {
+        Some(G202Decl::Assign(rhs)) => rhs,
+        Some(G202Decl::Values(values)) => values,
+        Some(G202Decl::Unresolvable) | None => return,
+    };
+
+    // 1. `findInjectionInBranch`, before any pattern test.
+    for expr in rhs {
+        if !matches!(expr, Expr::BinaryExpr(_)) {
+            continue;
+        }
+        let mut operands = Vec::new();
+        binary_expr_operands(expr, &mut operands);
+        if operands
+            .iter()
+            .any(|op| !g202_try_resolve(pass, decl_file, op))
+        {
+            pending.push((
+                expr.pos().0 as u32,
+                expr.end().0 as u32,
+                format!("G202: {G202_WHAT}"),
+            ));
+            return;
+        }
+    }
+
+    // 2. Without a SQL pattern in the declaration, a later mutation is not this
+    //    rule's business.
+    if !rhs
+        .iter()
+        .any(|e| sql_keyword_re().is_match(&g202_string_recursive(e)))
+    {
+        return;
+    }
+
+    // 3. `q += tainted` / `q = q + tainted`.
+    //
+    // Upstream narrows `filesToSearch` to the call's own file for a local
+    // variable and to the package for a package-level one. Searching every
+    // file is the same answer either way: an object is unique, so an
+    // assignment whose left-hand side resolves to a *local* one cannot appear
+    // outside the function that declares it.
+    for f in files {
+        let mut hit: Option<(u32, u32)> = None;
+        preorder(NodeRef::File(f), |n| {
+            if hit.is_some() {
+                return false;
+            }
+            let NodeRef::AssignStmt(a) = n else {
+                return true;
+            };
+            if a.lhs.len() != 1 || a.rhs.len() != 1 {
+                return true;
+            }
+            let Expr::Ident(lhs) = &a.lhs[0] else {
+                return true;
+            };
+            if code::object_of(pass, lhs) != Some(obj) {
+                return true;
+            }
+            let appended = match a.tok {
+                Some(Token::AddAssign) => &a.rhs[0],
+                Some(Token::ASSIGN) => {
+                    let Expr::BinaryExpr(be) = &a.rhs[0] else {
+                        return true;
+                    };
+                    if be.op != Token::ADD {
+                        return true;
+                    }
+                    let Expr::Ident(left) = &*be.x else {
+                        return true;
+                    };
+                    if code::object_of(pass, left) != Some(obj) {
+                        return true;
+                    }
+                    &*be.y
+                }
+                _ => return true,
+            };
+            if !g202_try_resolve(pass, f, appended) {
+                // `ctx.NewIssue(found, …)` — the assignment statement, not the
+                // appended expression.
+                hit = Some((a.lhs[0].pos().0 as u32, a.rhs[0].end().0 as u32));
+                return false;
+            }
+            true
+        });
+        if let Some((pos, end)) = hit {
+            pending.push((pos, end, format!("G202: {G202_WHAT}")));
+            return;
+        }
+    }
+}
+
 /// G202 — SQL string concatenation, the direct branch of upstream's
 /// `sqlStrConcat.checkQuery`.
-///
-/// DEFERRED: the identifier branch, where the query is built up in a variable
-/// (`q := "SELECT …"; q += tainted`) before the call.
 fn check_g202_call(pass: &Pass<'_>, file: &File, call: &CallExpr, pending: &mut Vec<(u32, u32, String)>) {
     let Some(query) = g202_query_arg(pass, file, call) else {
         return;
@@ -3980,7 +4140,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     check_g304(pass, &enabled, &mut pending);
     crate::gosec_ssa::check_ssa_analyzers(pass, &enabled, &mut pending);
 
-    for file in pass.files() {
+    let files = pass.files();
+    for file in files {
         preorder(NodeRef::File(file), |n| {
             match n {
                 NodeRef::CallExpr(call) => {
@@ -3999,6 +4160,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         check_g104_call(pass, call, &enabled, &mut pending);
                         if enabled.contains("G202") {
                             check_g202_call(pass, file, call, &mut pending);
+                            check_g202_ident_query(pass, files, file, call, &mut pending);
                         }
                         if enabled.contains("G201") {
                             check_g201_call(pass, file, call, &mut pending);
@@ -4014,6 +4176,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         for rhs in &stmt.rhs {
                             if let Expr::CallExpr(call) = rhs {
                                 check_g202_call(pass, file, call, &mut pending);
+                                check_g202_ident_query(pass, files, file, call, &mut pending);
                             }
                         }
                     }

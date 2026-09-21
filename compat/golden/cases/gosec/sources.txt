@@ -34,6 +34,7 @@ g122/g122.go          crates/guff-style/tests/testdata/gosec/g122.go
 g102/g102.go          crates/guff-style/tests/testdata/gosec/g102.go
 g402/g402.go          crates/guff-style/tests/testdata/gosec/g402.go
 g201/g201.go          crates/guff-style/tests/testdata/gosec/g201.go
+g202/g202.go          crates/guff-style/tests/testdata/gosec/g202.go
 
 # The three dot-import fixtures. A dot-imported call is an `*ast.Ident`, which
 # `GetCallInfo` answers for with the analysed package's own name, so no

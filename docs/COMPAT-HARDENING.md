@@ -33573,3 +33573,101 @@ golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 3,627 件緑。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-21（続き 305）— `close beats`（9）。G202 は**識別子の枝**を持っていなかった。ついでに G115 の残り 1 件は「最初に見た変換の文字列を使い回す」上流の挙動だと分かった
+
+beats の gosec は gcl-only 9・guff-only 4。`G202` の 3 件は
+osquery の browserhistory 拡張で、9 形測ったら**guff の G202 は変数越しの
+クエリを 1 つも見ていなかった**。
+
+#### 1. `checkQuery` の 2 本目の枝
+
+```go
+// Direct binary concatenation (e.g., "SELECT ..." + tainted)
+if be, ok := query.(*ast.BinaryExpr); ok { … ; return nil, nil }
+
+// Must be an identifier to continue (e.g., var query = ...; query += ...)
+ident, ok := query.(*ast.Ident)
+```
+
+guff は 1 本目だけを持っていて、関数の doc に
+*「DEFERRED: 識別子の枝」* と書いてあった。beats はそこにいる:
+
+```go
+query := `
+       SELECT … FROM urls
+       WHERE 1=1` + timestampWhere + `
+       ORDER BY visits.visit_time DESC
+       `
+rows, err := db.QueryContext(ctx, query, params...)
+```
+
+呼び出しの引数が `*ast.Ident` なので、1 本目の枝は形を見る前に降りる。
+
+#### 2. 枝の中の順番が素直ではない
+
+1. **宣言の中の危険な連結はその場で報告する** —— SQL パターンの判定は無い
+   （呼び出しは既に SQL の sink なので）。
+2. そのあとで `hasSQLPattern` が「後からの書き換え」の探索を門番する。
+3. その探索が受けるのは `q += tainted` と `q = q + tainted` だけ。
+
+`GetStringRecursive` は「文字列リテラルを `+` で繋いだもの、それ以外の葉は
+空文字列」なので、`"SELECT a FROM t WHERE " + where` は
+`"SELECT a FROM t WHERE "` に畳まれて SQL パターンに当たる ——
+**未知の部分があっても当たる**のがこの関数の要点。
+
+`filesToSearch` は上流ではローカル変数なら呼び出しのファイル、パッケージ変数
+なら全ファイル。オブジェクトは一意なので、ローカル変数を左辺に持つ代入が
+宣言した関数の外に現れることはない —— 常に全ファイルを見ても同じ答えになる、
+と書いて単純化した。
+
+#### 3. 残る G115 の 1 件は**上流のキャッシュ**
+
+`auditbeat/.../event.go:519` は guff が `int32 -> byte`、gcl が `rune -> byte`。
+上流を読むと:
+
+```go
+pair := conversionPair{src: srcBasic.Kind(), dst: dstBasic.Kind()}
+msg, ok := state.msgCache[pair]
+if !ok {
+    msg = fmt.Sprintf("integer overflow conversion %s -> %s", srcBasic.Name(), dstBasic.Name())
+```
+
+**`(srcKind, dstKind)` で引くキャッシュ**で、文字列は*最初に出会った変換*の
+ものが以後ずっと使われる。6 形を 1 ファイルに並べて確かめた:
+
+| ファイルの先頭にある変換 | 同じファイルの全 int32→uint8 変換 |
+|---|---|
+| `for _, c := range s { byte(c) }` | `rune -> byte` |
+| `func f(i int32) byte { byte(i) }` | `int32 -> byte` |
+
+つまり `byte(i)`（`i int32`）も、`byte(m)`（`m myInt`）も、ファイルの先頭に
+`range` があれば **`rune -> byte`** と出る。名前は型のものではなく、
+**その kind の組を最初に見たときの型のもの**。
+
+移植は可能だが、beats だけで G115 は 404 件あり、guff の走査順が
+`buildssa.SrcFuncs` と 1 箇所でも違えば 400 件の文言が動く。**2 行のために
+400 件を賭けない。**測って書き残し、この回では入れない。
+
+#### 4. 実測
+
+```
+beats (v9.5.2)
+  前   guff=7485 golangci=7554 both=7468  P=99.8%  R=98.9%  unexpected=103
+  後   guff=7488 golangci=7554 both=7471  P=99.8%  R=98.9%  unexpected=100
+  gosec  前 guff=404 gcl=409 both=400  P=99.0% R=97.8%
+         後 guff=407 gcl=409 both=403  P=99.0% R=98.5%
+```
+
+**閉じたのは 3 件、新規 0 件。** 残る gosec の gcl-only 6 は
+`G119`×3・`G305`×2・`G115`×1（§3）。G119 と G305 はどちらも未移植で、
+`gosec.rs` の DEFERRED 一覧に名前がある。
+
+fixture は `g202.go` を新設して 10 形（報告 7・沈黙 3）を入れ、
+`compat/golden/cases/gosec/sources.txt` に登録した。regen は
+**消えたキー 0 / 増えたキー 7**。
+
+golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 3,628 件緑。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
