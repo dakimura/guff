@@ -34026,3 +34026,84 @@ golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 3,631 件緑。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-21（続き 311）— `close beats`（15）。ブロックコメントの package doc は**マーカーを持たない**。そして 1 回目は出て 2 回目から出なくなる —— 物体スキャンがキャッシュを上書きしていた
+
+beats の staticcheck の gcl-only 8 件のうち **4 件**が
+`"cloud.google.com/go/pubsub" is deprecated`。4 つとも同じパッケージの import。
+
+#### 1. マーカーの無い `Deprecated:`
+
+pubsub の package doc はブロックコメントで、最後の段落に**行頭から**
+`Deprecated:` と書いてある:
+
+```go
+/*
+Package pubsub …
+
+Deprecated: Please use cloud.google.com/go/pubsub/v2.
+*/
+package pubsub // import "cloud.google.com/go/pubsub"
+```
+
+`CommentGroup.Text()` は区切りを落とすので、上流が見る段落は
+`// Deprecated:` の場合とまったく同じ。ところが guff の**バイト列の探り**は
+`// Deprecated:` と `* Deprecated:` しか知らず、**そのファイルを parse する
+ところまで行かなかった**。探りは「parse するかどうか」だけを決め、答えは
+`extract_deprecated_message` が出すので、行頭 `\nDeprecated:` を足すのが正解。
+
+#### 2. 直したら「1 件だけ出る」になった —— キャッシュの上書き
+
+package doc の探りだけを広げたところ、**4 件のうち 2 件**しか閉じなかった。
+最小再現を作ると、同じパッケージを import する 2 つのファイルのうち
+**最初の 1 つしか出ない**:
+
+```
+a.go:3:8  出る
+b.go:3:8  出ない     ← 同じ import、同じパッケージ
+```
+
+理由はキャッシュの作られ方だった。import spec は **物体（`blockdoc.H()`）の
+参照より先に**訪れられる。
+
+1. a.go の import → `dep_facts(need_objects=false)` が package doc だけを
+   読んで `{ package: Some(msg), objects_scanned: false }` を入れる → 報告。
+2. a.go の `blockdoc.H()` → `dep_facts(need_objects=true)` が
+   `objects_scanned == false` を見て**全ファイルを読み直す**。その読み直しの
+   ファイル選別は**狭いほうの探り**を使っていたので、ブロックコメントの
+   ファイルが弾かれ、`package: None` の facts で**キャッシュを上書き**した。
+3. b.go の import → 上書き後のキャッシュを引いて「非推奨ではない」。
+
+なので直すべきは**共有している探り 1 つ**のほうだった。`src_has_deprecated_doc`
+に行頭形を足し、package 用の探りは元どおり委譲するだけに戻した。
+
+#### 3. fixture
+
+`stub/example.com/blockdoc` を足し、`bad.go` から import させた。**2 ファイル
+目**（`bad_second_file.go`）が §2 の形で、`typecheck_rule` は 1 ファイルしか
+読まないので golden 側で守る —— `compat/golden/cases/staticcheck-sa` の
+`sources.txt` で**わざと同じディレクトリに**材料化している（このケースが
+「2 ファイルで 1 パッケージ」を欲しがる唯一の場所）。
+
+#### 4. 実測
+
+```
+beats (v9.5.2)
+  前   guff=7542 golangci=7554 both=7528  P=99.8%  R=99.7%  unexpected=40
+  後   guff=7546 golangci=7554 both=7532  P=99.8%  R=99.7%  unexpected=36
+  staticcheck  前 guff=528 gcl=533 both=525  P=99.4% R=98.5%
+               後 guff=532 gcl=533 both=529  P=99.4% R=99.2%
+```
+
+**閉じたのは 4 件、新規 0 件。** 壁は `--oss --tier pr` 2:47 → 2:58、
+beats の hunt 4:48 → 4:55。物体スキャンの探りを広げた分の増加で、
+**同じ桁の揺れの範囲**（この回の 3 回の計測は 2:44 / 2:47 / 2:58）。
+
+残る staticcheck の gcl-only 4 件は
+`ineffectual compiler directive`（`// go:generate` の空白）1・
+`should omit nil check` 1・`this value of config is never used` 2。
+
+golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 3,631 件緑。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）

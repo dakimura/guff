@@ -2381,7 +2381,16 @@ fn sa1019_flags_a_deprecated_struct_field_of_an_imported_type() {
     assert_eq!(count("h.Cfg.Old is deprecated"), 1, "{messages:?}");
     // Embedding spelled out by hand.
     assert_eq!(count("w.Options.Old is deprecated"), 1, "{messages:?}");
-    assert_eq!(messages.len(), 8, "{messages:?}");
+    // A package whose deprecation notice is a paragraph of a *block-comment*
+    // package doc, carrying no `//` or `*` marker of its own — which is how
+    // cloud.google.com/go/pubsub writes it, and what the byte probe that
+    // decides whether to parse the file could not see.
+    assert_eq!(
+        count("\"example.com/blockdoc\" is deprecated"),
+        1,
+        "{messages:?}"
+    );
+    assert_eq!(messages.len(), 9, "{messages:?}");
 }
 
 #[test]

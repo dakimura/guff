@@ -137,15 +137,17 @@ sa1018/bad/bad.go:7:35:staticcheck::SA1018: calling strings.Replace with n == 0 
 sa1018/ok/ok.go:6:2:staticcheck::QF1004: could use strings.ReplaceAll instead
 sa1018/ok/ok.go:6:2:staticcheck::SA4017: Replace doesn't have side effects and its return value is ignored
 sa1018/ok/ok.go:7:2:staticcheck::SA4017: Replace doesn't have side effects and its return value is ignored
-sa1019/bad/bad.go:6:2:staticcheck::SA1019: old.Legacy is deprecated: call New. 
-sa1019/bad/bad.go:7:8:staticcheck::SA1019: old.OldClient is deprecated: use NewClient instead. 
-sa1019/bad/bad.go:13:2:staticcheck::SA1019: o.Old is deprecated: use Fine instead. 
-sa1019/bad/bad.go:19:2:staticcheck::SA1019: w.Old is deprecated: use Fine instead. 
-sa1019/bad/bad.go:20:6:staticcheck::SA1019: w.Old is deprecated: use Fine instead. 
-sa1019/bad/bad.go:23:2:staticcheck::SA1019: pw.Old is deprecated: use Fine instead. 
-sa1019/bad/bad.go:26:2:staticcheck::SA1019: h.Cfg.Old is deprecated: use Fine instead. 
-sa1019/bad/bad.go:29:2:staticcheck::SA1019: w.Options.Old is deprecated: use Fine instead. 
-sa1019/bad/bad.go:29:4:staticcheck::QF1008: could remove embedded field "Options" from selector
+sa1019/bad/bad.go:4:2:staticcheck::SA1019: "example.com/blockdoc" is deprecated: Please use example.com/old. 
+sa1019/bad/bad.go:9:2:staticcheck::SA1019: old.Legacy is deprecated: call New. 
+sa1019/bad/bad.go:10:8:staticcheck::SA1019: old.OldClient is deprecated: use NewClient instead. 
+sa1019/bad/bad.go:16:2:staticcheck::SA1019: o.Old is deprecated: use Fine instead. 
+sa1019/bad/bad.go:22:2:staticcheck::SA1019: w.Old is deprecated: use Fine instead. 
+sa1019/bad/bad.go:23:6:staticcheck::SA1019: w.Old is deprecated: use Fine instead. 
+sa1019/bad/bad.go:26:2:staticcheck::SA1019: pw.Old is deprecated: use Fine instead. 
+sa1019/bad/bad.go:29:2:staticcheck::SA1019: h.Cfg.Old is deprecated: use Fine instead. 
+sa1019/bad/bad.go:32:2:staticcheck::SA1019: w.Options.Old is deprecated: use Fine instead. 
+sa1019/bad/bad.go:32:4:staticcheck::QF1008: could remove embedded field "Options" from selector
+sa1019/bad/second.go:18:8:staticcheck::SA1019: "example.com/blockdoc" is deprecated: Please use example.com/old. 
 sa1019/ok/ok.go:5:1:staticcheck::ST1021: comment on exported type Embedder should be of the form "Embedder ..." (with optional leading article)
 sa1020/bad/bad.go:7:22:staticcheck::SA1020: invalid port or service name in host:port pair
 sa1020/bad/bad.go:8:22:staticcheck::SA1020: invalid port or service name in host:port pair

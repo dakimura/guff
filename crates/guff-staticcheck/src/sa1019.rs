@@ -297,8 +297,28 @@ fn src_has_deprecated_doc(src: &[u8]) -> bool {
     // probe rejects, which is nearly all of them; `memmem` is the same search
     // vectorized. Both find the identical first match, so the answer cannot
     // change.
+    //
+    // The third form has no marker at all. A block-comment doc puts its
+    // paragraphs at column 0:
+    //
+    //     /*
+    //     Package pubsub …
+    //
+    //     Deprecated: Please use cloud.google.com/go/pubsub/v2.
+    //     */
+    //     package pubsub
+    //
+    // `CommentGroup.Text()` strips the delimiters, so upstream sees the same
+    // paragraph it sees for `// Deprecated:` — and
+    // `strings.HasPrefix(part, "Deprecated: ")` is all it can match once they
+    // are gone, which is why this is anchored to the start of a line rather
+    // than a bare substring. cloud.google.com/go/pubsub is exactly this shape.
+    //
+    // A column-0 `Deprecated:` inside a string literal would cost one parse;
+    // `extract_deprecated_message` still decides the answer.
     memchr::memmem::find(src, b"// Deprecated:").is_some()
         || memchr::memmem::find(src, b"* Deprecated:").is_some()
+        || memchr::memmem::find(src, b"\nDeprecated:").is_some()
 }
 
 /// Package comments sit immediately above the `package` clause. Object-level
