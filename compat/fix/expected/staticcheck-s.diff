@@ -531,12 +531,24 @@
  func g() {
 --- a/s1038/bad/bad.go
 +++ b/s1038/bad/bad.go
-@@ -2,4 +2,4 @@
- 
- import "fmt"
+@@ -7,7 +7,7 @@
+ 	"testing"
+ )
  
 -func f() { fmt.Print(fmt.Sprintf("hi")) }
 +func f() { fmt.Print("hi") }
+ 
+ // Upstream's three arms, measured against staticcheck 2.12.2 on 2026-09-21.
+ // The one line above is `fmt.Print` and nothing else: every shape below was
+@@ -60,7 +60,7 @@
+ 	t.Skip(fmt.Sprintf("a %v", err))
+ 	tb.Error(fmt.Sprintf("a %v", err))
+ 	// Silent: `Errorf` is not a key of the mapping.
+-	t.Errorf(fmt.Sprintf("a %v", err))
++	t.Error(fmt.Sprintf("a %v", err))
+ }
+ 
+ type svc struct{ logger *log.Logger }
 --- a/s1039/bad/bad.go
 +++ b/s1039/bad/bad.go
 @@ -2,4 +2,4 @@

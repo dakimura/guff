@@ -33387,3 +33387,98 @@ golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 3,627 件緑。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-21（続き 303）— `close beats`（7）。`code.CallName` は `typeutil.FuncName` であって「パッケージパス＋名前」ではない。S1038 と SA1006 が同じ 1 行で壊れていた
+
+beats に残っていた S1038 は guff-only 2・gcl-only 3。文言の差
+（`(but don't forget the newline)` が無い）と、`fmt.Fprintln(w, …)` の
+取りこぼし。25 形測ったら**4 つの欠陥**と、**丸ごと無い腕**が 1 つ出た。
+
+#### 1. `-ln` の接尾辞
+
+```go
+case "Println", "Fprintln", "Sprintln":
+    if _, ok := m.State["f"].(*ast.BasicLit); !ok { return }
+    msg = fmt.Sprintf("should use fmt.%s instead of fmt.%s(fmt.Sprintf(...)) (but don't forget the newline)", newname, name)
+```
+
+guff は接尾辞だけを落としていた（`BasicLit` のゲートは持っていた）。
+
+#### 2. arity はパターンの一部
+
+```
+(CallExpr (Symbol (Or "fmt.Print" "fmt.Sprint" "fmt.Println" "fmt.Sprintln")) [(CallExpr (Symbol "fmt.Sprintf") f:_)])
+(CallExpr (Symbol (Or "fmt.Fprint" "fmt.Fprintln"))                            [_ (CallExpr (Symbol "fmt.Sprintf") f:_)])
+```
+
+`[x]` は「引数ちょうど 1 つ」、`[_ x]` は「ちょうど 2 つで 2 番目」。
+guff は長さを見ずに `args[0]` を読んでいたので、
+`fmt.Print(fmt.Sprintf(...), "b")` を**出し**（上流は黙る）、
+`fmt.Fprintln(w, fmt.Sprintf(...))` を**落としていた**（上流は出す）。
+`io.Writer` が `_` である、というのがこの 2 本目のパターンの全部。
+
+#### 3. `(*log.Logger).Print` と `log.Print` は**別のオブジェクト**
+
+これが根っこ。`code.CallName` は `typeutil.FuncName` —— メソッドなら
+`(*log.Logger).Print`、パッケージ関数なら `log.Print`。guff の
+`code::call_name` は **パッケージパス＋オブジェクト名**なので、メソッドも
+`log.Print` になる（`callee_full_name` の doc コメントが、まさにこの罠で
+errchkjson がコーパス中の `(*encoding/json.Encoder).Encode` を全部落とした、と
+書いている）。
+
+S1038 は `is_call_to_any(&["log.Print", …])` でマッピングを引いていたので、
+`l.Print(fmt.Sprintf(…))` に対して
+**`log.Printf(...) instead of log.Print(...)`** と答えていた。上流は
+`l.Printf(...) instead of l.Print(...)` と言う —— 受け手は**書かれたとおりに**
+描画される（`s.logger.Printf`、`ls.list[0].Printf` も測った）。
+
+#### 4. `methSprintf` の腕が丸ごと無かった
+
+`t.Error(fmt.Sprintf(…))` → `t.Errorf(...)`、`t.Fatal`/`t.Log`/`t.Skip`、
+`testing.TB` 越し、`(*log.Logger)` の 6 メソッド —— 14 行のマッピングが
+1 つも移植されていなかった。上流の
+「`Errorf`/`Fatalf` が*正しい*メソッドを指すことを確かめる」ガードも入れた:
+`*testing.T` を埋め込んで**自前の `Errorf` を持つ**型は書き換えない
+（同じ埋め込みで `Errorf` を持たない型は書き換える —— 2 形測って両方固定した）。
+
+#### 5. 同じ 1 行が SA1006 も壊していた
+
+fixture を足したら golden の ratchet が `missing 2 → 3` に増えた。増えた 1 件は
+`t.Errorf(fmt.Sprintf(…))` の **SA1006**。見に行くと、SA1006 も
+`is_call_to_any(PRINTF_ONE_ARG)` でマッピングを引いていて、
+**15 行のうち 8 行がメソッド**（`(*testing.common).Errorf` など）——
+つまり**リストの半分以上が到達不能**だった。fixture が
+`fmt.Printf(s)` 1 行だけだったので、誰も気付いていない。
+
+`callee_full_name` に替えて 15 形測り、fixture に全部入れた。ratchet は
+`missing 2` に戻っている（緩めていない）。
+
+#### 6. fixture
+
+S1038 の fixture は **`func f() { fmt.Print(fmt.Sprintf("hi")) }` の 1 行**で、
+単体テストは `any(contains("fmt.Printf"))`。SA1006 の fixture は
+`fmt.Printf(s)` の 1 行で `len == 1`。上の 5 つは全部その下を通っていた。
+
+測った 25 形 + 15 形を入れて golden を regen（消えたキー 0 / 増えたキー 27 と 15）、
+`compat/fix/expected/` の 2 件も再録。単体テストは行とメッセージを丸ごと固定。
+単体テストは stub を読むので、`log` / `testing` / `os` の stub を足した
+（`testing.T` は `common` を埋め込む —— マッピングの鍵が
+`(*testing.common).Error` という**昇格した**メソッドだから）。
+
+#### 7. 実測
+
+```
+beats (v9.5.2)
+  前   guff=7482 golangci=7554 both=7463  P=99.7%  R=98.8%  unexpected=110
+  後   guff=7483 golangci=7554 both=7466  P=99.8%  R=98.8%  unexpected=105
+  staticcheck  前 guff=527 gcl=533 both=522  P=99.1% R=97.9%
+               後 guff=528 gcl=533 both=525  P=99.4% R=98.5%
+```
+
+guff-only 19 → 17、gcl-only 91 → 88。**閉じたのは 5 行（3 件）、新規 0 件。**
+beats に SA1006 の差は元から無く、そちらの 8 行は**他のターゲットで**効く。
+
+golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 3,627 件緑。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）

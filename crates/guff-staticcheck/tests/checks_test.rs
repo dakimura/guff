@@ -385,15 +385,43 @@ fn sa1005_allows_program_paths() {
 fn sa1006_flags_dynamic_printf_format() {
     let dir = support::testdata("sa1006");
     let fmt_stub = dir.join("stub/fmt/fmt.go");
+    let log_stub = dir.join("stub/log/log.go");
+    let os_stub = dir.join("stub/os/os.go");
+    let testing_stub = dir.join("stub/testing/testing.go");
     let pkg = support::typecheck_with_deps(
         "example.com/staticcheck/sa1006",
         &dir.join("bad.go"),
-        &[("fmt", &fmt_stub)],
+        &[
+            ("fmt", &fmt_stub),
+            ("log", &log_stub),
+            ("os", &os_stub),
+            ("testing", &testing_stub),
+        ],
     );
     support::assert_well_typed(&pkg);
-    let messages = support::run_analyzer(sa1006::analyzer(), &pkg);
-    assert_eq!(messages.len(), 1, "{messages:?}");
-    assert!(messages[0].contains("print-style function"));
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<i64> = support::run_analyzer_diagnostics(sa1006::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| {
+            assert!(d.message.contains("print-style function"), "{}", d.message);
+            fset.position(guff::position::Pos(d.pos as i64)).line
+        })
+        .collect();
+    got.sort();
+    // Eight of upstream's fifteen rows are methods, spelled the way
+    // `typeutil.FuncName` spells one. Package path plus object name turns
+    // `t.Errorf` into `testing.Errorf`, which is in no list, so lines 35-42
+    // reported nothing while line 11 kept this test green.
+    assert_eq!(
+        got,
+        vec![
+            11, // fmt.Printf, the shape this fixture used to be
+            25, 26, 27, 28, 29, 30, 31, // the package functions
+            35, 36, 37, 38, 39, 40, 41, 42, // the methods
+        ],
+        "lines 47-51 (further arguments, a constant format, a function not in \
+         the list) must stay silent",
+    );
 }
 
 #[test]
@@ -1873,19 +1901,91 @@ fn s1037_allows_ok_patterns() {
     assert!(support::run_analyzer(s1037::analyzer(), &pkg).is_empty());
 }
 
+/// Every S1038 finding on the fixture, as (line, message).
+///
+/// Upstream is three arms over one node and the fixture used to hold a single
+/// `fmt.Print(fmt.Sprintf(...))`, so `any(contains("fmt.Printf"))` passed while
+/// the `-ln` messages were missing their suffix, `fmt.Fprintln(w, …)` was
+/// invisible, the logger *methods* spoke as the package functions, and the
+/// whole `testing` arm did not exist.
 #[test]
 fn s1038_flags_bad_patterns() {
     let dir = support::testdata("s1038");
     let fmt_stub = dir.join("stub/fmt/fmt.go");
+    let log_stub = dir.join("stub/log/log.go");
+    let os_stub = dir.join("stub/os/os.go");
+    let testing_stub = dir.join("stub/testing/testing.go");
     let pkg = support::typecheck_with_deps(
         "example.com/staticcheck/s1038",
         &dir.join("bad.go"),
-        &[("fmt", &fmt_stub)],
+        &[
+            ("fmt", &fmt_stub),
+            ("log", &log_stub),
+            ("os", &os_stub),
+            ("testing", &testing_stub),
+        ],
     );
     support::assert_well_typed(&pkg);
-    let messages = support::run_analyzer(s1038::analyzer(), &pkg);
-    assert!(!messages.is_empty(), "{messages:?}");
-    assert!(messages.iter().any(|m| m.contains("fmt.Printf")));
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, String)> = support::run_analyzer_diagnostics(s1038::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| {
+            (
+                fset.position(guff::position::Pos(d.pos as i64)).line,
+                d.message,
+            )
+        })
+        .collect();
+    got.sort();
+    let at = |line: i64, msg: &str| (line, msg.to_string());
+    let newline = " (but don't forget the newline)";
+    assert_eq!(
+        got,
+        vec![
+            at(10, "should use fmt.Printf instead of fmt.Print(fmt.Sprintf(...))"),
+            at(17, "should use fmt.Printf instead of fmt.Print(fmt.Sprintf(...))"),
+            at(
+                18,
+                &format!("should use fmt.Printf instead of fmt.Println(fmt.Sprintf(...)){newline}")
+            ),
+            at(19, "should use fmt.Sprintf instead of fmt.Sprint(fmt.Sprintf(...))"),
+            at(
+                20,
+                &format!("should use fmt.Sprintf instead of fmt.Sprintln(fmt.Sprintf(...)){newline}")
+            ),
+            at(29, "should use fmt.Fprintf instead of fmt.Fprint(fmt.Sprintf(...))"),
+            at(
+                30,
+                &format!("should use fmt.Fprintf instead of fmt.Fprintln(fmt.Sprintf(...)){newline}")
+            ),
+            at(36, "should use log.Printf(...) instead of log.Print(fmt.Sprintf(...))"),
+            at(37, "should use log.Printf(...) instead of log.Println(fmt.Sprintf(...))"),
+            at(38, "should use log.Fatalf(...) instead of log.Fatal(fmt.Sprintf(...))"),
+            at(39, "should use log.Fatalf(...) instead of log.Fatalln(fmt.Sprintf(...))"),
+            at(40, "should use log.Panicf(...) instead of log.Panic(fmt.Sprintf(...))"),
+            at(41, "should use log.Panicf(...) instead of log.Panicln(fmt.Sprintf(...))"),
+            at(48, "should use l.Printf(...) instead of l.Print(fmt.Sprintf(...))"),
+            at(49, "should use l.Printf(...) instead of l.Println(fmt.Sprintf(...))"),
+            at(50, "should use l.Fatalf(...) instead of l.Fatal(fmt.Sprintf(...))"),
+            at(51, "should use l.Fatalf(...) instead of l.Fatalln(fmt.Sprintf(...))"),
+            at(52, "should use l.Panicf(...) instead of l.Panic(fmt.Sprintf(...))"),
+            at(53, "should use l.Panicf(...) instead of l.Panicln(fmt.Sprintf(...))"),
+            at(57, "should use t.Errorf(...) instead of t.Error(fmt.Sprintf(...))"),
+            at(58, "should use t.Fatalf(...) instead of t.Fatal(fmt.Sprintf(...))"),
+            at(59, "should use t.Logf(...) instead of t.Log(fmt.Sprintf(...))"),
+            at(60, "should use t.Skipf(...) instead of t.Skip(fmt.Sprintf(...))"),
+            at(61, "should use tb.Errorf(...) instead of tb.Error(fmt.Sprintf(...))"),
+            at(
+                72,
+                "should use s.logger.Printf(...) instead of s.logger.Print(fmt.Sprintf(...))"
+            ),
+            at(
+                73,
+                "should use ls.list[0].Printf(...) instead of ls.list[0].Print(fmt.Sprintf(...))"
+            ),
+            at(99, "should use w.Errorf(...) instead of w.Error(fmt.Sprintf(...))"),
+        ],
+    );
 }
 
 #[test]

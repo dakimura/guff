@@ -148,8 +148,35 @@ s1037/bad/bad.go:16:2:staticcheck::S1000: should use a simple channel send/recei
 s1037/bad/bad.go:16:2:staticcheck::S1037: should use time.Sleep instead of elaborate way of sleeping
 s1037/ok/ok.go:15:2:staticcheck::S1000: should use a simple channel send/receive instead of select with a single case
 s1037/ok/ok.go:25:2:staticcheck::S1000: should use a simple channel send/receive instead of select with a single case
-s1038/bad/bad.go:5:12:staticcheck::S1038: should use fmt.Printf instead of fmt.Print(fmt.Sprintf(...))
-s1038/bad/bad.go:5:22:staticcheck::S1039: unnecessary use of fmt.Sprintf
+s1038/bad/bad.go:10:12:staticcheck::S1038: should use fmt.Printf instead of fmt.Print(fmt.Sprintf(...))
+s1038/bad/bad.go:10:22:staticcheck::S1039: unnecessary use of fmt.Sprintf
+s1038/bad/bad.go:17:2:staticcheck::S1038: should use fmt.Printf instead of fmt.Print(fmt.Sprintf(...))
+s1038/bad/bad.go:18:2:staticcheck::S1038: should use fmt.Printf instead of fmt.Println(fmt.Sprintf(...)) (but don't forget the newline)
+s1038/bad/bad.go:19:6:staticcheck::S1038: should use fmt.Sprintf instead of fmt.Sprint(fmt.Sprintf(...))
+s1038/bad/bad.go:20:6:staticcheck::S1038: should use fmt.Sprintf instead of fmt.Sprintln(fmt.Sprintf(...)) (but don't forget the newline)
+s1038/bad/bad.go:29:2:staticcheck::S1038: should use fmt.Fprintf instead of fmt.Fprint(fmt.Sprintf(...))
+s1038/bad/bad.go:30:2:staticcheck::S1038: should use fmt.Fprintf instead of fmt.Fprintln(fmt.Sprintf(...)) (but don't forget the newline)
+s1038/bad/bad.go:36:2:staticcheck::S1038: should use log.Printf(...) instead of log.Print(fmt.Sprintf(...))
+s1038/bad/bad.go:37:2:staticcheck::S1038: should use log.Printf(...) instead of log.Println(fmt.Sprintf(...))
+s1038/bad/bad.go:38:2:staticcheck::S1038: should use log.Fatalf(...) instead of log.Fatal(fmt.Sprintf(...))
+s1038/bad/bad.go:39:2:staticcheck::S1038: should use log.Fatalf(...) instead of log.Fatalln(fmt.Sprintf(...))
+s1038/bad/bad.go:40:2:staticcheck::S1038: should use log.Panicf(...) instead of log.Panic(fmt.Sprintf(...))
+s1038/bad/bad.go:41:2:staticcheck::S1038: should use log.Panicf(...) instead of log.Panicln(fmt.Sprintf(...))
+s1038/bad/bad.go:48:2:staticcheck::S1038: should use l.Printf(...) instead of l.Print(fmt.Sprintf(...))
+s1038/bad/bad.go:49:2:staticcheck::S1038: should use l.Printf(...) instead of l.Println(fmt.Sprintf(...))
+s1038/bad/bad.go:50:2:staticcheck::S1038: should use l.Fatalf(...) instead of l.Fatal(fmt.Sprintf(...))
+s1038/bad/bad.go:51:2:staticcheck::S1038: should use l.Fatalf(...) instead of l.Fatalln(fmt.Sprintf(...))
+s1038/bad/bad.go:52:2:staticcheck::S1038: should use l.Panicf(...) instead of l.Panic(fmt.Sprintf(...))
+s1038/bad/bad.go:53:2:staticcheck::S1038: should use l.Panicf(...) instead of l.Panicln(fmt.Sprintf(...))
+s1038/bad/bad.go:57:2:staticcheck::S1038: should use t.Errorf(...) instead of t.Error(fmt.Sprintf(...))
+s1038/bad/bad.go:58:2:staticcheck::S1038: should use t.Fatalf(...) instead of t.Fatal(fmt.Sprintf(...))
+s1038/bad/bad.go:59:2:staticcheck::S1038: should use t.Logf(...) instead of t.Log(fmt.Sprintf(...))
+s1038/bad/bad.go:60:2:staticcheck::S1038: should use t.Skipf(...) instead of t.Skip(fmt.Sprintf(...))
+s1038/bad/bad.go:61:2:staticcheck::S1038: should use tb.Errorf(...) instead of tb.Error(fmt.Sprintf(...))
+s1038/bad/bad.go:63:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+s1038/bad/bad.go:72:2:staticcheck::S1038: should use s.logger.Printf(...) instead of s.logger.Print(fmt.Sprintf(...))
+s1038/bad/bad.go:73:2:staticcheck::S1038: should use ls.list[0].Printf(...) instead of ls.list[0].Print(fmt.Sprintf(...))
+s1038/bad/bad.go:99:2:staticcheck::S1038: should use w.Errorf(...) instead of w.Error(fmt.Sprintf(...))
 s1039/bad/bad.go:5:16:staticcheck::S1039: unnecessary use of fmt.Sprint
 s1040/bad/bad.go:16:29:staticcheck::S1040: type assertion to the same type: i already has type interface{}
 s1040/bad/bad.go:18:33:staticcheck::S1040: type assertion to the same type: x already has type msg
