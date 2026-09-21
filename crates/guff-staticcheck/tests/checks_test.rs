@@ -2498,6 +2498,45 @@ fn sa4006_flags_bad_cases() {
 ///
 /// The last two functions are the shapes the veto exists for, kept here so a
 /// fix that simply deletes it fails.
+/// A redefinition inside an `if` arm, when every other arm leaves the function.
+///
+/// `first_redef_after` only counts a redefinition in the assignment's own
+/// statement list, because a branch may not run — that guard is what keeps
+/// caddy's and helm's `if len(x) > 0 { y = … }` values live. But when every
+/// *other* arm of the chain ends in a `return` or a call `ctrlflow` proved
+/// cannot return, the redefining arm is the only way out and the first value
+/// is dead. beats writes exactly that in two `mtest`/`metrics` helpers, around
+/// `t.Fatal`.
+///
+/// The six silent functions are the guard's own shapes: no `else`, an arm that
+/// reads instead of leaving, an arm that calls something which does return,
+/// `break` (which stays in the function), a redefinition one level deeper than
+/// the chain, and a chain that is not in the assignment's statement list.
+#[test]
+fn sa4006_counts_a_branch_redefinition_when_the_other_arms_leave() {
+    let pkg = typecheck_rule("sa4006", "branches.go");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64)> = support::run_analyzer_diagnostics(sa4006::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| {
+            assert_eq!(d.message, "this value of config is never used");
+            let p = fset.position(guff::position::Pos(d.pos as i64));
+            (p.line, p.column)
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            (32, 2), // twoFatalArms — the beats shape
+            (46, 2), // returningArm
+            (58, 2), // redefiningArmFirst
+        ],
+        "{got:?}"
+    );
+}
+
 #[test]
 fn sa4006_ignores_later_reads_when_the_list_returns() {
     let pkg = typecheck_rule("sa4006", "terminated.go");

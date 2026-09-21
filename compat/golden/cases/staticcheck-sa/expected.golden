@@ -245,6 +245,9 @@ sa4006/bad/bad.go:17:2:staticcheck::SA4006: this value of f is never used
 sa4006/bad/bad.go:23:2:staticcheck::SA4006: this value of x is never used
 sa4006/bad/bad.go:29:2:staticcheck::SA4006: this value of s is never used
 sa4006/bad/bad.go:29:6:staticcheck::SA6001: m[string(key)] would be more efficient than k := string(key); m[k]
+sa4006/branches/branches.go:32:2:staticcheck::SA4006: this value of config is never used
+sa4006/branches/branches.go:46:2:staticcheck::SA4006: this value of config is never used
+sa4006/branches/branches.go:58:2:staticcheck::SA4006: this value of config is never used
 sa4006/generic_conv/generic_conv.go:58:2:staticcheck::SA4006: this value of p is never used
 sa4006/loops/loops.go:32:3:staticcheck::SA4006: this value of moreDiags is never used
 sa4006/loops/loops.go:43:2:staticcheck::SA4006: this value of moreDiags is never used
