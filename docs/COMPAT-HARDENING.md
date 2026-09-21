@@ -34517,3 +34517,76 @@ golden 239 / fix 239 / reject 14 / isolate 116 / `--oss --tier pr` 8 target の
 `cargo test --workspace --locked` 緑。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-21（続き 317）— `close beats`（20）: 分岐の中の再代入も、**他の腕が全部関数を出るなら**上書きである
+
+beats の staticcheck の gcl-only に `this value of config is never used` が
+2 件（`x-pack/metricbeat/module/aws/mtest` と `.../gcp/metrics`）。どちらも
+同じ形:
+
+```go
+config := map[string]interface{}{}
+if !okAccessKeyID || accessKeyID == "" {
+	t.Fatal("$AWS_ACCESS_KEY_ID not set or set to empty")
+} else if !okSecretAccessKey || secretAccessKey == "" {
+	t.Fatal("$AWS_SECRET_ACCESS_KEY not set or set to empty")
+} else {
+	config = map[string]interface{}{…}
+}
+config["default_region"] = defaultRegion   // これが「読み」に見えていた
+```
+
+#### 1. 最小再現は 2 段階で割れた
+
+まず `t.Fatal` の腕 1 本＋`else` で代入、という 7 形を測ったら**全部一致**。
+`else if` を足した 3 腕でも一致。割れたのは **`if` の後ろに読みがある**とき
+—— つまり `config["x"] = 1` を足した瞬間だった。3 腕かどうかは関係なかった。
+
+#### 2. guard は正しく、狭すぎた
+
+`first_redef_after` は「同じ文リストの再代入」しか上書きと認めない。分岐は
+走らないかもしれないからで、この guard は caddy と helm の
+
+```go
+loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+if len(settings.KubeConfig) > 0 {
+	loadingRules = &clientcmd.ClientConfigLoadingRules{…}
+}
+```
+
+を生かすために入っている。**他の腕が全部関数を出る**なら話は別で、
+再代入する腕が唯一の出口になる。`ctrlflow` の `call_never_returns` が
+`panic` / `t.Fatal` / `os.Exit` を知っているので、AST だけで答えが出る:
+
+- 最後の文が `return`、または**戻らないと証明された呼び出し**なら「出る」
+- `break` / `continue` / `goto` は**関数には残る**ので「出ない」
+- `else` が無ければ暗黙の腕が残るので「出ない」
+- 判定するのは**いちばん外側の** `if`（`else if` は上の `else` なので、
+  内側だけ見ると手前の腕を忘れる）
+- その `if` は**代入と同じ文リスト**に居なければならない（そうでないと
+  `if` を通らずに読みへ行ける）
+
+沈黙側の control を 6 形測って上流と一致を確認した（`else` 無し・他の腕が
+読む・他の腕が戻る関数を呼ぶ・`break`・再代入が 1 段深い・`if` が別の文リスト）。
+
+#### 3. 同じ家族が 1 日で 2 回目
+
+続き 314 の `wastedassign` も「位置だけを見る AST の fallback が、到達しない
+読みを数えていた」だった。こちらは「到達はするが**上書き済み**」。
+どちらも **fallback が CFG を持っていない**ことが原因で、guard を上流の
+規則どおりに狭めると直る。
+
+```
+beats (v9.5.2)
+  前   guff=7550 golangci=7554 both=7540  P=99.9%  R=99.8%  unexpected=24
+  後   guff=7552 golangci=7554 both=7542  P=99.9%  R=99.8%  unexpected=22
+```
+
+**閉じたのは 2 件、新規 0 件。** 測定中に `ineffassign` の別件も見つけた
+（`config := X; if a { return nil } else { config = Y }; config["x"]=1` を
+上流は報告し guff は報告しない）——別の linter なので書き残すだけにした。
+
+golden 239 / fix 239 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 緑。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）

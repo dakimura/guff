@@ -10,6 +10,7 @@ use guff::ast::{Expr, Ident, Stmt};
 use guff::node_mask;
 use guff::walk::{preorder, NodeRef};
 use guff_analysis::code::{example_func_spans, in_example_func, object_of};
+use guff_analysis::passes::facts::ctrlflow;
 use guff_analysis::passes::{buildir, inspect};
 use guff_analysis::{iter_non_debug, referrers, AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use guff_ssa::instr::{Extract, InstrData};
@@ -135,6 +136,11 @@ struct IdentIndex {
     /// assignment, which the position index reads as a read inside an
     /// enclosing loop.
     returns_after: HashMap<u32, u32>,
+    /// `if` keyword position -> the key of the statement list the `if`
+    /// statement is a direct member of. A branch redefinition can only be
+    /// unconditional for the code after the `if` when the `if` itself is in the
+    /// same statement list as the assignment being judged.
+    if_lists: HashMap<u32, u32>,
 }
 
 impl IdentIndex {
@@ -173,6 +179,11 @@ impl IdentIndex {
                     _ => None,
                 };
                 if let Some((key, list)) = list {
+                    for stmt in list.iter() {
+                        if let Stmt::IfStmt(ifs) = stmt {
+                            idx.if_lists.insert(ifs.if_.0 as u32, key);
+                        }
+                    }
                     for (i, stmt) in list.iter().enumerate() {
                         if let Stmt::AssignStmt(assign) = stmt {
                             let end = assign_end(assign);
@@ -290,6 +301,20 @@ impl IdentIndex {
             .map(|(p, _)| *p)
     }
 
+    /// Every redefinition of `obj` strictly between `lo` and `hi`, with the key
+    /// of the statement list it is a direct member of — branch ones included,
+    /// which [`Self::first_redef_after`] deliberately leaves out.
+    fn redefs_between(&self, obj: ObjectId, lo: u32, hi: u32) -> Vec<(u32, u32)> {
+        let Some(v) = self.defs.get(&obj) else {
+            return Vec::new();
+        };
+        v[v.partition_point(|&(p, _)| p <= lo)..]
+            .iter()
+            .take_while(|(p, _)| *p < hi)
+            .copied()
+            .collect()
+    }
+
     /// Whether `obj` is read after `after_pos` before being redefined.
     ///
     /// Hybrid SSA sometimes drops receiver/arg loads (e.g. `renderer.Run(...)`
@@ -337,8 +362,165 @@ impl IdentIndex {
     }
 }
 
+/// Whether a statement list ends in something that leaves the function, so the
+/// code after the `if` it belongs to is not reachable from it.
+///
+/// `return` and a call `ctrlflow` proved cannot return (`panic`, `t.Fatal`,
+/// `log.Fatalf`, `os.Exit`, …) both qualify; `break`, `continue` and `goto`
+/// stay in the function and do not.
+fn stmt_list_leaves_function(
+    ctrl: &ctrlflow::CtrlFlowResult,
+    info: &guff_types::api::Info,
+    list: &[Stmt],
+) -> bool {
+    match list.last() {
+        Some(Stmt::ReturnStmt(_)) => true,
+        Some(Stmt::ExprStmt(e)) => match unparen_expr(&e.x) {
+            Expr::CallExpr(call) => ctrl.call_never_returns(info, call),
+            _ => false,
+        },
+        Some(Stmt::BlockStmt(b)) => stmt_list_leaves_function(ctrl, info, &b.list),
+        Some(Stmt::IfStmt(ifs)) => {
+            // Every arm, and there has to be a final `else`.
+            let mut cur = ifs;
+            loop {
+                if !stmt_list_leaves_function(ctrl, info, &cur.body.list) {
+                    return false;
+                }
+                match cur.else_.as_deref() {
+                    Some(Stmt::IfStmt(next)) => cur = next,
+                    Some(Stmt::BlockStmt(b)) => {
+                        return stmt_list_leaves_function(ctrl, info, &b.list)
+                    }
+                    _ => return false,
+                }
+            }
+        }
+        _ => false,
+    }
+}
+
+/// Whether the redefinition sitting directly in the arm keyed `arm_key` runs on
+/// every path that leaves its `if` statement.
+///
+/// `first_redef_after` only counts a redefinition in the assignment's own
+/// statement list, because a branch may not run:
+///
+/// ```ignore
+/// loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+/// if len(settings.KubeConfig) > 0 {
+///     loadingRules = &clientcmd.ClientConfigLoadingRules{…}
+/// }
+/// // loadingRules read here — the first value is live on the other path
+/// ```
+///
+/// But when every *other* arm of the chain leaves the function, the redefining
+/// arm is the only way out and the first value is dead after all. beats writes
+/// that twice:
+///
+/// ```ignore
+/// config := map[string]interface{}{}
+/// if !okAccessKeyID || accessKeyID == "" {
+///     t.Fatal("$AWS_ACCESS_KEY_ID not set or set to empty")
+/// } else if !okSecretAccessKey || secretAccessKey == "" {
+///     t.Fatal("$AWS_SECRET_ACCESS_KEY not set or set to empty")
+/// } else {
+///     config = map[string]interface{}{…}
+/// }
+/// config["default_region"] = defaultRegion   // the read that looked like a use
+/// ```
+///
+/// The chain has to be the *outermost* `if` covering the redefinition — an
+/// `else if` is the `else` of the one above it, and judging the inner one alone
+/// would forget the arms before it — and it has to sit in the same statement
+/// list as the assignment, or reaching the read without running the `if` at all
+/// would be possible.
+fn branch_redef_is_unconditional(
+    pass: &Pass<'_>,
+    ctrl: &ctrlflow::CtrlFlowResult,
+    idents: &IdentIndex,
+    assign_block: Option<u32>,
+    redef_pos: u32,
+    arm_key: u32,
+) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let mut answer = false;
+    for file in pass.files() {
+        let mut judged = false;
+        guff::walk::preorder_prune(NodeRef::File(file), |n| {
+            if judged {
+                return false;
+            }
+            let NodeRef::IfStmt(ifs) = n else {
+                return true;
+            };
+            let start = ifs.if_.0 as u32;
+            // The end of the whole chain: the last arm's closing brace.
+            let mut end = ifs.body.rbrace.0 as u32;
+            {
+                let mut cur = ifs;
+                loop {
+                    match cur.else_.as_deref() {
+                        Some(Stmt::IfStmt(next)) => {
+                            end = next.body.rbrace.0 as u32;
+                            cur = next;
+                        }
+                        Some(Stmt::BlockStmt(b)) => {
+                            end = b.rbrace.0 as u32;
+                            break;
+                        }
+                        _ => break,
+                    }
+                }
+            }
+            if redef_pos < start || redef_pos > end {
+                return true;
+            }
+            // The outermost `if` covering it is the one that decides; whatever
+            // it says, stop looking.
+            judged = true;
+            if idents.if_lists.get(&start).copied() != assign_block {
+                return false;
+            }
+            let mut arms: Vec<&[Stmt]> = Vec::new();
+            let mut keys: Vec<u32> = Vec::new();
+            let mut cur = ifs;
+            loop {
+                arms.push(&cur.body.list);
+                keys.push(cur.body.lbrace.0 as u32);
+                match cur.else_.as_deref() {
+                    Some(Stmt::IfStmt(next)) => cur = next,
+                    Some(Stmt::BlockStmt(b)) => {
+                        arms.push(&b.list);
+                        keys.push(b.lbrace.0 as u32);
+                        break;
+                    }
+                    // No final `else`: the implicit fall-through arm runs no
+                    // redefinition and never leaves the function.
+                    _ => return false,
+                }
+            }
+            let Some(mine) = keys.iter().position(|k| *k == arm_key) else {
+                return false;
+            };
+            answer = arms
+                .iter()
+                .enumerate()
+                .all(|(i, list)| i == mine || stmt_list_leaves_function(ctrl, info, list));
+            false
+        });
+        if judged {
+            break;
+        }
+    }
+    answer
+}
+
 fn ssa_unused_but_ast_read(
     pass: &Pass<'_>,
+    ctrl: Option<&ctrlflow::CtrlFlowResult>,
     idents: &IdentIndex,
     lhs: &Expr,
     assign_pos: u32,
@@ -374,7 +556,28 @@ fn ssa_unused_but_ast_read(
     if returns_at.is_none() && idents.read_in_enclosing_loop(obj, assign_pos) {
         return true;
     }
-    idents.value_is_read_before_redef(obj, assign_pos, block, returns_at)
+    if !idents.value_is_read_before_redef(obj, assign_pos, block, returns_at) {
+        return false;
+    }
+    // It said "read". A branch redefinition between the assignment and that
+    // read still overwrites the value when every other arm of its `if` leaves
+    // the function — see `branch_redef_is_unconditional`.
+    let Some(ctrl) = ctrl else {
+        return true;
+    };
+    let Some(read_at) = idents
+        .first_use_after(obj, assign_pos)
+        .filter(|u| returns_at.is_none_or(|stop| *u < stop))
+    else {
+        return true;
+    };
+    !idents
+        .redefs_between(obj, assign_pos, read_at)
+        .into_iter()
+        .any(|(pos, key)| {
+            key != 0
+                && branch_redef_is_unconditional(pass, ctrl, idents, block, pos, key)
+        })
 }
 
 /// Whether the instruction that produced `v` is still in the function.
@@ -433,6 +636,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     // expression in a method body then resolves to nothing, so SA4006 never
     // fired inside a method at all. See `BuildIrResult::expr_values_with_methods`.
     let exprs = ir.expr_values_with_methods();
+    let ctrl = pass.result_of::<ctrlflow::CtrlFlowResult>(ctrlflow::analyzer());
     // Only candidates that SSA already believes are unused consult it, and most
     // packages have none — build the walk-wide index on the first question.
     let idents: OnceCell<IdentIndex> = OnceCell::new();
@@ -483,6 +687,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                 if !has_use(func, Value::Instr(rid)) {
                                     if ssa_unused_but_ast_read(
                                         pass,
+                                        ctrl.as_deref(),
                                         idents.get_or_init(|| IdentIndex::build(pass)),
                                         lhs,
                                         assign_end(assign),
@@ -543,6 +748,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if !has_use(func, v) {
                         if ssa_unused_but_ast_read(
                             pass,
+                            ctrl.as_deref(),
                             idents.get_or_init(|| IdentIndex::build(pass)),
                             lhs,
                             assign_end(assign),
@@ -572,7 +778,12 @@ fn sa4006_analyzer_impl() -> Analyzer {
         url: "https://staticcheck.dev/docs/checks/#SA4006",
         run: run as RunFn,
         run_despite_errors: false,
-        requires: vec![inspect::analyzer(), buildir::analyzer()],
+        requires: vec![
+            inspect::analyzer(),
+            buildir::analyzer(),
+            // `call_never_returns` — which `if` arm cannot reach the code below it.
+            ctrlflow::analyzer(),
+        ],
         fact_types: vec![],
     }
 }
