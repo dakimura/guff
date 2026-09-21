@@ -8,9 +8,12 @@
 # file gets its own directory here (`<check>/<stem>/`). Keeping two files in one
 # directory would merge them into one package and redeclare their identifiers.
 #
-# sa1019 imports "example.com/old" for its deprecation fixture, so that
-# package is materialized at the path the import resolves to.
+# sa1019 imports "example.com/old" and "example.com/blockdoc" for its
+# deprecation fixture, so those packages are materialized at the paths the
+# imports resolve to. `blockdoc` writes its package doc as a block comment,
+# which is how cloud.google.com/go/pubsub writes its deprecation notice.
 old/old.go                                   crates/guff-staticcheck/tests/testdata/sa1019/stub/example.com/old/old.go
+blockdoc/blockdoc.go                         crates/guff-staticcheck/tests/testdata/sa1019/stub/example.com/blockdoc/blockdoc.go
 sa1000/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa1000/bad.go
 sa1000/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa1000/ok.go
 sa1001/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa1001/bad.go
@@ -48,6 +51,7 @@ sa1017/ok/ok.go                              crates/guff-staticcheck/tests/testd
 sa1018/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa1018/bad.go
 sa1018/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa1018/ok.go
 sa1019/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa1019/bad.go
+sa1019/bad/second.go                         crates/guff-staticcheck/tests/testdata/sa1019/bad_second_file.go
 sa1019/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa1019/ok.go
 sa1020/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa1020/bad.go
 sa1020/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa1020/ok.go

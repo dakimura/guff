@@ -1,6 +1,9 @@
 package main
 
-import "example.com/old"
+import (
+	"example.com/blockdoc"
+	"example.com/old"
+)
 
 func main() {
 	old.Legacy()
@@ -27,4 +30,9 @@ func main() {
 
 	// Writing the embedding out by hand selects the same field.
 	w.Options.Old = 5
+}
+
+// A package whose deprecation notice lives in a block-comment package doc.
+func blockDocPackage() {
+	blockdoc.H()
 }
