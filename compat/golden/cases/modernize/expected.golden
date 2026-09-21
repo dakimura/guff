@@ -78,6 +78,16 @@ stditerators/stditerators.go:9:2:modernize::stditerators: NumFields/Field loop c
 stditerators/stditerators.go:16:11:modernize::stditerators: NumFields/Field loop can simplified using Struct.Fields iteration
 stditerators/stditerators.go:23:2:modernize::stditerators: Len/At loop can simplified using Tuple.Variables iteration
 stditerators/stditerators.go:40:6:modernize::rangeint: for loop can be modernized using range over int
+stmtlist/stmtlist.go:18:5:modernize::minmax: if statement can be modernized using max
+stmtlist/stmtlist.go:29:6:modernize::minmax: if statement can be modernized using max
+stmtlist/stmtlist.go:41:6:modernize::minmax: if statement can be modernized using max
+stmtlist/stmtlist.go:69:3:modernize::slicescontains: Loop can be simplified using slices.Contains
+stmtlist/stmtlist.go:85:3:modernize::slicescontains: Loop can be simplified using slices.Contains
+stmtlist/stmtlist.go:100:3:modernize::slicescontains: Loop can be simplified using slices.Contains
+stmtlist/stmtlist.go:115:3:modernize::slicescontains: Loop can be simplified using slices.Contains
+stmtlist/stmtlist.go:128:2:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
+stmtlist/stmtlist.go:138:3:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
+stmtlist/stmtlist.go:149:3:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
 stringsbuilder/stringsbuilder.go:7:6:modernize::rangeint: for loop can be modernized using range over int
 stringsbuilder/stringsbuilder.go:8:3:modernize::stringsbuilder: using string += string in a loop is inefficient
 stringsbuilder/stringsbuilder.go:17:6:modernize::rangeint: for loop can be modernized using range over int
