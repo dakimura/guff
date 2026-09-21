@@ -290,7 +290,7 @@ const RULES: &[RuleDef] = &[
 const EXTRA_RULE_IDS: &[&str] = &[
     "G101", "G102", "G104", "G107", "G109", "G110", "G111", "G112", "G115", "G117", "G118", "G120",
     "G122", "G124",
-    "G123", "G201", "G202",
+    "G119", "G123", "G201", "G202",
     "G203",
     "G204", "G301", "G302", "G303", "G304", "G305", "G306", "G402", "G403", "G602",
     // The taint engine's rules (`gosec_taint`), all SSA analyzers.
@@ -560,6 +560,8 @@ const RULE_SCORES: &[(&str, Score, Score)] = &[
     // G118 grades each of its three checks separately; see `issue_scores`.
     ("G118", Score::Medium, Score::High),
     ("G120", Score::Medium, Score::High),
+    // G119 grades its two messages separately; see `issue_scores`.
+    ("G119", Score::High, Score::High),
     ("G123", Score::High, Score::High),
     ("G122", Score::High, Score::Medium),
     ("G124", Score::Medium, Score::High),
@@ -609,6 +611,11 @@ const RULE_SCORES: &[(&str, Score, Score)] = &[
 fn issue_scores(rule: &str, msg: &str) -> (Score, Score) {
     if rule == "G402" && msg.contains("may be set to true") {
         return (Score::High, Score::Low);
+    }
+    if rule == "G119" && msg == crate::gosec_g119::MSG_SENSITIVE_REDIRECT_HEADER {
+        // The store arm is High/High (the table's entry); re-adding a sensitive
+        // header by name is High/Medium.
+        return (Score::High, Score::Medium);
     }
     if rule == "G118" {
         // One analyzer id, three checks, three grades — the table's entry is

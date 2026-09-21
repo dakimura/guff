@@ -13,6 +13,14 @@ type Handler interface {
 
 type Header map[string][]string
 
+// G119 reads the receiver type of `Set`/`Add` and the `Header` field of
+// `Request`; without them a redirect policy has nothing to store into.
+func (h Header) Set(key, value string) {}
+func (h Header) Add(key, value string) {}
+func (h Header) Del(key string)        {}
+func (h Header) Get(key string) string { return "" }
+func (h Header) Clone() Header         { return nil }
+
 // A real method set: the ArgTypeGuards on G705's `fmt` sinks ask whether the
 // writer implements this, and an empty interface is implemented by everything —
 // which would silently turn the guard into a no-op.
@@ -28,6 +36,7 @@ type Request struct {
 	RemoteAddr string
 	URL        *url.URL
 	Body       io.ReadCloser
+	Header     Header
 }
 
 func (r *Request) Context() context.Context                 { return context.Background() }
@@ -56,7 +65,8 @@ type RoundTripper interface {
 }
 
 type Client struct {
-	Transport RoundTripper
+	Transport     RoundTripper
+	CheckRedirect func(req *Request, via []*Request) error
 }
 
 func (c *Client) Do(req *Request) (*Response, error) { return nil, nil }

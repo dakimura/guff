@@ -34700,3 +34700,65 @@ golden 239 / fix 239 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 緑。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-21（続き 320）— `close beats`（23）: gosec `G119` を移植。**署名だけ**で「リダイレクト方針」と決まる
+
+beats の gosec の gcl-only 4 件のうち 3 件が `G119`:
+
+```
+x-pack/filebeat/input/cel/input.go:1421
+x-pack/filebeat/input/entityanalytics/provider/jamf/jamf.go:258
+x-pack/filebeat/input/entityanalytics/provider/okta/okta.go:274
+```
+
+どれも `client.CheckRedirect = func(req, via) { … req.Header = prev.Header.Clone() … }`。
+
+#### 1. 規則は署名で決まる
+
+`http.Client.CheckRedirect` は
+`func(req *Request, via []*Request) error`。上流は**関数の引数**しか見ない ——
+`*http.Request` の引数と `[]*http.Request` の引数を 1 つずつ持つ関数は
+「リダイレクト方針」で、名前も宣言場所も `CheckRedirect` に代入されているか
+どうかも関係ない。実測で確認した: 名前付き関数・メソッド・引数の順を入れ替え
+たもの・余分な引数があるもの、**全部報告される**。
+
+報告は 2 種類:
+
+- `req` から辿れる `http.Header` **フィールドへの store**（High/High）
+- そういう header への `(http.Header).Set` / `Add` で、名前が
+  `authorization` / `proxy-authorization` / `cookie` のいずれか（High/**Medium**）
+
+後者は大小文字を無視し、**定数の名前だけ**を見る。`Del` は対象外。
+
+#### 2. 移植した部品
+
+- `collectAnalyzerFunctions`（`MakeClosure` と静的呼び出し先の推移閉包）——
+  **G123 が既に同じファイルから移植していた**ので `pub(crate)` にして共有
+- `dependencyChecker`（`analyzers/dependency_checker.go`、`MaxDepth = 20`、
+  memo と visiting で Phi の循環を切る）
+- 3 つの型述語（`*http.Request` / `[]*http.Request` / `http.Header`）
+
+24 形を測って**一発で一致**した。stub の `net/http` に `Header.Set/Add/Del/Clone`、
+`Request.Header`、`Client.CheckRedirect` を足した。golden の `includes` に
+`G119` を足すのを忘れると fixture を置いても 0 行（続き 306 で踏んだ）。
+
+#### 3. nolintlint も 1 件閉じた
+
+beats の `httpjson/input.go:475` には
+`//nolint:gosec // G119: sensitive headers are removed below …` が書いてある。
+G119 が無い guff には抑えるものが無く、「このディレクティブは使われていない」
+になっていた —— **1 つの未移植ルールが 2 つの linter に差を作る**形
+（続き 226 の G201、続き 306 の G305 と同じ）。
+
+```
+beats (v9.5.2)
+  前   guff=7554 golangci=7554 both=7544  P=99.9%  R=99.9%  unexpected=20
+  後   guff=7556 golangci=7554 both=7547  P=99.9%  R=99.9%  unexpected=16
+```
+
+**閉じたのは 4 件（G119 3・nolintlint 1）、新規 0 件。**
+
+golden 239 / fix 239 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 緑。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）

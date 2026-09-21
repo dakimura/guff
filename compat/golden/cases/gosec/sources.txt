@@ -24,6 +24,7 @@ g602/g602.go          crates/guff-style/tests/testdata/gosec/g602.go
 g602v/g602_variadic.go  crates/guff-style/tests/testdata/gosec/g602_variadic.go
 g115/g115.go          crates/guff-style/tests/testdata/gosec/g115.go
 g118/g118.go          crates/guff-style/tests/testdata/gosec/g118.go
+g119/g119.go          crates/guff-style/tests/testdata/gosec/g119.go
 g123/g123.go          crates/guff-style/tests/testdata/gosec/g123.go
 g7xx/g7xx.go          crates/guff-style/tests/testdata/gosec/g7xx.go
 g710v/g710_variadic.go  crates/guff-style/tests/testdata/gosec/g710_variadic.go

@@ -136,6 +136,16 @@ g118/g118.go:242:33:gosec:medium:G118: context cancellation function returned by
 g118/g118.go:248:33:gosec:medium:G118: context cancellation function returned by WithCancel/WithTimeout/WithDeadline is not called
 g118/g118.go:254:33:gosec:medium:G118: context cancellation function returned by WithCancel/WithTimeout/WithDeadline is not called
 g118/g118.go:261:33:gosec:medium:G118: context cancellation function returned by WithCancel/WithTimeout/WithDeadline is not called
+g119/g119.go:30:7:gosec:high:G119: Unsafe redirect policy may propagate sensitive headers across origins
+g119/g119.go:39:6:gosec:high:G119: Unsafe redirect policy may propagate sensitive headers across origins
+g119/g119.go:47:6:gosec:high:G119: Unsafe redirect policy may propagate sensitive headers across origins
+g119/g119.go:54:6:gosec:high:G119: Unsafe redirect policy may propagate sensitive headers across origins
+g119/g119.go:59:6:gosec:high:G119: Unsafe redirect policy may propagate sensitive headers across origins
+g119/g119.go:65:16:gosec:high:G119: Sensitive headers should not be re-added in redirect policy callbacks
+g119/g119.go:66:16:gosec:high:G119: Sensitive headers should not be re-added in redirect policy callbacks
+g119/g119.go:67:16:gosec:high:G119: Sensitive headers should not be re-added in redirect policy callbacks
+g119/g119.go:68:16:gosec:high:G119: Sensitive headers should not be re-added in redirect policy callbacks
+g119/g119.go:78:7:gosec:high:G119: Sensitive headers should not be re-added in redirect policy callbacks
 g122/g122.go:21:10:gosec:medium:G304: Potential file inclusion via variable
 g122/g122.go:21:21:gosec:high:G122: Filesystem operation in filepath.Walk/WalkDir callback uses race-prone path; consider root-scoped APIs (e.g. os.Root) to prevent symlink TOCTOU traversal
 g122/g122.go:30:9:gosec:medium:G304: Potential file inclusion via variable
