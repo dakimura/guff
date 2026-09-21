@@ -3003,6 +3003,56 @@ sa_check!(sa9004, sa9004_flags_mixed_const_types, sa9004_allows_uniform_const_ty
 sa_check!(sa9006, sa9006_flags_fixed_shift, sa9006_allows_variable_shift, "shift");
 sa_check!(sa9009, sa9009_flags_ineffectual_directive, sa9009_allows_valid_directive, "go:");
 
+/// SA9009 under a license header.
+///
+/// The rule is lexical — upstream only reads the comment's text and column —
+/// but the production parse runs without `PARSE_COMMENTS` and keeps only
+/// *some* groups: the leading one survives and the rest are dropped. guff
+/// gated its source scan on "the file has no comments at all", which is true
+/// only for a file that starts straight at `package`. Every file with a
+/// licence header went unscanned, and beats writes `// go:generate moq …`
+/// under one in `filebeat/input/net/manager.go:40`.
+///
+/// `bad.go` could not see it: its directive *is* the leading comment group.
+/// The silent lines here are the rest of upstream's filter — a block comment,
+/// an indented one, a correct `//go:` with no space, `go:` with more spaces
+/// after the colon, a capital letter after it, and `go:` with nothing at all.
+#[test]
+fn sa9009_scans_a_file_that_starts_with_a_comment() {
+    let dir = support::testdata("sa9009");
+    let pkg = support::typecheck_file(&dir, "header.go", "example.com/staticcheck/sa9009/header");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, String)> = support::run_analyzer_diagnostics(sa9009::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| {
+            (
+                fset.position(guff::position::Pos(d.pos as i64)).line,
+                d.message,
+            )
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            (
+                14,
+                "ineffectual compiler directive due to extraneous space: \
+                 \"// go:generate under a header\""
+                    .to_string()
+            ),
+            (
+                35,
+                "ineffectual compiler directive due to extraneous space: \
+                 \"// go:build ignore\""
+                    .to_string()
+            ),
+        ],
+        "{got:?}"
+    );
+}
+
 /// `if a || b { … }` renames the pointer, in both directions — and so does any
 /// other branch that separates the check from the deref.
 ///

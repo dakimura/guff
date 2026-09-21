@@ -47,38 +47,82 @@ fn check_comment_text(pass: &Pass<'_>, slash: u32, text: &str, pending: &mut Vec
     ));
 }
 
-fn check_source_file(pass: &Pass<'_>, file_idx: usize, pending: &mut Vec<(u32, String)>) {
-    let Some(path) = pass.pkg().compiled_go_files.get(file_idx) else {
-        return;
+/// Read the file back and scan it line by line, returning whether it could be.
+///
+/// SA9009 is a purely lexical rule — upstream only asks for the comment's text
+/// and its column — so the source is a complete answer and the AST is not: the
+/// production parse runs without `PARSE_COMMENTS` and keeps only *some* groups
+/// (the leading file comment survives, everything else is dropped). Gating this
+/// scan on "the file has no comments at all" therefore switched it off for
+/// every file with a license header, which is every file in beats —
+/// `filebeat/input/net/manager.go:40` writes `// go:generate moq …` under one.
+///
+/// The path comes from the `FileSet` rather than from indexing
+/// `compiled_go_files` in step with `pass.files()`: the two lists do not have
+/// to be in the same order, and a cgo package's `FileSet` name is the generated
+/// file, which is what upstream reads too.
+fn check_source_file(pass: &Pass<'_>, file: &File, pending: &mut Vec<(u32, String)>) -> bool {
+    let start = file.file_start;
+    let name = pass.fset().position_for(start, false).filename;
+    if name.is_empty() {
+        return false;
+    }
+    // Line the AST file up with `compiled_go_files` by *name*: the two lists do
+    // not have to be in the same order, and the type checker already holds the
+    // bytes, so nothing is read twice. The `FileSet` name can be relative (the
+    // unit-test harness makes it so), which is why the path comes from the
+    // package rather than from the name.
+    let base = std::path::Path::new(&name).file_name();
+    let idx = pass
+        .pkg()
+        .compiled_go_files
+        .iter()
+        .position(|p| p.file_name() == base);
+    let owned;
+    let src: &str = match idx.and_then(|i| pass.pkg().source_bytes(i)) {
+        Some(bytes) => match std::str::from_utf8(bytes) {
+            Ok(s) => s,
+            Err(_) => return false,
+        },
+        None => {
+            let path = idx
+                .and_then(|i| pass.pkg().compiled_go_files.get(i))
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| std::path::PathBuf::from(&name));
+            match std::fs::read_to_string(&path) {
+                Ok(s) => {
+                    owned = s;
+                    &owned
+                }
+                Err(_) => return false,
+            }
+        }
     };
-    let Ok(src) = std::fs::read_to_string(path) else {
-        return;
-    };
-    let Some(file) = pass.files().get(file_idx) else {
-        return;
-    };
-    let mut offset = file.file_start.0;
+    let mut offset = start.0;
     if offset == 0 {
         offset = 1;
     }
-    for line in src.lines() {
-        let text = line.trim_end();
+    // `split_inclusive` keeps the newline, so the byte offsets stay exact
+    // whatever the line endings are.
+    for line in src.split_inclusive('\n') {
+        let text = line.trim_end_matches(['\n', '\r']);
         if text.starts_with("//") {
             check_comment_text(pass, offset as u32, text, pending);
         }
-        offset += line.len() as i64 + 1;
+        offset += line.len() as i64;
     }
+    true
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let mut pending = Vec::new();
-    for (file_idx, file) in pass.files().iter().enumerate() {
-        let groups = comment_groups(file);
-        if groups.is_empty() {
-            check_source_file(pass, file_idx, &mut pending);
+    for file in pass.files() {
+        // The source is the complete answer; the AST is only the fallback for
+        // a file that is not on disk.
+        if check_source_file(pass, file, &mut pending) {
             continue;
         }
-        for cg in groups {
+        for cg in comment_groups(file) {
             for c in &cg.list {
                 check_comment_text(pass, c.slash.0 as u32, &c.text, &mut pending);
             }
