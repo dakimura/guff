@@ -33671,3 +33671,75 @@ golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 3,628 件緑。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-21（続き 306）— `close beats`（10）。G305 を移植したら、**nolintlint の guff-only が 3 件同時に閉じた**
+
+beats に残っていた gosec の gcl-only は `G119`×3・`G305`×2・`G115`×1。
+そして guff-only の `nolintlint` 6 件のうち **3 件が G305 の不在の影**だった:
+
+```go
+//nolint:gosec // file path is checked below
+path := filepath.Join(destinationDir, header.Name)
+```
+
+上流はここで G305 を出し、`//nolint` がそれを抑える。guff は G305 を持たない
+ので抑えるものが無く、nolintlint が「このディレクティブは使われていない」と
+報告する —— **1 つの未移植ルールが、2 つの linter に 5 行の差を作っていた**
+（tar.go:98・tar.go:138・zip.go:55 が抑制側、tar.go:153・importer.go:149 が
+報告側）。続き 226 の G201 で telegraf が同じ形を見せている。
+
+#### 1. ルールは短い
+
+```go
+if node := a.calls.ContainsPkgCallExpr(n, ctx, false); node != nil {
+    file := gosec.ContainingFile(node, ctx)
+    for _, arg := range node.Args {
+        if baseType := getArchiveBaseType(arg, ctx, file); baseType != nil {
+            if slices.Contains(a.argTypes, baseType.String()) { … }
+```
+
+`filepath.Join` / `path.Join` の引数が `*archive/zip.File` か
+`*archive/tar.Header` から来ていれば報告。**joinした結果が後で検査されて
+いるかは一切見ない** —— 実際の展開器が軒並み `//nolint:gosec` を付けている
+のはそのため。
+
+`getArchiveBaseType` の 2 本目の腕（`name := header.Name` 越し）が実用上の
+本体で、上流は**定義している `:=`**（`id.Pos() == v.Pos()`）まで辿り、
+同じ添字の右辺がセレクタであることを要求する。多値の右辺は添字 1 に式が
+無いので何も答えない。
+
+`argTypes` は `types.Type.String()` と突き合わせるので、パッケージ**パス**
+（`*archive/tar.Header`）で書く。単体テストの stub も `archive/tar` に
+置かないと一致しない。
+
+#### 2. golden の case 設定にも足す
+
+`compat/golden/cases/gosec/config.yml` は guff が実装したルールを
+`includes` に明示列挙している（既定のままだと未実装のルールの findings が
+golden に溜まる）。**G305 を足し忘れると fixture を置いても 0 件**で、
+最初の regen がまさにそれだった。case の doc に「ルールを足すならここにも
+足す」と書いてあるとおり。
+
+#### 3. 実測
+
+```
+beats (v9.5.2)
+  前   guff=7488 golangci=7554 both=7471  P=99.8%  R=98.9%  unexpected=100
+  後   guff=7487 golangci=7554 both=7473  P=99.8%  R=98.9%  unexpected=95
+  gosec       前 guff=407 gcl=409 both=403  P=99.0% R=98.5%
+              後 guff=409 gcl=409 both=405  P=99.0% R=99.0%
+  nolintlint  前 guff=35 gcl=30 both=29  P=82.9% R=96.7%
+              後 guff=32 gcl=30 both=29  P=90.6% R=96.7%
+```
+
+**閉じたのは 5 行、新規 0 件。** gosec の gcl-only は 4（`G119`×3・`G115`×1）
+になった。G119 は未移植、G115 は続き 305 で「移植しない」と決めた分。
+
+fixture は `g305.go` を新設して 10 形（報告 6・沈黙 4）、stub に
+`archive/tar` と `archive/zip` を足した。regen は**消えたキー 0 /
+増えたキー 6**。
+
+golden 238 / fix 238 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 3,629 件緑。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）

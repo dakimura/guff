@@ -49,7 +49,7 @@
 //!
 //! Message format matches golangci: `"Gxxx: <what>"`.
 //!
-//! DEFERRED: remaining rules (G113, G116–G117, G119–G121, G304–G305, G307
+//! DEFERRED: remaining rules (G113, G116–G117, G119–G121, G307
 //! config-gated, G402 MinVersion/CipherSuites, G601, and the taint rules the
 //! engine has no table for — G701 SQL, G704 SSRF, G707–G709),
 //! full `gosec:disable` block directives / per-rule
@@ -64,7 +64,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 use guff::ast::{
-    AssignStmt, BinaryExpr, CallExpr, CompositeLit, Decl, Expr, File, Ident, ImportSpec, Spec,
+    AssignStmt, BinaryExpr, CallExpr, CompositeLit, Decl, Expr, File, Ident, ImportSpec, SelectorExpr,
+    Spec,
     ValueSpec,
 };
 use guff::token::Token;
@@ -291,7 +292,7 @@ const EXTRA_RULE_IDS: &[&str] = &[
     "G122", "G124",
     "G123", "G201", "G202",
     "G203",
-    "G204", "G301", "G302", "G303", "G304", "G306", "G402", "G403", "G602",
+    "G204", "G301", "G302", "G303", "G304", "G305", "G306", "G402", "G403", "G602",
     // The taint engine's rules (`gosec_taint`), all SSA analyzers.
     "G702", "G703", "G704", "G705", "G706", "G710",
 ];
@@ -570,6 +571,7 @@ const RULE_SCORES: &[(&str, Score, Score)] = &[
     ("G302", Score::Medium, Score::High),
     ("G303", Score::Medium, Score::High),
     ("G304", Score::Medium, Score::High),
+    ("G305", Score::Medium, Score::High),
     ("G306", Score::Medium, Score::High),
     ("G401", Score::Medium, Score::High),
     // G402 is message-dependent; see `issue_scores`.
@@ -3180,6 +3182,106 @@ fn resolve_ident(pass: &Pass<'_>, decls: &FileDecls<'_>, id: &Ident, depth: u32)
 ///
 /// A pass of its own because it needs [`FileDecls`]. Everything else in this
 /// file decides from the call alone.
+const G305_WHAT: &str = "File traversal when extracting zip/tar archive";
+
+/// `argTypes`, spelled the way `types.Type.String()` spells them — package
+/// *paths*, not names.
+const G305_ARG_TYPES: &[&str] = &["*archive/zip.File", "*archive/tar.Header"];
+
+/// The type of `x` in `x.Name`, which is what `getArchiveBaseType` answers.
+fn g305_selector_base_type(pass: &Pass<'_>, sel: &SelectorExpr) -> Option<String> {
+    let info = pass.types_info()?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let typ = info.types.get(&sel.x.id())?.typ;
+    Some(type_string(
+        &artifacts.types,
+        &artifacts.objects,
+        &artifacts.packages,
+        typ,
+        None,
+    ))
+}
+
+/// `getArchiveBaseType`: a `.Name` selector, or a variable short-declared from
+/// one.
+///
+/// The second arm is the whole reason the rule works on real extractors, which
+/// all read `header.Name` into a local before joining it. Upstream stops at the
+/// *defining* `:=` (`id.Pos() == v.Pos()`), takes the right-hand side at the
+/// same index, and requires it to be a selector — a multi-value right-hand side
+/// has no expression at index 1, so it answers nothing.
+fn g305_archive_base_type(pass: &Pass<'_>, file: &File, expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::SelectorExpr(sel) => g305_selector_base_type(pass, sel),
+        Expr::Ident(id) => {
+            let obj = code::object_of(pass, id)?;
+            let artifacts = pass.pkg().type_artifacts.as_ref()?;
+            if !matches!(artifacts.objects.get(obj), ObjectData::Var(_)) {
+                return None;
+            }
+            let decl_pos = obj.pos(&artifacts.objects);
+            let mut found: Option<String> = None;
+            let mut done = false;
+            preorder(NodeRef::File(file), |n| {
+                if done {
+                    return false;
+                }
+                let NodeRef::AssignStmt(a) = n else {
+                    return true;
+                };
+                if a.tok != Some(Token::DEFINE) {
+                    return true;
+                }
+                for (i, lhs) in a.lhs.iter().enumerate() {
+                    let Expr::Ident(lid) = lhs else {
+                        continue;
+                    };
+                    if lid.name_pos.0 as u32 != decl_pos || code::object_of(pass, lid) != Some(obj)
+                    {
+                        continue;
+                    }
+                    if let Some(Expr::SelectorExpr(sel)) = a.rhs.get(i) {
+                        found = g305_selector_base_type(pass, sel);
+                    }
+                    done = true;
+                    return false;
+                }
+                true
+            });
+            found
+        }
+        _ => None,
+    }
+}
+
+/// G305 — file traversal when extracting a zip or tar archive.
+///
+/// `filepath.Join`/`path.Join` with an argument that came off a
+/// `*archive/zip.File` or a `*archive/tar.Header`. That is the whole rule:
+/// there is no attempt to see whether the result is checked afterwards, which
+/// is why every real extractor carries a `//nolint:gosec` over the join — and
+/// why three of beats' looked like *unused* directives while this rule was
+/// missing.
+fn check_g305_call(pass: &Pass<'_>, file: &File, call: &CallExpr, pending: &mut Vec<(u32, u32, String)>) {
+    if !g304_call_is(pass, call, G304_JOIN_CALLS) {
+        return;
+    }
+    for arg in &call.args {
+        let Some(base) = g305_archive_base_type(pass, file, arg) else {
+            continue;
+        };
+        if G305_ARG_TYPES.contains(&base.as_str()) {
+            // `ctx.NewIssue(n, …)`: the call, and only one per call.
+            pending.push((
+                call.pos().0 as u32,
+                call.end().0 as u32,
+                format!("G305: {G305_WHAT}"),
+            ));
+            return;
+        }
+    }
+}
+
 /// G304 — a file read whose path is not a compile-time constant.
 ///
 /// Port of securego/gosec v2.27.1 `rules/readfile.go`. The rule is a call list
@@ -4145,7 +4247,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         preorder(NodeRef::File(file), |n| {
             match n {
                 NodeRef::CallExpr(call) => {
-                    check_call(pass, call, &enabled, &opts.file_perms, &mut pending)
+                    check_call(pass, call, &enabled, &opts.file_perms, &mut pending);
+                    if enabled.contains("G305") {
+                        check_g305_call(pass, file, call, &mut pending);
+                    }
                 }
                 NodeRef::CompositeLit(lit) => {
                     check_g402_composite(pass, lit, &enabled, &mut pending);

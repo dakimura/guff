@@ -194,6 +194,12 @@ g304/g304.go:86:52:gosec:medium:G304: Potential file inclusion via variable
 g304/g304.go:89:60:gosec:medium:G304: Potential file inclusion via variable
 g304/g304.go:109:12:gosec:medium:G304: Potential file inclusion via variable
 g304/g304.go:124:9:gosec:medium:G304: Potential file inclusion via variable
+g305/g305.go:32:9:gosec:medium:G305: File traversal when extracting zip/tar archive
+g305/g305.go:36:9:gosec:medium:G305: File traversal when extracting zip/tar archive
+g305/g305.go:42:9:gosec:medium:G305: File traversal when extracting zip/tar archive
+g305/g305.go:47:9:gosec:medium:G305: File traversal when extracting zip/tar archive
+g305/g305.go:53:7:gosec:medium:G305: File traversal when extracting zip/tar archive
+g305/g305.go:54:9:gosec:medium:G305: File traversal when extracting zip/tar archive
 g402/g402.go:19:4:gosec:high:G402: TLS Bad Cipher Suite: TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA
 g402/g402.go:40:23:gosec:high:G402: TLS InsecureSkipVerify set to true.
 g402/g402.go:52:4:gosec:high:G402: TLS Bad Cipher Suite: TLS_RSA_WITH_AES_128_CBC_SHA

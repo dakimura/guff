@@ -422,6 +422,46 @@ fn gosec_g202_follows_a_query_built_in_a_variable() {
     );
 }
 
+/// G305 — `filepath.Join`/`path.Join` on something that came off a
+/// `*archive/zip.File` or a `*archive/tar.Header`.
+///
+/// Ten shapes, six findings. The silent four are a *value* `tar.Header` (the
+/// type string carries the pointer), an unrelated struct with a `Name` field,
+/// a local declared from a call rather than a selector, and a call that is not
+/// a `Join`.
+#[test]
+fn gosec_g305_follows_the_archive_header_through_a_local() {
+    let dir = support::testdata("gosec");
+    let tar_stub = dir.join("stub/archive/tar/tar.go");
+    let zip_stub = dir.join("stub/archive/zip/zip.go");
+    let path_stub = dir.join("stub/path/path.go");
+    let filepath_stub = dir.join("stub/path/filepath/filepath.go");
+    let os_stub = dir.join("stub/os/os.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/gosec/g305",
+        &dir.join("g305.go"),
+        &[
+            ("archive/tar", &tar_stub),
+            ("archive/zip", &zip_stub),
+            ("path", &path_stub),
+            ("path/filepath", &filepath_stub),
+            ("os", &os_stub),
+        ],
+    );
+    let messages = support::run_analyzer(gosec(), &pkg);
+    let g305: Vec<&str> = messages
+        .iter()
+        .filter(|m| m.starts_with("G305"))
+        .map(|m| m.as_str())
+        .collect();
+    assert_eq!(g305.len(), 6, "{messages:?}");
+    assert!(
+        g305.iter()
+            .all(|m| *m == "G305: File traversal when extracting zip/tar archive"),
+        "{g305:?}"
+    );
+}
+
 /// G122 over a fixture that is about *which callbacks are found*.
 ///
 /// The callback argument is resolved as an SSA value upstream, so a function
