@@ -38,7 +38,7 @@
 | isolate-perfsprint | 7 | 7 | 7 | 100.0% | 100.0% | 0 |
 | isolate-tagalign | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-modernize | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
-| isolate-wastedassign | 17 | 17 | 17 | 100.0% | 100.0% | 0 |
+| isolate-wastedassign | 26 | 26 | 26 | 100.0% | 100.0% | 0 |
 | isolate-decorder | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-funlen | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-maintidx | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
@@ -341,7 +341,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| wastedassign | 17 | 17 | 17 | 100.0% | 100.0% |
+| wastedassign | 26 | 26 | 26 | 100.0% | 100.0% |
 
 ## isolate-decorder
 
