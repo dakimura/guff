@@ -34879,3 +34879,56 @@ golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 緑。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-21（続き 323）— `close beats`（26）: `typecheck` は**切れない linter** なので、`//nolint:typecheck` は常に「使われているか」を問われる
+
+beats の nolintlint の gcl-only 1 件:
+
+```
+x-pack/metricbeat/module/gcp/carbon/carbon.go:16
+  directive `//nolint:typecheck // civil is used for type casting` is unused for linter "typecheck"
+```
+
+#### 1. 名前が二重に落ちていた
+
+`typecheck` は golangci のコンパイルエラー用の疑似 linter で、**常に有効で
+切れない**。guff の `dedupe_normalized` と v1 移行はどちらもこの名前を
+**enable 一覧から落とす** —— 利用者が on にするものではないので当然だが、
+その結果:
+
+- `is_known_nolint_target` が知らない名前として扱い、
+  「unknown linters in //nolint directives」に入れてしまう
+- `enabled_linters` にも入らないので、未使用ディレクティブの候補から外れる
+
+の 2 つが重なって、**そのディレクティブについて guff は何も言わなかった**。
+
+直しは 2 行: 既知の名前に加え、`set_enabled_linters` が**空でないとき**だけ
+`typecheck` を足す。空は「制限なし」を意味する番兵なので、そこは空のまま
+にしないと `errcheck` の未使用ディレクティブが 2 つ黙る（単体テストが 2 本
+落ちて気づいた）。
+
+#### 2. 実測
+
+```
+//nolint:typecheck           コンパイルが通る    → 両方 報告
+//nolint:typecheck           本当にコンパイル不能 → 両方 報告
+//nolint:unknownlinter                          → 両方 沈黙（警告のみ）
+//nolint:staticcheck（無効） → 両方 沈黙
+```
+
+fixture は `nolintsem/unused/unused.go` に 1 形追加（golden の `nolint` と
+`nolint-strict` の 2 case に出る）。**`--fix` のベースラインも撮り直した** ——
+nolintlint の `--fix` は未使用ディレクティブを削除するので。
+
+```
+beats (v9.5.2)
+  前   guff=7553 golangci=7554 both=7547  P=99.9%  R=99.9%  unexpected=13
+  後   guff=7554 golangci=7554 both=7548  P=99.9%  R=99.9%  unexpected=12
+```
+
+**閉じたのは 1 件、新規 0 件。**
+
+golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 緑。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
