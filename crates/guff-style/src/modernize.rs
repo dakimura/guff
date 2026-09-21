@@ -991,6 +991,50 @@ fn simple_assign(stmt: &Stmt) -> Option<&AssignStmt> {
     }
 }
 
+/// The checks that read a statement's **neighbour** rather than the statement
+/// itself, run over every list a statement can sit in.
+///
+/// Upstream reaches the neighbour with `Cursor.PrevSibling`/`NextSibling`,
+/// which is a statement whenever the parent edge is `BlockStmt_List`,
+/// `CaseClause_Body` or `CommClause_Body` — the comment in
+/// `slicescontains.go` spells the three out. guff dispatched these three
+/// checks from `NodeRef::BlockStmt` alone, so every pair written inside a
+/// `switch` or `select` case was invisible: measured against golangci-lint
+/// 2.12.2, guff missed `minmax`, `slicescontains` and `waitgroupgo` in both
+/// clause kinds while agreeing on all three in a plain block.
+///
+/// `stringsseq` is deliberately absent: upstream gates it on
+/// `ek == edge.BlockStmt_List` (`stringsseq.go:78`), and golangci really does
+/// stay silent on the same pair inside a case body.
+///
+/// The first statement of a `CommClause` has the clause's `Comm` as its
+/// upstream previous sibling; passing `body` rather than the whole clause
+/// keeps that out of reach, which is what minmax's explicit
+/// `edge.CommClause_Comm` rejection does upstream.
+fn check_stmt_list(
+    pass: &Pass<'_>,
+    file: &File,
+    options: &ModernizeOptions,
+    list: &[Stmt],
+    pending: &mut Vec<Diagnostic>,
+) {
+    if enabled(options, "minmax") {
+        let before = pending.len();
+        check_minmax_block(pass, list, pending);
+        stamp_category(pending, before, "minmax");
+    }
+    if enabled(options, "slicescontains") {
+        let before = pending.len();
+        check_slicescontains(pass, file, list, pending);
+        stamp_category(pending, before, "slicescontains");
+    }
+    if enabled(options, "waitgroupgo") {
+        let before = pending.len();
+        check_waitgroupgo(pass, file, list, pending);
+        stamp_category(pending, before, "waitgroupgo");
+    }
+}
+
 /// minmax's **pattern 2** (x/tools `modernize/minmax.go:139-207`), which guff
 /// did not have at all:
 ///
@@ -1007,11 +1051,12 @@ fn simple_assign(stmt: &Stmt) -> Option<&AssignStmt> {
 /// syncthing writes the second form nine times.
 ///
 /// A `select` comm clause (`case v := <-ch:`) cannot be rewritten and upstream
-/// rejects it explicitly; here it is excluded for free, because that assignment
-/// is the clause's `Comm`, not a statement in a block's list.
-fn check_minmax_block(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<Diagnostic>) {
-    for i in 1..block.list.len() {
-        let Stmt::IfStmt(if_stmt) = &block.list[i] else {
+/// rejects it explicitly (`edge.CommClause_Comm`); here it is excluded for
+/// free, because that assignment is the clause's `Comm` and never a member of
+/// the statement list handed to this function — see [`check_stmt_list`].
+fn check_minmax_block(pass: &Pass<'_>, list: &[Stmt], pending: &mut Vec<Diagnostic>) {
+    for i in 1..list.len() {
+        let Stmt::IfStmt(if_stmt) = &list[i] else {
             continue;
         };
         if if_stmt.init.is_some() || if_stmt.else_.is_some() {
@@ -1029,7 +1074,7 @@ fn check_minmax_block(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<Diag
         let Some(tassign) = is_assign_block(&if_stmt.body) else {
             continue;
         };
-        let Some(fassign) = simple_assign(&block.list[i - 1]) else {
+        let Some(fassign) = simple_assign(&list[i - 1]) else {
             continue;
         };
         let lhs = &tassign.lhs[0];
@@ -2653,14 +2698,14 @@ fn with_imports(import_edits: &[TextEdit], rest: Vec<TextEdit>) -> Vec<TextEdit>
 fn check_slicescontains(
     pass: &Pass<'_>,
     file: &File,
-    block: &BlockStmt,
+    list: &[Stmt],
     pending: &mut Vec<Diagnostic>,
 ) {
     if pass.pkg().pkg_path == "slices" || pass.pkg().pkg_path.starts_with("slices/") {
         return;
     }
-    for i in 0..block.list.len() {
-        let Stmt::RangeStmt(rng) = &block.list[i] else {
+    for i in 0..list.len() {
+        let Stmt::RangeStmt(rng) = &list[i] else {
             continue;
         };
         let pos = rng.for_.0 as u32;
@@ -2715,7 +2760,7 @@ fn check_slicescontains(
         // Special case: body={ return true/false } next={ return false/true }
         if let Stmt::ReturnStmt(ret_last) = last {
             if body.len() == 1 {
-                if let Some(Stmt::ReturnStmt(after)) = block.list.get(i + 1) {
+                if let Some(Stmt::ReturnStmt(after)) = list.get(i + 1) {
                     let tval = if ret_last.results.len() == 1 {
                         is_true_or_false_lit(&ret_last.results[0])
                     } else {
@@ -2811,7 +2856,7 @@ fn check_slicescontains(
                 {
                     if let Some(assign_bool) = is_true_or_false_lit(&assign.rhs[0]) {
                         if let Some(j) = i.checked_sub(1) {
-                            if let Stmt::AssignStmt(prev) = &block.list[j] {
+                            if let Stmt::AssignStmt(prev) = &list[j] {
                                 if (prev.tok == Some(Token::ASSIGN)
                                     || prev.tok == Some(Token::DEFINE))
                                     && prev.lhs.len() == 1
@@ -3313,11 +3358,11 @@ fn waitgroupgo_done_span(
 fn check_waitgroupgo(
     pass: &Pass<'_>,
     file: &File,
-    block: &BlockStmt,
+    list: &[Stmt],
     pending: &mut Vec<Diagnostic>,
 ) {
-    for i in 0..block.list.len().saturating_sub(1) {
-        let Stmt::ExprStmt(add_stmt) = &block.list[i] else {
+    for i in 0..list.len().saturating_sub(1) {
+        let Stmt::ExprStmt(add_stmt) = &list[i] else {
             continue;
         };
         let Expr::CallExpr(add_call) = &add_stmt.x else {
@@ -3332,7 +3377,7 @@ fn check_waitgroupgo(
         let Some(add_recv) = waitgroup_recv(add_call) else {
             continue;
         };
-        let Stmt::GoStmt(GoStmt { go_, call: go_call }) = &block.list[i + 1] else {
+        let Stmt::GoStmt(GoStmt { go_, call: go_call }) = &list[i + 1] else {
             continue;
         };
         if !go_call.args.is_empty() {
@@ -7704,26 +7749,24 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                 }
                 NodeRef::BlockStmt(b) => {
-                    if enabled(&options, "minmax") {
-                        let _before = pending.len();
-                        check_minmax_block(pass, b, &mut pending);
-                        stamp_category(&mut pending, _before, "minmax");
-                    }
+                    // `stringsseq` is *not* in `check_stmt_list`: upstream
+                    // matches its previous sibling only when the parent edge is
+                    // `edge.BlockStmt_List`, so it genuinely stops at a `case`
+                    // body. Measured: golangci reports the `x := Split(…)` +
+                    // `range x` pair in a block and stays silent on the same
+                    // pair inside `switch`/`select`.
                     if enabled(&options, "stringsseq") {
                         let _before = pending.len();
                         check_stringsseq_block(pass, b, &mut pending);
                         stamp_category(&mut pending, _before, "stringsseq");
                     }
-                    if enabled(&options, "slicescontains") {
-                        let _before = pending.len();
-                        check_slicescontains(pass, file, b, &mut pending);
-                        stamp_category(&mut pending, _before, "slicescontains");
-                    }
-                    if enabled(&options, "waitgroupgo") {
-                        let _before = pending.len();
-                        check_waitgroupgo(pass, file, b, &mut pending);
-                        stamp_category(&mut pending, _before, "waitgroupgo");
-                    }
+                    check_stmt_list(pass, file, &options, &b.list, &mut pending);
+                }
+                NodeRef::CaseClause(c) => {
+                    check_stmt_list(pass, file, &options, &c.body, &mut pending);
+                }
+                NodeRef::CommClause(c) => {
+                    check_stmt_list(pass, file, &options, &c.body, &mut pending);
                 }
                 NodeRef::AssignStmt(a) => {
                     if enabled(&options, "stringscut") {

@@ -563,6 +563,146 @@
  		_ = xs[i]
  	}
  }
+--- a/stmtlist/stmtlist.go
++++ b/stmtlist/stmtlist.go
+@@ -9,15 +9,14 @@
+ // golangci-lint 2.12.2 before it was written down.
+ package stmtlist
+ 
++import "slices"
++
+ import "sync"
+ 
+ // -- minmax pattern 2: `x = a` immediately above `if a < b { x = b }`.
+ 
+ func minmaxBlock(a, b int) int {
+-	x := a
+-	if a < b {
+-		x = b
+-	}
++	x := max(a, b)
+ 	return x
+ }
+ 
+@@ -25,10 +24,7 @@
+ 	var x int
+ 	switch k {
+ 	case 1:
+-		x = a
+-		if a < b {
+-			x = b
+-		}
++		x = max(a, b)
+ 	}
+ 	return x
+ }
+@@ -37,10 +33,7 @@
+ 	var x int
+ 	select {
+ 	case <-ch:
+-		x = a
+-		if a < b {
+-			x = b
+-		}
++		x = max(a, b)
+ 	}
+ 	return x
+ }
+@@ -66,12 +59,7 @@
+ func containsCaseReturn(s []int, needle, k int) bool {
+ 	switch k {
+ 	case 1:
+-		for _, v := range s {
+-			if v == needle {
+-				return true
+-			}
+-		}
+-		return false
++		return slices.Contains(s, needle)
+ 	}
+ 	return false
+ }
+@@ -81,13 +69,7 @@
+ 	var found bool
+ 	switch k {
+ 	case 1:
+-		found = false
+-		for _, v := range s {
+-			if v == needle {
+-				found = true
+-				break
+-			}
+-		}
++		found = slices.Contains(s, needle)
+ 	}
+ 	return found
+ }
+@@ -96,13 +78,7 @@
+ 	var found bool
+ 	select {
+ 	case <-ch:
+-		found = false
+-		for _, v := range s {
+-			if v == needle {
+-				found = true
+-				break
+-			}
+-		}
++		found = slices.Contains(s, needle)
+ 	}
+ 	return found
+ }
+@@ -112,10 +88,8 @@
+ func containsTypeSwitch(list any, msg string) bool {
+ 	switch v := list.(type) {
+ 	case []string:
+-		for _, tag := range v {
+-			if msg == tag {
+-				return true
+-			}
++		if slices.Contains(v, msg) {
++			return true
+ 		}
+ 	}
+ 	return false
+@@ -124,31 +98,25 @@
+ // -- waitgroupgo: `wg.Add(1)` immediately above the `go` statement.
+ 
+ func waitgroupBlock(wg *sync.WaitGroup) {
+-	wg.Add(1)
+-	go func() {
+-		defer wg.Done()
++	wg.Go(func() {
+ 		_ = 1
+-	}()
++	})
+ }
+ 
+ func waitgroupCase(wg *sync.WaitGroup, k int) {
+ 	switch k {
+ 	case 1:
+-		wg.Add(1)
+-		go func() {
+-			defer wg.Done()
++		wg.Go(func() {
+ 			_ = 1
+-		}()
++		})
+ 	}
+ }
+ 
+ func waitgroupComm(wg *sync.WaitGroup, ch chan int) {
+ 	select {
+ 	case <-ch:
+-		wg.Add(1)
+-		go func() {
+-			defer wg.Done()
++		wg.Go(func() {
+ 			_ = 1
+-		}()
++		})
+ 	}
+ }
 --- a/stringsbuilder/stringsbuilder.go
 +++ b/stringsbuilder/stringsbuilder.go
 @@ -1,43 +1,46 @@

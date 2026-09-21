@@ -7095,6 +7095,62 @@ fn modernize_fmtappendf_wants_exactly_a_byte_slice_and_a_format_that_cannot_be_e
     );
 }
 
+/// The three modernize checks that read a statement's **neighbour** —
+/// `minmax` pattern 2, `slicescontains`, `waitgroupgo` — in each of the three
+/// statement lists a neighbour can live in.
+///
+/// guff dispatched all three from `NodeRef::BlockStmt` alone, so every pair
+/// written inside a `switch` or `select` case was invisible: upstream reaches
+/// the neighbour with `Cursor.PrevSibling`/`NextSibling`, which is a statement
+/// on `BlockStmt_List`, `CaseClause_Body` **and** `CommClause_Body`
+/// (`slicescontains.go:311` names the three).
+///
+/// Asserted as the set of report positions with the check name: nine of the
+/// ten findings repeat one of three messages, so `any(contains(…))` — and a
+/// bare total — hold for most subsets of this file. The tenth shape
+/// (`minmaxCommIsNotAStatement`) must produce **nothing**, which only an exact
+/// set can say. Every row was measured against golangci-lint 2.12.2 on this
+/// same file before it was written down.
+#[test]
+fn modernize_reads_the_neighbouring_statement_in_case_and_comm_clauses() {
+    let pkg =
+        support::typecheck_fixture("modernize", "example.com/modernize/stmtlist", "stmtlist.go");
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64, String)> = support::run_analyzer_diagnostics(modernize(), &pkg)
+        .into_iter()
+        .map(|d| {
+            let p = fset.position(guff::position::Pos(d.pos as i64));
+            (p.line, p.column, d.category)
+        })
+        .collect();
+    got.sort();
+    let want: Vec<(i64, i64, String)> = vec![
+        // minmax: block, `case` body, `select` comm clause body.
+        (18, 5, "minmax"),
+        (29, 6, "minmax"),
+        (41, 6, "minmax"),
+        // …and nothing at line 56: there the assignment above the `if` is the
+        // clause's own `Comm`, which upstream rejects and which is not in the
+        // body slice at all.
+        //
+        // slicescontains: `return false` as the next sibling, `found = false`
+        // as the previous sibling in each clause kind, and the type-switch
+        // binding beats ranges over.
+        (69, 3, "slicescontains"),
+        (85, 3, "slicescontains"),
+        (100, 3, "slicescontains"),
+        (115, 3, "slicescontains"),
+        // waitgroupgo: `wg.Add(1)` above the `go`, in all three lists.
+        (128, 2, "waitgroupgo"),
+        (138, 3, "waitgroupgo"),
+        (149, 3, "waitgroupgo"),
+    ]
+    .into_iter()
+    .map(|(l, c, n): (i64, i64, &str)| (l, c, n.to_string()))
+    .collect();
+    assert_eq!(got, want);
+}
+
 #[test]
 fn modernize_flags_waitgroupgo() {
     let pkg = support::typecheck_fixture(

@@ -35030,3 +35030,92 @@ golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 緑。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-22（続き 326）— `close beats`（29）: 隣の文を読む規則は、`switch` / `select` の case の中が見えていなかった
+
+beats の modernize の gcl-only:
+
+```
+x-pack/filebeat/processors/decode_cef/decode_cef.go:230
+  slicescontains: Loop can be simplified using slices.Contains
+```
+
+#### 1. 最小再現は「型スイッチ」ではなく「case の中」だった
+
+その行は `switch v := list.(type) { case []string: for _, tag := range v { … } }`
+という形で、最初は型スイッチの束縛が原因に見えた。4 形測って外れた:
+
+| 形 | golangci | guff（前） |
+|---|---|---|
+| 型スイッチの束縛を range（1 case） | 報告 | **沈黙** |
+| 同（`[]interface{}` の case を足す） | 報告 | **沈黙** |
+| `v := list.([]string)` してから range（case 無し） | 報告 | 報告 |
+| **値スイッチ**の case の中で平の引数を range | 報告 | **沈黙** |
+
+型スイッチは関係ない。**`case` の本体だということ**が全部だった。
+
+#### 2. 上流は兄弟を `Cursor` で取るので、親が何であっても届く
+
+`slicescontains` は隣の文を読む —— 次が `return false` なら
+`return slices.Contains(…)`、前が `found = false` なら `found = slices.Contains(…)`。
+上流はそれを `curRange.PrevSibling()` / `NextSibling()` で取り、
+`slicescontains.go:311` に
+
+> If the RangeStmt's previous sibling is a Stmt, the RangeStmt must be among
+> the Body list of a **BlockStmt, CaseClause, or CommClause**.
+
+と 3 つ並べて書いてある。guff は `NodeRef::BlockStmt` の腕からしか
+呼んでおらず、`case` / `select` の本体はそもそも走査に入っていなかった。
+
+#### 3. 同じ腕に 3 つあり、そのうち 2 つが同じ欠陥だった
+
+その腕には `minmax` / `stringsseq` / `slicescontains` / `waitgroupgo` が並んでいる。
+**隣を推測せず 1 つずつ測った**:
+
+```
+                     block   case   comm      guff（前）
+minmax（pattern 2）   報告   報告   報告      block のみ   ← 欠陥
+stringsseq           報告   沈黙   沈黙      一致        ← 欠陥ではない
+slicescontains       報告   報告   報告      block のみ   ← 欠陥
+waitgroupgo          報告   報告   報告      block のみ   ← 欠陥
+```
+
+`stringsseq` だけが違う。上流が `ek == edge.BlockStmt_List` と
+**明示的に書いている**（`stringsseq.go:78`）からで、実測でも case の中では
+golangci が黙る。隣の 3 つに合わせて広げていたら、ここで乖離を作っていた。
+
+#### 4. 移植
+
+3 つを `&BlockStmt` ではなく `&[Stmt]` で受けるようにして、
+`BlockStmt.list` / `CaseClause.body` / `CommClause.body` の 3 箇所から
+`check_stmt_list` で呼ぶ。`stringsseq` は `BlockStmt` の腕に残す。
+
+`CommClause` は `body` だけを渡す —— 最初の文の「上の文」は句の `Comm`
+（`case x = <-ch:`）で、そこは書き換えられないので上流が
+`edge.CommClause_Comm` で弾いている。`body` を渡せばその文は届かない。
+実測で確認: `case x = <-ch:` の直後に `if x < b { x = b }` と書いても
+両ツールとも黙る。
+
+#### 5. fixture
+
+測った 11 形を `stmtlist.go` に入れた（3 規則 × 3 リスト種 + 型スイッチ +
+沈黙する `Comm` の形）。golden も 10 行増えて位置まで一致、`--fix` の出力は
+両ツールで**バイト一致**（ベースラインも撮り直した）。
+
+Rust の単体テストは **(行, 桁, 規則名) の集合**で固定した。10 件のうち 9 件は
+3 つのメッセージの繰り返しなので、`any(contains(…))` も件数も部分集合で真に
+なる。10 形目（`minmaxCommIsNotAStatement`）は**何も出ないこと**が主張で、
+それは集合でしか言えない。
+
+```
+beats (v9.5.2)
+  前   guff=7554 golangci=7554 both=7549  P=99.9%  R=99.9%  unexpected=10
+  後   guff=7555 golangci=7554 both=7550  P=99.9%  R=99.9%  unexpected=9
+```
+
+**閉じたのは 1 件、新規 0 件。**
+
+golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 緑。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
