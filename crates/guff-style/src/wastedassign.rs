@@ -325,7 +325,7 @@ fn objs_captured_by_func_lits(pass: &Pass<'_>) -> HashSet<ObjectId> {
 /// Assignments that live in the sibling branch of an `if`/`else` that also
 /// contains `after_pos` are not redefinitions (caddy `stor, err = …` / `else {
 /// stor = … }` then shared use after the merge).
-/// The position past which no read can be reached from a store at `after_pos`.
+/// The position ranges in which no read can be reached from a store at `after_pos`.
 ///
 /// The AST fallback below is positional, and a position says nothing about
 /// reachability. beats' `libbeat/reader/debug` makeNullCheck writes
@@ -341,11 +341,83 @@ fn objs_captured_by_func_lits(pass: &Pass<'_>) -> HashSet<ObjectId> {
 /// — the `offset` on the last line sits *after* the store, so the fallback
 /// called the store live, but nothing can get there from inside a block that
 /// ends in `return`. Any enclosing block whose last statement is a `return`
-/// placed after the store cuts the function off at that block's end, and the
-/// tightest such cut wins. Only `return` qualifies: `break` and `continue`
-/// leave a loop but stay in the function, and `goto` jumps to a live label.
-fn unreachable_use_cutoff(pass: &Pass<'_>, after_pos: u32) -> Option<u32> {
-    let mut cutoff: Option<u32> = None;
+/// placed after the store cuts the function off at that block's end.
+///
+/// `break` and `continue` cut too, but only up to their target — the code
+/// after a loop still runs. beats' `packetbeat/protos/mysql` ends its row loop
+/// with
+///
+/// ```go
+/// if data[offset+4] == 0xfe {
+///     offset += length + 4 //nolint:wastedassign
+///     break
+/// }
+/// length, err = readLength(data, offset)   // ← not reachable from the store
+/// ```
+///
+/// and the `offset` read on the next line kept the store "live". So a block
+/// whose last statement is a branch placed after the store skips
+///
+/// - `break`: to the end of its target — the innermost enclosing `for` /
+///   `range` / `switch` / `select`, or the labelled statement;
+/// - `continue`: to the end of the target loop's body (the next iteration's
+///   reads are textually *before* the store, which this forward scan never
+///   counts; go/ssa's back edge is what sees them);
+/// - `return`: to the end of the function.
+///
+/// `goto` jumps to a live label and `fallthrough` into the next clause, so
+/// neither cuts.
+fn unreachable_use_ranges(pass: &Pass<'_>, after_pos: u32) -> Vec<(u32, u32)> {
+    use guff::commentmap::{node_end, node_pos};
+    use guff::token::Token;
+
+    // Every statement a branch can target, with its label.
+    struct Target {
+        pos: u32,
+        end: u32,
+        body_end: u32,
+        is_loop: bool,
+        label: Option<String>,
+    }
+    let mut targets: Vec<Target> = Vec::new();
+    let mut ranges: Vec<(u32, u32)> = Vec::new();
+    for file in pass.files() {
+        preorder(NodeRef::File(file), |n| {
+            let span = |n: NodeRef<'_>| (node_pos(n).0 as u32, node_end(n).0 as u32);
+            match n {
+                NodeRef::ForStmt(f) => {
+                    let (pos, end) = span(n);
+                    targets.push(Target { pos, end, body_end: f.body.end().0 as u32, is_loop: true, label: None });
+                }
+                NodeRef::RangeStmt(r) => {
+                    let (pos, end) = span(n);
+                    targets.push(Target { pos, end, body_end: r.body.end().0 as u32, is_loop: true, label: None });
+                }
+                NodeRef::SwitchStmt(_) | NodeRef::TypeSwitchStmt(_) | NodeRef::SelectStmt(_) => {
+                    let (pos, end) = span(n);
+                    targets.push(Target { pos, end, body_end: end, is_loop: false, label: None });
+                }
+                NodeRef::LabeledStmt(l) => {
+                    let inner = stmt_ref(&l.stmt);
+                    let (pos, end) = span(inner);
+                    let body_end = match &*l.stmt {
+                        Stmt::ForStmt(f) => f.body.end().0 as u32,
+                        Stmt::RangeStmt(r) => r.body.end().0 as u32,
+                        _ => end,
+                    };
+                    targets.push(Target {
+                        pos,
+                        end,
+                        body_end,
+                        is_loop: matches!(&*l.stmt, Stmt::ForStmt(_) | Stmt::RangeStmt(_)),
+                        label: Some(l.label.name.to_string()),
+                    });
+                }
+                _ => {}
+            }
+            true
+        });
+    }
     for file in pass.files() {
         preorder(NodeRef::File(file), |n| {
             let NodeRef::BlockStmt(b) = n else {
@@ -355,24 +427,44 @@ fn unreachable_use_cutoff(pass: &Pass<'_>, after_pos: u32) -> Option<u32> {
             if after_pos < start || after_pos >= end {
                 return true;
             }
-            let Some(Stmt::ReturnStmt(r)) = b.list.last() else {
-                return true;
-            };
-            if (r.return_.0 as u32) <= after_pos {
-                return true;
+            match b.list.last() {
+                Some(Stmt::ReturnStmt(r)) if (r.return_.0 as u32) > after_pos => {
+                    ranges.push((end, u32::MAX));
+                }
+                Some(Stmt::BranchStmt(br))
+                    if (br.tok_pos.0 as u32) > after_pos
+                        && matches!(br.tok, Token::BREAK | Token::CONTINUE) =>
+                {
+                    let is_continue = br.tok == Token::CONTINUE;
+                    let enclosing = targets.iter().filter(|t| t.pos < start && end <= t.end);
+                    let target = match &br.label {
+                        Some(label) => enclosing
+                            .filter(|t| t.label.as_deref() == Some(label.name.as_str()))
+                            .max_by_key(|t| t.pos),
+                        // The innermost statement of the right kind. A labelled
+                        // loop is listed twice (bare and labelled) with the
+                        // same span, so either copy answers.
+                        None => enclosing
+                            .filter(|t| t.label.is_none() && (t.is_loop || !is_continue))
+                            .max_by_key(|t| t.pos),
+                    };
+                    if let Some(t) = target {
+                        ranges.push((end, if is_continue { t.body_end } else { t.end }));
+                    }
+                }
+                _ => {}
             }
-            cutoff = Some(cutoff.map_or(end, |c: u32| c.min(end)));
             true
         });
     }
-    cutoff
+    ranges
 }
 
 fn ast_value_is_read_before_redef(pass: &Pass<'_>, obj: ObjectId, after_pos: u32) -> bool {
     let Some(info) = pass.types_info() else {
         return false;
     };
-    let unreachable_after = unreachable_use_cutoff(pass, after_pos);
+    let unreachable = unreachable_use_ranges(pass, after_pos);
     let sibling_defs = sibling_branch_assign_positions(pass, obj, after_pos);
     let mut next_use: Option<u32> = None;
     let mut next_def: Option<u32> = None;
@@ -392,7 +484,7 @@ fn ast_value_is_read_before_redef(pass: &Pass<'_>, obj: ObjectId, after_pos: u32
         }
     };
     let note_use = |pos: u32, next_use: &mut Option<u32>| {
-        if pos > after_pos && !unreachable_after.is_some_and(|c| pos >= c) {
+        if pos > after_pos && !unreachable.iter().any(|&(from, to)| pos >= from && pos < to) {
             *next_use = Some(next_use.map_or(pos, |u| u.min(pos)));
         }
     };

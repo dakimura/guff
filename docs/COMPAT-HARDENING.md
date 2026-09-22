@@ -35483,3 +35483,108 @@ golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 緑。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-22（続き 331）— `close beats`（34）: wastedassign の位置 fallback は `break` / `continue` が飛び越える読みを数えていた
+
+beats の **nolintlint** の guff-only:
+
+```
+packetbeat/protos/mysql/mysql.go:1152
+  directive `//nolint: ineffassign,wastedassign // …` is unused for linter "wastedassign"
+```
+
+guff の wastedassign がその行で**何も出していない**ということ。
+
+#### 1. 最小再現は 2 度外れた
+
+1 度目、関数の形（switch の default、ループ 2 つ、`+=` のあと `break`）を
+3 形書いたら**全部一致**した。行の外を見る。
+
+2 度目、実パッケージで `//nolint` を外して両ツールを回すと —— 最小 config では
+**golangci も wastedassign を出さなかった**。beats の config は
+`uniq-by-line: false`、既定の `true` だと同じ行の ineffassign が先に残って
+wastedassign は落ちる。それを揃えると golangci だけが報告した。
+
+3 度目は関数をまるごと scratchpad に写して再現し、削った:
+
+```go
+length, err := readLength(data, 0)       // ループの外の length
+for offset < len(data) {
+    if data[offset+4] == 0xfe {
+        offset += length + 4             // ← golangci 報告、guff 沈黙
+        break
+    }
+    length, err = readLength(data, offset) // ← offset の「後ろの」言及
+    …
+    offset += length + 4
+}
+```
+
+`break` の**後ろの文字列上に** `offset` の読みがあると guff は黙る。
+それが無い形（1 度目に書いたもの）は一致していた。
+
+#### 2. 原因: 位置だけの AST fallback
+
+guff の wastedassign は NaiveForm SSA が「無駄」と言った store を、AST 上で
+「後ろに読みがあれば生きている」と**許す** fallback を持つ（go/ssa が Load を
+出して upstream が問わない場所の埋め合わせ）。位置は到達可能性を知らないので、
+既に `return` で終わるブロックだけは切っていた（`unreachable_use_cutoff`）。
+`break` / `continue` は「関数からは出ない」として対象外だった。
+
+#### 3. 修正: 切る範囲を分岐先まで
+
+`unreachable_use_ranges` に一般化した。store を含むブロックの最後の文が
+store より後ろの
+
+- `return` → ブロックの終わりから関数の終わりまで
+- `break` → ブロックの終わりから**標的**（最内の `for` / `range` / `switch` /
+  `select`、ラベル付きならその文）の終わりまで
+- `continue` → ブロックの終わりから標的ループの**本体**の終わりまで
+
+`goto` と `fallthrough` は切らない。fallback は**許す**側にしか働かないので、
+ループの次の周回で読まれる値（文字列上は前にある）は SSA が生かす。
+
+#### 4. 12 形
+
+| 形 | golangci | guff 前 | 後 |
+|---|---|---|---|
+| D beats（外側 `length`、`, err =`） | 報告 | 沈黙 | 報告 |
+| E 反復ごとの `l :=`（後ろに言及なし） | 報告 | 報告 | 報告 |
+| F D から `err` を抜く | 報告 | 沈黙 | 報告 |
+| G `continue`、次の周回で読む | 沈黙 | 沈黙 | 沈黙 |
+| H `continue`、次の周回で上書き | 報告 | 沈黙 | 報告 |
+| I `switch` の中の `break`（switch だけ抜ける） | 沈黙 | 沈黙 | 沈黙 |
+| J ラベル付き `break outer` | 報告 | 沈黙 | 報告 |
+| K `break` のあとループの外で読む | 沈黙 | 沈黙 | 沈黙 |
+| L `break` のブロックが入れ子の `if` の中 | 報告 | 沈黙 | 報告 |
+
+（ほか先の 3 形と beats の関数そのもの。）G / I / K の沈黙は「分岐の後ろは
+全部切る」規則なら間違える側。fixture `wastedassign/branch.go`、Rust の
+単体テストは **(行, メッセージ)** の列。golden +6 キー、消えたキー 0。
+
+#### 5. 追加の測定: fallback を狭めたので
+
+fallback を狭めると、SSA が本当に間違えていた store の許しが外れて過剰報告が
+出うる（続き 234 の「抑制 guard は欠陥を隠す」）。wastedassign を有効にしている
+コーパスのうち PR tier の 2 つ（caddy / go-client）に加えて gitea / podman /
+dapr / argo-workflows / k6 / lazygit を hunt した: **wastedassign の新規は 0**。
+
+dapr に **bodyclose** の guff-only が 1 件出た
+（`tests/integration/suite/daprd/serviceinvocation/http/sserelay.go:245`）。
+wastedassign とは無関係で、dapr の前回測定（09-07）以降の bodyclose の変更
+（続き 327 など）からの退行と見られる。台帳に open として載ったので次の 1 件。
+
+```
+beats (v9.5.2)
+  前   guff=7552 golangci=7554 both=7551  unexpected=4
+  後   guff=7551 golangci=7554 both=7551  unexpected=3
+```
+
+**閉じたのは 1 件、新規 0 件。** beats に残るのは modernize の `stringscut`
+3 件（x/tools v0.44 の Index → Cut、guff は未移植）。
+
+golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 緑。
+
+台帳: **71/100 at zero**（77 定義、open 3、unmeasured 3）—— dapr の退行が
+測定で表に出た分、1 つ下がった。
