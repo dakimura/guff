@@ -10347,6 +10347,36 @@ fn wastedassign_ignores_stores_to_the_blank_identifier() {
     );
 }
 
+/// A store in a block ending in `break` / `continue`, with the variable
+/// mentioned later in the text: the AST fallback must not count a mention the
+/// branch jumps over. Six reports (D E F H J L) and three shapes that stay
+/// silent (G: read on the next iteration, I: the break only leaves a switch,
+/// K: read after the loop) — the silent ones are what a "skip everything after
+/// a branch" rule would get wrong, and only a positional list can say so.
+#[test]
+fn wastedassign_skips_reads_a_break_or_continue_jumps_over() {
+    let pkg = support::typecheck_fixture("wastedassign", "example.com/wastedassign/branch", "branch.go");
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, String)> = support::run_analyzer_diagnostics(wastedassign(), &pkg)
+        .into_iter()
+        .map(|d| (fset.position(guff::position::Pos(d.pos as i64)).line, d.message))
+        .collect();
+    got.sort();
+    let unused = |v: &str| format!("assigned to {v}, but never used afterwards");
+    assert_eq!(
+        got,
+        vec![
+            (35, unused("offset")),  // D: beats' mysql row loop
+            (57, unused("offset")),  // E: nothing mentioned later (reported before)
+            (72, unused("offset")),  // F: D without the `err`
+            (100, "assigned to x, but reassigned without using the value".to_string()), // H: continue
+            (129, unused("x")),      // J: labelled break past the outer body
+            (157, unused("x")),      // L: the break-block nested in an `if`
+        ],
+        "{got:?}"
+    );
+}
+
 /// A cell whose address is taken is heap-allocated by go/ssa and dropped from
 /// `Function.Locals` in `finishBody`; wastedassign only walks `Locals`, so no
 /// store to such a cell is a finding however dead it looks. syncthing

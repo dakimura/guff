@@ -34,3 +34,9 @@ bad.go:449:3:wastedassign::assigned to offset, but never used afterwards
 bad.go:461:4:wastedassign::assigned to offset, but never used afterwards
 blank/blank.go:75:2:wastedassign::assigned to v, but reassigned without using the value
 blank/blank.go:77:7:wastedassign::assigned to v, but reassigned without using the value
+branch/branch.go:35:4:wastedassign::assigned to offset, but never used afterwards
+branch/branch.go:57:4:wastedassign::assigned to offset, but never used afterwards
+branch/branch.go:72:4:wastedassign::assigned to offset, but never used afterwards
+branch/branch.go:100:4:wastedassign::assigned to x, but reassigned without using the value
+branch/branch.go:129:5:wastedassign::assigned to x, but never used afterwards
+branch/branch.go:157:5:wastedassign::assigned to x, but never used afterwards
