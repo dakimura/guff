@@ -265,6 +265,11 @@ struct RespUsage {
     /// The response reached a closure upstream calls *not called*, and nothing
     /// written in this function can settle it. See [`RespUsage::mark_go_escape`].
     forced_open: bool,
+    /// A func literal has already captured this response. Upstream decides at
+    /// the *first* `MakeClosure` among the captured cell's referrers and never
+    /// looks at a later one, so a goroutine that captures the response after
+    /// a closure that closes it changes nothing.
+    closure_seen: bool,
 }
 
 impl RespUsage {
@@ -279,6 +284,7 @@ impl RespUsage {
             path,
             obj,
             forced_open: false,
+            closure_seen: false,
         }
     }
 
@@ -322,6 +328,21 @@ impl RespUsage {
     /// Separate from `mark_settled` because the two race: the closure that
     /// captures the response is visited *after* the `go` that launches it, and
     /// settling must not undo this.
+    ///
+    /// Only the **first** capture decides. `for aref := range
+    /// *resRef.Addr.Referrers()` returns at the first `*ssa.MakeClosure`, so
+    /// dapr's
+    ///
+    /// ```go
+    /// if resp != nil {
+    ///     defer func() { _ = resp.Body.Close() }()
+    /// }
+    /// …
+    /// go func() { reader := bufio.NewReader(resp.Body); … }()
+    /// ```
+    ///
+    /// is settled by the deferred closure, and the goroutine after it is never
+    /// asked. The caller checks [`RespUsage::closure_seen`].
     fn mark_go_escape(&mut self) {
         self.forced_open = true;
     }
@@ -706,6 +727,7 @@ fn mark_captured_by_closure(
     for name in seen {
         if let Some(u) = usages.get_mut(&name) {
             u.mark_settled();
+            u.closure_seen = true;
         }
     }
 }
@@ -1019,18 +1041,31 @@ fn check_body(
             return true;
         };
         if let NodeRef::GoStmt(go) = n {
-            // Everything a `go` statement mentions escapes on a goroutine, and
-            // upstream's `isClosureCalled` does not count an `*ssa.Go` as a
-            // call. Both spellings land here: the literal that captures the
-            // response, and `go sink(resp)`, whose value reaches an
-            // `*ssa.Go` that none of `isopen`'s arms match.
-            let span = (go.go_.0 as u32, go.call.rparen.0 as u32);
-            for name in tracked_names_in(pass, NodeRef::CallExpr(&go.call), span, &usages) {
-                if let Some(u) = usages.get_mut(&name) {
-                    u.mark_go_escape();
+            // Upstream's `isClosureCalled` does not count an `*ssa.Go` as a
+            // call, and no arm of `isopen` matches an `*ssa.Go` referrer.
+            //
+            // - `go func() { … resp … }()`: the literal's `MakeClosure` is a
+            //   referrer of the captured cell. If it is the *first* capture,
+            //   upstream stops there with `called == false` and the response
+            //   is open whatever else happens; if an earlier closure captured
+            //   it, that one already decided.
+            // - `go sink(resp)`: the value reaches an `*ssa.Go` that nothing
+            //   matches. It is not a hand-off (a `defer resp.Body.Close()`
+            //   elsewhere still settles it) and not a leak either: upstream
+            //   skips it. So the walk does not descend, where the call arm
+            //   would read `resp` as passed to a callee.
+            if let Expr::FuncLit(lit) = code::unparen(&go.call.fun) {
+                let span = (lit.ty.func.0 as u32, lit.body.rbrace.0 as u32);
+                for name in tracked_names_in(pass, NodeRef::BlockStmt(&lit.body), span, &usages) {
+                    if let Some(u) = usages.get_mut(&name) {
+                        if !u.closure_seen {
+                            u.mark_go_escape();
+                        }
+                    }
                 }
+                mark_captured_by_closure(pass, lit, &mut usages);
             }
-            return true;
+            return false;
         }
         if let NodeRef::FuncLit(lit) = n {
             // A response captured by a func literal is upstream's `*ssa.Store`

@@ -200,3 +200,104 @@ func PlainDeferredClose(url string) error {
 	defer resp.Body.Close()
 	return nil
 }
+
+// --- Only the *first* capture decides -----------------------------------------
+//
+// `isopen` walks the captured cell's referrers and returns at the first
+// `*ssa.MakeClosure`: a goroutine that captures the response after a closure
+// that closes it is never asked. And `go goSink(resp)` with no literal reaches
+// an `*ssa.Go` that no arm matches — not a hand-off, not a leak, just skipped.
+// dapr's `serviceinvocation/http/sserelay.go` is the first shape.
+
+func goSink(r *http.Response) { _ = r }
+
+// Silent: the closing closure is deferred under `if resp != nil`, and the
+// goroutine that reads the body comes after it (dapr).
+func DeferredClosureBeforeGoroutine(url string) {
+	resp, err := http.Get(url)
+	if resp != nil {
+		defer func() {
+			_ = resp.Body.Close()
+		}()
+	}
+	if err != nil {
+		return
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = bufio.NewReader(resp.Body).ReadString('\n')
+	}()
+	<-done
+}
+
+// Silent: the same without the `if`.
+func DeferredClosureThenGoroutineReadsBody(url string) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+	go func() { _ = bufio.NewReader(resp.Body) }()
+}
+
+// Silent: the goroutine only reads a field.
+func DeferredClosureThenGoroutineReadsField(url string) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+	go func() { _ = resp.StatusCode }()
+}
+
+// Reported: the goroutine is the first capture; the closing closure after it
+// is never asked.
+func GoroutineBeforeDeferredClosure(url string) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return
+	}
+	go func() { _ = resp.StatusCode }()
+	defer func() { _ = resp.Body.Close() }()
+}
+
+// Silent: `go goSink(resp)` is skipped and the deferred close settles it.
+func GoSinkWithDeferredClose(url string) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+	go goSink(resp)
+}
+
+// Reported: `go goSink(resp)` is skipped, and nothing else closes the body.
+func GoSinkAlone(url string) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return
+	}
+	go goSink(resp)
+}
+
+// Silent: a closing deferred closure, then `go goSink(resp)`.
+func DeferredClosureThenGoSink(url string) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+	go goSink(resp)
+}
+
+// Silent: `go goSink(resp)` first — it is not a capture — then the closing
+// deferred closure, which is.
+func GoSinkThenDeferredClosure(url string) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return
+	}
+	go goSink(resp)
+	defer func() { _ = resp.Body.Close() }()
+}

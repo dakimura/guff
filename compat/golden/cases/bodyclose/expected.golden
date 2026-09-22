@@ -43,6 +43,8 @@ goescape/goescape.go:89:23:bodyclose::response body must be closed
 goescape/goescape.go:102:23:bodyclose::response body must be closed
 goescape/goescape.go:112:23:bodyclose::response body must be closed
 goescape/goescape.go:185:23:bodyclose::response body must be closed
+goescape/goescape.go:257:23:bodyclose::response body must be closed
+goescape/goescape.go:277:23:bodyclose::response body must be closed
 inplace/inplace.go:31:23:bodyclose::response body must be closed
 inplace/inplace.go:50:21:bodyclose::response body must be closed
 referrers/referrers.go:35:14:bodyclose::response body must be closed
