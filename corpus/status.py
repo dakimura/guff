@@ -120,6 +120,10 @@ EXCLUDED = {
     "LocalizedMessage the missing message.pb.go declares, and openapi/handler.go embeds "
     "v2/zitadel/*. 123 of 330 packages fail to load, and golangci-lint's whole report is "
     "1 typecheck issue. Host-independent (ollama's shape). Measured 2026-09-22 at v4.17.1",
+    "tidb": "golangci-lint crashes on it: at v26.3.17 (the first tag with a v2 config; the "
+    "candidate's v8.5.7 is v1 and refused) golangci-lint 2.12.2 panics in go/types "
+    "(Checker.builtin -> TypeParam.typeset -> isString(nil)) while type-checking a "
+    "dependency from source, two runs out of two. Measured 2026-09-22",
 }
 
 # Targets whose numbers this host cannot produce. Measuring them anywhere but
