@@ -1019,8 +1019,14 @@ fn parse_v2_modernize_settings() {
         ["omitzero", "newexpr", "any"],
     );
     assert!(
-        opts.disable.iter().any(|d| d == "stringscut"),
+        opts.disable.iter().any(|d| d == "bloop"),
         "suite-extra defaults must be appended: {:?}",
+        opts.disable
+    );
+    // stringscut is Suite's own (Index → Cut, x/tools v0.44) and stays on.
+    assert!(
+        !opts.disable.iter().any(|d| d == "stringscut"),
+        "stringscut is in the Suite: {:?}",
         opts.disable
     );
     let mut deduped = opts.disable.clone();

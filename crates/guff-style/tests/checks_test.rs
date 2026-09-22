@@ -7832,8 +7832,11 @@ fn modernize_flags_importcomment() {
     );
 }
 
+/// x/tools v0.44's stringscut is **Index → Cut**: `strings.Split(…)[0]` is a
+/// later upstream's pattern and golangci-lint 2.12 does not report it, so the
+/// Split shapes in `stringscut.go` are silent controls.
 #[test]
-fn modernize_flags_stringscut() {
+fn modernize_stringscut_ignores_split_first() {
     let pkg = support::typecheck_fixture(
         "modernize",
         "example.com/modernize/stringscut",
@@ -7841,17 +7844,60 @@ fn modernize_flags_stringscut() {
     );
     let messages = support::run_analyzer(modernize(), &pkg);
     assert!(
-        messages
-            .iter()
-            .filter(|m| m.contains("strings.Cut"))
-            .count()
-            >= 2,
+        !messages.iter().any(|m| m.contains("stringscut")),
         "{messages:?}"
     );
-    assert!(
-        messages.iter().filter(|m| m.contains("bytes.Cut")).count() >= 2,
-        "{messages:?}"
+}
+
+/// The Index → Cut / Contains shapes, every branch of upstream's use
+/// classification. 23 reports out of 33 calls, pinned by line: the messages
+/// repeat, and the ten silent calls (`i > 0`, `i` escaping, `s` reassigned or
+/// its address taken, a field argument, an unguarded one-byte `s[i+1:]`, a
+/// plain `i =`, a guard behind a function literal, a three-index slice, a
+/// parenthesised `i`) are what a looser rule gets wrong.
+#[test]
+fn modernize_flags_index_that_could_be_cut() {
+    let pkg = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/indexcut",
+        "indexcut.go",
     );
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, String)> = support::run_analyzer_diagnostics(modernize(), &pkg)
+        .into_iter()
+        .filter(|d| d.category == "stringscut")
+        .map(|d| (fset.position(guff::position::Pos(d.pos as i64)).line, d.message))
+        .collect();
+    got.sort();
+    let want: Vec<(i64, String)> = [
+        (21, "strings.Index can be simplified using strings.Cut"),
+        (30, "strings.IndexByte can be simplified using strings.Cut"),
+        (38, "strings.IndexByte can be simplified using strings.Cut"),
+        (47, "strings.Index can be simplified using strings.Contains"),
+        (56, "strings.Index can be simplified using strings.Contains"),
+        (57, "strings.Index can be simplified using strings.Contains"),
+        (58, "strings.Index can be simplified using strings.Contains"),
+        (59, "strings.Index can be simplified using strings.Contains"),
+        (65, "strings.Index can be simplified using strings.Contains"),
+        (66, "strings.Index can be simplified using strings.Contains"),
+        (67, "strings.Index can be simplified using strings.Contains"),
+        (114, "bytes.Index can be simplified using bytes.Cut"),
+        (123, "bytes.IndexByte can be simplified using bytes.Contains"),
+        (129, "strings.IndexByte can be simplified using strings.Contains"),
+        (141, "strings.Index can be simplified using strings.Cut"),
+        (147, "strings.Index can be simplified using strings.Cut"),
+        (157, "strings.Index can be simplified using strings.Contains"),
+        (171, "strings.Index can be simplified using strings.Cut"),
+        (180, "strings.Index can be simplified using strings.Cut"),
+        (181, "strings.Index can be simplified using strings.Cut"),
+        (194, "strings.Index can be simplified using strings.Cut"),
+        (203, "strings.Index can be simplified using strings.Cut"),
+        (212, "strings.Index can be simplified using strings.Cut"),
+    ]
+    .into_iter()
+    .map(|(l, m)| (l, m.to_string()))
+    .collect();
+    assert_eq!(got, want);
 }
 
 #[test]

@@ -7,8 +7,8 @@
   ],
   "goal": 100,
   "defined": 77,
-  "clean": 71,
-  "open": 3,
+  "clean": 72,
+  "open": 2,
   "unmeasured": 3,
   "targets": {
     "alertmanager": {
@@ -69,14 +69,11 @@
     },
     "beats": {
       "tier": "hunt",
-      "state": "open",
-      "at": "20260922T044402Z",
-      "open": 3,
+      "state": "clean",
+      "at": "20260922T052433Z",
+      "open": 0,
       "guff_only": 0,
-      "gcl_only": 3,
-      "by_linter": {
-        "modernize": 3
-      }
+      "gcl_only": 0
     },
     "boundary": {
       "tier": "hunt",
@@ -103,7 +100,7 @@
     "caddy": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260922T043827Z",
+      "at": "20260922T051627Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -143,7 +140,7 @@
     "cobra": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260922T043827Z",
+      "at": "20260922T051627Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -280,7 +277,7 @@
     "gin": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260922T043827Z",
+      "at": "20260922T051627Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -296,7 +293,7 @@
     "go-client": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260922T043827Z",
+      "at": "20260922T051627Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -336,7 +333,7 @@
     "helm": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260922T043827Z",
+      "at": "20260922T051627Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -376,7 +373,7 @@
     "k9s": {
       "tier": "pr",
       "state": "clean",
-      "at": "20260922T043827Z",
+      "at": "20260922T051627Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0

@@ -11,3 +11,7 @@ func Split(s, sep []byte) [][]byte { return nil }
 func SplitN(s, sep []byte, n int) [][]byte { return nil }
 
 func Fields(s []byte) [][]byte { return nil }
+
+func Index(s, sep []byte) int      { return -1 }
+func IndexByte(b []byte, c byte) int { return -1 }
+func Contains(b, subslice []byte) bool { return false }

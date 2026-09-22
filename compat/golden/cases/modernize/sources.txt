@@ -45,6 +45,7 @@ stmtlist/stmtlist.go                crates/guff-style/tests/testdata/modernize/s
 stringsbuilder/stringsbuilder.go    crates/guff-style/tests/testdata/modernize/stringsbuilder.go
 stringsbuildertest/sb_test.go       crates/guff-style/tests/testdata/modernize/stringsbuilder_test.go
 stringscut/stringscut.go            crates/guff-style/tests/testdata/modernize/stringscut.go
+indexcut/indexcut.go                crates/guff-style/tests/testdata/modernize/indexcut.go
 stringscutprefix/stringscutprefix.go  crates/guff-style/tests/testdata/modernize/stringscutprefix.go
 testingcontext/testingcontext.go    crates/guff-style/tests/testdata/modernize/testingcontext.go
 unsafefuncs/unsafefuncs.go          crates/guff-style/tests/testdata/modernize/unsafefuncs.go

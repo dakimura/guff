@@ -3895,9 +3895,6 @@ impl ModernizeSettings {
             "bloop",             // commented out upstream
             "importcomment",     // not in Suite
             "reflecttypeassert", // not in Suite
-            // Guff's path is Split/SplitN→Cut; Suite stringscut is Index→Cut
-            // only (SplitN support landed after v0.44).
-            "stringscut",
         ];
         let mut disable = self.disable.clone();
         for name in SUITE_EXTRA_OFF {
