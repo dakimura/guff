@@ -57,3 +57,13 @@ shadow/shadow.go:16:36:bodyclose::response body must be closed
 shadow/shadow.go:33:36:bodyclose::response body must be closed
 shadow/shadow.go:49:23:bodyclose::response body must be closed
 shadow/shadow.go:65:23:bodyclose::response body must be closed
+siblings/siblings.go:25:24:bodyclose::response body must be closed
+siblings/siblings.go:48:24:bodyclose::response body must be closed
+siblings/siblings.go:57:22:bodyclose::response body must be closed
+siblings/siblings.go:61:22:bodyclose::response body must be closed
+siblings/siblings.go:82:22:bodyclose::response body must be closed
+siblings/siblings.go:94:23:bodyclose::response body must be closed
+siblings/siblings.go:107:21:bodyclose::response body must be closed
+siblings/siblings.go:120:22:bodyclose::response body must be closed
+siblings/siblings.go:127:21:bodyclose::response body must be closed
+siblings/siblings.go:139:22:bodyclose::response body must be closed

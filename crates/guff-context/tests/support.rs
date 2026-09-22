@@ -195,6 +195,32 @@ pub fn run_analyzer(
     })
 }
 
+/// The diagnostics themselves, not just their messages.
+///
+/// Every bodyclose finding carries the identical text, so a count or an
+/// `any(contains(…))` holds for any subset of a fixture. The report positions
+/// are the only thing that says *which* response leaked.
+pub fn run_analyzer_diagnostics(
+    analyzer: &'static guff_analysis::Analyzer,
+    pkg: &Arc<Package>,
+) -> Vec<guff_analysis::Diagnostic> {
+    let result = run_on_packages(
+        &[analyzer],
+        std::slice::from_ref(pkg),
+        &RunnerOptions {
+            sequential: true,
+            ..RunnerOptions::default()
+        },
+    )
+    .expect("run analyzer");
+    for action in result.graph.all_actions() {
+        if let Some(err) = action.error() {
+            panic!("analyzer {} failed: {err}", action.string_id());
+        }
+    }
+    result.diagnostics().into_iter().map(|(_, d)| d).collect()
+}
+
 pub fn run_analyzer_with_settings(
     analyzer: &'static guff_analysis::Analyzer,
     pkg: &Arc<Package>,

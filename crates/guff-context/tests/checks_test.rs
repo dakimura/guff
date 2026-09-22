@@ -199,6 +199,61 @@ fn bodyclose_skips_a_function_by_result_type_not_by_result_name() {
     );
 }
 
+/// Two responses under one name are two responses.
+///
+/// This walk is an AST walk, so the only handle it has on `resp.Body.Close()`
+/// is the name — and it merged every binding of that name that no branch
+/// killed, on the grounds that sibling arms reach one `ssa.Phi`. That is true
+/// of one variable assigned twice. It is not true of two `:=`, which are two
+/// `Alloc`s upstream with no path carrying both, so no `Phi` ever joins them
+/// and a close on the second says nothing about the first.
+///
+/// beats' `authenticator_test.go` binds one `resp` from `rt.RoundTrip` and
+/// another from `client.Get` in two `if` bodies of one `t.Run` closure and
+/// closes only the second; the first leak was silent, and only the
+/// `//nolint:bodyclose` sitting on it — reported unused — showed it.
+///
+/// Asserted as the set of report positions. Every message in this file is the
+/// same string, so a count is true of any subset of the same size and says
+/// nothing about *which* binding reported; four of the fourteen functions must
+/// produce nothing at all, which no count can express. Both halves matter: the
+/// last four are one variable really assigned twice — an `if`/`else`, a `:=`
+/// then `=`, and a loop — which upstream does join, so a fix that simply
+/// stopped merging would light all of them. Measured against golangci-lint
+/// 2.12.2 (bodyclose v0.1.0) on this same file.
+#[test]
+fn bodyclose_two_bindings_of_one_name_are_two_responses() {
+    let dir = support::testdata("bodyclose");
+    let pkg = support::typecheck_pkg("example.com/bodyclose/siblings", &dir.join("siblings.go"));
+    assert!(!pkg.ill_typed, "{:?}", pkg.errors);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64)> = support::run_analyzer_diagnostics(bodyclose(), &pkg)
+        .into_iter()
+        .map(|d| {
+            let p = fset.position(guff::position::Pos(d.pos as i64));
+            (p.line, p.column)
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            (25, 24),  // siblingFirstOpen: the binding with no close
+            (48, 24),  // siblingSecondOpen: the same pair, order swapped
+            (57, 22),  // siblingBothOpen: both
+            (61, 22),
+            (82, 22),  // ifElseDistinct: the `if` arm; the `else` arm closes
+            (94, 23),  // siblingInLoop: the pair inside a loop body
+            (107, 21), // blockShadowOuterOpen: the outer one
+            (120, 22), // blockShadowInnerOpen: the inner one
+            (127, 21), // varShadow: a shadowing `var` is a binding too
+            (139, 22), // reusedForNonResponse: the name reused for a string
+        ],
+        "siblingBothClosed, oneVarIfElse, oneVarRedefined and oneVarInLoop \
+         must stay silent: {got:?}"
+    );
+}
+
 #[test]
 fn bodyclose_a_literal_declaring_the_name_is_not_a_capture() {
     let dir = support::testdata("bodyclose");
