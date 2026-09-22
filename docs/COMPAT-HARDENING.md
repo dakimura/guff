@@ -36000,3 +36000,53 @@ golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 緑。
 
 台帳: **75/100 at zero**（81 定義、open 1、unmeasured 5）
+
+### 2026-09-22（続き 339）— `adopt tidb` は**除外**。golangci-lint 自身が落ちる
+
+次は **tidb**。候補の `v8.5.7`（LTS 系列）の `.golangci.yml` は **v1**（`version` 無し、
+`disable-all`、`varcheck` / `deadcode`）で、golangci-lint v2 は
+`unsupported version of the configuration: ""` で起動しない。最新のタグ
+**`v26.3.17`**（2026-09-21）は v2 の config を持つのでそちらで測った。
+
+darwin で 782 パッケージとも load・型検査できる（`go build` が落ちるのは link 段だけ ——
+`tools/patch-go` の runtime への `//go:linkname` と、`main` を持たない plugin の例
+`pkg/plugin/conn_ip_example`）。
+
+#### golangci-lint が panic する
+
+golangci-lint 2.12.2（go1.26.2 でビルド）をリポジトリの config で `./...` に回すと、
+**2 回中 2 回**（採用時の hunt と再実行）、exit 2 で同じ trace:
+
+```
+panic: runtime error: invalid memory address or nil pointer dereference
+go/types.isString({0x0?, 0x0?})              predicates.go:30
+go/types.(*Checker).builtin-range1(…)        builtins.go:118
+go/types.(*_TypeSet).all(…)                  typeset.go:115
+go/types.(*TypeParam).typeset(…)             typeparam.go:166
+go/types.(*Checker).builtin(…)               builtins.go:115
+…
+golangci-lint/…/goanalysis.(*loadingPackage).loadImportedPackageWithFacts
+```
+
+依存を**ソースから**型検査している最中に、型パラメータの型集合に nil の項が入って
+いる。出力は panic だけで、finding の集合が無い —— 互換にする相手が無い。
+（3 回目は開発機のメモリ逼迫で止めた。）README の除外表と `EXCLUDED` に書いた。
+
+#### guff 側の手がかり（未解決）
+
+採用時の hunt では **guff が 1 パッケージを ill-typed にした**:
+
+```
+pkg/planner/plannersession/context.go:25:29: cannot use struct{sessionctx.Context; *PlanCtxExtended}
+  value as planctx.PlanContext value in variable declaration
+```
+
+`go build` は通るので guff の欠陥。ところが**再現しない**: 同じ config で `./...` を
+あと 2 回回して ill-typed 0、単一パッケージ・`./pkg/planner/...`・`./pkg/...`・
+govet だけの config でも 0。ファイルをそのまま別パッケージに写しても通り、30 メソッド
+それぞれの method value も、interface 側の method value への代入（署名の同一性）も通る。
+**3 回中 1 回だけの型検査の失敗** —— 並列の型検査か seed の共有に順序依存がある
+可能性が高い。guff のエラーは `assignable_to` の理由（missing method / wrong type）を
+捨てていて、どのメソッドかが出ない。次にこれを追うなら、まずその理由を出すこと。
+
+台帳: **75/100 at zero**（81 定義、open 1、unmeasured 5）
