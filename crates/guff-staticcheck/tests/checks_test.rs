@@ -1297,6 +1297,43 @@ fn s1001_flags_bad_patterns() {
     assert_eq!(count("arrays using assignment"), 2, "{messages:?}");
 }
 
+/// The `copy()` suggestion needs `copy` to still be the builtin at the loop
+/// (`types.Eval` + `IsBuiltin`). Seven shapes: reported for a plain loop, a
+/// shadow declared *after* the loop, a shadow confined to an inner block, and
+/// the array branch (which suggests an assignment and is not guarded); silent
+/// for a local named `copy` (datadog-agent's DeepCopy), a parameter named
+/// `copy`, and a package-level `func copy` — the last needs its own package,
+/// since it shadows the builtin for every file in it.
+#[test]
+fn s1001_skips_loops_where_copy_is_shadowed() {
+    let dir = support::testdata("s1001");
+    let pkg = support::typecheck_file(&dir, "shadow.go", "example.com/staticcheck/s1001/shadow");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, String)> = support::run_analyzer_diagnostics(s1001::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| (fset.position(guff::position::Pos(d.pos as i64)).line, d.message))
+        .collect();
+    got.sort();
+    let copy_msg = "should use copy(to, from) instead of a loop".to_string();
+    assert_eq!(
+        got,
+        vec![
+            (16, copy_msg.clone()), // plain
+            (40, copy_msg.clone()), // the shadow is declared after the loop
+            (53, copy_msg),         // the shadow is confined to an inner block
+            (62, "should copy arrays using assignment instead of using a loop".to_string()),
+        ]
+    );
+
+    let pkg = support::typecheck_file(&dir, "pkgshadow.go", "example.com/staticcheck/s1001/pkgshadow");
+    support::assert_well_typed(&pkg);
+    assert!(
+        support::run_analyzer(s1001::analyzer(), &pkg).is_empty(),
+        "a package-level `func copy` shadows the builtin for the whole package"
+    );
+}
+
 #[test]
 fn s1001_allows_ok_patterns() {
     let dir = support::testdata("s1001");

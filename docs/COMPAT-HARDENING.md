@@ -36215,3 +36215,75 @@ datadog-agent: guff=107 golangci=14 both=14  P=13.1%  R=100.0%
 
 台帳: **76/100 at zero**（83 定義、open 2、unmeasured 5）—— datadog-agent は
 open 93 で入り、loki（deferred）と並ぶ。
+
+### 2026-09-23（続き 343）— `close datadog-agent`（1）: `copy` が影に隠れている場所で S1001 は黙る
+
+datadog-agent の guff-only、staticcheck の 5 件はどれも 1 ファイル:
+
+```
+pkg/process/procutil/process_model.go:129,133,137,141,145
+  should use copy(to, from) instead of a loop
+```
+
+```go
+func (p *Process) DeepCopy() *Process {
+	copy := &Process{…}                    // ← ローカル変数の名前が copy
+	copy.Cmdline = make([]string, len(p.Cmdline))
+	for i := range p.Cmdline {
+		copy.Cmdline[i] = p.Cmdline[i]     // ← ここを copy(...) には書き換えられない
+	}
+```
+
+`copy` という名前のローカルが組み込みの `copy` を**隠している**ので、提案どおりに
+書き換えるとコンパイルが通らない。上流はそれを見ている:
+
+```go
+tv, err := types.Eval(pass.Fset, pass.Pkg, node.Pos(), "copy")
+if err == nil && tv.IsBuiltin() { … report … }
+```
+
+**ループの位置で** `copy` を引いて、組み込みのままかを確かめる。guff にはこの
+guard が無かった。配列の腕（`should copy arrays using assignment`）は組み込みを
+必要としないので、上流もそちらには guard を付けていない。
+
+#### 7 形
+
+| 形 | golangci | guff 前 |
+|---|---|---|
+| 素のループ | 報告 | 報告 |
+| **ローカル `copy :=`**（datadog） | 沈黙 | **報告** |
+| **引数 `copy []string`** | 沈黙 | **報告** |
+| 影がループの**後ろ**で宣言される | 報告 | 報告 |
+| 影が内側のブロックだけ | 報告 | 報告 |
+| 配列の腕（影あり） | 報告 | 報告 |
+| **パッケージ変数 `func copy(...)`** | 沈黙 | **報告** |
+
+最後の 1 形はパッケージ全体を黙らせるので fixture も別パッケージにした
+（`s1001/pkgshadow.go`）—— 最初この形を同じファイルに置いたら**残り 6 形が
+全部黙って**、測定にならなかった。
+
+`copy_is_builtin_at(pass, pos)`: ループ位置の最内スコープから `lookup_parent`
+して、当たったオブジェクトが universe の Builtin かを見る。fixture
+`s1001/shadow.go`（6 形）と `s1001/pkgshadow.go`、Rust の単体テストは
+**(行, メッセージ)** の列＋パッケージ影の 0 件。golden `staticcheck-s` は
++13 キー（ST1000 / ST1020 の雑音込み、両ツール一致）、消えたキー 0。
+**fixture を足したので `--fix` のベースラインも撮り直した**（+43 行、
+guff と golangci はバイト一致）。
+
+報告を減らす側なので差分掃引: `copy` を影にしているコードを持つ 9 target
+（podman / loki / skopeo / buildkit / nomad / karmada / dapr / velero / thanos）を
+修正前後の 2 バイナリで S1001 だけ回した —— **どれも前後 0 件**（S1001 自体が
+出ない）。効いたのは datadog-agent だけ:
+
+```
+datadog-agent
+  前   guff=107 golangci=14 both=14  R=100.0%  unexpected=93
+  後   guff=102 golangci=14 both=14  R=100.0%  unexpected=88
+```
+
+**閉じたのは 5 件、新規 0 件。** 残り 88 は revive 87 と bodyclose 1。
+
+golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 緑。
+
+台帳: **76/100 at zero**（83 定義、open 2、unmeasured 5）

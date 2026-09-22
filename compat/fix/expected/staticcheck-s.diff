@@ -83,6 +83,49 @@
 -	}
 +	copy(dst, dst)
  }
+--- a/s1001/shadow/shadow.go
++++ b/s1001/shadow/shadow.go
+@@ -13,9 +13,7 @@
+ 
+ // 1. plain: reported
+ func Plain(dst, src []string) {
+-	for i := range src {
+-		dst[i] = src[i]
+-	}
++	copy(dst, src)
+ }
+ 
+ // 2. a local named `copy` shadows the builtin: silent (datadog's DeepCopy)
+@@ -37,9 +35,7 @@
+ 
+ // 4. the shadow is declared *after* the loop: still the builtin at the loop
+ func ShadowedAfter(dst, src []string) int {
+-	for i := range src {
+-		dst[i] = src[i]
+-	}
++	copy(dst, src)
+ 	copy := 1
+ 	return copy
+ }
+@@ -50,16 +46,12 @@
+ 		copy := 2
+ 		_ = copy
+ 	}
+-	for i := range src {
+-		dst[i] = src[i]
+-	}
++	copy(dst, src)
+ }
+ 
+ // 6. arrays: the other branch, which has no builtin guard
+ func ArraysShadowed(dst, src *[4]byte) {
+ 	copy := 3
+ 	_ = copy
+-	for i := range src {
+-		dst[i] = src[i]
+-	}
++	*dst = *src
+ }
 --- a/s1002/bad/bad.go
 +++ b/s1002/bad/bad.go
 @@ -1,10 +1,10 @@

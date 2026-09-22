@@ -151,8 +151,34 @@ struct CopyLoop<'a> {
     assign: bool,
 }
 
+/// `types.Eval(fset, pkg, node.Pos(), "copy")` + `tv.IsBuiltin()`: at the
+/// loop's position, does `copy` still name the builtin? A local, a parameter
+/// or a package-level declaration called `copy` shadows it, and the rewrite
+/// `copy(dst, src)` would not compile — datadog-agent's `DeepCopy` methods
+/// name their result `copy` and hold five such loops. Upstream guards only the
+/// `copy()` branch; the array branch suggests an assignment and needs no
+/// builtin.
+fn copy_is_builtin_at(pass: &Pass<'_>, pos: u32) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return true;
+    };
+    let pkg_scope = artifacts.packages.get(artifacts.type_pkg).scope();
+    let scope = guff_types::scope::innermost(&artifacts.scopes, pkg_scope, pos).unwrap_or(pkg_scope);
+    match guff_types::scope::lookup_parent(&artifacts.scopes, &artifacts.objects, scope, "copy", pos)
+    {
+        Some((_, obj)) => matches!(
+            artifacts.objects.get(obj),
+            guff_types::arena::ObjectData::Builtin(_)
+        ),
+        // Not found at all: the universe is the outermost scope, so this
+        // cannot happen for `copy` — treat it as the builtin.
+        None => true,
+    }
+}
+
 fn check_copy_loop<'a>(
     pass: &Pass<'_>,
+    pos: u32,
     key: &Ident,
     value: Option<&Ident>,
     src: &'a Expr,
@@ -223,6 +249,9 @@ fn check_copy_loop<'a>(
         // grows a `[:]` when that side is an array — the same `[:]` the fix
         // writes. Hardcoding `copy(to, from)` said the wrong thing for every
         // array shape.
+        if !copy_is_builtin_at(pass, pos) {
+            return None;
+        }
         let to = if dst_arr { "to[:]" } else { "to" };
         let from = if src_arr { "from[:]" } else { "from" };
         format!("should use copy({to}, {from}) instead of a loop")
@@ -251,7 +280,7 @@ fn check_range<'a>(pass: &Pass<'_>, rs: &'a RangeStmt) -> Option<CopyLoop<'a>> {
         Expr::Ident(id) => Some(id),
         _ => None,
     });
-    check_copy_loop(pass, key, value, &rs.x, &rs.body.list)
+    check_copy_loop(pass, rs.for_.0 as u32, key, value, &rs.x, &rs.body.list)
 }
 
 fn check_for<'a>(pass: &Pass<'_>, fs: &'a ForStmt) -> Option<CopyLoop<'a>> {
@@ -299,7 +328,7 @@ fn check_for<'a>(pass: &Pass<'_>, fs: &'a ForStmt) -> Option<CopyLoop<'a>> {
     if post_key.name != key.name {
         return None;
     }
-    check_copy_loop(pass, key, None, src, &fs.body.list)
+    check_copy_loop(pass, fs.for_.0 as u32, key, None, src, &fs.body.list)
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {

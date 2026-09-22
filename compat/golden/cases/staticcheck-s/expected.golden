@@ -16,6 +16,19 @@ s1001/bad/bad.go:39:2:staticcheck::S1001: should use copy(to[:], from) instead o
 s1001/bad/bad.go:45:2:staticcheck::S1001: should copy arrays using assignment instead of using a loop
 s1001/bad/bad.go:59:2:staticcheck::S1001: should use copy(to, from) instead of a loop
 s1001/bad/bad.go:65:2:staticcheck::S1001: should use copy(to, from) instead of a loop
+s1001/pkgshadow/pkgshadow.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+s1001/pkgshadow/pkgshadow.go:8:1:staticcheck::ST1020: comment on exported function Loop should be of the form "Loop ..."
+s1001/shadow/shadow.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+s1001/shadow/shadow.go:14:1:staticcheck::ST1020: comment on exported function Plain should be of the form "Plain ..."
+s1001/shadow/shadow.go:16:2:staticcheck::S1001: should use copy(to, from) instead of a loop
+s1001/shadow/shadow.go:21:1:staticcheck::ST1020: comment on exported function ShadowedLocal should be of the form "ShadowedLocal ..."
+s1001/shadow/shadow.go:31:1:staticcheck::ST1020: comment on exported function ShadowedParam should be of the form "ShadowedParam ..."
+s1001/shadow/shadow.go:38:1:staticcheck::ST1020: comment on exported function ShadowedAfter should be of the form "ShadowedAfter ..."
+s1001/shadow/shadow.go:40:2:staticcheck::S1001: should use copy(to, from) instead of a loop
+s1001/shadow/shadow.go:47:1:staticcheck::ST1020: comment on exported function ShadowedInnerBlock should be of the form "ShadowedInnerBlock ..."
+s1001/shadow/shadow.go:53:2:staticcheck::S1001: should use copy(to, from) instead of a loop
+s1001/shadow/shadow.go:58:1:staticcheck::ST1020: comment on exported function ArraysShadowed should be of the form "ArraysShadowed ..."
+s1001/shadow/shadow.go:62:2:staticcheck::S1001: should copy arrays using assignment instead of using a loop
 s1002/bad/bad.go:4:5:staticcheck::S1002: should omit comparison to bool constant, can be simplified to x
 s1002/bad/bad.go:7:5:staticcheck::S1002: should omit comparison to bool constant, can be simplified to !x
 s1002/ok/ok.go:12:1:staticcheck::ST1021: comment on exported type TokenSource should be of the form "TokenSource ..." (with optional leading article)
