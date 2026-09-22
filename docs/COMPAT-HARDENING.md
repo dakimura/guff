@@ -36071,3 +36071,73 @@ opentelemetry-collector は「100 の go.mod と go.work 無し、`./...` が届
 README の除外表と `EXCLUDED` に書いた。
 
 台帳: **75/100 at zero**（81 定義、open 1、unmeasured 5）
+
+### 2026-09-22（続き 341）— `adopt trivy`: `GOEXPERIMENT=jsonv2` が捨てられていた、と `ptrToRefParam` は alias を見ない
+
+次は **trivy v0.74.0**（919MB、`.golangci.yaml`）。入れ子の `go.mod` は 14 個あるが
+全部 testdata。trivy 自身は mage で
+
+```go
+ENV = map[string]string{"CGO_ENABLED": "0", "GOEXPERIMENT": "jsonv2"}
+sh.RunWithV(ENV, "golangci-lint", "run", "--build-tags=integration")
+```
+
+と回すので、エントリも `build_tags: ["integration"]` と `env` をそのまま書いた。
+
+#### 1. guff だけ 9 パッケージが ill-typed
+
+```
+pkg/dependency/parser/c/conan/parse.go:41:42: undefined: jsontext
+pkg/x/json/json.go:66:18: undefined: jsontext
+…（bun / azure / azure/arm/parser / cloudformation/parser / kubernetes/parser / rpc / x/json_test）
+```
+
+`encoding/json/v2` と `encoding/json/jsontext` は GOROOT の全ファイルが
+`//go:build goexperiment.jsonv2`。guff の `guff-build` は `GOEXPERIMENT` の各名前を
+**既知の 10 個**と照合して、知らない名前を黙って捨てていた —— `jsonv2` はその中に無く、
+2 つの std パッケージは空で load された。Go 1.26 の `internal/goexperiment.Flags` は
+20 フィールドある（`arenas` / `cgocheck2` / `loopvar` / `newinliner` / `jsonv2` /
+`runtimefreegc` / `sizespecializedmalloc` / `goroutineleakprofile` / `simd` /
+`runtimesecret` が抜けていた）。一覧をそれに揃え、環境変数を読む部分と解析を分けて
+（`parse_goexperiments(goexp, goos)`）単体テストを 2 つ足した。未知の名前は今も
+無視する（`buildcfg` が拒否する名前）。
+
+golden はこれを測れない —— case の実行に環境変数を渡す欄が無い。
+`env` 付きの hunt エントリが gate の代わり: 修正後 ill-typed 0。
+
+#### 2. 型が通ると gocritic の guff-only が 1 件
+
+```
+pkg/iac/scanners/cloudformation/parser/parameter.go:46: ptrToRefParam: consider `v' to be of non-pointer type
+func unmarshalIntFirst(dec *jsontext.Decoder, v *any) error
+```
+
+go-critic の `isRefType` は要素型を**書かれたまま**型 switch する —— `*types.Map` /
+`*types.Chan` / `*types.Interface` / `*types.Named`（下が interface のとき）で、
+`*types.Alias` の腕が無い。go/types は alias を実体化するので、**`any` は alias で、
+`*any` は報告されない**。外側の `TypeOf(param.Type).(*types.Pointer)` も alias を
+通さない。guff は両方で `unalias_readonly` していた。
+
+12 形（golangci 2.12.2 / go-critic v0.14.3）: 報告は `*interface{}` / `*error` /
+`*map[string]int` / `*NamedIface` / `*chan int` の 5 形、沈黙は `*any`・map の alias・
+interface の alias・名前付き map・名前付き interface の alias・`*any` の戻り値・
+**ポインタ型の alias**（外側の assertion の側）の 7 形。2 つの unalias を外して 12/12。
+fixture `gocritic/ptrtoref.go`（golden の `gocritic` case に追加、+5 キー、消えたキー 0）、
+単体テストは報告位置の集合。
+
+報告を減らす側なので差分掃引: gocritic を有効にしている 39 target で、各自の
+gocritic 設定のまま修正前後の 2 バイナリを比べて **`ptrToRefParam` は前後同一**
+（dubbo-go 5、kubevirt 1、ほかは設定で無効）。
+
+#### 3. 結果
+
+```
+trivy: guff=0 golangci=0 both=0  [OK]
+```
+
+0 / 0 の確認: 同じ config・env・tag に `lll` を足すと両ツール **1,163 件で行単位一致**。
+
+golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 緑。
+
+台帳: **76/100 at zero**（82 定義、open 1、unmeasured 5）

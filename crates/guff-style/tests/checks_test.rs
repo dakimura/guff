@@ -8827,6 +8827,49 @@ fn gocritic_deprecated_comment_sees_every_declaration_doc() {
     );
 }
 
+/// ptrToRefParam ignores everything spelled through an alias: `isRefType` has
+/// no `*types.Alias` arm and the parameter's `(*types.Pointer)` assertion does
+/// not look through one either, so `*any` (trivy), `*MapAlias`, an alias of a
+/// named interface and an alias of a pointer type are all silent, while
+/// `*interface{}`, `*error`, `*map`, `*NamedIface` and `*chan` report. Twelve
+/// shapes, five reports, pinned by (line, column).
+#[test]
+fn gocritic_ptr_to_ref_param_does_not_look_through_aliases() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::GocriticOptions;
+
+    let pkg = support::typecheck_fixture("gocritic", "example.com/gocritic/ptrtoref", "ptrtoref.go");
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "gocritic",
+        GocriticOptions {
+            enabled_checks: vec!["ptrToRefParam".into()],
+            ..GocriticOptions::default()
+        },
+    );
+    let mut got: Vec<(i64, i64)> = support::run_analyzer_diagnostics_with_settings(
+        gocritic(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    )
+    .into_iter()
+    .filter(|d| d.message.contains("non-pointer type"))
+    .map(|d| {
+        let p = fset.position(guff::position::Pos(d.pos as i64));
+        (p.line, p.column)
+    })
+    .collect();
+    got.sort();
+    assert_eq!(got, vec![(18, 20), (19, 15), (20, 13), (24, 21), (26, 14)]);
+}
+
 #[test]
 fn gocritic_enable_all_extras() {
     // Counts over `extras.go` alone (the golden case also reads bad.go and

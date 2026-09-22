@@ -569,5 +569,20 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "40m"
+  },
+  {
+    "name": "trivy",
+    "url": "https://github.com/aquasecurity/trivy.git",
+    "ref": "v0.74.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "40m",
+    "build_tags": [
+      "integration"
+    ],
+    "env": {
+      "CGO_ENABLED": "0",
+      "GOEXPERIMENT": "jsonv2"
+    }
   }
 ]

@@ -287,6 +287,12 @@ fn default_tool_tags(goarch: &str) -> Vec<String> {
 
 /// Experiment names enabled for file matching (`goexperiment.x` tags).
 fn enabled_goexperiments() -> Vec<&'static str> {
+    parse_goexperiments(&env::var("GOEXPERIMENT").unwrap_or_default(), host_goos())
+}
+
+/// The experiments on for `goos` given a `GOEXPERIMENT` value — the baseline,
+/// then the comma-separated overrides (`name`, `noname`, `none`).
+fn parse_goexperiments(goexp: &str, goos: &str) -> Vec<&'static str> {
     // Baseline for Go ≥ 1.26 (see GOROOT/src/internal/buildcfg/exp.go).
     // Older toolchains ignore unknown experiment tags in match_file.
     let mut on = vec![
@@ -296,11 +302,10 @@ fn enabled_goexperiments() -> Vec<&'static str> {
         "greenteagc",
     ];
     // Dwarf5 is on except darwin/ios/aix — we approximate with host OS.
-    if !matches!(host_goos(), "darwin" | "ios" | "aix") {
+    if !matches!(goos, "darwin" | "ios" | "aix") {
         on.push("dwarf5");
     }
 
-    let goexp = env::var("GOEXPERIMENT").unwrap_or_default();
     if goexp.is_empty() {
         return on;
     }
@@ -328,18 +333,34 @@ fn enabled_goexperiments() -> Vec<&'static str> {
             }
             continue;
         }
-        // Only accept names we know about (static lifetime).
+        // Only accept names the toolchain knows: the fields of
+        // `internal/goexperiment.Flags`, lower-cased (Go 1.26). The list used
+        // to stop at ten, so `GOEXPERIMENT=jsonv2` was dropped on the floor
+        // and `encoding/json/v2` / `encoding/json/jsontext` — whose files are
+        // all `//go:build goexperiment.jsonv2` — loaded empty: trivy lints
+        // with that experiment, and nine of its packages went ill-typed on
+        // `undefined: jsontext`.
         let known = [
+            "fieldtrack",
+            "preemptibleloops",
+            "staticlockranking",
+            "boringcrypto",
             "regabiwrappers",
             "regabiargs",
-            "randomizedheapbase64",
-            "greenteagc",
-            "dwarf5",
-            "fieldtrack",
-            "boringcrypto",
-            "staticlockranking",
             "heapminimum512kib",
-            "preemptibleloops",
+            "arenas",
+            "cgocheck2",
+            "loopvar",
+            "newinliner",
+            "dwarf5",
+            "jsonv2",
+            "greenteagc",
+            "randomizedheapbase64",
+            "runtimefreegc",
+            "sizespecializedmalloc",
+            "goroutineleakprofile",
+            "simd",
+            "runtimesecret",
         ];
         if let Some(k) = known.iter().copied().find(|k| *k == part) {
             if !on.contains(&k) {
@@ -348,4 +369,28 @@ fn enabled_goexperiments() -> Vec<&'static str> {
         }
     }
     on
+}
+
+#[cfg(test)]
+mod goexperiment_tests {
+    use super::parse_goexperiments;
+
+    #[test]
+    fn jsonv2_is_a_known_experiment() {
+        let on = parse_goexperiments("jsonv2", "darwin");
+        assert!(on.contains(&"jsonv2"), "{on:?}");
+        // The baseline stays on underneath an addition.
+        assert!(on.contains(&"greenteagc"), "{on:?}");
+    }
+
+    #[test]
+    fn overrides_add_remove_and_reset() {
+        let on = parse_goexperiments("jsonv2,nogreenteagc,arenas", "linux");
+        assert!(on.contains(&"jsonv2") && on.contains(&"arenas"), "{on:?}");
+        assert!(!on.contains(&"greenteagc"), "{on:?}");
+        assert!(on.contains(&"dwarf5"), "dwarf5 is on for linux: {on:?}");
+        assert!(parse_goexperiments("none", "linux").is_empty());
+        // An unknown name is ignored, as buildcfg rejects it.
+        assert!(!parse_goexperiments("nosuchexperiment", "linux").contains(&"nosuchexperiment"));
+    }
 }
