@@ -8335,11 +8335,15 @@ fn check_range_val_copy(
 // --- batch 14: ptrToRefParam / tooManyResultsChecker / evalOrder /
 // unlabelStmt / returnAfterHttpError / exposedSyncMutex --------------------
 
+/// go-critic's `isRefType`: a type switch on the element **as written**, with
+/// no `*types.Alias` arm. go/types materializes aliases, so `*any` — `any` is
+/// an alias — is not a pointer to a reference type upstream, while
+/// `*interface{}` and `*error` are; the same goes for any alias of a map,
+/// channel or interface (trivy's `func unmarshalIntFirst(…, v *any)`).
 fn is_ref_type(pass: &Pass<'_>, typ: TypeId) -> bool {
     let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
         return false;
     };
-    let typ = unalias_readonly(&artifacts.types, typ);
     match artifacts.types.get(typ) {
         TypeData::Map(_) | TypeData::Chan(_) | TypeData::Interface(_) => true,
         TypeData::Named(_) => {
@@ -8368,7 +8372,8 @@ fn check_ptr_to_ref_param_fields(
         let Some(typ) = type_of(pass, ty_expr) else {
             continue;
         };
-        let typ = unalias_readonly(&artifacts.types, typ);
+        // `c.ctx.TypeOf(param.Type).(*types.Pointer)`: an alias of a pointer
+        // type is not a `*types.Pointer` either.
         let TypeData::Pointer(p) = artifacts.types.get(typ) else {
             continue;
         };
