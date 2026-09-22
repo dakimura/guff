@@ -118,24 +118,40 @@ const BODYCLOSE_BAD_SHAPES: usize = 25;
 /// `calledInFunc` ends in `!called`, so a response a goroutine touches is open
 /// whatever the closure does and whatever the caller writes afterwards.
 ///
-/// Counted at eight, with seven silent shapes in the same file: a called
-/// literal, a deferred one, a called one that closes nothing, a literal passed
-/// as an argument (to `run` and to `t.Cleanup`), one held in a local, and a
-/// goroutine that only sees the body. vitess's `streamQuerylog` defers the
-/// close and then reads the body from a goroutine — a real use-after-close
-/// that guff called handled.
+/// Pinned as the set of report positions — every message here is the same
+/// string, so a count holds for the wrong functions. Eight reports and seven
+/// silent shapes in the first half: a called literal, a deferred one, a called
+/// one that closes nothing, a literal passed as an argument (to `run` and to
+/// `t.Cleanup`), one held in a local, and a goroutine that only sees the body.
+/// vitess's `streamQuerylog` defers the close and then reads the body from a
+/// goroutine — a real use-after-close that guff called handled.
+///
+/// The second half is the other side of the same rule: only the **first**
+/// capture decides, and `go f(resp)` with no literal is skipped rather than
+/// being a leak. dapr's `sserelay.go` defers a closing closure and *then*
+/// reads the body from a goroutine; forcing every goroutine capture open
+/// reported it, and six of the eight shapes added for it must stay silent.
 #[test]
 fn bodyclose_a_goroutine_closure_is_never_called() {
     let dir = support::testdata("bodyclose");
     let pkg = support::typecheck_pkg("example.com/bodyclose/goescape", &dir.join("goescape.go"));
-    let messages = support::run_analyzer(bodyclose(), &pkg);
+    assert!(!pkg.ill_typed, "{:?}", pkg.errors);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<i64> = support::run_analyzer_diagnostics(bodyclose(), &pkg)
+        .into_iter()
+        .filter(|d| d.message.contains("response body must be closed"))
+        .map(|d| fset.position(guff::position::Pos(d.pos as i64)).line)
+        .collect();
+    got.sort();
     assert_eq!(
-        messages
-            .iter()
-            .filter(|m| m.contains("response body must be closed"))
-            .count(),
-        8,
-        "{messages:?}"
+        got,
+        vec![
+            29, 51, 64, 75, 89, 102, 112, 185, // the eight goroutine escapes
+            257, // GoroutineBeforeDeferredClosure: the goroutine captured first
+            277, // GoSinkAlone: `go goSink(resp)` skipped, nothing closes
+        ],
+        "DeferredClosureBeforeGoroutine (dapr) and the other five first-capture \
+         shapes must stay silent: {got:?}"
     );
 }
 

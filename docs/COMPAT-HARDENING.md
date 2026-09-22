@@ -35674,3 +35674,107 @@ golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）—— beats が clean に、
 dapr（続き 331 で見つかった bodyclose の退行）が open に残る。
+
+### 2026-09-22（続き 333）— `close dapr`: goroutine が「最初の捕捉」でなければ bodyclose は何も言わない
+
+続き 331 の追加 hunt で見つかった dapr の guff-only:
+
+```
+tests/integration/suite/daprd/serviceinvocation/http/sserelay.go:245
+  bodyclose: response body must be closed
+```
+
+```go
+resp, err := client.Do(req)
+if resp != nil {
+    defer func() {
+        cErr := resp.Body.Close()
+        …
+    }()
+}
+require.NoError(t, err)
+…
+go func() {
+    defer close(done)
+    reader := bufio.NewReader(resp.Body)
+    …
+}()
+```
+
+dapr は 09-07 に clean だった。退行の元は `adopt vitess`（#386）の
+`mark_go_escape`: 「`go` 文が触れた response は、`isClosureCalled` が
+`*ssa.Go` を呼び出しと数えないので必ず open」。vitess の
+`defer resp.Body.Close()` → goroutine で body を読む形はそれで正しく報告された。
+
+#### 1. 12 形で線を引いた
+
+| 形 | golangci | guff 前 |
+|---|---|---|
+| A dapr（`if resp != nil { defer func(){close}() }` → goroutine） | 沈黙 | **報告** |
+| B / C 閉じる defer closure だけ | 沈黙 | 沈黙 |
+| D `defer resp.Body.Close()` → goroutine（vitess） | 報告 | 報告 |
+| E 閉じる defer closure → 普通の closure | 沈黙 | 沈黙 |
+| F 閉じる defer closure → goroutine が body を読む | 沈黙 | **報告** |
+| G 同、goroutine はフィールドだけ | 沈黙 | **報告** |
+| H goroutine が**先**、閉じる defer closure が後 | 報告 | 報告 |
+| I `go sink(resp)` と `defer resp.Body.Close()` | 沈黙 | **報告** |
+| J `go sink(resp)` だけ | 報告 | 報告 |
+| K 閉じる defer closure → `go sink(resp)` | 沈黙 | **報告** |
+| L `go sink(resp)` → 閉じる defer closure | 沈黙 | **報告** |
+
+#### 2. 上流: **最初の** `MakeClosure` が決める
+
+closure が `resp` を捕捉すると、`resp` はヒープのセルになり、応答値の referrer は
+そのセルへの `*ssa.Store` 1 つになる。`isopen` はセルの referrer を命令順に
+回し、**最初の** `*ssa.MakeClosure` で `return r.calledInFunc(f, called)` する
+—— 後の closure は見ない。
+
+- D / H: 最初の捕捉が goroutine → `called == false` → open。
+- A / F / G / E / K / L: 最初の捕捉が defer された closure → その中の Close で
+  「open でない」。後の goroutine は問われない。
+- `go sink(resp)`（literal でない）: 値の referrer は `*ssa.Go` で、`isopen` の
+  どの腕にも当たらない —— **手渡しでも漏れでもなく、飛ばされる**。I は
+  `defer resp.Body.Close()` が、J は何も無いので末尾の `return true` が決める。
+
+guff は `go` が触れた response を**順序に関係なく**強制 open にしていた。
+`go sink(resp)` も同じ扱いだった（I / K / L）。
+
+#### 3. 修正
+
+`RespUsage.closure_seen` を足し、func literal の捕捉ごとに立てる。`go` の腕は
+
+- `go func(){ … }()`: literal が捕捉する名前について、**まだ closure に捕捉されて
+  いなければ** `mark_go_escape`、そのあと捕捉として settle（`closure_seen` も立つ）。
+- それ以外（`go f(resp)`）: 何もしない。子に降りない —— 降りると call の腕が
+  「引数で渡した＝手放した」と読む。
+
+fixture は既存の `bodyclose/goescape.go` の末尾に 8 形（A / F / G / H / I / J / K / L）。
+末尾に足したので既存の行はずれない。Rust の単体テストを件数（8）から
+**報告行の集合**（10）に変えた —— 追加 8 形のうち 6 形は沈黙が主張。
+golden +2 キー、消えたキー 0。
+
+#### 4. 差分掃引: bodyclose を有効にしている 34 target
+
+この修正は報告を**減らす**側なので、一致していた finding を黙らせうる。
+bodyclose を有効にしている target は全部 clean —— つまり guff の bodyclose の
+finding は全部上流と一致している。修正前と修正後の 2 バイナリで bodyclose だけを
+回して行単位で比べた（各 target の設定と build tag はそのまま）:
+
+- **34 target、合計 2,485 件が前後で行単位に同一**（fiber 1417、kratos 857、
+  boundary 63、cli 58、traefik 48、jaeger 33、beats 5、cert-manager 2、kubevirt 2、
+  vitess 1 …）。vitess の goroutine の 1 件（#386 の形）も残る。
+- 変わったのは dapr の 1 行だけ（前 1 → 後 0）。
+
+```
+dapr
+  前   guff=1556 golangci=1555 both=1555  unexpected=1
+  後   guff=1555 golangci=1555 both=1555  unexpected=0
+```
+
+**閉じたのは 1 件、新規 0 件。**
+
+golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 緑。
+
+台帳: **73/100 at zero**（77 定義、open 1、unmeasured 3）—— beats（続き 332）と
+dapr が clean。
