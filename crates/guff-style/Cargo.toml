@@ -18,6 +18,8 @@ guff-gostd = { path = "../guff-gostd" }
 guff-ssa = { path = "../guff-ssa" }
 guff-types = { path = "../guff-types" }
 guff-constant = { path = "../guff-constant" }
+# `is_under_go_cache`: gosec reports cgo findings by their GOCACHE path.
+guff-runner = { path = "../guff-runner" }
 memchr = "2"
 regex = "1"
 regex-syntax = "0.8"

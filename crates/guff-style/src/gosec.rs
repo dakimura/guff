@@ -4326,7 +4326,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let min_severity = threshold_score(&opts.severity);
     let min_confidence = threshold_score(&opts.confidence);
     let nosec_ranges = NosecRanges::build(pass);
+    let go_cache = guff_runner::default_go_cache_dir().ok();
     for (pos, end, msg) in pending {
+        if dropped_as_cgo_output(pass.fset(), pos, go_cache.as_deref()) {
+            continue;
+        }
         let rule = msg.split(':').next().unwrap_or("");
         let start_pos = pass.fset().position(guff::position::Pos(pos as i64));
         let end_line = pass
@@ -4352,6 +4356,23 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     Ok(None)
 }
 
+/// gosec names an issue by the **physical** file — `fobj.Name()` in
+/// `issue.New`, `file.Name()` in the SSA analyzers' `newIssue` — not the
+/// `//line`-adjusted one every other linter reports. For a file that imports
+/// "C" the physical file is cmd/cgo's output under GOCACHE, and golangci's Cgo
+/// processor drops every issue there. So no gosec finding in a cgo file
+/// survives, AST rules and SSA analyzers alike, while the package's other
+/// files are reported as usual (beats' `fileorigin_darwin.go`: a G115 guff
+/// reported through the `//line` mapping).
+fn dropped_as_cgo_output(
+    fset: &guff::position::FileSet,
+    pos: u32,
+    go_cache: Option<&std::path::Path>,
+) -> bool {
+    let physical = fset.position_for(guff::position::Pos(pos as i64), false);
+    guff_runner::is_under_go_cache(std::path::Path::new(&physical.filename), go_cache)
+}
+
 pub fn analyzer() -> &'static Analyzer {
     static A: OnceLock<Analyzer> = OnceLock::new();
     A.get_or_init(|| Analyzer {
@@ -4371,6 +4392,33 @@ pub fn analyzer() -> &'static Analyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A file cmd/cgo wrote under GOCACHE whose `//line` directive maps it back
+    /// to the source file: the adjusted position is the source, the physical
+    /// one is the cache — and the physical one decides.
+    #[test]
+    fn a_finding_in_cgo_output_is_dropped_by_its_physical_file() {
+        let fset = guff::position::FileSet::new();
+        let cache = std::path::Path::new("/home/u/.cache/go-build");
+        let cgo = fset.add_file("/home/u/.cache/go-build/ab/abcd-d.cgo1.go", -1, 100);
+        cgo.set_lines(vec![0, 20, 40, 60, 80]);
+        cgo.add_line_info(20, "/src/p/fileorigin_darwin.go", 95);
+        let plain = fset.add_file("/src/p/b.go", -1, 100);
+        plain.set_lines(vec![0, 20, 40]);
+
+        let in_cgo = (cgo.base() + 45) as u32;
+        let in_plain = (plain.base() + 25) as u32;
+        // The adjusted position is the hand-written file, which is what the
+        // other linters report and why the drop has to look past it.
+        assert_eq!(
+            fset.position(guff::position::Pos(in_cgo as i64)).filename,
+            "/src/p/fileorigin_darwin.go"
+        );
+        assert!(dropped_as_cgo_output(&fset, in_cgo, Some(cache)));
+        assert!(!dropped_as_cgo_output(&fset, in_plain, Some(cache)));
+        // Without a known GOCACHE nothing is dropped (golangci: `goCacheDir == ""`).
+        assert!(!dropped_as_cgo_output(&fset, in_cgo, None));
+    }
 
     #[test]
     fn includes_filters_rules() {
