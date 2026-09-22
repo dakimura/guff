@@ -277,6 +277,63 @@ fn gosec_g115_reports_only_unbounded_conversions() {
     );
 }
 
+/// `(line, message)` for every G115 in a single-file gosec fixture, sorted.
+fn g115_findings(pkg_id: &str, file: &str) -> Vec<(i64, String)> {
+    let pkg = support::typecheck_fixture("gosec", pkg_id, file);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut out: Vec<(i64, String)> = support::run_analyzer_diagnostics(gosec(), &pkg)
+        .into_iter()
+        .filter(|d| d.message.starts_with("G115:"))
+        .map(|d| (fset.position(guff::position::Pos(d.pos as i64)).line, d.message))
+        .collect();
+    out.sort();
+    out
+}
+
+/// A string range's value is go/ssa's `tRune` — int32 under the name "rune" —
+/// and gosec names every later conversion of the same kind pair after the
+/// first one it reached, so the `int32` parameter on line 28 reads "rune"
+/// too. Pinned by position: the messages repeat, so a count would hold for
+/// the wrong lines. `runeLit` (line 75) is the one silent conversion.
+#[test]
+fn gosec_g115_names_a_string_range_rune_and_caches_it_per_package() {
+    let rune_byte = "G115: integer overflow conversion rune -> byte";
+    let mut want: Vec<(i64, String)> = [23, 28, 33, 41, 49, 54, 59, 67]
+        .into_iter()
+        .map(|l| (l, rune_byte.to_string()))
+        .collect();
+    want.push((80, "G115: integer overflow conversion uint8 -> int8".to_string()));
+    assert_eq!(
+        g115_findings("example.com/gosec/g115names", "g115_names.go"),
+        want
+    );
+}
+
+/// The same cache from the other side: the first conversion of each pair
+/// spells the plain name, and the later ones — a string range, a `byte`
+/// parameter, a `uint8(…)` destination — inherit it. "First" is source order
+/// with each function's literals right after it; the fixture's function names
+/// run against the alphabet so a name-sorted order would disagree.
+#[test]
+fn gosec_g115_takes_each_message_from_the_first_conversion_in_source_order() {
+    let msg = |pair: &str| format!("G115: integer overflow conversion {pair}");
+    assert_eq!(
+        g115_findings("example.com/gosec/g115cache", "g115_cache.go"),
+        vec![
+            (13, msg("int32 -> byte")),
+            (17, msg("int32 -> byte")),
+            (22, msg("int32 -> byte")),
+            (25, msg("uint8 -> int8")),
+            (28, msg("uint8 -> int8")),
+            (30, msg("uint8 -> int8")),
+            (33, msg("int64 -> byte")),
+            (36, msg("int64 -> byte")),
+            (43, msg("uint16 -> int8")),
+            (46, msg("uint16 -> int8")),
+        ]
+    );
+}
+
 /// G118 is the third SSA analyzer. It is one id over three checks; the fixture
 /// marks every `context.With…` call and every `go` statement `// FINDING` or
 /// `// silent`, and `compat/golden/cases/gosec` gates those marks against

@@ -434,7 +434,7 @@ impl<'a> Builder<'a> {
                     invalid_ty
                 },
                 if want_value {
-                    self.prog.basic_type(BasicKind::Int32)
+                    self.prog.rune_type()
                 } else {
                     invalid_ty
                 },

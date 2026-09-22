@@ -181,6 +181,15 @@ pub fn lookup_basic(arena: &TypeArena, kind: BasicKind) -> Option<TypeId> {
     None
 }
 
+/// The predeclared `rune` alias basic allocated by [`init_alias_basics`]
+/// (go/types' `universeRune`), which [`lookup_basic`] never returns: it finds
+/// `Typ[Int32]` first.
+pub fn lookup_rune(arena: &TypeArena) -> Option<TypeId> {
+    (1..=arena.len()).map(TypeId::from_index).find(|&id| {
+        matches!(arena.get(id), TypeData::Basic(b) if b.kind == RUNE && b.name == "rune")
+    })
+}
+
 /// Initialize the predeclared basic types into a fresh arena.
 ///
 /// Returns a populated [`TypeArena`] and a lookup table indexed by
