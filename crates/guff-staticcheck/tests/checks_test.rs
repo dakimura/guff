@@ -4028,6 +4028,34 @@ fn st1016_flags_inconsistent_receiver_names() {
     // `compat/golden/cases/staticcheck-st` carries it as `st1016/bad/bad_more.go`.
 }
 
+/// A generic type is never reported: every method's receiver is an
+/// instantiation `G[T']`, and upstream's `Dereference(recv.Type()) != T.Type()`
+/// pointer comparison skips them all. Five generic shapes stay silent and the
+/// non-generic control reports — without it, deleting the check would pass.
+#[test]
+fn st1016_never_reports_a_generic_type() {
+    let dir = support::testdata("st1016");
+    let pkg = support::typecheck_file(&dir, "generic.go", "example.com/staticcheck/st1016/generic");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let got: Vec<(i64, i64, String)> = support::run_analyzer_diagnostics(st1016::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| {
+            let p = fset.position(guff::position::Pos(d.pos as i64));
+            (p.line, p.column, d.message)
+        })
+        .collect();
+    assert_eq!(
+        got,
+        vec![(
+            43,
+            19,
+            r#"methods on the same type should have the same receiver name (seen 1x "p", 1x "q")"#
+                .to_string()
+        )],
+    );
+}
+
 #[test]
 fn st1016_allows_consistent_receivers() {
     let dir = support::testdata("st1016");

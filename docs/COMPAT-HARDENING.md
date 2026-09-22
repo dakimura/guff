@@ -35933,3 +35933,70 @@ nomad: guff=0 golangci=0 both=0  [OK]
 走っていて、nomad は自分の CI で golangci を通しているので本来の config では 0。
 
 台帳: **74/100 at zero**（80 定義、open 1、unmeasured 5）
+
+### 2026-09-22（続き 338）— `adopt mimir`: ST1016 は**総称型を一度も報告しない**
+
+次は **mimir mimir-3.2.0**（642MB、`.golangci.yml`、`build-tags: [netgo, stringlabels]`）。
+darwin で 247 パッケージとも load・build できる。
+
+```
+mimir: guff=1 golangci=0 both=0
+  +guff pkg/streamingpromql/optimize/plan/rangevectorsplitting/operator.go:705
+        ST1016: methods on the same type should have the same receiver name (seen 2x "p", 9x "c")
+```
+
+`CachedSplit[T]` のメソッドが受信者を `p` と `c` で書き分けている。**総称型**だった。
+
+#### 1. 6 形
+
+| 形 | golangci | guff 前 |
+|---|---|---|
+| 非総称、`p` / `q` | 報告 | 報告 |
+| 非総称、値 `m` / ポインタ `n` | 報告 | 報告 |
+| `*Gen[T]`、`p` / `c` | 沈黙 | **報告** |
+| `GenV[T]`（値）、`p` / `c` | 沈黙 | **報告** |
+| `*Gen2[K, V]`、`a` / `b` | 沈黙 | **報告** |
+| `*GenP[T]` / `*GenP[U]`（型引数名も違う）、`p` / `q` | 沈黙 | **報告** |
+
+#### 2. 上流: 埋め込みを弾く比較が総称型を全部弾く
+
+```go
+if typeutil.Dereference(recv.Type()) != T.Type() {
+    // skip embedded methods
+    continue
+}
+```
+
+**ポインタ比較**。`type G[T any]` のメソッドはそれぞれ自分の受信者型引数を宣言するので、
+受信者の型は**インスタンス** `G[T']` で、原型 `G` とは別の `*types.Named`。全メソッドが
+「埋め込み」として飛ばされ、名前の表は空のまま —— 総称型は受信者名がどうであれ
+報告されない。`firstFn` もその後で決まるので位置の問題も起きない。
+
+guff は AST で受信者の型名だけを見て `G[T]` の `G` に集めていた。
+総称型の受信者は必ず角括弧付きで書かれる（Go の文法）ので、`IndexExpr` /
+`IndexListExpr` の受信者を飛ばす。
+
+#### 3. fixture と測定
+
+`st1016/generic.go`: 総称型 5 形（上の 4 形と、名前が揃っている 1 形）は沈黙、
+**非総称の対照 1 形は報告** —— 対照が無いと、ST1016 を消しても通る。Rust の単体
+テストは (行, 桁, メッセージ) の列。golden +8 キー（ST1000 / ST1021 の雑音込み、
+両ツール一致）、消えたキー 0。
+
+報告を減らす側なので差分掃引: ST1016 **だけ**を強制で有効にした config で、
+config が ST1016 を含む 20 target を修正前後の 2 バイナリで回した。
+**変わったのは mimir の 1 行だけ**、非総称の 19 件（cosmos-sdk 9、beats 9、velero 1）は
+前後同一。
+
+```
+mimir: guff=0 golangci=0 both=0  [OK]
+```
+
+**0 / 0 が測定であることの確認**: mimir の config は `default` 未指定（standard）なので
+errcheck は既に有効で 0 —— 対照にならない。代わりに `lll` を足すと両ツールとも
+**15,758 件、行単位で一致**（出力のパス表記が片方だけ `../../…` なので正規化して比較）。
+
+golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 緑。
+
+台帳: **75/100 at zero**（81 定義、open 1、unmeasured 5）
