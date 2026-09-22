@@ -35830,3 +35830,39 @@ typecheck issue がレポート全体を潰す（続き 217、dagger の除外�
 ここで出る数字は互換性ではなくプラットフォームの記録になる。
 
 台帳: **73/100 at zero**（78 定義、open 1、unmeasured 4）
+
+### 2026-09-22（続き 335）— `adopt k3s`。**核の 16 パッケージが darwin で load できない**ので、採用して測らない
+
+次は **k3s v1.36.3+k3s1**（577MB、`.golangci.yml`）。
+
+`go build ./...` はコンパイルエラーを 1 つも出さず、**load の段で**止まる:
+
+```
+package github.com/k3s-io/k3s
+	imports github.com/k3s-io/k3s/pkg/cli/agent
+	imports github.com/k3s-io/k3s/pkg/agent
+	imports github.com/k3s-io/k3s/pkg/cgroups: build constraints exclude all Go files in …/pkg/cgroups
+```
+
+`pkg/cgroups` と `pkg/proctitle` は **darwin 用のファイルを 1 つも持たない**
+（`go list ./...` にも出てこない —— inspektor-gadget の注記どおり、全ファイルが
+除外されたパッケージは列挙されない）。`go list -e` の `Error` / `DepsErrors` で数えると
+**150 中 16 パッケージ**が自分か依存で load に失敗する（`DepsErrors` の内訳は
+`pkg/proctitle` 13、`pkg/cgroups` 8）:
+
+```
+/  (root)  /cmd/agent  /cmd/cert  /cmd/encrypt  /cmd/etcdsnapshot  /cmd/server  /cmd/token
+/pkg/agent  /pkg/agent/cridockerd  /pkg/cli/agent  /pkg/cli/cert  /pkg/cli/etcdsnapshot
+/pkg/cli/secretsencrypt  /pkg/cli/server  /pkg/cli/token  /pkg/executor/embed
+```
+
+割合は 11% と cilium（28%）より小さいが、**汚染されているのが k3s の本体**
+（agent、全 CLI、全 cmd、root）で、残る 134 は `tests/**`（53）と周辺の `pkg/*`。
+`packages` の 1 パターンで本体を避けると本体を測らないことになり、`./pkg/...` は
+`pkg/agent` と `pkg/cli/*` を含む。golangci は load できないパッケージを
+typecheck issue にし、それがレポート全体を消す（続き 217）。
+
+cilium と同じ扱い: `hunt.json` に足し、`PLATFORM_BOUND` に `"k3s": "linux"`
+（1 行が長くなったので辞書を縦に展開した）。darwin では hunt を回していない。
+
+台帳: **73/100 at zero**（79 定義、open 1、unmeasured 5）
