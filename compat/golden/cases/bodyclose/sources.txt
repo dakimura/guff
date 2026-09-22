@@ -8,6 +8,9 @@ ok/ok.go       crates/guff-context/tests/testdata/bodyclose/ok.go
 # A func literal declaring its own `resp` is not a capture of the outer one:
 # four leaks and two closers, with the columns pinned here.
 shadow/shadow.go   crates/guff-context/tests/testdata/bodyclose/shadow.go
+# Two `:=` under one name are two responses, and a close on one is not a close
+# on the other — ten leaks, and four one-variable shapes that really do merge.
+siblings/siblings.go   crates/guff-context/tests/testdata/bodyclose/siblings.go
 # Which functions upstream skips whole: the test is on the resolved result
 # type, not on a result whose type is spelled `Response`.
 resultskip/resultskip.go   crates/guff-context/tests/testdata/bodyclose/resultskip.go

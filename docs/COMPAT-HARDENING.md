@@ -35119,3 +35119,118 @@ golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 緑。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-22（続き 327）— `close beats`（30）: 同じ名前の `resp` 2 つは、`resp` 2 つ
+
+beats の **nolintlint** の guff-only:
+
+```
+x-pack/otel/extension/beatsauthextension/authenticator_test.go:260
+  directive `//nolint:bodyclose // response is nil` is unused for linter "bodyclose"
+```
+
+「使われていない」というのは、guff の bodyclose がその行で**何も出していない**
+ということ。bodyclose の件数自体は 5/5 で一致していたので、抑制された 1 件の
+欠落はこの nolintlint の行からしか見えない。
+
+#### 1. 形ではなく「隣の `resp`」だった
+
+interface の invoke（`http.RoundTripper.RoundTrip`）、`_test.go`、サブテストの
+クロージャ、パッケージ内のファクトリが返す `http.RoundTripper`、`resp` を
+可変長 `any` の関数に渡す —— **5 形とも一致した**。行の外を見る（続き 326 と
+同じ）。
+
+同じクロージャの中に `resp` が 2 つあった:
+
+```go
+if tc.testRoundTripError {
+    resp, err := rt.RoundTrip(req) //nolint:bodyclose   ← 閉じない
+    ...
+}
+if tc.testHTTPRequest {
+    resp, err := client.Get(serverURL)                   ← 閉じる
+    _ = resp.Body.Close()
+}
+```
+
+最小再現:
+
+```go
+if req != nil {
+    resp, err := rt.RoundTrip(req); _ = err; _ = resp
+}
+if url != "" {
+    resp, err := c.Get(url); if err == nil { _ = resp.Body.Close() }
+}
+```
+
+golangci は 1 つ目を報告し、**guff は黙る**。2 つのブロックを入れ替えると
+両方が報告する —— 順序依存だった。
+
+#### 2. 名前で照合する表に、変数の同一性が無かった
+
+guff の bodyclose は AST 移植なので、閉じたかどうかの判定材料は
+`resp.Body.Close()` の**名前**しかない。表は名前をキーにしていて、
+「2 度目の代入が 1 度目を殺すか、併合するか」を**枝の形だけ**で決めていた:
+
+```rust
+let merged = match usages.get(name) {
+    Some(prev) if !kills(&path, &prev.path) => …併合…,
+    Some(_) => …1 つ目を報告してやり直す…,
+```
+
+これは**1 つの変数を 2 度代入した**ときは正しい（上流も `Phi` で束ねる）。
+`:=` が 2 つなら別の `Alloc` が 2 つで、どちらのパスも両方を運ばないので
+`Phi` は生まれない —— 併合してはいけない。
+
+`RespUsage` に `obj: Option<ObjectId>` を持たせ、名前が同じでも
+**オブジェクトが違えば併合しない**（1 つ目を清算して作り直す）ようにした。
+`:=` は `info.defs`、`=` は `info.uses` から引く。解決できなければ
+`None` で、そのときは従来どおり枝の形だけで決める。
+
+`var` 宣言側も同じで、影を作る `var` が追跡中の `resp` を**黙って捨てて**
+いた（報告せずに `insert` で上書き）。こちらも清算するようにした。
+
+#### 3. fixture は 14 形
+
+報告 10 形（兄弟ブロックの前・後・両方、`if`/`else` の 2 腕、ループの中、
+ブロックの影の内外、影を作る `var`、非レスポンスへの名前再利用）と
+**沈黙 4 形**（兄弟ブロックで両方閉じる、`if`/`else` で 1 変数、`:=` のあとに
+`=`、ループで 1 変数）。後半 4 形は上流が**本当に併合する**側で、
+「併合をやめる」だけの修正はここを全部光らせる。
+
+Rust の単体テストは**報告位置の集合**で固定した。このファイルのメッセージは
+全部同じ文字列なので、件数は同じ大きさのどの部分集合に対しても真になる。
+
+```
+beats (v9.5.2)
+  前   guff=7555 golangci=7554 both=7550  P=99.9%  R=99.9%  unexpected=9
+  後   guff=7554 golangci=7554 both=7550  P=99.9%  R=99.9%  unexpected=8
+```
+
+**閉じたのは 1 件、新規 0 件。** bodyclose の件数は 5/5 のまま —— 新しく出る
+1 件はその行の `//nolint` に吸われるので、動いたのは nolintlint の行だけ。
+
+#### 4. 測ったが直していない形（次の 1 件）
+
+同じ測定で、**1 つの変数**に対する別の乖離が出た:
+
+```go
+var resp *http.Response
+if alt  { resp, err = c.Get(url) }       ← golangci は**ここを報告**、guff は黙る
+if !alt { resp, err = c.Get(url + "/x") }
+return resp.Body.Close()
+```
+
+`if` が 2 つ続くと `Phi` が 2 段になる。上流の `*ssa.Phi` の腕は
+**その phi 自身の referrer** に `FieldAddr` を探して止まり、phi から phi へは
+辿らない —— 1 つ目の値は phi を 2 回くぐるので上流は見失って報告する。
+guff の `merged_depth` はこれを**ループの入れ子**としてだけ持っていて、
+ループのない 2 段 phi を表せない。これは今回の「変数の同一性」とは別の欠陥
+なので、この変更には入れていない。fixture にも入れていない（golden は
+乖離を記録できない）。次の 1 件として測定つきで持ち越す。
+
+golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 緑。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）

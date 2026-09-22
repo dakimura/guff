@@ -248,13 +248,27 @@ struct RespUsage {
     /// Branch path of the assignment that last wrote this variable, so the
     /// next one can tell "kills it" from "merges with it".
     path: Vec<(u32, u16)>,
+    /// Which variable these entries belong to.
+    ///
+    /// This table is keyed by *name*, because every close the walk sees is
+    /// spelled `resp.Body.Close()` and an AST has only the name to match on.
+    /// Two `resp`s in disjoint blocks are two different variables, though, and
+    /// upstream (which works on `ssa.Value`s) never merges them: each `:=` is
+    /// its own `Alloc` with its own referrers, and no `Phi` joins values that
+    /// no path carries together. Without this the second `resp`'s close
+    /// settled the first one too — beats writes exactly that, two `resp`s in
+    /// one `t.Run` closure, and the leak went unreported.
+    ///
+    /// `None` when the identifier did not resolve, in which case the branch
+    /// test below decides on its own, as it did before.
+    obj: Option<guff_types::arena::ObjectId>,
     /// The response reached a closure upstream calls *not called*, and nothing
     /// written in this function can settle it. See [`RespUsage::mark_go_escape`].
     forced_open: bool,
 }
 
 impl RespUsage {
-    fn new(pos: u32, path: Vec<(u32, u16)>) -> Self {
+    fn new(pos: u32, path: Vec<(u32, u16)>, obj: Option<guff_types::arena::ObjectId>) -> Self {
         Self {
             entries: vec![RespEntry {
                 pos,
@@ -263,6 +277,7 @@ impl RespUsage {
                 merged_depth: None,
             }],
             path,
+            obj,
             forced_open: false,
         }
     }
@@ -1380,6 +1395,23 @@ fn note_indirect_store(
     }
 }
 
+/// The object an assignment's left-hand identifier names.
+///
+/// A `:=` *defines* its names and an `=` *uses* them, so both tables are
+/// consulted. `_` has no object, and neither does an identifier in a file the
+/// type-checker could not finish; both answer `None`, which leaves the branch
+/// test to decide alone.
+fn assigned_object(pass: &Pass<'_>, expr: &Expr) -> Option<guff_types::arena::ObjectId> {
+    let Expr::Ident(id) = expr else {
+        return None;
+    };
+    let info = pass.types_info()?;
+    info.defs
+        .get(&id.id)
+        .and_then(|o| *o)
+        .or_else(|| info.uses.get(&id.id).copied())
+}
+
 /// Is `id` a package-level variable of the package being analysed?
 fn is_package_level_var(pass: &Pass<'_>, id: &guff::ast::Ident) -> bool {
     let Some(info) = pass.types_info() else {
@@ -1474,8 +1506,20 @@ fn handle_assign(
         // `plugins/inputs/prometheus/prometheus.go:581`: two clients, one
         // `resp`, one `defer resp.Body.Close()`.
         let path = shape.path(assign_report_pos(assign, i));
+        let obj = assigned_object(pass, lhs);
+        // A merge needs one variable. When the two assignments name *different*
+        // objects — a `:=` that shadows, or two `:=` in blocks neither of which
+        // encloses the other — there is no `Phi` joining them upstream and the
+        // earlier value keeps its own fate, so settle it here and start over.
+        // Only the branch geometry was asked before, and sibling arms read as
+        // a merge whether or not they shared a variable.
+        let same_var = match (obj, usages.get(name).and_then(|u| u.obj)) {
+            (Some(a), Some(b)) => a == b,
+            // Unresolved on either side: fall back to the geometry alone.
+            _ => true,
+        };
         let merged = match usages.get(name) {
-            Some(prev) if !kills(&path, &prev.path) => {
+            Some(prev) if same_var && !kills(&path, &prev.path) => {
                 merge_branch(&path, &prev.path).map(|at| shape.loop_depth(at))
             }
             Some(_) => {
@@ -1523,7 +1567,7 @@ fn handle_assign(
                     u.path = path.clone();
                 }
                 None => {
-                    usages.insert(name.to_string(), RespUsage::new(pos, path.clone()));
+                    usages.insert(name.to_string(), RespUsage::new(pos, path.clone(), obj));
                 }
             }
         }
@@ -1826,8 +1870,16 @@ fn handle_value_spec(
                     .unwrap_or(name_id.pos().0 as u32)
             };
             // A `var` declaration introduces the name, so there is nothing
-            // for it to merge with.
-            usages.insert(name.to_string(), RespUsage::new(pos, Vec::new()));
+            // for it to merge with — but if it *shadows* a response already
+            // tracked under that name, that one is a separate variable whose
+            // fate this declaration cannot change.
+            if let Some(prev) = usages.remove(name) {
+                prev.report(check_consumption, pending);
+            }
+            let obj = pass
+                .types_info()
+                .and_then(|info| info.defs.get(&name_id.id).and_then(|o| *o));
+            usages.insert(name.to_string(), RespUsage::new(pos, Vec::new(), obj));
         }
     }
 }
