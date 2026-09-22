@@ -16,3 +16,7 @@ func SplitSeq(s, sep string) func(func(string) bool) {
 func FieldsSeq(s string) func(func(string) bool) {
 	return func(yield func(string) bool) {}
 }
+
+func Index(s, substr string) int         { return -1 }
+func IndexByte(s string, c byte) int     { return -1 }
+func Contains(s, substr string) bool     { return false }

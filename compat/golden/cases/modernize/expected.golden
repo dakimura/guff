@@ -29,6 +29,29 @@ fmtappendf/fmtappendf.go:45:41:modernize::fmtappendf: Replace []byte(fmt.Sprint.
 fmtappendf/fmtappendf.go:48:41:modernize::fmtappendf: Replace []byte(fmt.Sprintln...) with fmt.Appendln
 fmtappendf/fmtappendf.go:55:10:modernize::fmtappendf: Replace []byte(fmt.Sprintf...) with fmt.Appendf
 fmtappendf/fmtappendf.go:59:10:modernize::fmtappendf: Replace []byte(fmt.Sprintf...) with fmt.Appendf
+indexcut/indexcut.go:21:11:modernize::stringscut: strings.Index can be simplified using strings.Cut
+indexcut/indexcut.go:30:12:modernize::stringscut: strings.IndexByte can be simplified using strings.Cut
+indexcut/indexcut.go:38:7:modernize::stringscut: strings.IndexByte can be simplified using strings.Cut
+indexcut/indexcut.go:47:7:modernize::stringscut: strings.Index can be simplified using strings.Contains
+indexcut/indexcut.go:56:7:modernize::stringscut: strings.Index can be simplified using strings.Contains
+indexcut/indexcut.go:57:7:modernize::stringscut: strings.Index can be simplified using strings.Contains
+indexcut/indexcut.go:58:7:modernize::stringscut: strings.Index can be simplified using strings.Contains
+indexcut/indexcut.go:59:7:modernize::stringscut: strings.Index can be simplified using strings.Contains
+indexcut/indexcut.go:65:7:modernize::stringscut: strings.Index can be simplified using strings.Contains
+indexcut/indexcut.go:66:7:modernize::stringscut: strings.Index can be simplified using strings.Contains
+indexcut/indexcut.go:67:7:modernize::stringscut: strings.Index can be simplified using strings.Contains
+indexcut/indexcut.go:114:7:modernize::stringscut: bytes.Index can be simplified using bytes.Cut
+indexcut/indexcut.go:123:7:modernize::stringscut: bytes.IndexByte can be simplified using bytes.Contains
+indexcut/indexcut.go:129:7:modernize::stringscut: strings.IndexByte can be simplified using strings.Contains
+indexcut/indexcut.go:141:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+indexcut/indexcut.go:147:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+indexcut/indexcut.go:157:10:modernize::stringscut: strings.Index can be simplified using strings.Contains
+indexcut/indexcut.go:171:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+indexcut/indexcut.go:180:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+indexcut/indexcut.go:181:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+indexcut/indexcut.go:194:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+indexcut/indexcut.go:203:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+indexcut/indexcut.go:212:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
 mapsloop/mapsloop.go:7:3:modernize::mapsloop: Replace m[k]=v loop with maps.Copy
 mapsloop/mapsloop.go:22:3:modernize::mapsloop: Replace m[k]=v loop with maps.Copy
 minmax/minmax.go:8:5:modernize::minmax: if statement can be modernized using min

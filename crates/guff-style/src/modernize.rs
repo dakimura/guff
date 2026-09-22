@@ -25,8 +25,9 @@
 //! - `unsafefuncs` — `unsafe.Pointer(uintptr(ptr)+…)` → `unsafe.Add` (Go 1.17+)
 //! - `importcomment` — obsolete `package p // import "path"` comments
 //!   (off by default via Suite parity; see `ModernizeSettings::to_guff_modernize`)
-//! - `stringscut` — `Split(N)(…)[0]` → `Cut` (Go 1.18+; strings+bytes Split/SplitN;
-//!   off by default — Suite's stringscut is Index→Cut only as of x/tools v0.44)
+//! - `stringscut` — `i := strings.Index(s, sep)` used only as `i < 0` / `i >= 0`
+//!   / `s[:i]` / `s[i+len(sep):]` → `strings.Cut` (or `Contains`) (Go 1.18+;
+//!   strings+bytes Index/IndexByte; x/tools v0.44)
 //! - `newexpr` — `func f(x T) *T { return &x }` → `new(x)` wrappers + call sites
 //!   (Go 1.26+; `NewLike` facts)
 //! - `errorsastype` — `var e T; if errors.As(err, &e)` → `errors.AsType[T]`
@@ -49,7 +50,6 @@
 //! appendclipped (unsafe-by-default upstream),
 //! atomictypes Pointer variants / IgnoredFiles,
 //! stditerators fresh-name generation on elem collisions / Seq2 dual-component
-//! patterns, stringscut Index/Contains
 //! patterns, unsafefuncs Slice/String helpers, importcomment Module==nil
 //! (GOPATH) skip, mapsloop Insert/Collect (iter.Seq2) / Clone (nil-preserving),
 //! slicescontains nested free break/continue analysis full parity,
@@ -70,13 +70,14 @@ use std::sync::OnceLock;
 
 use guff::ast::{
     AssignStmt, BinaryExpr, BlockStmt, BranchStmt, CallExpr, CommentGroup, Decl, Expr, Field, File,
-    ForStmt, FuncDecl, FuncLit, GenDecl, GoStmt, IfStmt, IncDecStmt, InterfaceType, RangeStmt,
-    Spec, Stmt, StructType, UnaryExpr, ValueSpec,
+    ForStmt, FuncDecl, FuncLit, GenDecl, GoStmt, Ident, IfStmt, IncDecStmt, InterfaceType,
+    RangeStmt, SliceExpr, Spec, Stmt, StructType, UnaryExpr, ValueSpec,
 };
 use guff::parser::{parse_file, PARSE_COMMENTS};
 use guff::position::{FileSet, Pos};
 use guff::token::Token;
-use guff::walk::{self, NodeRef};
+use guff::commentmap::{node_end, node_pos};
+use guff::walk::{self, expr_ref, stmt_ref, NodeRef};
 use guff_analysis::code;
 use guff_analysis::passes::{inspect, typeindex};
 // Every checker whose replacement text names a package goes through
@@ -4945,98 +4946,598 @@ fn check_importcomment(
     }
 }
 
-/// `x := strings.Split(N)(s, sep[, 2])[0]` → `x, _, _ := strings.Cut(s, sep)`.
-fn check_stringscut(pass: &Pass<'_>, assign: &AssignStmt, pending: &mut Vec<Diagnostic>) {
-    if assign.tok != Some(Token::DEFINE) || assign.lhs.len() != 1 || assign.rhs.len() != 1 {
-        return;
+// ---------------------------------------------------------------------------
+// stringscut — x/tools v0.44 `modernize/stringscut.go`
+// ---------------------------------------------------------------------------
+
+/// A use of a variable, with the ancestors a `Cursor` would give it: `stack`
+/// runs from the file down to the ident's parent.
+struct CutUse<'a> {
+    ident: &'a Ident,
+    stack: Vec<NodeRef<'a>>,
+}
+
+impl CutUse<'_> {
+    fn parent(&self) -> Option<NodeRef<'_>> {
+        self.stack.last().copied()
     }
-    let Some(lhs_name) = ident_name(&assign.lhs[0]) else {
-        return;
-    };
-    if lhs_name == "_" {
-        return;
+    fn grandparent(&self) -> Option<NodeRef<'_>> {
+        self.stack.len().checked_sub(2).map(|i| self.stack[i])
     }
-    let Expr::IndexExpr(ix) = &assign.rhs[0] else {
-        return;
-    };
-    if !code::is_integer_constant(pass, &ix.index, 0) {
-        return;
+}
+
+fn is_node(n: NodeRef<'_>, e: &Expr) -> bool {
+    n.erased_ptr() == expr_ref(e).erased_ptr()
+}
+
+/// `sameObject`: both are identifiers that resolve (as uses) to one object.
+fn cut_same_object(info: &guff_types::Info, a: &Expr, b: &Expr) -> bool {
+    match (a, b) {
+        (Expr::Ident(x), Expr::Ident(y)) => match (info.uses.get(&x.id), info.uses.get(&y.id)) {
+            (Some(p), Some(q)) => p == q,
+            _ => false,
+        },
+        _ => false,
     }
-    let Expr::CallExpr(call) = ix.x.as_ref() else {
-        return;
-    };
-    let (pkg, split_name, need_n) = if code::is_call_to(pass, call, "strings.Split") {
-        ("strings", "Split", false)
-    } else if code::is_call_to(pass, call, "strings.SplitN") {
-        ("strings", "SplitN", true)
-    } else if code::is_call_to(pass, call, "bytes.Split") {
-        ("bytes", "Split", false)
-    } else if code::is_call_to(pass, call, "bytes.SplitN") {
-        ("bytes", "SplitN", true)
-    } else {
-        return;
-    };
-    if need_n {
-        if call.args.len() != 3 || !code::is_integer_constant(pass, &call.args[2], 2) {
-            return;
+}
+
+/// `types.Identical(t, []byte)`: an unnamed slice of `byte`/`uint8`.
+fn is_byte_slice_type(arena: &guff_types::arena::TypeArena, t: TypeId) -> bool {
+    match arena.get(t) {
+        TypeData::Slice(s) => matches!(
+            arena.get(s.elem()),
+            TypeData::Basic(b) if b.kind() == guff_types::basic::BasicKind::Uint8
+        ),
+        _ => false,
+    }
+}
+
+/// `constSubstrLen`: the constant length of `substr` (seen through a
+/// `[]byte(…)` conversion), 1 for a byte constant, or -1.
+fn cut_const_substr_len(pass: &Pass<'_>, info: &guff_types::Info, arena: &guff_types::arena::TypeArena, substr: &Expr) -> i64 {
+    let mut substr = substr;
+    if let Expr::CallExpr(call) = substr {
+        if let Some(tv) = info.types.get(&call.fun.id()) {
+            if tv.mode == OperandMode::TypeExpr && is_byte_slice_type(arena, tv.typ) {
+                if let Some(arg) = call.args.first() {
+                    substr = arg;
+                }
+            }
         }
-    } else if call.args.len() != 2 {
-        return;
     }
-    // strings: require non-empty constant separator; bytes: allow any (often []byte lit).
-    if pkg == "strings" {
-        let Some(sep) = code::expr_to_string(pass, &call.args[1]) else {
-            return;
+    let Some(val) = info.types.get(&substr.id()).and_then(|tv| tv.val.as_ref()) else {
+        return -1;
+    };
+    match val.kind() {
+        guff_constant::Kind::String => code::expr_to_bytes(pass, substr).map_or(-1, |b| b.len() as i64),
+        guff_constant::Kind::Int => 1,
+        _ => -1,
+    }
+}
+
+/// `flip`: the comparison with its operands swapped.
+fn cut_flip(op: Token) -> Token {
+    match op {
+        Token::GEQ => Token::LEQ,
+        Token::GTR => Token::LSS,
+        Token::LEQ => Token::GEQ,
+        Token::LSS => Token::GTR,
+        other => other,
+    }
+}
+
+/// `checkIdxComparison`: -1 when `check` means `i < 0`, +1 when it means
+/// `i >= 0`, 0 otherwise. Only the exact forms: `i > 0` says more than
+/// "found" and is left alone (golang/go#76687).
+fn cut_check_idx_comparison(pass: &Pass<'_>, info: &guff_types::Info, check: &BinaryExpr, i_obj: ObjectId) -> i32 {
+    let is_i = |e: &Expr| matches!(e, Expr::Ident(id) if info.uses.get(&id.id) == Some(&i_obj));
+    if !is_i(&check.x) && !is_i(&check.y) {
+        return 0;
+    }
+    // The constant, if any, on the right.
+    let (mut op, mut y) = (check.op, &*check.y);
+    if info.types.get(&check.x.id()).is_some_and(|tv| tv.val.is_some()) {
+        op = cut_flip(op);
+        y = &check.x;
+    }
+    let y_is = |k: i64| code::is_integer_constant(pass, y, k);
+    if (op == Token::LSS && y_is(0)) || (op == Token::EQL && y_is(-1)) || (op == Token::LEQ && y_is(-1)) {
+        return -1;
+    }
+    if (op == Token::GEQ && y_is(0)) || (op == Token::NEQ && y_is(-1)) || (op == Token::GTR && y_is(-1)) {
+        return 1;
+    }
+    0
+}
+
+fn cut_cond_checks_idx(pass: &Pass<'_>, info: &guff_types::Info, cond: &Expr, i_obj: ObjectId) -> i32 {
+    match cond {
+        Expr::BinaryExpr(b) => cut_check_idx_comparison(pass, info, b, i_obj),
+        _ => 0,
+    }
+}
+
+/// `bodyTerminates`: the block ends in `return` or any branch statement.
+fn cut_body_terminates(block: &BlockStmt) -> bool {
+    matches!(block.list.last(), Some(Stmt::ReturnStmt(_) | Stmt::BranchStmt(_)))
+}
+
+/// `isSliceIndexGuarded`: is this use of `i` dominated by a check that it is
+/// non-negative — inside the body of `if i >= 0`, the else of `if i < 0`, or
+/// after an `if i < 0 { return }` in the same block? The innermost deciding
+/// ancestor answers; a function boundary answers no.
+fn cut_slice_index_guarded(pass: &Pass<'_>, info: &guff_types::Info, u: &CutUse<'_>, i_obj: ObjectId) -> bool {
+    // `Enclosing()` starts at the use itself.
+    let mut chain: Vec<NodeRef<'_>> = u.stack.clone();
+    chain.push(NodeRef::Ident(u.ident));
+    for k in (1..chain.len()).rev() {
+        let (anc, parent) = (chain[k], chain[k - 1]);
+        match parent {
+            NodeRef::IfStmt(ifs) => {
+                let in_body = anc.erased_ptr() == NodeRef::BlockStmt(&ifs.body).erased_ptr();
+                let in_else = ifs.else_.as_deref().is_some_and(|e| anc.erased_ptr() == stmt_ref(e).erased_ptr());
+                if in_body || in_else {
+                    let mut check = cut_cond_checks_idx(pass, info, &ifs.cond, i_obj);
+                    if in_else {
+                        check = -check;
+                    }
+                    if check > 0 {
+                        return true;
+                    }
+                    if check < 0 {
+                        return false;
+                    }
+                }
+            }
+            NodeRef::BlockStmt(blk) => {
+                if let Some(j) = blk.list.iter().position(|s| stmt_ref(s).erased_ptr() == anc.erased_ptr()) {
+                    for sib in blk.list[..j].iter().rev() {
+                        if let Stmt::IfStmt(ifs) = sib {
+                            if cut_cond_checks_idx(pass, info, &ifs.cond, i_obj) < 0 && cut_body_terminates(&ifs.body) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            NodeRef::FuncDecl(fd) => {
+                if fd.body.as_ref().is_some_and(|b| anc.erased_ptr() == NodeRef::BlockStmt(b).erased_ptr()) {
+                    return false;
+                }
+            }
+            NodeRef::FuncLit(fl) => {
+                if anc.erased_ptr() == NodeRef::BlockStmt(&fl.body).erased_ptr() {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// `isAfterSlice`, entered from the `i` ident's edge in its parent binary
+/// expression (`from_x`: `i` is its left operand). Like upstream it reads the
+/// slice's `Low` whatever the ident's parent is, and it does not check the
+/// operator of `i + k` — only that `k` is `len(substr)`.
+fn cut_is_after_slice(pass: &Pass<'_>, info: &guff_types::Info, arena: &guff_types::arena::TypeArena, from_x: bool, slice: &SliceExpr, substr: &Expr) -> bool {
+    let Some(Expr::BinaryExpr(low)) = slice.low.as_deref() else {
+        return false;
+    };
+    if slice.high.is_some() {
+        return false;
+    }
+    let is_len_call = |e: &Expr| -> bool {
+        let Expr::CallExpr(call) = e else {
+            return false;
         };
-        if sep.is_empty() {
-            return;
+        if call.args.len() != 1 || !cut_same_object(info, substr, &call.args[0]) {
+            return false;
+        }
+        let Expr::Ident(fun) = &*call.fun else {
+            return false;
+        };
+        info.uses.get(&fun.id).is_some_and(|&o| {
+            matches!(pass.pkg().type_artifacts.as_ref().map(|a| a.objects.get(o)),
+                Some(guff_types::arena::ObjectData::Builtin(b)) if b.name() == "len")
+        })
+    };
+    let substr_len = cut_const_substr_len(pass, info, arena, substr);
+    let other = if from_x { &*low.y } else { &*low.x };
+    match info.types.get(&other.id()).and_then(|tv| tv.val.as_ref()) {
+        None => low.op == Token::ADD && is_len_call(other),
+        Some(_) => code::expr_to_int(pass, other).is_some_and(|k| k == substr_len),
+    }
+}
+
+/// Spans of the four kinds of use `checkIdxUses` accepts.
+#[derive(Default)]
+struct CutUses {
+    negative: Vec<(u32, u32)>,
+    nonnegative: Vec<(u32, u32)>,
+    before: Vec<(u32, u32)>,
+    after: Vec<(u32, u32)>,
+}
+
+/// `checkIdxUses`: classify every use of `i`; `None` if any is none of
+/// "`i` negative", "`i` non-negative", `s[:i]`, or `s[i+len(substr):]`.
+fn cut_check_idx_uses(pass: &Pass<'_>, info: &guff_types::Info, arena: &guff_types::arena::TypeArena, uses: &[CutUse<'_>], s: &Expr, substr: &Expr, i_obj: ObjectId) -> Option<CutUses> {
+    // Upstream's own polarity: a *known* length other than 1 needs no guard.
+    let l = cut_const_substr_len(pass, info, arena, substr);
+    let require_guard = !(l != -1 && l != 1);
+    let span = |n: NodeRef<'_>| (node_pos(n).0 as u32, node_end(n).0 as u32);
+    let mut out = CutUses::default();
+    for u in uses {
+        let me = NodeRef::Ident(u.ident).erased_ptr();
+        let guarded = || !require_guard || cut_slice_index_guarded(pass, info, u, i_obj);
+        let ok = match u.parent() {
+            Some(p @ NodeRef::BinaryExpr(b)) if is_node(NodeRef::Ident(u.ident), &b.x) || is_node(NodeRef::Ident(u.ident), &b.y) => {
+                let from_x = expr_ref(&b.x).erased_ptr() == me;
+                match cut_check_idx_comparison(pass, info, b, i_obj) {
+                    -1 => {
+                        out.negative.push(span(p));
+                        true
+                    }
+                    1 => {
+                        out.nonnegative.push(span(p));
+                        true
+                    }
+                    _ => match u.grandparent() {
+                        Some(g @ NodeRef::SliceExpr(sl)) if cut_same_object(info, s, &sl.x) && sl.max.is_none() => {
+                            // `isBeforeSlice` needs the `SliceExpr_High` edge,
+                            // which an operand of a binary expression never is.
+                            if cut_is_after_slice(pass, info, arena, from_x, sl, substr) && guarded() {
+                                out.after.push(span(g));
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        _ => false,
+                    },
+                }
+            }
+            Some(p @ NodeRef::SliceExpr(sl)) => {
+                let is_high = sl.high.as_deref().is_some_and(|h| expr_ref(h).erased_ptr() == me);
+                let is_low = sl.low.as_deref().is_some_and(|l| expr_ref(l).erased_ptr() == me);
+                if (is_high || is_low) && cut_same_object(info, s, &sl.x) && sl.max.is_none() {
+                    // `isBeforeSlice`: `s[:i]` or `s[0:i]`. (`isAfterSlice`
+                    // has no arm for a slice-index edge.)
+                    let before = is_high && sl.low.as_deref().is_none_or(|l| code::is_integer_constant(pass, l, 0));
+                    if before && guarded() {
+                        out.before.push(span(p));
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        };
+        if !ok {
+            return None;
         }
     }
-    let pos = call.fun.pos().0 as u32;
-    if !go_at_least(pass, pos, "go1.18") {
-        return;
+    Some(out)
+}
+
+/// `hasModifyingUses`: an assignment to the variable after `after` (as the
+/// *first* left-hand operand — upstream compares `Lhs[0]` only), or its
+/// address taken anywhere.
+fn cut_has_modifying_uses(info: &guff_types::Info, uses: &[CutUse<'_>], after: u32) -> bool {
+    for u in uses {
+        let me = NodeRef::Ident(u.ident).erased_ptr();
+        match u.parent() {
+            Some(NodeRef::AssignStmt(a)) if a.lhs.iter().any(|l| expr_ref(l).erased_ptr() == me) => {
+                if u.ident.name_pos.0 as u32 <= after {
+                    continue;
+                }
+                if matches!(a.lhs.first(), Some(Expr::Ident(first))
+                    if info.uses.get(&first.id).is_some() && info.uses.get(&first.id) == info.uses.get(&u.ident.id))
+                {
+                    return true;
+                }
+            }
+            Some(NodeRef::UnaryExpr(un)) if un.op == Token::AND && expr_ref(&un.x).erased_ptr() == me => return true,
+            _ => {}
+        }
     }
-    let Expr::SelectorExpr(sel) = call.fun.as_ref() else {
-        return; // e.g. dot-import
+    false
+}
+
+/// `indexArgValid`: a constant, a local whose value nothing changes after the
+/// call, or `[]byte(x)` of either. Anything else might not be referentially
+/// transparent.
+fn cut_index_arg_valid(info: &guff_types::Info, arena: &guff_types::arena::TypeArena, uses: &HashMap<ObjectId, Vec<CutUse<'_>>>, expr: &Expr, after: u32) -> bool {
+    let Some(tv) = info.types.get(&expr.id()) else {
+        return false;
     };
-    let mut text_edits = vec![
-        TextEdit {
-            pos: assign.lhs[0].end().0 as u32,
-            end: assign.lhs[0].end().0 as u32,
-            new_text: ", _, _".into(),
+    if tv.val.is_some() {
+        return true;
+    }
+    match expr {
+        Expr::CallExpr(call) => {
+            is_byte_slice_type(arena, tv.typ)
+                && info.types.get(&call.fun.id()).is_some_and(|f| f.mode == OperandMode::TypeExpr)
+                && call.args.first().is_some_and(|a| cut_index_arg_valid(info, arena, uses, a, after))
+        }
+        Expr::Ident(id) => match info.uses.get(&id.id) {
+            Some(obj) => !uses.get(obj).is_some_and(|us| cut_has_modifying_uses(info, us, after)),
+            None => true,
         },
-        TextEdit {
-            pos: sel.sel.pos().0 as u32,
-            end: sel.sel.end().0 as u32,
-            new_text: "Cut".into(),
-        },
-        TextEdit {
-            pos: ix.lbrack.0 as u32,
-            end: ix.rbrack.0 as u32 + 1,
-            new_text: String::new(),
-        },
+        _ => false,
+    }
+}
+
+/// `i`'s defining identifier: `var i = F(…)` or `i := F(…)` (or `i = F(…)`,
+/// whose own left-hand `i` then disqualifies it as a use).
+fn cut_i_ident<'a>(call: &'a CallExpr, stack: &[NodeRef<'a>]) -> Option<&'a Ident> {
+    let me = NodeRef::CallExpr(call).erased_ptr();
+    match *stack.last()? {
+        NodeRef::ValueSpec(vs) => {
+            let k = vs.values.iter().position(|v| expr_ref(v).erased_ptr() == me)?;
+            vs.names.get(k)
+        }
+        NodeRef::AssignStmt(a) => {
+            let k = a.rhs.iter().position(|v| expr_ref(v).erased_ptr() == me)?;
+            match a.lhs.get(k)? {
+                Expr::Ident(id) => Some(id),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// `strings.Index{,Byte}` / `bytes.Index{,Byte}` whose result is only ever
+/// tested for `< 0` / `>= 0` or used to slice `s` before or after the match →
+/// `strings.Cut` (or `strings.Contains` when it is only tested).
+fn check_stringscut(pass: &Pass<'_>, pending: &mut Vec<Diagnostic>) {
+    const FUNCS: [(&str, &str, &str); 4] = [
+        ("strings.Index", "strings", "Index"),
+        ("strings.IndexByte", "strings", "IndexByte"),
+        ("bytes.Index", "bytes", "Index"),
+        ("bytes.IndexByte", "bytes", "IndexByte"),
     ];
-    if need_n {
-        text_edits.push(TextEdit {
-            pos: call.args[1].end().0 as u32,
-            end: call.rparen.0 as u32,
-            new_text: String::new(),
+    let Some(info) = pass.types_info() else {
+        return;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return;
+    };
+    let arena = &artifacts.types;
+
+    // The calls, with their ancestors, and every use's position by object.
+    struct Cand<'a> {
+        which: usize,
+        call: &'a CallExpr,
+        stack: Vec<NodeRef<'a>>,
+    }
+    let mut cands: Vec<Cand<'_>> = Vec::new();
+    let mut use_pos: HashMap<ObjectId, Vec<u32>> = HashMap::new();
+    for file in pass.files() {
+        let mut stack = Vec::new();
+        walk::preorder_stack(NodeRef::File(file), &mut stack, |n, st| {
+            match n {
+                NodeRef::CallExpr(call) => {
+                    if let Some(which) = FUNCS.iter().position(|(f, _, _)| code::is_call_to(pass, call, f)) {
+                        cands.push(Cand { which, call, stack: st.to_vec() });
+                    }
+                }
+                NodeRef::Ident(id) => {
+                    if let Some(&o) = info.uses.get(&id.id) {
+                        use_pos.entry(o).or_default().push(id.name_pos.0 as u32);
+                    }
+                }
+                _ => {}
+            }
+            true
         });
     }
-    pending.push(Diagnostic {
-        pos,
-        end: call.fun.end().0 as u32,
-        category: "stringscut".into(),
-        message: format!("{pkg}.{split_name} call can be simplified using {pkg}.Cut"),
-        suggested_fixes: vec![SuggestedFix {
-            message: format!("Replace {pkg}.{split_name} with {pkg}.Cut"),
-            text_edits,
-        }],
-        related: Vec::new(),
-        url: String::new(),
-        severity: String::new(),
-        ..Diagnostic::default()
-    });
+    if cands.is_empty() {
+        return;
+    }
+    // `index.Calls(obj)` per function, each in source order.
+    cands.sort_by_key(|c| (c.which, c.call.lparen.0));
+
+    let object_of_ident = |id: &Ident| -> Option<ObjectId> {
+        info.defs.get(&id.id).copied().flatten().or_else(|| info.uses.get(&id.id).copied())
+    };
+
+    // Which objects need their uses with ancestors: each `i`, and the
+    // variables inside `s` and `substr`.
+    let mut wanted: HashSet<ObjectId> = HashSet::new();
+    for c in &cands {
+        if let Some(o) = cut_i_ident(c.call, &c.stack).and_then(|id| object_of_ident(id)) {
+            wanted.insert(o);
+        }
+        for arg in &c.call.args {
+            walk::preorder(expr_ref(arg), |n| {
+                if let NodeRef::Ident(id) = n {
+                    if let Some(&o) = info.uses.get(&id.id) {
+                        wanted.insert(o);
+                    }
+                }
+                true
+            });
+        }
+    }
+    let mut uses: HashMap<ObjectId, Vec<CutUse<'_>>> = HashMap::new();
+    for file in pass.files() {
+        let mut stack = Vec::new();
+        walk::preorder_stack(NodeRef::File(file), &mut stack, |n, st| {
+            if let NodeRef::Ident(id) = n {
+                if let Some(&o) = info.uses.get(&id.id) {
+                    if wanted.contains(&o) {
+                        uses.entry(o).or_default().push(CutUse { ident: id, stack: st.to_vec() });
+                    }
+                }
+            }
+            true
+        });
+    }
+
+    let pkg_scope = artifacts.packages.get(artifacts.type_pkg).scope();
+    let mut scope_fix_count: HashMap<guff_types::arena::ScopeId, usize> = HashMap::new();
+    for c in &cands {
+        let (_, pkg_name, func_name) = FUNCS[c.which];
+        let call = c.call;
+        if !go_at_least(pass, call.lparen.0 as u32, "go1.18") {
+            continue;
+        }
+        let Some(i_ident) = cut_i_ident(c.call, &c.stack) else {
+            continue;
+        };
+        let Some(i_obj) = object_of_ident(i_ident) else {
+            continue;
+        };
+        let (Some(s), Some(substr)) = (call.args.first(), call.args.get(1)) else {
+            continue;
+        };
+        let call_pos = node_pos(NodeRef::CallExpr(call)).0 as u32;
+        if !cut_index_arg_valid(info, arena, &uses, s, call_pos) || !cut_index_arg_valid(info, arena, &uses, substr, call_pos) {
+            continue;
+        }
+        let no_uses = Vec::new();
+        let i_uses = uses.get(&i_obj).unwrap_or(&no_uses);
+        let Some(found) = cut_check_idx_uses(pass, info, arena, i_uses, s, substr, i_obj) else {
+            continue;
+        };
+        if found.negative.is_empty() && found.nonnegative.is_empty() && found.before.is_empty() && found.after.is_empty() {
+            continue;
+        }
+        let is_contains = (!found.negative.is_empty() || !found.nonnegative.is_empty())
+            && found.before.is_empty()
+            && found.after.is_empty();
+
+        let Some(block) = c.stack.iter().rev().find_map(|n| match n {
+            NodeRef::BlockStmt(b) => Some(*b),
+            _ => None,
+        }) else {
+            continue;
+        };
+        let Some(last_stmt) = block.list.last() else {
+            continue;
+        };
+        let Some(scope) = i_obj.parent(&artifacts.objects) else {
+            continue;
+        };
+        let last_pos = node_pos(stmt_ref(last_stmt)).0 as u32;
+        let last_end = node_end(stmt_ref(last_stmt)).0 as u32;
+        let (block_pos, block_end) = (block.pos().0 as u32, block.end().0 as u32);
+        let i_pos = i_ident.name_pos.0 as u32;
+        // `freshName`: a new name only if `preferred` is declared at the end
+        // of the block *and* referred to in it after `i`; shadowing an unused
+        // name is fine.
+        let fresh = |preferred: &str| -> String {
+            let at = guff_types::scope::innermost(&artifacts.scopes, pkg_scope, last_pos).unwrap_or(pkg_scope);
+            let Some((_, obj)) = guff_types::scope::lookup_parent(&artifacts.scopes, &artifacts.objects, at, preferred, last_pos) else {
+                return preferred.to_string();
+            };
+            let used_after = use_pos.get(&obj).is_some_and(|ps| {
+                ps.iter().any(|&p| p >= block_pos && p < block_end && p >= i_pos)
+            });
+            if used_after {
+                guff_analysis::refactor::fresh_name(&artifacts.scopes, &artifacts.objects, scope, last_end, preferred)
+            } else {
+                preferred.to_string()
+            }
+        };
+        let (mut ok_name, mut before_name, mut after_name, mut found_name) =
+            (String::new(), String::new(), String::new(), String::new());
+        if is_contains {
+            found_name = fresh("found");
+        } else {
+            ok_name = fresh("ok");
+            before_name = fresh("before");
+            after_name = fresh("after");
+        }
+        // A second fix in the same scope must not reuse the first one's names.
+        let count = scope_fix_count.get(&scope).copied().unwrap_or(0);
+        if count > 0 {
+            let suffix = count - 1;
+            if is_contains {
+                found_name = fresh(&format!("{found_name}{suffix}"));
+            } else {
+                ok_name = fresh(&format!("{ok_name}{suffix}"));
+                before_name = fresh(&format!("{before_name}{suffix}"));
+                after_name = fresh(&format!("{after_name}{suffix}"));
+            }
+        }
+        if found.negative.is_empty() && found.nonnegative.is_empty() {
+            ok_name = "_".into();
+        }
+        if found.before.is_empty() {
+            before_name = "_".into();
+        }
+        if found.after.is_empty() {
+            after_name = "_".into();
+        }
+
+        let mut edits: Vec<TextEdit> = Vec::new();
+        let mut replace = |spans: &[(u32, u32)], text: &str| {
+            for &(pos, end) in spans {
+                edits.push(TextEdit { pos, end, new_text: text.to_string() });
+            }
+        };
+        // `typesinternal.UsedIdent(info, call.Fun)`: `Index` in `strings.Index`,
+        // or the bare `Index` of a dot import.
+        let call_id = match code::unparen(&call.fun) {
+            Expr::SelectorExpr(sel) => (sel.sel.name_pos.0 as u32, sel.sel.end().0 as u32),
+            other => (other.pos().0 as u32, other.end().0 as u32),
+        };
+        let i_span = (i_pos, i_ident.end().0 as u32);
+        let replaced = if is_contains {
+            replace(&found.negative, &format!("!{found_name}"));
+            replace(&found.nonnegative, &found_name);
+            edits.push(TextEdit { pos: i_span.0, end: i_span.1, new_text: found_name.clone() });
+            edits.push(TextEdit { pos: call_id.0, end: call_id.1, new_text: "Contains".into() });
+            "Contains"
+        } else {
+            replace(&found.negative, &format!("!{ok_name}"));
+            replace(&found.nonnegative, &ok_name);
+            replace(&found.before, &before_name);
+            replace(&found.after, &after_name);
+            edits.push(TextEdit { pos: i_span.0, end: i_span.1, new_text: format!("{before_name}, {after_name}, {ok_name}") });
+            edits.push(TextEdit { pos: call_id.0, end: call_id.1, new_text: "Cut".into() });
+            "Cut"
+        };
+        // `IndexByte` takes a byte; `Cut` and `Contains` take a string or a
+        // `[]byte`.
+        if func_name == "IndexByte" {
+            let (sp, se) = (substr.pos().0 as u32, substr.end().0 as u32);
+            if pkg_name == "strings" {
+                match code::expr_to_int(pass, substr) {
+                    None => {
+                        edits.push(TextEdit { pos: sp, end: sp, new_text: "string(".into() });
+                        edits.push(TextEdit { pos: se, end: se, new_text: ")".into() });
+                    }
+                    Some(v) => edits.push(TextEdit {
+                        pos: sp,
+                        end: se,
+                        new_text: guff_gostd::strconv::quote_bytes(&[v as u8]),
+                    }),
+                }
+            } else {
+                edits.push(TextEdit { pos: sp, end: sp, new_text: "[]byte{".into() });
+                edits.push(TextEdit { pos: se, end: se, new_text: "}".into() });
+            }
+        }
+        *scope_fix_count.entry(scope).or_insert(0) += 1;
+        pending.push(Diagnostic {
+            pos: call.fun.pos().0 as u32,
+            end: call.fun.end().0 as u32,
+            category: "stringscut".into(),
+            message: format!("{pkg_name}.{func_name} can be simplified using {pkg_name}.{replaced}"),
+            suggested_fixes: vec![SuggestedFix {
+                message: format!("Simplify {pkg_name}.{func_name} call using {pkg_name}.{replaced}"),
+                text_edits: edits,
+            }],
+            ..Diagnostic::default()
+        });
+    }
 }
 
 /// Fact marking a function as "new-like": `func f(x T) *T { return &x }`.
@@ -7653,6 +8154,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         check_atomictypes(pass, &mut pending);
         stamp_category(&mut pending, _before, "atomictypes");
     }
+    if enabled(&options, "stringscut") {
+        let _before = pending.len();
+        check_stringscut(pass, &mut pending);
+        stamp_category(&mut pending, _before, "stringscut");
+    }
     // Computed once per package, like upstream's `sync.OnceValue`, and only
     // when `omitzero` is on — it re-parses every file for comments.
     let uses_kubebuilder = enabled(&options, "omitzero") && package_uses_kubebuilder(pass);
@@ -7769,11 +8275,6 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     check_stmt_list(pass, file, &options, &c.body, &mut pending);
                 }
                 NodeRef::AssignStmt(a) => {
-                    if enabled(&options, "stringscut") {
-                        let _before = pending.len();
-                        check_stringscut(pass, a, &mut pending);
-                        stamp_category(&mut pending, _before, "stringscut");
-                    }
                     if enabled(&options, "reflecttypeassert") {
                         let _before = pending.len();
                         check_reflecttypeassert(pass, file, a, &mut pending);

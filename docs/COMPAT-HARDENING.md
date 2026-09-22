@@ -35588,3 +35588,89 @@ golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 
 台帳: **71/100 at zero**（77 定義、open 3、unmeasured 3）—— dapr の退行が
 測定で表に出た分、1 つ下がった。
+
+### 2026-09-22（続き 332）— `close beats`（35）: modernize `stringscut` は x/tools v0.44 では **Index → Cut**。guff は後の版の Split を持っていた
+
+beats に残った 3 件はどれも gcl-only の `stringscut`:
+
+```
+metricbeat/module/kubernetes/state_container/state_container.go:177  strings.Index … using strings.Cut
+packetbeat/protos/dns/dns.go:516                                      strings.IndexByte … using strings.Cut
+packetbeat/protos/http/http.go:938                                    strings.IndexByte … using strings.Cut
+```
+
+#### 1. guff の stringscut は別物だった
+
+guff の `stringscut` は `strings.Split(s, sep)[0]` → `Cut` で、`settings.rs` が
+既定で**切っていた**（「Suite の stringscut は v0.44 では Index → Cut のみ、
+SplitN は後で入った」）。golangci-lint 2.12.2 が pin する x/tools v0.44 の
+`modernize/stringscut.go`（726 行）は `i := strings.Index(s, sep)` の `i` が
+
+- 「見つからない」（`i < 0`, `i == -1`, `-1 == i`, `0 > i`, `i <= -1`）か
+- 「見つかった」（`i >= 0`, `i != -1`, `i > -1`, `-1 < i`）の比較か
+- `s[:i]` / `s[0:i]`、`s[i+len(sep):]` / `s[len(sep)+i:]` / `s[i+k:]` / `s[k+i:]`
+
+**だけ**に使われるとき `before, after, ok := strings.Cut(s, sep)` を
+（比較だけなら `found := strings.Contains(…)` を）勧める。guff にはそれが無く、
+DEFERRED の一覧に「stringscut Index/Contains patterns」とあった。
+
+#### 2. 移植
+
+- `checkIdxUses`: `i` の各使用を親の辺（`BinaryExpr_X/Y`、`SliceExpr_Low/High`）で
+  分類し、1 つでも外れたら諦める。`preorder_stack` の祖先列で `Cursor` の
+  `ParentEdge` を写した（ポインタ同一性で辺を決める）。
+- `isSliceIndexGuarded`: `after` / `before` の置き換えは `i >= 0` の if の本体、
+  `i < 0` の else、`if i < 0 { return }` の後ろでだけ。関数境界で止まる。
+  **既知の長さが 1 以外**なら guard 不要 —— 上流の条件をそのまま（`l != -1 && l != 1`）。
+- `indexArgValid` / `hasModifyingUses`: `s` / `sep` は定数、呼び出し後に
+  代入されない局所変数（**`Lhs[0]` だけ**を見る上流どおり）、アドレスを
+  取られていない、または `[]byte(x)`。フィールドなどは諦める。
+- 修正文: `freshName`（ブロック内で `i` の後に使われている名前だけ避ける）、
+  同じスコープの 2 件目以降の接尾辞、`IndexByte` の byte 引数を
+  `"x"` / `string(c)` / `[]byte{c}` に。
+- 上流の癖も写した: `s[i-1:]` は「after」扱い（`i + k` の**演算子を見ない**）。
+
+Split 版は削除し、`SUITE_EXTRA_OFF` から外して既定で有効にした。
+
+#### 3. fixture: 33 呼び出し、報告 23・沈黙 10
+
+`modernize/indexcut.go`。beats の 3 形を先頭に、否定形 4 / 肯定形 3 /
+`Contains`、`bytes` と `[]byte(sep)`、変数の byte 2 種、1 バイト区切りの
+guard なし（沈黙）と 3 バイト区切りの guard なし（報告）、else の中、
+`var` 形、名前衝突、同スコープ 2 件、`len(sep)`、`k+i`、`i-1`（上流の癖）、
+関数リテラル越しの guard（沈黙）、3-index slice（沈黙）、括弧つき `(i)`（沈黙）、
+`i > 0`・`i` の逃げ・`s` の再代入・`&s`・フィールド引数・`i =`（全部沈黙）。
+
+**23 件を 1 発で位置一致**、`--fix` は golangci と**バイト一致**
+（`compat/fix/expected/modernize.diff` +208 行）。Rust の単体テストは
+**(行, メッセージ)** の列。旧 fixture の Split 形は沈黙の対照として残した。
+golden +23 キー、消えたキー 0。
+
+#### 4. 過剰報告の掃引
+
+既定で有効にしたので、modernize を有効にしている全 target に効く。それらは
+全部 clean —— つまり**上流の stringscut は 0 件**なので、guff が 1 件でも
+出せば過剰報告。modernize だけの config（各 target の modernize 設定と
+build tag はそのまま）で guff だけを回した:
+
+- 陽性対照 beats: **ちょうど 3 件**、位置も一致。
+- 18 target（alertmanager / argo-cd / argo-workflows / avalanchego /
+  cert-manager / coredns / external-dns / fiber / flipt / gitea / k6 / karmada /
+  otel-collector / podman / prometheus / scaleway-cli / traefik / vitess）: **全部 0**。
+- 「0 は走っていないだけ」でないことを prometheus で確認: modernize の件数が
+  hunt と同じ 16。（最初の掃引は macOS に無い `timeout` を噛ませていて、
+  全部 0 を「測った」。陽性対照で気づいた。）
+
+```
+beats (v9.5.2)
+  前   guff=7551 golangci=7554 both=7551  unexpected=3
+  後   guff=7554 golangci=7554 both=7554  unexpected=0
+```
+
+**閉じたのは 3 件、新規 0 件。beats は 0。** 続き 297 の `close beats`（1）から 35 本目。
+
+golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 緑。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）—— beats が clean に、
+dapr（続き 331 で見つかった bodyclose の退行）が open に残る。
