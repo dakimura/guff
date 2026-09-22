@@ -114,6 +114,12 @@ EXCLUDED = {
     "submodule cannot be named from there (go list ./pdata/... -> \"directory "
     "prefix pdata does not contain main module\"). Upstream lints it as 100 runs "
     "(make golint cds into each module); the harness runs one",
+    "zitadel": "the protobuf / OpenAPI code is generated at build time (buf generate "
+    "over buf.gen.yaml, with zitadel's own authoption / zitadel protoc plugins) and "
+    "committed nowhere: pkg/grpc/message holds message.go alone, naming a "
+    "LocalizedMessage the missing message.pb.go declares, and openapi/handler.go embeds "
+    "v2/zitadel/*. 123 of 330 packages fail to load, and golangci-lint's whole report is "
+    "1 typecheck issue. Host-independent (ollama's shape). Measured 2026-09-22 at v4.17.1",
 }
 
 # Targets whose numbers this host cannot produce. Measuring them anywhere but
