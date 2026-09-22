@@ -2,14 +2,14 @@
 //!
 //! Port of `honnef.co/go/tools/staticcheck/sa9005`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 use guff_analysis::callcheck::{self, render_type, Call, CallContext};
 use guff_analysis::passes::buildir;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 use guff_types::alias::unalias_readonly;
-use guff_types::arena::{ObjectData, TypeData};
+use guff_types::arena::{ObjectArena, ObjectData, TypeArena, TypeData};
 use guff_types::lookup::{lookup_field_or_method, LookupResult};
 use guff_types::object::is_exported;
 use guff_types::TypeId;
@@ -36,6 +36,51 @@ fn has_custom_marshaling(ctx: &CallContext<'_>, typ: TypeId, meths: &[&str]) -> 
     meths.iter().any(|m| has_method(ctx, typ, m))
 }
 
+/// `typeutil.Dereference`: a pointer's element, anything else unchanged.
+fn dereference(arena: &TypeArena, typ: TypeId) -> TypeId {
+    match arena.get(unalias_readonly(arena, typ).underlying(arena)) {
+        TypeData::Pointer(p) => p.elem(),
+        _ => typ,
+    }
+}
+
+/// Is any field of `typeutil.FlattenFields(st)` exported? An embedded struct
+/// (or pointer to one) is replaced by its own fields, recursively, so its
+/// *name* never counts: `struct{ OnlyHidden }` has no exported field and
+/// `struct{ inner }` has `inner.Method`. Any other embedded field is a field
+/// like the rest. A struct already seen contributes nothing (`type R struct{ *R }`).
+fn any_exported_flattened(
+    arena: &TypeArena,
+    objects: &ObjectArena,
+    st: TypeId,
+    seen: &mut HashSet<TypeId>,
+) -> bool {
+    if !seen.insert(st) {
+        return false;
+    }
+    let TypeData::Struct(s) = arena.get(st) else {
+        return false;
+    };
+    for i in 0..s.num_fields() {
+        let ObjectData::Var(v) = objects.get(s.field(i)) else {
+            continue;
+        };
+        if v.embedded() {
+            let inner = unalias_readonly(arena, dereference(arena, v.typ())).underlying(arena);
+            if matches!(arena.get(inner), TypeData::Struct(_)) {
+                if any_exported_flattened(arena, objects, inner, seen) {
+                    return true;
+                }
+                continue;
+            }
+        }
+        if is_exported(v.name()) {
+            return true;
+        }
+    }
+    false
+}
+
 fn check_marshal(call: &mut Call<'_>, ctx: &CallContext<'_>, arg_idx: usize, meths: &[&str]) {
     let Some(arg) = call.args.get_mut(arg_idx) else {
         return;
@@ -48,6 +93,10 @@ fn check_marshal(call: &mut Call<'_>, ctx: &CallContext<'_>, arg_idx: usize, met
     if has_custom_marshaling(ctx, typ, meths) {
         return;
     }
+    // `typeutil.Dereference(T).Underlying().(*types.Struct)`: a pointer to a
+    // struct is checked as the struct — `json.Unmarshal(b, &v)` is the
+    // common shape, and the message names the struct, not the pointer.
+    let typ = dereference(arena, typ);
     let u = unalias_readonly(arena, typ).underlying(arena);
     let TypeData::Struct(s) = arena.get(u) else {
         return;
@@ -55,14 +104,9 @@ fn check_marshal(call: &mut Call<'_>, ctx: &CallContext<'_>, arg_idx: usize, met
     if s.num_fields() == 0 {
         return;
     }
-    for i in 0..s.num_fields() {
-        let field = s.field(i);
-        let ObjectData::Var(v) = objects.get(field) else {
-            continue;
-        };
-        if is_exported(v.name()) {
-            return;
-        }
+    let mut seen = HashSet::new();
+    if any_exported_flattened(arena, objects, u, &mut seen) {
+        return;
     }
     let name = render_type(arena, objects, &ctx.prog.package_arena, typ);
     arg.invalid(format!(

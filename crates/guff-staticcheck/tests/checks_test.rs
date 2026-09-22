@@ -123,6 +123,41 @@ fn sa1026_flags_unmarshalable_types() {
     );
 }
 
+/// Embedded fields follow encoding/json's dominance rules (fakejson is a copy
+/// of its `typeFields`): a field json would not encode — hidden by a
+/// shallower one, beaten by a tagged one, or tied with another — is not a
+/// finding. 15 shapes, 6 reports; pinned by line because every message is
+/// about the same `fn` type and a count would hold for the wrong shapes.
+#[test]
+fn sa1026_follows_json_field_dominance_through_embedding() {
+    let dir = support::testdata("sa1026");
+    let json_stub = dir.join("stub/encoding/json/json.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1026/embed",
+        &dir.join("embed.go"),
+        &[("encoding/json", &json_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, String)> = support::run_analyzer_diagnostics(sa1026::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| (fset.position(guff::position::Pos(d.pos as i64)).line, d.message))
+        .collect();
+    got.sort();
+    let via = |path: &str| format!("trying to marshal unsupported type fn, via {path}");
+    assert_eq!(
+        got,
+        vec![
+            (41, via("x.Inner.Method")),  // 3: not shadowed
+            (76, via("x.AT.Method")),     // 6: the tagged bad field wins the tie
+            (102, via("x.Inner.Method")), // 9: a tagged embedding is a field
+            (136, via("x.PM.F")),         // 13: by value, so not addressable
+            (141, via("x.F")),            // 14: `json:"-,"` is the name "-"
+            (150, via("x.inner.Method")), // 15: unexported struct, exported field
+        ]
+    );
+}
+
 #[test]
 fn sa1026_allows_marshalable_types() {
     let dir = support::testdata("sa1026");
@@ -3277,6 +3312,49 @@ fn sa9005_flags_unexported_struct_marshal() {
     let messages = support::run_analyzer(sa9005::analyzer(), &pkg);
     assert!(!messages.is_empty(), "{messages:?}");
     assert!(messages[0].contains("exported fields"), "{messages:?}");
+}
+
+/// SA9005 dereferences the argument and flattens embedded structs, so an
+/// embedded field's name never counts — only the fields it brings. Ten
+/// shapes, eight reports; pinned by (line, type) because the rest of the
+/// message is the same every time.
+#[test]
+fn sa9005_dereferences_and_flattens_embedded_structs() {
+    let pkg = typecheck_rule("sa9005", "embed.go");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let prefix = "struct type '";
+    let suffix = "' doesn't have any exported fields, nor custom marshaling";
+    let pkg_path = "example.com/staticcheck/sa9005/embed.go.";
+    let mut got: Vec<(i64, String)> = support::run_analyzer_diagnostics(sa9005::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| {
+            let line = fset.position(guff::position::Pos(d.pos as i64)).line;
+            let typ = d
+                .message
+                .strip_prefix(prefix)
+                .and_then(|m| m.strip_suffix(suffix))
+                .unwrap_or(&d.message)
+                .replace(pkg_path, "");
+            (line, typ)
+        })
+        .collect();
+    got.sort();
+    let want: Vec<(i64, String)> = [
+        (25, "onlyHidden"),              // 1: plain
+        (28, "onlyHidden"),              // 2: a pointer names its struct
+        (36, "struct{OnlyHidden}"),      // 4: the embedding's name is not a field
+        (39, "struct{*OnlyHidden}"),     // 5: …by pointer too
+        (45, "struct{ch}"),              // 7: an embedded non-struct is a field
+        (48, "Rec"),                     // 8: self-embedding terminates
+        (51, "onlyHidden"),              // 9: json.Unmarshal(b, &v)
+        (56, "onlyHidden"),              // 10: a named pointer type
+    ]
+    .into_iter()
+    .map(|(l, t)| (l, t.to_string()))
+    .collect();
+    // Silent: 3 (`struct{ inner }` brings `inner.Method`) and 6.
+    assert_eq!(got, want);
 }
 
 #[test]

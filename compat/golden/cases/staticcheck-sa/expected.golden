@@ -175,6 +175,30 @@ sa1026/bad/bad.go:52:15:staticcheck::SA1026: trying to marshal unsupported type 
 sa1026/bad/bad.go:53:15:staticcheck::SA1026: trying to marshal unsupported type map[PlainKey][]int
 sa1026/bad/bad.go:54:15:staticcheck::SA1026: trying to marshal unsupported type map[PtrTextKey][]int
 sa1026/bad/bad.go:57:15:staticcheck::SA1026: trying to marshal unsupported type map[PlainKey][]int, via x.M
+sa1026/embed/embed.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+sa1026/embed/embed.go:23:1:staticcheck::ST1020: comment on exported function ShadowPtr should be of the form "ShadowPtr ..."
+sa1026/embed/embed.go:31:1:staticcheck::ST1020: comment on exported function ShadowVal should be of the form "ShadowVal ..."
+sa1026/embed/embed.go:39:1:staticcheck::ST1020: comment on exported function NotShadowed should be of the form "NotShadowed ..."
+sa1026/embed/embed.go:41:22:staticcheck::SA1026: trying to marshal unsupported type fn, via x.Inner.Method
+sa1026/embed/embed.go:50:1:staticcheck::ST1020: comment on exported function Annihilate should be of the form "Annihilate ..."
+sa1026/embed/embed.go:62:1:staticcheck::ST1020: comment on exported function TagWins should be of the form "TagWins ..."
+sa1026/embed/embed.go:74:1:staticcheck::ST1020: comment on exported function TagWinsBad should be of the form "TagWinsBad ..."
+sa1026/embed/embed.go:76:22:staticcheck::SA1026: trying to marshal unsupported type fn, via x.AT.Method
+sa1026/embed/embed.go:82:1:staticcheck::ST1020: comment on exported function TagShadows should be of the form "TagShadows ..."
+sa1026/embed/embed.go:92:1:staticcheck::ST1020: comment on exported function UnexportedEmbedded should be of the form "UnexportedEmbedded ..."
+sa1026/embed/embed.go:100:1:staticcheck::ST1020: comment on exported function TaggedEmbedded should be of the form "TaggedEmbedded ..."
+sa1026/embed/embed.go:102:22:staticcheck::SA1026: trying to marshal unsupported type fn, via x.Inner.Method
+sa1026/embed/embed.go:107:1:staticcheck::ST1020: comment on exported function DashEmbedded should be of the form "DashEmbedded ..."
+sa1026/embed/embed.go:117:1:staticcheck::ST1020: comment on exported function TwicePromoted should be of the form "TwicePromoted ..."
+sa1026/embed/embed.go:129:1:staticcheck::ST1020: comment on exported function PtrRecvViaPtr should be of the form "PtrRecvViaPtr ..."
+sa1026/embed/embed.go:134:1:staticcheck::ST1020: comment on exported function PtrRecvViaVal should be of the form "PtrRecvViaVal ..."
+sa1026/embed/embed.go:136:22:staticcheck::SA1026: trying to marshal unsupported type fn, via x.PM.F
+sa1026/embed/embed.go:139:1:staticcheck::ST1020: comment on exported function DashComma should be of the form "DashComma ..."
+sa1026/embed/embed.go:141:22:staticcheck::SA1026: trying to marshal unsupported type fn, via x.F
+sa1026/embed/embed.go:142:8:staticcheck::SA5008: malformed `json` tag: invalid trailing ',' character
+sa1026/embed/embed.go:142:8:staticcheck::SA5008: should encoding/json ignore this field or name it "-"? Either use `json:"-"` to ignore the field or use `json:"'-',"` to specify "-" as the name
+sa1026/embed/embed.go:148:1:staticcheck::ST1020: comment on exported function UnexportedStruct should be of the form "UnexportedStruct ..."
+sa1026/embed/embed.go:150:22:staticcheck::SA1026: trying to marshal unsupported type fn, via x.inner.Method
 sa1028/bad/bad.go:13:13:staticcheck::SA1028: sort.Slice must only be called on slices, was called on [1]int
 sa1028/bad/bad.go:14:13:staticcheck::SA1028: sort.Slice must only be called on slices, was called on string
 sa1028/bad/bad.go:15:13:staticcheck::SA1028: sort.Slice must only be called on slices, was called on int
@@ -414,6 +438,25 @@ sa9003/bad/bad.go:4:2:staticcheck::SA9003: empty branch
 sa9003/bad/bad.go:5:9:staticcheck::SA9003: empty branch
 sa9004/bad/bad.go:12:2:staticcheck::SA9004: only the first constant in this group has an explicit type
 sa9005/bad/bad.go:4:28:staticcheck::SA9005: struct type 'example.com/sa9005/bad.t' doesn't have any exported fields, nor custom marshaling
+sa9005/embed/embed.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+sa9005/embed/embed.go:24:1:staticcheck::ST1020: comment on exported function Plain should be of the form "Plain ..."
+sa9005/embed/embed.go:25:36:staticcheck::SA9005: struct type 'example.com/sa9005/embed.onlyHidden' doesn't have any exported fields, nor custom marshaling
+sa9005/embed/embed.go:27:1:staticcheck::ST1020: comment on exported function Pointer should be of the form "Pointer ..."
+sa9005/embed/embed.go:28:38:staticcheck::SA9005: struct type 'example.com/sa9005/embed.onlyHidden' doesn't have any exported fields, nor custom marshaling
+sa9005/embed/embed.go:30:1:staticcheck::ST1020: comment on exported function UnexportedEmbedsExported should be of the form "UnexportedEmbedsExported ..."
+sa9005/embed/embed.go:35:1:staticcheck::ST1020: comment on exported function ExportedEmbedsHidden should be of the form "ExportedEmbedsHidden ..."
+sa9005/embed/embed.go:36:51:staticcheck::SA9005: struct type 'struct{example.com/sa9005/embed.OnlyHidden}' doesn't have any exported fields, nor custom marshaling
+sa9005/embed/embed.go:38:1:staticcheck::ST1020: comment on exported function ExportedEmbedsHiddenPtr should be of the form "ExportedEmbedsHiddenPtr ..."
+sa9005/embed/embed.go:39:54:staticcheck::SA9005: struct type 'struct{*example.com/sa9005/embed.OnlyHidden}' doesn't have any exported fields, nor custom marshaling
+sa9005/embed/embed.go:41:1:staticcheck::ST1020: comment on exported function ExportedEmbedsVisible should be of the form "ExportedEmbedsVisible ..."
+sa9005/embed/embed.go:44:1:staticcheck::ST1020: comment on exported function EmbedsChan should be of the form "EmbedsChan ..."
+sa9005/embed/embed.go:45:41:staticcheck::SA9005: struct type 'struct{example.com/sa9005/embed.ch}' doesn't have any exported fields, nor custom marshaling
+sa9005/embed/embed.go:47:1:staticcheck::ST1020: comment on exported function Recursive should be of the form "Recursive ..."
+sa9005/embed/embed.go:48:40:staticcheck::SA9005: struct type 'example.com/sa9005/embed.Rec' doesn't have any exported fields, nor custom marshaling
+sa9005/embed/embed.go:50:1:staticcheck::ST1020: comment on exported function Unmarshal should be of the form "Unmarshal ..."
+sa9005/embed/embed.go:51:68:staticcheck::SA9005: struct type 'example.com/sa9005/embed.onlyHidden' doesn't have any exported fields, nor custom marshaling
+sa9005/embed/embed.go:53:1:staticcheck::ST1021: comment on exported type P should be of the form "P ..." (with optional leading article)
+sa9005/embed/embed.go:56:42:staticcheck::SA9005: struct type 'example.com/sa9005/embed.onlyHidden' doesn't have any exported fields, nor custom marshaling
 sa9006/bad/bad.go:2:30:staticcheck::SA9006: shifting 8-bit value by 8 bits will always clear it
 sa9007/bad/bad.go:3:12:staticcheck::SA9007: this call to os.RemoveAll deletes the user's entire temporary directory, not a subdirectory therein
 sa9008/bad/bad.go:10:20:staticcheck::SA9008: x refers to the result of a failed type assertion and is a zero value, not the value that was being type-asserted
