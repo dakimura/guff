@@ -36050,3 +36050,24 @@ govet だけの config でも 0。ファイルをそのまま別パッケージ�
 捨てていて、どのメソッドかが出ない。次にこれを追うなら、まずその理由を出すこと。
 
 台帳: **75/100 at zero**（81 定義、open 1、unmeasured 5）
+
+### 2026-09-22（続き 340）— `adopt opentelemetry-collector-contrib` は**除外**。ルートのモジュールに Go ファイルが 1 つも無い
+
+次は **opentelemetry-collector-contrib v0.159.0**（868MB）。兄弟の
+opentelemetry-collector は「100 の go.mod と go.work 無し、`./...` が届くのは 1 パッケージ」で
+除外済み。同じ形かを**クローンせずに**タグの git tree（`git/trees?recursive=1`、truncated
+でない）で数えた:
+
+- `go.mod` は **346**、`go.work` は無い（ルートの `go.mod` はある）。
+- `.go` ファイル **7,621** 個は**全部**ほかの 345 モジュールの下にあり、ルートの
+  モジュールに属する `.go` は **0**。
+
+ハーネスはチェックアウトのルートで 1 パターンを回すので、`./...` はどのパッケージにも
+当たらず、入れ子のモジュールはルートから名指しできない（兄弟の行の
+`directory prefix … does not contain main module`）。上流は Makefile が
+`$(FOR_GROUP_TARGET)` でターゲットを `ALL_MODS` のモジュール群ごとに回す（タグの
+`Makefile` で確認）。兄弟は少なくとも `internal/statusutil` に届いていたが、こちらは 0。
+
+README の除外表と `EXCLUDED` に書いた。
+
+台帳: **75/100 at zero**（81 定義、open 1、unmeasured 5）

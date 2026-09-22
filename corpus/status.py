@@ -124,6 +124,12 @@ EXCLUDED = {
     "candidate's v8.5.7 is v1 and refused) golangci-lint 2.12.2 panics in go/types "
     "(Checker.builtin -> TypeParam.typeset -> isString(nil)) while type-checking a "
     "dependency from source, two runs out of two. Measured 2026-09-22",
+    "opentelemetry-collector-contrib": "346 go.mod files and no go.work, and the root "
+    "module holds no Go file at all: every one of the 7,621 .go files at v0.159.0 sits "
+    "under the other 345 modules, so ./... at the checkout root matches nothing "
+    "(opentelemetry-collector's shape, one step further). Upstream dispatches its targets "
+    "module by module through the Makefile's FOR_GROUP_TARGET over ALL_MODS. Measured "
+    "2026-09-22 from the tag's git tree",
 }
 
 # Targets whose numbers this host cannot produce. Measuring them anywhere but

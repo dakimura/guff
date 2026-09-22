@@ -5,6 +5,7 @@
 
 | 日付 | 内容 |
 |------|------|
+| 2026-09-22 | **`adopt opentelemetry-collector-contrib` は除外**（v0.159.0）: タグの git tree で数えると go.mod 346・go.work 無し、`.go` 7,621 個は全部入れ子の 345 モジュールの下で**ルートのモジュールは 0 ファイル** —— `./...` は何にも当たらない。兄弟の opentelemetry-collector と同じ理由の、さらに極端な形（続き 340） |
 | 2026-09-22 | **`adopt tidb` は除外**: 候補の `v8.5.7` は v1 config で v2 が起動を拒否、`v26.3.17` は v2。そこで golangci-lint 2.12.2 が go/types の中で panic（`Checker.builtin` → `TypeParam.typeset` → `isString(nil)`、依存をソースから型検査中）、2 回中 2 回 —— 相手の出力が無い。guff 側に**再現しない ill-typed 1 件**（`plannersession` の埋め込み struct を `PlanContext` に代入、3 回中 1 回）が出たので手がかりとして記録。guff はその理由を捨てていてメソッド名が出ない（続き 339） |
 | 2026-09-22 | **`adopt mimir`**: hunt で ST1016 の guff-only 1 件 —— `CachedSplit[T]` の受信者 `p` / `c`。上流は「埋め込みメソッドを飛ばす」`Dereference(recv.Type()) != T.Type()` が**ポインタ比較**で、総称型のメソッドの受信者はインスタンス `G[T']` なので全メソッドが飛び、**総称型は一度も報告されない**。6 形で確認、受信者が `IndexExpr` / `IndexListExpr` なら飛ばす。fixture は総称 5 形＋非総称の対照。20 target の差分掃引で変わったのは mimir の 1 行だけ。0 / 0 は `lll` の対照（15,758 件一致）で測定と確認。台帳は **75/100**（続き 338） |
 | 2026-09-22 | **`adopt nomad`**（v2.0.5、15 linter）: タグ無しでは `go-metrics/compat/prometheus` が armon 実装を選んで `command/agent` がコンパイルできない。nomad の `make check` は `golangci-lint run --build-tags "$(GO_TAGS)"`（`ui hashicorpmetrics`）なので `build_tags` をそれに合わせた。**0 / 0 で clean** —— 「何も測っていない」でないことを `errcheck` を足した config で確認（両ツール 9 件一致）。台帳は **74/100**（続き 337） |
