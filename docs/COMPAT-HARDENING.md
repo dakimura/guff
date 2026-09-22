@@ -35896,3 +35896,40 @@ ollama（`//go:embed app/dist` の SPA ビルド成果物）と同じ形だが�
 `corpus/README.md` の除外表と `status.py` の `EXCLUDED` に理由を書いた。
 
 台帳: **73/100 at zero**（79 定義、open 1、unmeasured 5）
+
+### 2026-09-22（続き 337）— `adopt nomad`: build tag を上流の `make check` に合わせて、0 / 0 で clean
+
+次は **nomad v2.0.5**（632MB、`.golangci.yml`、15 linter）。
+
+`go list -e ./...` は **257 パッケージ全部**が load できる。ところがタグ無しの
+`go build ./...` は 1 か所で落ちる:
+
+```
+command/agent/command.go:1358:12: promSink.RunBackgroundCleanup undefined
+  (type *"github.com/hashicorp/go-metrics/compat/prometheus".PrometheusSink …)
+```
+
+`go-metrics/compat/prometheus` は build tag で実装を選ぶ —— `armon.go` は
+`//go:build armonmetrics || ignore || !hashicorpmetrics`、`hashicorp.go` は
+`//go:build hashicorpmetrics`。nomad の `GNUmakefile` は `GO_TAGS := hashicorpmetrics …`
+を**常に**付け、lint も
+
+```make
+@golangci-lint run --build-tags "$(GO_TAGS)"
+```
+
+で回す（ローカルでは `ui hashicorpmetrics`、CI では `codegen_generated` が加わる）。
+`codegen_generated` は `go generate` の出力（`client/structs/structs.generated.go`、
+コミットされていない）を選ぶだけで、`ui` を持つコミット済みファイルも無いので、
+効いているのは `hashicorpmetrics` だけ。3 通りのタグ集合とも `go build` は通る。
+エントリには `make check` の非 CI の集合 `["ui", "hashicorpmetrics"]` を書いた。
+
+```
+nomad: guff=0 golangci=0 both=0  [OK]
+```
+
+**0 / 0 は「何も測っていない」の形でもある**ので確かめた: 同じ config に
+`errcheck` を 1 つ足して両ツールを回すと、**どちらも errcheck 9 件**で一致。解析は
+走っていて、nomad は自分の CI で golangci を通しているので本来の config では 0。
+
+台帳: **74/100 at zero**（80 定義、open 1、unmeasured 5）
