@@ -6,10 +6,10 @@
     "`unmeasured` is not `clean`: an absent measurement is a question."
   ],
   "goal": 100,
-  "defined": 78,
+  "defined": 79,
   "clean": 73,
   "open": 1,
-  "unmeasured": 4,
+  "unmeasured": 5,
   "targets": {
     "alertmanager": {
       "tier": "hunt",
@@ -364,6 +364,12 @@
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
+    },
+    "k3s": {
+      "tier": "hunt",
+      "needs_platform": "linux",
+      "state": "unmeasured",
+      "skipped_on": "darwin"
     },
     "k6": {
       "tier": "hunt",

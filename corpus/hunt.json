@@ -541,5 +541,13 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "40m"
+  },
+  {
+    "name": "k3s",
+    "url": "https://github.com/k3s-io/k3s.git",
+    "ref": "v1.36.3+k3s1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "40m"
   }
 ]

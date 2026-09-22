@@ -129,7 +129,18 @@ EXCLUDED = {
 # Linux-only `unix.*` / `netlink.*` names from files with no build tag
 # (`pkg/datapath/maps`, `pkg/datapath/link`, `pkg/fqdn/proxy/ipfamily`, …), and
 # **224 of its 787 packages** are or import one of them (2026-09-22 続き 334).
-PLATFORM_BOUND = {"cri-o": "linux", "buildah": "linux", "tetragon": "linux", "cilium": "linux"}
+#
+# k3s ships two packages with no darwin file at all (`pkg/cgroups`,
+# `pkg/proctitle`), and `pkg/agent`, every `pkg/cli/*`, every `cmd/*` and the
+# root import them: 16 of 150 packages fail to load, and they are its core
+# (2026-09-22 続き 335).
+PLATFORM_BOUND = {
+    "cri-o": "linux",
+    "buildah": "linux",
+    "tetragon": "linux",
+    "cilium": "linux",
+    "k3s": "linux",
+}
 
 # Targets whose remaining open findings are a scoped-out **feature**, not a
 # defect to chase. `next` skips them so the queue does not hand the same
