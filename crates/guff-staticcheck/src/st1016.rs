@@ -62,6 +62,16 @@ fn recv_type_name(expr: &Expr) -> Option<String> {
     }
 }
 
+/// `G[T]` / `*G[K, V]`: the receiver of a method on a generic type.
+fn is_instantiated_recv(expr: &Expr) -> bool {
+    match expr {
+        Expr::StarExpr(s) => is_instantiated_recv(&s.x),
+        Expr::ParenExpr(p) => is_instantiated_recv(&p.x),
+        Expr::IndexExpr(_) | Expr::IndexListExpr(_) => true,
+        _ => false,
+    }
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let inspect = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
@@ -88,6 +98,18 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let Some(type_name) = recv_type_name(ty) else {
             return;
         };
+        // A method of a generic type never counts. Upstream skips "embedded
+        // methods" with `typeutil.Dereference(recv.Type()) != T.Type()`, a
+        // pointer comparison — and every method of `type G[T any]` declares
+        // its own receiver type parameters, so its receiver is an
+        // *instantiation* `G[T']`, never the origin `G`. Every method is
+        // skipped, the name map stays empty, and a generic type is never
+        // reported however its receivers are named (mimir's
+        // `CachedSplit[T]`: 2x "p", 9x "c"). A generic receiver is always
+        // spelled with its brackets, so the syntax answers it.
+        if is_instantiated_recv(ty) {
+            return;
+        }
         let recv_name = field.names.first().map(|n| n.name.as_str()).unwrap_or("");
         // `code.IsGenerated(pass, recv.Pos())`. An unnamed receiver's `Var` has
         // the type's position, which is what the fallback here spells.

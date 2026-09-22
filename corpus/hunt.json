@@ -561,5 +561,13 @@
       "ui",
       "hashicorpmetrics"
     ]
+  },
+  {
+    "name": "mimir",
+    "url": "https://github.com/grafana/mimir.git",
+    "ref": "mimir-3.2.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "40m"
   }
 ]
