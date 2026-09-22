@@ -35866,3 +35866,33 @@ cilium と同じ扱い: `hunt.json` に足し、`PLATFORM_BOUND` に `"k3s": "li
 （1 行が長くなったので辞書を縦に展開した）。darwin では hunt を回していない。
 
 台帳: **73/100 at zero**（79 定義、open 1、unmeasured 5）
+
+### 2026-09-22（続き 336）— `adopt zitadel` は**除外**。生成コードが無く、上流のレポートは typecheck 1 件
+
+次は **zitadel v4.17.1**（578MB、`.golangci.yaml`）。
+
+`go list ./...` がそもそも通らない:
+
+```
+openapi/handler.go:14:12: pattern v2/zitadel/*: no matching files found
+```
+
+`-e` を付けると **330 中 123 パッケージ**が load に失敗し、ほぼ全部が
+`DepsErrors` の「no required module provides package …」—— `pkg/grpc/settings/v2`
+（111）、`pkg/grpc/object/v3alpha`（67）、`pkg/grpc/system`（34）、`pkg/grpc/object`（23）。
+`pkg/grpc/**` には手書きの半分しか無い: `pkg/grpc/message/` は `message.go` 1 つで、
+それが名指す `LocalizedMessage` を宣言する `message.pb.go` はどのクローンにも無い。
+生成は nx のビルドが `buf.gen.yaml` で `buf generate` を回す（`go` / `go-grpc` /
+`grpc-gateway` / `openapiv2` / `validate` と、zitadel **自身の** `authoption` /
+`zitadel` プラグイン）。
+
+golangci-lint 2.12.2 をリポジトリ自身の config で回した（26 秒）: **1 issue、
+`typecheck`**（`pkg/grpc/message/message.go: undefined: LocalizedMessage`）。
+typecheck issue は run の他の issue を全部消すので、それが上流の答えの全部。
+
+ollama（`//go:embed app/dist` の SPA ビルド成果物）と同じ形だが、欠けているのは
+生成コード。**プラットフォームに依らない** —— どのホストでも `buf generate` を
+回すまで同じで、エントリのスキーマに生成手順を走らせる欄は無い。
+`corpus/README.md` の除外表と `status.py` の `EXCLUDED` に理由を書いた。
+
+台帳: **73/100 at zero**（79 定義、open 1、unmeasured 5）
