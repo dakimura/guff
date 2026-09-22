@@ -5,6 +5,7 @@
 
 | 日付 | 内容 |
 |------|------|
+| 2026-09-22 | **`adopt nomad`**（v2.0.5、15 linter）: タグ無しでは `go-metrics/compat/prometheus` が armon 実装を選んで `command/agent` がコンパイルできない。nomad の `make check` は `golangci-lint run --build-tags "$(GO_TAGS)"`（`ui hashicorpmetrics`）なので `build_tags` をそれに合わせた。**0 / 0 で clean** —— 「何も測っていない」でないことを `errcheck` を足した config で確認（両ツール 9 件一致）。台帳は **74/100**（続き 337） |
 | 2026-09-22 | **`adopt zitadel` は除外**（v4.17.1）: protobuf / OpenAPI の生成コードがコミットされておらず（nx ビルドの `buf generate`、zitadel 自身の protoc プラグイン込み）、`go list ./...` は `pattern v2/zitadel/*` で失敗、`-e` で 330 中 123 が load 失敗。golangci を自身の config で回すと**レポートは typecheck 1 件**。ollama と同じ形でホスト非依存。README の除外表と `EXCLUDED` に（続き 336） |
 | 2026-09-22 | **`adopt k3s`**（v1.36.3+k3s1）: `pkg/cgroups` と `pkg/proctitle` が darwin 用ファイルを持たず、`go build` はコンパイル前の load で止まる。`go list -e` の `DepsErrors` で **150 中 16** —— 割合は小さいが汚染されているのが本体（`pkg/agent`、全 `pkg/cli/*`、全 `cmd/*`、root）で、1 パターンでは避けられない。`PLATFORM_BOUND` に `linux`。台帳は **73/100**（79 定義、unmeasured 5）（続き 335） |
 | 2026-09-22 | **`adopt cilium`**（v1.20.1）: tetragon の親で同じ形。`go build ./...` はビルドタグの無いファイルが Linux 専用の `unix.*` / `netlink.*` を使う 16 パッケージで落ち、それを含む／依存するのは **224 / 787**。汚染の無い部分木は `api`（ほぼ生成物）・`hubble`・`clustermesh-apiserver` だけで本体 `pkg` は 185 / 558 が汚染 —— 絞り込めない。`hunt.json` に足して `PLATFORM_BOUND` に `linux`、darwin では測らない。台帳は **73/100**（78 定義、unmeasured 4）（続き 334） |
