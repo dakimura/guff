@@ -35322,3 +35322,62 @@ golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 緑。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-22（続き 329）— `close beats`（32）: gosec は cgo ファイルの finding を**全部**失う —— 物理ファイル名で報告するから
+
+beats の gosec の guff-only:
+
+```
+auditbeat/module/file_integrity/fileorigin_darwin.go:95
+  G115: integer overflow conversion int64 -> uint64
+```
+
+`C.getxattr(cPath, …, C.size_t(attrSize), 0, 0)` の `C.size_t(attrSize)`。
+
+#### 1. 形ではなく「cgo のファイル」だった
+
+最小再現（`import "C"` の 1 ファイル）で、golangci は**平の `uint64(n)` にすら
+黙った**。同じパッケージの cgo でないファイルの同じ変換は報告する。SSA は
+組めている —— 落ちているのはファイル単位。AST 規則も測った: cgo ファイルの
+`md5.Sum`（G401）、`crypto/md5` import（G501）、`unsafe.Pointer`（G103）を
+golangci は**全部黙り**、guff は全部出していた。
+
+#### 2. 上流: 物理ファイル名 → GOCACHE → Cgo processor
+
+gosec は issue の場所を**`//line` で調整しない名前**で記録する —— AST 規則は
+`issue.New` の `fobj.Name()`、SSA 解析は `newIssue` の `file.Name()`
+（行も `file.Line(pos)` で未調整）。cgo のファイルの物理名は cmd/cgo の出力で
+GOCACHE の下にある。golangci の gosec ラッパはそれをそのまま `Pos.Filename` に
+入れ、`processors/cgo.go` が `strings.HasPrefix(path, goCacheDir)` で捨てる。
+他の linter は `pass.Fset.Position`（調整済み）で元の `.go` に出るので残る。
+
+guff の gosec は調整済みの位置で報告していたので、元のファイルの行に出ていた。
+`excludeGenerated` は無関係（golangci は `false` で `NewAnalyzer` する）。
+
+#### 3. 移植
+
+gosec の報告ループで、**物理位置**（`position_for(pos, false)`）のファイルが
+GOCACHE の下なら捨てる（`dropped_as_cgo_output`）。判定は exclude 側の
+Cgo processor と同じ `guff_runner::is_under_go_cache` を使う —— guff-style に
+guff-runner を通常依存で足した（循環は無い）。
+
+#### 4. fixture が無い理由
+
+cgo は golden に載らない（`import "C"` は CI に C ツールチェインを要する —
+govet の `cgocall` が同じ理由で外れている）。代わりに単体テストで、
+GOCACHE 下の `.cgo1.go` に `//line` で元ファイルを写像した FileSet を作り、
+調整済みの位置が元ファイルであること・物理位置で捨てられること・
+平のファイルは残ること・GOCACHE 不明なら何も捨てないことを固定した。
+
+```
+beats (v9.5.2)
+  前   guff=7554 golangci=7554 both=7551  unexpected=6
+  後   guff=7553 golangci=7554 both=7551  unexpected=5
+```
+
+**閉じたのは 1 件、新規 0 件。**
+
+golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 緑。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
