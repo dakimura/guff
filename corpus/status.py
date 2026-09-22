@@ -124,7 +124,12 @@ EXCLUDED = {
 # (pkg/asm, pkg/constants, pkg/observer/observertesthelper, pkg/reader/namespace)
 # ship only `_linux.go` / `_windows.go`, so `go build ./...` fails on darwin and
 # **70 of its 219 packages** cannot be loaded at all (2026-09-06 続き 217).
-PLATFORM_BOUND = {"cri-o": "linux", "buildah": "linux", "tetragon": "linux"}
+#
+# cilium is tetragon's parent project and the same again: 16 packages use
+# Linux-only `unix.*` / `netlink.*` names from files with no build tag
+# (`pkg/datapath/maps`, `pkg/datapath/link`, `pkg/fqdn/proxy/ipfamily`, …), and
+# **224 of its 787 packages** are or import one of them (2026-09-22 続き 334).
+PLATFORM_BOUND = {"cri-o": "linux", "buildah": "linux", "tetragon": "linux", "cilium": "linux"}
 
 # Targets whose remaining open findings are a scoped-out **feature**, not a
 # defect to chase. `next` skips them so the queue does not hand the same
