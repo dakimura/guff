@@ -35778,3 +35778,55 @@ golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 
 台帳: **73/100 at zero**（77 定義、open 1、unmeasured 3）—— beats（続き 332）と
 dapr が clean。
+
+### 2026-09-22（続き 334）— `adopt cilium`。**787 パッケージ中 224 が darwin で読めない**ので、tetragon と同じく採用して測らない
+
+キューの次は **cilium v1.20.1**（541MB、`.golangci.yaml`）。tetragon（続き 217）の
+親プロジェクトで、同じ形だった。
+
+`go list ./...` は **787 パッケージ**を返すが、`go build ./...` は 16 パッケージで
+落ちる。どれも**ビルドタグの無い**ファイルが Linux にしか無い名前を使っている:
+
+```
+pkg/datapath/maps/maps_generated.go:137:20: undefined: unix.BPF_F_NO_PREALLOC
+pkg/datapath/linux/linux_defaults/linux_defaults.go:72:17: undefined: unix.RTPROT_KERNEL
+pkg/datapath/link/link.go:59:17: undefined: netlink.LinkAddAltName
+pkg/fqdn/proxy/ipfamily/ipfamily.go:26:35: undefined: unix.SOL_IP
+pkg/datapath/linux/netdevice/netdevice.go:22:50: undefined: netlink.FAMILY_V4
+…（ほか bandwidth / route/reconciler / probes / loadinfo / device / ztunnel/iptables /
+   bgp/test / testutils/netlink / testutils/scriptnet / cilium-cni/chaining/generic-veth /
+   tools/dpgen）
+```
+
+その 16 を**自分か依存に含む**パッケージは `go list -deps` で数えて
+**224 / 787（28%）**（tetragon は 70 / 219 = 32%）。
+
+#### 絞り込める部分木は無い
+
+トップレベルごとの汚染:
+
+| dir | 汚染 / 総数 |
+|---|---|
+| `pkg` | 185 / 558 |
+| `operator` | 13 / 65 |
+| `daemon` | 5 / 10 |
+| `plugins` | 6 / 9 |
+| `standalone-dns-proxy` | 5 / 8 |
+| `api` | 0 / 47 |
+| `hubble` | 0 / 19 |
+| `clustermesh-apiserver` | 0 / 15 |
+
+汚染の無い部分木は `api`（ほぼ swagger の生成物）・`hubble`・`clustermesh-apiserver`
+だけで、本体の `pkg` は 3 分の 1 が汚染されている。`packages` は 1 パターンしか
+取らないので、測れるのは生成物中心の周辺だけになる —— それは cilium を測ったことに
+ならない（inspektor-gadget と同じ判断）。
+
+#### 扱い
+
+tetragon と同じ: `hunt.json` に足し、`status.py` の `PLATFORM_BOUND` に
+`"cilium": "linux"`。Linux ホストならそのまま測れる。darwin での hunt は
+回していない —— 型検査できないパッケージが 1 つでもあると golangci の
+typecheck issue がレポート全体を潰す（続き 217、dagger の除外理由）ので、
+ここで出る数字は互換性ではなくプラットフォームの記録になる。
+
+台帳: **73/100 at zero**（78 定義、open 1、unmeasured 4）

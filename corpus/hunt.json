@@ -533,5 +533,13 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "40m"
+  },
+  {
+    "name": "cilium",
+    "url": "https://github.com/cilium/cilium.git",
+    "ref": "v1.20.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "40m"
   }
 ]
