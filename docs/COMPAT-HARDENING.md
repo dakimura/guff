@@ -36141,3 +36141,77 @@ golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 緑。
 
 台帳: **76/100 at zero**（82 定義、open 1、unmeasured 5）
+
+### 2026-09-23（続き 342）— `adopt datadog-agent`: build tag は上流の `invoke` が計算する 26 個、`./tools/...` の 1 パッケージだけ外す
+
+次は **datadog-agent 7.82.3**（945MB、`.golangci.yml`、`go.work` あり）。
+
+#### 1. タグ無しで測ると両側とも壊れる
+
+最初の hunt（タグ無し）は
+
+- guff: **254 パッケージが ill-typed** —— `undefined: fxutil.TestOneShotSubcommand`、
+  `undefined: config.NewMock` …。どれも `//go:build test` などのタグの向こうにある。
+- golangci: レポート全体が **typecheck 3 件**（`tools/host-profiler/extract_symbols` が
+  linux 専用の `comp/host-profiler/symboluploader` を import している）。
+
+上流は `invoke` 経由で回す:
+
+```python
+cmd = f'golangci-lint run … --build-tags "{tags_arg}" --path-prefix "{base_path}" {targets_str}'
+```
+
+`tags_arg` は `tasks/build_tags.bzl` のタグ集合から `get_default_build_tags(build="lint")` が
+計算する。darwin ぶんを同じ式で出すと 26 個:
+
+```
+cel clusterchecks consul containerd cri docker ec2 etcd fargateprocess grpcnotrace jmx
+kubeapiserver kubelet ncm oracle orchestrator otlp python retrynotrace sharedlibrarycheck
+systemprobechecks test trivy_no_javadb zk zlib zstd
+```
+
+（`LINUX_ONLY_TAGS` = netcgo / systemd / jetson / linux_bpf / nvml / pcap / podman / trivy /
+crio は darwin で落ちる。`python` は rtloader の cgo を有効にするが、ヘッダは
+リポジトリにあり `go build` は通る。）
+
+このタグでは **1623 中 1622 パッケージが load できる**。残る 1 つが上の
+`tools/host-profiler/extract_symbols` で、`./tools/...` にはそれ**しか**無い。
+typecheck issue は run の他の issue を全部消すので、`packages` を残り 6 つの
+サブツリーに絞った:
+
+```
+./cmd/... ./comp/... ./internal/... ./pkg/... ./rtloader/... ./test/...
+```
+
+`./rtloader/...` も外した（11 パッケージ、全部 `rtloader/test/*`）:
+`helpers_native.go` が `#include <datadog_agent_rtloader.h>` を書いていて、その
+ヘッダは cmake のビルド（`inv rtloader.build`）が作る。**両ツールとも**そこで
+`fatal error: 'datadog_agent_rtloader.h' file not found` になり、golangci は
+やはり typecheck 1 件にレポート全体を潰す。残るのは **1623 中 1611**。
+
+#### 2. 測れた
+
+```
+datadog-agent: guff=107 golangci=14 both=14  P=13.1%  R=100.0%
+  ill-typed 0、typecheck の崩壊なし、gcl-only 0
+```
+
+**上流の 14 件は全部 guff も出している（R=100%）。** 残る 93 件は guff-only:
+
+| linter | rule | 件数 |
+|---|---|--:|
+| revive | var-declaration | 41 |
+| revive | duplicated-imports | 20 |
+| revive | package-comments | 15 |
+| revive | unexported-return | 6 |
+| revive | blank-imports | 5 |
+| staticcheck | S1001（`copy(to, from)`） | 5 |
+| bodyclose | response body must be closed | 1 |
+
+`var-declaration` の多くと `duplicated-imports` の全部は **cgo が生成した宣言**
+（`var _cgo1 _Ctype_int`、cgo の前文が入れる 2 つ目の `import "unsafe"`）で、
+`//line` で手書きのファイルの行に落ちてくる —— 続き 322 の QF1011 と同じ形。
+ほかの 5 種はそれぞれ別の欠陥。1 件ずつ close していく。
+
+台帳: **76/100 at zero**（83 定義、open 2、unmeasured 5）—— datadog-agent は
+open 93 で入り、loki（deferred）と並ぶ。

@@ -6,9 +6,9 @@
     "`unmeasured` is not `clean`: an absent measurement is a question."
   ],
   "goal": 100,
-  "defined": 82,
+  "defined": 83,
   "clean": 76,
-  "open": 1,
+  "open": 2,
   "unmeasured": 5,
   "targets": {
     "alertmanager": {
@@ -228,6 +228,19 @@
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
+    },
+    "datadog-agent": {
+      "tier": "hunt",
+      "state": "open",
+      "at": "20260922T225137Z",
+      "open": 93,
+      "guff_only": 93,
+      "gcl_only": 0,
+      "by_linter": {
+        "revive": 87,
+        "staticcheck": 5,
+        "bodyclose": 1
+      }
     },
     "dubbo-go": {
       "tier": "hunt",
