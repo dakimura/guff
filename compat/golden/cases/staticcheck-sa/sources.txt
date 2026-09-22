@@ -65,6 +65,7 @@ sa1025/bad/bad.go                            crates/guff-staticcheck/tests/testd
 sa1025/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa1025/ok.go
 sa1026/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa1026/bad.go
 sa1026/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa1026/ok.go
+sa1026/embed/embed.go                        crates/guff-staticcheck/tests/testdata/sa1026/embed.go
 sa1027/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa1027/bad.go
 sa1027/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa1027/ok.go
 sa1028/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa1028/bad.go
@@ -223,6 +224,7 @@ sa9004/bad/bad.go                            crates/guff-staticcheck/tests/testd
 sa9004/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa9004/ok.go
 sa9005/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa9005/bad.go
 sa9005/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa9005/ok.go
+sa9005/embed/embed.go                        crates/guff-staticcheck/tests/testdata/sa9005/embed.go
 sa9006/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa9006/bad.go
 sa9006/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa9006/ok.go
 sa9007/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa9007/bad.go

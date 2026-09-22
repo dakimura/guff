@@ -35381,3 +35381,105 @@ golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 緑。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-22（続き 330）— `close beats`（33）: fakejson は `encoding/json` の写し —— 埋め込みの**支配規則**ごと。隣の SA9005 も埋め込みを見ていなかった
+
+beats の staticcheck の guff-only:
+
+```
+libbeat/processors/fingerprint/config.go:42
+  SA1026: trying to marshal unsupported type hashMethod, via x.Alias.Method.Hash
+```
+
+```go
+func (c *Config) MarshalJSON() ([]byte, error) {
+	type Alias Config
+	return json.Marshal(&struct {
+		Method   string
+		Encoding string
+		*Alias
+	}{…})
+}
+```
+
+`Alias.Method`（中に `func() hash.Hash`）は外側の `Method string` に**隠されて**
+いて、json はそれを出さない。
+
+#### 1. guff の fakejson は「最小移植」だった
+
+上流の `fakejson/encode.go` の冒頭:
+
+> This file contains a modified copy of the encoding/json encoder. …
+> with the same rules for tags, shadowing and addressability as encoding/json.
+
+`typeFields` は `encoding/json` のそれで、埋め込み構造体を幅優先でたどり、
+名前ごとに**生き残りを 1 つ**選ぶ: 浅い方、同じ深さなら json タグ付き、
+それでも並べば**両方消える**。guff は全フィールドを再帰で見るだけだった。
+
+#### 2. 15 形を測った
+
+| # | 形 | golangci | guff（前 ※） |
+|--:|---|---|---|
+| 1 | 外側の `Method string` が `*Inner` の `Method` を隠す（beats） | 沈黙 | 報告 |
+| 2 | 同、値で埋め込み | 沈黙 | 報告 |
+| 3 | 隠されない | **報告** | 報告 |
+| 4 | 同じ深さの 2 つが同名 → 両方消える | 沈黙 | 報告 |
+| 5 | タグ付きの良い方が勝つ | 沈黙 | 報告 |
+| 6 | タグ付きの悪い方が勝つ | **報告** | 報告 |
+| 7 | 浅いタグ名が深いフィールドを隠す | 沈黙 | 報告 |
+| 8 | 非公開の非構造体の埋め込み（`ch`）は無視 | 沈黙 | 報告 |
+| 9 | json 名の付いた埋め込みは平らにならず 1 フィールド | **報告** | 報告 |
+| 10 | `json:"-"` の埋め込み | 沈黙 | 沈黙 |
+| 11 | 深さ 2 に同じ構造体が 2 経路で届く → 消える | 沈黙 | 報告 |
+| 12 | ポインタで埋め込み → addressable、ポインタ受信の `MarshalJSON` が効く | 沈黙 | 沈黙 |
+| 13 | 値の中に値で埋め込み → 非 addressable、中を見る | **報告** | 報告 |
+| 14 | `json:"-,"` は名前 `-` のフィールド（出力される） | **報告** | 沈黙 |
+| 15 | 非公開の埋め込み構造体の公開フィールド | **報告** | 報告 |
+
+※「前」は旧コードからの読み。後は 15 形とも両ツール一致（報告 6・沈黙 9）。
+
+#### 3. 移植
+
+`typeFields` を写した: `(型, canAddr)` の visited、同じ深さで 2 度届いた型の
+重複（消去のため）、名前 → 深さ → タグ → index の整列、`dominantField`、
+index 順での検査。型と経路は `typeByIndex` / `pathByIndex` と同じく index から
+再導出する（途中のポインタは addressable）。`json:"-"` の判定も上流どおり
+**完全一致**だけにした（`-,` は名前 `-`）。
+
+#### 4. fixture が隣の欠陥を出した: SA9005
+
+fixture の 15 形目（`struct{ inner }`）に guff の **SA9005** が
+「公開フィールドが無い」と出し、golangci は黙った。上流の SA9005 は
+`typeutil.Dereference(T)` してから `typeutil.FlattenFields` を見る —— 埋め込み
+構造体（とそのポインタ）は**自分の名前ではなく中身**で数える。guff は
+deref も平坦化もしていなかった。10 形測ると guff 3 件・golangci 8 件:
+
+- **ポインタ引数を丸ごと見逃していた**。`json.Unmarshal(b, &v)`、
+  `json.Marshal(&v)`、名前付きポインタ型 —— SA9005 のいちばん普通の形。
+- 公開名の埋め込み（`struct{ OnlyHidden }` / `*OnlyHidden`）で中が全部
+  非公開なら報告（guff は名前で黙った）。
+- 自己埋め込み `type Rec struct{ *Rec; x int }` は止まって報告。
+- 逆に `struct{ inner }` は `inner.Method` を持つので沈黙（guff の誤報告）。
+
+`dereference` と `any_exported_flattened` を足して 8/8 一致。fixture は
+`sa9005/embed.go`（10 形）、stub の `encoding/json` に `Unmarshal` を足した。
+上流が呼び出しごとにしている `code.IsGenerated` は移植していない ——
+staticcheck の報告は生成ファイルでは driver 側で全部落ちるので冗長。
+
+Rust の単体テストはどちらも **(行, メッセージ)** の列。golden は
+`staticcheck-sa` に 43 キー増えて**消えたキー 0**、ratchet は既存の
+missing 3 / extra 1 のまま。
+
+```
+beats (v9.5.2)
+  前   guff=7553 golangci=7554 both=7551  unexpected=5
+  後   guff=7552 golangci=7554 both=7551  unexpected=4
+```
+
+**閉じたのは 1 件、新規 0 件。** SA9005 の変更は beats では何も増やさなかった
+（staticcheck の件数は SA1026 の 1 件分だけ減った）。
+
+golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 緑。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
