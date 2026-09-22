@@ -584,5 +584,41 @@
       "CGO_ENABLED": "0",
       "GOEXPERIMENT": "jsonv2"
     }
+  },
+  {
+    "name": "datadog-agent",
+    "url": "https://github.com/DataDog/datadog-agent.git",
+    "ref": "7.82.3",
+    "packages": "./cmd/... ./comp/... ./internal/... ./pkg/... ./test/...",
+    "tier": "hunt",
+    "timeout": "60m",
+    "build_tags": [
+      "cel",
+      "clusterchecks",
+      "consul",
+      "containerd",
+      "cri",
+      "docker",
+      "ec2",
+      "etcd",
+      "fargateprocess",
+      "grpcnotrace",
+      "jmx",
+      "kubeapiserver",
+      "kubelet",
+      "ncm",
+      "oracle",
+      "orchestrator",
+      "otlp",
+      "python",
+      "retrynotrace",
+      "sharedlibrarycheck",
+      "systemprobechecks",
+      "test",
+      "trivy_no_javadb",
+      "zk",
+      "zlib",
+      "zstd"
+    ]
   }
 ]
