@@ -2311,6 +2311,12 @@ pub(crate) fn collect_g115(
     src_funcs: &[FuncId],
     pending: &mut Vec<(u32, u32, String)>,
 ) {
+    // gosec `overflowState.msgCache`: one message per (src kind, dst kind)
+    // for the whole package, never reset between functions. The first
+    // conversion reached names every later one of the same kinds — a
+    // `byte(r)` of an `int32` parameter reads "rune -> byte" when a string
+    // range came first, and a `uint8(x)` reads "-> byte" after a `byte(x)`.
+    let mut msg_cache: HashMap<(BasicKind, BasicKind), String> = HashMap::new();
     for &fid in src_funcs {
         let func = prog.functions.get(fid);
         if func.blocks.is_empty() {
@@ -2352,11 +2358,16 @@ pub(crate) fn collect_g115(
                 else {
                     continue;
                 };
-                let msg = format!(
-                    "G115: integer overflow conversion {} -> {}",
-                    src_basic.name(),
-                    dst_basic.name()
-                );
+                let msg = msg_cache
+                    .entry((src_basic.kind(), dst_basic.kind()))
+                    .or_insert_with(|| {
+                        format!(
+                            "G115: integer overflow conversion {} -> {}",
+                            src_basic.name(),
+                            dst_basic.name()
+                        )
+                    })
+                    .clone();
                 let pos = func.pos(iid);
                 if pos.is_valid() {
                     pending.push((pos.0 as u32, pos.0 as u32, msg));

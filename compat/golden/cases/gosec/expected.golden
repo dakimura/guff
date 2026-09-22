@@ -108,6 +108,27 @@ g115/g115.go:235:15:gosec:high:G115: integer overflow conversion uint64 -> int64
 g115/g115.go:242:15:gosec:high:G115: integer overflow conversion uint64 -> int64
 g115/g115.go:272:34:gosec:high:G115: integer overflow conversion uint64 -> int64
 g115/g115.go:284:14:gosec:high:G115: integer overflow conversion uint64 -> int64
+g115c/g115_cache.go:13:40:gosec:high:G115: integer overflow conversion int32 -> byte
+g115c/g115_cache.go:17:11:gosec:high:G115: integer overflow conversion int32 -> byte
+g115c/g115_cache.go:22:38:gosec:high:G115: integer overflow conversion int32 -> byte
+g115c/g115_cache.go:25:51:gosec:high:G115: integer overflow conversion uint8 -> int8
+g115c/g115_cache.go:28:43:gosec:high:G115: integer overflow conversion uint8 -> int8
+g115c/g115_cache.go:30:53:gosec:high:G115: integer overflow conversion uint8 -> int8
+g115c/g115_cache.go:33:41:gosec:high:G115: integer overflow conversion int64 -> byte
+g115c/g115_cache.go:36:44:gosec:high:G115: integer overflow conversion int64 -> byte
+g115c/g115_cache.go:43:34:gosec:high:G115: integer overflow conversion uint16 -> int8
+g115c/g115_cache.go:46:41:gosec:high:G115: integer overflow conversion uint16 -> int8
+g115f/g115_files_a.go:7:37:gosec:high:G115: integer overflow conversion byte -> int8
+g115f/g115_files_b.go:3:39:gosec:high:G115: integer overflow conversion byte -> int8
+g115n/g115_names.go:23:11:gosec:high:G115: integer overflow conversion rune -> byte
+g115n/g115_names.go:28:44:gosec:high:G115: integer overflow conversion rune -> byte
+g115n/g115_names.go:33:11:gosec:high:G115: integer overflow conversion rune -> byte
+g115n/g115_names.go:41:11:gosec:high:G115: integer overflow conversion rune -> byte
+g115n/g115_names.go:49:11:gosec:high:G115: integer overflow conversion rune -> byte
+g115n/g115_names.go:54:42:gosec:high:G115: integer overflow conversion rune -> byte
+g115n/g115_names.go:59:11:gosec:high:G115: integer overflow conversion rune -> byte
+g115n/g115_names.go:67:12:gosec:high:G115: integer overflow conversion rune -> byte
+g115n/g115_names.go:80:43:gosec:high:G115: integer overflow conversion uint8 -> int8
 g117/g117.go:25:29:gosec:medium:G117: Marshaled struct field "Password" (JSON key "password") matches secret pattern
 g117/g117.go:28:35:gosec:medium:G117: Marshaled struct field "Password" (JSON key "password") matches secret pattern
 g117/g117.go:31:40:gosec:medium:G117: Marshaled struct field "Password" (JSON key "password") matches secret pattern

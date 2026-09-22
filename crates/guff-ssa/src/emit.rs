@@ -394,7 +394,8 @@ fn default_basic_type(prog: &Program, ut: TypeId) -> TypeId {
     let dflt = match kind {
         BasicKind::UntypedBool => BasicKind::Bool,
         BasicKind::UntypedInt => BasicKind::Int,
-        BasicKind::UntypedRune => BasicKind::Int32,
+        // `types.Default` answers `universeRune` ("use 'rune' name").
+        BasicKind::UntypedRune => return prog.rune_type(),
         BasicKind::UntypedFloat => BasicKind::Float64,
         BasicKind::UntypedComplex => BasicKind::Complex128,
         BasicKind::UntypedString => BasicKind::String,

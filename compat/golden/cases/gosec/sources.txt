@@ -14,8 +14,10 @@
 # one analysis and so want one package). g710v/ is the taint engine again, on
 # its own because what it pins is a *loss* — the variadic tail go/ssa packs into
 # an array the callee summary cannot see through — and g124e/ is G124 over the
-# composite literals that elide their element type. The rest share the files
-# below.
+# composite literals that elide their element type. g115n/, g115c/ and g115f/
+# are G115's *message names*: gosec caches one message per kind pair for the
+# whole package, so each scenario needs a package of its own (g115f/ is two
+# files, for the order across them). The rest share the files below.
 bad/bad.go            crates/guff-style/tests/testdata/gosec/bad.go
 ok/ok.go              crates/guff-style/tests/testdata/gosec/ok.go
 scores/scores.go      crates/guff-style/tests/testdata/gosec/scores.go
@@ -23,6 +25,10 @@ settings/settings.go  crates/guff-style/tests/testdata/gosec/settings.go
 g602/g602.go          crates/guff-style/tests/testdata/gosec/g602.go
 g602v/g602_variadic.go  crates/guff-style/tests/testdata/gosec/g602_variadic.go
 g115/g115.go          crates/guff-style/tests/testdata/gosec/g115.go
+g115n/g115_names.go   crates/guff-style/tests/testdata/gosec/g115_names.go
+g115c/g115_cache.go   crates/guff-style/tests/testdata/gosec/g115_cache.go
+g115f/g115_files_a.go  crates/guff-style/tests/testdata/gosec/g115_files_a.go
+g115f/g115_files_b.go  crates/guff-style/tests/testdata/gosec/g115_files_b.go
 g118/g118.go          crates/guff-style/tests/testdata/gosec/g118.go
 g119/g119.go          crates/guff-style/tests/testdata/gosec/g119.go
 g123/g123.go          crates/guff-style/tests/testdata/gosec/g123.go

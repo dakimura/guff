@@ -116,7 +116,7 @@ pub use arena::{
 pub use array::{array_elem, array_len, new_array, Array};
 pub use assignments::{assignable_to, AssignableResult};
 pub use basic::{
-    basic_info, basic_kind, basic_name, init_universe, lookup_basic, Basic, BasicInfo, BasicKind,
+    basic_info, basic_kind, basic_name, init_universe, lookup_basic, lookup_rune, Basic, BasicInfo, BasicKind,
     BASIC_KIND_COUNT, BYTE, IS_BOOLEAN, IS_COMPLEX, IS_CONST_TYPE, IS_FLOAT, IS_INTEGER,
     IS_NUMERIC, IS_ORDERED, IS_STRING, IS_UNSIGNED, IS_UNTYPED, RUNE,
 };

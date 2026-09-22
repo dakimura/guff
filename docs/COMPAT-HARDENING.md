@@ -35234,3 +35234,91 @@ golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 緑。
 
 台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）
+
+### 2026-09-22（続き 328）— `close beats`（31）: gosec G115 の型名は「最初に見た変換」の名前
+
+beats の **gosec** の食い違い 1 対（同数の guff-only / gcl-only ＝ 文言の差）:
+
+```
+auditbeat/module/file_integrity/event.go:519
+  gcl   G115: integer overflow conversion rune -> byte
+  guff  G115: integer overflow conversion int32 -> byte
+```
+
+`for i, c := range rwx { buf[w] = byte(c) }`（`rwx` は文字列定数）。
+
+#### 1. 欠陥は 2 つ、測ると 3 つ目が出た
+
+1 形 1 関数で 10 形測った（定数・リテラル・変数・名前付き文字列の range、
+`rune` / `int32` 引数、`[]rune` と `[]rune(s)` の range、`r := 'a'`、`uint8 -> int8`）。
+
+- **文字列 range の値が `int32`**。go/ssa は `tRune =
+  types.Universe.Lookup("rune").Type()`（"prints as "rune""）を使う
+  （`builder.go:103` / `:2180`）。guff の SSA は `basic_type(Int32)` ＝
+  `Typ[Int32]` で、`int32` と印字される。boxing の `types.Default(untyped rune)`
+  も同じく `universeRune` なので、`emit.rs` の既定型も直した。
+- **上流は `int32` 引数を「rune」と呼ぶ**。`int32Param(r int32) byte` に
+  golangci は `rune -> byte` を出した。`conversion_overflow.go:105` の
+  `state.msgCache[conversionPair{src.Kind(), dst.Kind()}]` がパッケージ全体で
+  1 つ（`Reset` は消さない）で、**その kind の組で最初に届いた変換が後の全部に
+  名前を付ける**。`uint8` と `byte`、`int32` と `rune` は kind が同じなので、
+  2 つ目以降は自分の綴りを印字しない。宛先側も同じ（`byte(x)` の後の
+  `uint8(x)` は `-> byte`）。
+- **「最初」の順序が名前順だった**。キャッシュを入れても `int8(s[i])`
+  （`uint8`）の後の `[]byte` 要素が `byte` のまま残った。guff の
+  `collect_src_funcs_with_methods` は関数を**名前でソート**していた。
+  `buildssa` はファイル順 × `Decls` 順で、各関数の直後にその関数リテラルを
+  深さ優先で並べる（`addAnons`）。キャッシュが無い間はこの順序は
+  観測できなかった —— 出力は後でソートされるので。
+
+途中で 2 形が guff から消えて見えたのは、guff の既定 `max-same-issues: 3` が
+同文の 4 件目以降を落としていただけだった（golangci 側だけ `=0` を付けていた）。
+比較には config 側に `issues.max-same-issues: 0` を書く。
+
+#### 2. 移植
+
+- `guff_types::lookup_rune` / `Program::rune_type()`: 名前 `rune` の alias basic
+  （`init_alias_basics` が作る）を返す。range の値型と `default_basic_type` が使う。
+- `collect_g115`: `(BasicKind, BasicKind) -> String` の表を関数の外に持つ。
+- `collect_src_funcs_with_methods`: `func_pos` で並べ、各関数の直後に
+  `anon_funcs` を再帰で。gosec の SSA 解析 7 つがこれを共有する。
+
+#### 3. fixture
+
+キャッシュはパッケージ単位なので、シナリオごとに別パッケージにした:
+
+- `g115_names.go`（9 件）: 先頭が定数 range → 以降の `int32` 引数・リテラル /
+  変数 / 名前付き文字列 / `[]rune` / クロージャ内の range・`rune` 引数が全部
+  `rune -> byte`。`r := 'a'` は畳まれて沈黙。別の組は別の名前。
+- `g115_cache.go`（10 件）: 逆側。先頭が `int32` 引数 → 以降の文字列 range は
+  `int32 -> byte`。`int8(s[i])` が先 → `byte` 引数は `uint8 -> int8`。
+  `byte(x)` が先 → `uint8(x)` は `-> byte`。メソッドとその中のリテラルは
+  宣言位置で届く。**関数名はアルファベットに逆らって**付けてある
+  （`zInt32` が `aRange` より前）ので、名前順なら答えが変わる。
+- `g115_files_{a,b}.go`: 2 ファイルのパッケージ。`a` の `byte` が `b` の `uint8`
+  に名前を付ける。Rust の fixture ハーネスは 1 パッケージ 1 ファイルなので
+  golden だけ。
+
+golden は 21 行増えて**消えたキー 0**、位置・型名まで一致。Rust の単体テストは
+**`(行, メッセージ)` の列**で固定した —— メッセージが繰り返すので、件数では
+間違った行でも真になる。
+
+```
+beats (v9.5.2)
+  前   guff=7554 golangci=7554 both=7550  P=99.9%  R=99.9%  unexpected=8
+  後   guff=7554 golangci=7554 both=7551  P=100.0% R=100.0% unexpected=6
+```
+
+**閉じたのは 1 件（両側 2 行）、新規 0 件。**
+
+#### 4. 次の 1 件（測定のみ）
+
+`fileorigin_darwin.go:95` の `G115: int64 -> uint64` は guff だけが出す。
+`C.getxattr(cPath, …, unsafe.Pointer(&data[0]), C.size_t(attrSize), 0, 0)` ——
+`unsafe.Pointer` 引数を持つ cgo 呼び出しは cgo が引数をクロージャに書き直す。
+型名ではなく cgo の問題なので、この変更には入れていない。
+
+golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 緑。
+
+台帳: **72/100 at zero**（77 定義、open 2、unmeasured 3）

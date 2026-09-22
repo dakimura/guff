@@ -131,30 +131,36 @@ pub(crate) fn collect_src_funcs_with_methods(prog: &Program, pkg: PackageId) -> 
         }
         named.push((f.name.clone(), fid));
     }
-    named.sort_by(|(a, _), (b, _)| a.cmp(b));
-    let mut funcs: Vec<FuncId> = named.into_iter().map(|(_, f)| f).collect();
     // Also package-level members (in case the object filter missed some).
     let ssa_pkg = prog.packages.get(pkg);
-    let mut top: Vec<(&str, FuncId)> = ssa_pkg
-        .members
-        .iter()
-        .filter_map(|(name, m)| match m {
-            MemberData::Function(fid) => Some((name.as_str(), *fid)),
-            _ => None,
-        })
-        .collect();
-    top.sort_by(|(a, _), (b, _)| a.cmp(b));
-    for (_, fid) in top {
-        if prog.functions.get(fid).synthetic.as_deref() == Some("package initializer") {
+    for (name, m) in ssa_pkg.members.iter() {
+        let MemberData::Function(fid) = m else {
+            continue;
+        };
+        if prog.functions.get(*fid).synthetic.as_deref() == Some("package initializer") {
             continue;
         }
-        if seen.insert(fid) {
+        if seen.insert(*fid) {
+            named.push((name.clone(), *fid));
+        }
+    }
+    // `buildssa` lists them **in source order** — files as given, `Decls` in
+    // order — each followed by its literals, depth first (`addAnons`). The
+    // order is observable: gosec G115 caches its message per kind pair for
+    // the whole package, so the first conversion reached names the rest.
+    // Sorting by name made a `func ByteSlice` name `func StrIndex`'s
+    // conversion ("byte -> int8" where gosec says "uint8 -> int8").
+    named.sort_by(|(a_name, a), (b_name, b)| {
+        let (pa, pb) = (prog.func_pos(*a), prog.func_pos(*b));
+        pa.0.cmp(&pb.0).then_with(|| a_name.cmp(b_name))
+    });
+    let mut funcs: Vec<FuncId> = Vec::new();
+    let mut emitted = HashSet::new();
+    for (_, fid) in named {
+        if emitted.insert(fid) {
             funcs.push(fid);
         }
-        collect_anon_funcs(prog, fid, &mut funcs, &mut seen);
-    }
-    for &fid in funcs.clone().iter() {
-        collect_anon_funcs(prog, fid, &mut funcs, &mut seen);
+        collect_anon_funcs(prog, fid, &mut funcs, &mut emitted);
     }
     funcs
 }

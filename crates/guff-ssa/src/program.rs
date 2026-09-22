@@ -204,6 +204,15 @@ impl Program {
             .unwrap_or_else(|| panic!("no predeclared basic type {:?} in arena", kind))
     }
 
+    /// The predeclared `rune`: `int32` under its own name. (Go: `tRune`,
+    /// `types.Universe.Lookup("rune").Type()` — "prints as "rune" (Typ[Rune]
+    /// is same as Int32)".) `basic_type(RUNE)` answers `Typ[Int32]`, which
+    /// prints as `int32` — gosec G115 names a string-range value by it.
+    pub fn rune_type(&self) -> TypeId {
+        guff_types::lookup_rune(&self.type_arena)
+            .unwrap_or_else(|| self.basic_type(guff_types::BasicKind::Int32))
+    }
+
     /// Returns a new slice of all SSA packages created in this program, in
     /// unspecified order. (Go: `(*Program).AllPackages`.)
     pub fn all_packages(&self) -> Vec<PackageId> {
