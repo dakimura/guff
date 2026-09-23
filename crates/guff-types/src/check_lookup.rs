@@ -264,6 +264,22 @@ pub fn implements(
 ) -> Result<(), String> {
     let ts = |types: &TypeArena, x: TypeId| type_string(types, oarena, parena, x, None);
 
+    // Go's `under(V)` on a type parameter is `tpar.iface()` — a constraint is
+    // *always* an interface there, because a constraint written as a bare type
+    // (`type fake[T []float32]`, weaviate's `fakeBatchClientWithRL`) is
+    // normalised to `interface{ []float32 }` when the type parameter is
+    // declared. guff builds that wrapper lazily, so ask for it here: without
+    // it `underlying` hands back the type parameter itself, `V` never looks
+    // like an interface, and its type set is never compared — `T does not
+    // satisfy dto.Embedding` for a `T` whose only term is one of Embedding's.
+    // (`type_param_iface` panics on anything else, so ask first.)
+    if crate::predicates::is_type_param(types, v) {
+        crate::typeparam::type_param_iface(types, oarena, parena, v);
+    }
+    if crate::predicates::is_type_param(types, t) {
+        crate::typeparam::type_param_iface(types, oarena, parena, t);
+    }
+
     let vu = v.underlying(types);
     let tu = t.underlying(types);
     if !is_valid(types, vu) || !is_valid(types, tu) {

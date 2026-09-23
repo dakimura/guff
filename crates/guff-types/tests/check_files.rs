@@ -2463,3 +2463,81 @@ fn single_argument_type_instantiation_in_call_position_is_a_conversion() {
         "both `p.Len` and `p.Apply` must be recorded selections"
     );
 }
+
+/// A constraint need not be written as an interface: `[T []int]` means the
+/// implicit `interface{ []int }`, and Go normalises it at declaration time.
+/// guff builds that wrapper lazily, so every predicate that reaches for a type
+/// parameter's type set has to ask for it — `Type::underlying` hands back the
+/// type parameter itself when the constraint's underlying is not an interface.
+///
+/// Both shapes below come from weaviate: `vectorsEqual[T []C, C float32 |
+/// []float32]` calls `len` on `T`, and `fakeBatchClientWithRL[T []float32]`
+/// instantiates a `[T dto.Embedding]` type with its own `T`. Each one made
+/// guff call the package ill-typed, which skips every analyzer in it.
+#[test]
+fn bare_type_constraint_is_an_interface() {
+    for (src, what) in [
+        (
+            "package p\n\
+             func f[T []int](v T) int { return len(v) }\n",
+            "len on a bare slice constraint",
+        ),
+        (
+            "package p\n\
+             func f[T []C, C float32 | []float32](v T) int { return len(v) }\n",
+            "len on a bare constraint over another parameter",
+        ),
+        (
+            "package p\n\
+             func f[T []int](v T) int { return cap(v) }\n",
+            "cap on a bare slice constraint",
+        ),
+        (
+            "package p\n\
+             type E interface{ []float32 | [][]float32 }\n\
+             type R[T E] struct{ v []T }\n\
+             type fake[T []float32] struct{ n int }\n\
+             func (c *fake[T]) Make() *R[T] { return &R[T]{} }\n",
+            "a bare constraint satisfying a union interface",
+        ),
+    ] {
+        let check = check_src(src);
+        assert!(check.errors.is_empty(), "{what}: {:?}", check.errors);
+    }
+}
+
+/// The other side of the same coin: normalising the constraint must not turn
+/// a *real* violation into silence. `~[]float32`'s type set holds every type
+/// whose underlying is `[]float32`, which is not a subset of the exact terms
+/// `[]float32 | [][]float32` — Go rejects both spellings of it.
+#[test]
+fn tilde_constraint_still_fails_an_exact_union() {
+    for (src, what) in [
+        (
+            "package p\n\
+             type E interface{ []float32 | [][]float32 }\n\
+             type R[T E] struct{ v []T }\n\
+             type fake[T ~[]float32] struct{ n int }\n\
+             func (c *fake[T]) Make() *R[T] { return &R[T]{} }\n",
+            "tilde written bare",
+        ),
+        (
+            "package p\n\
+             type E interface{ []float32 | [][]float32 }\n\
+             type R[T E] struct{ v []T }\n\
+             type fake[T interface{ ~[]float32 }] struct{ n int }\n\
+             func (c *fake[T]) Make() *R[T] { return &R[T]{} }\n",
+            "tilde written as an interface",
+        ),
+    ] {
+        let check = check_src(src);
+        assert!(
+            check
+                .errors
+                .iter()
+                .any(|e| format!("{e:?}").contains("does not satisfy")),
+            "{what}: expected a constraint violation, got {:?}",
+            check.errors
+        );
+    }
+}

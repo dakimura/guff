@@ -1200,7 +1200,17 @@ impl Checker {
             // ill-typed and the whole package it lives in is skipped by every
             // analyzer — syncthing's `lib/sliceutil` is three of these, and
             // nothing in a finding-set diff can show it (`compat/health.py`).
-            TypeData::Interface(_) if crate::predicates::is_type_param(&self.types, xtyp) => {
+            //
+            // The arm is keyed on `xtyp` rather than on `under`, because
+            // `Type::underlying` only reaches the constraint when the
+            // constraint *is* an interface. A type parameter written with a
+            // bare type — `func f[T []int](v T)`, or weaviate's
+            // `[T []C, C float32 | []float32]` — has a constraint whose
+            // underlying is a `Slice`, so `underlying` returns the type
+            // parameter itself and an `Interface` pattern never fires. Go
+            // normalises every constraint to an interface at declaration time
+            // and so never has to ask.
+            _ if crate::predicates::is_type_param(&self.types, xtyp) => {
                 if self.len_cap_holds_for_typeset(xtyp, id) {
                     mode = OperandMode::Value;
                 }
