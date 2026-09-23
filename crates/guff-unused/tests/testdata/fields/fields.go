@@ -303,3 +303,41 @@ func UseIgnored() int {
 	v := ignoredType{}
 	return v.live
 }
+
+// A *defined type over another struct type* declares no fields of its own, so
+// honnef's `namedType` never walks a field list for it and it owns nothing.
+// Upstream does not need it to: an unkeyed composite literal uses
+// `CoreType(TypeOf(node)).Fields()`, which are the same field objects the
+// underlying type declared.
+type definedBase struct {
+	defA int
+	defB int
+}
+
+type DefinedOver definedBase
+
+func UseDefinedOver() DefinedOver { return DefinedOver{1, 2} }
+
+// The same, keyed: only the field the key names is written.
+type definedBase2 struct {
+	keyedLive int
+	keyedDead int
+}
+
+type DefinedOver2 definedBase2
+
+func UseDefinedOver2() DefinedOver2 { return DefinedOver2{keyedLive: 1} }
+
+// A defined type over a generic *instantiation* — weaviate's
+// `type ObjTuple tuple[Replica]`, written with an unkeyed literal.
+type genBase[T any] struct {
+	genA T
+	genB int
+}
+
+type DefinedOverInst genBase[string]
+
+func UseDefinedOverInst() DefinedOverInst { return DefinedOverInst{"a", 2} }
+
+// The instantiation named directly, as the control that already worked.
+func UseInstDirect() genBase[int] { return genBase[int]{1, 2} }

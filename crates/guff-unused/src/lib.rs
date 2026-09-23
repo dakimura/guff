@@ -167,6 +167,32 @@ fn named_origin_obj(types: &TypeArena, typ: TypeId) -> Option<ObjectId> {
     }
 }
 
+/// The type object that *owns* the fields of `typ` — the one the field index
+/// is keyed by.
+///
+/// The index is keyed by the type that writes the struct out
+/// (`type T struct{…}`), because that is the declaration honnef's `namedType`
+/// walks. A defined type over another struct type — weaviate's
+/// `type ObjTuple tuple[Replica]`, or a plain `type Alias base` — declares no
+/// fields of its own and is absent from it.
+///
+/// Upstream never asks whose fields they are: it takes
+/// `CoreType(TypeOf(node)).Fields()` and uses the field *objects*. The struct
+/// behind the defined type is the same struct, so its fields are the same
+/// objects, and one of them names the owner.
+fn field_owner_obj(types: &TypeArena, fields: &FieldModel, typ: TypeId) -> Option<ObjectId> {
+    if let Some(o) = named_origin_obj(types, typ) {
+        if fields.arity.contains_key(&o) {
+            return Some(o);
+        }
+    }
+    let st_id = struct_type_of(types, typ)?;
+    let TypeData::Struct(st) = types.get(st_id) else {
+        return None;
+    };
+    (0..st.num_fields()).find_map(|i| fields.owner.get(&st.field(i)).copied())
+}
+
 /// The `Struct` behind `T` or `*T`, following aliases and the named type's
 /// underlying.
 fn struct_type_of(types: &TypeArena, typ: TypeId) -> Option<TypeId> {
@@ -467,7 +493,7 @@ fn attribute_field_uses(
     let use_all = |edges: &mut HashMap<ObjectId, HashSet<ObjectId>>,
                    owners: &[ObjectId],
                    typ: TypeId| {
-        let Some(ty_obj) = named_origin_obj(types, typ) else {
+        let Some(ty_obj) = field_owner_obj(types, fields, typ) else {
             return;
         };
         let Some(&n) = fields.arity.get(&ty_obj) else {
@@ -563,7 +589,7 @@ fn attribute_field_uses(
                 // resolves to the field, so `attribute_uses` already has them —
                 // except on an instantiated generic, where the object is a
                 // substituted copy. Resolve those by name.
-                if let Some(ty_obj) = named_origin_obj(types, tv.typ) {
+                if let Some(ty_obj) = field_owner_obj(types, fields, tv.typ) {
                     for elt in &lit.elts {
                         if let Expr::KeyValueExpr(kv) = elt {
                             if let Expr::Ident(key) = kv.key.as_ref() {

@@ -318,6 +318,11 @@ fn unused_reports_struct_fields() {
             "field deadProm is unused",
             "field deadQ is unused",
             "field f is unused",
+            // The only field of the four defined-type shapes that survives:
+            // `DefinedOver2{keyedLive: 1}` writes one of its two fields, and
+            // the defined type owns neither — upstream reaches them through
+            // the struct behind it.
+            "field keyedDead is unused",
             "field m is unused",
             "field mumbler2 is unused",
             "field plainInner is unused",
