@@ -1,0 +1,3 @@
+package siblingdetached
+
+func helper() {}

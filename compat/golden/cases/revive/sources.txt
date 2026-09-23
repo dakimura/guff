@@ -58,6 +58,10 @@ utiltest/extended_bad_test.go               crates/guff-revive/tests/testdata/re
 
 siblingok/siblingok.go                      crates/guff-revive/tests/testdata/revive/sibling_ok/siblingok.go
 siblingok/helper.go                         crates/guff-revive/tests/testdata/revive/sibling_ok/helper.go
+siblingdirective/siblingdirective.go        crates/guff-revive/tests/testdata/revive/sibling_directive_ok/siblingdirective.go
+siblingdirective/helper.go                  crates/guff-revive/tests/testdata/revive/sibling_directive_ok/helper.go
+siblingdetached/siblingdetached.go          crates/guff-revive/tests/testdata/revive/sibling_detached_bad/siblingdetached.go
+siblingdetached/zzhelper.go                 crates/guff-revive/tests/testdata/revive/sibling_detached_bad/zzhelper.go
 
 badfile/bad file.go                         crates/guff-revive/tests/testdata/revive/bad file.go
 

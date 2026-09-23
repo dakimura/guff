@@ -36356,3 +36356,72 @@ golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 緑。
 
 台帳: **76/100 at zero**（83 定義、open 2、unmeasured 5）
+
+### 2026-09-23（続き 345）— `close datadog-agent`（3）: 指示子だけの doc も doc —— `Doc != nil` と `isEmptyDoc` は**別のことを訊いている**
+
+datadog-agent の revive `package-comments` 15 件のうち 9 件。代表は
+`cmd/cluster-agent`（cgo ではない、2 ファイル）:
+
+```go
+// klog.go
+// Unless explicitly stated otherwise all files … （ライセンスヘッダ）
+
+//go:build !windows && kubeapiserver
+
+//nolint:revive // TODO(CINT) Fix revive linter
+package main
+```
+
+`//nolint:revive …` は `package` 節の**直上**にあるので、go/ast はこれを
+ファイルの `Doc` に付ける。上流の `checkPackageComment` は
+
+```go
+for name, file := range l.file.Pkg.Files() {
+	if file.AST.Doc != nil {
+		return nil
+	}
+```
+
+と **nil かどうかだけ**を見て、中身は読まない。だからこの 1 行でパッケージ全体の
+「should have a package comment」が消える（報告先は `main.go` になるはずだった）。
+
+その数行前の `isEmptyDoc(l.fileAst.Doc)` は `Doc.Text()` を見る。go/ast の
+`Text()` は**指示子の行を落とす**ので、同じコメントがそこでは「空」と読まれる。
+**2 つの判定は食い違うのが正しい。** guff は両方に text ベースの
+`is_empty_doc` を使っていた。
+
+#### 5 形
+
+| 形 | golangci | guff 前 |
+|---|---|---|
+| どのファイルにもコメント無し | 報告 | 報告 |
+| 兄弟ファイルに普通の doc | 沈黙 | 沈黙 |
+| **兄弟ファイルの doc が `//nolint:revive` だけ** | 沈黙 | **報告** |
+| 兄弟ファイルの doc が `//go:generate` だけ | 沈黙 | 沈黙 ※ |
+| doc が空行で離れている（detached） | 報告 | 報告 |
+
+※ `//go:generate` は guff の `is_directive_comment` が既に見ていた形。
+`//nolint:` は見ていなかった —— **指示子の一覧を増やすのではなく**、
+`Doc.is_some()` に変えて上流の nil 判定に揃えた。
+
+fixture は `revive/sibling_directive_ok/`（指示子だけの doc ＋ doc 無しの兄弟）と
+`revive/sibling_detached_bad/`（離れたコメント）の 2 ディレクトリ。golden `revive`
+は +6 キー（file-header / comments-density の雑音込み、両ツール一致）、消えたキー 0。
+
+```
+datadog-agent
+  前   guff=101 golangci=14 both=14  R=100.0%  unexpected=87
+  後   guff=92  golangci=14 both=14  R=100.0%  unexpected=78
+```
+
+**閉じたのは 9 件、新規 0 件。** `package-comments` は 15 → 6 に減った。残る 6 件と
+`var-declaration` 41 / `duplicated-imports` 20 / `unexported-return` 6 /
+`blank-imports` 5 は別の原因 —— 大半は**上流の revive が cgo の出力ではなく
+元のソースを読み直している**ことに由来する（`GetGoFileNames` が `//line` で
+調整済みの名前を返し、revive が `os.ReadFile` で読み直す）。guff の revive は
+`compiled_go_files` を読む。これはドライバ側の作り替えになるので別の 1 件にする。
+
+golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 緑。
+
+台帳: **76/100 at zero**（83 定義、open 2、unmeasured 5）

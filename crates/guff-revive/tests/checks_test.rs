@@ -122,6 +122,41 @@ fn revive_package_comments_accepts_sibling_file_doc() {
     );
 }
 
+/// A doc that holds only directives is still a doc: `checkPackageComment`
+/// returns at the first file with `Doc != nil` and never reads it, while
+/// `isEmptyDoc` a few lines earlier asks `Doc.Text()`, which go/ast strips
+/// directives from. datadog-agent's `cmd/cluster-agent/klog.go` silences its
+/// package with `//nolint:revive // TODO(CINT) Fix revive linter` alone. A
+/// comment detached by a blank line is not a doc and silences nothing.
+#[test]
+fn revive_package_comments_counts_a_directive_only_doc() {
+    let pkg = support::typecheck_fixture_dir(
+        "revive",
+        "sibling_directive_ok",
+        "example.com/revive/siblingdirective",
+    );
+    let messages = support::run_analyzer(revive(), &pkg);
+    assert!(
+        messages.iter().all(|m| !m.contains("package-comments")),
+        "a directive-only doc silences the package: {messages:?}"
+    );
+
+    let pkg = support::typecheck_fixture_dir(
+        "revive",
+        "sibling_detached_bad",
+        "example.com/revive/siblingdetached",
+    );
+    let messages: Vec<_> = support::run_analyzer(revive(), &pkg)
+        .into_iter()
+        .filter(|m| m.contains("package-comments"))
+        .collect();
+    assert_eq!(
+        messages,
+        vec!["package-comments: should have a package comment".to_string()],
+        "a detached comment is not a doc"
+    );
+}
+
 #[test]
 fn revive_exported_skips_methods_on_private_receivers() {
     let pkg = support::typecheck_fixture(
