@@ -451,6 +451,19 @@ vardeclconst/var_decl_untyped_const.go:46:10:revive:warning:var-declaration: sho
 vardeclconst/var_decl_untyped_const.go:47:10:revive:warning:var-declaration: should omit type float64 from declaration of var br5; it will be inferred from the right-hand side
 vardeclconst/var_decl_untyped_const.go:49:10:revive:warning:var-declaration: should omit type complex128 from declaration of var br6; it will be inferred from the right-hand side
 vardeclconst/var_decl_untyped_const.go:51:10:revive:warning:var-declaration: should omit type int from declaration of var br7; it will be inferred from the right-hand side
+vardeclcross/unexportedreturnalias/unexported_return_alias.go:15:1:revive:warning:file-header: the file doesn't have an appropriate header
+vardeclcross/unexportedreturnalias/unexported_return_alias.go:29:0:revive:warning:line-length-limit: line is 81 characters, out of limit 80
+vardeclcross/unexportedreturnalias/unexported_return_alias.go:36:7:revive:warning:unused-receiver: method receiver 'e' is not referenced in method's body, consider removing or renaming it as _
+vardeclcross/unexportedreturnalias/unexported_return_alias.go:39:7:revive:warning:unused-receiver: method receiver 'e' is not referenced in method's body, consider removing or renaming it as _
+vardeclcross/unexportedreturnalias/unexported_return_alias.go:42:7:revive:warning:unused-receiver: method receiver 'e' is not referenced in method's body, consider removing or renaming it as _
+vardeclcross/unexportedreturnalias/unexported_return_alias.go:45:7:revive:warning:unused-receiver: method receiver 'e' is not referenced in method's body, consider removing or renaming it as _
+vardeclcross/unexportedreturnalias/unexported_return_alias.go:48:7:revive:warning:unused-receiver: method receiver 'e' is not referenced in method's body, consider removing or renaming it as _
+vardeclcross/unexportedreturnalias/unexported_return_alias.go:51:7:revive:warning:unused-receiver: method receiver 'e' is not referenced in method's body, consider removing or renaming it as _
+vardeclcross/unexportedreturnalias/unexported_return_alias.go:51:33:revive:warning:unexported-return: exported method LocalAlias returns unexported type *unexportedreturnalias.localAlias, which can be annoying to use
+vardeclcross/unexportedreturnalias/unexported_return_alias.go:54:7:revive:warning:unused-receiver: method receiver 'e' is not referenced in method's body, consider removing or renaming it as _
+vardeclcross/unexportedreturnalias/unexported_return_alias.go:54:29:revive:warning:unexported-return: exported method Hidden returns unexported type *unexportedreturnalias.hidden, which can be annoying to use
+vardeclcross/unexportedreturnalias/unexported_return_alias.go:58:7:revive:warning:unused-receiver: method receiver 'e' is not referenced in method's body, consider removing or renaming it as _
+vardeclcross/unexportedreturnalias/unexported_return_alias.go:58:34:revive:warning:unexported-return: exported method LocalStruct returns unexported type *unexportedreturnalias.localStruct, which can be annoying to use
 vardeclcross/vardeclotherpkg/var_decl_other_package.go:13:1:revive:warning:file-header: the file doesn't have an appropriate header
 vardeclcross/vardeclotherpkg/var_decl_other_package.go:16:2:revive:warning:dot-imports: should not use dot imports
 vardeclcross/vardeclotherpkg/var_decl_other_package.go:18:2:revive:warning:duplicated-imports: Package "example.com/revive/vardeclother" already imported

@@ -465,6 +465,41 @@ fn revive_var_declaration_reports_untyped_constant_defaults() {
 /// wholly local type are all reported. `lhsAliasVar` below is the control for
 /// that: writing the gate as "unalias, then ask where the type lives" would
 /// silence a finding upstream makes.
+/// unexported-return has the same cross-package gate as var-declaration, for
+/// the same reason: revive type-checks with `importer.Default()`, which
+/// resolves no import, so a type spelled through one comes back nil and
+/// `exportedType(nil)` is "exported". An alias to another package's type is
+/// that shape — datadog-agent returns `[]*resource` where
+/// `type resource = metrics.Resource`. The line is the alias *target*: an
+/// unexported struct that merely holds an imported field still reports.
+#[test]
+fn revive_unexported_return_gates_on_a_cross_package_alias() {
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/unexportedreturnalias",
+        "unexported_return_alias.go",
+    );
+    let messages: Vec<String> = support::run_analyzer(revive(), &pkg)
+        .into_iter()
+        .filter(|m| m.contains("unexported-return:"))
+        .collect();
+    assert_eq!(
+        messages,
+        vec![
+            "unexported-return: exported method LocalAlias returns unexported type \
+             *unexportedreturnalias.localAlias, which can be annoying to use"
+                .to_string(),
+            "unexported-return: exported method Hidden returns unexported type \
+             *unexportedreturnalias.hidden, which can be annoying to use"
+                .to_string(),
+            "unexported-return: exported method LocalStruct returns unexported type \
+             *unexportedreturnalias.localStruct, which can be annoying to use"
+                .to_string(),
+        ],
+        "the five cross-package shapes must stay silent"
+    );
+}
+
 #[test]
 fn revive_var_declaration_gates_on_the_declared_type_too() {
     let pkg = support::typecheck_fixture(
