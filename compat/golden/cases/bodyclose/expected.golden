@@ -35,6 +35,11 @@ closerarg/closerarg.go:62:19:bodyclose::response body must be closed
 closerarg/closerarg.go:72:19:bodyclose::response body must be closed
 closerarg/closerarg.go:82:19:bodyclose::response body must be closed
 closerarg/closerarg.go:92:19:bodyclose::response body must be closed
+freevar/freevar.go:29:19:bodyclose::response body must be closed
+freevar/freevar.go:45:19:bodyclose::response body must be closed
+freevar/freevar.go:60:19:bodyclose::response body must be closed
+freevar/freevar.go:74:19:bodyclose::response body must be closed
+freevar/freevar.go:128:19:bodyclose::response body must be closed
 goescape/goescape.go:29:23:bodyclose::response body must be closed
 goescape/goescape.go:51:23:bodyclose::response body must be closed
 goescape/goescape.go:64:23:bodyclose::response body must be closed

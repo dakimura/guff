@@ -36287,3 +36287,72 @@ golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 緑。
 
 台帳: **76/100 at zero**（83 定義、open 2、unmeasured 5）
+
+### 2026-09-23（続き 344）— `close datadog-agent`（2）: closure が持っていない変数への store は、**呼ばれる** closure の捕捉で片付く
+
+datadog-agent の guff-only、bodyclose の 1 件:
+
+```go
+// pkg/util/ecs/metadata/v3or4/client.go
+var resp *http.Response
+operation := func() error {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	…
+	resp, err = client.Do(req)              // ← guff はここを報告、上流は黙る
+
+	defer func() {
+		telemetry.AddQueryToTelemetry(path, resp)   // ← resp を捕捉する closure
+	}()
+	…
+	defer resp.Body.Close()
+```
+
+`resp` は外側の関数の変数なので、closure の中の store は `ssa.FreeVar` を通る。
+上流は `isopen` で **その FreeVar の referrer** を回り、`*ssa.MakeClosure` を見つけたら
+`calledInFunc(f, isClosureCalled(c))` に委ねる。`isClosureCalled` は `MakeClosure` の
+referrer に `*ssa.Call` か `*ssa.Defer` があるかを見る —— `defer func(){…}()` は Defer、
+引数として渡された closure は Call。そして `calledInFunc` は**最初の「load でない命令」**で
+`isopen(b, i) || !called` を返すので、呼ばれる closure が何も open しなければ **false**＝
+「開いていない」。**閉じているかどうかは関係ない。**
+
+#### 8 形
+
+| 形 | golangci | guff 前 |
+|---|---|---|
+| 捕捉する closure 無し、外の `var`、closure が渡される | 報告 | 報告 |
+| 同、closure を直接呼ぶ | 報告 | 報告 |
+| 同、closure は呼ばれない | 報告 | 報告 |
+| 同、どこも閉じない | 報告 | 報告 |
+| **`defer func(){ sink(resp) }()` ＋ close**（datadog） | 沈黙 | **報告** |
+| **同、どこも閉じない** | 沈黙 | **報告** |
+| **捕捉する closure をその場で呼ぶ** | 沈黙 | **報告** |
+| 捕捉する closure を**呼ばない**（`_ = func(){…}`） | 報告 | 報告 |
+
+`captured_by_invoked_closure`: 入れ子の func literal が同じ名前を捕捉し、かつ
+**呼ばれる / defer される / 引数として渡される**なら settled。`go func(){…}()` は
+数えない（`*ssa.Go` は Call でも Defer でもない —— 続き 333 と同じ線）。
+
+**`_ = resp` は捕捉ではない**。go/ssa は blank への代入を落とすので FreeVar が
+生まれない。最初これを捕捉と数えて 1 形目（`defer func(){ _ = resp }()` 付き）を
+黙らせてしまい、測って気づいた。AST 側でも「全部 blank の代入の右辺だけの言及」は
+捕捉としない。
+
+従来の `closed_by_nested_closure`（閉じる closure だけを見る）は、この規則に
+含まれる —— `t.Cleanup(func(){ resp.Body.Close() })` は引数渡しなので Call referrer を持つ。
+
+fixture `bodyclose/freevar.go`（8 形）、Rust の単体テストは報告行の集合。
+golden +5 キー、消えたキー 0。差分掃引（bodyclose を有効にしている 37 target）:
+**2,486 件が前後で行単位に同一**。
+
+```
+datadog-agent
+  前   guff=102 golangci=14 both=14  R=100.0%  unexpected=88
+  後   guff=101 golangci=14 both=14  R=100.0%  unexpected=87
+```
+
+**閉じたのは 1 件、新規 0 件。** 残り 87 は全部 revive。
+
+golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 緑。
+
+台帳: **76/100 at zero**（83 定義、open 2、unmeasured 5）
