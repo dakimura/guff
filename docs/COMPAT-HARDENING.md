@@ -36636,3 +36636,51 @@ exhaustive.CheckGeneratedFlag: true,
 `crates/guff-style/src/exhaustive.rs` を「判定 → 指示子」の 2 段に割った。解析 AST はコメントを持たないので、コメントマップは `PARSE_COMMENTS` での**再パース**が要る（S1008 が同じ代金を払っている）。その再パースを `guff_analysis::comments::file_comments` に出し、**enum switch か enum キーの map リテラルを実際に持つファイルだけ**が払うようにした（型解決を先に済ませてから指示子を見る。上流は逆順だが、出力は変わらない）。
 
 fixture は 3 つの golden case が**同じソース**を読む形にした（`compat/isolate/fixtures/exhaustive/directives.go`）: `cases/exhaustive` 21 キー、`cases/exhaustive-explicit` 9 キー、`cases/exhaustive-default-case-required` 24 キー。1 設定では「指示子を尊重した」と「指示子を無視した」が区別できない —— ある設定で黙るべき形は、別の設定では**報告されなければならない**。
+
+### 2026-09-23（続き 349）— `close weaviate`（2）: exhaustive は**型を綴っていないリテラルを見ない**。上流は `lit.Type` で型を引く
+
+続き 348 で weaviate の exhaustive は 28 → 3 件になった。残る 3 件は 1 か所に固まっている:
+
+```go
+//exhaustive:enforce
+var stateTransitions = map[cmd.NamespaceState]map[cmd.NamespaceState]struct{}{
+	cmd.NamespaceStateActive: {                       // ← guff はここも数えていた
+		cmd.NamespaceStateSuspended: {},
+		cmd.NamespaceStateDeleting:  {},
+	},
+	…
+}
+```
+
+外側は 4 つの状態を全部並べているので上流も guff も黙る。食い違うのは**内側**の
+`{…}` で、続き 348 で移植したスタック走査のおかげで `//exhaustive:enforce` が内側まで届き、
+guff はそれぞれを「キーの足りない map リテラル」として報告していた。
+
+上流はリテラルの型を
+
+```go
+mapType, ok := pass.TypesInfo.Types[lit.Type].Type.(*types.Map)
+```
+
+と、**型式**から引く。型を省いたリテラル（`map[K]map[K]V{k: {…}}` の内側、`[]T{{…}}` の要素）には
+`lit.Type` が無く、`Types[nil]` はゼロ値なので、型アサーションが両方外れて `resultNotMapLiteral` で抜ける。
+**省略型のリテラルは、何個キーが欠けていても検査されない。** guff はリテラル自身の id で型を引いていたので、
+型チェッカが埋めた型が見えてしまっていた。
+
+#### 測定（scratchpad、9 個の省略／明示リテラル）
+
+| 形 | 上流 | 修正前の guff |
+|---|--:|--:|
+| `map[C]map[C]int{Red: {…}}` の内側 2 つ | 0 | 2 |
+| `map[C]map[C]int{Red: map[C]int{…}}` の内側 3 つ | 3 | 3 |
+| `[]holder{{m: map[C]int{…}}}` の内側 | 1 | 1 |
+| 名前付き map 型を省略した `map[C]ColorSet{Red: {…}}` の内側 3 つ | 0 | 3 |
+
+上流が拾う 4 件は全部「型を綴ってある」もの。名前付き型の行は上流の `*types.Named` フォールバックが
+効きそうに見えるが、それも `lit.Type` を引いた**後**の話なので走らない。
+
+fixture は続き 348 の 3 case が読む同じソースに足した（golden は 21 → 25 / 9 / 24 → 28 キー）。
+続き 348 で入れた入れ子の例は外側に `//exhaustive:ignore` が付いていて、内側も同じ理由で黙っていた ——
+**1 形しか通していなかったので、この枝が隠れていた。**
+
+weaviate: guff-only は **5 → 2**（残りは `unused` 1 と、それが出ないせいで立つ `nolintlint` 1）。

@@ -52,7 +52,7 @@
 | isolate-containedctx | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-iotamixing | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-asasalint | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
-| isolate-exhaustive | 8 | 8 | 8 | 100.0% | 100.0% | 0 |
+| isolate-exhaustive | 25 | 25 | 25 | 100.0% | 100.0% | 0 |
 | isolate-exhaustruct | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | isolate-funcorder | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
 | isolate-embeddedstructfieldcheck | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
@@ -425,7 +425,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| exhaustive | 8 | 8 | 8 | 100.0% | 100.0% |
+| exhaustive | 25 | 25 | 25 | 100.0% | 100.0% |
 
 ## isolate-exhaustruct
 

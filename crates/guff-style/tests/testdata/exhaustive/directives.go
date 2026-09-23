@@ -158,3 +158,38 @@ var mapThroughFuncLit = func() map[Color]string {
 var mapIgnoreThroughFuncLit = func() map[Color]string {
 	return map[Color]string{Red: "r"}
 }()
+
+// Elided composite-literal types: upstream resolves a literal's type through
+// its type *expression*, which these inner literals do not have.
+//
+// line 166
+var elidedNested = map[Color]map[Color]string{
+	Red:   {Red: "r"},
+	Green: {Red: "r"},
+	Blue:  {Red: "r"},
+}
+
+// line 173: the control — spelt out, so it is checked.
+var elidedSpeltOut = map[Color]map[Color]string{
+	Red:   map[Color]string{Red: "r"},
+	Green: map[Color]string{Red: "r"},
+	Blue:  map[Color]string{Red: "r"},
+}
+
+type colorHolder struct {
+	m map[Color]string
+}
+
+// line 184
+var elidedInStruct = []colorHolder{
+	{m: map[Color]string{Red: "r"}},
+}
+
+type ColorNames map[Color]string
+
+// line 191
+var elidedNamed = map[Color]ColorNames{
+	Red:   {Red: "r"},
+	Green: {Red: "r"},
+	Blue:  {Red: "r"},
+}

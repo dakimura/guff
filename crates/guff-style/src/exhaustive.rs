@@ -585,6 +585,17 @@ fn map_finding(
     ignore_members: &Option<Regex>,
     ignore_types: &Option<Regex>,
 ) -> Option<(u32, String)> {
+    // Upstream asks `pass.TypesInfo.Types[lit.Type]` for the literal's type,
+    // and a literal whose type is elided — the inner `{…}` of
+    // `map[Color]map[Color]int{Red: {…}}`, or of `[]holder{{m: …}}` — has no
+    // `Type` node at all. `Types[nil]` is the zero `TypeAndValue`, both type
+    // assertions fail, and the checker exits with `resultNotMapLiteral`. So an
+    // elided map literal is never checked, however many members it is missing.
+    // Measured against golangci-lint 2.12.2: of nine such literals it reports
+    // only the four that spell their type out.
+    if lit.ty.is_none() {
+        return None;
+    }
     // Upstream intentionally ignores empty map literals: they are commonly
     // used as mutable sets or initialized before being populated.
     if lit.elts.is_empty() {

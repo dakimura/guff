@@ -258,3 +258,47 @@ var dirMapNested = map[Color]map[Color]string{
 	},
 	Green: {},
 }
+
+// ---- elided composite-literal types ---------------------------------------
+
+// Upstream looks the literal's type up by its *type expression*
+// (`TypesInfo.Types[lit.Type]`), which a literal with an elided type does not
+// have — so the inner literals below are never checked, however many members
+// they are missing. The outer ones list every member and so say nothing
+// either; `elidedSpeltOut` is the control that fires.
+var elidedNested = map[Color]map[Color]string{
+	Red: {
+		Red:   "r",
+		Green: "g",
+	},
+	Green: {
+		Red: "r",
+	},
+	Blue: {},
+}
+
+var elidedSpeltOut = map[Color]map[Color]string{
+	Red:   map[Color]string{Red: "r"},
+	Green: map[Color]string{Red: "r"},
+	Blue:  map[Color]string{Red: "r"},
+}
+
+type colorHolder struct {
+	m map[Color]string
+}
+
+// Elided inside a slice of structs: the struct literal has no type either, but
+// the map literal it holds does.
+var elidedInStruct = []colorHolder{
+	{m: map[Color]string{Red: "r"}},
+}
+
+// A named map type, elided. The `*types.Named` fallback upstream keeps for
+// `lit.Type` never runs, because there is no `lit.Type`.
+type ColorNames map[Color]string
+
+var elidedNamed = map[Color]ColorNames{
+	Red:   {Red: "r"},
+	Green: {Red: "r"},
+	Blue:  {Red: "r"},
+}
