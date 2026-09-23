@@ -36818,3 +36818,70 @@ golden は `cases/unused` 79 キー / `cases/unused-field-writes` 17 キー（�
 `post-statements-are-reads: true` の側だけ `x++` の 1 件が消えるので、1 設定では区別できない）。
 
 weaviate: **guff=32 golangci=32 both=32 P=100% R=100%** —— 台帳は 77/100。
+
+### 2026-09-23（続き 352）— `close weaviate`（5）: **裸の型で書いた制約も interface**。guff は遅延で包むので、型集合を訊く側が毎回頼む必要がある
+
+weaviate は finding が完全一致（P=R=100%）になったが、health gate が赤のままだった —— guff が
+**2 パッケージを ill-typed** にしている:
+
+```
+adapters/repos/db/vector/common/vector_util.go:27: invalid argument: vecA for built-in len
+usecases/modulecomponents/batch/fakes_for_test.go:38: T does not satisfy dto.Embedding
+```
+
+#### 再現に `GUFF_DEBUG_ILL_TYPED=1` が要る
+
+最初、同じパッケージを手で回しても**何も出なかった**。hunt.sh は
+
+```sh
+env … "GUFF_DEBUG_ILL_TYPED=1" "$GUFF" run …
+```
+
+を付けている。付けずに測ると「直っている」「そもそも壊れていない」に見える —— 4 回の hunt すべてで
+再現していた欠陥が、手元では 2 回とも出なかった理由がこれ。**hunt が付ける env を真似てから測る。**
+
+#### 1 つの機構、2 つの現場
+
+```go
+func vectorsEqual[T []C, C float32 | []float32](vecA, vecB T, …) bool  // len(vecA)
+type fakeBatchClientWithRL[T []float32] struct{ … }                    // → R[T] where R[T dto.Embedding]
+```
+
+どちらも制約が **interface ではなく裸の型**。Go では宣言時に `interface{ []C }` へ正規化されるので、
+`under(T)` は常に interface になる。guff の `Type::underlying` は
+
+```rust
+TypeData::TypeParam(tp) => match tp.constraint() {
+    Some(b) => { let u = b.underlying(...); if Interface { u } else { self } }
+```
+
+—— **制約の underlying が interface でなければ型パラメータ自身を返す**。結果:
+
+- `builtin_len_cap` の `TypeData::Interface(_) if is_type_param(..)` の腕に入らない → `len` が無効引数
+- `implements` の `let vu = v.underlying(types)` が interface にならない → 型集合の比較に進まず「satisfy しない」
+
+`~[]E` のように**チルダで書いた**制約は暗黙 interface になるので両方とも通っていた（syncthing の
+`sliceutil` が続き 3xx でそれ）。**1 形だけ通っていたので機構が見えなかった。**
+
+#### 直し方と、1 度踏んだ罠
+
+`builtin_len_cap` は腕の条件を `under` ではなく `xtyp`（型パラメータかどうか）に変えた。
+`implements` は Go の `under(V)` に合わせて型パラメータの制約を interface に正規化してから読む。
+
+ただし `type_param_iface` は **TypeParam 以外を渡すと panic する**。最初 `v` と `t` に無条件で
+呼んだところ、gen2/gen3 の**正しいエラーまで消えた** —— panic が呑まれて型検査が途中で終わっていた。
+`is_type_param` で門を付けて直した。「直した後に**正しい拒否が残っているか**」を測っていなければ
+気づかない形で、fixture には拒否側を 2 つ入れてある。
+
+#### 測定（3 つの repro、Go と判定を突き合わせ）
+
+| 形 | Go | 修正前 | 修正後 |
+|---|---|---|---|
+| `f[T []int](v T) { len(v) }` | OK | **ill-typed** | OK |
+| `f[T []C, C float32 \| []float32]` の `len` | OK | **ill-typed** | OK |
+| `f[T []int]` の `cap` | OK | ill-typed | OK |
+| `fake[T []float32]` → `R[T dto.Embedding]` | OK | **ill-typed** | OK |
+| `fake[T ~[]float32]` → 同上 | **拒否** | 拒否 | 拒否 |
+| `fake[T interface{ ~[]float32 }]` → 同上 | **拒否** | 拒否 | 拒否 |
+
+weaviate の ill-typed は **2 → 0**。
