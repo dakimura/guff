@@ -175,7 +175,19 @@ DEFERRED_OPEN = {
     "`Literalized` / `BindingDecl` mean silence). That is "
     "golang.org/x/tools/internal/refactor/inline, 9,222 lines, and none of the "
     "three answers can be approximated without the substitution analysis itself. "
-    "Measured 2026-09-15 at v3.7.6 — see docs/COMPAT-HARDENING.md §4 (続き 292)"
+    "Measured 2026-09-15 at v3.7.6 — see docs/COMPAT-HARDENING.md §4 (続き 292)",
+    "datadog-agent": "the 76 remaining findings are all revive, and all of one mechanism: "
+    "golangci hands revive only *file names* (GetGoFileNames resolves each file's "
+    "position with PositionFor(adjusted), so a cgo package yields the original .go), "
+    "and revive re-reads, re-parses and re-type-checks them itself. Upstream's revive "
+    "never sees cgo's generated declarations; guff's runs on the typed AST of "
+    "compiled_go_files. Per-rule patches cannot fix it — guff reports at offsets in the "
+    "shared FileSet, which for a cgo package holds the generated file, so reporting an "
+    "original line needs a reverse //line lookup. Closing it means a revive-local file "
+    "set (parse the adjusted names), a position path for it, and a type policy matching "
+    "revive's importer-less check; 98 rule files read pass.files() today. Measured "
+    "2026-09-23 at 7.82.3 (guff=90 golangci=14 both=14, R=100%) — see "
+    "docs/COMPAT-HARDENING.md §4 (続き 347)"
 }
 
 

@@ -36481,3 +36481,73 @@ golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 緑。
 
 台帳: **76/100 at zero**（83 定義、open 2、unmeasured 5）
+
+### 2026-09-23（続き 347）— `close datadog-agent`（5）は**保留**。revive は cgo の出力ではなく**元のソースを読み直す**
+
+datadog-agent に残る 76 件は全部 revive で、1 つの仕組みに由来する。
+
+| rule | 件数 | 中身 |
+|---|--:|---|
+| var-declaration | 41 | `var _cgo1 _Ctype_int` など、cgo の前文が生成した宣言 |
+| duplicated-imports | 20 | cgo が足す 2 つ目の `import "unsafe"` |
+| package-comments | 6 | cgo の出力の先頭コメントが doc になる／ならない |
+| blank-imports | 5 | 生成された `_ "unsafe"` |
+| unexported-return | 4 | cgo パッケージのぶん（非 cgo の 2 件は続き 346 で閉じた） |
+
+#### 上流は何を読んでいるか
+
+golangci の revive ラッパは **ファイル名しか渡さない**:
+
+```go
+packages := [][]string{internal.GetGoFileNames(pass)}
+failures, err := w.revive.Lint(packages, w.lintingRules, *w.conf)
+```
+
+`GetGoFileNames` は `pass.Files` の各ファイルの位置を
+`fset.PositionFor(p, true)`（**調整済み**）で解決した名前を返す —— cgo
+パッケージでは `//line` が指す**元の .go**。revive 側は
+`lint.New(os.ReadFile, …)` で、その名前をディスクから**読み直して自分で
+パースし、自分で型検査する**（`lint.Package.TypeCheck`）。
+
+つまり上流の revive は cgo の生成物を**一度も見ない**。guff の revive は
+型付き AST（＝`compiled_go_files` の cgo 出力）をそのまま見ている。
+
+#### なぜ規則ごとに塞げないか
+
+位置が合わない。guff の報告位置は共有 FileSet のオフセットで、cgo
+パッケージではその FileSet に入っているのは**生成ファイル**（`//line` 付き）。
+元のファイルを読み直して「元の 25 行目」を報告しようとすると、
+生成ファイル側で「調整すると 25 行目になるオフセット」を逆引きする必要がある。
+`remap_pos`（続き 279 で `exported` / `package-comments` に入れたもの）は
+行・桁をそのまま共有 FileSet に載せ替えるだけなので、cgo では嘘になる。
+
+#### もう 1 つ、同じ家系の差
+
+revive の自前の型検査は `types.Config{Importer: importer.Default()}` で、
+モジュール build では **import を 1 つも解決できない**。だから
+「import を通してしか綴れない型」は上流では常に不明で、型を見る規則はそこで
+黙る。guff の revive は完全な型情報を持っているので、放っておくと上流より
+強く報告する。これまで 2 回、規則ごとに門を足して合わせてきた:
+`var-declaration`（続き 199）と `unexported-return`（続き 346）。一般形は
+「revive の型の見え方を importer 無しに揃える」で、これも同じ作り替えの一部。
+
+#### 必要なもの
+
+1. revive 専用のファイル集合: 各ファイルの**調整済み名**を解決して読み直し、
+   パースする（`parse_with_comments` は既にある）。
+2. その AST の位置を報告位置に直す経路（cgo では逆 `//line` 引き）。
+3. 型の方針: 上流と同じく importer 無しの部分的な型か、規則ごとの門を続けるか。
+
+98 個の rule ファイルが `pass.files()` と型情報を直接触っているので、
+1 件の PR では終わらない。`status.py` の `DEFERRED_OPEN` に入れて、
+`next` が同じ答えを毎回配らないようにする —— open 76 は台帳に残したまま。
+
+```
+datadog-agent: guff=90 golangci=14 both=14  P=15.6%  R=100.0%
+```
+
+**上流の 14 件は全部 guff も出している**（R=100%）し、その 14 件はどれも
+cgo ではないパッケージのもの。ここで止めるのは「測れていない」からではなく、
+**残りが 1 つの作り替えに集約されている**から。
+
+台帳: **76/100 at zero**（83 定義、open 2、unmeasured 5）
