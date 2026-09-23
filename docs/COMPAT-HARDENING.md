@@ -36425,3 +36425,59 @@ golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
 `cargo test --workspace --locked` 緑。
 
 台帳: **76/100 at zero**（83 定義、open 2、unmeasured 5）
+
+### 2026-09-23（続き 346）— `close datadog-agent`（4）: `unexported-return` にも **import 越しは見えない** 門がある
+
+datadog-agent の `unexported-return` 6 件のうち 2 件（非 cgo のぶん）。
+`comp/dogstatsd/http/impl/internal/reader`:
+
+```go
+type resource = metrics.Resource          // 別パッケージの型への alias
+type originInfo = agentpayload.Origin
+
+func (r *MetricDataReader) Resources() []*resource   { … }   // guff だけが報告
+func (r *MetricDataReader) Origin() *originInfo      { … }
+```
+
+revive は `lint.Package.TypeCheck()` で**自前で型検査する**。その
+`types.Config{Importer: importer.Default()}` はモジュール build では import を
+1 つも解決できないので、import を通してしか綴れない型は `Pkg.TypeOf` が nil を返し、
+`exportedType(nil)` は「exported」を返す —— つまり**黙る**。
+
+guff の `var-declaration` には既に同じ門がある（続き 199 の
+`var_decl_other_package.go`）。`unexported-return` には無かった。
+
+#### 8 形
+
+| 形 | golangci | guff 前 |
+|---|---|---|
+| 別パッケージの型への alias の slice（datadog） | 沈黙 | **報告** |
+| 同、ポインタ | 沈黙 | **報告** |
+| 同、map の値 | 沈黙 | **報告** |
+| **stdlib** の型への alias（`= bytes.Buffer`） | 沈黙 | **報告** |
+| alias の alias（末端が別パッケージ） | 沈黙 | **報告** |
+| ローカルの公開型への alias | 報告 | 報告 |
+| ただの非公開型 | 報告 | 報告 |
+| **import した型をフィールドに持つ**非公開 struct | 報告 | 報告 |
+
+最後の 1 形が線を引く: 「import に触れたら黙る」ではなく
+**「alias の行き先が別パッケージなら黙る」**。その struct はローカルで型検査でき、
+上流も報告する。`alias_target_is_imported` は alias の連鎖をたどって、
+末端の Named が現在のパッケージ以外なら exported として扱う。
+
+fixture `revive/unexported_return_alias.go`（8 形、既存の
+`vardeclother` stub を再利用）。golden `revive` +13 キー、消えたキー 0。
+
+```
+datadog-agent
+  前   guff=92 golangci=14 both=14  R=100.0%  unexpected=78
+  後   guff=90 golangci=14 both=14  R=100.0%  unexpected=76
+```
+
+**閉じたのは 2 件、新規 0 件。** 残る 4 件の `unexported-return` は cgo
+パッケージのもので、次の 1 件（revive が cgo の出力を読んでいる件）に含まれる。
+
+golden 240 / fix 240 / reject 14 / isolate 116 / `--oss --tier pr` 8 target、
+`cargo test --workspace --locked` 緑。
+
+台帳: **76/100 at zero**（83 定義、open 2、unmeasured 5）

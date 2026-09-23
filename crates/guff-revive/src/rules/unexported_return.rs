@@ -98,6 +98,33 @@ fn check_func(pass: &Pass<'_>, f: &FuncDecl, failures: &mut Vec<Failure>) {
     }
 }
 
+/// Does this alias resolve, through any chain of aliases, to a type declared in
+/// a different package? That is what revive's own type check cannot do.
+fn alias_target_is_imported(pass: &Pass<'_>, typ: guff_types::TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let (types, objects) = (&artifacts.types, &artifacts.objects);
+    let here = artifacts.type_pkg;
+    let mut cur = typ;
+    for _ in 0..16 {
+        let TypeData::Alias(a) = types.get(cur) else {
+            break;
+        };
+        let Some(rhs) = a.rhs() else {
+            return false;
+        };
+        match types.get(rhs) {
+            TypeData::Alias(_) => cur = rhs,
+            TypeData::Named(n) => {
+                return n.obj().pkg(objects).is_some_and(|p| p != here);
+            }
+            _ => return false,
+        }
+    }
+    false
+}
+
 fn exported_type(pass: &Pass<'_>, typ: guff_types::TypeId) -> bool {
     let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
         return true;
@@ -109,6 +136,19 @@ fn exported_type(pass: &Pass<'_>, typ: guff_types::TypeId) -> bool {
         TypeData::Alias(a) => {
             let obj = a.obj();
             if obj.pkg(objects).is_none() {
+                return true;
+            }
+            // An alias whose target lives in **another package** is invisible
+            // to upstream. revive type-checks the files itself with
+            // `importer.Default()`, which resolves no import in a module
+            // build, so `Pkg.TypeOf` hands `exportedType` a nil type and nil
+            // is "exported". datadog-agent's dogstatsd reader returns
+            // `[]*resource` where `type resource = metrics.Resource`.
+            //
+            // Only the alias *target* counts: an unexported struct that merely
+            // holds an imported field still type-checks locally and is still
+            // reported.
+            if alias_target_is_imported(pass, typ) {
                 return true;
             }
             if obj.exported(objects) {
