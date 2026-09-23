@@ -1,3 +1,9 @@
 # The fixture crates/guff-unused/tests/checks_test.rs counts under three
 # settings combinations; this case measures one of them end to end.
 fieldwrites.go  crates/guff-unused/tests/testdata/fieldwrites/fieldwrites.go
+
+# The same globals under `post-statements-are-reads: true`, which makes `x++` a
+# read and so keeps `incremented` alive — one shape that the other case cannot
+# distinguish from a plain write.
+globalwrites/globalwrites.go        crates/guff-unused/tests/testdata/globalwrites/globalwrites.go
+globalwrites/globalwrites_test.go   crates/guff-unused/tests/testdata/globalwrites/globalwrites_test.go

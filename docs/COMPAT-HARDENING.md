@@ -36749,3 +36749,72 @@ golden の `cases/unused` は 72 キー（+1: keyed の `keyedDead`）。差分�
 
 weaviate: guff-only は **2 → 1**（残りは「書き込みだけの package 変数」を guff が使用扱いにしている件で、
 それが出ないために `//nolint:unused` が余ると nolintlint が言う）。
+
+### 2026-09-23（続き 351）— `close weaviate`（4）: **書き込みは使用ではない**。ただしテストファイルで宣言した global は別
+
+weaviate の最後の guff-only は `nolintlint` 1 件だった:
+
+```
+adapters/repos/db/vector/cache/sharded_lock_cache.go:362:
+  directive `//nolint:unused` is unused for linter "unused"
+```
+
+その指示子が守っているのはこれ:
+
+```go
+//nolint:unused
+var prefetchFunc func(in uintptr) = func(in uintptr) { /* default arch */ }
+```
+
+`prefetchFunc` は `prefetch_amd64.go` / `prefetch_arm64.go` の `init` が代入するだけで、**一度も読まれない**。
+上流の `unused` はこれを報告するので指示子は仕事をしており、guff は報告しないので「余っている」と言っていた。
+つまり nolintlint の 1 件は **unused の取りこぼしの影**で、直すべきは unused のほう。
+
+honnef の規則はこう書かれている:
+
+```go
+// (4.9) functions use package-level variables they assign to iff in tests (sinks for benchmarks)
+// (9.7) variable _reads_ use variables, writes do not, except in tests
+path := g.fset.File(obj.Pos()).Name()
+if strings.HasSuffix(path, "_test.go") { if isGlobal(obj) { g.use(obj, by) } }
+```
+
+**代入の左辺は `g.write` に入り、`*ast.Ident` の腕は何も印を付けない。** 例外は「`_test.go` で
+**宣言された** package 変数」だけ —— 見るのは書いた側のファイルではなく**宣言のあるファイル**。
+
+guff には ident の write 概念が無く、`collect_write_positions` は selector（フィールド）だけを、しかも
+`field-writes-are-uses: false` のときだけ集めていた。(9.7) はそのオプションとは無関係なので、ident の
+write 位置は**常に**集める別の関数にした。
+
+#### 測定（scratchpad、11 形）
+
+| 形 | 上流 | 修正前の guff |
+|---|---|---|
+| `init` で代入、読まない | 報告 | 黙る |
+| 普通の関数で代入、読まない | 報告 | 黙る |
+| `x += 1` だけ | 報告 | 黙る |
+| `x++` だけ（`post-statements-are-reads` 既定 off） | 報告 | 黙る |
+| `for x = range 3` のキー | 報告 | 黙る |
+| 非テストファイルで宣言、**テストから**代入 | 報告 | 黙る |
+| `_test.go` で宣言、テストから代入 | 黙る | 黙る |
+| `_test.go` で宣言、一度も触らない | 報告 | 報告 |
+| 読む／`&x`／`x.f = 1` | 黙る | 黙る |
+
+上流が「書いた側のファイル」ではなく「宣言のファイル」を見る、という差がそのまま 6 行目に出る。
+
+#### 差分掃引で見つかった別件（今回の変更のせいではない）
+
+17 target の掃引で **lnd が +10**、どれも `var log is unused`（`log.go` の `var log btclog.Logger` を
+`UseLogger` が代入するだけの形）。上流に当てて確認し、**同じ 10 件を報告する**ことを確かめた ——
+取りこぼしが埋まった側の動き。
+
+loki は件数が動かず、同じ行の 4 つのフィールドのうち `uniq-by-line` で生き残る 1 つが入れ替わっただけだった。
+`uniq-by-line: false` で測ると **前後とも 4 件すべて**を報告しており、集合は同一。guff は行内で
+**列順に並べていない**（emission 順）ので、同じ行に複数の finding があると `uniq-by-line: true` の下で
+どれが残るかが揺れる —— loki の compat 設定は `uniq-by-line: false` なので台帳には出ないが、
+**同一行の複数 finding を持つ target では順序が効く**という hazard としてここに記録する。
+
+golden は `cases/unused` 79 キー / `cases/unused-field-writes` 17 キー（同じ新 fixture を 2 設定が読む ——
+`post-statements-are-reads: true` の側だけ `x++` の 1 件が消えるので、1 設定では区別できない）。
+
+weaviate: **guff=32 golangci=32 both=32 P=100% R=100%** —— 台帳は 77/100。

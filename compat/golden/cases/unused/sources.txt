@@ -15,6 +15,12 @@ locals/locals.go                      crates/guff-unused/tests/testdata/basic/lo
 # type it covers are in the second (nats-server's jetstream_helpers_test.go).
 fileignore/types.go                   crates/guff-unused/tests/testdata/fileignore/types.go
 fileignore/methods.go                 crates/guff-unused/tests/testdata/fileignore/methods.go
+# honnef's (9.7)/(4.9): a write is not a use, except for a global declared in a
+# test file. The `_test.go` half is the shape, not scaffolding — `run.tests` is
+# on, and the rule keys on the declaring file.
+globalwrites/globalwrites.go        crates/guff-unused/tests/testdata/globalwrites/globalwrites.go
+globalwrites/globalwrites_test.go   crates/guff-unused/tests/testdata/globalwrites/globalwrites_test.go
+
 # The struct-field rules. `fieldsunsafe` is the one package here the Rust tests
 # cannot use: its (5.2) and (6.6) shapes need imports, and the unit-test
 # type-checker has no importer.

@@ -54,6 +54,13 @@ genericiface/generic_iface.go:30:17:unused::func (*comps).list is unused
 genericiface/generic_iface.go:31:17:unused::func (*comps).closeIt is unused
 genericmethod/generic_method_bad.go:8:21:unused::func (*holder[T]).run is unused
 genericmethod/generic_method_bad.go:15:21:unused::func pair[K, V].key is unused
+globalwrites/globalwrites.go:11:5:unused::var writtenInInit is unused
+globalwrites/globalwrites.go:14:5:unused::var writtenInFunc is unused
+globalwrites/globalwrites.go:24:5:unused::var compoundAssigned is unused
+globalwrites/globalwrites.go:27:5:unused::var incremented is unused
+globalwrites/globalwrites.go:33:5:unused::var rangeKey is unused
+globalwrites/globalwrites.go:37:5:unused::var writtenFromTest is unused
+globalwrites/globalwrites_test.go:10:5:unused::var neverTouched is unused
 iface/iface_ok.go:13:19:unused::func (*syncBuf).trulyUnused is unused
 ifaceinstance/iface_instance.go:27:23:unused::field index is unused
 ifaceinstance/iface_instance.go:41:23:unused::field index is unused

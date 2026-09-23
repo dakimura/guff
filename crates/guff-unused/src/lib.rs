@@ -670,6 +670,92 @@ fn attribute_field_uses(
     });
 }
 
+/// Node ids of the plain identifiers that sit in a **write** position.
+///
+/// honnef's (9.7): "variable *reads* use variables, writes do not" — an
+/// assignment's left-hand side reaches `g.write`, whose `*ast.Ident` arm marks
+/// nothing. A package-level variable that is only ever assigned to is therefore
+/// unused, however many times it is written.
+///
+/// (4.9) is the one exception: a write does count when the variable is a
+/// package-level one **declared in a `_test.go` file** (a benchmark sink). The
+/// file that matters is the one holding the declaration, not the one holding
+/// the write.
+///
+/// This is not the `field-writes-are-uses` question — that option governs
+/// `g.write`'s `*ast.SelectorExpr` arm, which is why
+/// [`collect_write_positions`] is gated on it and this is not.
+fn collect_ident_write_positions(
+    files: &[guff::ast::File],
+    info: &guff_types::api::Info,
+    objects: &guff_types::arena::ObjectArena,
+    pkg_scope: Option<guff_types::arena::ScopeId>,
+    fset: &guff::position::FileSet,
+    opts: &Options,
+) -> HashSet<u32> {
+    let mut out = HashSet::new();
+    // `g.write`: `*ast.ParenExpr` recurses, `*ast.Ident` is the arm that
+    // silences. Everything else either reads its operand (`a[i]`, `*p`) or is
+    // the selector case [`collect_write_positions`] handles.
+    #[allow(clippy::too_many_arguments)]
+    fn note(
+        e: &Expr,
+        info: &guff_types::api::Info,
+        objects: &guff_types::arena::ObjectArena,
+        pkg_scope: Option<guff_types::arena::ScopeId>,
+        fset: &guff::position::FileSet,
+        out: &mut HashSet<u32>,
+    ) {
+        match e {
+            Expr::ParenExpr(p) => note(&p.x, info, objects, pkg_scope, fset, out),
+            Expr::Ident(id) => {
+                if id.name == "_" {
+                    return;
+                }
+                if let Some(obj) = info.uses.get(&id.id) {
+                    // (4.9): a global declared in a test file is kept alive by
+                    // the write.
+                    let declared_in_test = fset
+                        .file(guff::position::Pos(obj.pos(objects) as i64))
+                        .is_some_and(|f| f.name().ends_with("_test.go"));
+                    let is_global =
+                        pkg_scope.is_some() && obj.parent(objects) == pkg_scope;
+                    if declared_in_test && is_global {
+                        return;
+                    }
+                }
+                out.insert(id.id);
+            }
+            _ => {}
+        }
+    }
+    for file in files {
+        guff::walk::preorder(guff::walk::NodeRef::File(file), |n| {
+            match n {
+                guff::walk::NodeRef::AssignStmt(a) => {
+                    for lhs in &a.lhs {
+                        note(lhs, info, objects, pkg_scope, fset, &mut out);
+                    }
+                }
+                guff::walk::NodeRef::RangeStmt(r) => {
+                    if let Some(k) = r.key.as_ref() {
+                        note(k, info, objects, pkg_scope, fset, &mut out);
+                    }
+                    if let Some(v) = r.value.as_ref() {
+                        note(v, info, objects, pkg_scope, fset, &mut out);
+                    }
+                }
+                guff::walk::NodeRef::IncDecStmt(inc) if !opts.post_statements_are_reads => {
+                    note(&inc.x, info, objects, pkg_scope, fset, &mut out);
+                }
+                _ => {}
+            }
+            true
+        });
+    }
+    out
+}
+
 fn attribute_uses(
     info: &guff_types::api::Info,
     node: guff::walk::NodeRef<'_>,
@@ -1304,7 +1390,15 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .settings::<Options>("unused")
         .copied()
         .unwrap_or_default();
-    let writes = collect_write_positions(pass.files(), &opts);
+    let mut writes = collect_write_positions(pass.files(), &opts);
+    writes.extend(collect_ident_write_positions(
+        pass.files(),
+        info,
+        &artifacts.objects,
+        Some(artifacts.packages.get(artifacts.type_pkg).scope()),
+        &fset,
+        &opts,
+    ));
     let mut edges: HashMap<ObjectId, HashSet<ObjectId>> = HashMap::new();
     for (type_obj, field) in field_exempt {
         edges.entry(type_obj).or_default().insert(field);
