@@ -36684,3 +36684,68 @@ fixture は続き 348 の 3 case が読む同じソースに足した（golden �
 **1 形しか通していなかったので、この枝が隠れていた。**
 
 weaviate: guff-only は **5 → 2**（残りは `unused` 1 と、それが出ないせいで立つ `nolintlint` 1）。
+
+### 2026-09-23（続き 350）— `close weaviate`（3）: フィールドを**書き出していない型**は索引に居ない。上流はそもそも型に訊かない
+
+weaviate に残る guff-only 2 件のうち 1 件:
+
+```go
+type tuple[T any] struct {
+	Sender string
+	UTime  int64
+	O      T
+	ack    int
+	err    error
+}
+
+type ObjTuple tuple[Replica]
+
+votes = append(votes, ObjTuple{resp.sender, resp.UpdateTime, resp.Data, 0, nil})
+```
+
+guff は `field err is unused` を出し、上流は出さない。キーの無い composite literal は全フィールドを
+書くので、上流はこう数える:
+
+```go
+typ, isStruct := typeutil.CoreType(g.info.TypeOf(node)).(*types.Struct)
+…
+for field := range typ.Fields() { g.use(field, by) }
+```
+
+**リテラルの型から struct に降りて、そのフィールド「オブジェクト」を使う。** 誰が宣言したかは訊かない。
+
+guff の `FieldModel` は `(所有者の型オブジェクト, index)` で索引していて、登録は
+
+```rust
+if !matches!(ts.ty, Expr::StructType(_)) || ts.assign.0 != 0 { return true; }
+```
+
+—— つまり **`type T struct{…}` と書き下した型だけ**。これは正しい（honnef の `namedType` も AST の
+フィールドリストを歩くので、`type myConn tls.Conn` は何も所有しない）。しかし `use_all` がその索引を
+**引けなければ何もしない**ので、`type ObjTuple tuple[Replica]` や `type Alias base` のような
+「別の struct 型の上に定義した型」のリテラルは、フィールドを 1 つも使用扱いにしていなかった。
+
+#### 測定（scratchpad、5 形）
+
+| 形 | 上流 | 修正前の guff |
+|---|--:|--:|
+| `plain{1, 2}`（自分で struct を書いた型） | 0 | 0 |
+| `gen[string]{"a", 2}`（ジェネリックの直接実体化） | 0 | 0 |
+| `Alias2{1, 2}`（`type Alias2 base`） | 0 | **2** |
+| `ObjTuple{…}`（`type ObjTuple tuple[string]`） | 0 | **2** |
+| `DefinedOver2{keyedLive: 1}`（keyed、1 つだけ書く） | 1（`keyedDead`） | **2** |
+
+最後の行が 2 段目の発見だった。`use_all` を直しただけでは keyed のほうが残る —— キーの解決も
+同じ `named_origin_obj` を通っていて、同じ理由で索引を外していた。**1 形だけ直して緑にしない。**
+
+直しは「所有者を引く」1 か所に寄せた（`field_owner_obj`）: 索引に居ればそれ、居なければ
+**struct のフィールドオブジェクトから所有者を逆引きする**（同じ struct なので同じオブジェクト —— 上流が
+オブジェクトで押しているのと同じ性質を使う）。guff の arena はジェネリック実体でもフィールド
+オブジェクトを共有するので、`ObjTuple` もこの経路で解ける。
+
+golden の `cases/unused` は 72 キー（+1: keyed の `keyedDead`）。差分掃引は 33 target・**1,570 件**が
+前後完全一致で、動いたのは weaviate の 1 件だけ（`unused` が 0 件の target が 17 あるので、
+件数を持つ 16 target が実際の網）。
+
+weaviate: guff-only は **2 → 1**（残りは「書き込みだけの package 変数」を guff が使用扱いにしている件で、
+それが出ないために `//nolint:unused` が余ると nolintlint が言う）。

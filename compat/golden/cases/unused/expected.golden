@@ -46,6 +46,7 @@ fields/fields.go:274:2:unused::field mumbler2 is unused
 fields/fields.go:275:2:unused::field deadOut2 is unused
 fields/fields.go:281:23:unused::field deadIn3 is unused
 fields/fields.go:287:2:unused::field deadOut3 is unused
+fields/fields.go:324:2:unused::field keyedDead is unused
 fieldsunsafe/fieldsunsafe.go:36:2:unused::field deadM is unused
 fileignore/methods.go:13:17:unused::func (*plain).unusedMethod is unused
 fileignore/methods.go:15:6:unused::func unusedFree is unused
