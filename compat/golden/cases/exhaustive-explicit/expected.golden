@@ -1,0 +1,17 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh exhaustive-explicit
+# Produced by running golangci-lint on compat/golden/cases/exhaustive-explicit/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+directives.go:43:2:exhaustive::missing cases in switch of type p.Color: p.Blue
+directives.go:104:2:exhaustive::missing cases in switch of type p.Color: p.Blue
+directives.go:127:2:exhaustive::missing cases in switch of type p.Color: p.Blue
+directives.go:162:21:exhaustive::missing keys in map of key type p.Color: p.Blue
+directives.go:178:32:exhaustive::missing keys in map of key type p.Color: p.Blue
+directives.go:191:9:exhaustive::missing keys in map of key type p.Color: p.Blue
+directives.go:199:7:exhaustive::missing keys in map of key type p.Color: p.Blue
+directives.go:208:16:exhaustive::missing keys in map of key type p.Color: p.Blue
+directives.go:236:9:exhaustive::missing keys in map of key type p.Color: p.Blue

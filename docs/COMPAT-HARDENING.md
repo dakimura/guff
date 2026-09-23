@@ -36551,3 +36551,88 @@ cgo ではないパッケージのもの。ここで止めるのは「測れて�
 **残りが 1 つの作り替えに集約されている**から。
 
 台帳: **76/100 at zero**（83 定義、open 2、unmeasured 5）
+
+### 2026-09-23（続き 348）— `close weaviate`（1）: `explicit-exhaustive-map` は設定ではなく**ディレクティブへの切り替え**。exhaustive は 4 つの `//exhaustive:` 指示子を読む
+
+`adopt weaviate` の hunt が `guff=62 golangci=32 both=32 P=51.6% R=100.0%` を返した。guff-only 30 件のうち **28 件が exhaustive**、全部 map リテラル。weaviate の `.golangci.yml` は
+
+```yaml
+exhaustive:
+  default-signifies-exhaustive: true
+  check: [switch, map]
+  explicit-exhaustive-map: true
+```
+
+を書いている。guff の `ExhaustiveSettings` は末尾に
+
+```rust
+// DEFERRED: explicit-exhaustive-switch / explicit-exhaustive-map / check-generated.
+```
+
+を持っていて、この鍵を**読み捨てていた**。`explicit-exhaustive-map: true` は「map も見る」ではなく「map は `//exhaustive:enforce` が付いているものだけ見る」——
+既定と**逆向き**の設定なので、無視すると `check: [map]` を素で走らせたのと同じになる。weaviate のテストにある map リテラル 28 個がそれ。
+
+#### 上流は 4 つの指示子を読み、switch と map で**読み方が違う**
+
+`exhaustive@v0.12.0`:
+
+| | switch | map |
+|---|---|---|
+| 指示子の取り出し | `userDirectives`（4 つを**長い順**に 1 コメント 1 つ） | `hasCommentPrefix`（素の前方一致） |
+| 探す場所 | `commentMap[sw]` だけ | スタックを遡って **9 種のノード**のコメントを全部集める |
+| `//exhaustive:enforce-default-case-required` | `enforce` では**ない** | `enforce` で**ある**（前方一致） |
+| `//exhaustive:ignoreme` | `ignore` である | `ignore` である |
+
+`explicit` が立つと `ignore` は一切参照されず、`enforce` が無いものが飛ばされる（`if cfg.explicit && !…enforce { return }`）。
+`default-case-required` は switch 限定で、`//exhaustive:ignore-default-case-required` / `…enforce-default-case-required` が**設定を上書きする**。上流は 2 つ目を `else if` ではなく `if` で書いているので、両方付いていれば要求が勝つ。
+
+#### コメントと食い違うコード（1 箇所）
+
+map のスタック走査はこう書かれている:
+
+```go
+switch node.(type) {
+case *ast.CompositeLit, *ast.ReturnStmt, …, *ast.ValueSpec:
+    relatedComments = append(relatedComments, fileComments[node]...)
+    continue
+default:
+    // stop iteration on the first inappropriate node
+    break
+}
+```
+
+`break` は `switch` を抜けるだけで `for` は止まらない。コメントの言う「最初の不適合ノードで止まる」は**起きていない**。測って確かめた:
+
+```go
+//exhaustive:enforce
+var m = func() map[Color]int { return map[Color]int{Red: 1} }()
+```
+
+`FuncLit` / `BlockStmt`（どちらも一覧に無い）を跨いで `ValueSpec` の指示子が内側のリテラルに届き、上流は報告する。コメント通りに移植すると 1 形取りこぼす。
+
+#### `check-generated` は DEFERRED のままでよい
+
+golangci-lint のラッパは設定に関係なく
+
+```go
+// Should be managed with `linters.exclusions.generated`.
+exhaustive.CheckGeneratedFlag: true,
+```
+
+と**上書き pin** している。生成ファイルを飛ばさない guff の現状が golangci 互換として正しい（「ラップした linter の option を後から pin する」の新しい 1 例）。
+
+#### 測定（scratchpad、3 設定 × 24 形）
+
+| 設定 | 上流 | 修正前の guff | 修正後 |
+|---|--:|--:|--:|
+| 素（explicit なし） | 14 | 17 | 14 |
+| `explicit-exhaustive-{switch,map}: true` | 9 | 17 | 9 |
+| `default-case-required: true` | 15 | 17 | 15 |
+
+修正前の guff は 3 設定すべてで同じ 17 件を返していた（指示子も explicit も読んでいないので当然）。修正後は 3 設定とも上流とバイト一致。
+
+#### 実装
+
+`crates/guff-style/src/exhaustive.rs` を「判定 → 指示子」の 2 段に割った。解析 AST はコメントを持たないので、コメントマップは `PARSE_COMMENTS` での**再パース**が要る（S1008 が同じ代金を払っている）。その再パースを `guff_analysis::comments::file_comments` に出し、**enum switch か enum キーの map リテラルを実際に持つファイルだけ**が払うようにした（型解決を先に済ませてから指示子を見る。上流は逆順だが、出力は変わらない）。
+
+fixture は 3 つの golden case が**同じソース**を読む形にした（`compat/isolate/fixtures/exhaustive/directives.go`）: `cases/exhaustive` 21 キー、`cases/exhaustive-explicit` 9 キー、`cases/exhaustive-default-case-required` 24 キー。1 設定では「指示子を尊重した」と「指示子を無視した」が区別できない —— ある設定で黙るべき形は、別の設定では**報告されなければならない**。

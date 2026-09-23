@@ -572,7 +572,12 @@ pub struct ExhaustiveSettings {
     pub ignore_enum_types: Option<String>,
     #[serde(default, rename = "package-scope-only")]
     pub package_scope_only: Option<bool>,
-    // DEFERRED: explicit-exhaustive-switch / explicit-exhaustive-map / check-generated.
+    #[serde(default, rename = "explicit-exhaustive-switch")]
+    pub explicit_exhaustive_switch: Option<bool>,
+    #[serde(default, rename = "explicit-exhaustive-map")]
+    pub explicit_exhaustive_map: Option<bool>,
+    // DEFERRED: check-generated — golangci-lint pins the upstream flag to
+    // `true` whatever the config says, which is guff's behaviour already.
 }
 
 /// One entry in `linters.settings.musttag.functions`.
@@ -3580,6 +3585,12 @@ impl ExhaustiveSettings {
             package_scope_only: self
                 .package_scope_only
                 .unwrap_or(defaults.package_scope_only),
+            explicit_exhaustive_switch: self
+                .explicit_exhaustive_switch
+                .unwrap_or(defaults.explicit_exhaustive_switch),
+            explicit_exhaustive_map: self
+                .explicit_exhaustive_map
+                .unwrap_or(defaults.explicit_exhaustive_map),
         }
     }
 }

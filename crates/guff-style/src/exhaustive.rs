@@ -9,15 +9,21 @@
 //! Defaults match golangci / upstream: check switches only;
 //! `default` does **not** satisfy exhaustiveness unless configured.
 //!
-//! DEFERRED: `//exhaustive:ignore` / `//exhaustive:enforce` comment directives;
-//! `check-generated`; composing type-parameter / union keys; SuggestedFix.
+//! DEFERRED: composing type-parameter / union keys; SuggestedFix.
+//!
+//! `check-generated` needs nothing: golangci-lint pins the flag to `true`
+//! regardless of the user's config (generated files are meant to be handled by
+//! `linters.exclusions.generated` instead), which is what checking every file
+//! amounts to.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
-use guff::ast::{CompositeLit, Decl, Expr, Spec, Stmt, SwitchStmt};
+use guff::ast::{CommentGroup, CompositeLit, Decl, Expr, Spec, Stmt, SwitchStmt};
+use guff::commentmap::{new_comment_map, CommentMap};
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
+use guff_analysis::comments::file_comments as comments_with_positions;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Fact, FactTypeId, Pass, RunError, RunFn};
 use guff_types::alias::unalias_readonly;
@@ -496,98 +502,104 @@ fn missing_members(
     missing
 }
 
-fn check_switch(
+/// An enum switch that reached the reporting logic, with everything the
+/// comment directives can still change folded out.
+///
+/// Upstream tests the directives *before* resolving the tag type; the split
+/// here runs the type resolution first so that a file only pays for the
+/// comment map when it actually holds an enum switch or an enum-keyed map
+/// literal. Neither order can change what is reported.
+struct SwitchFinding {
+    pos: u32,
+    type_label: String,
+    missing_labels: Vec<String>,
+    has_default: bool,
+}
+
+fn switch_finding(
     pass: &Pass<'_>,
     sw: &SwitchStmt,
     local: &HashMap<ObjectId, EnumTypeInfo>,
-    options: &ExhaustiveOptions,
     ignore_members: &Option<Regex>,
     ignore_types: &Option<Regex>,
-    pending: &mut Vec<(u32, String)>,
-) {
-    if !options.check_switch {
-        return;
-    }
-    let Some(tag) = sw.tag.as_ref() else {
-        return;
-    };
-    let Some((tag_typ, mode)) = type_of_expr(pass, tag) else {
-        return;
-    };
+) -> Option<SwitchFinding> {
+    let tag = sw.tag.as_ref()?;
+    let (tag_typ, mode) = type_of_expr(pass, tag)?;
     if !is_value_mode(mode) {
-        return;
+        return None;
     }
-    let Some(enum_info) = enum_for_tag(pass, local, tag_typ) else {
-        return;
-    };
+    let enum_info = enum_for_tag(pass, local, tag_typ)?;
     if type_ignored(ignore_types, &enum_info.pkg_path, &enum_info.type_name_str) {
-        return;
+        return None;
     }
 
     let (found_vals, has_default) = analyze_clauses(pass, sw);
     let missing = missing_members(pass, &enum_info, &found_vals, ignore_members);
 
-    let type_label = format!("{}.{}", enum_info.pkg_name, enum_info.type_name_str);
-    let pos = sw.switch.0 as u32;
+    Some(SwitchFinding {
+        pos: sw.switch.0 as u32,
+        type_label: format!("{}.{}", enum_info.pkg_name, enum_info.type_name_str),
+        missing_labels: missing
+            .iter()
+            .map(|n| format!("{}.{}", enum_info.pkg_name, n))
+            .collect(),
+        has_default,
+    })
+}
 
-    if options.default_case_required && !has_default {
+fn report_switch(
+    f: &SwitchFinding,
+    options: &ExhaustiveOptions,
+    require_default_case: bool,
+    pending: &mut Vec<(u32, String)>,
+) {
+    let type_label = &f.type_label;
+    if require_default_case && !f.has_default {
         pending.push((
-            pos,
+            f.pos,
             format!("missing default case in switch of type {type_label}"),
         ));
         return;
     }
 
-    if missing.is_empty() {
+    if f.missing_labels.is_empty() {
         return;
     }
-    if has_default && options.default_signifies_exhaustive {
+    if f.has_default && options.default_signifies_exhaustive {
         return;
     }
 
-    let missing_labels: Vec<String> = missing
-        .iter()
-        .map(|n| format!("{}.{}", enum_info.pkg_name, n))
-        .collect();
     pending.push((
-        pos,
+        f.pos,
         format!(
             "missing cases in switch of type {type_label}: {}",
-            missing_labels.join(", ")
+            f.missing_labels.join(", ")
         ),
     ));
 }
 
-fn check_map(
+fn map_finding(
     pass: &Pass<'_>,
     lit: &CompositeLit,
     local: &HashMap<ObjectId, EnumTypeInfo>,
-    options: &ExhaustiveOptions,
     ignore_members: &Option<Regex>,
     ignore_types: &Option<Regex>,
-    pending: &mut Vec<(u32, String)>,
-) {
+) -> Option<(u32, String)> {
     // Upstream intentionally ignores empty map literals: they are commonly
     // used as mutable sets or initialized before being populated.
-    if !options.check_map || lit.elts.is_empty() {
-        return;
+    if lit.elts.is_empty() {
+        return None;
     }
-    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
-        return;
-    };
-    let Some(tv) = pass.types_info().and_then(|info| info.types.get(&lit.id)) else {
-        return;
-    };
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let tv = pass.types_info().and_then(|info| info.types.get(&lit.id))?;
     let typ = unalias_readonly(&artifacts.types, tv.typ);
     let under = typ.underlying(&artifacts.types);
     let TypeData::Map(map) = artifacts.types.get(under) else {
-        return;
+        return None;
     };
-    let Some(enum_info) = enum_for_tag(pass, local, map.key()) else {
-        return;
-    };
+    let enum_info = enum_for_tag(pass, local, map.key())?;
     if type_ignored(ignore_types, &enum_info.pkg_path, &enum_info.type_name_str) {
-        return;
+        return None;
     }
 
     let mut found_vals = HashSet::new();
@@ -601,7 +613,7 @@ fn check_map(
     }
     let missing = missing_members(pass, &enum_info, &found_vals, ignore_members);
     if missing.is_empty() {
-        return;
+        return None;
     }
 
     let type_label = format!("{}.{}", enum_info.pkg_name, enum_info.type_name_str);
@@ -609,7 +621,7 @@ fn check_map(
         .iter()
         .map(|name| format!("{}.{}", enum_info.pkg_name, name))
         .collect();
-    pending.push((
+    Some((
         lit.ty
             .as_ref()
             .map_or(lit.lbrace.0 as u32, |ty| ty.pos().0 as u32),
@@ -617,7 +629,90 @@ fn check_map(
             "missing keys in map of key type {type_label}: {}",
             missing_labels.join(", ")
         ),
-    ));
+    ))
+}
+
+// ============================================================
+// `//exhaustive:` comment directives
+// ============================================================
+
+const IGNORE_COMMENT: &str = "//exhaustive:ignore";
+const ENFORCE_COMMENT: &str = "//exhaustive:enforce";
+const IGNORE_DEFAULT_CASE_REQUIRED_COMMENT: &str = "//exhaustive:ignore-default-case-required";
+const ENFORCE_DEFAULT_CASE_REQUIRED_COMMENT: &str = "//exhaustive:enforce-default-case-required";
+
+/// Upstream `userDirectives` (switch only): each comment maps to **one**
+/// directive, longest text first, so `//exhaustive:enforce-default-case-required`
+/// is not also an `//exhaustive:enforce`.
+fn user_directives(groups: &[CommentGroup]) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    for g in groups {
+        for c in &g.list {
+            for d in [
+                ENFORCE_DEFAULT_CASE_REQUIRED_COMMENT,
+                IGNORE_DEFAULT_CASE_REQUIRED_COMMENT,
+                ENFORCE_COMMENT,
+                IGNORE_COMMENT,
+            ] {
+                if c.text.starts_with(d) {
+                    out.push(d);
+                    break;
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Upstream `hasCommentPrefix` (map only): a plain prefix test, with no
+/// longest-first disambiguation. `//exhaustive:ignore-default-case-required`
+/// therefore *does* ignore a map literal, and `//exhaustive:ignoreme` does too
+/// — both measured against golangci-lint 2.12.2.
+fn has_comment_prefix(groups: &[&CommentGroup], prefix: &str) -> bool {
+    groups
+        .iter()
+        .any(|g| g.list.iter().any(|c| c.text.starts_with(prefix)))
+}
+
+/// Node kinds whose comments upstream's map checker folds into the literal's
+/// "related comments" — `ast` does not associate a comment group with a
+/// `*ast.CompositeLit` itself, so the enclosing declaration or statement
+/// carries it.
+fn map_related_node(n: NodeRef<'_>) -> bool {
+    matches!(
+        n,
+        NodeRef::CompositeLit(_)
+            | NodeRef::ReturnStmt(_)
+            | NodeRef::IndexExpr(_)
+            | NodeRef::CallExpr(_)
+            | NodeRef::UnaryExpr(_)
+            | NodeRef::AssignStmt(_)
+            | NodeRef::DeclStmt(_)
+            | NodeRef::GenDecl(_)
+            | NodeRef::ValueSpec(_)
+    )
+}
+
+/// Comments upstream associates with a map literal, walking the ancestor
+/// stack from the literal outwards.
+///
+/// Upstream's loop reads `default: break`, and its comment says it stops at
+/// the first node that is not in the list above — but a `break` inside a
+/// `switch` leaves the `switch`, not the `for`, so the walk in fact runs to
+/// the top of the stack. Measured: an `//exhaustive:enforce` on a `var`
+/// declaration reaches a literal nested inside an immediately-invoked func
+/// literal, across the `FuncLit`/`BlockStmt` that are not in the list.
+fn map_related_comments<'a>(cm: &'a CommentMap<'a>, stack: &[NodeRef<'a>]) -> Vec<&'a CommentGroup> {
+    let mut out = Vec::new();
+    for node in stack.iter().rev() {
+        if !map_related_node(*node) {
+            continue;
+        }
+        if let Some(groups) = cm.get(*node) {
+            out.extend(groups.iter());
+        }
+    }
+    out
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -638,30 +733,80 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     let mut pending = Vec::new();
     for file in pass.files() {
+        // Ancestor stack, maintained the way `inspector.WithStack` does:
+        // `walk::inspect` calls back with `None` on the way out of a node.
+        let mut stack: Vec<NodeRef<'_>> = Vec::new();
+        let mut switches: Vec<(&SwitchStmt, SwitchFinding)> = Vec::new();
+        let mut maps: Vec<(Vec<NodeRef<'_>>, u32, String)> = Vec::new();
         walk::inspect(NodeRef::File(file), |n| {
             match n {
-                Some(NodeRef::SwitchStmt(sw)) => check_switch(
-                    pass,
-                    sw,
-                    &enums,
-                    &options,
-                    &ignore_members,
-                    &ignore_types,
-                    &mut pending,
-                ),
-                Some(NodeRef::CompositeLit(lit)) => check_map(
-                    pass,
-                    lit,
-                    &enums,
-                    &options,
-                    &ignore_members,
-                    &ignore_types,
-                    &mut pending,
-                ),
-                _ => {}
+                Some(node) => {
+                    stack.push(node);
+                    match node {
+                        NodeRef::SwitchStmt(sw) if options.check_switch => {
+                            if let Some(f) =
+                                switch_finding(pass, sw, &enums, &ignore_members, &ignore_types)
+                            {
+                                switches.push((sw, f));
+                            }
+                        }
+                        NodeRef::CompositeLit(lit) if options.check_map => {
+                            if let Some((pos, msg)) =
+                                map_finding(pass, lit, &enums, &ignore_members, &ignore_types)
+                            {
+                                maps.push((stack.clone(), pos, msg));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                None => {
+                    stack.pop();
+                }
             }
             true
         });
+        if switches.is_empty() && maps.is_empty() {
+            continue;
+        }
+
+        // Only files that hold an enum switch or an enum-keyed map literal pay
+        // for the comment map: the analysis AST carries no comments, so it
+        // costs a reparse (`s1008` pays the same toll for the same reason).
+        let reparsed = comments_with_positions(pass, file);
+        let cmap = new_comment_map(pass.fset(), NodeRef::File(file), &reparsed);
+
+        for (sw, f) in &switches {
+            let groups = cmap.get(NodeRef::SwitchStmt(sw)).unwrap_or(&[]);
+            let directives = user_directives(groups);
+            if !options.explicit_exhaustive_switch && directives.contains(&IGNORE_COMMENT) {
+                continue;
+            }
+            if options.explicit_exhaustive_switch && !directives.contains(&ENFORCE_COMMENT) {
+                continue;
+            }
+            let mut require_default_case = options.default_case_required;
+            if directives.contains(&IGNORE_DEFAULT_CASE_REQUIRED_COMMENT) {
+                require_default_case = false;
+            }
+            // Upstream uses a second `if` rather than `else if`, so a switch
+            // carrying both directives ends up enforcing.
+            if directives.contains(&ENFORCE_DEFAULT_CASE_REQUIRED_COMMENT) {
+                require_default_case = true;
+            }
+            report_switch(f, &options, require_default_case, &mut pending);
+        }
+
+        for (stack, pos, msg) in &maps {
+            let related = map_related_comments(&cmap, stack);
+            if !options.explicit_exhaustive_map && has_comment_prefix(&related, IGNORE_COMMENT) {
+                continue;
+            }
+            if options.explicit_exhaustive_map && !has_comment_prefix(&related, ENFORCE_COMMENT) {
+                continue;
+            }
+            pending.push((*pos, msg.clone()));
+        }
     }
 
     for (pos, msg) in pending {

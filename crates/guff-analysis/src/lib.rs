@@ -10,6 +10,7 @@
 mod analyzer;
 pub mod callcheck;
 pub mod code;
+pub mod comments;
 mod diagnostic;
 mod fact_codec;
 mod facts;
