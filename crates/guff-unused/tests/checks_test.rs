@@ -405,6 +405,76 @@ fn unused_settings_field_writes_are_uses_false() {
 
 /// `post-statements-are-reads: true` on top, which is the pair avalanchego
 /// sets. It changes exactly one row: `v.n++` becomes a read as well as a write.
+/// honnef's (9.7) "variable *reads* use variables, writes do not" and (4.9)
+/// "functions use package-level variables they assign to iff in tests".
+///
+/// A package-level variable that is only ever assigned to is unused. The one
+/// exception is a global **declared in a `_test.go` file** — benchmark sinks —
+/// and the rule asks about the declaring file, not the writing one, which is
+/// why `writtenFromTest` is reported although a benchmark assigns to it.
+///
+/// Exact list: seven of these messages differ only in a name.
+#[test]
+fn unused_reports_a_global_that_is_only_written() {
+    let dir = support::testdata("globalwrites");
+    let src = dir.join("globalwrites.go");
+    let test = dir.join("globalwrites_test.go");
+    let pkg = support::typecheck_pkg_files(
+        "example.com/unused/globalwrites",
+        &[src.as_path(), test.as_path()],
+    );
+    let mut messages = support::run_analyzer(analyzer(), &pkg);
+    messages.sort();
+    assert_eq!(
+        messages,
+        vec![
+            "var compoundAssigned is unused",
+            "var incremented is unused",
+            "var neverTouched is unused",
+            "var rangeKey is unused",
+            "var writtenFromTest is unused",
+            "var writtenInFunc is unused",
+            "var writtenInInit is unused",
+        ],
+        "{messages:?}"
+    );
+}
+
+/// `post-statements-are-reads` makes `x++` a read, so `incremented` survives —
+/// the one shape the default config cannot tell from a plain write.
+#[test]
+fn unused_post_statements_are_reads_keeps_an_incremented_global() {
+    let dir = support::testdata("globalwrites");
+    let src = dir.join("globalwrites.go");
+    let test = dir.join("globalwrites_test.go");
+    let pkg = support::typecheck_pkg_files(
+        "example.com/unused/globalwrites",
+        &[src.as_path(), test.as_path()],
+    );
+    let mut messages = support::run_analyzer_with_settings(
+        analyzer(),
+        &pkg,
+        "unused",
+        guff_unused::Options {
+            field_writes_are_uses: true,
+            post_statements_are_reads: true,
+        },
+    );
+    messages.sort();
+    assert_eq!(
+        messages,
+        vec![
+            "var compoundAssigned is unused",
+            "var neverTouched is unused",
+            "var rangeKey is unused",
+            "var writtenFromTest is unused",
+            "var writtenInFunc is unused",
+            "var writtenInInit is unused",
+        ],
+        "{messages:?}"
+    );
+}
+
 #[test]
 fn unused_settings_post_statements_are_reads() {
     let dir = support::testdata("fieldwrites");

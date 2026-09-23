@@ -16,3 +16,10 @@ fieldwrites.go:137:6:unused::type pin is unused
 fieldwrites.go:141:2:unused::field pin is unused
 fieldwrites.go:154:2:unused::field written is unused
 fieldwrites.go:166:2:unused::field written is unused
+globalwrites/globalwrites.go:11:5:unused::var writtenInInit is unused
+globalwrites/globalwrites.go:14:5:unused::var writtenInFunc is unused
+globalwrites/globalwrites.go:24:5:unused::var compoundAssigned is unused
+globalwrites/globalwrites.go:33:5:unused::var rangeKey is unused
+globalwrites/globalwrites.go:37:5:unused::var writtenFromTest is unused
+globalwrites/globalwrites.go:40:18:unused::field n is unused
+globalwrites/globalwrites_test.go:10:5:unused::var neverTouched is unused
