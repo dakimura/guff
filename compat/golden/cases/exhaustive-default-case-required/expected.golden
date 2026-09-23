@@ -23,6 +23,10 @@ directives.go:199:7:exhaustive::missing keys in map of key type p.Color: p.Blue
 directives.go:208:16:exhaustive::missing keys in map of key type p.Color: p.Blue
 directives.go:221:9:exhaustive::missing keys in map of key type p.Color: p.Blue
 directives.go:236:9:exhaustive::missing keys in map of key type p.Color: p.Blue
+directives.go:281:9:exhaustive::missing keys in map of key type p.Color: p.Green, p.Blue
+directives.go:282:9:exhaustive::missing keys in map of key type p.Color: p.Green, p.Blue
+directives.go:283:9:exhaustive::missing keys in map of key type p.Color: p.Green, p.Blue
+directives.go:293:6:exhaustive::missing keys in map of key type p.Color: p.Green, p.Blue
 foreign.go:10:2:exhaustive::missing default case in switch of type enumdep.Kind
 foreign.go:20:2:exhaustive::missing default case in switch of type enumdep.Flag
 foreign.go:29:2:exhaustive::missing default case in switch of type enumdep.Kind

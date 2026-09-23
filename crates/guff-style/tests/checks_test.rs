@@ -6103,6 +6103,13 @@ fn exhaustive_honours_ignore_directives() {
         (136, EXH_MISSING_KEY.to_string()),
         (143, EXH_MISSING_KEY.to_string()),
         (152, EXH_MISSING_KEY.to_string()),
+        // Only the literals that spell their type out: lines 166, 184 (the
+        // outer `[]colorHolder`) and 191 elide theirs, and the inner literals
+        // they hold do too.
+        (174, EXH_MISSING_KEY.to_string()),
+        (175, EXH_MISSING_KEY.to_string()),
+        (176, EXH_MISSING_KEY.to_string()),
+        (185, EXH_MISSING_KEY.to_string()),
     ];
     assert_eq!(got, want);
 }
@@ -6157,6 +6164,10 @@ fn exhaustive_default_case_directives_override_the_setting() {
         (136, EXH_MISSING_KEY.to_string()),
         (143, EXH_MISSING_KEY.to_string()),
         (152, EXH_MISSING_KEY.to_string()),
+        (174, EXH_MISSING_KEY.to_string()),
+        (175, EXH_MISSING_KEY.to_string()),
+        (176, EXH_MISSING_KEY.to_string()),
+        (185, EXH_MISSING_KEY.to_string()),
     ];
     assert_eq!(got, want);
 }
