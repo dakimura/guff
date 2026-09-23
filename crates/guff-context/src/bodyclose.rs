@@ -1727,7 +1727,7 @@ fn collect_closure_reassigned(pass: &Pass<'_>) -> ClosureStores {
                         // `calledInFunc`, which finds the `Close` on an
                         // `io.ReadCloser` and answers "not open". dapr's
                         // `outbox` tests close inside `t.Cleanup(func(){…})`.
-                        if closed_by_nested_closure(&fl.body, &id.name) {
+                        if captured_by_invoked_closure(pass, &fl.body, &id.name, span) {
                             continue;
                         }
                         out.inner.insert(obj);
@@ -1744,7 +1744,94 @@ fn collect_closure_reassigned(pass: &Pass<'_>) -> ClosureStores {
     out
 }
 
+/// Whether a func literal nested in `body` captures `name` and is **invoked**:
+/// called on the spot, deferred, or passed as an argument.
+///
+/// That is `isClosureCalled`, which counts an `*ssa.Call` or `*ssa.Defer`
+/// referrer of the `MakeClosure` — passing the literal to a function makes the
+/// call itself that referrer — and then `calledInFunc(f, true)`, which answers
+/// at the closure's first instruction that is not a load: a `Close` on an
+/// `io.ReadCloser` gives `!called`, and anything else gives
+/// `isopen(b, i) || !called`, both **false** for a called closure that opens
+/// nothing. So the capture settles the response whether or not the closure
+/// closes it — datadog-agent's `pkg/util/ecs/metadata/v3or4` defers
+/// `func() { telemetry.AddQueryToTelemetry(path, resp) }` and is silent
+/// upstream even in the variant where nothing closes the body.
+///
+/// A literal that is never invoked does not settle it (`called == false` makes
+/// `calledInFunc` true), and neither does `go func(){…}()`: an `*ssa.Go` is
+/// neither a `Call` nor a `Defer`.
+fn captured_by_invoked_closure(
+    pass: &Pass<'_>,
+    body: &BlockStmt,
+    name: &str,
+    outer_span: (u32, u32),
+) -> bool {
+    let mut found = false;
+    let mut stack: Vec<NodeRef<'_>> = Vec::new();
+    guff::walk::preorder_stack(NodeRef::BlockStmt(body), &mut stack, |n, st| {
+        if found {
+            return false;
+        }
+        let NodeRef::FuncLit(fl) = n else {
+            return true;
+        };
+        // Does it capture `name`? (A literal that declares its own does not.)
+        let span = (fl.ty.func.0 as u32, fl.body.rbrace.0 as u32);
+        let mut mentions = false;
+        let mut inner_stack: Vec<NodeRef<'_>> = Vec::new();
+        guff::walk::preorder_stack(
+            NodeRef::BlockStmt(&fl.body),
+            &mut inner_stack,
+            |inner, ist| {
+                if let NodeRef::Ident(id) = inner {
+                    // `_ = resp` loads nothing: go/ssa drops an assignment to
+                    // the blank identifier, so the literal captures no free
+                    // variable and upstream never reaches `calledInFunc`.
+                    let blank_rhs = matches!(ist.last(), Some(NodeRef::AssignStmt(a))
+                        if a.lhs.iter().all(|l| matches!(l, Expr::Ident(i) if i.name == "_")));
+                    if id.name == name && !blank_rhs && !declared_inside(pass, id, span) {
+                        mentions = true;
+                    }
+                }
+                true
+            },
+        );
+        let _ = outer_span;
+        if mentions && literal_is_invoked(fl, st) {
+            found = true;
+            return false;
+        }
+        true
+    });
+    found
+}
+
+/// `isClosureCalled`: the literal is the callee of a call or a `defer`, or an
+/// argument of one. `go f()` is neither.
+fn literal_is_invoked(fl: &guff::ast::FuncLit, stack: &[NodeRef<'_>]) -> bool {
+    let me = NodeRef::FuncLit(fl).erased_ptr();
+    let Some(parent) = stack.last() else {
+        return false;
+    };
+    let NodeRef::CallExpr(call) = parent else {
+        return false;
+    };
+    let is_callee = guff::walk::expr_ref(&call.fun).erased_ptr() == me;
+    let is_arg = call
+        .args
+        .iter()
+        .any(|a| guff::walk::expr_ref(a).erased_ptr() == me);
+    if !is_callee && !is_arg {
+        return false;
+    }
+    // `go f()` does not count; `defer f()` and a plain call do.
+    let grand = stack.len().checked_sub(2).map(|i| stack[i]);
+    !matches!(grand, Some(NodeRef::GoStmt(_)))
+}
+
 /// Whether some func literal nested in `body` calls `<name>.Body.Close()`.
+#[allow(dead_code)]
 fn closed_by_nested_closure(body: &BlockStmt, name: &str) -> bool {
     let mut found = false;
     preorder(NodeRef::BlockStmt(body), |n| {

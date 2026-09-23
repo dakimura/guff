@@ -24,3 +24,4 @@ dialer/dialer.go   crates/guff-context/tests/testdata/bodyclose/stub/example.com
 # `isClosureCalled`: a closure launched with `go`, or only returned, is not
 # called, and the response is open whatever the enclosing function writes.
 goescape/goescape.go   crates/guff-context/tests/testdata/bodyclose/goescape.go
+freevar/freevar.go   crates/guff-context/tests/testdata/bodyclose/freevar.go

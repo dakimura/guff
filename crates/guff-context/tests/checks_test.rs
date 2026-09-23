@@ -155,6 +155,40 @@ fn bodyclose_a_goroutine_closure_is_never_called() {
     );
 }
 
+/// A response stored into a variable the closure does not own is settled by a
+/// nested literal that *captures* it and is invoked — called, deferred, or
+/// passed as an argument (`isClosureCalled` counts a `Call` or `Defer`
+/// referrer of the `MakeClosure`, and `calledInFunc` then answers "not open").
+/// It settles even when nothing closes the body, which is what datadog-agent's
+/// ECS metadata client relies on. Eight shapes, five reports: the three silent
+/// ones are the deferred capture with a close, the same without one, and the
+/// capture called on the spot.
+#[test]
+fn bodyclose_a_captured_free_variable_is_settled_by_an_invoked_closure() {
+    let dir = support::testdata("bodyclose");
+    let pkg = support::typecheck_pkg("example.com/bodyclose/freevar", &dir.join("freevar.go"));
+    assert!(!pkg.ill_typed, "{:?}", pkg.errors);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<i64> = support::run_analyzer_diagnostics(bodyclose(), &pkg)
+        .into_iter()
+        .filter(|d| d.message.contains("response body must be closed"))
+        .map(|d| fset.position(guff::position::Pos(d.pos as i64)).line)
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            29,  // no capturing literal at all
+            45,  // the closure is called directly
+            60,  // the closure is never called
+            74,  // nothing closes the body, no capture either
+            128, // the capturing literal is never invoked
+        ],
+        "the deferred captures (with and without a close) and the immediately \
+         called one must stay silent: {got:?}"
+    );
+}
+
 /// A func literal that declares its own `resp` does not capture the outer one.
 ///
 /// Upstream reaches a closure through an `*ssa.MakeClosure` over a *free
