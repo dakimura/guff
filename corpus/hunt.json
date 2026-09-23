@@ -620,5 +620,13 @@
       "zlib",
       "zstd"
     ]
+  },
+  {
+    "name": "weaviate",
+    "url": "https://github.com/weaviate/weaviate.git",
+    "ref": "v1.39.2",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "60m"
   }
 ]

@@ -36885,3 +36885,29 @@ TypeData::TypeParam(tp) => match tp.constraint() {
 | `fake[T interface{ ~[]float32 }]` → 同上 | **拒否** | 拒否 | 拒否 |
 
 weaviate の ill-typed は **2 → 0**。
+
+### 2026-09-24（続き 353）— `adopt weaviate` 完了。台帳 **77/100**
+
+続き 348〜352 の 5 本で weaviate は
+
+```
+weaviate: guff=32 golangci=32 both=32 P=100.0% R=100.0%   ill-typed 0
+```
+
+になったので `corpus/hunt.json` に登録した（`v1.39.2`、`./...`、build tag は weaviate 自身の
+`.golangci.yml` が `integrationTest` / `integrationTestSlow` を宣言しているので entry 側には要らない）。
+台帳は **84 定義 / 77 clean / open 2 / unmeasured 5**。
+
+#### 採用時の 30 件がどう分かれたか
+
+| 由来 | 件数 | 続き |
+|---|--:|---|
+| exhaustive: `explicit-exhaustive-map` を読み捨て | 28 | 348 |
+| exhaustive: 型を綴っていないリテラルを見ていた | 3（うち 28 の残り） | 349 |
+| unused: 別 struct 型の上に定義した型のフィールド | 1 | 350 |
+| nolintlint: 書き込みだけの global を使用扱い（＝unused の取りこぼしの影） | 1 | 351 |
+| 型チェッカ: 裸の型で書いた制約が interface になっていない | ill-typed 2 パッケージ | 352 |
+
+**1 つの linter の中で 2 つ、`unused` の中で 2 つ、その下に型チェッカが 1 つ** —— 最初の hunt が
+「exhaustive 28」に見えたのは一番上の層だけで、直すたびに下の層が出てきた。
+`P=51.6%` の内訳を linter で割った時点では、まだ 5 本のうち 1 本しか見えていない。
