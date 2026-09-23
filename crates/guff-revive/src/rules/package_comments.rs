@@ -68,8 +68,16 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
         );
     }
 
-    // Missing package comment: once per package, only if no file has a doc.
-    if files.iter().any(|(_, rp)| !is_empty_doc(rp.file.doc.as_ref())) {
+    // Missing package comment: once per package, and only if **no file has a
+    // doc at all**. Upstream's `checkPackageComment` tests `file.AST.Doc !=
+    // nil`, not whether the doc says anything: a comment group that holds only
+    // directives still silences the package, even though `isEmptyDoc` — which
+    // reads `Doc.Text()`, and `go/ast` drops directives from that — calls it
+    // empty a few lines earlier. datadog-agent's `cmd/cluster-agent/klog.go`
+    // carries `//nolint:revive // TODO(CINT) Fix revive linter` right above its
+    // `package main`, and that alone is why upstream says nothing about the
+    // package's missing comment.
+    if files.iter().any(|(_, rp)| rp.file.doc.is_some()) {
         return failures;
     }
 

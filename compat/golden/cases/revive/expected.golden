@@ -398,6 +398,12 @@ scope/revivetest/preserve_scope.go:16:19:revive:warning:flag-parameter: paramete
 scope/revivetest/preserve_scope.go:18:10:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
 scope/revivetest/preserve_scope.go:19:9:revive:warning:indent-error-flow: if block ends with a return statement, so drop this else and outdent its block
 scope/revivetest/preserve_scope.go:20:10:revive:warning:add-constant: avoid magic numbers like '2', create a named constant for it
+siblingdetached/siblingdetached.go:5:1:revive:warning:file-header: the file doesn't have an appropriate header
+siblingdetached/siblingdetached.go:5:1:revive:warning:package-comments: should have a package comment
+siblingdetached/zzhelper.go:1:1:revive:warning:comments-density: the file has a comment density of  0% (0 comment lines for 1 code lines) but expected a minimum of 10%
+siblingdetached/zzhelper.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
+siblingdirective/helper.go:1:1:revive:warning:comments-density: the file has a comment density of  0% (0 comment lines for 1 code lines) but expected a minimum of 10%
+siblingdirective/helper.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
 siblingok/helper.go:1:1:revive:warning:comments-density: the file has a comment density of  0% (0 comment lines for 1 code lines) but expected a minimum of 10%
 siblingok/helper.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
 siblingok/siblingok.go:2:1:revive:warning:file-header: the file doesn't have an appropriate header
