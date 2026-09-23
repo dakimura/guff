@@ -6,5 +6,5 @@ directives.go  compat/isolate/fixtures/exhaustive/directives.go
 # The imported enum's module. Its go.mod is case scaffolding (see the replace
 # in go.mod); the source is the same file the isolate tier and the Rust unit
 # tests read.
-enumdep/go.mod   compat/golden/cases/exhaustive/enumdep.go.mod
+enumdep/go.mod   compat/golden/cases/exhaustive-default-case-required/enumdep.go.mod
 enumdep/enum.go  compat/isolate/fixtures/exhaustive/enumdep/enum.go

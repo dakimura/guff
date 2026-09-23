@@ -475,6 +475,10 @@ pub struct ExhaustiveOptions {
     pub ignore_enum_types: String,
     /// Only consider package-scope enums (not nested function scopes).
     pub package_scope_only: bool,
+    /// Check a switch statement only when it carries `//exhaustive:enforce`.
+    pub explicit_exhaustive_switch: bool,
+    /// Check a map literal only when it carries `//exhaustive:enforce`.
+    pub explicit_exhaustive_map: bool,
 }
 
 impl Default for ExhaustiveOptions {
@@ -487,6 +491,8 @@ impl Default for ExhaustiveOptions {
             ignore_enum_members: String::new(),
             ignore_enum_types: String::new(),
             package_scope_only: false,
+            explicit_exhaustive_switch: false,
+            explicit_exhaustive_map: false,
         }
     }
 }

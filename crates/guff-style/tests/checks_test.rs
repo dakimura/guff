@@ -6031,6 +6031,136 @@ fn exhaustive_checks_map_literals_when_enabled() {
     );
 }
 
+/// `(line, message)` for every exhaustive finding in the directives fixture,
+/// under one settings bag. Positions, not counts: most of these shapes say the
+/// same sentence, so a count would hold for the wrong lines.
+fn exhaustive_directive_findings(options: guff_style::ExhaustiveOptions) -> Vec<(i64, String)> {
+    let pkg = support::typecheck_fixture(
+        "exhaustive",
+        "example.com/exhaustive/directives",
+        "directives.go",
+    );
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut bag = SettingsBag::new();
+    bag.insert("exhaustive", options);
+    let mut out: Vec<(i64, String)> = support::run_analyzer_diagnostics_with_settings(
+        exhaustive(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    )
+    .into_iter()
+    .map(|d| {
+        (
+            fset.position(guff::position::Pos(d.pos as i64)).line,
+            d.message,
+        )
+    })
+    .collect();
+    out.sort();
+    out
+}
+
+fn exhaustive_both() -> guff_style::ExhaustiveOptions {
+    guff_style::ExhaustiveOptions {
+        check_switch: true,
+        check_map: true,
+        ..guff_style::ExhaustiveOptions::default()
+    }
+}
+
+const EXH_MISSING_TWO: &str =
+    "missing cases in switch of type directives.Color: directives.Green, directives.Blue";
+const EXH_MISSING_DEFAULT: &str = "missing default case in switch of type directives.Color";
+const EXH_MISSING_KEY: &str =
+    "missing keys in map of key type directives.Color: directives.Green, directives.Blue";
+
+/// The directives as they behave with neither `explicit-*` nor
+/// `default-case-required` — the shape golangci-lint runs by default.
+///
+/// Measured against golangci-lint 2.12.2 on the same sources
+/// (`compat/golden/cases/exhaustive`).
+#[test]
+fn exhaustive_honours_ignore_directives() {
+    let got = exhaustive_directive_findings(exhaustive_both());
+    let want: Vec<(i64, String)> = vec![
+        (20, EXH_MISSING_TWO.to_string()),
+        (40, EXH_MISSING_TWO.to_string()),
+        // `//exhaustive:enforce-default-case-required` demands the default
+        // case even though the setting is off, and that report wins over the
+        // missing members.
+        (52, EXH_MISSING_DEFAULT.to_string()),
+        // A trailing comment on the `switch` line is associated with no node.
+        (100, EXH_MISSING_TWO.to_string()),
+        (108, EXH_MISSING_KEY.to_string()),
+        (118, EXH_MISSING_KEY.to_string()),
+        // For a map literal the directive test is a plain prefix test, so
+        // `enforce-default-case-required` is not an ignore — while
+        // `ignore-default-case-required` on line 126 *is* one.
+        (131, EXH_MISSING_KEY.to_string()),
+        (136, EXH_MISSING_KEY.to_string()),
+        (143, EXH_MISSING_KEY.to_string()),
+        (152, EXH_MISSING_KEY.to_string()),
+    ];
+    assert_eq!(got, want);
+}
+
+/// `explicit-exhaustive-switch` / `explicit-exhaustive-map`: nothing is checked
+/// but what carries `//exhaustive:enforce`, and the ignore directives stop
+/// being consulted at all.
+#[test]
+fn exhaustive_explicit_checks_only_enforced_nodes() {
+    let got = exhaustive_directive_findings(guff_style::ExhaustiveOptions {
+        explicit_exhaustive_switch: true,
+        explicit_exhaustive_map: true,
+        ..exhaustive_both()
+    });
+    let want: Vec<(i64, String)> = vec![
+        // Line 52's `//exhaustive:enforce-default-case-required` is *not* an
+        // enforce for a switch: `userDirectives` maps each comment to the
+        // longest directive it starts with.
+        (40, EXH_MISSING_TWO.to_string()),
+        (118, EXH_MISSING_KEY.to_string()),
+        // …but it is one for a map literal, which asks for a plain prefix.
+        (131, EXH_MISSING_KEY.to_string()),
+        (136, EXH_MISSING_KEY.to_string()),
+        // Line 143's enforce sits on the `FuncDecl`, which the map checker
+        // does not look at; line 152's sits on a `var` two unlisted nodes
+        // above the literal, which it does.
+        (152, EXH_MISSING_KEY.to_string()),
+    ];
+    assert_eq!(got, want);
+}
+
+/// `default-case-required` plus the two directives that turn it off and on per
+/// switch.
+#[test]
+fn exhaustive_default_case_directives_override_the_setting() {
+    let got = exhaustive_directive_findings(guff_style::ExhaustiveOptions {
+        default_case_required: true,
+        ..exhaustive_both()
+    });
+    let want: Vec<(i64, String)> = vec![
+        (20, EXH_MISSING_DEFAULT.to_string()),
+        (40, EXH_MISSING_DEFAULT.to_string()),
+        (52, EXH_MISSING_DEFAULT.to_string()),
+        // Line 63 lists every member and has no default, and is silent only
+        // because of `//exhaustive:ignore-default-case-required`; line 76 is
+        // the same switch without it.
+        (76, EXH_MISSING_DEFAULT.to_string()),
+        (100, EXH_MISSING_DEFAULT.to_string()),
+        (108, EXH_MISSING_KEY.to_string()),
+        (118, EXH_MISSING_KEY.to_string()),
+        (131, EXH_MISSING_KEY.to_string()),
+        (136, EXH_MISSING_KEY.to_string()),
+        (143, EXH_MISSING_KEY.to_string()),
+        (152, EXH_MISSING_KEY.to_string()),
+    ];
+    assert_eq!(got, want);
+}
+
 #[test]
 fn musttag_flags_missing_json_tags() {
     let pkg = support::typecheck_fixture("musttag", "example.com/musttag", "bad.go");
