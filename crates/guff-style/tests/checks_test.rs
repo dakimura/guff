@@ -3286,6 +3286,87 @@ fn forbidigo_allows_sprintf() {
     assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
 }
 
+/// `analyze-types`: a pattern is matched against the *resolved* text
+/// (`expandMatchText`), not the source text.
+///
+/// The pattern below reads `^user\.` and the fixture never writes `user.` in
+/// its source — every call goes through an alias (`osu`, `user2`) or a
+/// variable. A port that matches the source text scores zero here. The last
+/// shape is the opposite trap: a local type named `user` whose *source* text
+/// matches and whose resolved text (`forbidigotypes.user.Lookup`) does not.
+///
+/// `(line, message)`, not a count: five of the six differ only in a name.
+#[test]
+fn forbidigo_analyze_types_resolves_aliases_and_receivers() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::{ForbidigoOptions, ForbidigoPattern};
+
+    let pkg = support::typecheck_fixture(
+        "forbidigotypes",
+        "example.com/forbidigotypes",
+        "analyzetypes.go",
+    );
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "forbidigo",
+        ForbidigoOptions {
+            forbid: vec![
+                ForbidigoPattern {
+                    pattern: r"^user\.(Lookup|LookupId|Current|User\.GroupIds)$".into(),
+                    pkg: "^os/user$".into(),
+                    msg: "unsafe".into(),
+                },
+                ForbidigoPattern {
+                    pattern: r"^fmt\.Println$".into(),
+                    pkg: String::new(),
+                    msg: "no Println".into(),
+                },
+            ],
+            exclude_godoc_examples: true,
+            analyze_types: true,
+        },
+    );
+    let mut got: Vec<(i64, String)> = support::run_analyzer_diagnostics_with_settings(
+        forbidigo(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    )
+    .into_iter()
+    .map(|d| {
+        (
+            fset.position(guff::position::Pos(d.pos as i64)).line,
+            d.message,
+        )
+    })
+    .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            (16, r#"use of `osu.Lookup` forbidden because "unsafe""#.to_string()),
+            (
+                20,
+                r#"use of `user2.LookupId` forbidden because "unsafe""#.to_string()
+            ),
+            (24, r#"use of `u.GroupIds` forbidden because "unsafe""#.to_string()),
+            (28, r#"use of `osu.Current` forbidden because "unsafe""#.to_string()),
+            (32, r#"use of `u.GroupIds` forbidden because "unsafe""#.to_string()),
+            (
+                36,
+                r#"use of `fmt.Println` forbidden because "no Println""#.to_string()
+            ),
+        ],
+        "{got:?}"
+    );
+}
+
 #[test]
 fn forbidigo_respects_custom_forbid_settings() {
     use std::sync::Arc;
