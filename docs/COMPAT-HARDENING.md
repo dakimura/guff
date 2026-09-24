@@ -36911,3 +36911,61 @@ weaviate: guff=32 golangci=32 both=32 P=100.0% R=100.0%   ill-typed 0
 **1 つの linter の中で 2 つ、`unused` の中で 2 つ、その下に型チェッカが 1 つ** —— 最初の hunt が
 「exhaustive 28」に見えたのは一番上の層だけで、直すたびに下の層が出てきた。
 `P=51.6%` の内訳を linter で割った時点では、まだ 5 本のうち 1 本しか見えていない。
+
+### 2026-09-24（続き 354）— `adopt teleport` → `close teleport`（1）: `analyze-types` は **pkg の絞り込みだけでなく、照合するテキストそのものを差し替える**
+
+台帳の次は **teleport**（`v18.11.1`、773 パッケージ、darwin で load も build も通る。リンクの
+`ld: warning: ignoring duplicate libraries: '-lobjc'` だけ）。採用 hunt:
+
+```
+teleport: guff=18 golangci=16 both=10 P=55.6% R=62.5%
+  guff-only  {'bodyclose': 5, 'staticcheck': 3}
+  gcl-only   {'forbidigo': 6}
+```
+
+まず**取りこぼし側**の forbidigo 6 件。全部 `session/host/user/user_forward.go` の 1 ファイルで、
+teleport の設定はこう:
+
+```yaml
+- pkg: '^os/user$'
+  pattern: '^user\.(Lookup|LookupId|LookupGroup|LookupGroupId|Current|User\.GroupIds)$'
+  msg: 'os/user lookup APIs potentially unsafe; use the session/host/user wrapper instead'
+analyze-types: true
+```
+
+そのファイルは `osu "os/user"` と**別名で import している**。guff の forbidigo は
+`analyze-types` を「`pkg` フィルタを有効にする」だけの意味で実装していて、**照合するテキストは
+ソースのまま**だった（ヘッダにも "full type-text expansion remains DEFERRED" と書いてあった）。
+`osu.Lookup` は `^user\.Lookup$` に当たらないので、6 件まるごと黙っていた。
+
+上流 `expandMatchText`（forbidigo v2.3.1）:
+
+| ノード | 照合テキスト | pkg |
+|---|---|---|
+| `Ident`（メソッドでない） | `pkg.Name() + "." + src`, および `src` | `obj.Pkg().Path()` |
+| `Ident`（メソッド） | `src` のみ | 同上 |
+| `X.f` で `X` が **PkgName** | `imported.Name() + "." + f` ——**別名ではなく本来の名前** | `imported.Path()` |
+| `X.f` で `X` が **Var** | `typeNameWithPackage(X の型)` + `.f` | その型のパッケージ |
+| 型が名前を持たない（無名 struct 等） | **空**（＝何にも当たらない） | — |
+
+`typeNameWithPackage` はポインタを剥がし、alias を辿り、`pkg.Name() + "." + TypeName` を返す。
+なので `u.GroupIds()` は `user.User.GroupIds` として照合される —— **変数名ではなく型の名前**。
+
+#### 測定（scratchpad、7 形）
+
+| 形 | 上流 | 修正前の guff |
+|---|---|---|
+| `osu.Lookup(n)`（別名 import） | 報告 | **黙る** |
+| `user2.LookupId(n)`（もう 1 つの別名） | 報告 | **黙る** |
+| `u.GroupIds()`（引数が `*osu.User`） | 報告 | **黙る** |
+| `u.GroupIds()`（ローカル変数） | 報告 | **黙る** |
+| `fmt.Println`（素の import） | 報告 | 報告 |
+| `strings.ToUpper`（無関係） | 黙る | 黙る |
+| ローカルの `type user struct{}` の `v.Lookup` | **黙る** | 黙る |
+
+最後の行が逆向きの罠: **ソーステキストは当たるのに解決後のテキストは当たらない**
+（`forbidigotypes.user.Lookup`）。fixture のパターンは `^user\.` なのに、ソースには
+`user.` が一度も現れない —— ソーステキストで照合する移植はこの case で 0 点になる。
+
+golden は新 case `cases/forbidigo-analyze-types`（6 キー）。unit test は `stub/os/user` を置いて
+同じファイルを読む。

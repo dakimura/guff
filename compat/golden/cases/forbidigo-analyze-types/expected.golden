@@ -1,0 +1,14 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh forbidigo-analyze-types
+# Produced by running golangci-lint on compat/golden/cases/forbidigo-analyze-types/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+analyzetypes.go:16:56:forbidigo::use of `osu.Lookup` forbidden because "os/user lookup APIs potentially unsafe; use the wrapper instead"
+analyzetypes.go:20:58:forbidigo::use of `user2.LookupId` forbidden because "os/user lookup APIs potentially unsafe; use the wrapper instead"
+analyzetypes.go:24:60:forbidigo::use of `u.GroupIds` forbidden because "os/user lookup APIs potentially unsafe; use the wrapper instead"
+analyzetypes.go:28:12:forbidigo::use of `osu.Current` forbidden because "os/user lookup APIs potentially unsafe; use the wrapper instead"
+analyzetypes.go:32:9:forbidigo::use of `u.GroupIds` forbidden because "os/user lookup APIs potentially unsafe; use the wrapper instead"
+analyzetypes.go:36:22:forbidigo::use of `fmt.Println` forbidden because "no Println"

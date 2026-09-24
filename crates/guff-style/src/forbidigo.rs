@@ -4,8 +4,9 @@
 //! Forbids identifiers matching configured regexp patterns. Default patterns
 //! match `fmt.Print*` / builtin `print` / `println`.
 //!
-//! golangci-lint always ignores `//permit` (prefer `//nolint`). `analyze-types` enables `pkg` filtering on resolved object packages;
-//! full type-text expansion remains DEFERRED (see DEVELOPMENT.md R13).
+//! golangci-lint always ignores `//permit` (prefer `//nolint`). `analyze-types`
+//! resolves the text a pattern is matched against (`expandMatchText`) as well
+//! as the package the `pkg` filter sees.
 
 use std::sync::OnceLock;
 
@@ -15,6 +16,9 @@ use guff::ast::{
 };
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_types::alias::unalias_readonly;
+use guff_types::arena::{ObjectData, TypeData};
+use guff_types::TypeId;
 use regex::Regex;
 
 use crate::options::{ForbidigoOptions, ForbidigoPattern};
@@ -122,6 +126,124 @@ fn expr_text(expr: &Expr) -> String {
     }
 }
 
+/// `typeNameWithPackage`: `pkg.Name() + "." + TypeName`, and the package path.
+///
+/// A pointer is dereferenced first, an alias is followed to its right-hand
+/// side, and a named type outside any package (the universe) keeps its bare
+/// name with an empty path. Anything else — an anonymous struct, a slice — has
+/// no name, and upstream then matches *nothing* rather than the source text.
+fn type_name_with_package(pass: &Pass<'_>, typ: TypeId) -> Option<(String, String)> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let types = &artifacts.types;
+    let mut t = unalias_readonly(types, typ);
+    if let TypeData::Pointer(ptr) = types.get(t) {
+        t = unalias_readonly(types, ptr.elem());
+    }
+    let TypeData::Named(_) = types.get(t) else {
+        return None;
+    };
+    let obj = guff_types::named::named_obj(types, t);
+    let name = obj.name(&artifacts.objects).to_string();
+    match obj.pkg(&artifacts.objects) {
+        None => Some((name, String::new())),
+        Some(pid) => {
+            let pkg = artifacts.packages.get(pid);
+            Some((format!("{}.{}", pkg.name(), name), pkg.path().to_string()))
+        }
+    }
+}
+
+/// `expandMatchText`: with `analyze-types`, the text a pattern is matched
+/// against is the *resolved* one, not the source text.
+///
+/// `osu.Lookup` with `osu "os/user"` is matched as `user.Lookup` — the
+/// imported package's **name**, never the local alias — and `u.GroupIds()` on
+/// a `*os/user.User` as `user.User.GroupIds`. teleport forbids exactly those
+/// under `pkg: ^os/user$`, and guff matched the source text, so a file that
+/// imports the package under any alias went silent.
+///
+/// Returns the texts to match and the package path the `pkg` filter sees. An
+/// empty text list means "match nothing" (upstream's anonymous-type arm).
+fn expand_match_text(pass: &Pass<'_>, expr: &Expr, src: &str) -> (Vec<String>, Option<String>) {
+    let Some(info) = pass.types_info() else {
+        return (vec![src.to_string()], None);
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return (vec![src.to_string()], None);
+    };
+    match expr {
+        Expr::Ident(id) => {
+            let Some(obj) = info.uses.get(&id.id).copied() else {
+                return (vec![src.to_string()], None);
+            };
+            let Some(pid) = obj.pkg(&artifacts.objects) else {
+                return (vec![src.to_string()], None);
+            };
+            let pkg = artifacts.packages.get(pid);
+            let path = pkg.path().to_string();
+            // A method keeps the bare source text: its receiver, not its
+            // package, is what the name is qualified by.
+            let is_method = obj
+                .typ(&artifacts.objects)
+                .map(|t| t.underlying(&artifacts.types))
+                .is_some_and(|u| {
+                    matches!(artifacts.types.get(u), TypeData::Signature(sig) if sig.recv().is_some())
+                });
+            if is_method {
+                (vec![src.to_string()], Some(path))
+            } else {
+                (
+                    vec![format!("{}.{}", pkg.name(), src), src.to_string()],
+                    Some(path),
+                )
+            }
+        }
+        Expr::SelectorExpr(sel) => {
+            let field = sel.sel.name.clone();
+            let mut texts = vec![src.to_string()];
+            let mut pkg_path = None;
+            // "If we are lucky, the entire selector expression has a known
+            // type" — the type of `X`, not of the selector.
+            if let Some(tv) = info.types.get(&sel.x.id()) {
+                match type_name_with_package(pass, tv.typ) {
+                    Some((type_name, path)) => {
+                        texts = vec![format!("{type_name}.{field}")];
+                        pkg_path = Some(path);
+                    }
+                    None => texts = Vec::new(),
+                }
+            }
+            // Then the special cases, which override what the type said.
+            if let Expr::Ident(x) = sel.x.as_ref() {
+                if let Some(obj) = info.uses.get(&x.id).copied() {
+                    match artifacts.objects.get(obj) {
+                        ObjectData::PkgName(pn) => {
+                            let imported = artifacts.packages.get(pn.imported());
+                            texts = vec![format!("{}.{}", imported.name(), field)];
+                            pkg_path = Some(imported.path().to_string());
+                        }
+                        ObjectData::Var(_) => {
+                            match obj
+                                .typ(&artifacts.objects)
+                                .and_then(|t| type_name_with_package(pass, t))
+                            {
+                                Some((type_name, path)) => {
+                                    texts = vec![format!("{type_name}.{field}")];
+                                    pkg_path = Some(path);
+                                }
+                                None => texts = Vec::new(),
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            (texts, pkg_path)
+        }
+        _ => (vec![src.to_string()], None),
+    }
+}
+
 fn expr_pkg_path(pass: &Pass<'_>, expr: &Expr) -> Option<String> {
     let info = pass.types_info()?;
     match expr {
@@ -149,12 +271,12 @@ fn check_ident_or_selector(st: &mut ForbidState<'_>, expr: &Expr) {
     if src.is_empty() {
         return;
     }
-    let texts = [src.as_str()];
-    let pkg_path = if st.analyze_types {
-        expr_pkg_path(st.pass, expr)
+    let (owned_texts, pkg_path) = if st.analyze_types {
+        expand_match_text(st.pass, expr, &src)
     } else {
-        None
+        (vec![src.clone()], None)
     };
+    let texts: Vec<&str> = owned_texts.iter().map(String::as_str).collect();
     for p in st.patterns {
         if !p.matches(&texts) {
             continue;
