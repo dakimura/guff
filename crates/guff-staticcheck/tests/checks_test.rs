@@ -1446,6 +1446,35 @@ fn s1005_allows_ok_patterns() {
     assert!(support::run_analyzer(s1005::analyzer(), &pkg).is_empty());
 }
 
+/// S1005 and `range` over a func.
+///
+/// Upstream returns before reporting anything when the ranged-over expression
+/// has a `Signature` underlying — "iteration variables are not optional with
+/// rangefunc". Dropping the `_` from `for _ = range seq` does not compile, so
+/// there is no fix to offer, and guff reported three of teleport's iterators.
+///
+/// `(line, message)`, and the fixture holds the same three shapes over a slice
+/// and a map: a gate that silenced S1005 outright would look green against the
+/// iterator half alone.
+#[test]
+fn s1005_keeps_blanks_in_a_range_over_func() {
+    let dir = support::testdata("s1005rangefunc");
+    let pkg = support::typecheck_file(
+        &dir,
+        "rangefunc.go",
+        "example.com/staticcheck/s1005rangefunc",
+    );
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<i64> = support::run_analyzer_diagnostics(s1005::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| fset.position(guff::position::Pos(d.pos as i64)).line)
+        .collect();
+    got.sort();
+    // 37/42/48 are the slice and map shapes; 14, 19, 25 and 32 are iterators.
+    assert_eq!(got, vec![37, 42, 48], "{got:?}");
+}
+
 #[test]
 fn s1007_flags_bad_patterns() {
     let dir = support::testdata("s1007");

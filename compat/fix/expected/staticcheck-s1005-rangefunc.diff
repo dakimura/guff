@@ -1,0 +1,33 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh staticcheck-s1005-rangefunc
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/staticcheck-s1005-rangefunc/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/s1005rangefunc/rangefunc.go
++++ b/s1005rangefunc/rangefunc.go
+@@ -34,17 +34,17 @@
+ }
+ 
+ func rangeOverSlice(s []int) {
+-	for _ = range s {
++	for range s {
+ 	}
+ }
+ 
+ func rangeOverMapValue(m map[int]string) {
+-	for k, _ := range m {
++	for k := range m {
+ 		_ = k
+ 	}
+ }
+ 
+ func rangeOverSliceBoth(s []int) {
+-	for _, _ = range s {
++	for range s {
+ 	}
+ }
