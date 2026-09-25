@@ -1,0 +1,32 @@
+# Golden case: S1005 and `range` over a func.
+#
+# This case exists for its `go.mod`, not its config: `staticcheck-s` declares
+# `go 1.22`, and a `range` over a function — an `iter.Seq` / `iter.Seq2`
+# iterator — needs 1.23, so the shape cannot live there.
+#
+# S1005 returns before reporting anything for one, because "iteration
+# variables are not optional with rangefunc": dropping the `_` from
+# `for _ = range seq` does not compile, so there is no fix to offer. guff had
+# no such gate and reported three of teleport's iterators.
+#
+# The fixture carries the same three shapes over a slice and a map, which *are*
+# reported. Without them a fix that silenced S1005 altogether would look green.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - staticcheck
+  settings:
+    staticcheck:
+      checks:
+        - all
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true
