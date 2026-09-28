@@ -36969,3 +36969,52 @@ analyze-types: true
 
 golden は新 case `cases/forbidigo-analyze-types`（6 キー）。unit test は `stub/os/user` を置いて
 同じファイルを読む。
+
+### 2026-09-24（続き 355）— `close teleport`（2）: S1005 は **range の相手が関数なら何も言わない**
+
+teleport の guff-only 8 件のうち 3 件は S1005「unnecessary assignment to the blank identifier」で、
+どれも **iterator を range している**:
+
+```go
+for _ = range cache.ScopeAndAncestors("/aa/bb/cc") { … }   // iter.Seq
+for key, _ := range seq { … }                              // iter.Seq2
+```
+
+上流 `s1005.go` の `fn3` は最初にこう書いている:
+
+```go
+if _, ok := pass.TypesInfo.TypeOf(rs.X).Underlying().(*types.Signature); ok {
+    // iteration variables are not optional with rangefunc
+    return
+}
+```
+
+**`for _ = range seq` から `_` を落とすとコンパイルできない**ので、提案する fix が存在しない。
+guff にはこの門が無く、slice/map と同じに扱っていた。
+
+#### 測定（scratchpad、7 形）
+
+| 形 | 上流 | 修正前の guff |
+|---|---|---|
+| `for _ = range seq1()`（`iter.Seq`） | 黙る | **報告** |
+| `for k, _ := range seq2()`（`iter.Seq2`） | 黙る | **報告** |
+| `for _, _ = range seq2()` | 黙る | **報告** |
+| `f := seq1(); for _ = range f`（変数経由） | 黙る | **報告** |
+| `for _ = range s`（slice） | 報告 | 報告 |
+| `for k, _ := range m`（map） | 報告 | 報告 |
+| `for _, _ = range s`（slice） | 報告 | 報告 |
+
+fixture には **黙る側 4 形と報告する側 3 形**を同じファイルに入れた。黙る側だけなら
+「門が効いた」と「S1005 が丸ごと止まった」を区別できない。
+
+golden は新 case `cases/staticcheck-s1005-rangefunc`（4 キー）。既存の `cases/staticcheck-s` は
+`go 1.22` 宣言なので range-over-func が置けず、`staticcheck-go114` と同じく **go.mod のための case**
+をもう 1 つ作った形になる。
+
+#### fix ベースラインも撮る
+
+golden case を足すと fix tier の case も 1 つ増える。`expected/` に何も無い状態は
+「上流は何も書き換えない」という**主張**として読まれる（`compat/fix/README.md`）ので、
+録らないまま回すと guff が 23 行書く側で落ちる。`./compat/fix/regen.sh staticcheck-s1005-rangefunc`
+で録った上流の出力は 23 行、**書き換えるのは slice/map の 3 形だけ**で rangefunc の 4 形には
+触れない —— 門が正しいことを、報告だけでなく**書き込み側からも**押さえた形になる。

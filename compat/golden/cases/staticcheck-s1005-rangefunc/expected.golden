@@ -1,0 +1,12 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh staticcheck-s1005-rangefunc
+# Produced by running golangci-lint on compat/golden/cases/staticcheck-s1005-rangefunc/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+s1005rangefunc/rangefunc.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+s1005rangefunc/rangefunc.go:37:6:staticcheck::S1005: unnecessary assignment to the blank identifier
+s1005rangefunc/rangefunc.go:42:9:staticcheck::S1005: unnecessary assignment to the blank identifier
+s1005rangefunc/rangefunc.go:48:6:staticcheck::S1005: unnecessary assignment to the blank identifier

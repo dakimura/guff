@@ -16,6 +16,7 @@ use guff_analysis::{
     entry_mask, match_pattern, match_pos, AnalysisResult, Analyzer, Diagnostic, Pass, RunError,
     RunFn, SuggestedFix, TextEdit,
 };
+use guff_types::arena::TypeData;
 
 use crate::render::render_stmt;
 
@@ -131,6 +132,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let NodeRef::RangeStmt(rs) = node else {
             return;
         };
+        if ranges_over_func(pass, rs) {
+            return;
+        }
         check_range_blank(rs, &mut pending);
     });
 
@@ -153,6 +157,25 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         });
     }
     Ok(None)
+}
+
+/// Is the ranged-over expression a function — a `range`-over-func iterator?
+///
+/// Upstream returns before reporting anything for one: "iteration variables
+/// are not optional with rangefunc". `for _ = range seq` over an `iter.Seq`
+/// cannot drop the `_`, so the suggestion would not compile. teleport ranges
+/// over `iter.Seq` and `iter.Seq2` in three places and guff reported all of
+/// them.
+fn ranges_over_func(pass: &Pass<'_>, rs: &RangeStmt) -> bool {
+    let (Some(info), Some(artifacts)) = (pass.types_info(), pass.pkg().type_artifacts.as_ref())
+    else {
+        return false;
+    };
+    let Some(tv) = info.types.get(&rs.x.id()) else {
+        return false;
+    };
+    let under = tv.typ.underlying(&artifacts.types);
+    matches!(artifacts.types.get(under), TypeData::Signature(_))
 }
 
 /// The three range shapes, all fixed by `edit.Delete` rather than by printing
