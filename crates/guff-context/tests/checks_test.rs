@@ -422,6 +422,67 @@ fn bodyclose_follows_the_referrers_of_the_response() {
     );
 }
 
+/// A response stored into a **struct field** is settled by *any* closed body in
+/// the same **basic block** — whichever response that body belongs to.
+///
+/// Upstream reaches the shape through `*ssa.Store` -> `*ssa.FieldAddr` and then
+/// scans `f.Block().Instrs` for a `Body` load with a `Close` among its
+/// referrers, without ever checking that the body it found is the one it is
+/// deciding about. teleport's `lib/cloud/azure/errors_test.go` closes exactly
+/// one body and carries the comment "The bodyclose linter trips if we don't
+/// explicitly close the body, even though it's a no-op in this case"; that one
+/// close settles all five of the responses the file builds, and guff reported
+/// every one of them.
+///
+/// guff diverged in **both** directions, which is why the fixture holds both
+/// halves. It over-reported every closed field store, and it *dropped*
+/// `h.F = build()` entirely — an assignment to a field selector bound no name,
+/// so no table ever held it and nothing reported it even with no close in
+/// sight (line 273 below, the only miss in the group).
+///
+/// Asserted as the set of `(line, column)` positions: every message in this
+/// file is the same string, so a count is true of any subset of the same size,
+/// and eighteen of the shapes must produce *nothing*. Measured against
+/// golangci-lint 2.12.2 (bodyclose v0.0.0-20260129054331) over 34 shapes, of
+/// which these fifteen fire.
+#[test]
+fn bodyclose_settles_a_field_store_from_anywhere_in_its_block() {
+    let dir = support::testdata("bodyclose");
+    let pkg =
+        support::typecheck_pkg("example.com/bodyclose/fieldblock", &dir.join("fieldblock.go"));
+    assert!(!pkg.ill_typed, "{:?}", pkg.errors);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64)> = support::run_analyzer_diagnostics(bodyclose(), &pkg)
+        .into_iter()
+        .map(|d| {
+            let p = fset.position(guff::position::Pos(d.pos as i64));
+            (p.line, p.column)
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            (182, 30), // FbOneNotClosed: nothing in the block closes anything
+            (188, 31), // FbTwoNoneClosed
+            (189, 31),
+            (196, 31), // FbClosedInBranch: the close is in the `if`, its own block
+            (197, 31),
+            (207, 31), // FbSliceElemClosed: an IndexAddr is not a FieldAddr
+            (213, 45), // FbMapValueClosed: nor is a MapUpdate
+            (220, 31), // FbInLoopNotClosed
+            (227, 31), // FbStoreInline: never bound, never closed
+            (235, 30), // FbCloseAfterBranch: the store's block ends at the `if`
+            (244, 30), // FbCloseAfterLoop
+            (254, 30), // FbCloseAfterAndAnd: `&&` branches too
+            (261, 30), // FbCloseInSwitchCase: a `case` body is its own block
+            (273, 18), // FbFieldAssignNotClosed: the shape guff used to drop
+            (282, 15), // FbTwoLocalsOneClosed: a plain local stays value-tracked
+        ],
+        "{got:?}"
+    );
+}
+
 #[test]
 fn bodyclose_allows_closed_and_returned() {
     let dir = support::testdata("bodyclose");

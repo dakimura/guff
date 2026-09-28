@@ -391,6 +391,15 @@ struct Shape {
     arms: Vec<(u32, u16, u32, u32)>,
     /// `(start, end)` of every `for` / `range` body.
     loops: Vec<(u32, u32)>,
+    /// Positions at which a *basic block* ends.
+    ///
+    /// Upstream's `FieldAddr` arm scans `f.Block().Instrs` — one basic block,
+    /// not one lexical scope — so [`Shape::block`] needs the block boundaries
+    /// and not just the branch arms. A bare `{ … }`, a `defer` and a plain
+    /// call do not end a block; `if` / `for` / `switch` / `select`, a label and
+    /// a short-circuit `&&` / `||` do. Measured, all of them (COMPAT-HARDENING
+    /// 2026-09-28).
+    breaks: Vec<u32>,
 }
 
 impl Shape {
@@ -405,6 +414,7 @@ impl Shape {
                 NodeRef::FuncLit(_) => return false,
                 NodeRef::IfStmt(i) => {
                     let at = i.if_.0 as u32;
+                    s.breaks.push(at);
                     s.arms
                         .push((at, 0, i.body.lbrace.0 as u32, i.body.rbrace.0 as u32));
                     if let Some(e) = i.else_.as_deref() {
@@ -412,17 +422,42 @@ impl Shape {
                             .push((at, 1, e.pos().0 as u32, e.end().0 as u32));
                     }
                 }
-                NodeRef::SwitchStmt(sw) => Self::clauses(&mut s, sw.switch.0 as u32, &sw.body.list),
-                NodeRef::TypeSwitchStmt(sw) => {
+                NodeRef::SwitchStmt(sw) => {
+                    s.breaks.push(sw.switch.0 as u32);
                     Self::clauses(&mut s, sw.switch.0 as u32, &sw.body.list)
                 }
-                NodeRef::SelectStmt(se) => Self::clauses(&mut s, se.select_.0 as u32, &se.body.list),
-                NodeRef::ForStmt(f) => s
-                    .loops
-                    .push((f.body.lbrace.0 as u32, f.body.rbrace.0 as u32)),
-                NodeRef::RangeStmt(r) => s
-                    .loops
-                    .push((r.body.lbrace.0 as u32, r.body.rbrace.0 as u32)),
+                NodeRef::TypeSwitchStmt(sw) => {
+                    s.breaks.push(sw.switch.0 as u32);
+                    Self::clauses(&mut s, sw.switch.0 as u32, &sw.body.list)
+                }
+                NodeRef::SelectStmt(se) => {
+                    s.breaks.push(se.select_.0 as u32);
+                    Self::clauses(&mut s, se.select_.0 as u32, &se.body.list)
+                }
+                // A loop body is not an arm — nothing here records a path for
+                // it — so the closing brace has to be a boundary of its own, or
+                // a store inside the body and a close after the loop would
+                // count the same number of breaks and read as one block.
+                NodeRef::ForStmt(f) => {
+                    s.breaks.push(f.for_.0 as u32);
+                    s.breaks.push(f.body.rbrace.0 as u32);
+                    s.loops
+                        .push((f.body.lbrace.0 as u32, f.body.rbrace.0 as u32))
+                }
+                NodeRef::RangeStmt(r) => {
+                    s.breaks.push(r.for_.0 as u32);
+                    s.breaks.push(r.body.rbrace.0 as u32);
+                    s.loops
+                        .push((r.body.lbrace.0 as u32, r.body.rbrace.0 as u32))
+                }
+                NodeRef::LabeledStmt(l) => s.breaks.push(l.label.name_pos.0 as u32),
+                // `a && b` compiles to a branch and a merge block, so a store
+                // before it and a close after it are two blocks.
+                NodeRef::BinaryExpr(b)
+                    if matches!(b.op, guff::token::Token::LAND | guff::token::Token::LOR) =>
+                {
+                    s.breaks.push(b.op_pos.0 as u32)
+                }
                 _ => {}
             }
             true
@@ -459,7 +494,27 @@ impl Shape {
             .filter(|(s, e)| pos >= *s && pos <= *e)
             .count() as u32
     }
+
+    /// The basic block `pos` sits in, as a value two positions can be compared
+    /// on: the arms enclosing it, plus how many block boundaries of *that same*
+    /// path come before it.
+    ///
+    /// Counting boundaries per path is what keeps a nested branch from leaking:
+    /// a statement inside an `if` body has the arm in its path, so the
+    /// boundaries recorded outside that arm are not its own.
+    fn block(&self, pos: u32) -> BlockKey {
+        let path = self.path(pos);
+        let runs = self
+            .breaks
+            .iter()
+            .filter(|b| **b < pos && self.path(**b) == path)
+            .count();
+        (path, runs)
+    }
 }
+
+/// A basic block, as [`Shape::block`] identifies one.
+type BlockKey = (Vec<(u32, u16)>, usize);
 
 /// Does the assignment at `new` kill the one at `prev`, or merge with it?
 ///
@@ -1035,6 +1090,12 @@ fn check_body(
     // side of an assignment or a `var` spec (tracked by name), and a call
     // statement (reported by the `ExprStmt` arm).
     let handled_calls = calls_handled_elsewhere(body);
+    // Upstream settles a response stored into a struct field by scanning the
+    // *whole basic block* the field address sits in for any closed body — it
+    // never checks that the body it found belongs to the response it is
+    // deciding about. See [`field_store_calls`].
+    let field_stores = field_store_calls(pass, body, &shape);
+    let closing_blocks = blocks_closing_a_body(body, &shape);
 
     inspect(NodeRef::BlockStmt(body), |n| {
         let Some(n) = n else {
@@ -1115,7 +1176,20 @@ fn check_body(
                 // `isopen` reports. guff only ever tracked assignments, so
                 // `getPingResponse(t, "ping").Uncompressed` (connect-go, four
                 // times) said nothing.
-                if !handled_calls.contains(&call.id)
+                if let Some(block) = field_stores.get(&call.id) {
+                    // The field-store arm decides on its own: the name-keyed
+                    // tables below never see this call, because an assignment
+                    // to `h.F` binds no name and a composite-literal element
+                    // binds nothing at all.
+                    if !closing_blocks.contains(block) {
+                        let msg = if check_consumption {
+                            MSG_CLOSE_AND_CONSUME
+                        } else {
+                            MSG_CLOSE
+                        };
+                        pending.push((call.lparen.0 as u32, msg.to_string()));
+                    }
+                } else if !handled_calls.contains(&call.id)
                     && !closed_call_results.contains(&call.id)
                     && !is_conversion(pass, call)
                     && call_result_is_response(pass, call)
@@ -1283,7 +1357,7 @@ fn call_result_is_response(pass: &Pass<'_>, call: &CallExpr) -> bool {
 /// The calls whose result some other arm of the walk already accounts for.
 fn calls_handled_elsewhere(body: &BlockStmt) -> HashSet<u32> {
     let mut out = HashSet::new();
-    let mut note = |e: &Expr, out: &mut HashSet<u32>| {
+    let note = |e: &Expr, out: &mut HashSet<u32>| {
         if let Expr::CallExpr(c) = e {
             out.insert(c.id);
         }
@@ -1302,6 +1376,150 @@ fn calls_handled_elsewhere(body: &BlockStmt) -> HashSet<u32> {
             }
             Some(NodeRef::ExprStmt(es)) => note(&es.x, &mut out),
             _ => {}
+        }
+        true
+    });
+    out
+}
+
+/// Is this call a `<anything>.Body.Close()`?
+///
+/// Upstream's `getBodyOp` matches the *load of the `Body` field* and asks only
+/// whether one of its referrers is a `Close`, so it does not care what the
+/// response reached that field through — a chain of identifiers, a call, an
+/// index expression. [`body_close_chain`] and [`body_close_call_base`] each
+/// answer for one of those shapes because they have to name the value; the
+/// block scan below only has to know that *a* body was closed here.
+fn is_body_close_call(call: &CallExpr) -> bool {
+    let Expr::SelectorExpr(close_sel) = call.fun.as_ref() else {
+        return false;
+    };
+    if close_sel.sel.name != CLOSE_METHOD {
+        return false;
+    }
+    matches!(close_sel.x.as_ref(), Expr::SelectorExpr(body_sel) if body_sel.sel.name == BODY_FIELD)
+}
+
+/// Is `expr` a selector onto a **struct field**, as opposed to a package
+/// member, a map entry or a slice element?
+///
+/// Upstream's silencing arm is reached only by a `*ssa.Store` whose address is
+/// a `*ssa.FieldAddr`. A store into a map value or a slice element is an
+/// `*ssa.MapUpdate` / `*ssa.IndexAddr` and takes no such branch, which is why
+/// `s[0].Body.Close()` and `m["a"].Body.Close()` leave their responses
+/// reportable in both tools. A qualified `pkg.Var = resp` is an `*ssa.Global`
+/// store, which upstream answers "not open" for on its own line above.
+fn selects_struct_field(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Expr::SelectorExpr(sel) = expr else {
+        return false;
+    };
+    let Some(typ) = type_of(pass, &sel.x) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    is_struct_typ(pass, typ)
+}
+
+/// Is `typ`, or the type it points to, a struct?
+///
+/// `pointer_elem` panics on anything that is not a pointer, so the discriminant
+/// has to be read first — the same trap `type_param_iface` set in weaviate
+/// (続き 352), where calling it unconditionally swallowed correct answers.
+fn is_struct_typ(pass: &Pass<'_>, typ: TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let under = typ.underlying(&artifacts.types);
+    let under = match artifacts.types.get(under) {
+        TypeData::Pointer(_) => {
+            let elem = pointer_elem(&artifacts.types, under);
+            unalias_readonly(&artifacts.types, elem).underlying(&artifacts.types)
+        }
+        _ => under,
+    };
+    matches!(artifacts.types.get(under), TypeData::Struct(_))
+}
+
+/// Every `*http.Response`-valued call whose result upstream sees stored into a
+/// struct field, mapped to the basic block that store lands in.
+///
+/// Two syntactic sites reach `*ssa.Store` -> `*ssa.FieldAddr`: an element of a
+/// struct composite literal (`&T{F: build()}`, elided or spelt out, keyed or
+/// positional) and an assignment to a field selector (`h.F = build()`). guff
+/// reported the first unconditionally and dropped the second entirely, so it
+/// diverged in both directions at once.
+fn field_store_calls(pass: &Pass<'_>, body: &BlockStmt, shape: &Shape) -> HashMap<u32, BlockKey> {
+    let mut out: HashMap<u32, BlockKey> = HashMap::new();
+    let note = |expr: &Expr, at: u32, out: &mut HashMap<u32, BlockKey>| {
+        let Expr::CallExpr(call) = code::unparen(expr) else {
+            return;
+        };
+        if is_conversion(pass, call)
+            || is_httptest_result_call(pass, &Expr::CallExpr(call.clone()))
+            || !call_result_is_response(pass, call)
+        {
+            return;
+        }
+        out.insert(call.id, shape.block(at));
+    };
+    inspect(NodeRef::BlockStmt(body), |n| {
+        let Some(n) = n else {
+            return true;
+        };
+        match n {
+            // A closure is its own function, with its own blocks.
+            NodeRef::FuncLit(_) => return false,
+            NodeRef::CompositeLit(lit) => {
+                let at = lit.lbrace.0 as u32;
+                let is_struct = type_of(pass, &Expr::CompositeLit(lit.clone()))
+                    .is_some_and(|t| is_struct_typ(pass, t));
+                if !is_struct {
+                    return true;
+                }
+                for elt in &lit.elts {
+                    match elt {
+                        Expr::KeyValueExpr(kv) => note(&kv.value, at, &mut out),
+                        other => note(other, at, &mut out),
+                    }
+                }
+            }
+            NodeRef::AssignStmt(assign) => {
+                for (i, lhs) in assign.lhs.iter().enumerate() {
+                    if !selects_struct_field(pass, lhs) {
+                        continue;
+                    }
+                    if let Some(rhs) = rhs_for_index(assign, i) {
+                        note(rhs, lhs.pos().0 as u32, &mut out);
+                    }
+                }
+            }
+            _ => {}
+        }
+        true
+    });
+    out
+}
+
+/// The blocks in which some response body is closed.
+///
+/// Position-independent on purpose: upstream walks `f.Block().Instrs` from the
+/// start, so a close written *above* the store settles it just the same.
+fn blocks_closing_a_body(body: &BlockStmt, shape: &Shape) -> HashSet<BlockKey> {
+    let mut out = HashSet::new();
+    inspect(NodeRef::BlockStmt(body), |n| {
+        let Some(n) = n else {
+            return true;
+        };
+        if matches!(n, NodeRef::FuncLit(_)) {
+            return false;
+        }
+        if let NodeRef::CallExpr(call) = n {
+            if is_body_close_call(call) {
+                out.insert(shape.block(call.lparen.0 as u32));
+            }
         }
         true
     });
