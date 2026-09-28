@@ -25,3 +25,7 @@ dialer/dialer.go   crates/guff-context/tests/testdata/bodyclose/stub/example.com
 # called, and the response is open whatever the enclosing function writes.
 goescape/goescape.go   crates/guff-context/tests/testdata/bodyclose/goescape.go
 freevar/freevar.go   crates/guff-context/tests/testdata/bodyclose/freevar.go
+# A response stored into a struct field is settled by any closed body in the
+# same basic block, whatever response that body belongs to — and a `h.F = call`
+# with no close was dropped entirely. 34 shapes, both halves.
+fieldblock/fieldblock.go   crates/guff-context/tests/testdata/bodyclose/fieldblock.go

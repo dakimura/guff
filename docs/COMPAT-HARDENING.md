@@ -37018,3 +37018,90 @@ golden case を足すと fix tier の case も 1 つ増える。`expected/` に�
 録らないまま回すと guff が 23 行書く側で落ちる。`./compat/fix/regen.sh staticcheck-s1005-rangefunc`
 で録った上流の出力は 23 行、**書き換えるのは slice/map の 3 形だけ**で rangefunc の 4 形には
 触れない —— 門が正しいことを、報告だけでなく**書き込み側からも**押さえた形になる。
+
+### 2026-09-28（続き 356）— `close teleport`（3）: bodyclose は **struct フィールドへの store を、その基本ブロック内の「どれかの」body の close で** 黙る
+
+teleport の guff-only 8 件の残り 5 件は bodyclose で、全部 `lib/cloud/azure/errors_test.go`
+（48/58/63/111/122 行）。このファイルには次のコメントが書いてある:
+
+```go
+// The bodyclose linter trips if we don't explicitly close the body, even though it's a no-op in this case.
+badRequestErrorWithUnknownCode.RawResponse.Body.Close()
+```
+
+**1 つ close すると 5 つ全部が黙る**。上流 `isopen`（timakin/bodyclose
+`v0.0.0-20260129054331`）の該当枝:
+
+```go
+if s, ok := aref.(*ssa.Store); ok {
+    if f, ok := s.Addr.(*ssa.FieldAddr); ok {
+        for _, bRef := range f.Block().Instrs {   // ← 基本ブロック**全体**
+            bOp, ok := r.getBodyOp(bRef)
+            ...
+            for _, ccall := range *bOp.Referrers() {
+                if r.isCloseCall(ccall) { return false }
+            }
+        }
+    }
+}
+```
+
+`getBodyOp` が拾った `Body` が**いま判定している response のものかを確かめていない**。値を
+まったく追わない近似で、`FieldAddr` への store に限って効く。
+
+#### 測定（scratchpad、34 形）
+
+| 形 | 上流 | 修正前の guff |
+|---|---|---|
+| field store（`&T{F: build()}`）、同ブロックで close | 黙る | **報告** |
+| field store、close なし | 報告 | 報告 |
+| field store 2 つ、最初だけ close | **両方**黙る | 両方報告 |
+| 非ポインタ literal `T{F: build()}`、close | 黙る | **報告** |
+| `h.F = build()` して close | 黙る | 黙る |
+| 無関係な**ローカル**の close で黙る | 黙る | **報告** |
+| 入れ子フィールド `o.In.Resp`、close | 黙る | **報告** |
+| slice 要素 `s[0].Body.Close()` | 報告 | 報告 |
+| map 値 `m["a"].Body.Close()` | 報告 | 報告 |
+| close が store より**手前** | 黙る | **報告** |
+| **別フィールド** `h.Other.Body.Close()` で黙る | 黙る | **報告** |
+| loop body 内で store＋close | 黙る | **報告** |
+| func literal 内で store＋close | 黙る | **報告** |
+| store→`if`→close（間に分岐） | 報告 | 報告 |
+| store→close→`if` | 黙る | **報告** |
+| store→`for`→close | 報告 | 報告 |
+| store→`_ = a && b`→close | 報告 | 報告 |
+| 素の `{ }` ブロック内の close | 黙る | **報告** |
+| store は `switch` の前、close は `case` 内 | 報告 | 報告 |
+| store と close が同じ `case` 内 | 黙る | **報告** |
+| store→`defer sink()`→close | 黙る | **報告** |
+| `defer h.F.Body.Close()` | 黙る | **報告** |
+| store→`sink()`→close | 黙る | **報告** |
+| **`h.F = build()` で close なし** | **報告** | **黙る（取りこぼし）** |
+| plain local 2 つ、最初だけ close | 2 つ目は報告 | 2 つ目は報告 |
+
+**guff は両方向に外していた**。閉じた field store を全部過剰報告し、かつ `h.F = build()` を
+閉じ忘れても**丸ごと落としていた**（フィールドセレクタへの代入は名前を束縛しないので、
+どの表にも載らず誰も報告しなかった）。
+
+#### 形が決めたこと
+
+* 黙らせる規則は `FieldAddr` への store に**限る**。plain local 2 つの形がそれを分ける ——
+  一般則なら 2 つ目も黙るはずだが報告される。
+* スコープは**基本ブロック**で、レキシカルブロックではない。素の `{ }`・`defer`・ただの
+  呼び出しは切らず、`if`/`for`/`switch`/`select`/ラベル/`&&` は切る。
+* ブロック内の**順序は無関係**（close が store の手前でも黙る）。
+* struct フィールドだけ。slice 要素は `IndexAddr`、map 値は `MapUpdate` で、この枝に入らない。
+
+#### 移植
+
+`Shape` に `breaks`（基本ブロックの境界）と `Shape::block` を足した。`block` は
+「囲っている arm の path」と「**同じ path の**境界が手前に何個あるか」の組で、ネストした分岐が
+漏れないようにしている。ループ本体は arm を作らないので、閉じ括弧も境界に入れた ——
+入れないと「ループ内の store」と「ループ後の close」が同じ数を数えて 1 ブロックに見える。
+
+`pointer_elem` は非ポインタで **panic** するので、判別子を先に読む `is_struct_typ` を通した。
+weaviate の `type_param_iface`（続き 352）と同じ罠で、無条件に呼ぶと正しい答えごと消える。
+
+golden は既存 case `cases/bodyclose` に `fieldblock/fieldblock.go` を 1 本足して 68 → **83 キー**
+（上流が撃つのは 15 形、黙るのは 18 形）。unit test は位置の**集合**で照合する ——
+このファイルのメッセージは全部同じ文字列なので、件数は同じ大きさのどの部分集合にも当てはまる。
