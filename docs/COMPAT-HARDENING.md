@@ -37199,3 +37199,22 @@ unit test は `check_files.rs` に 2 本。凍結 base に `func()` を置いた
 逆側に「型引数が推論できない呼び出し（`reg()` / `reg2[int]()`）は 2 件とも cannot infer のまま」を 1 本。
 
 opa: ill-typed packages **2 → 0**。
+
+### 2026-09-29（続き 359）— `adopt opa` 完了。台帳 **79/100**
+
+続き 358 の修正で opa は
+
+```
+opa: guff=0 golangci=0 both=0 P=100.0% R=100.0%   ill-typed 0
+```
+
+になったので `corpus/hunt.json` に登録した（`v1.19.1`、`./...`）。台帳は **86 定義 / 79 clean / open 2 /
+unmeasured 5**。
+
+**finding が両側 0 のターゲット**なので、このエントリが守るのは「guff が過剰報告しない」側と
+health gate（ill-typed / panic）だけ。取りこぼしはここでは測れない。それでも採用時の唯一の乖離は
+health gate が拾った型チェッカの欠陥で、finding の件数には一度も出ていなかった —— 両側 0 でも
+ill-typed のパッケージでは全 analyzer が黙るので、`guff=0` は「0 件を確かめた」ではなく
+「何も見ていない」と区別できない。
+
+これで `candidates-100.json` の候補は尽きた（`next` が `refresh the survey` を返す）。
