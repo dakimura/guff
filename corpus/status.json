@@ -6,8 +6,8 @@
     "`unmeasured` is not `clean`: an absent measurement is a question."
   ],
   "goal": 100,
-  "defined": 84,
-  "clean": 77,
+  "defined": 85,
+  "clean": 78,
   "open": 2,
   "unmeasured": 5,
   "targets": {
@@ -589,6 +589,14 @@
       "tier": "hunt",
       "state": "clean",
       "at": "20260905T072109Z",
+      "open": 0,
+      "guff_only": 0,
+      "gcl_only": 0
+    },
+    "teleport": {
+      "tier": "hunt",
+      "state": "clean",
+      "at": "20260929T011510Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0

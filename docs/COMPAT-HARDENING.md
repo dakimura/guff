@@ -37105,3 +37105,27 @@ weaviate の `type_param_iface`（続き 352）と同じ罠で、無条件に呼
 golden は既存 case `cases/bodyclose` に `fieldblock/fieldblock.go` を 1 本足して 68 → **83 キー**
 （上流が撃つのは 15 形、黙るのは 18 形）。unit test は位置の**集合**で照合する ——
 このファイルのメッセージは全部同じ文字列なので、件数は同じ大きさのどの部分集合にも当てはまる。
+
+### 2026-09-29（続き 357）— `adopt teleport` 完了。台帳 **78/100**
+
+続き 354〜356 の 3 本で teleport は
+
+```
+teleport: guff=16 golangci=16 both=16 P=100.0% R=100.0%
+```
+
+になったので `corpus/hunt.json` に登録した（`v18.11.1`、`./...`）。`candidates-100.json` の ref は
+`v18.10.0` だが、3 本の close はすべて `corpus/cache/teleport` の `v18.11.1` で測っているので
+そちらを pin にした。前セッションの hunt は entry を**コミットせずに**回していて、
+`hunt-20260928T040257Z` は manifest が空のまま途中で止まっていた —— entry が無いと
+`hunt.sh --name teleport` は `no hunt targets selected` で落ちる。
+
+台帳は **85 定義 / 78 clean / open 2 / unmeasured 5**。
+
+#### 採用時の 14 件がどう分かれたか
+
+| 由来 | 件数 | 続き |
+|---|--:|---|
+| forbidigo: `analyze-types` が照合テキストを差し替えていない（別名 import） | gcl-only 6 | 354 |
+| staticcheck S1005: range-over-func を slice と同じに扱っていた | guff-only 3 | 355 |
+| bodyclose: field store を同じ基本ブロックの close で黙らせていない | guff-only 5 | 356 |

@@ -628,5 +628,13 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "60m"
+  },
+  {
+    "name": "teleport",
+    "url": "https://github.com/gravitational/teleport.git",
+    "ref": "v18.11.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "60m"
   }
 ]
