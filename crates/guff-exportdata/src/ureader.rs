@@ -18,7 +18,7 @@ use guff_types::object::type_name::new_type_name;
 use guff_types::object::var::{new_field, new_param, new_var, VarKind};
 use guff_types::package::new_package;
 use guff_types::scope::{insert as scope_insert, lookup as scope_lookup};
-use guff_types::signature::{new_signature_type, signature_set_recv_type_params, signature_set_type_params};
+use guff_types::signature::{new_generic_signature_type, new_signature_type};
 use guff_types::tuple::new_tuple;
 use guff_types::typelists::bind_tparams;
 use guff_types::typeparam::{new_type_param, set_constraint};
@@ -754,25 +754,25 @@ impl<'dec> Reader<'dec> {
         let params = self.params(decoder, state);
         let results = self.params(decoder, state);
         let variadic = self.dec.bool();
-        let sig = new_signature_type(
+        let rparams = if rtparams.is_empty() {
+            None
+        } else {
+            bind_tparams(state.ctx.types, rtparams.to_vec())
+        };
+        let tparams = if tparams.is_empty() {
+            None
+        } else {
+            bind_tparams(state.ctx.types, tparams.to_vec())
+        };
+        let sig = new_generic_signature_type(
             state.ctx.types,
             recv,
-            &[],
-            &[],
+            rparams,
+            tparams,
             params,
             results,
             variadic,
         );
-        if !rtparams.is_empty() {
-            if let Some(list) = bind_tparams(state.ctx.types, rtparams.to_vec()) {
-                signature_set_recv_type_params(state.ctx.types, sig, list);
-            }
-        }
-        if !tparams.is_empty() {
-            if let Some(list) = bind_tparams(state.ctx.types, tparams.to_vec()) {
-                signature_set_type_params(state.ctx.types, sig, list);
-            }
-        }
         let _ = decoder;
         sig
     }

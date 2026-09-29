@@ -30,7 +30,7 @@ use crate::object::var::{new_param, VarKind};
 use crate::pointer::new_pointer;
 use crate::predicates::is_valid;
 use crate::signature::{
-    new_signature_type, signature_set_recv_type_params, signature_set_type_params,
+    new_generic_signature_type,
 };
 use crate::slice::new_slice;
 use crate::stmt::unparen;
@@ -105,22 +105,15 @@ impl Checker {
 
         let params_tuple = new_tuple(&mut self.types, &params);
         let results_tuple = new_tuple(&mut self.types, &results);
-        let sig = new_signature_type(
+        new_generic_signature_type(
             &mut self.types,
             recv,
-            &[],
-            &[],
+            rparams,
+            tparams,
             params_tuple,
             results_tuple,
             variadic,
-        );
-        if let Some(tl) = tparams {
-            signature_set_type_params(&mut self.types, sig, tl);
-        }
-        if let Some(rl) = rparams {
-            signature_set_recv_type_params(&mut self.types, sig, rl);
-        }
-        sig
+        )
     }
 
     /// Collect the parameters (or results) described by `list`, returning the

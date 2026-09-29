@@ -122,7 +122,45 @@ pub fn new_signature_type(
     }))
 }
 
+/// Construct a function type that carries its type parameters from the start.
+///
+/// Use this, not [`new_signature_type`] followed by
+/// [`signature_set_type_params`], whenever the type parameters are known at
+/// construction. Signatures are hash-consed, and the key of a signature with
+/// no receiver, no parameters and no results is the same everywhere: building
+/// `func[T any]()` as `func()` returns whatever `func()` is already interned —
+/// with any standard-library import that is a *frozen* type from another
+/// package — and setting the type parameters afterwards rewrites that shared
+/// type in place. Every nullary generic function in the package then shares
+/// one signature (the last type-parameter list written wins), and plain
+/// `func()` becomes generic. Built here, the key includes the type-parameter
+/// ids, which are unique to the declaration.
+pub fn new_generic_signature_type(
+    arena: &mut TypeArena,
+    recv: Option<ObjectId>,
+    rparams: Option<TypeParamList>,
+    tparams: Option<TypeParamList>,
+    params: Option<TypeId>,
+    results: Option<TypeId>,
+    variadic: bool,
+) -> TypeId {
+    if variadic && crate::tuple::tuple_len(arena, params) == 0 {
+        panic!("variadic function must have at least one parameter");
+    }
+    arena.alloc(TypeData::Signature(Signature {
+        recv,
+        params,
+        results,
+        variadic,
+        rparams,
+        tparams,
+    }))
+}
+
 /// Set the function-level type parameters on a Signature.
+///
+/// Mutates `id` in place, so `id` must not be shared: see
+/// [`new_generic_signature_type`] for what goes wrong with a hash-consed one.
 pub fn signature_set_type_params(arena: &mut TypeArena, id: TypeId, params: TypeParamList) {
     // `remutate` and not `get_mut`: the type parameters are part of the
     // hash-cons key, so setting them here has to move the entry.

@@ -2541,3 +2541,85 @@ fn tilde_constraint_still_fails_an_exact_union() {
         );
     }
 }
+
+/// Check `src` in an arena whose frozen base already holds a plain `func()` —
+/// the state any imported package that mentions `func()` leaves behind (every
+/// standard-library import does). Returns the checker and that `func()`.
+fn check_src_over_imported_nullary_func(src: &str) -> (Checker, guff_types::arena::TypeId) {
+    let mut check = Checker::new(Config::default());
+    let plain = guff_types::new_signature_type(&mut check.types, None, &[], &[], None, None, false);
+    check.types.freeze();
+    check.check_files(vec![parse(src)]);
+    (check, plain)
+}
+
+/// A generic function with no parameters and no results has the signature key
+/// of plain `func()`. Signatures are hash-consed, and the type parameters used
+/// to be attached *after* the signature was interned: `func[T any]()` came back
+/// as the imported `func()` and was then made generic in place. Every nullary
+/// generic function in the package shared that one signature, so
+///
+/// * `reg[S]()` — "cannot infer type arguments" once another nullary generic
+///   had written its list over the shared one, or plain `func()` "cannot index";
+/// * `reg2[S, int]()` — "got 2 type arguments but want 1" (the last writer won);
+/// * `f := reg[S]; f()` — the instantiation is the generic original.
+///
+/// From opa v1.19.1 (`types.RegisterJSONFields[DataRequestV1]()` in `init`),
+/// where it made `v1/server` and `v1/server/types` ill-typed. A package with no
+/// imports never hit it: the first `func()` is then allocated fresh.
+#[test]
+fn nullary_generic_functions_do_not_share_the_imported_func_signature() {
+    let src = "package p\n\
+               type S struct{}\n\
+               func reg[T any]()      {}\n\
+               func reg2[T, U any]()  {}\n\
+               func regR[T any]() int { return 0 }\n\
+               func init() {\n\
+               \treg[S]()\n\
+               \treg2[S, int]()\n\
+               \t_ = regR[S]()\n\
+               \tf := reg[S]\n\
+               \tf()\n\
+               \treg[Later]()\n\
+               \tvar cb func() = func() {}\n\
+               \tcb()\n\
+               }\n\
+               type Later struct{ A int }\n";
+    let (check, plain) = check_src_over_imported_nullary_func(src);
+    assert!(check.errors.is_empty(), "{:?}", check.errors);
+    assert!(
+        guff_types::signature_type_params(&check.types, plain).is_none(),
+        "the imported `func()` must stay non-generic"
+    );
+
+    // Each nullary generic keeps its own type-parameter list.
+    let pkg_scope = check.packages.get(check.pkg).scope();
+    let tparam_count = |name: &str| {
+        let obj = scope_lookup(&check.scopes, pkg_scope, name).expect(name);
+        let typ = obj.typ(&check.objects).expect(name);
+        guff_types::signature_type_params(&check.types, typ).map_or(0, |l| l.len())
+    };
+    assert_eq!(tparam_count("reg"), 1);
+    assert_eq!(tparam_count("reg2"), 2);
+    assert_eq!(tparam_count("regR"), 1);
+}
+
+/// The other side: a call that really cannot infer its type argument still
+/// says so, once per call, over the same imported `func()`.
+#[test]
+fn nullary_generic_call_without_type_arguments_still_fails_to_infer() {
+    let src = "package p\n\
+               func reg[T any]()     {}\n\
+               func reg2[T, U any]() {}\n\
+               func init() {\n\
+               \treg()\n\
+               \treg2[int]()\n\
+               }\n";
+    let (check, _) = check_src_over_imported_nullary_func(src);
+    let infer = check
+        .errors
+        .iter()
+        .filter(|e| format!("{e:?}").contains("cannot infer"))
+        .count();
+    assert_eq!(infer, 2, "{:?}", check.errors);
+}
