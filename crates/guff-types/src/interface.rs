@@ -199,15 +199,9 @@ fn set_method_receivers(
         }
         // The receiver is unnamed, like Go's `NewVar(pos, pkg, "", typ)`.
         let recv = crate::object::var::new_var(objects, "", recv_type);
-        let new_sig = crate::signature::new_signature_type(
-            types, Some(recv), &[], &[], params, results, variadic,
+        let new_sig = crate::signature::new_generic_signature_type(
+            types, Some(recv), rparams, tparams, params, results, variadic,
         );
-        if let Some(rp) = rparams {
-            crate::signature::signature_set_recv_type_params(types, new_sig, rp);
-        }
-        if let Some(tp) = tparams {
-            crate::signature::signature_set_type_params(types, new_sig, tp);
-        }
         match objects.get_mut(m) {
             crate::arena::ObjectData::Func(f) => f.set_typ(new_sig),
             _ => continue,

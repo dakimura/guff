@@ -187,7 +187,7 @@ pub use scope::{
 };
 pub use selection::{selection_string, selection_type, Selection, SelectionKind};
 pub use signature::{
-    new_signature_type, signature_params, signature_recv, signature_recv_type_params,
+    new_generic_signature_type, new_signature_type, signature_params, signature_recv, signature_recv_type_params,
     signature_results, signature_set_recv_type_params, signature_set_type_params,
     signature_type_params, signature_variadic, Signature,
 };

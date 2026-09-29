@@ -37129,3 +37129,73 @@ teleport: guff=16 golangci=16 both=16 P=100.0% R=100.0%
 | forbidigo: `analyze-types` が照合テキストを差し替えていない（別名 import） | gcl-only 6 | 354 |
 | staticcheck S1005: range-over-func を slice と同じに扱っていた | guff-only 3 | 355 |
 | bodyclose: field store を同じ基本ブロックの close で黙らせていない | guff-only 5 | 356 |
+
+### 2026-09-29（続き 358）— `adopt opa` → `close opa`（1）: **引数も結果も無いジェネリック関数**は、import 先の `func()` と署名を共有していた
+
+台帳の次は **opa**（`v1.19.1`、`./...`）。採用 hunt:
+
+```
+opa: ill-typed packages 2 > baseline 0; e.g. github.com/open-policy-agent/opa/v1/server, …/v1/server/types
+opa: guff=0 golangci=0 both=0 P=100.0% R=100.0%
+```
+
+finding は両側 0（opa の CI は自分の config で緑なので妥当）だが、health gate が赤。guff が 2 パッケージを
+ill-typed と判定していて、そこでは全 analyzer が黙る:
+
+```
+v1/server/types/types.go:114:2: cannot infer type arguments in call
+v1/server/compile_handler.go:132:2: cannot index func()
+```
+
+どちらも `init` の中の `types.RegisterJSONFields[DataRequestV1]()` —— **引数も結果も無い**ジェネリック関数の
+明示インスタンス化。
+
+#### 最小再現で再現しなかった回
+
+最初の scratchpad（`reg[S]()` / `reg2[S, int]()` / `other.Reg[S]()` / `f := reg[S]` …）は**全部通った**。
+型引数を後方宣言にしても、`go 1.25.0` にしても通る。opa の `types.go` を scratch module に
+`replace` で持ち出して宣言単位で ddmin にかけた（**`go build` が通ること**を条件に入れないと、
+必要な宣言を消した別の型エラーに縮む）。残った差分は **`import "reflect"`** —— 標準ライブラリを 1 つ
+import した途端、同じパッケージの `reg[S]()` まで全部落ちた:
+
+| 形（`import "fmt"` 等 あり） | go | 修正前の guff |
+|---|---|---|
+| `reg[S]()`（`func[T any]()`） | ok | **cannot infer type arguments** |
+| `reg2[S, int]()`（`func[T, U any]()`） | ok | **got 2 type arguments but want 1** |
+| `other.Reg[S]()`（別パッケージの nullary generic） | ok | **cannot infer** |
+| `f := reg[S]; f()` | ok | **cannot infer**（`f` が generic のまま） |
+| `regP[S](1)`（引数あり） | ok | ok |
+| `_ = regR[S]()`（結果あり） | ok | ok |
+| 上の 6 形、import なし | ok | ok |
+
+import の種類は無関係（fmt / strings / reflect / errors / sort の 5 つで同じ）。
+
+#### 機構
+
+`TypeArena` は Signature を構造で hash-cons する。`new_signature_type` は型パラメータ無しで署名を作り、
+あとから `signature_set_type_params` が `remutate` で**その場で**書き換える。`remutate` は overlay の
+intern 表だけ直す（「base は凍結済みで二度と変わらない」前提）。
+
+ところが receiver も引数も結果も無い署名のキーは**どこでも `func()`** で、import したパッケージの
+`func()` が凍結 base に載っている。`func[T any]()` の `alloc` はその **base の id** を返し、
+型パラメータの書き込みは copy-on-write で**この arena の中の stdlib の `func()` ごと**ジェネリックにする。
+パッケージ内の nullary generic は全部同じ id を共有し、最後に書いた型パラメータ列が勝つ ——
+`reg2` の "want 1" はそれ。import が無ければ最初の `func()` は overlay に新規で入り、`remutate` が
+キーを外すので 2 つ目以降は新しい id になる（だから最小再現が通った）。
+
+引数・結果は `Var` を持つ tuple で id が宣言ごとに一意なので、キーが衝突するのは nullary だけ。
+
+#### 修正
+
+`new_generic_signature_type` を足し、型パラメータを**最初から持った**データで `alloc` する。
+キーに型パラメータの id（宣言ごとに一意）が入るので、素の `func()` とは衝突しない。
+checker（`signature_check.rs`）、export data の読み（`ureader.rs`）、interface メソッドの receiver 付け替え
+（`interface.rs`）の 3 か所をそれに替えた。`call.rs` の `signature_set_type_params` は
+`rename_tparams` が新しく作った署名に掛けるので共有されず、そのまま。
+
+unit test は `check_files.rs` に 2 本。凍結 base に `func()` を置いた Checker（＝import 済みの状態）で
+上の 6 形＋後方宣言＋`var cb func()` を型検査し、エラー 0・`func()` が非ジェネリックのまま・
+`reg`/`reg2`/`regR` の型パラメータ数 1/2/1 を固定する。修正を外すと落ちることを確認済み。
+逆側に「型引数が推論できない呼び出し（`reg()` / `reg2[int]()`）は 2 件とも cannot infer のまま」を 1 本。
+
+opa: ill-typed packages **2 → 0**。
