@@ -14,3 +14,21 @@ bad_test.go:16:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider 
 bad_test.go:17:3:ginkgolinter::ginkgo-linter: "Expect": missing assertion method. Expected "To()", "ToNot()" or "NotTo()"
 bad_test.go:26:3:ginkgolinter::ginkgo-linter: wrong length assertion. Consider using `Expect(t[len(u)/2+1:]).Should(HaveLen(1))` instead
 bad_test.go:27:3:ginkgolinter::ginkgo-linter: wrong length assertion. Consider using `Expect(t[len(u)-1 : len(t)]).Should(BeEmpty())` instead
+benumerically/benumerically.go:14:2:ginkgolinter::ginkgo-linter: wrong length assertion. Consider using `Expect(s).ToNot(BeEmpty())` instead
+benumerically/benumerically.go:15:2:ginkgolinter::ginkgo-linter: wrong length assertion. Consider using `Expect(s).ToNot(BeEmpty())` instead
+benumerically/benumerically.go:16:2:ginkgolinter::ginkgo-linter: wrong length assertion. Consider using `Expect(s).ToNot(BeEmpty())` instead
+benumerically/benumerically.go:17:2:ginkgolinter::ginkgo-linter: wrong length assertion. Consider using `Expect(s).To(BeEmpty())` instead
+benumerically/benumerically.go:22:2:ginkgolinter::ginkgo-linter: wrong length assertion. Consider using `Expect(s).ToNot(BeEmpty())` instead
+benumerically/benumerically.go:24:2:ginkgolinter::ginkgo-linter: wrong length assertion. Consider using `Expect(s).ShouldNot(BeEmpty())` instead
+benumerically/benumerically.go:25:2:ginkgolinter::ginkgo-linter: wrong length assertion. Consider using `Expect(s).To(HaveLen(3))` instead
+benumerically/benumerically.go:28:2:ginkgolinter::ginkgo-linter: wrong length assertion. Consider using `Expect(s).To(BeEmpty())` instead
+benumerically/benumerically.go:29:2:ginkgolinter::ginkgo-linter: wrong length assertion. Consider using `Expect(s).Should(BeEmpty())` instead
+benumerically/benumerically.go:30:2:ginkgolinter::ginkgo-linter: wrong length assertion. Consider using `Expect(s).To(BeEmpty())` instead
+benumerically/benumerically.go:31:2:ginkgolinter::ginkgo-linter: wrong length assertion. Consider using `Expect(s).ToNot(BeEmpty())` instead
+benumerically/benumerically.go:32:2:ginkgolinter::ginkgo-linter: wrong length assertion. Consider using `Expect(s).To(BeEmpty())` instead
+benumerically/benumerically.go:33:2:ginkgolinter::ginkgo-linter: wrong length assertion. Consider using `Expect(s).To(BeEmpty())` instead
+benumerically/benumerically.go:34:2:ginkgolinter::ginkgo-linter: wrong length assertion. Consider using `Expect(s).ToNot(BeEmpty())` instead
+benumerically/benumerically.go:35:2:ginkgolinter::ginkgo-linter: wrong length assertion. Consider using `Expect(s).To(HaveLen(3))` instead
+benumerically/benumerically.go:36:2:ginkgolinter::ginkgo-linter: wrong length assertion. Consider using `Expect(s).ToNot(HaveLen(3))` instead
+benumerically/benumerically.go:37:2:ginkgolinter::ginkgo-linter: wrong length assertion. Consider using `Expect(s).To(HaveLen(zero + 3))` instead
+benumerically/benumerically.go:39:2:ginkgolinter::ginkgo-linter: wrong length assertion. Consider using `Expect(s).To(HaveLen(0.0))` instead

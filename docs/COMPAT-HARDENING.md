@@ -37555,3 +37555,51 @@ v1/v3 は位置順とキー順が一致する側の対照。
 unit test は 4 版の issue 集合を `assert_eq!` で固定（修正前は落ちる）。golden は新 case
 `dupl-occurrence-order`（4 キー、v1/v3 のみ）。fix ベースラインは書き換えなし。
 grype: `grype/db/v6` の dupl は上流と同じ cpe_store の 2 件だけになった。
+
+### 2026-09-30（続き 366）— `close gosec`（2）: ginkgolinter の `BeNumerically` 長さ規則を上流どおりに移植
+
+gosec の guff-only の残り 1 件:
+
+```
+cmd/gosec/main_test.go:212: ginkgo-linter: wrong length assertion. Consider using `Expect(analyzers.Analyzers).ToNot(BeEmpty())` instead
+```
+
+`Expect(len(analyzers.Analyzers)).To(BeNumerically(">=", 0))` —— 常に真の比較で、上流は何も言わない。
+
+#### 上流（ginkgolinter v0.23.0 `LenRule` ＋ `BeNumericallyMatcher`）
+
+* 演算子は文字列リテラルで固定表（`"=="` `"!="` `">"` `">="` `"<"` `"<="` `"="`）。
+* 値は **整数定数**（リテラルでも名前付き定数でも）のときだけ `IntValue`。`0.0` は float 定数なので不明扱い。
+* 「0 より大」は `!= 0`・`> 0`・`>= 1` の 3 つだけ。`>= 0` は含まない。
+* 適用は `==`・`!=`・「0 より大」。`==` は 0 なら `BeEmpty()`、それ以外は `HaveLen(<引数そのまま>)`。
+  `!=` と「0 より大」は**先にアサーションを反転**する（`To`↔`ToNot`、`NotTo`→`To`、`Should`↔`ShouldNot`）。
+
+guff は `>` と `>=` を 0 と組にして「0 より大」とし（`>= 0` が誤検出）、反転は `To`→`ToNot` しか
+持たず（`ToNot` はそのまま）、値は整数リテラルしか読まなかった。
+
+#### 測定（scratchpad、27 形）
+
+| 形 | 上流 | 修正前の guff |
+|---|---|---|
+| `To(… ">=", 0)` | 黙る | **ToNot(BeEmpty())** |
+| `ToNot(… ">=", 0)` | 黙る | **報告** |
+| `To(… ">", zero)`（名前付き定数） | ToNot(BeEmpty()) | **黙る** |
+| `ToNot(… ">", 0)` | **To**(BeEmpty()) | ToNot(BeEmpty()) |
+| `ShouldNot(… "!=", 0)` | **Should**(BeEmpty()) | ShouldNot(BeEmpty()) |
+| `NotTo(… ">", 0)` | **To**(BeEmpty()) | NotTo(BeEmpty()) |
+| `ToNot(… ">=", 1)` | **To**(BeEmpty()) | ToNot(BeEmpty()) |
+| `ToNot(… "!=", 3)` | **To**(HaveLen(3)) | ToNot(HaveLen(3)) |
+| `To(… "==", zero+3)` | To(HaveLen(zero + 3)) | **黙る** |
+| `To(… "==", 0.0)` | To(HaveLen(0.0)) | **黙る** |
+| `>= 2` / `> 1` / `< 1` / `<= 0` / `>= zero` / `>= 1.0` / `> 0.0` | 黙る | 黙る |
+| `> 0` / `>= 1` / `!= 0` / `== 0` / `== 3` / `!= 3` / `Should(> 0)` / `!= zero` / `== zero` / `ToNot(== 0)` | 報告 | 報告 |
+
+27 形中 10 形で答えが違った（上流 18 件）。`BeNumerically` の腕を上流の形で書き直し、定数評価
+（`int_const`: 型情報の定数値が Int 種で int64 に収まる）と `reverse_assertion` を足した。
+
+#### fixture と test
+
+`testdata/ginkgolinter/benumerically.go`（27 形、各行に上流の提案 or `silent`）。unit test は報告された
+行ごとの**提案文**を `assert_eq!` で固定（件数だけだと提案が全部間違っていても通る）。旧実装で落ちる。
+golden `ginkgolinter` に足して 消えたキー 0 / 増えたキー 18。ginkgolinter の提案は fix なので
+fix ベースラインも 61 行増え（新ファイルの hunk だけ）、guff の `--fix` も一致。
