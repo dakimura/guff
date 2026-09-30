@@ -51,3 +51,4 @@ testingcontext/testingcontext.go    crates/guff-style/tests/testdata/modernize/t
 unsafefuncs/unsafefuncs.go          crates/guff-style/tests/testdata/modernize/unsafefuncs.go
 waitgroupgo/waitgroupgo.go          crates/guff-style/tests/testdata/modernize/waitgroupgo.go
 plusbuild/plusbuild.go              compat/golden/cases/modernize/plusbuild.go.txt
+stringscutprefixsearch/stringscutprefix_search.go  crates/guff-style/tests/testdata/modernize/stringscutprefix_search.go

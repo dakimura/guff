@@ -37788,3 +37788,58 @@ guff の共有 `config::is_rule_option` は下線も除くので、この規則�
 
 fixture `testdata/revive/dot_imports_allowed.go`（stub 2 つを dot import）、unit test は引数なし・camel・
 kebab・snake の 4 通りで報告行を固定（修正前は落ちる）。golden は新 case `revive-dot-imports-allowed`（1 キー）。
+
+### 2026-10-01（続き 371）— `close lima`（3）: modernize stringscutprefix は**最初の文の中を全部**探し、引数は構文で比べる
+
+lima の guff-only のうち 1 件は nolintlint:
+
+```
+pkg/copytool/rsync.go:154: directive `//nolint:modernize // stringscutprefix: …` is unused for linter "modernize"
+```
+
+つまり上流はその行で stringscutprefix を報告していて、guff は報告していなかった:
+
+```go
+if strings.HasSuffix(cp.Path, "/") {
+	if cp.IsRemote {
+		for j, cp2 := range copyPaths { … cp2.Path = strings.TrimSuffix(cp2.Path, "/") … }
+	} else {
+		cp.Path = strings.TrimSuffix(cp.Path, "/")
+	}
+}
+```
+
+上流（x/tools v0.44.0 `stringscutprefix.go` pattern 1）は `if` 本体の**最初の文**（ここでは入れ子の
+`if … else …` 全体）の CallExpr を preorder で全部見て、4 つの Trim 関数のどれでもないもの・Prefix/Suffix が
+逆のもの・引数が合わないものは `continue` し、2 引数とも `astutil.EqualSyntax` なものを最初に見つけた
+ところで報告する。guff は同じ種類の Trim を**最初の 1 つ**だけ取り、引数が合わなければ諦めていた。
+さらに引数の比較が `same_non_dynamic`（値としての同一性、呼び出しを拒む）で、fix の文字列化も
+1 引数の呼び出ししか書けなかったので、`HasSuffix(s, suffix())` は黙っていた。
+
+#### 測定（scratchpad → fixture、10 形）
+
+| 形 | 上流 | 修正前の guff |
+|---|---|---|
+| 素直な形 | 報告 | 報告 |
+| 入れ子の if、不一致の Trim の後に else で一致（lima） | 報告 | **黙る** |
+| 不一致の Trim だけ | 黙る | 黙る |
+| 一致が 2 文目 | 黙る | 黙る |
+| 逆種類の Trim の後に一致 | 報告 | 報告 |
+| 引数が呼び出し `suffix()` | 報告 | **黙る** |
+| `(s)`（括弧は構文上別物） | 黙る | 黙る |
+| init 文あり | 黙る | 黙る |
+| 一致 2 つ | 1 件 | 1 件 |
+| index 式 `m["k"]` | 報告 | 報告 |
+
+#### fix も上流と揃えた
+
+golden に足すと fix 層で 1 か所ずれた: 上流は変数名を `refactor.FreshName(info.Scopes[ifStmt], ifStmt.Pos(), …)`
+で決めるので、引数に `ok` がある関数では `before, ok0 := …; ok0` になる。guff は `ok` を固定で書き、
+パラメータを隠していた。`before`/`after` と `ok` の両方を fresh name にした（init 文がない形だけなので
+`if` の暗黙スコープは空で、`if` の位置で見える名前を避ければ同じ答えになる）。
+
+fixture `testdata/modernize/stringscutprefix_search.go`（10 関数、各行に上流の答え）、unit test は報告行
+`[13, 20, 46, 52, 71, 77]` を固定（既存の test は `any(contains)` だった）。golden `modernize` に足して
+消えたキー 0 / 増えた 6、fix ベースラインは新ファイルの hunk だけ 67 行増え、guff の `--fix` も一致。
+
+lima の残りは revive 2 件（cgo 生成コード）で、datadog-agent と同じ既知の機構。

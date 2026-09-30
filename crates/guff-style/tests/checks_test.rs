@@ -8649,6 +8649,32 @@ fn modernize_flags_stringscutprefix_pattern2_and_bytes() {
     );
 }
 
+/// stringscutprefix pattern 1 walks every call in the *first* statement of the
+/// `if` body in preorder, passes over any Trim call of the other kind or with
+/// other arguments, and pairs the Has call with the first whose arguments are
+/// `astutil.EqualSyntax` — a mismatched Trim is not a reason to stop (lima:
+/// the match sat in the `else` of a nested `if`), and `suffix()` equals
+/// `suffix()` syntactically. guff took only the first Trim of the Has call's
+/// kind, and could not render a zero-argument call for its fix, so both shapes
+/// were silent. Ten functions in `stringscutprefix_search.go`, each commented
+/// with golangci-lint 2.12.2's answer; the reported lines are pinned.
+#[test]
+fn modernize_stringscutprefix_searches_the_whole_first_statement() {
+    let pkg = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/stringscutprefixsearch",
+        "stringscutprefix_search.go",
+    );
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut lines: Vec<i64> = support::run_analyzer_diagnostics(modernize(), &pkg)
+        .into_iter()
+        .filter(|d| d.message.contains("can be simplified to Cut"))
+        .map(|d| fset.position(guff::position::Pos(d.pos as i64)).line)
+        .collect();
+    lines.sort();
+    assert_eq!(lines, vec![13, 20, 46, 52, 71, 77]);
+}
+
 #[test]
 fn modernize_allows_modern_code() {
     let pkg = support::typecheck_fixture("modernize", "example.com/modernize/ok", "ok.go");

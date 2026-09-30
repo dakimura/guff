@@ -127,6 +127,12 @@ stringscutprefix/stringscutprefix.go:9:5:modernize::stringscutprefix: TrimPrefix
 stringscutprefix/stringscutprefix.go:16:5:modernize::stringscutprefix: TrimSuffix can be simplified to CutSuffix
 stringscutprefix/stringscutprefix.go:23:5:modernize::stringscutprefix: HasPrefix + TrimPrefix can be simplified to CutPrefix
 stringscutprefix/stringscutprefix.go:30:5:modernize::stringscutprefix: HasSuffix + TrimSuffix can be simplified to CutSuffix
+stringscutprefixsearch/stringscutprefix_search.go:13:5:modernize::stringscutprefix: HasSuffix + TrimSuffix can be simplified to CutSuffix
+stringscutprefixsearch/stringscutprefix_search.go:20:5:modernize::stringscutprefix: HasSuffix + TrimSuffix can be simplified to CutSuffix
+stringscutprefixsearch/stringscutprefix_search.go:46:5:modernize::stringscutprefix: HasPrefix + TrimPrefix can be simplified to CutPrefix
+stringscutprefixsearch/stringscutprefix_search.go:52:5:modernize::stringscutprefix: HasSuffix + TrimSuffix can be simplified to CutSuffix
+stringscutprefixsearch/stringscutprefix_search.go:71:5:modernize::stringscutprefix: HasSuffix + TrimSuffix can be simplified to CutSuffix
+stringscutprefixsearch/stringscutprefix_search.go:77:5:modernize::stringscutprefix: HasSuffix + TrimSuffix can be simplified to CutSuffix
 stringsseq/stringsseq.go:11:23:modernize::stringsseq: Ranging over SplitSeq is more efficient
 stringsseq/stringsseq.go:17:23:modernize::stringsseq: Ranging over FieldsSeq is more efficient
 stringsseq/stringsseq.go:27:23:modernize::stringsseq: Ranging over SplitSeq is more efficient
