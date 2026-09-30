@@ -37492,3 +37492,66 @@ ratchet（missing 1 / extra 4、importer の差による既知の床）は変わ
 #### grype の残り
 
 guff-only の dupl 2 件（`*_package_store_test.go:25-986`）は別の欠陥で、次の PR。
+
+### 2026-09-30（続き 365）— `close grype`（2）: dupl は match の**最初の出現**で単位を切る —— 出現の順は位置順ではない
+
+grype の guff-only 2 件は dupl:
+
+```
+grype/db/v6/affected_package_store_test.go:25: 25-986 lines are duplicate of `…/unaffected_package_store_test.go:25-986`
+（逆向きも 1 件）
+```
+
+2 ファイルの 25–986 行は名前以外同一で、上流の直列化（`syntax.Serialize`）でも 4,555 ノード一致する。
+なのに上流は何も言わない。
+
+#### 上流の中を覗いた
+
+golangci-lint の dupl（`golangci/dupl@c99c5cf5`）をコピーして `FindSyntaxUnits` に print を入れ、
+`go list -test -compiled` の順（非テスト → テスト）でファイルを渡すと golangci の答え（cpe_store の 2 件）
+がそのまま再現する。巨大な match は存在していた:
+
+```
+MATCH len=4859 ps=[unaffected_cpe_store_test.go@6338 affected_cpe_store_test.go@6707] units=1
+  i=0    type=26 owns=0    rem=4665  unaffected_cpe_store_test.go
+  i=1    type=21 owns=71   rem=4664  unaffected_cpe_store_test.go
+  i=73   type=1  owns=4591 rem=4592  unaffected_package_store_test.go   ← File ノードが丸ごと完結した単位
+```
+
+ファイルは切れ目なく 1 本の列に連結されるので、繰り返しは cpe_store_test の末尾から
+package_store_test へまたがる。`getUnitsIndexes` は **最初の出現**（`ps[0]`）だけで単位を切り、
+短い方の `unaffected_package_store_test.go` では File ノードが残り長にちょうど収まる完結単位になる。
+最後の単位の大きさ（`Owns`）を他の出現と比べる検査で、長い方の `affected_…` の File ノードと合わず
+落ちる —— 何も報告されない。
+
+guff で同じことをすると最初の出現は `affected_…` で、その File ノード（owns 4667）は収まらないので
+中に降り、25–986 行の関数群を単位として報告していた。
+
+#### 原因
+
+`walk_trans` が報告前に `ps.sort_unstable()` していた（初回移植から）。上流の `contextList.getAll()` は
+左文脈キーの昇順に、各キー内は走査で足した順に連結するだけで、位置では並べない。どの出現が先頭かは
+クローンの有無を変えないが、**何が単位として切られるか**を変える。ソートを外した。
+
+#### 測定（fixture、4 パッケージ × 4 ファイル、threshold 50）
+
+`a2` は `u2` に関数を 1 本足したもの、`a1` / `u1` は同じ helper で終わるが先頭の宣言が違う（左文脈キーが
+変わる）。
+
+| 版 | 先頭宣言（a1 / u1） | 上流 | 修正前の guff |
+|---|---|---|---|
+| v1 | `var` / `type` | a2/u2 のクローン | 同じ |
+| v2 | `type` / `var` | **黙る** | a2/u2 を報告 |
+| v3 | `const` / `func` | a2/u2 のクローン | 同じ |
+| v4 | `func` / `const` | **黙る** | a2/u2 を報告 |
+
+v1/v3 は位置順とキー順が一致する側の対照。
+
+#### 触らなかったこと
+
+上流の hash は `firstSeq[indexes[0] : lastIndex+Owns]`（最後の単位の最後のノードを含まない）で、guff は
+`last_index + 1 + owns`。グループ分けにしか効かず、差が出る形を測っていないので変えていない。
+
+unit test は 4 版の issue 集合を `assert_eq!` で固定（修正前は落ちる）。golden は新 case
+`dupl-occurrence-order`（4 キー、v1/v3 のみ）。fix ベースラインは書き換えなし。
+grype: `grype/db/v6` の dupl は上流と同じ cpe_store の 2 件だけになった。

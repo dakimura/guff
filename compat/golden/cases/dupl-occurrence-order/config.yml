@@ -1,0 +1,34 @@
+# Golden case: dupl reports what the **first** occurrence of a match cuts.
+#
+# dupl's suffix tree hands back a match's occurrences grouped by the node
+# that precedes each one (the left context), keys ascending — not by
+# position. `FindSyntaxUnits` then decides the reported units from the first
+# occurrence alone: if its last unit is a whole File node the other
+# occurrences disagree with, the unit is dropped and nothing is reported.
+#
+# guff sorted the occurrences by position. On grype that made the longer
+# `affected_package_store_test.go` first — its File node incomplete, so guff
+# descended and reported its 961-line body — where upstream starts from the
+# shorter `unaffected_…` file and reports nothing.
+#
+# Four packages of four files each: `a2` is `u2` plus one function, and
+# `a1` / `u1` end in the same helper after a different first declaration. In
+# v2 and v4 the two orders disagree and upstream is silent; v1 and v3 are the
+# control where they agree and upstream reports the a2/u2 clone.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - dupl
+  settings:
+    dupl:
+      threshold: 50
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
