@@ -37755,3 +37755,36 @@ if s, ok := T.(*types.Struct); ok && s.NumFields() == 0 { … "empty anonymous s
 
 lima の残り: dot-imports 2（`allowedPackages` を読まない）、modernize 1（stringscutprefix の探索）、
 revive 2（cgo 生成コード —— datadog-agent と同じ既知の機構）。
+
+### 2026-10-01（続き 370）— `close lima`（2）: revive dot-imports の `allowedPackages` を読む
+
+lima の guff-only のうち 2 件は revive `dot-imports`（`pkg/limayaml/defaults.go:35`, `pkg/osutil/user.go:20`）。
+どちらも `. "github.com/lima-vm/lima/v2/pkg/must"` で、lima の設定は:
+
+```yaml
+- name: dot-imports
+  arguments:
+    - allowedPackages:
+        - github.com/lima-vm/lima/v2/pkg/must
+```
+
+guff の dot-imports は引数を**一切読んでいなかった**。上流（revive v1.15.0 `rule/dot_imports.go`）は
+最初の引数を map として読み、`isRuleOption(k, "allowedPackages")` —— **小文字化してハイフンを除く**
+比較 —— に当たるキーの文字列リストを、`strconv.Quote` した形で import の literal と比べる。
+
+#### 測定（scratchpad、6 設定）
+
+| 引数 | 上流 | 修正前の guff |
+|---|---|---|
+| なし | 2 件 | 2 件 |
+| `allowedPackages: [allowed]` | 1 件 | **2 件** |
+| `allowed-packages: [allowed]` | 1 件 | **2 件** |
+| `allowed_packages: [allowed]` | **2 件**（下線は除かない） | 2 件 |
+| `AllowedPackages: [allowed, other]` | 0 件 | **2 件** |
+| `allowedPackages: []` | 2 件 | 2 件 |
+
+guff の共有 `config::is_rule_option` は下線も除くので、この規則では使わず上流の正規化をそのまま書いた
+（共有のほうの差は他の規則にも効くはずだが、測っていないので触っていない）。
+
+fixture `testdata/revive/dot_imports_allowed.go`（stub 2 つを dot import）、unit test は引数なし・camel・
+kebab・snake の 4 通りで報告行を固定（修正前は落ちる）。golden は新 case `revive-dot-imports-allowed`（1 キー）。

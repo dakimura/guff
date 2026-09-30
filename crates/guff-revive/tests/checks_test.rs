@@ -1136,6 +1136,59 @@ fn revive_ifelse_rules_reach_every_container() {
     });
 }
 
+/// dot-imports reads its `allowedPackages` map argument (revive v1.15.0). The
+/// key is matched lowercased with hyphens removed — `allowedPackages` and
+/// `allowed-packages` count, `allowed_packages` does not — and each path is
+/// compared with the import literal as quoted. guff ignored the argument, so
+/// lima's allowed `pkg/must` dot imports were guff-only findings. Measured
+/// against golangci-lint 2.12.2.
+#[test]
+fn revive_dot_imports_honours_allowed_packages() {
+    use std::collections::HashMap;
+
+    use guff_revive::{with_settings, RuleArgument, RuleSetting, Settings};
+
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/dotimportsallowed",
+        "dot_imports_allowed.go",
+    );
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let run = |key: Option<&str>| {
+        let arguments = match key {
+            None => Vec::new(),
+            Some(k) => vec![RuleArgument::Map(HashMap::from([(
+                k.to_string(),
+                RuleArgument::List(vec![RuleArgument::String("example.com/revive/dot".into())]),
+            )]))],
+        };
+        let settings = Settings {
+            rules: Some(vec![RuleSetting {
+                name: "dot-imports".into(),
+                arguments,
+                disabled: false,
+                severity: None,
+                exclude: Vec::new(),
+            }]),
+            ..Settings::default()
+        };
+        with_settings(settings, || {
+            let mut lines: Vec<i64> = support::run_analyzer_diagnostics(revive(), &pkg)
+                .into_iter()
+                .filter(|d| d.message.starts_with("dot-imports:"))
+                .map(|d| fset.position(guff::position::Pos(d.pos as i64)).line)
+                .collect();
+            lines.sort();
+            lines
+        })
+    };
+    assert_eq!(run(None), vec![6, 7]);
+    assert_eq!(run(Some("allowedPackages")), vec![7]);
+    assert_eq!(run(Some("allowed-packages")), vec![7]);
+    // Upstream removes hyphens, not underscores.
+    assert_eq!(run(Some("allowed_packages")), vec![6, 7]);
+}
+
 #[test]
 fn revive_preserve_scope_suppresses_scope_enlarging_suggestions() {
     use guff_revive::{with_settings, RuleArgument, RuleSetting, Settings};

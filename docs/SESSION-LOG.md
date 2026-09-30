@@ -5,6 +5,7 @@
 
 | 日付 | 内容 |
 |------|------|
+| 2026-10-01 | **`close lima`（2）**: revive dot-imports が `allowedPackages` 引数を読んでいなかった。上流はキーを小文字化・ハイフン除去で照合（下線は除かない）、パスは quote して import literal と比較。6 設定で一致、新 golden `revive-dot-imports-allowed`（続き 370） |
 | 2026-10-01 | **`close lima`（1）**: SA1029 は組み込み型の判定では alias を剥がすが、空 struct の判定では剥がさない（`T.(*types.Struct)`）。lima の `type K = struct{}` を `K{}` で使うキーを guff は報告していた。10 形（続き 369） |
 | 2026-10-01 | **`close kitex`（1）**: staticcheck の生成コード判定を上流に揃えた —— honnef はファイルの**どの行**の `// Code generated … DO NOT EDIT.` でも生成物とし、`FilterGenerated` は **report 箇所ごと**。guff は 78 check 中 75 で AST ヘッダ判定、29 check は上流が絞らないのに絞り、S1008/ST1013/ST1023/QF1011/SA9005 は絞らず、S1025/S1038 は箇所の区別なし。golden 4 case を実体化して全ファイルに印を付けるハーネスで、末尾印 1088→基準線（上流 655）、先頭印＋disable 520→基準線（上流 656）（続き 368） |
 | 2026-09-30 | **`close nerdctl`（1）**: forbidigo の `pkg:` は解決したパスに当てるが、未解決（`analyze-types` なし、または builtin）なら "" に当てる。guff は型解析なしでは `pkg` を無視して報告（nerdctl の 7 件）、ありでは未解決でパターンを飛ばしていた（`pkg: ^$` が `println` に当たらない）。6 呼び出し × 2 設定の fixture、新 golden 2 つ（続き 367） |

@@ -158,7 +158,7 @@ impl<'a> SharedFileRules<'a> {
             cyclomatic: enabled("cyclomatic").then(|| cyclomatic::Checker::new(pass)),
             deep_exit: enabled("deep-exit").then(|| deep_exit::Checker::new(pass)),
             defer: enabled("defer").then(|| defer::Checker::new(pass)),
-            dot_imports: enabled("dot-imports").then(dot_imports::Checker::new),
+            dot_imports: enabled("dot-imports").then(|| dot_imports::Checker::new(pass)),
             duplicated_imports: enabled("duplicated-imports").then(duplicated_imports::Checker::new),
             empty_lines: enabled("empty-lines").then(|| empty_lines::Checker::new(pass)),
             enforce_map_style: enabled("enforce-map-style")

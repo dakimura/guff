@@ -1,0 +1,9 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh revive-dot-imports-allowed
+# Produced by running golangci-lint on compat/golden/cases/revive-dot-imports-allowed/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+use/dot_imports_allowed.go:7:2:revive:warning:dot-imports: should not use dot imports

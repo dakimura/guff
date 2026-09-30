@@ -1,0 +1,5 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+dot/dot.go                    crates/guff-revive/tests/testdata/revive/stub/example.com/revive/dot/dot.go
+dotother/dotother.go          crates/guff-revive/tests/testdata/revive/stub/example.com/revive/dotother/dotother.go
+use/dot_imports_allowed.go    crates/guff-revive/tests/testdata/revive/dot_imports_allowed.go
