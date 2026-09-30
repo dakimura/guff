@@ -42,6 +42,8 @@
 //! - **G405** — weak encryption (`crypto/des` / `crypto/rc4`)
 //! - **G406** — deprecated weak hash (`golang.org/x/crypto/{md4,ripemd160}`)
 //! - **G501–G507** — blocklisted imports
+//! - **G601** — implicit memory aliasing in a `range` loop, below Go 1.22 (see
+//!   `gosec_g601`)
 //! - **G602** — slice index / bounds out of range (SSA; see `gosec_g602`)
 //! - **G702 / G703 / G704 / G705 / G706 / G710** — command injection, path traversal, SSRF,
 //!   XSS, log injection and open redirect: one taint engine over five tables of
@@ -50,7 +52,7 @@
 //! Message format matches golangci: `"Gxxx: <what>"`.
 //!
 //! DEFERRED: remaining rules (G113, G116–G117, G119–G121, G307
-//! config-gated, G402 MinVersion/CipherSuites, G601, and the taint rules the
+//! config-gated, G402 MinVersion/CipherSuites, and the taint rules the
 //! engine has no table for — G701 SQL, G704 SSRF, G707–G709),
 //! full `gosec:disable` block directives / per-rule
 //! `config` map, G104 audit mode + config allowlist extensions, G107 local
@@ -292,7 +294,7 @@ const EXTRA_RULE_IDS: &[&str] = &[
     "G122", "G124",
     "G119", "G123", "G201", "G202",
     "G203",
-    "G204", "G301", "G302", "G303", "G304", "G305", "G306", "G402", "G403", "G602",
+    "G204", "G301", "G302", "G303", "G304", "G305", "G306", "G402", "G403", "G601", "G602",
     // The taint engine's rules (`gosec_taint`), all SSA analyzers.
     "G702", "G703", "G704", "G705", "G706", "G710",
 ];
@@ -589,6 +591,7 @@ const RULE_SCORES: &[(&str, Score, Score)] = &[
     ("G505", Score::Medium, Score::High),
     ("G506", Score::Medium, Score::High),
     ("G507", Score::Medium, Score::High),
+    ("G601", Score::Medium, Score::Medium),
     ("G602", Score::Low, Score::High),
     // taint/analyzer.go grades every taint finding `rule.Severity` /
     // `issue.High`; the severities are the four `taint.RuleInfo`s in
@@ -4247,6 +4250,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     check_g102(pass, &enabled, &mut pending);
     check_g122(pass, &enabled, &mut pending);
     check_g304(pass, &enabled, &mut pending);
+    crate::gosec_g601::check_g601(pass, &enabled, &opts, &mut pending);
     crate::gosec_ssa::check_ssa_analyzers(pass, &enabled, &mut pending);
 
     let files = pass.files();

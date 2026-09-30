@@ -1,0 +1,29 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh gosec-g601
+# Produced by running golangci-lint on compat/golden/cases/gosec-g601/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+g601/g601.go:23:50:gosec:medium:G601: Implicit memory aliasing in for loop.
+g601/g601.go:24:48:gosec:medium:G601: Implicit memory aliasing in for loop.
+g601/g601.go:28:62:gosec:medium:G601: Implicit memory aliasing in for loop.
+g601/g601.go:30:60:gosec:medium:G601: Implicit memory aliasing in for loop.
+g601/g601.go:32:86:gosec:medium:G601: Implicit memory aliasing in for loop.
+g601/g601.go:33:59:gosec:medium:G601: Implicit memory aliasing in for loop.
+g601/g601.go:34:51:gosec:medium:G601: Implicit memory aliasing in for loop.
+g601/g601.go:37:48:gosec:medium:G601: Implicit memory aliasing in for loop.
+g601/g601.go:38:48:gosec:medium:G601: Implicit memory aliasing in for loop.
+g601/g601.go:40:57:gosec:medium:G601: Implicit memory aliasing in for loop.
+g601/g601.go:42:55:gosec:medium:G601: Implicit memory aliasing in for loop.
+g601/g601.go:43:90:gosec:medium:G601: Implicit memory aliasing in for loop.
+g601/g601.go:46:49:gosec:medium:G601: Implicit memory aliasing in for loop.
+g601/g601.go:47:61:gosec:medium:G601: Implicit memory aliasing in for loop.
+g601/g601.go:48:56:gosec:medium:G601: Implicit memory aliasing in for loop.
+g601/g601.go:49:53:gosec:medium:G601: Implicit memory aliasing in for loop.
+g601/g601.go:50:58:gosec:medium:G601: Implicit memory aliasing in for loop.
+g601/g601.go:51:48:gosec:medium:G601: Implicit memory aliasing in for loop.
+g601/g601.go:52:67:gosec:medium:G601: Implicit memory aliasing in for loop.
+g601/g601.go:53:58:gosec:medium:G601: Implicit memory aliasing in for loop.
+g601/g601.go:54:86:gosec:medium:G601: Implicit memory aliasing in for loop.

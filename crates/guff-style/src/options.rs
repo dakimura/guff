@@ -1055,6 +1055,10 @@ pub struct GosecOptions {
     pub g117: G117Options,
     /// `config.G301` / `G302` / `G306` — the file-permission thresholds.
     pub file_perms: FilePermOptions,
+    /// `GOSECGOVERSION` as golangci-lint sets it (`run.go`, else detected from
+    /// the main go.mod). `None` falls back to the package's module version.
+    /// Only G601 asks.
+    pub go: Option<String>,
 }
 
 /// `linters.settings.gosec.config.G301` / `G302` / `G306`.

@@ -90,6 +90,87 @@ fn gosec_g602_tracks_bounds_through_reslices() {
     assert_eq!((bounds, index), (1, 3), "{messages:?}");
 }
 
+/// G601 — implicit memory aliasing in a `range` loop — over the 32 shapes of
+/// `g601.go`, each tagged FIRES or silent with what golangci-lint 2.12.2
+/// (gosec v2.26.1) does in a `go 1.18` module. 21 fire.
+///
+/// Asserted as the **set of report positions**: every finding carries the same
+/// message, so a count is true of any subset and `any(contains)` of any
+/// non-empty one. The silent shapes are the half that pins upstream's state
+/// machine — `return &v`, `&v.f` through a real pointer, a range key, `&(v)`,
+/// `&v` after the loop that set it — and the fired half includes the ones that
+/// state makes surprising: a named pointer and an alias of one, `&v` for an
+/// `=`-assigned variable after an inner loop but inside an outer range.
+///
+/// The same fixture at 1.22 reports nothing: the gate is `GOSECGOVERSION`
+/// (golangci's `run.go`), not the file.
+#[test]
+fn gosec_g601_follows_upstreams_alias_state_and_version_gate() {
+    use guff_style::GosecOptions;
+
+    let pkg = support::typecheck_fixture("gosec", "example.com/gosec/g601", "g601.go");
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let run = |go: &str| {
+        let mut bag = SettingsBag::new();
+        bag.insert(
+            "gosec",
+            GosecOptions {
+                includes: vec!["G601".to_string()],
+                go: Some(go.to_string()),
+                ..GosecOptions::default()
+            },
+        );
+        let mut got: Vec<(i64, i64)> = support::run_analyzer_diagnostics_with_settings(
+            gosec(),
+            &pkg,
+            &RunnerOptions {
+                settings: Arc::new(bag),
+                ..RunnerOptions::default()
+            },
+        )
+        .into_iter()
+        .map(|d| {
+            assert_eq!(d.message, "G601: Implicit memory aliasing in for loop.");
+            let p = fset.position(guff::position::Pos(d.pos as i64));
+            (p.line, p.column)
+        })
+        .collect();
+        got.sort();
+        got
+    };
+
+    assert_eq!(
+        run("1.18"),
+        vec![
+            (23, 50), // s01 plain &v
+            (24, 48), // s02 &v.f, v a struct
+            (28, 62), // s06 return f(&v)
+            (30, 60), // s08 `for _, v = range`
+            (32, 86), // s10 &a after an inner loop
+            (33, 59), // s11 closure
+            (34, 51), // s12 &p, p a pointer but no selector
+            (37, 48), // s15 &v.g.h, v a struct
+            (38, 48), // s16 named pointer type
+            (40, 57), // s18 map
+            (42, 55), // s20 generic element
+            (43, 90), // s21 `=`-assigned inner value, &v inside the outer range
+            (46, 49), // s24 string
+            (47, 61), // s25 nested block
+            (48, 56), // s26 defer
+            (49, 53), // s27 go
+            (50, 58), // s28 r = &v
+            (51, 48), // s29 alias of a pointer
+            (52, 67), // s30 pointer-constrained type parameter
+            (53, 58), // s31 an unrelated unary before it
+            (54, 86), // s32 a second loop
+        ],
+        "G601 report positions at go 1.18"
+    );
+    assert_eq!(run("1.21.13"), run("1.18"));
+    assert!(run("1.22").is_empty());
+    assert!(run("1.26.5").is_empty());
+}
+
 /// Where G602 gets a capacity from when guff's SSA does not spell the slice the
 /// way upstream reads it.
 ///
