@@ -148,6 +148,26 @@ sa4018/bad/bad.go                            crates/guff-staticcheck/tests/testd
 sa4018/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa4018/ok.go
 sa4019/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa4019/bad.go
 sa4019/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa4019/ok.go
+# SA4019 reads only the *preamble* (honnef `astutil.Preamble`: comment groups
+# before the package doc, each through `CommentGroup.Text()`). One file per
+# shape, no explanatory comments — a comment would change the preamble. Six
+# report (two lines, two groups, `//+build` with no space, a permutation,
+# three copies, a `/* */` block); six are silent (a string literal, the body,
+# the package doc group, a doc group after a blank line, the `//go:build` dual
+# form, different constraints). gosec's testutils/g104_samples.go was the
+# string-literal case.
+sa4019/shapes/a01_twice.go              crates/guff-staticcheck/tests/testdata/sa4019/shapes/a01_twice.go
+sa4019/shapes/a02_groups.go             crates/guff-staticcheck/tests/testdata/sa4019/shapes/a02_groups.go
+sa4019/shapes/a03_string.go             crates/guff-staticcheck/tests/testdata/sa4019/shapes/a03_string.go
+sa4019/shapes/a04_body.go               crates/guff-staticcheck/tests/testdata/sa4019/shapes/a04_body.go
+sa4019/shapes/a05_doc.go                crates/guff-staticcheck/tests/testdata/sa4019/shapes/a05_doc.go
+sa4019/shapes/a06_nospace.go            crates/guff-staticcheck/tests/testdata/sa4019/shapes/a06_nospace.go
+sa4019/shapes/a07_perm.go               crates/guff-staticcheck/tests/testdata/sa4019/shapes/a07_perm.go
+sa4019/shapes/a08_dualform.go           crates/guff-staticcheck/tests/testdata/sa4019/shapes/a08_dualform.go
+sa4019/shapes/a09_three.go              crates/guff-staticcheck/tests/testdata/sa4019/shapes/a09_three.go
+sa4019/shapes/a10_docafter.go           crates/guff-staticcheck/tests/testdata/sa4019/shapes/a10_docafter.go
+sa4019/shapes/a11_block.go              crates/guff-staticcheck/tests/testdata/sa4019/shapes/a11_block.go
+sa4019/shapes/a12_different.go          crates/guff-staticcheck/tests/testdata/sa4019/shapes/a12_different.go
 sa4020/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa4020/bad.go
 sa4020/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa4020/ok.go
 # A bare type parameter never subsumes a later case clause.

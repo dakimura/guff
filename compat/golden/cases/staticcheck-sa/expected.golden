@@ -323,6 +323,14 @@ sa4017/bad/bad.go:23:2:staticcheck::SA4017: trimmed doesn't have side effects an
 sa4017/bad/bad.go:24:2:staticcheck::SA4017: norm doesn't have side effects and its return value is ignored
 sa4018/bad/bad.go:2:23:staticcheck::SA4018: self-assignment of x to x
 sa4019/bad/bad.go:4:1:staticcheck::SA4019: identical build constraints "!plan9" and "!plan9"
+sa4019/shapes/a01_twice.go:4:1:staticcheck::SA4019: identical build constraints "go1.10" and "go1.10"
+sa4019/shapes/a02_groups.go:5:1:staticcheck::SA4019: identical build constraints "go1.10" and "go1.10"
+sa4019/shapes/a05_doc.go:1:1:staticcheck::ST1000: package comment should be of the form "Package p..."
+sa4019/shapes/a06_nospace.go:4:1:staticcheck::SA4019: identical build constraints "go1.10" and "go1.10"
+sa4019/shapes/a07_perm.go:4:1:staticcheck::SA4019: identical build constraints "go1.10 !nothing" and "!nothing go1.10"
+sa4019/shapes/a09_three.go:5:1:staticcheck::SA4019: identical build constraints "go1.10" and "go1.10"
+sa4019/shapes/a10_docafter.go:3:1:staticcheck::ST1000: package comment should be of the form "Package p..."
+sa4019/shapes/a11_block.go:6:1:staticcheck::SA4019: identical build constraints "go1.10" and "go1.10"
 sa4020/bad/bad.go:9:2:staticcheck::SA4020: unreachable case clause: any will always match before example.com/sa4020/bad.T
 sa4020/typeparam/typeparam.go:49:2:staticcheck::SA4020: unreachable case clause: io.Reader will always match before example.com/sa4020/typeparam.reader
 sa4020/typeparam/typeparam.go:59:2:staticcheck::SA4020: unreachable case clause: io.Reader will always match before io.ReadCloser
