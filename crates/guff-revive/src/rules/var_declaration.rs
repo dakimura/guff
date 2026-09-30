@@ -260,6 +260,15 @@ fn untyped_const_default_name(pass: &Pass<'_>, expr: &Expr) -> Option<&'static s
         Expr::UnaryExpr(u) if matches!(u.op, Token::ADD | Token::SUB | Token::XOR) => {
             untyped_const_default_name(pass, &u.x)
         }
+        // A shift has the type of its left operand, whatever the right one is
+        // (the spec; `types.Eval` of `1 << shift` out of context is untyped
+        // int). nerdctl's `var val byte = 1 << shift` is therefore an untyped
+        // constant whose default, `int`, is not `byte`: silent upstream. guff
+        // required both operands to be untyped constants, found `shift` was
+        // not, and reported.
+        Expr::BinaryExpr(b) if matches!(b.op, Token::SHL | Token::SHR) => {
+            untyped_const_default_name(pass, &b.x)
+        }
         Expr::BinaryExpr(b)
             if matches!(
                 b.op,
@@ -271,8 +280,6 @@ fn untyped_const_default_name(pass: &Pass<'_>, expr: &Expr) -> Option<&'static s
                     | Token::AND
                     | Token::OR
                     | Token::XOR
-                    | Token::SHL
-                    | Token::SHR
             ) =>
         {
             let l = untyped_const_default_name(pass, &b.x)?;

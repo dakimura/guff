@@ -107,3 +107,4 @@ incdec/incdec.go                            crates/guff-revive/tests/testdata/re
 # keyed by a per-file position.
 collide/alpha.go                            crates/guff-revive/tests/testdata/revive/exported_collide/alpha.go
 collide/beta.go                             crates/guff-revive/tests/testdata/revive/exported_collide/beta.go
+vardeclshift/var_declaration_shift.go      crates/guff-revive/tests/testdata/revive/var_declaration_shift.go

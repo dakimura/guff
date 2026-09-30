@@ -518,3 +518,10 @@ vardeclother/vardeclother.go:12:7:revive:warning:exported: exported const Answer
 vardeclother/vardeclother.go:14:1:revive:warning:exported: exported function TestFunc should have comment or be unexported
 vardeclother/vardeclother.go:14:15:revive:warning:unused-parameter: parameter 'c' seems to be unused, consider removing or renaming it as _
 vardeclother/vardeclother.go:16:1:revive:warning:exported: exported function Str should have comment or be unexported
+vardeclshift/var_declaration_shift.go:5:1:revive:warning:file-header: the file doesn't have an appropriate header
+vardeclshift/var_declaration_shift.go:11:8:revive:warning:var-declaration: should omit type int from declaration of var b; it will be inferred from the right-hand side
+vardeclshift/var_declaration_shift.go:13:8:revive:warning:var-declaration: should omit type int from declaration of var d; it will be inferred from the right-hand side
+vardeclshift/var_declaration_shift.go:15:8:revive:warning:var-declaration: should omit type int from declaration of var g; it will be inferred from the right-hand side
+vardeclshift/var_declaration_shift.go:17:8:revive:warning:var-declaration: should omit type int from declaration of var i; it will be inferred from the right-hand side
+vardeclshift/var_declaration_shift.go:18:8:revive:warning:var-declaration: should omit type int from declaration of var j; it will be inferred from the right-hand side
+vardeclshift/var_declaration_shift.go:23:28:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
