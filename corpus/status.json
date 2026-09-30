@@ -6,8 +6,8 @@
     "`unmeasured` is not `clean`: an absent measurement is a question."
   ],
   "goal": 100,
-  "defined": 112,
-  "clean": 105,
+  "defined": 113,
+  "clean": 106,
   "open": 2,
   "unmeasured": 5,
   "targets": {
@@ -621,6 +621,14 @@
       "tier": "hunt",
       "state": "clean",
       "at": "20260905T031614Z",
+      "open": 0,
+      "guff_only": 0,
+      "gcl_only": 0
+    },
+    "nerdctl": {
+      "tier": "hunt",
+      "state": "clean",
+      "at": "20260930T172948Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
