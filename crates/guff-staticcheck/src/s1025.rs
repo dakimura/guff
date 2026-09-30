@@ -233,11 +233,19 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         pending.push((match_pos(node), msg.into(), fix_msg, edit));
     });
     for (pos, message, fix_msg, edit) in pending {
+        // Upstream filters generated files for every message but
+        // "should use String() instead of fmt.Sprintf" — the one
+        // `report.Report` in s1025.go without `report.FilterGenerated()`.
+        let filter_generated = !message.starts_with("should use String()");
         let Some(edit) = edit else {
-            pass.report_unless_generated(pos, message);
+            if filter_generated {
+                pass.report_unless_generated(pos, message);
+            } else {
+                pass.reportf(pos, message);
+            }
             continue;
         };
-        if code::is_generated_at(pass, pos) {
+        if filter_generated && code::is_generated_file_at(pass, pos) {
             continue;
         }
         pass.report(Diagnostic {

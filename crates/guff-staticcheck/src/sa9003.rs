@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 use guff::ast::{BlockStmt, IfStmt, Stmt};
 use guff::node_mask;
 use guff::walk::NodeRef;
-use guff_analysis::code::{example_func_spans, in_example_func, is_generated_at};
+use guff_analysis::code::{example_func_spans, in_example_func, is_generated_file_at};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
@@ -38,7 +38,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             match else_ {
                 Stmt::BlockStmt(BlockStmt { list, .. }) if list.is_empty() => {
                     let pos = else_.pos().0 as u32;
-                    if !is_generated_at(pass, pos) {
+                    if !is_generated_file_at(pass, pos) {
                         pending.push(pos);
                     }
                 }
@@ -47,7 +47,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
         if ifs.body.list.is_empty() {
             let pos = ifs.if_.0 as u32;
-            if !is_generated_at(pass, pos) {
+            if !is_generated_file_at(pass, pos) {
                 pending.push(pos);
             }
         }

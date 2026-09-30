@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use guff_analysis::code::is_generated_at;
+use guff_analysis::code::is_generated_file_at;
 use guff_analysis::{
     AnalysisResult, Analyzer, Diagnostic, Pass, RelatedInformation, RunError, RunFn,
 };
@@ -48,7 +48,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 .as_ref()
                 .map(|n| n.pos().0 as u32)
                 .unwrap_or(first.path.value_pos.0 as u32);
-            if is_generated_at(pass, pos) {
+            if is_generated_file_at(pass, pos) {
                 continue;
             }
             let mut related = Vec::new();

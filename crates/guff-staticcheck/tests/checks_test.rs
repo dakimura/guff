@@ -2428,6 +2428,69 @@ fn sa3001_allows_reading_benchmark_n() {
     assert!(support::run_analyzer(sa3001::analyzer(), &pkg).is_empty());
 }
 
+/// `report.FilterGenerated` asks honnef's `generated` analyzer, which reads
+/// the raw file line by line and takes a `// Code generated … DO NOT EDIT.`
+/// line **anywhere** — after the code, inside a raw string, inside a block
+/// comment — but only at column 0 and only ending in exactly ` DO NOT EDIT.`.
+/// guff answered from the AST header unless the check required the fact, and
+/// 75 of the 78 filtering checks do not; kitex's `nphttp2/mocks_test.go`
+/// (marker at line 461) was an S1009 upstream filters.
+///
+/// Ten files, one `b != nil && len(b) > 0` each, measured against
+/// golangci-lint 2.12.2: six are generated upstream, four report.
+#[test]
+fn s1009_filters_a_file_with_a_generated_marker_on_any_line() {
+    let reported: Vec<&str> = [
+        "g01header.go",
+        "g02tail.go",
+        "g03rawstring.go",
+        "g04indented.go",
+        "g05block.go",
+        "g06noperiod.go",
+        "g07oldcgo.go",
+        "g08empty.go",
+        "g09trailingspace.go",
+        "g10plain.go",
+    ]
+    .into_iter()
+    .filter(|f| {
+        let pkg = typecheck_rule("s1009generated", f);
+        !support::run_analyzer(s1009::analyzer(), &pkg).is_empty()
+    })
+    .collect();
+    assert_eq!(
+        reported,
+        vec![
+            "g04indented.go",      // indented: not at column 0
+            "g06noperiod.go",      // `DO NOT EDIT` without the period
+            "g09trailingspace.go", // trailing space after the period
+            "g10plain.go",         // no marker
+        ]
+    );
+}
+
+/// Upstream filters generated files per *report site*, not per check. In
+/// s1025.go the "should use String()" report is the one without
+/// `report.FilterGenerated()`; in s1038.go only the `fmt.Print*` report has
+/// it, not the method or `log`-package ones. `mixed.go` ends in a
+/// `// Code generated … DO NOT EDIT.` line and holds one of each: the two
+/// unfiltered sites report, the two filtered ones do not.
+#[test]
+fn s1025_and_s1038_filter_generated_code_per_report_site() {
+    let pkg = typecheck_rule("s1009generated", "mixed.go");
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let lines = |a: &'static guff_analysis::Analyzer| {
+        let mut v: Vec<i64> = support::run_analyzer_diagnostics(a, &pkg)
+            .into_iter()
+            .map(|d| fset.position(guff::position::Pos(d.pos as i64)).line)
+            .collect();
+        v.sort();
+        v
+    };
+    assert_eq!(lines(s1025::analyzer()), vec![15]); // String(); not line 16
+    assert_eq!(lines(s1038::analyzer()), vec![18]); // log.Print; not line 17
+}
+
 fn typecheck_rule(rule: &str, file: &str) -> std::sync::Arc<guff_packages::Package> {
     let dir = support::testdata(rule);
     let deps_owned = support::collect_stubs(&dir);

@@ -145,7 +145,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     for (pos, message, edit) in pending {
         // `report.FilterGenerated()`: same gate as `reportf`, spelled out here
         // because the diagnostic carries a fix.
-        if code::is_generated_at(pass, pos) {
+        if code::is_generated_file_at(pass, pos) {
             continue;
         }
         pass.report(Diagnostic {

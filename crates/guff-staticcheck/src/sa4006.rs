@@ -766,7 +766,14 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
     });
     for (pos, msg) in pending {
-        pass.report_unless_generated(pos, msg);
+        // Upstream skips only goyacc output (`code.Generator(pass, node.Pos())
+        // == generated.Goyacc`), not generated code in general.
+        if guff_analysis::code::generator_at(pass, pos)
+            == Some(guff_analysis::passes::facts::generated::Generator::Goyacc)
+        {
+            continue;
+        }
+        pass.reportf(pos, msg);
     }
     Ok(None)
 }

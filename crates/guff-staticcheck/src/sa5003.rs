@@ -68,7 +68,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         check_loop(loop_, &mut pending);
     });
     for pos in pending {
-        pass.report_unless_generated(pos, "defers in this infinite loop will never run");
+        pass.reportf(pos, "defers in this infinite loop will never run");
     }
     Ok(None)
 }

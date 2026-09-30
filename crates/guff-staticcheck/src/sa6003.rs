@@ -75,7 +75,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
     });
     for pos in pending {
-        pass.report_unless_generated(pos, "should range over string, not []rune(string)");
+        pass.reportf(pos, "should range over string, not []rune(string)");
     }
     Ok(None)
 }

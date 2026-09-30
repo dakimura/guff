@@ -163,7 +163,18 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     {
         return Err("SA9005 requires buildir analyzer".into());
     }
+    let start = pass.diagnostics().len();
     callcheck::run(pass, rules());
+    // Upstream's `check` opens with `if code.IsGenerated(call.Pass,
+    // call.Instr.Pos()) { return }` — honnef's whole-file scan, so a call in a
+    // file with a `// Code generated … DO NOT EDIT.` line anywhere is not
+    // checked. The callcheck driver has no `Pass` to ask, so the filter runs on
+    // what it reported: a call's diagnostics sit in the call's own file.
+    for d in pass.take_diagnostics_from(start) {
+        if !guff_analysis::code::is_generated_file_at(pass, d.pos) {
+            pass.report(d);
+        }
+    }
     Ok(None)
 }
 

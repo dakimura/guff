@@ -128,6 +128,13 @@ impl<'a> Pass<'a> {
         self.diagnostics
     }
 
+    /// Remove and return the diagnostics reported since `start` (a length
+    /// taken from [`Self::diagnostics`] earlier), for a check that has to
+    /// filter what a shared driver reported on its behalf.
+    pub fn take_diagnostics_from(&mut self, start: usize) -> Vec<Diagnostic> {
+        self.diagnostics.split_off(start.min(self.diagnostics.len()))
+    }
+
     pub fn other_files(&self) -> &[String] {
         &self.other_files
     }
@@ -170,9 +177,10 @@ impl<'a> Pass<'a> {
 
     /// Emit a diagnostic unless `pos` is in a generated file.
     ///
-    /// Port of `report.FilterGenerated`.
+    /// Port of `report.FilterGenerated`: honnef's whole-file scan, see
+    /// [`crate::code::is_generated_file_at`].
     pub fn report_unless_generated(&mut self, pos: u32, message: impl Into<String>) {
-        if crate::code::is_generated_at(self, pos) {
+        if crate::code::is_generated_file_at(self, pos) {
             return;
         }
         self.reportf(pos, message);

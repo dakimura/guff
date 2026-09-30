@@ -96,3 +96,16 @@ s1039/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1039/ok.go
 s1040/inner/inner.go   crates/guff-staticcheck/tests/testdata/s1040/stub/example.com/s1040/inner/inner.go
 s1040/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1040/bad.go
 s1040/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1040/ok.go
+# honnef report.FilterGenerated: a `// Code generated … DO NOT EDIT.` line anywhere in the raw file,
+# at column 0 (kitex nphttp2/mocks_test.go). Six of these ten are generated upstream.
+s1009generated/g01header.go            crates/guff-staticcheck/tests/testdata/s1009generated/g01header.go
+s1009generated/g02tail.go              crates/guff-staticcheck/tests/testdata/s1009generated/g02tail.go
+s1009generated/g03rawstring.go         crates/guff-staticcheck/tests/testdata/s1009generated/g03rawstring.go
+s1009generated/g04indented.go          crates/guff-staticcheck/tests/testdata/s1009generated/g04indented.go
+s1009generated/g05block.go             crates/guff-staticcheck/tests/testdata/s1009generated/g05block.go
+s1009generated/g06noperiod.go          crates/guff-staticcheck/tests/testdata/s1009generated/g06noperiod.go
+s1009generated/g07oldcgo.go            crates/guff-staticcheck/tests/testdata/s1009generated/g07oldcgo.go
+s1009generated/g08empty.go             crates/guff-staticcheck/tests/testdata/s1009generated/g08empty.go
+s1009generated/g09trailingspace.go     crates/guff-staticcheck/tests/testdata/s1009generated/g09trailingspace.go
+s1009generated/g10plain.go             crates/guff-staticcheck/tests/testdata/s1009generated/g10plain.go
+s1009generated/mixed.go                crates/guff-staticcheck/tests/testdata/s1009generated/mixed.go

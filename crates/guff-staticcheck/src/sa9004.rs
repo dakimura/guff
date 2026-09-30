@@ -30,13 +30,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     });
     for (pos, edits) in pending {
         if edits.is_empty() {
-            pass.report_unless_generated(
+            pass.reportf(
                 pos,
                 "only the first constant in this group has an explicit type",
             );
-            continue;
-        }
-        if code::is_generated_at(pass, pos) {
             continue;
         }
         pass.report(Diagnostic {

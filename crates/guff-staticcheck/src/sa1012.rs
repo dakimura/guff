@@ -47,7 +47,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
     });
     for pos in pending {
-        pass.report_unless_generated(pos, MSG);
+        pass.reportf(pos, MSG);
     }
     Ok(None)
 }

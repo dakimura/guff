@@ -216,7 +216,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         pending.push(pos);
     }
     for pos in pending {
-        pass.report_unless_generated(
+        pass.reportf(
             pos,
             "m[string(key)] would be more efficient than k := string(key); m[k]",
         );

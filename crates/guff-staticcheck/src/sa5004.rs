@@ -52,9 +52,6 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         check_for_select(pass, fs, &mut pending);
     });
     for (pos, end, message) in pending {
-        if code::is_generated_at(pass, pos) {
-            continue;
-        }
         pass.report(Diagnostic {
             pos,
             message,

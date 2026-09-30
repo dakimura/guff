@@ -58,6 +58,16 @@ fn is_generated_bytes(src: &[u8]) -> Option<Generator> {
     None
 }
 
+/// honnef `isGenerated` for the package's `i`-th file: the retained source if
+/// there is one, the file on disk otherwise.
+pub(crate) fn scan_file(pass: &Pass<'_>, i: usize) -> Option<Generator> {
+    if let Some(bytes) = pass.pkg().source_bytes(i) {
+        return is_generated_bytes(bytes);
+    }
+    let path = pass.pkg().compiled_go_files.get(i)?;
+    is_generated(path)
+}
+
 fn is_generated(path: &Path) -> Option<Generator> {
     let f = std::fs::File::open(path).ok()?;
     let mut br = BufReader::new(f);

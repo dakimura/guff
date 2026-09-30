@@ -79,7 +79,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         };
         // `report.FilterGenerated()` upstream: same gate, but the fix has to
         // ride along, so the diagnostic is built here rather than by `reportf`.
-        if code::is_generated_at(pass, pos) {
+        if code::is_generated_file_at(pass, pos) {
             continue;
         }
         pass.report(Diagnostic {

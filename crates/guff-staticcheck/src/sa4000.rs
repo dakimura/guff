@@ -8,7 +8,7 @@ use guff::ast::Expr;
 use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
-use guff_analysis::code::{call_name, is_generated_at};
+use guff_analysis::code::{call_name, is_generated_file_at};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 use guff_types::arena::{TypeData, TypeId};
@@ -228,7 +228,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             }
         }
         if let (Expr::BasicLit(l1), Expr::BasicLit(l2)) = (&*op.x, &*op.y) {
-            if l1.value == "0" && l2.value == "0" && is_generated_at(pass, l1.value_pos.0 as u32) {
+            if l1.value == "0" && l2.value == "0" && is_generated_file_at(pass, l1.value_pos.0 as u32) {
                 return;
             }
         }
@@ -257,7 +257,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         ));
     });
     for (pos, msg) in pending {
-        pass.report_unless_generated(pos, msg);
+        pass.reportf(pos, msg);
     }
     Ok(None)
 }
