@@ -976,10 +976,19 @@ fn selector_diagnostic(
         let name = obj.name(&artifacts.objects).to_string();
         let facts = dep_facts(pass, dep_cache, &pkg_path, true);
         let msg = if is_method {
-            let recv = selection_recv_base_name(pass, sel).or_else(|| {
-                method_recv_base_from_sig(&artifacts.types, &artifacts.objects, obj)
-            })?;
-            facts.methods.get(&method_fact_key(&recv, &name))
+            // The *declaring* type first, as for fields below: a promoted
+            // method's object is the one declared on the embedded type, and
+            // its signature's receiver names that type. The selection's
+            // receiver is the outer type — glamour's `n.Text(source)` on an
+            // `*ast.CodeSpan` is `BaseNode.Text` two embeddings down, and
+            // `CodeSpan.Text` is a key no scan writes. The receiver stays as
+            // a fallback for a signature without a named receiver.
+            let by_sig = method_recv_base_from_sig(&artifacts.types, &artifacts.objects, obj)
+                .and_then(|recv| facts.methods.get(&method_fact_key(&recv, &name)));
+            by_sig.or_else(|| {
+                let recv = selection_recv_base_name(pass, sel)?;
+                facts.methods.get(&method_fact_key(&recv, &name))
+            })
         } else if is_field {
             // The *declaring* struct, not the receiver — see
             // `field_owner_base_name`. They differ for a promoted field.

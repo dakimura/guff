@@ -37327,3 +37327,56 @@ golden は 3 か所:
   case と区別できないので、版に縛られない G602 を g602.go で 4 キー同乗させた。
 
 fix ベースラインは両 case とも「何も書き換えない」（gosec に fix は無い）。
+
+### 2026-09-30（続き 362）— `close glamour`（1）: SA1019 は **埋め込み越しに昇格したメソッド**を宣言した型で引く
+
+glamour（`v2.0.1`）の採用 hunt は guff-only 3、全部 nolintlint:
+
+```
+ansi/elements.go:202,307,366: directive `//nolint: staticcheck` is unused for linter "staticcheck"
+```
+
+guff の nolintlint が「unused」と言うのは、上流ではその行に staticcheck の finding があり
+（`//nolint` が消している）、guff には無いということ —— 本当の差は **SA1019 の取りこぼし 3 件**。
+3 行とも `n.Text(source)` で、`n` は `*ast.CodeSpan` / `*ast.Image` / `*east.Strikethrough`。
+どれも `Text` を宣言しておらず、goldmark の deprecated な `BaseNode.Text` を `BaseInline`
+（`Image` は `baseLink` も）越しに昇格させている。自前で `Text` を持つ `HTMLBlock` / `RawHTML` の
+2 行は guff も報告していた。
+
+#### 機構
+
+依存の source scan は method を**宣言した型**で `Base.Text` と記録する。guff の lookup は
+**選択の receiver**（`CodeSpan`）で `CodeSpan.Text` を引いていた —— field については既に直してある
+（`field_owner_base_name`、buildkit の `ArgsEscaped`）のと同じ欠陥の method 版。
+method は field より簡単で、選ばれた `Func` オブジェクトの signature の receiver がそのまま宣言型なので、
+そちらを先に引き、receiver は fallback に残した。
+
+#### 測定（scratchpad、staticcheck のみ、11 形）
+
+| 形 | 上流 | 修正前の guff |
+|---|---|---|
+| `(&Base{}).Text()`（宣言型そのもの） | 報告 | 報告 |
+| `(&Inline{}).Text()`（1 段昇格） | 報告 | **黙る** |
+| `(&Deep{}).Text()`（2 段、goldmark の形） | 報告 | **黙る** |
+| `(&PtrEmb{}).Text()`（`*Base` を埋め込み） | 報告 | **黙る** |
+| `Inline{}.Val()`（値 receiver、昇格） | 報告 | **黙る** |
+| `n.Text()`（interface メソッド） | 報告 | 報告 |
+| `x.Text`（メソッド値、昇格） | 報告 | **黙る** |
+| `(&Wrap{}).Old()`（宣言パッケージを use 側が import していない） | 報告 | **黙る** |
+| `(&Own{}).Val()`（`Own` は `Text` だけ上書き） | 報告 | **黙る** |
+| `(&Own{}).Text()`（生きたメソッドで上書き） | 黙る | 黙る |
+| 同一パッケージの昇格メソッド | 黙る | 黙る |
+
+上流 9 / 修正前 guff 2 → 修正後 9。promoted-field case のコメントは「宣言パッケージが間接 import だと
+loader の欠陥で黙る（blank import が要る）」と書いているが、**method では間接でも報告された**
+（`Wrap.Old`）—— field 側の blank import がまだ要るかは測っていない。
+
+#### fixture と test
+
+`testdata/sa1019/stub/example.com/{oldmethod,oldinner}` と `promoted_methods.go`（11 形、各行に上流の答え）。
+unit test は形ごとの件数と合計 9 で固定（メッセージ先頭のレンダリングで数える）。修正を外すと落ちる。
+golden は新 case `staticcheck-sa1019-promoted-method`（9 キー、**staticcheck 単独** —— 2 本目の linter で
+依存を full 解析させると `Deprecated` fact が立ち、receiver を見ない経路に乗って欠陥が隠れる、と
+promoted-field case が書いている理由と同じ）。fix ベースラインは「書き換えなし」。
+
+glamour: guff-only 3 → 0（guff=0 golangci=0）。

@@ -1,0 +1,17 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh staticcheck-sa1019-promoted-method
+# Produced by running golangci-lint on compat/golden/cases/staticcheck-sa1019-promoted-method/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+use/promoted_methods.go:9:6:staticcheck::SA1019: (&oldmethod.Base{}).Text is deprecated: do not use. 
+use/promoted_methods.go:10:6:staticcheck::SA1019: (&oldmethod.Inline{}).Text is deprecated: do not use. 
+use/promoted_methods.go:11:6:staticcheck::SA1019: (&oldmethod.Deep{}).Text is deprecated: do not use. 
+use/promoted_methods.go:12:6:staticcheck::SA1019: (&oldmethod.PtrEmb{}).Text is deprecated: do not use. 
+use/promoted_methods.go:14:6:staticcheck::SA1019: oldmethod.Inline{}.Val is deprecated: do not use. 
+use/promoted_methods.go:15:6:staticcheck::SA1019: n.Text is deprecated: interface method. 
+use/promoted_methods.go:17:6:staticcheck::SA1019: x.Text is deprecated: do not use. 
+use/promoted_methods.go:18:2:staticcheck::SA1019: (&oldmethod.Wrap{}).Old is deprecated: inner. 
+use/promoted_methods.go:19:6:staticcheck::SA1019: (&oldmethod.Own{}).Val is deprecated: do not use. 

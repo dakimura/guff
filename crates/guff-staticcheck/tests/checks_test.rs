@@ -2528,6 +2528,40 @@ fn sa1019_flags_a_deprecated_struct_field_of_an_imported_type() {
     assert_eq!(messages.len(), 9, "{messages:?}");
 }
 
+/// The method half of the promoted-field lookup above. glamour's
+/// `n.Text(source)` on an `*ast.CodeSpan` is goldmark's deprecated
+/// `BaseNode.Text` two embeddings down; the importer's scan keys it as
+/// `Base.Text`, and a lookup keyed by the selection's receiver asked for
+/// `CodeSpan.Text`. With the defect, only the direct call and the interface
+/// method were reported — 2 of 9.
+///
+/// Counted per form, by the rendered selector each message starts with.
+#[test]
+fn sa1019_flags_a_deprecated_method_promoted_through_embedding() {
+    let pkg = typecheck_rule("sa1019", "promoted_methods.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa1019::analyzer(), &pkg);
+    let count = |needle: &str| messages.iter().filter(|m| m.starts_with(needle)).count();
+    // Declared on the operand's type: worked before.
+    assert_eq!(count("(&oldmethod.Base{}).Text is deprecated"), 1, "{messages:?}");
+    // Promoted one level, two levels, and through an embedded pointer.
+    assert_eq!(count("(&oldmethod.Inline{}).Text is deprecated"), 1, "{messages:?}");
+    assert_eq!(count("(&oldmethod.Deep{}).Text is deprecated"), 1, "{messages:?}");
+    assert_eq!(count("(&oldmethod.PtrEmb{}).Text is deprecated"), 1, "{messages:?}");
+    // Value receiver, promoted.
+    assert_eq!(count("oldmethod.Inline{}.Val is deprecated"), 1, "{messages:?}");
+    // Interface method: worked before.
+    assert_eq!(count("n.Text is deprecated: interface method"), 1, "{messages:?}");
+    // Method value, promoted.
+    assert_eq!(count("x.Text is deprecated"), 1, "{messages:?}");
+    // Declared in a package the file does not import.
+    assert_eq!(count("(&oldmethod.Wrap{}).Old is deprecated: inner"), 1, "{messages:?}");
+    // `Own` shadows `Text` with a live method but not `Val`.
+    assert_eq!(count("(&oldmethod.Own{}).Val is deprecated"), 1, "{messages:?}");
+    assert_eq!(count("(&oldmethod.Own{}).Text"), 0, "{messages:?}");
+    assert_eq!(messages.len(), 9, "{messages:?}");
+}
+
 #[test]
 fn sa1019_allows_live_fields_reached_through_embedding() {
     // Controls for the promoted-field lookup: a live sibling of the deprecated
