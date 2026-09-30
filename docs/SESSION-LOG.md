@@ -5,6 +5,7 @@
 
 | 日付 | 内容 |
 |------|------|
+| 2026-09-30 | **`close grype`（2）**: dupl が match の出現を位置順に並べていた（`ps.sort_unstable()`、初回移植から）。上流は左文脈キー順で、単位は**最初の出現**だけで切られるので、どの出現が先頭かで報告が変わる。grype の 961 行クローンは上流では File ノード丸ごとの単位になって落ちる。上流 dupl を print 付きで動かして特定。4 版 fixture＋新 golden `dupl-occurrence-order`（続き 365） |
 | 2026-09-30 | **`close grype`（1）**: revive の ifelse 3 規則（indent-error-flow / superfluous-else / early-return）が関数本体直下の if しか見ず、関数宣言の中の func literal・ループ・`case`・素のブロックを素通りしていた。上流 `internal/ifelse.visitor` をそのまま移植（`select` 節直下と if 条件式の中は上流でも黙る）。15 形で修正前 3 → 13、early-return 9 形も一致（続き 364） |
 | 2026-09-30 | **`close gosec`（1）**: SA4019 は preamble（package doc より前のコメントグループ）だけを `CommentGroup.Text()` で読む。guff は全コメント、無ければ**ソースの全行**を読んでいて、gosec の `g104_samples.go` の raw string の中の `// +build go1.10` を数えていた。12 形を測り、doc グループ内の 2 形と `//+build`（空白なし）も直った。`staticcheck-sa` に 12 ファイル（続き 363） |
 | 2026-09-30 | **`close glamour`（1）**: nolintlint の「unused」3 件の正体は SA1019 の取りこぼし —— 埋め込み越しに昇格した deprecated メソッド（goldmark の `BaseNode.Text`）を、選択の receiver（`CodeSpan.Text`）で引いていた。field で直したのと同じ欠陥の method 版で、メソッドオブジェクトの signature の receiver（宣言型）を先に引く。11 形を測って上流 9 / 修正前 2 → 9。新 golden `staticcheck-sa1019-promoted-method`（続き 362） |

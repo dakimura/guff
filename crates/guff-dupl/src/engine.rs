@@ -169,6 +169,45 @@ mod engine_tests {
         assert!(issues.is_empty(), "{issues:?}");
     }
 
+    /// Which occurrence of a match comes first decides what dupl reports:
+    /// `find_syntax_units` cuts units on `ps[0]` only. Each variant is four
+    /// files — `a2` is `u2` plus one more function, and `a1` / `u1` end in the
+    /// same helper after a different first declaration, which sets the
+    /// left-context key each occurrence is filed under. Upstream orders the
+    /// occurrences by that key; guff sorted them by position. In v2 and v4 the
+    /// two orders disagree: upstream's first occurrence is `u2`, whose File
+    /// node is a complete unit the size check then drops (nothing reported),
+    /// while position order made `a2` first and reported its functions. v1 and
+    /// v3 are the control where both orders agree and upstream reports.
+    ///
+    /// Measured against golangci-lint 2.12.2 at threshold 50.
+    #[test]
+    fn occurrence_order_is_upstreams_not_positional() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testdata/dupl/order");
+        let issues = |v: &str| {
+            let files: Vec<std::path::PathBuf> = ["a1.go", "a2.go", "u1.go", "u2.go"]
+                .iter()
+                .map(|f| dir.join(v).join(f))
+                .collect();
+            let refs: Vec<&Path> = files.iter().map(|p| p.as_path()).collect();
+            let mut got: Vec<(String, i32, i32)> = run(&refs, 50)
+                .expect("run")
+                .into_iter()
+                .map(|i| {
+                    let name = i.from.filename.rsplit('/').next().unwrap_or("").to_string();
+                    (name, i.from.line_start, i.from.line_end)
+                })
+                .collect();
+            got.sort();
+            got
+        };
+        let clone = vec![("a2.go".to_string(), 3, 29), ("u2.go".to_string(), 3, 29)];
+        assert_eq!(issues("v1"), clone);
+        assert_eq!(issues("v2"), vec![]);
+        assert_eq!(issues("v3"), clone);
+        assert_eq!(issues("v4"), vec![]);
+    }
+
     #[test]
     fn run_on_bad_fixture() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))

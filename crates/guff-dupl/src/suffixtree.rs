@@ -313,8 +313,16 @@ fn walk_trans<T: Token + Clone>(
     }
 
     if length >= threshold && cl.lists.len() > 1 {
-        let mut ps = cl.get_all();
-        ps.sort_unstable();
+        // Upstream's order, not position order: `getAll` concatenates the
+        // lists by ascending left-context key, each in the order the walk
+        // appended to it. `find_syntax_units` judges units on `ps[0]` alone,
+        // so which occurrence is first decides what is reported. Sorting by
+        // position made grype's longer `affected_package_store_test.go` the
+        // first occurrence, whose File node is incomplete, and guff reported
+        // its 961-line body; upstream's first occurrence is the shorter
+        // `unaffected_…` file, whose File node is one complete unit that the
+        // last-unit size check then drops.
+        let ps = cl.get_all();
         out.push(SuffixMatch {
             ps,
             len: length as i32,
