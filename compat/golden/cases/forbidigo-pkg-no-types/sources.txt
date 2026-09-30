@@ -1,0 +1,5 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# The fixture the Rust unit test reads.
+pkgfilter.go  crates/guff-style/tests/testdata/forbidigotypes/pkgfilter.go

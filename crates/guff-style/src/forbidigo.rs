@@ -281,14 +281,15 @@ fn check_ident_or_selector(st: &mut ForbidState<'_>, expr: &Expr) {
         if !p.matches(&texts) {
             continue;
         }
-        if st.analyze_types {
-            if let Some(pkg_re) = &p.pkg_re {
-                let Some(path) = pkg_path.as_deref() else {
-                    continue;
-                };
-                if !pkg_re.is_match(path) {
-                    continue;
-                }
+        // `p.Package == "" || p.pkgRe.MatchString(pkgText)`, with `pkgText`
+        // empty whenever it was not resolved — always without
+        // `analyze-types`, and with it for an object that has no package (a
+        // builtin). So a `pkg:` pattern never fires without type analysis
+        // unless its regex matches "" (nerdctl's `pkg: …/nerdctl/v2/pkg`
+        // rules are dormant upstream), and `pkg: ^$` does fire on `println`.
+        if let Some(pkg_re) = &p.pkg_re {
+            if !pkg_re.is_match(pkg_path.as_deref().unwrap_or("")) {
+                continue;
             }
         }
         let explanation = if p.msg.is_empty() {
