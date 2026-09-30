@@ -72,6 +72,7 @@ sa1028/bad/bad.go                            crates/guff-staticcheck/tests/testd
 sa1028/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa1028/ok.go
 sa1029/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa1029/bad.go
 sa1029/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa1029/ok.go
+sa1029/alias/alias.go                        crates/guff-staticcheck/tests/testdata/sa1029/alias.go
 sa1030/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa1030/bad.go
 sa1030/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa1030/ok.go
 sa1031/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa1031/bad.go

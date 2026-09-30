@@ -37713,3 +37713,45 @@ S1038 18 行だけを固定（修正前は 9 ファイル・両方 2 件で落�
 （消えたキー 0 / 増えた 16）、fix ベースラインは `mixed.go` の hunk だけ増えた。
 
 kitex: guff-only 1 → 0。
+
+### 2026-10-01（続き 369）— `close lima`（1）: SA1029 は**空 struct の判定では alias を剥がさない**
+
+lima（`v2.2.0`）の採用 hunt の guff-only のうち 2 件:
+
+```
+pkg/instance/start.go:446,454: SA1029: should not use empty anonymous struct as key for value; …
+```
+
+どちらも `type watchHostAgentEventsTimeoutKey = struct{}` のような **alias** を `K{}` で使っている。
+
+上流（honnef v0.7.0 `sa1029`）:
+
+```go
+if typ, ok := types.Unalias(T).(*types.Basic); ok { … "(via alias %s)" … }
+if s, ok := T.(*types.Struct); ok && s.NumFields() == 0 { … "empty anonymous struct" … }
+```
+
+組み込み型の枝は `types.Unalias` するが、空 struct の枝は**しない**。go1.23 以降の go/types で alias は
+`*types.Alias` なので、alias 越しの空 struct は上流では黙る。guff の `callcheck::is_empty_struct_type` は
+先に `unalias_readonly` していた（使っているのは SA1029 だけ）。
+
+#### 測定（scratchpad、10 形）
+
+| キー | 上流 | 修正前の guff |
+|---|---|---|
+| `struct{}{}` | 報告 | 報告 |
+| `aliasEmpty{}`（`= struct{}`） | **黙る** | **報告** |
+| `aliasOfAlias{}`（alias の alias） | **黙る** | **報告** |
+| `namedEmpty{}`（定義型） | 黙る | 黙る |
+| `"k"` / `1` | 報告 | 報告 |
+| `aliasString("k")` / `aliasInt(1)` | 報告（via alias …） | 報告（同文） |
+| `namedString("k")` / `aliasNonEmpty{1}` | 黙る | 黙る |
+
+組み込み型の alias の文言が一致していることから、guff の SSA 値の型が alias を保っていることも確かめた
+（剥がしていれば「via alias」が出ない）。
+
+`testdata/sa1029/alias.go`（10 形）と unit test（行ごとの種別、修正前は落ちる）、golden `staticcheck-sa` に
+1 ファイル（消えたキー 0 / 増えた 6）。
+
+lima の残り: dot-imports 2（`allowedPackages` を読まない）、modernize 1（stringscutprefix の探索）、
+revive 2（cgo 生成コード —— datadog-agent と同じ既知の機構）。

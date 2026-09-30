@@ -202,6 +202,12 @@ sa1026/embed/embed.go:150:22:staticcheck::SA1026: trying to marshal unsupported 
 sa1028/bad/bad.go:13:13:staticcheck::SA1028: sort.Slice must only be called on slices, was called on [1]int
 sa1028/bad/bad.go:14:13:staticcheck::SA1028: sort.Slice must only be called on slices, was called on string
 sa1028/bad/bad.go:15:13:staticcheck::SA1028: sort.Slice must only be called on slices, was called on int
+sa1029/alias/alias.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+sa1029/alias/alias.go:16:29:staticcheck::SA1029: should not use empty anonymous struct as key for value; define your own type to avoid collisions
+sa1029/alias/alias.go:19:29:staticcheck::SA1029: should not use built-in type string as key for value; define your own type to avoid collisions
+sa1029/alias/alias.go:20:29:staticcheck::SA1029: should not use built-in type string (via alias aliasString) as key for value; define your own type to avoid collisions
+sa1029/alias/alias.go:22:29:staticcheck::SA1029: should not use built-in type int (via alias aliasInt) as key for value; define your own type to avoid collisions
+sa1029/alias/alias.go:25:29:staticcheck::SA1029: should not use built-in type int as key for value; define your own type to avoid collisions
 sa1029/bad/bad.go:16:25:staticcheck::SA1029: should not use built-in type string as key for value; define your own type to avoid collisions
 sa1029/bad/bad.go:17:25:staticcheck::SA1029: keys used with context.WithValue must be comparable, but type example.com/sa1029/bad.T3 is not comparable
 sa1029/bad/bad.go:19:25:staticcheck::SA1029: should not use empty anonymous struct as key for value; define your own type to avoid collisions

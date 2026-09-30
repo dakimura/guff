@@ -853,8 +853,12 @@ pub fn builtin_key_type(
 ///
 /// Upstream SA1029 checks `T.(*types.Struct)` without calling `Underlying()`,
 /// so a named `type pathParam struct{}` is allowed as a context key.
+///
+/// The type as the value carries it — `T.(*types.Struct)` in SA1029, with no
+/// `types.Unalias` (the basic-type branch just above it unaliases, this one
+/// does not). So `type key = struct{}` used as `key{}` is not an empty
+/// anonymous struct upstream: lima's `watchHostAgentEventsTimeoutKey{}`.
 pub fn is_empty_struct_type(arena: &TypeArena, typ: TypeId) -> bool {
-    let typ = unalias_readonly(arena, typ);
     match arena.get(typ) {
         TypeData::Struct(s) => s.num_fields() == 0,
         _ => false,

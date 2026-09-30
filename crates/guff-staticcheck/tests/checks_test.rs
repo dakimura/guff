@@ -955,6 +955,51 @@ fn sa1029_flags_bad_context_keys() {
     assert_eq!(count("not comparable"), 2, "{messages:?}");
 }
 
+/// SA1029 unaliases the key type for the built-in-type message
+/// (`types.Unalias(T).(*types.Basic)`) but not for the empty-struct one
+/// (`T.(*types.Struct)`). lima's `type launchingShellKey = struct{}` used as
+/// `launchingShellKey{}` is therefore silent upstream; guff unaliased both and
+/// reported it. Ten keys, measured against golangci-lint 2.12.2, pinned per
+/// line with the message kind.
+#[test]
+fn sa1029_does_not_unalias_the_empty_struct_key() {
+    let dir = support::testdata("sa1029");
+    let ctx_stub = dir.join("stub/context/context.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1029alias",
+        &dir.join("alias.go"),
+        &[("context", &ctx_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, String)> = support::run_analyzer_diagnostics(sa1029::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| {
+            let line = fset.position(guff::position::Pos(d.pos as i64)).line;
+            let what = if d.message.contains("empty anonymous struct") {
+                "empty struct".to_string()
+            } else if let Some(rest) = d.message.strip_prefix("should not use built-in type ") {
+                rest.split(" as key").next().unwrap_or("").to_string()
+            } else {
+                d.message.clone()
+            };
+            (line, what)
+        })
+        .collect();
+    got.sort();
+    let r = |l: i64, w: &str| (l, w.to_string());
+    assert_eq!(
+        got,
+        vec![
+            r(16, "empty struct"),
+            r(19, "string"),
+            r(20, "string (via alias aliasString)"),
+            r(22, "int (via alias aliasInt)"),
+            r(25, "int"),
+        ]
+    );
+}
+
 #[test]
 fn sa1029_allows_custom_context_keys() {
     let dir = support::testdata("sa1029");
