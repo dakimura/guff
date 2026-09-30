@@ -5,6 +5,7 @@
 
 | 日付 | 内容 |
 |------|------|
+| 2026-09-30 | **`close nerdctl`（1）**: forbidigo の `pkg:` は解決したパスに当てるが、未解決（`analyze-types` なし、または builtin）なら "" に当てる。guff は型解析なしでは `pkg` を無視して報告（nerdctl の 7 件）、ありでは未解決でパターンを飛ばしていた（`pkg: ^$` が `println` に当たらない）。6 呼び出し × 2 設定の fixture、新 golden 2 つ（続き 367） |
 | 2026-09-30 | **`close gosec`（2）**: ginkgolinter の `Expect(len(x)).To(BeNumerically(…))` を上流 `LenRule` どおりに移植 —— 「0 より大」は `!= 0`/`> 0`/`>= 1` だけ（`>= 0` は誤検出だった）、`!=` と「0 より大」はアサーションを反転（`ToNot`→`To` 等）、値は名前付き定数も評価。27 形で 10 形ずれていた（続き 366） |
 | 2026-09-30 | **`close grype`（2）**: dupl が match の出現を位置順に並べていた（`ps.sort_unstable()`、初回移植から）。上流は左文脈キー順で、単位は**最初の出現**だけで切られるので、どの出現が先頭かで報告が変わる。grype の 961 行クローンは上流では File ノード丸ごとの単位になって落ちる。上流 dupl を print 付きで動かして特定。4 版 fixture＋新 golden `dupl-occurrence-order`（続き 365） |
 | 2026-09-30 | **`close grype`（1）**: revive の ifelse 3 規則（indent-error-flow / superfluous-else / early-return）が関数本体直下の if しか見ず、関数宣言の中の func literal・ループ・`case`・素のブロックを素通りしていた。上流 `internal/ifelse.visitor` をそのまま移植（`select` 節直下と if 条件式の中は上流でも黙る）。15 形で修正前 3 → 13、early-return 9 形も一致（続き 364） |

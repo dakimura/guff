@@ -3448,6 +3448,70 @@ fn forbidigo_analyze_types_resolves_aliases_and_receivers() {
     );
 }
 
+/// A pattern's `pkg:` is tested against the resolved package path, and that
+/// path is "" whenever nothing was resolved — always without
+/// `analyze-types`, and for a builtin with it. So without type analysis only
+/// a `pkg` regex that matches "" can fire (nerdctl's
+/// `pkg: …/nerdctl/v2/pkg` rules are dormant upstream; guff reported them
+/// 7 times), and with it `pkg: ^$` fires on `println` (guff skipped it).
+/// One call per pattern in `pkgfilter.go`; measured against golangci-lint
+/// 2.12.2 (forbidigo v2.3.1) with both settings.
+#[test]
+fn forbidigo_pkg_is_matched_against_the_resolved_path_or_empty() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::{ForbidigoOptions, ForbidigoPattern};
+
+    let pkg = support::typecheck_fixture(
+        "forbidigotypes",
+        "example.com/forbidigopkg",
+        "pkgfilter.go",
+    );
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let pat = |pattern: &str, pkg: &str| ForbidigoPattern {
+        pattern: pattern.into(),
+        pkg: pkg.into(),
+        msg: String::new(),
+    };
+    let lines = |analyze_types: bool| {
+        let mut bag = SettingsBag::new();
+        bag.insert(
+            "forbidigo",
+            ForbidigoOptions {
+                forbid: vec![
+                    pat(r"^fmt\.Println$", "^fmt$"),
+                    pat(r"^strings\.ToUpper$", ".*"),
+                    pat(r"^println$", "^$"),
+                    pat(r"^print$", ".+"),
+                    pat(r"^user\.Current$", "^os/user$"),
+                    pat(r"^user\.Lookup$", ""),
+                ],
+                exclude_godoc_examples: true,
+                analyze_types,
+            },
+        );
+        let mut got: Vec<i64> = support::run_analyzer_diagnostics_with_settings(
+            forbidigo(),
+            &pkg,
+            &RunnerOptions {
+                settings: Arc::new(bag),
+                ..RunnerOptions::default()
+            },
+        )
+        .into_iter()
+        .map(|d| fset.position(guff::position::Pos(d.pos as i64)).line)
+        .collect();
+        got.sort();
+        got
+    };
+    // strings.ToUpper (`.*`), println (`^$`), user.Lookup (no pkg).
+    assert_eq!(lines(false), vec![15, 16, 19]);
+    // Everything but print (`.+` against a builtin's empty path).
+    assert_eq!(lines(true), vec![14, 15, 16, 18, 19]);
+}
+
 #[test]
 fn forbidigo_respects_custom_forbid_settings() {
     use std::sync::Arc;

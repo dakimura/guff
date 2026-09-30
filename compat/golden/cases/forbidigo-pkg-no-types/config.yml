@@ -1,0 +1,41 @@
+# Golden case: forbidigo's `pkg:` without `analyze-types`.
+#
+# Upstream tests every pattern's `pkg` regex against the resolved package
+# path — `p.Package == "" || p.pkgRe.MatchString(pkgText)` — and without
+# analyze-types that path is never resolved: it is "". So a `pkg:` pattern is
+# dormant unless its regex matches the empty string. nerdctl ships exactly
+# that: two `pkg: github.com/containerd/nerdctl/v2/pkg` rules and no
+# analyze-types, which fire nowhere upstream; guff applied `pkg` only when
+# analyzing types, and reported them 7 times.
+#
+# Fires here: `.*` (matches ""), `^$` (matches ""), and the pattern with no
+# `pkg`. Silent: `^fmt$`, `.+`, `^os/user$`.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - forbidigo
+  settings:
+    forbidigo:
+      analyze-types: false
+      forbid:
+        - pattern: ^fmt\.Println$
+          pkg: ^fmt$
+        - pattern: ^strings\.ToUpper$
+          pkg: .*
+        - pattern: ^println$
+          pkg: ^$
+        - pattern: ^print$
+          pkg: .+
+        - pattern: ^user\.Current$
+          pkg: ^os/user$
+        - pattern: ^user\.Lookup$
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

@@ -37603,3 +37603,41 @@ guff は `>` と `>=` を 0 と組にして「0 より大」とし（`>= 0` が�
 行ごとの**提案文**を `assert_eq!` で固定（件数だけだと提案が全部間違っていても通る）。旧実装で落ちる。
 golden `ginkgolinter` に足して 消えたキー 0 / 増えたキー 18。ginkgolinter の提案は fix なので
 fix ベースラインも 61 行増え（新ファイルの hunk だけ）、guff の `--fix` も一致。
+
+### 2026-09-30（続き 367）— `close nerdctl`（1）: forbidigo の `pkg:` は **解決できなかったパスを "" として**照合する
+
+nerdctl（`v2.4.0`）の採用 hunt は guff=16 golangci=0。うち 7 件が forbidigo:
+
+```
+use of `os.ReadFile` forbidden because "use filesystem.ReadFile instead of os.ReadFile"
+use of `os.WriteFile` forbidden because "os.WriteFile is neither atomic nor durable - …"
+```
+
+nerdctl の設定は両方 `pkg: github.com/containerd/nerdctl/v2/pkg` 付きで、`analyze-types` は無い。
+
+上流（forbidigo v2.3.1）の判定は `p.matches(matchTexts) && (p.Package == "" || p.pkgRe.MatchString(pkgText))`。
+`pkgText` は `analyze-types` が無ければ**常に ""**、あっても package を持たないオブジェクト（builtin）なら
+""。だから `pkg:` 付きパターンは型解析なしでは「"" に当たる正規表現」でない限り**眠っている** ——
+nerdctl の 2 規則は上流ではどこにも当たらない。guff は `pkg` を型解析のときだけ見ていて、なしでは素通しで
+報告し、ありでは解決できないとパターンごと飛ばしていた。
+
+#### 測定（scratchpad、9 形 → fixture 6 呼び出し × 2 設定）
+
+| 呼び出し / パターン | types なし 上流 | types なし 修正前 guff | types あり 上流 | types あり 修正前 guff |
+|---|---|---|---|---|
+| `fmt.Println` / `pkg: ^fmt$` | 黙る | **報告** | 報告 | 報告 |
+| `strings.ToUpper` / `pkg: .*` | 報告 | 報告 | 報告 | 報告 |
+| `println` / `pkg: ^$` | 報告 | 報告 | 報告 | **黙る** |
+| `print` / `pkg: .+` | 黙る | **報告** | 黙る | 黙る |
+| `user.Current` / `pkg: ^os/user$` | 黙る | **報告** | 報告 | 報告 |
+| `user.Lookup` / pkg なし | 報告 | 報告 | 報告 | 報告 |
+
+修正は 1 行: `pkg_re` は常に、解決したパス（無ければ ""）に当てる。
+
+#### fixture と test
+
+`testdata/forbidigotypes/pkgfilter.go`（6 呼び出し）。unit test は同じ 6 パターンを types なし／ありで回し、
+行の集合 `[15, 16, 19]` / `[14, 15, 16, 18, 19]` を固定（修正前は落ちる）。golden は新 case 2 つ
+（`forbidigo-pkg-no-types` 3 キー、`forbidigo-pkg-types` 5 キー）。
+
+nerdctl: forbidigo 7 件は消えた。残りの guff-only（gci 1、revive var-declaration 1）は別の PR。
