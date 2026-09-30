@@ -37218,3 +37218,32 @@ ill-typed のパッケージでは全 analyzer が黙るので、`guff=0` は「
 「何も見ていない」と区別できない。
 
 これで `candidates-100.json` の候補は尽きた（`next` が `refresh the survey` を返す）。
+
+### 2026-09-30（続き 360）— 候補キューを補充し、小さい 7 本を修正なしで採用。台帳 **86/100**
+
+opa で `candidates-100.json` の 73 本が尽きた（`next` が `refresh the survey`）。`candidates-100.md` に
+「Surveyed, v2, not selected」の 55 本が予備として書いてあったので、1 本ずつ GitHub に当て直した ——
+**最新リリースのタグ**に v2 の `.golangci` があるか（元の survey は default branch を読んでいた。
+harness はそこでタグが別のコードベースだった）、タグに root `go.mod` があるか、archived か。
+48 本を追加、7 本は理由つきで見送り（`candidates-100.md` の「Refresh 2026-09-29」、#451）。
+
+小さい順に 8 本を hunt した:
+
+| target | ref | guff | golangci | both | 内訳 |
+|---|---|--:|--:|--:|---|
+| stern | `v1.34.0` | 0 | 0 | 0 | — |
+| open-feature-go-sdk | `v1.19.0` | 0 | 0 | 0 | — |
+| logrus | `v1.10.2` | 0 | 0 | 0 | — |
+| viper | `v1.21.0` | 1 | 1 | 1 | staticcheck 1 |
+| lipgloss | `v2.0.6` | 2 | 2 | 2 | nolintlint 2 |
+| colima | `v0.10.3` | 0 | 0 | 0 | — |
+| hertz | `v0.10.6` | 185 | 185 | 185 | govet 81 / staticcheck 100 / unused 4 |
+| gorm | `v1.31.2` | 821 | 825 | 821 | **gcl-only 4** → 次の `close gorm` |
+
+どれも ill-typed 0。**修正なしで一致した 7 本は 1 本の PR で採用した**（1 本ずつ出すと、同じ doc 節への
+追記が毎回衝突して 7 回直列の CI になる。ユーザー確認済み）。台帳は **93 定義 / 86 clean / open 2 /
+unmeasured 5**。
+
+7 本のうち 4 本は両側 0 件で、守るのは過剰報告と health gate だけ（続き 359 の opa と同じ）。
+小さいライブラリは自分の config で CI を回していて lint が綺麗なのが普通なので、予備リストの小さい側は
+この形が続くはず —— 件数を稼ぐのは hertz のような「finding が残っているターゲット」の方。

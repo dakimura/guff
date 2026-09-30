@@ -644,5 +644,61 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "60m"
+  },
+  {
+    "name": "stern",
+    "url": "https://github.com/stern/stern.git",
+    "ref": "v1.34.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "open-feature-go-sdk",
+    "url": "https://github.com/open-feature/go-sdk.git",
+    "ref": "v1.19.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "logrus",
+    "url": "https://github.com/sirupsen/logrus.git",
+    "ref": "v1.10.2",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "viper",
+    "url": "https://github.com/spf13/viper.git",
+    "ref": "v1.21.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "lipgloss",
+    "url": "https://github.com/charmbracelet/lipgloss.git",
+    "ref": "v2.0.6",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "colima",
+    "url": "https://github.com/abiosoft/colima.git",
+    "ref": "v0.10.3",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "hertz",
+    "url": "https://github.com/cloudwego/hertz.git",
+    "ref": "v0.10.6",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
   }
 ]
