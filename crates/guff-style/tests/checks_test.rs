@@ -10554,6 +10554,66 @@ fn ginkgolinter_flags_common_assertion_mistakes() {
     );
 }
 
+/// `Expect(len(s))` against `BeNumerically` — 27 shapes, each commented in
+/// `benumerically.go` with what golangci-lint 2.12.2 (ginkgolinter v0.23.0)
+/// suggests. Upstream's `LenRule` applies only to `==`, `!=` and "greater
+/// than zero" (`!= 0`, `> 0`, `>= 1`, with the value an *integer constant*,
+/// named or literal), and every rule but `==` reverses the assertion first.
+/// guff took `>= 0` as greater than zero (gosec's
+/// `Expect(len(analyzers.Analyzers)).To(BeNumerically(">=", 0))`), never
+/// reversed `ToNot` / `ShouldNot` / `NotTo`, and read only integer literals.
+///
+/// Pinned per line: the suggested assertion is what the rule computes, and a
+/// count would pass with every suggestion wrong.
+#[test]
+fn ginkgolinter_benumerically_len_rule_matches_upstream() {
+    let pkg = support::typecheck_fixture(
+        "ginkgolinter",
+        "example.com/ginkgolinter/benumerically",
+        "benumerically.go",
+    );
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, String)> = support::run_analyzer_diagnostics(ginkgolinter(), &pkg)
+        .into_iter()
+        .map(|d| {
+            let line = fset.position(guff::position::Pos(d.pos as i64)).line;
+            let sug = d
+                .message
+                .split("`Expect(s).")
+                .nth(1)
+                .and_then(|r| r.split("` instead").next())
+                .unwrap_or(&d.message)
+                .to_string();
+            (line, sug)
+        })
+        .collect();
+    got.sort();
+    let want: Vec<(i64, String)> = [
+            (14, "ToNot(BeEmpty())"),
+            (15, "ToNot(BeEmpty())"),
+            (16, "ToNot(BeEmpty())"),
+            (17, "To(BeEmpty())"),
+            (22, "ToNot(BeEmpty())"),
+            (24, "ShouldNot(BeEmpty())"),
+            (25, "To(HaveLen(3))"),
+            (28, "To(BeEmpty())"),
+            (29, "Should(BeEmpty())"),
+            (30, "To(BeEmpty())"),
+            (31, "ToNot(BeEmpty())"),
+            (32, "To(BeEmpty())"),
+            (33, "To(BeEmpty())"),
+            (34, "ToNot(BeEmpty())"),
+            (35, "To(HaveLen(3))"),
+            (36, "ToNot(HaveLen(3))"),
+            (37, "To(HaveLen(zero + 3))"),
+            (39, "To(HaveLen(0.0))"),
+    ]
+    .iter()
+    .map(|&(l, s)| (l, s.to_string()))
+    .collect();
+    assert_eq!(got, want);
+}
+
 #[test]
 fn ginkgolinter_allows_idiomatic_assertions() {
     let pkg = support::typecheck_fixture("ginkgolinter", "example.com/ginkgolinter/ok", "ok.go");

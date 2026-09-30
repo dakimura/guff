@@ -89,12 +89,6 @@ fn len_inner(expr: &Expr) -> Option<&Expr> {
     }
 }
 
-fn lit_int_value(expr: &Expr) -> Option<&str> {
-    match expr {
-        Expr::BasicLit(lit) if lit.kind == Some(Token::INT) => Some(lit.value.as_str()),
-        _ => None,
-    }
-}
 fn is_ginkgo_path(path: &str) -> bool {
     matches!(
         path.trim_matches('"'),
@@ -225,6 +219,30 @@ fn is_bool_lit(expr: &Expr, want: bool) -> bool {
         expr,
         Expr::Ident(id) if matches!((want, id.name.as_str()), (true, "true") | (false, "false"))
     )
+}
+
+/// ginkgolinter `reverseassertion.ChangeAssertionLogic`.
+fn reverse_assertion(method: &str) -> &str {
+    match method {
+        "To" => "ToNot",
+        "ToNot" | "NotTo" => "To",
+        "Should" => "ShouldNot",
+        "ShouldNot" => "Should",
+        other => other,
+    }
+}
+
+/// ginkgolinter `value.GetValuer` returning an `IntValue`: the expression is a
+/// constant of integer kind that fits an `int64`. `0.0` is a constant too, but
+/// of float kind, and upstream treats it as an unknown value.
+fn int_const(pass: &Pass<'_>, expr: &Expr) -> Option<i64> {
+    let tv = pass.types_info()?.types.get(&expr.id())?;
+    let v = tv.val.as_ref()?;
+    if v.kind() != guff_constant::Kind::Int {
+        return None;
+    }
+    let (n, exact) = guff_constant::int64_val(v);
+    exact.then_some(n)
 }
 
 fn is_zero_lit(expr: &Expr) -> bool {
@@ -393,91 +411,58 @@ fn check_len_rule(
                 return true;
             }
             "BeNumerically" => {
-                if let Some(c) = matcher_call(matcher) {
-                    if let Some(op) = c.args.first().and_then(|e| match e {
-                        Expr::BasicLit(lit) if lit.kind == Some(Token::STRING) => {
-                            Some(lit.value.trim_matches('"'))
-                        }
-                        _ => None,
-                    }) {
-                        let rhs_zero = c.args.get(1).map(is_zero_lit).unwrap_or(false);
-                        if op == "==" && rhs_zero {
-                            push_len(pending, "BeEmpty()");
-                            return true;
-                        }
-                        if matches!(op, ">" | ">=") && rhs_zero {
-                            let method = match assert_method {
-                                "To" => "ToNot",
-                                "Should" => "ShouldNot",
-                                other => other,
-                            };
-                            let sug = suggest_assert(
-                                assertion.actual_func,
-                                &subject,
-                                method,
-                                "BeEmpty()",
-                            );
-                            push_suggestion(assertion, MSG_LEN, &sug, pending);
-                            return true;
-                        }
-                        if op == "!=" && rhs_zero {
-                            let method = match assert_method {
-                                "To" => "ToNot",
-                                "Should" => "ShouldNot",
-                                other => other,
-                            };
-                            let sug = suggest_assert(
-                                assertion.actual_func,
-                                &subject,
-                                method,
-                                "BeEmpty()",
-                            );
-                            push_suggestion(assertion, MSG_LEN, &sug, pending);
-                            return true;
-                        }
-                        if matches!(op, "==" | "!=") {
-                            if let Some(n) = c.args.get(1).and_then(lit_int_value) {
-                                if op == "==" {
-                                    push_len(pending, &format!("HaveLen({n})"));
-                                } else {
-                                    let method = match assert_method {
-                                        "To" => "ToNot",
-                                        "Should" => "ShouldNot",
-                                        other => other,
-                                    };
-                                    let sug = suggest_assert(
-                                        assertion.actual_func,
-                                        &subject,
-                                        method,
-                                        &format!("HaveLen({n})"),
-                                    );
-                                    push_suggestion(assertion, MSG_LEN, &sug, pending);
-                                }
-                                return true;
+                // Upstream `LenRule` over a `BeNumericallyMatcher`
+                // (ginkgolinter v0.23.0). The operator is a string literal
+                // from a fixed table; the value is an `IntValue` only when it
+                // is an integer constant — a literal or a named constant, but
+                // not `0.0`. "Greater than zero" is exactly `!= 0`, `> 0` and
+                // `>= 1`: `>= 0` holds for every length and is left alone.
+                //
+                // Applied to `==`, `!=` and greater-than-zero. `==` suggests
+                // `BeEmpty()` for zero and `HaveLen(<arg as written>)`
+                // otherwise; `!=` and greater-than-zero first *reverse* the
+                // assertion (`To`↔`ToNot`, `NotTo`→`To`, `Should`↔`ShouldNot`)
+                // — so `ToNot(BeNumerically(">", 0))` is `To(BeEmpty())`.
+                let Some(c) = matcher_call(matcher) else {
+                    return false;
+                };
+                let Some(op) = c.args.first().and_then(|e| match e {
+                    Expr::BasicLit(lit) if lit.kind == Some(Token::STRING) => {
+                        match lit.value.as_str() {
+                            "\"==\"" | "\"!=\"" | "\">\"" | "\">=\"" | "\"<\"" | "\"<=\"" | "\"=\"" => {
+                                Some(lit.value.trim_matches('"'))
                             }
-                        }
-                        // `>= 1` is also treated as non-empty by upstream.
-                        if op == ">=" {
-                            if let Some(Expr::BasicLit(lit)) = c.args.get(1) {
-                                if lit.kind == Some(Token::INT) && lit.value == "1" {
-                                    let method = match assert_method {
-                                        "To" => "ToNot",
-                                        "Should" => "ShouldNot",
-                                        other => other,
-                                    };
-                                    let sug = suggest_assert(
-                                        assertion.actual_func,
-                                        &subject,
-                                        method,
-                                        "BeEmpty()",
-                                    );
-                                    push_suggestion(assertion, MSG_LEN, &sug, pending);
-                                    return true;
-                                }
-                            }
+                            _ => None,
                         }
                     }
+                    _ => None,
+                }) else {
+                    return false;
+                };
+                let arg = c.args.get(1);
+                let value = arg.and_then(|a| int_const(pass, a));
+                let greater_than_zero = (value == Some(0) && matches!(op, "!=" | ">"))
+                    || (value == Some(1) && op == ">=");
+                if !(op == "==" || op == "!=" || greater_than_zero) {
+                    return false;
                 }
+                let method = if op == "==" {
+                    assert_method
+                } else {
+                    reverse_assertion(assert_method)
+                };
+                let matcher_sug = if op == "==" || op == "!=" {
+                    match (value, arg) {
+                        (Some(0), _) => "BeEmpty()".to_string(),
+                        (_, Some(a)) => format!("HaveLen({})", expr_string(pass, a)),
+                        (_, None) => return false,
+                    }
+                } else {
+                    "BeEmpty()".to_string()
+                };
+                let sug = suggest_assert(assertion.actual_func, &subject, method, &matcher_sug);
+                push_suggestion(assertion, MSG_LEN, &sug, pending);
+                return true;
             }
             _ => {}
         }
