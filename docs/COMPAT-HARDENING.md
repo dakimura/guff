@@ -37880,3 +37880,53 @@ guff の `untyped_const_default_name` は二項演算を「両辺とも untyped 
 
 fixture `testdata/revive/var_declaration_shift.go`（10 宣言）、unit test は報告行 `[11, 13, 15, 17, 18]` を
 固定（修正前は落ちる）。golden `revive` に足して 消えたキー 0 / 増えた 7。
+
+### 2026-10-01（続き 374）— 19 本を採用。台帳 **105/100** —— 目標到達
+
+続き 360 の補充キューから、修正なしで一致した 14 本と、続き 361〜371 で閉じた 5 本（gorm / glamour /
+grype / gosec / kitex）を、**全修正が入った main（`dfc72768`）で測り直して**から登録した:
+
+| target | ref | guff | golangci | both |
+|---|---|--:|--:|--:|
+| gotify | `v3.1.1` | 1 | 1 | 1 |
+| client_golang | `v1.24.1` | 0 | 0 | 0 |
+| bubbletea | `v2.0.10` | 0 | 0 | 0 |
+| clickhouse-go | `v2.48.0` | 12 | 12 | 12 |
+| echo | `v5.4.0` | 0 | 0 | 0 |
+| go-kratos-kratos | `v3.0.0` | 0 | 0 | 0 |
+| goose | `v3.28.0` | 0 | 0 | 0 |
+| sarama | `v1.61.1` | 0 | 0 | 0 |
+| node_exporter | `v1.12.1` | 17 | 17 | 17 |
+| apache-answer | `v2.0.2` | 3 | 3 | 3 |
+| act | `v0.2.89` | 3 | 3 | 3 |
+| rekor | `v1.5.4` | 0 | 0 | 0 |
+| soft-serve | `v0.12.2` | 0 | 0 | 0 |
+| kube-state-metrics | `v2.20.0` | 0 | 0 | 0 |
+| gorm | `v1.31.2` | 825 | 825 | 825 |
+| glamour | `v2.0.1` | 0 | 0 | 0 |
+| grype | `v0.119.0` | 3056 | 3056 | 3056 |
+| gosec | `v2.29.0` | 0 | 0 | 0 |
+| kitex | `v0.16.2` | 248 | 248 | 248 |
+
+全部 ill-typed 0。台帳は **112 定義 / 105 clean / open 2（deferred: loki, datadog-agent）/ unmeasured 5
+（linux 専用）**。`status.py next` は `done` を返す。
+
+#### 採用前に何が壊れていたか
+
+5 本の close と、その途中で直した横断的な欠陥:
+
+| 続き | 何が | 発見元 |
+|---|---|---|
+| 361 | gosec G601 未実装、版は `run.go`（go.mod の `toolchain` 優先） | gorm |
+| 362 | SA1019 が昇格メソッドを receiver 型で引いていた | glamour |
+| 363 | SA4019 が文字列リテラルの中の `// +build` を数えていた | gosec |
+| 364 | revive ifelse 3 規則が関数本体直下の if しか見ていなかった | grype |
+| 365 | dupl が match の出現を位置順に並べていた | grype |
+| 366 | ginkgolinter `BeNumerically` の長さ規則 | gosec |
+| 368 | staticcheck 全体の生成コード判定（どの行でも、report 箇所ごと） | kitex |
+
+nerdctl（続き 367 / 372 / 373）と lima（369〜371）は別に扱う: nerdctl は残り 2 つの修正（#464, #465）が
+main に入ってから測る。lima は revive の 2 件が cgo 生成コード由来（datadog-agent と同じ既知の機構）。
+
+「両側 0」のターゲットが 19 本中 10 本ある。守るのは過剰報告と health gate だけ（続き 359）—— 件数が
+目標に届いても、取りこぼしの検出力は finding を持つターゲット（grype 3056・gorm 825・kitex 248 …）が担う。
