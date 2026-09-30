@@ -37930,3 +37930,36 @@ main に入ってから測る。lima は revive の 2 件が cgo 生成コード
 
 「両側 0」のターゲットが 19 本中 10 本ある。守るのは過剰報告と health gate だけ（続き 359）—— 件数が
 目標に届いても、取りこぼしの検出力は finding を持つターゲット（grype 3056・gorm 825・kitex 248 …）が担う。
+
+### 2026-10-01（続き 373）— `close nerdctl`（3）: gci の `no-inline-comments` / `no-prefix-comments` は上流では**何もしない**
+
+nerdctl の guff-only の最後の 1 件:
+
+```
+pkg/cmd/system/events.go:29: File is not properly formatted (gci)
+	_ "github.com/containerd/containerd/api/events" // Register grpc event types
+```
+
+nerdctl の gci 設定は `no-inline-comments: true` と `no-prefix-comments: true`。guff はこれを実装して
+import の行末コメントを落とし、元と違うので「整形されていない」と言っていた。
+
+golangci-lint 2.12.2 は両方を gci の設定に写すが、gci v0.13.7（pin されている版）では
+`NoInlineComments` / `NoPrefixComments` は **`pkg/config` の struct にしか現れない** —— どこからも
+読まれない。gci 自身の CLI も両フラグを deprecated にしている。上流では no-op。
+
+#### 測定
+
+| gci 設定（同じ入力） | 上流 | 修正前の guff |
+|---|---|---|
+| `no-inline-comments: true` | 行 5（コメント付きの並べ替え） | **行 4**（行末コメントを落とした） |
+| `no-prefix-comments: true` | 行 5 | 行 5 |
+| 両方 | 行 5 | **行 4** |
+| どちらもなし | 行 5 | 行 5 |
+
+設定は受け付けたまま、両オプションを適用しないようにした。
+
+fmt 層に対の case（`gci-comment-options-on` / `-off`、同じ入力）—— 上流の出力は**バイト単位で同じ**で、
+それが「no-op」の証拠になっている。修正前の guff は `-on` で落ちる。設定パースの unit test は
+「読むが適用しない」に書き換えた。
+
+nerdctl: gci の 1 件が消え、guff-only は 0（forbidigo 続き 367、var-declaration 続き 372）。
