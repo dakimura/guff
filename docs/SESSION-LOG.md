@@ -5,6 +5,7 @@
 
 | 日付 | 内容 |
 |------|------|
+| 2026-10-01 | **`close lima`（3）**: modernize stringscutprefix は if 本体の最初の文の中の呼び出しを全部探し（不一致の Trim は飛ばす）、引数は `EqualSyntax` で比べる。guff は最初の Trim 1 つだけ・値比較・1 引数の呼び出ししか書けず、lima の入れ子 else と `suffix()` を落としていた。fix の変数名も上流どおり fresh name（`ok0`）。10 形（続き 371） |
 | 2026-10-01 | **`close lima`（2）**: revive dot-imports が `allowedPackages` 引数を読んでいなかった。上流はキーを小文字化・ハイフン除去で照合（下線は除かない）、パスは quote して import literal と比較。6 設定で一致、新 golden `revive-dot-imports-allowed`（続き 370） |
 | 2026-10-01 | **`close lima`（1）**: SA1029 は組み込み型の判定では alias を剥がすが、空 struct の判定では剥がさない（`T.(*types.Struct)`）。lima の `type K = struct{}` を `K{}` で使うキーを guff は報告していた。10 形（続き 369） |
 | 2026-10-01 | **`close kitex`（1）**: staticcheck の生成コード判定を上流に揃えた —— honnef はファイルの**どの行**の `// Code generated … DO NOT EDIT.` でも生成物とし、`FilterGenerated` は **report 箇所ごと**。guff は 78 check 中 75 で AST ヘッダ判定、29 check は上流が絞らないのに絞り、S1008/ST1013/ST1023/QF1011/SA9005 は絞らず、S1025/S1038 は箇所の区別なし。golden 4 case を実体化して全ファイルに印を付けるハーネスで、末尾印 1088→基準線（上流 655）、先頭印＋disable 520→基準線（上流 656）（続き 368） |

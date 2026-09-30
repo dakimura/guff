@@ -1079,6 +1079,73 @@
  	}
  	return b
  }
+--- a/stringscutprefixsearch/stringscutprefix_search.go
++++ b/stringscutprefixsearch/stringscutprefix_search.go
+@@ -6,22 +6,22 @@
+ // `if` body is the one upstream pairs with the Has call. Each function's
+ // comment is what golangci-lint 2.12.2 does. See the Rust test for why.
+ 
+-func use(string)      {}
++func use(string)     {}
+ func suffix() string { return "/" }
+ 
+ func cutPlain(s string) { // FIRES
+-	if strings.HasSuffix(s, "/") {
+-		s = strings.TrimSuffix(s, "/")
++	if before, ok := strings.CutSuffix(s, "/"); ok {
++		s = before
+ 	}
+ 	use(s)
+ }
+ 
+ func cutNestedElse(s, t string, ok bool) { // FIRES: a mismatched Trim first, the match in the else (lima)
+-	if strings.HasSuffix(s, "/") {
++	if before, ok0 := strings.CutSuffix(s, "/"); ok0 {
+ 		if ok {
+ 			t = strings.TrimSuffix(t, "/")
+ 		} else {
+-			s = strings.TrimSuffix(s, "/")
++			s = before
+ 		}
+ 	}
+ 	use(s + t)
+@@ -43,14 +43,14 @@
+ }
+ 
+ func cutKindMismatchFirst(s string) { // FIRES: TrimSuffix is skipped, TrimPrefix matches
+-	if strings.HasPrefix(s, "/") {
+-		use(strings.TrimSuffix(s, "/") + strings.TrimPrefix(s, "/"))
++	if after, ok := strings.CutPrefix(s, "/"); ok {
++		use(strings.TrimSuffix(s, "/") + after)
+ 	}
+ }
+ 
+ func cutCallArgument(s string) { // FIRES: arguments compared as syntax, a call equals itself
+-	if strings.HasSuffix(s, suffix()) {
+-		use(strings.TrimSuffix(s, suffix()))
++	if before, ok := strings.CutSuffix(s, suffix()); ok {
++		use(before)
+ 	}
+ }
+ 
+@@ -68,13 +68,13 @@
+ }
+ 
+ func cutTwoMatches(s string) { // FIRES once
+-	if strings.HasSuffix(s, "/") {
+-		use(strings.TrimSuffix(s, "/") + strings.TrimSuffix(s, "/"))
++	if before, ok := strings.CutSuffix(s, "/"); ok {
++		use(before + strings.TrimSuffix(s, "/"))
+ 	}
+ }
+ 
+ func cutIndexExpr(m map[string]string) { // FIRES
+-	if strings.HasSuffix(m["k"], "/") {
+-		use(strings.TrimSuffix(m["k"], "/"))
++	if before, ok := strings.CutSuffix(m["k"], "/"); ok {
++		use(before)
+ 	}
+ }
 --- a/stringsseq/stringsseq.go
 +++ b/stringsseq/stringsseq.go
 @@ -8,13 +8,13 @@

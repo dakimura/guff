@@ -2199,24 +2199,15 @@ fn check_slicesdelete(
     });
 }
 
-fn find_first_call_named<'a>(pass: &Pass<'_>, stmt: &'a Stmt, name: &str) -> Option<&'a CallExpr> {
-    let mut found = None;
-    walk::inspect(walk::stmt_ref(stmt), |n| {
-        let Some(n) = n else {
-            return true;
-        };
-        if found.is_some() {
-            return false;
-        }
-        if let NodeRef::CallExpr(c) = n {
-            if code::is_call_to(pass, c, name) {
-                found = Some(c);
-                return false;
-            }
-        }
-        true
-    });
-    found
+/// `refactor.FreshName` at `pos`: `preferred`, or `preferred0`, `preferred1`, …
+/// when that name is already visible there.
+fn fresh_at(pass: &Pass<'_>, pos: u32, preferred: &str) -> String {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return preferred.to_string();
+    };
+    let pkg_scope = artifacts.packages.get(artifacts.type_pkg).scope();
+    let scope = guff_types::scope::innermost(&artifacts.scopes, pkg_scope, pos).unwrap_or(pkg_scope);
+    guff_analysis::refactor::fresh_name(&artifacts.scopes, &artifacts.objects, scope, pos, preferred)
 }
 
 fn cutprefix_kind(pass: &Pass<'_>, call: &CallExpr) -> Option<(&'static str, &'static str, bool)> {
@@ -2261,22 +2252,51 @@ fn check_stringscutprefix(
             let pos = has_call.pos().0 as u32;
             if go_at_least(pass, pos, "go1.20") && has_call.args.len() == 2 {
                 if let Some((pkg, cut_name, is_prefix)) = cutprefix_kind(pass, has_call) {
-                    let trim_name = if is_prefix {
-                        format!("{pkg}.TrimPrefix")
-                    } else {
-                        format!("{pkg}.TrimSuffix")
-                    };
-                    if let Some(trim_call) =
-                        find_first_call_named(pass, &if_stmt.body.list[0], &trim_name)
-                    {
-                        if trim_call.args.len() == 2
-                            && code::same_non_dynamic(pass, &has_call.args[0], &trim_call.args[0])
-                            && code::same_non_dynamic(pass, &has_call.args[1], &trim_call.args[1])
+                    // Upstream walks every call in the *first* statement in
+                    // preorder, skips any that is not one of the four Trim
+                    // functions or is the other kind (Prefix/Suffix), and takes
+                    // the first whose two arguments are `astutil.EqualSyntax`
+                    // with the Has call's — a mismatched Trim is passed over, not
+                    // a reason to stop. lima nests `if cp.IsRemote { …TrimSuffix(cp2.Path…) }
+                    // else { cp.Path = strings.TrimSuffix(cp.Path, "/") }` under
+                    // `if strings.HasSuffix(cp.Path, "/")`. And the comparison is
+                    // syntactic: `suffix()` equals `suffix()`, `(s)` does not
+                    // equal `s`.
+                    let mut found = None;
+                    walk::inspect(walk::stmt_ref(&if_stmt.body.list[0]), |n| {
+                        if found.is_some() {
+                            return false;
+                        }
+                        if let Some(NodeRef::CallExpr(c)) = n {
+                            if let Some((_, _, is_prefix1)) = trim_kind(pass, c) {
+                                if is_prefix1 == is_prefix
+                                    && c.args.len() == 2
+                                    && code::equal_syntax(&has_call.args[0], &c.args[0])
+                                    && code::equal_syntax(&has_call.args[1], &c.args[1])
+                                {
+                                    found = Some(c);
+                                    return false;
+                                }
+                            }
+                        }
+                        true
+                    });
+                    if let Some(trim_call) = found {
                         {
-                            if let (Some(s_text), Some(affix_text)) =
-                                (expr_text(&has_call.args[0]), expr_text(&has_call.args[1]))
-                            {
-                                let var_name = if is_prefix { "after" } else { "before" };
+                            // The source text when the renderer cannot spell the
+                            // argument: upstream edits by position and renders
+                            // nothing, so `HasSuffix(s, suffix())` reports too.
+                            if let (Some(s_text), Some(affix_text)) = (
+                                expr_text_src(pass, &has_call.args[0]),
+                                expr_text_src(pass, &has_call.args[1]),
+                            ) {
+                                // `refactor.FreshName(info.Scopes[ifStmt], ifStmt.Pos(), …)`
+                                // for both names: a parameter already called `ok`
+                                // makes the second name `ok0`.
+                                let if_pos = if_stmt.if_.0 as u32;
+                                let var_name =
+                                    fresh_at(pass, if_pos, if is_prefix { "after" } else { "before" });
+                                let ok_name = fresh_at(pass, if_pos, "ok");
                                 let (message, fix_message) = if is_prefix {
                                     (
                                         "HasPrefix + TrimPrefix can be simplified to CutPrefix",
@@ -2308,13 +2328,13 @@ fn check_stringscutprefix(
                                                     pos,
                                                     end,
                                                     new_text: format!(
-                                                        "{var_name}, ok := {prefix}{cut_name}({s_text}, {affix_text}); ok"
+                                                        "{var_name}, {ok_name} := {prefix}{cut_name}({s_text}, {affix_text}); {ok_name}"
                                                     ),
                                                 },
                                                 TextEdit {
                                                     pos: trim_call.pos().0 as u32,
                                                     end: trim_call.end().0 as u32,
-                                                    new_text: var_name.into(),
+                                                    new_text: var_name.clone(),
                                                 },
                                             ],
                                         ),
