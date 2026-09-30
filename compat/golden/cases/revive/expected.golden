@@ -112,6 +112,21 @@ directives/sibling.go:7:6:revive:warning:exported: type name will be used as dir
 dot/dot.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
 dot/dot.go:1:1:revive:warning:package-comments: should have a package comment
 dot/dot.go:3:7:revive:warning:exported: exported const X should have comment or be unexported
+earlyreturn/early_return_containers.go:4:1:revive:warning:file-header: the file doesn't have an appropriate header
+earlyreturn/early_return_containers.go:4:9:revive:warning:package-directory-mismatch: package name "earlyreturncontainers" does not match directory name "earlyreturn"
+earlyreturn/early_return_containers.go:10:2:revive:warning:early-return: if c { ... } else { ... return } can be simplified to if !c { ... return } ...
+earlyreturn/early_return_containers.go:18:2:revive:warning:early-return: if c { ... } else { ... return } can be simplified to if !c { ... return } ...
+earlyreturn/early_return_containers.go:28:3:revive:warning:early-return: if c { ... } else { ... continue } can be simplified to if !c { ... continue } ...
+earlyreturn/early_return_containers.go:38:3:revive:warning:early-return: if c { ... } else { ... return } can be simplified to if !c { ... return } ...
+earlyreturn/early_return_containers.go:48:3:revive:warning:early-return: if c { ... } else { ... return } can be simplified to if !c { ... return } ...
+earlyreturn/early_return_containers.go:58:2:revive:warning:enforce-switch-style: switch must have a default case clause
+earlyreturn/early_return_containers.go:58:11:revive:warning:unnecessary-stmt: switch with only one case can be replaced by an if-then
+earlyreturn/early_return_containers.go:59:7:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+earlyreturn/early_return_containers.go:60:3:revive:warning:early-return: if c { ... } else { ... break } can be simplified to if !c { ... break } ...
+earlyreturn/early_return_containers.go:70:3:revive:warning:early-return: if c { ... } else { ... return } can be simplified to if !c { ... return } ...
+earlyreturn/early_return_containers.go:80:12:revive:warning:identical-ifelseif-branches: "if...else if" chain with identical branches (lines 80 and 82)
+earlyreturn/early_return_containers.go:82:9:revive:warning:identical-ifelseif-conditions: "if...else if" chain with identical conditions (lines 80 and 82)
+earlyreturn/early_return_containers.go:93:3:revive:warning:early-return: if c { ... } else { ... return } can be simplified to if !c { ... return } ...
 emptyblockrange/empty_block_range.go:17:1:revive:warning:file-header: the file doesn't have an appropriate header
 emptyblockrange/empty_block_range.go:23:2:revive:warning:empty-block: this block is empty, you can remove it
 emptyblockrange/empty_block_range.go:28:2:revive:warning:empty-block: this block is empty, you can remove it
@@ -338,6 +353,31 @@ footest/stutter_bad.go:4:6:revive:warning:exported: func name will be used as fo
 funclen/function_length_bad.go:7:1:revive:warning:file-header: the file doesn't have an appropriate header
 funclen/function_length_bad.go:9:1:revive:warning:function-length: maximum number of statements per function exceeded; max 50 but got 53
 funclen/function_length_bad.go:10:7:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+ifelsecontainers/ifelse_containers.go:6:1:revive:warning:file-header: the file doesn't have an appropriate header
+ifelsecontainers/ifelse_containers.go:12:14:revive:warning:flag-parameter: parameter 'bad' seems to be a control flag, avoid control coupling
+ifelsecontainers/ifelse_containers.go:15:9:revive:warning:indent-error-flow: if block ends with a return statement, so drop this else and outdent its block
+ifelsecontainers/ifelse_containers.go:21:15:revive:warning:flag-parameter: parameter 'bad' seems to be a control flag, avoid control coupling
+ifelsecontainers/ifelse_containers.go:25:10:revive:warning:indent-error-flow: if block ends with a return statement, so drop this else and outdent its block
+ifelsecontainers/ifelse_containers.go:33:11:revive:warning:flag-parameter: parameter 'bad' seems to be a control flag, avoid control coupling
+ifelsecontainers/ifelse_containers.go:34:11:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+ifelsecontainers/ifelse_containers.go:34:18:revive:warning:add-constant: avoid magic numbers like '2', create a named constant for it
+ifelsecontainers/ifelse_containers.go:37:10:revive:warning:indent-error-flow: if block ends with a return statement, so drop this else and outdent its block
+ifelsecontainers/ifelse_containers.go:48:10:revive:warning:indent-error-flow: if block ends with a return statement, so drop this else and outdent its block
+ifelsecontainers/ifelse_containers.go:56:2:revive:warning:enforce-switch-style: switch must have a default case clause
+ifelsecontainers/ifelse_containers.go:56:11:revive:warning:unnecessary-stmt: switch with only one case can be replaced by an if-then
+ifelsecontainers/ifelse_containers.go:57:7:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+ifelsecontainers/ifelse_containers.go:60:10:revive:warning:indent-error-flow: if block ends with a return statement, so drop this else and outdent its block
+ifelsecontainers/ifelse_containers.go:83:10:revive:warning:indent-error-flow: if block ends with a return statement, so drop this else and outdent its block
+ifelsecontainers/ifelse_containers.go:107:10:revive:warning:indent-error-flow: if block ends with a return statement, so drop this else and outdent its block
+ifelsecontainers/ifelse_containers.go:118:10:revive:warning:indent-error-flow: if block ends with a return statement, so drop this else and outdent its block
+ifelsecontainers/ifelse_containers.go:130:10:revive:warning:superfluous-else: if block ends with a continue statement, so drop this else and outdent its block
+ifelsecontainers/ifelse_containers.go:138:2:revive:warning:enforce-switch-style: switch must have a default case clause
+ifelsecontainers/ifelse_containers.go:138:11:revive:warning:unnecessary-stmt: switch with only one case can be replaced by an if-then
+ifelsecontainers/ifelse_containers.go:139:7:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+ifelsecontainers/ifelse_containers.go:142:10:revive:warning:superfluous-else: if block ends with a break statement, so drop this else and outdent its block
+ifelsecontainers/ifelse_containers.go:154:10:revive:warning:superfluous-else: if block ends with a break statement, so drop this else and outdent its block
+ifelsecontainers/ifelse_containers.go:164:10:revive:warning:indent-error-flow: if block ends with a return statement, so drop this else and outdent its block
+ifelsecontainers/ifelse_containers.go:175:9:revive:warning:indent-error-flow: if block ends with a return statement, so drop this else and outdent its block
 incdec/incdec.go:13:1:revive:warning:file-header: the file doesn't have an appropriate header
 incdec/incdec.go:15:6:revive:warning:exported: exported type M should have comment or be unexported
 incdec/incdec.go:21:1:revive:warning:exported: exported method M.Bump should have comment or be unexported

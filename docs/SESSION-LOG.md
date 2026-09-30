@@ -5,6 +5,7 @@
 
 | 日付 | 内容 |
 |------|------|
+| 2026-09-30 | **`close grype`（1）**: revive の ifelse 3 規則（indent-error-flow / superfluous-else / early-return）が関数本体直下の if しか見ず、関数宣言の中の func literal・ループ・`case`・素のブロックを素通りしていた。上流 `internal/ifelse.visitor` をそのまま移植（`select` 節直下と if 条件式の中は上流でも黙る）。15 形で修正前 3 → 13、early-return 9 形も一致（続き 364） |
 | 2026-09-30 | **`close gosec`（1）**: SA4019 は preamble（package doc より前のコメントグループ）だけを `CommentGroup.Text()` で読む。guff は全コメント、無ければ**ソースの全行**を読んでいて、gosec の `g104_samples.go` の raw string の中の `// +build go1.10` を数えていた。12 形を測り、doc グループ内の 2 形と `//+build`（空白なし）も直った。`staticcheck-sa` に 12 ファイル（続き 363） |
 | 2026-09-30 | **`close glamour`（1）**: nolintlint の「unused」3 件の正体は SA1019 の取りこぼし —— 埋め込み越しに昇格した deprecated メソッド（goldmark の `BaseNode.Text`）を、選択の receiver（`CodeSpan.Text`）で引いていた。field で直したのと同じ欠陥の method 版で、メソッドオブジェクトの signature の receiver（宣言型）を先に引く。11 形を測って上流 9 / 修正前 2 → 9。新 golden `staticcheck-sa1019-promoted-method`（続き 362） |
 | 2026-09-30 | **`close gorm`（1）**: gosec **G601**（range 変数のアドレス、Go 1.22 未満）を移植。上流は状態つき preorder walk で、32 形を測って撃つ 21 / 黙る 11 を fixture に固定。版は `GOSECGOVERSION`＝golangci の `run.go` で、未設定なら go.mod の **`toolchain` 行が `go` 行より優先** —— CLI で同じ検出をして gosec に渡す。golden 3 か所（`gosec` はキー差分 0、新 `gosec-g601` 21 キー、新 `gosec-g601-toolchain`）。gorm の gcl-only 4 → 0（続き 361） |
