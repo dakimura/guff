@@ -37963,3 +37963,18 @@ fmt 層に対の case（`gci-comment-options-on` / `-off`、同じ入力）—�
 「読むが適用しない」に書き換えた。
 
 nerdctl: gci の 1 件が消え、guff-only は 0（forbidigo 続き 367、var-declaration 続き 372）。
+
+### 2026-10-01（続き 375）— `adopt nerdctl`。台帳 **106/100**
+
+続き 367（forbidigo `pkg:`）/ 372（var-declaration のシフト）/ 373（gci の no-op オプション）の 3 本で
+nerdctl（`v2.4.0`）は
+
+```
+nerdctl: guff=0 golangci=0 both=0 P=100.0% R=100.0%   ill-typed 0
+```
+
+になった（3 本すべてが入った #465 の head で測定）。採用時の guff=16 は forbidigo 7、gci 1、
+var-declaration 1 と、同じ run で他の 7 件が出ていたが、それらは #465 の時点の main では出ない
+（その間に入った修正のどれが効いたかは、この測定からは切り分けられない）。
+
+台帳は **113 定義 / 106 clean / open 2 / unmeasured 5**。

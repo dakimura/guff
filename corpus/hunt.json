@@ -852,5 +852,13 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "30m"
+  },
+  {
+    "name": "nerdctl",
+    "url": "https://github.com/containerd/nerdctl.git",
+    "ref": "v2.4.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
   }
 ]
