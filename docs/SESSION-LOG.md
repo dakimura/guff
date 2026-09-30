@@ -5,6 +5,7 @@
 
 | 日付 | 内容 |
 |------|------|
+| 2026-09-30 | **`close gosec`（1）**: SA4019 は preamble（package doc より前のコメントグループ）だけを `CommentGroup.Text()` で読む。guff は全コメント、無ければ**ソースの全行**を読んでいて、gosec の `g104_samples.go` の raw string の中の `// +build go1.10` を数えていた。12 形を測り、doc グループ内の 2 形と `//+build`（空白なし）も直った。`staticcheck-sa` に 12 ファイル（続き 363） |
 | 2026-09-30 | **`close glamour`（1）**: nolintlint の「unused」3 件の正体は SA1019 の取りこぼし —— 埋め込み越しに昇格した deprecated メソッド（goldmark の `BaseNode.Text`）を、選択の receiver（`CodeSpan.Text`）で引いていた。field で直したのと同じ欠陥の method 版で、メソッドオブジェクトの signature の receiver（宣言型）を先に引く。11 形を測って上流 9 / 修正前 2 → 9。新 golden `staticcheck-sa1019-promoted-method`（続き 362） |
 | 2026-09-30 | **`close gorm`（1）**: gosec **G601**（range 変数のアドレス、Go 1.22 未満）を移植。上流は状態つき preorder walk で、32 形を測って撃つ 21 / 黙る 11 を fixture に固定。版は `GOSECGOVERSION`＝golangci の `run.go` で、未設定なら go.mod の **`toolchain` 行が `go` 行より優先** —— CLI で同じ検出をして gosec に渡す。golden 3 か所（`gosec` はキー差分 0、新 `gosec-g601` 21 キー、新 `gosec-g601-toolchain`）。gorm の gcl-only 4 → 0（続き 361） |
 | 2026-09-30 | **候補キュー補充＋小さい 7 本を採用**: `candidates-100.json` が空になったので予備 55 本をタグ単位で当て直し 48 本追加（#451）。小さい順の 8 本を hunt し、修正なしで一致した stern / open-feature-go-sdk / logrus / viper / lipgloss / colima / hertz（185/185）を 1 PR で採用。台帳 **93 定義 / 86 clean**。gorm は gcl-only 4 で次の close（続き 360） |

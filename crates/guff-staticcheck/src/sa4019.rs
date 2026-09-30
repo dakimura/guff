@@ -1,42 +1,50 @@
 //! SA4019 — multiple identical build constraints in the same file
 //!
-//! Port of `honnef.co/go/tools/staticcheck/sa4019`.
+//! Port of `honnef.co/go/tools/staticcheck/sa4019` (v0.7.0).
 //!
-//! Upstream only inspects `// +build` lines (via preamble text). The gofmt
-//! dual form (`//go:build` + `// +build`) is intentional and must not flag.
+//! Upstream reads `astutil.Preamble(f)`: the text of every comment group that
+//! starts before the package doc comment — or before `package` when there is
+//! none — each through `CommentGroup.Text()`, and keeps the lines that start
+//! with `+build `. So:
+//!
+//! - a `+build` line inside the package doc group, or anywhere after it, is
+//!   not a constraint here;
+//! - `//+build x` counts like `// +build x` (`Text()` strips `//` and one
+//!   space), and so does a `+build x` line of a `/* */` preamble comment;
+//! - `//go:build` is a directive `Text()` drops, so the gofmt dual form never
+//!   pairs with its `// +build` twin.
+//!
+//! This used to collect `// +build` from every comment in the file and, when
+//! none matched, from every line of the raw source — string literals included.
+//! gosec's `testutils/g104_samples.go` holds test programs in raw strings, two
+//! of which start with `// +build go1.10`, and that was a finding upstream does
+//! not have.
 
 use std::sync::OnceLock;
 
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
-/// Collect `// +build` constraint lines only (honnef SA4019 parity).
-fn build_tags_from_lines<'a, I>(lines: I) -> Vec<Vec<String>>
-where
-    I: IntoIterator<Item = &'a str>,
-{
+/// `astutil.Preamble`: the preamble comment groups' `Text()`, newline-joined.
+fn preamble(file: &guff::ast::File) -> String {
+    let cutoff = file.doc.as_ref().map_or(file.package, |d| d.pos());
     let mut out = Vec::new();
-    for line in lines {
-        let text = line.trim();
-        // AST Comment.Text keeps the `//` prefix; preamble-style text may not.
-        let rest = text
-            .strip_prefix("// +build ")
-            .or_else(|| text.strip_prefix("+build "));
-        if let Some(rest) = rest {
-            out.push(rest.split_whitespace().map(String::from).collect());
+    for cg in &file.comments {
+        if cg.pos() >= cutoff {
+            break;
         }
+        out.push(cg.text());
     }
-    out
+    out.join("\n")
 }
 
+/// honnef `buildTags`: the fields of each preamble line after `+build `.
 fn build_tags(file: &guff::ast::File) -> Vec<Vec<String>> {
-    let mut lines = Vec::new();
-    for cg in &file.comments {
-        for c in &cg.list {
-            lines.push(c.text.as_str());
-        }
-    }
-    build_tags_from_lines(lines)
+    preamble(file)
+        .split('\n')
+        .filter_map(|line| line.strip_prefix("+build "))
+        .map(|rest| rest.split_whitespace().map(String::from).collect())
+        .collect()
 }
 
 fn identical(a: &[String], b: &[String]) -> bool {
@@ -50,37 +58,13 @@ fn identical(a: &[String], b: &[String]) -> bool {
     sa == sb
 }
 
-fn build_tags_from_source(pass: &Pass<'_>, file_idx: usize) -> Vec<Vec<String>> {
-    if let Some(file) = pass.files().get(file_idx) {
-        let from_ast = build_tags(file);
-        if !from_ast.is_empty() {
-            return from_ast;
-        }
-    }
-    // Prefer retained typecheck buffers (no second fs::read).
-    if let Some(bytes) = pass.pkg().source_bytes(file_idx) {
-        let text = String::from_utf8_lossy(bytes);
-        return build_tags_from_lines(text.lines());
-    }
-    let Some(path) = pass.pkg().compiled_go_files.get(file_idx) else {
-        return Vec::new();
-    };
-    let Ok(src) = std::fs::read_to_string(path) else {
-        return Vec::new();
-    };
-    build_tags_from_lines(src.lines())
-}
-
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _inspect = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "SA4019 requires inspect analyzer".to_string())?;
     let mut all_pending = Vec::new();
-    for (file_idx, file) in pass.files().iter().enumerate() {
-        let mut constraints = build_tags_from_source(pass, file_idx);
-        if constraints.is_empty() {
-            constraints = build_tags(file);
-        }
+    for file in pass.files() {
+        let constraints = build_tags(file);
         for i in 0..constraints.len() {
             for j in (i + 1)..constraints.len() {
                 if identical(&constraints[i], &constraints[j]) {
@@ -127,22 +111,41 @@ mod tests {
         assert!(validate(&[analyzer()]).is_ok());
     }
 
+    fn tags(src: &str) -> Vec<Vec<String>> {
+        let fset = guff::position::FileSet::new();
+        let file = guff::parser::parse_file(&fset, "a.go", src.as_bytes(), guff::parser::Mode::NONE)
+            .expect("parse");
+        build_tags(&file)
+    }
+
+    /// The twelve shapes of the golden case, as the preamble reads them:
+    /// measured against golangci-lint 2.12.2 (staticcheck v0.7.0).
     #[test]
-    fn dual_form_go_build_plus_build_is_not_duplicate() {
-        let tags = build_tags_from_lines([
-            "//go:build linux",
-            "// +build linux",
-        ]);
-        assert_eq!(tags, vec![vec!["linux".to_string()]]);
+    fn only_the_preamble_holds_build_constraints() {
+        let g = || vec!["go1.10".to_string()];
+        // Two lines, one group or two.
+        assert_eq!(tags("// +build go1.10\n// +build go1.10\n\npackage p\n"), vec![g(), g()]);
+        assert_eq!(tags("// +build go1.10\n\n// +build go1.10\n\npackage p\n"), vec![g(), g()]);
+        // No space after `//`, and a block comment: both still `+build` lines.
+        assert_eq!(tags("//+build go1.10\n//+build go1.10\n\npackage p\n"), vec![g(), g()]);
+        assert_eq!(tags("/*\n+build go1.10\n+build go1.10\n*/\n\npackage p\n"), vec![g(), g()]);
+        // The dual form: `//go:build` is a directive `Text()` drops.
+        assert_eq!(tags("//go:build go1.10\n// +build go1.10\n\npackage p\n"), vec![g()]);
+        // Not the preamble: a string literal, the body, the package doc.
+        assert!(tags("package p\n\nvar s = `\n// +build go1.10\n// +build go1.10\n`\n").is_empty());
+        assert_eq!(tags("// +build go1.10\n\npackage p\n\n// +build go1.10\nvar x int\n"), vec![g()]);
+        assert!(tags("// +build go1.10\n// +build go1.10\npackage p\n").is_empty());
+        assert_eq!(
+            tags("// +build go1.10\n\n// +build go1.10\n// Package p is doc.\npackage p\n"),
+            vec![g()]
+        );
     }
 
     #[test]
-    fn duplicate_plus_build_lines_match() {
-        let tags = build_tags_from_lines([
-            "// +build linux",
-            "// +build linux",
-        ]);
-        assert_eq!(tags.len(), 2);
-        assert!(identical(&tags[0], &tags[1]));
+    fn identical_ignores_order() {
+        let a = vec!["go1.10".to_string(), "!nothing".to_string()];
+        let b = vec!["!nothing".to_string(), "go1.10".to_string()];
+        assert!(identical(&a, &b));
+        assert!(!identical(&a, &a[..1]));
     }
 }

@@ -37380,3 +37380,51 @@ golden は新 case `staticcheck-sa1019-promoted-method`（9 キー、**staticche
 promoted-field case が書いている理由と同じ）。fix ベースラインは「書き換えなし」。
 
 glamour: guff-only 3 → 0（guff=0 golangci=0）。
+
+### 2026-09-30（続き 363）— `close gosec`（1）: SA4019 は **preamble** しか読まない —— 文字列リテラルの中の `// +build` を拾っていた
+
+gosec（`v2.29.0`）の採用 hunt は guff-only 2。そのうち 1 件:
+
+```
+testutils/g104_samples.go:1: SA4019: identical build constraints "go1.10" and "go1.10"
+```
+
+このファイルはテスト用の Go プログラムを **raw string** で持っていて、そのうち 2 つが
+`// +build go1.10` で始まる。guff の SA4019 は「ファイル中の**全コメント**から `// +build ` 行を集め、
+1 つも無ければ**ソースの全行**を読む」実装で、コメントが無いこのファイルでは後者に落ちて文字列の中身を
+build constraint として数えていた。
+
+上流（honnef v0.7.0）は `astutil.Preamble(f)` —— package の doc コメント（無ければ `package` 句）より
+**前に始まる**コメントグループだけを `CommentGroup.Text()` で連結し、`+build ` で始まる行を取る。
+
+#### 測定（scratchpad、12 ファイル、1 ファイル 1 形）
+
+| 形 | 上流 | 修正前の guff |
+|---|---|---|
+| `// +build` 2 行（1 グループ） | 報告 | 報告 |
+| 空行で分かれた 2 グループ | 報告 | 報告 |
+| `//+build`（空白なし）2 行 | 報告 | **黙る** |
+| 並び替え（`a b` と `b a`） | 報告 | 報告 |
+| 3 行（上流は 3 組を出すが uniq-by-line で 1 件） | 報告 | 報告 |
+| `/* +build … */` ブロック | 報告 | 報告 |
+| raw string の中の 2 行 | 黙る | **報告** |
+| 1 行は preamble、1 行は本文 | 黙る | 黙る |
+| package doc グループ（`package` に隣接）の中の 2 行 | 黙る | **報告** |
+| preamble 1 行 ＋ doc グループの中の 1 行 | 黙る | **報告** |
+| `//go:build` ＋ `// +build`（gofmt の併記） | 黙る | 黙る |
+| 違う制約 2 行 | 黙る | 黙る |
+
+`//+build` が上流で数えられるのは `Text()` が `//` と空白 1 つを剥がすから（`//go:build` は
+ディレクティブとして落とされるので併記とは組にならない）。
+
+guff のパーサは `PARSE_COMMENTS` なしでも最初の宣言より前のコメントを必ず保持するので、preamble は
+常に AST にある —— ソースを読む fallback は要らなかった。`build_tags` を `Preamble` の写しに置き換え、
+fallback を消した。
+
+#### fixture と test
+
+`testdata/sa4019/shapes/` に 12 ファイル（**説明コメントは入れない** —— 入れると preamble が変わる。
+説明は golden の `sources.txt` 側）。unit test は 12 形をパーサ経由で `build_tags` に通し、形ごとの
+制約列を `assert_eq!` で固定。golden は既存 `staticcheck-sa` に足して、消えたキー 0 / 増えたキー 8
+（SA4019 6、ST1000 2 —— doc グループの 2 形は ST1000 も撃つので、そこが本当に package doc だという
+独立の証拠になっている）。fix ベースラインも撮り直した。
