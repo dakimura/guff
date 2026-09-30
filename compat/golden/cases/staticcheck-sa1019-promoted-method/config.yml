@@ -1,0 +1,33 @@
+# Golden case: SA1019 on a **promoted** deprecated method.
+#
+# glamour `ansi/elements.go` writes `n.Text(source) //nolint: staticcheck` on an
+# `*ast.CodeSpan`, `*ast.Image` and `*east.Strikethrough`. None of them
+# declares `Text`: it is goldmark's deprecated `BaseNode.Text`, reached through
+# `BaseInline` (and `baseLink`). guff keyed its method lookup by the
+# *selection's receiver* — `CodeSpan.Text` — which no scan writes, so the three
+# findings were missing and nolintlint called the three directives unused.
+# `staticcheck-sa1019-promoted-field` is the same defect for fields.
+#
+# `staticcheck` alone, for the reason that case gives: a second linter that
+# forces a full analysis of the dependency makes the `Deprecated` fact exist,
+# and the fact path never consults a receiver.
+#
+# Nine of the eleven shapes are reported. The two silent ones are a method
+# shadowed by a live one, and a promoted method of the package's own type.
+#
+# Measured on this fixture while the defect was live: upstream 9, guff 2
+# (the direct call and the interface method).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - staticcheck
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

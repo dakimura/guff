@@ -1,0 +1,9 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# The stub packages the Rust unit test imports as `example.com/oldmethod` and
+# `example.com/oldinner`; this module is `example.com`, so they keep their
+# import paths. `use/` never imports `oldinner` — that shape is the point.
+oldinner/oldinner.go   crates/guff-staticcheck/tests/testdata/sa1019/stub/example.com/oldinner/oldinner.go
+oldmethod/oldmethod.go  crates/guff-staticcheck/tests/testdata/sa1019/stub/example.com/oldmethod/oldmethod.go
+use/promoted_methods.go  crates/guff-staticcheck/tests/testdata/sa1019/promoted_methods.go
