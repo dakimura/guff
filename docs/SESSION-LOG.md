@@ -5,6 +5,7 @@
 
 | 日付 | 内容 |
 |------|------|
+| 2026-09-29 | **`adopt opa` 完了**: `guff=0 golangci=0`、ill-typed 0 で `corpus/hunt.json` に登録（`v1.19.1` / `./...`）。台帳 **86 定義 / 79 clean / open 2 / unmeasured 5**。両側 0 件なので守るのは過剰報告と health gate だけ —— 採用時の唯一の乖離（続き 358）も件数ではなく ill-typed に出ていた。`candidates-100.json` はこれで空（続き 359） |
 | 2026-09-29 | **`close opa`（1）**: 引数も結果も無いジェネリック関数（`RegisterJSONFields[T any]()`）は署名キーが `func()` で、hash-cons が import 先の凍結 `func()` を返し、型パラメータをその場で書いていた —— パッケージ内の nullary generic が 1 つの署名を共有（`got 2 type arguments but want 1`）。import が無いと再現しない。`new_generic_signature_type` で型パラメータを持ったまま alloc。opa の ill-typed **2 → 0**（続き 358） |
 | 2026-09-29 | **`adopt teleport` 完了**: `guff=16 golangci=16 both=16 P=100% R=100%` で `corpus/hunt.json` に登録（`v18.11.1` / `./...`、3 本の close を測った checkout の版）。台帳 **85 定義 / 78 clean / open 2 / unmeasured 5**。採用時の 14 件は forbidigo 6（analyze-types の照合テキスト）/ S1005 3（range-over-func）/ bodyclose 5（field store の基本ブロック）の 3 層（続き 357） |
 | 2026-09-28 | **`close teleport`（3）**: bodyclose は **struct フィールドへの store を、その基本ブロック内の「どれかの」body の close で**黙る —— `*ssa.Store` -> `*ssa.FieldAddr` の枝が `f.Block().Instrs` を丸ごと走査し、見つけた `Body` が判定中の response のものか確かめない。teleport の `errors_test.go` は 1 つ close して 5 つ黙らせており、ファイル自身に「bodyclose が騒ぐので閉じている」と書いてある。34 形測定し、guff は**両方向**に外していた —— 閉じた field store を全部過剰報告し、かつ `h.F = build()` を閉じ忘れても**丸ごと落としていた**（セレクタ代入は名前を束縛しないので表に載らない）。境界は基本ブロックで、素の `{ }`・`defer`・呼び出しは切らず `if`/`for`/`switch`/`&&` は切る。`Shape` に境界を持たせて移植。`pointer_elem` は非ポインタで panic するので判別子を先に読む（続き 356） |

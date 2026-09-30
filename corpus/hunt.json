@@ -636,5 +636,13 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "60m"
+  },
+  {
+    "name": "opa",
+    "url": "https://github.com/open-policy-agent/opa.git",
+    "ref": "v1.19.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "60m"
   }
 ]
