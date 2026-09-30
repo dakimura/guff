@@ -56,7 +56,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             pass.report_unless_generated(pos, message);
             continue;
         };
-        if code::is_generated_at(pass, pos) {
+        if code::is_generated_file_at(pass, pos) {
             continue;
         }
         pass.report(Diagnostic {

@@ -5,7 +5,7 @@
 use std::sync::OnceLock;
 
 use guff::walk::NodeRef;
-use guff_analysis::code::is_generated_at;
+use guff_analysis::code::is_generated_file_at;
 use guff_analysis::passes::inspect;
 use guff_analysis::{
     matches, AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
@@ -36,7 +36,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             return true;
         };
         let pos = bin.x.pos().0 as u32;
-        if is_generated_at(pass, pos) {
+        if is_generated_file_at(pass, pos) {
             return true;
         }
         let replacement = format!(

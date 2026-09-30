@@ -348,6 +348,10 @@ pub(crate) fn check_gen_decl(
 
 pub(crate) fn report(pass: &mut Pass<'_>, pending: Vec<(u32, u32, String)>) {
     for (pos, end, message) in pending {
+        // `report.FilterGenerated()` in `sharedcheck.RedundantTypeInDeclarationChecker`.
+        if guff_analysis::code::is_generated_file_at(pass, pos) {
+            continue;
+        }
         pass.report(Diagnostic {
             pos,
             end,

@@ -109,6 +109,22 @@ s1009/table/table.go:63:3:staticcheck::S1009: should omit nil check; len() for n
 s1009/table/table.go:64:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
 s1009/table/table.go:65:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
 s1009/table/table.go:66:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009generated/g02tail.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+s1009generated/g03rawstring.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+s1009generated/g04indented.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+s1009generated/g04indented.go:4:5:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009generated/g05block.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+s1009generated/g06noperiod.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+s1009generated/g06noperiod.go:4:5:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009generated/g07oldcgo.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+s1009generated/g08empty.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+s1009generated/g09trailingspace.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+s1009generated/g09trailingspace.go:4:5:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009generated/g10plain.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+s1009generated/g10plain.go:4:5:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009generated/mixed.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+s1009generated/mixed.go:15:6:staticcheck::S1025: should use String() instead of fmt.Sprintf
+s1009generated/mixed.go:18:2:staticcheck::S1038: should use log.Printf(...) instead of log.Print(fmt.Sprintf(...))
 s1010/bad/bad.go:3:36:staticcheck::S1010: should omit second index in slice, s[a:len(s)] is identical to s[a:]
 s1011/bad/bad.go:16:2:staticcheck::S1011: should replace loop with dst = append(dst, src...)
 s1011/bad/bad.go:23:2:staticcheck::S1011: should replace loop with h.items = append(h.items, src...)

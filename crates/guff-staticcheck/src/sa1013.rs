@@ -75,10 +75,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     });
     for (pos, edits) in pending {
         if edits.is_empty() {
-            pass.report_unless_generated(pos, MSG);
-            continue;
-        }
-        if code::is_generated_at(pass, pos) {
+            pass.reportf(pos, MSG);
             continue;
         }
         pass.report(Diagnostic {

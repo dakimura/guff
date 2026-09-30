@@ -193,12 +193,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     });
     for (pos, message, edit) in pending {
         let Some(edit) = edit else {
-            pass.report_unless_generated(pos, message);
+            pass.reportf(pos, message);
             continue;
         };
-        if code::is_generated_at(pass, pos) {
-            continue;
-        }
         pass.report(Diagnostic {
             pos,
             message,

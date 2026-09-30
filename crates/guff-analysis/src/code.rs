@@ -341,9 +341,12 @@ pub fn generator_at(pass: &Pass<'_>, pos: u32) -> Option<crate::passes::facts::g
         if file.file_start.0 > pos.0 || pos.0 > file.file_end.0 {
             continue;
         }
-        let result = pass.result_of::<crate::passes::facts::generated::GeneratedResult>(
+        // The fact when the analyzer required it, the same scan when not.
+        let Some(result) = pass.result_of::<crate::passes::facts::generated::GeneratedResult>(
             crate::passes::facts::generated::analyzer(),
-        )?;
+        ) else {
+            return crate::passes::facts::generated::scan_file(pass, i);
+        };
         let path = pass.pkg().compiled_go_files.get(i)?;
         return result.files.get(path.to_string_lossy().as_ref()).copied();
     }
@@ -370,6 +373,38 @@ pub fn is_generated_at(pass: &Pass<'_>, pos: u32) -> bool {
             }
         }
         return is_generated(file);
+    }
+    false
+}
+
+/// Whether `pos` is in a file honnef's `generated` analyzer marks — the
+/// question `report.FilterGenerated` asks.
+///
+/// Not the same as [`is_generated_at`]. honnef's `isGenerated` reads the raw
+/// file line by line and accepts a `// Code generated … DO NOT EDIT.` line
+/// **anywhere** — kitex's `nphttp2/mocks_test.go` has one at line 461, below a
+/// hand-written mock, and every `FilterGenerated` check is silent in the whole
+/// file. `is_generated_at` answers from the fact when the analyzer requires it
+/// and otherwise from the AST header, which is go/ast's narrower rule; 75 of
+/// the 78 staticcheck checks that filter do not require the fact, and so
+/// reported there (S1009 in kitex). The fact when present, the same scan when
+/// not.
+pub fn is_generated_file_at(pass: &Pass<'_>, pos: u32) -> bool {
+    let pos = Pos(pos as i64);
+    for (i, file) in pass.files().iter().enumerate() {
+        if file.file_start.0 > pos.0 || pos.0 > file.file_end.0 {
+            continue;
+        }
+        if let Some(result) =
+            pass.result_of::<crate::passes::facts::generated::GeneratedResult>(
+                crate::passes::facts::generated::analyzer(),
+            )
+        {
+            if let Some(path) = pass.pkg().compiled_go_files.get(i) {
+                return result.files.contains_key(path.to_string_lossy().as_ref());
+            }
+        }
+        return crate::passes::facts::generated::scan_file(pass, i).is_some();
     }
     false
 }

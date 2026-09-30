@@ -209,21 +209,29 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "S1038 requires inspect analyzer".to_string())?
         .clone();
 
-    let mut pending: Vec<(u32, String)> = Vec::new();
+    let mut pending: Vec<(u32, String, bool)> = Vec::new();
     inspect.preorder_typed(node_mask!(CallExpr), pass.files(), |node| {
         let NodeRef::CallExpr(call) = node else {
             return;
         };
+        // Only the `fmt.Print*(fmt.Sprintf(…))` report passes
+        // `report.FilterGenerated()` upstream; the method and `log`-package
+        // reports are made in generated files too.
         let msg = fmt_print_message(pass, call)
-            .or_else(|| method_message(pass, call))
-            .or_else(|| pkg_log_message(pass, call));
-        if let Some(msg) = msg {
-            pending.push((match_pos(node), msg));
+            .map(|m| (m, true))
+            .or_else(|| method_message(pass, call).map(|m| (m, false)))
+            .or_else(|| pkg_log_message(pass, call).map(|m| (m, false)));
+        if let Some((msg, filter_generated)) = msg {
+            pending.push((match_pos(node), msg, filter_generated));
         }
     });
 
-    for (pos, message) in pending {
-        pass.report_unless_generated(pos, message);
+    for (pos, message, filter_generated) in pending {
+        if filter_generated {
+            pass.report_unless_generated(pos, message);
+        } else {
+            pass.reportf(pos, message);
+        }
     }
     Ok(None)
 }

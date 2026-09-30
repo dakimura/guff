@@ -98,9 +98,6 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             pass.reportf(pos, message);
             continue;
         };
-        if code::is_generated_at(pass, pos) {
-            continue;
-        }
         pass.report(Diagnostic {
             pos,
             message,

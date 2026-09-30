@@ -67,7 +67,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
     });
     for pos in pending {
-        pass.report_unless_generated(
+        pass.reportf(
             pos,
             "defers in this range loop won't run unless the channel gets closed",
         );

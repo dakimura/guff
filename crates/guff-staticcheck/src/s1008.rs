@@ -5,7 +5,6 @@
 use std::sync::OnceLock;
 
 use guff::ast::{BinaryExpr, BlockStmt, Comment, CommentGroup, Expr, IfStmt, ReturnStmt, Stmt};
-use guff::ast::is_generated;
 use guff::commentmap::{new_comment_map, CommentMap};
 use guff::parser::{parse_file, PARSE_COMMENTS};
 use guff::position::FileSet;
@@ -322,7 +321,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     {
         let files = pass.files();
         for file in files {
-            if is_generated(file) {
+            // `report.FilterGenerated`: honnef's whole-file scan, not the
+            // go/ast header rule (see `code::is_generated_file_at`).
+            if guff_analysis::code::is_generated_file_at(pass, file.package.0 as u32) {
                 continue;
             }
             // The comment map below costs a disk read, a full `PARSE_COMMENTS`

@@ -148,6 +148,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     }
 
     for (pos, end, message, replacement) in pending {
+        // `report.FilterGenerated()`.
+        if guff_analysis::code::is_generated_file_at(pass, pos) {
+            continue;
+        }
         pass.report(Diagnostic {
             pos,
             end,

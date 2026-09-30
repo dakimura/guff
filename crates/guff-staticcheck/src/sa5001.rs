@@ -115,7 +115,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         check_block(pass, block, &mut pending);
     });
     for (pos, msg) in pending {
-        pass.report_unless_generated(pos, msg);
+        pass.reportf(pos, msg);
     }
     Ok(None)
 }

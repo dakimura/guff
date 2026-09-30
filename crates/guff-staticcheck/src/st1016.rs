@@ -23,7 +23,7 @@ use std::sync::OnceLock;
 use guff::ast::Expr;
 use guff::node_mask;
 use guff::walk::NodeRef;
-use guff_analysis::code::is_generated_at;
+use guff_analysis::code::is_generated_file_at;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
@@ -118,7 +118,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             .first()
             .map(|n| n.pos().0 as u32)
             .unwrap_or_else(|| ty.pos().0 as u32);
-        if is_generated_at(pass, recv_pos) {
+        if is_generated_file_at(pass, recv_pos) {
             return;
         }
 
@@ -161,7 +161,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     }
 
     for (pos, message) in pending {
-        pass.report_unless_generated(pos, message);
+        pass.reportf(pos, message);
     }
     Ok(None)
 }
