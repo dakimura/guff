@@ -1189,6 +1189,43 @@ fn revive_dot_imports_honours_allowed_packages() {
     assert_eq!(run(Some("allowed_packages")), vec![6, 7]);
 }
 
+/// var-declaration asks whether the right-hand side is an untyped constant and,
+/// if so, whether the declared type is its default type (revive re-evaluates
+/// the expression out of context with `types.Eval`). A shift takes the type of
+/// its left operand, so `1 << shift` is untyped int even though `shift` is a
+/// variable; guff required both operands to be untyped constants and reported
+/// nerdctl's `var val byte = 1 << shift`. Ten declarations, pinned by line.
+#[test]
+fn revive_var_declaration_types_a_shift_by_its_left_operand() {
+    use guff_revive::{with_settings, RuleSetting, Settings};
+
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/vardeclshift",
+        "var_declaration_shift.go",
+    );
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let settings = Settings {
+        rules: Some(vec![RuleSetting {
+            name: "var-declaration".into(),
+            arguments: Vec::new(),
+            disabled: false,
+            severity: None,
+            exclude: Vec::new(),
+        }]),
+        ..Settings::default()
+    };
+    with_settings(settings, || {
+        let mut lines: Vec<i64> = support::run_analyzer_diagnostics(revive(), &pkg)
+            .into_iter()
+            .filter(|d| d.message.starts_with("var-declaration:"))
+            .map(|d| fset.position(guff::position::Pos(d.pos as i64)).line)
+            .collect();
+        lines.sort();
+        assert_eq!(lines, vec![11, 13, 15, 17, 18]);
+    });
+}
+
 #[test]
 fn revive_preserve_scope_suppresses_scope_enlarging_suggestions() {
     use guff_revive::{with_settings, RuleArgument, RuleSetting, Settings};

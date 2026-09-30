@@ -37843,3 +37843,40 @@ fixture `testdata/modernize/stringscutprefix_search.go`（10 関数、各行に�
 消えたキー 0 / 増えた 6、fix ベースラインは新ファイルの hunk だけ 67 行増え、guff の `--fix` も一致。
 
 lima の残りは revive 2 件（cgo 生成コード）で、datadog-agent と同じ既知の機構。
+
+### 2026-10-01（続き 372）— `close nerdctl`（2）: revive var-declaration は**シフトを左オペランドの型**で見る
+
+nerdctl の guff-only の 1 件:
+
+```
+pkg/netutil/subnet/subnet.go:84: var-declaration: should omit type byte from declaration of var val; it will be inferred from the right-hand side
+```
+
+`var val byte = 1 << shift` —— `shift` は変数。上流（revive v1.15.0 `var_declarations.go`）は右辺が
+untyped 定数なら、**宣言型がその既定型のときだけ**報告する。untyped かどうかは
+`types.Eval(fset, pkg, expr.Pos(), render(expr))` で**文脈を外して**評価し直して決める。シフトの型は
+左オペランドの型（仕様）なので `1 << shift` は untyped int、既定型 `int` ≠ `byte` で黙る。
+
+guff の `untyped_const_default_name` は二項演算を「両辺とも untyped 定数なら既定型の大きい方」で扱い、
+シフトもそこに入れていた。`shift` は定数でないので全体が「untyped でない」になり、型が一致して報告していた。
+
+#### 測定（scratchpad、10 宣言）
+
+| 宣言 | 上流 | 修正前の guff |
+|---|---|---|
+| `var a byte = 1 << shift`（nerdctl） | 黙る | **報告** |
+| `var b int = 1 << shift` | 報告 | 報告 |
+| `var c byte = 1 << 2` | 黙る | 黙る |
+| `var d int = 1 << 2` | 報告 | 報告 |
+| `var e uint = 1 << shift` | 黙る | **報告** |
+| `var g int = 1 << (shift + 1)` | 報告 | 報告 |
+| `var h uint8 = 3 >> shift` | 黙る | **報告** |
+| `var i int = shift2() << 1`（左が型付き） | 報告 | 報告 |
+| `var j int = -1 << shift` | 報告 | 報告 |
+| `var k int64 = 1 << shift` | 黙る | **報告** |
+
+シフトは左オペランドの既定型だけを見るようにした。同じ演算子表を持つ `rhs_names_untyped_const` は
+どこからも呼ばれていないので触っていない。
+
+fixture `testdata/revive/var_declaration_shift.go`（10 宣言）、unit test は報告行 `[11, 13, 15, 17, 18]` を
+固定（修正前は落ちる）。golden `revive` に足して 消えたキー 0 / 増えた 7。
