@@ -701,17 +701,13 @@ pub fn parse_gci_settings(settings: &serde_yaml::Value) -> guff_fmt::GciOptions 
             opts.no_lex_order = b;
         }
     }
-    // Post-processed in guff-fmt (gci `print` CLI does not expose these).
-    if let Some(v) = gmap.get(serde_yaml::Value::String("no-inline-comments".into())) {
-        if let Some(b) = v.as_bool() {
-            opts.no_inline_comments = b;
-        }
-    }
-    if let Some(v) = gmap.get(serde_yaml::Value::String("no-prefix-comments".into())) {
-        if let Some(b) = v.as_bool() {
-            opts.no_prefix_comments = b;
-        }
-    }
+    // `no-inline-comments` / `no-prefix-comments` are accepted and ignored.
+    // golangci-lint copies them into gci's config, and gci v0.13.7 (the version
+    // 2.12.2 pins) never reads them: `NoInlineComments` / `NoPrefixComments`
+    // appear only in `pkg/config`, and its own CLI marks both flags
+    // deprecated. guff implemented them, so nerdctl's
+    // `_ ".../api/events" // Register grpc event types` was "not properly
+    // formatted" here and fine upstream.
     opts
 }
 
@@ -2186,8 +2182,9 @@ gci:
         );
         assert!(opts.custom_order);
         assert!(opts.no_lex_order);
-        assert!(opts.no_inline_comments);
-        assert!(opts.no_prefix_comments);
+        // No-ops upstream (gci v0.13.7 never reads them): parsed, not applied.
+        assert!(!opts.no_inline_comments);
+        assert!(!opts.no_prefix_comments);
     }
 
     #[test]

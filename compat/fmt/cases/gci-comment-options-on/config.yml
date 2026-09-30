@@ -1,0 +1,13 @@
+# gci `no-inline-comments` / `no-prefix-comments` set. Both are no-ops upstream:
+# golangci-lint copies them into gci's config and gci v0.13.7 never reads them
+# (its CLI marks both flags deprecated). The expected output is therefore the
+# same as gci-comment-options-off's, comments kept. guff implemented them and
+# dropped the comments (nerdctl's `_ ".../api/events" // Register grpc event types`).
+version: "2"
+formatters:
+  enable:
+    - gci
+  settings:
+    gci:
+      no-inline-comments: true
+      no-prefix-comments: true
