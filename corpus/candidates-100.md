@@ -202,6 +202,37 @@ build tags, vendored tree, licence).
 | [open-feature/go-sdk](https://github.com/open-feature/go-sdk) | 248 | 1.0MB | `.golangci.yml` |
 | [netobserv/netobserv-ebpf-agent](https://github.com/netobserv/netobserv-ebpf-agent) | 209 | 45.9MB | `.golangci.yml` |
 
+## Refresh 2026-09-29 — the reserve list promoted
+
+The 73 selected rows ran out with the ledger at **79/100** (86 defined; 2 open
+targets deferred, 5 linux-only). The "Surveyed, v2, not selected" list above was
+re-checked row by row against GitHub and **48 of its 55** were appended to
+`candidates-100.json`, with the latest release tag as `ref`.
+
+What the re-check looked at, per repository: the latest release (tags when there
+is none), whether **that tag** — not the default branch — carries a
+`.golangci.{yml,yaml}` with `version: "2"`, whether the tag has a root `go.mod`,
+and whether the repository is archived. The survey had read the config from the
+default branch; harness/harness is what that costs (its release tag was a
+different codebase).
+
+Not appended, and why:
+
+| repo | reason |
+|---|---|
+| typesense/typesense-go | the `v3.2.0` tag carries a **v1** config; only the default branch is v2 |
+| uber-go/zap | same — `v1.28.0` has a v1 config |
+| uber-go/nilaway | no release and no tag to pin |
+| filebrowser/filebrowser | archived |
+| metallb/metallb | the latest release is `metallb-chart-0.16.1`, a Helm chart tag — the harness failure mode (release ref ≠ the Go tree) |
+| netobserv/netobserv-ebpf-agent | an eBPF agent; expected to be linux-bound like cri-o / tetragon |
+| golangci/golangci-lint | its `v2.14.0` is newer than the pinned reference (2.12.2); its config may enable options the reference does not know |
+
+`kratos` was already a candidate name, so go-kratos/kratos is `go-kratos-kratos`.
+`_new_keys` is empty on every appended row: the key gap closed with the first 8
+picks, so these are Group B — code-shape volume. `status.py next` takes them
+smallest first, as before.
+
 ## Stale exclusions in `corpus/README.md`
 
 `README.md` excludes fiber, hugo, etcd and terraform for "no confirmed v2".
