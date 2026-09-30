@@ -700,5 +700,157 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "30m"
+  },
+  {
+    "name": "gotify",
+    "url": "https://github.com/gotify/server.git",
+    "ref": "v3.1.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "client_golang",
+    "url": "https://github.com/prometheus/client_golang.git",
+    "ref": "v1.24.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "bubbletea",
+    "url": "https://github.com/charmbracelet/bubbletea.git",
+    "ref": "v2.0.10",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "clickhouse-go",
+    "url": "https://github.com/ClickHouse/clickhouse-go.git",
+    "ref": "v2.48.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "echo",
+    "url": "https://github.com/labstack/echo.git",
+    "ref": "v5.4.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "go-kratos-kratos",
+    "url": "https://github.com/go-kratos/kratos.git",
+    "ref": "v3.0.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "goose",
+    "url": "https://github.com/pressly/goose.git",
+    "ref": "v3.28.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "sarama",
+    "url": "https://github.com/IBM/sarama.git",
+    "ref": "v1.61.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "node_exporter",
+    "url": "https://github.com/prometheus/node_exporter.git",
+    "ref": "v1.12.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "apache-answer",
+    "url": "https://github.com/apache/answer.git",
+    "ref": "v2.0.2",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "act",
+    "url": "https://github.com/nektos/act.git",
+    "ref": "v0.2.89",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "rekor",
+    "url": "https://github.com/sigstore/rekor.git",
+    "ref": "v1.5.4",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "soft-serve",
+    "url": "https://github.com/charmbracelet/soft-serve.git",
+    "ref": "v0.12.2",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "60m"
+  },
+  {
+    "name": "kube-state-metrics",
+    "url": "https://github.com/kubernetes/kube-state-metrics.git",
+    "ref": "v2.20.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "60m"
+  },
+  {
+    "name": "gorm",
+    "url": "https://github.com/go-gorm/gorm.git",
+    "ref": "v1.31.2",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "glamour",
+    "url": "https://github.com/charmbracelet/glamour.git",
+    "ref": "v2.0.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "grype",
+    "url": "https://github.com/anchore/grype.git",
+    "ref": "v0.119.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "gosec",
+    "url": "https://github.com/securego/gosec.git",
+    "ref": "v2.29.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "kitex",
+    "url": "https://github.com/cloudwego/kitex.git",
+    "ref": "v0.16.2",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
   }
 ]
