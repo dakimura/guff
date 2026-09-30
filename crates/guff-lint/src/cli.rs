@@ -796,6 +796,23 @@ fn load_run_config(
         Some(v) if !v.trim().is_empty() => format!("{settings_fingerprint}\nrun.go={v}"),
         _ => settings_fingerprint,
     };
+    // `GOSECGOVERSION` is `run.go` after the loader has filled it in, so unlike
+    // the other linters gosec sees the *detected* value too — and detection
+    // prefers go.mod's `toolchain` line, which no package's module version
+    // carries. Only G601 reads it; `go env` is spent only when gosec runs.
+    let settings_fingerprint = if selection.resolve_names().iter().any(|n| n == "gosec") {
+        let go = go_version
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(detect_run_go);
+        let fp = format!("{settings_fingerprint}\ngosec.go={go}");
+        linter_settings.gosec.go = Some(go);
+        fp
+    } else {
+        settings_fingerprint
+    };
 
     let mut path_mode = crate::PathMode::Rel;
     if let Some(raw) = output.path_mode.as_deref() {
@@ -1007,5 +1024,94 @@ fn prettify_bytes(n: u64) -> String {
         format!("{:.1} KB", n / KB)
     } else {
         format!("{n} B")
+    }
+}
+
+/// golangci-lint's `detectGoVersion` (`pkg/config/config.go`): what `run.go`
+/// becomes when the config leaves it unset.
+///
+/// `go env GOMOD GOVERSION`; with a go.mod, its **`toolchain`** directive if it
+/// has one, else its `go` directive; without one (or when it will not read),
+/// `GOVERSION`; and `1.22` when all of that is empty. Toolchain names go
+/// through `parseGoVersion`, which drops the `go` prefix and a prerelease
+/// suffix (`go1.24rc1` → `1.24`); the `go` directive is returned as written.
+pub(crate) fn detect_run_go() -> String {
+    let out = std::process::Command::new("go")
+        .args(["env", "GOMOD", "GOVERSION"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default();
+    let mut lines = out.lines();
+    let gomod = lines.next().unwrap_or("").trim().to_string();
+    let goversion = lines.next().unwrap_or("").trim().to_string();
+    let detected = if gomod.is_empty() {
+        parse_toolchain_version(&goversion)
+    } else {
+        match std::fs::read_to_string(&gomod) {
+            Ok(text) => run_go_from_go_mod(&text).unwrap_or_else(|| parse_toolchain_version(&goversion)),
+            Err(_) => parse_toolchain_version(&goversion),
+        }
+    };
+    if detected.is_empty() {
+        "1.22".to_string()
+    } else {
+        detected
+    }
+}
+
+/// The go.mod half of [`detect_run_go`]: `toolchain` wins over `go`.
+fn run_go_from_go_mod(text: &str) -> Option<String> {
+    let mut go = None;
+    let mut toolchain = None;
+    for line in text.lines() {
+        let line = line.split("//").next().unwrap_or("").trim();
+        let mut fields = line.split_whitespace();
+        match (fields.next(), fields.next()) {
+            (Some("toolchain"), Some(name)) => toolchain = Some(name.to_string()),
+            (Some("go"), Some(v)) => go = Some(v.to_string()),
+            _ => {}
+        }
+    }
+    if let Some(name) = toolchain.filter(|n| !n.is_empty()) {
+        return Some(parse_toolchain_version(&name));
+    }
+    go.filter(|v| !v.is_empty())
+}
+
+/// golangci `parseGoVersion`: trim `go`, cut at the first rune that is neither
+/// a digit nor a dot.
+fn parse_toolchain_version(v: &str) -> String {
+    let raw = v.strip_prefix("go").unwrap_or(v);
+    let end = raw
+        .find(|c: char| !c.is_ascii_digit() && c != '.')
+        .unwrap_or(raw.len());
+    raw[..end].to_string()
+}
+
+#[cfg(test)]
+mod detect_run_go_tests {
+    use super::*;
+
+    #[test]
+    fn toolchain_directive_wins_over_go() {
+        assert_eq!(
+            run_go_from_go_mod("module m\n\ngo 1.21\n\ntoolchain go1.22.0\n").as_deref(),
+            Some("1.22.0")
+        );
+        assert_eq!(run_go_from_go_mod("module m\ngo 1.18\n").as_deref(), Some("1.18"));
+        assert_eq!(
+            run_go_from_go_mod("module m\ngo 1.21 // pinned\ntoolchain go1.24rc1\n").as_deref(),
+            Some("1.24")
+        );
+        assert_eq!(run_go_from_go_mod("module m\n"), None);
+    }
+
+    #[test]
+    fn toolchain_names_lose_prefix_and_prerelease() {
+        assert_eq!(parse_toolchain_version("go1.26.5"), "1.26.5");
+        assert_eq!(parse_toolchain_version("go1.24rc1"), "1.24");
+        assert_eq!(parse_toolchain_version(""), "");
     }
 }

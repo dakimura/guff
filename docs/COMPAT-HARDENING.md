@@ -37247,3 +37247,83 @@ unmeasured 5**。
 7 本のうち 4 本は両側 0 件で、守るのは過剰報告と health gate だけ（続き 359 の opa と同じ）。
 小さいライブラリは自分の config で CI を回していて lint が綺麗なのが普通なので、予備リストの小さい側は
 この形が続くはず —— 件数を稼ぐのは hertz のような「finding が残っているターゲット」の方。
+
+### 2026-09-30（続き 361）— `close gorm`（1）: gosec **G601** を移植。版は `run.go` —— 未設定なら go.mod の **`toolchain` 行**が先
+
+gorm（`v1.31.2`、`go 1.18`）の採用 hunt:
+
+```
+gorm: guff=821 golangci=825 both=821 P=100.0% R=99.5%
+  gcl-only  generics.go:783 / schema/schema_test.go:194,235,303  gosec G601
+```
+
+4 件とも `for _, f := range fields { … &f … }` —— Go 1.22 より前のループ変数のアドレス。
+guff の gosec は G601 を**実装していなかった**（ヘッダの DEFERRED 一覧に載っていた）。
+
+#### 上流（gosec v2.26.1 `rules/implicit_aliasing.go`）
+
+ループの問いではなく**状態を持つ preorder walk**:
+
+* `RangeStmt` の value が識別子なら、その `*types.Var` を集合に入れ、`rightBrace` を本体の `}` まで
+  伸ばす（縮まない）。key は見ない。
+* **どの** `UnaryExpr`（`-v` も `<-ch` も）でも、`rightBrace` より後ろなら先に集合を空にする。
+* `ReturnStmt` は直下の `&x` を「許容」に登録する。walk は return を結果より先に訪れるので
+  `return &v` は黙り、`return f(&v)` は撃つ。
+* `&x` は、`x` を selector と入れ子の unary 越しに（paren や index は越えない）剥がした識別子が
+  集合にあれば撃つ。ただし selector があり**かつ**変数の型がそのまま `*types.Pointer` なら黙る。
+
+#### 測定（scratchpad `go 1.18`、32 形）
+
+撃つ 21 / 黙る 11。直感に反するものだけ:
+
+| 形 | 上流 |
+|---|---|
+| `return &v` / `return &v.f` | 黙る（許容） |
+| `return take(&v)` | **撃つ** |
+| `for v := range ch` の `&v` | 黙る（`v` は key） |
+| `&(v)` | 黙る（paren は剥がさない） |
+| `&v.f`、`v` が `*T` | 黙る |
+| `&v.f`、`v` が `type P *T` | **撃つ**（名前付きは `*types.Pointer` ではない） |
+| `&v.f`、`v` が `type A = *T` | **撃つ**（go1.23+ の go/types では `*types.Alias`） |
+| `var v int; for _, v = range xs {}; &v`（ループの後） | 黙る（`}` を越えた unary で空になる） |
+| 同じことを外側の range 本体の中で | **撃つ**（`rightBrace` は外側の `}`） |
+| `&v` の前に `_ = -v` | 撃つ |
+
+#### 版の門
+
+`gosec.GoVersion()` は**ファイルの版でもツールチェインの版でもない**。golangci-lint の
+`Loader.handleGoVersion` が `os.Setenv("GOSECGOVERSION", cfg.Run.Go)` し、`run.go` が未設定なら
+`detectGoVersion` が埋める —— `go env GOMOD` の go.mod の **`toolchain` 行を優先**し、無ければ `go` 行、
+それも無ければ `GOVERSION`、最後に `1.22`。
+
+| go.mod / config | golangci | 修正後の guff |
+|---|--:|--:|
+| `go 1.21` | 17 | 17 |
+| `go 1.21` + `toolchain go1.22.0` | **0** | 0 |
+| `go 1.18` + `run.go: "1.22"` | 0 | 0 |
+| `go 1.22` | 0 | 0 |
+
+どのパッケージの module version も `toolchain` 行を持っていないので、guff は gosec が有効なときだけ
+CLI で `go env GOMOD GOVERSION` を 1 回撃って同じ検出をし、`GosecOptions::go` に入れる
+（issues cache の指紋にも `gosec.go=` を足した）。
+
+**同じ検出値は govet / revive / gocritic / gofumpt にも流れているはず**（`handleGoVersion` は
+`run.go` を埋めてから全部に配る）。guff の `apply_go_version` は設定値しか配らず、未設定なら各 linter が
+module version に落ちる —— `go 1.21` + `toolchain go1.22` の module で loopclosure を落とさない
+乖離があり得る。今回は測っていないので直していない。
+
+#### fixture と test
+
+`crates/guff-style/tests/testdata/gosec/g601.go` に 32 形（各行に上流の FIRES / silent）。unit test は
+**位置の集合**で 21 件を固定し、同じ fixture が `1.22` / `1.26.5` で 0 件になることも見る。
+版の解析（gosec の `(\d+).(\d+)…` 正規表現、合わなければ 0.0.0 ＝門は開く）と go.mod 検出にも
+単体テスト。
+
+golden は 3 か所:
+
+* `gosec`（`go 1.26`）の `includes` に G601 を足し g601/ を置いた —— **キー差分 0**（門が効いている証拠）。
+* 新 case `gosec-g601`（`go 1.18`）—— 21 キー。
+* 新 case `gosec-g601-toolchain`（`go 1.21` + `toolchain go1.22.0`）—— G601 0 件。空の golden は壊れた
+  case と区別できないので、版に縛られない G602 を g602.go で 4 キー同乗させた。
+
+fix ベースラインは両 case とも「何も書き換えない」（gosec に fix は無い）。

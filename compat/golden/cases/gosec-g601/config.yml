@@ -1,0 +1,32 @@
+# Golden case: gosec G601 — implicit memory aliasing in a `range` loop.
+#
+# This case exists for its `go.mod`: G601 returns before looking at anything
+# when gosec's Go version is 1.22 or later, and the `gosec` case is `go 1.26`.
+# That version is not the file's and not the toolchain's: golangci-lint writes
+# its `run.go` into `GOSECGOVERSION`, and with `run.go` unset that is detected
+# from this go.mod — here, 1.18.
+#
+# g601.go is 32 shapes, each tagged FIRES or silent with what upstream does;
+# 21 fire. The silent half is what pins upstream's state machine (a `return
+# &v`, a selector through a real pointer, a range key, `&(v)`, `&v` after the
+# loop that set it) — without it, a port that reported every `&` of a range
+# value would match on the firing half alone.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gosec
+  settings:
+    gosec:
+      includes:
+        - G601
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

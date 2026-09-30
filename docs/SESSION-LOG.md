@@ -5,6 +5,7 @@
 
 | 日付 | 内容 |
 |------|------|
+| 2026-09-30 | **`close gorm`（1）**: gosec **G601**（range 変数のアドレス、Go 1.22 未満）を移植。上流は状態つき preorder walk で、32 形を測って撃つ 21 / 黙る 11 を fixture に固定。版は `GOSECGOVERSION`＝golangci の `run.go` で、未設定なら go.mod の **`toolchain` 行が `go` 行より優先** —— CLI で同じ検出をして gosec に渡す。golden 3 か所（`gosec` はキー差分 0、新 `gosec-g601` 21 キー、新 `gosec-g601-toolchain`）。gorm の gcl-only 4 → 0（続き 361） |
 | 2026-09-30 | **候補キュー補充＋小さい 7 本を採用**: `candidates-100.json` が空になったので予備 55 本をタグ単位で当て直し 48 本追加（#451）。小さい順の 8 本を hunt し、修正なしで一致した stern / open-feature-go-sdk / logrus / viper / lipgloss / colima / hertz（185/185）を 1 PR で採用。台帳 **93 定義 / 86 clean**。gorm は gcl-only 4 で次の close（続き 360） |
 | 2026-09-29 | **`adopt opa` 完了**: `guff=0 golangci=0`、ill-typed 0 で `corpus/hunt.json` に登録（`v1.19.1` / `./...`）。台帳 **86 定義 / 79 clean / open 2 / unmeasured 5**。両側 0 件なので守るのは過剰報告と health gate だけ —— 採用時の唯一の乖離（続き 358）も件数ではなく ill-typed に出ていた。`candidates-100.json` はこれで空（続き 359） |
 | 2026-09-29 | **`close opa`（1）**: 引数も結果も無いジェネリック関数（`RegisterJSONFields[T any]()`）は署名キーが `func()` で、hash-cons が import 先の凍結 `func()` を返し、型パラメータをその場で書いていた —— パッケージ内の nullary generic が 1 つの署名を共有（`got 2 type arguments but want 1`）。import が無いと再現しない。`new_generic_signature_type` で型パラメータを持ったまま alloc。opa の ill-typed **2 → 0**（続き 358） |

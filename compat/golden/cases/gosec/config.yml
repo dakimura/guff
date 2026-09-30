@@ -3,7 +3,7 @@
 # Every rule guff implements is named explicitly in `includes` rather than
 # leaving gosec on its defaults, for the same reason the govet case lists its
 # analyzers: gosec v2.26.1 (the version golangci-lint 2.12.2 pins) ships 39
-# rules and 22 SSA analyzers, and guff implements 41 of those 61. Running the
+# rules and 22 SSA analyzers, and guff implements 42 of those 61. Running the
 # rest would fill the golden with findings from checks guff has never claimed,
 # turning a known scope decision into a permanent diff. Adding a rule to guff
 # means adding it here.
@@ -18,6 +18,11 @@
 # golangci maps gosec's per-issue score to "low" / "medium" / "high"
 # (convertScoreToString), where every other linter leaves it empty. The golden
 # key includes severity, so this case is also the first to gate that mapping.
+#
+# G601 is listed but reports nothing here, on purpose: this module is `go 1.26`
+# and G601 returns before looking at anything from Go 1.22 on. Its findings
+# are in `gosec-g601` (a `go 1.18` module over the same g601/ fixture); this
+# case is where a gate that stopped working would show up as 21 new keys.
 version: "2"
 
 linters:
@@ -70,6 +75,7 @@ linters:
         - G505
         - G506
         - G507
+        - G601
         - G602
         - G702
         - G703

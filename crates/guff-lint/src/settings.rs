@@ -1907,6 +1907,11 @@ pub struct GosecSettings {
     /// `G302` / `G306` scalars are interpreted; `global` is DEFERRED.
     #[serde(default)]
     pub config: Option<serde_yaml::Value>,
+    /// What golangci-lint puts in `GOSECGOVERSION`: `run.go`, or when that is
+    /// unset, [`crate::cli::detect_run_go`]. Not a config key — the loader
+    /// writes the environment variable. G601 reads it.
+    #[serde(skip)]
+    pub go: Option<String>,
     // DEFERRED: concurrency.
 }
 
@@ -2050,6 +2055,7 @@ impl GosecSettings {
             g101,
             g117,
             file_perms,
+            go: self.go.clone(),
         }
     }
 }

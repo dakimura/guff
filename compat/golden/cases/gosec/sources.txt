@@ -22,6 +22,7 @@ bad/bad.go            crates/guff-style/tests/testdata/gosec/bad.go
 ok/ok.go              crates/guff-style/tests/testdata/gosec/ok.go
 scores/scores.go      crates/guff-style/tests/testdata/gosec/scores.go
 settings/settings.go  crates/guff-style/tests/testdata/gosec/settings.go
+g601/g601.go          crates/guff-style/tests/testdata/gosec/g601.go
 g602/g602.go          crates/guff-style/tests/testdata/gosec/g602.go
 g602v/g602_variadic.go  crates/guff-style/tests/testdata/gosec/g602_variadic.go
 g115/g115.go          crates/guff-style/tests/testdata/gosec/g115.go

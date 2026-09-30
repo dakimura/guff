@@ -1,0 +1,5 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# The fixture is the one the Rust unit test reads.
+g601/g601.go  crates/guff-style/tests/testdata/gosec/g601.go

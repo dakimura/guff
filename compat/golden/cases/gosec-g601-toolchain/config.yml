@@ -1,0 +1,31 @@
+# Golden case: G601's version comes from go.mod's `toolchain` line.
+#
+# golangci-lint's `detectGoVersion` fills an unset `run.go` from the main
+# go.mod, and it prefers the **`toolchain`** directive over `go` —  so this
+# module, `go 1.21` with `toolchain go1.22.0`, is linted by gosec as 1.22 and
+# G601 says nothing, though the language version is 1.21 and the same fixture
+# fires 21 times in `gosec-g601`. No package's module version carries the
+# toolchain line, which is why guff detects it separately for gosec.
+#
+# G602 rides along over g602.go, which no version gates, so that this golden
+# is not empty: an empty one would also be what a broken case looks like.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gosec
+  settings:
+    gosec:
+      includes:
+        - G601
+        - G602
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true
