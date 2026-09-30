@@ -180,46 +180,12 @@ pub fn run_enabled(pass: &Pass<'_>) -> std::collections::HashMap<&'static str, V
     let mut by_rule: std::collections::HashMap<&'static str, Vec<Failure>> =
         rules.iter().map(|(n, _, _)| (*n, Vec::new())).collect();
 
-    for file in pass.files() {
-        walk::inspect(NodeRef::File(file), |n| {
-            let Some(n) = n else {
-                return true;
-            };
-            match n {
-                NodeRef::FuncDecl(f) => {
-                    if let Some(body) = &f.body {
-                        for (rule, args, check) in &rules {
-                            visit_block(
-                                &body.list,
-                                true,
-                                BranchKind::Return,
-                                rule,
-                                *args,
-                                by_rule.get_mut(rule).unwrap(),
-                                *check,
-                            );
-                        }
-                    }
-                    return false;
-                }
-                NodeRef::FuncLit(f) => {
-                    for (rule, args, check) in &rules {
-                        visit_block(
-                            &f.body.list,
-                            true,
-                            BranchKind::Return,
-                            rule,
-                            *args,
-                            by_rule.get_mut(rule).unwrap(),
-                            *check,
-                        );
-                    }
-                    return false;
-                }
-                _ => {}
-            }
-            true
-        });
+    for (rule, args, check) in &rules {
+        let failures = by_rule.get_mut(rule).unwrap();
+        let mut v = Visitor { rule, args: *args, failures, check: *check };
+        for file in pass.files() {
+            v.walk(NodeRef::File(file));
+        }
     }
     by_rule
 }
@@ -231,182 +197,177 @@ fn apply_one(
     check: fn(&Chain, Args) -> Option<String>,
 ) -> Vec<Failure> {
     let mut failures = Vec::new();
+    let mut v = Visitor { rule, args, failures: &mut failures, check };
     for file in pass.files() {
-        walk::inspect(NodeRef::File(file), |n| {
+        v.walk(NodeRef::File(file));
+    }
+    failures
+}
+
+/// Port of revive `internal/ifelse.visitor` (v1.15.0).
+///
+/// `Visit` claims six node kinds and walks everything else: a function body
+/// (either kind) ends in a return, a `for` / `range` body in a continue, a
+/// `case` clause in a break, any other block in nothing. Inside a claimed
+/// block, `visitBlock` hands `if` statements to `visitIf` and walks every
+/// other statement through `Visit` again — which is how an if-else chain
+/// inside a func literal, a loop or a `switch` case is reached. guff used to
+/// visit only the function bodies and the `if`s directly in them, so grype's
+/// `if tt.wantErr { …; return } else { … }` inside a `t.Run` closure was
+/// never looked at.
+///
+/// Two things fall out of that shape and are kept on purpose. An `if` met by
+/// the walk rather than by `visitBlock` — the direct child of a `select`
+/// clause, whose body is a statement list and not a block — is not a chain;
+/// only its bodies are visited. And `visitIf` never walks the condition or
+/// the initializer, so a func literal there is not visited.
+struct Visitor<'f> {
+    rule: &'static str,
+    args: Args,
+    failures: &'f mut Vec<Failure>,
+    check: fn(&Chain, Args) -> Option<String>,
+}
+
+impl Visitor<'_> {
+    /// `ast.Walk(v, node)` with `Visit`.
+    fn walk(&mut self, node: NodeRef<'_>) {
+        walk::inspect(node, |n| {
             let Some(n) = n else {
                 return true;
             };
             match n {
                 NodeRef::FuncDecl(f) => {
                     if let Some(body) = &f.body {
-                        visit_block(
-                            &body.list,
-                            true,
-                            BranchKind::Return,
-                            rule,
-                            args,
-                            &mut failures,
-                            check,
-                        );
+                        self.visit_block(&body.list, BranchKind::Return);
                     }
-                    return false;
+                    false
                 }
                 NodeRef::FuncLit(f) => {
-                    visit_block(
-                        &f.body.list,
-                        true,
-                        BranchKind::Return,
-                        rule,
-                        args,
-                        &mut failures,
-                        check,
-                    );
-                    return false;
+                    self.visit_block(&f.body.list, BranchKind::Return);
+                    false
                 }
-                _ => {}
+                NodeRef::ForStmt(f) => {
+                    self.visit_block(&f.body.list, BranchKind::Continue);
+                    false
+                }
+                NodeRef::RangeStmt(r) => {
+                    self.visit_block(&r.body.list, BranchKind::Continue);
+                    false
+                }
+                NodeRef::CaseClause(c) => {
+                    self.visit_block(&c.body, BranchKind::Break);
+                    false
+                }
+                NodeRef::BlockStmt(b) => {
+                    self.visit_block(&b.list, BranchKind::Regular);
+                    false
+                }
+                _ => true,
             }
-            true
         });
     }
-    failures
+
+    /// `visitBlock`: only the **last** statement's chain is at the block end,
+    /// and only it carries the block's end kind — every other chain starts
+    /// from the zero `Chain` (`Empty`), and passes that on to the blocks
+    /// nested inside it.
+    fn visit_block(&mut self, stmts: &[Stmt], end_kind: BranchKind) {
+        for (i, stmt) in stmts.iter().enumerate() {
+            let Stmt::IfStmt(if_stmt) = stmt else {
+                self.walk(walk::stmt_ref(stmt));
+                continue;
+            };
+            let mut chain = Chain::zero();
+            if i + 1 == stmts.len() {
+                chain.at_block_end = true;
+                chain.block_end_kind = end_kind;
+            }
+            self.visit_if(if_stmt, chain);
+        }
+    }
+
+    fn visit_if(&mut self, if_stmt: &IfStmt, mut chain: Chain) {
+        // Other if-else chains nested inside this `if { }` block.
+        self.visit_block(&if_stmt.body.list, chain.block_end_kind);
+
+        if matches!(
+            if_stmt.init.as_deref(),
+            Some(Stmt::AssignStmt(AssignStmt {
+                tok: Some(Token::DEFINE),
+                ..
+            }))
+        ) {
+            chain.has_initializer = true;
+        }
+        chain.if_branch = block_branch(&if_stmt.body);
+
+        let Some(else_stmt) = &if_stmt.else_ else {
+            if self.args.allow_jump {
+                self.check_rule(if_stmt, None, &chain);
+            }
+            return;
+        };
+
+        match else_stmt.as_ref() {
+            Stmt::IfStmt(else_if) => {
+                if !chain.if_branch.kind.deviates() {
+                    chain.has_prior_non_deviating = true;
+                }
+                self.visit_if(else_if, chain);
+            }
+            Stmt::BlockStmt(else_block) => {
+                // Other if-else chains nested inside this `else { }` block.
+                self.visit_block(&else_block.list, chain.block_end_kind);
+                chain.has_else = true;
+                chain.else_branch = block_branch(else_block);
+                self.check_rule(if_stmt, Some(else_block), &chain);
+            }
+            _ => {}
+        }
+    }
+
+    fn check_rule(&mut self, if_stmt: &IfStmt, else_block: Option<&BlockStmt>, chain: &Chain) {
+        let Some(mut message) = (self.check)(chain, self.args) else {
+            return;
+        };
+        if chain.has_initializer {
+            message.push_str(" (move short variable declaration to its own line if necessary)");
+        }
+        // Upstream's ifelse framework lets each rule pick a target:
+        // early-return points at the `if`, indent-error-flow and
+        // superfluous-else point at the *else* (`ifelse.TargetElse`). Go's AST
+        // has no position for the `else` keyword, so the else branch's own
+        // Pos() — its `{` — is what gets reported.
+        let pos = match else_block {
+            Some(b) if target_else(self.rule) => b.lbrace.0 as u32,
+            _ => if_stmt.if_.0 as u32,
+        };
+        self.failures.push(Failure {
+            rule: self.rule,
+            pos,
+            message,
+            ..Failure::default()
+        });
+    }
 }
 
-fn visit_block(
-    stmts: &[Stmt],
-    at_block_end: bool,
-    end_kind: BranchKind,
-    rule: &'static str,
-    args: Args,
-    failures: &mut Vec<Failure>,
-    check: fn(&Chain, Args) -> Option<String>,
-) {
-    for (i, stmt) in stmts.iter().enumerate() {
-        let Stmt::IfStmt(if_stmt) = stmt else {
-            continue;
+impl Chain {
+    /// Go's zero `Chain`.
+    fn zero() -> Self {
+        let empty = Branch {
+            kind: BranchKind::Empty,
+            has_decls: false,
+            call: None,
         };
-        let chain_at_end = at_block_end && i + 1 == stmts.len();
-        let chain = Chain {
-            if_branch: Branch {
-                kind: BranchKind::Empty,
-                has_decls: false,
-                call: None,
-            },
+        Chain {
+            if_branch: empty.clone(),
             has_else: false,
-            else_branch: Branch {
-                kind: BranchKind::Empty,
-                has_decls: false,
-                call: None,
-            },
+            else_branch: empty,
             has_initializer: false,
             has_prior_non_deviating: false,
-            at_block_end: chain_at_end,
-            block_end_kind: end_kind,
-        };
-        visit_if(if_stmt, chain, rule, args, failures, check);
-    }
-}
-
-fn visit_if(
-    if_stmt: &IfStmt,
-    mut chain: Chain,
-    rule: &'static str,
-    args: Args,
-    failures: &mut Vec<Failure>,
-    check: fn(&Chain, Args) -> Option<String>,
-) {
-    // Nested if-else chains inside this then-block.
-    visit_block(
-        &if_stmt.body.list,
-        false,
-        chain.block_end_kind,
-        rule,
-        args,
-        failures,
-        check,
-    );
-
-    // Propagate initializer / prior-non-deviating across `else if` (upstream
-    // `internal/ifelse.visitor.visitIf` passes the same Chain into the next if).
-    if matches!(
-        if_stmt.init.as_deref(),
-        Some(Stmt::AssignStmt(AssignStmt {
-            tok: Some(Token::DEFINE),
-            ..
-        }))
-    ) {
-        chain.has_initializer = true;
-    }
-    chain.if_branch = block_branch(&if_stmt.body);
-    chain.has_else = false;
-    chain.else_branch = Branch {
-        kind: BranchKind::Empty,
-        has_decls: false,
-        call: None,
-    };
-
-    let Some(else_stmt) = &if_stmt.else_ else {
-        // early-return can fire on if-without-else when allowJump is set.
-        if rule == "early-return" {
-            if let Some(mut message) = check(&chain, args) {
-                if chain.has_initializer {
-                    message.push_str(
-                        " (move short variable declaration to its own line if necessary)",
-                    );
-                }
-                failures.push(Failure {
-                    rule,
-                    pos: if_stmt.if_.0 as u32,
-                    message,
-                    ..Failure::default()
-                });
-            }
+            at_block_end: false,
+            block_end_kind: BranchKind::Empty,
         }
-        return;
-    };
-
-    match else_stmt.as_ref() {
-        Stmt::IfStmt(else_if) => {
-            if !chain.if_branch.kind.deviates() {
-                chain.has_prior_non_deviating = true;
-            }
-            visit_if(else_if, chain, rule, args, failures, check);
-        }
-        Stmt::BlockStmt(else_block) => {
-            visit_block(
-                &else_block.list,
-                false,
-                chain.block_end_kind,
-                rule,
-                args,
-                failures,
-                check,
-            );
-            chain.has_else = true;
-            chain.else_branch = block_branch(else_block);
-            if let Some(mut message) = check(&chain, args) {
-                if chain.has_initializer {
-                    message.push_str(
-                        " (move short variable declaration to its own line if necessary)",
-                    );
-                }
-                failures.push(Failure {
-                    rule,
-                    // Upstream's ifelse framework lets each rule pick a target:
-                    // early-return points at the `if`, indent-error-flow and
-                    // superfluous-else point at the *else* (`ifelse.TargetElse`).
-                    // Go's AST has no position for the `else` keyword, so the
-                    // else branch's own Pos() — its `{` — is what gets reported.
-                    pos: if target_else(rule) {
-                        else_block.lbrace.0 as u32
-                    } else {
-                        if_stmt.if_.0 as u32
-                    },
-                    message,
-                    ..Failure::default()
-                });
-            }
-        }
-        _ => {}
     }
 }
 

@@ -37428,3 +37428,67 @@ fallback を消した。
 制約列を `assert_eq!` で固定。golden は既存 `staticcheck-sa` に足して、消えたキー 0 / 増えたキー 8
 （SA4019 6、ST1000 2 —— doc グループの 2 形は ST1000 も撃つので、そこが本当に package doc だという
 独立の証拠になっている）。fix ベースラインも撮り直した。
+
+### 2026-09-30（続き 364）— `close grype`（1）: revive の ifelse 3 規則は **関数本体の直下の if しか見ていなかった**
+
+grype（`v0.119.0`）の採用 hunt の gcl-only 3 件は全部 revive `indent-error-flow`、どれもテストの
+`t.Run(…, func(t *testing.T) { … if tt.wantErr { …; return } else { … } … })`。
+
+#### 上流（revive v1.15.0 `internal/ifelse.visitor`）
+
+`Visit` は 6 種のノードを受け持ち、それ以外は歩き続ける:
+
+| ノード | ブロック末尾の種類 |
+|---|---|
+| `FuncDecl` / `FuncLit` の本体 | Return |
+| `ForStmt` / `RangeStmt` の本体 | Continue |
+| `CaseClause` | Break |
+| その他の `BlockStmt` | Regular |
+
+受け持ったブロックの中では `visitBlock` が `if` を `visitIf` に渡し、**それ以外の文は `Visit` で歩き直す**
+—— func literal・ループ・`case` の中の chain はこうして届く。末尾の文の chain だけが `AtBlockEnd` と
+ブロックの種類を持ち、他は Go のゼロ値 `Chain`（`Empty`）から始まって、入れ子のブロックにもそれを渡す。
+
+guff は `FuncDecl` と `FuncLit` の本体の**直下の `if`** だけを見て、`FuncDecl` で `false` を返して
+走査ごと剪定していた（関数宣言の中の func literal は一度も訪れない）。入れ子のブロックには
+`at_block_end = false` と外側の種類を固定で渡していた。
+
+#### 測定（scratchpad、indent-error-flow / superfluous-else 15 形 ＋ early-return 9 形）
+
+| 置き場所 | 上流 | 修正前の guff |
+|---|---|---|
+| 関数本体 | 報告 | 報告 |
+| 関数の中の func literal | 報告 | **黙る** |
+| `for` 本体 / `range` 本体 | 報告 | **黙る** |
+| `case` 節 | 報告 | **黙る** |
+| 素のブロック | 報告 | **黙る** |
+| `go func() { … }()` | 報告 | **黙る** |
+| if 本体の中 | 報告 | 報告 |
+| `continue` / `break` / `break L` → else（superfluous-else） | 報告 | **黙る** |
+| var 宣言の func literal | 報告 | **黙る** |
+| package レベルの func literal | 報告 | 報告 |
+| `select` 節の直下の if | **黙る** | 黙る |
+| if の**条件式**の中の func literal | **黙る** | 黙る |
+
+最後の 2 行は上流の形がそのまま生む沈黙: `select` の節の本体はブロックではなく文の列なので、そこで
+出会う `if` は `visitBlock` を通らず chain にならない。`visitIf` は条件式と初期化子を歩かない。
+修正前の guff は 13 件中 3 件、修正後は 13 件。early-return 9 形（関数末尾・非末尾・range 末尾・
+末尾の if の中・非末尾の if の中・`case` 末尾・func literal 末尾・else if 連鎖・else ブロック末尾）
+も 8 件で一致。
+
+#### 移植
+
+`Visitor` を上流の形で書き直した（`walk` ＝ `ast.Walk(v, …)` と `Visit`、`visit_block`、`visit_if`、
+`check_rule`、`Chain::zero`）。3 規則とも同じ visitor を通るので、early-return / superfluous-else の
+`AtBlockEnd` / `BlockEndKind` の扱いも一緒に上流に揃った。
+
+#### fixture と test
+
+`testdata/revive/ifelse_containers.go`（15 形）と `early_return_containers.go`（9 形）、各 `if` に上流の答え。
+unit test は 3 規則を有効にして `(行, 列, 規則)` の集合を 13 件＋8 件で固定、旧 visitor に戻すと落ちる。
+golden `revive` に 2 ファイルを足して 消えたキー 0 / 増えたキー 40（他の規則も撃つ）。この case の
+ratchet（missing 1 / extra 4、importer の差による既知の床）は変わらず。
+
+#### grype の残り
+
+guff-only の dupl 2 件（`*_package_store_test.go:25-986`）は別の欠陥で、次の PR。

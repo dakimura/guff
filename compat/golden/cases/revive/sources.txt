@@ -27,6 +27,8 @@ ok/revivetest/ok.go                         crates/guff-revive/tests/testdata/re
 ctxallow/revivetest/context_allow.go        crates/guff-revive/tests/testdata/revive/context_allow.go
 generated/revivetest/generated_bad.go       crates/guff-revive/tests/testdata/revive/generated_bad.go
 scope/revivetest/preserve_scope.go          crates/guff-revive/tests/testdata/revive/preserve_scope.go
+ifelsecontainers/ifelse_containers.go      crates/guff-revive/tests/testdata/revive/ifelse_containers.go
+earlyreturn/early_return_containers.go      crates/guff-revive/tests/testdata/revive/early_return_containers.go
 
 blankgroupbad/blank_group_bad.go            crates/guff-revive/tests/testdata/revive/blank_group_bad.go
 blankgroupok/blank_group_ok.go              crates/guff-revive/tests/testdata/revive/blank_group_ok.go

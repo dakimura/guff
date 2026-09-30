@@ -1045,6 +1045,97 @@ fn revive_context_as_argument_respects_allow_types_before() {
     });
 }
 
+/// The ifelse rules over every container revive's visitor walks into: a
+/// function body, a func literal inside one, a `for` / `range` body, a `case`
+/// clause, a plain block, a `go` func literal, a nested `if` body, a labeled
+/// loop, a var-declared and a package-level func literal — and the two it does
+/// not: the direct child of a `select` clause and a func literal inside an
+/// `if` condition. guff visited only function bodies and the `if`s directly in
+/// them, so grype's `if tt.wantErr { …; return } else { … }` inside a `t.Run`
+/// closure was silent, and so were 10 of these 13.
+///
+/// Positions as a set per rule, measured against golangci-lint 2.12.2.
+#[test]
+fn revive_ifelse_rules_reach_every_container() {
+    use guff_revive::{with_settings, RuleSetting, Settings};
+
+    let rule = |name: &str| RuleSetting {
+        name: name.into(),
+        arguments: Vec::new(),
+        disabled: false,
+        severity: None,
+        exclude: Vec::new(),
+    };
+    let settings = Settings {
+        rules: Some(vec![
+            rule("indent-error-flow"),
+            rule("superfluous-else"),
+            rule("early-return"),
+        ]),
+        ..Settings::default()
+    };
+    let findings = |pkg: &std::sync::Arc<guff_analysis::Package>| {
+        let fset = pkg.fset.clone().expect("fixture has a FileSet");
+        let mut got: Vec<(i64, i64, String)> = support::run_analyzer_diagnostics(revive(), pkg)
+            .into_iter()
+            .map(|d| {
+                let p = fset.position(guff::position::Pos(d.pos as i64));
+                let rule = d.message.split(':').next().unwrap_or("").to_string();
+                (p.line, p.column, rule)
+            })
+            .collect();
+        got.sort();
+        got
+    };
+    let ifelse = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/ifelsecontainers",
+        "ifelse_containers.go",
+    );
+    let early = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/earlyreturncontainers",
+        "early_return_containers.go",
+    );
+    let r = |line: i64, col: i64, rule: &str| (line, col, rule.to_string());
+    with_settings(settings, || {
+        assert_eq!(
+            findings(&ifelse),
+            vec![
+                r(15, 9, "indent-error-flow"),   // function body
+                r(25, 10, "indent-error-flow"),  // func literal inside a function
+                r(37, 10, "indent-error-flow"),  // for body
+                r(48, 10, "indent-error-flow"),  // range body
+                r(60, 10, "indent-error-flow"),  // case clause
+                // 72: the direct child of a select clause — not a chain
+                r(83, 10, "indent-error-flow"),  // plain block
+                // 94: a func literal inside an if condition — not visited
+                r(107, 10, "indent-error-flow"), // go func literal
+                r(118, 10, "indent-error-flow"), // nested in an if body
+                r(130, 10, "superfluous-else"),  // continue, then else
+                r(142, 10, "superfluous-else"),  // break in a case, then else
+                r(154, 10, "superfluous-else"),  // break to a label, then else
+                r(164, 10, "indent-error-flow"), // func literal in a var decl
+                r(175, 9, "indent-error-flow"),  // package-level func literal
+            ],
+        );
+        assert_eq!(
+            findings(&early),
+            vec![
+                r(10, 2, "early-return"), // last in a function
+                r(18, 2, "early-return"), // not last
+                r(28, 3, "early-return"), // last in a range body
+                r(38, 3, "early-return"), // last in an if body that is last
+                r(48, 3, "early-return"), // last in an if body that is not
+                r(60, 3, "early-return"), // last in a case clause
+                r(70, 3, "early-return"), // last in a func literal
+                // 80: if / else if / else — the jump is not in the first else
+                r(93, 3, "early-return"), // last inside an else block
+            ],
+        );
+    });
+}
+
 #[test]
 fn revive_preserve_scope_suppresses_scope_enlarging_suggestions() {
     use guff_revive::{with_settings, RuleArgument, RuleSetting, Settings};
