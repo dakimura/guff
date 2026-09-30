@@ -6,8 +6,8 @@
     "`unmeasured` is not `clean`: an absent measurement is a question."
   ],
   "goal": 100,
-  "defined": 86,
-  "clean": 79,
+  "defined": 93,
+  "clean": 86,
   "open": 2,
   "unmeasured": 5,
   "targets": {
@@ -147,6 +147,14 @@
       "tier": "pr",
       "state": "clean",
       "at": "20260929T014533Z",
+      "open": 0,
+      "guff_only": 0,
+      "gcl_only": 0
+    },
+    "colima": {
+      "tier": "hunt",
+      "state": "clean",
+      "at": "20260929T080511Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -352,6 +360,14 @@
       "guff_only": 0,
       "gcl_only": 0
     },
+    "hertz": {
+      "tier": "hunt",
+      "state": "clean",
+      "at": "20260929T080522Z",
+      "open": 0,
+      "guff_only": 0,
+      "gcl_only": 0
+    },
     "hydra": {
       "tier": "hunt",
       "state": "clean",
@@ -438,6 +454,22 @@
       "guff_only": 0,
       "gcl_only": 0
     },
+    "lipgloss": {
+      "tier": "hunt",
+      "state": "clean",
+      "at": "20260929T080505Z",
+      "open": 0,
+      "guff_only": 0,
+      "gcl_only": 0
+    },
+    "logrus": {
+      "tier": "hunt",
+      "state": "clean",
+      "at": "20260929T080451Z",
+      "open": 0,
+      "guff_only": 0,
+      "gcl_only": 0
+    },
     "loki": {
       "tier": "hunt",
       "state": "open",
@@ -485,6 +517,14 @@
       "tier": "hunt",
       "state": "clean",
       "at": "20260929T015200Z",
+      "open": 0,
+      "guff_only": 0,
+      "gcl_only": 0
+    },
+    "open-feature-go-sdk": {
+      "tier": "hunt",
+      "state": "clean",
+      "at": "20260929T080442Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -573,6 +613,14 @@
       "tier": "hunt",
       "state": "clean",
       "at": "20260905T031614Z",
+      "open": 0,
+      "guff_only": 0,
+      "gcl_only": 0
+    },
+    "stern": {
+      "tier": "hunt",
+      "state": "clean",
+      "at": "20260929T080409Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
@@ -667,6 +715,14 @@
       "tier": "hunt",
       "state": "clean",
       "at": "20260914T080226Z",
+      "open": 0,
+      "guff_only": 0,
+      "gcl_only": 0
+    },
+    "viper": {
+      "tier": "hunt",
+      "state": "clean",
+      "at": "20260929T080458Z",
       "open": 0,
       "guff_only": 0,
       "gcl_only": 0
