@@ -504,20 +504,17 @@ fn build_formatter_run_config(
 
     let mut gofumpt = formatters.gofumpt_options();
     if gofumpt.lang.is_none() {
-        gofumpt.lang = go_version
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-            .or_else(|| {
-                // mvdan/gofumpt with unset -lang tracks the toolchain; empty
-                // must not become "go1" (disables 0o octal rewrite — gin
-                // `//nolint:gofumpt` on time.Date(…, 07, 01, …)).
-                let v = guff_runner::detect_go_version();
-                if v.is_empty() {
-                    None
-                } else {
-                    Some(v)
-                }
-            });
+        // golangci sets `GoFumpt.LangVersion` to `run.go`, which is never
+        // empty after `handleGoVersion` (see `detect_run_go`). Empty must not
+        // become "go1" (that disables the 0o octal rewrite — gin's
+        // `//nolint:gofumpt` on time.Date(…, 07, 01, …)).
+        gofumpt.lang = Some(
+            go_version
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(detect_run_go),
+        );
     }
     gofumpt.match_golangci = !std::env::var_os("GUFF_GOFUMPT_MATCH_GOLANGCI")
         .is_some_and(|v| v == "0");
@@ -788,31 +785,27 @@ fn load_run_config(
     }
 
     // golangci `Loader.handleGoVersion`: `run.go` is a linter setting, not a
-    // source property. It also has to reach the cache key — two runs of the
-    // same tree that differ only in `run.go` are two different analyses, and
-    // the raw `linters.settings` fingerprint cannot see the difference.
-    linter_settings.apply_go_version(go_version.as_deref());
-    let settings_fingerprint = match go_version.as_deref() {
-        Some(v) if !v.trim().is_empty() => format!("{settings_fingerprint}\nrun.go={v}"),
-        _ => settings_fingerprint,
-    };
-    // `GOSECGOVERSION` is `run.go` after the loader has filled it in, so unlike
-    // the other linters gosec sees the *detected* value too — and detection
-    // prefers go.mod's `toolchain` line, which no package's module version
-    // carries. Only G601 reads it; `go env` is spent only when gosec runs.
-    let settings_fingerprint = if selection.resolve_names().iter().any(|n| n == "gosec") {
-        let go = go_version
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-            .unwrap_or_else(detect_run_go);
-        let fp = format!("{settings_fingerprint}\ngosec.go={go}");
-        linter_settings.gosec.go = Some(go);
-        fp
-    } else {
-        settings_fingerprint
-    };
+    // source property, and an unset one is *filled in* before anything reads
+    // it — `detectGoVersion` over the main go.mod, whose `toolchain` line wins
+    // over its `go` line (see `detect_run_go`). The result is what govet
+    // (loopclosure is dropped from 1.22), revive, gocritic, gofumpt's `-lang`
+    // and gosec's `GOSECGOVERSION` all see. guff used to pass only a
+    // configured value and let each linter fall back to the package's module
+    // version, which carries no toolchain line: a `go 1.21` + `toolchain
+    // go1.22.0` module kept loopclosure and revive's range-val rules on.
+    //
+    // It also has to reach the cache key — two runs of the same tree that
+    // differ only in `run.go` are two different analyses, and the raw
+    // `linters.settings` fingerprint cannot see the difference.
+    let run_go = go_version
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(detect_run_go);
+    linter_settings.apply_go_version(Some(&run_go));
+    linter_settings.gosec.go = Some(run_go.clone());
+    let settings_fingerprint = format!("{settings_fingerprint}\nrun.go={run_go}");
 
     let mut path_mode = crate::PathMode::Rel;
     if let Some(raw) = output.path_mode.as_deref() {
@@ -869,14 +862,12 @@ fn fmt_cmd(args: FmtArgs) -> Result<i32, RunError> {
 
     let mut gofumpt = formatters.gofumpt_options();
     if gofumpt.lang.is_none() {
-        gofumpt.lang = go_version.filter(|s| !s.is_empty()).or_else(|| {
-            let v = guff_runner::detect_go_version();
-            if v.is_empty() {
-                None
-            } else {
-                Some(v)
-            }
-        });
+        // `run.go` as `handleGoVersion` fills it in (see `detect_run_go`).
+        gofumpt.lang = Some(
+            go_version
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(detect_run_go),
+        );
     }
 
     let meta = MetaFormatter::new(

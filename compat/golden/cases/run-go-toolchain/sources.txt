@@ -1,0 +1,11 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# COMPAT-HARDENING Phase 4. `run-go` and `run-go-122` share this list; only
+# their `config.yml` differs.
+#
+# The module is `go 1.21` (see go.mod) and that is part of the fixture: the
+# checks that read a Go version fire *below* a version, so at the current one
+# there would be nothing for `run.go` to take away.
+
+gover/gover.go   crates/guff-lint/tests/testdata/runsem/gover/gover.go

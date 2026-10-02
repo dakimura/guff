@@ -5,6 +5,7 @@
 
 | 日付 | 内容 |
 |------|------|
+| 2026-10-02 | **`run.go` の自動検出を全 linter に**: golangci は未設定の `run.go` を go.mod から検出（`toolchain` 行優先）して govet / revive / gocritic / gofumpt / gosec に配る。guff は設定値しか配らず、`go 1.21` + `toolchain go1.22.0` の module で loopclosure と range-val 系を出していた。新 golden `run-go-toolchain`（`run-go-122` と同一キー）（続き 376） |
 | 2026-10-01 | **`adopt nerdctl`**: forbidigo / var-declaration / gci の 3 修正で 0/0、ill-typed 0。台帳 **113 定義 / 106 clean**（続き 375） |
 | 2026-10-01 | **`close nerdctl`（3）**: gci の `no-inline-comments` / `no-prefix-comments` は pin されている gci v0.13.7 ではどこからも読まれない no-op（CLI でも deprecated）。guff は実装して nerdctl の行末コメント付き import を「未整形」にしていた。fmt 層に on/off の対（上流出力はバイト同一）（続き 373） |
 | 2026-10-01 | **19 本採用、台帳 105/100 —— 目標到達**: 補充キューの 14 本（修正不要）と close 済みの gorm / glamour / grype（3056/3056）/ gosec / kitex を、全修正入りの main で測り直して登録。112 定義 / 105 clean / open 2（deferred）/ unmeasured 5（linux 専用）。nerdctl は #464/#465 待ち、lima は cgo 由来の revive 2 件が残る（続き 374） |
