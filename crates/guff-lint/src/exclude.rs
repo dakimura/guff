@@ -488,7 +488,18 @@ impl IssueFilter {
         // metalinter, whose own sort is by name; and `linter.LastLinter`
         // (nolintlint) is handled where nolintlint's findings are born, which
         // is after this sort — see `NolintIndex::filter_issues`.
-        issues.sort_by(|a, b| a.from_linter.cmp(&b.from_linter));
+        //
+        // Name order *within two groups*, though. The goanalysis runner returns
+        // `slices.Concat(retIssues, buildIssues(diags, …))`: the issues of the
+        // linters that report through golangci's issue reporter
+        // (`WithIssuesReporter`) first, each in turn, and only then the
+        // `analysis.Diagnostic`s of the rest. On one line, revive's
+        // range-val-in-closure therefore survives `uniq-by-line` over govet's
+        // loopclosure, though `govet` < `revive`.
+        issues.sort_by(|a, b| {
+            let group = |l: &str| u8::from(!reports_through_issue_reporter(l));
+            (group(&a.from_linter), &a.from_linter).cmp(&(group(&b.from_linter), &b.from_linter))
+        });
 
         // golangci Cgo processor: drop issues under GOCACHE / _cgo_gotypes.go.
         let go_cache = self.go_cache_dir.as_deref();
@@ -1375,6 +1386,37 @@ mod tests {
     }
 
     #[test]
+    fn uniq_by_line_puts_issue_reporter_linters_first() {
+        // golangci's goanalysis runner concatenates the issues of the linters
+        // that report through `WithIssuesReporter` (revive, gosec, errcheck, …)
+        // *before* the `analysis.Diagnostic`s of the rest (govet,
+        // staticcheck, …), each group in name order. So on one line revive's
+        // range-val-in-closure beats govet's loopclosure though "govet" <
+        // "revive"; within a group, name order still decides.
+        let filter =
+            IssueFilter::from_config(&IssuesConfig::default(), &SeverityConfig::default());
+        let kept = filter.apply(
+            vec![
+                issue_at("govet", "a.go", 13, "loopclosure: loop variable v captured by func literal"),
+                issue_at("revive", "a.go", 13, "range-val-in-closure: loop variable v captured by func literal"),
+                issue_at("revive", "a.go", 12, "range-val-address: suspicious assignment of 'v'"),
+                issue_at("gosec", "a.go", 12, "G601: Implicit memory aliasing in for loop."),
+                issue_at("staticcheck", "a.go", 20, "SA5009: Printf format %d has arg of wrong type string"),
+                issue_at("govet", "a.go", 20, "printf: fmt.Printf format %d has arg \"s\" of wrong type string"),
+            ],
+            &[],
+        );
+        let mut by_line: Vec<(i64, &str)> =
+            kept.iter().map(|i| (i.line as i64, i.from_linter.as_str())).collect();
+        by_line.sort();
+        assert_eq!(
+            by_line,
+            vec![(12, "gosec"), (13, "revive"), (20, "govet")],
+            "reporter over diagnostic on line 13; name order within a group on 12 and 20"
+        );
+    }
+
+    #[test]
     fn severity_default_applied() {
         let severity = SeverityConfig {
             default_severity: Some("warning".into()),
@@ -1775,4 +1817,28 @@ linters:
         }
         assert_eq!(normalize_slashes(r"C:\tmp\a.go").as_ref(), "C:/tmp/a.go");
     }
+}
+
+/// Linters whose golangci wrapper collects issues itself and hands them over
+/// with `WithIssuesReporter` (golangci-lint 2.12.2 `pkg/golinters`), rather
+/// than as `analysis.Diagnostic`s. Their issues come first in the runner's
+/// output — see the sort in `ExcludeConfig::apply`.
+fn reports_through_issue_reporter(linter: &str) -> bool {
+    matches!(
+        linter,
+        "dupl"
+            | "errcheck"
+            | "gochecksumtype"
+            | "gocognit"
+            | "goconst"
+            | "gocyclo"
+            | "gomoddirectives"
+            | "gomodguard"
+            | "gosec"
+            | "nolintlint"
+            | "promlinter"
+            | "revive"
+            | "unconvert"
+            | "unused"
+    )
 }

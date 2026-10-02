@@ -1,0 +1,12 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh issues-uniq-by-line-reporter-first
+# Produced by running golangci-lint on compat/golden/cases/issues-uniq-by-line-reporter-first/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+reporter/reporter.go:12:21:gosec:medium:G601: Implicit memory aliasing in for loop.
+reporter/reporter.go:13:27:revive:warning:range-val-in-closure: loop variable v captured by func literal
+reporter/reporter.go:19:11:errcheck::Error return value of `os.Remove` is not checked
+reporter/reporter.go:20:14:govet::printf: fmt.Printf format %d has arg "s" of wrong type string
