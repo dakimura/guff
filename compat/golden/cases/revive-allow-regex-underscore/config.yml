@@ -1,0 +1,28 @@
+# Golden case: revive's option keys ignore case and hyphens — not underscores.
+#
+# revive's `isRuleOption` lowercases the key and removes `-`, so
+# `allowRegex`, `allow-regex` and `AllowRegex` are all the same option, but
+# `allow_regex` is an unknown key that the rule passes over: unused-parameter
+# and unused-receiver keep their default `^_$` and say "renaming it as _".
+# guff dropped underscores as well and applied the pattern. Same fixture as
+# `revive-allow-regex`, whose `allowRegex` spelling does apply it.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      rules:
+        - name: unused-parameter
+          arguments:
+            - allow_regex: "^_"
+        - name: unused-receiver
+          arguments:
+            - allow_regex: "^_"
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false

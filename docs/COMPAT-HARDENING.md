@@ -38046,3 +38046,23 @@ unconvert, unused）の分で、metalinter の linter 順（名前順）に並�
 4 行）と unit test（govet / revive・gosec / revive・staticcheck / govet）。修正前は unit test が落ちる。
 コーパスの hunt は `uniq-by-line: false` に patch して測るので、この差は台帳には出ない —— 既定設定の
 利用者にだけ見える差だった。
+
+### 2026-10-02（続き 378）— revive のオプション名は**ハイフンだけ**を無視する
+
+続き 370（dot-imports）で残した宿題。revive の `isRuleOption` は `normalizeRuleOption` —— 小文字化して
+`-` を除く —— で照合する。guff の共有 `config::is_rule_option` は `_` も除いていた。これを使っていたのは
+file-length-limit の `max`（`-` も `_` も含まないので無関係）と、unused-parameter / unused-receiver の
+`allowRegex`（`AllowRegex::new`）の 2 か所。他の規則は既に `rule_option_matches`（`-` だけ）だった。
+
+#### 測定（unused-parameter、`keep` と `_x` の 2 引数）
+
+| キー | 上流 | 修正前の guff |
+|---|---|---|
+| `allowRegex: "^_"` | `to match ^_` | 同じ |
+| `allow-regex` | `to match ^_` | 同じ |
+| `AllowRegex` | `to match ^_` | 同じ |
+| `allow_regex` | **既定 `^_$` のまま**（`renaming it as _`） | `to match ^_`（適用していた） |
+
+`is_rule_option` を `rule_option_matches` に委ね、dot-imports の自前の正規化もそれに寄せた。golden は
+`revive-allow-regex` と同じ fixture で鍵だけ `allow_regex` にした新 case `revive-allow-regex-underscore`
+（上流は `_ctx` / `_t` も既定の `^_$` に外れて報告する）、unit test は 5 通りの綴りと 2 つの下線版。

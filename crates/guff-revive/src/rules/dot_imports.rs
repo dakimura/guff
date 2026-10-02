@@ -5,8 +5,7 @@
 //! lima allows its own `pkg/must` that way. The key is matched as revive's
 //! `isRuleOption` does — lowercased with hyphens removed, so `allowedPackages`,
 //! `allowed-packages` and `AllowedPackages` all count, but `allowed_packages`
-//! does not (guff's shared `config::is_rule_option` also drops underscores,
-//! which is why this rule does not use it).
+//! does not.
 
 use std::collections::HashSet;
 
@@ -24,11 +23,6 @@ pub struct Checker {
     allowed: HashSet<String>,
 }
 
-/// revive `normalizeRuleOption`: lowercase, hyphens removed.
-fn normalize_rule_option(s: &str) -> String {
-    s.replace('-', "").to_lowercase()
-}
-
 fn allowed_packages(pass: &Pass<'_>) -> HashSet<String> {
     let mut out = HashSet::new();
     let args = config::rule_arguments(pass, "dot-imports");
@@ -36,7 +30,7 @@ fn allowed_packages(pass: &Pass<'_>) -> HashSet<String> {
         return out;
     };
     for (k, v) in map {
-        if normalize_rule_option(k) != normalize_rule_option("allowedPackages") {
+        if !config::is_rule_option(k, "allowedPackages") {
             continue;
         }
         if let RuleArgument::List(items) = v {
