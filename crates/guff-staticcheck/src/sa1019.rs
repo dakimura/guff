@@ -1092,6 +1092,17 @@ fn import_diagnostic(
     if related_pkg_path(pass, path) {
         return None;
     }
+    // Upstream: `if path == "github.com/golang/protobuf/proto" { gen, ok :=
+    // code.Generator(pass, spec.Path.Pos()); if ok && gen ==
+    // generated.ProtocGenGo { return } }` — protoc-gen-go output may import
+    // the deprecated package. Only that generator: mockgen output importing it
+    // is still reported.
+    if path == "github.com/golang/protobuf/proto"
+        && guff_analysis::code::generator_at(pass, spec.path.value_pos.0 as u32)
+            == Some(guff_analysis::passes::facts::generated::Generator::ProtocGenGo)
+    {
+        return None;
+    }
     // Export-only stdlib deps never run `fact_deprecated`. Synthesize the
     // package fact from the knowledge table + frozen GOROOT package docs.
     // Third-party: package docs survive Mode::NONE, but fact remapping can

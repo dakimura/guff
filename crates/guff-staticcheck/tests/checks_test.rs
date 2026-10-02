@@ -2670,6 +2670,25 @@ fn sa1019_flags_a_deprecated_method_promoted_through_embedding() {
     assert_eq!(messages.len(), 9, "{messages:?}");
 }
 
+/// SA1019 lets protoc-gen-go's output import the deprecated
+/// `github.com/golang/protobuf/proto`: upstream returns when
+/// `code.Generator(pass, spec.Path.Pos()) == generated.ProtocGenGo`. Only that
+/// generator — mockgen output importing it is reported, as is plain code.
+/// Measured against golangci-lint 2.12.2 with the real module.
+#[test]
+fn sa1019_lets_protoc_gen_go_output_import_golang_protobuf() {
+    let count = |file: &str| {
+        let pkg = typecheck_rule("sa1019", file);
+        support::run_analyzer(sa1019::analyzer(), &pkg)
+            .iter()
+            .filter(|m| m.contains("github.com/golang/protobuf/proto\" is deprecated"))
+            .count()
+    };
+    assert_eq!(count("protogen/pb.go"), 0, "protoc-gen-go output");
+    assert_eq!(count("protogen/mock.go"), 1, "mockgen output");
+    assert_eq!(count("protogen/plain.go"), 1, "plain code");
+}
+
 #[test]
 fn sa1019_allows_live_fields_reached_through_embedding() {
     // Controls for the promoted-field lookup: a live sibling of the deprecated

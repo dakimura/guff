@@ -5,6 +5,7 @@
 
 | 日付 | 内容 |
 |------|------|
+| 2026-10-02 | **SA1019 の protoc-gen-go 例外**: protoc-gen-go の出力が deprecated な `github.com/golang/protobuf/proto` を import しても上流は黙る（mockgen や手書きは報告）。guff に無かった。新 golden `staticcheck-sa1019-protoc-gen-go`（続き 379） |
 | 2026-10-02 | **revive のオプション名**: 上流の `isRuleOption` はハイフンだけを無視し、下線は無視しない。guff の共有ヘルパは下線も除いていて、`allow_regex` を `allowRegex` として適用していた。新 golden `revive-allow-regex-underscore`（続き 378） |
 | 2026-10-02 | **`uniq-by-line` の並び**: golangci の goanalysis runner は issue reporter 経由の linter（revive・gosec・errcheck ほか 14）の issue を先に、`analysis.Diagnostic` の linter（govet・staticcheck…）を後に並べる。guff は名前順一列で、同じ行の govet と revive で残す方が逆だった。新 golden `issues-uniq-by-line-reporter-first`。hunt は uniq を切って測るので台帳には出ない差（続き 377） |
 | 2026-10-02 | **`run.go` の自動検出を全 linter に**: golangci は未設定の `run.go` を go.mod から検出（`toolchain` 行優先）して govet / revive / gocritic / gofumpt / gosec に配る。guff は設定値しか配らず、`go 1.21` + `toolchain go1.22.0` の module で loopclosure と range-val 系を出していた。新 golden `run-go-toolchain`（`run-go-122` と同一キー）（続き 376） |
