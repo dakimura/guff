@@ -333,16 +333,13 @@ pub fn rule_arg_strings(pass: &Pass<'_>, name: &str) -> Vec<String> {
 }
 
 /// Upstream compares configuration keys case-insensitively and ignoring `-`
-/// and `_`, so `max`, `Max`, `skip-comments` and `skipComments` all match
-/// (`lint.isRuleOption`).
+/// (`isRuleOption`), so `max`, `Max`, `skip-comments` and `skipComments` all
+/// match — **hyphens** only, not underscores.
+/// `allow_regex` is not `allowRegex` upstream (unused-parameter keeps its
+/// default `^_$` and says "renaming it as _"); this used to drop underscores
+/// too and applied it.
 pub fn is_rule_option(key: &str, want: &str) -> bool {
-    fn norm(s: &str) -> String {
-        s.chars()
-            .filter(|c| *c != '-' && *c != '_')
-            .flat_map(char::to_lowercase)
-            .collect()
-    }
-    norm(key) == norm(want)
+    rule_option_matches(key, want)
 }
 
 /// `arguments: [{ allowRegex: "^_" }]`, shared verbatim by `unused-parameter`
@@ -510,4 +507,21 @@ pub fn with_settings<R>(settings: Settings, f: impl FnOnce() -> R) -> R {
     let out = f();
     THREAD_SETTINGS.with(|slot| *slot.borrow_mut() = None);
     out
+}
+
+#[cfg(test)]
+mod rule_option_tests {
+    use super::*;
+
+    /// revive `isRuleOption`: case and hyphens are ignored, underscores are
+    /// not. Measured with unused-parameter's `allowRegex` against
+    /// golangci-lint 2.12.2.
+    #[test]
+    fn option_keys_ignore_case_and_hyphens_not_underscores() {
+        for key in ["allowRegex", "allow-regex", "AllowRegex", "allowregex", "ALLOW-REGEX"] {
+            assert!(is_rule_option(key, "allowRegex"), "{key}");
+        }
+        assert!(!is_rule_option("allow_regex", "allowRegex"));
+        assert!(!is_rule_option("allowed_packages", "allowedPackages"));
+    }
 }
