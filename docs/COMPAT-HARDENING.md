@@ -37978,3 +37978,37 @@ var-declaration 1 と、同じ run で他の 7 件が出ていたが、それら
 （その間に入った修正のどれが効いたかは、この測定からは切り分けられない）。
 
 台帳は **113 定義 / 106 clean / open 2 / unmeasured 5**。
+
+### 2026-10-02（続き 376）— `run.go` が未設定なら、**検出した値**を全 linter に渡す
+
+続き 361（gosec G601）で残した宿題。golangci-lint の `Loader.handleGoVersion` は、未設定の `run.go` を
+`detectGoVersion`（go.mod の **`toolchain` 行が `go` 行より優先**）で埋めてから、govet（1.22 以上で
+loopclosure を外す）・revive・gocritic・gofumpt の `-lang`・gosec の `GOSECGOVERSION` に配る。guff は
+設定された `run.go` だけを配り、未設定なら各 linter がパッケージの module version（toolchain 行を持たない）
+に落ちていた。gofumpt の `-lang` は未設定時に**ホストのツールチェイン**を使っていた。
+
+#### 測定（scratchpad、`uniq-by-line: false`）
+
+| go.mod / config | 上流 | 修正前の guff | 修正後 |
+|---|---|---|---|
+| `go 1.21` + `toolchain go1.22.0` | 0 件 | **loopclosure / range-val-address / range-val-in-closure** | 0 件 |
+| `go 1.20` + `toolchain go1.22.0` | 0 件 | 同上 | 0 件 |
+| `go 1.21` | 4 件 | 4 件 | 4 件 |
+| `go 1.21` + toolchain + `run.go: "1.21"` | 4 件 | 4 件 | 4 件 |
+| `go 1.22` | 0 件 | 0 件 | 0 件 |
+
+`run.go` は CLI で 1 回だけ決め（設定値、無ければ `detect_run_go`）、`apply_go_version`・gosec・gofumpt の
+2 経路すべてに同じ値を渡す。issues cache の指紋にも常に `run.go=` を足した。
+
+コーパスで toolchain 行が `go` 行と minor を変えるのは gotify（1.25 → 1.26）と photoprism（同）の 2 本だけで、
+修正後に測り直して gotify 1/1、photoprism 452/452 のまま。
+
+golden は新 case `run-go-toolchain`（`run-go` と同じ設定・`go 1.21` + `toolchain go1.22.0`）—— 上流の答えは
+`run-go-122`（`run.go: "1.22"` を手で書いた case）と**キー単位で同一**。
+
+#### ついでに見えたこと（次の PR）
+
+`uniq-by-line: true`（既定）だと、同じ行に複数の linter が出たとき残る 1 件が上流と違った。上流の
+goanalysis runner は **issue reporter 経由の linter（revive・gosec・errcheck ほか 14 本）の issue を先に**、
+`analysis.Diagnostic` の linter を後に並べる（`slices.Concat(retIssues, buildIssues(diags, …))`）。guff は
+linter 名の一列で並べていた。
