@@ -5,6 +5,7 @@
 
 | 日付 | 内容 |
 |------|------|
+| 2026-10-02 | **`uniq-by-line` の並び**: golangci の goanalysis runner は issue reporter 経由の linter（revive・gosec・errcheck ほか 14）の issue を先に、`analysis.Diagnostic` の linter（govet・staticcheck…）を後に並べる。guff は名前順一列で、同じ行の govet と revive で残す方が逆だった。新 golden `issues-uniq-by-line-reporter-first`。hunt は uniq を切って測るので台帳には出ない差（続き 377） |
 | 2026-10-02 | **`run.go` の自動検出を全 linter に**: golangci は未設定の `run.go` を go.mod から検出（`toolchain` 行優先）して govet / revive / gocritic / gofumpt / gosec に配る。guff は設定値しか配らず、`go 1.21` + `toolchain go1.22.0` の module で loopclosure と range-val 系を出していた。新 golden `run-go-toolchain`（`run-go-122` と同一キー）（続き 376） |
 | 2026-10-01 | **`adopt nerdctl`**: forbidigo / var-declaration / gci の 3 修正で 0/0、ill-typed 0。台帳 **113 定義 / 106 clean**（続き 375） |
 | 2026-10-01 | **`close nerdctl`（3）**: gci の `no-inline-comments` / `no-prefix-comments` は pin されている gci v0.13.7 ではどこからも読まれない no-op（CLI でも deprecated）。guff は実装して nerdctl の行末コメント付き import を「未整形」にしていた。fmt 層に on/off の対（上流出力はバイト同一）（続き 373） |

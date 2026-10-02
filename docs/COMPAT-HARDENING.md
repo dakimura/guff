@@ -38012,3 +38012,37 @@ golden は新 case `run-go-toolchain`（`run-go` と同じ設定・`go 1.21` + `
 goanalysis runner は **issue reporter 経由の linter（revive・gosec・errcheck ほか 14 本）の issue を先に**、
 `analysis.Diagnostic` の linter を後に並べる（`slices.Concat(retIssues, buildIssues(diags, …))`）。guff は
 linter 名の一列で並べていた。
+
+### 2026-10-02（続き 377）— `uniq-by-line` は **issue reporter の linter を先に**並べた順で 1 件を残す
+
+`uniq-by-line`（既定 true）は golangci の `UniqByLine` processor で、(file, line) ごとに**最初に来た** issue を
+残す。並びは `SortResults` より前、goanalysis runner が返した順。guff は「linter 名の順」と書いて名前で
+並べていた（`exclude.rs`）。
+
+上流（golangci-lint 2.12.2 `pkg/goanalysis/runners.go`）:
+
+```go
+return slices.Concat(retIssues, buildIssues(diags, cfg.getLinterNameForDiagnostic))
+```
+
+`retIssues` は `WithIssuesReporter` で自前に issue を集める linter（dupl, errcheck, gochecksumtype,
+gocognit, goconst, gocyclo, gomoddirectives, gomodguard, gosec, nolintlint, promlinter, revive,
+unconvert, unused）の分で、metalinter の linter 順（名前順）に並ぶ。その**後ろ**に
+`analysis.Diagnostic` の linter（govet, staticcheck, …）が、analyzer 順 × パッケージ順で続く。
+
+#### 測定（scratchpad、同じ行に 2 linter × 4 行）
+
+| 行 | 組 | 上流が残す | 修正前の guff |
+|---|---|---|---|
+| `out = append(out, &v)` | gosec G601 / revive range-val-address（reporter 同士） | gosec | gosec |
+| `go func() { fmt.Println(v) }()` | govet loopclosure / revive range-val-in-closure | **revive** | **govet** |
+| `os.Remove("x")` | errcheck / gosec G104（reporter 同士） | errcheck | errcheck |
+| `fmt.Printf("%d", "s")` | staticcheck / govet printf（diagnostic 同士） | govet | govet |
+
+5 回回して上流の答えは毎回同じ（非決定ではない）。並べ替えを「(reporter か, 名前)」の安定ソートにした。
+
+既存の golden `issues-uniq-by-line-order` は errcheck と staticcheck の組で、どちらの規則でも errcheck が
+先なので区別できていなかった。新 case `issues-uniq-by-line-reporter-first`（既定の `uniq-by-line`、上の
+4 行）と unit test（govet / revive・gosec / revive・staticcheck / govet）。修正前は unit test が落ちる。
+コーパスの hunt は `uniq-by-line: false` に patch して測るので、この差は台帳には出ない —— 既定設定の
+利用者にだけ見える差だった。
