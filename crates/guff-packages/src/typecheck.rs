@@ -1510,6 +1510,7 @@ impl DepLoadWalk {
                     || production_reaches_stack(
                         dep,
                         &self.visiting,
+                        &self.done,
                         dep_graph,
                         test_only,
                         loadable,
@@ -1540,9 +1541,16 @@ impl DepLoadWalk {
 /// is deciding about, and a ring that needs a *second* one to close is the
 /// legal `P`-test-imports-`Q`-whose-test-imports-`P` shape, which the walk
 /// handles by declining whichever of the two it reaches second.
+///
+/// The search stops at anything in `done`. The walk finishes a package only
+/// after every production dependency of it is finished, so nothing a finished
+/// package reaches by production edges can still be open. Without the cut every
+/// test edge re-walked the production graph from scratch: on grafana (4549 seed
+/// deps) that was 3.5s of serial time in front of the seed build.
 fn production_reaches_stack(
     from: &str,
     open: &[String],
+    done: &HashSet<String>,
     dep_graph: &HashMap<String, Vec<String>>,
     test_only: &HashMap<String, Vec<String>>,
     loadable: &HashSet<String>,
@@ -1554,7 +1562,7 @@ fn production_reaches_stack(
         if open.contains(p) {
             return true;
         }
-        if !seen.insert(p) {
+        if done.contains(p) || !seen.insert(p) {
             continue;
         }
         let Some(deps) = dep_graph.get(p) else {
