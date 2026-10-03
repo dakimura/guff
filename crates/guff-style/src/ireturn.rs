@@ -4,17 +4,16 @@
 //! "Accept Interfaces, Return Concrete Types" — report functions that return
 //! interfaces. Default allow-list: `anon`, `error`, `empty`, `stdlib`.
 //!
-//! DEFERRED: full upstream std package table (we use the Go "first path element
-//! has no `.`" heuristic); collision error when both `allow` and `reject` are
+//! DEFERRED: collision error when both `allow` and `reject` are
 //! set (prefer `reject`); per-func `//nolint:ireturn` (guff CLI nolint covers
 //! this); generic type-param `OfType` detail string parity.
 
+use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use guff::ast::{Decl, Expr, FuncDecl, InterfaceType};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
-use guff_types::predicates::is_type_param;
 use guff_types::{TypeData, TypeId};
 use regex::Regex;
 
@@ -53,13 +52,46 @@ fn default_allow() -> Vec<String> {
     ]
 }
 
-/// Go / `golang.org/x/mod` heuristic: std packages have no `.` in the first path element.
+/// Upstream's `std` table (`analyzer/std.go`, generated), transcribed rather
+/// than guessed. A "no `.` in the first path element" heuristic calls every
+/// package of a dotless module (`module myapp`) standard library, and `stdlib`
+/// is on the default allow-list, so those interfaces were never reported.
+const STD_PKGS: &[&str] = &[
+    "archive/tar", "archive/zip", "bufio", "bytes", "cmd/cgo", "cmd/fix", "cmd/go", "cmd/gofmt",
+    "cmd/yacc", "compress/bzip2", "compress/flate", "compress/gzip", "compress/lzw",
+    "compress/zlib", "container/heap", "container/list", "container/ring", "crypto",
+    "crypto/aes", "crypto/cipher", "crypto/des", "crypto/dsa", "crypto/ecdsa",
+    "crypto/elliptic", "crypto/hmac", "crypto/md5", "crypto/rand", "crypto/rc4", "crypto/rsa",
+    "crypto/sha1", "crypto/sha256", "crypto/sha512", "crypto/subtle", "crypto/tls",
+    "crypto/x509", "crypto/x509/pkix", "database/sql", "database/sql/driver", "debug/dwarf",
+    "debug/elf", "debug/gosym", "debug/macho", "debug/pe", "encoding", "encoding/ascii85",
+    "encoding/asn1", "encoding/base32", "encoding/base64", "encoding/binary", "encoding/csv",
+    "encoding/gob", "encoding/hex", "encoding/json", "encoding/pem", "encoding/xml", "errors",
+    "expvar", "flag", "fmt", "go/ast", "go/build", "go/doc", "go/format", "go/parser",
+    "go/printer", "go/scanner", "go/token", "hash", "hash/adler32", "hash/crc32", "hash/crc64",
+    "hash/fnv", "html", "html/template", "image", "image/color", "image/color/palette",
+    "image/draw", "image/gif", "image/jpeg", "image/png", "index/suffixarray", "io",
+    "io/ioutil", "log", "log/syslog", "math", "math/big", "math/cmplx", "math/rand", "mime",
+    "mime/multipart", "net", "net/http", "net/http/cgi", "net/http/cookiejar", "net/http/fcgi",
+    "net/http/httptest", "net/http/httputil", "net/http/pprof", "net/mail", "net/rpc",
+    "net/rpc/jsonrpc", "net/smtp", "net/textproto", "net/url", "os", "os/exec", "os/signal",
+    "os/user", "path", "path/filepath", "reflect", "regexp", "regexp/syntax", "runtime",
+    "runtime/cgo", "runtime/debug", "runtime/pprof", "runtime/race", "sort", "strconv",
+    "strings", "sync", "sync/atomic", "syscall", "testing", "testing/iotest", "testing/quick",
+    "text/scanner", "text/tabwriter", "text/template", "text/template/parse", "time", "unicode",
+    "unicode/utf16", "unicode/utf8", "unsafe", "cmd/addr2line", "cmd/nm", "cmd/objdump",
+    "cmd/pack", "debug/plan9obj", "cmd/pprof", "go/constant", "go/importer", "go/types",
+    "mime/quotedprintable", "runtime/trace", "context", "net/http/httptrace", "plugin",
+    "math/bits", "crypto/ed25519", "hash/maphash", "time/tzdata", "embed",
+    "go/build/constraint", "io/fs", "runtime/metrics", "testing/fstest", "debug/buildinfo",
+    "net/netip", "go/doc/comment", "crypto/ecdh", "runtime/coverage", "cmp", "log/slog", "maps",
+    "slices", "testing/slogtest", "go/version", "math/rand/v2", "iter", "structs", "unique",
+    "crypto/fips140", "crypto/hkdf", "crypto/mlkem", "crypto/pbkdf2", "crypto/sha3", "weak",
+    "testing/synctest", "crypto/hpke", "crypto/mlkem/mlkemtest", "testing/cryptotest",
+];
+
 fn is_std_pkg(pkg: &str) -> bool {
-    if pkg.is_empty() {
-        return false;
-    }
-    let elem = pkg.split('/').next().unwrap_or(pkg);
-    !elem.contains('.')
+    STD_PKGS.contains(&pkg)
 }
 
 fn pkg_of_named(named: &str) -> Option<&str> {
@@ -67,6 +99,7 @@ fn pkg_of_named(named: &str) -> Option<&str> {
     Some(&named[..idx])
 }
 
+/// Upstream `isStdPkgInterface`: the text before the last `.` is in the table.
 fn is_std_named_interface(named: &str) -> bool {
     pkg_of_named(named).is_some_and(is_std_pkg)
 }
@@ -116,40 +149,38 @@ fn classify_ast_interface(it: &InterfaceType) -> IFace {
     }
 }
 
-fn classify_typed(pass: &Pass<'_>, expr: &Expr) -> Option<IFace> {
+/// The interface behind a result type, if it has one.
+fn interface_under(pass: &Pass<'_>, expr: &Expr) -> Option<TypeId> {
     let typ = type_of_expr(pass, expr)?;
-    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
-        return None;
-    };
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let under = typ.underlying(&artifacts.types);
+    matches!(artifacts.types.get(under), TypeData::Interface(_)).then_some(typ)
+}
 
-    // Resolve aliases so `type E = error` still classifies as error.
-    let resolved = match artifacts.types.get(typ) {
-        TypeData::Alias(_) => typ.underlying(&artifacts.types),
-        _ => typ,
-    };
-    let under = resolved.underlying(&artifacts.types);
+/// Upstream's `*ast.Ident` arm, which classifies by the type's *string*:
+/// `TypeOf(ident).String()`.
+///
+/// An alias is its own name there — `type handler = other.Handler` prints as
+/// `pkg.handler` — so it is a named interface even when it aliases `error` or
+/// a stdlib interface. guff used to classify the aliased type's *underlying*
+/// interface instead, which is unnamed, and so called it `anon`: on the
+/// default allow-list, and never reported.
+fn classify_ident(pass: &Pass<'_>, expr: &Expr, dot_imported_std: &HashSet<String>) -> Option<IFace> {
+    let typ = interface_under(pass, expr)?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let under = typ.underlying(&artifacts.types);
     let name = type_string(pass, typ);
+    // Upstream asks whether the string has a package qualifier. A package's
+    // own named type always prints with one — except when the package path is
+    // empty, which only a test harness produces — so ask the type as well.
+    let has_pkg = match artifacts.types.get(typ) {
+        TypeData::Named(n) => n.obj().pkg(&artifacts.objects).is_some(),
+        TypeData::Alias(a) => a.obj().pkg(&artifacts.objects).is_some(),
+        _ => false,
+    };
+    let is_named = name.contains('.') || has_pkg;
 
-    // Type parameters → generic keyword.
-    if is_type_param(&artifacts.types, typ) || is_type_param(&artifacts.types, resolved) {
-        let of_type = type_string(pass, under)
-            .trim_start_matches("interface{")
-            .trim_end_matches('}')
-            .trim()
-            .to_string();
-        return Some(IFace {
-            name,
-            kind: IFaceKind::Generic,
-            of_type,
-        });
-    }
-
-    if !matches!(artifacts.types.get(under), TypeData::Interface(_)) {
-        return None;
-    }
-
-    // `any` / empty interface
-    if iface_is_empty(pass, resolved) && (name == "any" || name == "interface{}") {
+    if iface_is_empty(pass, typ) && name == "any" {
         return Some(IFace {
             name,
             kind: IFaceKind::Empty,
@@ -163,63 +194,54 @@ fn classify_typed(pass: &Pass<'_>, expr: &Expr) -> Option<IFace> {
             of_type: String::new(),
         });
     }
-
-    // Named interface (same-package types may print without a `pkg.` prefix when
-    // the fixture package path is empty — still Named, not Generic).
-    let is_named_type = matches!(
-        artifacts.types.get(resolved),
-        TypeData::Named(_) | TypeData::Alias(_)
-    );
-    if is_named_type {
-        // Prefer package path from the type object for stdlib detection.
-        let pkg_path = match artifacts.types.get(resolved) {
-            TypeData::Named(n) => {
-                let obj = n.obj();
-                obj.pkg(&artifacts.objects)
-                    .map(|p| artifacts.packages.get(p).path().to_string())
-            }
-            TypeData::Alias(a) => {
-                let obj = a.obj();
-                obj.pkg(&artifacts.objects)
-                    .map(|p| artifacts.packages.get(p).path().to_string())
-            }
-            _ => None,
-        };
-        if pkg_path.as_deref().is_some_and(is_std_pkg) || is_std_named_interface(&name) {
-            return Some(IFace {
-                name,
-                kind: IFaceKind::NamedStd,
-                of_type: String::new(),
-            });
-        }
+    // No package qualifier: a type parameter.
+    if !is_named {
+        let of_type = type_string(pass, under)
+            .trim_start_matches("interface{")
+            .trim_end_matches('}')
+            .trim()
+            .to_string();
         return Some(IFace {
             name,
-            kind: IFaceKind::Named,
-            of_type: String::new(),
+            kind: IFaceKind::Generic,
+            of_type,
         });
     }
-
-    // Unnamed interface from types info (shouldn't normally reach here).
-    if iface_is_empty(pass, resolved) {
-        Some(IFace {
-            name: if name.is_empty() {
-                "interface{}".to_string()
-            } else {
-                name
-            },
-            kind: IFaceKind::Empty,
-            of_type: String::new(),
-        })
+    // A stdlib interface reached by a bare name only through a dot import.
+    let kind = if pkg_of_named(&name)
+        .is_some_and(|pkg| is_std_pkg(pkg) && dot_imported_std.contains(pkg))
+    {
+        IFaceKind::NamedStd
     } else {
-        Some(IFace {
-            name: "anonymous interface".to_string(),
-            kind: IFaceKind::Anon,
-            of_type: String::new(),
-        })
-    }
+        IFaceKind::Named
+    };
+    Some(IFace {
+        name,
+        kind,
+        of_type: String::new(),
+    })
 }
 
-fn collect_results(pass: &Pass<'_>, fd: &FuncDecl) -> Vec<IFace> {
+/// Upstream's `*ast.SelectorExpr` arm.
+fn classify_selector(pass: &Pass<'_>, expr: &Expr) -> Option<IFace> {
+    let typ = interface_under(pass, expr)?;
+    let name = type_string(pass, typ);
+    let kind = if is_std_named_interface(&name) {
+        IFaceKind::NamedStd
+    } else {
+        IFaceKind::Named
+    };
+    Some(IFace {
+        name,
+        kind,
+        of_type: String::new(),
+    })
+}
+
+/// Upstream `filterInterfaces`: only three spellings of a result type are
+/// looked at. `*I`, `G[int]`, `[]I`, a parenthesized type … are not results to
+/// ireturn at all.
+fn collect_results(pass: &Pass<'_>, fd: &FuncDecl, dot_imported_std: &HashSet<String>) -> Vec<IFace> {
     let Some(results) = fd.ty.results.as_ref() else {
         return Vec::new();
     };
@@ -228,20 +250,13 @@ fn collect_results(pass: &Pass<'_>, fd: &FuncDecl) -> Vec<IFace> {
         let Some(ty) = field.ty.as_ref() else {
             continue;
         };
-        match ty {
-            Expr::InterfaceType(it) => out.push(classify_ast_interface(it)),
-            Expr::Ident(_) | Expr::SelectorExpr(_) => {
-                if let Some(issue) = classify_typed(pass, ty) {
-                    out.push(issue);
-                }
-            }
-            _ => {
-                // StarExpr / IndexExpr etc. — try types info.
-                if let Some(issue) = classify_typed(pass, ty) {
-                    out.push(issue);
-                }
-            }
-        }
+        let issue = match ty {
+            Expr::InterfaceType(it) => Some(classify_ast_interface(it)),
+            Expr::Ident(_) => classify_ident(pass, ty, dot_imported_std),
+            Expr::SelectorExpr(_) => classify_selector(pass, ty),
+            _ => None,
+        };
+        out.extend(issue);
     }
     out
 }
@@ -331,6 +346,14 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let validator = Validator::from_opts(&opts);
 
     let mut pending: Vec<(u32, String)> = Vec::new();
+    // Upstream collects dot imports across the whole pass, not per file.
+    let dot_imported_std: HashSet<String> = pass
+        .files()
+        .iter()
+        .flat_map(|f| f.imports.iter())
+        .filter(|imp| imp.name.as_ref().is_some_and(|n| n.name == "."))
+        .map(|imp| imp.path.value.trim_matches('"').to_string())
+        .collect();
     for file in pass.files() {
         for decl in &file.decls {
             let Decl::FuncDecl(fd) = decl else {
@@ -344,7 +367,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             // name. `FuncDecl.Pos()` is `d.Type.Pos()` in go/ast.
             let pos = fd.ty.pos().0 as u32;
             let mut seen = std::collections::HashSet::new();
-            for issue in collect_results(pass, fd) {
+            for issue in collect_results(pass, fd, &dot_imported_std) {
                 if validator.is_valid(&issue) {
                     continue;
                 }

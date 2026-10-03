@@ -51,6 +51,15 @@ fn effective_packages(opts: &RowserrcheckOptions) -> Vec<String> {
     pkgs
 }
 
+/// Whether any file of the package imports `path` (vendor prefix removed).
+fn imports_directly(pass: &Pass<'_>, path: &str) -> bool {
+    pass.files().iter().any(|file| {
+        file.imports
+            .iter()
+            .any(|spec| cut_vendor(spec.path.value.trim_matches('"')) == path)
+    })
+}
+
 fn cut_vendor(path: &str) -> &str {
     if let Some(idx) = path.rfind("/vendor/") {
         &path[idx + "/vendor/".len()..]
@@ -389,7 +398,22 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .settings::<RowserrcheckOptions>("rowserrcheck")
         .cloned()
         .unwrap_or_default();
-    let packages = effective_packages(&options);
+    // Upstream runs once per package path and starts with
+    //
+    //     pkg := pssa.Pkg.Prog.ImportedPackage(pkgPath)
+    //     if pkg == nil { return } // skip
+    //
+    // and the SSA program only holds what the package being analysed imports
+    // itself — a `*sql.DB` handed over by another package does not bring
+    // `database/sql` with it. So a package with no import of its own is not
+    // checked at all, however it uses the rows.
+    let packages: Vec<String> = effective_packages(&options)
+        .into_iter()
+        .filter(|p| imports_directly(pass, p))
+        .collect();
+    if packages.is_empty() {
+        return Ok(None);
+    }
 
     let mut pending: Vec<(u32, String)> = Vec::new();
     for file in pass.files() {

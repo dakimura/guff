@@ -342,6 +342,11 @@ impl IssueFilter {
 
     /// Set the directory used to relativize absolute issue paths before
     /// matching `exclusions.paths` / rule `path` patterns (golangci cfg/gomod).
+    /// The `relative-path-mode` base, if one was set.
+    pub fn path_base(&self) -> Option<&Path> {
+        self.path_base.as_deref()
+    }
+
     pub fn with_path_base(mut self, base: impl Into<PathBuf>) -> Self {
         self.path_base = Some(base.into());
         self
@@ -926,7 +931,7 @@ fn normalize_path_regex(pat: &str) -> Cow<'_, str> {
 /// matches has become `../../../corpus/cache/external-dns/internal/…` and the
 /// `^internal/` anchor no longer holds. A shared `-c ../shared/.golangci.yml`
 /// gets the same treatment.
-fn path_for_match<'a>(filename: &'a str, base: Option<&Path>) -> Cow<'a, str> {
+pub(crate) fn path_for_match<'a>(filename: &'a str, base: Option<&Path>) -> Cow<'a, str> {
     let norm = normalize_slashes(filename);
     let Some(base) = base else {
         return norm;

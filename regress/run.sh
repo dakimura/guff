@@ -245,6 +245,7 @@ guff_cmd=(
   "$GUFF" run
   -c "$CONFIG"
   --out-format json
+  --path-mode abs
   --issues-exit-code 0
   --no-cache
   --timeout "$TIMEOUT"

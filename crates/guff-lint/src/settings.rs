@@ -2257,14 +2257,21 @@ fn parse_settings<T: serde::de::DeserializeOwned>(
 ///
 /// go-critic parses params through `linter.CheckerParams`, which coerces
 /// strings, so both `maxResults: 10` and `maxResults: "10"` are accepted.
+/// golangci-lint matches both keys case-insensitively: viper lowercases the
+/// config, and the wrapper looks each checker's params up by
+/// `strings.ToLower(info.Name)` / `strings.ToLower(k)`.
 fn gocritic_param<'a>(
     settings: &'a serde_yaml::Value,
     check: &str,
     param: &str,
 ) -> Option<&'a serde_yaml::Value> {
-    settings
-        .get(serde_yaml::Value::String(check.to_string()))?
-        .get(serde_yaml::Value::String(param.to_string()))
+    fn get_ci<'a>(map: &'a serde_yaml::Value, key: &str) -> Option<&'a serde_yaml::Value> {
+        map.as_mapping()?
+            .iter()
+            .find(|(k, _)| k.as_str().is_some_and(|k| k.eq_ignore_ascii_case(key)))
+            .map(|(_, v)| v)
+    }
+    get_ci(get_ci(settings, check)?, param)
 }
 
 fn gocritic_param_usize(settings: &serde_yaml::Value, check: &str, param: &str) -> Option<usize> {
@@ -3953,6 +3960,24 @@ impl GocriticSettings {
             }
             if let Some(b) = gocritic_param_bool(settings, "truncateCmp", "skipArchDependent") {
                 check_settings.truncate_cmp_skip_arch_dependent = b;
+            }
+            if let Some(n) = gocritic_param_usize(settings, "commentedOutCode", "minLength") {
+                check_settings.commented_out_code_min_length = n;
+            }
+            if let Some(b) = gocritic_param_bool(settings, "captLocal", "paramsOnly") {
+                check_settings.capt_local_params_only = b;
+            }
+            if let Some(b) = gocritic_param_bool(settings, "elseif", "skipBalanced") {
+                check_settings.elseif_skip_balanced = b;
+            }
+            if let Some(b) = gocritic_param_bool(settings, "rangeValCopy", "skipTestFuncs") {
+                check_settings.range_val_copy_skip_test_funcs = b;
+            }
+            if let Some(b) = gocritic_param_bool(settings, "rangeExprCopy", "skipTestFuncs") {
+                check_settings.range_expr_copy_skip_test_funcs = b;
+            }
+            if let Some(b) = gocritic_param_bool(settings, "underef", "skipRecvDeref") {
+                check_settings.underef_skip_recv_deref = b;
             }
         }
         guff_style::GocriticOptions {

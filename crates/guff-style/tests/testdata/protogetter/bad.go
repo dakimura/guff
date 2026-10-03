@@ -33,3 +33,29 @@ func nilCompareReversed(u *pb.User) bool {
 func optionalIntoStringField(u *pb.User) *pb.Address {
 	return &pb.Address{City: u.Name}
 }
+
+// A func-typed variable is not an `ast.Fun`, so the optional field passed to it
+// is reported even though the getter would not compile there.
+func passOptionalToFuncValue(u *pb.User) {
+	f := func(*string) {}
+	f(u.Nickname)
+}
+
+// Only optional fields are filtered: a plain field passed to a method or to a
+// function of this file is reported as usual.
+type nameSink struct{}
+
+func (nameSink) takeName(string) {}
+
+func takeName(string) {}
+
+func passPlainField(s nameSink, u *pb.User) {
+	s.takeName(u.Name)
+	takeName(u.Name)
+}
+
+// A declaration without a pointer type keeps the finding.
+func declareValue(u *pb.User) string {
+	var n = u.Name
+	return n
+}

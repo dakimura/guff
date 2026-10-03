@@ -910,8 +910,9 @@ impl LintResult {
     ) -> (Vec<Issue>, usize) {
         let (mut issues, fixed) = self.filter.apply_with_fixer(issues, &self.packages, fixer);
         let prefix = self.path_prefix.as_deref();
+        let base = self.filter.path_base();
         for issue in &mut issues {
-            issue.filename = format_issue_path(&issue.filename, self.path_mode, prefix);
+            issue.filename = format_issue_path(&issue.filename, self.path_mode, prefix, base);
         }
         (issues, fixed)
     }

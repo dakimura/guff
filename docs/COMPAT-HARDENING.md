@@ -38093,3 +38093,61 @@ if path == "github.com/golang/protobuf/proto" {
 fixture は stub の `github.com/golang/protobuf/proto`（package doc に `Deprecated:`）と 3 ファイル
 （`testdata/sa1019/protogen/`）。unit test は 1 ファイル 1 パッケージで 0 / 1 / 1 を固定（修正前は落ちる）。
 golden は新 case `staticcheck-sa1019-protoc-gen-go`（stub を `replace` で解決、2 キー）。
+
+### 2026-10-03（続き 380）— 「部分実装のまま」だった 6 linter の 6 クラス
+
+1 つの大きめの設定（58 linter、`settings` 多数）で guff と golangci-lint を突き合わせ、差分を 1 件ずつ
+上流ソースまで辿ったら、**どれも「書いてある DEFERRED / 既定値の決め打ち / 近似」**だった。6 クラスとも
+fixture で再現してから直し、golden で上流と突合した。
+
+| linter | 欠陥 | 上流 | 新 golden |
+|---|---|---|---|
+| protogetter | optional フィールド（`*string`、getter は `string`）を**関数引数・return・`var p *T =`** に渡すと報告していた（DEFERRED と書いてあった） | `CallExpr` / `ReturnStmt` / `DeclStmt` の腕で filter。裸の `f(...)` は **パーサが同一ファイル内で `f` を解決したとき**だけ（`fun.Obj.Kind == ast.Fun`） | `protogetter` に `crossfile/` を追加 |
+| gocritic | per-check param 6 つ（`commentedOutCode.minLength` / `captLocal.paramsOnly` / `elseif.skipBalanced` / `range{Val,Expr}Copy.skipTestFuncs` / `underef.skipRecvDeref`）が既定値の定数。**param の鍵を大文字小文字区別で引いていた**（上流は `strings.ToLower`）。`captLocal` は**レシーバ名**を見ていなかった | `localDefWalker` はレシーバも `NameParam` | `gocritic-check-flags-{default,tuned}` |
+| ireturn | `type h = other.Iface` を返すと **`anon` 扱いで既定 allow** に入り黙っていた（エイリアスの underlying を見ていた）。stdlib 判定が「先頭要素にドットが無い」推測で、**ドット無し module（`module myapp`）の全 interface を stdlib 扱い** | `TypeOf(ident).String()` で分類（エイリアスは自分の名前）。stdlib は生成済み 186 package の表 | `ireturn-shapes`（module パスにドット無し） |
+| contextcheck | ジェネリック関数を**インスタンス経由で先に**踏むと報告が消えた | go/ssa はインスタンスを `wrap[int]` という別関数（origin を呼ぶラッパ）にする。guff は key をオブジェクトだけで作っていたので origin と衝突し、ラッパが自分の key を循環ガードで見て「valid」を origin に上書きしていた | `contextcheck` に `generic/` を追加 |
+| rowserrcheck | `database/sql` を**自分で import していない**パッケージ（`*sql.DB` を別パッケージから受け取る）も検査していた | `Prog.ImportedPackage(path) == nil` で丸ごと skip（bodyclose の直接 import ゲートと同じ形） | `rowserrcheck` に `dbx/` `indirect/` を追加 |
+| sloglint | `key-naming-case` の変換が手書きの近似で、**`.` を区切りとして扱っていなかった** —— `http.method` 等のドット区切りキーが snake_case 違反として出ない | `github.com/ettle/strcase` v0.2.0 の `convertWithoutInitialisms` + `defaultSplitFn` を移植。数字の間の `.` は区切らない、数字→英字で割る、頭字語は最後の大文字の前で割る | `sloglint-key-case-{snake,kebab,camel,pascal}`（33 キー） + 変換結果を上流の出力で固定する unit test |
+
+contextcheck の連鎖メッセージも 1 つ直っている: 上流は `submit->wrap[int]->wrap->wrap$1`、guff は
+`wrap[int]` の段を飛ばしていた（key 衝突で origin の fact を直接読んでいたため）。
+
+sloglint の欠陥は、測った設定が該当ディレクトリを `exclusions.rules` で sloglint 除外していたので
+**ルート配置の config では差分 0 件に見えていた**。config をリポジトリ外に置いて同じ実行をしたら
+（`relative-path-mode: cfg` で `^dir/` のアンカーが外れる）39 件の golangci-only として出た。
+**除外規則は欠陥を隠す** —— 1 つの設定で 0 件でも、除外を外した測定が要る。
+
+### 2026-10-03（続き 381）— サブディレクトリから `./...`：対象パッケージと表示パスの両方が違っていた
+
+モノレポの CI によくある「`working-directory: backend/<svc>` で `golangci-lint run ./...`、設定は
+リポジトリ直下を親探索」の形で測ったら、2 つ食い違っていた。
+
+1. **`./...` をモジュールルートから展開していた**。ネイティブ go list（`guff-golist`）、オフライン
+   ローダ、キャッシュキー（`native_cache`）の 3 か所とも `"./..." | "..."` を同じ腕で扱っていた。
+   `go list` の `./...` は他の `./` パターンと同じく**作業ディレクトリ基準**で、モジュール全体を
+   意味するのは素の `...` だけ。サービスのジョブが他サービスと共有ライブラリまで lint していた。
+2. **表示パスが作業ディレクトリ基準だった**。上流の表示は `RelativePath` ＝
+   `filepath.Rel(basePath, file)`（`path_relativity` → `path_prettifier`）で、`basePath` は
+   `run.relative-path-mode`（既定 `cfg` ＝設定ファイルのディレクトリ）。`backend/svc` から実行すると
+   上流は `backend/svc/x.go`、guff は `x.go` —— **全行がテキスト上で食い違う**。除外の照合には既に
+   `cfg` 基準を使っていたが、表示には使っておらず、`run.relative-path-mode` も読んでいなかった。
+   `wd` / `gomod` / `gitroot` / `cfg` を実装し、未知の値は上流と同じく設定ロード時に
+   `get base path: unknown relative path mode: X` で止める（`Config.Validate` より前）。
+
+測定（errcheck、`lib` / `other` / `svc/app` の 3 パッケージ、設定はモジュール直下）:
+
+| cwd | relative-path-mode | 上流 | 修正前の guff |
+|---|---|---|---|
+| `svc` | 既定 | `svc/app/app.go` | `lib/lib.go` `other/other.go` `app/app.go` |
+| `svc/app` | 既定 | `svc/app/app.go` | 同上 |
+| `svc` | `wd` | `app/app.go` | — |
+| `.` | `cfg`（設定は `cfgs/`） | `../svc/app/app.go` 等 | — |
+
+3 cwd × 6 設定の 18 通りで上流と一致。unit test は `crates/guff-lint/tests/subdir_test.rs`、
+reject case `run-relative-path-mode-unknown`（`output.path-mode: rel` も同居させて、こちらが
+先に出ることを固定）。
+
+**ハーネス側の非対称**: golden / OSS / isolate / filesets / hunt / drift / fuzz / reduce / regress は
+golangci-lint にだけ `--path-mode abs` を渡し、設定は作業ツリーの外（ケースディレクトリや
+`compat/results/`）に置いていた。guff の表示が作業ディレクトリ基準だった間は偶然一致していただけで、
+修正後は 262 golden が全部ずれた。guff にも `--path-mode abs` を渡して対称にした。

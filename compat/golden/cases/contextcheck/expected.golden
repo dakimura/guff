@@ -21,6 +21,8 @@ crosspkg/outer/outer.go:23:8:contextcheck::Function `New$1->Close->Close` should
 docflag/docflag.go:37:23:contextcheck::Function `notSkippedOtherLinter` should pass the context parameter
 docflag/docflag.go:47:23:contextcheck::Function `notSkippedSpacedColon` should pass the context parameter
 docflag/docflag.go:57:10:contextcheck::Function `plainDoc` should pass the context parameter
+generic/generic.go:42:21:contextcheck::Function `viaMethod->viaFunc->wrap[map[string]any]->wrap->wrap$1` should pass the context parameter
+generic/generic.go:45:26:contextcheck::Function `viaSecondInstance->wrap[int]->wrap->wrap$1` should pass the context parameter
 httphandler_bad/bad.go:13:9:contextcheck::Non-inherited new context, use function like `context.WithXXX` or `r.Context` instead
 reassign/reassign.go:16:8:contextcheck::Function `helper` should pass the context parameter
 reassign/reassign.go:24:9:contextcheck::Non-inherited new context, use function like `context.WithXXX` instead

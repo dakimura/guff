@@ -1,0 +1,12 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh ireturn-shapes
+# Produced by running golangci-lint on compat/golden/cases/ireturn-shapes/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+shapes/shapes.go:11:1:ireturn::viaSelector returns interface (ireturnshapes/sub.Iface)
+shapes/shapes.go:17:1:ireturn::viaAlias returns interface (ireturnshapes/shapes.local)
+shapes/shapes.go:21:1:ireturn::viaErrorAlias returns interface (ireturnshapes/shapes.errAlias)
+shapes/shapes.go:25:1:ireturn::viaStdAlias returns interface (ireturnshapes/shapes.readerAlias)

@@ -297,6 +297,19 @@ impl<'a> Runner<'a> {
                     return format!("{base}{suffix}");
                 }
             }
+            // An instance of a generic function is its own function in go/ssa,
+            // named with its type arguments: `pkg.newRaw[int]`, whose body is a
+            // wrapper calling the origin `pkg.newRaw`. Keyed by the object
+            // alone, the two collided — checking the wrapper found its own key
+            // in the cycle guard, judged itself valid, and wrote that verdict
+            // over the origin's. Every caller that reached a generic function
+            // through an instance before the origin was visited then lost its
+            // report.
+            if !f.type_args.is_empty() {
+                if let Some(i) = f.name.find('[') {
+                    return format!("{base}{}", &f.name[i..]);
+                }
+            }
             base
         } else {
             f.name.clone()

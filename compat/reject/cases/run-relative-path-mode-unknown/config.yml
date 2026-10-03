@@ -1,0 +1,8 @@
+version: "2"
+run:
+  relative-path-mode: repo
+linters:
+  default: none
+  enable: [errcheck]
+output:
+  path-mode: rel

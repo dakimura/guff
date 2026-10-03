@@ -61,10 +61,7 @@
 //! regexpSimplify Go-only spellings (`[][]`) / full quasilyte/regex Value parity,
 //! boolExprSimplify SkipChilds (nested dual-report) / SideEffectFree full parity,
 //! badRegexp dangling-anchor / flag edge-case full parity with quasilyte/regex,
-//! remaining per-check `settings` params (rangeExprCopy/rangeValCopy/hugeParam
-//! sizeThreshold, nestingReduce bodyWidth, truncateCmp skipArchDependent; wired:
-//! tooManyResultsChecker maxResults, ifElseChain minThreshold, unnamedResult
-//! checkExported),
+//! ruleguard's per-check `settings` params (every other checker's are wired),
 //! SuggestedFix, caseOrder expression-switch overlap,
 //! wrapperFunc/unlambda/typeSwitchVar full type-aware parity,
 //! sortSlice SideEffectFree full parity, sqlQuery embedded-field Exec walk,
@@ -764,7 +761,7 @@ fn assign_pos(assign: &AssignStmt) -> u32 {
         .0 as u32
 }
 
-fn check_elseif(stmt: &IfStmt, pending: &mut Pending) {
+fn check_elseif(stmt: &IfStmt, skip_balanced: bool, pending: &mut Pending) {
     let Some(Stmt::BlockStmt(else_body)) = stmt.else_.as_deref() else {
         return;
     };
@@ -774,8 +771,8 @@ fn check_elseif(stmt: &IfStmt, pending: &mut Pending) {
     let Stmt::IfStmt(inner) = &else_body.list[0] else {
         return;
     };
-    // skipBalanced=true (golangci default): skip if then-body is a single if.
-    if stmt.body.list.len() == 1 && matches!(stmt.body.list[0], Stmt::IfStmt(_)) {
+    // `skipBalanced` (default true): skip when the then-body is a single if.
+    if skip_balanced && stmt.body.list.len() == 1 && matches!(stmt.body.list[0], Stmt::IfStmt(_)) {
         return;
     }
     if inner.else_.is_some() || inner.init.is_some() {
@@ -1244,22 +1241,79 @@ fn check_capt_local_fields(fields: &Option<FieldList>, pending: &mut Pending) {
     };
     for field in &fl.list {
         for name in &field.names {
-            if is_exported(&name.name) {
-                report(
-                    pending,
-                    name.pos().0 as u32,
-                    "captLocal",
-                    format!("`{}' should not be capitalized", name.name),
-                );
-            }
+            check_capt_local_name(name, pending);
         }
     }
 }
 
-fn check_capt_local(func: &FuncDecl, pending: &mut Pending) {
-    // paramsOnly=true (golangci default)
+/// Port of `captLocal` over upstream's `localDefWalker`.
+///
+/// The walker's signature step names params, results *and the receiver*, all
+/// as `NameParam`, so `paramsOnly` (default true) still checks the receiver.
+/// It skips a function without a body (`EnterFunc`).
+///
+/// With `paramsOnly: false` the body's definitions are checked too, with the
+/// walker's own reach: `:=` and `var` / `const` specs, and nothing below them —
+/// `ast.Inspect` returns false at both, so a function literal on the right of
+/// `:=` is not entered. Function-literal parameters, range keys and values,
+/// and type-switch bindings are never local defs at all.
+fn check_capt_local(pass: &Pass<'_>, func: &FuncDecl, params_only: bool, pending: &mut Pending) {
+    let Some(body) = &func.body else {
+        return;
+    };
     check_capt_local_fields(&func.ty.params, pending);
     check_capt_local_fields(&func.ty.results, pending);
+    if let Some(recv) = func.recv.as_ref().and_then(|r| r.list.first()) {
+        if let Some(name) = recv.names.first() {
+            check_capt_local_name(name, pending);
+        }
+    }
+    if params_only {
+        return;
+    }
+    let defs = pass.types_info().map(|info| &info.defs);
+    walk::inspect(NodeRef::BlockStmt(body), |n| match n {
+        Some(NodeRef::AssignStmt(a)) => {
+            if a.tok == Some(Token::DEFINE) {
+                for lhs in &a.lhs {
+                    let Expr::Ident(id) = lhs else {
+                        continue;
+                    };
+                    // `w.info.Defs[id] == nil`: a name `:=` re-assigns is not
+                    // a definition.
+                    if defs.and_then(|d| d.get(&id.id)).copied().flatten().is_some() {
+                        check_capt_local_name(id, pending);
+                    }
+                }
+            }
+            false
+        }
+        Some(NodeRef::GenDecl(g)) => {
+            for spec in &g.specs {
+                // Upstream `return false`s out of the whole decl at the first
+                // spec that is not a value spec.
+                let Spec::ValueSpec(vs) = spec else {
+                    return false;
+                };
+                for id in &vs.names {
+                    check_capt_local_name(id, pending);
+                }
+            }
+            false
+        }
+        _ => true,
+    });
+}
+
+fn check_capt_local_name(name: &Ident, pending: &mut Pending) {
+    if is_exported(&name.name) {
+        report(
+            pending,
+            name.pos().0 as u32,
+            "captLocal",
+            format!("`{}' should not be capitalized", name.name),
+        );
+    }
 }
 
 fn call_qualified_name(call: &CallExpr) -> Option<String> {
@@ -2539,9 +2593,10 @@ fn unparen_expr(e: &Expr) -> &Expr {
     cur
 }
 
-/// go-critic underef with default `skipRecvDeref: true`.
-fn check_underef(pass: &Pass<'_>, sel: &SelectorExpr, pending: &mut Pending) {
-    if is_ptr_recv_method_call(pass, sel) {
+/// go-critic underef. `skipRecvDeref` (default true) leaves `(*p).M()` alone
+/// when `M` has a pointer receiver.
+fn check_underef(pass: &Pass<'_>, sel: &SelectorExpr, skip_recv_deref: bool, pending: &mut Pending) {
+    if skip_recv_deref && is_ptr_recv_method_call(pass, sel) {
         return;
     }
     let Expr::ParenExpr(paren) = sel.x.as_ref() else {
@@ -3382,7 +3437,12 @@ fn declaration_docs(file: &File) -> Vec<&CommentGroup> {
     out
 }
 
-fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Pending) {
+fn run_comment_checks(
+    pass: &Pass<'_>,
+    set: &HashSet<String>,
+    params: &crate::GocriticCheckSettings,
+    pending: &mut Pending,
+) {
     let need_codegen = enabled(set, "codegenComment");
     let need_fmt = enabled(set, "commentFormatting");
     let need_depr = enabled(set, "deprecatedComment");
@@ -3469,7 +3529,7 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Pend
 
         if need_commented_code {
             let mut local = Vec::new();
-            check_commented_out_code(&parsed, &mut local);
+            check_commented_out_code(&parsed, params.commented_out_code_min_length, &mut local);
             for (pos, msg, edit) in local {
                 if let Some(mapped) = code::remap_reparsed_pos(pass.fset(), file.pos(), &re_fset, Pos(pos as i64))
                         .map(|p| p.0 as u32) {
@@ -3640,7 +3700,7 @@ fn parsed_commented_out_code_stmts(text: &str) -> Option<Vec<Stmt>> {
         .filter(|stmts| !stmts.is_empty())
 }
 
-fn check_commented_out_code(file: &File, pending: &mut Pending) {
+fn check_commented_out_code(file: &File, min_length: usize, pending: &mut Pending) {
     static NOT_QUITE_FUNC_CALL_RE: OnceLock<Regex> = OnceLock::new();
     let not_quite_func_call = NOT_QUITE_FUNC_CALL_RE
         .get_or_init(|| Regex::new(r"\w+\s+\([^)]*\)\s*$").expect("commentedOutCode call RE"));
@@ -3658,7 +3718,7 @@ fn check_commented_out_code(file: &File, pending: &mut Pending) {
         {
             continue;
         }
-        if text.chars().count() < 15
+        if text.chars().count() < min_length
             && !text.contains("print")
             && !text.contains("fmt.")
             && !text.contains("log.")
@@ -9603,7 +9663,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             match n {
                 NodeRef::IfStmt(s) => {
                     if scoped("elseif", s.if_) {
-                        check_elseif(s, &mut pending);
+                        check_elseif(s, params.elseif_skip_balanced, &mut pending);
                     }
                     if scoped("dupBranchBody", s.if_) {
                         check_dup_branch_body(s, &mut pending);
@@ -9692,10 +9752,14 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     let in_test_func = test_func_bodies
                         .iter()
                         .any(|(lo, hi)| s.for_.0 as u32 >= *lo && (s.for_.0 as u32) <= *hi);
-                    if scoped("rangeExprCopy", s.for_) && !in_test_func {
+                    if scoped("rangeExprCopy", s.for_)
+                        && !(in_test_func && params.range_expr_copy_skip_test_funcs)
+                    {
                         check_range_expr_copy(pass, s, params.range_expr_copy_size_threshold, &mut pending);
                     }
-                    if scoped("rangeValCopy", s.for_) && !in_test_func {
+                    if scoped("rangeValCopy", s.for_)
+                        && !(in_test_func && params.range_val_copy_skip_test_funcs)
+                    {
                         check_range_val_copy(pass, s, params.range_val_copy_size_threshold, &mut pending);
                     }
                     if scoped("nestingReduce", s.for_) {
@@ -9819,7 +9883,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 }
                 NodeRef::FuncDecl(f) => {
                     if enabled(&set, "captLocal") {
-                        check_capt_local(f, &mut pending);
+                        check_capt_local(pass, f, params.capt_local_params_only, &mut pending);
                     }
                     if enabled(&set, "exitAfterDefer") {
                         check_exit_after_defer(pass, f, &mut pending);
@@ -9932,7 +9996,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                 }
                 NodeRef::SelectorExpr(sel) if enabled(&set, "underef") => {
-                    check_underef(pass, sel, &mut pending);
+                    check_underef(pass, sel, params.underef_skip_recv_deref, &mut pending);
                 }
                 NodeRef::TypeAssertExpr(a) if enabled(&set, "sloppyTypeAssert") => {
                     check_sloppy_type_assert(pass, a, &mut pending);
@@ -9981,7 +10045,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         });
     }
 
-    run_comment_checks(pass, &set, &mut pending);
+    run_comment_checks(pass, &set, &params, &mut pending);
 
     // go-critic runs one checker at a time, in checker-name order, so its
     // warnings reach golangci-lint grouped by checker. That order is load

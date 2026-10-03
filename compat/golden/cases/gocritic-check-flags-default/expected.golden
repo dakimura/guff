@@ -1,0 +1,17 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh gocritic-check-flags-default
+# Produced by running golangci-lint on compat/golden/cases/gocritic-check-flags-default/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+gocritic/checkflags.go:8:2:gocritic::commentedOutCode: may want to remove commented-out code
+gocritic/checkflags.go:10:2:gocritic::commentedOutCode: may want to remove commented-out code
+gocritic/checkflags.go:21:7:gocritic::captLocal: `R' should not be capitalized
+gocritic/checkflags.go:23:15:gocritic::captLocal: `In' should not be capitalized
+gocritic/checkflags.go:23:24:gocritic::captLocal: `Out' should not be capitalized
+gocritic/checkflags.go:56:9:gocritic::elseif: can replace 'else {if cond {}}' with 'else if cond {}'
+gocritic/checkflags.go:69:30:gocritic::underef: could simplify (*p).field to p.field
+gocritic/checkflags_test.go:21:2:gocritic::rangeExprCopy: copy of arr (512 bytes) can be avoided with &arr
+gocritic/checkflags_test.go:24:2:gocritic::rangeValCopy: each iteration copies 512 bytes (consider pointers or indexing)

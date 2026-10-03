@@ -10,7 +10,7 @@
 
 --- a/bad/bad.go
 +++ b/bad/bad.go
-@@ -3,33 +3,33 @@
+@@ -3,42 +3,42 @@
  import "example.com/pb"
  
  func useName(u *pb.User) string {
@@ -50,3 +50,40 @@
 -	return &pb.Address{City: u.Name}
 +	return &pb.Address{City: u.GetName()}
  }
+ 
+ // A func-typed variable is not an `ast.Fun`, so the optional field passed to it
+ // is reported even though the getter would not compile there.
+ func passOptionalToFuncValue(u *pb.User) {
+ 	f := func(*string) {}
+-	f(u.Nickname)
++	f(u.GetNickname())
+ }
+ 
+ // Only optional fields are filtered: a plain field passed to a method or to a
+@@ -50,12 +50,12 @@
+ func takeName(string) {}
+ 
+ func passPlainField(s nameSink, u *pb.User) {
+-	s.takeName(u.Name)
+-	takeName(u.Name)
++	s.takeName(u.GetName())
++	takeName(u.GetName())
+ }
+ 
+ // A declaration without a pointer type keeps the finding.
+ func declareValue(u *pb.User) string {
+-	var n = u.Name
++	var n = u.GetName()
+ 	return n
+ }
+--- a/crossfile/call.go
++++ b/crossfile/call.go
+@@ -8,7 +8,7 @@
+ // here even though `u.GetNickname()` would not compile. `takeNickLocal` is in
+ // this file, so the same call shape is filtered.
+ func passOptionalAcrossFiles(u *pb.User) {
+-	takeNick(u.Nickname)
++	takeNick(u.GetNickname())
+ 	takeNickLocal(u.Nickname)
+ }
+ 

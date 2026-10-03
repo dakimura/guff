@@ -1,0 +1,71 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh sloglint-key-case-kebab
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/sloglint-key-case-kebab/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/sloglint/keycase.go
++++ b/sloglint/keycase.go
+@@ -9,36 +9,36 @@
+ 
+ func keyCases() {
+ 	slog.Info("m", slog.Int("already", 1))
+-	slog.Info("m", slog.Int("http.method", 1))
+-	slog.Info("m", slog.Int("user_id", 1))
++	slog.Info("m", slog.Int("http-method", 1))
+ 	slog.Info("m", slog.Int("user-id", 1))
+-	slog.Info("m", slog.Int("userId", 1))
+-	slog.Info("m", slog.Int("UserID", 1))
+-	slog.Info("m", slog.Int("HTTPServer", 1))
+-	slog.Info("m", slog.Int("fooBAR", 1))
+-	slog.Info("m", slog.Int("FOOBar", 1))
++	slog.Info("m", slog.Int("user-id", 1))
++	slog.Info("m", slog.Int("user-id", 1))
++	slog.Info("m", slog.Int("user-id", 1))
++	slog.Info("m", slog.Int("http-server", 1))
++	slog.Info("m", slog.Int("foo-bar", 1))
++	slog.Info("m", slog.Int("foo-bar", 1))
+ 	slog.Info("m", slog.Int("v4.3", 1))
+ 	slog.Info("m", slog.Int("v4,3", 1))
+ 	slog.Info("m", slog.Int("port80", 1))
+ 	slog.Info("m", slog.Int("80port", 1))
+ 	slog.Info("m", slog.Int("a1b2", 1))
+ 	slog.Info("m", slog.Int("123", 1))
+-	slog.Info("m", slog.Int("a..b", 1))
+-	slog.Info("m", slog.Int("_leading", 1))
+-	slog.Info("m", slog.Int("trailing_", 1))
+-	slog.Info("m", slog.Int("--dashes--", 1))
+-	slog.Info("m", slog.Int(" spaced key ", 1))
+-	slog.Info("m", slog.Int("tab\tkey", 1))
+-	slog.Info("m", slog.Int("x.y_z", 1))
+-	slog.Info("m", slog.Int("a-b_c.d", 1))
+-	slog.Info("m", slog.Int("ID", 1))
++	slog.Info("m", slog.Int("a-b", 1))
++	slog.Info("m", slog.Int("leading", 1))
++	slog.Info("m", slog.Int("trailing-", 1))
++	slog.Info("m", slog.Int("dashes-", 1))
++	slog.Info("m", slog.Int("spaced-key", 1))
++	slog.Info("m", slog.Int("tab-key", 1))
++	slog.Info("m", slog.Int("x-y-z", 1))
++	slog.Info("m", slog.Int("a-b-c-d", 1))
++	slog.Info("m", slog.Int("id", 1))
+ 	slog.Info("m", slog.Int("json", 1))
+-	slog.Info("m", slog.Int("Already", 1))
+-	slog.Info("m", slog.Int("ÅngströmUnit", 1))
++	slog.Info("m", slog.Int("already", 1))
++	slog.Info("m", slog.Int("ångström-unit", 1))
+ 	slog.Info("m", slog.Int("straße", 1))
+-	slog.Info("m", slog.Int("İstanbul", 1))
++	slog.Info("m", slog.Int("istanbul", 1))
+ 	slog.Info("m", slog.Int("日本語key", 1))
+-	slog.Info("m", slog.Int("ⅫRoman", 1))
+-	slog.Info("m", slog.Int("dot.", 1))
+-	slog.Info("m", slog.Int("Mixed.Case_key-x", 1))
++	slog.Info("m", slog.Int("ⅻ-roman", 1))
++	slog.Info("m", slog.Int("dot-", 1))
++	slog.Info("m", slog.Int("mixed-case-key-x", 1))
+ }

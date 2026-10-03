@@ -1,2 +1,4 @@
 # The isolate fixture, so the two tiers cannot drift.
 bad.go  compat/isolate/fixtures/rowserrcheck/bad.go
+dbx/dbx.go            compat/isolate/fixtures/rowserrcheck/dbx/dbx.go
+indirect/indirect.go  compat/isolate/fixtures/rowserrcheck/indirect/indirect.go

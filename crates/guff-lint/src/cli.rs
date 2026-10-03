@@ -637,6 +637,50 @@ fn missing_module_plugin(settings: &LinterSettings) -> Option<String> {
         .cloned()
 }
 
+/// `fsutils.GetBasePath(mode, cfgDir)`.
+///
+/// `cfg` (the default) is the config file's directory, or the working
+/// directory when there is no config file; `wd` the working directory; `gomod`
+/// the directory of the nearest `go.mod`; `gitroot` the git toplevel.
+///
+/// Kept lexical (`cwd.join(dir)`, no symlink resolution) because the issue
+/// paths it is compared with are lexical too — `path_for_match` takes
+/// `filepath.Rel` of the two, and resolving only one side would turn every
+/// path under a symlinked checkout into `../..`.
+fn relative_path_base(
+    mode: Option<&str>,
+    config_path: Option<&Path>,
+) -> Result<Option<PathBuf>, ConfigError> {
+    let Ok(cwd) = std::env::current_dir() else {
+        return Ok(None);
+    };
+    let base = match mode.unwrap_or("").trim() {
+        "" | "cfg" => match config_path.and_then(|p| p.parent()) {
+            Some(dir) if !dir.as_os_str().is_empty() => cwd.join(dir),
+            _ => cwd,
+        },
+        "gomod" => cwd
+            .ancestors()
+            .find(|d| d.join("go.mod").is_file())
+            .map(Path::to_path_buf)
+            .unwrap_or(cwd),
+        "gitroot" => {
+            let out = std::process::Command::new("git")
+                .args(["rev-parse", "--show-toplevel"])
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .ok_or_else(|| {
+                    ConfigError::Validation("get git root: git rev-parse --show-toplevel failed".into())
+                })?;
+            PathBuf::from(String::from_utf8_lossy(&out.stdout).trim())
+        }
+        // `wd`; `ConfigFile::validate` has already refused anything else.
+        _ => cwd,
+    };
+    Ok(Some(base))
+}
+
 fn load_run_config(
     no_config: bool,
     config: Option<&PathBuf>,
@@ -720,14 +764,11 @@ fn load_run_config(
     } else {
         IssueFilter::from_config(&issues, &severity)
     };
-    // golangci relative-path-mode default `cfg`: match exclusions against paths
-    // relative to the config file directory.
-    if let Some(ref p) = config_path {
-        if let Some(dir) = p.parent() {
-            filter = filter.with_path_base(dir.to_path_buf());
-        }
-    } else if let Ok(cwd) = std::env::current_dir() {
-        filter = filter.with_path_base(cwd);
+    // golangci `run.relative-path-mode` (`fsutils.GetBasePath`): every issue's
+    // `RelativePath` is taken against this directory, and both the exclusion
+    // path regexes and the printed path use it.
+    if let Some(base) = relative_path_base(run.relative_path_mode.as_deref(), config_path.as_deref())? {
+        filter = filter.with_path_base(base);
     }
 
     // Config `output.formats` / `output.format` — CLI `--out-format` overrides.

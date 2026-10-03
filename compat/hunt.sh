@@ -243,7 +243,7 @@ PY
     cd "$dir"
     env $target_env "GUFF_CACHE=$guff_cache" "GOLANGCI_LINT_CACHE=$guff_cache" \
       "GUFF_DEBUG_ILL_TYPED=1" \
-      "$GUFF" run -c "$run_config" --out-format json --issues-exit-code 0 \
+      "$GUFF" run -c "$run_config" --out-format json --path-mode abs --issues-exit-code 0 \
       $tag_flag --timeout "$timeout" --no-cache $packages
   ) >"$guff_json" 2>"$RUN_DIR/${name}.guff.stderr"; then
     echo "  guff FAILED — see $RUN_DIR/${name}.guff.stderr" >&2

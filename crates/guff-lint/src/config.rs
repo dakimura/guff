@@ -325,6 +325,11 @@ pub struct RunConfig {
     pub issues_exit_code: Option<i32>,
     #[serde(default, rename = "modules-download-mode")]
     pub modules_download_mode: Option<String>,
+    /// `run.relative-path-mode`: the directory issue paths are relative to,
+    /// both for `exclusions` path regexes and for the printed path. Unset is
+    /// `cfg` (the config file's directory).
+    #[serde(default, rename = "relative-path-mode")]
+    pub relative_path_mode: Option<String>,
 }
 
 impl RunConfig {
@@ -336,6 +341,7 @@ impl RunConfig {
             && self.concurrency.is_none()
             && self.issues_exit_code.is_none()
             && self.modules_download_mode.is_none()
+            && self.relative_path_mode.is_none()
     }
 }
 
@@ -1217,6 +1223,20 @@ fn validate_severity(severity: &SeverityConfig, default: Option<&String>) -> Res
     Ok(())
 }
 
+/// An unknown `run.relative-path-mode`.
+///
+/// `Run.Validate` has a check for this too, but the loader computes the base
+/// path first (`fsutils.GetBasePath`, before `Config.Validate` runs), so that
+/// is the one a user meets — ahead of every other validation error.
+fn validate_relative_path_mode(run: &RunConfig) -> Result<(), ConfigError> {
+    match run.relative_path_mode.as_deref() {
+        None | Some("") | Some("gomod") | Some("gitroot") | Some("cfg") | Some("wd") => Ok(()),
+        Some(other) => Err(ConfigError::Validation(format!(
+            "get base path: unknown relative path mode: {other}"
+        ))),
+    }
+}
+
 /// `config.Output.validatePathMode`: only unset and `abs` exist.
 ///
 /// `rel` reads like the name of the default, and is not a value — measured
@@ -1288,6 +1308,7 @@ impl ConfigFile {
     pub fn validate(&self) -> Result<(), ConfigError> {
         match self {
             Self::V2(v2) => {
+                validate_relative_path_mode(&v2.run)?;
                 validate_path_mode(&v2.output)?;
                 // `config.Linters.validateNoFormatters`: v2 moved these six to
                 // their own section, and naming one under `linters` is a config

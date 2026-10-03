@@ -1,0 +1,21 @@
+# Golden case: sloglint `key-naming-case: pascal` over keys that exercise every
+# branch of upstream's `github.com/ettle/strcase` split function. guff's own
+# case conversion did not treat `.` as a delimiter, so dotted keys
+# (`http.method`) were never reported.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - sloglint
+  settings:
+    sloglint:
+      key-naming-case: pascal
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

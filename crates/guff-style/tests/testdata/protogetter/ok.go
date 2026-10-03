@@ -65,3 +65,32 @@ func copyOptionalIntoPointer(u *pb.User, dst *string) {
 	dst = u.Nickname
 	_ = dst
 }
+
+// An optional field handed to a function keeps the direct read: the parameter
+// is `*string`, and `u.GetNickname()` is a `string`. Upstream filters it for
+// any `x.f(...)` call, and for a bare `f(...)` when `f` is declared in this
+// file.
+type nickSink struct{}
+
+func (nickSink) take(*string) {}
+
+func takeNickHere(*string) {}
+
+func passOptionalToMethod(s nickSink, u *pb.User) {
+	s.take(u.Nickname)
+}
+
+func passOptionalToFileFunc(u *pb.User) {
+	takeNickHere(u.Nickname)
+}
+
+// Returned from a function whose result is `*string`.
+func returnOptional(u *pb.User) *string {
+	return u.Nickname
+}
+
+// `var p *T = …` filters every value, whatever it is.
+func declarePointer(u *pb.User) {
+	var p *string = u.Nickname
+	_ = p
+}
