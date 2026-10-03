@@ -209,7 +209,7 @@ def run_guff(guff: str, work: Path, config: Path, env: dict[str, str]) -> list[s
     try:
         r = subprocess.run(
             [guff, "run", "-c", str(config), "--out-format", "json",
-             "--issues-exit-code", "0", "--no-cache", "--timeout", "5m", "./..."],
+             "--path-mode", "abs", "--issues-exit-code", "0", "--no-cache", "--timeout", "5m", "./..."],
             cwd=work, capture_output=True, text=True, env=e,
         )
     finally:

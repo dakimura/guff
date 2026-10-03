@@ -754,10 +754,8 @@ pub struct GocriticOptions {
 
 /// Per-check parameters from `linters.settings.gocritic.settings`.
 ///
-/// Only the checks whose parameters guff honours are listed; the remaining
-/// go-critic params (`hugeParam.sizeThreshold`, `nestingReduce.bodyWidth`,
-/// `truncateCmp.skipArchDependent`, …) are still DEFERRED. Defaults come from
-/// each checker's `linter.CheckerParams` in go-critic v0.14.4.
+/// Every `info.Params` read in go-critic v0.14.3's checkers except ruleguard's.
+/// Defaults come from each checker's `linter.CheckerParams`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GocriticCheckSettings {
     /// `tooManyResultsChecker.maxResults` — warn above this result count.
@@ -776,6 +774,19 @@ pub struct GocriticCheckSettings {
     pub nesting_reduce_body_width: usize,
     /// `truncateCmp.skipArchDependent` — skip `int` / `uint` / `uintptr`.
     pub truncate_cmp_skip_arch_dependent: bool,
+    /// `commentedOutCode.minLength` — shorter comments are skipped unless they
+    /// mention `print` / `fmt.` / `log.`.
+    pub commented_out_code_min_length: usize,
+    /// `captLocal.paramsOnly` — check only signature names.
+    pub capt_local_params_only: bool,
+    /// `elseif.skipBalanced` — skip when the then-body is a single `if`.
+    pub elseif_skip_balanced: bool,
+    /// `rangeValCopy.skipTestFuncs` — skip `func TestXxx(*testing.T)`.
+    pub range_val_copy_skip_test_funcs: bool,
+    /// `rangeExprCopy.skipTestFuncs` — skip `func TestXxx(*testing.T)`.
+    pub range_expr_copy_skip_test_funcs: bool,
+    /// `underef.skipRecvDeref` — leave `(*p).M()` for pointer-receiver `M`.
+    pub underef_skip_recv_deref: bool,
 }
 
 impl Default for GocriticCheckSettings {
@@ -791,6 +802,12 @@ impl Default for GocriticCheckSettings {
             range_expr_copy_size_threshold: crate::gocritic::DEFAULT_RANGE_EXPR_COPY_SIZE_THRESHOLD,
             nesting_reduce_body_width: crate::gocritic::DEFAULT_NESTING_REDUCE_BODY_WIDTH,
             truncate_cmp_skip_arch_dependent: true,
+            commented_out_code_min_length: 15,
+            capt_local_params_only: true,
+            elseif_skip_balanced: true,
+            range_val_copy_skip_test_funcs: true,
+            range_expr_copy_skip_test_funcs: true,
+            underef_skip_recv_deref: true,
         }
     }
 }

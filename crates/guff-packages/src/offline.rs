@@ -255,7 +255,14 @@ fn expand_patterns(
 
     let mut dirs = Vec::new();
     for pattern in &patterns {
-        if pattern == "./..." || pattern == "..." {
+        // `./...` is relative to the working directory, like any `./` pattern:
+        // run from `backend/svc`, it is that directory's packages, not the
+        // module's. Only the bare `...` means everything in the main module.
+        if pattern == "./..." {
+            walk_packages(ctxt, src_dir, &mut dirs)?;
+            continue;
+        }
+        if pattern == "..." {
             let root = module_root.unwrap_or(src_dir);
             walk_packages(ctxt, root, &mut dirs)?;
             continue;

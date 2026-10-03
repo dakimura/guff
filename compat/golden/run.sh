@@ -183,6 +183,7 @@ for case_dir in "$CASES_DIR"/*/; do
       "$GUFF" run \
       -c "$case_dir/config.yml" \
       --out-format json \
+      --path-mode abs \
       --issues-exit-code 0 \
       --no-cache \
       ./...

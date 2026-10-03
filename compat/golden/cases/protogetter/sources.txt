@@ -2,6 +2,11 @@
 bad/bad.go   crates/guff-style/tests/testdata/protogetter/bad.go
 ok/ok.go     crates/guff-style/tests/testdata/protogetter/ok.go
 
+# Two files of one package: the Rust fixtures are single-file, and the rule
+# under test is that `ast.Ident.Obj` only resolves within a file.
+crossfile/call.go  crates/guff-style/tests/testdata/protogetter/crossfile_call.go
+crossfile/decl.go  crates/guff-style/tests/testdata/protogetter/crossfile_decl.go
+
 # The stub proto package, as its own module so `./...` does not lint it.
 pb/go.mod    compat/golden/cases/protogetter/pb.go.mod
 pb/pb.go     crates/guff-style/tests/testdata/protogetter/stub/example.com/pb/pb.go

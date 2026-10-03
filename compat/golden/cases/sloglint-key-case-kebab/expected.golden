@@ -1,0 +1,30 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh sloglint-key-case-kebab
+# Produced by running golangci-lint on compat/golden/cases/sloglint-key-case-kebab/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+sloglint/keycase.go:12:26:sloglint::keys should be written in kebab-case
+sloglint/keycase.go:13:26:sloglint::keys should be written in kebab-case
+sloglint/keycase.go:15:26:sloglint::keys should be written in kebab-case
+sloglint/keycase.go:16:26:sloglint::keys should be written in kebab-case
+sloglint/keycase.go:17:26:sloglint::keys should be written in kebab-case
+sloglint/keycase.go:18:26:sloglint::keys should be written in kebab-case
+sloglint/keycase.go:19:26:sloglint::keys should be written in kebab-case
+sloglint/keycase.go:26:26:sloglint::keys should be written in kebab-case
+sloglint/keycase.go:27:26:sloglint::keys should be written in kebab-case
+sloglint/keycase.go:28:26:sloglint::keys should be written in kebab-case
+sloglint/keycase.go:29:26:sloglint::keys should be written in kebab-case
+sloglint/keycase.go:30:26:sloglint::keys should be written in kebab-case
+sloglint/keycase.go:31:26:sloglint::keys should be written in kebab-case
+sloglint/keycase.go:32:26:sloglint::keys should be written in kebab-case
+sloglint/keycase.go:33:26:sloglint::keys should be written in kebab-case
+sloglint/keycase.go:34:26:sloglint::keys should be written in kebab-case
+sloglint/keycase.go:36:26:sloglint::keys should be written in kebab-case
+sloglint/keycase.go:37:26:sloglint::keys should be written in kebab-case
+sloglint/keycase.go:39:26:sloglint::keys should be written in kebab-case
+sloglint/keycase.go:41:26:sloglint::keys should be written in kebab-case
+sloglint/keycase.go:42:26:sloglint::keys should be written in kebab-case
+sloglint/keycase.go:43:26:sloglint::keys should be written in kebab-case

@@ -1,0 +1,26 @@
+# Golden case: the six gocritic check params guff used to hard-code, at their
+# defaults. `gocritic-check-flags-tuned` moves every one of them.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gocritic
+  settings:
+    gocritic:
+      disable-all: true
+      enabled-checks:
+        - captLocal
+        - commentedOutCode
+        - elseif
+        - rangeExprCopy
+        - rangeValCopy
+        - underef
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

@@ -1,0 +1,44 @@
+// Keys for the four `key-naming-case` golden cases (`sloglint-key-case-*`),
+// one per line so each finding names its key. Upstream converts them with
+// `github.com/ettle/strcase` (`convertWithoutInitialisms` + `defaultSplitFn`):
+// `.` is a delimiter except between digits, a digit-to-letter edge splits, and
+// an acronym splits before its last capital (`FOOBar` → `foo_bar`).
+package sloglint
+
+import "log/slog"
+
+func keyCases() {
+	slog.Info("m", slog.Int("already", 1))
+	slog.Info("m", slog.Int("http.method", 1))
+	slog.Info("m", slog.Int("user_id", 1))
+	slog.Info("m", slog.Int("user-id", 1))
+	slog.Info("m", slog.Int("userId", 1))
+	slog.Info("m", slog.Int("UserID", 1))
+	slog.Info("m", slog.Int("HTTPServer", 1))
+	slog.Info("m", slog.Int("fooBAR", 1))
+	slog.Info("m", slog.Int("FOOBar", 1))
+	slog.Info("m", slog.Int("v4.3", 1))
+	slog.Info("m", slog.Int("v4,3", 1))
+	slog.Info("m", slog.Int("port80", 1))
+	slog.Info("m", slog.Int("80port", 1))
+	slog.Info("m", slog.Int("a1b2", 1))
+	slog.Info("m", slog.Int("123", 1))
+	slog.Info("m", slog.Int("a..b", 1))
+	slog.Info("m", slog.Int("_leading", 1))
+	slog.Info("m", slog.Int("trailing_", 1))
+	slog.Info("m", slog.Int("--dashes--", 1))
+	slog.Info("m", slog.Int(" spaced key ", 1))
+	slog.Info("m", slog.Int("tab\tkey", 1))
+	slog.Info("m", slog.Int("x.y_z", 1))
+	slog.Info("m", slog.Int("a-b_c.d", 1))
+	slog.Info("m", slog.Int("ID", 1))
+	slog.Info("m", slog.Int("json", 1))
+	slog.Info("m", slog.Int("Already", 1))
+	slog.Info("m", slog.Int("ÅngströmUnit", 1))
+	slog.Info("m", slog.Int("straße", 1))
+	slog.Info("m", slog.Int("İstanbul", 1))
+	slog.Info("m", slog.Int("日本語key", 1))
+	slog.Info("m", slog.Int("ⅫRoman", 1))
+	slog.Info("m", slog.Int("dot.", 1))
+	slog.Info("m", slog.Int("Mixed.Case_key-x", 1))
+}

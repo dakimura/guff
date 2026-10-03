@@ -1,0 +1,3 @@
+# The four `sloglint-key-case-*` cases share one fixture and differ only in
+# `key-naming-case`.
+sloglint/keycase.go  crates/guff-style/tests/testdata/sloglint/keycase.go

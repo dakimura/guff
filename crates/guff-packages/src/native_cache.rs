@@ -303,8 +303,8 @@ fn collect_go_names(
     out: &mut Vec<String>,
 ) {
     let walk_root = match pattern {
-        "." | "" => base.to_path_buf(),
-        "./..." | "..." => module_root.unwrap_or(base).to_path_buf(),
+        "." | "" | "./..." => base.to_path_buf(),
+        "..." => module_root.unwrap_or(base).to_path_buf(),
         p if p.ends_with("/...") => {
             let prefix = p.trim_end_matches("/...");
             resolve_pattern_dir(base, module_root, module_path, prefix)

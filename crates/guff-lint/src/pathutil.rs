@@ -24,16 +24,28 @@ impl PathMode {
 
 /// Rewrite `filename` for issue output.
 ///
-/// - `PathMode::Rel`: strip the current working directory prefix when possible.
+/// - `PathMode::Rel`: relative to `base` — golangci's `RelativePath`, taken
+///   against the `run.relative-path-mode` directory (by default the config
+///   file's, *not* the working directory: run from `backend/svc` with the
+///   config at the repo root, upstream prints `backend/svc/x.go`). Without a
+///   base, relative to the working directory.
 /// - `PathMode::Abs`: leave as-is (typically already absolute from FileSet).
 /// - `path_prefix`: optional golangci `output.path-prefix` prepended after mode.
-pub fn format_issue_path(filename: &str, mode: PathMode, path_prefix: Option<&str>) -> String {
+pub fn format_issue_path(
+    filename: &str,
+    mode: PathMode,
+    path_prefix: Option<&str>,
+    base: Option<&Path>,
+) -> String {
     if filename.is_empty() {
         return String::new();
     }
-    let mut path = match mode {
-        PathMode::Abs => filename.replace('\\', "/"),
-        PathMode::Rel => relativize_to_cwd(filename),
+    let mut path = match (mode, base) {
+        (PathMode::Abs, _) => filename.replace('\\', "/"),
+        (PathMode::Rel, Some(base)) => {
+            crate::exclude::path_for_match(filename, Some(base)).into_owned()
+        }
+        (PathMode::Rel, None) => relativize_to_cwd(filename),
     };
     if let Some(prefix) = path_prefix {
         if !prefix.is_empty() {
@@ -108,12 +120,12 @@ mod tests {
     #[test]
     fn format_abs_keeps_input() {
         let p = "/tmp/proj/a.go";
-        assert_eq!(format_issue_path(p, PathMode::Abs, None), p);
+        assert_eq!(format_issue_path(p, PathMode::Abs, None, None), p);
     }
 
     #[test]
     fn format_prefix() {
-        let p = format_issue_path("a.go", PathMode::Abs, Some("mod"));
+        let p = format_issue_path("a.go", PathMode::Abs, Some("mod"), None);
         assert_eq!(p, "mod/a.go");
     }
 }

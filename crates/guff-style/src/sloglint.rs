@@ -231,70 +231,143 @@ fn is_const_key(pass: &Pass<'_>, key: &Expr) -> bool {
     matches!(artifacts.objects.get(obj), ObjectData::Const(_))
 }
 
-/// Whitespace is a word separator for `github.com/ettle/strcase`, which is what
-/// upstream sloglint uses. It matters beyond keys with spaces in them: the
-/// message itself is built as `caseFn(caseName + " case")`, so the case
-/// function has to turn `snake case` into `snake_case` — apply it to a string
-/// that treats the space as content and the sentence comes out unchanged.
-fn is_strcase_space(c: char) -> bool {
-    c == ' ' || c == '\t' || c == '\n' || c == '\r' || (c as u32 >= 128 && c.is_whitespace())
+/// Port of `github.com/ettle/strcase` v0.2.0, the four functions sloglint
+/// calls: `convertWithoutInitialisms` driven by `defaultSplitFn`.
+///
+/// The case functions are also applied to the *message*: upstream builds it as
+/// `caseFn(caseName + " case")`, so `snake case` has to come out `snake_case`.
+///
+/// guff had a hand-written approximation that split only on `_`, `-` and
+/// whitespace. `.` is a delimiter upstream too, so dotted keys —
+/// `slog.String("http.method", …)`, the OpenTelemetry spelling — were never
+/// reported as not being snake_case.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WordCase {
+    Lower,
+    Title,
+    Camel,
+}
+
+#[derive(PartialEq, Eq)]
+enum SplitAction {
+    Noop,
+    Split,
+    SkipSplit,
+}
+
+/// `isSpace`: ASCII whitespace, then `unicode.IsSpace` above 127.
+fn strcase_is_space(r: char) -> bool {
+    matches!(r, ' ' | '\t' | '\n' | '\r') || (r as u32 >= 128 && r.is_whitespace())
+}
+
+/// `defaultSplitFn`. `prev` and `next` are `'\0'` past either end, as the
+/// zero rune is upstream.
+fn default_split_fn(prev: char, curr: char, next: char) -> SplitAction {
+    if curr.is_lowercase() {
+        return SplitAction::Noop;
+    }
+    if curr == '_' || curr == '-' || strcase_is_space(curr) {
+        return SplitAction::SkipSplit;
+    }
+    if curr.is_uppercase() && (prev.is_lowercase() || (prev.is_uppercase() && next.is_lowercase())) {
+        return SplitAction::Split;
+    }
+    // `unicode.IsNumber` is the N category, which is what `is_numeric` tests.
+    if prev.is_numeric() {
+        // `v4.3` is not split.
+        if (curr == '.' || curr == ',') && next.is_numeric() {
+            return SplitAction::Noop;
+        }
+        if !curr.is_numeric() && curr != '.' {
+            return SplitAction::Split;
+        }
+    }
+    if curr == '.' {
+        return SplitAction::SkipSplit;
+    }
+    SplitAction::Noop
+}
+
+/// Go's `unicode.ToUpper` / `ToLower` map one rune to one rune. Rust's can
+/// expand (`ß` → `SS`); where they do, Go has no simple mapping and keeps the
+/// rune — except `İ`, whose simple lowercase is `i`.
+fn strcase_to_upper(r: char) -> char {
+    let mut it = r.to_uppercase();
+    match (it.next(), it.next()) {
+        (Some(u), None) => u,
+        _ => r,
+    }
+}
+
+fn strcase_to_lower(r: char) -> char {
+    let mut it = r.to_lowercase();
+    match (it.next(), it.next()) {
+        (Some(l), None) => l,
+        (Some('i'), Some(_)) => 'i',
+        _ => r,
+    }
+}
+
+/// `convertWithoutInitialisms(input, delimiter, wordCase)`; `None` is the zero
+/// delimiter (no separator written).
+fn convert_without_initialisms(input: &str, delimiter: Option<char>, word_case: WordCase) -> String {
+    // `strings.TrimSpace` trims Unicode whitespace, as `str::trim` does.
+    let runes: Vec<char> = input.trim().chars().collect();
+    let mut b = String::with_capacity(input.len() + 4);
+    let mut curr = '\0';
+    let mut in_word = false;
+    let mut first_word = true;
+    for i in 0..runes.len() {
+        let prev = curr;
+        curr = runes[i];
+        let next = runes.get(i + 1).copied().unwrap_or('\0');
+        match default_split_fn(prev, curr, next) {
+            SplitAction::SkipSplit => {
+                if in_word {
+                    b.extend(delimiter);
+                }
+                in_word = false;
+                continue;
+            }
+            SplitAction::Split => {
+                if in_word {
+                    b.extend(delimiter);
+                }
+                in_word = false;
+            }
+            SplitAction::Noop => {}
+        }
+        let out = match word_case {
+            WordCase::Lower => strcase_to_lower(curr),
+            WordCase::Title if in_word => strcase_to_lower(curr),
+            WordCase::Title => strcase_to_upper(curr),
+            WordCase::Camel if in_word => strcase_to_lower(curr),
+            WordCase::Camel if first_word => {
+                first_word = false;
+                strcase_to_lower(curr)
+            }
+            WordCase::Camel => strcase_to_upper(curr),
+        };
+        b.push(out);
+        in_word = true;
+    }
+    b
 }
 
 fn to_snake(s: &str) -> String {
-    let mut out = String::new();
-    let chars: Vec<char> = s.chars().collect();
-    for (i, &c) in chars.iter().enumerate() {
-        if c == '-' || c == '_' || is_strcase_space(c) {
-            if !out.ends_with('_') {
-                out.push('_');
-            }
-            continue;
-        }
-        if c.is_uppercase() {
-            if i > 0 && !out.ends_with('_') {
-                let prev = chars[i - 1];
-                let next_lower = chars.get(i + 1).is_some_and(|n| n.is_lowercase());
-                if prev.is_lowercase() || prev.is_ascii_digit() || next_lower {
-                    out.push('_');
-                }
-            }
-            out.extend(c.to_lowercase());
-        } else {
-            out.push(c);
-        }
-    }
-    out.trim_matches('_').to_string()
+    convert_without_initialisms(s, Some('_'), WordCase::Lower)
 }
 
 fn to_kebab(s: &str) -> String {
-    to_snake(s).replace('_', "-")
+    convert_without_initialisms(s, Some('-'), WordCase::Lower)
 }
 
 fn to_pascal(s: &str) -> String {
-    let mut out = String::new();
-    let mut upper = true;
-    for c in s.chars() {
-        if c == '_' || c == '-' || is_strcase_space(c) {
-            upper = true;
-            continue;
-        }
-        if upper {
-            out.extend(c.to_uppercase());
-            upper = false;
-        } else {
-            out.push(c);
-        }
-    }
-    out
+    convert_without_initialisms(s, None, WordCase::Title)
 }
 
 fn to_camel(s: &str) -> String {
-    let p = to_pascal(s);
-    let mut chars = p.chars();
-    match chars.next() {
-        None => String::new(),
-        Some(f) => f.to_lowercase().collect::<String>() + chars.as_str(),
-    }
+    convert_without_initialisms(s, None, WordCase::Camel)
 }
 
 fn case_fn(case_name: &str) -> Option<fn(&str) -> String> {
@@ -946,4 +1019,37 @@ pub fn analyzer() -> &'static Analyzer {
         requires: vec![inspect::analyzer()],
         fact_types: Vec::new(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `(input, ToSnake, ToKebab, ToCamel, ToPascal)` as printed by
+    /// `github.com/ettle/strcase` v0.2.0 itself. The golden cases only see
+    /// whether a key is reported; the fix text is the converted key.
+    #[test]
+    fn strcase_matches_upstream() {
+        let cases = [
+            ("http.method", "http_method", "http-method", "httpMethod", "HttpMethod"),
+            ("HTTPServer", "http_server", "http-server", "httpServer", "HttpServer"),
+            ("FOOBar", "foo_bar", "foo-bar", "fooBar", "FooBar"),
+            ("v4.3", "v4.3", "v4.3", "v4.3", "V4.3"),
+            ("80port", "80port", "80port", "80port", "80port"),
+            ("a..b", "a_b", "a-b", "aB", "AB"),
+            ("trailing_", "trailing_", "trailing-", "trailing", "Trailing"),
+            (" spaced key ", "spaced_key", "spaced-key", "spacedKey", "SpacedKey"),
+            ("straße", "straße", "straße", "straße", "Straße"),
+            ("İstanbul", "istanbul", "istanbul", "istanbul", "İstanbul"),
+            ("ⅫRoman", "ⅻ_roman", "ⅻ-roman", "ⅻRoman", "ⅫRoman"),
+            ("Mixed.Case_key-x", "mixed_case_key_x", "mixed-case-key-x", "mixedCaseKeyX", "MixedCaseKeyX"),
+            ("snake case", "snake_case", "snake-case", "snakeCase", "SnakeCase"),
+        ];
+        for (input, snake, kebab, camel, pascal) in cases {
+            assert_eq!(to_snake(input), snake, "ToSnake({input:?})");
+            assert_eq!(to_kebab(input), kebab, "ToKebab({input:?})");
+            assert_eq!(to_camel(input), camel, "ToCamel({input:?})");
+            assert_eq!(to_pascal(input), pascal, "ToPascal({input:?})");
+        }
+    }
 }

@@ -405,7 +405,7 @@ class Oracle:
             r = subprocess.run(
                 [
                     self.guff, "run", "-c", str(self.config),
-                    "--out-format", "json", "--issues-exit-code", "0",
+                    "--out-format", "json", "--path-mode", "abs", "--issues-exit-code", "0",
                     "--no-cache", "--timeout", self.timeout,
                     *self.packages.split(),
                 ],

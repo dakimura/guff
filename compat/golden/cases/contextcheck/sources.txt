@@ -30,3 +30,4 @@ background/background.go   crates/guff-context/tests/testdata/contextcheck_backg
 # A closure is keyed by its parent, not by its bare `run$1` name: three `run`
 # methods here, and only the one that captures a context is a finding.
 anonkey/anonkey.go         crates/guff-context/tests/testdata/contextcheck_anonkey/anonkey.go
+generic/generic.go         crates/guff-context/tests/testdata/contextcheck_generic/generic.go

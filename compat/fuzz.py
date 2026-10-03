@@ -191,7 +191,7 @@ class Runner:
             r = subprocess.run(
                 [
                     self.guff, "run", "-c", str(config), "--out-format", "json",
-                    "--issues-exit-code", "0", "--no-cache", "--timeout", self.timeout, "./...",
+                    "--path-mode", "abs", "--issues-exit-code", "0", "--no-cache", "--timeout", self.timeout, "./...",
                 ],
                 cwd=work, capture_output=True, text=True, env=e,
             )

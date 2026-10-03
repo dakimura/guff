@@ -20,8 +20,11 @@
 //! `u.GetNickname()` (a `string`) where a `*string` is wanted does not compile,
 //! so upstream does not propose it.
 //!
+//! An optional field passed as a call argument or returned is filtered the
+//! same way, and so is every value of `var p *T = …` (upstream's `CallExpr`,
+//! `ReturnStmt` and `DeclStmt` arms).
+//!
 //! DEFERRED (see DEVELOPMENT.md R13): StarExpr getter-returns-value,
-//! optional-proto argument filtering, `DeclStmt`/`ReturnStmt` handling,
 //! generated-file skip by non-protoc prefixes, and SuggestedFix emission.
 
 use std::collections::HashSet;
@@ -35,7 +38,7 @@ use guff::walk::{preorder, NodeRef};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn, Diagnostic, SuggestedFix, TextEdit};
 use guff_types::alias::unalias_readonly;
-use guff_types::arena::{TypeData, TypeId};
+use guff_types::arena::{ObjectId, TypeData, TypeId};
 use guff_types::named::{named_method, named_num_methods};
 use guff_types::pointer::pointer_elem;
 
@@ -215,6 +218,36 @@ fn getter_result_has_pointer(pass: &Pass<'_>, expr: &Expr, name: &str) -> Option
     None
 }
 
+/// Port of `filterOptionalProtoSelectorExpr`: filter each `msg.Field` argument
+/// that [`is_optional_proto`] says the getter cannot stand in for.
+fn filter_optional_proto_args(pass: &Pass<'_>, args: &[Expr], filtered: &mut HashSet<i64>) {
+    for arg in args {
+        let Expr::SelectorExpr(a) = arg else {
+            continue;
+        };
+        if is_proto_message(pass, &a.x) && is_optional_proto(pass, a) {
+            filtered.insert(a.sel.pos().0);
+        }
+    }
+}
+
+/// Port of `isOptionalProto`: the field is a pointer and `Get<Field>` does not
+/// return one. A missing getter counts as "does not" — upstream discards `ok`.
+fn is_optional_proto(pass: &Pass<'_>, a: &guff::ast::SelectorExpr) -> bool {
+    let (Some(info), Some(artifacts)) = (pass.types_info(), pass.pkg().type_artifacts.as_ref())
+    else {
+        return false;
+    };
+    let Some(tv) = info.types.get(&a.id) else {
+        return false;
+    };
+    let under = tv.typ.underlying(&artifacts.types);
+    if !matches!(artifacts.types.get(under), TypeData::Pointer(_)) {
+        return false;
+    }
+    getter_result_has_pointer(pass, &a.x, &a.sel.name) != Some(true)
+}
+
 /// Port of `isProtoMessage`.
 fn is_proto_message(pass: &Pass<'_>, expr: &Expr) -> bool {
     if method_exists(pass, expr, "ProtoReflect") {
@@ -384,6 +417,23 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             }
         }
 
+        // The functions `ast.Ident.Obj` would resolve to: top-level, no
+        // receiver, declared in this file.
+        let file_funcs: HashSet<ObjectId> = pass
+            .types_info()
+            .map(|info| {
+                file.decls
+                    .iter()
+                    .filter_map(|d| match d {
+                        guff::ast::Decl::FuncDecl(fd) if fd.recv.is_none() => {
+                            info.defs.get(&fd.name.id).copied().flatten()
+                        }
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         preorder(NodeRef::File(file), |n| {
             match n {
                 NodeRef::AssignStmt(a) => {
@@ -467,6 +517,46 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 // the field is still reported. That quirk is load-bearing:
                 // guff already matched it, and only the common spelling was
                 // wrong. dapr writes 80 of them (`if req.Metadata == nil`).
+                // Upstream's `CallExpr` arm: an optional field (`*string`
+                // whose getter returns `string`) handed to a function keeps
+                // the direct read, because the getter would not type-check
+                // there. Which calls qualify is upstream's, quirks included:
+                // any `x.f(...)` call, but a bare `f(...)` only when the
+                // *parser* resolved `f` to a function declared in this file
+                // (`fun.Obj.Kind == ast.Fun`). A function from another file of
+                // the package, a builtin, a func-typed variable or a type
+                // conversion leaves the argument reported.
+                NodeRef::CallExpr(c) => match c.fun.as_ref() {
+                    Expr::SelectorExpr(_) => filter_optional_proto_args(pass, &c.args, &mut filtered),
+                    Expr::Ident(id)
+                        if !c.args.is_empty()
+                            && pass
+                                .types_info()
+                                .and_then(|info| info.uses.get(&id.id))
+                                .is_some_and(|obj| file_funcs.contains(obj)) =>
+                    {
+                        filter_optional_proto_args(pass, &c.args, &mut filtered)
+                    }
+                    _ => {}
+                },
+                NodeRef::ReturnStmt(r) => filter_optional_proto_args(pass, &r.results, &mut filtered),
+                // `var p *T = msg.Field`: every value of a spec whose declared
+                // type is a pointer is filtered, optional or not.
+                NodeRef::DeclStmt(d) => {
+                    if let guff::ast::Decl::GenDecl(g) = &d.decl {
+                        for spec in &g.specs {
+                            let guff::ast::Spec::ValueSpec(vs) = spec else {
+                                continue;
+                            };
+                            if !matches!(vs.ty, Some(Expr::StarExpr(_))) {
+                                continue;
+                            }
+                            for v in &vs.values {
+                                filtered.insert(v.pos().0);
+                            }
+                        }
+                    }
+                }
                 NodeRef::BinaryExpr(b) if b.op == Token::EQL || b.op == Token::NEQ => {
                     let is_nil = |e: &Expr| matches!(e, Expr::Ident(id) if id.name == "nil");
                     let x_is_nil = is_nil(&b.x);

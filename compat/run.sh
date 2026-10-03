@@ -271,6 +271,7 @@ run_target() {
       "$GUFF" run \
       -c "$run_config" \
       --out-format json \
+      --path-mode abs \
       --issues-exit-code 0 \
       --timeout "$timeout" \
       --no-cache \

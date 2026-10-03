@@ -72,7 +72,7 @@ probe_target() {
   (
     cd "$dir"
     env "GUFF_CACHE=$cache" "GUFF_DEBUG_ILL_TYPED=1" \
-      "$GUFF" run -c "$cfg" --out-format json --issues-exit-code 0 \
+      "$GUFF" run -c "$cfg" --out-format json --path-mode abs --issues-exit-code 0 \
       --timeout "$timeout" --no-cache $packages
   ) >"$guff_json" 2>"$RUN_DIR/${name}.guff.stderr" || {
     echo "  $name: guff failed; see $RUN_DIR/${name}.guff.stderr" >&2
