@@ -64,14 +64,14 @@ guff:            20s
 
 | Repository | golangci-lint | guff | Speedup |
 |---|---:|---:|---:|
-| grafana | 279.8s | **19.8s** | **14× faster** |
-| consul | 38.0s | **5.2s** | **7× faster** |
-| helm | 17.5s | **1.4s** | **13× faster** |
-| k9s | 14.6s | **2.2s** | **7× faster** |
-| caddy | 9.1s | **0.85s** | **11× faster** |
-| containerd | 5.2s | **0.37s** | **14× faster** |
-| gin | 3.9s | **0.38s** | **10× faster** |
-| cobra | 1.4s | **0.23s** | **6× faster** |
+| grafana | 358.0s | **28.8s** | **12× faster** |
+| consul | 33.7s | **4.5s** | **7× faster** |
+| helm | 17.0s | **1.4s** | **12× faster** |
+| k9s | 15.0s | **2.7s** | **6× faster** |
+| caddy | 8.7s | **0.96s** | **9× faster** |
+| containerd | 5.0s | **0.41s** | **12× faster** |
+| gin | 3.8s | **0.44s** | **9× faster** |
+| cobra | 1.4s | **0.26s** | **5× faster** |
 
 Darwin arm64 冷缓存基准。
 
@@ -265,7 +265,7 @@ jobs:
         with:
           go-version: stable
 
-      - uses: dakimura/guff@v0.7.0
+      - uses: dakimura/guff@v0.8.0
         with:
           args: run --out-format=github-actions ./...
 ```
@@ -287,7 +287,7 @@ jobs:
 docker run --rm \
   -v "$PWD":/app \
   -w /app \
-  ghcr.io/dakimura/guff:0.7.0 \
+  ghcr.io/dakimura/guff:0.8.0 \
   run ./...
 ```
 
@@ -301,7 +301,7 @@ docker run --rm \
   -v "$(go env GOCACHE)":/root/.cache/go-build \
   -e GOMODCACHE=/go/pkg/mod \
   -e GOCACHE=/root/.cache/go-build \
-  ghcr.io/dakimura/guff:0.7.0 \
+  ghcr.io/dakimura/guff:0.8.0 \
   run ./...
 ```
 
