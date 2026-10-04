@@ -1284,6 +1284,18 @@ impl<'a> Builder<'a> {
         let body = self.new_basic_block("for.body".to_string());
         let done = self.new_basic_block("for.done".to_string());
         let loop_ = self.new_basic_block("for.loop".to_string());
+        // go/ssa's `forStmt`: with a post statement, `continue` goes to a
+        // `for.post` block that runs it and then jumps to the loop. guff used
+        // to jump straight back to `for.loop` and append the post statement to
+        // the body's fallthrough, so a `continue` skipped `i++` — and in a loop
+        // whose body otherwise leaves (`break` / `return`), the post statement
+        // was unreachable and SA4006 called its value unused (gin
+        // `gin.go:709`).
+        let cont = if s.post.is_some() {
+            self.new_basic_block("for.post".to_string())
+        } else {
+            loop_
+        };
 
         self.emit_jump(loop_);
         self.set_block(Some(loop_));
@@ -1304,16 +1316,20 @@ impl<'a> Builder<'a> {
         // store and called the assignment before the break wasted (gitea
         // `services/gitdiff`).
         if let Some(name) = label {
-            self.set_label_loop_targets(name, done, loop_);
+            self.set_label_loop_targets(name, done, cont);
         }
-        self.push_targets(done, loop_);
+        self.push_targets(done, cont);
         self.stmt(&Stmt::BlockStmt(s.body.clone()));
-        if let Some(post) = &s.post {
-            self.stmt_with_label(post, None);
-        }
         self.pop_targets();
         if self.block.is_some() {
-            self.emit_jump(loop_);
+            self.emit_jump(cont);
+        }
+        if let Some(post) = &s.post {
+            self.set_block(Some(cont));
+            self.stmt_with_label(post, None);
+            if self.block.is_some() {
+                self.emit_jump(loop_);
+            }
         }
 
         self.set_block(Some(done));

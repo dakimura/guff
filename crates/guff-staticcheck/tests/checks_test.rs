@@ -2928,10 +2928,17 @@ fn sa4006_allows_ok_cases() {
     let pkg = typecheck_rule("sa4006", "ok.go");
     support::assert_well_typed(&pkg);
     let messages = support::run_analyzer(sa4006::analyzer(), &pkg);
-    // golangci-lint 2.12.2 reports nothing here, and neither does guff since
-    // `MakeInterface` gained its operand: `i = n` boxes `n`, so `n` has a
-    // referrer and no longer looks unused.
-    assert!(messages.is_empty(), "{messages:?}");
+    // golangci-lint 2.12.2 reported nothing here, and neither did guff once
+    // `MakeInterface` gained its operand (`i = n` boxes `n`, so `n` has a
+    // referrer). 2.14.0 (staticcheck v0.8.1) reports exactly two: `n++` and
+    // `n += 1`, whose stored sums nothing reads.
+    assert_eq!(
+        messages,
+        vec![
+            "this value of n is never used".to_string(),
+            "this value of n is never used".to_string(),
+        ],
+    );
 }
 sa_check_bad_ok!(sa4008, sa4008_flags_bad_cases, sa4008_allows_ok_cases);
 sa_check_bad_ok!(sa4009, sa4009_flags_bad_cases, sa4009_allows_ok_cases);

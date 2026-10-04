@@ -50,6 +50,18 @@ fields/fields.go:324:2:unused::field keyedDead is unused
 fieldsunsafe/fieldsunsafe.go:36:2:unused::field deadM is unused
 fileignore/methods.go:13:17:unused::func (*plain).unusedMethod is unused
 fileignore/methods.go:15:6:unused::func unusedFree is unused
+genericifaces/generic_interfaces.go:40:16:unused::func (*S3_2).m3 is unused
+genericifaces/generic_interfaces.go:62:16:unused::func (*S4_2).m4_1 is unused
+genericifaces/generic_interfaces.go:65:16:unused::func (*S4_2).m4_2 is unused
+genericifaces/generic_interfaces.go:68:16:unused::func (*S4_2).m4_3 is unused
+genericifaces/generic_interfaces.go:73:16:unused::func (*S4_3).m4_1 is unused
+genericifaces/generic_interfaces.go:76:16:unused::func (*S4_3).m4_2 is unused
+genericifaces/generic_interfaces.go:126:16:unused::func (*S6_3).m6_1 is unused
+genericifaces/generic_interfaces.go:129:16:unused::func (*S6_3).m6_2 is unused
+genericifaces/generic_interfaces.go:142:16:unused::func (*S6_5).m6_1 is unused
+genericifaces/generic_interfaces.go:145:16:unused::func (*S6_5).m6_2 is unused
+genericifaces/generic_interfaces.go:164:16:unused::func (*S7_3).m7 is unused
+genericifaces/generic_interfaces.go:169:16:unused::func (*S7_4).m7 is unused
 genericmethod/generic_method_bad.go:8:21:unused::func (*holder[T]).run is unused
 genericmethod/generic_method_bad.go:15:21:unused::func pair[K, V].key is unused
 globalwrites/globalwrites.go:11:5:unused::var writtenInInit is unused

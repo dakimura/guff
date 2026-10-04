@@ -26,3 +26,4 @@ globalwrites/globalwrites_test.go   crates/guff-unused/tests/testdata/globalwrit
 # type-checker has no importer.
 fields/fields.go                      crates/guff-unused/tests/testdata/fields/fields.go
 fieldsunsafe/fieldsunsafe.go          crates/guff-unused/tests/testdata/fieldsunsafe/fieldsunsafe.go
+genericifaces/generic_interfaces.go   crates/guff-unused/tests/testdata/basic/generic_interfaces_v081.go

@@ -1,6 +1,13 @@
 //! SA5011 — possible nil pointer dereference.
 //!
-//! Port of `honnef.co/go/tools/staticcheck/sa5011`.
+//! Port of `honnef.co/go/tools/staticcheck/sa5011` as of v0.7.0.
+//!
+//! **Not registered.** staticcheck v0.8 removed SA5011 from its analyzer list
+//! (golangci-lint 2.13.1 onward runs nothing under that name), so this module
+//! is no longer in [`crate::analyzers`]. It is kept, with its unit tests, as
+//! the reference for the `sigma_shadows` reconstruction below; the golden
+//! fixtures in `cases/staticcheck-sa` keep measuring that both tools are
+//! silent on them.
 //!
 //! Upstream relies on SSA sigma nodes so that `if x != nil { *x }` uses a
 //! different value inside the branch. When the same value is reused (no

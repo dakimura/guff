@@ -37,15 +37,15 @@ func usedAdd() {
 	println(n)
 }
 
-// `n++` is an *ast.IncDecStmt; upstream only walks *ast.AssignStmt, so an
-// increment whose result nothing reads is still not a finding.
+// Reported since golangci-lint 2.14.0 (staticcheck v0.8.1), which walks
+// *ast.IncDecStmt too; 2.12.2 only walked *ast.AssignStmt and said nothing.
 func unusedInc() {
 	var n int
 	n++
 }
 
-// `n += 1` is an AssignStmt, but it is judged by its right-hand side — the
-// constant `1` — and constants are skipped.
+// Reported since 2.14.0: the right-hand constant has no IR value, so a `+=`
+// is judged by the left-hand side's — the sum, which nothing reads.
 func unusedAdd() {
 	n := 1
 	n += 1
@@ -114,4 +114,39 @@ func namedResultUnderDefer() (out int, err error) {
 	}
 	err = nil
 	return 1, err
+}
+
+// A loop's post statement runs on `continue` too: go/ssa (and honnef IR) give
+// it a `for.post` block that `continue` jumps to, so `i++` reaches the loop
+// header and its value is read by the condition. guff used to send `continue`
+// straight to the header, which left `i++` unreachable in a loop whose body
+// otherwise leaves — and SA4006 called it unused (gin `gin.go:709`).
+func postAfterContinueThenBreak(t []int, m int) int {
+	for i, tl := 0, len(t); i < tl; i++ {
+		if t[i] != m {
+			continue
+		}
+		break
+	}
+	return 0
+}
+
+func postAfterContinueThenReturn(t []int, m int) int {
+	for i := 0; i < len(t); i++ {
+		if t[i] != m {
+			continue
+		}
+		return 1
+	}
+	return 0
+}
+
+// An unconditional `break`: the post statement is unreachable, its block is
+// deleted, and there is no value to judge.
+func postNeverRuns(t []int) int {
+	i := 0
+	for ; i < len(t); i++ {
+		break
+	}
+	return i
 }
