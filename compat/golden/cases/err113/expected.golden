@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/err113/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 bad.go:14:9:err113::do not define dynamic errors, use wrapped static errors instead: "errors.New(\\"dynamic\\")"
 bad.go:20:9:err113::do not define dynamic errors, use wrapped static errors instead: "fmt.Errorf(\\"%s: %d\\", name, n*2+1)"

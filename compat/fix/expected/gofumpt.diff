@@ -6,7 +6,7 @@
 #
 # An absent file for a case means upstream's --fix changes nothing there, and
 # guff must change nothing either.
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 --- a/comments/comments.go
 +++ b/comments/comments.go
@@ -27,6 +27,18 @@
 +	// unspaced
  	_ = 5
  }
+--- a/longoneline/longoneline.go
++++ b/longoneline/longoneline.go
+@@ -18,7 +18,9 @@
+ 	f.getOrCreateFn = fn
+ 	return f
+ }
++
+ func (f *Fake) WithActorExists(fn func(string, string) bool) *Fake { f.actorExistsFn = fn; return f }
++
+ func (f *Fake) WithRegisterType(fn func(string)) *Fake {
+ 	f.registerTypeFn = fn
+ 	return f
 --- a/unformatted/unformatted.go
 +++ b/unformatted/unformatted.go
 @@ -4,7 +4,6 @@

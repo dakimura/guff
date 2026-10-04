@@ -4,6 +4,6 @@
 # Produced by running golangci-lint on compat/golden/cases/sqlclosecheck-imports/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 direct/direct.go:10:23:sqlclosecheck::Rows/Stmt/NamedStmt was not closed

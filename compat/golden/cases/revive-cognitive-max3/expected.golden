@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/revive-cognitive-max3/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 cognitivecomplexity/cognitive_complexity.go:60:1:revive:warning:cognitive-complexity: function funcLitTwoDeep has cognitive complexity 5 (> max enabled 3)
 cognitivecomplexity/cognitive_complexity.go:90:1:revive:warning:cognitive-complexity: function labeledBreak has cognitive complexity 4 (> max enabled 3)

@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/staticcheck-386/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 sa1027/bad/bad.go:14:2:staticcheck::SA1027: address of non 64-bit aligned field C passed to sync/atomic.AddInt64
 sa1027/bad/bad.go:15:2:staticcheck::SA1027: address of non 64-bit aligned field C passed to sync/atomic.LoadInt64

@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/revive-exclude-off/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 ruleexclude/excluded.go:3:1:revive:warning:exported: comment on exported type Excluded should be of the form "Excluded ..." (with optional leading article)
 ruleexclude/excluded.go:12:9:revive:warning:bool-literal-in-expr: omit Boolean literal in expression

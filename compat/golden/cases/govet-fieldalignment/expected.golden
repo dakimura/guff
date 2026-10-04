@@ -4,19 +4,19 @@
 # Produced by running golangci-lint on compat/golden/cases/govet-fieldalignment/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
-fieldalignment/bad.go:16:24:govet::fieldalignment: struct of size 24 could be 16
-fieldalignment/bad.go:23:20:govet::fieldalignment: struct of size 40 could be 32
-fieldalignment/bad.go:30:19:govet::fieldalignment: struct of size 24 could be 16
-fieldalignment/bad.go:36:22:govet::fieldalignment: struct of size 32 could be 24
-fieldalignment/bad.go:45:4:govet::fieldalignment: struct of size 24 could be 16
-fieldalignment/bad.go:55:23:govet::fieldalignment: struct with 16 pointer bytes could be 8
-fieldalignment/bad.go:61:20:govet::fieldalignment: struct with 24 pointer bytes could be 16
-fieldalignment/bad.go:66:21:govet::fieldalignment: struct with 24 pointer bytes could be 16
-fieldalignment/bad.go:74:20:govet::fieldalignment: struct of size 32 could be 24
-fieldalignment/bad.go:80:14:govet::fieldalignment: struct with 24 pointer bytes could be 16
-fieldalignment/bad.go:85:16:govet::fieldalignment: struct with 16 pointer bytes could be 8
-fieldalignment/bad.go:90:22:govet::fieldalignment: struct with 32 pointer bytes could be 24
-fieldalignment/bad.go:97:17:govet::fieldalignment: struct with 16 pointer bytes could be 8
-fieldalignment/bad.go:105:25:govet::fieldalignment: struct with 24 pointer bytes could be 16
+fieldalignment/bad.go:16:24:govet::fieldalignment: sizeBoolInt64Bool has size 24 but the optimal size is 16 leading to a waste of 8 bytes (33%)
+fieldalignment/bad.go:23:20:govet::fieldalignment: sizeWithArray has size 40 (allocator size class 48) but the optimal size is 32 leading to a waste of 16 bytes (33%)
+fieldalignment/bad.go:30:19:govet::fieldalignment: sizeWithTags has size 24 but the optimal size is 16 leading to a waste of 8 bytes (33%)
+fieldalignment/bad.go:36:22:govet::fieldalignment: sizeWithComplex has size 32 but the optimal size is 24 leading to a waste of 8 bytes (25%)
+fieldalignment/bad.go:45:4:govet::fieldalignment: struct has size 24 but the optimal size is 16 leading to a waste of 8 bytes (33%)
+fieldalignment/bad.go:55:23:govet::fieldalignment: ptrsUint32String has 16 leading bytes of pointer data but optimal value is 8
+fieldalignment/bad.go:61:20:govet::fieldalignment: ptrsStringPtr has 24 leading bytes of pointer data but optimal value is 16
+fieldalignment/bad.go:66:21:govet::fieldalignment: ptrsArrayOfPtr has 24 leading bytes of pointer data but optimal value is 16
+fieldalignment/bad.go:74:20:govet::fieldalignment: ptrsInterface has size 32 but the optimal size is 24 leading to a waste of 8 bytes (25%)
+fieldalignment/bad.go:80:14:govet::fieldalignment: ptrsAny has 24 leading bytes of pointer data but optimal value is 16
+fieldalignment/bad.go:85:16:govet::fieldalignment: ptrsSlice has 16 leading bytes of pointer data but optimal value is 8
+fieldalignment/bad.go:90:22:govet::fieldalignment: ptrsMapChanFunc has 32 leading bytes of pointer data but optimal value is 24
+fieldalignment/bad.go:97:17:govet::fieldalignment: ptrsString has 16 leading bytes of pointer data but optimal value is 8
+fieldalignment/bad.go:105:25:govet::fieldalignment: ptrsGeneric has 24 leading bytes of pointer data but optimal value is 16

@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/unused-field-writes/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 fieldwrites.go:17:2:unused::field written is unused
 fieldwrites.go:27:2:unused::field written is unused

@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/rangeint/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 intrange_bad/bad.go:8:2:intrange::for loop can be changed to use an integer range (Go 1.22+)
 intrange_bad/bad.go:8:6:modernize::rangeint: for loop can be modernized using range over int

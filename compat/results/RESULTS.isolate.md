@@ -30,7 +30,7 @@
 | isolate-copyloopvar | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | isolate-nosprintfhostport | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-nilnil | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
-| isolate-recvcheck | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
+| isolate-recvcheck | 3 | 3 | 2 | 66.7% | 66.7% | 0 |
 | isolate-interfacebloat | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-nonamedreturns | 14 | 14 | 14 | 100.0% | 100.0% | 0 |
 | isolate-inamedparam | 5 | 5 | 5 | 100.0% | 100.0% | 0 |
@@ -38,7 +38,7 @@
 | isolate-perfsprint | 7 | 7 | 7 | 100.0% | 100.0% | 0 |
 | isolate-tagalign | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-modernize | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
-| isolate-wastedassign | 26 | 26 | 26 | 100.0% | 100.0% | 0 |
+| isolate-wastedassign | 26 | 28 | 26 | 100.0% | 92.9% | 0 |
 | isolate-decorder | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-funlen | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-maintidx | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
@@ -52,7 +52,7 @@
 | isolate-containedctx | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-iotamixing | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-asasalint | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
-| isolate-exhaustive | 25 | 25 | 25 | 100.0% | 100.0% | 0 |
+| isolate-exhaustive | 25 | 33 | 25 | 100.0% | 75.8% | 0 |
 | isolate-exhaustruct | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | isolate-funcorder | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
 | isolate-embeddedstructfieldcheck | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
@@ -69,7 +69,7 @@
 | isolate-musttag | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-reassign | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-tagliatelle | 31 | 31 | 31 | 100.0% | 100.0% | 0 |
-| isolate-canonicalheader | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
+| isolate-canonicalheader | 6 | 10 | 0 | 0.0% | 0.0% | 0 |
 | isolate-ireturn | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-iface | 5 | 5 | 5 | 100.0% | 100.0% | 0 |
 | isolate-varnamelen | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
@@ -82,7 +82,7 @@
 | isolate-contextcheck | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-wsl | 7 | 7 | 7 | 100.0% | 100.0% | 0 |
 | isolate-gocritic | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
-| isolate-revive | 7 | 7 | 7 | 100.0% | 100.0% | 0 |
+| isolate-revive | 7 | 6 | 6 | 85.7% | 100.0% | 0 |
 | isolate-gosec | 8 | 8 | 8 | 100.0% | 100.0% | 0 |
 | isolate-unparam | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-dupl | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
@@ -293,7 +293,11 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| recvcheck | 3 | 3 | 3 | 100.0% | 100.0% |
+| recvcheck | 3 | 3 | 2 | 66.7% | 66.7% |
+
+### Allowed known diffs (2)
+- guff-only: `bad.go:21:recvcheck:the methods of "Period" use pointer receiver and non-pointer receiver.`
+- golangci-only: `bad.go:28:recvcheck:the methods of "Encoded" use pointer receiver and non-pointer receiver.`
 
 ## isolate-interfacebloat
 
@@ -341,7 +345,11 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| wastedassign | 26 | 26 | 26 | 100.0% | 100.0% |
+| wastedassign | 26 | 28 | 26 | 100.0% | 92.9% |
+
+### Allowed known diffs (2)
+- golangci-only: `bad.go:307:wastedassign:assigned to e, but reassigned without using the value`
+- golangci-only: `bad.go:318:wastedassign:assigned to a, but reassigned without using the value`
 
 ## isolate-decorder
 
@@ -425,7 +433,17 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| exhaustive | 25 | 25 | 25 | 100.0% | 100.0% |
+| exhaustive | 25 | 33 | 25 | 100.0% | 75.8% |
+
+### Allowed known diffs (8)
+- golangci-only: `directives.go:104:exhaustive:failed to parse directives: conflicting directives "ignore" and "enforce"`
+- golangci-only: `directives.go:116:exhaustive:failed to parse directives: invalid directive "ignoreme"`
+- golangci-only: `directives.go:116:exhaustive:missing cases in switch of type p.Color: p.Blue`
+- golangci-only: `directives.go:127:exhaustive:failed to parse directives: invalid directive "enforcement"`
+- golangci-only: `directives.go:172:exhaustive:missing keys in map of key type p.Color: p.Blue`
+- golangci-only: `directives.go:184:exhaustive:failed to parse directives: invalid directive "ignoreme"`
+- golangci-only: `directives.go:184:exhaustive:missing keys in map of key type p.Color: p.Blue`
+- golangci-only: `foreign.go:62:exhaustive:missing cases in switch of type enumdep.Kind: enumdep.KindA, enumdep.KindM`
 
 ## isolate-exhaustruct
 
@@ -527,7 +545,18 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| canonicalheader | 6 | 6 | 6 | 100.0% | 100.0% |
+| canonicalheader | 6 | 10 | 0 | 0.0% | 0.0% |
+
+### Allowed known diffs (16)
+- guff-only: `bad.go:14:canonicalheader:non-canonical header "accept-encoding", instead use: "Accept-Encoding"`
+- guff-only: `bad.go:15:canonicalheader:non-canonical header "user-agent", instead use: "User-Agent"`
+- guff-only: `bad.go:16:canonicalheader:non-canonical header "if-none-match", instead use: "If-None-Match"`
+- guff-only: `bad.go:6:canonicalheader:non-canonical header "content-type", instead use: "Content-Type"`
+- guff-only: `fieldonly/fieldonly.go:13:canonicalheader:non-canonical header "content-type", instead use: "Content-Type"`
+- guff-only: `fieldonly/fieldonly.go:14:canonicalheader:non-canonical header "if-none-match", instead use: "If-None-Match"`
+- golangci-only: `bad.go:13:canonicalheader:use "X-Request-ID" instead of "x-request-id"`
+- golangci-only: `bad.go:14:canonicalheader:use "Accept-Encoding" instead of "accept-encoding"`
+- … and 8 more (see `compat/allowlists/`)
 
 ## isolate-ireturn
 
@@ -605,7 +634,10 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| revive | 7 | 7 | 7 | 100.0% | 100.0% |
+| revive | 7 | 6 | 6 | 85.7% | 100.0% |
+
+### Allowed known diffs (1)
+- guff-only: `bad.go:32:revive:empty-block: this block is empty, you can remove it`
 
 ## isolate-gosec
 

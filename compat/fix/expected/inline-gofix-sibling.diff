@@ -1,0 +1,30 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh inline-gofix-sibling
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/inline-gofix-sibling/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.14.0
+
+--- a/bad.go
++++ b/bad.go
+@@ -26,7 +26,7 @@
+ func B() *int { return ptr.Of[int](1) }
+ 
+ // Silent: both type arguments spelled.
+-func C() (int, string) { return ptr.Pair[int, string](1, "a") }
++func C() (int, string) { return int(1), string("a") }
+ 
+ // Reported: neither spelled.
+ func D() (int, string) { return ptr.Pair(1, "a") }
+@@ -37,7 +37,7 @@
+ // Silent here: not generic, so the message does not apply. Upstream says
+ // "Call of ptr.Plain should be inlined" instead — the inliner half guff does
+ // not have.
+-func F() int { return ptr.Plain(1) }
++func F() int { return 1 }
+ 
+ // Silent: generic, but no directive on the declaration.
+ func G() *int { return ptr.NotMarked(1) }

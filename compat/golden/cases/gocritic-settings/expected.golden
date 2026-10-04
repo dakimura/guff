@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/gocritic-settings/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 settings.go:30:2:gocritic::singleCaseSwitch: should rewrite switch statement to if statement
 settings.go:45:16:gocritic::appendAssign: append result not assigned to the same slice

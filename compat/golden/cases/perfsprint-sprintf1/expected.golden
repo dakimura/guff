@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/perfsprint-sprintf1/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 bad.go:12:9:perfsprint::string-format: fmt.Sprintf can be replaced with just using the string
 bad.go:16:9:perfsprint::integer-format: fmt.Sprintf can be replaced with faster strconv.Itoa

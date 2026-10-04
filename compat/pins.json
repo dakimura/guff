@@ -10,7 +10,7 @@
     "compat/drift.py has been run against the new version and its report",
     "reviewed — see docs/COMPAT-HARDENING.md Phase 7."
   ],
-  "golangci_lint": "2.12.2",
+  "golangci_lint": "2.14.0",
 
   "_shelled_out_why": [
     "Two tools golangci-lint *links* and guff *shells out to*. A different",

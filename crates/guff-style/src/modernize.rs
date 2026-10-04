@@ -2526,18 +2526,6 @@ fn expr_uses_range_vars(pass: &Pass<'_>, expr: &Expr, rng: &RangeStmt) -> bool {
     node_uses_objs(pass, walk::expr_ref(expr), &range_var_objs(pass, rng))
 }
 
-/// Side-effect heuristic: reject call / unary / composite needles for Contains.
-fn expr_may_have_effects(expr: &Expr) -> bool {
-    match expr {
-        Expr::CallExpr(_) | Expr::UnaryExpr(_) | Expr::CompositeLit(_) | Expr::FuncLit(_) => true,
-        Expr::ParenExpr(p) => expr_may_have_effects(&p.x),
-        Expr::SelectorExpr(sel) => expr_may_have_effects(&sel.x),
-        Expr::IndexExpr(ix) => expr_may_have_effects(&ix.x) || expr_may_have_effects(&ix.index),
-        Expr::BinaryExpr(b) => expr_may_have_effects(&b.x) || expr_may_have_effects(&b.y),
-        _ => false,
-    }
-}
-
 /// The `ContainsFunc` half of upstream's signature check: not variadic, and the
 /// sole parameter's type identical to the ranged slice's element type.
 ///
@@ -2604,13 +2592,15 @@ fn slicescontains_cond(
             if !types_identical(pass, elem_ty, needle_ty) {
                 return None;
             }
-            // `usesRangeVar(arg2)` is upstream's only test on the needle.
-            // There is no purity check: `slices.Contains(s, strings.ToLower(k))`
-            // evaluates the needle once where the loop evaluated it per
-            // element, and upstream rewrites it anyway. The invented guard
-            // silenced every comparison against a call — beats' packetbeat
-            // `isSecretParameter` and its decode_cef twin among them.
             if expr_uses_range_vars(pass, needle, rng) {
+                return None;
+            }
+            // `if !typesinternal.NoEffects(info, arg2) { return }`, new in
+            // x/tools v0.50 (golangci-lint 2.14.0): `slices.Contains(s,
+            // strings.ToLower(k))` evaluates the needle once where the loop
+            // evaluated it per element. v0.44 had no such check and rewrote
+            // it — which is why an invented guard here was once removed.
+            if expr_has_effects(pass, needle) {
                 return None;
             }
             // `astutil.Format(fset, arg2)`: source text, which cannot fail.
@@ -2651,7 +2641,9 @@ fn slicescontains_cond(
                 return None;
             }
             let pred_text = expr_text(&call.fun)?;
-            if expr_may_have_effects(&call.fun) {
+            // The same `NoEffects(info, arg2)` as the needle above; arg2 is
+            // the predicate expression here.
+            if expr_has_effects(pass, &call.fun) {
                 return None;
             }
             Some(("ContainsFunc", pred_text))
@@ -3939,94 +3931,46 @@ fn check_reflecttypeassert(
     });
 }
 
-/// Edits deleting the declarations of local variables that `deleted` was the
-/// last use of.
+/// Port of `usesNonTypeSymbol` (x/tools v0.50, golangci-lint 2.14.0): does
+/// `expr` name a value — a var, const or func, or anything else whose
+/// identifier would vanish in a `TypeFor` rewrite? `TypeOf(pkg.Var)` keeps a
+/// deliberate link to `pkg.Var` that `TypeFor[int]()` would cut, so upstream
+/// declines. Type names, package names, `nil` and builtins either reappear in
+/// the type argument or do not matter to it.
 ///
-/// Port of `refactor.DeleteUnusedVars`. Rewriting `reflect.TypeOf(zero)` to
-/// `reflect.TypeFor[MyStruct]()` erases the only mention of `zero`, and Go
-/// rejects the result with `declared and not used` — the fix has to take the
-/// declaration with it.
+/// Upstream walks every node (`ast.Preorder`) and switches on `info.Uses[id]`,
+/// so an identifier with no `Uses` entry at all lands in `default` and counts
+/// as a value too.
 ///
-/// Scoped to the shape `var x T` with no initialiser and no other names, which
-/// is `deleteVarFromValueSpec`'s `!declaresOtherNames && noRHSEffects` branch
-/// reaching `DeleteSpec` -> `DeleteDecl` -> `DeleteStmt`. DEFERRED: the `n:n`
-/// assignment and multi-name spec forms, which blank out one name rather than
-/// removing a line. Declining there costs a `declared and not used` that guff
-/// already had, never a wrong edit.
-fn delete_newly_unused_vars(
-    pass: &Pass<'_>,
-    file: &File,
-    deleted: &Expr,
-    edits: &mut Vec<TextEdit>,
-) {
-    let Some(index) = pass.result_of::<typeindex::Index>(typeindex::analyzer()) else {
-        return;
-    };
+/// This replaced `refactor.DeleteUnusedVars`, which v0.44 called on the
+/// operand to delete a `var zero T` the rewrite left unused: v0.50 never
+/// erases a variable reference, so there is nothing left to delete.
+fn uses_non_type_symbol(pass: &Pass<'_>, expr: &Expr) -> bool {
     let (Some(info), Some(artifacts)) = (pass.types_info(), pass.pkg().type_artifacts.as_ref())
     else {
-        return;
+        return false;
     };
-
-    // How many uses of each local var disappear with `deleted`.
-    let mut delcount: HashMap<ObjectId, usize> = HashMap::new();
-    walk::inspect(walk::expr_ref(deleted), |n| {
-        let Some(NodeRef::Ident(id)) = n else {
-            return true;
-        };
-        if let Some(obj) = info.uses.get(&id.id).copied() {
-            if let ObjectData::Var(v) = artifacts.objects.get(obj) {
-                if v.kind() == VarKind::Local {
-                    *delcount.entry(obj).or_default() += 1;
-                }
+    let mut found = false;
+    walk::inspect(walk::expr_ref(expr), |n| {
+        if found {
+            return false;
+        }
+        if let Some(NodeRef::Ident(id)) = n {
+            let type_level = info.uses.get(&id.id).is_some_and(|obj| {
+                matches!(
+                    artifacts.objects.get(*obj),
+                    ObjectData::TypeName(_)
+                        | ObjectData::PkgName(_)
+                        | ObjectData::Nil(_)
+                        | ObjectData::Builtin(_)
+                )
+            });
+            if !type_level {
+                found = true;
+                return false;
             }
         }
         true
-    });
-
-    // Deterministic order: two vars in one deleted expression would otherwise
-    // produce edits in hash order, and the recorded diff has to be stable.
-    let mut objs: Vec<ObjectId> = delcount.keys().copied().collect();
-    objs.sort_by_key(|o| index.def(*o).unwrap_or(0));
-
-    let src = refactor::file_source(pass, file);
-    for obj in objs {
-        if index.uses(obj).len() != delcount[&obj] {
-            continue; // still used elsewhere
-        }
-        let Some(def_id) = index.def(obj) else {
-            continue;
-        };
-        if let Some((pos, end)) = sole_var_decl_span(file, def_id) {
-            edits.extend(refactor::delete_with_line(file, src, pos, end));
-        }
-    }
-}
-
-/// The span of `var x T` when `def_id` names its sole variable and it has no
-/// initialiser; `None` for every other declaration shape.
-fn sole_var_decl_span(file: &File, def_id: u32) -> Option<(u32, u32)> {
-    let mut found = None;
-    walk::inspect(NodeRef::File(file), |n| {
-        if found.is_some() {
-            return false;
-        }
-        let Some(NodeRef::DeclStmt(ds)) = n else {
-            return true;
-        };
-        let Decl::GenDecl(gd) = &ds.decl else {
-            return true;
-        };
-        if gd.tok != Some(Token::VAR) || gd.specs.len() != 1 || gd.rparen.is_valid() {
-            return true;
-        }
-        let Spec::ValueSpec(vs) = &gd.specs[0] else {
-            return true;
-        };
-        if vs.names.len() != 1 || !vs.values.is_empty() || vs.names[0].id != def_id {
-            return true;
-        }
-        found = Some((gd.tok_pos.0 as u32, ds.decl.end().0 as u32));
-        false
     });
     found
 }
@@ -4046,7 +3990,6 @@ fn too_long_to_spell(tstr: &str, operand: &Expr) -> bool {
 
 fn check_reflecttypefor(
     pass: &Pass<'_>,
-    file: &File,
     call: &CallExpr,
     claimed: &HashSet<u32>,
     pending: &mut Vec<Diagnostic>,
@@ -4074,6 +4017,9 @@ fn check_reflecttypefor(
         return;
     }
     if expr_has_effects(pass, &call.args[0]) {
+        return;
+    }
+    if uses_non_type_symbol(pass, &call.args[0]) {
         return;
     }
     let Some(arg_ty) = type_of(pass, &call.args[0]) else {
@@ -4118,22 +4064,18 @@ fn check_reflecttypefor(
         message: "reflect.TypeOf call can be simplified using TypeFor".into(),
         suggested_fixes: vec![SuggestedFix {
             message: "Replace TypeOf by TypeFor".into(),
-            text_edits: {
-                let mut edits = vec![
-                    TextEdit {
-                        pos: sel.sel.pos().0 as u32,
-                        end: sel.sel.end().0 as u32,
-                        new_text: format!("TypeFor[{tstr}]"),
-                    },
-                    TextEdit {
-                        pos: (call.lparen.0 + 1) as u32,
-                        end: call.rparen.0 as u32,
-                        new_text: String::new(),
-                    },
-                ];
-                delete_newly_unused_vars(pass, file, &call.args[0], &mut edits);
-                edits
-            },
+            text_edits: vec![
+                TextEdit {
+                    pos: sel.sel.pos().0 as u32,
+                    end: sel.sel.end().0 as u32,
+                    new_text: format!("TypeFor[{tstr}]"),
+                },
+                TextEdit {
+                    pos: (call.lparen.0 + 1) as u32,
+                    end: call.rparen.0 as u32,
+                    new_text: String::new(),
+                },
+            ],
         }],
         related: Vec::new(),
         url: String::new(),
@@ -4171,6 +4113,9 @@ fn check_reflecttypefor_elem(
         return;
     }
     if expr_has_effects(pass, &typeof_call.args[0]) {
+        return;
+    }
+    if uses_non_type_symbol(pass, &typeof_call.args[0]) {
         return;
     }
     let Some(arg_ty) = type_of(pass, &typeof_call.args[0]) else {
@@ -7084,12 +7029,24 @@ fn check_stringsbuilder(pass: &Pass<'_>, file: &File, pending: &mut Vec<Diagnost
     {
         return;
     }
-    // Upstream's only gate is `within(pass, "strings", "runtime")` — the two
-    // packages where the fix would make an import cycle. guff also skipped
-    // every `_test.go` file, from the rule's first commit and with no reason
-    // recorded; nothing in `stringsbuilder.go` (or anywhere else in modernize)
-    // looks at the file name. beats accumulates a status string in a loop in
-    // `heartbeat/monitors/wrappers/summarizer/summarizer_test.go:173`.
+    // `within(pass, "strings", "runtime")`: the two packages where the fix
+    // would make an import cycle.
+    //
+    // And, since x/tools v0.50 (golangci-lint 2.14.0), no `_test.go` file at
+    // all — "suggested fixes may increase verbosity, and performance doesn't
+    // matter as much" (go.dev/issue/78613). Upstream asks per candidate, after
+    // the overlap check, but every candidate here is in the same file, so the
+    // answer is the same for all of them. v0.44 had no such gate, and an
+    // earlier guff skip of test files with no reason recorded was removed for
+    // missing beats' `summarizer_test.go:173`; this one is upstream's own.
+    if pass
+        .fset()
+        .position(file.pos())
+        .filename
+        .ends_with("_test.go")
+    {
+        return;
+    }
 
     // Candidates: local string vars on the LHS of some `+=`.
     let mut candidates: HashSet<ObjectId> = HashSet::new();
@@ -8322,7 +8279,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         // Prefer Elem() special-case; plain TypeOf is handled when
                         // this call is not itself the X of a `.Elem()` selector.
                         check_reflecttypefor_elem(pass, c, &mut reflect_elem_claimed, &mut pending);
-                        check_reflecttypefor(pass, file, c, &reflect_elem_claimed, &mut pending);
+                        check_reflecttypefor(pass, c, &reflect_elem_claimed, &mut pending);
                         stamp_category(&mut pending, _before, "reflecttypefor");
                     }
                     if enabled(&options, "unsafefuncs") {

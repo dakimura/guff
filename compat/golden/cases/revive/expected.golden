@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/revive/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 bad/revivetest/bad.go:1:1:revive:warning:comments-density: the file has a comment density of  0% (0 comment lines for 42 code lines) but expected a minimum of 10%
 bad/revivetest/bad.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
@@ -21,7 +21,6 @@ bad/revivetest/bad.go:26:7:revive:warning:unused-receiver: method receiver 'w' i
 bad/revivetest/bad.go:29:7:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
 bad/revivetest/bad.go:30:2:revive:warning:increment-decrement: should replace i += 1 with i++
 bad/revivetest/bad.go:30:7:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
-bad/revivetest/bad.go:34:2:revive:warning:empty-block: this block is empty, you can remove it
 bad/revivetest/bad.go:39:9:revive:warning:range: should omit 2nd value from range; this loop is equivalent to `for k := range ...`
 bad/revivetest/bad.go:45:2:revive:warning:redefines-builtin-id: redefinition of the built-in function len
 bad/revivetest/bad.go:45:9:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
@@ -128,11 +127,8 @@ earlyreturn/early_return_containers.go:80:12:revive:warning:identical-ifelseif-b
 earlyreturn/early_return_containers.go:82:9:revive:warning:identical-ifelseif-conditions: "if...else if" chain with identical conditions (lines 80 and 82)
 earlyreturn/early_return_containers.go:93:3:revive:warning:early-return: if c { ... } else { ... return } can be simplified to if !c { ... return } ...
 emptyblockrange/empty_block_range.go:17:1:revive:warning:file-header: the file doesn't have an appropriate header
-emptyblockrange/empty_block_range.go:23:2:revive:warning:empty-block: this block is empty, you can remove it
-emptyblockrange/empty_block_range.go:28:2:revive:warning:empty-block: this block is empty, you can remove it
 emptyblockrange/empty_block_range.go:41:10:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
 emptyblockrange/empty_block_range.go:41:12:revive:warning:empty-block: this block is empty, you can remove it
-emptyblockrange/empty_block_range.go:49:3:revive:warning:empty-block: this block is empty, you can remove it
 emptyblockrange/empty_block_range.go:57:7:revive:warning:empty-block: this block is empty, you can remove it
 emptyblockrange/empty_block_range.go:65:11:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
 emptyblockrange/empty_block_range.go:65:13:revive:warning:empty-block: this block is empty, you can remove it
@@ -140,8 +136,6 @@ emptyblockrange/empty_block_range.go:73:12:revive:warning:add-constant: avoid ma
 emptyblockrange/empty_block_range.go:73:19:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
 emptyblockrange/empty_block_range.go:73:26:revive:warning:empty-block: this block is empty, you can remove it
 emptyblockrange/empty_block_range.go:81:3:revive:warning:empty-block: this block is empty, you can remove it
-emptyblockrange/empty_block_range.go:90:4:revive:warning:empty-block: this block is empty, you can remove it
-emptyblockrange/empty_block_range.go:102:4:revive:warning:empty-block: this block is empty, you can remove it
 extended/util/extended_bad.go:2:1:revive:warning:file-header: the file doesn't have an appropriate header
 extended/util/extended_bad.go:2:9:revive:warning:package-naming: don't use "util" because it is a bad package name according to https://go.dev/blog/package-names#bad-package-names
 extended/util/extended_bad.go:14:8:revive:warning:imports-blocklist: should not use the following blocklisted import: "os"

@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/errchkjson/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 bad.go:10:9:errchkjson::Error return value of `encoding/json.Marshal` is not checked: unsafe type `float64` found
 bad.go:19:2:errchkjson::Error return value of `(*encoding/json.Encoder).Encode` is not checked

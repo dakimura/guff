@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/nolint-after-exclusions/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 nolintorder/nolintorder.go:20:21:nolintlint::directive `//nolint:errcheck` is unused for linter "errcheck"
 nolintorder/nolintorder.go:26:18:nolintlint::directive `//nolint:errcheck` is unused for linter "errcheck"

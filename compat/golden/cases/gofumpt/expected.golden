@@ -4,7 +4,8 @@
 # Produced by running golangci-lint on compat/golden/cases/gofumpt/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 comments/comments.go:11:1:gofumpt::File is not properly formatted
+longoneline/longoneline.go:20:1:gofumpt::File is not properly formatted
 unformatted/unformatted.go:7:1:gofumpt::File is not properly formatted

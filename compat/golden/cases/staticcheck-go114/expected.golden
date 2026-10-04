@@ -4,6 +4,6 @@
 # Produced by running golangci-lint on compat/golden/cases/staticcheck-go114/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 sa3000/bad/bad.go:5:1:staticcheck::SA3000: TestMain should call os.Exit to set exit code

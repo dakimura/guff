@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/staticcheck-sa/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 old/old.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
 old/old.go:6:1:staticcheck::ST1021: comment on exported type OldClient should be of the form "OldClient ..." (with optional leading article)
@@ -137,17 +137,17 @@ sa1018/bad/bad.go:7:35:staticcheck::SA1018: calling strings.Replace with n == 0 
 sa1018/ok/ok.go:6:2:staticcheck::QF1004: could use strings.ReplaceAll instead
 sa1018/ok/ok.go:6:2:staticcheck::SA4017: Replace doesn't have side effects and its return value is ignored
 sa1018/ok/ok.go:7:2:staticcheck::SA4017: Replace doesn't have side effects and its return value is ignored
-sa1019/bad/bad.go:4:2:staticcheck::SA1019: "example.com/blockdoc" is deprecated: Please use example.com/old. 
-sa1019/bad/bad.go:9:2:staticcheck::SA1019: old.Legacy is deprecated: call New. 
-sa1019/bad/bad.go:10:8:staticcheck::SA1019: old.OldClient is deprecated: use NewClient instead. 
-sa1019/bad/bad.go:16:2:staticcheck::SA1019: o.Old is deprecated: use Fine instead. 
-sa1019/bad/bad.go:22:2:staticcheck::SA1019: w.Old is deprecated: use Fine instead. 
-sa1019/bad/bad.go:23:6:staticcheck::SA1019: w.Old is deprecated: use Fine instead. 
-sa1019/bad/bad.go:26:2:staticcheck::SA1019: pw.Old is deprecated: use Fine instead. 
-sa1019/bad/bad.go:29:2:staticcheck::SA1019: h.Cfg.Old is deprecated: use Fine instead. 
-sa1019/bad/bad.go:32:2:staticcheck::SA1019: w.Options.Old is deprecated: use Fine instead. 
+sa1019/bad/bad.go:4:2:staticcheck::SA1019: example.com/blockdoc is deprecated: Please use example.com/old. 
+sa1019/bad/bad.go:9:2:staticcheck::SA1019: example.com/old.Legacy is deprecated: call New. 
+sa1019/bad/bad.go:10:8:staticcheck::SA1019: example.com/old.OldClient is deprecated: use NewClient instead. 
+sa1019/bad/bad.go:16:2:staticcheck::SA1019: (example.com/old.Options).Old is deprecated: use Fine instead. 
+sa1019/bad/bad.go:22:2:staticcheck::SA1019: (example.com/old.Wrapper).Old is deprecated: use Fine instead. 
+sa1019/bad/bad.go:23:6:staticcheck::SA1019: (example.com/old.Wrapper).Old is deprecated: use Fine instead. 
+sa1019/bad/bad.go:26:2:staticcheck::SA1019: (example.com/old.PtrWrapper).Old is deprecated: use Fine instead. 
+sa1019/bad/bad.go:29:2:staticcheck::SA1019: (example.com/old.Wrapper).Old is deprecated: use Fine instead. 
+sa1019/bad/bad.go:32:2:staticcheck::SA1019: (example.com/old.Options).Old is deprecated: use Fine instead. 
 sa1019/bad/bad.go:32:4:staticcheck::QF1008: could remove embedded field "Options" from selector
-sa1019/bad/second.go:18:8:staticcheck::SA1019: "example.com/blockdoc" is deprecated: Please use example.com/old. 
+sa1019/bad/second.go:18:8:staticcheck::SA1019: example.com/blockdoc is deprecated: Please use example.com/old. 
 sa1019/ok/ok.go:5:1:staticcheck::ST1021: comment on exported type Embedder should be of the form "Embedder ..." (with optional leading article)
 sa1020/bad/bad.go:7:22:staticcheck::SA1020: invalid port or service name in host:port pair
 sa1020/bad/bad.go:8:22:staticcheck::SA1020: invalid port or service name in host:port pair
@@ -256,11 +256,11 @@ sa4001/bad/bad.go:8:6:staticcheck::SA4001: &*x will be simplified to x. It will 
 sa4001/bad/bad.go:9:6:staticcheck::SA4001: *&x will be simplified to x. It will not copy x.
 sa4003/bad/bad.go:4:9:staticcheck::SA4003: no value of type uint is less than 0
 sa4003/bad/bad.go:5:9:staticcheck::SA4003: no value of type uint is less than 0
-sa4003/literal/literal.go:27:6:staticcheck::SA4003: every value of type uint32 is >= 0
-sa4003/literal/literal.go:28:6:staticcheck::SA4003: every value of type uint32 is >= 0
-sa4003/literal/literal.go:29:6:staticcheck::SA4003: every value of type uint32 is >= 0
-sa4003/literal/literal.go:30:6:staticcheck::SA4003: every value of type uint32 is >= 0
-sa4003/literal/literal.go:31:6:staticcheck::SA4003: every value of type uint32 is >= 0
+sa4003/literal/literal.go:27:6:staticcheck::SA4003: every value of type example.com/sa4003/literal.Level is >= 0
+sa4003/literal/literal.go:28:6:staticcheck::SA4003: every value of type example.com/sa4003/literal.Level is >= 0
+sa4003/literal/literal.go:29:6:staticcheck::SA4003: every value of type example.com/sa4003/literal.Level is >= 0
+sa4003/literal/literal.go:30:6:staticcheck::SA4003: every value of type example.com/sa4003/literal.Level is >= 0
+sa4003/literal/literal.go:31:6:staticcheck::SA4003: every value of type example.com/sa4003/literal.Level is >= 0
 sa4003/literal/literal.go:43:11:staticcheck::SA4000: identical expressions on the left and right side of the '-' operator
 sa4003/literal/literal.go:48:6:staticcheck::SA4024: builtin function len does not return negative values
 sa4003/literal/literal.go:54:6:staticcheck::SA4028: x % 1 is always zero
@@ -274,7 +274,6 @@ sa4006/bad/bad.go:11:2:staticcheck::SA4006: this value of n is never used
 sa4006/bad/bad.go:17:2:staticcheck::SA4006: this value of f is never used
 sa4006/bad/bad.go:23:2:staticcheck::SA4006: this value of x is never used
 sa4006/bad/bad.go:29:2:staticcheck::SA4006: this value of s is never used
-sa4006/bad/bad.go:29:6:staticcheck::SA6001: m[string(key)] would be more efficient than k := string(key); m[k]
 sa4006/branches/branches.go:32:2:staticcheck::SA4006: this value of config is never used
 sa4006/branches/branches.go:46:2:staticcheck::SA4006: this value of config is never used
 sa4006/branches/branches.go:58:2:staticcheck::SA4006: this value of config is never used
@@ -289,6 +288,8 @@ sa4006/methods/methods.go:40:2:staticcheck::SA4006: this value of x is never use
 sa4006/methods/methods.go:47:2:staticcheck::SA4006: this value of x is never used
 sa4006/methods/methods.go:59:3:staticcheck::SA4006: this value of v is never used
 sa4006/methods/methods.go:67:3:staticcheck::SA4006: this value of x is never used
+sa4006/ok/ok.go:44:2:staticcheck::SA4006: this value of n is never used
+sa4006/ok/ok.go:51:2:staticcheck::SA4006: this value of n is never used
 sa4006/range_ptr/range_ptr.go:28:3:staticcheck::SA4006: this value of v is never used
 sa4006/range_ptr/range_ptr.go:38:3:staticcheck::SA4006: this value of v is never used
 sa4006/range_ptr/range_ptr.go:48:3:staticcheck::SA4006: this value of v is never used
@@ -422,17 +423,10 @@ sa5009/bad/bad.go:3:23:staticcheck::SA5009: Printf format %s reads arg #1, but c
 sa5010/bad/bad.go:4:19:staticcheck::SA5010: impossible type assertion; A and B contradict each other:\n	wrong type for M method\n		have func()\n		want func() int
 sa5010/generic/generic.go:49:6:staticcheck::SA5010: impossible type assertion; gPlainA and gPlainB contradict each other:\n	wrong type for Get method\n		have func() int\n		want func() string
 sa5010/generic/generic.go:57:6:staticcheck::SA5010: impossible type assertion; interface{Get() map[string][]T} and interface{Get() int} contradict each other:\n	wrong type for Get method\n		have func() map[string][]T\n		want func() int
-sa5011/bad/bad.go:6:8:staticcheck::SA5011: possible nil pointer dereference
-sa5011/bad/bad.go:23:17:staticcheck::SA5011: possible nil pointer dereference
-sa5011/bad/bad.go:41:11:staticcheck::SA5011: possible nil pointer dereference
-sa5011/bad/bad.go:53:7:staticcheck::SA5011: possible nil pointer dereference
 sa5011/bad/bad.go:61:2:staticcheck::S1021: should merge variable declaration with assignment on next line
-sa5011/bad/bad.go:63:7:staticcheck::SA5011: possible nil pointer dereference
-sa5011/ok/ok.go:89:17:staticcheck::SA5011: possible nil pointer dereference
 sa5011/ok/ok.go:297:2:staticcheck::S1021: should merge variable declaration with assignment on next line
 sa5012/bad/bad.go:3:32:staticcheck::SA5012: variadic argument "oldnew" is expected to have even number of elements, but has 3 elements
 sa6000/bad/bad.go:7:3:staticcheck::SA6000: calling regexp.MatchString in a loop has poor performance, consider using regexp.Compile
-sa6000/ok/ok.go:13:5:staticcheck::SA4006: this value of match is never used
 sa6001/bad/bad.go:4:7:staticcheck::SA6001: m[string(key)] would be more efficient than k := string(key); m[k]
 sa6001/bad/bad.go:12:7:staticcheck::SA6001: m[string(key)] would be more efficient than k := string(key); m[k]
 sa6002/bad/bad.go:18:39:staticcheck::SA6002: argument should be pointer-like to avoid allocations
@@ -444,7 +438,7 @@ sa6002/bad/bad.go:28:48:staticcheck::SA6002: argument should be pointer-like to 
 sa6003/bad/bad.go:2:20:staticcheck::S1029: should range over string, not []rune(string)
 sa6003/bad/bad.go:2:20:staticcheck::SA6003: should range over string, not []rune(string)
 sa6005/bad/bad.go:5:35:staticcheck::SA6005: should use strings.EqualFold instead
-sa6005/bad/bad.go:11:35:staticcheck::SA6005: should use strings.EqualFold instead
+sa6005/bad/bad.go:11:35:staticcheck::SA6005: should use !strings.EqualFold instead
 sa6006/bad/bad.go:3:33:staticcheck::SA6006: use io.Writer.Write instead of converting from []byte to string to use io.WriteString
 sa9001/bad/bad.go:2:38:staticcheck::SA9001: defers in this range loop won't run unless the channel gets closed
 sa9002/bad/bad.go:3:26:staticcheck::SA9002: file mode '644' evaluates to 01204; did you mean '0644'?

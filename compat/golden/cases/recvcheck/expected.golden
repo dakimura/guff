@@ -4,8 +4,8 @@
 # Produced by running golangci-lint on compat/golden/cases/recvcheck/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 bad.go:3:6:recvcheck::the methods of "RPC" use pointer receiver and non-pointer receiver.
-bad.go:21:6:recvcheck::the methods of "Period" use pointer receiver and non-pointer receiver.
+bad.go:28:6:recvcheck::the methods of "Encoded" use pointer receiver and non-pointer receiver.
 bad.go:35:6:recvcheck::the methods of "Mixed" use pointer receiver and non-pointer receiver.

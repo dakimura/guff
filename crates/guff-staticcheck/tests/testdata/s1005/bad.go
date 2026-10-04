@@ -29,16 +29,14 @@ func rangeBlankValue(xs []int) {
 	}
 }
 
-// The other half of upstream's first pattern:
+// Not findings since golangci-lint 2.14.0 (staticcheck v0.8.1). v0.7.0's first
+// pattern was
 //
 //	(AssignStmt [_ (Ident "_")] _ (Or (IndexExpr _ _) (UnaryExpr "<-" _)))
 //
-// guff carried only the receive arm, so a map index with a discarded comma-ok
-// went unreported in either assignment token. boundary's
-// internal/plugin/loopback writes two of them.
-//
-// Read the *pinned* v0.7.0 for this: the tip has since dropped the IndexExpr
-// arm, with a comment arguing that `x, _ = m[k]` may be deliberate.
+// and reported both of these; v0.8.1 dropped the IndexExpr arm, arguing that
+// `x, _ = m[k]` may say "there might be no entry, and I don't care". They stay
+// in this file so the golden case keeps recording that upstream is silent here.
 func mapIndexDeclare(m map[string]int) int {
 	v, _ := m["k"]
 	return v

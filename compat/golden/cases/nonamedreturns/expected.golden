@@ -4,19 +4,19 @@
 # Produced by running golangci-lint on compat/golden/cases/nonamedreturns/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
-bad/bad.go:3:1:nonamedreturns::named return "n" with type "int" found
-bad/bad.go:14:1:nonamedreturns::named return "f" with type "func(*Command) error" found
-bad/bad.go:16:1:nonamedreturns::named return "g" with type "func(a int, b string) (bool, error)" found
-bad/bad.go:18:1:nonamedreturns::named return "h" with type "func()" found
-bad/bad.go:20:1:nonamedreturns::named return "c" with type "<-chan int" found
-bad/bad.go:22:1:nonamedreturns::named return "c" with type "chan<- int" found
-bad/bad.go:24:1:nonamedreturns::named return "c" with type "chan int" found
-bad/bad.go:28:14:nonamedreturns::named return "f" with type "func(*Command) error" found
-bad/bad.go:39:1:nonamedreturns::named return "s" with type "struct{A int}" found
-bad/bad.go:41:1:nonamedreturns::named return "i" with type "interface{Foo() int}" found
-bad/bad.go:43:1:nonamedreturns::named return "p" with type "Pair[string, int]" found
-bad/bad.go:45:1:nonamedreturns::named return "p" with type "*Pair[string, []int]" found
-bad/bad.go:47:1:nonamedreturns::named return "m" with type "map[string]func(int) error" found
-bad/bad.go:49:1:nonamedreturns::named return "a" with type "[3]<-chan struct{B bool}" found
+bad/bad.go:3:13:nonamedreturns::named return "n" with type "int" found
+bad/bad.go:14:21:nonamedreturns::named return "f" with type "func(*Command) error" found
+bad/bad.go:16:26:nonamedreturns::named return "g" with type "func(a int, b string) (bool, error)" found
+bad/bad.go:18:26:nonamedreturns::named return "h" with type "func()" found
+bad/bad.go:20:21:nonamedreturns::named return "c" with type "<-chan int" found
+bad/bad.go:22:21:nonamedreturns::named return "c" with type "chan<- int" found
+bad/bad.go:24:19:nonamedreturns::named return "c" with type "chan int" found
+bad/bad.go:28:22:nonamedreturns::named return "f" with type "func(*Command) error" found
+bad/bad.go:39:27:nonamedreturns::named return "s" with type "struct{A int}" found
+bad/bad.go:41:26:nonamedreturns::named return "i" with type "interface{Foo() int}" found
+bad/bad.go:43:20:nonamedreturns::named return "p" with type "Pair[string, int]" found
+bad/bad.go:45:23:nonamedreturns::named return "p" with type "*Pair[string, []int]" found
+bad/bad.go:47:22:nonamedreturns::named return "m" with type "map[string]func(int) error" found
+bad/bad.go:49:24:nonamedreturns::named return "a" with type "[3]<-chan struct{B bool}" found

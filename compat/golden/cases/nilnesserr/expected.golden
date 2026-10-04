@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/nilnesserr/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 bad.go:13:3:nilnesserr::return a nil value error after check error
 bad.go:28:3:nilnesserr::return a nil value error after check error

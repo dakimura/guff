@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/nilnil/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 bad.go:9:2:nilnil::return both a `nil` error and an invalid value: use a sentinel error instead
 bad.go:13:2:nilnil::return both a `nil` error and an invalid value: use a sentinel error instead

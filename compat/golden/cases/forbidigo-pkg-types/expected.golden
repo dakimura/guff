@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/forbidigo-pkg-types/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 pkgfilter.go:14:2:forbidigo::use of `fmt.Println` forbidden by pattern `^fmt\\.Println$`
 pkgfilter.go:15:6:forbidigo::use of `strings.ToUpper` forbidden by pattern `^strings\\.ToUpper$`

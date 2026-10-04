@@ -6,7 +6,7 @@
 #
 # An absent file for a case means upstream's --fix changes nothing there, and
 # guff must change nothing either.
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 --- a/bad.go
 +++ b/bad.go
@@ -61,7 +61,7 @@
  	// with `strconv.Quote`, which has no way to spell a backtick literal. The
  	// backticks are gone from the fixed file.
 -	raw := `the the word`
-+	raw := "the word"
++	raw := `the word`
  
  	// ...but a raw string's `\t` is two characters, so `the\tthe` is one word
  	// and this one is silent — the pair above and below only differ by quoting.

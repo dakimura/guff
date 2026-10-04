@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/revive-limits-zero/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 rulelimits/rule_limits.go:40:1:revive:warning:function-length: maximum number of lines per function exceeded; max 12 but got 31
 rulelimits/rule_limits.go:86:1:revive:warning:function-length: maximum number of lines per function exceeded; max 12 but got 14

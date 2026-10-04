@@ -4,6 +4,6 @@
 # Produced by running golangci-lint on compat/golden/cases/nolint-after-typecheck/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 broken/broken.go:12:12:typecheck::pattern all:dist/*: no matching files found

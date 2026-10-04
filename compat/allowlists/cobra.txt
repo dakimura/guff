@@ -1,0 +1,15 @@
+
+# golangci-lint 2.12.2 -> 2.14.0 (Phase 8, 2026-10-04). Not accepted mismatches:
+# each is a ledger item still to port, and these lines go when it lands.
+# why: goconst v1.11.0 scope split and positions (gocritic-goconst #3, #4).
+cobra guff-only command.go:1192:goconst:string `true` has 6 occurrences, make it a constant
+cobra guff-only completions.go:802:goconst:string `bash` has 6 occurrences, make it a constant
+cobra guff-only completions.go:837:goconst:string `zsh` has 6 occurrences, make it a constant
+cobra guff-only completions.go:876:goconst:string `fish` has 6 occurrences, make it a constant
+cobra guff-only completions.go:901:goconst:string `powershell` has 6 occurrences, make it a constant
+cobra guff-only completions_test.go:2548:goconst:string `bash` has 6 occurrences, make it a constant
+cobra guff-only completions_test.go:3879:goconst:string `true` has 6 occurrences, make it a constant
+cobra guff-only shell_completions.go:39:goconst:string `true` has 6 occurrences, make it a constant
+cobra golangci-only command.go:1192:goconst:string `true` has 4 occurrences, make it a constant
+cobra golangci-only completions_test.go:2548:goconst:string `bash` has 5 occurrences, make it a constant
+cobra golangci-only shell_completions.go:39:goconst:string `true` has 4 occurrences, make it a constant

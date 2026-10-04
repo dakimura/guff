@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/testableexamples/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 bad_test.go:9:16:testableexamples::missing output for example, go test can't validate it
 bad_test.go:13:19:testableexamples::missing output for example, go test can't validate it

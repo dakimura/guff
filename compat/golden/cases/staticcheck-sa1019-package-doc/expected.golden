@@ -4,6 +4,6 @@
 # Produced by running golangci-lint on compat/golden/cases/staticcheck-sa1019-package-doc/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
-use.go:4:2:staticcheck::SA1019: "example.com/sa1019pkgdoc/dep" is deprecated: The database-backed peerstore will be removed in the future. 
+use.go:4:2:staticcheck::SA1019: example.com/sa1019pkgdoc/dep is deprecated: The database-backed peerstore will be removed in the future. 

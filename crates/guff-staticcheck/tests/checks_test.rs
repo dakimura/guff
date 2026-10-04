@@ -1474,11 +1474,10 @@ fn s1005_flags_bad_patterns() {
     // range` went unreported because `is_blank` demanded an identifier with no
     // object — which a `:=` blank has.
     //
-    // Seven since 2026-09-06: the first pattern is
-    // `(Or (IndexExpr _ _) (UnaryExpr "<-" _))` at the pinned v0.7.0, and only
-    // the receive arm had been carried, so `v, _ := m["k"]` reported in neither
-    // assignment token.
-    assert_eq!(messages.len(), 7, "{messages:?}");
+    // Five: the two map comma-ok shapes in the fixture were findings at
+    // staticcheck v0.7.0 (golangci-lint 2.12.2) and are not at v0.8.1
+    // (golangci-lint 2.14.0), which dropped the pattern's IndexExpr arm.
+    assert_eq!(messages.len(), 5, "{messages:?}");
     assert!(messages.iter().all(|m| m.contains("blank identifier")));
     assert!(messages.iter().all(|m| m.contains("blank identifier")));
 }

@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/generics/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 generics/generics.go:19:1:revive:warning:exported: exported method Box.Get should have comment or be unexported
 generics/generics.go:21:1:revive:warning:exported: exported method Box.Peek should have comment or be unexported

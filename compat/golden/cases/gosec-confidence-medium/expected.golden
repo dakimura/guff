@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/gosec-confidence-medium/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 ladder/scoreladder.go:34:2:gosec:low:G104: Errors unhandled
 ladder/scoreladder.go:39:6:gosec:medium:G401: Use of weak cryptographic primitive

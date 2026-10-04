@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/godoclint-stdlib-doclink/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 doclink/a.go:12:1:godoclint::text "encoding/json.Encoder" should be replaced with "[encoding/json.Encoder]" to link to stdlib type
 doclink/a.go:15:1:godoclint::text "encoding/json.Encoder" should be replaced with "[encoding/json.Encoder]" to link to stdlib type (2 instances)

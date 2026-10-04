@@ -1,0 +1,44 @@
+# What guff's `--fix` writes TODAY for canonicalheader — generated, do not hand-edit.
+#
+# A pending baseline, not an allowlist: the case's real expectation is
+# expected/canonicalheader.diff, and it is printed in full on every run. This file only
+# keeps CI green while the gap is worked down, and it fails the gate if guff's
+# output moves in *either* direction — including once guff gets it right, so the
+# ledger cannot quietly outlive the defect it records.
+#
+# Re-record with: ./compat/fix/regen.sh --pending canonicalheader
+--- a/bad.go
++++ b/bad.go
+@@ -3,7 +3,7 @@
+ import "net/http"
+ 
+ func Bad(h http.Header) {
+-	_ = h.Get("content-type")
++	_ = h.Get("Content-Type")
+ }
+ 
+ // The message quotes the header it saw and the canonical spelling, so every
+@@ -11,9 +11,9 @@
+ // sites upstream matches, not just `Get`.
+ func More(h http.Header) {
+ 	h.Set("x-request-id", "1")
+-	h.Add("accept-encoding", "gzip")
+-	h.Del("user-agent")
+-	_ = h.Values("if-none-match")
++	h.Add("Accept-Encoding", "gzip")
++	h.Del("User-Agent")
++	_ = h.Values("If-None-Match")
+ }
+ 
+ // Negatives: a header whose MIME-canonical form is in upstream's initialism
+--- a/fieldonly/fieldonly.go
++++ b/fieldonly/fieldonly.go
+@@ -10,6 +10,6 @@
+ import "net/http"
+ 
+ func Reported(r *http.Request) {
+-	_ = r.Header.Get("content-type")
+-	_ = r.Header.Values("if-none-match")
++	_ = r.Header.Get("Content-Type")
++	_ = r.Header.Values("If-None-Match")
+ }

@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/godoclint-single-pkg-doc-tests/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 singlepkg/a.go:1:1:godoclint::package has more than one godoc ("singlepkg")
 singlepkg/a_test.go:1:1:godoclint::package has more than one godoc ("singlepkg")

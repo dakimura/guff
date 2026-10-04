@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/revive-limits-default/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 rulelimits/rule_limits.go:17:1:revive:warning:argument-limit: maximum number of arguments per function exceeded; max 8 but got 9
 rulelimits/rule_limits.go:24:1:revive:warning:function-result-limit: maximum number of return results per function exceeded; max 3 but got 4

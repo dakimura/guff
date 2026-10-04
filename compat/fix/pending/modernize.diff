@@ -1,0 +1,1313 @@
+# What guff's `--fix` writes TODAY for modernize — generated, do not hand-edit.
+#
+# A pending baseline, not an allowlist: the case's real expectation is
+# expected/modernize.diff, and it is printed in full on every run. This file only
+# keeps CI green while the gap is worked down, and it fails the gate if guff's
+# output moves in *either* direction — including once guff gets it right, so the
+# ledger cannot quietly outlive the defect it records.
+#
+# Re-record with: ./compat/fix/regen.sh --pending modernize
+--- a/bloop/bloop.go
++++ b/bloop/bloop.go
+@@ -90,7 +90,7 @@
+ 		wg.Done()
+ 	}
+ 	wg.Add(2)
+-	for i := 0; i < 2; i++ {
++	for range 2 {
+ 		go poster()
+ 	}
+ 	wg.Wait()
+--- a/errorsastype/errorsastype.go
++++ b/errorsastype/errorsastype.go
+@@ -15,22 +15,22 @@
+ 	}
+ 
+ 	{
+-		var patherr *os.PathError
+-		if errors.As(err, &patherr) { // want
++
++		if patherr, ok := errors.AsType[*os.PathError](err); ok { // want
+ 			print(patherr)
+ 		}
+ 	}
+ 	{
+-		var patherr *os.PathError
++
+ 		print("not a use of patherr")
+-		if errors.As(err, &patherr) { // want
++		if patherr, ok := errors.AsType[*os.PathError](err); ok { // want
+ 			print(patherr)
+ 		}
+ 		print("also not a use of patherr")
+ 	}
+ 	{
+-		var patherr *os.PathError
+-		if errors.As(err, &patherr) { // want (unused in body → _)
++
++		if _, ok := errors.AsType[*os.PathError](err); ok { // want (unused in body → _)
+ 			print("not a use of patherr")
+ 		}
+ 	}
+@@ -51,35 +51,34 @@
+ 
+ 	const ok = 1
+ 	{
+-		var patherr *os.PathError
+-		if errors.As(err, &patherr) { // want (shadow ok)
++
++		if patherr, ok := errors.AsType[*os.PathError](err); ok { // want (shadow ok)
+ 			print(patherr)
+ 		}
+ 	}
+ 	{
+-		var patherr *os.PathError
+-		if errors.As(err, &patherr) { // want (fresh ok name)
++
++		if patherr, ok1 := errors.AsType[*os.PathError](err); ok1 { // want (fresh ok name)
+ 			print(patherr, ok)
+ 		}
+ 	}
+ 	{
+-		var patherr *os.PathError
+-		if !errors.As(err, &patherr) { // want negated
++
++		if patherr, ok := errors.AsType[*os.PathError](err); !ok { // want negated
+ 			print(patherr)
+ 		}
+ 	}
+ 	{
+-		var patherr *os.PathError
+-		var linkerr *os.LinkError
+-		if errors.As(err, &patherr) { // want
++
++		if patherr, ok := errors.AsType[*os.PathError](err); ok { // want
+ 			print(patherr)
+-		} else if !errors.As(err, &linkerr) { // want
++		} else if _, ok := errors.AsType[*os.LinkError](err); !ok { // want
+ 			print("not a use of linkerr")
+ 		}
+ 	}
+ 	{
+-		var patherr *os.PathError
+-		if !errors.As(err, &patherr) { // want
++
++		if patherr, ok := errors.AsType[*os.PathError](err); !ok { // want
+ 			print("not a use of patherr")
+ 		} else {
+ 			print(patherr)
+@@ -105,8 +104,8 @@
+ 			Bar() string
+ 			error
+ 		}
+-		var target FooError
+-		if errors.As(err, &target) { // want
++
++		if target, ok := errors.AsType[FooError](err); ok { // want
+ 			print(target)
+ 		}
+ 	}
+--- a/importcomment/importcomment.go
++++ b/importcomment/importcomment.go
+@@ -1,3 +1,3 @@
+-package importcomment // import "example.com/obsolete"
++package importcomment
+ 
+ func ok() {}
+--- a/indexcut/indexcut.go
++++ b/indexcut/indexcut.go
+@@ -18,34 +18,34 @@
+ 
+ // beats metricbeat state_container: both halves, a 3-byte separator
+ func beforeAndAfter(cID string) (string, string) {
+-	split := strings.Index(cID, "://")
+-	if split != -1 {
+-		return cID[:split], cID[split+3:]
++	before, after, ok := strings.Cut(cID, "://")
++	if ok {
++		return before, after
+ 	}
+ 	return "", ""
+ }
+ 
+ // beats packetbeat dns: if-init, the after half under the guard
+ func ifInitAfter(s string, m map[string]string) {
+-	if idx := strings.IndexByte(s, '.'); idx != -1 {
+-		m["tld"] = s[idx+1:]
++	if _, after, ok := strings.Cut(s, "."); ok {
++		m["tld"] = after
+ 	}
+ }
+ 
+ // beats packetbeat http: early return, then the before half
+ func earlyReturnBefore(c []byte) string {
+ 	cs := string(c)
+-	s := strings.IndexByte(cs, ':')
+-	if s < 0 {
++	before, _, ok := strings.Cut(cs, ":")
++	if !ok {
+ 		return ""
+ 	}
+-	return cs[:s]
++	return before
+ }
+ 
+ // only tested: Contains
+ func onlyTested(s string) bool {
+-	i := strings.Index(s, "x")
+-	if i >= 0 {
++	found := strings.Contains(s, "x")
++	if found {
+ 		return true
+ 	}
+ 	return false
+@@ -53,19 +53,19 @@
+ 
+ // every spelling of "not found"
+ func negatives(s string) {
+-	a := strings.Index(s, "a")
+-	b := strings.Index(s, "b")
+-	c := strings.Index(s, "c")
+-	d := strings.Index(s, "d")
+-	use(a == -1, -1 == b, 0 > c, d <= -1)
++	found := strings.Contains(s, "a")
++	found0 := strings.Contains(s, "b")
++	found1 := strings.Contains(s, "c")
++	found2 := strings.Contains(s, "d")
++	use(!found, !found0, !found1, !found2)
+ }
+ 
+ // every spelling of "found"
+ func nonnegatives(s string) {
+-	a := strings.Index(s, "a")
+-	b := strings.Index(s, "b")
+-	c := strings.Index(s, "c")
+-	use(a != -1, b > -1, -1 < c)
++	found := strings.Contains(s, "a")
++	found0 := strings.Contains(s, "b")
++	found1 := strings.Contains(s, "c")
++	use(found, found0, found1)
+ }
+ 
+ // `i > 0` says more than "found": silent
+@@ -111,23 +111,23 @@
+ 
+ // bytes, with a []byte(sep) conversion
+ func bytesCut(b []byte) []byte {
+-	i := bytes.Index(b, []byte("::"))
+-	if i >= 0 {
+-		return b[:i]
++	before, _, ok := bytes.Cut(b, []byte("::"))
++	if ok {
++		return before
+ 	}
+ 	return nil
+ }
+ 
+ // bytes.IndexByte with a variable byte
+ func bytesIndexByteVar(b []byte, c byte) bool {
+-	i := bytes.IndexByte(b, c)
+-	return i >= 0
++	found := bytes.Contains(b, []byte{c})
++	return found
+ }
+ 
+ // strings.IndexByte with a variable byte
+ func stringsIndexByteVar(s string, c byte) bool {
+-	i := strings.IndexByte(s, c)
+-	return i < 0
++	found := strings.Contains(s, string(c))
++	return !found
+ }
+ 
+ // one-byte separator, after half with no guard: silent
+@@ -138,24 +138,24 @@
+ 
+ // three-byte separator, after half with no guard: no guard needed
+ func unguardedThreeBytes(s string) string {
+-	i := strings.Index(s, "://")
+-	return s[i+3:]
++	_, after, _ := strings.Cut(s, "://")
++	return after
+ }
+ 
+ // the before half in the else of a negative check
+ func elseOfNegative(s string) string {
+-	i := strings.Index(s, "=")
+-	if i < 0 {
++	before, _, ok := strings.Cut(s, "=")
++	if !ok {
+ 		return ""
+ 	} else {
+-		return s[0:i]
++		return before
+ 	}
+ }
+ 
+ // var form
+ func varForm(s string) bool {
+-	var i = strings.Index(s, "v")
+-	return i != -1
++	var found = strings.Contains(s, "v")
++	return found
+ }
+ 
+ // plain assignment to an existing variable: silent
+@@ -168,50 +168,50 @@
+ // `ok` is taken and used later in the block: a fresh name
+ func nameTaken(s string) (string, bool) {
+ 	ok := len(s) > 3
+-	i := strings.Index(s, "=")
+-	if i >= 0 {
+-		return s[:i], ok
++	before, _, ok0 := strings.Cut(s, "=")
++	if ok0 {
++		return before, ok
+ 	}
+ 	return "", ok
+ }
+ 
+ // two fixes in one scope get suffixed names
+ func twoInScope(s, t string) (string, string) {
+-	i := strings.Index(s, "=")
+-	j := strings.Index(t, "=")
++	before, _, ok := strings.Cut(s, "=")
++	before0, _, ok0 := strings.Cut(t, "=")
+ 	var a, b string
+-	if i >= 0 {
+-		a = s[:i]
++	if ok {
++		a = before
+ 	}
+-	if j >= 0 {
+-		b = t[:j]
++	if ok0 {
++		b = before0
+ 	}
+ 	return a, b
+ }
+ 
+ // len(sep) with a variable separator
+ func lenSep(s, sep string) string {
+-	i := strings.Index(s, sep)
+-	if i >= 0 {
+-		return s[i+len(sep):]
++	_, after, ok := strings.Cut(s, sep)
++	if ok {
++		return after
+ 	}
+ 	return ""
+ }
+ 
+ // k + i
+ func constPlusI(s string) string {
+-	i := strings.Index(s, "ab")
+-	if i >= 0 {
+-		return s[2+i:]
++	_, after, ok := strings.Cut(s, "ab")
++	if ok {
++		return after
+ 	}
+ 	return ""
+ }
+ 
+ // `i - 1`: upstream does not check the operator of `i + k`
+ func minusOne(s string) string {
+-	i := strings.Index(s, "x")
+-	if i >= 0 {
+-		return s[i-1:]
++	_, after, ok := strings.Cut(s, "x")
++	if ok {
++		return after
+ 	}
+ 	return ""
+ }
+--- a/mapsloop/mapsloop.go
++++ b/mapsloop/mapsloop.go
+@@ -2,10 +2,10 @@
+ 
+ package modernize
+ 
++import "maps"
++
+ func copyMap(dst, src map[int]string) {
+-	for k, v := range src {
+-		dst[k] = v
+-	}
++	maps.Copy(dst, src)
+ }
+ 
+ // The destination is a *call result*, indexed. syncthing `lib/httpcache` writes
+@@ -18,7 +18,5 @@
+ type recorder struct{ header headers }
+ 
+ func (r *recorder) writeHeader(w interface{ Header() headers }) {
+-	for k, v := range r.header {
+-		w.Header()[k] = v
+-	}
++	maps.Copy(w.Header(), r.header)
+ }
+--- a/minmax/minmax.go
++++ b/minmax/minmax.go
+@@ -4,19 +4,13 @@
+ // `lhs0 = rhs0` immediately above `if a < b { lhs = rhs }` with no else, and it
+ // says "if statement", where pattern 1 says "if/else statement".
+ func clampMin(x, y int) int {
+-	v := x
+-	if v > y {
+-		v = y
+-	}
++	v := min(x, y)
+ 
+ 	return v
+ }
+ 
+ func clampMax(x, y int) int {
+-	v := x
+-	if v < y {
+-		v = y
+-	}
++	v := max(x, y)
+ 
+ 	return v
+ }
+@@ -25,10 +19,7 @@
+ func clampPlainAssign(x, y int) int {
+ 	var v int
+ 
+-	v = x
+-	if v > y {
+-		v = y
+-	}
++	v = min(x, y)
+ 
+ 	return v
+ }
+@@ -68,11 +59,7 @@
+ func withElse(x, y int) int {
+ 	var v int
+ 
+-	if x > y {
+-		v = y
+-	} else {
+-		v = x
+-	}
++	v = min(x, y)
+ 
+ 	return v
+ }
+@@ -81,10 +68,7 @@
+ // name — and not "the same value", so `len(a)` matches `len(a)` although a call
+ // is not provably pure. syncthing writes this five times.
+ func clampToLen(a, b []string) int {
+-	count := len(a)
+-	if len(b) < len(a) {
+-		count = len(b)
+-	}
++	count := min(len(b), len(a))
+ 
+ 	return count
+ }
+@@ -92,10 +76,7 @@
+ // And the two spellings of one expression differ only in spacing, which is not
+ // part of the syntax.
+ func clampArith(buf []byte, written, chunk int) int {
+-	toWrite := chunk
+-	if toWrite > len(buf)-written {
+-		toWrite = len(buf) - written
+-	}
++	toWrite := min(chunk, len(buf)-written)
+ 
+ 	return toWrite
+ }
+@@ -106,10 +87,7 @@
+ // fix. syncthing `internal/db/sqlite/folderdb_update.go` writes this with a
+ // function literal inside the call, which no hand-written printer covers.
+ func clampIndexFromCall(es []int) int {
+-	globIdx := slicesIndexFunc(es, func(e int) bool { return e > 0 })
+-	if globIdx < 0 {
+-		globIdx = 0
+-	}
++	globIdx := max(slicesIndexFunc(es, func(e int) bool { return e > 0 }), 0)
+ 
+ 	return es[globIdx]
+ }
+--- a/minmaxfloat/minmaxfloat.go
++++ b/minmaxfloat/minmaxfloat.go
+@@ -13,15 +13,6 @@
+ 	return b
+ }
+ 
+-// Reported: the comparison's operands are returned in the *other* order, which
+-// flips the sign back to `max`.
+-func max(a, b int) int {
+-	if b > a {
+-		return b
+-	}
+-	return a
+-}
+-
+ var (
+ 	_ = min(1.0, 2.0)
+ 	_ = max(1, 2)
+--- a/minmaxshadow/minmaxshadow.go
++++ b/minmaxshadow/minmaxshadow.go
+@@ -14,15 +14,6 @@
+ // A local shadow counts too (upstream's own testdata has `hour, min := 3600,
+ // 60`), which is why the lookup starts at the innermost scope.
+ package minmax
+-
+-// This declaration is itself a finding — the other arm of the rule — and it is
+-// what shadows `min` for everything below.
+-func min(a, b int) int {
+-	if a < b {
+-		return a
+-	}
+-	return b
+-}
+ 
+ // silent: `min` is this package's function, not the builtin.
+ func shadowedIf(a, b int) int {
+@@ -46,21 +37,14 @@
+ 
+ // FINDING: nothing shadows `max`.
+ func maxIf(a, b int) int {
+-	x := a
+-	if x < b {
+-		x = b
+-	}
++	x := max(a, b)
+ 	return x
+ }
+ 
+ // FINDING: the if/else arm of `max`.
+ func maxIfElse(a, b int) int {
+ 	var x int
+-	if a < b {
+-		x = b
+-	} else {
+-		x = a
+-	}
++	x = max(a, b)
+ 	return x
+ }
+ 
+--- a/minmaxuser/minmaxuser.go
++++ b/minmaxuser/minmaxuser.go
+@@ -12,23 +12,6 @@
+ // expressions to be the comparison's own operands, in either order, with the
+ // direction spelling the function's name.
+ package minmax
+-
+-// Pattern 1: one if/else.
+-func min(a, b int) int {
+-	if a < b {
+-		return a
+-	} else {
+-		return b
+-	}
+-}
+-
+-// Pattern 2: an if, then a return.
+-func max(a, b int64) int64 {
+-	if a > b {
+-		return a
+-	}
+-	return b
+-}
+ 
+ type holder struct{}
+ 
+--- a/plusbuild/plusbuild.go
++++ b/plusbuild/plusbuild.go
+@@ -3,7 +3,6 @@
+ // golden records the same finding wherever it is regenerated.
+ 
+ //go:build go1.18
+-// +build go1.18
+ 
+ package plusbuild
+ 
+--- a/reflecttypeassert/reflecttypeassert.go
++++ b/reflecttypeassert/reflecttypeassert.go
+@@ -10,31 +10,31 @@
+ type payload struct{ n int }
+ 
+ func twoValued(v reflect.Value) {
+-	x, ok := v.Interface().(string)
++	x, ok := reflect.TypeAssert[string](v)
+ 	_, _ = x, ok
+ 
+-	p, ok := v.Interface().(payload)
++	p, ok := reflect.TypeAssert[payload](v)
+ 	_, _ = p, ok
+ 
+-	r, ok := v.Interface().(io.Reader)
++	r, ok := reflect.TypeAssert[io.Reader](v)
+ 	_, _ = r, ok
+ }
+ 
+ func assignment(v reflect.Value) {
+ 	var y int
+ 	var ok bool
+-	y, ok = v.Interface().(int)
++	y, ok = reflect.TypeAssert[int](v)
+ 	_, _ = y, ok
+ }
+ 
+ func inIfInit(v reflect.Value) {
+-	if s, ok := v.Interface().(string); ok {
++	if s, ok := reflect.TypeAssert[string](v); ok {
+ 		_ = s
+ 	}
+ }
+ 
+ func receiverExpr(vs []reflect.Value) {
+-	e, ok := vs[0].Interface().(error)
++	e, ok := reflect.TypeAssert[error](vs[0])
+ 	_, _ = e, ok
+ }
+ 
+--- a/reflecttypefor/reflecttypefor.go
++++ b/reflecttypefor/reflecttypefor.go
+@@ -14,7 +14,7 @@
+ }
+ 
+ func typeofElem() reflect.Type {
+-	return reflect.TypeOf((*MyStruct)(nil)).Elem()
++	return reflect.TypeFor[MyStruct]()
+ }
+ 
+ // Interface-typed args are dynamic; must not suggest TypeFor.
+@@ -35,9 +35,9 @@
+ // writes eleven of these in a row.
+ func starNew() []reflect.Type {
+ 	return []reflect.Type{
+-		reflect.TypeOf(*new(string)),
+-		reflect.TypeOf(*new(int64)),
+-		reflect.TypeOf(*new([]byte)),
++		reflect.TypeFor[string](),
++		reflect.TypeFor[int64](),
++		reflect.TypeFor[[]byte](),
+ 	}
+ }
+ 
+@@ -47,8 +47,8 @@
+ func pureBuiltins(s []int) []reflect.Type {
+ 	return []reflect.Type{
+ 		reflect.TypeOf(len(s)),
+-		reflect.TypeOf(make([]int, 3)),
+-		reflect.TypeOf(min(1, 2)),
++		reflect.TypeFor[[]int](),
++		reflect.TypeFor[int](),
+ 	}
+ }
+ 
+@@ -83,7 +83,7 @@
+ 
+ // `TypeOf((*T)(nil))` standing alone, with no `.Elem()` after it.
+ func nilConversionWithoutElem() reflect.Type {
+-	return reflect.TypeOf((*MyStruct)(nil))
++	return reflect.TypeFor[*MyStruct]()
+ }
+ 
+ type List[T any] struct{ items []T }
+@@ -94,9 +94,9 @@
+ // is not "complicated" the way an unnamed `interface{}` would be.
+ func nilConversions() []reflect.Type {
+ 	return []reflect.Type{
+-		reflect.TypeOf(map[string]any(nil)),
+-		reflect.TypeOf([]int(nil)),
+-		reflect.TypeOf(map[string]int(nil)),
++		reflect.TypeFor[map[string]any](),
++		reflect.TypeFor[[]int](),
++		reflect.TypeFor[map[string]int](),
+ 	}
+ }
+ 
+@@ -123,12 +123,12 @@
+ // the type-level branches measurable with operands that name only types.
+ func typeOnlyOperands() []reflect.Type {
+ 	return []reflect.Type{
+-		reflect.TypeOf(List[int]{}),                // FINDING
++		reflect.TypeFor[List[int]](),               // FINDING
+ 		reflect.TypeOf(List[struct{ N int }]{}),    // complicated
+-		reflect.TypeOf(List[Expr]{}),               // FINDING: a named interface
++		reflect.TypeFor[List[Expr]](),              // FINDING: a named interface
+ 		reflect.TypeOf(List[interface{ Bar() }]{}), // complicated
+ 		reflect.TypeOf(Expr(nil)),                  // an interface: dynamic
+ 		reflect.TypeOf(MyStruct{N: 1}),             // N names a field
+-		reflect.TypeOf(uint(0)),                    // FINDING: a conversion keeps its type
++		reflect.TypeFor[uint](),                    // FINDING: a conversion keeps its type
+ 	}
+ }
+--- a/slicesbackward/slicesbackward.go
++++ b/slicesbackward/slicesbackward.go
+@@ -2,10 +2,12 @@
+ 
+ package modernize
+ 
++import "slices"
++
+ func sumBackward(s []int) int {
+ 	sum := 0
+-	for i := len(s) - 1; i >= 0; i-- {
+-		sum += s[i]
++	for _, v := range slices.Backward(s) {
++		sum += v
+ 	}
+ 	return sum
+ }
+--- a/slicescontains/slicescontains.go
++++ b/slicescontains/slicescontains.go
+@@ -1,50 +1,28 @@
+ package slicescontains
+ 
++import "slices"
++
+ func containsReturn(s []int, needle int) bool {
+-	for _, v := range s {
+-		if v == needle {
+-			return true
+-		}
+-	}
+-	return false
++	return slices.Contains(s, needle)
+ }
+ 
+ func containsIndexElem(s []int, needle int) bool {
+-	for i := range s {
+-		if s[i] == needle {
+-			return true
+-		}
+-	}
+-	return false
++	return slices.Contains(s, needle)
+ }
+ 
+ func containsFuncPred(s []int) bool {
+ 	pred := func(v int) bool { return v > 0 }
+-	for _, v := range s {
+-		if pred(v) {
+-			return true
+-		}
+-	}
+-	return false
++	return slices.ContainsFunc(s, pred)
+ }
+ 
+ func containsBreakBody(s []int, needle int) {
+-	for _, v := range s {
+-		if v == needle {
+-			println("found")
+-			break
+-		}
++	if slices.Contains(s, needle) {
++		println("found")
+ 	}
+ }
+ 
+ func containsFoundAssign(s []int, needle int) bool {
+-	found := false
+-	for _, v := range s {
+-		if v == needle {
+-			found = true
+-			break
+-		}
+-	}
++	found := slices.Contains(s, needle)
+ 	return found
+ }
+ 
+@@ -122,22 +100,12 @@
+ 
+ // Reported: the parameter type is the element type.
+ func containsFuncIdenticalParam(stack []*obj) bool {
+-	for _, vis := range stack {
+-		if objPred(vis) {
+-			return true
+-		}
+-	}
+-	return false
++	return slices.ContainsFunc(stack, objPred)
+ }
+ 
+ // Reported: the element type *is* the interface.
+ func containsFuncIfaceElem(stack []value) bool {
+-	for _, vis := range stack {
+-		if ifacePred(vis) {
+-			return true
+-		}
+-	}
+-	return false
++	return slices.ContainsFunc(stack, ifacePred)
+ }
+ 
+ // Not findings since golangci-lint 2.14.0: x/tools v0.50 requires NoEffects of
+--- a/stditerators/stditerators.go
++++ b/stditerators/stditerators.go
+@@ -6,22 +6,22 @@
+ 
+ // C-style loop over Struct.{NumFields,Field} -> Struct.Fields iteration.
+ func useStruct(s *types.Struct) {
+-	for i := 0; i < s.NumFields(); i++ {
+-		_ = s.Field(i)
++	for field := range s.Fields() {
++		_ = field
+ 	}
+ }
+ 
+ // range-over-int form: for i := range s.NumFields().
+ func useStructRange(s *types.Struct) {
+-	for i := range s.NumFields() {
+-		_ = s.Field(i)
++	for field := range s.Fields() {
++		_ = field
+ 	}
+ }
+ 
+ // Tuple.{Len,At} -> Tuple.Variables iteration.
+ func useTuple(t *types.Tuple) {
+-	for i := 0; i < t.Len(); i++ {
+-		_ = t.At(i)
++	for v := range t.Variables() {
++		_ = v
+ 	}
+ }
+ 
+@@ -37,7 +37,7 @@
+ 
+ // Not modernizable: no matching table type.
+ func plainSlice(xs []int) {
+-	for i := 0; i < len(xs); i++ {
++	for i := range xs {
+ 		_ = xs[i]
+ 	}
+ }
+--- a/stmtlist/stmtlist.go
++++ b/stmtlist/stmtlist.go
+@@ -9,15 +9,14 @@
+ // golangci-lint 2.12.2 before it was written down.
+ package stmtlist
+ 
++import "slices"
++
+ import "sync"
+ 
+ // -- minmax pattern 2: `x = a` immediately above `if a < b { x = b }`.
+ 
+ func minmaxBlock(a, b int) int {
+-	x := a
+-	if a < b {
+-		x = b
+-	}
++	x := max(a, b)
+ 	return x
+ }
+ 
+@@ -25,10 +24,7 @@
+ 	var x int
+ 	switch k {
+ 	case 1:
+-		x = a
+-		if a < b {
+-			x = b
+-		}
++		x = max(a, b)
+ 	}
+ 	return x
+ }
+@@ -37,10 +33,7 @@
+ 	var x int
+ 	select {
+ 	case <-ch:
+-		x = a
+-		if a < b {
+-			x = b
+-		}
++		x = max(a, b)
+ 	}
+ 	return x
+ }
+@@ -66,12 +59,7 @@
+ func containsCaseReturn(s []int, needle, k int) bool {
+ 	switch k {
+ 	case 1:
+-		for _, v := range s {
+-			if v == needle {
+-				return true
+-			}
+-		}
+-		return false
++		return slices.Contains(s, needle)
+ 	}
+ 	return false
+ }
+@@ -81,13 +69,7 @@
+ 	var found bool
+ 	switch k {
+ 	case 1:
+-		found = false
+-		for _, v := range s {
+-			if v == needle {
+-				found = true
+-				break
+-			}
+-		}
++		found = slices.Contains(s, needle)
+ 	}
+ 	return found
+ }
+@@ -96,13 +78,7 @@
+ 	var found bool
+ 	select {
+ 	case <-ch:
+-		found = false
+-		for _, v := range s {
+-			if v == needle {
+-				found = true
+-				break
+-			}
+-		}
++		found = slices.Contains(s, needle)
+ 	}
+ 	return found
+ }
+@@ -112,10 +88,8 @@
+ func containsTypeSwitch(list any, msg string) bool {
+ 	switch v := list.(type) {
+ 	case []string:
+-		for _, tag := range v {
+-			if msg == tag {
+-				return true
+-			}
++		if slices.Contains(v, msg) {
++			return true
+ 		}
+ 	}
+ 	return false
+@@ -124,31 +98,25 @@
+ // -- waitgroupgo: `wg.Add(1)` immediately above the `go` statement.
+ 
+ func waitgroupBlock(wg *sync.WaitGroup) {
+-	wg.Add(1)
+-	go func() {
+-		defer wg.Done()
++	wg.Go(func() {
+ 		_ = 1
+-	}()
++	})
+ }
+ 
+ func waitgroupCase(wg *sync.WaitGroup, k int) {
+ 	switch k {
+ 	case 1:
+-		wg.Add(1)
+-		go func() {
+-			defer wg.Done()
++		wg.Go(func() {
+ 			_ = 1
+-		}()
++		})
+ 	}
+ }
+ 
+ func waitgroupComm(wg *sync.WaitGroup, ch chan int) {
+ 	select {
+ 	case <-ch:
+-		wg.Add(1)
+-		go func() {
+-			defer wg.Done()
++		wg.Go(func() {
+ 			_ = 1
+-		}()
++		})
+ 	}
+ }
+--- a/stringsbuilder/stringsbuilder.go
++++ b/stringsbuilder/stringsbuilder.go
+@@ -1,43 +1,46 @@
+ package modernize
++
++import "strings"
+ 
+ // basic: var + loop += + rvalue use
+ func builderBasic() {
+-	var s string
+-	s += "before"
+-	for i := 0; i < 10; i++ {
+-		s += "in"
++	var s strings.Builder
++	s.WriteString("before")
++	for range 10 {
++		s.WriteString("in")
+ 	}
+-	s += "after"
+-	print(s)
++	s.WriteString("after")
++	print(s.String())
+ }
+ 
+ // short decl
+ func builderShort() {
+-	s := "a"
+-	for i := 0; i < 10; i++ {
+-		s += "b"
++	var s strings.Builder
++	s.WriteString("a")
++	for range 10 {
++		s.WriteString("b")
+ 	}
+-	print(s)
++	print(s.String())
+ }
+ 
+ // empty short decl
+ func builderEmptyShort() {
+-	s := ""
+-	for i := 0; i < 10; i++ {
+-		s += "b"
++	var s strings.Builder
++	for range 10 {
++		s.WriteString("b")
+ 	}
+-	print(s)
++	print(s.String())
+ }
+ 
+ // paren var decl where s is last
+ func builderParenLast(slice []string) string {
+ 	var (
+-		msg string
++		msg strings.Builder
+ 	)
+ 	for _, s := range slice {
+-		msg += s
++		msg.WriteString(s)
+ 	}
+-	return msg
++	return msg.String()
+ }
+ 
+ // nope: += only outside a loop
+@@ -51,7 +54,7 @@
+ // nope: declaration in if init (not an unrestricted stmt list)
+ func builderIfInit() {
+ 	if s := "a"; true {
+-		for i := 0; i < 10; i++ {
++		for range 10 {
+ 			s += "x"
+ 		}
+ 		print(s)
+@@ -62,7 +65,7 @@
+ func builderDirectAssign(x string) string {
+ 	var s string
+ 	s = x
+-	for i := 0; i < 3; i++ {
++	for range 3 {
+ 		s += x
+ 	}
+ 	return s
+@@ -74,7 +77,7 @@
+ 		str   = "hello"
+ 		after int
+ 	)
+-	for i := 0; i < 100; i++ {
++	for range 100 {
+ 		str += "!"
+ 	}
+ 	println(str, after)
+--- a/stringscutprefix/stringscutprefix.go
++++ b/stringscutprefix/stringscutprefix.go
+@@ -6,29 +6,29 @@
+ )
+ 
+ func pattern2TrimPrefix(s, pre string) string {
+-	if after := strings.TrimPrefix(s, pre); after != s {
++	if after, ok := strings.CutPrefix(s, pre); ok {
+ 		return after
+ 	}
+ 	return s
+ }
+ 
+ func pattern2TrimSuffix(s, suf string) string {
+-	if before := strings.TrimSuffix(s, suf); before != s {
++	if before, ok := strings.CutSuffix(s, suf); ok {
+ 		return before
+ 	}
+ 	return s
+ }
+ 
+ func bytesHasPrefix(b, pre []byte) []byte {
+-	if bytes.HasPrefix(b, pre) {
+-		return bytes.TrimPrefix(b, pre)
++	if after, ok := bytes.CutPrefix(b, pre); ok {
++		return after
+ 	}
+ 	return b
+ }
+ 
+ func bytesHasSuffix(b, suf []byte) []byte {
+-	if bytes.HasSuffix(b, suf) {
+-		return bytes.TrimSuffix(b, suf)
++	if before, ok := bytes.CutSuffix(b, suf); ok {
++		return before
+ 	}
+ 	return b
+ }
+--- a/stringscutprefixsearch/stringscutprefix_search.go
++++ b/stringscutprefixsearch/stringscutprefix_search.go
+@@ -6,22 +6,22 @@
+ // `if` body is the one upstream pairs with the Has call. Each function's
+ // comment is what golangci-lint 2.12.2 does. See the Rust test for why.
+ 
+-func use(string)      {}
++func use(string)     {}
+ func suffix() string { return "/" }
+ 
+ func cutPlain(s string) { // FIRES
+-	if strings.HasSuffix(s, "/") {
+-		s = strings.TrimSuffix(s, "/")
++	if before, ok := strings.CutSuffix(s, "/"); ok {
++		s = before
+ 	}
+ 	use(s)
+ }
+ 
+ func cutNestedElse(s, t string, ok bool) { // FIRES: a mismatched Trim first, the match in the else (lima)
+-	if strings.HasSuffix(s, "/") {
++	if before, ok0 := strings.CutSuffix(s, "/"); ok0 {
+ 		if ok {
+ 			t = strings.TrimSuffix(t, "/")
+ 		} else {
+-			s = strings.TrimSuffix(s, "/")
++			s = before
+ 		}
+ 	}
+ 	use(s + t)
+@@ -43,14 +43,14 @@
+ }
+ 
+ func cutKindMismatchFirst(s string) { // FIRES: TrimSuffix is skipped, TrimPrefix matches
+-	if strings.HasPrefix(s, "/") {
+-		use(strings.TrimSuffix(s, "/") + strings.TrimPrefix(s, "/"))
++	if after, ok := strings.CutPrefix(s, "/"); ok {
++		use(strings.TrimSuffix(s, "/") + after)
+ 	}
+ }
+ 
+ func cutCallArgument(s string) { // FIRES: arguments compared as syntax, a call equals itself
+-	if strings.HasSuffix(s, suffix()) {
+-		use(strings.TrimSuffix(s, suffix()))
++	if before, ok := strings.CutSuffix(s, suffix()); ok {
++		use(before)
+ 	}
+ }
+ 
+@@ -68,13 +68,13 @@
+ }
+ 
+ func cutTwoMatches(s string) { // FIRES once
+-	if strings.HasSuffix(s, "/") {
+-		use(strings.TrimSuffix(s, "/") + strings.TrimSuffix(s, "/"))
++	if before, ok := strings.CutSuffix(s, "/"); ok {
++		use(before + strings.TrimSuffix(s, "/"))
+ 	}
+ }
+ 
+ func cutIndexExpr(m map[string]string) { // FIRES
+-	if strings.HasSuffix(m["k"], "/") {
+-		use(strings.TrimSuffix(m["k"], "/"))
++	if before, ok := strings.CutSuffix(m["k"], "/"); ok {
++		use(before)
+ 	}
+ }
+--- a/stringsseq/stringsseq.go
++++ b/stringsseq/stringsseq.go
+@@ -8,13 +8,13 @@
+ )
+ 
+ func rangeSplit(s string) {
+-	for _, part := range strings.Split(s, ",") {
++	for part := range strings.SplitSeq(s, ",") {
+ 		_ = part
+ 	}
+ }
+ 
+ func rangeFields(s string) {
+-	for _, part := range strings.Fields(s) {
++	for part := range strings.FieldsSeq(s) {
+ 		_ = part
+ 	}
+ }
+@@ -24,13 +24,13 @@
+ // release, and the analyzer's doc comment lists them. syncthing
+ // `cmd/syncthing/crash_reporting.go` ranges over `bytes.Split(data, …)`.
+ func rangeBytesSplit(data []byte) {
+-	for _, line := range bytes.Split(data, []byte("\n")) {
++	for line := range bytes.SplitSeq(data, []byte("\n")) {
+ 		_ = line
+ 	}
+ }
+ 
+ func rangeBytesFields(data []byte) {
+-	for _, f := range bytes.Fields(data) {
++	for f := range bytes.FieldsSeq(data) {
+ 		_ = f
+ 	}
+ }
+--- a/testingcontext/testingcontext.go
++++ b/testingcontext/testingcontext.go
+@@ -22,16 +22,14 @@
+ 
+ // Reported: the plain test function.
+ func TestPlain(t *testing.T) {
+-	ctx, cancel := context.WithCancel(context.Background())
+-	defer cancel()
++	ctx := t.Context()
+ 	_ = ctx
+ }
+ 
+ // Reported: a `t.Run` subtest — the literal is argument index 1 of `T.Run`.
+ func TestSubtest(t *testing.T) {
+ 	t.Run("x", func(t *testing.T) {
+-		ctx, cancel := context.WithCancel(context.Background())
+-		defer cancel()
++		ctx := t.Context()
+ 		_ = ctx
+ 	})
+ }
+@@ -92,8 +90,7 @@
+ // Reported: `B.Run` counts as well as `T.Run`, and the message names `b`.
+ func BenchmarkSub(b *testing.B) {
+ 	b.Run("x", func(b *testing.B) {
+-		ctx, cancel := context.WithCancel(context.Background())
+-		defer cancel()
++		ctx := b.Context()
+ 		_ = ctx
+ 	})
+ }
+@@ -109,8 +106,7 @@
+ 
+ // Reported: `context.TODO` is the other accepted parent.
+ func TestTODO(t *testing.T) {
+-	ctx, cancel := context.WithCancel(context.TODO())
+-	defer cancel()
++	ctx := t.Context()
+ 	_ = ctx
+ }
+ 
+@@ -128,8 +124,7 @@
+ // Reported: a bare block is still inside the test function.
+ func TestNestedBlock(t *testing.T) {
+ 	{
+-		ctx, cancel := context.WithCancel(context.Background())
+-		defer cancel()
++		ctx := t.Context()
+ 		_ = ctx
+ 	}
+ }
+@@ -137,8 +132,7 @@
+ // Reported: so is a `for` body.
+ func TestForBody(t *testing.T) {
+ 	for range 1 {
+-		ctx, cancel := context.WithCancel(context.Background())
+-		defer cancel()
++		ctx := t.Context()
+ 		_ = ctx
+ 	}
+ }
+@@ -147,8 +141,7 @@
+ func TestSwitchCase(t *testing.T) {
+ 	switch 1 {
+ 	case 1:
+-		ctx, cancel := context.WithCancel(context.Background())
+-		defer cancel()
++		ctx := t.Context()
+ 		_ = ctx
+ 	}
+ }
+@@ -156,8 +149,7 @@
+ // Reported: the message names whatever the parameter is called.
+ func TestRenamedParam(t *testing.T) {
+ 	t.Run("x", func(sub *testing.T) {
+-		ctx, cancel := context.WithCancel(context.Background())
+-		defer cancel()
++		ctx := sub.Context()
+ 		_ = ctx
+ 	})
+ }
+--- a/unsafefuncs/unsafefuncs.go
++++ b/unsafefuncs/unsafefuncs.go
+@@ -3,17 +3,17 @@
+ import "unsafe"
+ 
+ func addConst(ptr unsafe.Pointer) unsafe.Pointer {
+-	return unsafe.Pointer(uintptr(ptr) + 1)
++	return unsafe.Add(ptr, 1)
+ }
+ 
+ func addVar(ptr unsafe.Pointer, n int) unsafe.Pointer {
+-	return unsafe.Pointer(uintptr(ptr) + uintptr(n))
++	return unsafe.Add(ptr, n)
+ }
+ 
+ type uP = unsafe.Pointer
+ 
+ func addAlias(ptr uP) uP {
+-	return uP(uintptr(ptr) + 1)
++	return unsafe.Add(ptr, 1)
+ }
+ 
+ type namedUP unsafe.Pointer
+--- a/waitgroupgo/waitgroupgo.go
++++ b/waitgroupgo/waitgroupgo.go
+@@ -5,11 +5,9 @@
+ import "sync"
+ 
+ func spawn(wg *sync.WaitGroup) {
+-	wg.Add(1)
+-	go func() {
+-		defer wg.Done()
++	wg.Go(func() {
+ 		_ = 1
+-	}()
++	})
+ }
+ 
+ // "Body must start with `defer wg.Done()` or end with `wg.Done()`." guff had
+@@ -19,28 +17,22 @@
+ type wgHolder struct{ wg sync.WaitGroup }
+ 
+ func spawnTrailingDone(wg *sync.WaitGroup) {
+-	wg.Add(1)
+-	go func() {
++	wg.Go(func() {
+ 		work()
+-		wg.Done()
+-	}()
++	})
+ }
+ 
+ // The receiver only has to be the same *syntax* the `Add` used.
+ func spawnIndexedReceiver(wgs []sync.WaitGroup) {
+-	wgs[0].Add(1)
+-	go func() {
++	wgs[0].Go(func() {
+ 		work()
+-		wgs[0].Done()
+-	}()
++	})
+ }
+ 
+ func spawnFieldReceiver(h *wgHolder) {
+-	h.wg.Add(1)
+-	go func() {
++	h.wg.Go(func() {
+ 		work()
+-		h.wg.Done()
+-	}()
++	})
+ }
+ 
+ // Silent: `Done` is neither first-and-deferred nor last.

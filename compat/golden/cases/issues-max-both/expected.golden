@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/issues-max-both/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 limits/limits.go:34:7:errcheck::Error return value is not checked
 limits/limits.go:37:9:errcheck::Error return value of `f.Close` is not checked

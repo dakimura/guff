@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/prealloc/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 bad.go:4:6:prealloc::Consider preallocating out with capacity n
 bad.go:17:6:prealloc::Consider preallocating out with capacity len(a)/2 + len(b)

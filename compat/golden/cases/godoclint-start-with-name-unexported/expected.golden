@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/godoclint-start-with-name-unexported/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 unexported/a.go:9:1:godoclint::godoc should start with symbol name ("AlsoExported")
 unexported/a.go:15:1:godoclint::godoc should start with symbol name ("other")

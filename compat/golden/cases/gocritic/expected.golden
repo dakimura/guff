@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/gocritic/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 bad.go:1:1:gocritic::codegenComment: comment should match `Code generated .* DO NOT EDIT.` regexp
 bad.go:14:1:gocritic::commentFormatting: put a space between `//` and comment text
@@ -240,6 +240,7 @@ extras.go:526:6:gocritic::equalFold: consider replacing with !strings.EqualFold(
 extras.go:527:6:gocritic::equalFold: consider replacing with bytes.EqualFold(xb, yb)
 extras.go:531:6:gocritic::equalFold: consider replacing with strings.EqualFold(string(p), string(y))
 extras.go:535:6:gocritic::sprintfQuotedString: use %q instead of "%s" for quoted strings
+extras.go:536:6:gocritic::sprintfQuotedString: use %#q instead of "`%s`" for backquoted strings
 extras.go:537:6:gocritic::redundantSprint: s is already string
 extras.go:541:6:gocritic::timeExprSimplify: use t.UnixMilli() instead of t.Unix() / 1000
 extras.go:542:6:gocritic::timeExprSimplify: use tp.UnixMicro() instead of tp.UnixNano() * 1000

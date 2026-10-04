@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/parens/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 parens/parens.go:49:2:govet::assign: self-assignment of x
 parens/parens.go:56:2:govet::assign: self-assignment of s.f

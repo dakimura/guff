@@ -69,7 +69,7 @@ pub use settings::{
 /// golangci-lint version this release targets for config / finding-set parity.
 ///
 /// guff uses its own SemVer; bump this when the compatibility pin moves.
-pub const GOLANGCI_LINT_COMPAT: &str = "2.12.2";
+pub const GOLANGCI_LINT_COMPAT: &str = "2.14.0";
 
 /// Package version (`CARGO_PKG_VERSION`), for `guff version --short`.
 pub fn guff_version() -> &'static str {

@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/staticcheck-s1005-rangefunc/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 s1005rangefunc/rangefunc.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
 s1005rangefunc/rangefunc.go:37:6:staticcheck::S1005: unnecessary assignment to the blank identifier

@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/nestif/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 bad.go:4:1:nestif::`if a` has complex nested blocks (complexity: 6)
 bad.go:18:1:nestif::`if x || y` has complex nested blocks (complexity: 6)

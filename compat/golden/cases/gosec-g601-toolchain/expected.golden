@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/gosec-g601-toolchain/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 g602/g602.go:10:8:gosec:low:G602: slice bounds out of range
 g602/g602.go:16:10:gosec:low:G602: slice index out of range

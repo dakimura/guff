@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/tagalign-strict/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 tagalign/strict.go:29:20:tagalign::tag is not aligned, should be: tag1:"true" tag2:"true"
 tagalign/strict.go:31:20:tagalign::tag is not aligned, should be:             tag2:"true"

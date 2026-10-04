@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/run-go/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 gover/gover.go:17:7:errcheck::Error return value is not checked
 gover/gover.go:28:21:revive:warning:range-val-address: suspicious assignment of 'v'. range-loop variables always have the same address

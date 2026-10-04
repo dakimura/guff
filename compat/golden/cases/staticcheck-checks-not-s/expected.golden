@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/staticcheck-checks-not-s/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 checks/checks.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
 checks/checks.go:22:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead

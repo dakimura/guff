@@ -1,6 +1,6 @@
 {
-  "missing": 2,
+  "missing": 1,
   "extra": 0,
-  "why": "Two SA4006 findings upstream reaches through IR block optimization (an empty `if` body drops the reference to its condition) that guff-ssa keeps. Recall only — guff no longer reports anything upstream does not.",
+  "why": "golangci-lint 2.14.0 (staticcheck v0.8.1) moved this from 2/0 to 1/0 with no help from guff: upstream stopped reporting the SA4006 in s1017/ok that guff never reported (ledger: staticcheck-ir #1, honnef IR dropped sigma nodes). The S1005 map comma-ok shapes v0.8.1 dropped were ported in the same change (ledger: staticcheck-checks #3). What remains is from before the bump: Two SA4006 findings upstream reaches through IR block optimization (an empty `if` body drops the reference to its condition) that guff-ssa keeps. Recall only — guff no longer reports anything upstream does not.",
   "target": "0/0 — see docs/COMPAT-HARDENING.md §4 (2026-08-08) for the remaining class."
 }

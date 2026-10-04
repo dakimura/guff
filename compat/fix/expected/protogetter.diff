@@ -6,7 +6,7 @@
 #
 # An absent file for a case means upstream's --fix changes nothing there, and
 # guff must change nothing either.
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 --- a/bad/bad.go
 +++ b/bad/bad.go
@@ -87,3 +87,14 @@
  	takeNickLocal(u.Nickname)
  }
  
+--- a/ok/ok.go
++++ b/ok/ok.go
+@@ -45,7 +45,7 @@
+ type aliasUser = pb.User
+ 
+ func viaAlias(u *aliasUser) string {
+-	return u.Name
++	return u.GetName()
+ }
+ 
+ // `Nickname: u.Nickname` in a keyed literal: the field is `*string` and

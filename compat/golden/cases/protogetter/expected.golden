@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/protogetter/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 bad/bad.go:6:9:protogetter::avoid direct access to proto field u.Name, use u.GetName() instead
 bad/bad.go:10:9:protogetter::avoid direct access to proto field u.Age, use u.GetAge() instead
@@ -17,3 +17,4 @@ bad/bad.go:53:13:protogetter::avoid direct access to proto field u.Name, use u.G
 bad/bad.go:54:11:protogetter::avoid direct access to proto field u.Name, use u.GetName() instead
 bad/bad.go:59:10:protogetter::avoid direct access to proto field u.Name, use u.GetName() instead
 crossfile/call.go:11:11:protogetter::avoid direct access to proto field u.Nickname, use u.GetNickname() instead
+ok/ok.go:48:9:protogetter::avoid direct access to proto field u.Name, use u.GetName() instead

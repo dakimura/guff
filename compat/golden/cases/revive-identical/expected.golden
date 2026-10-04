@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/revive-identical/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 identical/identical.go:35:2:revive:warning:identical-branches: both branches of the if are identical
 identical/identical.go:67:2:revive:warning:identical-branches: both branches of the if are identical

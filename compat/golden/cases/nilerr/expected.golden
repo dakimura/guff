@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/nilerr/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 bad/bad.go:8:3:nilerr::error is not nil (line 6) but it returns nil
 bad/bad.go:16:3:nilerr::error is nil (line 14) but it returns error

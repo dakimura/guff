@@ -5,3 +5,8 @@
 #
 # Prefer fixing guff over growing this list. Entries here are accepted
 # mismatches (message phrasing, enable-set gaps, known DEFERRED).
+
+# golangci-lint 2.12.2 -> 2.14.0 (Phase 8, 2026-10-04). Not accepted mismatches:
+# each is a ledger item still to port, and these lines go when it lands.
+# why: gofumpt v0.12.0's new rules (docs/PHASE8-LEDGER.md formatters).
+gin golangci-only binding/json_test.go:134:gofumpt:File is not properly formatted

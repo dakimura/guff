@@ -1,0 +1,11 @@
+# Known finding-set diffs for per-linter isolate runs.
+# Format: <target> <guff-only|golangci-only> <normalized-key>
+# target = isolate-<linter>
+#
+# Recorded when the pin moved golangci-lint 2.12.2 -> 2.14.0 (Phase 8). Not an
+# accepted mismatch: the same diff is a ratchet in the golden tier, and this
+# file goes when that ratchet reaches zero.
+# why: recvcheck v0.3.x (golangci-lint 2.14.0) replaced its default exclusion list — docs/PHASE8-LEDGER.md small-b #7.
+
+isolate-recvcheck guff-only bad.go:21:recvcheck:the methods of "Period" use pointer receiver and non-pointer receiver.
+isolate-recvcheck golangci-only bad.go:28:recvcheck:the methods of "Encoded" use pointer receiver and non-pointer receiver.

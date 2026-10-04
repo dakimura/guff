@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/nonascii/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 nonascii/nonascii.go:35:10:errcheck::Error return value of `os.Chdir` is not checked
 nonascii/nonascii.go:40:2:ineffassign::ineffectual assignment to αβγ

@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/goheader/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 bad.go:1:1:goheader::Missed header for check
 block_mismatch.go:2:12:goheader::Actual: ce-Identifier: Apache-2.0\nExpected:se-Identifier: {{ LICENSE }}

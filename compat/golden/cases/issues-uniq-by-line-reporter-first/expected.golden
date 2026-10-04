@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/issues-uniq-by-line-reporter-first/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 reporter/reporter.go:12:21:gosec:medium:G601: Implicit memory aliasing in for loop.
 reporter/reporter.go:13:27:revive:warning:range-val-in-closure: loop variable v captured by func literal
