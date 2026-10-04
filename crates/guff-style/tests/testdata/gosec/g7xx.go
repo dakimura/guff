@@ -66,8 +66,8 @@ func g702ThroughStdlibCall() {
 	_ = exec.Command("sh", "-c", strings.Join(parts, " "))
 }
 
-// fires — a struct field that was assigned from a source. The walk is
-// field-sensitive: it looks for a store to *this* field, not at the struct.
+// silent since 2.14.0 — the walk reads stores to *this* field of `h`, and
+// x/tools v0.50 builds the literal in a temporary and copies it into `h`.
 func g702FieldTaint() {
 	h := g702Holder{cmd: os.Getenv("GUFF_G702")}
 	_ = exec.Command("sh", "-c", h.cmd)

@@ -932,6 +932,10 @@ fn nillable(ta: &mut TypeArena, oa: &ObjectArena, pa: &PackageArena, t: TypeId) 
     nillable_under(ta, t.underlying(ta))
 }
 
+/// go/ssa's `nillable` on an underlying type. `unsafe.Pointer` joined in x/tools
+/// v0.50 (golangci-lint 2.14.0); guff already answered `nil == nil` for it by
+/// another route (`cases/govet`, `nilness/unsafeptr`), so this only keeps the
+/// predicate itself the same as upstream's.
 fn nillable_under(ta: &TypeArena, u: TypeId) -> bool {
     matches!(
         ta.get(u),
@@ -941,7 +945,7 @@ fn nillable_under(ta: &TypeArena, u: TypeId) -> bool {
             | TypeData::Map(_)
             | TypeData::Signature(_)
             | TypeData::Interface(_)
-    )
+    ) || matches!(ta.get(u), TypeData::Basic(b) if b.kind() == BasicKind::UnsafePointer)
 }
 
 pub fn analyzer() -> &'static Analyzer {

@@ -235,15 +235,16 @@ fn gosec_g602_learns_a_bound_from_variadic_calls_and_makeslice() {
 ///
 /// gosec keys a cookie by the SSA value its field stores are rooted at and
 /// skips any root whose `Pos()` is `token.NoPos`. An element that elides its
-/// type still gets an `Alloc (complit)` at the inner `{` when the element is a
-/// pointer, or when the container is a map; only a slice / array **of values**
-/// roots its stores at an `IndexAddr`, which carries no position. guff read
-/// `lit.ty` instead and so was blind to every elided element — kratos's
-/// `c.Jar.SetCookies(…, []*http.Cookie{{…}})` was the finding that showed it.
+/// type gets an `Alloc (complit)` at the inner `{`. Through x/tools v0.44 a
+/// slice / array element **of value type** was the exception — written in
+/// place through an `IndexAddr` with no position — and v0.50 (golangci-lint
+/// 2.14.0) removed it. guff once read `lit.ty` instead and was blind to every
+/// elided element — kratos's `c.Jar.SetCookies(…, []*http.Cookie{{…}})` was
+/// the finding that showed it.
 ///
-/// Asserted as the **set of report positions**: all 19 findings carry the
+/// Asserted as the **set of report positions**: all 22 findings carry the
 /// identical message, so `any(contains("G124"))` — or a bare count — is true of
-/// any subset. Measured against golangci-lint 2.12.2 (gosec v2.27.1) with
+/// any subset. Measured against golangci-lint 2.14.0 (gosec v2.29.0) with
 /// `max-same-issues: 0`, which the default of 3 otherwise hides.
 #[test]
 fn gosec_g124_sees_composite_literals_that_elide_their_element_type() {
@@ -281,10 +282,16 @@ fn gosec_g124_sees_composite_literals_that_elide_their_element_type() {
             (57, 71),
             (60, 41),
             (64, 19),
-            // elided element of value type, but under a map: go/ssa has to
-            // materialise the value before `MapUpdate`, so it gets a position
+            // elided element of value type under a map: materialised for
+            // `MapUpdate` in every x/tools version
             (70, 37),
             (74, 54),
+            // …and under a slice, an array and a named slice: v0.44 wrote these
+            // in place through a position-less `IndexAddr`; v0.50 (golangci-lint
+            // 2.14.0) builds each element in its own `Alloc`
+            (77, 65),
+            (79, 67),
+            (81, 56),
             // …and the insecure SameSite, to prove an elided literal is still
             // read for its fields rather than reported on sight
             (94, 24),
@@ -293,14 +300,12 @@ fn gosec_g124_sees_composite_literals_that_elide_their_element_type() {
     );
 }
 
-/// The other half of the same table: a slice or array **of values** whose
-/// element type is elided is silent in both tools, because the field stores
-/// are rooted at an `IndexAddr` and `reportInsecureCookies` drops a root with
-/// `allocPos == token.NoPos`. Without this the fix above could be written as
-/// "report every elided cookie literal" and all 19 positions would still line
-/// up — the three silent shapes are the only thing that says otherwise.
+/// The other half: an elided literal is still read for its fields, so a
+/// secure one stays quiet whether it elides its type or not. Without this, the
+/// rule above could be written as "report every cookie literal" and all 22
+/// positions would still line up.
 #[test]
-fn gosec_g124_stays_quiet_for_elided_values_in_slices_and_arrays() {
+fn gosec_g124_stays_quiet_for_secure_cookie_literals() {
     let pkg = support::typecheck_fixture("gosec", "example.com/gosec/g124elided", "g124_elided.go");
     let fset = pkg.fset.clone().expect("fixture has a FileSet");
     let lines: Vec<i64> = support::run_analyzer_diagnostics(gosec(), &pkg)
@@ -309,10 +314,6 @@ fn gosec_g124_stays_quiet_for_elided_values_in_slices_and_arrays() {
         .map(|d| fset.position(guff::position::Pos(d.pos as i64)).line)
         .collect();
     for (line, what) in [
-        (77, "[]http.Cookie{{…}}"),
-        (79, "[1]http.Cookie{{…}}"),
-        (81, "ValJar{{…}} (a named []http.Cookie)"),
-        // and the two secure literals, one elided and one not
         (86, "elided, all three attributes safe"),
         (90, "spelled out, all three attributes safe"),
     ] {
@@ -849,7 +850,7 @@ fn gosec_g117_reports_only_fields_that_are_actually_serialized() {
 /// nearest silent one (a sanitizer on the same source, a constant in the
 /// argument the sink actually checks, a second assignment that kills the
 /// taint), and `compat/golden/cases/gosec` pins every line and column of both
-/// halves against golangci-lint 2.12.2.
+/// halves against the pinned golangci-lint.
 #[test]
 fn gosec_taint_rules_report_only_reachable_sources() {
     let pkg = support::typecheck_fixture("gosec", "example.com/gosec/g7xx", "g7xx.go");
@@ -869,7 +870,11 @@ fn gosec_taint_rules_report_only_reachable_sources() {
             count("G706"),
             count("G710")
         ),
-        (7, 5, 20, 8, 5, 3),
+        // G702 is 6, not 7, since golangci-lint 2.14.0: `g702FieldTaint`
+        // went silent when x/tools v0.50 stopped writing the literal into `h`.
+        // G703 is guff's 5 until PR 9 ports gosec v2.29.0, which stops
+        // treating `filepath.Clean` as a sanitizer.
+        (6, 5, 20, 8, 5, 3),
         "{messages:?}"
     );
 }
@@ -10811,11 +10816,13 @@ fn wastedassign_flags_unused_local_assignments() {
             // The beats shape: a method, whose `if`-init condition reads the
             // variable, whose declaration above the loop is the wasted store.
             (116, "assigned to exists, but reassigned without using the value".to_string()),
-            // Composite-literal initialisers. A struct or array literal is
-            // written into the address, so there is no store to report at all
-            // (lines 145 and 156 stay silent); a slice or map literal is built
-            // and stored, and `&elem{}` is a UnaryExpr around one, so all three
-            // of these do report.
+            // Composite-literal initialisers. Since x/tools v0.50
+            // (golangci-lint 2.14.0) every literal is built in a temporary and
+            // stored once, so the struct (145) and array (156) literals that
+            // v0.44 wrote in place report too, alongside the slice, the map
+            // and `&elem{}`.
+            (145, "assigned to e, but reassigned without using the value".to_string()),
+            (156, "assigned to a, but reassigned without using the value".to_string()),
             (167, "assigned to s, but reassigned without using the value".to_string()),
             (177, "assigned to m, but reassigned without using the value".to_string()),
             (189, "assigned to p, but reassigned without using the value".to_string()),
