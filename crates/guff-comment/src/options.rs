@@ -62,8 +62,7 @@ impl GodoxOptions {
 /// Defaults match golangci-lint: empty keyword filter, empty ignore list,
 /// `comments-only=false`.
 ///
-/// DEFERRED: SuggestedFix; cross-line duplicate detection spanning adjacent
-/// `//` lines; `skip-raw-strings`.
+/// DEFERRED: cross-line duplicate detection spanning adjacent `//` lines.
 #[derive(Debug, Clone, Default)]
 pub struct DupwordOptions {
     /// If non-empty, only these words are flagged as duplicates.
@@ -72,6 +71,9 @@ pub struct DupwordOptions {
     pub ignore: Vec<String>,
     /// When true, skip string literals.
     pub comments_only: bool,
+    /// When true, skip backquoted string literals (dupword v0.1.8,
+    /// golangci-lint 2.14.0).
+    pub skip_raw_strings: bool,
 }
 
 /// `linters.settings.godoclint` / `linters-settings.godoclint`.

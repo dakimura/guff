@@ -19,6 +19,8 @@ linters:
             - pkg: github.com/sirupsen/logrus
               desc: use log/slog
     gomoddirectives:
+      replace-allow-all: true
+      ignore-forbidden: true
       replace-local: true
       replace-allow-list:
         - launchpad.net/gocheck

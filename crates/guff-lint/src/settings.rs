@@ -556,6 +556,33 @@ pub struct ExhaustructSettings {
     pub allow_empty_declarations: Option<bool>,
 }
 
+/// `linters.settings.exhaustruct_v5` (golangci-lint 2.13.0+).
+///
+/// Only the three keys whose meaning is the same in go-exhaustruct v4 and v5
+/// reach the analyzer (see [`merge_exhaustruct_v5`]); the rest are read so a
+/// config that sets them can be told so, not silently linted as if it had not.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct ExhaustructV5Settings {
+    #[serde(default, rename = "enforce-patterns", deserialize_with = "string_or_seq")]
+    pub enforce_patterns: Vec<String>,
+    #[serde(default, rename = "ignore-patterns", deserialize_with = "string_or_seq")]
+    pub ignore_patterns: Vec<String>,
+    #[serde(default, rename = "optional-patterns", deserialize_with = "string_or_seq")]
+    pub optional_patterns: Vec<String>,
+    #[serde(default, rename = "allow-empty")]
+    pub allow_empty: Option<bool>,
+    #[serde(default, rename = "allow-empty-patterns", deserialize_with = "string_or_seq")]
+    pub allow_empty_patterns: Vec<String>,
+    #[serde(default, rename = "allow-empty-returns")]
+    pub allow_empty_returns: Option<bool>,
+    #[serde(default, rename = "allow-empty-declarations")]
+    pub allow_empty_declarations: Option<bool>,
+    #[serde(default, rename = "allow-empty-blank-assignments")]
+    pub allow_empty_blank_assignments: Option<bool>,
+    #[serde(default, rename = "explicit-mode")]
+    pub explicit_mode: Option<bool>,
+}
+
 /// `linters.settings.exhaustive` / `linters-settings.exhaustive`.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct ExhaustiveSettings {
@@ -988,6 +1015,8 @@ pub struct DupwordSettings {
     pub ignore: Vec<String>,
     #[serde(default, rename = "comments-only")]
     pub comments_only: Option<bool>,
+    #[serde(default, rename = "skip-raw-strings")]
+    pub skip_raw_strings: Option<bool>,
 }
 
 /// `linters.settings.godoclint` / `linters-settings.godoclint`.
@@ -2205,6 +2234,8 @@ pub struct DepguardDenySetting {
 /// `check-module-path` remain DEFERRED.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct GomoddirectivesSettings {
+    #[serde(default, rename = "replace-allow-all")]
+    pub replace_allow_all: bool,
     #[serde(default, rename = "replace-local")]
     pub replace_local: bool,
     #[serde(default, rename = "replace-allow-list", deserialize_with = "string_or_seq")]
@@ -2219,6 +2250,8 @@ pub struct GomoddirectivesSettings {
     pub tool_forbidden: bool,
     #[serde(default, rename = "go-debug-forbidden")]
     pub go_debug_forbidden: bool,
+    #[serde(default, rename = "ignore-forbidden")]
+    pub ignore_forbidden: bool,
 }
 
 /// Combined `gomodguard` + `gomodguard_v2` settings (same Pass bag key).
@@ -2503,6 +2536,15 @@ impl LinterSettings {
                 out.exhaustruct = s;
             }
         }
+        // exhaustruct (v4) and exhaustruct_v5 drive one analyzer for now, so
+        // v5's settings fill the shared bag only where v4's key is absent.
+        if let Some(v) = map.get(serde_yaml::Value::String("exhaustruct_v5".into())) {
+            if let Some(s) = parse_settings::<ExhaustructV5Settings>("exhaustruct_v5", v) {
+                if !map.contains_key(serde_yaml::Value::String("exhaustruct".into())) {
+                    merge_exhaustruct_v5(&mut out.exhaustruct, &s);
+                }
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("exhaustive".into())) {
             if let Some(s) = parse_settings::<ExhaustiveSettings>("exhaustive", v) {
                 out.exhaustive = s;
@@ -2602,6 +2644,20 @@ impl LinterSettings {
         }
         if let Some(v) = map.get(serde_yaml::Value::String("modernize".into())) {
             if let Some(s) = parse_settings::<ModernizeSettings>("modernize", v) {
+                // golangci-lint 2.14.0's wrapper warns about the two names
+                // x/tools v0.50 took out of the suite, and matches `disable`
+                // as written: `waitgroup` no longer disables `waitgroupgo`.
+                for name in &s.disable {
+                    match name.as_str() {
+                        "fmtappendf" => eprintln!(
+                            "guff: modernize: fmtappendf has been removed from the modernize suite"
+                        ),
+                        "waitgroup" => eprintln!(
+                            "guff: modernize: waitgroup has been renamed to 'waitgroupgo'"
+                        ),
+                        _ => {}
+                    }
+                }
                 out.modernize = s;
             }
         }
@@ -3820,6 +3876,7 @@ impl DupwordSettings {
             keywords: self.keywords.clone(),
             ignore: self.ignore.clone(),
             comments_only: self.comments_only.unwrap_or(false),
+            skip_raw_strings: self.skip_raw_strings.unwrap_or(false),
         }
     }
 }
@@ -3886,6 +3943,7 @@ impl DepguardSettings {
 impl GomoddirectivesSettings {
     pub fn to_guff_gomoddirectives(&self) -> guff_import::GomoddirectivesOptions {
         guff_import::GomoddirectivesOptions {
+            replace_allow_all: self.replace_allow_all,
             replace_local: self.replace_local,
             replace_allow_list: self.replace_allow_list.clone(),
             retract_allow_no_explanation: self.retract_allow_no_explanation,
@@ -3893,6 +3951,7 @@ impl GomoddirectivesSettings {
             toolchain_forbidden: self.toolchain_forbidden,
             tool_forbidden: self.tool_forbidden,
             go_debug_forbidden: self.go_debug_forbidden,
+            ignore_forbidden: self.ignore_forbidden,
         }
     }
 }
@@ -4196,6 +4255,47 @@ fn merge_gomodguard_v1(out: &mut GomodguardSettings, value: &serde_yaml::Value) 
                 out.local_replace_directives = b;
             }
         }
+    }
+}
+
+/// Carry `exhaustruct_v5` settings into the v4 analyzer's [`ExhaustructSettings`].
+///
+/// `allow-empty`, `allow-empty-returns` and `allow-empty-declarations` mean the
+/// same in both majors and are copied. Everything else is v5-only — `Type#Field`
+/// patterns, `allow-empty-blank-assignments`, `explicit-mode` — and has no v4
+/// counterpart to map onto: v4's `include` / `exclude` / `allow-empty-rx` are
+/// plain regexps over the type's full path, and quietly reading a v5 pattern as
+/// one would match something else. Those keys are reported and left out, so the
+/// run is v5 with its defaults for them.
+fn merge_exhaustruct_v5(out: &mut ExhaustructSettings, v5: &ExhaustructV5Settings) {
+    out.allow_empty = v5.allow_empty;
+    out.allow_empty_returns = v5.allow_empty_returns;
+    out.allow_empty_declarations = v5.allow_empty_declarations;
+    let mut unsupported: Vec<&str> = Vec::new();
+    if !v5.enforce_patterns.is_empty() {
+        unsupported.push("enforce-patterns");
+    }
+    if !v5.ignore_patterns.is_empty() {
+        unsupported.push("ignore-patterns");
+    }
+    if !v5.optional_patterns.is_empty() {
+        unsupported.push("optional-patterns");
+    }
+    if !v5.allow_empty_patterns.is_empty() {
+        unsupported.push("allow-empty-patterns");
+    }
+    if v5.allow_empty_blank_assignments == Some(true) {
+        unsupported.push("allow-empty-blank-assignments");
+    }
+    if v5.explicit_mode == Some(true) {
+        unsupported.push("explicit-mode");
+    }
+    if !unsupported.is_empty() {
+        eprintln!(
+            "guff: linters.settings.exhaustruct_v5: {} not implemented yet; \
+             running with its default",
+            unsupported.join(", ")
+        );
     }
 }
 

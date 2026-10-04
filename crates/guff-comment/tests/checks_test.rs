@@ -194,6 +194,7 @@ fn dupword_keywords_ignore_comments_only_respect_settings() {
             keywords: vec!["the".into()],
             ignore: vec!["is".into()],
             comments_only: true,
+            skip_raw_strings: false,
         },
     );
     let messages = support::run_analyzer_with_settings(

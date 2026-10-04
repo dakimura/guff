@@ -1,0 +1,21 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh exhaustruct-v5
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/exhaustruct-v5/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.14.0
+
+--- a/tag/ok.go
++++ b/tag/ok.go
+@@ -3,7 +3,7 @@
+ type Point struct {
+ 	X int
+ 	Y int
+-	Z int `exhaustruct:"optional"`
++	Z int //exhaustruct:optional
+ }
+ 
+ func ok() {

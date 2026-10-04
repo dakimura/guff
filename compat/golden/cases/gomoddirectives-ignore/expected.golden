@@ -1,0 +1,23 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh gomoddirectives-ignore
+# Produced by running golangci-lint on compat/golden/cases/gomoddirectives-ignore/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+go.mod:8:1:gomoddirectives::ignore directive is not allowed
+go.mod:11:2:gomoddirectives::directories named 'vendor' are ignored by default
+go.mod:11:2:gomoddirectives::ignore directive is not allowed
+go.mod:12:2:gomoddirectives::files/directories starting with '.' and '_' are ignored by default
+go.mod:12:2:gomoddirectives::ignore directive is not allowed
+go.mod:13:2:gomoddirectives::files/directories starting with '.' and '_' are ignored by default
+go.mod:13:2:gomoddirectives::ignore directive is not allowed
+go.mod:14:2:gomoddirectives::files/directories starting with '.' and '_' are ignored by default
+go.mod:14:2:gomoddirectives::ignore directive is not allowed
+go.mod:15:2:gomoddirectives::directories named 'testdata' are ignored by default
+go.mod:15:2:gomoddirectives::ignore directive is not allowed
+go.mod:16:2:gomoddirectives::files/directories starting with '.' and '_' are ignored by default
+go.mod:16:2:gomoddirectives::ignore directive is not allowed
+go.mod:23:1:gomoddirectives::multiple replacement of the same module
+go.mod:25:1:gomoddirectives::the original module and the replacement are identical

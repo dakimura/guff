@@ -67,6 +67,10 @@ pub struct DenyEntry {
 /// `check-module-path`.
 #[derive(Debug, Clone, Default)]
 pub struct GomoddirectivesOptions {
+    /// When true, every `replace` directive is allowed (gomoddirectives v0.9.0,
+    /// golangci-lint 2.13.0). Identical and duplicate replaces are still
+    /// reported: the option short-circuits only the allow / local decision.
+    pub replace_allow_all: bool,
     /// When true, local `replace` directives are allowed.
     pub replace_local: bool,
     /// Module paths whose `replace` is allowed even when replaces are forbidden.
@@ -77,6 +81,9 @@ pub struct GomoddirectivesOptions {
     pub toolchain_forbidden: bool,
     pub tool_forbidden: bool,
     pub go_debug_forbidden: bool,
+    /// golangci-lint 2.13.0 passes `ignore-forbidden` through; 2.12 had the
+    /// key in its config struct and dropped it on the way to the analyzer.
+    pub ignore_forbidden: bool,
 }
 
 /// `linters.settings.gomodguard` / `gomodguard_v2`.

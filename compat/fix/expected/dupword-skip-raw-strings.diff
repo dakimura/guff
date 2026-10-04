@@ -1,0 +1,31 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh dupword-skip-raw-strings
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/dupword-skip-raw-strings/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.14.0
+
+--- a/skip_raw_strings.go
++++ b/skip_raw_strings.go
+@@ -5,9 +5,9 @@
+ // pkg/golinters/dupword/testdata/dupword_skip_raw_strings.go.
+ 
+ func skipRawStrings() (string, string, string) {
+-	// this line include duplicated word the the
++	// this line include duplicated word the
+ 	raw := `this line include duplicated word the the`
+-	interpreted := "this line include duplicated word the the"
++	interpreted := "this line include duplicated word the"
+ 	multiline := `
+ SELECT the the column
+ FROM table`
+@@ -18,5 +18,5 @@
+ // trailing space are written after the loop. Upstream asks whether the last
+ // *byte*, read as a Latin-1 rune, is a space — so `à` (C3 A0) counts as one.
+ func trailingWhitespace() (string, string, string) {
+-	return "the the end ", "end the the ", "voilà voilà"
++	return "the end ", "end the ", "voilà voilà"
+ }

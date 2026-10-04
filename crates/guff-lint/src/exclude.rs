@@ -1150,7 +1150,10 @@ pub fn issue_from_cached(
 /// When a deprecated linter and its alias share an analyzer, prefer the
 /// enabled alias name for `FromLinter` (golangci-lint v2 parity).
 fn remap_enabled_alias_from_linters(issues: &mut [Issue], enabled: &HashSet<String>) {
-    const PAIRS: &[(&str, &str)] = &[("gomodguard", "gomodguard_v2")];
+    const PAIRS: &[(&str, &str)] = &[
+        ("gomodguard", "gomodguard_v2"),
+        ("exhaustruct", "exhaustruct_v5"),
+    ];
     if enabled.is_empty() {
         return;
     }

@@ -356,6 +356,22 @@ fn run_cmd(args: RunArgs, startup: Instant) -> Result<i32, RunError> {
         return Ok(crate::EXIT_CONFIG_ERROR);
     }
 
+    // `printDeprecatedLinterMessages`: a deprecated linter runs, with a
+    // warning. Upstream walks a map, so its order is random; guff sorts.
+    let mut deprecated: Vec<&String> = linter_names
+        .iter()
+        .filter(|n| crate::registry::deprecation(n).is_some())
+        .collect();
+    deprecated.sort();
+    for name in deprecated {
+        if let Some((since, message, replacement)) = crate::registry::deprecation(name) {
+            eprintln!(
+                "guff: The linter '{name}' is deprecated (since {since}) due to: \
+                 {message} Replaced by {replacement}."
+            );
+        }
+    }
+
     // An empty selection means the config asked for nothing — `default: none`
     // with no `enable`, or every default linter listed under `disable`. It used
     // to fall back to the standard preset, which turned "disable everything"

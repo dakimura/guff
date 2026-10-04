@@ -72,8 +72,12 @@ fn exclude_word(word: &str, ignore: &HashSet<&str>) -> bool {
 /// * A duplicate that `excludeWords` rejects takes neither branch, so it is
 ///   dropped from the rewrite while not being reported.
 ///
-/// Both are upstream's, and v0.1.8 changes the first — which is why this reads
-/// the pinned v0.1.7.
+/// v0.1.8 (golangci-lint 2.14.0) added the trailing-whitespace flush: that
+/// last arm now takes a non-space character only, and text ending in
+/// whitespace writes its final word and the whitespace after the loop. The
+/// flush asks `unicode.IsSpace(rune(raw[len(raw)-1]))` — the last *byte* read
+/// as a Latin-1 rune — so a text ending in `à` (`C3 A0`) or `Ņ` (`C5 85`)
+/// counts as ending in a space. That is upstream's, and kept.
 fn check_one_key(
     raw: &str,
     key: Option<&str>,
@@ -126,7 +130,7 @@ fn check_one_key(
         } else if r.is_whitespace() && !last_rune.is_whitespace() {
             space_start = i;
             cur_word = &raw[word_start..i];
-        } else if i + 1 == n {
+        } else if i + 1 == n && !r.is_whitespace() {
             let word = &raw[word_start..];
             let keyed = key.is_none_or(|k| word == k);
             if keyed && word == pre_word {
@@ -140,6 +144,30 @@ fn check_one_key(
             }
         }
         last_rune = r;
+    }
+
+    // Upstream's `rune(raw[len(raw)-1])`: a byte, widened as Latin-1.
+    let ends_in_space = raw
+        .as_bytes()
+        .last()
+        .is_some_and(|&b| char::from(b).is_whitespace());
+    if ends_in_space {
+        if !cur_word.is_empty() {
+            let keyed = key.is_none_or(|k| cur_word == k);
+            if keyed && cur_word == pre_word {
+                if !exclude_word(cur_word, ignore) {
+                    find = true;
+                    found.insert(cur_word);
+                } else {
+                    new_line.push_str(last_space);
+                    new_line.push_str(cur_word);
+                }
+            } else {
+                new_line.push_str(last_space);
+                new_line.push_str(cur_word);
+            }
+        }
+        new_line.push_str(&raw[space_start..]);
     }
 
     if !find {
@@ -193,9 +221,15 @@ fn check_string_lit(
     lit: &BasicLit,
     keywords: &[String],
     ignore: &HashSet<&str>,
+    skip_raw_strings: bool,
     pending: &mut Vec<(u32, String, Option<TextEdit>)>,
 ) {
     if lit.kind != Some(Token::STRING) {
+        return;
+    }
+    // `skip-raw-strings` (v0.1.8, golangci-lint 2.14.0): leave backquoted
+    // literals alone — SQL and templates repeat words on purpose.
+    if skip_raw_strings && lit.value.starts_with('`') {
         return;
     }
     // Upstream (`fixDuplicateWordInString`, dupword.go:185) unquotes first and
@@ -213,10 +247,14 @@ fn check_string_lit(
     let Some((update, words)) = find_duplicates(&value, keywords, ignore) else {
         return;
     };
-    let update = if quote {
-        strconv::quote(&update)
-    } else {
+    // v0.1.8 writes a raw literal back raw; v0.1.7 `strconv.Quote`d it, which
+    // turned a multi-line backquoted string into one `"…\n…"` line.
+    let update = if !quote {
         update
+    } else if lit.value.starts_with('`') {
+        format!("`{update}`")
+    } else {
+        strconv::quote(&update)
     };
     // `lit.Pos()` to `lit.End()`: the whole literal, delimiters included.
     let pos = lit.value_pos.0 as u32;
@@ -303,7 +341,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 return true;
             };
             if let NodeRef::BasicLit(lit) = n {
-                check_string_lit(lit, &options.keywords, &ignore, &mut pending);
+                check_string_lit(lit, &options.keywords, &ignore, options.skip_raw_strings, &mut pending);
             }
             true
         });

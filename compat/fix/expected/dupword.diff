@@ -77,3 +77,28 @@
  
  	_, _, _, _, _, _, _, _ = tabbed, newline, escaped, quoteInside, raw, rawEsc, uni, runes
  }
+--- a/rawskip/skip_raw_strings.go
++++ b/rawskip/skip_raw_strings.go
+@@ -5,11 +5,11 @@
+ // pkg/golinters/dupword/testdata/dupword_skip_raw_strings.go.
+ 
+ func skipRawStrings() (string, string, string) {
+-	// this line include duplicated word the the
+-	raw := `this line include duplicated word the the`
+-	interpreted := "this line include duplicated word the the"
++	// this line include duplicated word the
++	raw := `this line include duplicated word the`
++	interpreted := "this line include duplicated word the"
+ 	multiline := `
+-SELECT the the column
++SELECT the column
+ FROM table`
+ 	return raw, interpreted, multiline
+ }
+@@ -18,5 +18,5 @@
+ // trailing space are written after the loop. Upstream asks whether the last
+ // *byte*, read as a Latin-1 rune, is a space — so `à` (C3 A0) counts as one.
+ func trailingWhitespace() (string, string, string) {
+-	return "the the end ", "end the the ", "voilà voilà"
++	return "the end ", "end the ", "voilà voilà"
+ }
