@@ -206,20 +206,18 @@ fn unused_keeps_interface_impl_methods() {
     assert!(messages[0].contains("trulyUnused is unused"));
 }
 
-/// A generic sealing interface keeps its implementations alive — and the
-/// neighbouring fixture's does not.
+/// A generic sealing interface keeps its implementations alive.
 ///
-/// `unused` carries its own `implements` (unused/implements.go), in which an
-/// interface method's **bare** type parameter binds to whatever the concrete
-/// method uses (consistently, across the interface), while a type parameter
-/// *inside* another type matches nothing. So `sigil(T)` is satisfied by both
-/// `sigil(string)` and `sigil(int)`, and `generic_iface.go`'s
-/// `list() ([]T, error)` is satisfied by no concrete `list`.
+/// `unused` carries its own `implements` (unused/implements.go). Under
+/// staticcheck v0.7.0 (golangci-lint 2.12.2) an interface method's **bare**
+/// type parameter bound to whatever the concrete method used while a type
+/// parameter *inside* another type matched nothing, so `sigil(T)` was
+/// satisfied and `generic_iface.go`'s `list() ([]T, error)` was not. v0.8.1
+/// (golangci-lint 2.14.0) unifies the signatures, and both are satisfied.
 ///
-/// Matching interface methods by name cannot separate the two — the names are
-/// the same on both sides — which is why guff resolves generic interfaces by
-/// signature. Measured against golangci-lint 2.12.2 on both fixtures; the
-/// golden gates them side by side.
+/// Matching interface methods by name cannot tell a real mismatch from either
+/// — the names are the same on both sides — which is why guff resolves
+/// generic interfaces by signature.
 #[test]
 fn unused_resolves_generic_interfaces_by_signature() {
     let dir = support::testdata("basic");
@@ -234,6 +232,14 @@ fn unused_resolves_generic_interfaces_by_signature() {
         vec!["field index is unused", "field index is unused"],
         "both `sigil` methods implement ResultRef[T] and stay: {messages:?}"
     );
+
+    // dapr's shape: `list() ([]T, error)` unifies with `list() ([]int, error)`.
+    let pkg = support::typecheck_pkg(
+        "example.com/unused/genericiface",
+        &dir.join("generic_iface.go"),
+    );
+    let messages = support::run_analyzer(analyzer(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
 }
 
 /// (2.1) "named types use exported methods" is an *edge from the type*.

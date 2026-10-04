@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 use guff::ast::{Expr, Ident, Stmt};
+use guff::token::Token;
 use guff::node_mask;
 use guff::walk::{preorder, NodeRef};
 use guff_analysis::code::{example_func_spans, in_example_func, object_of};
@@ -644,11 +645,46 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     // before it even looks at `fn.Source()`.
     let examples = example_func_spans(pass);
     let mut pending = Vec::new();
-    // Upstream walks `*ast.AssignStmt` only: `n++` is an `*ast.IncDecStmt` and is
-    // never examined, so `func f(n int) { n++ }` is not a finding. Verified
-    // against golangci-lint 2.12.2.
-    inspect.preorder_typed(node_mask!(AssignStmt), pass.files(), |node| {
+    // staticcheck v0.8.1 (golangci-lint 2.14.0) walks `*ast.IncDecStmt` too:
+    // `n++` is judged by `fn.ValueForExpr(inc.X)` — the incremented value — and
+    // reported at the statement when nothing reads it. v0.7.0 never looked.
+    inspect.preorder_typed(node_mask!(AssignStmt, IncDecStmt), pass.files(), |node| {
         match node {
+            NodeRef::IncDecStmt(inc) => {
+                let pos = inc.x.pos().0 as u32;
+                if in_example_func(&examples, pos) {
+                    return;
+                }
+                // Upstream formats `inc.X` with `%s`, which is the name for an
+                // identifier and Go's struct notation (`&{x f}`) for anything
+                // else. DEFERRED: the non-identifier spellings.
+                let Expr::Ident(id) = unparen_expr(&inc.x) else {
+                    return;
+                };
+                let Some(ev) = exprs.get(&inc.x) else {
+                    return;
+                };
+                let func = ir.prog.functions.get(ev.func);
+                let Some((v, _)) = exprs.value_in(&ir.prog, ev.func, &inc.x) else {
+                    return;
+                };
+                // "a zero-valued constant, for example in 'foo := []string(nil)'"
+                if matches!(v, Value::Const(_)) {
+                    return;
+                }
+                // A post statement after an unconditional `break` is in a
+                // block upstream's IR deletes, so `ValueForExpr` finds
+                // nothing there. guff's expression index was recorded at build
+                // time and still points into the deleted block.
+                if let Value::Instr(iid) = v {
+                    if !func.live_blocks().any(|(_, b)| b.instrs.contains(&iid)) {
+                        return;
+                    }
+                }
+                if !has_use(func, v) {
+                    pending.push((pos, format!("this value of {} is never used", id.name)));
+                }
+            }
             NodeRef::AssignStmt(assign) => {
                 // `irutil.IsExample` is asked per `SrcFuncs` entry, before the
                 // body is looked at, so every assignment inside a runnable
@@ -720,10 +756,22 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if !matches!(unparen_expr(lhs), Expr::Ident(_)) {
                         continue;
                     }
-                    // Upstream asks `fn.ValueForExpr(rhs)` and nothing else, so
-                    // a compound assignment is judged by its right-hand side:
-                    // `n += 1` yields the constant `1` and is skipped below.
-                    let Some((v, _)) = exprs.value_in(&ir.prog, fid, rhs) else {
+                    // `fn.ValueForExpr(rhs)`, and — since staticcheck v0.8.1
+                    // (golangci-lint 2.14.0) — the left-hand side's value when
+                    // that is nil and the statement is `+=`, `*=`, …. A
+                    // constant is no longer an IR value there, so `n += 1`
+                    // is judged by the sum it stores; guff's IR keeps the
+                    // constant, so a constant answer counts as nil here.
+                    let rhs_value = exprs
+                        .value_in(&ir.prog, fid, rhs)
+                        .filter(|(v, _)| !matches!(v, Value::Const(_)));
+                    let compound = !matches!(assign.tok, Some(Token::ASSIGN | Token::DEFINE));
+                    let value = match rhs_value {
+                        Some(found) => Some(found),
+                        None if compound => exprs.value_in(&ir.prog, fid, lhs),
+                        None => None,
+                    };
+                    let Some((v, _)) = value else {
                         continue;
                     };
                     // A conversion that only re-labels an existing value —

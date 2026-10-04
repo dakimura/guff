@@ -1,8 +1,8 @@
 // staticcheck's unused draws an edge from a concrete method to the interface
-// method it implements — but not when the interface has type parameters. dapr's
-// `pkg/runtime/hotreload/loader/operator` is built out of ten such streamers and
-// silences forty findings with `//nolint:unused`.
-//
+// method it implements. Through v0.7.0 (golangci-lint 2.12.2) that missed an
+// interface whose methods use its type parameters inside other types (`[]T`):
+// dapr's `pkg/runtime/hotreload/loader/operator` silenced forty findings with
+// `//nolint:unused`. v0.8.1 (2.14.0) unifies signatures and finds the edge.
 // The non-generic pair below is the control: implementing a used interface
 // method there *is* a use, and neither tool reports it.
 package genericiface

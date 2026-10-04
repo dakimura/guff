@@ -11,6 +11,7 @@
 //! set, reported only when their owner type came out used.
 
 mod lenient_implements;
+mod unify;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;

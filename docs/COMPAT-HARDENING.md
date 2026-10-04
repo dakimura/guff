@@ -497,7 +497,7 @@ finding が 1 件も動かずに変わるものが 2 つあるので別に測る
 古い binary に取り残されたジョブは、誰もベースラインだと思っていないものと比較しながら
 OK を出し続ける。
 
-### Phase 8 — golangci-lint 2.14.0 への追従 `[PR 1〜3 完了 2026-10-04 / 残り PR 4〜15]`
+### Phase 8 — golangci-lint 2.14.0 への追従 `[PR 1〜4 完了 2026-10-05 / 残り PR 4b〜15]`
 
 Phase 7 の drift は「上流の**出力**がどこで動いたか」を教えるが、見えるのは
 **ゴールデンに書いた形**の分だけである。2.12.2 → 2.14.0 では gosec G407・govet `stdversion`・
@@ -553,6 +553,17 @@ guff-ssa は**元から v0.50 の形**（一時 Alloc に組んでから 1 回 S
 過剰報告として現れる、の実例がまとめて 3 つ。nilness の `unsafe.Pointer` は、guff が**別経路で既に**
 2.14.0 の答えを出していた（2.12.2 に対しては誤報だった）ことが、形を足して初めて分かった。
 
+**PR 4（2026-10-05）**: honnef v0.8 のうち観測できる分。SA5011 の登録解除（上流は analyzer 一覧から外し、
+本体を `panic` にした）、SA4006 の `n++` / `+=`、unused の `typeutil.Unify`（上流 testdata `generic-interfaces.go` を
+golden に取り込み 12 件一致）。**SA4006 の新しい枝が guff-ssa の 1 年物の欠陥を掘り当てた**:
+for 文の `continue` が post 文を飛ばしてループ頭へ戻っていた（go/ssa は `for.post` ブロックへ飛ぶ）。
+本体が `break` / `return` で抜けるループでは `i++` が到達不能になり、OSS で gin / caddy / consul / grafana に
+誤報が 6 件出た。golden は 265 case とも**この欠陥の前後で 1 件も動かなかった** —— どの fixture も
+「`continue` してから抜ける」形を持っていなかった。直したうえで、到達不能な post 文（無条件 `break`）は
+上流の IR が削除するので値が無い、も合わせて fixture に足した。
+IsStub / EnclosingFunction / DebugRef / σ 模倣の撤去は golden に観測差が無いので、上流 testdata を fixture に
+してから（PR 4b）。
+
 ---
 
 ## 3. 進捗表
@@ -567,7 +578,7 @@ guff-ssa は**元から v0.50 の形**（一時 Alloc に組んでから 1 回 S
 | 5 | コーパス多様化 | 中 | **進行中** — `corpus/shapes.py` が「どの形の入力がどのゲートにも当たっていないか」を測って CI ゲート化。k9s と cobra を `pr` tier に、grafana を go.work の 2 モジュール跨ぎに。非 ASCII は `cases/nonascii`。**6 バグ**（10 本目）: `linters.disable` の優先順、nolintlint が除外フィルタを素通り、gocritic の `skipTestFuncs` と `importShadow` の走査範囲、printf の `parseIndex` 3 か所、godox の位置。11 本目は**サブ形**（`genericrecv` / `genericunion` / `genericalias`）を測って controller-runtime を足し、**8 バグ**: revive の受け手の綴り 3 種、`var-declaration` の刈り込み、gocritic `newDeref` の型、errorlint の allowed **対**、SSA 系 16 analyzer がメソッドを見ていない、ドット import の使用記録がパッケージ単位、SA1019 の位置と末尾スペース、非推奨インターフェースメソッド、govet printf の引数描画。12 本目は**踏んでいる形が型検査を通っているか**を測って `allX`（型集合を見る述語 7 本 × 演算子 11 箇所）・untyped 定数の型パラメータ変換・go1.24 のジェネリック型エイリアスを入れた —— どれも**落ちるとパッケージ丸ごと ill-typed** ＝ 型依存 analyzer が全部黙る側の欠陥。ついでにエイリアス実体の TypeName が package を持たず revive の `unexported-return` が素通りしていた 1 件。`range` / 送受信（`commonUnder` 系）は 15 本目で解消（`#[ignore]` 解除）。**15 本目は ill-typed をもう一段掘って型検査器の欠陥 6 種**: untyped な「値」の代入可能性（`bool(v != 0)`）、埋め込みを辿らないメソッド署名の遅延解決、`IsComparable` のフラグ読み、`commonUnder`、`convertible_to` のメソッド集合準備、逆方向の型推論（go1.21）。kubernetes は 8 → 1 パッケージ、**16 本目の部分的な明示型引数（`sets.KeySet[string](m)`）で 0** | 2026-08-13 |
 | 6 | 縮小器 → 差分ファジング | 中 | **完了** — 道具（`compat/reduce.py` / `compat/fuzz.py` / `compat/gospans`）と、それで見つかる分の消化。1 周目 864 ミュータントで 36 件 = 9 バグ、2 周目（seed 1・2 編集/ミュータント・888 ミュータント）で **4 件 = 4 バグ**（errorlint の `(nil)`、gocritic newDeref の描画ノード、SA1006 の paren、nolintlint の unused を**別の**ディレクティブが打ち消す）。**型情報が要るとされた 3 変異**（rename / littype / rangeint）は型検査器を足さずに実装。ファザー自身の穴も 1 つ（`issue_key` 直マップで related-information 行まで数え、staticcheck-sa の baseline を 5→17 に膨らませていた）。`--recheck` を追加。**15 本目で `--allow-dirty-seeds` を初めて回した**: staticcheck-sa 220 ミュータントで 4 件 —— **4 件とも 1 つの構造的欠陥**（パターンマッチャが根でしか括弧を外していなかった）を別々に指していた。revive 側は上流のレースが乗るので `UNSTABLE` が 60 中 7 出るが、確認を通った 1 件が **revive の括弧の向きは staticcheck と逆**（上流は素の型アサーションで括弧を見ない＝黙る、guff は剥がして撃っていた）を出した。**縮小器に「根集合の ddmin」を第 1 パスとして足した**: ill-typed の再現条件がファイルではなく**どのパッケージを root に入れたか**だったので、64 → 3 パッケージまで落として原因に直行した（`--no-reduce-roots` で無効）。結果 controller-runtime の ill-typed は **16 → 0**、そこで**見えるようになった差分が 17 件**（recall は 100% のまま。うち 3 件はその場で修正、17 件を理由つき allowlist に記録（差分は 20 → 17）） | 2026-08-13 |
 | 7 | 上流ドリフト検知 | 小 | **完了** — `compat/drift.py` が 81 ゴールデンケースで `golangci@pin` 対 `golangci@candidate`（guff 非依存）と `guff` 対 `candidate`（ピンを上げた日のゲート）を測り、linter インベントリと config 受理も別に見る。`compat/pins.json` にピンを一元化。週次 workflow（`upstream-drift.yml`）。**2.11.4 で検証**: gosec G124 / govet `inline` / revive enable-all の 5 rule / clickhouselint・gomodguard_v2 の追加と gomodguard の deprecated 化 —— 全部 `since: v2.12.0` と一致。今日は pin == 最新なので 0 件で exit 0。**15 本目が `--update` の経路を初めて通した**: ledger の `why` を `--update` が書く placeholder のままにしておくと**週次ジョブが黙る**（＝ §1 が言っている「見ていないから通っているゲート」の一段上）ことが分かり、placeholder を「レビュー済み」と認めないようにした | 2026-08-13 |
-| 8 | golangci-lint 2.14.0 への追従 | 大 | **PR 1〜3 完了** — [`PHASE8-LEDGER.md`](PHASE8-LEDGER.md)（266 行 / 15 PR）。pin = 2.14.0、golden 27+1 case を ratchet に記録（modernize 2/0・staticcheck-s 1/0 まで即縮小）、config 層（exhaustruct_v5 受理・deprecation 警告・dupword / gomoddirectives の新 option）。x/tools の当て木 3 つを撤去（wastedassign 0/0、gosec 3/7）。残りは台帳 §6 の PR 4〜15 | 2026-10-04 |
+| 8 | golangci-lint 2.14.0 への追従 | 大 | **PR 1〜4 完了** — [`PHASE8-LEDGER.md`](PHASE8-LEDGER.md)（266 行 / 15 PR）。pin = 2.14.0、golden 27+1 case を ratchet に記録（modernize 2/0・staticcheck-s 1/0 まで即縮小）、config 層（exhaustruct_v5 受理・deprecation 警告・dupword / gomoddirectives の新 option）。x/tools の当て木 3 つを撤去（wastedassign 0/0、gosec 3/7）。SA5011 削除・SA4006・unused Unify、for 文の `continue` が post を飛ばす guff-ssa の欠陥を修正。残りは台帳 §6 の PR 4b〜15 | 2026-10-05 |
 
 **現在の指標**（`docs/COVERAGE.md` / 2026-08-13、16 本目で再生成）: **551** checks 中
 `never` **3** / `unit-only` **1** / `fired` **547（99.3%）**

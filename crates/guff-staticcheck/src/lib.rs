@@ -326,7 +326,9 @@ pub fn analyzers() -> Vec<&'static guff_analysis::Analyzer> {
         sa5008::analyzer(),
         sa5009::analyzer(),
         sa5010::analyzer(),
-        sa5011::analyzer(),
+        // Not sa5011: staticcheck v0.8 (golangci-lint 2.13.1) took it out of
+        // the analyzer list and made its body `panic("SA5011 is broken and
+        // should not be used")`. The port stays in the crate, unregistered.
         sa5012::analyzer(),
         sa6000::analyzer(),
         sa6001::analyzer(),
