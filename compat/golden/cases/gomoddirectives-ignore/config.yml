@@ -1,0 +1,22 @@
+# Golden case: gomoddirectives v0.9 / v0.10 (golangci-lint 2.13 / 2.14) —
+# `replace-allow-all`, `ignore-forbidden` (passed through since 2.13), and the
+# unconditional ignored-by-default check. The fixture is go.mod itself.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gomoddirectives
+  settings:
+    gomoddirectives:
+      replace-allow-all: true
+      ignore-forbidden: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

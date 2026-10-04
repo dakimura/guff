@@ -183,8 +183,8 @@ guff の `parse_settings` は未知キーを黙って無視するので、設定
 
 | 項目 | 上流 | guff の現状 | status |
 |------|------|-------------|--------|
-| `exhaustruct_v5`（Since v2.13.0、analyzer 名・`//nolint` 名とも `exhaustruct_v5`） | `enable` に書ける、`default: all` に入る | `registry.rs` / `KNOWN_LINTER_NAMES` に無い → `cli.rs:353` の unknown linters で **exit 3** | needs-port |
-| `exhaustruct`（v4）の deprecated 化 | 警告レベル、実行は続く、Migration なし | deprecation 警告の仕組み自体が無い（wsl / gomodguard も同じ） | needs-port（S） |
+| `exhaustruct_v5`（Since v2.13.0、analyzer 名・`//nolint` 名とも `exhaustruct_v5`） | `enable` に書ける、`default: all` に入る | `registry.rs` / `KNOWN_LINTER_NAMES` に無い → `cli.rs:353` の unknown linters で **exit 3** | **PR 2**: 名前を受理、v4 エンジンで代用、golden `exhaustruct-v5` に ratchet 3/0 |
+| `exhaustruct`（v4）の deprecated 化 | 警告レベル、実行は続く、Migration なし | deprecation 警告の仕組み自体が無い（wsl / gomodguard も同じ） | **done (PR 2)**: exhaustruct / wsl / gomodguard の 3 本。Migration 提案は未 |
 | modernize `autoFix: true` | `help linters` の表示だけ | guff の一覧は capability タグを出さない | not-applicable |
 | golines / revive の URL | メタデータだけ | — | not-applicable |
 
@@ -197,15 +197,15 @@ analyzer 本体（L）が入るまでは finding 0 件になる —— これは
 |--------|------|----------|------|--------|
 | exhaustruct_v5 | enforce-patterns / ignore-patterns / optional-patterns / allow-empty / allow-empty-patterns / allow-empty-returns / allow-empty-declarations / **allow-empty-blank-assignments**（struct のみ、schema に無い） / explicit-mode | false / 空。report-full-type-path は配線されず常に false。不正パターンは Fatalf | 無し | needs-port |
 | canonicalheader | `exclusions` []string / `use-default-exclusions` | 空 / **true** | 無し（DEFERRED の理由「YAML 設定が無い」は 2.14.0 で腐った） | needs-port |
-| dupword | `skip-raw-strings` | false | 無し | needs-port |
+| dupword | `skip-raw-strings` | false | 無し | **done (PR 2)** |
 | fatcontext | `check-loops` / `check-function-literals` | true / true | 既に読む | already-matches |
 | funcorder | `function` | false | 既に読む | already-matches |
 | nonamedreturns | `allow-unused-named-returns` | false | 既に読む | already-matches |
 | goconst | `exclude-types`（Assignment/Binary/Case/Return/Call/CompositeLit、大小無視、未知値はエラー） / `ignore-map-keys`、`ignore-calls` は deprecated | **[Call]** / false | 無し | needs-port。**ラッパの後付け規則**: ignore-calls:false かつ exclude-types がちょうど [Call] なら空。明示した exclude-types は既定を**置換**（マージしない） |
-| gomoddirectives | `replace-allow-all` / `ignore-forbidden`（struct のみ） | false / false | 無し（ignore-forbidden は DEFERRED） | needs-port |
+| gomoddirectives | `replace-allow-all` / `ignore-forbidden`（struct のみ） | false / false | 無し（ignore-forbidden は DEFERRED） | **done (PR 2)**（ignore 既定ディレクトリ検査と、ブロック内の列も） |
 | gofumpt | `extra.group-params` / `extra.clothe-returns` / `extra.balance-calls`、`extra-rules` は deprecated | false ×3 | `extra-rules` だけ | needs-port。**文言とコードが食い違う**: 警告は「use extra.group-params instead」だが、`extra-rules: true` は 3 規則すべて（balance-calls 含む）を有効にする。コードに合わせる |
 | iface | `enable: [unusedmethod]`、`settings.unusedmethod.exclude` | 既定は identical のみ | 無し | needs-port |
-| modernize | `disable` に書ける名前: fmtappendf 削除、waitgroup → waitgroupgo、7 個追加 | 旧名は warn（照合は改名しない） | 任意文字列を受理（受理は一致）、警告なし | needs-port（警告と suite） |
+| modernize | `disable` に書ける名前: fmtappendf 削除、waitgroup → waitgroupgo、7 個追加 | 旧名は warn（照合は改名しない） | 任意文字列を受理（受理は一致）、警告なし | **PR 2: 警告は done**（Suite は PR 1） |
 | gosec | `config.global` の `nosec-require-rules` / `nosec-require-justification`、代替タグの `#` 正規化 | 無効 | `config.global` 全体が DEFERRED | needs-port |
 | revive | `directives: specify-disable-rule`（と既存の specify-disable-reason） | — | directives を読まない | needs-port |
 | revive `line-length-limit` | map 引数 `{max, excludes}` | — | 整数だけ（map だと 80 に落ちる） | needs-port |
@@ -231,13 +231,13 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 
 | # | upstream_path | kind | 要約 | guff の場所 | status | effort | upstream testdata |
 |---|---------------|------|------|-------------|--------|--------|-------------------|
-| 1 | lintersdb/builder_linter.go `exhaustruct.NewV5` | new-check | 新 linter exhaustruct_v5 | guff-lint/src/registry.rs, cli.rs:336-353 | needs-port | L | exhaustruct_v5.go / _custom.{go,yml} / _cgo.go |
-| 2 | config/linters_settings.go ExhaustructV5Settings | config-schema | `linters.settings.exhaustruct_v5` 新設 | guff-lint/src/settings.rs（v4 のみ） | needs-port | M | — |
-| 3 | builder_linter.go exhaustruct DeprecatedWarning | message | v4 の deprecated 警告と `[deprecated]` 表示 | registry.rs format_linters_listing / cli.rs | needs-port | S | — |
+| 1 | lintersdb/builder_linter.go `exhaustruct.NewV5` | new-check | 新 linter exhaustruct_v5 | guff-lint/src/registry.rs, cli.rs:336-353 | **PR 2: v4 エンジンで代用**（tag・パターン・explicit-mode は PR 14） | L | exhaustruct_v5.go / _custom.{go,yml} / _cgo.go |
+| 2 | config/linters_settings.go ExhaustructV5Settings | config-schema | `linters.settings.exhaustruct_v5` 新設 | guff-lint/src/settings.rs（v4 のみ） | **PR 2: 3 キーのみ配線、残りは警告** | M | — |
+| 3 | builder_linter.go exhaustruct DeprecatedWarning | message | v4 の deprecated 警告と `[deprecated]` 表示 | registry.rs format_linters_listing / cli.rs | **done (PR 2)**（`[deprecated]` 表示と Migration 提案は未） | S | — |
 | 4 | builder_linter.go modernize WithAutoFix | other | 一覧の `[auto-fix]` 表示だけ。--fix 可否とは無関係 | registry.rs | not-applicable | S | — |
 | 5 | builder_linter.go golines / revive WithURL | other | URL はメタデータだけ | — | not-applicable | S | — |
 | 6 | CanonicalHeaderSettings + canonicalheader.New | behavior | fork 乗り換え + exclusions / use-default-exclusions | guff-style/src/canonicalheader.rs, settings.rs | needs-port | M | canonicalheader_custom.{go,yml} |
-| 7 | DupWordSettings.SkipRawStrings | new-option | dupword `skip-raw-strings` | settings.rs DupwordSettings, guff-comment/src/options.rs | needs-port | S | dupword_skip_raw_strings.{go,yml} |
+| 7 | DupWordSettings.SkipRawStrings | new-option | dupword `skip-raw-strings` | settings.rs DupwordSettings, guff-comment/src/options.rs | **done (PR 2)** | S | dupword_skip_raw_strings.{go,yml} |
 | 8 | FatcontextSettings | new-option | check-loops / check-function-literals（既定 true） | settings.rs:938, guff-context/src/fatcontext.rs:293 | already-matches | S | fatcontext_checkloops.{go,yml}, fatcontext_checkfunctionliterals.{go,yml} |
 | 9 | FuncOrderSettings.Function | new-option | funcorder `function` | settings.rs:1363, guff-style/src/funcorder.rs:229,276 | already-matches | S | — |
 | 10 | GoConstSettings ExcludeTypes / IgnoreMapKeys | new-option | goconst の新キーとラッパの互換処理 | settings.rs GoconstSettings:502 | needs-port | M | goconst_exclude_types.{go,yml} |
@@ -259,13 +259,13 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 | # | upstream_path | kind | 要約 | guff の場所 | status | effort | upstream testdata |
 |---|---------------|------|------|-------------|--------|--------|-------------------|
 | 1 | golinters/canonicalheader | behavior | fork に差し替え（既定でも文言と報告ノードが変わる）+ 新 option | guff-style/src/canonicalheader.rs | needs-port | M | canonicalheader{,_cgo,_custom}.go, _custom.yml |
-| 2 | golinters/dupword | new-option | skip-raw-strings を flag に渡す | guff-comment/src/dupword.rs | needs-port | S | dupword_skip_raw_strings.{go,yml} |
-| 3 | golinters/exhaustruct/exhaustruct_v5.go | new-check | 新 linter（v5.2.0） | guff-style/src/exhaustruct.rs, registry.rs | needs-port | L | exhaustruct_v5*.go/yml, exhaustruct_v4*.go/yml |
+| 2 | golinters/dupword | new-option | skip-raw-strings を flag に渡す | guff-comment/src/dupword.rs | **done (PR 2)** | S | dupword_skip_raw_strings.{go,yml} |
+| 3 | golinters/exhaustruct/exhaustruct_v5.go | new-check | 新 linter（v5.2.0） | guff-style/src/exhaustruct.rs, registry.rs | **PR 2: v4 エンジンで代用**（tag・パターン・explicit-mode は PR 14） | L | exhaustruct_v5*.go/yml, exhaustruct_v4*.go/yml |
 | 4 | golinters/fatcontext | new-option | 2 フラグを渡す | settings.rs, fatcontext.rs | already-matches | S | fatcontext*.go/yml |
 | 5 | golinters/funcorder | new-option | function を渡す | funcorder.rs:276 | already-matches | S | — |
 | 6 | golinters/gochecksumtype | substrate | Analyzer 直利用、sumTypeFact で依存パッケージの sum type を検査 | guff-style/src/gochecksumtype.rs | needs-port | M | — |
 | 7 | golinters/goconst runGoconst/toType | new-option | exclude-types の意味論（ignore-calls を変えても call が除外されないケース） | settings.rs, guff-style/src/goconst.rs:272 | needs-port | M | goconst_exclude_types.{go,yml}, goconst_eval_and_find_duplicates.go |
-| 8 | golinters/gomoddirectives | new-option | replace-allow-all / ignore-forbidden を渡す | guff-import/src/gomoddirectives.rs, options.rs:66 | needs-port | S | — |
+| 8 | golinters/gomoddirectives | new-option | replace-allow-all / ignore-forbidden を渡す | guff-import/src/gomoddirectives.rs, options.rs:66 | **done (PR 2)** | S | — |
 | 9 | golinters/gosec New | new-check | `Excludes += "G407"` の暫定処理を削除 → G407 が既定で走る | guff-style/src/gosec.rs | needs-port | L | — |
 | 10 | golinters/iface | new-check | enable に unusedmethod | iface.rs | needs-port | M | iface_unusedmethod.{go,yml} |
 | 11 | golinters/internal/util.go FormatCode | message | `%#q` 化（CanBackquote 偽ならダブルクォート）。goconst / errcheck / dupl / gocyclo / gocognit / gochecknoinits | goconst.rs:330, gocyclo.rs:39, gocognit.rs:40, guff-errcheck/src/lib.rs:210, guff-dupl/src/dupl.rs:59 | needs-port | S | — |
@@ -469,8 +469,8 @@ revive の upstream testdata は module zip に無く、手元 checkout（v1.15.
 
 | # | upstream_path | kind | 要約 | guff の場所 | status | effort | upstream testdata |
 |---|---------------|------|------|-------------|--------|--------|-------------------|
-| 1 | golinters/exhaustruct/exhaustruct_v5.go | new-check | 新 linter（WithVersion(5)、`//nolint:exhaustruct` では抑止されない） | 無し | needs-port | L | exhaustruct_v5*.go/yml |
-| 2 | builder_linter.go DeprecatedWarning | message | v4 の deprecated 警告 | 無し | needs-port | S | exhaustruct_v4*.go/yml |
+| 1 | golinters/exhaustruct/exhaustruct_v5.go | new-check | 新 linter（WithVersion(5)、`//nolint:exhaustruct` では抑止されない） | 無し | **PR 2: v4 エンジンで代用**（tag・パターン・explicit-mode は PR 14） | L | exhaustruct_v5*.go/yml |
+| 2 | builder_linter.go DeprecatedWarning | message | v4 の deprecated 警告 | 無し | **done (PR 2)** | S | exhaustruct_v4*.go/yml |
 | 3 | v5 processor.go（tag 廃止） | behavior | `exhaustruct:"optional"` tag を見ず、コメントディレクティブだけ | exhaustruct.rs has_optional_tag | needs-port | M | internal/structure/testdata/*.go |
 | 4 | v5 tag-migration-visitor.go | new-check | tag を「not supported anymore」で報告 + fix | 無し | needs-port | M | — |
 | 5 | v5 internal/directive | new-check | ディレクティブスキャナと解析エラー 6 種 | 無し | needs-port | L | internal/directive/testdata/*.go |
@@ -546,9 +546,9 @@ v5 の `analyzer/testdata` は module zip に無い。GitHub の v5.2.0 タグ�
 | 1 | nonamedreturns analyzer.go Reportf | position | 報告位置を名前付き戻り値の識別子に | guff-style/src/nonamedreturns.rs check_results | needs-port | S | default-config/*, report-error-in-defer/* |
 | 2 | nonamedreturns defer 免除 | behavior | defer 内参照 + 代入 / 値付き return | nonamedreturns.rs | already-matches | S | 同上 |
 | 3 | nonamedreturns allow-unused-named-returns | new-option | 新オプション | settings.rs, nonamedreturns.rs | already-matches | S | allow-unused-named-returns/* |
-| 4 | dupword skip-raw-strings | new-option | raw 文字列を検査しない | guff-comment/src/dupword.rs | needs-port | S | raw_string_sql/a.go, dupword_skip_raw_strings.{go,yml} |
-| 5 | dupword raw fix | behavior | raw のまま書き戻す | dupword.rs check_string_lit | needs-port | S | raw_string_multiline/*, raw_string_dup/a.go |
-| 6 | dupword checkOneKey 末尾 | behavior | 末尾空白直前の単語を比較（最終バイトを rune 扱い） | dupword.rs check_one_key | needs-port | M | raw_string_multiline/* |
+| 4 | dupword skip-raw-strings | new-option | raw 文字列を検査しない | guff-comment/src/dupword.rs | **done (PR 2)** | S | raw_string_sql/a.go, dupword_skip_raw_strings.{go,yml} |
+| 5 | dupword raw fix | behavior | raw のまま書き戻す | dupword.rs check_string_lit | **done (PR 2)** | S | raw_string_multiline/*, raw_string_dup/a.go |
+| 6 | dupword checkOneKey 末尾 | behavior | 末尾空白直前の単語を比較（最終バイトを rune 扱い） | dupword.rs check_one_key | **done (PR 2)** | M | raw_string_multiline/* |
 | 7 | tagalign find | behavior | 離れたインライン struct フィールドもグループに | guff-style/src/tagalign.rs:166 | needs-port | S | — |
 | 8 | noinlineerr errMessage | message | `=` 代入用の文言 | guff-style/src/noinlineerr.rs:50 | needs-port | S | a/main.go{,.golden} |
 | 9 | noinlineerr shadow チェック | behavior | `:=` のときだけ（親スコープのみの Lookup） | noinlineerr.rs:193 | needs-port | S | a/main.go{,.golden} |
@@ -563,9 +563,9 @@ v5 の `analyzer/testdata` は module zip に無い。GitHub の v5.2.0 タグ�
 |---|---------------|------|------|-------------|--------|--------|-------------------|
 | 1 | errcheck selectorAndFunc / baseCallExpr | behavior | 型引数付き呼び出しの照合 | guff-errcheck/src/lib.rs:658 | already-matches | S | TestTypeParameterizedFunctionExclude |
 | 2 | errcheck DefaultExcludedSymbols | behavior | sha3 の 3 シンボル | guff-errcheck/src/excludes.rs:38 | already-matches | S | testdata/sha3.go |
-| 3 | gomoddirectives replace-allow-all | new-option | replace をすべて許可 | guff-import/src/gomoddirectives.rs | needs-port | S | testdata/replace/go.mod |
-| 4 | gomoddirectives ignore-forbidden | new-option | ignore ディレクティブを禁止 | gomoddirectives.rs, gomod.rs | needs-port | M | testdata/ignore/go.mod |
-| 5 | gomoddirectives checkIgnoreDirectives | new-check | 既定で ignore される dir の指定を報告（`..` も） | 無し | needs-port | M | testdata/ignore_defaults/go.mod（repo から） |
+| 3 | gomoddirectives replace-allow-all | new-option | replace をすべて許可 | guff-import/src/gomoddirectives.rs | **done (PR 2)** | S | testdata/replace/go.mod |
+| 4 | gomoddirectives ignore-forbidden | new-option | ignore ディレクティブを禁止 | gomoddirectives.rs, gomod.rs | **done (PR 2)** | M | testdata/ignore/go.mod |
+| 5 | gomoddirectives checkIgnoreDirectives | new-check | 既定で ignore される dir の指定を報告（`..` も） | 無し | **done (PR 2)** | M | testdata/ignore_defaults/go.mod（repo から） |
 | 6 | tagliatelle report | behavior | json `embed` フラグを skip | guff-style/src/tagliatelle.rs:265 | needs-port | S | — |
 | 7 | recvcheck 既定除外 | default-change | Marshal 系 → Unmarshal 系 | guff-style/src/recvcheck.rs:25 | needs-port | S | builtinmethods/valuetype.go |
 | 8 | ginkgolinter `.Error()` チェーン | behavior | ErrorMethodPayload | guff-style/src/ginkgolinter.rs（DEFERRED） | needs-port | L | — |
@@ -654,7 +654,7 @@ golden を regen したら fix のベースラインも撮り直す。測定は 
 | # | PR | 中身 | 縮む ratchet | 規模 |
 |---|----|------|--------------|------|
 | 1 | **pin bump + golden regen** | `compat/pins.json` と `GOLANGCI_LINT_COMPAT` を 2.14.0 に、全 golden / fix / reject を regen（2 回一致）。§5.1 の各行を case ごとの `ratchet.json` に、fix の不足を `pending/` に記録。drift-ledger は不要（pin == 最新で 0 件）。**加えて over-fix 5 項目を移植した**: fix tier は guff が上流より多く書き換える case を pending に置けず、`divergent/` は「guff が正しい」場合専用なので、S1005 の map comma-ok（staticcheck-checks #3）と modernize の Suite 入れ替え（#1, #2）・reflecttypefor `usesNonTypeSymbol`（#8）・slicescontains `NoEffects`（#9）・stringsbuilder `_test.go`（#10）をこの PR で入れた | modernize 19/27 → **2/0**、staticcheck-s → **1/0**（ここで作って即縮めた） | M |
-| 2 | **config 層** | §3: `exhaustruct_v5` の名前受理と settings、deprecation 警告の仕組み（exhaustruct / wsl / gomodguard を一度に）、新キー 15 種の受理と配線（効果は後続 PR でも、キーは読む）、goconst のラッパ後付け規則、gofumpt `extra.*`、modernize 旧名警告、cache DefaultDir の fatal。reject tier に新規拒否（未知の goconst exclude-types 値、不正な exhaustruct_v5 パターン）を追加 | 無し（finding は動かない） | M |
+| 2 | **config 層（実際の範囲）** | exhaustruct_v5 の名前受理（v4 エンジンで代用、v5 設定は 3 キーのみ配線・残りは警告）、deprecation 警告（exhaustruct / wsl / gomodguard）、dupword `skip-raw-strings` と v0.1.8 の挙動 2 つ、gomoddirectives v0.10（allow-all / ignore-forbidden / ignore 既定ディレクトリ / ブロック内の列）、modernize の旧名警告。**linter 本体と一体のキー（canonicalheader exclusions、goconst、gofumpt extra.*、iface、gosec global、revive）は各 linter の PR に移した** | exhaustruct-v5 3/0（新設）。dupword fix pending 消滅 | M |
 | 3 | **x/tools substrate（安い方）** | wastedassign の `composite_lit_rhs` 撤去、`nillable` に unsafe.Pointer、gosec G702 / G124 の再測定（§5.2-3） | wastedassign 4/2 → 0/0、gosec 一部 | S |
 | 4 | **honnef IR 寄せ** | SSI 模倣の撤去（sa4006 / sa4008 / sa5011）、DebugRef の監査、IsStub、`EnclosingFunction` の `_`、SA5011 の登録解除 | staticcheck-s SA4006、staticcheck-sa の SA5011 ×6、sa6000 SA4006 を測る | L（golden 全体を変換して一度に測る。共有ヘルパだけ直すと偶然一致していた check が壊れる） |
 | 5 | **staticcheck の文言・小移植** | SA1019 SelectorName + literal キー位置、SA4003、SA6005、SA1026、SA5008 embed、SA9010（新規）、SA4006 IncDec | staticcheck-sa1019-* 42/42 → 0/0、staticcheck-sa の大半 | M |

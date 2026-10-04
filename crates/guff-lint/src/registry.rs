@@ -135,6 +135,13 @@ pub fn analyzers_for_linter_with_settings(
         "wsl_v5" => Some(vec![guff_style::wsl_v5()]),
         "unconvert" => Some(vec![guff_style::unconvert()]),
         "exhaustruct" => Some(vec![guff_style::exhaustruct()]),
+        // `exhaustruct_v5` (golangci-lint 2.13.0) is go-exhaustruct v5, a
+        // rewrite: comment directives instead of the `exhaustruct:"optional"`
+        // tag, `Type#Field` patterns, explicit mode. Until that port lands
+        // (docs/PHASE8-LEDGER.md, exhaustruct) it drives the v4 analyzer, which
+        // answers the same on configs that use none of those — see
+        // `merge_exhaustruct_v5` for what is and is not carried over.
+        "exhaustruct_v5" => Some(vec![guff_style::exhaustruct()]),
         "exhaustive" => Some(vec![guff_style::exhaustive()]),
         "musttag" => Some(vec![guff_style::musttag()]),
         "loggercheck" => Some(vec![guff_style::loggercheck()]),
@@ -204,6 +211,21 @@ pub fn analyzers_for_linter_with_settings(
     Some(settings.apply_to_analyzers(name, analyzers))
 }
 
+/// golangci-lint's `DeprecatedWarning` linters: `(since, message, replacement)`.
+///
+/// A deprecated linter still runs — this only drives the warning `run` prints
+/// for it (`printDeprecatedLinterMessages`). Upstream also prints a suggested
+/// replacement config for `gomodguard` and `wsl` (their `Migration`); guff does
+/// not yet.
+pub fn deprecation(name: &str) -> Option<(&'static str, &'static str, &'static str)> {
+    match name {
+        "exhaustruct" => Some(("v2.13.0", "new major version.", "exhaustruct_v5")),
+        "gomodguard" => Some(("v2.12.0", "new major version.", "gomodguard_v2")),
+        "wsl" => Some(("v2.2.0", "new major version.", "wsl_v5")),
+        _ => None,
+    }
+}
+
 /// True for linters implemented as post-processors (no Analyzer DAG nodes).
 pub fn is_meta_linter(name: &str) -> bool {
     matches!(name, "nolintlint")
@@ -235,6 +257,7 @@ pub const KNOWN_LINTER_NAMES: &[&str] = &[
     "errname",
     "errorlint",
     "exhaustruct",
+    "exhaustruct_v5",
     "exhaustive",
     "exptostd",
     "fatcontext",
@@ -376,6 +399,7 @@ fn builtin_linter_description(name: &str) -> &'static str {
         "errname" => "Checks that sentinel errors are prefixed with Err and types with Error.",
         "errorlint" => "Finds error comparison and type assertion issues with wrapped errors.",
         "exhaustruct" => "Checks if all structure fields are initialized.",
+        "exhaustruct_v5" => "Checks if all structure fields are initialized.",
         "exhaustive" => "Check exhaustiveness of enum switch statements.",
         "exptostd" => "Detects functions from golang.org/x/exp/ that can be replaced by std functions.",
         "fatcontext" => "Detects nested contexts in loops and function literals.",
@@ -746,6 +770,18 @@ mod tests {
     fn gomodguard_v2_is_known() {
         assert!(known_linter_names().contains(&"gomodguard_v2"));
         assert!(!linter_description("gomodguard_v2").is_empty());
+    }
+
+    #[test]
+    fn exhaustruct_v5_is_known_and_attributed_to_itself() {
+        assert!(known_linter_names().contains(&"exhaustruct_v5"));
+        assert!(!linter_description("exhaustruct_v5").is_empty());
+        assert!(analyzers_for_linter("exhaustruct_v5").is_some());
+        // The shared analyzer's canonical owner stays `exhaustruct`; the issue
+        // filter renames to `exhaustruct_v5` when only v5 is enabled.
+        assert_eq!(linter_name_for_analyzer("exhaustruct"), "exhaustruct");
+        assert_eq!(deprecation("exhaustruct").map(|d| d.2), Some("exhaustruct_v5"));
+        assert_eq!(deprecation("exhaustruct_v5"), None);
     }
 
     #[test]

@@ -3,3 +3,4 @@ bad.go      compat/isolate/fixtures/dupword/bad.go
 
 # The stub module, replaced in so `./...` never lints it.
 bad/bad.go  crates/guff-comment/tests/testdata/dupword/bad.go
+rawskip/skip_raw_strings.go  crates/guff-comment/tests/testdata/dupword/skip_raw_strings.go

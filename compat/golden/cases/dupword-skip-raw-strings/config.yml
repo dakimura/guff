@@ -1,0 +1,23 @@
+# Golden case: dupword `skip-raw-strings` (dupword v0.1.8, golangci-lint 2.14.0).
+#
+# The comment and the interpreted string must still be reported; only the two
+# backquoted literals are skipped. cases/dupword runs the same shapes with the
+# option off, which is where the raw-string rewrite is measured.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - dupword
+  settings:
+    dupword:
+      skip-raw-strings: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

@@ -1,0 +1,13 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh dupword-skip-raw-strings
+# Produced by running golangci-lint on compat/golden/cases/dupword-skip-raw-strings/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+skip_raw_strings.go:8:2:dupword::Duplicate words (the) found
+skip_raw_strings.go:10:17:dupword::Duplicate words (the) found
+skip_raw_strings.go:21:9:dupword::Duplicate words (the) found
+skip_raw_strings.go:21:25:dupword::Duplicate words (the) found
+skip_raw_strings.go:21:41:dupword::Duplicate words (voilà) found

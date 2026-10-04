@@ -18,3 +18,10 @@ bad/bad.go:17:13:dupword::Duplicate words (a) found
 bad/bad.go:29:9:dupword::Duplicate words (the) found
 bad/bad.go:36:9:dupword::Duplicate words (é) found
 bad/bad.go:39:11:dupword::Duplicate words (the) found
+rawskip/skip_raw_strings.go:8:2:dupword::Duplicate words (the) found
+rawskip/skip_raw_strings.go:9:9:dupword::Duplicate words (the) found
+rawskip/skip_raw_strings.go:10:17:dupword::Duplicate words (the) found
+rawskip/skip_raw_strings.go:11:15:dupword::Duplicate words (the) found
+rawskip/skip_raw_strings.go:21:9:dupword::Duplicate words (the) found
+rawskip/skip_raw_strings.go:21:25:dupword::Duplicate words (the) found
+rawskip/skip_raw_strings.go:21:41:dupword::Duplicate words (voilà) found

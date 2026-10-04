@@ -902,6 +902,7 @@ fn parse_v2_comment_settings() {
             keywords: vec!["the".into()],
             ignore: vec!["is".into()],
             comments_only: Some(true),
+            skip_raw_strings: None,
         }
     );
     let bag = settings.to_bag();
@@ -943,6 +944,7 @@ fn parse_v2_import_settings() {
     assert_eq!(
         settings.gomoddirectives,
         GomoddirectivesSettings {
+            replace_allow_all: true,
             replace_local: true,
             replace_allow_list: vec!["launchpad.net/gocheck".into()],
             retract_allow_no_explanation: true,
@@ -950,6 +952,7 @@ fn parse_v2_import_settings() {
             toolchain_forbidden: true,
             tool_forbidden: true,
             go_debug_forbidden: true,
+            ignore_forbidden: true,
         }
     );
 
@@ -1848,4 +1851,36 @@ fn parse_v2_wsl_v5_settings() {
     assert_eq!(opts.cuddle_max_statements, 2);
     assert!(!opts.checks.contains(&guff_style::WslV5Check::Err));
     assert!(opts.checks.contains(&guff_style::WslV5Check::If));
+}
+
+/// `exhaustruct_v5` drives the v4 analyzer until its own port lands, so its
+/// settings fill the shared `exhaustruct` options — the three keys that mean
+/// the same in both majors, and only when `exhaustruct` itself is not set.
+#[test]
+fn exhaustruct_v5_settings_reach_the_shared_analyzer() {
+    let v5_only = r#"
+version: "2"
+linters:
+  settings:
+    exhaustruct_v5:
+      allow-empty: true
+      allow-empty-returns: true
+      allow-empty-declarations: true
+"#;
+    let s = LinterSettings::from_yaml(parse_config_str(v5_only).unwrap().linter_settings_raw());
+    assert_eq!(s.exhaustruct.allow_empty, Some(true));
+    assert_eq!(s.exhaustruct.allow_empty_returns, Some(true));
+    assert_eq!(s.exhaustruct.allow_empty_declarations, Some(true));
+
+    let both = r#"
+version: "2"
+linters:
+  settings:
+    exhaustruct:
+      allow-empty: false
+    exhaustruct_v5:
+      allow-empty: true
+"#;
+    let s = LinterSettings::from_yaml(parse_config_str(both).unwrap().linter_settings_raw());
+    assert_eq!(s.exhaustruct.allow_empty, Some(false), "v4's own key wins");
 }

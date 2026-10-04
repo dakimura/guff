@@ -54,6 +54,7 @@
 | isolate-asasalint | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-exhaustive | 25 | 33 | 25 | 100.0% | 75.8% | 0 |
 | isolate-exhaustruct | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
+| isolate-exhaustruct_v5 | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | isolate-funcorder | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
 | isolate-embeddedstructfieldcheck | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | isolate-mnd | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
@@ -450,6 +451,12 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
 | exhaustruct | 4 | 4 | 4 | 100.0% | 100.0% |
+
+## isolate-exhaustruct_v5
+
+| Linter | guff | golangci | both | P | R |
+|--------|-----:|---------:|-----:|--:|--:|
+| exhaustruct_v5 | 4 | 4 | 4 | 100.0% | 100.0% |
 
 ## isolate-funcorder
 

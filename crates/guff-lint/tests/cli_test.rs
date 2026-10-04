@@ -751,6 +751,43 @@ fn cli_run_accepts_short_enable_and_disable() {
     );
 }
 
+/// `exhaustruct_v5` (golangci-lint 2.13.0) is a linter name, and a deprecated
+/// linter still runs but says so — `printDeprecatedLinterMessages`, in the
+/// same words. Before 2.14.0 guff refused `exhaustruct_v5` as unknown (exit 3)
+/// and enabled `exhaustruct` / `wsl` / `gomodguard` without a word.
+#[test]
+fn cli_run_accepts_exhaustruct_v5_and_warns_on_deprecated_linters() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    std::fs::write(tmp.path().join("go.mod"), "module example.com\n\ngo 1.24\n").unwrap();
+    std::fs::write(tmp.path().join("a.go"), "package a\n").unwrap();
+
+    let out = Command::new(bin())
+        .args([
+            "run", "--no-config", "-E", "exhaustruct_v5", "-E", "exhaustruct", "-E", "wsl",
+            "./...",
+        ])
+        .current_dir(tmp.path())
+        .output()
+        .expect("spawn guff run -E exhaustruct_v5");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "stderr={stderr}");
+    assert!(
+        stderr.contains(
+            "The linter 'exhaustruct' is deprecated (since v2.13.0) due to: \
+             new major version. Replaced by exhaustruct_v5."
+        ),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains(
+            "The linter 'wsl' is deprecated (since v2.2.0) due to: \
+             new major version. Replaced by wsl_v5."
+        ),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("'exhaustruct_v5' is deprecated"), "{stderr}");
+}
+
 /// A linter name guff cannot resolve must stop the run, not warn and continue.
 ///
 /// Regression test for the 2026-08-17 field report (issue G). guff used to

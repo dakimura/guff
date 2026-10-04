@@ -1,7 +1,7 @@
 //! Minimal `go.mod` finder + parser for gomoddirectives / gomodguard.
 //!
 //! Enough to cover the default checks we port; not a full `golang.org/x/mod`
-//! substitute. DEFERRED: full directive coverage (ignore, godebug blocks, …).
+//! substitute. DEFERRED: full directive coverage (godebug blocks, …).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -18,6 +18,8 @@ pub struct GoMod {
     pub tools: Vec<Directive>,
     pub toolchain: Option<Directive>,
     pub godebugs: Vec<Directive>,
+    /// `ignore` (go1.25): directory paths, unquoted.
+    pub ignores: Vec<Directive>,
 }
 
 /// A one-line go.mod directive and the line it sits on.
@@ -159,6 +161,22 @@ pub fn parse_gomod_str(path: &Path, text: &str) -> GoMod {
                 if let Some(p) = toks.first() {
                     out.tools.push(Directive {
                         value: (*p).to_string(),
+                        line: ln,
+                    });
+                }
+            });
+            continue;
+        }
+        if let Some(block) = parse_block_header(line, "ignore") {
+            consume_block(&mut lines, block, line_no, |toks, ln| {
+                if let Some(p) = toks.first() {
+                    // modfile unquotes an interpreted-string path.
+                    let v = p
+                        .strip_prefix('"')
+                        .and_then(|s| s.strip_suffix('"'))
+                        .unwrap_or(p);
+                    out.ignores.push(Directive {
+                        value: v.to_string(),
                         line: ln,
                     });
                 }

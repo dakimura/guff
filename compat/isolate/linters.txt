@@ -59,6 +59,7 @@ iotamixing
 asasalint
 exhaustive
 exhaustruct
+exhaustruct_v5
 funcorder
 embeddedstructfieldcheck
 mnd

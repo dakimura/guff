@@ -8,8 +8,10 @@
 //! Settings: `linters.settings.gomoddirectives` (`replace-local`,
 //! `replace-allow-list`, `retract-allow-no-explanation`, `exclude-forbidden`,
 //! `toolchain-forbidden`, `tool-forbidden`, `go-debug-forbidden`).
-//! DEFERRED: `ignore-forbidden`, `toolchain-pattern`, `go-version-pattern`,
-//! `check-module-path`.
+//! `replace-allow-all` and `ignore-forbidden` are gomoddirectives v0.9 / v0.10
+//! (golangci-lint 2.13 / 2.14), as is the unconditional check that an `ignore`
+//! path does not name a directory the go command already skips.
+//! DEFERRED: `toolchain-pattern`, `go-version-pattern`, `check-module-path`.
 
 use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
@@ -29,6 +31,59 @@ const REASON_EXCLUDE: &str = "exclude directive is not allowed";
 const REASON_TOOLCHAIN: &str = "toolchain directive is not allowed";
 const REASON_TOOL: &str = "tool directive is not allowed";
 const REASON_GODEBUG: &str = "godebug directive is not allowed";
+const REASON_IGNORE: &str = "ignore directive is not allowed";
+const REASON_IGNORED_BY_DEFAULT_HIDDEN: &str =
+    "files/directories starting with '.' and '_' are ignored by default";
+
+/// Go's `path.Clean`, for splitting an `ignore` path into elements the way
+/// upstream does (`strings.SplitSeq(path.Clean(value.Path), "/")`).
+fn go_path_clean(p: &str) -> String {
+    if p.is_empty() {
+        return ".".to_string();
+    }
+    let absolute = p.starts_with('/');
+    let mut out: Vec<&str> = Vec::new();
+    for part in p.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                if out.last().is_some_and(|l| *l != "..") {
+                    out.pop();
+                } else if !absolute {
+                    out.push("..");
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    let joined = out.join("/");
+    if absolute {
+        format!("/{joined}")
+    } else if joined.is_empty() {
+        ".".to_string()
+    } else {
+        joined
+    }
+}
+
+/// `checkIgnoreDirectives` (v0.10): one finding per *element* that the go
+/// command would skip anyway — `vendor`, `testdata`, or a name starting with
+/// `.` or `_`. `..` starts with `.`, so `ignore ../x` is reported too; that
+/// is upstream's, and kept.
+fn ignored_by_default(value: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for elem in go_path_clean(value).split('/') {
+        if elem == "." {
+            continue;
+        }
+        if elem == "vendor" || elem == "testdata" {
+            out.push(format!("directories named '{elem}' are ignored by default"));
+        } else if elem.starts_with('.') || elem.starts_with('_') {
+            out.push(REASON_IGNORED_BY_DEFAULT_HIDDEN.to_string());
+        }
+    }
+    out
+}
 
 /// Deduplicate analysis across packages that share a module root.
 fn checked_gomods() -> &'static Mutex<HashSet<String>> {
@@ -37,6 +92,9 @@ fn checked_gomods() -> &'static Mutex<HashSet<String>> {
 }
 
 fn check_replace(r: &Replace, opts: &GomoddirectivesOptions) -> Option<String> {
+    if opts.replace_allow_all {
+        return None;
+    }
     if opts.replace_allow_list.iter().any(|p| p == &r.old_path) {
         return None;
     }
@@ -85,11 +143,20 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .unwrap_or("go.mod");
     let gomod_file = pass.fset().add_file(filename, -1, src.len() as i64);
     gomod_file.set_lines_for_content(src.as_bytes());
+    // modfile reports a directive at its `Syntax.Start`: the first token of
+    // the line, which inside a `replace ( … )` / `ignore ( … )` block is past
+    // the indentation. Reporting at the line start put every block entry one
+    // column early.
+    let src_lines: Vec<&str> = src.split('\n').collect();
     let line_pos = |line: u32| -> u32 {
         let line = line.max(1) as usize;
         let max = gomod_file.line_count().max(1);
         let line = line.min(max);
-        gomod_file.line_start(line).0 as u32
+        let indent = src_lines
+            .get(line - 1)
+            .map(|l| l.len() - l.trim_start_matches([' ', '\t']).len())
+            .unwrap_or(0);
+        gomod_file.line_start(line).0 as u32 + indent as u32
     };
 
     let mut pending: Vec<(u32, String)> = Vec::new();
@@ -125,6 +192,16 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     if opts.exclude_forbidden {
         for excl in &gomod.excludes {
             pending.push((line_pos(excl.line), REASON_EXCLUDE.to_string()));
+        }
+    }
+    for ig in &gomod.ignores {
+        for reason in ignored_by_default(&ig.value) {
+            pending.push((line_pos(ig.line), reason));
+        }
+    }
+    if opts.ignore_forbidden {
+        for ig in &gomod.ignores {
+            pending.push((line_pos(ig.line), REASON_IGNORE.to_string()));
         }
     }
     if opts.toolchain_forbidden {
