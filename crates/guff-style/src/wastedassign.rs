@@ -20,7 +20,6 @@ use guff_ssa::instr::{Alloc, InstrData};
 use guff_ssa::mode::BuilderMode;
 use guff_ssa::ssautil::build_package_for_analysis;
 use guff_ssa::value::Value;
-use guff_types::arena::TypeData;
 use guff_types::ObjectId;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -786,68 +785,6 @@ fn is_next_operation_to_op_is_store(
 }
 
 
-/// What go/ssa does with `x = <composite literal>`, which decides whether there
-/// is a store to report and where it sits.
-///
-/// `compLit` writes an array or struct literal *into the address* elementwise,
-/// so no `Store` exists and upstream's `opInLocals` loop never sees one. A
-/// slice or map literal is built as a value first and then stored, and that
-/// `Store` carries the literal's `Lbrace` — not the assignment's `=`.
-///
-/// Measured on 2026-09-21: `x := []int{1}` reports at the `{` in column 12,
-/// `x := map[string]int{"a": 1}` at the `{` in column 21, and `x := [3]int{…}`
-/// and `x := E{}` report nothing at all.
-enum CompositeRhs {
-    /// Written into the address: there is no `Store`.
-    NoStore,
-    /// Stored, at the literal's `Lbrace`.
-    StoredAt(u32),
-}
-
-/// The composite-literal right-hand side of the assignment whose store sits at
-/// `after`, if that is what it is.
-fn composite_lit_rhs(pass: &Pass<'_>, after: u32) -> Option<CompositeRhs> {
-    let info = pass.types_info()?;
-    let artifacts = pass.pkg().type_artifacts.as_ref()?;
-    let mut found = None;
-    for file in pass.files() {
-        preorder(NodeRef::File(file), |n| {
-            if found.is_some() {
-                return false;
-            }
-            let NodeRef::AssignStmt(a) = n else {
-                return true;
-            };
-            // Only a 1:1 assignment pairs an LHS name with an RHS expression; a
-            // multi-value call has one RHS for several names.
-            if a.lhs.len() != a.rhs.len() {
-                return true;
-            }
-            let Some(i) = a.lhs.iter().position(|e| {
-                matches!(e, Expr::Ident(id) if id.name_pos.0 as u32 == after)
-            }) else {
-                return true;
-            };
-            let Expr::CompositeLit(lit) = unparen(&a.rhs[i]) else {
-                return false;
-            };
-            let Some(tav) = info.types.get(&lit.id) else {
-                return false;
-            };
-            let under = tav.typ.underlying(&artifacts.types);
-            found = Some(match artifacts.types.get(under) {
-                TypeData::Struct(_) | TypeData::Array(_) => CompositeRhs::NoStore,
-                _ => CompositeRhs::StoredAt(lit.lbrace.0 as u32),
-            });
-            false
-        });
-        if found.is_some() {
-            break;
-        }
-    }
-    found
-}
-
 fn check_func(
     func: &Function,
     type_switch_lines: &HashSet<i64>,
@@ -921,13 +858,14 @@ fn check_func(
                 continue;
             }
 
-            let report_at = match composite_lit_rhs(pass, after) {
-                Some(CompositeRhs::NoStore) => continue,
-                Some(CompositeRhs::StoredAt(lbrace)) => lbrace,
-                None => after,
-            };
+            // x/tools v0.50 (golangci-lint 2.14.0) dropped go/ssa's in-place
+            // initialisation of composite literals: `x = T{…}` builds into a
+            // temporary and stores once, at the left-hand name, which is the
+            // shape guff-ssa already builds. The AST approximation that made
+            // v0.44's answer (no store for a struct or array literal, the
+            // literal's `{` for a slice or map) went with it.
             if let Some(msg) = format_reason(reason, comment) {
-                out.push((report_at, msg));
+                out.push((after, msg));
             }
         }
     }

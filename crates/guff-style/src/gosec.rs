@@ -2620,74 +2620,24 @@ fn composite_lit_type_name(pass: &Pass<'_>, lit: &CompositeLit) -> Option<String
 /// |---|---|---|
 /// | `&http.Cookie{…}` / `http.Cookie{…}` | `Alloc (complit)` at the `{` | yes |
 /// | `[]*http.Cookie{{…}}`, `[1]*http.Cookie{{…}}`, `map[K]*http.Cookie{k: {…}}` | `Alloc (complit)` at the inner `{` | yes |
-/// | `map[K]http.Cookie{k: {…}}` | `Alloc (complit)`, materialised for the `MapUpdate` | yes |
-/// | `[]http.Cookie{{…}}`, `[1]http.Cookie{{…}}` | `IndexAddr` into the slicelit — **`NoPos`** | no |
+/// | `map[K]http.Cookie{k: {…}}`, `[]http.Cookie{{…}}`, `[1]http.Cookie{{…}}` | `Alloc (complit)` at the inner `{` | yes, since 2.14.0 |
 ///
-/// So an elided element is reportable exactly when it is a **pointer**; an
-/// elided *value* is reportable only under a map, and that case is driven from
-/// the parent by [`check_g124_elided_map_values`] (a struct is never a map key
-/// here: `http.Cookie` has a `[]string` field and so is not comparable).
-///
-/// Measured against golangci-lint 2.12.2 / gosec v2.27.1 over 24 shapes; see
-/// the `gosecg124elided` fixture.
+/// The last row is x/tools v0.50 (golangci-lint 2.14.0). v0.44's `assign`
+/// initialised a composite literal *in place* when the destination was an
+/// address, and an element of a slice or array literal is one: the fields were
+/// stored through an `IndexAddr` into the slicelit, which has no position, so
+/// only a map — whose element has to be a value for `MapUpdate` — got an
+/// allocation. v0.50 deleted that path; every element literal is built into its
+/// own `Alloc` and copied, so an elided value is reported wherever it sits
+/// (`cases/gosec`, `g124_elided.go`).
 fn g124_lit_allocates_cookie(pass: &Pass<'_>, lit: &CompositeLit) -> bool {
     match lit.ty.as_deref() {
         Some(ty) => is_http_cookie_type_expr(pass, ty),
-        None => composite_lit_type_name(pass, lit).as_deref() == Some("*net/http.Cookie"),
+        None => matches!(
+            composite_lit_type_name(pass, lit).as_deref(),
+            Some("*net/http.Cookie" | "net/http.Cookie")
+        ),
     }
-}
-
-/// The value-typed half of the table in [`g124_lit_allocates_cookie`]: an
-/// elided `{…}` under a **map** literal, which go/ssa materialises into an
-/// allocation positioned at the `{` so it can be handed to `MapUpdate`.
-fn check_g124_elided_map_values(
-    pass: &Pass<'_>,
-    lit: &CompositeLit,
-    enabled: &HashSet<&'static str>,
-    pending: &mut Vec<(u32, u32, String)>,
-) {
-    if !enabled.contains("G124") {
-        return;
-    }
-    if !composite_lit_is_map(pass, lit) {
-        return;
-    }
-    for elt in &lit.elts {
-        let Expr::KeyValueExpr(kv) = elt else {
-            continue;
-        };
-        let Expr::CompositeLit(inner) = kv.value.as_ref() else {
-            continue;
-        };
-        if inner.ty.is_some() {
-            continue; // spelled out: the ordinary path already saw it
-        }
-        if composite_lit_type_name(pass, inner).as_deref() != Some("net/http.Cookie") {
-            continue;
-        }
-        report_g124_lit(pass, inner, pending);
-    }
-}
-
-/// Whether the checker gave `lit` a type whose underlying is a map.
-///
-/// Asked of the literal rather than of `lit.ty` so a map literal that itself
-/// elides its type — `map[string]map[string]http.Cookie{"a": {"b": {…}}}` —
-/// answers the same as one that spells it out.
-fn composite_lit_is_map(pass: &Pass<'_>, lit: &CompositeLit) -> bool {
-    let Some(info) = pass.types_info() else {
-        return false;
-    };
-    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
-        return false;
-    };
-    let Some(tav) = info.types.get(&lit.id) else {
-        return false;
-    };
-    matches!(
-        artifacts.types.get(tav.typ.underlying(&artifacts.types)),
-        TypeData::Map(_)
-    )
 }
 
 fn check_g124_composite(
@@ -4267,7 +4217,6 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     check_g402_composite(pass, lit, &enabled, &mut pending);
                     check_g112_composite(pass, lit, &enabled, &mut pending);
                     check_g124_composite(pass, lit, &enabled, &mut pending);
-                    check_g124_elided_map_values(pass, lit, &enabled, &mut pending);
                 }
                 NodeRef::ExprStmt(stmt) => {
                     // Upstream gosec G104 only visits AssignStmt + ExprStmt

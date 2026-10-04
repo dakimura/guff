@@ -106,10 +106,10 @@ linter 単位で移植を始める前に、**多くの linter を同時に動か
 
 | 変更 | guff | status | 説明できる drift |
 |------|------|--------|------------------|
-| `builder.assign` から複合リテラルの in-place 初期化が消え、`x := T{...}` は一時 Alloc → 1 回の Store（位置は左辺の ident） | `guff-ssa` は**既に v0.50 の形**。v0.44 を再現しているのは `guff-style/src/wastedassign.rs` の AST 近似 `composite_lit_rhs` | needs-port（近似の撤去だけ。S） | wastedassign 4 件（307:2 / 318:2 / 329:2 / 339:2）と消える 2 件（329:12 / 339:21）。**gosec の説明できない 2 系統**（G702 g7xx:73:18 の消滅、G124 g124_elided の +3）も同じ lowering 変更と推定 |
+| `builder.assign` から複合リテラルの in-place 初期化が消え、`x := T{...}` は一時 Alloc → 1 回の Store（位置は左辺の ident） | `guff-ssa` は**既に v0.50 の形**。v0.44 を再現しているのは `guff-style/src/wastedassign.rs` の AST 近似 `composite_lit_rhs` | **done (PR 3)** | wastedassign 4 件（307:2 / 318:2 / 329:2 / 339:2）と消える 2 件（329:12 / 339:21）。**gosec の説明できない 2 系統**（G702 g7xx:73:18 の消滅、G124 g124_elided の +3）も同じ lowering 変更と推定 |
 | `typeutil.Callee` / `StaticCallee` が `fn.Origin()` を返す | `guff-analysis/src/code.rs` `call_target_object`、`guff-govet/src/govet_util.rs` `static_callee`、`passes/typeindex.rs` は**インスタンス側の ObjectId** のまま | needs-port（M。共有ヘルパなので golden 全体で実験してから） | unusedresult のジェネリック受信者表記（`[int]` → `[T]`、未測定） |
 | `typeindex.Calls` が `F[int](...)` を遡る | `used_ident` が既に剥がしている。ただし Calls の照合は Callee の Origin 化に依存 | needs-port（上と同時） | — |
-| `const.go nillable` が `unsafe.Pointer` を nil 可能型に | `guff-govet/src/nilness.rs` `nillable_under` に Basic(UnsafePointer) が無い | needs-port（S） | — |
+| `const.go nillable` が `unsafe.Pointer` を nil 可能型に | `guff-govet/src/nilness.rs` `nillable_under` に Basic(UnsafePointer) が無い | **done (PR 3)** | — |
 | range-over-func の yield 内ラベルから `_goto: ycont` が外れた | `guff-ssa/src/builder/range_func.rs:184` は v0.44 のまま | needs-port（M） | — |
 | `internal/stdlib/manifest.go` に Go 1.27 シンボル | goimports の `stdlib_exports.txt`（GOROOT 由来、internal を含む）に `uuid` / `crypto/mldsa` / `encoding/json/v2` / `bytes.CutLast` が無い | needs-port（M。**上流マニフェストから転記**、手元 Go で再生成しない） | — |
 | unified IR export data V5 / indexed v3 | `guff-exportdata` は V0–V2 だけ | needs-port（L。Go 1.27 toolchain で走らせる日まで不要） | — |
@@ -335,8 +335,8 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 
 | # | upstream_path | kind | 要約 | guff の場所 | status | effort | upstream testdata |
 |---|---------------|------|------|-------------|--------|--------|-------------------|
-| 1 | go/ssa/builder.go assign | substrate | in-place compLit 経路の削除 | guff-style/src/wastedassign.rs composite_lit_rhs | needs-port | S | ssa/testdata/objlookup.go, valueforexpr.go |
-| 2 | go/ssa/const.go nillable | behavior | unsafe.Pointer を nil 可能型に | guff-govet/src/nilness.rs:935 | needs-port | S | const_test.go |
+| 1 | go/ssa/builder.go assign | substrate | in-place compLit 経路の削除 | guff-style/src/wastedassign.rs composite_lit_rhs | **done (PR 3)**: wastedassign の近似撤去、gosec G124 / G702 も同じ原因で解消 | S | ssa/testdata/objlookup.go, valueforexpr.go |
+| 2 | go/ssa/const.go nillable | behavior | unsafe.Pointer を nil 可能型に | guff-govet/src/nilness.rs:935 | **done (PR 3)**（guff は別経路で既に一致していた。2.12.2 に対しては誤報だった） | S | const_test.go |
 | 3 | go/ssa buildYieldFunc lblock | behavior | range-over-func のラベル goto が親へ抜ける | guff-ssa/src/builder/range_func.rs:184 | needs-port | M | — |
 | 4 | typeutil/callee.go Callee Origin | behavior | Callee が Origin を返す | code.rs:756, govet_util.rs:132, typeindex.rs:231 | needs-port | M | callee_test.go |
 | 5 | typeindex.go Calls | behavior | 明示インスタンス化を遡る + Callee Origin で照合 | typeindex.rs:231-262 | needs-port | S | — |
@@ -655,7 +655,7 @@ golden を regen したら fix のベースラインも撮り直す。測定は 
 |---|----|------|--------------|------|
 | 1 | **pin bump + golden regen** | `compat/pins.json` と `GOLANGCI_LINT_COMPAT` を 2.14.0 に、全 golden / fix / reject を regen（2 回一致）。§5.1 の各行を case ごとの `ratchet.json` に、fix の不足を `pending/` に記録。drift-ledger は不要（pin == 最新で 0 件）。**加えて over-fix 5 項目を移植した**: fix tier は guff が上流より多く書き換える case を pending に置けず、`divergent/` は「guff が正しい」場合専用なので、S1005 の map comma-ok（staticcheck-checks #3）と modernize の Suite 入れ替え（#1, #2）・reflecttypefor `usesNonTypeSymbol`（#8）・slicescontains `NoEffects`（#9）・stringsbuilder `_test.go`（#10）をこの PR で入れた | modernize 19/27 → **2/0**、staticcheck-s → **1/0**（ここで作って即縮めた） | M |
 | 2 | **config 層（実際の範囲）** | exhaustruct_v5 の名前受理（v4 エンジンで代用、v5 設定は 3 キーのみ配線・残りは警告）、deprecation 警告（exhaustruct / wsl / gomodguard）、dupword `skip-raw-strings` と v0.1.8 の挙動 2 つ、gomoddirectives v0.10（allow-all / ignore-forbidden / ignore 既定ディレクトリ / ブロック内の列）、modernize の旧名警告。**linter 本体と一体のキー（canonicalheader exclusions、goconst、gofumpt extra.*、iface、gosec global、revive）は各 linter の PR に移した** | exhaustruct-v5 3/0（新設）。dupword fix pending 消滅 | M |
-| 3 | **x/tools substrate（安い方）** | wastedassign の `composite_lit_rhs` 撤去、`nillable` に unsafe.Pointer、gosec G702 / G124 の再測定（§5.2-3） | wastedassign 4/2 → 0/0、gosec 一部 | S |
+| 3 | **x/tools substrate（安い方）** | wastedassign の `composite_lit_rhs` 撤去、gosec taint の「構造体コピーを遡る」guff 独自ループ撤去（G702）、G124 の「省略された値要素は map の下だけ」規則を全要素へ、nilness `nillable` に unsafe.Pointer | wastedassign 4/2 → **0/0**、gosec 6/8 → **3/7**（残りは gosec 本体、PR 9） | S |
 | 4 | **honnef IR 寄せ** | SSI 模倣の撤去（sa4006 / sa4008 / sa5011）、DebugRef の監査、IsStub、`EnclosingFunction` の `_`、SA5011 の登録解除 | staticcheck-s SA4006、staticcheck-sa の SA5011 ×6、sa6000 SA4006 を測る | L（golden 全体を変換して一度に測る。共有ヘルパだけ直すと偶然一致していた check が壊れる） |
 | 5 | **staticcheck の文言・小移植** | SA1019 SelectorName + literal キー位置、SA4003、SA6005、SA1026、SA5008 embed、SA9010（新規）、SA4006 IncDec | staticcheck-sa1019-* 42/42 → 0/0、staticcheck-sa の大半 | M |
 | 6 | **modernize 残り（ゴールデン側）** | stringscut の Split / SplitN 腕（Suite 入れ替え・reflecttypefor・slicescontains・stringsbuilder は PR 1 で済み） | modernize 2/0 → 0/0 | S |

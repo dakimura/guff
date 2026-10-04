@@ -1589,29 +1589,13 @@ impl Taint<'_> {
 
     /// The values stored into `alloc`'s `field`, via its `FieldAddr` referrers.
     ///
-    /// The second loop is guff's, not upstream's, and it is here because the
-    /// two SSA builders lower a composite literal differently. go/ssa writes an
-    /// addressable one straight into its target:
-    ///
-    /// ```text
-    /// t0 = local holder (h)
-    /// t1 = &t0.cmd [#0]
-    /// *t1 = os.Getenv("X")
-    /// ```
-    ///
-    /// guff fills a `complit` temporary and copies the whole struct across:
-    ///
-    /// ```text
-    /// t0 = local holder (h)      t1 = local holder (complit)
-    /// t2 = &t1.cmd [#0]          *t2 = os.Getenv("X")
-    /// t4 = *t1                   *t0 = t4
-    /// ```
-    ///
-    /// so `h`'s own referrers carry no field store at all and upstream's walk —
-    /// which only reads `FieldAddr` stores — finds nothing. Following a
-    /// whole-struct store back to the temporary it came from recovers exactly
-    /// the shape go/ssa would have produced. Left as a taint-side adaptation
-    /// rather than a change to `builder`, which every SSA analyzer shares.
+    /// Only direct field stores, as upstream. Through x/tools v0.44 go/ssa
+    /// wrote an addressable composite literal straight into its target
+    /// (`t1 = &t0.cmd; *t1 = os.Getenv(…)`), and guff — which fills a
+    /// `complit` temporary and copies the struct across — followed that copy
+    /// back to recover the same answer. v0.50 (golangci-lint 2.14.0) builds the
+    /// temporary too, so `h := holder{cmd: taint}` leaves `h` with no field
+    /// store and upstream's walk finds nothing; so does this one now.
     fn stores_to_field(&self, alloc: InstrId, fid: FuncId, field: usize) -> Vec<Value> {
         let func = self.func(fid);
         let mut out = Vec::new();
@@ -1628,43 +1612,6 @@ impl Taint<'_> {
                         out.push(st.val);
                     }
                 }
-            }
-        }
-        // A whole-struct store into this cell: follow the value to the cell it
-        // was loaded from and read that one's field stores instead.
-        let mut seen = HashSet::new();
-        seen.insert(Value::Instr(alloc));
-        let mut queue: Vec<InstrId> = vec![alloc];
-        while let Some(cell) = queue.pop() {
-            for &r in referrers(func, Value::Instr(cell)) {
-                let InstrData::Store(st) = func.instrs.get(r) else {
-                    continue;
-                };
-                if st.addr != Value::Instr(cell) {
-                    continue;
-                }
-                let Some(src) = self.trace_to_alloc(st.val, fid) else {
-                    continue;
-                };
-                if !seen.insert(Value::Instr(src)) {
-                    continue;
-                }
-                for &sr in referrers(func, Value::Instr(src)) {
-                    let InstrData::FieldAddr(fa) = func.instrs.get(sr) else {
-                        continue;
-                    };
-                    if fa.field != field {
-                        continue;
-                    }
-                    for &fr in referrers(func, Value::Instr(sr)) {
-                        if let InstrData::Store(st) = func.instrs.get(fr) {
-                            if st.addr == Value::Instr(sr) {
-                                out.push(st.val);
-                            }
-                        }
-                    }
-                }
-                queue.push(src);
             }
         }
         out

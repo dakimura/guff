@@ -127,12 +127,12 @@ func (t tree) getByComponents(components []string) (tree, error) {
 	return dir, nil
 }
 
-// `compLit` writes an array or struct literal *into the address*, so no `Store`
-// exists and there is nothing to report. A slice or map literal is built as a
-// value and then stored, and that `Store` carries the literal's `Lbrace` — not
-// the assignment's `=`. Reporting every one of them at the `=` put a finding on
-// beats' `x-pack/metricbeat/module/aws/billing/billing.go:209` (`event :=
-// mb.Event{}`) that upstream does not make.
+// Through x/tools v0.44 `compLit` wrote an array or struct literal *into the
+// address* (no `Store`, nothing to report) and stored a slice or map literal at
+// its `Lbrace`. v0.50 (golangci-lint 2.14.0) builds every literal into a
+// temporary and stores it once, at the left-hand name — so all four below are
+// reported now, including beats' `x-pack/metricbeat/module/aws/billing/
+// billing.go:209` (`event := mb.Event{}`) that 2.12.2 left alone.
 type elem struct{ N int }
 
 func mkElem() elem          { return elem{} }
@@ -140,7 +140,7 @@ func mkSlice() []int        { return nil }
 func mkMap() map[string]int { return nil }
 func mkArray() [3]int       { return [3]int{} }
 
-// Silent: a struct literal.
+// Reported since 2.14.0: a struct literal.
 func structLiteralInit(c bool) elem {
 	e := elem{}
 	if c {
@@ -151,7 +151,7 @@ func structLiteralInit(c bool) elem {
 	return e
 }
 
-// Silent: an array literal, elements and all.
+// Reported since 2.14.0: an array literal.
 func arrayLiteralInit(c bool) [3]int {
 	a := [3]int{1, 2, 3}
 	if c {
@@ -162,7 +162,7 @@ func arrayLiteralInit(c bool) [3]int {
 	return a
 }
 
-// Reported, at the `{`.
+// Reported, at the name (2.12.2: the `{`).
 func sliceLiteralInit(c bool) []int {
 	s := []int{1}
 	if c {
