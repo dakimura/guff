@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/revive-limits-configured/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 rulelimits/rule_limits.go:1:0:revive:warning:line-length-limit: line is 77 characters, out of limit 60
 rulelimits/rule_limits.go:3:0:revive:warning:line-length-limit: line is 79 characters, out of limit 60

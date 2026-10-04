@@ -34,3 +34,12 @@
 # minimal reproduction. Also the remaining `extra` in the staticcheck-sa golden.
 consul guff-only agent/event_endpoint_test.go:115:staticcheck:err refers to the result of a failed type assertion and is a zero value, not the value that was being type-asserted
 consul guff-only agent/http_test.go:1728:staticcheck:err refers to the result of a failed type assertion and is a zero value, not the value that was being type-asserted
+
+# golangci-lint 2.12.2 -> 2.14.0 (Phase 8, 2026-10-04). Not accepted mismatches:
+# each is a ledger item still to port, and these lines go when it lands.
+# why: gofmt printer resync to go1.27 (§2.4) and SA1019 rendering / composite-literal keys (staticcheck-checks #1, #2).
+consul golangci-only agent/agent.go:3191:staticcheck:this comparison is always true
+consul golangci-only agent/catalog_endpoint_test.go:1148:staticcheck:this value of req is never used
+consul golangci-only agent/checks/check.go:1131:staticcheck:this comparison is never true
+consul golangci-only agent/consul/state/config_entry.go:526:staticcheck:this comparison is always true
+consul golangci-only agent/proxycfg/state_test.go:3768:gofmt:File is not properly formatted

@@ -25,15 +25,11 @@ static PAT_BLANK_RECV2: OnceLock<Pattern> = OnceLock::new();
 
 fn pat_blank_recv1() -> &'static Pattern {
     PAT_BLANK_RECV1.get_or_init(|| {
-        // The `IndexExpr` arm is not optional, and it is not in the tip of
-        // dominikh/go-tools either: the checkout there is past the pinned
-        // v0.7.0 and has since dropped it, with a comment arguing that
-        // `x, _ = m[k]` may be a deliberate "there might be no entry". The
-        // pinned v0.7.0 — what golangci-lint 2.12.2 runs — still reports it,
-        // in both assignment tokens. Read the tag, not the tip.
-        must_parse(
-            r#"(AssignStmt [_ (Ident "_")] _ (Or (IndexExpr _ _) (UnaryExpr "<-" _)))"#,
-        )
+        // No `IndexExpr` arm. v0.7.0 (golangci-lint 2.12.2) had one and
+        // reported `x, _ = m[k]` in both assignment tokens; v0.8.1
+        // (golangci-lint 2.14.0) dropped it, arguing the comma-ok may be a
+        // deliberate "there might be no entry, and I don't care".
+        must_parse(r#"(AssignStmt [_ (Ident "_")] _ (UnaryExpr "<-" _))"#)
     })
 }
 

@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/fatcontext/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 bad.go:11:3:fatcontext::nested context in loop
 bad.go:19:3:fatcontext::nested context in function literal

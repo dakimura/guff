@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/funcorder/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 bad.go:7:1:funcorder::constructor "NewT" for struct "T" should be placed after the struct declaration
 bad.go:15:1:funcorder::unexported method "unexported" for struct "T" should be placed after the exported method "AlsoExported"

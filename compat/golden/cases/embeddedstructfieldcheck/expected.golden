@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/embeddedstructfieldcheck/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 bad.go:9:2:embeddedstructfieldcheck::embedded fields should be listed before regular fields
 bad.go:16:2:embeddedstructfieldcheck::embedded fields should be listed before regular fields

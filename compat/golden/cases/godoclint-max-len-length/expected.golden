@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/godoclint-max-len-length/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 maxlen/a.go:1:1:godoclint::godoc line is too long (67 > 39)
 maxlen/a.go:4:1:godoclint::godoc line is too long (78 > 39)

@@ -4,13 +4,13 @@
 # Produced by running golangci-lint on compat/golden/cases/staticcheck-sa1019-promoted-field/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
-use.go:5:28:staticcheck::SA1019: b.Old is deprecated: base field message. 
-use.go:7:38:staticcheck::SA1019: w.Old is deprecated: base field message. 
-use.go:9:39:staticcheck::SA1019: w.Old is deprecated: base field message. 
-use.go:11:50:staticcheck::SA1019: w.Old is deprecated: base field message. 
-use.go:15:48:staticcheck::SA1019: o.DeepOld is deprecated: deep field message. 
-use.go:17:41:staticcheck::SA1019: h.Cfg.Old is deprecated: base field message. 
-use.go:19:37:staticcheck::SA1019: w.Base.Old is deprecated: base field message. 
+use.go:5:28:staticcheck::SA1019: (example.com/sa1019promoted/dep.Base).Old is deprecated: base field message. 
+use.go:7:38:staticcheck::SA1019: (example.com/sa1019promoted/dep.Wrapper).Old is deprecated: base field message. 
+use.go:9:39:staticcheck::SA1019: (example.com/sa1019promoted/dep.PtrWrapper).Old is deprecated: base field message. 
+use.go:11:50:staticcheck::SA1019: (example.com/sa1019promoted/dep.Wrapper).Old is deprecated: base field message. 
+use.go:15:48:staticcheck::SA1019: (example.com/sa1019promoted/dep.Outer).DeepOld is deprecated: deep field message. 
+use.go:17:41:staticcheck::SA1019: (example.com/sa1019promoted/dep.Wrapper).Old is deprecated: base field message. 
+use.go:19:37:staticcheck::SA1019: (example.com/sa1019promoted/dep.Base).Old is deprecated: base field message. 
 use.go:19:39:staticcheck::QF1008: could remove embedded field "Base" from selector

@@ -4,6 +4,6 @@
 # Produced by running golangci-lint on compat/golden/cases/run-build-tags-none/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 tags/plain.go:11:7:errcheck::Error return value is not checked

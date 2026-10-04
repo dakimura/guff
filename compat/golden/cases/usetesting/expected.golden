@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/usetesting/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 bad_test.go:9:9:usetesting::os.MkdirTemp() could be replaced by t.TempDir() in TestBad
 bad_test.go:18:10:usetesting::os.TempDir() could be replaced by t.TempDir() in testHelperWithClosure

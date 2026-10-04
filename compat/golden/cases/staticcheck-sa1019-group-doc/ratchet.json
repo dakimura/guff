@@ -1,0 +1,6 @@
+{
+  "missing": 17,
+  "extra": 17,
+  "why": "staticcheck v0.8.1 (golangci-lint 2.14.0) renders SA1019 with SelectorName rather than the full expression, and drops the quotes around package paths. Ledger: staticcheck-checks #1, #2. Recorded when the pin moved 2.12.2 -> 2.14.0; see docs/PHASE8-LEDGER.md §5.1.",
+  "target": "0/0 — docs/PHASE8-LEDGER.md §6 names the PR that closes it."
+}

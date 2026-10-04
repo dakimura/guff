@@ -140,9 +140,9 @@ func containsFuncIfaceElem(stack []value) bool {
 	return false
 }
 
-// Upstream's only test on the needle is `usesRangeVar`. There is no purity
-// check: `slices.Contains(s, strings.ToLower(k))` evaluates the needle once
-// where the loop evaluated it per element, and upstream rewrites it anyway.
+// Not findings since golangci-lint 2.14.0: x/tools v0.50 requires NoEffects of
+// the needle, since `slices.Contains(s, strings.ToLower(k))` evaluates it once
+// where the loop evaluated it per element. v0.44 rewrote both of these.
 func containsCallNeedle(hide []string, key string) bool {
 	for _, k := range hide {
 		if lower(key) == k {

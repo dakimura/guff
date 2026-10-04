@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/revive-allow-regex/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 allowregex/allow_regex.go:12:12:revive:warning:unused-parameter: parameter 'ctx' seems to be unused, consider removing or renaming it to match ^_
 allowregex/allow_regex.go:24:7:revive:warning:unused-receiver: method receiver 't' is not referenced in method's body, consider removing or renaming it to match ^_

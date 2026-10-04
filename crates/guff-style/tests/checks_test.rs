@@ -7651,29 +7651,26 @@ fn modernize_flags_reflecttypefor() {
     assert_eq!(
         got,
         vec![
-            (13, 9), // a plain variable
             (17, 9), // TypeOf((*T)(nil)).Elem()
             (38, 3), // *new(string) — `new` is a pure builtin
             (39, 3), // *new(int64)
             (40, 3), // *new([]byte)
-            (49, 3), // len(s)
             (50, 3), // make([]int, 3)
             (51, 3), // min(1, 2)
-            (58, 3), // a + b
-            (59, 3), // s[1:2]
-            (60, 3), // x.(MyStruct)
-            (61, 3), // m[k]
-            (80, 3),  // TypeOf(q).Elem() — "MyStruct" is short enough to spell
             (86, 9),  // TypeOf((*T)(nil)) with no .Elem() after it
             (97, 3),  // map[string]any(nil) — `any` is an alias, not an unnamed interface
             (98, 3),  // []int(nil)
             (99, 3),  // map[string]int(nil)
-            (112, 3), // List[int]
-            (114, 3), // List[Expr] — a *named* interface type argument
+            (126, 3), // List[int]{}
+            (128, 3), // List[Expr]{} — a *named* interface type argument
+            (132, 3), // uint(0)
         ],
-        "lines 22 (interface), 69-71 (effects one level down), 79 (element type \
-         too long) and 113/115 (a List of an unnamed struct, of an unnamed \
-         interface) must stay silent",
+        "since golangci-lint 2.14.0 an operand naming a value is never rewritten \
+         (`usesNonTypeSymbol`): lines 13, 49, 58-61, 80 and 112/114 go through a \
+         variable and are silent now. Lines 22 (interface), 69-71 (effects one \
+         level down), 79 (element type too long), 113/115 and 127/129 (a List \
+         of an unnamed struct, of an unnamed interface), 130 (an interface) and \
+         131 (a field key) must stay silent",
     );
 }
 
@@ -7917,10 +7914,9 @@ fn modernize_slicescontains_reads_the_predicate_signature() {
             42,  // the bool accumulator
             125, // a predicate whose parameter *is* the element type
             135, // …and one where the element type is the interface
-            // A needle that is a *call*. Upstream's only test on it is
-            // `usesRangeVar`; there is no purity check.
-            147, // a local slice
-            159, // the same behind a selector
+            // Not 147 or 159: a needle that is a *call*. x/tools v0.50
+            // (golangci-lint 2.14.0) requires `NoEffects` of the needle; v0.44
+            // had no purity check and rewrote both.
         ],
         "{got:?}"
     );
@@ -8496,16 +8492,16 @@ fn modernize_flags_stringsbuilder() {
     );
 }
 
-/// A `_test.go` file is not an exception.
+/// A `_test.go` file is skipped, since golangci-lint 2.14.0.
 ///
-/// Upstream's only gate is `within(pass, "strings", "runtime")` — the two
-/// packages where the fix would make an import cycle. Nothing in
-/// `stringsbuilder.go`, or anywhere else in modernize, looks at the file name.
-/// guff skipped every test file from the rule's first commit with no reason
-/// recorded, and beats accumulates a status string in a loop in
-/// `heartbeat/monitors/wrappers/summarizer/summarizer_test.go:173`.
+/// x/tools v0.44 had no such gate — `within(pass, "strings", "runtime")` was
+/// all — and guff once skipped test files with no reason recorded, missing
+/// beats' `summarizer_test.go:173`. v0.50 skips them on purpose: "suggested
+/// fixes may increase verbosity, and performance doesn't matter as much"
+/// (go.dev/issue/78613). The fixture still holds two loops that would
+/// otherwise be reported, so this fails if the gate goes missing.
 #[test]
-fn modernize_stringsbuilder_also_looks_at_test_files() {
+fn modernize_stringsbuilder_skips_test_files() {
     let pkg = support::typecheck_fixture(
         "modernize",
         "example.com/modernize/stringsbuildertest",
@@ -8517,7 +8513,7 @@ fn modernize_stringsbuilder_also_looks_at_test_files() {
             .iter()
             .filter(|m| m.contains("using string += string in a loop is inefficient"))
             .count(),
-        2,
+        0,
         "{messages:?}"
     );
 }

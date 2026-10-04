@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/forbidigo-analyze-types/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 analyzetypes.go:16:56:forbidigo::use of `osu.Lookup` forbidden because "os/user lookup APIs potentially unsafe; use the wrapper instead"
 analyzetypes.go:20:58:forbidigo::use of `user2.LookupId` forbidden because "os/user lookup APIs potentially unsafe; use the wrapper instead"

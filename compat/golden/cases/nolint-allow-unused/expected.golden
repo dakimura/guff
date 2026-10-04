@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/nolint-allow-unused/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 analyzer/analyzer.go:15:14:govet::printf: fmt.Printf format %d has arg "not a number" of wrong type string
 block/block.go:9:7:errcheck::Error return value is not checked

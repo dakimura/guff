@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/predeclared/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 bad.go:7:6:predeclared::function len has same name as predeclared identifier
 bad.go:9:6:predeclared::type copy has same name as predeclared identifier

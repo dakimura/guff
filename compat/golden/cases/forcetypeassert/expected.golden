@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/forcetypeassert/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 bad/bad.go:8:2:forcetypeassert::type assertion must be checked
 bad/bad.go:12:2:forcetypeassert::type assertion must be checked

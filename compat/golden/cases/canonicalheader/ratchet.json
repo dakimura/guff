@@ -1,0 +1,6 @@
+{
+  "missing": 10,
+  "extra": 6,
+  "why": "golangci-lint 2.14.0 moved canonicalheader to the golangci/canonicalheader fork: new message form `use \"X\" instead of \"x\"` (6/6) and new initialisms X-Request-ID / ETag / WWW-Authenticate (4 missing). Ledger: iface-canonicalheader #1, #2. Recorded when the pin moved 2.12.2 -> 2.14.0; see docs/PHASE8-LEDGER.md §5.1.",
+  "target": "0/0 — docs/PHASE8-LEDGER.md §6 names the PR that closes it."
+}

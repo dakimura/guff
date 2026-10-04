@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/godoclint-all/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 basic/bad.go:1:1:godoclint::package godoc should start with "Package example "
 basic/bad.go:7:1:godoclint::godoc should start with symbol name ("Foo")

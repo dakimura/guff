@@ -1,6 +1,6 @@
 {
-  "missing": 10,
+  "missing": 8,
   "extra": 0,
-  "why": "SA4017 needs cross-package purity inference (net/http.StatusText, a user-defined errors.New in an imported package); every ST check itself matches.",
+  "why": "golangci-lint 2.14.0: the two st1005 SA4017 findings guff never reported are gone upstream too (ledger §5.2-2), so 10 -> 8 with no guff change. Before the bump: SA4017 needs cross-package purity inference (net/http.StatusText, a user-defined errors.New in an imported package); every ST check itself matches.",
   "target": "0/0 — see docs/COMPAT-HARDENING.md §4 (2026-08-08) for the remaining classes."
 }

@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/wastedassign/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 bad.go:6:2:wastedassign::assigned to n, but reassigned without using the value
 bad.go:8:3:wastedassign::assigned to n, but reassigned without using the value
@@ -20,8 +20,10 @@ bad.go:244:2:wastedassign::assigned to s, but reassigned without using the value
 bad.go:264:2:wastedassign::assigned to x, but reassigned without using the value
 bad.go:270:2:wastedassign::assigned to x, but reassigned without using the value
 bad.go:278:7:wastedassign::assigned to exists, but reassigned without using the value
-bad.go:329:12:wastedassign::assigned to s, but reassigned without using the value
-bad.go:339:21:wastedassign::assigned to m, but reassigned without using the value
+bad.go:307:2:wastedassign::assigned to e, but reassigned without using the value
+bad.go:318:2:wastedassign::assigned to a, but reassigned without using the value
+bad.go:329:2:wastedassign::assigned to s, but reassigned without using the value
+bad.go:339:2:wastedassign::assigned to m, but reassigned without using the value
 bad.go:351:2:wastedassign::assigned to p, but reassigned without using the value
 bad.go:371:3:wastedassign::assigned to c, but reassigned without using the value
 bad.go:372:3:wastedassign::assigned to c, but reassigned without using the value

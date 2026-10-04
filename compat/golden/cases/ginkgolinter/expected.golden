@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/ginkgolinter/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 bad_test.go:12:3:ginkgolinter::ginkgo-linter: wrong length assertion. Consider using `Expect(s).Should(HaveLen(1))` instead
 bad_test.go:13:3:ginkgolinter::ginkgo-linter: wrong length assertion. Consider using `Expect(s).Should(BeEmpty())` instead

@@ -5,3 +5,11 @@
 #
 # Prefer fixing guff over growing this list. Entries here are accepted
 # mismatches (message phrasing, enable-set gaps, known DEFERRED).
+
+# golangci-lint 2.12.2 -> 2.14.0 (Phase 8, 2026-10-04). Not accepted mismatches:
+# each is a ledger item still to port, and these lines go when it lands.
+# why: modernize suite additions guff has not ported (xtools-modernize) and SA1019 rendering (staticcheck-checks #1).
+helm golangci-only internal/chart/v3/loader/load.go:126:modernize:stringscut: strings.SplitN call can be simplified using strings.Cut
+helm golangci-only pkg/chart/v2/loader/load.go:156:modernize:stringscut: strings.SplitN call can be simplified using strings.Cut
+helm golangci-only pkg/kube/client_test.go:81:staticcheck:(k8s.io/apimachinery/pkg/apis/meta/v1.ObjectMeta).SelfLink is deprecated: selfLink is a legacy read-only field that is no longer populated by the system. +optional
+helm golangci-only pkg/registry/client.go:234:modernize:stringscut: strings.Split call can be simplified using strings.Cut

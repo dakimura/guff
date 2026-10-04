@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/revive-defer-default/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 deferrule/defer_rule.go:29:3:revive:warning:defer: prefer not to defer inside loops
 deferrule/defer_rule.go:36:3:revive:warning:defer: prefer not to defer inside loops

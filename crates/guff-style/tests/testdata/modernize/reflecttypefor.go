@@ -115,3 +115,20 @@ func generics() []reflect.Type {
 		reflect.TypeOf(d),
 	}
 }
+
+// Since golangci-lint 2.14.0 (x/tools v0.50) an operand that names a value — a
+// variable, a field, a function — is never rewritten (`usesNonTypeSymbol`):
+// `TypeOf(pkg.Var)` keeps a link to `pkg.Var` that `TypeFor[int]()` would cut.
+// That silences every shape above that goes through a variable, so these keep
+// the type-level branches measurable with operands that name only types.
+func typeOnlyOperands() []reflect.Type {
+	return []reflect.Type{
+		reflect.TypeOf(List[int]{}),                // FINDING
+		reflect.TypeOf(List[struct{ N int }]{}),    // complicated
+		reflect.TypeOf(List[Expr]{}),               // FINDING: a named interface
+		reflect.TypeOf(List[interface{ Bar() }]{}), // complicated
+		reflect.TypeOf(Expr(nil)),                  // an interface: dynamic
+		reflect.TypeOf(MyStruct{N: 1}),             // N names a field
+		reflect.TypeOf(uint(0)),                    // FINDING: a conversion keeps its type
+	}
+}

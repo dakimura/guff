@@ -5,3 +5,133 @@
 #
 # Prefer fixing guff over growing this list. Entries here are accepted
 # mismatches (message phrasing, enable-set gaps, known DEFERRED).
+
+# golangci-lint 2.12.2 -> 2.14.0 (Phase 8, 2026-10-04). Not accepted mismatches:
+# each is a ledger item still to port, and these lines go when it lands.
+# why: SA1019 now checks struct-literal keys and renders SelectorName (staticcheck-checks #1, #2); goimports/gosec/exhaustive from §2.4 and the gosec / exhaustive groups.
+grafana golangci-only pkg/api/annotations.go:145:staticcheck:(github.com/grafana/grafana/pkg/services/annotations.Item).DashboardID is deprecated: Use DashboardUID and OrgID instead
+grafana golangci-only pkg/api/annotations.go:420:staticcheck:(github.com/grafana/grafana/pkg/services/annotations.DeleteParams).DashboardID is deprecated: Use DashboardUID and OrgID instead
+grafana golangci-only pkg/api/annotations.go:44:staticcheck:(github.com/grafana/grafana/pkg/services/annotations.ItemQuery).DashboardID is deprecated: Use DashboardUID and OrgID instead
+grafana golangci-only pkg/api/annotations_test.go:331:staticcheck:(github.com/grafana/grafana/pkg/services/annotations.Item).DashboardID is deprecated: Use DashboardUID and OrgID instead
+grafana golangci-only pkg/api/annotations_test.go:332:staticcheck:(github.com/grafana/grafana/pkg/services/annotations.Item).DashboardID is deprecated: Use DashboardUID and OrgID instead
+grafana golangci-only pkg/api/annotations_test.go:336:staticcheck:(github.com/grafana/grafana/pkg/services/dashboards.Dashboard).FolderID is deprecated: use FolderUID instead
+grafana golangci-only pkg/api/annotations_test.go:338:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/api/annotations_test.go:369:staticcheck:(github.com/grafana/grafana/pkg/services/annotations.Item).DashboardID is deprecated: Use DashboardUID and OrgID instead
+grafana golangci-only pkg/api/annotations_test.go:370:staticcheck:(github.com/grafana/grafana/pkg/services/annotations.Item).DashboardID is deprecated: Use DashboardUID and OrgID instead
+grafana golangci-only pkg/api/bootdata.go:228:staticcheck:(github.com/grafana/grafana/pkg/api/dtos.FrontendSettingsAuthDTO).SAMLSkipOrgRoleSync is deprecated: this is no longer used and will be removed in Grafana 11
+grafana golangci-only pkg/api/bootdata.go:229:staticcheck:(github.com/grafana/grafana/pkg/api/dtos.FrontendSettingsAuthDTO).LDAPSkipOrgRoleSync is deprecated: this is no longer used and will be removed in Grafana 11
+grafana golangci-only pkg/api/bootdata.go:230:staticcheck:(github.com/grafana/grafana/pkg/api/dtos.FrontendSettingsAuthDTO).JWTAuthSkipOrgRoleSync is deprecated: this is no longer used and will be removed in Grafana 11
+grafana golangci-only pkg/api/bootdata.go:231:staticcheck:(github.com/grafana/grafana/pkg/api/dtos.FrontendSettingsAuthDTO).GoogleSkipOrgRoleSync is deprecated: this is no longer used and will be removed in Grafana 11
+grafana golangci-only pkg/api/bootdata.go:232:staticcheck:(github.com/grafana/grafana/pkg/api/dtos.FrontendSettingsAuthDTO).GrafanaComSkipOrgRoleSync is deprecated: this is no longer used and will be removed in Grafana 11
+grafana golangci-only pkg/api/bootdata.go:233:staticcheck:(github.com/grafana/grafana/pkg/api/dtos.FrontendSettingsAuthDTO).GenericOAuthSkipOrgRoleSync is deprecated: this is no longer used and will be removed in Grafana 11
+grafana golangci-only pkg/api/bootdata.go:234:staticcheck:(github.com/grafana/grafana/pkg/api/dtos.FrontendSettingsAuthDTO).AzureADSkipOrgRoleSync is deprecated: this is no longer used and will be removed in Grafana 11
+grafana golangci-only pkg/api/bootdata.go:235:staticcheck:(github.com/grafana/grafana/pkg/api/dtos.FrontendSettingsAuthDTO).GithubSkipOrgRoleSync is deprecated: this is no longer used and will be removed in Grafana 11
+grafana golangci-only pkg/api/bootdata.go:236:staticcheck:(github.com/grafana/grafana/pkg/api/dtos.FrontendSettingsAuthDTO).GitLabSkipOrgRoleSync is deprecated: this is no longer used and will be removed in Grafana 11
+grafana golangci-only pkg/api/bootdata.go:237:staticcheck:(github.com/grafana/grafana/pkg/api/dtos.FrontendSettingsAuthDTO).OktaSkipOrgRoleSync is deprecated: this is no longer used and will be removed in Grafana 11
+grafana golangci-only pkg/api/datasources.go:559:staticcheck:(github.com/grafana/grafana/pkg/services/datasources.GetDataSourceQuery).ID is deprecated: use UID
+grafana golangci-only pkg/api/datasources.go:585:staticcheck:(github.com/grafana/grafana/pkg/services/datasources.GetDataSourceQuery).ID is deprecated: use UID
+grafana golangci-only pkg/api/folder_bench_test.go:299:staticcheck:(github.com/grafana/grafana/pkg/services/dashboards.Dashboard).FolderID is deprecated: use FolderUID instead
+grafana golangci-only pkg/api/folder_bench_test.go:327:staticcheck:(github.com/grafana/grafana/pkg/services/dashboards.Dashboard).FolderID is deprecated: use FolderUID instead
+grafana golangci-only pkg/api/folder_bench_test.go:355:staticcheck:(github.com/grafana/grafana/pkg/services/dashboards.Dashboard).FolderID is deprecated: use FolderUID instead
+grafana golangci-only pkg/api/folder_permission_test.go:159:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/api/folder_permission_test.go:189:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/api/folder_permission_test.go:214:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/api/preferences_test.go:38:staticcheck:(github.com/grafana/grafana/pkg/services/preference.Preference).HomeDashboardID is deprecated: Use HomeDashboardUID instead
+grafana golangci-only pkg/api/preferences_test.go:74:staticcheck:(github.com/grafana/grafana/pkg/services/preference.Preference).HomeDashboardID is deprecated: Use HomeDashboardUID instead
+grafana golangci-only pkg/components/imguploader/webdavuploader.go:28:staticcheck:(net/http.Transport).Dial has been deprecated since Go 1.7: Use DialContext instead, which allows the transport to cancel dials as soon as they are no longer needed. If both are set, DialContext takes priority.
+grafana golangci-only pkg/expr/testing.go:43:staticcheck:(github.com/grafana/grafana-plugin-sdk-go/backend.PluginContext).OrgID is deprecated: Use Namespace instead.
+grafana golangci-only pkg/infra/tracing/tracing.go:19:staticcheck:go.opentelemetry.io/otel/exporters/jaeger is deprecated: This module is no longer supported. OpenTelemetry dropped support for Jaeger exporter in July 2023. Jaeger officially accepts and recommends using OTLP. Use [go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp] or [go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc] instead.
+grafana golangci-only pkg/registry/apis/collections/legacy/stars.go:220:staticcheck:(github.com/grafana/grafana/pkg/services/star.StarDashboardCommand).DashboardID is deprecated: use DashboardUID
+grafana golangci-only pkg/registry/apis/iam/authorizer/external_group_mapping_test.go:82:staticcheck:(k8s.io/apimachinery/pkg/apis/meta/v1.ListMeta).SelfLink is deprecated: selfLink is a legacy read-only field that is no longer populated by the system. +optional
+grafana golangci-only pkg/services/accesscontrol/acimpl/service_bench_test.go:358:staticcheck:(github.com/grafana/grafana/pkg/services/user.SignedInUser).TeamIDs is deprecated: use TeamUIDs instead
+grafana golangci-only pkg/services/annotations/annotationsimpl/cleanup_test.go:147:staticcheck:(github.com/grafana/grafana/pkg/services/annotations.Item).DashboardID is deprecated: Use DashboardUID and OrgID instead
+grafana golangci-only pkg/services/annotations/annotationsimpl/cleanup_test.go:221:staticcheck:(github.com/grafana/grafana/pkg/services/annotations.Item).DashboardID is deprecated: Use DashboardUID and OrgID instead
+grafana golangci-only pkg/services/annotations/annotationsimpl/xorm_store_test.go:694:staticcheck:(github.com/grafana/grafana/pkg/services/annotations.Item).DashboardID is deprecated: Use DashboardUID and OrgID instead
+grafana golangci-only pkg/services/apiserver/auth/authenticator/authenticator_test.go:37:staticcheck:(github.com/grafana/grafana/pkg/services/user.SignedInUser).TeamIDs is deprecated: use TeamUIDs instead
+grafana golangci-only pkg/services/apiserver/client/discovery.go:92:goimports:File is not properly formatted
+grafana golangci-only pkg/services/authn/identity.go:317:staticcheck:(github.com/grafana/grafana/pkg/services/user.SignedInUser).TeamIDs is deprecated: use TeamUIDs instead
+grafana golangci-only pkg/services/authz/rbac.go:354:goimports:File is not properly formatted
+grafana golangci-only pkg/services/dashboards/service/dashboard_service.go:1528:staticcheck:(github.com/grafana/grafana/pkg/services/dashboards.DashboardSearchProjection).FolderID is deprecated: use FolderUID instead
+grafana golangci-only pkg/services/dashboards/service/dashboard_service_test.go:2032:staticcheck:(github.com/grafana/grafana/pkg/services/annotations.Item).DashboardID is deprecated: Use DashboardUID and OrgID instead
+grafana golangci-only pkg/services/dashboards/service/dashboard_service_test.go:769:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/dashboards/service/dashboard_service_test.go:796:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/datasources/service/cache.go:60:staticcheck:(github.com/grafana/grafana/pkg/services/datasources.GetDataSourceQuery).ID is deprecated: use UID
+grafana golangci-only pkg/services/datasources/service/datasource.go:151:staticcheck:(github.com/grafana/grafana/pkg/services/datasources.GetDataSourceQuery).Name is deprecated: Use UID
+grafana golangci-only pkg/services/datasources/service/datasource.go:180:staticcheck:(github.com/grafana/grafana/pkg/services/datasources.GetDataSourceQuery).ID is deprecated: use UID
+grafana golangci-only pkg/services/datasources/service/datasource.go:617:staticcheck:(github.com/grafana/grafana/pkg/services/datasources.GetDataSourceQuery).ID is deprecated: use UID
+grafana golangci-only pkg/services/datasources/service/datasource.go:685:staticcheck:(github.com/grafana/grafana/pkg/services/datasources.GetDataSourceQuery).Name is deprecated: Use UID
+grafana golangci-only pkg/services/datasources/service/datasource.go:891:staticcheck:(github.com/grafana/grafana-plugin-sdk-go/backend/proxy.ClientCfg).ClientCert is deprecated: ClientCert is the file path to the client certificate.
+grafana golangci-only pkg/services/datasources/service/datasource.go:892:staticcheck:(github.com/grafana/grafana-plugin-sdk-go/backend/proxy.ClientCfg).ClientKey is deprecated: ClientKey is the file path to the client key.
+grafana golangci-only pkg/services/datasources/service/datasource.go:893:staticcheck:(github.com/grafana/grafana-plugin-sdk-go/backend/proxy.ClientCfg).RootCAs is deprecated: RootCAs is a list of file paths to the root CA certificates.
+grafana golangci-only pkg/services/datasources/service/datasource_test.go:639:staticcheck:(github.com/grafana/grafana/pkg/services/datasources.GetDataSourceQuery).ID is deprecated: use UID
+grafana golangci-only pkg/services/datasources/service/datasource_test.go:695:staticcheck:(github.com/grafana/grafana/pkg/services/datasources.GetDataSourceQuery).ID is deprecated: use UID
+grafana golangci-only pkg/services/datasources/service/legacy.go:79:staticcheck:(github.com/grafana/grafana/pkg/services/datasources.GetDataSourceQuery).Name is deprecated: Use UID
+grafana golangci-only pkg/services/datasources/service/legacy.go:80:staticcheck:(github.com/grafana/grafana/pkg/services/datasources.GetDataSourceQuery).ID is deprecated: use UID
+grafana golangci-only pkg/services/datasources/service/store.go:193:staticcheck:(github.com/grafana/grafana/pkg/services/datasources.GetDataSourceQuery).ID is deprecated: use UID
+grafana golangci-only pkg/services/datasources/service/store_test.go:139:staticcheck:(github.com/grafana/grafana/pkg/services/datasources.GetDataSourceQuery).ID is deprecated: use UID
+grafana golangci-only pkg/services/encryption/provider/cipher_aescfb.go:42:gosec:G407: Use of hardcoded IV/nonce for encryption by passing hardcoded slice/array by passing a zeroed buffer from make
+grafana golangci-only pkg/services/folder/folderimpl/conversions_test.go:73:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/folder/folderimpl/folder_unifiedstorage_test.go:113:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/folder/folderimpl/folder_unifiedstorage_test.go:123:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/folder/folderimpl/folder_unifiedstorage_test.go:473:staticcheck:(github.com/grafana/grafana/pkg/services/folder.GetFolderQuery).ID is deprecated: use FolderUID instead
+grafana golangci-only pkg/services/folder/folderimpl/folder_unifiedstorage_test.go:487:staticcheck:(github.com/grafana/grafana/pkg/services/folder.GetFolderQuery).ID is deprecated: use FolderUID instead
+grafana golangci-only pkg/services/folder/folderimpl/folder_unifiedstorage_test.go:553:staticcheck:(github.com/grafana/grafana/pkg/services/folder.GetFolderQuery).ID is deprecated: use FolderUID instead
+grafana golangci-only pkg/services/folder/folderimpl/folder_unifiedstorage_test.go:572:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/folder/folderimpl/folder_unifiedstorage_test.go:745:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/folder/folderimpl/folder_unifiedstorage_test.go:818:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/folder/folderimpl/folder_unifiedstorage_test.go:844:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/folder/folderimpl/folder_unifiedstorage_test.go:893:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/folder/folderimpl/folder_unifiedstorage_test.go:942:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/folder/folderimpl/unifiedstore.go:295:staticcheck:(github.com/grafana/grafana/pkg/services/folder.FolderReference).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/libraryelements/api.go:199:staticcheck:(github.com/grafana/grafana/pkg/services/libraryelements/model.SearchLibraryElementsQuery).FolderFilter is deprecated: use FolderFilterUIDs instead
+grafana golangci-only pkg/services/libraryelements/api.go:331:staticcheck:(github.com/grafana/grafana/pkg/services/libraryelements/model.LibraryElementConnectionDTO).ID is deprecated: this field will be removed in the future
+grafana golangci-only pkg/services/libraryelements/database.go:713:staticcheck:(github.com/grafana/grafana/pkg/services/folder.GetFolderQuery).ID is deprecated: use FolderUID instead
+grafana golangci-only pkg/services/libraryelements/k8s_conversion_test.go:40:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/libraryelements/k8s_conversion_test.go:50:staticcheck:(github.com/grafana/grafana/pkg/services/dashboards.DashboardRef).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/libraryelements/libraryelements_get_all_test.go:1386:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/libraryelements/libraryelements_get_all_test.go:1416:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/libraryelements/libraryelements_get_all_test.go:1433:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/libraryelements/libraryelements_get_all_test.go:1479:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/libraryelements/libraryelements_get_all_test.go:411:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/libraryelements/libraryelements_patch_test.go:106:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/libraryelements/libraryelements_patch_test.go:32:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/libraryelements/libraryelements_patch_test.go:358:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/libraryelements/libraryelements_patch_test.go:422:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/libraryelements/libraryelements_test.go:316:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/librarypanels/librarypanels_test.go:493:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/live/pipeline/pipeline.go:11:staticcheck:go.opentelemetry.io/otel/exporters/jaeger is deprecated: This module is no longer supported. OpenTelemetry dropped support for Jaeger exporter in July 2023. Jaeger officially accepts and recommends using OTLP. Use [go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp] or [go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc] instead.
+grafana golangci-only pkg/services/live/runstream/manager_test.go:253:staticcheck:(github.com/grafana/grafana-plugin-sdk-go/backend.PluginContext).OrgID is deprecated: Use Namespace instead.
+grafana golangci-only pkg/services/live/runstream/manager_test.go:338:staticcheck:(github.com/grafana/grafana-plugin-sdk-go/backend.PluginContext).OrgID is deprecated: Use Namespace instead.
+grafana golangci-only pkg/services/live/runstream/manager_test.go:407:staticcheck:(github.com/grafana/grafana-plugin-sdk-go/backend.PluginContext).OrgID is deprecated: Use Namespace instead.
+grafana golangci-only pkg/services/live/runstream/manager_test.go:68:staticcheck:(github.com/grafana/grafana-plugin-sdk-go/backend.PluginContext).OrgID is deprecated: Use Namespace instead.
+grafana golangci-only pkg/services/ngalert/api/api_prometheus_test.go:2425:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/ngalert/notifier/merge/merge.go:172:goimports:File is not properly formatted
+grafana golangci-only pkg/services/notifications/webhook.go:123:staticcheck:(net/http.Transport).Dial has been deprecated since Go 1.7: Use DialContext instead, which allows the transport to cancel dials as soon as they are no longer needed. If both are set, DialContext takes priority.
+grafana golangci-only pkg/services/preference/prefapi/api.go:61:staticcheck:(github.com/grafana/grafana/pkg/services/preference.SavePreferenceCommand).HomeDashboardID is deprecated: Use HomeDashboardUID instead
+grafana golangci-only pkg/services/provisioning/dashboards/file_reader_test.go:174:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/provisioning/dashboards/file_reader_test.go:373:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/provisioning/dashboards/file_reader_test.go:378:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/provisioning/dashboards/file_reader_test.go:383:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/provisioning/dashboards/file_reader_test.go:388:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/provisioning/dashboards/file_reader_test.go:562:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/provisioning/dashboards/file_reader_test.go:718:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/provisioning/dashboards/file_reader_test.go:720:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/provisioning/dashboards/file_reader_test.go:722:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead
+grafana golangci-only pkg/services/provisioning/datasources/datasources.go:241:staticcheck:(github.com/grafana/grafana/pkg/services/datasources.GetDataSourceQuery).Name is deprecated: Use UID
+grafana golangci-only pkg/services/provisioning/datasources/datasources.go:65:staticcheck:(github.com/grafana/grafana/pkg/services/datasources.GetDataSourceQuery).Name is deprecated: Use UID
+grafana golangci-only pkg/services/provisioning/datasources/datasources.go:96:staticcheck:(github.com/grafana/grafana/pkg/services/datasources.GetDataSourceQuery).Name is deprecated: Use UID
+grafana golangci-only pkg/services/publicdashboards/internal/service/query.go:53:staticcheck:(github.com/grafana/grafana/pkg/services/annotations.ItemQuery).DashboardID is deprecated: Use DashboardUID and OrgID instead
+grafana golangci-only pkg/services/rendering/rendering.go:139:staticcheck:(net/http.Transport).Dial has been deprecated since Go 1.7: Use DialContext instead, which allows the transport to cancel dials as soon as they are no longer needed. If both are set, DialContext takes priority.
+grafana golangci-only pkg/services/secrets/kvstore/migrations/datasource_mig_test.go:76:staticcheck:(github.com/grafana/grafana/pkg/services/datasources.GetDataSourceQuery).Name is deprecated: Use UID
+grafana golangci-only pkg/services/secrets/kvstore/migrations/datasource_mig_test.go:99:staticcheck:(github.com/grafana/grafana/pkg/services/datasources.GetDataSourceQuery).Name is deprecated: Use UID
+grafana golangci-only pkg/storage/unified/client.go:359:goimports:File is not properly formatted
+grafana golangci-only pkg/storage/unified/search/remote_index_store.go:284:exhaustive:missing cases in switch of type gcerr.ErrorCode: gcerr.OK, gcerr.Unknown, gcerr.NotFound, gcerr.AlreadyExists, gcerr.InvalidArgument, gcerr.Unimplemented, gcerr.FailedPrecondition, gcerr.PermissionDenied, gcerr.Canceled
+grafana golangci-only pkg/tsdb/azuremonitor/schema_metric_metadata.go:360:staticcheck:(github.com/grafana/schemads.Column).Description is deprecated: use Metadata.Description. Producers SHOULD populate Metadata.Description; for one release they MAY also populate this field for older consumers. Consumers SHOULD prefer Metadata.Description and fall back to this field only if Metadata.Description is empty.
+grafana golangci-only pkg/tsdb/cloudwatch/models/cloudwatch_query_test.go:963:staticcheck:(github.com/grafana/grafana/pkg/tsdb/cloudwatch/kinds/dataquery.CloudWatchMetricsQuery).Alias is deprecated: use label @deprecated use label
+grafana golangci-only pkg/tsdb/graphite/healthcheck_test.go:116:staticcheck:(github.com/grafana/grafana-plugin-sdk-go/backend.PluginContext).OrgID is deprecated: Use Namespace instead.
+grafana golangci-only pkg/tsdb/graphite/query_test.go:712:staticcheck:(github.com/grafana/grafana-plugin-sdk-go/backend.PluginContext).OrgID is deprecated: Use Namespace instead.
+grafana golangci-only pkg/tsdb/loki/healthcheck_test.go:131:staticcheck:(github.com/grafana/grafana-plugin-sdk-go/backend.PluginContext).OrgID is deprecated: Use Namespace instead.
+grafana golangci-only pkg/util/encryption.go:140:gosec:G407: Use of hardcoded IV/nonce for encryption by passing hardcoded slice/array by passing a zeroed buffer from make
+grafana golangci-only pkg/util/proxyutil/reverse_proxy.go:41:staticcheck:(net/http/httputil.ReverseProxy).Director has been deprecated since Go 1.26 and an alternative has been available since Go 1.20: Use Rewrite instead.
+grafana golangci-only pkg/web/response_writer.go:156:staticcheck:net/http.CloseNotifier has been deprecated since Go 1.11 and an alternative has been available since Go 1.7: the CloseNotifier interface predates Go's context package. New code should use [Request.Context] instead.
+grafana golangci-only pkg/web/response_writer.go:50:staticcheck:net/http.CloseNotifier has been deprecated since Go 1.11 and an alternative has been available since Go 1.7: the CloseNotifier interface predates Go's context package. New code should use [Request.Context] instead.

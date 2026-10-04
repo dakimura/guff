@@ -1,17 +1,17 @@
 package modernize
 
-// The file name is the whole point. Upstream's only gate is
-// `within(pass, "strings", "runtime")` — the two packages where the fix would
-// make an import cycle — and nothing in `stringsbuilder.go`, or anywhere else
-// in modernize, looks at whether the file ends in `_test.go`. guff skipped
-// every test file from the rule's first commit, with no reason recorded, and
-// beats accumulates a status string in a loop in
+// The file name is the whole point. golangci-lint 2.12.2 (x/tools v0.44)
+// reported both loops below; 2.14.0 (x/tools v0.50) skips every file ending in
+// `_test.go` — "suggested fixes may increase verbosity, and performance
+// doesn't matter as much" (go.dev/issue/78613). The markers below are what
+// 2.12.2 said; the golden case records that 2.14.0 says nothing. beats
+// accumulates a status string in a loop in
 // `heartbeat/monitors/wrappers/summarizer/summarizer_test.go:173`.
 
 func builderInTestFile(xs []string) string {
 	s := ""
 	for _, x := range xs {
-		s += x // FINDING
+		s += x // reported by 2.12.2 only
 	}
 	return s
 }
@@ -22,7 +22,7 @@ func builderTwoInOneLoop(xs []string) (string, string) {
 	a := ""
 	b := ""
 	for _, x := range xs {
-		a += x // FINDING
+		a += x // reported by 2.12.2 only
 		if x != "" {
 			b += x
 		} else {

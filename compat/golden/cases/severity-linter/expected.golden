@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/severity-linter/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 cmd/cmd.go:20:2:gosec:low:G104: Errors unhandled
 cmd/cmd.go:20:7:errcheck::Error return value is not checked

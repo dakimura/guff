@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/tagliatelle/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 bad.go:8:17:tagliatelle::json(camel): got 'UserId' want 'userId'
 bad.go:9:17:tagliatelle::yaml(snake): got 'UserAge' want 'user_age'

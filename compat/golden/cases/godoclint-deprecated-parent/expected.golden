@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/godoclint-deprecated-parent/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 deprecated/a.go:6:1:godoclint::deprecation note should be formatted as "Deprecated: "
 deprecated/a.go:13:1:godoclint::deprecation note should be formatted as "Deprecated: "

@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/revive-exported-default/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 exflags/exflags.go:23:6:revive:warning:exported: exported type Undocumented should have comment or be unexported
 exflags/exflags.go:25:7:revive:warning:exported: exported const UndocumentedConst should have comment or be unexported

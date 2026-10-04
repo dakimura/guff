@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/gocritic-check-settings-tuned/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 gocritic/checksettings.go:19:19:gocritic::hugeParam: s is heavy (80 bytes); consider passing it by pointer
 gocritic/checksettings.go:20:20:gocritic::hugeParam: m is heavy (128 bytes); consider passing it by pointer

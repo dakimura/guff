@@ -1,0 +1,10 @@
+# Known finding-set diffs for per-linter isolate runs.
+# Format: <target> <guff-only|golangci-only> <normalized-key>
+# target = isolate-<linter>
+#
+# Recorded when the pin moved golangci-lint 2.12.2 -> 2.14.0 (Phase 8). Not an
+# accepted mismatch: the same diff is a ratchet in the golden tier, and this
+# file goes when that ratchet reaches zero.
+# why: revive v1.17.0 (golangci-lint 2.14.0): empty-block no longer reports a bare `for range x {}` — docs/PHASE8-LEDGER.md revive #1.
+
+isolate-revive guff-only bad.go:32:revive:empty-block: this block is empty, you can remove it

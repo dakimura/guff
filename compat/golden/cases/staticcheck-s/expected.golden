@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/staticcheck-s/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 s1000/bad/bad.go:4:2:staticcheck::S1000: should use a simple channel send/receive instead of select with a single case
 s1001/bad/bad.go:4:2:staticcheck::S1001: should use copy(to, from) instead of a loop
@@ -65,9 +65,7 @@ s1005/bad/bad.go:4:2:staticcheck::S1005: unnecessary assignment to the blank ide
 s1005/bad/bad.go:15:6:staticcheck::S1005: unnecessary assignment to the blank identifier
 s1005/bad/bad.go:21:6:staticcheck::S1005: unnecessary assignment to the blank identifier
 s1005/bad/bad.go:27:9:staticcheck::S1005: unnecessary assignment to the blank identifier
-s1005/bad/bad.go:43:2:staticcheck::S1005: unnecessary assignment to the blank identifier
-s1005/bad/bad.go:49:2:staticcheck::S1005: unnecessary assignment to the blank identifier
-s1005/bad/bad.go:55:2:staticcheck::S1005: unnecessary assignment to the blank identifier
+s1005/bad/bad.go:53:2:staticcheck::S1005: unnecessary assignment to the blank identifier
 s1006/bad/bad.go:4:2:staticcheck::S1006: should use for {} instead of for true {}
 s1006/bad/bad.go:4:2:staticcheck::SA5002: loop condition never changes or has a race condition
 s1006/bad/bad.go:4:2:staticcheck::SA5002: this loop will spin, using 100% CPU
@@ -139,7 +137,6 @@ s1016/ok/ok.go:13:1:staticcheck::ST1020: comment on exported method Copy should 
 s1017/bad/bad.go:6:2:staticcheck::S1017: should replace this if statement with an unconditional strings.TrimPrefix
 s1017/bad/bad.go:9:2:staticcheck::S1017: should replace this if statement with an unconditional strings.TrimPrefix
 s1017/bad/bad.go:10:3:staticcheck::SA4006: this value of s is never used
-s1017/ok/ok.go:7:3:staticcheck::SA4006: this value of s is never used
 s1017/ok/ok.go:7:3:staticcheck::SA4018: self-assignment of s to s
 s1018/bad/bad.go:4:2:staticcheck::S1018: should use copy() instead of loop for sliding slice elements
 s1019/bad/bad.go:3:31:staticcheck::S1019: should use make(chan int) instead

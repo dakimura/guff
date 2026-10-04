@@ -6,7 +6,7 @@
 #
 # An absent file for a case means upstream's --fix changes nothing there, and
 # guff must change nothing either.
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 --- a/bloop/bloop.go
 +++ b/bloop/bloop.go
@@ -19,72 +19,93 @@
  		go poster()
  	}
  	wg.Wait()
---- a/fmtappendf/fmtappendf.go
-+++ b/fmtappendf/fmtappendf.go
-@@ -12,10 +12,10 @@
- // The conversion has to be to `[]byte` itself. `types.Identical` is what
- // upstream asks, so a *named* byte slice keeps its own methods and its own
- // nil-vs-empty contract and is left alone; an alias still qualifies.
--func plain(x int) []byte          { return []byte(fmt.Sprintf("%d", x)) }
-+func plain(x int) []byte          { return fmt.Appendf(nil, "%d", x) }
- func named(x int) json.RawMessage { return json.RawMessage(fmt.Sprintf("%d", x)) }
- func localNamed(x int) myBytes    { return myBytes(fmt.Sprintf("%d", x)) }
--func alias(x int) aliasBytes      { return aliasBytes(fmt.Sprintf("%d", x)) }
-+func alias(x int) aliasBytes      { return fmt.Appendf(nil, "%d", x) }
- func toString(x int) string       { return string(fmt.Sprintf("%d", x)) }
+--- a/errorsastype/errorsastype.go
++++ b/errorsastype/errorsastype.go
+@@ -15,22 +15,19 @@
+ 	}
  
- // `[]byte(fmt.Sprintf(""))` is an empty but non-nil slice while
-@@ -24,39 +24,39 @@
- // one of `s v x X`. Any other verb, or one byte of literal text, and the
- // rewrite is offered. `Sprintln` always writes a newline and is never skipped.
- func fEmpty() []byte               { return []byte(fmt.Sprintf("")) }
--func fD(x int) []byte              { return []byte(fmt.Sprintf("%d", x)) }
-+func fD(x int) []byte              { return fmt.Appendf(nil, "%d", x) }
- func fS(x string) []byte           { return []byte(fmt.Sprintf("%s", x)) }
- func fV(x any) []byte              { return []byte(fmt.Sprintf("%v", x)) }
- func fLowerX(x string) []byte      { return []byte(fmt.Sprintf("%x", x)) }
- func fUpperX(x string) []byte      { return []byte(fmt.Sprintf("%X", x)) }
--func fQ(x string) []byte           { return []byte(fmt.Sprintf("%q", x)) }
--func fLeadingText(x string) []byte { return []byte(fmt.Sprintf("a%s", x)) }
-+func fQ(x string) []byte           { return fmt.Appendf(nil, "%q", x) }
-+func fLeadingText(x string) []byte { return fmt.Appendf(nil, "a%s", x) }
- func fTwoS(x, y string) []byte     { return []byte(fmt.Sprintf("%s%s", x, y)) }
- func fPrecS(x string) []byte       { return []byte(fmt.Sprintf("%.5s", x)) }
--func fPrecD(x int) []byte          { return []byte(fmt.Sprintf("%.5d", x)) }
-+func fPrecD(x int) []byte          { return fmt.Appendf(nil, "%.5d", x) }
- func fWidthS(x string) []byte      { return []byte(fmt.Sprintf("%10s", x)) }
--func fNoVerb() []byte              { return []byte(fmt.Sprintf("plain")) }
--func fPercent(x string) []byte     { return []byte(fmt.Sprintf("%%%s", x)) }
-+func fNoVerb() []byte              { return fmt.Appendf(nil, "plain") }
-+func fPercent(x string) []byte     { return fmt.Appendf(nil, "%%%s", x) }
- func fIndexed(x string) []byte     { return []byte(fmt.Sprintf("%[1]s", x)) }
--func fMixed(x int) []byte          { return []byte(fmt.Sprintf("%v%d", x, x)) }
-+func fMixed(x int) []byte          { return fmt.Appendf(nil, "%v%d", x, x) }
+ 	{
+-		var patherr *os.PathError
+-		if errors.As(err, &patherr) { // want
++		if patherr, ok := errors.AsType[*os.PathError](err); ok { // want
+ 			print(patherr)
+ 		}
+ 	}
+ 	{
+-		var patherr *os.PathError
+ 		print("not a use of patherr")
+-		if errors.As(err, &patherr) { // want
++		if patherr, ok := errors.AsType[*os.PathError](err); ok { // want
+ 			print(patherr)
+ 		}
+ 		print("also not a use of patherr")
+ 	}
+ 	{
+-		var patherr *os.PathError
+-		if errors.As(err, &patherr) { // want (unused in body → _)
++		if _, ok := errors.AsType[*os.PathError](err); ok { // want (unused in body → _)
+ 			print("not a use of patherr")
+ 		}
+ 	}
+@@ -51,35 +48,29 @@
  
- // `Sprint` has no format string of its own; the guard only bites when the first
- // argument is a constant.
--func sprintVar(x int) []byte   { return []byte(fmt.Sprint(x)) }
-+func sprintVar(x int) []byte   { return fmt.Append(nil, x) }
- func sprintEmpty() []byte      { return []byte(fmt.Sprint("")) }
- func sprintNoArgs() []byte     { return []byte(fmt.Sprint()) }
--func sprintlnVar(x int) []byte { return []byte(fmt.Sprintln(x)) }
-+func sprintlnVar(x int) []byte { return fmt.Appendln(nil, x) }
+ 	const ok = 1
+ 	{
+-		var patherr *os.PathError
+-		if errors.As(err, &patherr) { // want (shadow ok)
++		if patherr, ok := errors.AsType[*os.PathError](err); ok { // want (shadow ok)
+ 			print(patherr)
+ 		}
+ 	}
+ 	{
+-		var patherr *os.PathError
+-		if errors.As(err, &patherr) { // want (fresh ok name)
++		if patherr, ok0 := errors.AsType[*os.PathError](err); ok0 { // want (fresh ok name)
+ 			print(patherr, ok)
+ 		}
+ 	}
+ 	{
+-		var patherr *os.PathError
+-		if !errors.As(err, &patherr) { // want negated
++		if patherr, ok := errors.AsType[*os.PathError](err); !ok { // want negated
+ 			print(patherr)
+ 		}
+ 	}
+ 	{
+-		var patherr *os.PathError
+-		var linkerr *os.LinkError
+-		if errors.As(err, &patherr) { // want
++		if patherr, ok := errors.AsType[*os.PathError](err); ok { // want
+ 			print(patherr)
+-		} else if !errors.As(err, &linkerr) { // want
++		} else if _, ok := errors.AsType[*os.LinkError](err); !ok { // want
+ 			print("not a use of linkerr")
+ 		}
+ 	}
+ 	{
+-		var patherr *os.PathError
+-		if !errors.As(err, &patherr) { // want
++		if patherr, ok := errors.AsType[*os.PathError](err); !ok { // want
+ 			print("not a use of patherr")
+ 		} else {
+ 			print(patherr)
+@@ -105,8 +96,7 @@
+ 			Bar() string
+ 			error
+ 		}
+-		var target FooError
+-		if errors.As(err, &target) { // want
++		if target, ok := errors.AsType[FooError](err); ok { // want
+ 			print(target)
+ 		}
+ 	}
+--- a/importcomment/importcomment.go
++++ b/importcomment/importcomment.go
+@@ -1,3 +1,3 @@
+-package importcomment // import "example.com/obsolete"
++package importcomment
  
- // The rendering of the fix must not decide the diagnostic. `expr_text` renders
- // a call only when it has exactly one argument, so a `fmt.Sprintf` whose
- // operand is a no-argument method call came back `None` and the *finding* went
- // with it. Upstream splices source ranges and has no rendering that can fail.
- func appendfCallOperand(w writer, r request) {
--	w.Write([]byte(fmt.Sprintf("unexpected UA: %s", r.UserAgent())))
-+	w.Write(fmt.Appendf(nil, "unexpected UA: %s", r.UserAgent()))
- }
- 
- func appendfTwoArgCallOperand(w writer, r request) {
--	w.Write([]byte(fmt.Sprintf("%s %s", r.Header("a", "b"), r.UserAgent())))
-+	w.Write(fmt.Appendf(nil, "%s %s", r.Header("a", "b"), r.UserAgent()))
- }
- 
- type writer interface{ Write(p []byte) (int, error) }
+ func ok() {}
 --- a/indexcut/indexcut.go
 +++ b/indexcut/indexcut.go
 @@ -18,34 +18,34 @@
@@ -499,15 +520,49 @@
  
  package plusbuild
  
---- a/reflecttypefor/reflecttypefor.go
-+++ b/reflecttypefor/reflecttypefor.go
-@@ -9,12 +9,11 @@
+--- a/reflecttypeassert/reflecttypeassert.go
++++ b/reflecttypeassert/reflecttypeassert.go
+@@ -10,31 +10,31 @@
+ type payload struct{ n int }
+ 
+ func twoValued(v reflect.Value) {
+-	x, ok := v.Interface().(string)
++	x, ok := reflect.TypeAssert[string](v)
+ 	_, _ = x, ok
+ 
+-	p, ok := v.Interface().(payload)
++	p, ok := reflect.TypeAssert[payload](v)
+ 	_, _ = p, ok
+ 
+-	r, ok := v.Interface().(io.Reader)
++	r, ok := reflect.TypeAssert[io.Reader](v)
+ 	_, _ = r, ok
  }
  
- func typeofVar() reflect.Type {
--	var zero MyStruct
--	return reflect.TypeOf(zero)
-+	return reflect.TypeFor[MyStruct]()
+ func assignment(v reflect.Value) {
+ 	var y int
+ 	var ok bool
+-	y, ok = v.Interface().(int)
++	y, ok = reflect.TypeAssert[int](v)
+ 	_, _ = y, ok
+ }
+ 
+ func inIfInit(v reflect.Value) {
+-	if s, ok := v.Interface().(string); ok {
++	if s, ok := reflect.TypeAssert[string](v); ok {
+ 		_ = s
+ 	}
+ }
+ 
+ func receiverExpr(vs []reflect.Value) {
+-	e, ok := vs[0].Interface().(error)
++	e, ok := reflect.TypeAssert[error](vs[0])
+ 	_, _ = e, ok
+ }
+ 
+--- a/reflecttypefor/reflecttypefor.go
++++ b/reflecttypefor/reflecttypefor.go
+@@ -14,7 +14,7 @@
  }
  
  func typeofElem() reflect.Type {
@@ -516,7 +571,7 @@
  }
  
  // Interface-typed args are dynamic; must not suggest TypeFor.
-@@ -35,9 +34,9 @@
+@@ -35,9 +35,9 @@
  // writes eleven of these in a row.
  func starNew() []reflect.Type {
  	return []reflect.Type{
@@ -529,41 +584,18 @@
  	}
  }
  
-@@ -46,19 +45,19 @@
- // println or recover.
+@@ -47,8 +47,8 @@
  func pureBuiltins(s []int) []reflect.Type {
  	return []reflect.Type{
--		reflect.TypeOf(len(s)),
+ 		reflect.TypeOf(len(s)),
 -		reflect.TypeOf(make([]int, 3)),
 -		reflect.TypeOf(min(1, 2)),
-+		reflect.TypeFor[int](),
 +		reflect.TypeFor[[]int](),
 +		reflect.TypeFor[int](),
  	}
  }
  
- // Operand shapes `NoEffects` accepts that an outermost-node-only check missed.
- func operandShapes(a, b int, s []int, x any, m map[string]int, k string) []reflect.Type {
- 	return []reflect.Type{
--		reflect.TypeOf(a + b),
--		reflect.TypeOf(s[1:2]),
--		reflect.TypeOf(x.(MyStruct)),
--		reflect.TypeOf(m[k]),
-+		reflect.TypeFor[int](),
-+		reflect.TypeFor[[]int](),
-+		reflect.TypeFor[MyStruct](),
-+		reflect.TypeFor[int](),
- 	}
- }
- 
-@@ -77,13 +76,13 @@
- func elemTooLong(p *AVeryLongTypeNameIndeed, q *MyStruct) []reflect.Type {
- 	return []reflect.Type{
- 		reflect.TypeOf(p).Elem(),
--		reflect.TypeOf(q).Elem(),
-+		reflect.TypeFor[MyStruct](),
- 	}
- }
+@@ -83,7 +83,7 @@
  
  // `TypeOf((*T)(nil))` standing alone, with no `.Elem()` after it.
  func nilConversionWithoutElem() reflect.Type {
@@ -572,7 +604,7 @@
  }
  
  type List[T any] struct{ items []T }
-@@ -94,9 +93,9 @@
+@@ -94,9 +94,9 @@
  // is not "complicated" the way an unnamed `interface{}` would be.
  func nilConversions() []reflect.Type {
  	return []reflect.Type{
@@ -585,21 +617,20 @@
  	}
  }
  
-@@ -104,14 +103,12 @@
- // arguments, so a named generic instantiated with an unnamed struct or an
- // unnamed interface is still complicated.
- func generics() []reflect.Type {
--	var a List[int]
- 	var b List[struct{ N int }]
--	var c List[Expr]
- 	var d List[interface{ Bar() }]
+@@ -123,12 +123,12 @@
+ // the type-level branches measurable with operands that name only types.
+ func typeOnlyOperands() []reflect.Type {
  	return []reflect.Type{
--		reflect.TypeOf(a),
-+		reflect.TypeFor[List[int]](),
- 		reflect.TypeOf(b),
--		reflect.TypeOf(c),
-+		reflect.TypeFor[List[Expr]](),
- 		reflect.TypeOf(d),
+-		reflect.TypeOf(List[int]{}),                // FINDING
++		reflect.TypeFor[List[int]](),               // FINDING
+ 		reflect.TypeOf(List[struct{ N int }]{}),    // complicated
+-		reflect.TypeOf(List[Expr]{}),               // FINDING: a named interface
++		reflect.TypeFor[List[Expr]](),              // FINDING: a named interface
+ 		reflect.TypeOf(List[interface{ Bar() }]{}), // complicated
+ 		reflect.TypeOf(Expr(nil)),                  // an interface: dynamic
+ 		reflect.TypeOf(MyStruct{N: 1}),             // N names a field
+-		reflect.TypeOf(uint(0)),                    // FINDING: a conversion keeps its type
++		reflect.TypeFor[uint](),                    // FINDING: a conversion keeps its type
  	}
  }
 --- a/slicesbackward/slicesbackward.go
@@ -680,7 +711,7 @@
  	return found
  }
  
-@@ -122,46 +100,26 @@
+@@ -122,22 +100,12 @@
  
  // Reported: the parameter type is the element type.
  func containsFuncIdenticalParam(stack []*obj) bool {
@@ -704,33 +735,7 @@
 +	return slices.ContainsFunc(stack, ifacePred)
  }
  
- // Upstream's only test on the needle is `usesRangeVar`. There is no purity
- // check: `slices.Contains(s, strings.ToLower(k))` evaluates the needle once
- // where the loop evaluated it per element, and upstream rewrites it anyway.
- func containsCallNeedle(hide []string, key string) bool {
--	for _, k := range hide {
--		if lower(key) == k {
--			return true
--		}
--	}
--	return false
-+	return slices.Contains(hide, lower(key))
- }
- 
- type hider struct{ hide []string }
- 
- // The same with the slice behind a selector, which is how beats writes it.
- func (h *hider) containsCallNeedleField(key string) bool {
--	for _, k := range h.hide {
--		if lower(key) == k {
--			return true
--		}
--	}
--	return false
-+	return slices.Contains(h.hide, lower(key))
- }
- 
- // Silent: the needle reads the range variable.
+ // Not findings since golangci-lint 2.14.0: x/tools v0.50 requires NoEffects of
 --- a/stditerators/stditerators.go
 +++ b/stditerators/stditerators.go
 @@ -6,22 +6,22 @@
@@ -1004,43 +1009,23 @@
  		str += "!"
  	}
  	println(str, after)
---- a/stringsbuildertest/sb_test.go
-+++ b/stringsbuildertest/sb_test.go
-@@ -8,26 +8,28 @@
- // beats accumulates a status string in a loop in
- // `heartbeat/monitors/wrappers/summarizer/summarizer_test.go:173`.
+--- a/stringscut/stringscut.go
++++ b/stringscut/stringscut.go
+@@ -6,12 +6,12 @@
+ )
  
-+import "strings"
-+
- func builderInTestFile(xs []string) string {
--	s := ""
-+	var s strings.Builder
- 	for _, x := range xs {
--		s += x // FINDING
-+		s.WriteString(x) // FINDING
- 	}
--	return s
-+	return s.String()
+ func splitFirst(s string) string {
+-	x := strings.Split(s, ",")[0]
++	x, _, _ := strings.Cut(s, ",")
+ 	return x
  }
  
- // The same selection rule as in a non-test file: only the first candidate of a
- // loop nest is reported.
- func builderTwoInOneLoop(xs []string) (string, string) {
--	a := ""
-+	var a strings.Builder
- 	b := ""
- 	for _, x := range xs {
--		a += x // FINDING
-+		a.WriteString(x) // FINDING
- 		if x != "" {
- 			b += x
- 		} else {
- 			b += "_"
- 		}
- 	}
--	return a, b
-+	return a.String(), b
+ func splitNFirst(s string) string {
+-	x := strings.SplitN(s, "=", 2)[0]
++	x, _, _ := strings.Cut(s, "=")
+ 	return x
  }
+ 
 --- a/stringscutprefix/stringscutprefix.go
 +++ b/stringscutprefix/stringscutprefix.go
 @@ -6,29 +6,29 @@

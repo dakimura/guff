@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/makezero/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 bad.go:7:2:makezero::slice `x` does not have non-zero initial length
 bad.go:8:6:makezero::append to slice `x` with non-zero initialized length

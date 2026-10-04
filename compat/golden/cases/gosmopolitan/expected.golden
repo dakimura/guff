@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/gosmopolitan/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 bad.go:5:10:gosmopolitan::string literal contains rune in Han script
 bad.go:8:11:gosmopolitan::usage of time.Local

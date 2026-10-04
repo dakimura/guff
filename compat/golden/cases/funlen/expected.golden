@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/funlen/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 bad.go:6:6:funlen::Function 'TooLong' is too long (14 > 10)
 bad.go:23:6:funlen::Function 'TooManyStatements' has too many statements (24 > 10)

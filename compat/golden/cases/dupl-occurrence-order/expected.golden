@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/dupl-occurrence-order/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 v1/a2.go:3:0:dupl::3-29 lines are duplicate of `v1/u2.go:3-29`
 v1/u2.go:3:0:dupl::3-29 lines are duplicate of `v1/a2.go:3-29`

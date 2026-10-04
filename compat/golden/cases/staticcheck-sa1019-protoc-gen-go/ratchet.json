@@ -1,0 +1,6 @@
+{
+  "missing": 2,
+  "extra": 2,
+  "why": "staticcheck v0.8.1 (golangci-lint 2.14.0): SA1019 SelectorName rendering. Ledger: staticcheck-checks #1, #2. Recorded when the pin moved 2.12.2 -> 2.14.0; see docs/PHASE8-LEDGER.md §5.1.",
+  "target": "0/0 — docs/PHASE8-LEDGER.md §6 names the PR that closes it."
+}

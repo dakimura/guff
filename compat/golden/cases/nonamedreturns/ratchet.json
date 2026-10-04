@@ -1,0 +1,6 @@
+{
+  "missing": 14,
+  "extra": 14,
+  "why": "nonamedreturns v1.0.8 (golangci-lint 2.14.0) reports at the named result instead of at the func. Ledger: small-a #1. Recorded when the pin moved 2.12.2 -> 2.14.0; see docs/PHASE8-LEDGER.md §5.1.",
+  "target": "0/0 — docs/PHASE8-LEDGER.md §6 names the PR that closes it."
+}

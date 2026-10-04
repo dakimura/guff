@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/errorlint/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 bad/bad.go:8:9:errorlint::comparing with == will fail on wrapped errors. Use errors.Is to check for a specific error
 bad/bad.go:25:16:errorlint::type assertion on error will fail on wrapped errors. Use errors.As to check for specific errors

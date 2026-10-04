@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/godoclint-no-unused-link/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 links.go:1:1:godoclint::godoc has unused link ("pkgunused")
 links.go:22:1:godoclint::godoc has unused link ("dangling")

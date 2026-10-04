@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/revive-severity-rule/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 settings/settings.go:23:5:revive:warning:error-naming: error var BadError should have name of the form ErrFoo
 settings/settings.go:27:2:revive:error:increment-decrement: should replace i += 1 with i++

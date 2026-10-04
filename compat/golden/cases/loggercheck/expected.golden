@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/loggercheck/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 bad.go:10:19:loggercheck::odd number of arguments passed as key-value pairs for logging
 bad.go:14:19:loggercheck::logging keys are expected to be inlined constant strings, please replace "42" provided with string

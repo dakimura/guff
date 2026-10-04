@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/gosec-g601/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 g601/g601.go:23:50:gosec:medium:G601: Implicit memory aliasing in for loop.
 g601/g601.go:24:48:gosec:medium:G601: Implicit memory aliasing in for loop.

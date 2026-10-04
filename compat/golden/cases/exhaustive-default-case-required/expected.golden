@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/exhaustive-default-case-required/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.12.2
+# golangci-lint: 2.14.0
 
 bad.go:16:2:exhaustive::missing default case in switch of type p.Color
 bad.go:25:13:exhaustive::missing keys in map of key type p.Color: p.Blue
@@ -13,11 +13,18 @@ directives.go:21:2:exhaustive::missing default case in switch of type p.Color
 directives.go:43:2:exhaustive::missing default case in switch of type p.Color
 directives.go:58:2:exhaustive::missing default case in switch of type p.Color
 directives.go:85:2:exhaustive::missing default case in switch of type p.Color
+directives.go:104:2:exhaustive::failed to parse directives: conflicting directives "ignore" and "enforce"
+directives.go:116:2:exhaustive::failed to parse directives: invalid directive "ignoreme"
+directives.go:116:2:exhaustive::missing default case in switch of type p.Color
+directives.go:127:2:exhaustive::failed to parse directives: invalid directive "enforcement"
 directives.go:127:2:exhaustive::missing default case in switch of type p.Color
 directives.go:139:2:exhaustive::missing default case in switch of type p.Color
 directives.go:150:19:exhaustive::missing keys in map of key type p.Color: p.Blue
 directives.go:162:21:exhaustive::missing keys in map of key type p.Color: p.Blue
+directives.go:172:31:exhaustive::missing keys in map of key type p.Color: p.Blue
 directives.go:178:32:exhaustive::missing keys in map of key type p.Color: p.Blue
+directives.go:184:26:exhaustive::failed to parse directives: invalid directive "ignoreme"
+directives.go:184:26:exhaustive::missing keys in map of key type p.Color: p.Blue
 directives.go:191:9:exhaustive::missing keys in map of key type p.Color: p.Blue
 directives.go:199:7:exhaustive::missing keys in map of key type p.Color: p.Blue
 directives.go:208:16:exhaustive::missing keys in map of key type p.Color: p.Blue
@@ -32,5 +39,6 @@ foreign.go:20:2:exhaustive::missing default case in switch of type enumdep.Flag
 foreign.go:29:2:exhaustive::missing default case in switch of type enumdep.Kind
 foreign.go:42:2:exhaustive::missing default case in switch of type enumdep.Mostly
 foreign.go:51:2:exhaustive::missing cases in switch of type enumdep.Kind: enumdep.KindA, enumdep.KindM
+foreign.go:62:2:exhaustive::missing default case in switch of type enumdep.Kind
 foreign.go:82:2:exhaustive::missing default case in switch of type enumdep.Kind
 foreign.go:99:18:exhaustive::missing keys in map of key type enumdep.Kind: enumdep.KindA, enumdep.KindM
