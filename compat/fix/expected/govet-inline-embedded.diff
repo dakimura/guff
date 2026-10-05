@@ -1,0 +1,33 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh govet-inline-embedded
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/govet-inline-embedded/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.14.0
+
+--- a/a/a.go
++++ b/a/a.go
+@@ -17,6 +17,6 @@
+ 
+ // x/tools issue78994: a parameter or result without a name is not an
+ // embedded field.
+-func f(Value) Value { return 1 }
++func f(Val) Val { return 1 }
+ 
+-var x []Value
++var x []Val
+--- a/b/b.go
++++ b/b/b.go
+@@ -14,7 +14,7 @@
+ type Val = a.Val
+ 
+ type R struct {
+-	Val
++	a.Val
+ }
+ 
+-var _ a.Value
++var _ a.Val

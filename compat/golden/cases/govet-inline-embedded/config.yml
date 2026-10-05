@@ -1,0 +1,22 @@
+# Golden case: x/tools v0.50's inline analyzer decides "embedded field" from
+# Defs[id].(*types.Var).Embedded() instead of the syntax (issue78994): local,
+# pointer and qualified embeddings of an alias are not inlined unless the
+# alias has its target's name; unnamed parameters/results still are.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+  settings:
+    govet:
+      enable:
+        - inline
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

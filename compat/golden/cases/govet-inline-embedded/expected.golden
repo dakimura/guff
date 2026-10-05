@@ -1,0 +1,13 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh govet-inline-embedded
+# Produced by running golangci-lint on compat/golden/cases/govet-inline-embedded/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+a/a.go:20:8:govet::inline: Type alias Value should be inlined
+a/a.go:20:15:govet::inline: Type alias Value should be inlined
+a/a.go:22:9:govet::inline: Type alias Value should be inlined
+b/b.go:17:2:govet::inline: Type alias Val should be inlined
+b/b.go:20:7:govet::inline: Type alias a.Value should be inlined
