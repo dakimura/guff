@@ -1,0 +1,18 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh canonicalheader-exclusions
+# Produced by running golangci-lint on compat/golden/cases/canonicalheader-exclusions/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+bad.go:6:12:canonicalheader::use "Content-Type" instead of "content-type"
+bad.go:13:8:canonicalheader::use "x-request-ID" instead of "x-request-id"
+bad.go:14:8:canonicalheader::use "Accept-Encoding" instead of "accept-encoding"
+bad.go:15:8:canonicalheader::use "User-Agent" instead of "user-agent"
+bad.go:16:15:canonicalheader::use "If-None-Match" instead of "if-none-match"
+bad.go:23:12:canonicalheader::use "ETAG" instead of "etag"
+bad.go:24:12:canonicalheader::use "Www-Authenticate" instead of "www-authenticate"
+bad.go:25:12:canonicalheader::use "x-request-ID" instead of "x-request-id"
+fieldonly/fieldonly.go:13:19:canonicalheader::use "Content-Type" instead of "content-type"
+fieldonly/fieldonly.go:14:22:canonicalheader::use "If-None-Match" instead of "if-none-match"

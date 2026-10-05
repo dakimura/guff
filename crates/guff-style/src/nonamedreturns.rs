@@ -1048,12 +1048,10 @@ fn check_results(
     pass: &Pass<'_>,
     results: &FieldList,
     body: &BlockStmt,
-    // Upstream reports the **function**, not the named return: `func_pos` is
-    // the `func` keyword, which is `(*ast.FuncDecl).Pos()` and
-    // `(*ast.FuncLit).Pos()` alike. Reporting the identifier put every finding
-    // a dozen columns to the right — invisible to the isolate and OSS keys,
-    // which carry no column.
-    func_pos: u32,
+    // Unused since nonamedreturns v1.0.8 (golangci-lint 2.14.0), which reports
+    // `n.Pos()` — the named result itself. v1.0.6 reported the function (the
+    // `func` keyword), and guff followed that until the 2.14.0 pin.
+    _func_pos: u32,
     opts: &NonamedreturnsOptions,
     pending: &mut Vec<(u32, String)>,
 ) {
@@ -1081,7 +1079,7 @@ fn check_results(
                 };
                 if referenced.contains(&obj) || *has_naked {
                     pending.push((
-                        func_pos,
+                        name.name_pos.0 as u32,
                         format!(
                             "named return \"{}\" with type \"{}\" must not be referenced or used by a naked return",
                             name.name, ty_str
@@ -1126,7 +1124,7 @@ fn check_results(
             }
 
             pending.push((
-                func_pos,
+                name.name_pos.0 as u32,
                 format!(
                     "named return \"{}\" with type \"{}\" found",
                     name.name, ty_str

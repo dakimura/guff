@@ -2696,46 +2696,20 @@ fn canonicalheader_flags_non_canonical_keys() {
     let pkg =
         support::typecheck_fixture("canonicalheader", "example.com/canonicalheader", "bad.go");
     let messages = support::run_analyzer(canonicalheader(), &pkg);
+    // The golangci/canonicalheader fork (golangci-lint 2.14.0): one message,
+    // `use <canonical> instead of <given>`, for literals and constants alike.
+    let has = |m: &str| messages.iter().any(|x| x == m);
+    assert!(has("use \"Test-Header\" instead of \"Test-HEader\""), "{messages:?}");
     assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("non-canonical header \"Test-Header\"")
-                || m.contains("non-canonical header \"Test-HEader\"")),
+        has("use \"Raw-String-Literal\" instead of \"Raw-STRING-Literal\""),
         "{messages:?}"
     );
-    assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("non-canonical header \"Raw-STRING-Literal\"")
-                || m.contains("instead use: \"Raw-String-Literal\"")),
-        "{messages:?}"
-    );
-    assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("non-canonical header \"testHeaderValue\"")
-                || m.contains("instead use: \"Testheadervalue\"")),
-        "{messages:?}"
-    );
-    // `etag` is **not** reported. Upstream's `canonicalHeaderKey` returns
-    // `isWellKnown` when the MIME-canonical form is in the initialism table,
-    // and its caller returns on that — so the table only ever suppresses:
-    //
-    //     if argValue == headerKeyCanonical || isWellKnown { return }
-    //
-    // This test used to assert the opposite, and no tier could see it: the
-    // isolate fixture reached the linter through `content-type` alone.
-    assert!(
-        !messages.iter().any(|m| m.contains("\"etag\"")),
-        "etag canonicalizes into the initialism table, so upstream is silent: {messages:?}"
-    );
-    assert!(
-        !messages
-            .iter()
-            .any(|m| m.contains("\"www-authenticate\"")),
-        "{messages:?}"
-    );
-    assert!(messages.len() >= 6, "{messages:?}");
+    assert!(has("use \"Testheadervalue\" instead of \"testHeaderValue\""), "{messages:?}");
+    // `etag` **is** reported, with the table's spelling. lasiar's version
+    // (golangci-lint 2.12.2) returned on `isWellKnown` and stayed silent; the
+    // fork makes the table the canonical spelling instead.
+    assert!(has("use \"ETag\" instead of \"etag\""), "{messages:?}");
+    assert!(messages.len() >= 7, "{messages:?}");
 }
 
 /// Upstream's `headerObject` scan decides whether the package is checked at
@@ -2783,8 +2757,8 @@ fn canonicalheader_checks_when_the_request_field_is_used() {
     assert_eq!(
         messages,
         vec![
-            "non-canonical header \"content-type\", instead use: \"Content-Type\"",
-            "non-canonical header \"if-none-match\", instead use: \"If-None-Match\"",
+            "use \"Content-Type\" instead of \"content-type\"",
+            "use \"If-None-Match\" instead of \"if-none-match\"",
         ],
         "{messages:?}"
     );

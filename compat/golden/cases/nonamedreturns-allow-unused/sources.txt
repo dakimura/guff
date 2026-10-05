@@ -1,0 +1,2 @@
+# The fixture the isolate tier uses, so the two cannot drift.
+bad/bad.go   compat/isolate/fixtures/nonamedreturns/bad.go

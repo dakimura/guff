@@ -175,6 +175,7 @@ mod wastedassign;
 mod zerologlint;
 
 pub use options::{
+    CanonicalheaderOptions,
     AsasalintOptions, BidichkOptions, CopyloopvarOptions, CyclopOptions, DecorderOptions,
     DogsledOptions, EmbeddedstructfieldcheckOptions, ExhaustiveOptions, ExhaustructOptions,
     ForbidigoOptions, ForbidigoPattern, FuncorderOptions, FunlenOptions, GochecksumtypeOptions,

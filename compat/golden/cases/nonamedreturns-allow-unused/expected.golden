@@ -1,0 +1,12 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh nonamedreturns-allow-unused
+# Produced by running golangci-lint on compat/golden/cases/nonamedreturns-allow-unused/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+bad/bad.go:3:13:nonamedreturns::named return "n" with type "int" must not be referenced or used by a naked return
+bad/bad.go:39:27:nonamedreturns::named return "s" with type "struct{A int}" must not be referenced or used by a naked return
+bad/bad.go:43:20:nonamedreturns::named return "p" with type "Pair[string, int]" must not be referenced or used by a naked return
+bad/bad.go:49:24:nonamedreturns::named return "a" with type "[3]<-chan struct{B bool}" must not be referenced or used by a naked return

@@ -1,0 +1,56 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh canonicalheader-exclusions
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/canonicalheader-exclusions/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.14.0
+
+--- a/bad.go
++++ b/bad.go
+@@ -3,24 +3,24 @@
+ import "net/http"
+ 
+ func Bad(h http.Header) {
+-	_ = h.Get("content-type")
++	_ = h.Get("Content-Type")
+ }
+ 
+ // The message quotes the header it saw and the canonical spelling, so every
+ // header name is a different sentence. `Set`, `Add` and `Del` are separate call
+ // sites upstream matches, not just `Get`.
+ func More(h http.Header) {
+-	h.Set("x-request-id", "1")
+-	h.Add("accept-encoding", "gzip")
+-	h.Del("user-agent")
+-	_ = h.Values("if-none-match")
++	h.Set("x-request-ID", "1")
++	h.Add("Accept-Encoding", "gzip")
++	h.Del("User-Agent")
++	_ = h.Values("If-None-Match")
+ }
+ 
+ // Negatives: a header whose MIME-canonical form is in upstream's initialism
+ // table is **not** reported at all — the table suppresses rather than
+ // suggests. guff used to report these with the mapped spelling.
+ func WellKnownAreSilent(h http.Header) {
+-	_ = h.Get("etag")
+-	_ = h.Get("www-authenticate")
+-	_ = h.Get("x-request-id")
++	_ = h.Get("ETAG")
++	_ = h.Get("Www-Authenticate")
++	_ = h.Get("x-request-ID")
+ }
+--- a/fieldonly/fieldonly.go
++++ b/fieldonly/fieldonly.go
+@@ -10,6 +10,6 @@
+ import "net/http"
+ 
+ func Reported(r *http.Request) {
+-	_ = r.Header.Get("content-type")
+-	_ = r.Header.Values("if-none-match")
++	_ = r.Header.Get("Content-Type")
++	_ = r.Header.Values("If-None-Match")
+ }
