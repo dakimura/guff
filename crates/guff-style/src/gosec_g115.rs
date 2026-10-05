@@ -1650,7 +1650,10 @@ impl<'a> RangeAnalyzer<'a> {
                                     arg_res.max_value_set,
                                     is_src_unsigned,
                                 );
-                                res.max_value_set = res.max_value_set && arg_res.max_value_set;
+                                // gosec v2.29.0: `||` — min(x, c) is bounded
+                                // above by c even when x is not (and dually
+                                // for max's lower bound below).
+                                res.max_value_set = res.max_value_set || arg_res.max_value_set;
                             } else {
                                 res.min_value = max_bounds(
                                     res.min_value,
@@ -1659,7 +1662,7 @@ impl<'a> RangeAnalyzer<'a> {
                                     arg_res.min_value_set,
                                     is_src_unsigned,
                                 );
-                                res.min_value_set = res.min_value_set && arg_res.min_value_set;
+                                res.min_value_set = res.min_value_set || arg_res.min_value_set;
                                 res.max_value = max_bounds(
                                     res.max_value,
                                     res.max_value_set,

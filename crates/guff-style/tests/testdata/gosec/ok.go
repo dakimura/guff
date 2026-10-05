@@ -195,7 +195,7 @@ func (s *safeRand) Int() int { return s.r.Int() }
 
 func (s *safeRand) Perm(n int) []int { return s.r.Perm(n) }
 
-// `Perm` and `Shuffle` are not on gosec's list even package-qualified.
+// Package-qualified `Perm` and `Shuffle` are G404 since gosec v2.29.0.
 func okPerm(n int) []int { return rand.Perm(n) }
 
 func okShuffle(xs []int) {

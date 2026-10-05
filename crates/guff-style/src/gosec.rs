@@ -156,13 +156,12 @@ const RULES: &[RuleDef] = &[
     },
     RuleDef {
         id: "G404",
-        // gosec v2.26.1 `rules/rand.go`, verbatim. `Perm`, `Shuffle` and
-        // `ExpFloat64` are *not* on it — they were guff additions, and with
-        // the package-qualified match in place they were the only remaining
-        // way `rand.Perm(n)` could be a finding upstream is silent on.
+        // gosec v2.29.0 `rules/rand.go`, verbatim (v2.29.0 added `ExpFloat64`,
+        // `Perm`, `Shuffle` and v2's `Uint`).
         calls: &[
             ("math/rand", "New"),
             ("math/rand", "Read"),
+            ("math/rand", "ExpFloat64"),
             ("math/rand", "Float32"),
             ("math/rand", "Float64"),
             ("math/rand", "Int"),
@@ -172,9 +171,12 @@ const RULES: &[RuleDef] = &[
             ("math/rand", "Int63n"),
             ("math/rand", "Intn"),
             ("math/rand", "NormFloat64"),
+            ("math/rand", "Perm"),
+            ("math/rand", "Shuffle"),
             ("math/rand", "Uint32"),
             ("math/rand", "Uint64"),
             ("math/rand/v2", "New"),
+            ("math/rand/v2", "ExpFloat64"),
             ("math/rand/v2", "Float32"),
             ("math/rand/v2", "Float64"),
             ("math/rand/v2", "Int"),
@@ -185,6 +187,9 @@ const RULES: &[RuleDef] = &[
             ("math/rand/v2", "IntN"),
             ("math/rand/v2", "N"),
             ("math/rand/v2", "NormFloat64"),
+            ("math/rand/v2", "Perm"),
+            ("math/rand/v2", "Shuffle"),
+            ("math/rand/v2", "Uint"),
             ("math/rand/v2", "Uint32"),
             ("math/rand/v2", "Uint32N"),
             ("math/rand/v2", "Uint64"),
@@ -1031,7 +1036,9 @@ fn g202_try_resolve(pass: &Pass<'_>, file: &File, e: &Expr) -> bool {
         Expr::CompositeLit(lit) => {
             !lit.elts.is_empty() && lit.elts.iter().all(|el| g202_try_resolve(pass, file, el))
         }
-        Expr::CallExpr(_) => false,
+        Expr::CallExpr(call) => {
+            builder_string_is_const(pass, file, call, &mut |a| g202_try_resolve(pass, file, a))
+        }
         Expr::Ident(id) => g202_resolve_ident(pass, file, id),
         _ => false,
     }
@@ -3000,6 +3007,7 @@ enum DeclNode<'a> {
 /// a definition this file does not contain is a miss, and a miss means
 /// "no Obj".
 struct FileDecls<'a> {
+    file: &'a guff::ast::File,
     /// Defining-ident position → its declaration, when `TryResolve` handles it.
     decls: HashMap<u32, DeclNode<'a>>,
     /// Every object defined in this file. A hit here without an entry in
@@ -3015,6 +3023,7 @@ struct FileDecls<'a> {
 impl<'a> FileDecls<'a> {
     fn build(pass: &Pass<'_>, file: &'a guff::ast::File) -> Self {
         let mut out = FileDecls {
+            file,
             decls: HashMap::new(),
             defined_here: HashSet::new(),
             bodies: Vec::new(),
@@ -3091,7 +3100,9 @@ fn try_resolve(pass: &Pass<'_>, decls: &FileDecls<'_>, expr: &Expr, depth: u32) 
                     .all(|e| try_resolve(pass, decls, e, depth + 1))
         }
         Expr::Ident(id) => resolve_ident(pass, decls, id, depth),
-        Expr::CallExpr(_) => false, // upstream `resolveCallExpr` is a stub
+        Expr::CallExpr(call) => builder_string_is_const(pass, decls.file, call, &mut |a| {
+            try_resolve(pass, decls, a, depth + 1)
+        }),
         Expr::BinaryExpr(b) => {
             try_resolve(pass, decls, &b.x, depth + 1) && try_resolve(pass, decls, &b.y, depth + 1)
         }
@@ -3103,6 +3114,118 @@ fn try_resolve(pass: &Pass<'_>, decls: &FileDecls<'_>, expr: &Expr, depth: u32) 
         Expr::SliceExpr(sl) => try_resolve(pass, decls, &sl.x, depth + 1),
         _ => false,
     }
+}
+
+/// gosec v2.29.0 `resolveCallExpr`: `b.String()` on a local `strings.Builder`
+/// or `bytes.Buffer` resolves when every value written to `b` in this file
+/// resolves (`builderWritesAreConst`). Any other call does not.
+///
+/// `resolve` is the caller's `TryResolve`; guff has two (G202's and the
+/// `FileDecls` one), and each recurses through its own.
+fn builder_string_is_const(
+    pass: &Pass<'_>,
+    file: &File,
+    call: &CallExpr,
+    resolve: &mut dyn FnMut(&Expr) -> bool,
+) -> bool {
+    // `builderStringReceiver`.
+    let Expr::SelectorExpr(sel) = &*call.fun else {
+        return false;
+    };
+    if sel.sel.name != "String" || !call.args.is_empty() {
+        return false;
+    }
+    let Expr::Ident(recv) = &*sel.x else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(typ) = pass.types_info().and_then(|i| i.types.get(&recv.id)).map(|tv| tv.typ) else {
+        return false;
+    };
+    // `isStringBuilderType`: a pointer is looked through, an alias is not.
+    let typ = match artifacts.types.get(typ) {
+        TypeData::Pointer(p) => p.elem(),
+        _ => typ,
+    };
+    if !matches!(artifacts.types.get(typ), TypeData::Named(_))
+        || !(code::type_with_name(pass, typ, "strings.Builder")
+            || code::type_with_name(pass, typ, "bytes.Buffer"))
+    {
+        return false;
+    }
+    let Some(obj) = code::object_of(pass, recv) else {
+        return false;
+    };
+    // Only local builders: a package-level one may be written elsewhere.
+    let pkg_scope = obj.pkg(&artifacts.objects).map(|p| artifacts.packages.get(p).scope());
+    if pkg_scope.is_some() && obj.parent(&artifacts.objects) == pkg_scope {
+        return false;
+    }
+
+    // `builderWritesAreConst`.
+    let is_obj = |id: &Ident| code::object_of(pass, id) == Some(obj);
+    let mut all_refs: HashSet<u32> = HashSet::new();
+    let mut accounted: HashSet<u32> = HashSet::new();
+    let mut safe = true;
+    preorder(NodeRef::File(file), |n| {
+        match n {
+            NodeRef::Ident(id) if is_obj(id) => {
+                all_refs.insert(id.id);
+            }
+            NodeRef::ValueSpec(vs) => {
+                for name in &vs.names {
+                    if is_obj(name) {
+                        accounted.insert(name.id);
+                    }
+                }
+            }
+            NodeRef::AssignStmt(a) if a.tok == Some(Token::DEFINE) => {
+                for (i, lhs) in a.lhs.iter().enumerate() {
+                    let Expr::Ident(id) = lhs else { continue };
+                    if !is_obj(id) {
+                        continue;
+                    }
+                    accounted.insert(id.id);
+                    // Only an empty composite literal is a known-empty start.
+                    let empty = a.lhs.len() == a.rhs.len() && {
+                        let mut e = &a.rhs[i];
+                        if let Expr::UnaryExpr(u) = e {
+                            if u.op == Token::AND {
+                                e = &u.x;
+                            }
+                        }
+                        matches!(e, Expr::CompositeLit(cl) if cl.elts.is_empty())
+                    };
+                    if !empty {
+                        safe = false;
+                    }
+                }
+            }
+            NodeRef::CallExpr(c) => {
+                if let Expr::SelectorExpr(s) = &*c.fun {
+                    if let Expr::Ident(r) = &*s.x {
+                        if is_obj(r) {
+                            accounted.insert(r.id);
+                            match s.sel.name.as_str() {
+                                "WriteString" | "WriteByte" | "WriteRune" | "Write" => {
+                                    if !c.args.iter().all(|a| resolve(a)) {
+                                        safe = false;
+                                    }
+                                }
+                                "String" | "Len" | "Cap" | "Reset" | "Grow" => {}
+                                _ => safe = false,
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        true
+    });
+    safe && all_refs.is_subset(&accounted)
 }
 
 /// `resolveIdent`: only `ast.Var` objects are followed; everything else
