@@ -399,7 +399,7 @@ fn file_cache() -> &'static Mutex<HashMap<String, CachedFile>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn file_stamp(path: &str) -> Option<(u64, SystemTime)> {
+pub(crate) fn file_stamp(path: &str) -> Option<(u64, SystemTime)> {
     let md = std::fs::metadata(path).ok()?;
     Some((md.len(), md.modified().ok()?))
 }
@@ -435,7 +435,7 @@ fn has_path_prefix(path: &str, prefix: &str) -> bool {
 }
 
 /// `isGoRootFile`: the standard library is never read for directives.
-fn is_goroot_file(filename: &str) -> bool {
+pub(crate) fn is_goroot_file(filename: &str) -> bool {
     has_path_prefix(filename, "$GOROOT") || goroot().is_some_and(|g| has_path_prefix(filename, g))
 }
 

@@ -998,3 +998,85 @@ fn every_isolate_linter_name_resolves() {
          nothing, so `guff run` now refuses configs golangci-lint accepts: {missing:?}"
     );
 }
+
+/// golangci-lint 2.14.0's gochecksumtype returns `notFoundError` from `run`
+/// when a `//sumtype:decl` documents a declaration with no `TypeSpec`, and an
+/// analyzer error fails the whole `goanalysis_metalinter`: no issue of any
+/// linter is printed, stderr carries the two log lines below, exit code 3.
+///
+/// Measured against golangci-lint 2.14.0 on the first fixture. Run twice on
+/// one cache: upstream does not save issues from a failed run, so the second
+/// run must fail the same way rather than replay a cached partial result.
+#[test]
+fn cli_run_fails_on_sumtype_decl_without_type_spec() {
+    const WANT_STDERR: &str = "level=warning msg=\"[runner] Can't run linter goanalysis_metalinter: \
+gochecksumtype: type '' is not defined\"\n\
+level=error msg=\"Running error: can't run linter goanalysis_metalinter\\ngochecksumtype: \
+type '' is not defined\"\n";
+    let tmp = tempfile::TempDir::new().unwrap();
+    let cache_dir = tmp.path().join("guff-cache");
+    let module = tmp.path().join("m");
+    std::fs::create_dir_all(module.join("brk")).unwrap();
+    std::fs::create_dir_all(module.join("user")).unwrap();
+    std::fs::write(module.join("go.mod"), "module example.com/m\n\ngo 1.24\n").unwrap();
+    std::fs::write(
+        module.join("brk/brk.go"),
+        "package brk\n\n//sumtype:decl\nvar X = 1\n\n//sumtype:decl\ntype T interface{ t() }\n\n\
+         type A struct{}\n\nfunc (A) t() {}\n",
+    )
+    .unwrap();
+    // A finding of another linter, which the failed run must not print.
+    std::fs::write(
+        module.join("user/user.go"),
+        "package user\n\nimport (\n\t\"fmt\"\n\n\t\"example.com/m/brk\"\n)\n\n\
+         func F(t brk.T) {\n\tswitch t.(type) {\n\t}\n\tfmt.Printf(\"%d\\n\", \"x\")\n}\n",
+    )
+    .unwrap();
+    let cfg = module.join(".golangci.yml");
+    std::fs::write(
+        &cfg,
+        "version: \"2\"\nlinters:\n  default: none\n  enable: [gochecksumtype, govet]\n",
+    )
+    .unwrap();
+
+    // `./...` analyses brk itself; `./user/...` reaches it only as an import,
+    // read from source because guff does not analyse it.
+    for pattern in ["./...", "./...", "./user/...", "./user/..."] {
+        let out = Command::new(bin())
+            .args(["run", "-c"])
+            .arg(&cfg)
+            .arg(pattern)
+            .current_dir(&module)
+            .env("GUFF_CACHE", &cache_dir)
+            .output()
+            .expect("spawn guff run");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(
+            out.status.code(),
+            Some(guff_lint::EXIT_RUN_FAILURE),
+            "{pattern}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+        assert!(stdout.is_empty(), "{pattern}: a failed run prints no issue:\n{stdout}");
+        assert_eq!(stderr, WANT_STDERR, "{pattern}");
+    }
+
+    // Fixed, the same cache reports both linters' findings.
+    std::fs::write(
+        module.join("brk/brk.go"),
+        "package brk\n\n//sumtype:decl\ntype T interface{ t() }\n\ntype A struct{}\n\nfunc (A) t() {}\n",
+    )
+    .unwrap();
+    let out = Command::new(bin())
+        .args(["run", "-c"])
+        .arg(&cfg)
+        .arg("./...")
+        .current_dir(&module)
+        .env("GUFF_CACHE", &cache_dir)
+        .output()
+        .expect("spawn guff run");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(1), "stdout:\n{stdout}");
+    assert!(stdout.contains("missing cases for A (gochecksumtype)"), "{stdout}");
+    assert!(stdout.contains("(govet)"), "{stdout}");
+}

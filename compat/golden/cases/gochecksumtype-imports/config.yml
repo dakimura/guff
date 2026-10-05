@@ -1,0 +1,29 @@
+# Golden case: gochecksumtype across packages (golangci-lint 2.14.0's
+# sumTypeFact), on guff's own fixture.
+#
+# - user switches over ops.Op, declared in the main module, and over
+#   sumdep.Shape / sumdep.Event, declared in another module (a `replace` to
+#   ./sumdep, so `./...` never makes it a root): golangci analyses both for
+#   facts, guff reads the second from its source.
+# - aliases and generic types are not variants; a defined type over the sum
+#   type's interface is checked as the sum type; an unexported variant counts.
+# - far reaches sumdep.Shape only through user, which declares no sum type:
+#   facts are imported from direct imports only.
+# - a `//sumtype:decl` inside a function body is "not defined".
+# - linedir: `//line` directives to a .go and a non-.go file, on the
+#   declaration ("from" location) and on the switches (issue position).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gochecksumtype
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

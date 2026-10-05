@@ -39,7 +39,7 @@ pub use ssa_util::{
     is_nil_const, param_value, referrers, short_call_name, store_modifies_param, terminates,
     walk_dominated,
 };
-pub use analyzer::{AnalysisResult, Analyzer, RunError, RunFn};
+pub use analyzer::{as_run_failure, run_failure, AnalysisResult, Analyzer, RunError, RunFn};
 pub use diagnostic::{Diagnostic, RelatedInformation, SuggestedFix, TextEdit};
 pub use passes::facts::generated::{GeneratedResult, Generator};
 pub use fact_codec::{

@@ -142,8 +142,12 @@ pub fn run_on_packages(
         )?
     };
 
+    // golangci's `runAnalyzers` saves issues only `if len(errs) == 0`: a run
+    // that failed must fail again next time rather than replay a partial set.
     if let Some(cache) = &opts.cache {
-        save_to_cache(cache, &to_analyze, &graph.root_diagnostics());
+        if graph.run_failures().is_empty() {
+            save_to_cache(cache, &to_analyze, &graph.root_diagnostics());
+        }
     }
 
     let mut pkgs = packages.to_vec();

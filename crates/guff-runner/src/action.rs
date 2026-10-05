@@ -604,7 +604,9 @@ impl Action {
         };
         let encoded = encode_action_facts(&facts, &self.package);
         if let Some(cache) = &self.cache {
-            if !self.analyzer.fact_types.is_empty() {
+            // A failed run persists nothing: a cached (empty) fact set would
+            // let the next run skip this action and lose the error with it.
+            if !self.analyzer.fact_types.is_empty() && run_result.is_ok() {
                 let _ = cache.put_facts(
                     &self.package,
                     HashMode::NeedAllDeps,
@@ -721,6 +723,26 @@ impl Graph {
 
     pub fn all_actions(&self) -> &[Arc<Action>] {
         &self.all
+    }
+
+    /// The errors built with [`guff_analysis::run_failure`], from any action —
+    /// a dependency's included, as golangci's `extract` visits the whole graph
+    /// — rendered `analyzer: message` like upstream's
+    /// `fmt.Errorf("%s: %w", act.Analyzer.Name, act.Err)`. Dependencies come
+    /// before their importers. A non-empty answer means the run failed.
+    pub fn run_failures(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        for act in &self.all {
+            if let Some(err) = act.error() {
+                if let Some(msg) = guff_analysis::as_run_failure(&err) {
+                    let line = format!("{}: {}", act.analyzer.name, msg);
+                    if !out.contains(&line) {
+                        out.push(line);
+                    }
+                }
+            }
+        }
+        out
     }
 
     /// Diagnostics from the root actions, de-duplicated the way golangci-lint

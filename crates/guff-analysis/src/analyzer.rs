@@ -11,6 +11,26 @@ use crate::pass::Pass;
 /// Error returned from an analyzer [`Run`](Analyzer::run) function.
 pub type RunError = String;
 
+/// Marks a [`RunError`] built by [`run_failure`].
+const RUN_FAILURE_MARK: &str = "\u{1}run-failure\u{1}";
+
+/// A [`RunError`] for an error the *upstream* analyzer returns from `run`.
+///
+/// golangci-lint fails the whole `goanalysis_metalinter` on any analyzer
+/// error: nothing but `Running error` is printed and the process exits 3.
+/// guff's own `RunError`s are mostly skips with no upstream counterpart
+/// (ill-typed packages, missing prerequisites), so the runner keeps dropping
+/// those and only an error made here takes the run down. guff-lint asks for
+/// them with `Graph::run_failures` and renders them as upstream does.
+pub fn run_failure(message: impl Into<String>) -> RunError {
+    format!("{RUN_FAILURE_MARK}{}", message.into())
+}
+
+/// The message of an error built by [`run_failure`]; `None` for any other.
+pub fn as_run_failure(err: &str) -> Option<&str> {
+    err.strip_prefix(RUN_FAILURE_MARK)
+}
+
 /// Optional result produced by an analyzer for its dependents.
 ///
 /// `Sync` (not just `Send`) so the action runner can share one `Arc<AnalysisResult>`

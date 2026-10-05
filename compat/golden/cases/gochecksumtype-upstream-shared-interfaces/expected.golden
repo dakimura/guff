@@ -1,0 +1,9 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh gochecksumtype-upstream-shared-interfaces
+# Produced by running golangci-lint on compat/golden/cases/gochecksumtype-upstream-shared-interfaces/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+missing_two/main.go:20:2:gochecksumtype::exhaustiveness check failed for sum type "T" (from missing_two/main.go:5:6): missing cases for B, C
