@@ -1,0 +1,19 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh exhaustruct-v5-allow-empty-blank-assignments
+# Produced by running golangci-lint on compat/golden/cases/exhaustruct-v5-allow-empty-blank-assignments/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+config/allow_empty/blank_assignments/blank_assignments.go:39:30:exhaustruct_v5::blank_assignments.Other is missing field C
+config/allow_empty/blank_assignments/blank_assignments.go:41:16:exhaustruct_v5::blank_assignments.TestStruct is missing fields A, B
+config/allow_empty/blank_assignments/blank_assignments.go:56:6:exhaustruct_v5::blank_assignments.TestStruct is missing field B
+config/allow_empty/blank_assignments/blank_assignments.go:62:13:exhaustruct_v5::blank_assignments.TestStruct is missing fields A, B
+config/allow_empty/blank_assignments/blank_assignments.go:75:10:exhaustruct_v5::blank_assignments.TestStruct is missing fields A, B
+config/allow_empty/blank_assignments/blank_assignments.go:81:23:exhaustruct_v5::blank_assignments.Other is missing field C
+config/allow_empty/blank_assignments/blank_assignments.go:86:10:exhaustruct_v5::blank_assignments.TestStruct is missing fields A, B
+config/allow_empty/blank_assignments/blank_assignments.go:91:7:exhaustruct_v5::blank_assignments.TestStruct is missing fields A, B
+config/allow_empty/blank_assignments/blank_assignments.go:96:9:exhaustruct_v5::blank_assignments.TestStruct is missing fields A, B
+config/allow_empty/blank_assignments/blank_assignments.go:101:19:exhaustruct_v5::blank_assignments.TestStruct is missing fields A, B
+config/allow_empty/blank_assignments/blank_assignments.go:106:11:exhaustruct_v5::blank_assignments.TestStruct is missing fields A, B

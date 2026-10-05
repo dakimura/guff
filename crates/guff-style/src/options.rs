@@ -679,6 +679,28 @@ pub struct ExhaustructOptions {
     pub allow_empty_declarations: bool,
 }
 
+/// `linters.settings.exhaustruct_v5` (golangci-lint 2.13.0+): the keys
+/// golangci-lint's `exhaustruct.NewV5` copies into go-exhaustruct v5's
+/// `analyzer.Config`. `ReportFullTypePath` is not among them, so it is not here.
+#[derive(Debug, Clone, Default)]
+pub struct ExhaustructV5Options {
+    /// Full-path regexps selecting the checked types, and `Type#Field` ones
+    /// requiring a field.
+    pub enforce_patterns: Vec<String>,
+    /// Regexps of types skipped; outrank `enforce_patterns`.
+    pub ignore_patterns: Vec<String>,
+    /// Regexps of types whose fields are all optional, and `Type#Field` ones
+    /// making one field optional.
+    pub optional_patterns: Vec<String>,
+    pub allow_empty: bool,
+    pub allow_empty_patterns: Vec<String>,
+    pub allow_empty_returns: bool,
+    pub allow_empty_declarations: bool,
+    pub allow_empty_blank_assignments: bool,
+    /// Check only types enforced by a directive or a pattern.
+    pub explicit_mode: bool,
+}
+
 impl Default for ExhaustructOptions {
     fn default() -> Self {
         Self {

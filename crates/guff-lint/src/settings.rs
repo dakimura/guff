@@ -43,6 +43,7 @@ pub struct LinterSettings {
     pub usestdlibvars: UsestdlibvarsSettings,
     pub unconvert: UnconvertSettings,
     pub exhaustruct: ExhaustructSettings,
+    pub exhaustruct_v5: ExhaustructV5Settings,
     pub canonicalheader: CanonicalheaderSettings,
     pub exhaustive: ExhaustiveSettings,
     pub musttag: MusttagSettings,
@@ -557,11 +558,8 @@ pub struct ExhaustructSettings {
     pub allow_empty_declarations: Option<bool>,
 }
 
-/// `linters.settings.exhaustruct_v5` (golangci-lint 2.13.0+).
-///
-/// Only the three keys whose meaning is the same in go-exhaustruct v4 and v5
-/// reach the analyzer (see [`merge_exhaustruct_v5`]); the rest are read so a
-/// config that sets them can be told so, not silently linted as if it had not.
+/// `linters.settings.exhaustruct_v5` (golangci-lint 2.13.0+): the keys
+/// golangci-lint's `exhaustruct.NewV5` copies into go-exhaustruct v5's config.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct ExhaustructV5Settings {
     #[serde(default, rename = "enforce-patterns", deserialize_with = "string_or_seq")]
@@ -2560,13 +2558,9 @@ impl LinterSettings {
                 out.exhaustruct = s;
             }
         }
-        // exhaustruct (v4) and exhaustruct_v5 drive one analyzer for now, so
-        // v5's settings fill the shared bag only where v4's key is absent.
         if let Some(v) = map.get(serde_yaml::Value::String("exhaustruct_v5".into())) {
             if let Some(s) = parse_settings::<ExhaustructV5Settings>("exhaustruct_v5", v) {
-                if !map.contains_key(serde_yaml::Value::String("exhaustruct".into())) {
-                    merge_exhaustruct_v5(&mut out.exhaustruct, &s);
-                }
+                out.exhaustruct_v5 = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("exhaustive".into())) {
@@ -2914,6 +2908,7 @@ impl LinterSettings {
         bag.insert("usestdlibvars", self.usestdlibvars.to_guff_usestdlibvars());
         bag.insert("unconvert", self.unconvert.to_guff_unconvert());
         bag.insert("exhaustruct", self.exhaustruct.to_guff_exhaustruct());
+        bag.insert("exhaustruct_v5", self.exhaustruct_v5.to_guff_exhaustruct_v5());
         bag.insert("canonicalheader", self.canonicalheader.to_guff_canonicalheader());
         bag.insert("exhaustive", self.exhaustive.to_guff_exhaustive());
         bag.insert("musttag", self.musttag.to_guff_musttag());
@@ -3649,6 +3644,22 @@ impl ExhaustructSettings {
     }
 }
 
+impl ExhaustructV5Settings {
+    pub fn to_guff_exhaustruct_v5(&self) -> guff_style::ExhaustructV5Options {
+        guff_style::ExhaustructV5Options {
+            enforce_patterns: self.enforce_patterns.clone(),
+            ignore_patterns: self.ignore_patterns.clone(),
+            optional_patterns: self.optional_patterns.clone(),
+            allow_empty: self.allow_empty.unwrap_or(false),
+            allow_empty_patterns: self.allow_empty_patterns.clone(),
+            allow_empty_returns: self.allow_empty_returns.unwrap_or(false),
+            allow_empty_declarations: self.allow_empty_declarations.unwrap_or(false),
+            allow_empty_blank_assignments: self.allow_empty_blank_assignments.unwrap_or(false),
+            explicit_mode: self.explicit_mode.unwrap_or(false),
+        }
+    }
+}
+
 impl ExhaustiveSettings {
     pub fn to_guff_exhaustive(&self) -> guff_style::ExhaustiveOptions {
         let defaults = guff_style::ExhaustiveOptions::default();
@@ -4280,47 +4291,6 @@ fn merge_gomodguard_v1(out: &mut GomodguardSettings, value: &serde_yaml::Value) 
                 out.local_replace_directives = b;
             }
         }
-    }
-}
-
-/// Carry `exhaustruct_v5` settings into the v4 analyzer's [`ExhaustructSettings`].
-///
-/// `allow-empty`, `allow-empty-returns` and `allow-empty-declarations` mean the
-/// same in both majors and are copied. Everything else is v5-only — `Type#Field`
-/// patterns, `allow-empty-blank-assignments`, `explicit-mode` — and has no v4
-/// counterpart to map onto: v4's `include` / `exclude` / `allow-empty-rx` are
-/// plain regexps over the type's full path, and quietly reading a v5 pattern as
-/// one would match something else. Those keys are reported and left out, so the
-/// run is v5 with its defaults for them.
-fn merge_exhaustruct_v5(out: &mut ExhaustructSettings, v5: &ExhaustructV5Settings) {
-    out.allow_empty = v5.allow_empty;
-    out.allow_empty_returns = v5.allow_empty_returns;
-    out.allow_empty_declarations = v5.allow_empty_declarations;
-    let mut unsupported: Vec<&str> = Vec::new();
-    if !v5.enforce_patterns.is_empty() {
-        unsupported.push("enforce-patterns");
-    }
-    if !v5.ignore_patterns.is_empty() {
-        unsupported.push("ignore-patterns");
-    }
-    if !v5.optional_patterns.is_empty() {
-        unsupported.push("optional-patterns");
-    }
-    if !v5.allow_empty_patterns.is_empty() {
-        unsupported.push("allow-empty-patterns");
-    }
-    if v5.allow_empty_blank_assignments == Some(true) {
-        unsupported.push("allow-empty-blank-assignments");
-    }
-    if v5.explicit_mode == Some(true) {
-        unsupported.push("explicit-mode");
-    }
-    if !unsupported.is_empty() {
-        eprintln!(
-            "guff: linters.settings.exhaustruct_v5: {} not implemented yet; \
-             running with its default",
-            unsupported.join(", ")
-        );
     }
 }
 

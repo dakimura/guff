@@ -1,0 +1,11 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh exhaustruct-v5-custom
+# Produced by running golangci-lint on compat/golden/cases/exhaustruct-v5-custom/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+exhaustruct_v5_custom.go:26:6:exhaustruct_v5::testdata.ExhaustructCustom is missing field B
+exhaustruct_v5_custom.go:34:6:exhaustruct_v5::testdata.ExhaustructCustom is missing fields B, D
+exhaustruct_v5_custom.go:41:6:exhaustruct_v5::testdata.ExhaustructCustom is missing field c

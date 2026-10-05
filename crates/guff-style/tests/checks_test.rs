@@ -6,7 +6,7 @@ use guff_analysis::SettingsBag;
 use guff_runner::RunnerOptions;
 use guff_style::{
     arangolint, asasalint, asciicheck, bidichk, canonicalheader, clickhouselint, containedctx,
-    copyloopvar, cyclop, decorder, dogsled, embeddedstructfieldcheck, exhaustive, exhaustruct,
+    copyloopvar, cyclop, decorder, dogsled, embeddedstructfieldcheck, exhaustive, exhaustruct, exhaustruct_v5,
     exptostd, forbidigo, funcorder, funlen, gocheckcompilerdirectives, gochecknoglobals,
     gochecknoinits, gochecksumtype, gocognit, goconst, gocritic, gocyclo, goheader, goprintffuncname,
     gosec, gosmopolitan, grouper, iface, inamedparam, interfacebloat, intrange, iotamixing, ireturn,
@@ -6049,6 +6049,25 @@ fn exhaustruct_flags_missing_fields() {
             .iter()
             .any(|m| m.contains("<anonymous>") && m.contains("missing field B")),
         "expected anonymous missing B: {messages:?}"
+    );
+}
+
+/// go-exhaustruct v5 reads optionality from comment directives and reports the
+/// v4 tag instead of honouring it. The golden cases `exhaustruct-v5-*` carry
+/// upstream's own testdata; this is the in-process smoke test of the reparse
+/// that finds the directives at all.
+#[test]
+fn exhaustruct_v5_reads_comment_directives() {
+    let pkg = support::typecheck_fixture("exhaustruct/v5", "example.com/v5", "directives.go");
+    let mut messages = support::run_analyzer(exhaustruct_v5(), &pkg);
+    messages.sort();
+    assert_eq!(
+        messages,
+        vec![
+            "struct tag \"exhaustruct\" is not supported anymore, use comment directives".to_string(),
+            "v5.T is missing field A".to_string(),
+            "v5.Tagged is missing field A".to_string(),
+        ],
     );
 }
 

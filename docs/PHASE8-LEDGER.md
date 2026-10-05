@@ -183,7 +183,7 @@ guff の `parse_settings` は未知キーを黙って無視するので、設定
 
 | 項目 | 上流 | guff の現状 | status |
 |------|------|-------------|--------|
-| `exhaustruct_v5`（Since v2.13.0、analyzer 名・`//nolint` 名とも `exhaustruct_v5`） | `enable` に書ける、`default: all` に入る | `registry.rs` / `KNOWN_LINTER_NAMES` に無い → `cli.rs:353` の unknown linters で **exit 3** | **PR 2**: 名前を受理、v4 エンジンで代用、golden `exhaustruct-v5` に ratchet 3/0 |
+| `exhaustruct_v5`（Since v2.13.0、analyzer 名・`//nolint` 名とも `exhaustruct_v5`） | `enable` に書ける、`default: all` に入る | `registry.rs` / `KNOWN_LINTER_NAMES` に無い → `cli.rs:353` の unknown linters で **exit 3** | **PR 2**: 名前を受理、v4 エンジンで代用、golden `exhaustruct-v5` に ratchet 3/0。**done (PR 14b)**: v5 エンジン `guff-style/src/exhaustruct_v5.rs`、ratchet 削除 |
 | `exhaustruct`（v4）の deprecated 化 | 警告レベル、実行は続く、Migration なし | deprecation 警告の仕組み自体が無い（wsl / gomodguard も同じ） | **done (PR 2)**: exhaustruct / wsl / gomodguard の 3 本。Migration 提案は未 |
 | modernize `autoFix: true` | `help linters` の表示だけ | guff の一覧は capability タグを出さない | not-applicable |
 | golines / revive の URL | メタデータだけ | — | not-applicable |
@@ -195,7 +195,7 @@ analyzer 本体（L）が入るまでは finding 0 件になる —— これは
 
 | linter | キー | 上流既定 | guff | status |
 |--------|------|----------|------|--------|
-| exhaustruct_v5 | enforce-patterns / ignore-patterns / optional-patterns / allow-empty / allow-empty-patterns / allow-empty-returns / allow-empty-declarations / **allow-empty-blank-assignments**（struct のみ、schema に無い） / explicit-mode | false / 空。report-full-type-path は配線されず常に false。不正パターンは Fatalf | 無し | needs-port |
+| exhaustruct_v5 | enforce-patterns / ignore-patterns / optional-patterns / allow-empty / allow-empty-patterns / allow-empty-returns / allow-empty-declarations / **allow-empty-blank-assignments**（struct のみ、schema に無い） / explicit-mode | false / 空。report-full-type-path は配線されず常に false。不正パターンは Fatalf | `ExhaustructV5Settings::to_guff_exhaustruct_v5`（全 9 キー）。不正パターンは analyzer エラー | **done (PR 14b)** |
 | canonicalheader | `exclusions` []string / `use-default-exclusions` | 空 / **true** | 無し（DEFERRED の理由「YAML 設定が無い」は 2.14.0 で腐った） | needs-port |
 | dupword | `skip-raw-strings` | false | 無し | **done (PR 2)** |
 | fatcontext | `check-loops` / `check-function-literals` | true / true | 既に読む | already-matches |
@@ -231,8 +231,8 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 
 | # | upstream_path | kind | 要約 | guff の場所 | status | effort | upstream testdata |
 |---|---------------|------|------|-------------|--------|--------|-------------------|
-| 1 | lintersdb/builder_linter.go `exhaustruct.NewV5` | new-check | 新 linter exhaustruct_v5 | guff-lint/src/registry.rs, cli.rs:336-353 | **PR 2: v4 エンジンで代用**（tag・パターン・explicit-mode は PR 14） | L | exhaustruct_v5.go / _custom.{go,yml} / _cgo.go |
-| 2 | config/linters_settings.go ExhaustructV5Settings | config-schema | `linters.settings.exhaustruct_v5` 新設 | guff-lint/src/settings.rs（v4 のみ） | **PR 2: 3 キーのみ配線、残りは警告** | M | — |
+| 1 | lintersdb/builder_linter.go `exhaustruct.NewV5` | new-check | 新 linter exhaustruct_v5 | guff-lint/src/registry.rs, cli.rs:336-353 | **done (PR 14b)**（PR 2 の v4 代用を置換） | L | exhaustruct_v5.go / _custom.{go,yml} / _cgo.go |
+| 2 | config/linters_settings.go ExhaustructV5Settings | config-schema | `linters.settings.exhaustruct_v5` 新設 | guff-lint/src/settings.rs | **done (PR 14b)**: 全キーを v5 の options へ（PR 2 の 3 キー合流と警告は撤去） | M | — |
 | 3 | builder_linter.go exhaustruct DeprecatedWarning | message | v4 の deprecated 警告と `[deprecated]` 表示 | registry.rs format_linters_listing / cli.rs | **done (PR 2)**（`[deprecated]` 表示と Migration 提案は未） | S | — |
 | 4 | builder_linter.go modernize WithAutoFix | other | 一覧の `[auto-fix]` 表示だけ。--fix 可否とは無関係 | registry.rs | not-applicable | S | — |
 | 5 | builder_linter.go golines / revive WithURL | other | URL はメタデータだけ | — | not-applicable | S | — |
@@ -260,7 +260,7 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 |---|---------------|------|------|-------------|--------|--------|-------------------|
 | 1 | golinters/canonicalheader | behavior | fork に差し替え（既定でも文言と報告ノードが変わる）+ 新 option | guff-style/src/canonicalheader.rs | **done (PR 8)** | M | canonicalheader{,_cgo,_custom}.go, _custom.yml |
 | 2 | golinters/dupword | new-option | skip-raw-strings を flag に渡す | guff-comment/src/dupword.rs | **done (PR 2)** | S | dupword_skip_raw_strings.{go,yml} |
-| 3 | golinters/exhaustruct/exhaustruct_v5.go | new-check | 新 linter（v5.2.0） | guff-style/src/exhaustruct.rs, registry.rs | **PR 2: v4 エンジンで代用**（tag・パターン・explicit-mode は PR 14） | L | exhaustruct_v5*.go/yml, exhaustruct_v4*.go/yml |
+| 3 | golinters/exhaustruct/exhaustruct_v5.go | new-check | 新 linter（v5.2.0） | guff-style/src/exhaustruct_v5.rs, registry.rs | **done (PR 14b)** | L | exhaustruct_v5*.go/yml, exhaustruct_v4*.go/yml |
 | 4 | golinters/fatcontext | new-option | 2 フラグを渡す | settings.rs, fatcontext.rs | already-matches | S | fatcontext*.go/yml |
 | 5 | golinters/funcorder | new-option | function を渡す | funcorder.rs:276 | already-matches | S | — |
 | 6 | golinters/gochecksumtype | substrate | Analyzer 直利用、sumTypeFact で依存パッケージの sum type を検査 | guff-style/src/gochecksumtype.rs | needs-port | M | — |
@@ -469,19 +469,19 @@ revive の upstream testdata は module zip に無いので、v1.17.0 タグか�
 
 | # | upstream_path | kind | 要約 | guff の場所 | status | effort | upstream testdata |
 |---|---------------|------|------|-------------|--------|--------|-------------------|
-| 1 | golinters/exhaustruct/exhaustruct_v5.go | new-check | 新 linter（WithVersion(5)、`//nolint:exhaustruct` では抑止されない） | 無し | **PR 2: v4 エンジンで代用**（tag・パターン・explicit-mode は PR 14） | L | exhaustruct_v5*.go/yml |
+| 1 | golinters/exhaustruct/exhaustruct_v5.go | new-check | 新 linter（WithVersion(5)、`//nolint:exhaustruct` では抑止されない） | guff-style/src/exhaustruct_v5.rs（analyzer 名 `exhaustruct_v5`） | **done (PR 14b)** | L | exhaustruct_v5*.go/yml |
 | 2 | builder_linter.go DeprecatedWarning | message | v4 の deprecated 警告 | 無し | **done (PR 2)** | S | exhaustruct_v4*.go/yml |
-| 3 | v5 processor.go（tag 廃止） | behavior | `exhaustruct:"optional"` tag を見ず、コメントディレクティブだけ | exhaustruct.rs has_optional_tag | needs-port | M | internal/structure/testdata/*.go |
-| 4 | v5 tag-migration-visitor.go | new-check | tag を「not supported anymore」で報告 + fix | 無し | needs-port | M | — |
-| 5 | v5 internal/directive | new-check | ディレクティブスキャナと解析エラー 6 種 | 無し | needs-port | L | internal/directive/testdata/*.go |
-| 6 | v5 shouldCheck / isFieldRequired | behavior | 優先順位（使用箇所 > 型 > explicit-mode） | exhaustruct.rs check_lit | needs-port | L | structs.go |
-| 7 | v5 internal/pattern | new-option | enforce / optional パターン、`Type#Field`、leftmost-longest | exhaustruct.rs compile_patterns / match_full | needs-port | M | — |
-| 8 | v5 checkEmptyAllowed | new-option | allow-empty-blank-assignments、括弧越し | exhaustruct.rs empty_struct_allowed | needs-port | S | — |
-| 9 | v5 resolveLiteralType | behavior | 別名の表示、`[]*T{{}}`、`type PT *T`、型パラメータ | exhaustruct.rs get_struct_type | needs-port | M | origins.go |
-| 10 | v5 struct.go SkippedFields | behavior | `_` を報告しない、埋め込み展開、Go 1.27 昇格キー | exhaustruct.rs skipped_fields | needs-port | L | structs.go |
-| 11 | v5 astutil/file-parser.go | substrate | 依存パッケージのソースからディレクティブを読む | 無し | needs-port | M | internal/astutil/testdata/*.go |
+| 3 | v5 processor.go（tag 廃止） | behavior | `exhaustruct:"optional"` tag を見ず、コメントディレクティブだけ | exhaustruct_v5.rs `Processor` | **done (PR 14b)** | M | internal/structure/testdata/*.go |
+| 4 | v5 tag-migration-visitor.go | new-check | tag を「not supported anymore」で報告 + fix | exhaustruct_v5.rs `visit_struct_type`。fix は `//line` 下も含め golangci と byte 一致（guff-lint `fix.rs` が編集先を行ディレクティブ適用後のファイル名で引いて捨てていたのを物理名に直した） | **done (PR 14b)** | M | — |
+| 5 | v5 internal/directive | new-check | ディレクティブスキャナと解析エラー 6 種 | exhaustruct_v5.rs `parse_directive` / `scan_file` / `Scanner`（解析ファイルはコメント無しなので自パッケージは reparse） | **done (PR 14b)** | L | internal/directive/testdata/*.go |
+| 6 | v5 shouldCheck / isFieldRequired | behavior | 優先順位（使用箇所 > 型 > explicit-mode） | exhaustruct_v5.rs `LiteralVisitor::process` / `StructMeta::is_field_required` | **done (PR 14b)** | L | structs.go |
+| 7 | v5 internal/pattern | new-option | enforce / optional パターン、`Type#Field`、leftmost-longest | exhaustruct_v5.rs `PatternList`（全体一致は `\A(?:p)\z` と同値） | **done (PR 14b)** | M | — |
+| 8 | v5 checkEmptyAllowed | new-option | allow-empty-blank-assignments、括弧越し | exhaustruct_v5.rs `check_empty_allowed` / `enclosing_of_literal` | **done (PR 14b)** | S | — |
+| 9 | v5 resolveLiteralType | behavior | 別名の表示、`[]*T{{}}`、`type PT *T`、型パラメータ | exhaustruct_v5.rs `resolve_literal_type` / `core_struct` | **done (PR 14b)** | M | origins.go |
+| 10 | v5 struct.go SkippedFields | behavior | `_` を報告しない、埋め込み展開、Go 1.27 昇格キー | exhaustruct_v5.rs `StructMeta::skipped_fields` / `index_promotion`。昇格キーの枝は移植済みだが go1.27 の fixture（`go127/promoted`）は手元 toolchain が 1.26 で golden にできない（PR 15） | **done (PR 14b)** | L | structs.go |
+| 11 | v5 astutil/file-parser.go | substrate | 依存パッケージのソースからディレクティブを読む | exhaustruct_v5.rs `load_file` / `Cx::dep_struct_lines`。guff の依存オブジェクトは位置を持たない（seed overlay が `clear_source_positions` で消す）ので、依存パッケージのファイルを import グラフから引き、型名で宣言を探して各フィールドの行を得る | **done (PR 14b)** | M | internal/astutil/testdata/*.go |
 
-v5 の `analyzer/testdata` は module zip に無い。GitHub の v5.2.0 タグから取る。
+v5 の `analyzer/testdata` は module zip に無い。GitHub の v5.2.0 タグから取った（`crates/guff-style/tests/testdata/exhaustruct/upstream-v5.2.0/`、LICENSE 付き）。golden は upstream の `analyzer_test.go` / `analyzer_empty_test.go` の Config ごとに 1 case（`exhaustruct-v5-*` 21 case、golangci 自身の `exhaustruct_v5{,_custom,_cgo}` を含む）。入れていないのは `report_full_path`（golangci が `ReportFullTypePath` を配線しない）と `go127/promoted`（Go 1.27 toolchain が要る、PR 15）。
 
 ### exhaustive-sumtype
 
@@ -667,7 +667,7 @@ golden を regen したら fix のベースラインも撮り直す。測定は 
 | 11 | **unused / unparam** — **done** | Unify、unparam AnonFuncs + linkname + signRequiredBy + alias。あわせて既存の乖離 3 つ: 総称レシーバと literal の名前（`RelString`）、signRequiredBy の名前照合（受信者名 `g1` が関数 `g1` を固定していた）、`f[int](x)` を値の使用と見ていた | unused 0/2 → 0/0（PR 4）、unparam 1/0 → **0/0（ratchet 削除）**、新設 golden `unparam-upstream`（上流 testscript 6 本 + ゼロサイズ） | M |
 | 12 | **modernize 残り（ゴールデンに出ない側）** — **done**（embedlit は Go 1.27 なので PR 15） | minmax ×2、atomictypes、waitgroupgo、testingcontext、rangeint、slicesbackward ×3、stringscut ×3、stringscutprefix、stringsbuilder lastEditEnd、slicesclip。**各項目で上流 testdata を fixture 化**（ratchet は動かないので fixture が唯一の検算） | 新設 golden `modernize-upstream`（x/tools v0.50 の testdata 36 ファイル、179 件）と同じ case の fix tier（1797 行、golangci と byte 一致） | M〜L |
 | 13 | **gofumpt v0.12 の残り + printer** — **done** | §2.4 の toolchain 確認の後。括弧除去、effectiveEnd + multi、removeParens、joinStdImports、diagnose。`omit_v010_rules` / `match_golangci` gate の撤去。あわせて既存の乖離 2 つ: gofumpt の simplify が package レベルの宣言を歩いていなかった、printer に `sanitizeImportPath` が無かった（`` import `C` ``） | fmt tier に gofumpt v0.12 の testscript 33 case と `gofmt-go127-printer`（2.12.2 と 2.14.0 で答えが違う形だけ）。fmt 50 case 全一致 | L |
-| 14 | **新機能（大）を 1 本ずつ** | G407、exhaustruct_v5（3〜4 PR に分割：設定 → ディレクティブスキャナ → 欠落計算 → tag 移行）、gochecksumtype fact、iface unusedmethod / opaque / unexported、stdversion、goconst eval-const-expressions、embedlit | ― | 各 L |
+| 14 | **新機能（大）を 1 本ずつ** | G407、exhaustruct_v5（**done (PR 14b)**: 1 PR で全部。上流 testdata の golden 21 case と fix 3 case が golangci と一致、ratchet 3/0 → 0/0）、gochecksumtype fact、iface unusedmethod / opaque / unexported、stdversion、goconst eval-const-expressions、embedlit | ― | 各 L |
 | 15 | **Go 1.27 toolchain 対応（保留）** | export data V5、printf %d go1.27、stringscut CutLast、昇格フィールドキー。ターゲット Go が 1.27 になる日まで保留 | ― | L |
 
 PR 1〜11 で §5.1 の ratchet は**既存の恒久差分（revive 1/4、inline-gofix-sibling 2/0、staticcheck-qf / st の SA4017）まで戻る**見込み。

@@ -1,0 +1,9 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh exhaustruct-v5-optional-pattern
+# Produced by running golangci-lint on compat/golden/cases/exhaustruct-v5-optional-pattern/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+types/optional_pattern/optional_pattern.go:26:6:exhaustruct_v5::optionalpattern.TestRequired is missing fields A, B, C

@@ -1,9 +1,9 @@
 # Golden case: exhaustruct_v5 on the exhaustruct fixture.
 #
 # golangci-lint 2.13.0 added exhaustruct_v5 (go-exhaustruct v5) and deprecated
-# exhaustruct. guff drives v5 with the v4 analyzer until the v5 port lands
-# (docs/PHASE8-LEDGER.md, exhaustruct); this case is where the two answers are
-# compared, under v5's own linter name.
+# exhaustruct. The v4 fixture under v5 is where the two majors part: v5 reports
+# the `exhaustruct:"optional"` tag (with a fix) and no longer honours it. v5's
+# own testdata is in the `exhaustruct-v5-*` cases.
 #
 # The original note for the v4 case:
 #

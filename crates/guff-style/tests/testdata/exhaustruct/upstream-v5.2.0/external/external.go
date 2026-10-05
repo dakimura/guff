@@ -1,0 +1,48 @@
+// Package external provides common types for cross-package testing.
+// These types are imported by other test packages to verify behavior
+// with external types, especially regarding unexported fields.
+package external
+
+// Simple is a struct with exported, unexported, and optional fields.
+// When used from another package, only A and B should be required.
+type Simple struct {
+	A string
+	B int
+	C string //exhaustruct:optional
+	d string // unexported, inaccessible from other packages
+}
+
+// WithOptionalDirective has optional fields marked via comment directive.
+// When used from another package, only Required should be required.
+type WithOptionalDirective struct {
+	Required string
+	//exhaustruct:optional
+	OptionalFirst  string
+	OptionalSecond string //exhaustruct:optional
+}
+
+// Excluded matches exclusion patterns (.*Excluded.*).
+type Excluded struct {
+	A string
+	B int
+	c string
+}
+
+// Empty is an empty struct for edge case testing.
+type Empty struct{}
+
+// OnlyUnexported has only unexported fields.
+// When used from another package, no fields should be required.
+type OnlyUnexported struct {
+	a string
+	b int
+}
+
+// EnforcedUnexported marks an unexported field enforced. The directive is
+// written without knowing who reads the type, and no other package can write
+// the field, so it reaches only literals in this one.
+type EnforcedUnexported struct {
+	A string
+	//exhaustruct:enforce
+	b int
+}

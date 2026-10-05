@@ -1,0 +1,27 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh exhaustruct-v5-basic
+# Produced by running golangci-lint on compat/golden/cases/exhaustruct-v5-basic/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+types/basic/basic.go:30:6:exhaustruct_v5::basic.Test is missing fields A, B, C, D
+types/basic/basic.go:34:6:exhaustruct_v5::basic.Test is missing field D
+types/basic/basic.go:45:14:exhaustruct_v5::basic.Test is missing fields A, B, C, D
+types/collections/collections.go:20:3:exhaustruct_v5::collections.Test is missing field A
+types/collections/collections.go:21:3:exhaustruct_v5::collections.Test is missing field A
+types/collections/collections.go:35:8:exhaustruct_v5::collections.Test is missing field A
+types/collections/collections.go:36:8:exhaustruct_v5::collections.Test is missing field A
+types/collections/issue_144.go:18:3:exhaustruct_v5::collections.Test is missing field A
+types/collections/issue_144.go:19:4:exhaustruct_v5::collections.Test is missing field A
+types/collections/issue_144.go:22:3:exhaustruct_v5::collections.Test is missing field A
+types/collections/issue_144.go:23:4:exhaustruct_v5::collections.Test is missing field A
+types/collections/issue_144.go:33:8:exhaustruct_v5::collections.Test is missing field A
+types/collections/issue_144.go:34:9:exhaustruct_v5::collections.Test is missing field A
+types/collections/issue_168.go:25:3:exhaustruct_v5::collections.<anonymous> is missing field K2
+types/collections/issue_168.go:25:12:exhaustruct_v5::collections.<anonymous> is missing field V2
+types/collections/issue_168.go:31:3:exhaustruct_v5::collections.<anonymous> is missing fields K2, K3
+types/collections/issue_168.go:37:3:exhaustruct_v5::collections.<anonymous> is missing field K
+types/collections/issue_168.go:37:7:exhaustruct_v5::collections.<anonymous> is missing field V2
+types/collections/issue_168.go:66:3:exhaustruct_v5::collections.<anonymous> is missing field K2

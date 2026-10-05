@@ -1,0 +1,13 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh exhaustruct-v5-ignored-tags
+# Produced by running golangci-lint on compat/golden/cases/exhaustruct-v5-ignored-tags/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+config/ignored_tags/ignored_tags.go:9:15:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+config/ignored_tags/ignored_tags.go:14:15:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+config/ignored_tags/ignored_tags.go:21:15:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+config/ignored_tags/ignored_tags.go:27:6:exhaustruct_v5::ignored_tags.ExcludedButEnforcedAtUse is missing fields Field, Other
+config/ignored_tags/ignored_tags.go:35:16:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives

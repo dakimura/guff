@@ -1,0 +1,26 @@
+# Golden case: go-exhaustruct v5.2.0's own analyzer testdata, TestAnalyzerIgnoredTags,
+# configured as upstream's analyzer_test.go / analyzer_empty_test.go configure it,
+# through the keys golangci-lint's `exhaustruct.NewV5` maps onto `analyzer.Config`.
+#
+# The module is `testdata` (upstream's go.mod) so `testdata/external` and the
+# `testdata/config/...` paths in patterns and messages resolve as they do upstream.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - exhaustruct_v5
+  settings:
+    exhaustruct_v5:
+      ignore-patterns:
+        - '.*\.Excluded.*'
+        - '.*\.<anonymous>'
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

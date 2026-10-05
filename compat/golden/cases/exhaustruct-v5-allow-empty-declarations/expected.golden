@@ -1,0 +1,13 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh exhaustruct-v5-allow-empty-declarations
+# Produced by running golangci-lint on compat/golden/cases/exhaustruct-v5-allow-empty-declarations/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+config/allow_empty/declarations/declarations.go:43:9:exhaustruct_v5::declarations.TestStruct is missing fields A, B
+config/allow_empty/declarations/declarations.go:47:19:exhaustruct_v5::declarations.TestStruct is missing fields A, B
+config/allow_empty/declarations/declarations.go:51:9:exhaustruct_v5::declarations.TestStruct is missing fields A, B
+config/allow_empty/declarations/declarations.go:51:23:exhaustruct_v5::declarations.NestedStruct is missing fields Inner, Value
+config/allow_empty/declarations/declarations.go:56:9:exhaustruct_v5::declarations.TestStruct is missing fields A, B

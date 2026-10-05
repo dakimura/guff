@@ -1,0 +1,43 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh exhaustruct-v5-ignored-tags
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/exhaustruct-v5-ignored-tags/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.14.0
+
+--- a/config/ignored_tags/ignored_tags.go
++++ b/config/ignored_tags/ignored_tags.go
+@@ -6,19 +6,19 @@
+ 
+ type ExcludedByPattern struct {
+ 	// want +1 `struct tag "exhaustruct" is not supported anymore`
+-	Field string `exhaustruct:"optional"`
++	Field string //exhaustruct:optional
+ }
+ 
+ type Reported struct {
+ 	// want +1 `struct tag "exhaustruct" is not supported anymore`
+-	Field string `exhaustruct:"optional"`
++	Field string //exhaustruct:optional
+ }
+ 
+ // A literal enforcing the type checks it despite the pattern, so the field its
+ // dead tag was written to spare is reported as missing.
+ type ExcludedButEnforcedAtUse struct {
+ 	// want +1 `struct tag "exhaustruct" is not supported anymore`
+-	Field string `exhaustruct:"optional"`
++	Field string //exhaustruct:optional
+ 	Other string
+ }
+ 
+@@ -32,6 +32,6 @@
+ func ignoredAnonymous() {
+ 	_ = struct {
+ 		// want +1 `struct tag "exhaustruct" is not supported anymore`
+-		Field string `exhaustruct:"optional"`
++		Field string //exhaustruct:optional
+ 	}{Field: "x"}
+ }

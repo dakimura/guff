@@ -62,6 +62,7 @@
 //! - [`wsl`]
 //! - [`unconvert`]
 //! - [`exhaustruct`]
+//! - [`exhaustruct_v5`]
 //! - [`exhaustive`]
 //! - [`musttag`]
 //! - [`loggercheck`]
@@ -94,6 +95,7 @@ mod cyclop;
 mod dogsled;
 mod exhaustive;
 mod exhaustruct;
+mod exhaustruct_v5;
 mod exptostd;
 mod funcorder;
 mod funlen;
@@ -178,7 +180,7 @@ mod zerologlint;
 pub use options::{
     CanonicalheaderOptions,
     AsasalintOptions, BidichkOptions, CopyloopvarOptions, CyclopOptions, DecorderOptions,
-    DogsledOptions, EmbeddedstructfieldcheckOptions, ExhaustiveOptions, ExhaustructOptions,
+    DogsledOptions, EmbeddedstructfieldcheckOptions, ExhaustiveOptions, ExhaustructOptions, ExhaustructV5Options,
     ForbidigoOptions, ForbidigoPattern, FuncorderOptions, FunlenOptions, GochecksumtypeOptions,
     GocognitOptions, GoconstOptions, GocriticCheckSettings, GocriticOptions, GocycloOptions,
     GoheaderOptions,
@@ -202,6 +204,7 @@ pub use cyclop::analyzer as cyclop;
 pub use dogsled::analyzer as dogsled;
 pub use exhaustive::analyzer as exhaustive;
 pub use exhaustruct::analyzer as exhaustruct;
+pub use exhaustruct_v5::analyzer as exhaustruct_v5;
 pub use exptostd::analyzer as exptostd;
 pub use funcorder::analyzer as funcorder;
 pub use funlen::analyzer as funlen;
@@ -340,6 +343,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         wsl_v5(),
         unconvert(),
         exhaustruct(),
+        exhaustruct_v5(),
         exhaustive(),
         musttag(),
         loggercheck(),

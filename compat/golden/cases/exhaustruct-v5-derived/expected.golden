@@ -1,0 +1,14 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh exhaustruct-v5-derived
+# Produced by running golangci-lint on compat/golden/cases/exhaustruct-v5-derived/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+types/derived/derived.go:25:6:exhaustruct_v5::derived.Derived is missing fields A, B, c
+types/derived/derived.go:26:6:exhaustruct_v5::derived.DerivedDerived is missing fields A, B, c
+types/derived/derived.go:58:6:exhaustruct_v5::derived.DerivedFromIgnored is missing fields X, Y
+types/derived/derived.go:77:6:exhaustruct_v5::derived.DerivedTarget is missing fields X, Y
+types/derived/issue_139.go:23:6:exhaustruct_v5::derived.ExternalDerived is missing fields A, B
+types/derived/issue_139.go:24:6:exhaustruct_v5::derived.ExternalDerivedDerived is missing fields A, B

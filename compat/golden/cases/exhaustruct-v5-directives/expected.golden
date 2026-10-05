@@ -1,0 +1,39 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh exhaustruct-v5-directives
+# Produced by running golangci-lint on compat/golden/cases/exhaustruct-v5-directives/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+types/directives/directives.go:67:6:exhaustruct_v5::directives.Test is missing fields A, B, C, D
+types/directives/directives.go:72:3:exhaustruct_v5::directives.Test is missing fields A, B, C, D
+types/directives/directives.go:74:3:exhaustruct_v5::directives.Test is missing fields A, B, C, D
+types/directives/directives.go:78:8:exhaustruct_v5::directives.Test is missing fields A, B, C, D
+types/directives/directives.go:80:8:exhaustruct_v5::directives.Test is missing fields A, B, C, D
+types/directives/directives.go:86:6:exhaustruct_v5::directives.TestExcluded is missing fields A, B
+types/directives/directives.go:89:6:exhaustruct_v5::directives.TestExcluded is missing field A
+types/directives/directives.go:103:13:exhaustruct_v5::directives.Embedded is missing fields E, F, g, H
+types/directives/directives.go:134:6:exhaustruct_v5::directives.TestWithOptionalFields is missing fields Required, AlsoRequired
+types/directives/directives.go:140:6:exhaustruct_v5::directives.TestWithOptionalFields is missing field AlsoRequired
+types/directives/directives.go:162:6:exhaustruct_v5::directives.TestMixedOptional is missing field Required
+types/directives/directives.go:184:6:exhaustruct_v5::external.WithOptionalDirective is missing field Required
+types/directives/errors.go:7:2:exhaustruct_v5::empty directive
+types/directives/errors.go:8:6:exhaustruct_v5::directives.Test is missing fields A, B, C, D
+types/directives/errors.go:12:2:exhaustruct_v5::unknown directive (directive=unknown)
+types/directives/errors.go:13:6:exhaustruct_v5::directives.Test is missing fields A, B, C, D
+types/directives/errors.go:18:2:exhaustruct_v5::duplicate directives
+types/directives/errors.go:24:2:exhaustruct_v5::unknown directive (directive=unknown)
+types/directives/errors.go:30:2:exhaustruct_v5::directive after a space is not read (directive=enforce)
+types/directives/errors.go:38:2:exhaustruct_v5::multiple exhaustruct directives in a single comment group, ignoring
+types/directives/errors.go:47:13:exhaustruct_v5::directive ignored, conflicting directive already exists for the same target line
+types/directives/nested.go:68:6:exhaustruct_v5::directives.NestedInner is missing field Y
+types/directives/nested.go:117:3:exhaustruct_v5::directives.NestedExcluded is missing field Y
+types/directives/nested.go:202:7:exhaustruct_v5::directives.NestedInner is missing field Y
+types/directives/nested.go:236:6:exhaustruct_v5::directives.NestedInner is missing field Y
+types/directives/package-clause.go:7:22:exhaustruct_v5::directives.NestedInner is missing field Y
+types/directives/priority.go:38:6:exhaustruct_v5::directives.PriorityIgnored is missing fields A, B
+types/directives/priority.go:46:6:exhaustruct_v5::directives.PriorityEnforced is missing fields A, B
+types/directives/priority.go:56:6:exhaustruct_v5::directives.PriorityIgnored is missing fields A, B
+types/directives/priority.go:95:10:exhaustruct_v5::directives.IgnoredNested is missing fields A, B
+types/directives/priority.go:111:9:exhaustruct_v5::directives.PriorityEnforced is missing field B

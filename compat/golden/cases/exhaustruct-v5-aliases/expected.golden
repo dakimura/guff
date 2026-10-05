@@ -1,0 +1,16 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh exhaustruct-v5-aliases
+# Produced by running golangci-lint on compat/golden/cases/exhaustruct-v5-aliases/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+types/aliases/aliases.go:24:6:exhaustruct_v5::aliases.Alias is missing fields A, B, C, D
+types/aliases/aliases.go:25:6:exhaustruct_v5::aliases.AliasAlias is missing fields A, B, C, D
+types/aliases/aliases.go:26:6:exhaustruct_v5::aliases.AliasDerived is missing fields A, B, C, D
+types/aliases/aliases.go:36:6:exhaustruct_v5::aliases.ExternalAlias is missing fields A, B
+types/aliases/aliases.go:37:6:exhaustruct_v5::aliases.ExternalAliasAlias is missing fields A, B
+types/aliases/aliases.go:64:6:exhaustruct_v5::aliases.IgnoredBaseAlias is missing fields X, Y
+types/aliases/aliases.go:80:6:exhaustruct_v5::aliases.AliasTarget is missing fields X, Y
+types/aliases/aliases.go:114:6:exhaustruct_v5::aliases.AnonAliasChecked is missing field Y
