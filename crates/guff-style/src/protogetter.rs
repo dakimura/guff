@@ -51,25 +51,21 @@ const PROTOC_PREFIXES: &[&str] = &[
 
 /// Returns the named type behind `expr`'s type, dereferencing one pointer.
 ///
-/// Port of `typesNamed`, **including its blindness to aliases**:
+/// Port of `typesNamed`:
 ///
 /// ```go
 /// ptr, ok := t.Underlying().(*types.Pointer)
 /// if ok { t = ptr.Elem() }
-/// named, ok := t.(*types.Named)   // a plain assertion — no Unalias
+/// named, ok := types.Unalias(t).(*types.Named)
 /// ```
 ///
-/// Since Go 1.23 (`gotypesalias=1`) a type written through an alias is a
-/// `*types.Alias`, and that assertion fails on it. So a message reached as
-/// `*backend.WorkflowRuntimeState`, where `backend.WorkflowRuntimeState =
-/// protos.WorkflowRuntimeState`, is not a proto message to protogetter at all —
-/// no getters are suggested for any of its fields.
-///
-/// guff unaliased on both steps, which is the *correct* answer to the question
-/// "what named type is this" and the wrong answer to "what does protogetter
-/// do". dapr v1.18.3 reaches every durabletask message through such an alias:
-/// golangci-lint reports zero protogetter findings on the whole repo, and guff
-/// reported 54. The pointer step still uses the underlying type, as upstream
+/// protogetter v1.0.1 (golangci-lint 2.14.0) unaliases at that last step —
+/// `named, ok := types.Unalias(t).(*types.Named)` — so a message reached
+/// through `type Message = pb.Message` is a proto message again. v0.3.20
+/// (golangci-lint 2.12.2) asserted `*types.Named` on the alias itself and
+/// failed: dapr v1.18.3 reaches every durabletask message through such an alias
+/// and got zero protogetter findings upstream, which guff matched by declining
+/// to unalias. The pointer step still reads the underlying type, as upstream
 /// does, so an alias *for a pointer* is dereferenced there.
 fn expr_named_type(pass: &Pass<'_>, expr: &Expr) -> Option<TypeId> {
     let info = pass.types_info()?;
@@ -80,6 +76,7 @@ fn expr_named_type(pass: &Pass<'_>, expr: &Expr) -> Option<TypeId> {
         TypeData::Pointer(_) => pointer_elem(&artifacts.types, under),
         _ => t,
     };
+    let t = unalias_readonly(&artifacts.types, t);
     match artifacts.types.get(t) {
         TypeData::Named(_) => Some(t),
         _ => None,

@@ -7189,16 +7189,27 @@ fn check_sprintf_quoted_string(pass: &Pass<'_>, call: &CallExpr, pending: &mut P
         QUOTED_PCT_S.get_or_init(|| Regex::new(r#"^`.*"%s".*`$"#).expect("quoted %s regex"));
     let escaped_pct_s =
         ESCAPED_PCT_S.get_or_init(|| Regex::new(r#"^".*\\"%s\\".*"$"#).expect("escaped %s regex"));
-    // The `%#q` / backquoted arm is unreachable upstream: it is a second
-    // `m.Match("fmt.Sprintf($s, $*_)")` with the *same* syntax pattern as the
-    // first, and ruleguard keeps only one rule per pattern. Verified against
-    // golangci-lint 2.12 — `fmt.Sprintf("foo `+"`%s`"+` bar", s)` reports nothing.
+    // go-critic v0.15.0 (golangci-lint 2.14.0) adds a second rule for a
+    // double-quoted format holding a backquoted `%s` ("`%s`"). Through
+    // v0.14.x the rulesdata carried one rule for the pattern, and
+    // `fmt.Sprintf("foo `+"`%s`"+` bar", s)` reported nothing (golangci-lint
+    // 2.12); v0.15.0's rulesdata carries both. The texts cannot match both.
+    static BACKQUOTED_PCT_S: OnceLock<Regex> = OnceLock::new();
+    let backquoted_pct_s = BACKQUOTED_PCT_S
+        .get_or_init(|| Regex::new(r#"^".*`%s`.*"$"#).expect("backquoted %s regex"));
     if quoted_pct_s.is_match(v) || escaped_pct_s.is_match(v) {
         report(
             pending,
             call.fun.pos().0 as u32,
             "sprintfQuotedString",
             r#"use %q instead of "%s" for quoted strings"#,
+        );
+    } else if backquoted_pct_s.is_match(v) {
+        report(
+            pending,
+            call.fun.pos().0 as u32,
+            "sprintfQuotedString",
+            r#"use %#q instead of "`%s`" for backquoted strings"#,
         );
     }
 }
