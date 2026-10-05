@@ -1,0 +1,17 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh exhaustruct-v5-generics
+# Produced by running golangci-lint on compat/golden/cases/exhaustruct-v5-generics/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+types/generics/generics.go:16:6:exhaustruct_v5::generics.testGenericStruct is missing fields A, B
+types/generics/generics.go:20:6:exhaustruct_v5::generics.testGenericStruct is missing field B
+types/generics/generics.go:37:9:exhaustruct_v5::generics.T is missing field B
+types/generics/generics.go:47:9:exhaustruct_v5::generics.T is missing field B
+types/generics/generics.go:52:9:exhaustruct_v5::generics.T is missing field B
+types/generics/generics.go:62:9:exhaustruct_v5::generics.T is missing field B
+types/generics/generics.go:82:9:exhaustruct_v5::generics.T is missing field B
+types/generics/generics.go:102:9:exhaustruct_v5::generics.T is missing field B
+types/generics/generics.go:171:9:exhaustruct_v5::generics.T is missing field B

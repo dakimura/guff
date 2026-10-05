@@ -51,6 +51,7 @@
 | errorlint | 🟡 | comparison / type assertion 対応。errorf は既定オフ。allowed-errors は上流の 64 行の表を `(センチネル, それを返した関数)` の対で引く移植（2026-08-12） |
 | exhaustive | ✅ | |
 | exhaustruct | 🟡 | 検出は対応。`//exhaustruct:ignore` コメントディレクティブは DEFERRED |
+| exhaustruct_v5 | ✅ | go-exhaustruct v5.2.0。コメントディレクティブ（依存パッケージ側も）、`Type#Field` パターン、explicit-mode、tag 移行の fix。上流 testdata の golden 21 case で一致 |
 | exptostd | ✅ | |
 | fatcontext | ✅ | |
 | forbidigo | ✅ | |

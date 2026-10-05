@@ -1,0 +1,9 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh exhaustruct-v5-anonymous
+# Produced by running golangci-lint on compat/golden/cases/exhaustruct-v5-anonymous/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+types/anonymous/anonymous.go:12:6:exhaustruct_v5::anonymous.<anonymous> is missing fields A, B

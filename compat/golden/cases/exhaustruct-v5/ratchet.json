@@ -1,6 +1,0 @@
-{
-  "missing": 3,
-  "extra": 0,
-  "why": "guff runs exhaustruct_v5 on the v4 analyzer until the v5 port lands. v5 no longer reads the `exhaustruct:\"optional\"` struct tag: it reports the tag itself (\"struct tag \\\"exhaustruct\\\" is not supported anymore, use comment directives\", with a fix) and then reports the field the tag used to excuse, twice here. v4 honours the tag, so guff reports neither. docs/PHASE8-LEDGER.md exhaustruct #3, #4.",
-  "target": "0/0 — docs/PHASE8-LEDGER.md §6, PR 14 (exhaustruct_v5)."
-}

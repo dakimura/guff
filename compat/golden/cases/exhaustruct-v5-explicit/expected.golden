@@ -1,0 +1,10 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh exhaustruct-v5-explicit
+# Produced by running golangci-lint on compat/golden/cases/exhaustruct-v5-explicit/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+types/explicit/explicit.go:37:6:exhaustruct_v5::explicit.Enforced is missing fields A, B
+types/explicit/explicit.go:49:6:exhaustruct_v5::explicit.EnforcedViaDirective is missing fields A, B

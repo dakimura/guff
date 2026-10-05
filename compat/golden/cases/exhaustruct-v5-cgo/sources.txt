@@ -1,0 +1,3 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces)
+exhaustruct_v5_cgo.go  crates/guff-style/tests/testdata/exhaustruct/golangci-v2.14.0/exhaustruct_v5_cgo.go

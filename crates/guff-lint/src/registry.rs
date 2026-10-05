@@ -136,12 +136,9 @@ pub fn analyzers_for_linter_with_settings(
         "unconvert" => Some(vec![guff_style::unconvert()]),
         "exhaustruct" => Some(vec![guff_style::exhaustruct()]),
         // `exhaustruct_v5` (golangci-lint 2.13.0) is go-exhaustruct v5, a
-        // rewrite: comment directives instead of the `exhaustruct:"optional"`
-        // tag, `Type#Field` patterns, explicit mode. Until that port lands
-        // (docs/PHASE8-LEDGER.md, exhaustruct) it drives the v4 analyzer, which
-        // answers the same on configs that use none of those — see
-        // `merge_exhaustruct_v5` for what is and is not carried over.
-        "exhaustruct_v5" => Some(vec![guff_style::exhaustruct()]),
+        // rewrite with an analyzer of its own: comment directives instead of
+        // the `exhaustruct:"optional"` tag, `Type#Field` patterns, explicit mode.
+        "exhaustruct_v5" => Some(vec![guff_style::exhaustruct_v5()]),
         "exhaustive" => Some(vec![guff_style::exhaustive()]),
         "musttag" => Some(vec![guff_style::musttag()]),
         "loggercheck" => Some(vec![guff_style::loggercheck()]),
@@ -777,9 +774,10 @@ mod tests {
         assert!(known_linter_names().contains(&"exhaustruct_v5"));
         assert!(!linter_description("exhaustruct_v5").is_empty());
         assert!(analyzers_for_linter("exhaustruct_v5").is_some());
-        // The shared analyzer's canonical owner stays `exhaustruct`; the issue
-        // filter renames to `exhaustruct_v5` when only v5 is enabled.
+        // v4 and v5 are separate analyzers, each reporting under its own
+        // name, so `//nolint:exhaustruct` does not silence v5.
         assert_eq!(linter_name_for_analyzer("exhaustruct"), "exhaustruct");
+        assert_eq!(linter_name_for_analyzer("exhaustruct_v5"), "exhaustruct_v5");
         assert_eq!(deprecation("exhaustruct").map(|d| d.2), Some("exhaustruct_v5"));
         assert_eq!(deprecation("exhaustruct_v5"), None);
     }

@@ -1,0 +1,15 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh exhaustruct-v5-embedded
+# Produced by running golangci-lint on compat/golden/cases/exhaustruct-v5-embedded/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+types/embedded/embedded.go:31:13:exhaustruct_v5::embedded.Embedded is missing field g
+types/embedded/embedded.go:37:6:exhaustruct_v5::embedded.TestEmbedded is missing field Embedded
+types/embedded/embedded.go:45:13:exhaustruct_v5::external.Simple is missing field B
+types/embedded/embedded.go:72:6:exhaustruct_v5::embedded.OptionalDirect is missing field Strict
+types/embedded/embedded.go:73:6:exhaustruct_v5::embedded.OptionalDirect is missing field Strict
+types/embedded/embedded.go:80:6:exhaustruct_v5::embedded.OptionalHolder is missing field EnforcedInside
+types/embedded/embedded.go:81:6:exhaustruct_v5::embedded.OptionalHolder is missing field EnforcedInside

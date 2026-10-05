@@ -280,7 +280,11 @@ fn resolve_edit(
     } else {
         start_pos
     };
-    let filename = fset.position(start_pos).filename;
+    // The file on disk, not the one a `//line` directive names: an edit
+    // rewrites bytes, and upstream takes their offsets from `Fset.File(pos)`,
+    // which no line directive renames. The adjusted name used to drop every
+    // edit in a file carrying one (exhaustruct_v5's `lined_tags` testdata).
+    let filename = fset.position_for(start_pos, false).filename;
     if filename.is_empty() {
         return None;
     }

@@ -1,0 +1,28 @@
+# Golden case: go-exhaustruct v5.2.0's own analyzer testdata, `allow_empty/global`,
+# configured as upstream's analyzer_test.go / analyzer_empty_test.go configure it,
+# through the keys golangci-lint's `exhaustruct.NewV5` maps onto `analyzer.Config`.
+#
+# The module is `testdata` (upstream's go.mod) so `testdata/external` and the
+# `testdata/config/...` paths in patterns and messages resolve as they do upstream.
+#
+# golden-may-be-empty: upstream's own file carries no `// want` at all —
+# every literal in it is empty, and `allow-empty` lets each one through. It guards against
+# over-reporting, so silence is the answer.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - exhaustruct_v5
+  settings:
+    exhaustruct_v5:
+      allow-empty: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

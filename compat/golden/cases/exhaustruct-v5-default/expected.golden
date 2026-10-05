@@ -1,0 +1,67 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh exhaustruct-v5-default
+# Produced by running golangci-lint on compat/golden/cases/exhaustruct-v5-default/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+config/allow_empty/error_returns/error_returns.go:42:9:exhaustruct_v5::error_returns.TestStruct is missing field A
+config/allow_empty/error_returns/error_returns.go:46:24:exhaustruct_v5::error_returns.BError is missing field msg
+config/allow_empty/error_returns/error_returns.go:50:31:exhaustruct_v5::error_returns.BError is missing field msg
+config/allow_empty/error_returns/error_returns.go:56:22:exhaustruct_v5::error_returns.TestStruct is missing field A
+config/allow_empty/error_returns/error_returns.go:74:11:exhaustruct_v5::error_returns.BError is missing field msg
+config/allow_empty/error_returns/error_returns.go:81:12:exhaustruct_v5::error_returns.BError is missing field msg
+config/dep_directives/dep/dep.go:7:2:exhaustruct_v5::unknown directive (directive=optionall)
+config/dep_directives/user/user.go:9:6:exhaustruct_v5::dep.Shared is missing field B
+golangci/exhaustruct_v5.go:25:6:exhaustruct_v5::testdata.Exhaustruct is missing field c
+golangci/exhaustruct_v5.go:33:6:exhaustruct_v5::testdata.Exhaustruct is missing field B
+golangci/exhaustruct_v5.go:41:6:exhaustruct_v5::testdata.Exhaustruct is missing fields B, D
+types/blank/blank.go:47:6:exhaustruct_v5::blank.NoCompare is missing field B
+types/blank/blank.go:48:6:exhaustruct_v5::blank.Padded is missing field B
+types/blank/blank.go:55:6:exhaustruct_v5::blank.NoCompare is missing fields A, B
+types/blank/blank.go:56:6:exhaustruct_v5::blank.Padded is missing fields A, B
+types/blank/blank.go:57:6:exhaustruct_v5::blank.Layout is missing field A
+types/lined_tags/lined_tags.go:11:18:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/lined_tags/lined_tags.go:26:16:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/lined_tags/lined_tags.go:35:16:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/lined_tags/lined_tags.go:45:106:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/lined_tags/lined_tags.go:53:43:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/pointers/pointers.go:31:14:exhaustruct_v5::pointers.Base is missing field B
+types/pointers/pointers.go:35:17:exhaustruct_v5::pointers.PtrAlias is missing field B
+types/pointers/pointers.go:39:31:exhaustruct_v5::pointers.PtrAlias is missing field B
+types/pointers/pointers.go:43:18:exhaustruct_v5::pointers.PtrAlias is missing field B
+types/pointers/pointers.go:47:19:exhaustruct_v5::pointers.PtrDefined is missing field B
+types/stdlib/stdlib.go:20:6:exhaustruct_v5::net.TCPAddr is missing fields IP, Port, Zone
+types/stdlib/stdlib.go:24:6:exhaustruct_v5::net.TCPAddr is missing fields Port, Zone
+types/tags/tags.go:7:18:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/tags/tags.go:13:15:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/tags/tags.go:19:15:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/tags/tags.go:31:9:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/tags/tags.go:36:16:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/tags/tags.go:37:16:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/tags/tags.go:43:35:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/tags/tags.go:48:18:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/tags/tags.go:57:15:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/tags/tags.go:64:15:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/tags/tags.go:70:15:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/tags/tags.go:77:15:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/tags/tags.go:83:15:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/tags/tags.go:83:55:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/tags/tags.go:89:15:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/tags/tags.go:98:15:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/tags/tags.go:104:15:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/tags/tags.go:111:39:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/tags/tags.go:116:26:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/tags/tags.go:124:15:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/tags/tags.go:131:42:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/tags/tags.go:137:15:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/tags/tags.go:144:15:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/tags/tags.go:150:15:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/tags/tags.go:160:4:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/tags/tags.go:166:39:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/tags/tags.go:174:16:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/tags/tags.go:180:16:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/tags/tags.go:188:27:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/tags/tags.go:196:16:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives
+types/tags/tags.go:205:16:exhaustruct_v5::struct tag "exhaustruct" is not supported anymore, use comment directives

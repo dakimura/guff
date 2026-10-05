@@ -1853,34 +1853,37 @@ fn parse_v2_wsl_v5_settings() {
     assert!(opts.checks.contains(&guff_style::WslV5Check::If));
 }
 
-/// `exhaustruct_v5` drives the v4 analyzer until its own port lands, so its
-/// settings fill the shared `exhaustruct` options — the three keys that mean
-/// the same in both majors, and only when `exhaustruct` itself is not set.
+/// `exhaustruct_v5` has an analyzer of its own: every key golangci-lint's
+/// `exhaustruct.NewV5` maps reaches its options, and none of them touches v4's.
 #[test]
-fn exhaustruct_v5_settings_reach_the_shared_analyzer() {
-    let v5_only = r#"
-version: "2"
-linters:
-  settings:
-    exhaustruct_v5:
-      allow-empty: true
-      allow-empty-returns: true
-      allow-empty-declarations: true
-"#;
-    let s = LinterSettings::from_yaml(parse_config_str(v5_only).unwrap().linter_settings_raw());
-    assert_eq!(s.exhaustruct.allow_empty, Some(true));
-    assert_eq!(s.exhaustruct.allow_empty_returns, Some(true));
-    assert_eq!(s.exhaustruct.allow_empty_declarations, Some(true));
-
-    let both = r#"
+fn exhaustruct_v5_settings_reach_their_own_analyzer() {
+    let yaml = r#"
 version: "2"
 linters:
   settings:
     exhaustruct:
       allow-empty: false
     exhaustruct_v5:
+      enforce-patterns: ['.*\.Enforced', '.*\.T#F']
+      ignore-patterns: ['.*\.Ignored']
+      optional-patterns: ['.*\.Opt']
       allow-empty: true
+      allow-empty-patterns: ['.*\.Empty']
+      allow-empty-returns: true
+      allow-empty-declarations: true
+      allow-empty-blank-assignments: true
+      explicit-mode: true
 "#;
-    let s = LinterSettings::from_yaml(parse_config_str(both).unwrap().linter_settings_raw());
-    assert_eq!(s.exhaustruct.allow_empty, Some(false), "v4's own key wins");
+    let s = LinterSettings::from_yaml(parse_config_str(yaml).unwrap().linter_settings_raw());
+    assert_eq!(s.exhaustruct.allow_empty, Some(false), "v4 keeps its own key");
+    let o = s.exhaustruct_v5.to_guff_exhaustruct_v5();
+    assert_eq!(o.enforce_patterns, vec![r".*\.Enforced", r".*\.T#F"]);
+    assert_eq!(o.ignore_patterns, vec![r".*\.Ignored"]);
+    assert_eq!(o.optional_patterns, vec![r".*\.Opt"]);
+    assert_eq!(o.allow_empty_patterns, vec![r".*\.Empty"]);
+    assert!(o.allow_empty);
+    assert!(o.allow_empty_returns);
+    assert!(o.allow_empty_declarations);
+    assert!(o.allow_empty_blank_assignments);
+    assert!(o.explicit_mode);
 }
