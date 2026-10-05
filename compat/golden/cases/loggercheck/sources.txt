@@ -1,2 +1,3 @@
 # The isolate fixture, so the two tiers cannot drift.
 bad.go  compat/isolate/fixtures/loggercheck/bad.go
+stringer/v0120_stringer.go  crates/guff-style/tests/testdata/loggercheck/v0120_stringer.go

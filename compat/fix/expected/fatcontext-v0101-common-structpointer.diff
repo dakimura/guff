@@ -1,0 +1,182 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh fatcontext-v0101-common-structpointer
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/fatcontext-v0101-common-structpointer/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.14.0
+
+--- a/example.go
++++ b/example.go
+@@ -16,7 +16,7 @@
+ 	}
+ 
+ 	for i := 0; i < 10; i++ {
+-		ctx = context.WithValue(ctx, "key", i) // want "nested context in loop"
++		ctx := context.WithValue(ctx, "key", i) // want "nested context in loop"
+ 		ctx = context.WithValue(ctx, "other", "val")
+ 	}
+ 
+@@ -26,17 +26,17 @@
+ 		ctx = context.WithValue(ctx, "key", i)
+ 		ctx = context.WithValue(ctx, "other", "val")
+ 		// Not OK because this var has NOT been re-assigned to a known empty context.
+-		ctx2 = context.WithValue(ctx2, "key", i) // want "nested context in loop"
++		ctx2 := context.WithValue(ctx2, "key", i) // want "nested context in loop"
+ 	}
+ 
+ 	for item := range []string{"one", "two", "three"} {
+-		ctx = wrapContext(ctx) // want "nested context in loop"
++		ctx := wrapContext(ctx) // want "nested context in loop"
+ 		ctx := context.WithValue(ctx, "key", item)
+ 		ctx = wrapContext(ctx)
+ 	}
+ 
+ 	for {
+-		ctx = wrapContext(ctx) // want "nested context in loop"
++		ctx := wrapContext(ctx) // want "nested context in loop"
+ 		break
+ 	}
+ 
+@@ -69,14 +69,14 @@
+ 		default:
+ 		}
+ 
+-		ctx = wrapContext(ctx) // want "nested context in loop"
++		ctx := wrapContext(ctx) // want "nested context in loop"
+ 
+ 		break
+ 	}
+ 
+ 	// detects contexts wrapped in function literals (this is risky as function literals can be called multiple times)
+ 	_ = func() {
+-		ctx = wrapContext(ctx) // want "nested context in function literal"
++		ctx := wrapContext(ctx) // want "nested context in function literal"
+ 	}
+ 
+ 	// this is fine because context.Background is an empty context
+@@ -105,7 +105,7 @@
+ 
+ 	for {
+ 		ctx2 := context.Background()
+-		ctx = wrapContext(ctx) // want "nested context in loop"
++		ctx := wrapContext(ctx) // want "nested context in loop"
+ 		if doSomething() != nil {
+ 			ctx2 = wrapContext(ctx2)
+ 		}
+@@ -144,19 +144,19 @@
+ 	pc := &struct{ Ctx context.Context }{ctx}
+ 	for i := 0; i < 10; i++ {
+ 		c := pc
+-		c.Ctx = context.WithValue(c.Ctx, "key", i) // want "nested context in loop"
++		c.Ctx := context.WithValue(c.Ctx, "key", i) // want "nested context in loop"
+ 		c.Ctx = context.WithValue(c.Ctx, "other", "val")
+ 	}
+ 
+ 	r := []struct{ Ctx context.Context }{{ctx}}
+ 	for i := 0; i < 10; i++ {
+-		r[0].Ctx = context.WithValue(r[0].Ctx, "key", i) // want "nested context in loop"
++		r[0].Ctx := context.WithValue(r[0].Ctx, "key", i) // want "nested context in loop"
+ 		r[0].Ctx = context.WithValue(r[0].Ctx, "other", "val")
+ 	}
+ 
+ 	rp := []*struct{ Ctx context.Context }{{ctx}}
+ 	for i := 0; i < 10; i++ {
+-		rp[0].Ctx = context.WithValue(rp[0].Ctx, "key", i) // want "nested context in loop"
++		rp[0].Ctx := context.WithValue(rp[0].Ctx, "key", i) // want "nested context in loop"
+ 		rp[0].Ctx = context.WithValue(rp[0].Ctx, "other", "val")
+ 	}
+ }
+@@ -165,7 +165,7 @@
+ 	for {
+ 		err := doSomething()
+ 		if err != nil {
+-			ctx = wrapContext(ctx) // want "nested context in loop"
++			ctx := wrapContext(ctx) // want "nested context in loop"
+ 		}
+ 
+ 		break
+@@ -175,7 +175,7 @@
+ 		err := doSomething()
+ 		if err != nil {
+ 			if true {
+-				ctx = wrapContext(ctx) // want "nested context in loop"
++				ctx := wrapContext(ctx) // want "nested context in loop"
+ 			}
+ 		}
+ 
+@@ -186,7 +186,7 @@
+ 		err := doSomething()
+ 		switch err {
+ 		case nil:
+-			ctx = wrapContext(ctx) // want "nested context in loop"
++			ctx := wrapContext(ctx) // want "nested context in loop"
+ 		}
+ 
+ 		break
+@@ -196,7 +196,7 @@
+ 		err := doSomething()
+ 		switch err {
+ 		default:
+-			ctx = wrapContext(ctx) // want "nested context in loop"
++			ctx := wrapContext(ctx) // want "nested context in loop"
+ 		}
+ 
+ 		break
+@@ -215,7 +215,7 @@
+ 
+ 	for {
+ 		{
+-			ctx = wrapContext(ctx) // want "nested context in loop"
++			ctx := wrapContext(ctx) // want "nested context in loop"
+ 		}
+ 
+ 		break
+@@ -224,7 +224,7 @@
+ 	for {
+ 		select {
+ 		case <-ctx.Done():
+-			ctx = wrapContext(ctx) // want "nested context in loop"
++			ctx := wrapContext(ctx) // want "nested context in loop"
+ 		default:
+ 		}
+ 
+@@ -235,7 +235,7 @@
+ // this middleware could run on every request, bloating the request parameter level context and causing a memory leak
+ func badMiddleware(ctx context.Context) func() error {
+ 	return func() error {
+-		ctx = wrapContext(ctx) // want "nested context in function literal"
++		ctx := wrapContext(ctx) // want "nested context in function literal"
+ 		return doSomethingWithCtx(ctx)
+ 	}
+ }
+@@ -343,11 +343,11 @@
+ func runOnceInLoop(t *testing.T, ctx context.Context) {
+ 	for i := 0; i < 10; i++ {
+ 		defer func() {
+-			ctx = wrapContext(ctx) // want "nested context in function literal"
++			ctx := wrapContext(ctx) // want "nested context in function literal"
+ 		}()
+ 
+ 		t.Cleanup(func() {
+-			ctx = wrapContext(ctx) // want "nested context in function literal"
++			ctx := wrapContext(ctx) // want "nested context in function literal"
+ 		})
+ 	}
+ }
+@@ -356,11 +356,11 @@
+ // number of times.
+ func deferredCall(ctx context.Context) {
+ 	defer takesFunc(func() {
+-		ctx = wrapContext(ctx) // want "nested context in function literal"
++		ctx := wrapContext(ctx) // want "nested context in function literal"
+ 	})
+ 
+ 	go func() {
+-		ctx = wrapContext(ctx) // want "nested context in function literal"
++		ctx := wrapContext(ctx) // want "nested context in function literal"
+ 	}()
+ }
+ 

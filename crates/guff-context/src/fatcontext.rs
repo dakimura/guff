@@ -13,6 +13,7 @@ use guff_analysis::passes::inspect;
 use guff_analysis::{
     AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
 };
+use guff_types::arena::TypeData;
 use guff_types::selection::SelectionKind;
 
 const CATEGORY_IN_LOOP: &str = "nested context in loop";
@@ -67,15 +68,68 @@ fn unparen(e: &Expr) -> &Expr {
     cur
 }
 
-fn is_empty_context(e: &Expr) -> bool {
-    let Expr::CallExpr(CallExpr { fun, .. }) = unparen(e) else {
+/// `isEmptyContext`: `context.Background()` / `context.TODO()`, or
+/// `t.Context()` where `t` is a parameter declared `*testing.T`, `*testing.B`
+/// or `testing.TB` — upstream resolves `ident.Obj.Decl` to that `*ast.Field`;
+/// `testing_params` holds the name positions of such parameters.
+fn is_empty_context(pass: &Pass<'_>, e: &Expr, testing_params: &HashSet<u32>) -> bool {
+    let Expr::CallExpr(CallExpr { fun, .. }) = e else {
         return false;
     };
-    let Expr::SelectorExpr(SelectorExpr { x, sel, .. }) = unparen(fun) else {
+    let Expr::SelectorExpr(SelectorExpr { x, sel, .. }) = fun.as_ref() else {
         return false;
     };
-    matches!(unparen(x), Expr::Ident(Ident { name, .. }) if name == "context")
-        && matches!(sel.name.as_str(), "Background" | "TODO")
+    let Expr::Ident(ident) = x.as_ref() else {
+        return false;
+    };
+    if ident.name == "context" && matches!(sel.name.as_str(), "Background" | "TODO") {
+        return true;
+    }
+    if sel.name != "Context" {
+        return false;
+    }
+    let (Some(info), Some(a)) = (pass.types_info(), pass.pkg().type_artifacts.as_ref()) else {
+        return false;
+    };
+    info.uses
+        .get(&ident.id)
+        .is_some_and(|&obj| testing_params.contains(&obj.pos(&a.objects)))
+}
+
+/// The name positions of every parameter, result or receiver declared with
+/// type `*testing.T`, `*testing.B`, `*testing.TB` or the same without the star
+/// — by the spelling, as upstream reads `decl.Type`.
+fn testing_params(file: &guff::ast::File) -> HashSet<u32> {
+    let mut out = HashSet::new();
+    let mut add = |fl: Option<&guff::ast::FieldList>| {
+        for field in fl.into_iter().flat_map(|l| l.list.iter()) {
+            let Some(mut ty) = field.ty.as_ref() else {
+                continue;
+            };
+            if let Expr::StarExpr(star) = ty {
+                ty = &star.x;
+            }
+            let Expr::SelectorExpr(sel) = ty else {
+                continue;
+            };
+            let testing = matches!(sel.x.as_ref(), Expr::Ident(i) if i.name == "testing");
+            if testing && matches!(sel.sel.name.as_str(), "T" | "B" | "TB") {
+                out.extend(field.names.iter().map(|n| n.name_pos.0 as u32));
+            }
+        }
+    };
+    walk::inspect(NodeRef::File(file), |n| {
+        match n {
+            Some(NodeRef::FuncDecl(fd)) => add(fd.recv.as_ref()),
+            Some(NodeRef::FuncType(ft)) => {
+                add(ft.params.as_ref());
+                add(ft.results.as_ref());
+            }
+            _ => {}
+        }
+        true
+    });
+    out
 }
 
 fn var_name(e: &Expr) -> Option<String> {
@@ -188,11 +242,12 @@ fn find_nested_context<'a>(
     pass: &Pass<'_>,
     stmts: &'a [Stmt],
     enclosing: NodeRef<'_>,
+    testing_params: &HashSet<u32>,
 ) -> Option<&'a AssignStmt> {
     let mut reset: HashSet<String> = HashSet::new();
     for stmt in stmts {
         if let Some(list) = get_stmt_list(stmt) {
-            if let Some(found) = find_nested_context(pass, list, enclosing) {
+            if let Some(found) = find_nested_context(pass, list, enclosing, testing_params) {
                 return Some(found);
             }
         }
@@ -209,7 +264,7 @@ fn find_nested_context<'a>(
             continue;
         }
         let name = var_name(&assign.lhs[0]).unwrap_or_default();
-        if is_empty_context(&assign.rhs[0]) {
+        if is_empty_context(pass, &assign.rhs[0], testing_params) {
             if !name.is_empty() {
                 reset.insert(name);
             }
@@ -297,6 +352,72 @@ fn category_enabled(category: &str, opts: &FatcontextOptions) -> bool {
     }
 }
 
+/// `isCleanupCall`: `x.Cleanup(…)` where `x` is a `testing.T`, `B` or `TB`
+/// (or a pointer to one) — the named type itself, no unalias.
+fn is_cleanup_call(pass: &Pass<'_>, call: &CallExpr) -> bool {
+    let Expr::SelectorExpr(sel) = call.fun.as_ref() else {
+        return false;
+    };
+    if sel.sel.name != "Cleanup" {
+        return false;
+    }
+    let Some(a) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(mut t) = pass.types_info().and_then(|i| i.types.get(&sel.x.id())).map(|tv| tv.typ) else {
+        return false;
+    };
+    if let TypeData::Pointer(p) = a.types.get(t) {
+        t = p.elem();
+    }
+    if !matches!(a.types.get(t), TypeData::Named(_)) {
+        return false;
+    }
+    let obj = guff_types::named::named_obj(&a.types, t);
+    let in_testing = obj
+        .pkg(&a.objects)
+        .is_some_and(|p| a.packages.get(p).path() == "testing");
+    in_testing && matches!(obj.name(&a.objects), "T" | "B" | "TB")
+}
+
+/// `isRunOnce` (v0.10): the starts of the function literals that run at most
+/// once per execution of the statement registering them — `defer func() {…}()`
+/// and `t.Cleanup(func() {…})` — and so cannot grow the context they capture.
+/// Inside a loop (anywhere above, even outside the function) they run once
+/// per iteration and stay reported.
+fn run_once_func_lits(pass: &Pass<'_>, file: &guff::ast::File) -> HashSet<u32> {
+    let mut out = HashSet::new();
+    let mut stack: Vec<NodeRef<'_>> = Vec::new();
+    walk::inspect(NodeRef::File(file), |n| {
+        let Some(n) = n else {
+            stack.pop();
+            return true;
+        };
+        stack.push(n);
+        let NodeRef::FuncLit(lit) = n else {
+            return true;
+        };
+        let len = stack.len();
+        let Some(NodeRef::CallExpr(call)) = len.checked_sub(2).map(|i| stack[i]) else {
+            return true;
+        };
+        let lit_pos = lit.ty.pos().0;
+        let run_once = if matches!(call.fun.as_ref(), Expr::FuncLit(f) if f.ty.pos().0 == lit_pos) {
+            matches!(len.checked_sub(3).map(|i| stack[i]), Some(NodeRef::DeferStmt(_)))
+        } else {
+            is_cleanup_call(pass, call)
+        };
+        let in_loop = stack
+            .iter()
+            .any(|a| matches!(a, NodeRef::ForStmt(_) | NodeRef::RangeStmt(_)));
+        if run_once && !in_loop {
+            out.insert(lit_pos as u32);
+        }
+        true
+    });
+    out
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
@@ -309,11 +430,18 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     let mut pending = Vec::new();
     for file in pass.files() {
+        let run_once = run_once_func_lits(pass, file);
+        let testing = testing_params(file);
         walk::preorder(NodeRef::File(file), |n| {
+            if let NodeRef::FuncLit(lit) = n {
+                if run_once.contains(&(lit.ty.pos().0 as u32)) {
+                    return true;
+                }
+            }
             let Some(body) = body_of(n) else {
                 return true;
             };
-            let Some(assign) = find_nested_context(pass, &body.list, n) else {
+            let Some(assign) = find_nested_context(pass, &body.list, n, &testing) else {
                 return true;
             };
             let category = category_for(pass, n, assign);

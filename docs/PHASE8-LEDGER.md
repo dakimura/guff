@@ -569,11 +569,11 @@ v5 の `analyzer/testdata` は module zip に無い。GitHub の v5.2.0 タグ�
 | 6 | tagliatelle report | behavior | json `embed` フラグを skip | guff-style/src/tagliatelle.rs:265 | **done (PR 14g)** | S | — |
 | 7 | recvcheck 既定除外 | default-change | Marshal 系 → Unmarshal 系 | guff-style/src/recvcheck.rs:25 | **done (PR 8)** | S | builtinmethods/valuetype.go |
 | 8 | ginkgolinter `.Error()` チェーン | behavior | ErrorMethodPayload | guff-style/src/ginkgolinter.rs（DEFERRED） | needs-port | L | — |
-| 9 | bodyclose `//bodyclose:handled` | new-check | callee の Doc ディレクティブ | guff-context/src/bodyclose.rs | needs-port | M | handledresponse/*, consumption/consumption.go |
-| 10 | loggercheck checkStringerValues | new-check | nil で panic しうる Stringer 値 | guff-style/src/loggercheck.rs | needs-port | M | — |
+| 9 | bodyclose `//bodyclose:handled` | new-check | callee の Doc ディレクティブ | guff-context/src/bodyclose.rs | **done (PR 14j)**：依存の宣言は名前で引く（guff の依存 object は位置を持たない） | M | handledresponse/*, consumption/consumption.go |
+| 10 | loggercheck checkStringerValues | new-check | nil で panic しうる Stringer 値 | guff-style/src/loggercheck.rs | **done (PR 14j)** | M | — |
 | 11 | loggercheck 引数数ガード | behavior | 多値展開で panic | loggercheck.rs:375 | already-matches | S | issue108 |
 | 12 | fatcontext 2 フラグ | new-option | check-loops / check-function-literals | settings.rs:942, fatcontext.rs:291 | already-matches | S | fatcontext*.go/yml |
-| 13 | fatcontext isRunOnce | behavior | defer IIFE と t.Cleanup を報告しない | guff-context/src/fatcontext.rs run | needs-port | M | common/example.go, no_*/example.go |
+| 13 | fatcontext isRunOnce | behavior | defer IIFE と t.Cleanup を報告しない | guff-context/src/fatcontext.rs run | **done (PR 14j)**：併せて isEmptyContext の `t.Context()`（両版にあり guff 未移植） | M | common/example.go, no_*/example.go |
 | 14 | unparam addSrcFunc（AnonFuncs） | behavior | 到達不能な func literal も検査 | guff-style/src/unparam.rs:2048, :1117 | **done (PR 11)**: 到達不能な文の func literal も検査（外側の dead view は literal 自身には掛けない） | M | unexported_methods.txtar |
 | 15 | unparam 非公開型のメソッド | behavior | issue #91 | unparam.rs | already-matches | S | unexported_methods.txtar |
 | 16 | unparam linknameDoc | behavior | `//go:linkname` を skip | unparam.rs check_func_decl | **done (PR 11)** | S | linkname.txtar |

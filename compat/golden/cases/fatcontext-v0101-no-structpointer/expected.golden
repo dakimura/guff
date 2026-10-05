@@ -1,0 +1,8 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh fatcontext-v0101-no-structpointer
+# Produced by running golangci-lint on compat/golden/cases/fatcontext-v0101-no-structpointer/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
