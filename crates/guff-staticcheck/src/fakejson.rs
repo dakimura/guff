@@ -20,6 +20,11 @@ pub trait MarshalerLookup {
     /// Does the method set of `typ` (or of `*typ` when `ptr`) hold `method`
     /// with the signature `func() ([]byte, error)`?
     fn implements(&self, typ: TypeId, method: &str, ptr: bool) -> bool;
+
+    /// The signature of `method` in the method set of `typ` (or of `*typ`
+    /// when `ptr`) — `types.LookupFieldOrMethod(t, false, nil, method)` for
+    /// `fakexml`, which checks the shape itself.
+    fn method_signature(&self, typ: TypeId, method: &str, ptr: bool) -> Option<TypeId>;
 }
 
 /// Error returned when a type cannot be JSON-marshaled.
@@ -374,7 +379,7 @@ fn type_fields(
 }
 
 /// Minimal `reflect.StructTag.Get` — returns the value for `key:"value"`.
-fn struct_tag_get<'a>(tag: &'a str, key: &str) -> &'a str {
+pub(crate) fn struct_tag_get<'a>(tag: &'a str, key: &str) -> &'a str {
     let mut rest = tag;
     while !rest.is_empty() {
         rest = rest.trim_start();

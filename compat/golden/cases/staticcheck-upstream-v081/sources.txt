@@ -1,0 +1,14 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+sa9010/go1.18/deferr/deferr.go  crates/guff-staticcheck/tests/testdata/upstream-v0.8.1/sa9010/testdata/go1.18/deferr/deferr.go
+sa9010/go1.0/deferr/deferr.go  crates/guff-staticcheck/tests/testdata/upstream-v0.8.1/sa9010/testdata/go1.0/example.com/deferr/deferr.go
+sa1026/go1.18/CheckUnsupportedMarshal/generics.go  crates/guff-staticcheck/tests/testdata/upstream-v0.8.1/sa1026/testdata/go1.18/CheckUnsupportedMarshal/generics.go
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go  crates/guff-staticcheck/tests/testdata/upstream-v0.8.1/sa1026/testdata/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go
+sa1030/go1.15/CheckStrconv/CheckStrconv.go  crates/guff-staticcheck/tests/testdata/upstream-v0.8.1/sa1030/testdata/go1.15/CheckStrconv/CheckStrconv.go
+sa1030/go1.15/CheckStrconv/stub.go  crates/guff-staticcheck/tests/testdata/upstream-v0.8.1/sa1030/testdata/go1.15/CheckStrconv/stub.go
+sa1030/go1.0/CheckStrconv/CheckStrconv.go  crates/guff-staticcheck/tests/testdata/upstream-v0.8.1/sa1030/testdata/go1.0/CheckStrconv/CheckStrconv.go
+sa5007/go1.0/CheckInfiniteRecursion/CheckInfiniteRecursion.go  crates/guff-staticcheck/tests/testdata/upstream-v0.8.1/sa5007/testdata/go1.0/CheckInfiniteRecursion/CheckInfiniteRecursion.go
+sa5008/go1.18/CheckStructTags/generics.go  crates/guff-staticcheck/tests/testdata/upstream-v0.8.1/sa5008/testdata/go1.18/CheckStructTags/generics.go
+sa5008/go1.0/CheckStructTags2/CheckStructTags2.go  crates/guff-staticcheck/tests/testdata/upstream-v0.8.1/sa5008/testdata/go1.0/CheckStructTags2/CheckStructTags2.go
+extra/sa5008.go  crates/guff-staticcheck/tests/testdata/v081-extra/sa5008.go
+extra/sa1026.go  crates/guff-staticcheck/tests/testdata/v081-extra/sa1026.go

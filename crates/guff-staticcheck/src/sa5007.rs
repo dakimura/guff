@@ -5,7 +5,7 @@
 use std::sync::OnceLock;
 
 use guff_analysis::passes::buildir;
-use guff_analysis::{dominates_all_returns, each_call, AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::{dominates_all_exits, each_call, AnalysisResult, Analyzer, RunError, RunFn, Pass};
 use guff_ssa::instr::InstrData;
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -27,7 +27,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 if matches!(caller.instrs.get(iid), InstrData::Go(_)) {
                     return;
                 }
-                if dominates_all_returns(caller, bid) {
+                if dominates_all_exits(caller, bid) {
                     reports.push(caller.pos(iid).0 as u32);
                 }
             });

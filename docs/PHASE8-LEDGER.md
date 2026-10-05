@@ -258,7 +258,7 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 
 | # | upstream_path | kind | 要約 | guff の場所 | status | effort | upstream testdata |
 |---|---------------|------|------|-------------|--------|--------|-------------------|
-| 1 | golinters/canonicalheader | behavior | fork に差し替え（既定でも文言と報告ノードが変わる）+ 新 option | guff-style/src/canonicalheader.rs | needs-port | M | canonicalheader{,_cgo,_custom}.go, _custom.yml |
+| 1 | golinters/canonicalheader | behavior | fork に差し替え（既定でも文言と報告ノードが変わる）+ 新 option | guff-style/src/canonicalheader.rs | **done (PR 8)** | M | canonicalheader{,_cgo,_custom}.go, _custom.yml |
 | 2 | golinters/dupword | new-option | skip-raw-strings を flag に渡す | guff-comment/src/dupword.rs | **done (PR 2)** | S | dupword_skip_raw_strings.{go,yml} |
 | 3 | golinters/exhaustruct/exhaustruct_v5.go | new-check | 新 linter（v5.2.0） | guff-style/src/exhaustruct.rs, registry.rs | **PR 2: v4 エンジンで代用**（tag・パターン・explicit-mode は PR 14） | L | exhaustruct_v5*.go/yml, exhaustruct_v4*.go/yml |
 | 4 | golinters/fatcontext | new-option | 2 フラグを渡す | settings.rs, fatcontext.rs | already-matches | S | fatcontext*.go/yml |
@@ -271,9 +271,9 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 | 11 | golinters/internal/util.go FormatCode | message | `%#q` 化（CanBackquote 偽ならダブルクォート）。goconst / errcheck / dupl / gocyclo / gocognit / gochecknoinits | goconst.rs:330, gocyclo.rs:39, gocognit.rs:40, guff-errcheck/src/lib.rs:210, guff-dupl/src/dupl.rs:59 | needs-port | S | — |
 | 12 | golinters/misspell | message | `%#q` 化 | guff-misspell/src/misspell.rs:30 | needs-port | S | — |
 | 13 | golinters/nolintlint/internal/issues.go | message | `%#q` 化 | guff-lint/src/nolintlint.rs:206, nolint.rs:603 | needs-port | S | — |
-| 14 | golinters/modernize | message | fmtappendf / waitgroup の旧名警告 | settings.rs, modernize.rs | needs-port | S | fix/in,out の waitgroupgo / waitgroup / fmtappendf |
+| 14 | golinters/modernize | message | fmtappendf / waitgroup の旧名警告 | settings.rs, modernize.rs | **done (PR 2)** | S | fix/in,out の waitgroupgo / waitgroup / fmtappendf |
 | 15 | golinters/nonamedreturns | new-option | allow-unused-named-returns を渡す | settings.rs:1347, nonamedreturns.rs:1060 | already-matches | S | — |
-| 16 | golinters/revive | behavior | revive v1.17 の公開 API に寄せ、enable-all に 3 規則が増える | guff-revive/src/config.rs AHEAD_OF_PIN_RULES:148 | needs-port | M | revive.yml |
+| 16 | golinters/revive | behavior | revive v1.17 の公開 API に寄せ、enable-all に 3 規則が増える | guff-revive/src/config.rs AHEAD_OF_PIN_RULES:148 | **done (PR 10)** | M | revive.yml |
 
 `%#q` の 3 項目は `guff_gostd::strconv::quote_sharp` / `can_backquote`（guff-gostd/src/strconv.rs:54,69）を共有すれば S で済む。
 
@@ -360,16 +360,16 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 | 4 | sa4003.go | behavior | 型名を tx そのものに、型パラメータを type set で | sa4003.rs | **PR 5: 型名は done**（型パラメータの type set は DEFERRED） | M | go1.18/CheckExtremeComparison.go |
 | 5 | sa4006.go IncDec / 複合代入 | new-check | `n++` と結果が読まれない複合代入 | sa4006.rs:647 | **done (PR 4)** | M | CheckUnreadVariableValues.go |
 | 6 | sa4006.go hasUse Sigma 削除 | substrate | sigma 越しの未使用が消える | sa4006.rs has_use_rec | already-matches | S | — |
-| 7 | analysis.go / sa5011.go | removed-check | SA5011 削除 | guff-staticcheck/src/lib.rs:164,329 | needs-port | S | — |
+| 7 | analysis.go / sa5011.go | removed-check | SA5011 削除 | guff-staticcheck/src/lib.rs:164,329 | **done (PR 4)** | S | — |
 | 8 | sa6005.go | message | `!strings.EqualFold`、fix タイトル小文字 | sa6005.rs:70,83 | **done (PR 5)** | S | CheckToLowerToUpperComparison.go{,.golden} |
-| 9 | sa9010.go（新規） | new-check | `deferred return function not called` | 無し | needs-port | S | sa9010/testdata/** |
-| 10 | sa1026.go | behavior | MarshalIndent を追加 | sa1026.rs:139 | needs-port | S | CheckUnsupportedMarshal.go |
+| 9 | sa9010.go（新規） | new-check | `deferred return function not called` | sa9010.rs | **done (PR 14d)** | S | sa9010/testdata/** |
+| 10 | sa1026.go | behavior | MarshalIndent を追加（併せて fakexml を移植：xml は map 不可・cyclic 型・attr/innerxml/comment） | sa1026.rs, fakexml.rs | **done (PR 14d)** | S | CheckUnsupportedMarshal.go |
 | 11 | sa9005.go | behavior | MarshalIndent を追加 | sa9005.rs:146,148 | already-matches | S | CheckNoopMarshal.go |
-| 12 | sa5007.go | substrate | exit ブロックの判定（**両版で非報告。guff の既存の過剰報告**） | sa5007.rs, guff-analysis/src/ssa_util.rs:322 | needs-port | S | CheckInfiniteRecursion.go |
-| 13 | sa5008/jsonv2.go | behavior | `embed` を有効オプションに | sa5008_json.rs:224 | needs-port | S | — |
-| 14 | sa1030.go | message | `%q` に rune(val) | sa1030.rs | needs-port | S | — |
-| 15 | unused/implements.go Unify | behavior | 完全単一化 | guff-unused/src/lenient_implements.rs | needs-port | M | generic-interfaces.go |
-| 16 | unused.go 昇格フィールドキー | behavior | 途中の埋め込みフィールドを used に | guff-unused/src/lib.rs:590 | needs-port | S | — |
+| 12 | sa5007.go | substrate | exit ブロックの判定（**両版で非報告。guff の既存の過剰報告**） | sa5007.rs, guff-analysis/src/ssa_util.rs dominates_all_exits | **done (PR 14d)**：panic ブロックも exit | S | CheckInfiniteRecursion.go |
+| 13 | sa5008/jsonv2.go | behavior | `embed` を有効オプションに（併せて `string` を type set で判定） | sa5008_json.rs | **done (PR 14d)** | S | — |
+| 14 | sa1030.go | message | `%q` に rune(val) | sa1030.rs | already-matches（golden で確認） | S | — |
+| 15 | unused/implements.go Unify | behavior | 完全単一化 | guff-unused/src/lenient_implements.rs | **done (PR 4)** | M | generic-interfaces.go |
+| 16 | unused.go 昇格フィールドキー | behavior | 途中の埋め込みフィールドを used に | guff-unused/src/lib.rs:590 | **PR 15 へ**：昇格フィールドをキーにできるのは Go 1.27 から。guff の型検査（literals.rs `field_index`）がまだ unknown field で落とす | S | — |
 | 17 | sa4010.go | behavior | Sigma / DebugRef を外す | sa4010.rs | unsure | M | CheckIneffectiveAppend.go |
 | 18 | sa6001.go | behavior | MapLookup が 1 つ以上必要 | sa6001.rs | already-matches | S | — |
 | 19 | sa6002.go MaybePointerLike | behavior | term の無い type-set 制約（comparable 等）を pointer-like に | guff-analysis/src/callcheck.rs:721 | already-matches | S | — |
@@ -504,8 +504,8 @@ v5 の `analyzer/testdata` は module zip に無い。GitHub の v5.2.0 タグ�
 |---|---------------|------|------|-------------|--------|--------|-------------------|
 | 1 | canonicalheader literal_string.go / constant_string.go | message | `use %q instead of %q` に統一 | guff-style/src/canonicalheader.rs check_call | **done (PR 8)** | S | const/, common/, alias/ ほか |
 | 2 | canonicalheader analyzer.go | behavior | initialism 表が「抑制」から「正解の綴り」に | canonicalheader.rs canonical_header_key | **done (PR 8)** | S | initialism/initialism.go{,.golden} |
-| 3 | canonicalheader exclusions | new-option | exclusions / use-default-exclusions | canonicalheader.rs, settings.rs | needs-port | M | exclusions/*, canonicalheader_custom.{go,yml} |
-| 4 | canonicalheader SuggestedFix 文言 | message | `should be replaced %q with %q` | check_call | needs-port | S | — |
+| 3 | canonicalheader exclusions | new-option | exclusions / use-default-exclusions | canonicalheader.rs, settings.rs | **done (PR 8)** | M | exclusions/*, canonicalheader_custom.{go,yml} |
+| 4 | canonicalheader SuggestedFix 文言 | message | `should be replaced %q with %q` | check_call | **done (PR 8)** | S | — |
 | 5 | canonicalheader nil ガード | behavior | `(h.Get)("x")` で panic していた | canonicalheader.rs is_header_method | already-matches | S | — |
 | 6 | iface unusedmethod（新規） | new-check | interface の未使用メソッド | guff-style/src/iface.rs | needs-port | M | unusedmethod/testdata/**, iface_unusedmethod.{go,yml} |
 | 7 | iface unused 照合 | behavior | 名前一致からオブジェクト一致へ | iface.rs check_unused | already-matches | S | unused/testdata/src/basic/* |

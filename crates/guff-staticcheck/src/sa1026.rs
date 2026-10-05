@@ -15,7 +15,7 @@ use guff_types::typestring::type_string;
 use guff_types::lookup::{lookup_field_or_method, LookupResult};
 use guff_types::TypeId;
 
-use crate::fakejson;
+use crate::{fakejson, fakexml};
 
 /// Answers the method-set questions `fakejson` asks, over a private copy of the
 /// type arena — `lookup_field_or_method` memoises into it.
@@ -26,7 +26,7 @@ struct Lookup<'a> {
 }
 
 impl fakejson::MarshalerLookup for Lookup<'_> {
-    fn implements(&self, typ: TypeId, method: &str, ptr: bool) -> bool {
+    fn method_signature(&self, typ: TypeId, method: &str, ptr: bool) -> Option<TypeId> {
         let mut types = self.types.borrow_mut();
         let recv = if ptr {
             guff_types::pointer::new_pointer(&mut types, typ)
@@ -46,16 +46,21 @@ impl fakejson::MarshalerLookup for Lookup<'_> {
             method,
         ) {
             LookupResult::Found { obj, .. } => obj,
-            _ => return false,
+            _ => return None,
         };
         let ObjectData::Func(f) = self.objects.get(found) else {
+            return None;
+        };
+        f.typ()
+    }
+
+    fn implements(&self, typ: TypeId, method: &str, ptr: bool) -> bool {
+        let Some(sig) = self.method_signature(typ, method, ptr) else {
             return false;
         };
+        let types = self.types.borrow();
         // `func() ([]byte, error)` — a `MarshalText` with any other shape does
         // not implement the interface.
-        let Some(sig) = f.typ() else {
-            return false;
-        };
         let TypeData::Signature(sig) = types.get(sig.underlying(&types)) else {
             return false;
         };
@@ -94,7 +99,22 @@ fn relative_to(pkg: PackageId) -> impl Fn(PackageId, &PackageArena) -> String {
     }
 }
 
-fn check_marshal(call: &mut Call<'_>, ctx: &CallContext<'_>) {
+/// Which encoder a rule checks against.
+#[derive(Clone, Copy)]
+enum Format {
+    Json,
+    Xml,
+}
+
+fn check_json(call: &mut Call<'_>, ctx: &CallContext<'_>) {
+    check_marshal(call, ctx, Format::Json);
+}
+
+fn check_xml(call: &mut Call<'_>, ctx: &CallContext<'_>) {
+    check_marshal(call, ctx, Format::Xml);
+}
+
+fn check_marshal(call: &mut Call<'_>, ctx: &CallContext<'_>, format: Format) {
     let Some(arg) = call.args.first() else {
         return;
     };
@@ -107,8 +127,20 @@ fn check_marshal(call: &mut Call<'_>, ctx: &CallContext<'_>) {
         objects,
         packages,
     };
-    let Some(err) = fakejson::marshal(arena, objects, packages, &lookup, typ) else {
-        return;
+    let (what, err_typ, path) = match format {
+        Format::Json => {
+            let Some(err) = fakejson::marshal(arena, objects, packages, &lookup, typ) else {
+                return;
+            };
+            ("unsupported", err.typ, err.path)
+        }
+        // `TagPathError` is left to vet and every other error to SA5008: both
+        // can point at the struct tag instead of at the call.
+        Format::Xml => match fakexml::marshal(arena, objects, packages, &lookup, typ) {
+            Some(fakexml::XmlError::Unsupported { typ, path }) => ("unsupported", typ, path),
+            Some(fakexml::XmlError::Cyclic { typ, path }) => ("cyclic", typ, path),
+            Some(fakexml::XmlError::Other) | None => return,
+        },
     };
     // `types.TypeString(err.Type, types.RelativeTo(call.Parent.Pkg.Pkg))` —
     // guff printed the import path for a type of the package under analysis,
@@ -119,16 +151,13 @@ fn check_marshal(call: &mut Call<'_>, ctx: &CallContext<'_>) {
         .map(|p| ctx.prog.packages.get(p).pkg)
         .map(relative_to);
     let typ_str = match &qf {
-        Some(q) => type_string(arena, objects, packages, err.typ, Some(q)),
-        None => callcheck::render_type(arena, objects, packages, err.typ),
+        Some(q) => type_string(arena, objects, packages, err_typ, Some(q)),
+        None => callcheck::render_type(arena, objects, packages, err_typ),
     };
-    let msg = if err.path == "x" {
-        format!("trying to marshal unsupported type {typ_str}")
+    let msg = if path == "x" {
+        format!("trying to marshal {what} type {typ_str}")
     } else {
-        format!(
-            "trying to marshal unsupported type {typ_str}, via {}",
-            err.path
-        )
+        format!("trying to marshal {what} type {typ_str}, via {path}")
     };
     call.args[0].invalid(msg);
 }
@@ -136,20 +165,14 @@ fn check_marshal(call: &mut Call<'_>, ctx: &CallContext<'_>) {
 fn rules() -> &'static HashMap<&'static str, callcheck::CheckFn> {
     static RULES: OnceLock<HashMap<&'static str, callcheck::CheckFn>> = OnceLock::new();
     RULES.get_or_init(|| {
-        // Upstream's rule table is exactly these four. `MarshalIndent` is not
-        // on it — checking it too made consul's
-        // `json.MarshalIndent(bound, …)` a guff-only finding.
+        // honnef v0.8.1 added both `MarshalIndent`s.
         HashMap::from([
-            ("encoding/json.Marshal", check_marshal as callcheck::CheckFn),
-            (
-                "(*encoding/json.Encoder).Encode",
-                check_marshal as callcheck::CheckFn,
-            ),
-            ("encoding/xml.Marshal", check_marshal as callcheck::CheckFn),
-            (
-                "(*encoding/xml.Encoder).Encode",
-                check_marshal as callcheck::CheckFn,
-            ),
+            ("encoding/json.Marshal", check_json as callcheck::CheckFn),
+            ("encoding/json.MarshalIndent", check_json as callcheck::CheckFn),
+            ("encoding/xml.Marshal", check_xml as callcheck::CheckFn),
+            ("encoding/xml.MarshalIndent", check_xml as callcheck::CheckFn),
+            ("(*encoding/json.Encoder).Encode", check_json as callcheck::CheckFn),
+            ("(*encoding/xml.Encoder).Encode", check_xml as callcheck::CheckFn),
         ])
     })
 }
