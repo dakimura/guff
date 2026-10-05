@@ -30,7 +30,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     // Rules that read comments share one PARSE_COMMENTS reparse per file; the
     // cache is scoped to this package so its ASTs are dropped with it.
     crate::util::clear_reparse_cache();
-    let failures = rules::run_enabled_rules(pass);
+    let mut failures = rules::run_enabled_rules(pass);
     // `//revive:disable[...]` comments, read from the same reparse the
     // comment-reading rules use, before the cache is dropped.
     let enabled_rules: Vec<String> = config::all_rules()
@@ -38,8 +38,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .filter(|r| config::rule_enabled(pass, r))
         .map(|r| (*r).to_string())
         .collect();
-    let directives = crate::directives::collect(pass, &enabled_rules);
-    let failures = crate::directives::filter(pass, &directives, failures);
+    let mut directive_failures = Vec::new();
+    let directives =
+        crate::directives::collect(pass, &enabled_rules, &settings, &mut directive_failures);
+    failures = crate::directives::filter(pass, &directives, failures);
+    // A directive's own failure is not subject to any directive.
+    failures.extend(directive_failures);
     crate::util::clear_reparse_cache();
     // `lint/file.go` skips a rule for a file its `exclude` list matches, before
     // the rule ever runs:
@@ -73,7 +77,15 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             pos: failure.pos,
             suggested_fixes: replacement_fix(pass, &failure, &message),
             message,
-            severity: config::rule_severity(pass, failure.rule),
+            severity: match failure.rule {
+                crate::directives::SPECIFY_DISABLE_REASON | crate::directives::SPECIFY_DISABLE_RULE => {
+                    match settings.directive_severity(failure.rule) {
+                        Some("error") => "error".to_string(),
+                        _ => "warning".to_string(),
+                    }
+                }
+                _ => config::rule_severity(pass, failure.rule),
+            },
             column: failure.column,
             ..Diagnostic::default()
         });

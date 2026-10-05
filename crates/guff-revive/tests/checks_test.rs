@@ -225,6 +225,7 @@ fn revive_comments_density_reports_a_ratio_below_the_minimum() {
             enable_default_rules: false,
             enable_all_rules: false,
             go: None,
+            directives: Vec::new(),
         },
     );
     let bag = Arc::new(bag);
@@ -284,6 +285,7 @@ fn revive_unnecessary_if_compares_the_rendered_targets() {
             enable_default_rules: false,
             enable_all_rules: false,
             go: None,
+            directives: Vec::new(),
         },
     );
     let bag = Arc::new(bag);
@@ -357,6 +359,7 @@ fn revive_never_unwraps_parentheses() {
             enable_default_rules: false,
             enable_all_rules: false,
             go: None,
+            directives: Vec::new(),
         },
     );
     let bag = Arc::new(bag);
@@ -909,6 +912,7 @@ fn revive_applies_per_rule_and_global_severity() {
         enable_default_rules: false,
         enable_all_rules: false,
         go: None,
+        directives: Vec::new(),
     };
     let mut bag = SettingsBag::new();
     bag.insert("revive", settings);
@@ -1976,6 +1980,7 @@ fn exclude_messages(exclude: Vec<&str>) -> Vec<String> {
         enable_default_rules: false,
         enable_all_rules: false,
         go: None,
+        directives: Vec::new(),
     };
     settings.confidence = Some(0.0);
     guff_revive::with_settings(settings, || {
@@ -2038,6 +2043,7 @@ fn exported_flag_messages(args: &[&str]) -> Vec<String> {
         enable_default_rules: false,
         enable_all_rules: false,
         go: None,
+        directives: Vec::new(),
     };
     guff_revive::with_settings(settings, || {
         let pkg = support::typecheck_fixture_dir("revive", "exported_flags", "example.com/revive/exflags");
@@ -2139,6 +2145,7 @@ fn import_alias_messages(args: Vec<guff_revive::RuleArgument>) -> Vec<String> {
         enable_default_rules: false,
         enable_all_rules: false,
         go: None,
+        directives: Vec::new(),
     };
     guff_revive::with_settings(settings, || {
         let pkg =
@@ -2227,6 +2234,7 @@ fn revive_unconditional_recursion_distinguishes_an_unnamed_receiver() {
         enable_default_rules: false,
         enable_all_rules: false,
         go: None,
+        directives: Vec::new(),
     };
     let messages = guff_revive::with_settings(settings, || {
         let pkg = support::typecheck_fixture_dir(

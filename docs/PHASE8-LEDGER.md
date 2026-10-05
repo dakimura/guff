@@ -196,7 +196,7 @@ analyzer 本体（L）が入るまでは finding 0 件になる —— これは
 | linter | キー | 上流既定 | guff | status |
 |--------|------|----------|------|--------|
 | exhaustruct_v5 | enforce-patterns / ignore-patterns / optional-patterns / allow-empty / allow-empty-patterns / allow-empty-returns / allow-empty-declarations / **allow-empty-blank-assignments**（struct のみ、schema に無い） / explicit-mode | false / 空。report-full-type-path は配線されず常に false。不正パターンは Fatalf | `ExhaustructV5Settings::to_guff_exhaustruct_v5`（全 9 キー）。不正パターンは analyzer エラー | **done (PR 14b)** |
-| canonicalheader | `exclusions` []string / `use-default-exclusions` | 空 / **true** | 無し（DEFERRED の理由「YAML 設定が無い」は 2.14.0 で腐った） | needs-port |
+| canonicalheader | `exclusions` []string / `use-default-exclusions` | 空 / **true** | 無し（DEFERRED の理由「YAML 設定が無い」は 2.14.0 で腐った） | **done (PR 8)** |
 | dupword | `skip-raw-strings` | false | 無し | **done (PR 2)** |
 | fatcontext | `check-loops` / `check-function-literals` | true / true | 既に読む | already-matches |
 | funcorder | `function` | false | 既に読む | already-matches |
@@ -206,11 +206,11 @@ analyzer 本体（L）が入るまでは finding 0 件になる —— これは
 | gofumpt | `extra.group-params` / `extra.clothe-returns` / `extra.balance-calls`、`extra-rules` は deprecated | false ×3 | `extra-rules` だけ | needs-port。**文言とコードが食い違う**: 警告は「use extra.group-params instead」だが、`extra-rules: true` は 3 規則すべて（balance-calls 含む）を有効にする。コードに合わせる |
 | iface | `enable: [unusedmethod]`、`settings.unusedmethod.exclude` | 既定は identical のみ | `IfaceSettings` の `settings.{unused,unusedmethod}.exclude`（golangci の `valueToString` どおりカンマ連結した flag 文字列を渡し、analyzer 側で分割・TrimSpace・空除去） | **done (PR 14h)** |
 | modernize | `disable` に書ける名前: fmtappendf 削除、waitgroup → waitgroupgo、7 個追加 | 旧名は warn（照合は改名しない） | 任意文字列を受理（受理は一致）、警告なし | **PR 2: 警告は done**（Suite は PR 1） |
-| gosec | `config.global` の `nosec-require-rules` / `nosec-require-justification`、代替タグの `#` 正規化 | 無効 | `config.global` 全体が DEFERRED | needs-port |
-| revive | `directives: specify-disable-rule`（と既存の specify-disable-reason） | — | directives を読まない | needs-port |
-| revive `line-length-limit` | map 引数 `{max, excludes}` | — | 整数だけ（map だと 80 に落ちる） | needs-port |
-| revive `identical-switch-branches` | `allow-identical-default` | false | 引数を読まない | needs-port |
-| revive `comment-spacings` | 既定 allow-list に `//#nosec` | — | 組み込み既定なし | needs-port |
+| gosec | `config.global` の `nosec-require-rules` / `nosec-require-justification`、代替タグの `#` 正規化 | 無効 | `config.global` 全体が DEFERRED | **done (PR 14l)**：nosec / `#nosec` / show-ignored / nosec-require-*（audit は G104 だけに効くので DEFERRED） |
+| revive | `directives: specify-disable-rule`（と既存の specify-disable-reason） | — | directives を読まない | **done (PR 14l)** |
+| revive `line-length-limit` | map 引数 `{max, excludes}` | — | 整数だけ（map だと 80 に落ちる） | **done (PR 10)** |
+| revive `identical-switch-branches` | `allow-identical-default` | false | 引数を読まない | **done (PR 10)** |
+| revive `comment-spacings` | 既定 allow-list に `//#nosec` | — | 組み込み既定なし | **done (PR 10)** |
 
 ### 3.3 既定値・inventory 以外の config 層の挙動
 
@@ -236,18 +236,18 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 | 3 | builder_linter.go exhaustruct DeprecatedWarning | message | v4 の deprecated 警告と `[deprecated]` 表示 | registry.rs format_linters_listing / cli.rs | **done (PR 2)**（`[deprecated]` 表示と Migration 提案は未） | S | — |
 | 4 | builder_linter.go modernize WithAutoFix | other | 一覧の `[auto-fix]` 表示だけ。--fix 可否とは無関係 | registry.rs | not-applicable | S | — |
 | 5 | builder_linter.go golines / revive WithURL | other | URL はメタデータだけ | — | not-applicable | S | — |
-| 6 | CanonicalHeaderSettings + canonicalheader.New | behavior | fork 乗り換え + exclusions / use-default-exclusions | guff-style/src/canonicalheader.rs, settings.rs | needs-port | M | canonicalheader_custom.{go,yml} |
+| 6 | CanonicalHeaderSettings + canonicalheader.New | behavior | fork 乗り換え + exclusions / use-default-exclusions | guff-style/src/canonicalheader.rs, settings.rs | **done (PR 8)** | M | canonicalheader_custom.{go,yml} |
 | 7 | DupWordSettings.SkipRawStrings | new-option | dupword `skip-raw-strings` | settings.rs DupwordSettings, guff-comment/src/options.rs | **done (PR 2)** | S | dupword_skip_raw_strings.{go,yml} |
 | 8 | FatcontextSettings | new-option | check-loops / check-function-literals（既定 true） | settings.rs:938, guff-context/src/fatcontext.rs:293 | already-matches | S | fatcontext_checkloops.{go,yml}, fatcontext_checkfunctionliterals.{go,yml} |
 | 9 | FuncOrderSettings.Function | new-option | funcorder `function` | settings.rs:1363, guff-style/src/funcorder.rs:229,276 | already-matches | S | — |
 | 10 | GoConstSettings ExcludeTypes / IgnoreMapKeys | new-option | goconst の新キーとラッパの互換処理 | settings.rs GoconstSettings:502 | **done (PR 14i)**：goconst.rs を v1.11.0 visitor/api から全面移植 | M | goconst_exclude_types.{go,yml} |
-| 11 | GoModDirectivesSettings | new-option | replace-allow-all / ignore-forbidden | settings.rs:2207 | needs-port | S | — |
+| 11 | GoModDirectivesSettings | new-option | replace-allow-all / ignore-forbidden | settings.rs:2207 | **done (PR 2)** | S | — |
 | 12 | NoNamedReturnsSettings | new-option | allow-unused-named-returns | settings.rs:1342, nonamedreturns.rs:1060 | already-matches | S | — |
 | 13 | formatters_settings.go GoFumptExtra | new-option | gofumpt `extra.*`、extra-rules deprecated | guff-lint/src/config.rs:590, guff-fmt/src/gofumpt.rs | needs-port | M | gofumpt_with_extra.{go,yml} |
 | 14 | jsonschema iface-analyzers | config-schema | iface `unusedmethod` と exclude | settings.rs IfaceSettings:2137, iface.rs | **done (PR 14h)**（`enable` に opaque / unexported / unusedmethod も受理） | M | iface_unusedmethod.{go,yml} |
-| 15 | jsonschema modernize-analyzers | config-schema | disable 名の変更と旧名警告。guff は fmtappendf を既定で走らせ続ける | settings.rs ModernizeSettings, modernize.rs:111,8305 | needs-port | M | — |
-| 16 | goformatters/gci standard_list.go | behavior | std 一覧に crypto/mldsa, uuid（guff は go1.26 分の 4 つも欠落、計 6） | guff-fmt/src/native/gci_std_packages.txt | needs-port | S | — |
-| 17 | goanalysis/runners.go isOutsideFile | behavior | ファイル外の TextEdit を捨てる（guff は end 側を検査しない） | guff-lint/src/fix.rs:267-315 | needs-port | S | — |
+| 15 | jsonschema modernize-analyzers | config-schema | disable 名の変更と旧名警告。guff は fmtappendf を既定で走らせ続ける | settings.rs ModernizeSettings, modernize.rs:111,8305 | **done (PR 2 / PR 12)**：旧名警告は settings.rs、fmtappendf は v0.50 の suite から外した | M | — |
+| 16 | goformatters/gci standard_list.go | behavior | std 一覧に crypto/mldsa, uuid（guff は go1.26 分の 4 つも欠落、計 6） | guff-fmt/src/native/gci_std_packages.txt | **done (PR 14l)**：go1.27 の一覧に転記（fmt case gci-std-go127） | S | — |
+| 17 | goanalysis/runners.go isOutsideFile | behavior | ファイル外の TextEdit を捨てる（guff は end 側を検査しない） | guff-lint/src/fix.rs:267-315 | **done (PR 14l)** | S | — |
 | 18 | runner_action_cache.go inheritFactsFromDeps | substrate | warm cache で facts が欠ける不具合の修正 | guff-runner/src/action.rs, guff-analysis/src/fact_codec.rs:67 | already-matches | S | — |
 | 19 | internal/cache position.go / toRelativePath | substrate | issues cache を相対パス化 | guff-runner/src/cache.rs | not-applicable | S | position_test.go, cache_test.go |
 | 20 | cache DefaultDir（error を返す） | behavior | 相対パス cache で run が fatal、`cache status` の off | guff-runner/src/cache.rs:77, guff-lint/src/lib.rs:820, cli.rs:1022 | needs-port | S | — |
@@ -415,7 +415,7 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 | 1 | rule/empty_block.go | behavior | bare な `for range x {}` を報告しない | guff-revive/src/rules/empty_block.rs check_range | **done (PR 10)** | S | empty_block.go |
 | 2 | lint/file.go internal failure | behavior | 失敗した rule だけ読み飛ばす | rules/mod.rs run_enabled_rules | already-matches | S | — |
 | 3 | lint/file.go handleConfig | behavior | `disable-line` が範囲を閉じない | guff-revive/src/directives.rs | **done (PR 10)**: golden `revive-v117-directives`（範囲内の disable-line を自作 fixture で） | S | revive_disable_directives*.go |
-| 4 | lint/file.go specify-disable-rule | new-option | 名前なし disable を報告 | directives.rs | needs-port（PR 10 で見送り: guff は `directives:` 設定を読まない。specify-disable-reason と一緒に） | M | revive_disable_directives_specify_*.go |
+| 4 | lint/file.go specify-disable-rule | new-option | 名前なし disable を報告 | directives.rs | **done (PR 14l)**：`directives` 設定ごと（specify-disable-reason も） | M | revive_disable_directives_specify_*.go |
 | 5 | rule/marshal_receiver.go | new-check | 新 rule | 無し | **done (PR 10)** | S | marshal_receiver.go |
 | 6 | rule/use_slices_concat.go | new-check | 新 rule | 無し | **done (PR 10)** | M | use_slices_concat.go, go1.22/use_slices_concat.go |
 | 7 | rule/multiline_if_init.go | new-check | allRules 入り | config.rs AHEAD_OF_PIN_RULES | **done (PR 10)**: EXTENDED_RULES へ、AHEAD_OF_PIN_RULES は空 | S | multiline_if_init.go |
@@ -447,8 +447,8 @@ revive の upstream testdata は module zip に無いので、v1.17.0 タグか�
 | 4 | analyzers/pathtraversal.go | behavior | G703 のサニタイザから Clean / Abs / PathEscape を削除 | gosec_taint.rs:293 | **done (PR 9)** | S | g703_samples.go |
 | 5 | rules/rand.go | behavior | G404 に Perm / Shuffle / ExpFloat64 / v2.Uint | gosec.rs:157 | **done (PR 9)** | S | g404_samples.go |
 | 6 | resolve.go TryResolve（Builder） | behavior | 定数だけで組んだ Builder の String() を定数扱い。**`try_resolve` と `g202_try_resolve` の両方に** | gosec.rs:3130, :1020 | **done (PR 9)**: `builder_string_is_const` を両方の TryResolve から。golden に `g202b/g202_builder.go`（全分岐） | M | g202_samples.go |
-| 7 | analyzer.go / config.go nosec-require-* | new-option | global オプション | gosec.rs:2148, settings.rs:1906 | needs-port（PR 9 で見送り: guff は gosec の `config.global` をまだ一切読まない。§3 の行と一緒に） | M | — |
-| 8 | config.go NoSecTag | behavior | 代替タグの `#` 正規化 | gosec.rs:2336 | needs-port（PR 9 で見送り: guff は gosec の `config.global` をまだ一切読まない。§3 の行と一緒に） | S | — |
+| 7 | analyzer.go / config.go nosec-require-* | new-option | global オプション | gosec.rs:2148, settings.rs:1906 | **done (PR 14l)** | M | — |
+| 8 | config.go NoSecTag | behavior | 代替タグの `#` 正規化 | gosec.rs:2336 | **done (PR 14l)** | S | — |
 | 9 | rules/hardcoded_credentials.go | behavior | G101 に ASIA | gosec.rs:369 | already-matches | S | g101_samples.go |
 
 ### gocritic-goconst

@@ -1,0 +1,21 @@
+# Golden case: gosec v2.29 config.global — show-ignored keeps suppressed findings in the output.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gosec
+  settings:
+    gosec:
+      includes: [G404]
+      config:
+        global:
+          show-ignored: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

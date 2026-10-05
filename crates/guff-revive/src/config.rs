@@ -502,6 +502,7 @@ pub fn extended_test_settings() -> Settings {
         // keeps every `at least` gate open and `use-errors-new`'s "below 1.26"
         // one too (revive v1.17.0).
         go: Some("1.25".to_string()),
+        directives: Vec::new(),
     }
 }
 

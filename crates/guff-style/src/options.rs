@@ -1160,6 +1160,53 @@ pub struct GosecOptions {
     /// the main go.mod). `None` falls back to the package's module version.
     /// Only G601 asks.
     pub go: Option<String>,
+    /// `config.global`: how `#nosec` directives are read.
+    pub nosec: GosecNosecOptions,
+}
+
+/// `linters.settings.gosec.config.global`, the options that decide what a
+/// `#nosec` / `//gosec:disable` directive suppresses. golangci-lint passes
+/// each value through `fmt.Sprintf("%v")`, so a bool is `"true"`/`"false"`,
+/// and drops `nosec: false` altogether.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct GosecNosecOptions {
+    /// `nosec`: set to anything; `"true"`/`"enabled"` ignores every directive
+    /// (`ignoreNosec`), any other value renames the default tag.
+    pub nosec: Option<String>,
+    /// `#nosec`: an alternative tag, checked after the default one.
+    pub alternative: Option<String>,
+    /// `show-ignored`: a suppressed finding is still reported.
+    pub show_ignored: bool,
+    /// `nosec-require-rules`: a directive naming no rule suppresses nothing.
+    pub require_rules: bool,
+    /// `nosec-require-justification`: a directive without `-- reason`
+    /// suppresses nothing.
+    pub require_justification: bool,
+}
+
+impl GosecNosecOptions {
+    /// `IsGlobalEnabled(Nosec)`.
+    pub fn ignore_nosec(&self) -> bool {
+        matches!(self.nosec.as_deref(), Some("true" | "enabled"))
+    }
+
+    /// `NoSecTag`: one `#`, whether or not the value already had one.
+    fn tag(value: &str) -> String {
+        format!("#{}", value.strip_prefix('#').unwrap_or(value))
+    }
+
+    /// The default tag: `#nosec`, or `#<value>` when `nosec` is set.
+    pub fn default_tag(&self) -> String {
+        Self::tag(self.nosec.as_deref().unwrap_or("nosec"))
+    }
+
+    /// The alternative tag, which is the default one when unset.
+    pub fn alternative_tag(&self) -> String {
+        match &self.alternative {
+            Some(v) => Self::tag(v),
+            None => self.default_tag(),
+        }
+    }
 }
 
 /// `linters.settings.gosec.config.G301` / `G302` / `G306`.

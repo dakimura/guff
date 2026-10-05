@@ -303,6 +303,13 @@ fn resolve_edit(
         return None;
     }
     let file = fset.file(start_pos)?;
+    // `isOutsideFile` (golangci-lint 2.14): an edit whose end lies past the
+    // file it starts in is dropped, not clamped — `File.Offset` would panic
+    // upstream, and here it would read another file's range as an offset.
+    let (base, size) = (file.base() as i64, file.size() as i64);
+    if end_pos.0 < base || end_pos.0 > base + size {
+        return None;
+    }
     let start = file.offset(start_pos) as usize;
     let end = file.offset(end_pos) as usize;
     if start > end {
@@ -418,6 +425,24 @@ mod tests {
         assert!(remaining.is_empty());
         let content = fs::read_to_string(&path).unwrap();
         assert_eq!(content, "time.Sleep(42 * time.Nanosecond)");
+    }
+
+    /// `isOutsideFile`: an edit whose end runs past its file is dropped, while
+    /// the other edits of the same fix still apply.
+    #[test]
+    fn an_edit_ending_outside_its_file_is_dropped() {
+        let src = "time.Sleep(1)";
+        let (_dir, path, fset, base) = scratch(src);
+        let issues = vec![issue_with_edits(
+            path.to_str().unwrap(),
+            vec![
+                edit(base, 0, 4, "TIME"),
+                // One byte past the end of the file.
+                edit(base, 11, src.len() + 1, "2"),
+            ],
+        )];
+        apply_fixes(&fset, &issues, None).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "TIME.Sleep(1)");
     }
 
     #[test]

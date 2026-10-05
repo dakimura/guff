@@ -1,0 +1,16 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh revive-v117-specify-reason
+# Produced by running golangci-lint on compat/golden/cases/revive-v117-specify-reason/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+fixtures.go:31:1:revive:warning:specify-disable-reason: reason of lint disabling not found
+fixtures.go:32:1:revive:warning:exported: exported function Exported5 should have comment or be unexported
+fixtures.go:39:1:revive:warning:specify-disable-reason: reason of lint disabling not found
+fixtures.go:40:1:revive:warning:exported: exported function Exported6 should have comment or be unexported
+fixtures.go:47:1:revive:warning:specify-disable-reason: reason of lint disabling not found
+fixtures.go:48:1:revive:warning:exported: exported function Exported7 should have comment or be unexported
+fixtures.go:55:1:revive:warning:specify-disable-reason: reason of lint disabling not found
+fixtures.go:56:1:revive:warning:exported: exported function Exported8 should have comment or be unexported

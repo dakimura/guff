@@ -26,8 +26,11 @@ crypto/elliptic
 crypto/fips140
 crypto/hkdf
 crypto/hmac
+crypto/hpke
 crypto/md5
+crypto/mldsa
 crypto/mlkem
+crypto/mlkem/mlkemtest
 crypto/pbkdf2
 crypto/rand
 crypto/rc4
@@ -149,6 +152,7 @@ runtime/debug
 runtime/metrics
 runtime/pprof
 runtime/race
+runtime/secret
 runtime/trace
 slices
 sort
@@ -160,6 +164,7 @@ sync/atomic
 syscall
 syscall/js
 testing
+testing/cryptotest
 testing/fstest
 testing/iotest
 testing/quick
@@ -176,4 +181,5 @@ unicode/utf16
 unicode/utf8
 unique
 unsafe
+uuid
 weak
