@@ -12,3 +12,4 @@ sa5008/go1.18/CheckStructTags/generics.go  crates/guff-staticcheck/tests/testdat
 sa5008/go1.0/CheckStructTags2/CheckStructTags2.go  crates/guff-staticcheck/tests/testdata/upstream-v0.8.1/sa5008/testdata/go1.0/CheckStructTags2/CheckStructTags2.go
 extra/sa5008.go  crates/guff-staticcheck/tests/testdata/v081-extra/sa5008.go
 extra/sa1026.go  crates/guff-staticcheck/tests/testdata/v081-extra/sa1026.go
+blank/blank.go  crates/guff-staticcheck/tests/testdata/v081-extra/blank.go

@@ -6,7 +6,9 @@
 # markers are its own runner's answer; this golden is golangci-lint's.
 # sa5008/go1.0/CheckStructTags is left out: it imports jessevdk/go-flags.
 # extra/ is guff's own: the shapes the vendored files do not reach (xml attrs,
-# innerxml, comment fields, embedded pointers; `embed`; multi-term type sets).
+# innerxml, comment fields, embedded pointers; `embed`; multi-term type sets;
+# SA4031/SA9008 skipping `func _()`, whose IR function EnclosingFunction no
+# longer finds).
 version: "2"
 
 linters:
@@ -21,6 +23,8 @@ linters:
         - SA1030
         - SA5007
         - SA5008
+        - SA4031
+        - SA9008
 
 issues:
   max-issues-per-linter: 0

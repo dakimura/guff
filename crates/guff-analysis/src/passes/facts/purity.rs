@@ -214,20 +214,27 @@ fn full_name(prog: &Program, obj: ObjectId) -> String {
     )
 }
 
-/// Port of `irutil.IsStub`: a body that does nothing but return or panic with
-/// constants.
+/// Port of `irutil.IsStub` (staticcheck v0.8): a body that does nothing but
+/// return or panic with a fixed value — a constant, or a new allocation,
+/// possibly wrapped in an interface.
 ///
 /// honnef's IR materializes constants as instructions (`*ir.Const`) and so has
 /// to allow them here; guff models them as `Value::Const` operands, which never
-/// appear in an instruction list. The set of accepted bodies is the same.
+/// appear in an instruction list. A function with no source (`fn.Source() ==
+/// nil`) is never a stub: what it does cannot be seen.
 fn is_stub(func: &Function) -> bool {
+    if func.syntax_decl.is_none() {
+        return false;
+    }
     for (_, block) in func.live_blocks() {
         for &iid in &block.instrs {
             match func.instrs.get(iid) {
                 InstrData::Panic(_)
                 | InstrData::Return(_)
                 | InstrData::DebugRef(_)
-                | InstrData::Jump(_) => {}
+                | InstrData::Jump(_)
+                | InstrData::MakeInterface(_)
+                | InstrData::Alloc(_) => {}
                 _ => return false,
             }
         }
