@@ -318,7 +318,7 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 |---|---------------|------|------|-------------|--------|--------|-------------------|
 | 1 | fieldalignment.go | message | 文言を全面変更（型名、size class、waste） | guff-govet/src/fieldalignment.rs check_struct | **done (PR 7)** | M | a.go, a_amd64.go, a_386.go |
 | 2 | composite.go | behavior | 型パラメータ複合リテラルを先頭 term だけで判定 | guff-govet/src/composites.rs | **done (PR 14f)**（guff は型パラメータを常に局所扱いで報告漏れしていた） | S | a.go{,.golden}, flag/flag.go |
-| 3 | inline.go withinTestOf | behavior | 専用テスト内の使用を抑制（同ディレクトリ、Fuzz、const / alias） | guff-govet/src/inline.rs | needs-port | M | issue76190.txtar |
+| 3 | inline.go withinTestOf | behavior | 専用テスト内の使用を抑制（同ディレクトリ、Fuzz、const / alias） | guff-govet/src/inline.rs | **done (PR 14p)** for constants and aliases（guff の inline は一般の関数インライナを持たないので、issue76190 の関数呼び出しはそもそも報告しない＝別の大きな未移植。他パッケージの const も依存のソースから） | M | issue76190.txtar |
 | 4 | inline.go 埋め込みフィールド判定 | behavior | `Defs[id].Embedded()` に変更 | inline.rs | **done (PR 14o)**：併せて他パッケージの `//go:fix inline` alias（上流は fact）を依存のソースから | S | issue78994.txtar |
 | 5 | printf.go okPrintfArg | behavior | go1.27+ で %d からポインタを外す | guff-govet/src/printf.rs verb_arg_type | needs-port | M | issue62595/a_go126.go, a_go127.go, a/a.go |
 | 6 | printf types.go reason | message | 「(use %p for a pointer)」 | printf.rs match_arg_type | needs-port | S | issue62595/a_go127.go |

@@ -1,0 +1,65 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh govet-inline-within-test
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/govet-inline-within-test/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.14.0
+
+--- a/a/a_x_test.go
++++ b/a/a_x_test.go
+@@ -11,6 +11,6 @@
+ }
+ 
+ func Test(t *testing.T) {
+-	print(a.K) // inlined
+-	var _ a.A  // inlined
++	print(a.One) // inlined
++	var _ a.T    // inlined
+ }
+--- a/a/other_test.go
++++ b/a/other_test.go
+@@ -3,13 +3,13 @@
+ import "testing"
+ 
+ func Test(t *testing.T) {
+-	print(K) // inlined
+-	var _ A  // inlined
++	print(One) // inlined
++	var _ T    // inlined
+ }
+ 
+ func TestK(t *testing.T) {
+ 	print(K) // not inlined: TestK is K's test
+-	var _ A  // inlined
++	var _ T  // inlined
+ }
+ 
+ func TestA_comment(t *testing.T) {
+@@ -17,7 +17,7 @@
+ }
+ 
+ func TestKey(t *testing.T) {
+-	print(K) // inlined: TestKey is not TestK
++	print(One) // inlined: TestKey is not TestK
+ }
+ 
+ func ExampleK() {
+@@ -27,5 +27,5 @@
+ type helper struct{}
+ 
+ func (helper) TestK() {
+-	print(K) // inlined: a method is not a test
++	print(One) // inlined: a method is not a test
+ }
+--- a/b/b_test.go
++++ b/b/b_test.go
+@@ -7,5 +7,5 @@
+ )
+ 
+ func TestK(t *testing.T) {
+-	print(a.K) // inlined: another package's test
++	print(a.One) // inlined: another package's test
+ }

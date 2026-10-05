@@ -817,11 +817,37 @@ fn is_known_inlinable_alias(pkg_path: &str, name: &str) -> bool {
 
 /// Names of type aliases marked `//go:fix inline` in a reparsed file.
 /// (Go: the `*ast.TypeSpec` arm of `gofixdirective.Find`.)
+/// A `//go:fix inline` constant of another package, used as `pkg.K`: its
+/// target qualified the way the use is (`pkg.One`). Upstream carries the
+/// constant as a fact. A right-hand side that is itself qualified would need
+/// an import at the use site and is not handled here.
+fn dependency_const_target(pass: &Pass<'_>, obj: ObjectId, qualifier: &Expr) -> Option<String> {
+    let a = pass.pkg().type_artifacts.as_ref()?;
+    if !matches!(a.objects.get(obj), ObjectData::Const(_)) {
+        return None;
+    }
+    let obj_pkg = obj.pkg(&a.objects)?;
+    if Some(obj_pkg) == pass.type_pkg() {
+        return None;
+    }
+    let Expr::Ident(q) = qualifier else {
+        return None;
+    };
+    let path = a.packages.get(obj_pkg).path().to_string();
+    let (_, consts) = dependency_inline_decls(pass, &path);
+    let rhs = consts.get(obj.name(&a.objects))?;
+    (!rhs.contains('.')).then(|| format!("{}.{rhs}", q.name))
+}
+
 /// The `//go:fix inline` aliases declared by the package at `path`, read from
 /// its source files (cached per path for the run).
-fn dependency_inlinable_aliases(pass: &Pass<'_>, path: &str) -> std::sync::Arc<HashSet<String>> {
+fn dependency_inline_decls(
+    pass: &Pass<'_>,
+    path: &str,
+) -> (std::sync::Arc<HashSet<String>>, std::sync::Arc<HashMap<String, String>>) {
     use std::sync::{Arc, Mutex};
-    static CACHE: OnceLock<Mutex<HashMap<String, Arc<HashSet<String>>>>> = OnceLock::new();
+    type Decls = (Arc<HashSet<String>>, Arc<HashMap<String, String>>);
+    static CACHE: OnceLock<Mutex<HashMap<String, Decls>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     if let Some(hit) = cache.lock().unwrap().get(path) {
         return hit.clone();
@@ -845,6 +871,7 @@ fn dependency_inlinable_aliases(pass: &Pass<'_>, path: &str) -> std::sync::Arc<H
         }
     }
     let mut out = HashSet::new();
+    let mut consts = HashMap::new();
     for file in files {
         let Ok(src) = fs::read(&file) else {
             continue;
@@ -858,8 +885,9 @@ fn dependency_inlinable_aliases(pass: &Pass<'_>, path: &str) -> std::sync::Arc<H
             continue;
         };
         out.extend(go_fix_alias_names(&parsed));
+        consts.extend(go_fix_const_names(&parsed));
     }
-    let out = Arc::new(out);
+    let out = (Arc::new(out), Arc::new(consts));
     cache.lock().unwrap().insert(path.to_string(), out.clone());
     out
 }
@@ -985,7 +1013,7 @@ fn inlinable_alias(
         // golangci-lint computes facts for every dependency. guff reads the
         // declaring package's files instead, found through the import graph.
         let path = artifacts.packages.get(obj_pkg).path().to_string();
-        return dependency_inlinable_aliases(pass, &path).contains(name);
+        return dependency_inline_decls(pass, &path).0.contains(name);
     }
     let set = local.get_or_insert_with(|| {
         if !package_has_go_fix_inline(pass) {
@@ -1094,6 +1122,71 @@ fn format_expr(pass: &Pass<'_>, e: &Expr) -> String {
 /// `expr_id` is the whole use expression — the `SelectorExpr` for `pkg.A`, the
 /// `IndexExpr` for `A[int]` — because that is what carries the instantiated
 /// type and what upstream spans.
+/// `withinTestOf` (x/tools v0.50): a use is not inlined inside the target's
+/// own test — in `x_test.go` when the target is declared in `x.go`, or in a
+/// top-level `TestX` / `ExampleX` / `BenchX` / `FuzzX` (optionally `…_suffix`,
+/// and `Recv_X` for a method) of the target's package.
+fn within_test_of(pass: &Pass<'_>, use_pos: u32, target: ObjectId) -> bool {
+    let fset = pass.fset();
+    let use_file = fset.position(guff::position::Pos(i64::from(use_pos))).filename;
+    let Some(use_base) = use_file.strip_suffix("_test.go") else {
+        return false;
+    };
+    let Some(a) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let tpos = target.pos(&a.objects);
+    if tpos != 0 {
+        let tfile = fset.position(guff::position::Pos(i64::from(tpos))).filename;
+        if tfile.strip_suffix(".go") == Some(use_base) {
+            return true;
+        }
+    }
+    // The top-level function enclosing the use.
+    let Some(fd) = pass.files().iter().flat_map(|f| f.decls.iter()).find_map(|d| match d {
+        Decl::FuncDecl(fd) => {
+            let n = guff::walk::NodeRef::FuncDecl(fd);
+            let (s, e) = (guff::commentmap::node_pos(n).0, guff::commentmap::node_end(n).0);
+            (s <= i64::from(use_pos) && i64::from(use_pos) < e).then_some(fd)
+        }
+        _ => None,
+    }) else {
+        return false;
+    };
+    if fd.recv.is_some() {
+        return false;
+    }
+    let pkg_path = pass.pkg().pkg_path.trim_end_matches("_test");
+    let target_path = target
+        .pkg(&a.objects)
+        .map(|p| a.packages.get(p).path().to_string())
+        .unwrap_or_default();
+    if pkg_path != target_path {
+        return false;
+    }
+    let mut symbol = target.name(&a.objects).to_string();
+    if let ObjectData::Func(f) = a.objects.get(target) {
+        let recv = f
+            .typ()
+            .and_then(|sig| guff_types::signature::signature_recv(&a.types, sig))
+            .and_then(|r| r.typ(&a.objects));
+        if let Some(mut t) = recv {
+            if let guff_types::arena::TypeData::Pointer(p) = a.types.get(t) {
+                t = p.elem();
+            }
+            if matches!(a.types.get(t), guff_types::arena::TypeData::Named(_)) {
+                let named = guff_types::named::named_obj(&a.types, t).name(&a.objects).to_string();
+                symbol = format!("{named}_{symbol}");
+            }
+        }
+    }
+    let fname = fd.name.name.as_str();
+    ["Test", "Example", "Bench", "Fuzz"].iter().any(|pre| {
+        let want = format!("{pre}{symbol}");
+        fname == want || fname.starts_with(&format!("{want}_"))
+    })
+}
+
 /// `inlineAlias` (x/tools v0.50): an alias naming an embedded field is not
 /// inlined when that would rename the field — `Defs[id]` is an embedded
 /// `*types.Var` and the alias's right-hand side is not a named type of the
@@ -1327,9 +1420,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 let Some(obj) = info.uses.get(&sel.sel.id).copied() else {
                     return;
                 };
-                let Some(target) = inline_target(pass, obj, &mut local) else {
+                let target = inline_target(pass, obj, &mut local)
+                    .or_else(|| dependency_const_target(pass, obj, &sel.x));
+                let Some(target) = target else {
                     if inlinable_alias(pass, obj, &mut local_aliases)
                         && !renames_embedded_field(pass, sel.sel.id, obj)
+                        && !within_test_of(pass, sel.x.pos().0 as u32, obj)
                     {
                         let base = Expr::SelectorExpr(sel.clone());
                         let (node, expr) = match indexed.get(&sel.id) {
@@ -1342,6 +1438,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     return;
                 };
+                if within_test_of(pass, sel.x.pos().0 as u32, obj) {
+                    return;
+                }
                 let name = format_expr_name(&Expr::SelectorExpr(sel.clone()));
                 // `reportInline` spans the *selector* when the name is
                 // qualified — `cur.ParentEdgeKind() == edge.SelectorExpr_Sel`
@@ -1371,6 +1470,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 let Some(target) = inline_target(pass, obj, &mut local) else {
                     if inlinable_alias(pass, obj, &mut local_aliases)
                         && !renames_embedded_field(pass, id.id, obj)
+                        && !within_test_of(pass, id.pos().0 as u32, obj)
                     {
                         let base = Expr::Ident(id.clone());
                         let (node, expr) = match indexed.get(&id.id) {
@@ -1383,6 +1483,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     return;
                 };
+                if within_test_of(pass, id.pos().0 as u32, obj) {
+                    return;
+                }
                 pending.push((
                     id.pos().0 as u32,
                     format!("Constant {} should be inlined", id.name),
