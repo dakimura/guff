@@ -56,7 +56,26 @@ fn walk_decl(d: &mut Decl) {
                 walk_block(body);
             }
         }
-        Decl::GenDecl(_) | Decl::BadDecl(_) => {}
+        // Upstream's simplifier is an `ast.Walk` over the whole file, so a
+        // package-level `var _ = [][]int{[]int{1}}` is simplified too (gofumpt
+        // v0.12's simplify testscript).
+        Decl::GenDecl(g) => {
+            for spec in &mut g.specs {
+                match spec {
+                    guff::ast::Spec::ValueSpec(vs) => {
+                        if let Some(ty) = &mut vs.ty {
+                            walk_expr(ty);
+                        }
+                        for v in &mut vs.values {
+                            walk_expr(v);
+                        }
+                    }
+                    guff::ast::Spec::TypeSpec(ts) => walk_expr(&mut ts.ty),
+                    guff::ast::Spec::ImportSpec(_) => {}
+                }
+            }
+        }
+        Decl::BadDecl(_) => {}
     }
 }
 

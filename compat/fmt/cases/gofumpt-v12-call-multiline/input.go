@@ -1,0 +1,43 @@
+package p
+
+func _() {
+	// already consistent
+	_ = call(a, b, c)
+
+	_ = call(
+		a,
+		b,
+		c,
+	)
+
+	// closing paren at start of line, opening paren not at end of line:
+	// left alone, as only the opening-paren-at-end-of-line case is enforced.
+	_ = call(a, b,
+		c,
+	)
+
+	// first argument on the same line as the opening paren is left alone.
+	slog.Debug("Message",
+		slog.String("a", "1"),
+		slog.String("b", "2"),
+	)
+
+	// opening paren at end of line, closing paren not at start of line:
+	// move closing paren so both are consistent.
+	_ = call(
+		a,
+		b,
+		c)
+
+	// inline comment after the last argument should still cause the
+	// closing paren to be moved to its own line.
+	_ = call(
+		a,
+		b,
+		c) // trailing
+
+	// nested calls
+	_ = outer(inner(
+		a,
+		b))
+}

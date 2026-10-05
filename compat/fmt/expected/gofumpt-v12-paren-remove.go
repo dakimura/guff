@@ -1,0 +1,67 @@
+package p
+
+import "fmt"
+
+type T struct{ x int }
+
+func (T) Foo() int { return 0 }
+
+type C chan int
+
+type C2 chan (<-chan int)
+
+type C3 chan (chan int)
+
+var _ = (*T)(nil)
+
+func f(x int) int { return x }
+
+var a, b bool
+
+var mm map[T]int
+
+func g() {
+	_ = f(3)
+	_ = 3
+	_ = f(3)
+	_ = fmt.Sprintln(3)
+	_ = (T{}).x
+	_ = ([]int{1, 2})[0]
+	xs := []int{1, 2, 3}
+	_ = xs[1:2]
+
+	// Keep parens in binary/unary expressions for readability.
+	_ = (1 + 2) * 3
+	_ = -(1 + 2)
+	_ = !(a || b)
+
+	// Keep parens with inner comment.
+	_ = ( /* keep */ 3)
+
+	// Keep parens around composite literals in conditions.
+	if (T{x: 3}) == (T{x: 3}) {
+	}
+
+	// Keep parens when the expression begins with a composite literal.
+	if 1 == (T{}.Foo()) {
+	}
+	for (T{}.Foo()) == 1 {
+	}
+	switch (T{}.x) {
+	}
+	if ([]int{1}[0]) == 0 {
+	}
+	_ = ([]int{1, 2, 3}[1:2])
+
+	// Drop parens when the composite literal is enclosed in parens or brackets.
+	if (T{}).Foo() == 0 {
+	}
+	_ = mm[T{}]
+	_ = fmt.Sprintln(T{})
+
+	// Drop double parens.
+	_ = f(3)
+
+	// Drop parens around call args.
+	_ = f(f(3))
+}

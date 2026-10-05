@@ -603,6 +603,20 @@ pub fn parse_gofumpt_settings(settings: &serde_yaml::Value) -> guff_fmt::Gofumpt
             opts.extra_rules = b;
         }
     }
+    if let Some(extra) = gmap
+        .get(serde_yaml::Value::String("extra".into()))
+        .and_then(|v| v.as_mapping())
+    {
+        let flag = |k: &str| {
+            extra
+                .get(serde_yaml::Value::String(k.into()))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+        };
+        opts.group_params = flag("group-params");
+        opts.clothe_returns = flag("clothe-returns");
+        opts.balance_calls = flag("balance-calls");
+    }
     if let Some(v) = gmap.get(serde_yaml::Value::String("module-path".into())) {
         if let Some(s) = v.as_str() {
             if !s.is_empty() {

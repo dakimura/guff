@@ -22,15 +22,22 @@ pub const NAME: &str = "gofumpt";
 /// Options for [`Gofumpt`] (`formatters.settings.gofumpt`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GofumptOptions {
-    /// Pass `-extra` (stricter rules that need human review).
+    /// `extra-rules`: every extra rule (deprecated upstream in favour of
+    /// `extra.*`, but still honoured — gofumpt's `Extra.Set("true")`).
     pub extra_rules: bool,
+    /// `extra.group-params`, `extra.clothe-returns`, `extra.balance-calls`
+    /// (gofumpt v0.12, golangci-lint 2.14.0).
+    pub group_params: bool,
+    pub clothe_returns: bool,
+    pub balance_calls: bool,
     /// Pass `-modpath` (module path containing the source).
     pub module_path: Option<String>,
     /// Pass `-lang` (target Go version, e.g. `go1.22` / `1.22`).
     /// `None` → gofumpt reads the version from `go.mod`.
     pub lang: Option<String>,
-    /// Match golangci-lint's pinned gofumpt (omit post-v0.10 multiline call /
-    /// paren rules that diverge from that pin). Default `false` via [`Default`].
+    /// Match golangci-lint's pinned gofumpt. Since golangci-lint 2.14.0 pins
+    /// gofumpt v0.12.0 — the version this port follows — no rule reads it;
+    /// it is kept for the CLI switch and the cache fingerprint.
     pub match_golangci: bool,
 }
 
@@ -67,6 +74,9 @@ impl Gofumpt {
     fn native_opts(&self, filename: &str) -> NativeOptions {
         NativeOptions {
             extra_rules: self.options.extra_rules,
+            group_params: self.options.group_params,
+            clothe_returns: self.options.clothe_returns,
+            balance_calls: self.options.balance_calls,
             lang: self.options.lang.as_ref().map(|l| normalize_lang(l)),
             module_path: self.options.module_path.clone(),
             filename: filename.to_string(),
@@ -84,6 +94,9 @@ impl Formatter for Gofumpt {
     fn options_fingerprint(&self) -> String {
         crate::fingerprint_parts(&[
             ("extra", if self.options.extra_rules { "1" } else { "0" }),
+            ("group_params", if self.options.group_params { "1" } else { "0" }),
+            ("clothe_returns", if self.options.clothe_returns { "1" } else { "0" }),
+            ("balance_calls", if self.options.balance_calls { "1" } else { "0" }),
             (
                 "lang",
                 self.options
@@ -330,24 +343,22 @@ func f(x int) int {
     }
 
     #[test]
-    fn match_golangci_skips_v010_multiline_call_parens() {
+    fn multiline_call_parens_are_balanced_only_under_balance_calls() {
+        // gofumpt v0.12 (golangci-lint 2.14.0): the multi-line call rule is the
+        // `balance_calls` extra rule, off by default.
         let src = b"package p\n\nfunc f() {\n\tfoo(\n\t\ta, b)\n}\n";
-        let latest = Gofumpt::new(GofumptOptions::default());
-        let out = latest.format("p.go", src).expect("gofumpt latest");
-        let s = String::from_utf8(out).unwrap();
-        assert!(
-            s.contains("\n\t)") && !s.contains("a, b)"),
-            "latest should put ) on its own line, got:\n{s}"
-        );
+        let default = Gofumpt::new(GofumptOptions::default());
+        let out = default.format("p.go", src).expect("gofumpt default");
+        assert_eq!(out, src.to_vec(), "default leaves the parens alone");
 
-        let pinned = Gofumpt::new(GofumptOptions {
-            match_golangci: true,
+        let balanced = Gofumpt::new(GofumptOptions {
+            balance_calls: true,
             ..Default::default()
         });
-        let out = pinned.format("p.go", src).expect("gofumpt match_golangci");
-        assert_eq!(
-            out, src,
-            "match_golangci should leave multiline call parens unchanged"
+        let s = String::from_utf8(balanced.format("p.go", src).expect("gofumpt balance_calls")).unwrap();
+        assert!(
+            s.contains("\n\t)") && !s.contains("a, b)"),
+            "balance_calls puts ) on its own line, got:\n{s}"
         );
     }
 }

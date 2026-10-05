@@ -92,14 +92,11 @@ fn format_parsed_inner(
     let fumpt_opts = FumptOptions {
         lang_version: opts.lang.clone().unwrap_or_default(),
         module_path: opts.module_path.clone().unwrap_or_default(),
-        omit_v010_rules: opts.match_golangci,
-        extra: if opts.extra_rules {
-            Extra {
-                group_params: true,
-                clothe_returns: true,
-            }
-        } else {
-            Extra::default()
+        // `ExtraRules` is `Extra.Set("true")`: all three.
+        extra: Extra {
+            group_params: opts.extra_rules || opts.group_params,
+            clothe_returns: opts.extra_rules || opts.clothe_returns,
+            balance_calls: opts.extra_rules || opts.balance_calls,
         },
     };
     apply_file(fset, file, fumpt_opts);

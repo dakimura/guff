@@ -829,7 +829,9 @@ impl<'a> Printer<'a> {
             let mut changed = false;
             let group_pos = self.pos_for(group.pos());
             let group_end_plus = Pos(group.end().0 + 1);
-            if self.last_tok != Token::IMPORT
+            // go1.27: not when the next token is an identifier.
+            if tok != Token::IDENT
+                && self.last_tok != Token::IMPORT
                 && group_pos.column == 1
                 && self.pos_for(group_end_plus) == next
             {

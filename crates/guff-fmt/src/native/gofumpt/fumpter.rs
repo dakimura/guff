@@ -42,6 +42,7 @@ fn rx_shebang() -> &'static Regex {
 pub(crate) struct Extra {
     pub group_params: bool,
     pub clothe_returns: bool,
+    pub balance_calls: bool,
 }
 
 impl Extra {
@@ -53,6 +54,9 @@ impl Extra {
         if self.clothe_returns {
             active.push("clothe_returns");
         }
+        if self.balance_calls {
+            active.push("balance_calls");
+        }
         active.join(",")
     }
 }
@@ -62,8 +66,6 @@ pub(crate) struct Options {
     pub lang_version: String,
     pub module_path: String,
     pub extra: Extra,
-    /// When true, skip gofumpt ≥v0.10 multiline call / paren-removal rules.
-    pub omit_v010_rules: bool,
 }
 
 /// Apply gofumpt rules to `file` / `fset` in place.
@@ -192,50 +194,45 @@ impl Fumpter {
 
         // Multiline top-level decls get a blank line between them.
         let mut last_multi = false;
-        let mut last_end = NO_POS;
-        let infos: Vec<(Pos, Pos, bool)> = file
+        // Anchored at the package clause, so the comments before it (a
+        // copyright header, the package doc) are not taken for the first
+        // declaration's own.
+        let mut last_end = file.name.end();
+        let infos: Vec<(Pos, Pos, Option<i64>)> = file
             .decls
             .iter()
             .map(|decl| {
-                let pos = decl.pos();
-                let end = decl.end();
-                let mut multi = self.line(pos) < self.line(Pos(end.0.saturating_sub(1)));
-                // A func declaration that fits on one source line is still
-                // printed across several once header+body passes 100 bytes
-                // (go/printer's `funcBody`), so gofumpt — v0.10.0 onward, and
-                // golangci-lint 2.14.0 pins v0.12.0 — counts it as multi-line,
-                // by source byte length. Under 2.12.2 (v0.9.2) this was not a
-                // rule: dapr `pkg/actors/table/fake/fake.go:69` was formatted.
-                if let Decl::FuncDecl(fd) = decl {
-                    if !multi && fd.body.is_some() && end.0 - pos.0 > 100 {
-                        multi = true;
-                    }
-                }
-                (pos, end, multi)
+                let fn_len = match decl {
+                    Decl::FuncDecl(fd) if fd.body.is_some() => Some(decl.end().0 - decl.pos().0),
+                    _ => None,
+                };
+                (decl.pos(), decl.end(), fn_len)
             })
             .collect();
 
-        for (pos0, end, multi) in infos {
+        for (pos0, end, fn_len) in infos {
             let mut pos = pos0;
-            // v0.10.0 rewrote this to carry an `effectiveEnd`: a trailing
-            // *inline* comment on `lastEnd`'s line belongs to the previous
-            // declaration and extends its end, and the newline goes there.
-            // v0.9.2 (golangci-lint 2.12.2) took `pos` from that inline comment
-            // instead, so gatekeeper's `} // +kubebuilder:rbac:…` followed by
-            // another comment line got no blank line; v0.10.0 onward adds one.
-            // golangci-lint 2.14.0 pins gofumpt v0.12.0, which has the
-            // `effectiveEnd` form: since the pin moved it is not gated on
-            // `omit_v010_rules` any more.
+            // `effectiveEnd`: a trailing *inline* comment on `lastEnd`'s line
+            // belongs to the previous declaration and extends its end, and the
+            // newline goes there; the first comment on a later line is where
+            // this declaration starts.
             let mut effective_end = last_end;
-            if last_end.is_valid() {
-                let last_end_line = self.line(last_end);
-                for cg in self.comments_between(last_end, pos0) {
-                    if self.line(cg.pos()) != last_end_line {
-                        pos = cg.pos();
-                        break;
-                    }
-                    effective_end = cg.end();
+            let last_end_line = self.line(last_end);
+            for cg in self.comments_between(last_end, pos0) {
+                if self.line(cg.pos()) != last_end_line {
+                    pos = cg.pos();
+                    break;
                 }
+                effective_end = cg.end();
+            }
+            // `multi` from that comment-adjusted start (gofumpt v0.12), so a
+            // declaration under a doc comment or directive is multi-line.
+            let mut multi = self.line(pos) < self.line(Pos(end.0.saturating_sub(1)));
+            // A func declaration that fits on one source line is still printed
+            // across several once header+body passes 100 bytes (go/printer's
+            // `funcBody`), so it counts as multi-line, by source byte length.
+            if !multi && fn_len.is_some_and(|n| n > 100) {
+                multi = true;
             }
             if multi && last_multi && self.line(effective_end) + 1 == self.line(pos) {
                 self.add_newline(effective_end);
@@ -248,6 +245,13 @@ impl Fumpter {
     }
 
     fn join_lone_decls(&mut self, file: &mut File) {
+        // gofumpt v0.12: unwrap single-spec var groups first, so an adjacent
+        // `var` line and `var ( … )` group merge in one pass.
+        for d in &mut file.decls {
+            if let Decl::GenDecl(g) = d {
+                remove_parens(self, g);
+            }
+        }
         let old = std::mem::take(&mut file.decls);
         let mut new_decls = Vec::with_capacity(old.len());
         let mut i = 0;
@@ -304,10 +308,15 @@ impl Fumpter {
                     _ => break,
                 };
                 let cont_end = Decl::GenDecl(cont.clone()).end();
-                let rparen = self
+                // `Rparen` at the last content character (`end - 1`), like a
+                // real `)`, so the group ends on its content's final line and
+                // the empty-line separator after it is idempotent.
+                let rparen = Pos(self
                     .inline_comment(cont_end)
                     .map(|c| c.end())
-                    .unwrap_or(cont_end);
+                    .unwrap_or(cont_end)
+                    .0
+                    - 1);
                 if let Decl::GenDecl(start) = &mut start_decl {
                     start.specs.extend(cont.specs);
                     start.rparen = rparen;
@@ -342,7 +351,9 @@ impl Fumpter {
                     let mut parts = vec![
                         "//gofumpt:diagnose".to_string(),
                         "version:".into(),
-                        "v0.10.0 (go1.26.4)".into(),
+                        // What golangci-lint 2.14.0 prints: gofumpt v0.12.0,
+                        // built by the go1.27.0 that built the binary.
+                        "v0.12.0 (go1.27.0)".into(),
                         "flags:".into(),
                         format!("-lang={}", self.opts.lang_version),
                         format!("-modpath={}", self.opts.module_path),
@@ -415,6 +426,8 @@ impl Fumpter {
         let mut first_group = true;
         let mut last_end = d.tok_pos;
         let mut needs_sort = false;
+        // The original positions of the std imports moved up.
+        let mut moved_from: Vec<Pos> = Vec::new();
 
         let module_prefix = if self.opts.module_path.is_empty() {
             String::new()
@@ -449,7 +462,15 @@ impl Fumpter {
                 {
                     true
                 }
-                _ if !first_group && (spec.name.is_some() || spec.comment.is_some()) => true,
+                // A named import outside the top group is treated as non-std.
+                _ if !first_group && spec.name.is_some() => true,
+                // gofumpt v0.12: never move a commented import — go/printer
+                // places comments by position, so they would stay behind.
+                _ if (!first_group || !other.is_empty())
+                    && (spec.doc.is_some() || spec.comment.is_some()) =>
+                {
+                    true
+                }
                 _ => false,
             };
             if is_other {
@@ -458,6 +479,7 @@ impl Fumpter {
             }
             if !first_group || !other.is_empty() {
                 let mut spec = spec;
+                moved_from.push(spec_pos(&spec));
                 set_import_pos(&mut spec, d.tok_pos);
                 needs_sort = true;
                 std.push(Spec::ImportSpec(spec));
@@ -466,6 +488,15 @@ impl Fumpter {
             }
         }
 
+        // A moved std import leaves its line behind with nothing on it, which
+        // go/printer would print as an empty line: drop those lines from the
+        // file's line table.
+        for pos in moved_from {
+            let line = self.line(pos);
+            if (line as usize) < self.pos_file.line_count() {
+                self.pos_file.merge_line(line as usize);
+            }
+        }
         if !std.is_empty() && !other.is_empty() {
             let std_end = match std.last().unwrap() {
                 Spec::ImportSpec(s) => import_end(s),
@@ -618,26 +649,7 @@ fn walk_gen_decl(f: &mut Fumpter, node: &mut GenDecl) {
     }
 
     // Single var (...) → drop parens
-    if node.tok == Some(Token::VAR)
-        && node.specs.len() == 1
-        && node.lparen.is_valid()
-        && node.doc.is_none()
-    {
-        let spec_pos = node.specs[0].pos();
-        let spec_end = node.specs[0].end();
-        if !f.comments_between(node.tok_pos, spec_pos).is_empty() {
-            node.tok_pos = spec_pos;
-        } else {
-            f.remove_lines(f.line(node.tok_pos), f.line(spec_pos));
-        }
-        if !f.comments_between(spec_end, node.rparen).is_empty() {
-            f.remove_lines(f.line(spec_end) + 1, f.line(node.rparen));
-        } else {
-            f.remove_lines(f.line(spec_end), f.line(node.rparen));
-        }
-        node.lparen = NO_POS;
-        node.rparen = NO_POS;
-    }
+    remove_parens(f, node);
 
     for s in &mut node.specs {
         match s {
@@ -937,7 +949,12 @@ fn walk_stmt(f: &mut Fumpter, stmt: &mut Stmt) {
             for e in &mut a.rhs {
                 walk_expr(f, e);
             }
-            if a.rhs.len() == 1 && !matches!(&a.rhs[0], Expr::BinaryExpr(_)) {
+            // gofumpt v0.12: not across a comment — joining its lines leaves
+            // the right-hand side at an indentation gofmt would not produce.
+            if a.rhs.len() == 1
+                && !matches!(&a.rhs[0], Expr::BinaryExpr(_))
+                && f.comments_between(a.tok_pos, a.rhs[0].pos()).is_empty()
+            {
                 f.remove_lines(f.line(a.tok_pos), f.line(a.rhs[0].pos()));
             }
         }
@@ -1026,7 +1043,7 @@ fn walk_expr(f: &mut Fumpter, expr: &mut Expr) {
                 }),
             ));
             *p.x = inner;
-            if !f.opts.omit_v010_rules && can_remove_parens(f, p) {
+            if can_remove_parens(f, p) {
                 *expr = std::mem::replace(
                     p.x.as_mut(),
                     Expr::BadExpr(guff::ast::BadExpr {
@@ -1050,9 +1067,7 @@ fn walk_expr(f: &mut Fumpter, expr: &mut Expr) {
         }
         Expr::CallExpr(c) => {
             walk_call(f, c);
-            if !f.opts.omit_v010_rules {
-                call_post(f, c);
-            }
+            call_post(f, c);
         }
         Expr::CompositeLit(c) => {
             if let Some(ty) = &mut c.ty {
@@ -1161,24 +1176,76 @@ fn walk_call(f: &mut Fumpter, c: &mut CallExpr) {
     }
 }
 
+/// `removeParens`: unwrap a single-spec `var ( x = 1 )` group without a doc
+/// comment into a lone `var x = 1`.
+fn remove_parens(f: &mut Fumpter, node: &mut GenDecl) {
+    if node.tok != Some(Token::VAR)
+        || node.specs.len() != 1
+        || !node.lparen.is_valid()
+        || node.doc.is_some()
+    {
+        return;
+    }
+    let spec_pos = node.specs[0].pos();
+    let spec_end = node.specs[0].end();
+    if !f.comments_between(node.tok_pos, spec_pos).is_empty() {
+        // A comment on the line above must now go before the declaration.
+        node.tok_pos = spec_pos;
+    } else {
+        f.remove_lines(f.line(node.tok_pos), f.line(spec_pos));
+    }
+    if !f.comments_between(spec_end, node.rparen).is_empty() {
+        // One newline stays, so a comment on the next line does not become
+        // an inline one.
+        f.remove_lines(f.line(spec_end) + 1, f.line(node.rparen));
+    } else {
+        f.remove_lines(f.line(spec_end), f.line(node.rparen));
+    }
+    node.lparen = NO_POS;
+    node.rparen = NO_POS;
+}
+
 fn can_remove_parens(f: &Fumpter, node: &ParenExpr) -> bool {
-    match &*node.x {
+    // Parens holding comments stay: the printer may not place them well
+    // without them.
+    if !f.comments_between(node.lparen, node.rparen).is_empty() {
+        return false;
+    }
+    !keep_parens(&node.x, true)
+}
+
+/// `keepParens` (gofumpt v0.12): keep the parentheses directly around `expr`
+/// around binary, unary and type expressions (readability, and conversions
+/// like `(<-chan T)(v)`) when outermost, and around any expression whose
+/// leftmost operand is a composite literal — its brace would otherwise open
+/// an if, for or switch body.
+fn keep_parens(expr: &Expr, outermost: bool) -> bool {
+    match expr {
+        Expr::CompositeLit(_) => true,
+        Expr::CallExpr(c) => keep_parens(&c.fun, false),
+        Expr::SelectorExpr(s) => keep_parens(&s.x, false),
+        Expr::IndexExpr(i) => keep_parens(&i.x, false),
+        Expr::IndexListExpr(i) => keep_parens(&i.x, false),
+        Expr::SliceExpr(s) => keep_parens(&s.x, false),
+        Expr::TypeAssertExpr(t) => keep_parens(&t.x, false),
         Expr::BinaryExpr(_)
         | Expr::UnaryExpr(_)
         | Expr::StarExpr(_)
-        | Expr::CompositeLit(_)
         | Expr::ChanType(_)
         | Expr::ArrayType(_)
         | Expr::MapType(_)
         | Expr::FuncType(_)
         | Expr::InterfaceType(_)
-        | Expr::StructType(_) => false,
-        _ => f.comments_between(node.lparen, node.rparen).is_empty(),
+        | Expr::StructType(_) => outermost,
+        _ => false,
     }
 }
 
+/// gofumpt v0.12: only under the `balance_calls` extra rule, and only one
+/// direction — an opening paren at the end of its line moves the closing one
+/// onto its own; the reverse is left alone.
 fn call_post(f: &mut Fumpter, node: &CallExpr) {
-    if node.args.is_empty() {
+    if !f.opts.extra.balance_calls || node.args.is_empty() {
         return;
     }
     let open_line = f.line(node.lparen);
@@ -1196,8 +1263,6 @@ fn call_post(f: &mut Fumpter, node: &CallExpr) {
     let close_at_bol = close_line != last_line;
     if open_at_eol && !close_at_bol {
         f.add_newline(node.rparen);
-    } else if close_at_bol && !open_at_eol {
-        f.add_newline(Pos(node.lparen.0 + 1));
     }
 }
 
