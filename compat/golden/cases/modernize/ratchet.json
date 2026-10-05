@@ -1,6 +1,0 @@
-{
-  "missing": 2,
-  "extra": 0,
-  "why": "x/tools v0.50.0 (golangci-lint 2.14.0) added a strings.Split / strings.SplitN arm to stringscut, which guff has not ported (ledger: xtools-modernize, stringscut Split). The rest of the 2.14.0 suite change — fmtappendf out; errorsastype, importcomment, reflecttypeassert in; reflecttypefor's usesNonTypeSymbol; slicescontains' NoEffects; stringsbuilder skipping _test.go — was ported with the pin bump, because the fix tier refuses to hold a case where guff rewrites more than upstream. Recorded when the pin moved 2.12.2 -> 2.14.0; see docs/PHASE8-LEDGER.md §5.1.",
-  "target": "0/0 — docs/PHASE8-LEDGER.md §6 names the PR that closes it."
-}

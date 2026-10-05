@@ -5259,7 +5259,113 @@ fn cut_i_ident<'a>(call: &'a CallExpr, stack: &[NodeRef<'a>]) -> Option<&'a Iden
 /// `strings.Index{,Byte}` / `bytes.Index{,Byte}` whose result is only ever
 /// tested for `< 0` / `>= 0` or used to slice `s` before or after the match →
 /// `strings.Cut` (or `strings.Contains` when it is only tested).
+/// `stringsplitCut` (x/tools v0.50, golangci-lint 2.14.0):
+///
+/// ```text
+/// x := strings.SplitN(s, ",", 2)[0]   →   x, _, _ := strings.Cut(s, ",")
+/// ```
+///
+/// Only for a non-empty constant separator — `strings.Split(s, "")[0]` is the
+/// first character, `Cut`'s `before` is `""` — and only as the sole
+/// right-hand side of a `:=` with one non-blank name. Upstream asks the
+/// cursor's parent edges, so a parenthesised call or index does not qualify.
+fn check_stringsplit_cut(pass: &Pass<'_>, pending: &mut Vec<Diagnostic>) {
+    let Some(info) = pass.types_info() else {
+        return;
+    };
+    let const_string = |e: &Expr| -> Option<String> {
+        let v = info.types.get(&e.id())?.val.as_ref()?;
+        (v.kind() == guff_constant::Kind::String).then(|| guff_constant::string_val_lossy(v))
+    };
+    for file in pass.files() {
+        walk::preorder(NodeRef::File(file), |n| {
+            let NodeRef::AssignStmt(assign) = n else {
+                return true;
+            };
+            if assign.tok != Some(Token::DEFINE) || assign.lhs.len() != 1 || assign.rhs.len() != 1 {
+                return true;
+            }
+            let Expr::Ident(lhs) = &assign.lhs[0] else {
+                return true;
+            };
+            if lhs.name == "_" {
+                return true;
+            }
+            let Expr::IndexExpr(ix) = &assign.rhs[0] else {
+                return true;
+            };
+            let Expr::CallExpr(call) = ix.x.as_ref() else {
+                return true;
+            };
+            let (name, want_args) = if code::is_call_to(pass, call, "strings.Split") {
+                ("Split", 2)
+            } else if code::is_call_to(pass, call, "strings.SplitN") {
+                ("SplitN", 3)
+            } else {
+                return true;
+            };
+            if call.args.len() != want_args {
+                return true;
+            }
+            if want_args == 3 && code::expr_to_int(pass, &call.args[2]) != Some(2) {
+                return true;
+            }
+            if const_string(&call.args[1]).is_none_or(|s| s.is_empty()) {
+                return true;
+            }
+            if code::expr_to_int(pass, &ix.index) != Some(0) {
+                return true;
+            }
+            let pos = call.fun.pos().0 as u32;
+            if !go_at_least(pass, pos, "go1.18") {
+                return true;
+            }
+            let Expr::SelectorExpr(sel) = call.fun.as_ref() else {
+                return true; // a dot-import; `UsedIdent` would be the ident itself
+            };
+            let mut edits = vec![
+                TextEdit {
+                    pos: lhs.end().0 as u32,
+                    end: lhs.end().0 as u32,
+                    new_text: ", _, _".into(),
+                },
+                TextEdit {
+                    pos: sel.sel.pos().0 as u32,
+                    end: sel.sel.end().0 as u32,
+                    new_text: "Cut".into(),
+                },
+            ];
+            if want_args == 3 {
+                edits.push(TextEdit {
+                    pos: call.args[1].end().0 as u32,
+                    end: call.rparen.0 as u32,
+                    new_text: String::new(),
+                });
+            }
+            edits.push(TextEdit {
+                pos: ix.lbrack.0 as u32,
+                end: ix.rbrack.0 as u32 + 1,
+                new_text: String::new(),
+            });
+            let before = pending.len();
+            pending.push(Diagnostic {
+                pos,
+                end: call.fun.end().0 as u32,
+                message: format!("strings.{name} call can be simplified using strings.Cut"),
+                suggested_fixes: vec![SuggestedFix {
+                    message: format!("Simplify strings.{name} call using strings.Cut"),
+                    text_edits: edits,
+                }],
+                ..Diagnostic::default()
+            });
+            stamp_category(pending, before, "stringscut");
+            true
+        });
+    }
+}
+
 fn check_stringscut(pass: &Pass<'_>, pending: &mut Vec<Diagnostic>) {
+    check_stringsplit_cut(pass, pending);
     const FUNCS: [(&str, &str, &str); 4] = [
         ("strings.Index", "strings", "Index"),
         ("strings.IndexByte", "strings", "IndexByte"),
