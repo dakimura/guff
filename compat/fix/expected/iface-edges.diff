@@ -1,0 +1,196 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh iface-edges
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/iface-edges/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.14.0
+
+--- a/methods.go
++++ b/methods.go
+@@ -6,7 +6,7 @@
+ 
+ type base interface {
+ 	Base() // used through an embedding interface
+-	Unused()
++
+ }
+ 
+ type derived interface {
+@@ -21,8 +21,6 @@
+ 
+ // A generic interface's methods are reached through an instance.
+ type getter[T any] interface {
+-	Get() T
+-	Put(T)
+ }
+ 
+ func useGetter(g getter[int]) int {
+@@ -33,7 +31,6 @@
+ 	// A local interface declaration.
+ 	type localIface interface {
+ 		LocalUsed()
+-		LocalUnused()
+ 	}
+ 	var l localIface
+ 	l.LocalUsed()
+@@ -42,20 +39,17 @@
+ type (
+ 	// grouped is documented on its spec.
+ 	grouped interface {
+-		G() // trailing note
+ 	}
+ 
+ 	// other is documented too.
+ 	other interface {
+-		// O is documented.
+-		O()
+ 	}
+ )
+ 
+ var _ grouped
+ var _ other
+ 
+-type closer interface{ Close() error }
++type closer interface{}
+ 
+ func Exported(c closer, m map[string]closer, ch chan<- closer, a [2]closer, w io.Writer, f func(closer)) {
+ }
+--- a/opaque.go
++++ b/opaque.go
+@@ -5,7 +5,7 @@
+ // *Pointer. Each function below pins one way a pointer type is (or is not)
+ // the same value on two return paths.
+ 
+-type Server interface{ Serve() error }
++type Server interface{}
+ 
+ type server struct{ a int }
+ 
+@@ -20,7 +20,7 @@
+ }
+ 
+ // One variable returned twice: one pointer.
+-func SameVar(x bool) Server {
++func SameVar(x bool) *server {
+ 	s := &server{}
+ 	if x {
+ 		return s
+@@ -31,7 +31,7 @@
+ func mk() *server { return nil }
+ 
+ // One callee: its signature's result, one pointer.
+-func SameCallee(x bool) Server {
++func SameCallee(x bool) *server {
+ 	if x {
+ 		return mk()
+ 	}
+@@ -39,7 +39,7 @@
+ }
+ 
+ // `b := a` gives b a's type.
+-func CopiedVar(x bool) Server {
++func CopiedVar(x bool) *server {
+ 	a := &server{}
+ 	b := a
+ 	if x {
+@@ -58,7 +58,7 @@
+ }
+ 
+ // Parameters of one field share the field's type.
+-func OneFieldTwoParams(x bool, a, b *server) Server {
++func OneFieldTwoParams(x bool, a, b *server) *server {
+ 	if x {
+ 		return a
+ 	}
+@@ -83,7 +83,7 @@
+ 	return
+ }
+ 
+-func OneAssign(x bool) (s Server) {
++func OneAssign(x bool) (s *server) {
+ 	s = &server{}
+ 	return
+ }
+@@ -96,7 +96,7 @@
+ }
+ 
+ // Values of a Named type are always the same type.
+-func TwoValues(x bool) Server {
++func TwoValues(x bool) server {
+ 	if x {
+ 		return server{}
+ 	}
+@@ -105,26 +105,26 @@
+ 
+ func mk2() (*server, error) { return nil, nil }
+ 
+-func SameTupleCallee(x bool) (Server, error) {
++func SameTupleCallee(x bool) (*server, error) {
+ 	if x {
+ 		return mk2()
+ 	}
+ 	return mk2()
+ }
+ 
+-func AssignFromTuple() (s Server, err error) {
++func AssignFromTuple() (s *server, err error) {
+ 	s, err = mk2()
+ 	return
+ }
+ 
+-func FromSlice(x bool, ss []*server) Server {
++func FromSlice(x bool, ss []*server) *server {
+ 	if x {
+ 		return ss[0]
+ 	}
+ 	return ss[1]
+ }
+ 
+-func FromRange(ss []*server) Server {
++func FromRange(ss []*server) *server {
+ 	for _, s := range ss {
+ 		return s
+ 	}
+@@ -133,7 +133,7 @@
+ 
+ type holder struct{ s *server }
+ 
+-func FromField(h holder, x bool) Server {
++func FromField(h holder, x bool) *server {
+ 	if x {
+ 		return h.s
+ 	}
+@@ -147,7 +147,7 @@
+ 	return &server{}
+ }
+ 
+-type Fn interface{ Call() }
++type Fn interface{}
+ 
+ type fn func()
+ 
+@@ -162,11 +162,11 @@
+ 
+ func (b *Box[T]) Serve() error { return nil }
+ 
+-func NewBox() Server {
++func NewBox() *Box[int] {
+ 	return &Box[int]{}
+ }
+ 
+-func Third() (int, string, Server, error) {
++func Third() (int, string, *server, error) {
+ 	return 0, "", &server{}, nil
+ }
+ 
+@@ -178,6 +178,6 @@
+ 	return nil, nil
+ }
+ 
+-func Paren() Server {
++func Paren() *server {
+ 	return (&server{})
+ }

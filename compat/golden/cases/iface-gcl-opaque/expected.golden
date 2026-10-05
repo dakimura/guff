@@ -1,0 +1,9 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh iface-gcl-opaque
+# Produced by running golangci-lint on compat/golden/cases/iface-gcl-opaque/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+iface_opaque.go:31:29:iface::opaque: 'NewServer' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '*server'

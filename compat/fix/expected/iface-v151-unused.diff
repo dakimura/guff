@@ -1,0 +1,84 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh iface-v151-unused
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/iface-v151-unused/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.14.0
+
+--- a/basic/basic.go
++++ b/basic/basic.go
+@@ -44,16 +44,8 @@
+ // grouped type declaration
+ 
+ type (
+-	Executor interface { // want "^interface 'Executor' is declared but not used within the package$"
+-		Execute() error
+-	}
+-
+ 	Job struct {
+ 		Name string
+-	}
+-
+-	Runner interface { // want "^interface 'Runner' is declared but not used within the package$"
+-		Run() error
+ 	}
+ )
+ 
+@@ -77,7 +69,3 @@
+ }
+ 
+ // -- single type declaration
+-
+-type Writer interface { // want "^interface 'Writer' is declared but not used within the package$"
+-	Write(b []byte) error
+-}
+--- a/ignoredirective/ignoredirective.go
++++ b/ignoredirective/ignoredirective.go
+@@ -1,17 +1,8 @@
+ package ignoredirective
+-
+-type Sender interface { // want "^interface 'Sender' is declared but not used within the package$"
+-	Send(msg string) error
+-}
+ 
+ //iface:ignore=unused
+ type MessageHandler interface {
+ 	HandleMessage(msg string) error
+-}
+-
+-//iface:ignore=identical
+-type Commitable interface { // want "^interface 'Commitable' is declared but not used within the package$"
+-	Commit() error
+ }
+ 
+ type (
+@@ -22,15 +13,6 @@
+ 
+ 	Job struct {
+ 		Name string
+-	}
+-
+-	Runner interface { // want "^interface 'Runner' is declared but not used within the package$"
+-		Run() error
+-	}
+-
+-	//iface:ignore=identical
+-	Calculator interface { // want "^interface 'Calculator' is declared but not used within the package$"
+-		Calc() int
+ 	}
+ )
+ 
+@@ -44,10 +26,3 @@
+ 		Read() ([]byte, error)
+ 	}
+ )
+-
+-//iface:ignore=identical
+-type (
+-	Caller interface { // want "^interface 'Caller' is declared but not used within the package$"
+-		Call() error
+-	}
+-)

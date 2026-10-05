@@ -1,0 +1,30 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh iface-v151-unusedmethod
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/iface-v151-unusedmethod/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.14.0
+
+--- a/basic/basic.go
++++ b/basic/basic.go
+@@ -6,7 +6,6 @@
+ )
+ 
+ type Logger interface {
+-	Debug(msg string, args ...any) // want "^method 'Debug\\(\\)' is declared on interface 'Logger' but not used within the package$"
+ 	Info(msg string, args ...any)
+ 
+ 	Warn(msg string, args ...any) //iface:ignore=unusedmethod
+--- a/concrete/main.go
++++ b/concrete/main.go
+@@ -15,7 +15,6 @@
+ func (G) m(string) {}
+ 
+ type I interface {
+-	m(string) // want "^method 'm\\(\\)' is declared on interface 'I' but not used within the package$"
+ }
+ 
+ type H struct{}

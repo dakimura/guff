@@ -2171,19 +2171,30 @@ pub struct ThelperSettings {
     pub tb: ThelperKindSettings,
 }
 
-/// Nested `linters.settings.iface.settings.unused`.
+/// Nested `linters.settings.iface.settings.unused` / `.unusedmethod`.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
-pub struct IfaceUnusedSettings {
-    /// Exact package paths to skip (golangci `settings.unused.exclude`).
+pub struct IfaceExcludeSettings {
+    /// Package paths to skip (the analyzer's `exclude` flag). golangci's
+    /// `valueToString` joins a list with commas and passes a string through;
+    /// the analyzer splits on commas either way.
     #[serde(default, deserialize_with = "string_or_seq")]
     pub exclude: Vec<String>,
+}
+
+impl IfaceExcludeSettings {
+    fn flag(&self) -> String {
+        self.exclude.join(",")
+    }
 }
 
 /// Nested `linters.settings.iface.settings`.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct IfaceNestedSettings {
     #[serde(default)]
-    pub unused: IfaceUnusedSettings,
+    pub unused: IfaceExcludeSettings,
+    /// Since golangci-lint 2.14.0 (iface v1.5.1).
+    #[serde(default)]
+    pub unusedmethod: IfaceExcludeSettings,
 }
 
 /// `linters.settings.iface` / `linters-settings.iface`.
@@ -4236,7 +4247,8 @@ impl IfaceSettings {
     pub fn to_guff_iface(&self) -> guff_style::IfaceOptions {
         guff_style::IfaceOptions {
             enable: self.enable.clone(),
-            unused_exclude: self.settings.unused.exclude.clone(),
+            unused_exclude: self.settings.unused.flag(),
+            unusedmethod_exclude: self.settings.unusedmethod.flag(),
         }
     }
 }

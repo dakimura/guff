@@ -1,0 +1,10 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh iface-gcl-unexported
+# Produced by running golangci-lint on compat/golden/cases/iface-gcl-unexported/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+iface_unexported.go:76:16:iface::unexported: unexported interface 'unexportedReader' used as parameter in exported function 'ReadAll'
+iface_unexported.go:82:28:iface::unexported: unexported interface 'unexportedReader' used as return value in exported function 'NewUnexportedReader'

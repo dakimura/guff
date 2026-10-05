@@ -1,0 +1,17 @@
+# Golden case: golangci-lint v2.14.0's pkg/golinters/iface/testdata/iface_default.go
+# (default settings: identical only).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - iface
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

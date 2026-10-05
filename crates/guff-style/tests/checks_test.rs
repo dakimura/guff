@@ -1915,7 +1915,8 @@ fn iface_respects_enable_unused_settings() {
         "iface",
         IfaceOptions {
             enable: vec!["unused".into()],
-            unused_exclude: Vec::new(),
+            unused_exclude: String::new(),
+            unusedmethod_exclude: String::new(),
         },
     );
     let messages = support::run_analyzer_with_settings(

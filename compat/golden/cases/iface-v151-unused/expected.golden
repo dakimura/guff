@@ -1,0 +1,16 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh iface-v151-unused
+# Produced by running golangci-lint on compat/golden/cases/iface-v151-unused/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+basic/basic.go:47:2:iface::unused: interface 'Executor' is declared but not used within the package
+basic/basic.go:55:2:iface::unused: interface 'Runner' is declared but not used within the package
+basic/basic.go:81:6:iface::unused: interface 'Writer' is declared but not used within the package
+ignoredirective/ignoredirective.go:3:6:iface::unused: interface 'Sender' is declared but not used within the package
+ignoredirective/ignoredirective.go:13:6:iface::unused: interface 'Commitable' is declared but not used within the package
+ignoredirective/ignoredirective.go:27:2:iface::unused: interface 'Runner' is declared but not used within the package
+ignoredirective/ignoredirective.go:32:2:iface::unused: interface 'Calculator' is declared but not used within the package
+ignoredirective/ignoredirective.go:50:2:iface::unused: interface 'Caller' is declared but not used within the package

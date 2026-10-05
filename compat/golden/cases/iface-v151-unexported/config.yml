@@ -1,0 +1,21 @@
+# Golden case: iface v1.5.1's unexported/testdata (golangci-lint 2.14.0) —
+# checkType peeling to the inner identifier, formatType via types.TypeString.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - iface
+  settings:
+    iface:
+      enable:
+        - unexported
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

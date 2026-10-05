@@ -1,0 +1,10 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh iface-gcl-cgo
+# Produced by running golangci-lint on compat/golden/cases/iface-gcl-cgo/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+iface_cgo.go:27:6:iface::identical: interface 'Pinger' contains identical methods or type constraints with another interface, causing redundancy (see: Healthcheck)
+iface_cgo.go:31:6:iface::identical: interface 'Healthcheck' contains identical methods or type constraints with another interface, causing redundancy (see: Pinger)

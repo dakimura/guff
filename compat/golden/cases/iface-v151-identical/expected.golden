@@ -1,0 +1,19 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh iface-v151-identical
+# Produced by running golangci-lint on compat/golden/cases/iface-v151-identical/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+basic/basic.go:3:6:iface::identical: interface 'Healthcheck' contains identical methods or type constraints with another interface, causing redundancy (see: Pinger)
+basic/basic.go:7:6:iface::identical: interface 'Pinger' contains identical methods or type constraints with another interface, causing redundancy (see: Healthcheck)
+basic/basic.go:26:2:iface::identical: interface 'Runner' contains identical methods or type constraints with another interface, causing redundancy (see: Task)
+basic/basic.go:34:2:iface::identical: interface 'Task' contains identical methods or type constraints with another interface, causing redundancy (see: Runner)
+embedded/embedded.go:5:6:iface::identical: interface 'Sender' contains identical methods or type constraints with another interface, causing redundancy (see: Messenger)
+embedded/embedded.go:13:6:iface::identical: interface 'Messenger' contains identical methods or type constraints with another interface, causing redundancy (see: Sender)
+embedded/embedded.go:17:6:iface::identical: interface 'SendCloser' contains identical methods or type constraints with another interface, causing redundancy (see: Channel, Comm)
+embedded/embedded.go:22:6:iface::identical: interface 'Comm' contains identical methods or type constraints with another interface, causing redundancy (see: Channel, SendCloser)
+embedded/embedded.go:27:6:iface::identical: interface 'Channel' contains identical methods or type constraints with another interface, causing redundancy (see: Comm, SendCloser)
+typeconstraints/typeconstraints.go:3:6:iface::identical: interface 'Int' contains identical methods or type constraints with another interface, causing redundancy (see: Integer)
+typeconstraints/typeconstraints.go:7:6:iface::identical: interface 'Integer' contains identical methods or type constraints with another interface, causing redundancy (see: Int)

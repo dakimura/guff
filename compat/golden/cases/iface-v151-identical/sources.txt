@@ -1,0 +1,7 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces)
+basic/basic.go  crates/guff-style/tests/testdata/iface/upstream-v1.5.1/identical/basic/basic.go
+embedded/embedded.go  crates/guff-style/tests/testdata/iface/upstream-v1.5.1/identical/embedded/embedded.go
+ignoredirective/ignoredirective.go  crates/guff-style/tests/testdata/iface/upstream-v1.5.1/identical/ignoredirective/ignoredirective.go
+typeconstraints/typeconstraints.go  crates/guff-style/tests/testdata/iface/upstream-v1.5.1/identical/typeconstraints/typeconstraints.go
+typedefalias/typedefalias.go  crates/guff-style/tests/testdata/iface/upstream-v1.5.1/identical/typedefalias/typedefalias.go

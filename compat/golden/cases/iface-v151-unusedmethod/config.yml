@@ -1,0 +1,27 @@
+# Golden case: iface v1.5.1's unusedmethod/testdata (golangci-lint 2.14.0), new
+# in that version. The exclude list is joined with commas by golangci, so the
+# empty entry exercises the analyzer's empty removal.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - iface
+  settings:
+    iface:
+      enable:
+        - unusedmethod
+      settings:
+        unusedmethod:
+          exclude:
+            - excludepkg
+            - ""
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

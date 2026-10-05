@@ -1,0 +1,4 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces)
+opaque.go  crates/guff-style/tests/testdata/iface/edges/opaque.go
+methods.go  crates/guff-style/tests/testdata/iface/edges/methods.go

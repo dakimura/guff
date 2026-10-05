@@ -1,0 +1,28 @@
+# Golden case: iface shapes upstream's testdata does not pin — opaque's
+# go/types pointer identity (two `&T{}` are two implementations), named
+# results, aliases; unusedmethod through embedding and generic instances,
+# local declarations; unexported through containers, receivers and type
+# parameters; directives and fix ranges on grouped specs.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - iface
+  settings:
+    iface:
+      enable:
+        - identical
+        - unused
+        - opaque
+        - unexported
+        - unusedmethod
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

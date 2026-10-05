@@ -1,0 +1,12 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh iface-gcl-fix
+# Produced by running golangci-lint on compat/golden/cases/iface-gcl-fix/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+iface.go:10:6:iface::unused: interface 'Pinger' is declared but not used within the package
+iface.go:14:6:iface::unused: interface 'Healthcheck' is declared but not used within the package
+iface.go:32:29:iface::opaque: 'NewServer' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '*server'
+iface.go:43:6:iface::unused: interface 'UserRepository' is declared but not used within the package
