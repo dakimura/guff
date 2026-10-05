@@ -14,5 +14,4 @@ grafana golangci-only pkg/services/authz/rbac.go:354:goimports:File is not prope
 grafana golangci-only pkg/services/encryption/provider/cipher_aescfb.go:42:gosec:G407: Use of hardcoded IV/nonce for encryption by passing hardcoded slice/array by passing a zeroed buffer from make
 grafana golangci-only pkg/services/ngalert/notifier/merge/merge.go:172:goimports:File is not properly formatted
 grafana golangci-only pkg/storage/unified/client.go:359:goimports:File is not properly formatted
-grafana golangci-only pkg/storage/unified/search/remote_index_store.go:284:exhaustive:missing cases in switch of type gcerr.ErrorCode: gcerr.OK, gcerr.Unknown, gcerr.NotFound, gcerr.AlreadyExists, gcerr.InvalidArgument, gcerr.Unimplemented, gcerr.FailedPrecondition, gcerr.PermissionDenied, gcerr.Canceled
 grafana golangci-only pkg/util/encryption.go:140:gosec:G407: Use of hardcoded IV/nonce for encryption by passing hardcoded slice/array by passing a zeroed buffer from make

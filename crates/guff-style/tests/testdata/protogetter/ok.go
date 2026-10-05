@@ -37,11 +37,11 @@ func appendToField(u *pb.User, more string) {
 	u.Names = append(u.Names, more)
 }
 
-// A message reached through a *type alias* is not a proto message to
-// protogetter at all: its `typesNamed` asserts `t.(*types.Named)` with no
-// `Unalias`, and since Go 1.23 an aliased type is a `*types.Alias`. dapr
-// reaches every durabletask message this way, which is why golangci-lint
-// reports nothing for the whole repo.
+// Reported since golangci-lint 2.14.0: protogetter v1.0.1's `typesNamed`
+// unaliases, so a message reached through a *type alias* is a proto message.
+// v0.3.20 asserted `t.(*types.Named)` on the `*types.Alias` and failed — dapr
+// reaches every durabletask message this way, and 2.12.2 reported nothing for
+// the whole repo. (The only finding in this "ok" file.)
 type aliasUser = pb.User
 
 func viaAlias(u *aliasUser) string {

@@ -30,7 +30,7 @@
 | isolate-copyloopvar | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | isolate-nosprintfhostport | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-nilnil | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
-| isolate-recvcheck | 3 | 3 | 2 | 66.7% | 66.7% | 0 |
+| isolate-recvcheck | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-interfacebloat | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-nonamedreturns | 14 | 14 | 14 | 100.0% | 100.0% | 0 |
 | isolate-inamedparam | 5 | 5 | 5 | 100.0% | 100.0% | 0 |
@@ -52,7 +52,7 @@
 | isolate-containedctx | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-iotamixing | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-asasalint | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
-| isolate-exhaustive | 25 | 33 | 25 | 100.0% | 75.8% | 0 |
+| isolate-exhaustive | 37 | 37 | 37 | 100.0% | 100.0% | 0 |
 | isolate-exhaustruct | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | isolate-exhaustruct_v5 | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | isolate-funcorder | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
@@ -70,7 +70,7 @@
 | isolate-musttag | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-reassign | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-tagliatelle | 31 | 31 | 31 | 100.0% | 100.0% | 0 |
-| isolate-canonicalheader | 6 | 10 | 0 | 0.0% | 0.0% | 0 |
+| isolate-canonicalheader | 10 | 10 | 10 | 100.0% | 100.0% | 0 |
 | isolate-ireturn | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-iface | 5 | 5 | 5 | 100.0% | 100.0% | 0 |
 | isolate-varnamelen | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
@@ -294,11 +294,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| recvcheck | 3 | 3 | 2 | 66.7% | 66.7% |
-
-### Allowed known diffs (2)
-- guff-only: `bad.go:21:recvcheck:the methods of "Period" use pointer receiver and non-pointer receiver.`
-- golangci-only: `bad.go:28:recvcheck:the methods of "Encoded" use pointer receiver and non-pointer receiver.`
+| recvcheck | 3 | 3 | 3 | 100.0% | 100.0% |
 
 ## isolate-interfacebloat
 
@@ -430,17 +426,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| exhaustive | 25 | 33 | 25 | 100.0% | 75.8% |
-
-### Allowed known diffs (8)
-- golangci-only: `directives.go:104:exhaustive:failed to parse directives: conflicting directives "ignore" and "enforce"`
-- golangci-only: `directives.go:116:exhaustive:failed to parse directives: invalid directive "ignoreme"`
-- golangci-only: `directives.go:116:exhaustive:missing cases in switch of type p.Color: p.Blue`
-- golangci-only: `directives.go:127:exhaustive:failed to parse directives: invalid directive "enforcement"`
-- golangci-only: `directives.go:172:exhaustive:missing keys in map of key type p.Color: p.Blue`
-- golangci-only: `directives.go:184:exhaustive:failed to parse directives: invalid directive "ignoreme"`
-- golangci-only: `directives.go:184:exhaustive:missing keys in map of key type p.Color: p.Blue`
-- golangci-only: `foreign.go:62:exhaustive:missing cases in switch of type enumdep.Kind: enumdep.KindA, enumdep.KindM`
+| exhaustive | 37 | 37 | 37 | 100.0% | 100.0% |
 
 ## isolate-exhaustruct
 
@@ -548,18 +534,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| canonicalheader | 6 | 10 | 0 | 0.0% | 0.0% |
-
-### Allowed known diffs (16)
-- guff-only: `bad.go:14:canonicalheader:non-canonical header "accept-encoding", instead use: "Accept-Encoding"`
-- guff-only: `bad.go:15:canonicalheader:non-canonical header "user-agent", instead use: "User-Agent"`
-- guff-only: `bad.go:16:canonicalheader:non-canonical header "if-none-match", instead use: "If-None-Match"`
-- guff-only: `bad.go:6:canonicalheader:non-canonical header "content-type", instead use: "Content-Type"`
-- guff-only: `fieldonly/fieldonly.go:13:canonicalheader:non-canonical header "content-type", instead use: "Content-Type"`
-- guff-only: `fieldonly/fieldonly.go:14:canonicalheader:non-canonical header "if-none-match", instead use: "If-None-Match"`
-- golangci-only: `bad.go:13:canonicalheader:use "X-Request-ID" instead of "x-request-id"`
-- golangci-only: `bad.go:14:canonicalheader:use "Accept-Encoding" instead of "accept-encoding"`
-- … and 8 more (see `compat/allowlists/`)
+| canonicalheader | 10 | 10 | 10 | 100.0% | 100.0% |
 
 ## isolate-ireturn
 

@@ -10355,7 +10355,8 @@ fn protogetter_flags_direct_proto_field_reads() {
 fn protogetter_ignores_getters_writes_and_non_proto() {
     let pkg = support::typecheck_fixture("protogetter", "example.com/protogetter/ok", "ok.go");
     let messages = support::run_analyzer(protogetter(), &pkg);
-    assert!(messages.is_empty(), "{messages:?}");
+    // The one finding is the alias shape, reported since protogetter v1.0.1.
+    assert_eq!(messages, vec!["avoid direct access to proto field u.Name, use u.GetName() instead".to_string()]);
 }
 
 /// `msg.Field == nil` is filtered when `GetField` returns a non-pointer.
@@ -10373,9 +10374,12 @@ fn protogetter_ignores_getters_writes_and_non_proto() {
 fn protogetter_nil_comparison_follows_the_getter_result_type() {
     let ok = support::typecheck_fixture("protogetter", "example.com/protogetter/ok", "ok.go");
     let ok_messages = support::run_analyzer(protogetter(), &ok);
-    assert!(
-        ok_messages.is_empty(),
-        "a non-pointer getter's nil comparison is filtered: {ok_messages:?}"
+    // Nothing but the alias shape (protogetter v1.0.1), which is not a nil
+    // comparison.
+    assert_eq!(
+        ok_messages,
+        vec!["avoid direct access to proto field u.Name, use u.GetName() instead".to_string()],
+        "a non-pointer getter's nil comparison is filtered"
     );
 
     let bad = support::typecheck_fixture("protogetter", "example.com/protogetter", "bad.go");
