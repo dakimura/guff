@@ -98,6 +98,8 @@ mod unused_receiver;
 mod use_any;
 mod use_errors_new;
 mod use_slices_concat;
+mod use_waitgroup_go;
+mod redundant_build_tag;
 mod use_fmt_print;
 mod var_declaration;
 mod var_naming;
@@ -217,6 +219,8 @@ pub fn run_enabled_rules(pass: &Pass<'_>) -> Vec<Failure> {
     run("multiline-if-init", multiline_if_init::apply);
     run("marshal-receiver", marshal_receiver::apply);
     run("use-slices-concat", use_slices_concat::apply);
+    run("use-waitgroup-go", use_waitgroup_go::apply);
+    run("redundant-build-tag", redundant_build_tag::apply);
     run("package-naming", package_naming::apply);
     run("use-slices-sort", use_slices_sort::apply);
     run("inefficient-map-lookup", inefficient_map_lookup::apply);

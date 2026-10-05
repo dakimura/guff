@@ -96,3 +96,8 @@ useany/use_any.go:16:18:revive:warning:use-any: since Go 1.18 'interface{}' can 
 useerrorsnew/use_errors_new.go:6:2:revive:warning:use-errors-new: replace fmt.Errorf by errors.New
 useerrorsnew/use_errors_new.go:7:23:revive:warning:use-errors-new: replace fmt.Errorf by errors.New
 useerrorsnew/use_errors_new.go:11:12:revive:warning:use-errors-new: replace fmt.Errorf by errors.New
+wggo/use_waitgroup_go.go:10:2:revive:warning:use-waitgroup-go: replace wg.Add()...go {...wg.Done()...} with wg.Go(...)
+wggo/use_waitgroup_go.go:16:2:revive:warning:use-waitgroup-go: replace wg.Add()...go {...wg.Done()...} with wg.Go(...)
+wggo/use_waitgroup_go.go:24:3:revive:warning:use-waitgroup-go: replace wg.Add()...go {...wg.Done()...} with wg.Go(...)
+wggo/use_waitgroup_go.go:36:2:revive:warning:use-waitgroup-go: replace wg.Add()...go {...wg.Done()...} with wg.Go(...)
+wggo/use_waitgroup_go.go:59:2:revive:warning:use-waitgroup-go: replace wg.Add()...go {...wg.Done()...} with wg.Go(...)
