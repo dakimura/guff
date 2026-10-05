@@ -13,7 +13,7 @@ static STD_PKGS: &[&str] = &[
     "math", "mime", "net", "os", "path", "plugin",
     "reflect", "regexp", "runtime", "slices", "sort", "strconv",
     "strings", "structs", "sync", "syscall", "testing", "time",
-    "unicode", "unique", "unsafe", "weak",
+    "unicode", "unique", "unsafe", "uuid", "weak",
 ];
 
 /// Go `isStdPkg`.

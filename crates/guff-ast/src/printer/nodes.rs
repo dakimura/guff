@@ -328,7 +328,7 @@ impl<'a> Printer<'a> {
             prev_break = 0;
         }
         let mut size = 0usize;
-        let mut lnsum = 0.0f64;
+        let mut log2sum = 0.0f64;
         let mut count = 0usize;
         let mut prev_line = prev.line;
         for (i, x) in list.iter().enumerate() {
@@ -352,7 +352,7 @@ impl<'a> Printer<'a> {
                 if count == 0 || (prev_size <= 40 && size <= 40) {
                     use_ff = false;
                 } else {
-                    let ratio = size as f64 / (lnsum / count as f64).exp();
+                    let ratio = size as f64 / exp2ish(log2sum / count as f64);
                     // Match Go: use formfeed when the size ratio is extreme.
                     use_ff = 2.5 * ratio <= 1.0 || 2.5 <= ratio;
                 }
@@ -372,7 +372,7 @@ impl<'a> Printer<'a> {
                         blank = false;
                     }
                     if n > 1 {
-                        lnsum = 0.0;
+                        log2sum = 0.0;
                         count = 0;
                     }
                 }
@@ -390,7 +390,7 @@ impl<'a> Printer<'a> {
                 self.expr0(x, depth);
             }
             if size > 0 {
-                lnsum += (size as f64).ln();
+                log2sum += log2ish(size as f64);
                 count += 1;
             }
             prev_line = line;
@@ -1093,7 +1093,9 @@ impl<'a> Printer<'a> {
             if line < xb {
                 return true;
             }
-            if xb < xe {
+            // go1.27: a multi-line composite literal does not count — it has
+            // its own field indentation already (go.dev/issue/7195).
+            if xb < xe && !is_composite_lit_like(x) {
                 multiline += 1;
             }
             line = xe;
@@ -1321,7 +1323,8 @@ impl<'a> Printer<'a> {
                     self.print(&[Item::Ident(name), ws(BLANK)]);
                 }
                 self.set_pos(x.path.pos());
-                self.print(&[Item::Lit(&x.path)]);
+                let path = sanitize_import_path(&x.path);
+                self.print(&[Item::Lit(path.as_ref().unwrap_or(&x.path))]);
                 self.set_comment(x.comment.as_ref());
                 self.set_pos(x.end_pos);
             }
@@ -1532,4 +1535,76 @@ fn get_doc(x: &Decl) -> Option<&CommentGroup> {
         Decl::FuncDecl(x) => x.doc.as_ref(),
         Decl::BadDecl(_) => None,
     }
+}
+
+/// `sanitizeImportPath`: a valid import path is printed double-quoted, so
+/// ``import `C` `` becomes `import "C"`. `None` when the literal is already
+/// canonical, or is not a string, or is not a valid path (then it is printed
+/// as written).
+fn sanitize_import_path(lit: &crate::ast::BasicLit) -> Option<crate::ast::BasicLit> {
+    if lit.kind != Some(crate::token::Token::STRING) {
+        return None;
+    }
+    let s = crate::directive::unquote(&lit.value).ok()?;
+    if s.is_empty() {
+        return None;
+    }
+    const ILLEGAL: &str = "!\"#$%&'()*,:;<=>?[\\]^{|}`\u{FFFD}";
+    if s.chars().any(|r| r.is_control() || r.is_whitespace() || ILLEGAL.contains(r)) {
+        return None;
+    }
+    let quoted = format!("\"{s}\"");
+    if quoted == lit.value {
+        return None;
+    }
+    let mut out = lit.clone();
+    out.value = quoted;
+    Some(out)
+}
+
+/// `isCompositeLitLike` (go1.27): a composite literal, or `&` of one, under
+/// any parentheses.
+fn is_composite_lit_like(x: &Expr) -> bool {
+    fn strip(mut e: &Expr) -> &Expr {
+        while let Expr::ParenExpr(p) = e {
+            e = &p.x;
+        }
+        e
+    }
+    match strip(x) {
+        Expr::CompositeLit(_) => true,
+        Expr::UnaryExpr(u) => u.op == Token::AND && matches!(strip(&u.x), Expr::CompositeLit(_)),
+        _ => false,
+    }
+}
+
+/// `log2ish` (go1.27 `go/printer/math.go`): a crude log₂ that is the same on
+/// every architecture — `e + 2*(f-1)` for `x = f·2^e`, `f` in `[0.5, 1)`.
+fn log2ish(x: f64) -> f64 {
+    let (f, e) = frexp(x);
+    e as f64 + 2.0 * (f - 1.0)
+}
+
+/// `exp2ish`: the matching crude 2^x, `(1+frac)·2^floor(x)`.
+fn exp2ish(x: f64) -> f64 {
+    let n = x.floor();
+    let f = x - n;
+    (1.0 + f) * 2f64.powi(n as i32)
+}
+
+/// `math.Frexp` for the finite positive values the printer passes.
+fn frexp(x: f64) -> (f64, i32) {
+    if x == 0.0 || !x.is_finite() {
+        return (x, 0);
+    }
+    let bits = x.to_bits();
+    let exp = ((bits >> 52) & 0x7ff) as i32;
+    if exp == 0 {
+        // Subnormal: scale into the normal range first.
+        let (f, e) = frexp(x * 2f64.powi(64));
+        return (f, e - 64);
+    }
+    let e = exp - 1022;
+    let f = f64::from_bits((bits & !(0x7ff << 52)) | (1022u64 << 52));
+    (f, e)
 }

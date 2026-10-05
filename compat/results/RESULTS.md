@@ -4,8 +4,8 @@
 |--------|-----:|---------:|-----:|--:|--:|-----------:|
 | fixture | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | local | 108 | 108 | 108 | 100.0% | 100.0% | 0 |
-| gin | 9 | 10 | 9 | 100.0% | 90.0% | 0 |
-| caddy | 1 | 6 | 1 | 100.0% | 16.7% | 0 |
+| gin | 10 | 10 | 10 | 100.0% | 100.0% | 0 |
+| caddy | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
 | helm | 80 | 80 | 80 | 100.0% | 100.0% | 0 |
 | k9s | 636 | 597 | 493 | 77.5% | 82.6% | 0 |
 | cobra | 157 | 152 | 149 | 94.9% | 98.0% | 0 |
@@ -34,26 +34,16 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| gofumpt | 0 | 1 | 0 | 100.0% | 0.0% |
+| gofumpt | 1 | 1 | 1 | 100.0% | 100.0% |
 | gosec | 2 | 2 | 2 | 100.0% | 100.0% |
 | govet | 7 | 7 | 7 | 100.0% | 100.0% |
-
-### Allowed known diffs (1)
-- golangci-only: `binding/json_test.go:134:gofumpt:File is not properly formatted`
 
 ## caddy
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| gofumpt | 0 | 5 | 0 | 100.0% | 0.0% |
+| gofumpt | 5 | 5 | 5 | 100.0% | 100.0% |
 | staticcheck | 1 | 1 | 1 | 100.0% | 100.0% |
-
-### Allowed known diffs (5)
-- golangci-only: `modules/caddyhttp/fileserver/matcher.go:625:gofumpt:File is not properly formatted`
-- golangci-only: `modules/caddyhttp/server.go:638:gofumpt:File is not properly formatted`
-- golangci-only: `modules/caddytls/fileloader.go:120:gofumpt:File is not properly formatted`
-- golangci-only: `modules/caddytls/folderloader.go:178:gofumpt:File is not properly formatted`
-- golangci-only: `modules/caddytls/pemloader.go:92:gofumpt:File is not properly formatted`
 
 ## helm
 

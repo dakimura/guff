@@ -1,0 +1,10 @@
+# gofumpt v0.12.0's testscript `assignment-newlines.txtar`, input `foo.go`, verbatim
+# (golangci-lint 2.14.0 bundles gofumpt v0.12.0). The script's own
+# `foo.go.golden` is gofumpt's answer; expected/ holds golangci-lint fmt's.
+version: "2"
+formatters:
+  enable:
+    - gofumpt
+  settings:
+    gofumpt:
+      module-path: example.com

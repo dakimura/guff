@@ -1,0 +1,11 @@
+package p
+
+var (
+	A = 1
+	B = 2
+)
+
+var (
+	C = 3
+	D = 4
+)

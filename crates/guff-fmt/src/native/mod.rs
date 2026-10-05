@@ -76,13 +76,18 @@ impl std::error::Error for NotImplemented {}
 pub struct NativeOptions {
     /// `gofmt -s` / simplify.
     pub simplify: bool,
-    /// `gofumpt -extra`.
+    /// `gofumpt -extra` (all extra rules).
     pub extra_rules: bool,
+    /// `gofumpt -extra=group_params,clothe_returns,balance_calls`.
+    pub group_params: bool,
+    pub clothe_returns: bool,
+    pub balance_calls: bool,
     /// `gofumpt -lang` (e.g. `go1.22`).
     pub lang: Option<String>,
     /// `gofumpt -modpath`.
     pub module_path: Option<String>,
-    /// Omit gofumpt ≥v0.10 multiline call / paren rules (golangci pin parity).
+    /// golangci-lint pin parity. No gofumpt rule reads it since the 2.14.0
+    /// pin (gofumpt v0.12.0); see `GofumptOptions::match_golangci`.
     pub match_golangci: bool,
     /// `goimports -local` (comma-joined prefixes).
     pub local_prefixes: Vec<String>,

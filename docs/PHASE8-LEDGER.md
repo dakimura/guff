@@ -521,23 +521,23 @@ v5 の `analyzer/testdata` は module zip に無い。GitHub の v5.2.0 タグ�
 
 | # | upstream_path | kind | 要約 | guff の場所 | status | effort | upstream testdata |
 |---|---------------|------|------|-------------|--------|--------|-------------------|
-| 1 | format.go Options.Extra | new-option | extra の 3 規則（extra-rules は 3 つ全部） | guff-lint/src/config.rs, guff-fmt/src/gofumpt.rs, native/gofumpt/fumpter.rs | needs-port | M | func-merge-parameters / clothe-returns / diagnose.txtar |
-| 2 | format.go CallExpr | behavior | 括弧揃えが BalanceCalls 下、一方向だけ | fumpter.rs call_post | needs-port | S | call-multiline.txtar |
-| 3 | format.go ParenExpr | behavior | 括弧除去が既定有効、keepParens 再帰 | fumpter.rs can_remove_parens | needs-port | M | paren-remove.txtar |
+| 1 | format.go Options.Extra | new-option | extra の 3 規則（extra-rules は 3 つ全部） | guff-lint/src/config.rs, guff-fmt/src/gofumpt.rs, native/gofumpt/fumpter.rs | **done (PR 13)**: `extra.group-params` / `clothe-returns` / `balance-calls`、`extra-rules` は 3 つ全部 | M | func-merge-parameters / clothe-returns / diagnose.txtar |
+| 2 | format.go CallExpr | behavior | 括弧揃えが BalanceCalls 下、一方向だけ | fumpter.rs call_post | **done (PR 13)** | S | call-multiline.txtar |
+| 3 | format.go ParenExpr | behavior | 括弧除去が既定有効、keepParens 再帰 | fumpter.rs can_remove_parens | **done (PR 13)** | M | paren-remove.txtar |
 | 4 | format.go File（100 バイト） | behavior | 1 行 func が 100 バイト超なら multi | fumpter.rs file_rules | **done (PR 8)** | S | decls-separated.txtar |
 | 5 | format.go File（effectiveEnd） | behavior | 行末コメントは前の宣言の末尾、起点は Name.End() | fumpter.rs file_rules | **done (PR 8)** | S | decls-separated.txtar |
-| 6 | format.go removeParens + join | behavior | 単一 spec の括弧外しを結合より前に、Rparen を end-1 | fumpter.rs join_lone_decls | needs-port | M | decl-group-single.txtar, decls-separated.txtar |
-| 7 | format.go AssignStmt | behavior | 間にコメントがあれば詰めない | fumpter.rs walk_stmt | needs-port | S | assignment-newlines.txtar |
-| 8 | format.go joinStdImports | behavior | コメント付き import を移さない、元の行を消す | fumpter.rs join_std_imports | needs-port | M | std-imports.txtar |
+| 6 | format.go removeParens + join | behavior | 単一 spec の括弧外しを結合より前に、Rparen を end-1 | fumpter.rs join_lone_decls | **done (PR 13)** | M | decl-group-single.txtar, decls-separated.txtar |
+| 7 | format.go AssignStmt | behavior | 間にコメントがあれば詰めない | fumpter.rs walk_stmt | **done (PR 13)** | S | assignment-newlines.txtar |
+| 8 | format.go joinStdImports | behavior | コメント付き import を移さない、元の行を消す | fumpter.rs join_std_imports | **done (PR 13)** | M | std-imports.txtar |
 | 9 | format.go commentGroupLooksLikeCode | behavior | コメントアウトされたコード | fumpter.rs | already-matches | S | comment-code.txtar |
 | 10 | format.go rxShebangComment | behavior | shebang | fumpter.rs rx_shebang | already-matches | S | comment-shebang.txtar |
-| 11 | format.go diagnose | behavior | `-extra=...` 列挙とバージョン文字列（旧書式のファイルが未整形になる） | fumpter.rs fix_comments / Extra::string | needs-port | S | diagnose.txtar, gomod.txtar |
+| 11 | format.go diagnose | behavior | `-extra=...` 列挙とバージョン文字列（旧書式のファイルが未整形になる） | fumpter.rs fix_comments / Extra::string | **done (PR 13)**: バージョン文字列 `v0.12.0 (go1.27.0)` と `-extra=` 列挙 | S | diagnose.txtar, gomod.txtar |
 | 12 | format.go shouldMergeAdjacentFields | behavior | 印字文字列で比較 | fumpter.rs should_merge | already-matches | S | func-merge-parameters.txtar |
-| 13 | govendor printer indentList | substrate | 複合リテラルを multi-line に数えない | guff-ast/src/printer/nodes.rs | needs-port | S | — |
-| 14 | govendor printer intersperseComments | substrate | 次トークンが IDENT なら doc 再整形しない | guff-ast/src/printer/printer.rs | needs-port | S | — |
-| 15 | govendor printer exprList log2ish | substrate | 近似関数（ビット一致で移植） | nodes.rs:331 | needs-port | S | — |
-| 16 | govendor doc/comment std.go | substrate | std 一覧に `uuid` | guff-ast/src/doc/comment/std_pkgs.rs | needs-port | S | — |
-| 17 | format.go File（multi の pos） | behavior | multi をコメント補正後の pos で（#5 と同時に） | fumpter.rs file_rules | needs-port | S | decls-separated.txtar |
+| 13 | govendor printer indentList | substrate | 複合リテラルを multi-line に数えない | guff-ast/src/printer/nodes.rs | **done (PR 13)**: fmt case `gofmt-go127-printer` | S | — |
+| 14 | govendor printer intersperseComments | substrate | 次トークンが IDENT なら doc 再整形しない | guff-ast/src/printer/printer.rs | **done (PR 13)**: fmt case `gofmt-go127-printer` | S | — |
+| 15 | govendor printer exprList log2ish | substrate | 近似関数（ビット一致で移植） | nodes.rs:331 | **done (PR 13)**: `math.Frexp` 相当をビット演算で | S | — |
+| 16 | govendor doc/comment std.go | substrate | std 一覧に `uuid` | guff-ast/src/doc/comment/std_pkgs.rs | **done (PR 13)** | S | — |
+| 17 | format.go File（multi の pos） | behavior | multi をコメント補正後の pos で（#5 と同時に） | fumpter.rs file_rules | **done (PR 13)** | S | decls-separated.txtar |
 
 ### small-a
 
@@ -666,7 +666,7 @@ golden を regen したら fix のベースラインも撮り直す。測定は 
 | 10 | **revive** — **done** | empty-block range、multiline-if-init を enable-all に、marshal-receiver、use-slices-concat、文言 4 本、Go 版ゲート 2 本、directives。redundant-build-tag / use-waitgroup-go（rule ごと未実装）と `directives:` 設定は残す | revive 1/10 → **1/4（恒久分のみ）**、新設 golden 7 case | M |
 | 11 | **unused / unparam** — **done** | Unify、unparam AnonFuncs + linkname + signRequiredBy + alias。あわせて既存の乖離 3 つ: 総称レシーバと literal の名前（`RelString`）、signRequiredBy の名前照合（受信者名 `g1` が関数 `g1` を固定していた）、`f[int](x)` を値の使用と見ていた | unused 0/2 → 0/0（PR 4）、unparam 1/0 → **0/0（ratchet 削除）**、新設 golden `unparam-upstream`（上流 testscript 6 本 + ゼロサイズ） | M |
 | 12 | **modernize 残り（ゴールデンに出ない側）** — **done**（embedlit は Go 1.27 なので PR 15） | minmax ×2、atomictypes、waitgroupgo、testingcontext、rangeint、slicesbackward ×3、stringscut ×3、stringscutprefix、stringsbuilder lastEditEnd、slicesclip。**各項目で上流 testdata を fixture 化**（ratchet は動かないので fixture が唯一の検算） | 新設 golden `modernize-upstream`（x/tools v0.50 の testdata 36 ファイル、179 件）と同じ case の fix tier（1797 行、golangci と byte 一致） | M〜L |
-| 13 | **gofumpt v0.12 の残り + printer** | §2.4 の toolchain 確認の後。括弧除去、effectiveEnd + multi、removeParens、joinStdImports、diagnose。`omit_v010_rules` / `match_golangci` gate の撤去 | ― | L |
+| 13 | **gofumpt v0.12 の残り + printer** — **done** | §2.4 の toolchain 確認の後。括弧除去、effectiveEnd + multi、removeParens、joinStdImports、diagnose。`omit_v010_rules` / `match_golangci` gate の撤去。あわせて既存の乖離 2 つ: gofumpt の simplify が package レベルの宣言を歩いていなかった、printer に `sanitizeImportPath` が無かった（`` import `C` ``） | fmt tier に gofumpt v0.12 の testscript 33 case と `gofmt-go127-printer`（2.12.2 と 2.14.0 で答えが違う形だけ）。fmt 50 case 全一致 | L |
 | 14 | **新機能（大）を 1 本ずつ** | G407、exhaustruct_v5（3〜4 PR に分割：設定 → ディレクティブスキャナ → 欠落計算 → tag 移行）、gochecksumtype fact、iface unusedmethod / opaque / unexported、stdversion、goconst eval-const-expressions、embedlit | ― | 各 L |
 | 15 | **Go 1.27 toolchain 対応（保留）** | export data V5、printf %d go1.27、stringscut CutLast、昇格フィールドキー。ターゲット Go が 1.27 になる日まで保留 | ― | L |
 
