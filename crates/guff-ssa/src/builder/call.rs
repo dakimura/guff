@@ -414,6 +414,38 @@ impl<'a> Builder<'a> {
                     .get(2)
                     .map(|a| self.expr(a))
                     .or(len);
+                // go/ssa treats `make([]T, n, m)` with a constant `m` as
+                // `new([m]T)[:n]`: an Alloc commented "makeslice", resliced.
+                // gosec's G407 (and its byte-range analysis) reads exactly
+                // that shape.
+                if let Some(Value::Const(cid)) = cap {
+                    let m = self
+                        .prog
+                        .constants
+                        .get(cid)
+                        .val
+                        .as_ref()
+                        .map(|v| guff_constant::int64_val(v).0)
+                        .unwrap_or(0);
+                    let elem = guff_types::slice_elem(&self.prog.type_arena, u);
+                    let at = guff_types::new_array(&mut self.prog.type_arena, elem, m);
+                    let fid = self.func_id;
+                    let alloc =
+                        crate::emit::emit_new(self.prog, fid, block, at, e.lparen, "makeslice".to_string());
+                    let id = crate::emit::emit_with_pos(
+                        self.func_mut(),
+                        block,
+                        InstrData::Slice(crate::instr::Slice {
+                            x: alloc,
+                            low: None,
+                            high: len,
+                            max: None,
+                            typ,
+                        }),
+                        e.lparen,
+                    );
+                    return Value::Instr(id);
+                }
                 InstrData::MakeSlice(MakeSlice { len, cap, typ })
             }
             _ => return self.invalid_zero(),

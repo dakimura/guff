@@ -289,7 +289,7 @@ fn explicit_vals_in_range(pos: &[u64], neg: &[i64], dst: IntTypeInfo) -> bool {
 /// gosec `GetConstantInt64`. Deliberately *not* `callcheck::extract_const_int`:
 /// that one flattens `Phi` and `ChangeType` first, and a range analysis that
 /// reads a phi as a constant loses the very branch it is trying to measure.
-fn constant_int64(prog: &Program, func: &Function, v: Value) -> Option<i64> {
+pub(crate) fn constant_int64(prog: &Program, func: &Function, v: Value) -> Option<i64> {
     if let Value::Const(cid) = v {
         return const_id_int64(prog, cid);
     }
@@ -575,14 +575,14 @@ fn is_range_check_cond(prog: &Program, func: &Function, cond: Value, x: Value) -
 /// gosec `rangeResult`. The pool bookkeeping (`shared`, `acquireResult`,
 /// `releaseResult`) has no counterpart: results are owned.
 #[derive(Clone)]
-struct RangeResult {
-    min_value: u64,
-    max_value: u64,
-    min_value_set: bool,
-    max_value_set: bool,
+pub(crate) struct RangeResult {
+    pub(crate) min_value: u64,
+    pub(crate) max_value: u64,
+    pub(crate) min_value_set: bool,
+    pub(crate) max_value_set: bool,
     explicit_positive_vals: Vec<u64>,
     explicit_negative_vals: Vec<i64>,
-    is_range_check: bool,
+    pub(crate) is_range_check: bool,
 }
 
 impl RangeResult {
@@ -794,7 +794,7 @@ fn signed_max_for_unsigned_size(size: i32) -> i64 {
 
 /// gosec `RangeAnalyzer`, scoped to one function (upstream calls `state.Reset()`
 /// per `SrcFunc`, which clears every cache in it).
-struct RangeAnalyzer<'a> {
+pub(crate) struct RangeAnalyzer<'a> {
     prog: &'a Program,
     func: &'a Function,
     /// `Instruction.Block()`, which guff-ssa does not store on the instruction.
@@ -804,7 +804,7 @@ struct RangeAnalyzer<'a> {
 }
 
 impl<'a> RangeAnalyzer<'a> {
-    fn new(prog: &'a Program, func: &'a Function) -> Self {
+    pub(crate) fn new(prog: &'a Program, func: &'a Function) -> Self {
         let mut block_of = HashMap::new();
         for (bid, block) in func.live_blocks() {
             for &iid in &block.instrs {
@@ -829,7 +829,7 @@ impl<'a> RangeAnalyzer<'a> {
     }
 
     /// gosec `RangeAnalyzer.IsReachable`.
-    fn is_reachable(&self, start: BlockId, target: BlockId, exclude: Option<BlockId>) -> bool {
+    pub(crate) fn is_reachable(&self, start: BlockId, target: BlockId, exclude: Option<BlockId>) -> bool {
         if start == target {
             return true;
         }
@@ -856,7 +856,7 @@ impl<'a> RangeAnalyzer<'a> {
     }
 
     /// gosec `RangeAnalyzer.ResolveRange`.
-    fn resolve_range(&mut self, v: Value, block: BlockId) -> RangeResult {
+    pub(crate) fn resolve_range(&mut self, v: Value, block: BlockId) -> RangeResult {
         let key = RangeCacheKey { block, val: v };
         if let Some(hit) = self.cache.get(&key) {
             return hit.clone();
