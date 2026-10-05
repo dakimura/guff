@@ -1,0 +1,75 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh govet-upstream-x-tools-v050
+# Produced by running golangci-lint on compat/golden/cases/govet-upstream-x-tools-v050/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+composite/typeparams/typeparams.go:22:6:govet::composites: T2b struct literal uses unkeyed fields
+tests/a/a_test.go:24:1:govet::tests: Example_BadSuffix has malformed example suffix: BadSuffix
+tests/a/a_test.go:30:1:govet::tests: ExampleBuf_Clear refers to unknown field or method: Buf.Clear
+tests/a/a_test.go:34:1:govet::tests: ExampleBuf_Append_Bad has malformed example suffix: Bad
+tests/a/a_test.go:40:1:govet::tests: ExampleBuf_Reset should return nothing
+tests/a/a_test.go:42:1:govet::tests: ExampleBuf_Len should be niladic
+tests/a/a_test.go:46:1:govet::tests: ExamplePuffer refers to unknown identifier: Puffer
+tests/a/a_test.go:48:1:govet::tests: ExamplePuffer_Append refers to unknown identifier: Puffer
+tests/a/a_test.go:50:1:govet::tests: ExamplePuffer_suffix refers to unknown identifier: Puffer
+tests/a/a_test.go:54:1:govet::tests: ExampleBar refers to unknown identifier: Bar
+tests/a/a_test.go:62:2:govet::tests: output comment block must be the last comment block
+tests/a/a_test.go:69:2:govet::tests: output comment block must be the last comment block
+tests/a/a_test.go:86:2:govet::tests: there can only be one output comment block per example
+tests/a/a_test.go:89:2:govet::tests: there can only be one output comment block per example
+tests/a/a_test.go:104:6:govet::tests: TestbadSuffix has malformed name: first letter after 'Test' must not be lowercase
+tests/a/a_test.go:106:6:govet::tests: TestemptyImportBadSuffix has malformed name: first letter after 'Test' must not be lowercase
+tests/a/a_test.go:118:6:govet::tests: BenchmarkbadSuffix has malformed name: first letter after 'Benchmark' must not be lowercase
+tests/a/ax_test.go:7:1:govet::tests: ExampleBar refers to unknown identifier: Bar
+tests/a/go118_test.go:7:6:govet::tests: Fuzzfoo has malformed name: first letter after 'Fuzz' must not be lowercase
+tests/a/go118_test.go:20:2:govet::tests: wrong number of values in call to (*testing.F).Add: 0, fuzz target expects 2
+tests/a/go118_test.go:21:2:govet::tests: wrong number of values in call to (*testing.F).Add: 4, fuzz target expects 2
+tests/a/go118_test.go:22:11:govet::tests: mismatched type in call to (*testing.F).Add: int, fuzz target expects []byte
+tests/a/go118_test.go:23:2:govet::tests: mismatched types in call to (*testing.F).Add: [[]byte int], fuzz target expects [int []byte]
+tests/a/go118_test.go:26:3:govet::tests: fuzz target must not call any *F methods
+tests/a/go118_test.go:29:3:govet::tests: fuzz target must not call any *F methods
+tests/a/go118_test.go:34:9:govet::tests: argument to Fuzz must be a function
+tests/a/go118_test.go:38:9:govet::tests: fuzz target must not return any value
+tests/a/go118_test.go:42:9:govet::tests: fuzz target must have 1 or more argument
+tests/a/go118_test.go:46:16:govet::tests: the first parameter of a fuzz target must be *testing.T
+tests/a/go118_test.go:50:16:govet::tests: the first parameter of a fuzz target must be *testing.T
+tests/a/go118_test.go:54:30:govet::tests: fuzzing arguments can only have the following types: string, bool, float32, float64, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, []byte
+tests/a/go118_test.go:58:30:govet::tests: fuzzing arguments can only have the following types: string, bool, float32, float64, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, []byte
+tests/a/go118_test.go:62:43:govet::tests: fuzzing arguments can only have the following types: string, bool, float32, float64, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, []byte
+tests/a/go118_test.go:97:16:govet::tests: the first parameter of a fuzz target must be *testing.T
+tests/b_x_test/b_test.go:14:1:govet::tests: ExampleFoo_G refers to unknown field or method: Foo.G
+tests/b_x_test/b_test.go:18:1:govet::tests: ExampleBar_F refers to unknown identifier: Bar
+tests/divergent/buf_test.go:9:1:govet::tests: Example_BadSuffix has malformed example suffix: BadSuffix
+tests/divergent/buf_test.go:15:1:govet::tests: ExampleBuf_Clear refers to unknown field or method: Buf.Clear
+tests/divergent/buf_test.go:19:1:govet::tests: ExampleBuf_Append_Bad has malformed example suffix: Bad
+tests/divergent/buf_test.go:25:1:govet::tests: ExampleBuf_Reset should return nothing
+tests/divergent/buf_test.go:27:1:govet::tests: ExampleBuf_Len should be niladic
+tests/divergent/buf_test.go:31:1:govet::tests: ExamplePuffer refers to unknown identifier: Puffer
+tests/divergent/buf_test.go:33:1:govet::tests: ExamplePuffer_Append refers to unknown identifier: Puffer
+tests/divergent/buf_test.go:35:1:govet::tests: ExamplePuffer_suffix refers to unknown identifier: Puffer
+tests/typeparams/typeparams_test.go:16:6:govet::tests: TesttypeParam has malformed name: first letter after 'Test' must not be lowercase
+tests/typeparams/typeparams_test.go:16:19:govet::tests: TesttypeParam has type parameters: it will not be run by go test as a TestXXX function
+tests/typeparams/typeparams_test.go:17:6:govet::tests: BenchmarktypeParam has malformed name: first letter after 'Benchmark' must not be lowercase
+tests/typeparams/typeparams_test.go:17:24:govet::tests: BenchmarktypeParam has type parameters: it will not be run by go test as a BenchmarkXXX function
+tests/typeparams/typeparams_test.go:19:1:govet::tests: ExampleZero should not have type params
+unusedresult/a/a.go:16:2:govet::unusedresult: result of fmt.Errorf call not used
+unusedresult/a/a.go:19:2:govet::unusedresult: result of errors.New call not used
+unusedresult/a/a.go:22:2:govet::unusedresult: result of (error).Error call not used
+unusedresult/a/a.go:25:2:govet::unusedresult: result of (*bytes.Buffer).String call not used
+unusedresult/a/a.go:27:2:govet::unusedresult: result of fmt.Sprint call not used
+unusedresult/a/a.go:28:2:govet::unusedresult: result of fmt.Sprintf call not used
+unusedresult/a/a.go:30:2:govet::unusedresult: result of fmt.Sprint call not used
+unusedresult/a/a.go:31:2:govet::unusedresult: result of fmt.Sprintf call not used
+unusedresult/a/a.go:36:2:govet::unusedresult: result of (*bytes.Buffer).String call not used
+unusedresult/a/a.go:46:3:govet::unusedresult: result of (*bytes.Buffer).String call not used
+unusedresult/typeparams/typeparams.go:15:2:govet::unusedresult: result of fmt.Errorf call not used
+unusedresult/typeparams/typeparams.go:18:2:govet::unusedresult: result of errors.New call not used
+unusedresult/typeparams/typeparams.go:21:2:govet::unusedresult: result of (error).Error call not used
+unusedresult/typeparams/typeparams.go:24:2:govet::unusedresult: result of (*bytes.Buffer).String call not used
+unusedresult/typeparams/typeparams.go:26:2:govet::unusedresult: result of fmt.Sprint call not used
+unusedresult/typeparams/typeparams.go:27:2:govet::unusedresult: result of fmt.Sprintf call not used
+unusedresult/typeparams/typeparams.go:33:2:govet::unusedresult: result of (*example.com/unusedresult/typeparams/userdefs.SingleTypeParam[T]).String call not used
+unusedresult/typeparams/typeparams.go:37:2:govet::unusedresult: result of (*example.com/unusedresult/typeparams/userdefs.MultiTypeParam[T, U]).String call not used

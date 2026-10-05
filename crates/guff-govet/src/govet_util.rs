@@ -110,6 +110,14 @@ pub fn is_method_named(
     let Some(recv_typ) = recv.typ(&artifacts.objects) else {
         return false;
     };
+    // `typesinternal.IsMethodNamed` asks `ReceiverNamed`, which strips one
+    // pointer: `(*testing.B).Loop`, `(*errgroup.Group).Go` and every method of
+    // `*testing.F` have pointer receivers, and none of them matched.
+    let u = guff_types::alias::unalias_readonly(&artifacts.types, recv_typ);
+    let recv_typ = match artifacts.types.get(u) {
+        TypeData::Pointer(p) => p.elem(),
+        _ => recv_typ,
+    };
     is_type_named(pass, recv_typ, pkg_path, recv_type)
 }
 

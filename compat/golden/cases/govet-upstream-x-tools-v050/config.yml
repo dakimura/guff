@@ -1,0 +1,29 @@
+# Golden case: golang.org/x/tools v0.50.0's own testdata (golangci-lint
+# 2.14.0) for the vet passes whose code changed since v0.44: composite (a type
+# parameter is checked by its first term) and unusedresult (`for b.Loop()`
+# bodies), plus tests: its fuzz-target checks ask (*testing.F).Fuzz, a
+# pointer receiver guff's IsMethodNamed never matched. Vendored verbatim (BSD, LICENSE next to them) except the
+# GOPATH-style imports, rewritten to example.com/…. nilness's testdata is not
+# here: gc rejects it (`print([3]int)`, `//go:cgo_unsafe_args`), and its
+# cgo_unsafe_args change is a guff-govet test instead. Nor is composite/a: it
+# holds deliberate type errors, and golangci-lint then reports only those.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+  settings:
+    govet:
+      enable:
+        - composites
+        - unusedresult
+        - tests
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

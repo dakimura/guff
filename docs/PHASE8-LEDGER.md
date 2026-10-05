@@ -317,7 +317,7 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 | # | upstream_path | kind | 要約 | guff の場所 | status | effort | upstream testdata |
 |---|---------------|------|------|-------------|--------|--------|-------------------|
 | 1 | fieldalignment.go | message | 文言を全面変更（型名、size class、waste） | guff-govet/src/fieldalignment.rs check_struct | **done (PR 7)** | M | a.go, a_amd64.go, a_386.go |
-| 2 | composite.go | behavior | 型パラメータ複合リテラルを先頭 term だけで判定 | guff-govet/src/composites.rs | needs-port | S | a.go{,.golden}, flag/flag.go |
+| 2 | composite.go | behavior | 型パラメータ複合リテラルを先頭 term だけで判定 | guff-govet/src/composites.rs | **done (PR 14f)**（guff は型パラメータを常に局所扱いで報告漏れしていた） | S | a.go{,.golden}, flag/flag.go |
 | 3 | inline.go withinTestOf | behavior | 専用テスト内の使用を抑制（同ディレクトリ、Fuzz、const / alias） | guff-govet/src/inline.rs | needs-port | M | issue76190.txtar |
 | 4 | inline.go 埋め込みフィールド判定 | behavior | `Defs[id].Embedded()` に変更 | inline.rs | needs-port | S | issue78994.txtar |
 | 5 | printf.go okPrintfArg | behavior | go1.27+ で %d からポインタを外す | guff-govet/src/printf.rs verb_arg_type | needs-port | M | issue62595/a_go126.go, a_go127.go, a/a.go |
@@ -325,8 +325,8 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 | 7 | printf types.go UnsafePointer | behavior | unsafe.Pointer は argPointer の verb だけ受理 | printf.rs | needs-port | S | — |
 | 8 | printf.go checkPrint | removed-check | Println の redundant newline 削除 | （元から無い） | already-matches | S | a/a.go |
 | 9 | printf.go recursiveStringer Origin | behavior | ジェネリック受信者で再帰検出（親機能ごと未移植の既存ギャップ） | 無し | needs-port | S | — |
-| 10 | nilness.go hasCgoUnsafeArgs | behavior | `//go:cgo_unsafe_args` 関数を対象外 | guff-govet/src/nilness.rs | needs-port | S | a/a.go |
-| 11 | unusedresult.go inBenchmarkLoop | behavior | `for b.Loop()` 直下を報告しない | guff-govet/src/unusedresult.rs | needs-port | S | a/a.go |
+| 10 | nilness.go hasCgoUnsafeArgs | behavior | `//go:cgo_unsafe_args` 関数を対象外 | guff-govet/src/nilness.rs | **done (PR 14f)**（gc が testdata を拒むので checks_test で検証） | S | a/a.go |
+| 11 | unusedresult.go inBenchmarkLoop | behavior | `for b.Loop()` 直下を報告しない | guff-govet/src/unusedresult.rs | **done (PR 14f)**。併せて `is_method_named` がポインタ受信者を剥がすように（loopclosure の errgroup、tests の `*testing.F` も同じ理由で死んでいた）→ tests を v0.50 から全面移植 | S | a/a.go |
 | 12 | unusedresult.go（Callee Origin） | message | ジェネリック受信者表記 `[int]` → `[T]` | unusedresult.rs callee_obj | unsure | S | typeparams/typeparams.go |
 | 13 | hostport.go | behavior | 引数 2 未満で panic | hostport.rs:184 | already-matches | S | a/a.go{,.golden} |
 | 14 | stdversion.go | behavior | 文言変更 + 除外移動。**guff に analyzer が丸ごと無い**（govet 既定有効） | 無し（settings.rs:3091 に名前だけ） | needs-port | L | stdversion/testdata/test.txtar |

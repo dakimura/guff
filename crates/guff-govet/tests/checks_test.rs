@@ -1284,6 +1284,27 @@ fn nilness_sees_the_ir_cut_after_a_call_that_cannot_return() {
     );
 }
 
+/// x/tools v0.50 skips a function declared `//go:cgo_unsafe_args` — and the
+/// closures inside it — because cgo's magic is invisible to SSA. f21/f22 are
+/// upstream's own testdata; f23 is the same body without the directive.
+#[test]
+fn nilness_skips_cgo_unsafe_args_functions() {
+    let dir = support::testdata("nilness");
+    let pkg = support::typecheck_pkg(
+        "example.com/govet/nilness/cgo",
+        &dir.join("cgo_unsafe_args.go"),
+    );
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let got: Vec<(i64, String)> = support::run_analyzer_diagnostics(nilness_analyzer(), &pkg)
+        .into_iter()
+        .map(|d| (fset.position(guff::position::Pos(d.pos as i64)).line, d.message))
+        .collect();
+    assert_eq!(
+        got,
+        vec![(27, "nil dereference in load".to_string())],
+    );
+}
+
 #[test]
 fn unreachable_flags_code_after_return() {
     let dir = support::testdata("unreachable");
