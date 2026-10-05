@@ -252,6 +252,22 @@ fn field_owner_base_name(pass: &Pass<'_>, sel: &SelectorExpr) -> Option<String> 
     }
 }
 
+/// The struct literal's own type, for a key SA1019 asks as `T.F`. A key
+/// cannot name a promoted field, so the literal's type is the declaring one.
+fn literal_type_base_name(pass: &Pass<'_>, sel: &SelectorExpr) -> Option<String> {
+    let info = pass.types_info()?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let tv = info.types.get(&sel.x.id())?;
+    let t = deref_named(&artifacts.types, tv.typ);
+    match artifacts.types.get(t) {
+        TypeData::Named(_) => {
+            let obj = guff_types::named::named_obj(&artifacts.types, t);
+            Some(obj.name(&artifacts.objects).to_string())
+        }
+        _ => None,
+    }
+}
+
 /// Strip aliases and a single pointer, as a field walk needs at every hop.
 fn deref_named(types: &guff_types::arena::TypeArena, id: guff_types::TypeId) -> guff_types::TypeId {
     let resolved = guff_types::alias::unalias_readonly(types, id);
@@ -930,7 +946,12 @@ fn selector_diagnostic(
     // methods, missed, and returned — which is why a deprecated field was
     // silent for every importer even once the scanner collected it.
     let sel_kind = info.selections.get(&sel.id).map(|s| s.kind());
-    let is_field = sel_kind == Some(guff_types::selection::SelectionKind::FieldVal);
+    // A struct literal's key is asked as the selector SA1019 builds for it
+    // (`T{F: …}` → `T.F`), which the checker never saw, so it has no
+    // selection to say "field". The object does.
+    let is_field = sel_kind == Some(guff_types::selection::SelectionKind::FieldVal)
+        || (sel_kind.is_none()
+            && matches!(artifacts.objects.get(obj), ObjectData::Var(v) if v.is_field()));
     let is_method = !is_field
         && (sel_kind.is_some() || func_has_receiver(&artifacts.types, &artifacts.objects, obj));
     let synthetic;
@@ -993,7 +1014,8 @@ fn selector_diagnostic(
             // The *declaring* struct, not the receiver — see
             // `field_owner_base_name`. They differ for a promoted field.
             let recv = field_owner_base_name(pass, sel)
-                .or_else(|| selection_recv_base_name(pass, sel))?;
+                .or_else(|| selection_recv_base_name(pass, sel))
+                .or_else(|| literal_type_base_name(pass, sel))?;
             facts.fields.get(&method_fact_key(&recv, &name))
         } else {
             facts.objects.get(&name)

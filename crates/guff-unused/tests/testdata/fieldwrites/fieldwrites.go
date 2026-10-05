@@ -185,3 +185,10 @@ func UseIndexed() string {
 	v.written[0] = "x"
 	return v.Exported
 }
+
+// A map literal's key is a read, not a field write: with `field-writes-are-
+// uses: false` the struct-literal key above stops counting, and this one must
+// not stop with it.
+var mapKey = "k"
+
+func UseMapKey() map[string]int { return map[string]int{mapKey: 1} }

@@ -1,0 +1,23 @@
+# Golden case: SA1019 on a deprecated field named as a struct literal's key,
+# declared in another package of the same module.
+#
+# staticcheck v0.8.1 (golangci-lint 2.14.0) asks `ObjectOf(key)` for every key
+# of a struct literal. guff's type checker did not record the key as a use of
+# the field, so controller-runtime's `reconcile.Result{Requeue: true}` (eleven
+# of them, inside Ginkgo's `var _ = Describe(...)`) was silent while upstream
+# reported it. The selector form and the package-level initializer are here as
+# controls; the live field is the negative.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - staticcheck
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

@@ -292,6 +292,11 @@ impl Checker {
                     }
                 };
                 let fld = field_objs[i];
+                // `check.recordUse(key, fld)`: a struct literal's key is a use
+                // of the field. Without it `Uses` had no entry for the key, and
+                // everything that asks `ObjectOf(key)` — SA1019's struct-literal
+                // branch (staticcheck v0.8.1) first — found nothing.
+                self.record_use(key, fld);
                 let etyp = fld
                     .typ(&self.objects)
                     .unwrap_or_else(|| self.invalid_type());
