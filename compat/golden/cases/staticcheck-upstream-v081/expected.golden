@@ -1,0 +1,124 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh staticcheck-upstream-v081
+# Produced by running golangci-lint on compat/golden/cases/staticcheck-upstream-v081/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+extra/sa1026.go:37:20:staticcheck::SA1026: trying to marshal unsupported type chan int, via x.A
+extra/sa1026.go:38:20:staticcheck::SA1026: trying to marshal unsupported type chan int, via x.A
+extra/sa1026.go:41:14:staticcheck::SA1026: trying to marshal unsupported type chan int, via x.Attrs.A
+extra/sa1026.go:43:14:staticcheck::SA1026: trying to marshal unsupported type func(), via x[0]
+extra/sa1026.go:45:21:staticcheck::SA1026: trying to marshal unsupported type chan int, via x.Attrs.A
+extra/sa1026.go:46:21:staticcheck::SA1026: trying to marshal unsupported type map[Iface]int
+extra/sa1026.go:47:30:staticcheck::SA1026: trying to marshal unsupported type func()
+extra/sa5008.go:10:6:staticcheck::SA5008: invalid appearance of `string` tag option; it is only intended for fields of numeric types or pointers to those
+extra/sa5008.go:22:13:staticcheck::SA5008: invalid appearance of `string` tag option; it is only intended for fields of numeric types or pointers to those
+extra/sa5008.go:24:13:staticcheck::SA5008: invalid appearance of `string` tag option; it is only intended for fields of numeric types or pointers to those
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:81:15:staticcheck::SA1026: trying to marshal unsupported type chan int, via x.Ch
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:83:15:staticcheck::SA1026: trying to marshal unsupported type func(), via x.B
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:87:30:staticcheck::SA1026: trying to marshal unsupported type chan int, via x.Ch
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:89:30:staticcheck::SA1026: trying to marshal unsupported type func(), via x.B
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:94:14:staticcheck::SA1026: trying to marshal unsupported type chan int, via x.Ch
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:97:14:staticcheck::SA1026: trying to marshal unsupported type func(), via x.B
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:100:29:staticcheck::SA1026: trying to marshal unsupported type chan int, via x.Ch
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:103:29:staticcheck::SA1026: trying to marshal unsupported type func(), via x.B
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:105:15:staticcheck::SA1026: trying to marshal unsupported type chan int, via x.T7.T3.Ch
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:106:15:staticcheck::SA1026: trying to marshal unsupported type PointerMarshaler, via x.F
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:110:14:staticcheck::SA1026: trying to marshal unsupported type chan int, via x.T7.T3.Ch
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:111:14:staticcheck::SA1026: trying to marshal unsupported type PointerMarshaler, via x.F
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:126:15:staticcheck::SA1026: trying to marshal unsupported type PointerMarshaler
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:130:15:staticcheck::SA1026: trying to marshal unsupported type PointerMarshaler, via x.F
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:132:15:staticcheck::SA1026: trying to marshal unsupported type PointerMarshaler, via x[0]
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:136:15:staticcheck::SA1026: trying to marshal unsupported type PointerMarshaler, via x[k]
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:137:15:staticcheck::SA1026: trying to marshal unsupported type PointerMarshaler, via x[k]
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:138:15:staticcheck::SA1026: trying to marshal unsupported type PointerMarshaler, via x[0][k]
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:154:14:staticcheck::SA1026: trying to marshal unsupported type PointerMarshaler
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:158:14:staticcheck::SA1026: trying to marshal unsupported type PointerMarshaler, via x.F
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:160:14:staticcheck::SA1026: trying to marshal unsupported type PointerMarshaler, via x[0]
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:169:15:staticcheck::SA1026: trying to marshal unsupported type map[interface{}]string
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:172:15:staticcheck::SA1026: trying to marshal unsupported type PointerMarshaler, via x[k]
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:173:15:staticcheck::SA1026: trying to marshal unsupported type PointerMarshaler, via x[k]
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:174:15:staticcheck::SA1026: trying to marshal unsupported type PointerMarshaler, via x[0][k]
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:198:15:staticcheck::SA1026: trying to marshal unsupported type map[PointerMarshaler]string
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:205:14:staticcheck::SA1026: trying to marshal unsupported type map[string]string
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:227:15:staticcheck::SA1026: trying to marshal unsupported type chan int, via x.lT4.C
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:249:14:staticcheck::SA1026: trying to marshal unsupported type chan int, via x.lT4.C
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:260:15:staticcheck::SA1026: trying to marshal unsupported type chan int, via x.Field.Field2[0].Map[k]
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:265:15:staticcheck::SA1026: trying to marshal unsupported type <-chan time.Time, via x.C
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:276:14:staticcheck::SA1026: trying to marshal unsupported type map[string]chan int, via x.Field.Field2[0].Map
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:281:14:staticcheck::SA1026: trying to marshal unsupported type <-chan time.Time, via x.C
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:303:14:staticcheck::SA1026: trying to marshal unsupported type map[string]string, via x.Field
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:304:14:staticcheck::SA1026: trying to marshal unsupported type map[string]string, via x.Field
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:316:14:staticcheck::SA1026: trying to marshal cyclic type P, via x.Foo.Bar
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:322:15:staticcheck::SA1026: trying to marshal unsupported type func(arg T1)
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:323:14:staticcheck::SA1026: trying to marshal unsupported type func(arg T1)
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:327:21:staticcheck::SA1026: trying to marshal unsupported type func(arg T1)
+sa1026/go1.0/CheckUnsupportedMarshal/CheckUnsupportedMarshal.go:328:20:staticcheck::SA1026: trying to marshal unsupported type func(arg T1)
+sa1026/go1.18/CheckUnsupportedMarshal/generics.go:15:15:staticcheck::SA1026: trying to marshal unsupported type chan int, via x[k]
+sa1030/go1.0/CheckStrconv/CheckStrconv.go:6:25:staticcheck::SA1030: 'bitSize' argument is invalid, must be either 32 or 64
+sa1030/go1.0/CheckStrconv/CheckStrconv.go:9:25:staticcheck::SA1030: 'bitSize' argument is invalid, must be either 32 or 64
+sa1030/go1.0/CheckStrconv/CheckStrconv.go:11:26:staticcheck::SA1030: 'bitSize' argument is invalid, must be within 0 and 64
+sa1030/go1.0/CheckStrconv/CheckStrconv.go:15:26:staticcheck::SA1030: 'bitSize' argument is invalid, must be within 0 and 64
+sa1030/go1.0/CheckStrconv/CheckStrconv.go:16:23:staticcheck::SA1030: 'base' must not be smaller than 2, unless it is 0
+sa1030/go1.0/CheckStrconv/CheckStrconv.go:17:23:staticcheck::SA1030: 'base' must not be smaller than 2, unless it is 0
+sa1030/go1.0/CheckStrconv/CheckStrconv.go:21:23:staticcheck::SA1030: 'base' must not be larger than 36
+sa1030/go1.0/CheckStrconv/CheckStrconv.go:23:27:staticcheck::SA1030: 'bitSize' argument is invalid, must be within 0 and 64
+sa1030/go1.0/CheckStrconv/CheckStrconv.go:27:27:staticcheck::SA1030: 'bitSize' argument is invalid, must be within 0 and 64
+sa1030/go1.0/CheckStrconv/CheckStrconv.go:28:24:staticcheck::SA1030: 'base' must not be smaller than 2, unless it is 0
+sa1030/go1.0/CheckStrconv/CheckStrconv.go:29:24:staticcheck::SA1030: 'base' must not be smaller than 2, unless it is 0
+sa1030/go1.0/CheckStrconv/CheckStrconv.go:33:24:staticcheck::SA1030: 'base' must not be larger than 36
+sa1030/go1.0/CheckStrconv/CheckStrconv.go:35:33:staticcheck::SA1030: 'bitSize' argument is invalid, must be either 32 or 64
+sa1030/go1.0/CheckStrconv/CheckStrconv.go:38:33:staticcheck::SA1030: 'bitSize' argument is invalid, must be either 32 or 64
+sa1030/go1.0/CheckStrconv/CheckStrconv.go:39:25:staticcheck::SA1030: 'fmt' argument is invalid: unknown format 'j'
+sa1030/go1.0/CheckStrconv/CheckStrconv.go:41:23:staticcheck::SA1030: 'base' must not be smaller than 2
+sa1030/go1.0/CheckStrconv/CheckStrconv.go:42:23:staticcheck::SA1030: 'base' must not be smaller than 2
+sa1030/go1.0/CheckStrconv/CheckStrconv.go:46:23:staticcheck::SA1030: 'base' must not be larger than 36
+sa1030/go1.0/CheckStrconv/CheckStrconv.go:48:24:staticcheck::SA1030: 'base' must not be smaller than 2
+sa1030/go1.0/CheckStrconv/CheckStrconv.go:49:24:staticcheck::SA1030: 'base' must not be smaller than 2
+sa1030/go1.0/CheckStrconv/CheckStrconv.go:53:24:staticcheck::SA1030: 'base' must not be larger than 36
+sa1030/go1.0/CheckStrconv/CheckStrconv.go:55:38:staticcheck::SA1030: 'bitSize' argument is invalid, must be either 32 or 64
+sa1030/go1.0/CheckStrconv/CheckStrconv.go:58:38:staticcheck::SA1030: 'bitSize' argument is invalid, must be either 32 or 64
+sa1030/go1.0/CheckStrconv/CheckStrconv.go:59:30:staticcheck::SA1030: 'fmt' argument is invalid: unknown format 'j'
+sa1030/go1.0/CheckStrconv/CheckStrconv.go:61:28:staticcheck::SA1030: 'base' must not be smaller than 2
+sa1030/go1.0/CheckStrconv/CheckStrconv.go:62:28:staticcheck::SA1030: 'base' must not be smaller than 2
+sa1030/go1.0/CheckStrconv/CheckStrconv.go:66:28:staticcheck::SA1030: 'base' must not be larger than 36
+sa1030/go1.0/CheckStrconv/CheckStrconv.go:68:29:staticcheck::SA1030: 'base' must not be smaller than 2
+sa1030/go1.0/CheckStrconv/CheckStrconv.go:69:29:staticcheck::SA1030: 'base' must not be smaller than 2
+sa1030/go1.0/CheckStrconv/CheckStrconv.go:73:29:staticcheck::SA1030: 'base' must not be larger than 36
+sa1030/go1.15/CheckStrconv/CheckStrconv.go:8:27:staticcheck::SA1030: 'bitSize' argument is invalid, must be either 64 or 128
+sa1030/go1.15/CheckStrconv/CheckStrconv.go:11:27:staticcheck::SA1030: 'bitSize' argument is invalid, must be either 64 or 128
+sa1030/go1.15/CheckStrconv/CheckStrconv.go:13:35:staticcheck::SA1030: 'bitSize' argument is invalid, must be either 64 or 128
+sa1030/go1.15/CheckStrconv/CheckStrconv.go:16:35:staticcheck::SA1030: 'bitSize' argument is invalid, must be either 64 or 128
+sa1030/go1.15/CheckStrconv/CheckStrconv.go:17:27:staticcheck::SA1030: 'fmt' argument is invalid: unknown format 'j'
+sa5007/go1.0/CheckInfiniteRecursion/CheckInfiniteRecursion.go:5:9:staticcheck::SA5007: infinite recursive call
+sa5007/go1.0/CheckInfiniteRecursion/CheckInfiniteRecursion.go:41:2:staticcheck::SA5007: infinite recursive call
+sa5007/go1.0/CheckInfiniteRecursion/CheckInfiniteRecursion.go:56:2:staticcheck::SA5007: infinite recursive call
+sa5007/go1.0/CheckInfiniteRecursion/CheckInfiniteRecursion.go:61:2:staticcheck::SA5007: infinite recursive call
+sa5008/go1.0/CheckStructTags2/CheckStructTags2.go:4:10:staticcheck::SA5008: duplicate struct tag "choice"
+sa5008/go1.0/CheckStructTags2/CheckStructTags2.go:5:10:staticcheck::SA5008: duplicate struct tag "optional-value"
+sa5008/go1.0/CheckStructTags2/CheckStructTags2.go:6:10:staticcheck::SA5008: duplicate struct tag "default"
+sa5008/go1.18/CheckStructTags/generics.go:5:6:staticcheck::SA5008: invalid appearance of `string` tag option; it is only intended for fields of numeric types or pointers to those
+sa5008/go1.18/CheckStructTags/generics.go:15:6:staticcheck::SA5008: invalid appearance of `string` tag option; it is only intended for fields of numeric types or pointers to those
+sa5008/go1.18/CheckStructTags/generics.go:30:7:staticcheck::SA5008: invalid appearance of `string` tag option; it is only intended for fields of numeric types or pointers to those
+sa5008/go1.18/CheckStructTags/generics.go:35:7:staticcheck::SA5008: invalid appearance of `string` tag option; it is only intended for fields of numeric types or pointers to those
+sa5008/go1.18/CheckStructTags/generics.go:40:7:staticcheck::SA5008: invalid appearance of `string` tag option; it is only intended for fields of numeric types or pointers to those
+sa5008/go1.18/CheckStructTags/generics.go:45:8:staticcheck::SA5008: invalid appearance of `string` tag option; it is only intended for fields of numeric types or pointers to those
+sa5008/go1.18/CheckStructTags/generics.go:50:7:staticcheck::SA5008: invalid appearance of `string` tag option; it is only intended for fields of numeric types or pointers to those
+sa5008/go1.18/CheckStructTags/generics.go:54:6:staticcheck::SA5008: invalid appearance of `string` tag option; it is only intended for fields of numeric types or pointers to those
+sa9010/go1.0/deferr/deferr.go:57:2:staticcheck::SA9010: deferred return function not called
+sa9010/go1.0/deferr/deferr.go:58:2:staticcheck::SA9010: deferred return function not called
+sa9010/go1.0/deferr/deferr.go:59:2:staticcheck::SA9010: deferred return function not called
+sa9010/go1.0/deferr/deferr.go:60:2:staticcheck::SA9010: deferred return function not called
+sa9010/go1.0/deferr/deferr.go:61:2:staticcheck::SA9010: deferred return function not called
+sa9010/go1.0/deferr/deferr.go:62:2:staticcheck::SA9010: deferred return function not called
+sa9010/go1.0/deferr/deferr.go:63:2:staticcheck::SA9010: deferred return function not called
+sa9010/go1.0/deferr/deferr.go:64:2:staticcheck::SA9010: deferred return function not called
+sa9010/go1.0/deferr/deferr.go:65:2:staticcheck::SA9010: deferred return function not called
+sa9010/go1.0/deferr/deferr.go:66:2:staticcheck::SA9010: deferred return function not called
+sa9010/go1.0/deferr/deferr.go:67:2:staticcheck::SA9010: deferred return function not called
+sa9010/go1.0/deferr/deferr.go:68:2:staticcheck::SA9010: deferred return function not called
+sa9010/go1.0/deferr/deferr.go:72:2:staticcheck::SA9010: deferred return function not called
+sa9010/go1.0/deferr/deferr.go:73:2:staticcheck::SA9010: deferred return function not called
+sa9010/go1.18/deferr/deferr.go:5:2:staticcheck::SA9010: deferred return function not called

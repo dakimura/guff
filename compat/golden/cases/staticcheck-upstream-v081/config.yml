@@ -1,0 +1,31 @@
+# Golden case: honnef.co/go/tools v0.8.1's own testdata (golangci-lint
+# 2.14.0) for the staticcheck checks whose code changed in ways no other case
+# exercises: SA9010 (new), SA1026 (MarshalIndent), SA1030 (message), SA5007
+# (exit blocks), SA5008 (json/v2 `embed`). One package per testdata
+# directory, verbatim (MIT, LICENSE next to them). Upstream's `//@ diag`
+# markers are its own runner's answer; this golden is golangci-lint's.
+# sa5008/go1.0/CheckStructTags is left out: it imports jessevdk/go-flags.
+# extra/ is guff's own: the shapes the vendored files do not reach (xml attrs,
+# innerxml, comment fields, embedded pointers; `embed`; multi-term type sets).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - staticcheck
+  settings:
+    staticcheck:
+      checks:
+        - SA9010
+        - SA1026
+        - SA1030
+        - SA5007
+        - SA5008
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

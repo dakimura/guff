@@ -221,7 +221,7 @@ pub(crate) fn validate_json_tag(
                     }
                 }
             }
-            "inline" | "unknown" | "omitzero" | "omitempty" => {}
+            "embed" | "inline" | "unknown" | "omitzero" | "omitempty" => {}
             "string" => {
                 if !string_option_applies(pass, field) {
                     report(field, pending, STRING_OPTION_MSG.to_string());
@@ -319,7 +319,56 @@ fn string_option_applies(pass: &Pass<'_>, field: &Field) -> bool {
         return true;
     };
     let arena = &artifacts.types;
-    let t = dereference(arena, tv.typ.underlying(arena));
+    // ```go
+    // tset := typeutil.NewTypeSet(pass.TypesInfo.TypeOf(field.Type))
+    // if len(tset.Terms) == 0 { report }
+    // for _, term := range tset.Terms {
+    //     T := typeutil.Dereference(term.Type().Underlying())
+    //     for _, term2 := range typeutil.NewTypeSet(T).Terms { … }
+    // }
+    // ```
+    // A type parameter is checked through its constraint, one pointer level
+    // per term, so `PT ~*T` with `T int | string` passes and `PPT *PT` does
+    // not. An unconstrained inner set (`*T` with `T any`) passes: the inner
+    // loop has nothing to look at.
+    let terms = normal_terms(arena, tv.typ);
+    if terms.is_empty() {
+        return false;
+    }
+    terms.into_iter().all(|term| {
+        let t = dereference(arena, term.underlying(arena));
+        normal_terms(arena, t)
+            .into_iter()
+            .all(|t2| stringable_basic(arena, t2))
+    })
+}
+
+/// `typeparams.NormalTerms` as `typeutil.NewTypeSet` uses it: the term types
+/// of a type parameter's constraint or of an interface, or the type itself.
+/// Empty for "all types" — and for an empty set or an error, which
+/// `NewTypeSet` also turns into no terms.
+fn normal_terms(arena: &guff_types::arena::TypeArena, t: TypeId) -> Vec<TypeId> {
+    let t = guff_types::alias::unalias_readonly(arena, t);
+    let iface = match arena.get(t) {
+        TypeData::TypeParam(tp) => match tp.constraint() {
+            Some(c) => c,
+            None => return Vec::new(),
+        },
+        _ => t,
+    };
+    match arena.get(iface.underlying(arena)) {
+        TypeData::Interface(i) => i
+            .cached_typeset()
+            .and_then(|ts| ts.term_types())
+            .unwrap_or_default(),
+        _ if matches!(arena.get(t), TypeData::TypeParam(_)) => Vec::new(),
+        _ => vec![t],
+    }
+}
+
+/// `basic.Info()&(IsBoolean|IsInteger|IsFloat|IsString) != 0` — bools and
+/// strings because encoding/json v1 happens to accept them.
+fn stringable_basic(arena: &guff_types::arena::TypeArena, t: TypeId) -> bool {
     match arena.get(t.underlying(arena)) {
         TypeData::Basic(b) => matches!(
             b.kind(),

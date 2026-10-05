@@ -318,21 +318,22 @@ where
     }
 }
 
-/// Blocks that end in `return`.
-pub fn return_blocks(func: &Function) -> Vec<BlockId> {
+/// Blocks with no successors — `ir.Function.Exits`: every block that ends
+/// in `return` **or `panic`**.
+pub fn exit_blocks(func: &Function) -> Vec<BlockId> {
     func.live_blocks()
-        .filter_map(|(bid, block)| {
-            matches!(block_control(func, block), Some(InstrData::Return(_))).then_some(bid)
-        })
+        .filter_map(|(bid, block)| block.succs.is_empty().then_some(bid))
         .collect()
 }
 
-/// Reports whether `from` dominates every return block in `func`.
-pub fn dominates_all_returns(func: &Function, from: BlockId) -> bool {
+/// Reports whether `from` dominates every exit block of `func`. A path that
+/// panics is a way out too: `if x < 10 { f(x+1) } else { panic(…) }` is not
+/// an infinite recursion, and counting only `return`s said it was.
+pub fn dominates_all_exits(func: &Function, from: BlockId) -> bool {
     let from_block = func.blocks.get(from);
-    return_blocks(func)
+    exit_blocks(func)
         .iter()
-        .all(|&ret| from_block.dominates(func.blocks.get(ret)))
+        .all(|&exit| from_block.dominates(func.blocks.get(exit)))
 }
 
 /// Reports whether `block` is inside a natural loop.
