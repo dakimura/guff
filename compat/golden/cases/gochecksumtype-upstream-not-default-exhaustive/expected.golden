@@ -1,0 +1,11 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh gochecksumtype-upstream-not-default-exhaustive
+# Produced by running golangci-lint on compat/golden/cases/gochecksumtype-upstream-not-default-exhaustive/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+default_exhaustive/main.go:18:2:gochecksumtype::exhaustiveness check failed for sum type "T" (from default_exhaustive/main.go:7:6): missing cases for B
+missing_with_panic/main.go:16:2:gochecksumtype::exhaustiveness check failed for sum type "T" (from missing_with_panic/main.go:5:6): missing cases for B
+not_default_exhaustive/main.go:18:2:gochecksumtype::exhaustiveness check failed for sum type "T" (from not_default_exhaustive/main.go:7:6): missing cases for B

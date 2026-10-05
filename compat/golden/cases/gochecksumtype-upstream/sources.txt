@@ -1,0 +1,17 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces)
+types.go  crates/guff-style/tests/testdata/gochecksumtype/upstream-v0.5.1-0.20260828200218-ae6904d28606/src/multiple_sumtypes/types.go
+multiple_sumtypes_user/main.go  crates/guff-style/tests/testdata/gochecksumtype/upstream-v0.5.1-0.20260828200218-ae6904d28606/src/multiple_sumtypes_user/main.go
+all_leaves/main.go  crates/guff-style/tests/testdata/gochecksumtype/upstream-v0.5.1-0.20260828200218-ae6904d28606/src/all_leaves/main.go
+default_exhaustive/main.go  crates/guff-style/tests/testdata/gochecksumtype/upstream-v0.5.1-0.20260828200218-ae6904d28606/src/default_exhaustive/main.go
+missing_one/main.go  crates/guff-style/tests/testdata/gochecksumtype/upstream-v0.5.1-0.20260828200218-ae6904d28606/src/missing_one/main.go
+missing_two/main.go  crates/guff-style/tests/testdata/gochecksumtype/upstream-v0.5.1-0.20260828200218-ae6904d28606/src/missing_two/main.go
+missing_with_panic/main.go  crates/guff-style/tests/testdata/gochecksumtype/upstream-v0.5.1-0.20260828200218-ae6904d28606/src/missing_with_panic/main.go
+no_missing/main.go  crates/guff-style/tests/testdata/gochecksumtype/upstream-v0.5.1-0.20260828200218-ae6904d28606/src/no_missing/main.go
+not_default_exhaustive/main.go  crates/guff-style/tests/testdata/gochecksumtype/upstream-v0.5.1-0.20260828200218-ae6904d28606/src/not_default_exhaustive/main.go
+not_interface/main.go  crates/guff-style/tests/testdata/gochecksumtype/upstream-v0.5.1-0.20260828200218-ae6904d28606/src/not_interface/main.go
+not_sealed/main.go  crates/guff-style/tests/testdata/gochecksumtype/upstream-v0.5.1-0.20260828200218-ae6904d28606/src/not_sealed/main.go
+subtype_in_switch/main.go  crates/guff-style/tests/testdata/gochecksumtype/upstream-v0.5.1-0.20260828200218-ae6904d28606/src/subtype_in_switch/main.go
+with_alias/main.go  crates/guff-style/tests/testdata/gochecksumtype/upstream-v0.5.1-0.20260828200218-ae6904d28606/src/with_alias/main.go
+with_tests/lib.go  crates/guff-style/tests/testdata/gochecksumtype/upstream-v0.5.1-0.20260828200218-ae6904d28606/src/with_tests/lib.go
+with_tests/lib_test.go  crates/guff-style/tests/testdata/gochecksumtype/upstream-v0.5.1-0.20260828200218-ae6904d28606/src/with_tests/lib_test.go

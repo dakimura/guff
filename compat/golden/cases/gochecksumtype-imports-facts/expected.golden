@@ -1,0 +1,17 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh gochecksumtype-imports-facts
+# Produced by running golangci-lint on compat/golden/cases/gochecksumtype-imports-facts/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+linedir/linedir.go:30:2:gochecksumtype::exhaustiveness check failed for sum type "Tmpl" (from linedir/gen.tmpl:101): missing cases for T2
+linedir/linedir.go:33:2:gochecksumtype::exhaustiveness check failed for sum type "Plain" (from linedir/linedir.go:7:6): missing cases for P2
+user/user.go:11:2:gochecksumtype::exhaustiveness check failed for sum type "Shape" (from sumdep/dep.go:6:6): missing cases for Square
+user/user.go:23:2:gochecksumtype::exhaustiveness check failed for sum type "Shape" (from sumdep/dep.go:6:6): missing cases for Circle
+user/user.go:36:2:gochecksumtype::exhaustiveness check failed for sum type "Shape" (from sumdep/dep.go:6:6): missing cases for Circle
+user/user.go:42:2:gochecksumtype::exhaustiveness check failed for sum type "Event" (from sumdep/dep.go:30:6): missing cases for key
+user/user.go:53:2:gochecksumtype::exhaustiveness check failed for sum type "Op" (from ops/ops.go:5:6): missing cases for Neg, Sub
+user/user.go:61:2:gochecksumtype::exhaustiveness check failed for sum type "Op" (from ops/ops.go:5:6): missing cases for Add, Neg, Sub
+user/user.go:68:7:gochecksumtype::type 'Inner' is not defined

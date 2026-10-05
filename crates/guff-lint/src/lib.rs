@@ -95,6 +95,11 @@ pub const EXIT_NO_LINTERS: i32 = 3;
 /// nothing" are different answers to the user.
 pub const EXIT_CONFIG_ERROR: i32 = 3;
 
+/// Exit code when an analyzer fails the run (golangci-lint's `Running error:
+/// can't run linter goanalysis_metalinter`, `exitcodes.Failure`) — see
+/// `guff_analysis::run_failure`.
+pub const EXIT_RUN_FAILURE: i32 = 3;
+
 /// Exit code when `--timeout` / `run.timeout` is exceeded (golangci-lint uses 4).
 pub const EXIT_TIMEOUT: i32 = 4;
 
@@ -1134,6 +1139,16 @@ fn run_and_write_inner(
         });
 
     let result = run_linters(opts)?;
+    // An analyzer error fails golangci's `goanalysis_metalinter`, and with it
+    // the run: `Runner.Run` logs the warning, `run` returns the joined error,
+    // no issue is printed and the exit code is `exitcodes.Failure`.
+    if let Some(failure) = result.run.graph.run_failures().first() {
+        eprintln!("level=warning msg=\"[runner] Can't run linter goanalysis_metalinter: {failure}\"");
+        eprintln!(
+            "level=error msg=\"Running error: can't run linter goanalysis_metalinter\\n{failure}\""
+        );
+        return Ok(EXIT_RUN_FAILURE);
+    }
     let tf = std::time::Instant::now();
     let mut issues = result.unfiltered_issues();
     let mut fmt_ran = None;

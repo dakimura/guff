@@ -1827,15 +1827,15 @@ linters:
 }
 
 /// Linters whose golangci wrapper collects issues itself and hands them over
-/// with `WithIssuesReporter` (golangci-lint 2.12.2 `pkg/golinters`), rather
+/// with `WithIssuesReporter` (golangci-lint 2.14.0 `pkg/golinters`), rather
 /// than as `analysis.Diagnostic`s. Their issues come first in the runner's
-/// output — see the sort in `ExcludeConfig::apply`.
+/// output — see the sort in `ExcludeConfig::apply`. `gochecksumtype` left the
+/// list in 2.14.0, when its wrapper became the module's own `Analyzer`.
 fn reports_through_issue_reporter(linter: &str) -> bool {
     matches!(
         linter,
         "dupl"
             | "errcheck"
-            | "gochecksumtype"
             | "gocognit"
             | "goconst"
             | "gocyclo"

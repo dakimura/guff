@@ -1,0 +1,12 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh gochecksumtype-gcl-custom
+# Produced by running golangci-lint on compat/golden/cases/gochecksumtype-gcl-custom/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+gochecksumtype_custom.go:13:6:gochecksumtype::type 'One' is not an interface
+gochecksumtype_custom.go:23:2:gochecksumtype::exhaustiveness check failed for sum type "SumType" (from gochecksumtype_custom.go:10:6): missing cases for Two
+gochecksumtype_custom.go:27:2:gochecksumtype::exhaustiveness check failed for sum type "SumType" (from gochecksumtype_custom.go:10:6): missing cases for Two
+gochecksumtype_custom.go:33:2:gochecksumtype::exhaustiveness check failed for sum type "SumType" (from gochecksumtype_custom.go:10:6): missing cases for Two

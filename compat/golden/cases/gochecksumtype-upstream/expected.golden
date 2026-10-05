@@ -1,0 +1,18 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh gochecksumtype-upstream
+# Produced by running golangci-lint on compat/golden/cases/gochecksumtype-upstream/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+missing_one/main.go:16:2:gochecksumtype::exhaustiveness check failed for sum type "T" (from missing_one/main.go:5:6): missing cases for B
+missing_two/main.go:20:2:gochecksumtype::exhaustiveness check failed for sum type "T" (from missing_two/main.go:5:6): missing cases for B, C
+missing_with_panic/main.go:16:2:gochecksumtype::exhaustiveness check failed for sum type "T" (from missing_with_panic/main.go:5:6): missing cases for B
+multiple_sumtypes_user/main.go:6:2:gochecksumtype::exhaustiveness check failed for sum type "First" (from types.go:5:6): missing cases for FirstB
+multiple_sumtypes_user/main.go:12:2:gochecksumtype::exhaustiveness check failed for sum type "Second" (from types.go:16:6): missing cases for SecondB
+not_interface/main.go:4:6:gochecksumtype::type 'T' is not an interface
+not_sealed/main.go:4:6:gochecksumtype::interface 'T' is not sealed (sealing requires at least one unexported method)
+subtype_in_switch/main.go:27:2:gochecksumtype::exhaustiveness check failed for sum type "T1" (from subtype_in_switch/main.go:5:6): missing cases for B, C
+with_alias/main.go:18:2:gochecksumtype::exhaustiveness check failed for sum type "T" (from with_alias/main.go:5:6): missing cases for A
+with_tests/lib_test.go:6:2:gochecksumtype::exhaustiveness check failed for sum type "T" (from with_tests/lib.go:5:6): missing cases for B
