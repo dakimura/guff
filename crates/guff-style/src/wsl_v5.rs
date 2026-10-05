@@ -453,6 +453,10 @@ fn msg_no_shared(check: &str) -> String {
     format!("{MSG_ABOVE} (no shared variables above {check})")
 }
 
+fn msg_not_shared(check: &str) -> String {
+    format!("{MSG_ABOVE} (variable not shared with {check})")
+}
+
 fn msg_too_many(check: &str) -> String {
     format!("{MSG_ABOVE} (too many statements above {check})")
 }
@@ -675,6 +679,14 @@ fn check_err_cuddle(
 /// the `err`-precedence branch and the `cuddle-max-statements` limit, so an
 /// expression statement is never reported for having too many statements above
 /// it — only for cuddling an invalid type or sharing no identifier.
+/// `unlabeledStmt`: the statement under any number of labels.
+fn unlabeled_stmt(mut s: &Stmt) -> &Stmt {
+    while let Stmt::LabeledStmt(l) = s {
+        s = &l.stmt;
+    }
+    s
+}
+
 fn check_cuddle_blockish(
     fset: &FileSet,
     stmts: &[Stmt],
@@ -685,7 +697,9 @@ fn check_cuddle_blockish(
     pending: &mut Pending,
 ) {
     let stmt = &stmts[i];
-    let prev = &stmts[i - 1];
+    // `unlabeledStmt(previousNode)` (v5.9): `L: x := 1` above shares `x`
+    // like `x := 1` does. Positions still come from the statements as written.
+    let prev = unlabeled_stmt(&stmts[i - 1]);
     let n_above = n_cuddled_before(fset, stmts, i);
     if n_above == 0 {
         return;
@@ -712,29 +726,73 @@ fn check_cuddle_blockish(
         return;
     }
 
-    // err check always wins over cuddle-max when enabled.
+    // err check always wins over cuddle-max when enabled. The report is at
+    // `cursor.NthPrevious(1)` — the err assignment itself.
     if check_enabled(options, WslV5Check::Err) {
         if let Some(err_name) = is_err_not_nil_check(stmt) {
             if assign_defines_err(prev, &err_name) {
                 if n_above > 1 {
-                    if let Some(extra) = stmts.get(i.saturating_sub(2)) {
-                        pending.push((extra.pos().0 as u32, msg_too_many(check_name), insert_at(fset, extra.pos())));
-                    }
+                    let extra = &stmts[i - 1];
+                    pending.push((extra.pos().0 as u32, msg_too_many(check_name), insert_at(fset, extra.pos())));
                 }
                 return;
             }
         }
     }
 
+    // `countValidCuddledStatements`: walk back over the cuddled statements
+    // as written — a labeled one is not an assignment, so it ends the run —
+    // counting those that share a name with the target, up to `limit`.
+    // `true` when the walk stopped at one that shares nothing.
+    let relaxes = matches!(stmt, Stmt::DeferStmt(_) | Stmt::GoStmt(_));
+    let count_valid = |limit: usize| -> (usize, bool) {
+        let mut count = 0;
+        let mut cur = i;
+        while cur > 0 {
+            let p = &stmts[cur - 1];
+            if stmt_end(fset, p) + 1 != stmt_start(fset, &stmts[cur]) {
+                break;
+            }
+            if count >= limit {
+                break;
+            }
+            if !is_assign_decl_or_inc(p) && !relaxes {
+                break;
+            }
+            let mut idents = find_lhs(p);
+            idents.extend(find_rhs(p));
+            if !lists_overlap(&idents, &target) {
+                return (count, true);
+            }
+            count += 1;
+            cur -= 1;
+        }
+        (count, false)
+    };
+
     let max = options.cuddle_max_statements;
-    if max == 0 {
-        pending.push((stmt.pos().0 as u32, msg_too_many(check_name), insert_at(fset, stmt.pos())));
+    if check_enabled(options, WslV5Check::CuddleGroup) {
+        // The cuddled chain is a unit: any statement that shares nothing, or
+        // too many that do, separates the whole group from the trigger.
+        let (shared, stopped) = count_valid(usize::MAX);
+        if stopped || shared > max {
+            pending.push((stmt.pos().0 as u32, msg_too_many(check_name), insert_at(fset, stmt.pos())));
+        }
         return;
     }
-    if n_above > max {
-        let idx = i - max;
-        pending.push((stmts[idx].pos().0 as u32, msg_too_many(check_name), insert_at(fset, stmts[idx].pos())));
+    let (allowed, stopped) = count_valid(max);
+    if n_above <= allowed {
+        return;
     }
+    // `cursor.NthPrevious(allowedCount)`: the statement itself when none is
+    // allowed.
+    let node = &stmts[i - allowed];
+    let msg = if stopped {
+        msg_not_shared(check_name)
+    } else {
+        msg_too_many(check_name)
+    };
+    pending.push((node.pos().0 as u32, msg, insert_at(fset, node.pos())));
 }
 
 fn check_statements(

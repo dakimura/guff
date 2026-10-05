@@ -170,9 +170,9 @@ fn find_consecutive_groups<'a>(
                     _ => groups.push(std::mem::take(&mut cur)),
                 }
                 cur.clear();
-                if matches!(&field.ty, Some(guff::ast::Expr::StructType(_))) {
-                    continue;
-                }
+                // v1.4.3 skipped a struct-typed field here (`continue`), so a
+                // tagged inline struct after a gap was never grouped; v1.4.4
+                // starts the next group with it like any other field.
             }
         }
         cur.push(field);

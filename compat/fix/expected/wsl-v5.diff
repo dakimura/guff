@@ -48,3 +48,66 @@
  	_ = x
 -
  }
+--- a/upstream/if.go
++++ b/upstream/if.go
+@@ -4,6 +4,7 @@
+ 
+ func fn1() {
+ 	a := 1
++
+ 	b := 2 // want `missing whitespace above this line \(too many statements above if\)`
+ 	if b == 2 {
+ 		panic(1)
+@@ -15,6 +16,7 @@
+ func fn2() {
+ 	b := 2
+ 	a := 1
++
+ 	if b == 2 { // want `missing whitespace above this line \(no shared variables above if\)`
+ 		panic(1)
+ 	}
+@@ -24,7 +26,6 @@
+ 
+ func fn3() {
+ 	err := errors.New("error") // want +1 `unnecessary whitespace \(err\)`
+-
+ 	if err != nil {
+ 		panic(err)
+ 	}
+@@ -34,6 +35,7 @@
+ 	if a := 1; a != 2 {
+ 		panic(a)
+ 	}
++
+ 	if a := 2; a != 2 { // want `missing whitespace above this line \(invalid statement above if\)`
+ 		panic(a)
+ 	}
+@@ -52,14 +54,17 @@
+ 	if true {
+ 		_ = 1
+ 		_ = 2
++
+ 		return // want `missing whitespace above this line \(too many lines above return\)`
+ 	} else if false {
+ 		_ = 1
+ 		_ = 2
++
+ 		return // want `missing whitespace above this line \(too many lines above return\)`
+ 	} else {
+ 		_ = 1
+ 		_ = 2
++
+ 		return // want `missing whitespace above this line \(too many lines above return\)`
+ 	}
+ }
+@@ -79,8 +84,10 @@
+ func reportsForLabeledStatementWhenTwoStmtsAboveIf() {
+ 	for {
+ 		x := 1
++
+ 	LABEL: // want `missing whitespace above this line \(never cuddle label\)`
+ 		y := 2
++
+ 		if x > y { // want `missing whitespace above this line \(too many statements above if\)`
+ 			goto LABEL
+ 		}

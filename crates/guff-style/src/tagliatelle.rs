@@ -271,6 +271,10 @@ fn analyze_struct(
             if key == "xml" && (value.contains('>') || value.contains(':')) {
                 continue;
             }
+            // v0.8.0: json/v2's `embed` has no name of its own to lint.
+            if *key == "json" && flags.iter().any(|f| f == "embed") {
+                continue;
+            }
             if flags.iter().any(|f| f == "inline") {
                 continue;
             }

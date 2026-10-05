@@ -1,0 +1,69 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh noinlineerr-upstream-v106
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/noinlineerr-upstream-v106/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.14.0
+
+--- a/main.go
++++ b/main.go
+@@ -62,15 +62,17 @@
+ }
+ 
+ func invalid() error {
+-	if err := doSomething(); err != nil { // want "avoid inline error handling using `if err := ...; err != nil`; use plain assignment `err := ...`"
++	err := doSomething()
++	if err != nil { // want "avoid inline error handling using `if err := ...; err != nil`; use plain assignment `err := ...`"
+ 		return err
+ 	}
+ 
+-	if err := doSmthManyArgs(0, // want "avoid inline error handling using `if err := ...; err != nil`; use plain assignment `err := ...`"
++	err := doSmthManyArgs(0,
+ 		0,
+ 		0,
+ 		0,
+-	); err != nil {
++	)
++	if err != nil {
+ 		return err
+ 	}
+ 
+@@ -79,11 +81,13 @@
+ 		return err
+ 	}
+ 
+-	if err := doMyAliasErr(); err != nil { // want "avoid inline error handling using `if err := ...; err != nil`; use plain assignment `err := ...`"
++	err := doMyAliasErr()
++	if err != nil { // want "avoid inline error handling using `if err := ...; err != nil`; use plain assignment `err := ...`"
+ 		return err
+ 	}
+ 
+-	if err := doMyCustomErr(); err != nil { // want "avoid inline error handling using `if err := ...; err != nil`; use plain assignment `err := ...`"
++	err := doMyCustomErr()
++	if err != nil { // want "avoid inline error handling using `if err := ...; err != nil`; use plain assignment `err := ...`"
+ 		return err
+ 	}
+ 
+@@ -101,7 +105,8 @@
+ }
+ 
+ func naming() error {
+-	if otherName := doSomething(); otherName != nil { // want "avoid inline error handling using `if err := ...; err != nil`; use plain assignment `err := ...`"
++	otherName := doSomething()
++	if otherName != nil { // want "avoid inline error handling using `if err := ...; err != nil`; use plain assignment `err := ...`"
+ 		return otherName
+ 	}
+ 
+@@ -114,7 +119,8 @@
+ 		return err
+ 	}
+ 
+-	if err = doSomething2(); err != nil { // want "avoid inline error handling using `if err = ...; err != nil`; use plain assignment `err = ...`"
++	err = doSomething2()
++	if err != nil { // want "avoid inline error handling using `if err = ...; err != nil`; use plain assignment `err = ...`"
+ 		return err
+ 	}
+ 
