@@ -16,8 +16,8 @@ use guff_types::Config;
 /// `fieldalignment` reports at the `struct` keyword — `node.Pos()` of an
 /// `*ast.StructType` — which is neither the type name nor the `{`, and the
 /// message carries no hint of where it landed. So this pins `(line, column)`
-/// as well as the message, and pins the **count**: thirty struct types are
-/// written in the fixture and fourteen of them are reported. The sixteen
+/// as well as the message, and pins the **count**: thirty-two struct types are
+/// written in the fixture and sixteen of them are reported. The sixteen
 /// silent ones are the point of the other half of the file — an analyzer that
 /// reported every struct would still pass an `any(contains(…))` assertion.
 #[test]
@@ -37,31 +37,31 @@ fn fieldalignment_reports_size_and_pointer_bytes_at_the_struct_keyword() {
     .collect();
     got.sort();
 
-    let size = |line, col, from, to| (line, col, format!("struct of size {from} could be {to}"));
-    let ptrs = |line, col, from, to| {
-        (
-            line,
-            col,
-            format!("struct with {from} pointer bytes could be {to}"),
-        )
-    };
+    // x/tools v0.50 (golangci-lint 2.14.0) names the struct ("struct" when it
+    // is not a type declaration's right-hand side) and accounts in allocator
+    // size classes; v0.44 said `struct of size N could be M` and `struct with N
+    // pointer bytes could be M`. The last two rows reach the two branches no
+    // other shape does: the same size class (no waste clause) and past 32 KiB.
+    let row = |line: i64, col: i64, msg: &str| (line, col, msg.to_string());
     assert_eq!(
         got,
         vec![
-            size(16, 24, 24, 16),  // bool, int64, bool
-            size(23, 20, 40, 32),  // an array's element alignment counts
-            size(30, 19, 24, 16),  // tags do not move a field
-            size(36, 22, 32, 24),  // complex128
-            size(45, 4, 24, 16),   // the anonymous struct, at its own `struct`
-            ptrs(55, 23, 16, 8),   // uint32 then string
-            ptrs(61, 20, 24, 16),  // string then *uint32
-            ptrs(66, 21, 24, 16),  // an array of pointers
-            size(74, 20, 32, 24),  // an interface is two words: a size finding
-            ptrs(80, 14, 24, 16),  // any
-            ptrs(85, 16, 16, 8),   // a slice
-            ptrs(90, 22, 32, 24),  // map, chan, func
-            ptrs(97, 17, 16, 8),   // bool, string, int64
-            ptrs(105, 25, 24, 16), // a type parameter constrained by `any`
+            row(16, 24, "sizeBoolInt64Bool has size 24 but the optimal size is 16 leading to a waste of 8 bytes (33%)"),
+            row(23, 20, "sizeWithArray has size 40 (allocator size class 48) but the optimal size is 32 leading to a waste of 16 bytes (33%)"),
+            row(30, 19, "sizeWithTags has size 24 but the optimal size is 16 leading to a waste of 8 bytes (33%)"),
+            row(36, 22, "sizeWithComplex has size 32 but the optimal size is 24 leading to a waste of 8 bytes (25%)"),
+            row(45, 4, "struct has size 24 but the optimal size is 16 leading to a waste of 8 bytes (33%)"),
+            row(55, 23, "ptrsUint32String has 16 leading bytes of pointer data but optimal value is 8"),
+            row(61, 20, "ptrsStringPtr has 24 leading bytes of pointer data but optimal value is 16"),
+            row(66, 21, "ptrsArrayOfPtr has 24 leading bytes of pointer data but optimal value is 16"),
+            row(74, 20, "ptrsInterface has size 32 but the optimal size is 24 leading to a waste of 8 bytes (25%)"),
+            row(80, 14, "ptrsAny has 24 leading bytes of pointer data but optimal value is 16"),
+            row(85, 16, "ptrsSlice has 16 leading bytes of pointer data but optimal value is 8"),
+            row(90, 22, "ptrsMapChanFunc has 32 leading bytes of pointer data but optimal value is 24"),
+            row(97, 17, "ptrsString has 16 leading bytes of pointer data but optimal value is 8"),
+            row(105, 25, "ptrsGeneric has 24 leading bytes of pointer data but optimal value is 16"),
+            row(193, 20, "sameSizeClass has size 64 but the optimal size is 56 (allocator size class 64)"),
+            row(200, 25, "pastSmallAllocator has size 40024 (uses global allocator) but the optimal size is 40016 leading to a waste of 8 bytes (0%)"),
         ],
         "fieldalignment findings"
     );

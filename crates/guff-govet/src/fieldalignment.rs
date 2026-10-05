@@ -345,7 +345,60 @@ fn render_reordered(node: &StructType, elems: &[Elem]) -> Option<String> {
     String::from_utf8(buf).ok()
 }
 
-fn check_struct(pass: &Pass<'_>, node: &StructType) -> Option<Diagnostic> {
+/// The Go runtime's allocator size classes (`internal/runtime/gc`
+/// `SizeClassToSize`), identical in go1.26 and go1.27.0 — the Go that built
+/// golangci-lint 2.14.0, whose runtime answers `classSize` upstream.
+const SIZE_CLASS_TO_SIZE: [i64; 68] = [
+    0, 8, 16, 24, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240, 256, 288, 320,
+    352, 384, 416, 448, 480, 512, 576, 640, 704, 768, 896, 1024, 1152, 1280, 1408, 1536, 1792,
+    2048, 2304, 2688, 3072, 3200, 3456, 4096, 4864, 5376, 6144, 6528, 6784, 6912, 8192, 9472,
+    9728, 10240, 10880, 12288, 13568, 14336, 16384, 18432, 19072, 20480, 21760, 24576, 27264,
+    28672, 32768,
+];
+
+/// `classSize`: `cap(bytes.Clone(make([]byte, size)))`, the size class a
+/// pointer-free allocation of `size` bytes rounds up to, or `-1` above 32 KiB
+/// ("avoid allocation").
+fn class_size(size: i64) -> i64 {
+    if size > 1 << 15 {
+        return -1;
+    }
+    SIZE_CLASS_TO_SIZE
+        .iter()
+        .copied()
+        .find(|&c| c >= size)
+        .unwrap_or(size)
+}
+
+/// x/tools v0.50 (golangci-lint 2.14.0) names the struct and accounts in
+/// allocator size classes; v0.44 said `struct of size N could be M`.
+fn size_message(name: &str, actual: i64, optimal: i64) -> String {
+    let mut m = format!("{name} has size {actual}");
+    let mut actual_class = class_size(actual);
+    if actual_class == -1 {
+        actual_class = actual;
+        m.push_str(" (uses global allocator)");
+    } else if actual_class != actual {
+        m.push_str(&format!(" (allocator size class {actual_class})"));
+    }
+    m.push_str(&format!(" but the optimal size is {optimal}"));
+    let mut optimal_class = class_size(optimal);
+    if optimal_class == -1 {
+        optimal_class = optimal;
+    } else if optimal_class != optimal {
+        m.push_str(&format!(" (allocator size class {optimal_class})"));
+    }
+    let wastage = actual_class - optimal_class;
+    if wastage > 0 {
+        m.push_str(&format!(
+            " leading to a waste of {wastage} bytes ({}%)",
+            wastage * 100 / actual_class
+        ));
+    }
+    m
+}
+
+fn check_struct(pass: &Pass<'_>, node: &StructType, name: &str) -> Option<Diagnostic> {
     let info = pass.types_info()?;
     let typ = info.types.get(&node.id)?.typ;
     let artifacts = pass.pkg().type_artifacts.as_ref()?;
@@ -368,11 +421,11 @@ fn check_struct(pass: &Pass<'_>, node: &StructType) -> Option<Diagnostic> {
 
     let sz = s.sizeof(arena, objs, struct_ty);
     let message = if sz != optsz {
-        format!("struct of size {sz} could be {optsz}")
+        size_message(name, sz, optsz)
     } else {
         let ptrs = s.ptrdata(arena, objs, struct_ty);
         if ptrs != optptrs {
-            format!("struct with {ptrs} pointer bytes could be {optptrs}")
+            format!("{name} has {ptrs} leading bytes of pointer data but optimal value is {optptrs}")
         } else {
             // Already optimal.
             return None;
@@ -406,12 +459,24 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "fieldalignment requires inspect analyzer".to_string())?
         .clone();
 
+    // `curStruct.Parent().Node().(*ast.TypeSpec)`: a struct type that is a
+    // type declaration's right-hand side is named by it — generic and alias
+    // declarations included — and any other is "struct".
+    let mut names: std::collections::HashMap<u32, String> = std::collections::HashMap::new();
+    inspect.preorder_typed(node_mask!(TypeSpec), pass.files(), |n| {
+        if let NodeRef::TypeSpec(ts) = n {
+            if let Expr::StructType(s) = &ts.ty {
+                names.insert(s.id, ts.name.name.clone());
+            }
+        }
+    });
     let mut pending = Vec::new();
     inspect.preorder_typed(node_mask!(StructType), pass.files(), |n| {
         let NodeRef::StructType(s) = n else {
             return;
         };
-        if let Some(diag) = check_struct(pass, s) {
+        let name = names.get(&s.id).map(String::as_str).unwrap_or("struct");
+        if let Some(diag) = check_struct(pass, s, name) {
             pending.push(diag);
         }
     });

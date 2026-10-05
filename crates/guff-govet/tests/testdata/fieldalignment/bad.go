@@ -185,3 +185,21 @@ type okNested struct {
 		y bool
 	}
 }
+
+// The x/tools v0.50 (golangci-lint 2.14.0) message accounts in allocator size
+// classes. Two branches no other shape reaches: actual and optimal sizes in the
+// same class (57 -> 64 and 50 -> 56 both allocate 64: no waste clause), and a
+// struct past 32 KiB, which "uses global allocator".
+type sameSizeClass struct {
+	a bool
+	b int64
+	c bool
+	d [40]byte
+}
+
+type pastSmallAllocator struct {
+	a bool
+	b int64
+	c [40000]byte
+	d bool
+}

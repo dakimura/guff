@@ -316,7 +316,7 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 
 | # | upstream_path | kind | 要約 | guff の場所 | status | effort | upstream testdata |
 |---|---------------|------|------|-------------|--------|--------|-------------------|
-| 1 | fieldalignment.go | message | 文言を全面変更（型名、size class、waste） | guff-govet/src/fieldalignment.rs check_struct | needs-port | M | a.go, a_amd64.go, a_386.go |
+| 1 | fieldalignment.go | message | 文言を全面変更（型名、size class、waste） | guff-govet/src/fieldalignment.rs check_struct | **done (PR 7)** | M | a.go, a_amd64.go, a_386.go |
 | 2 | composite.go | behavior | 型パラメータ複合リテラルを先頭 term だけで判定 | guff-govet/src/composites.rs | needs-port | S | a.go{,.golden}, flag/flag.go |
 | 3 | inline.go withinTestOf | behavior | 専用テスト内の使用を抑制（同ディレクトリ、Fuzz、const / alias） | guff-govet/src/inline.rs | needs-port | M | issue76190.txtar |
 | 4 | inline.go 埋め込みフィールド判定 | behavior | `Defs[id].Embedded()` に変更 | inline.rs | needs-port | S | issue78994.txtar |
@@ -660,7 +660,7 @@ golden を regen したら fix のベースラインも撮り直す。測定は 
 | 4b | **honnef IR 寄せ（fixture 先行）** | SSI 模倣の撤去（sa4008 `assigned_in`、sa4006 AST hybrid）、DebugRef の監査、IsStub、`EnclosingFunction` の `_`、Recover ブロック。**今の golden に観測差が無い**ので、上流 testdata（irutil/testdata/switches、Nilness/*.go ほか）を fixture にしてから | — | L |
 | 5 | **staticcheck の文言・小移植** | SA1019 SelectorName + literal キー位置 + 引用符なし import、SA4003 の型名、SA6005 の `!`（**done**）。SA1026 / SA5008 embed / SA9010（新規）は残り | staticcheck-sa1019-* 42/42 → **0/0（ratchet 削除）**、staticcheck-sa 16/17 → **0/1**（残りは恒久の SA5005） | M |
 | 6 | **modernize 残り（ゴールデン側）** | stringscut の Split / SplitN 腕（**done**）。条件の各枝を fixture に足して上流と一致を確認 | modernize 2/0 → **0/0（ratchet 削除）** | S |
-| 7 | **govet 文言** | fieldalignment（size class 表の pin を決める）、composite、inline の埋め込み判定、unusedresult b.Loop、nilness cgo | govet-fieldalignment 14/14 → 0/0 | M |
+| 7 | **govet 文言** | fieldalignment（**done**: 型名・size class 表は go1.27.0 から転記、全枝を fixture で確認）。composite、inline の埋め込み判定、unusedresult b.Loop、nilness cgo は golden に観測差なし（fixture 先行） | govet-fieldalignment 14/14 → **0/0（ratchet 削除）** | M |
 | 8 | **出力差の小物まとめ** | nonamedreturns 位置、canonicalheader fork（文言 + initialism + exclusions）、exhaustive ディレクティブ厳密一致 / 不正ディレクティブ / alias、recvcheck、protogetter alias、gocritic sprintfQuotedString、gofumpt 100 バイト規則 | nonamedreturns 14/14、canonicalheader 10/6、exhaustive ×3、recvcheck、protogetter、gocritic、gofumpt → 0 | M（項目は多いが各 S） |
 | 9 | **gosec 既存ルール** | G118、G115、G703、G404、`%#q` 系と並べて TryResolve Builder（2 系統） | gosec 6/8 → 0/0 | M |
 | 10 | **revive** | empty-block range、multiline-if-init を enable-all に、marshal-receiver、use-slices-concat、文言 4 本、Go 版ゲート 2 本、directives | revive 1/10 → 既存 1/4 | M |

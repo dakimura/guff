@@ -122,3 +122,22 @@
  }
  
  // ---- already optimal, and therefore silent ------------------------------
+@@ -191,15 +191,15 @@
+ // same class (57 -> 64 and 50 -> 56 both allocate 64: no waste clause), and a
+ // struct past 32 KiB, which "uses global allocator".
+ type sameSizeClass struct {
++	b int64
++	d [40]byte
+ 	a bool
+-	b int64
+ 	c bool
+-	d [40]byte
+ }
+ 
+ type pastSmallAllocator struct {
+-	a bool
+ 	b int64
+ 	c [40000]byte
++	a bool
+ 	d bool
+ }
