@@ -1,0 +1,17 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh format-code-v214
+# Produced by running golangci-lint on compat/golden/cases/format-code-v214/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+fc.go:4:9:goconst::string "line one\\nline two" has 3 occurrences, make it a constant
+fc.go:19:9:goconst::string `a	b c` has 3 occurrences, make it a constant
+fc.go:31:9:goconst::string "bell\\a!" has 3 occurrences, make it a constant
+fc.go:43:9:goconst::string back`tick has 3 occurrences, make it a constant
+fc.go:55:9:goconst::string `plain value` has 3 occurrences, but such constant `Plain` already exists
+fc.go:69:11:nolintlint::directive "//nolint:gocyclo // see `README`" is unused for linter "gocyclo"
+fc.go:73:11:nolintlint::directive `//nolint:gocyclo` is unused for linter "gocyclo"
+fc.go:73:11:nolintlint::directive `//nolint:gocyclo` should provide explanation such as `//nolint:gocyclo // this is why`
+fc.go:76:8:misspell::`recieve` is a misspelling of `receive`

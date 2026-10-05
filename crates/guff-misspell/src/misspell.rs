@@ -27,8 +27,9 @@ fn report_diff(pass: &mut Pass<'_>, file_pos: Pos, diff: &Diff) {
         pos: start,
         end,
         message: format!(
-            "`{}` is a misspelling of `{}`",
-            diff.original, diff.corrected
+            "{} is a misspelling of {}",
+            guff_analysis::golinters::sharp_q(&diff.original),
+            guff_analysis::golinters::sharp_q(&diff.corrected)
         ),
         suggested_fixes: vec![SuggestedFix {
             message: String::new(),

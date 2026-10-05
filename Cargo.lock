@@ -415,6 +415,7 @@ version = "0.8.0"
 dependencies = [
  "guff-ast",
  "guff-constant",
+ "guff-gostd",
  "guff-packages",
  "guff-pattern",
  "guff-ssa",

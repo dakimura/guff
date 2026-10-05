@@ -11,6 +11,7 @@ mod analyzer;
 pub mod callcheck;
 pub mod code;
 pub mod comments;
+pub mod golinters;
 mod diagnostic;
 mod fact_codec;
 mod facts;

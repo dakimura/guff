@@ -37,14 +37,6 @@ fn func_name(fn_: &FuncDecl) -> String {
     fn_.name.name.clone()
 }
 
-fn format_code(code: &str) -> String {
-    if code.contains('`') {
-        code.to_string()
-    } else {
-        format!("`{code}`")
-    }
-}
-
 fn expr_id(e: &Expr) -> u32 {
     e.id()
 }
@@ -432,7 +424,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     f.ty.pos().0 as u32,
                     format!(
                         "cognitive complexity {c} of func {} is high (> {min_complexity})",
-                        format_code(&name)
+                        guff_analysis::golinters::format_code(&name)
                     ),
                 ));
             }

@@ -328,14 +328,13 @@ fn collect(
 }
 
 fn format_message(key: &str, count: usize, matching_const: Option<&str>) -> String {
-    let quoted = if key.contains('`') {
-        key.to_string()
-    } else {
-        format!("`{key}`")
-    };
+    // `internal.FormatCode` — `%#q` since golangci-lint 2.14, so a string
+    // holding a newline is double-quoted with its escapes.
+    let quoted = guff_analysis::golinters::format_code(key);
     if let Some(name) = matching_const {
+        let name = guff_analysis::golinters::format_code(name);
         format!(
-            "string {quoted} has {count} occurrences, but such constant `{name}` already exists"
+            "string {quoted} has {count} occurrences, but such constant {name} already exists"
         )
     } else {
         format!("string {quoted} has {count} occurrences, make it a constant")
@@ -343,7 +342,8 @@ fn format_message(key: &str, count: usize, matching_const: Option<&str>) -> Stri
 }
 
 fn format_duplicate_message(name: &str, first_pos: &guff::position::Position) -> String {
-    format!("This constant is a duplicate of `{name}` at {first_pos}")
+    let name = guff_analysis::golinters::format_code(name);
+    format!("This constant is a duplicate of {name} at {first_pos}")
 }
 
 fn report_duplicate_consts(

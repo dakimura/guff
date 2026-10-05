@@ -268,9 +268,9 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 | 8 | golinters/gomoddirectives | new-option | replace-allow-all / ignore-forbidden を渡す | guff-import/src/gomoddirectives.rs, options.rs:66 | **done (PR 2)** | S | — |
 | 9 | golinters/gosec New | new-check | `Excludes += "G407"` の暫定処理を削除 → G407 が既定で走る | guff-style/src/gosec.rs | **done (PR 14a)** | L | — |
 | 10 | golinters/iface | new-check | enable に unusedmethod | iface.rs | needs-port | M | iface_unusedmethod.{go,yml} |
-| 11 | golinters/internal/util.go FormatCode | message | `%#q` 化（CanBackquote 偽ならダブルクォート）。goconst / errcheck / dupl / gocyclo / gocognit / gochecknoinits | goconst.rs:330, gocyclo.rs:39, gocognit.rs:40, guff-errcheck/src/lib.rs:210, guff-dupl/src/dupl.rs:59 | needs-port | S | — |
-| 12 | golinters/misspell | message | `%#q` 化 | guff-misspell/src/misspell.rs:30 | needs-port | S | — |
-| 13 | golinters/nolintlint/internal/issues.go | message | `%#q` 化 | guff-lint/src/nolintlint.rs:206, nolint.rs:603 | needs-port | S | — |
+| 11 | golinters/internal/util.go FormatCode | message | `%#q` 化（CanBackquote 偽ならダブルクォート）。goconst / errcheck / dupl / gocyclo / gocognit / gochecknoinits | goconst.rs:330, gocyclo.rs:39, gocognit.rs:40, guff-errcheck/src/lib.rs:210, guff-dupl/src/dupl.rs:59 | **done (PR 14e)**：guff-analysis/src/golinters.rs `format_code` / `sharp_q` | S | — |
+| 12 | golinters/misspell | message | `%#q` 化 | guff-misspell/src/misspell.rs:30 | **done (PR 14e)**：guff-analysis/src/golinters.rs `format_code` / `sharp_q` | S | — |
+| 13 | golinters/nolintlint/internal/issues.go | message | `%#q` 化 | guff-lint/src/nolintlint.rs:206, nolint.rs:603 | **done (PR 14e)**：guff-analysis/src/golinters.rs `format_code` / `sharp_q` | S | — |
 | 14 | golinters/modernize | message | fmtappendf / waitgroup の旧名警告 | settings.rs, modernize.rs | **done (PR 2)** | S | fix/in,out の waitgroupgo / waitgroup / fmtappendf |
 | 15 | golinters/nonamedreturns | new-option | allow-unused-named-returns を渡す | settings.rs:1347, nonamedreturns.rs:1060 | already-matches | S | — |
 | 16 | golinters/revive | behavior | revive v1.17 の公開 API に寄せ、enable-all に 3 規則が増える | guff-revive/src/config.rs AHEAD_OF_PIN_RULES:148 | **done (PR 10)** | M | revive.yml |
