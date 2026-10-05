@@ -14,8 +14,8 @@ func (RPC) version() int {
 	return 1
 }
 
-// A pointer `UnmarshalJSON` beside a value method: not on the list 2.12.2 pins,
-// so it counts towards the mix. dapr's `ReminderPeriod`.
+// A pointer `UnmarshalJSON` beside a value method: excluded since 2.14.0
+// (recvcheck v0.3.x), so not a mix any more. dapr's `ReminderPeriod`.
 type Period struct{ raw string }
 
 func (p Period) String() string              { return p.raw }

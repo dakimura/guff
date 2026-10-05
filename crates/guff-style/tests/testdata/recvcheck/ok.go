@@ -14,11 +14,11 @@ type ConsistentVal struct {
 func (c ConsistentVal) Get() int { return c.n }
 func (c ConsistentVal) String() string { return "" }
 
-// The built-in exclusion list golangci-lint 2.12.2 pins (recvcheck v0.2.0) is
-// the *encoding* half — MarshalText/JSON/YAML/XML/Binary and GobEncode. With
-// `MarshalJSON` excluded the only value receiver here is gone, so the type
-// reads as pointer-only and is not a finding. v0.3.0 swapped the list for the
-// decoding half, which inverts this.
+// Not "ok" since golangci-lint 2.14.0: recvcheck v0.3.x excludes the
+// *decoding* half (UnmarshalText/JSON/YAML/XML/Binary, GobDecode), so the
+// value `MarshalJSON` stays and mixes with the pointer `SetData`. Under 2.12.2
+// (v0.2.0, the encoding half) `MarshalJSON` was the excluded one and this
+// read as pointer-only.
 type ValueType struct{}
 
 func (v ValueType) MarshalJSON() ([]byte, error)  { return nil, nil }
