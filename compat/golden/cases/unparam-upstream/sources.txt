@@ -1,0 +1,12 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+linkname/foo.go  crates/guff-style/tests/testdata/unparam/upstream-2fa3d841/linkname/foo.go
+samerets/foo.go  crates/guff-style/tests/testdata/unparam/upstream-2fa3d841/samerets/foo.go
+typealias/foo.go  crates/guff-style/tests/testdata/unparam/upstream-2fa3d841/typealias/foo.go
+typeparams/foo.go  crates/guff-style/tests/testdata/unparam/upstream-2fa3d841/typeparams/foo.go
+typeparams/foo_main.go  crates/guff-style/tests/testdata/unparam/upstream-2fa3d841/typeparams/foo_main.go
+typeparams/foo_other.go  crates/guff-style/tests/testdata/unparam/upstream-2fa3d841/typeparams/foo_other.go
+unexported_methods/foo.go  crates/guff-style/tests/testdata/unparam/upstream-2fa3d841/unexported_methods/foo.go
+unexported_methods/foo_test.go  crates/guff-style/tests/testdata/unparam/upstream-2fa3d841/unexported_methods/foo_test.go
+usedas/foo.go  crates/guff-style/tests/testdata/unparam/upstream-2fa3d841/usedas/foo.go
+zerosize/zerosize.go  crates/guff-style/tests/testdata/unparam/zerosize.go

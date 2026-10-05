@@ -1,0 +1,42 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh unparam-upstream
+# Produced by running golangci-lint on compat/golden/cases/unparam-upstream/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+linkname/foo.go:7:18:unparam::regularFunc - f is unused
+samerets/foo.go:12:27:unparam::manyReturns - result 0 (int) is always 3
+samerets/foo.go:30:29:unparam::manyReturnsMultiple - result b is always true
+samerets/foo.go:30:37:unparam::manyReturnsMultiple - result s is always "foo"
+samerets/foo.go:38:30:unparam::singleNilError - result 1 (error) is always nil
+samerets/foo.go:43:28:unparam::manyNilError - result 1 (error) is always nil
+samerets/foo.go:74:39:unparam::doubleReturnNotForwarded - result 1 (error) is always nil
+samerets/foo.go:92:29:unparam::neverForwarded - result 1 (error) is always nil
+samerets/foo.go:99:50:unparam::(FooType).neverForwardedPtrMethod - result 1 (error) is always nil
+typealias/foo.go:9:20:unparam::(Alias).bar - s is unused
+typealias/foo.go:23:17:unparam::use - b is unused
+typealias/foo.go:45:14:unparam::take - m always receives 7
+typeparams/foo.go:39:38:unparam::(Tuple[T1, T2]).unusedGeneric - t1 is unused
+typeparams/foo.go:57:17:unparam::g1 - v is unused
+typeparams/foo.go:60:21:unparam::g2 - v is unused
+typeparams/foo.go:63:18:unparam::g1s - v is unused
+typeparams/foo.go:66:22:unparam::g2s - v is unused
+typeparams/foo.go:69:18:unparam::g1a - v is unused
+typeparams/foo.go:72:22:unparam::g2a - v is unused
+typeparams/foo.go:75:18:unparam::g1p - v is unused
+typeparams/foo.go:78:22:unparam::g2p - v is unused
+typeparams/foo.go:81:23:unparam::g1struct - v is unused
+typeparams/foo.go:86:17:unparam::nonGeneric - v is unused
+typeparams/foo.go:89:42:unparam::(GenericType1[T1]).genericMethod - v is unused
+typeparams/foo.go:120:11:unparam::(*closureHolder[T1]).closureMethod$2 - t1 is unused
+typeparams/foo.go:127:11:unparam::localTypeParam$1 - l is unused
+unexported_methods/foo.go:13:27:unparam::(*fooType).Run$1 - unusedParam is unused
+unexported_methods/foo.go:21:29:unparam::(*fooType).oneUnused - a is unused
+usedas/foo.go:9:19:unparam::oneUnused - b is unused
+zerosize/zerosize.go:23:14:unparam::nonZero - n is unused
+zerosize/zerosize.go:23:21:unparam::nonZero - s is unused
+zerosize/zerosize.go:28:27:unparam::withTypeParam - v is unused
+zerosize/zerosize.go:28:32:unparam::withTypeParam - h is unused
+zerosize/zerosize.go:28:45:unparam::withTypeParam - s is unused

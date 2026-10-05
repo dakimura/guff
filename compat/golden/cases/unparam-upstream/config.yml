@@ -1,0 +1,23 @@
+# Golden case: unparam 2fa3d841b0c8's own testscripts (golangci-lint 2.14.0)
+# for everything that changed since 5beb8c8f8f15 — linkname, samerets
+# (returnValues through deferred stores), typealias (error aliases,
+# types.Identical constants), typeparams (containsTypeParam, Origin),
+# unexported_methods (AnonFuncs and methods AllFunctions skips), usedas
+# (map / channel / select / go / defer uses). The .go files are extracted
+# verbatim from the .txtar scripts, one package per script; the scripts'
+# `stdout.golden` is unparam's CLI answer, this golden is golangci-lint's.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - unparam
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true
