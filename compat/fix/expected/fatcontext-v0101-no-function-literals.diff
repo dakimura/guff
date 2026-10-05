@@ -1,0 +1,21 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh fatcontext-v0101-no-function-literals
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/fatcontext-v0101-no-function-literals/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.14.0
+
+--- a/example.go
++++ b/example.go
+@@ -9,7 +9,7 @@
+ 	ctx := context.Background()
+ 
+ 	for i := 0; i < 10; i++ {
+-		ctx = context.WithValue(ctx, "key", i) // want "nested context in loop"
++		ctx := context.WithValue(ctx, "key", i) // want "nested context in loop"
+ 		_ = ctx
+ 	}
+ }

@@ -1,0 +1,10 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh fatcontext-v0101-structpointer
+# Produced by running golangci-lint on compat/golden/cases/fatcontext-v0101-structpointer/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+example.go:15:3:fatcontext::potential nested context in struct pointer
+example.go:22:2:fatcontext::potential nested context in struct pointer

@@ -121,6 +121,128 @@ fn rhs_result_is_response(pass: &Pass<'_>, assign: &AssignStmt, lhs_index: usize
         .is_some_and(|e| expr_is_response(pass, e))
 }
 
+/// `responseHandledByDirective`: the static callee is declared with a
+/// `//bodyclose:handled` doc comment, so the response it returns is the
+/// callee's to close. Upstream finds the declaration by the position of the
+/// callee's object; guff's dependency objects carry no position, so it is
+/// found by name (and receiver type name) in the declaring package's files.
+fn handled_by_directive(pass: &Pass<'_>, fun: &Expr) -> bool {
+    let Some(obj) = code::call_target_object(pass, fun) else {
+        return false;
+    };
+    let Some(a) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let guff_types::arena::ObjectData::Func(f) = a.objects.get(obj) else {
+        return false;
+    };
+    let Some(pkg) = obj.pkg(&a.objects) else {
+        return false;
+    };
+    let path = a.packages.get(pkg).path().to_string();
+    // The standard library declares no such directive.
+    if !path.split('/').next().is_some_and(|first| first.contains('.')) && path != pass.pkg().pkg_path {
+        return false;
+    }
+    let recv = f
+        .typ()
+        .and_then(|sig| guff_types::signature::signature_recv(&a.types, sig))
+        .and_then(|r| r.typ(&a.objects))
+        .map(|t| {
+            let t = match a.types.get(t) {
+                TypeData::Pointer(p) => p.elem(),
+                _ => t,
+            };
+            match a.types.get(t) {
+                TypeData::Named(_) => named_obj(&a.types, t).name(&a.objects).to_string(),
+                _ => String::new(),
+            }
+        })
+        .unwrap_or_default();
+    let name = obj.name(&a.objects).to_string();
+    handled_decls(pass, &path).contains(&(recv, name))
+}
+
+/// `(receiver type name, function name)` of every declaration in the package
+/// at `path` whose doc comment has a line reading `bodyclose:handled`.
+fn handled_decls(pass: &Pass<'_>, path: &str) -> std::sync::Arc<HashSet<(String, String)>> {
+    use std::sync::{Arc, Mutex};
+    static CACHE: OnceLock<Mutex<HashMap<String, Arc<HashSet<(String, String)>>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(hit) = cache.lock().unwrap().get(path) {
+        return hit.clone();
+    }
+    let mut files: Vec<std::path::PathBuf> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut queue: Vec<&guff_analysis::Package> = vec![pass.pkg()];
+    while let Some(pkg) = queue.pop() {
+        if pkg.pkg_path == path {
+            files = if pkg.compiled_go_files.is_empty() {
+                pkg.go_files.clone()
+            } else {
+                pkg.compiled_go_files.clone()
+            };
+            break;
+        }
+        for imp in pkg.imports.values() {
+            if seen.insert(imp.id.clone()) {
+                queue.push(imp);
+            }
+        }
+    }
+    let mut out = HashSet::new();
+    for file in files {
+        let Ok(src) = std::fs::read(&file) else {
+            continue;
+        };
+        if !src.windows(17).any(|w| w == b"bodyclose:handled") {
+            continue;
+        }
+        let fset = guff::position::FileSet::new();
+        let name = file.to_string_lossy();
+        let Ok(parsed) = guff::parser::parse_file(&fset, &name, &src, guff::parser::PARSE_COMMENTS) else {
+            continue;
+        };
+        for decl in &parsed.decls {
+            let guff::ast::Decl::FuncDecl(fd) = decl else {
+                continue;
+            };
+            let Some(doc) = fd.doc.as_ref() else {
+                continue;
+            };
+            let marked = doc.list.iter().any(|c| {
+                c.text.strip_prefix("//").unwrap_or(&c.text).trim() == "bodyclose:handled"
+            });
+            if !marked {
+                continue;
+            }
+            let recv = fd
+                .recv
+                .as_ref()
+                .and_then(|r| r.list.first())
+                .and_then(|f| f.ty.as_ref())
+                .map(recv_base_name)
+                .unwrap_or_default();
+            out.insert((recv, fd.name.name.clone()));
+        }
+    }
+    let out = Arc::new(out);
+    cache.lock().unwrap().insert(path.to_string(), out.clone());
+    out
+}
+
+/// `T` of a receiver written `T`, `*T`, `T[P]` or `*T[P]`.
+fn recv_base_name(e: &Expr) -> String {
+    match e {
+        Expr::StarExpr(s) => recv_base_name(&s.x),
+        Expr::ParenExpr(p) => recv_base_name(&p.x),
+        Expr::IndexExpr(i) => recv_base_name(&i.x),
+        Expr::IndexListExpr(i) => recv_base_name(&i.x),
+        Expr::Ident(id) => id.name.clone(),
+        _ => String::new(),
+    }
+}
+
 fn is_httptest_result_call(pass: &Pass<'_>, expr: &Expr) -> bool {
     let Expr::CallExpr(call) = expr else {
         return false;
@@ -2323,6 +2445,23 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
     }
 
+    // `isopen` returns false first thing for a call whose callee is declared
+    // `//bodyclose:handled`. Every way guff reports a response lands on the
+    // `(` of the call that produced it, so those positions are dropped.
+    if !pending.is_empty() {
+        let mut handled: HashSet<u32> = HashSet::new();
+        for file in pass.files() {
+            inspect(NodeRef::File(file), |n| {
+                if let Some(NodeRef::CallExpr(call)) = n {
+                    if handled_by_directive(pass, &call.fun) {
+                        handled.insert(call.lparen.0 as u32);
+                    }
+                }
+                true
+            });
+        }
+        pending.retain(|(pos, _)| !handled.contains(pos));
+    }
     for (pos, msg) in pending {
         pass.reportf(pos, &msg);
     }

@@ -12,3 +12,6 @@ bad.go:18:16:loggercheck::odd number of arguments passed as key-value pairs for 
 bad.go:23:12:loggercheck::logging message should not use format specifier "%s"
 bad.go:23:24:loggercheck::logging keys are expected to be inlined constant strings, please replace "name" provided with string
 bad.go:23:24:loggercheck::odd number of arguments passed as key-value pairs for logging
+stringer/v0120_stringer.go:28:24:loggercheck::logging value may panic when nil because its element type implements fmt.Stringer
+stringer/v0120_stringer.go:33:24:loggercheck::logging value may panic when nil because its element type implements fmt.Stringer
+stringer/v0120_stringer.go:35:19:loggercheck::logging keys are expected to be inlined constant strings, please replace "v" provided with string

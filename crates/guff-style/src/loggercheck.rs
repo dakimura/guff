@@ -419,6 +419,17 @@ fn check_call(
         }
     }
 
+    // `checkStringerValues` (v0.12): every value position.
+    for i in (1..filtered.len()).step_by(2) {
+        let arg = filtered[i];
+        if nil_stringer_value(pass, arg) {
+            pending.push((
+                arg.pos().0 as u32,
+                "logging value may panic when nil because its element type implements fmt.Stringer".into(),
+            ));
+        }
+    }
+
     if opts.no_printf_like {
         for arg in &call.args {
             if let Some(format) = code::expr_to_string(pass, arg) {
@@ -432,6 +443,67 @@ fn check_call(
             }
         }
     }
+}
+
+/// A pointer whose element type implements `fmt.Stringer` and which does
+/// itself: `types.Implements(elem, stringer) && types.Implements(ptr, …)`.
+/// The second half only rules out an element that is an interface (a pointer
+/// to an interface has no methods); for any other element the pointer's method
+/// set contains the element's.
+fn nil_stringer_value(pass: &Pass<'_>, arg: &Expr) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let types = &artifacts.types;
+    let Some(t) = type_of_expr(pass, arg) else {
+        return false;
+    };
+    let TypeData::Pointer(p) = types.get(unalias_readonly(types, t)) else {
+        return false;
+    };
+    let elem = unalias_readonly(types, p.elem());
+    if matches!(types.get(elem.underlying(types)), TypeData::Interface(_)) {
+        return false;
+    }
+    let mut scratch = types.clone();
+    let found = match guff_types::lookup::lookup_field_or_method(
+        &mut scratch,
+        &artifacts.objects,
+        &artifacts.packages,
+        elem,
+        false,
+        None,
+        "String",
+    ) {
+        guff_types::lookup::LookupResult::Found { obj, .. } => obj,
+        _ => return false,
+    };
+    let guff_types::arena::ObjectData::Func(f) = artifacts.objects.get(found) else {
+        return false;
+    };
+    let Some(sig) = f.typ() else {
+        return false;
+    };
+    let TypeData::Signature(sig) = types.get(sig.underlying(types)) else {
+        return false;
+    };
+    if guff_types::tuple::tuple_len(types, sig.params()) != 0 || sig.variadic() {
+        return false;
+    }
+    let Some(results) = sig.results() else {
+        return false;
+    };
+    if guff_types::tuple::tuple_len(types, Some(results)) != 1 {
+        return false;
+    }
+    tuple_at(types, results, 0)
+        .typ(&artifacts.objects)
+        .is_some_and(|r| {
+            matches!(
+                types.get(unalias_readonly(types, r)),
+                TypeData::Basic(b) if b.kind() == guff_types::basic::BasicKind::String
+            )
+        })
 }
 
 /// Port of upstream `renderNodeEllipsis`: print the node with `go/printer`,

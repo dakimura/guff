@@ -1,0 +1,21 @@
+# Golden case: fatcontext v0.10.1's own testdata (no_structpointer, as its analyzer_test
+# runs it), vendored verbatim (LICENSE next to it), under golangci-lint 2.14.0.
+# golden-may-be-empty: upstream runs no_structpointer with check-struct-pointers
+# off to show that the struct-pointer shapes in it are not reported.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - fatcontext
+  settings:
+    fatcontext:
+      check-struct-pointers: false
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
