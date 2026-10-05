@@ -29,11 +29,30 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "SA9008 requires inspect analyzer".to_string())?
         .clone();
 
+    // `ir.EnclosingFunction` returns nil "for functions named `_`, because we
+    // don't generate IR for them" (v0.8 looks the declaration up by its name),
+    // and upstream skips the match — closures inside them included.
+    let blank_funcs: Vec<(i64, i64)> = pass
+        .files()
+        .iter()
+        .flat_map(|f| f.decls.iter())
+        .filter_map(|d| match d {
+            guff::ast::Decl::FuncDecl(fd) if fd.name.name == "_" => {
+                let n = NodeRef::FuncDecl(fd);
+                Some((guff::commentmap::node_pos(n).0, guff::commentmap::node_end(n).0))
+            }
+            _ => None,
+        })
+        .collect();
     let mut pending = Vec::new();
     inspect.preorder_typed(node_mask!(IfStmt), pass.files(), |n| {
         let NodeRef::IfStmt(ifs) = n else {
             return;
         };
+        let at = ifs.if_.0;
+        if blank_funcs.iter().any(|&(s, e)| s <= at && at < e) {
+            return;
+        }
         check_if(pass, ifs, &mut pending);
     });
     for (pos, msg) in pending {

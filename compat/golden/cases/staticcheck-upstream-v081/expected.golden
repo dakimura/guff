@@ -6,6 +6,8 @@
 
 # golangci-lint: 2.14.0
 
+blank/blank.go:23:7:staticcheck::SA9008: x refers to the result of a failed type assertion and is a zero value, not the value that was being type-asserted
+blank/blank.go:26:5:staticcheck::SA4031: this nil check is always true
 extra/sa1026.go:37:20:staticcheck::SA1026: trying to marshal unsupported type chan int, via x.A
 extra/sa1026.go:38:20:staticcheck::SA1026: trying to marshal unsupported type chan int, via x.A
 extra/sa1026.go:41:14:staticcheck::SA1026: trying to marshal unsupported type chan int, via x.Attrs.A

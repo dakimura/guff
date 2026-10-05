@@ -129,14 +129,14 @@ honnef IR は **SSI（σ ノード）をやめて go/ssa 相当の pruned SSA �
 | 単一 Exit ブロック廃止、noreturn は `Panic("noreturn")` + unreachable | `guff-ssa/src/emit.rs:453` が既に同形 | already-matches | — |
 | defer を持つ関数に **Recover ブロック**、`Function.Returns()` に含まれる | `guff-ssa/src/function.rs:215` DEFERRED、`dom.rs` / `blockopt.rs` TODO | needs-port（M。消費者 SA5012 fact / nilness fact が未移植なので今は観測差なし） | — |
 | 定数が命令でなくなり、使用ごとに別の Const | `program.rs:338` が既に使用ごとに alloc | already-matches | — |
-| `IsStub` が MakeInterface / Alloc を許可、外部関数を stub としない。`IsTrivial` 新設 | `passes/facts/purity.rs:223 is_stub` は v0.7 相当 | needs-port（S） | （st1005 の SA4017 消滅は IsStub では説明できない、§5） |
+| `IsStub` が MakeInterface / Alloc を許可、外部関数を stub としない。`IsTrivial` 新設 | `passes/facts/purity.rs:223 is_stub` は v0.7 相当 | **IsStub done (PR 14n)**（IsTrivial は nilness DFA と一緒に） | （st1005 の SA4017 消滅は IsStub では説明できない、§5） |
 | buildir が直接 import だけ作る / FuncValue が nil を返す | 推移閉包で作る。消費者は SA4023 の未移植枝だけ | not-applicable（SA4023 の Call 枝を移植するとき再検討） | — |
 | nilness fact を DFA に全面書き換え、typedness 削除 | どちらも未移植 | needs-port（L。SA4023 の Call/Extract 枝の前提） | — |
 | `IsPointerLike` → `MaybePointerLike` | `callcheck.rs:721` は Interface なら true で既に一致 | already-matches | — |
 | `CoreType` が要素型の異なる chan 項で nil | honnef CoreType の直接移植なし | unsure（極端な端例） | — |
 | `typeutil.Unify` 追加、unused の implements が完全単一化に | `guff-unused/src/lenient_implements.rs` は旧 methodsChecker | **done (PR 4)** | unused `genericiface/generic_iface.go:30,31` の extra 2 |
 | `SelectorName` の fallback 2 枝 | `code.rs knowledge_selector_name` に無い | **done (PR 5)** | SA1019 の文言（§4 staticcheck-checks） |
-| `EnclosingFunction` が `func _()` を見つけない | SA9008 は AST 実装で `_` を見ない。SA4031 は contextcheck 有効時だけ `_` が入る | needs-port（S） | — |
+| `EnclosingFunction` が `func _()` を見つけない | SA9008 は AST 実装で `_` を見ない。SA4031 は contextcheck 有効時だけ `_` が入る | **done (PR 14n)** | — |
 | ジェネリクス周りを go/ssa に再同期（issue 78110 の拡幅、MethodVal の Source を Sel に） | 土台は同系譜だが 78110 は 0 件 | unsure（M） | — |
 | 宣言が Go 1.27 の昇格フィールドキー | guff-types が型検査で拒否 | not-applicable | — |
 
@@ -203,7 +203,7 @@ analyzer 本体（L）が入るまでは finding 0 件になる —— これは
 | nonamedreturns | `allow-unused-named-returns` | false | 既に読む | already-matches |
 | goconst | `exclude-types`（Assignment/Binary/Case/Return/Call/CompositeLit、大小無視、未知値はエラー） / `ignore-map-keys`、`ignore-calls` は deprecated | **[Call]** / false | 無し | **done (PR 14i)**：goconst.rs を v1.11.0 visitor/api から全面移植。**ラッパの後付け規則**: ignore-calls:false かつ exclude-types がちょうど [Call] なら空。明示した exclude-types は既定を**置換**（マージしない） |
 | gomoddirectives | `replace-allow-all` / `ignore-forbidden`（struct のみ） | false / false | 無し（ignore-forbidden は DEFERRED） | **done (PR 2)**（ignore 既定ディレクトリ検査と、ブロック内の列も） |
-| gofumpt | `extra.group-params` / `extra.clothe-returns` / `extra.balance-calls`、`extra-rules` は deprecated | false ×3 | `extra-rules` だけ | needs-port。**文言とコードが食い違う**: 警告は「use extra.group-params instead」だが、`extra-rules: true` は 3 規則すべて（balance-calls 含む）を有効にする。コードに合わせる |
+| gofumpt | `extra.group-params` / `extra.clothe-returns` / `extra.balance-calls`、`extra-rules` は deprecated | false ×3 | `extra-rules` だけ | **done (PR 13)** |
 | iface | `enable: [unusedmethod]`、`settings.unusedmethod.exclude` | 既定は identical のみ | `IfaceSettings` の `settings.{unused,unusedmethod}.exclude`（golangci の `valueToString` どおりカンマ連結した flag 文字列を渡し、analyzer 側で分割・TrimSpace・空除去） | **done (PR 14h)** |
 | modernize | `disable` に書ける名前: fmtappendf 削除、waitgroup → waitgroupgo、7 個追加 | 旧名は warn（照合は改名しない） | 任意文字列を受理（受理は一致）、警告なし | **PR 2: 警告は done**（Suite は PR 1） |
 | gosec | `config.global` の `nosec-require-rules` / `nosec-require-justification`、代替タグの `#` 正規化 | 無効 | `config.global` 全体が DEFERRED | **done (PR 14l)**：nosec / `#nosec` / show-ignored / nosec-require-*（audit は G104 だけに効くので DEFERRED） |
@@ -243,7 +243,7 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 | 10 | GoConstSettings ExcludeTypes / IgnoreMapKeys | new-option | goconst の新キーとラッパの互換処理 | settings.rs GoconstSettings:502 | **done (PR 14i)**：goconst.rs を v1.11.0 visitor/api から全面移植 | M | goconst_exclude_types.{go,yml} |
 | 11 | GoModDirectivesSettings | new-option | replace-allow-all / ignore-forbidden | settings.rs:2207 | **done (PR 2)** | S | — |
 | 12 | NoNamedReturnsSettings | new-option | allow-unused-named-returns | settings.rs:1342, nonamedreturns.rs:1060 | already-matches | S | — |
-| 13 | formatters_settings.go GoFumptExtra | new-option | gofumpt `extra.*`、extra-rules deprecated | guff-lint/src/config.rs:590, guff-fmt/src/gofumpt.rs | needs-port | M | gofumpt_with_extra.{go,yml} |
+| 13 | formatters_settings.go GoFumptExtra | new-option | gofumpt `extra.*`、extra-rules deprecated | guff-lint/src/config.rs:590, guff-fmt/src/gofumpt.rs | **done (PR 13)** | M | gofumpt_with_extra.{go,yml} |
 | 14 | jsonschema iface-analyzers | config-schema | iface `unusedmethod` と exclude | settings.rs IfaceSettings:2137, iface.rs | **done (PR 14h)**（`enable` に opaque / unexported / unusedmethod も受理） | M | iface_unusedmethod.{go,yml} |
 | 15 | jsonschema modernize-analyzers | config-schema | disable 名の変更と旧名警告。guff は fmtappendf を既定で走らせ続ける | settings.rs ModernizeSettings, modernize.rs:111,8305 | **done (PR 2 / PR 12)**：旧名警告は settings.rs、fmtappendf は v0.50 の suite から外した | M | — |
 | 16 | goformatters/gci standard_list.go | behavior | std 一覧に crypto/mldsa, uuid（guff は go1.26 分の 4 つも欠落、計 6） | guff-fmt/src/native/gci_std_packages.txt | **done (PR 14l)**：go1.27 の一覧に転記（fmt case gci-std-go127） | S | — |
@@ -386,7 +386,7 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 | 2 | go/ir func.go / source.go（debugRef 非公開） | substrate | Referrers から DebugRef が消える | guff-analysis/src/ssa_util.rs:61, buildir.rs:247, sa6001.rs:193 ほか | needs-port | M | testdata/valueforexpr.go |
 | 3 | go/ir exit 廃止 / noreturn | substrate | Exit 廃止（Recover 部分は #17） | guff-ssa/src/emit.rs:453 | already-matches | S | — |
 | 4 | go/ir const.go | substrate | 定数が命令でなく、使用ごと | guff-ssa/src/program.rs:330 | already-matches | S | — |
-| 5 | irutil/stub.go | behavior | IsStub の拡張、IsTrivial | passes/facts/purity.rs:223 | needs-port | S | — |
+| 5 | irutil/stub.go | behavior | IsStub の拡張、IsTrivial | passes/facts/purity.rs:223 | **IsStub done (PR 14n)**（MakeInterface / Alloc、ソース無しは stub でない）。IsTrivial は SA4023 の nilness DFA（#7）と一緒に | S | — |
 | 6 | buildir.go 直接 import | behavior | FuncValue が nil | guff-ssa/src/ssautil/load.rs:310 | not-applicable | S | testdata/indirect.txtar |
 | 7 | analysis/facts/nilness（DFA） | substrate | nilness fact 書き換え、typedness 削除 | 無し | needs-port | L | Nilness/*.go |
 | 8 | typeutil MaybePointerLike | behavior | 項なし型パラメータ | callcheck.rs:721 | already-matches | S | — |
@@ -398,14 +398,14 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 | 14 | generate.go（sa5011 無効化） | removed-check | SA5011 が Analyzers から消える | lib.rs:329 | **done (PR 4)** | S | — |
 | 15 | go/ir compLit 昇格キー | behavior | Go 1.27 | guff-types/src/literals.rs:272 | not-applicable | M | — |
 | 16 | go/ir generics 再同期 | substrate | 78110 拡幅、MethodVal の Source | guff-ssa/src/instantiate.rs ほか | unsure | M | fixedbugs/issue78110.go ほか |
-| 17 | go/ir source.go EnclosingFunction | behavior | `func _()` を見つけない（SA4031 / SA9008） | sa9008.rs, sa4031.rs:150, buildir.rs:153,178 | needs-port | S | — |
+| 17 | go/ir source.go EnclosingFunction | behavior | `func _()` を見つけない（SA4031 / SA9008） | sa9008.rs, sa4031.rs:150, buildir.rs:153,178 | **done (PR 14n)**：SA9008 が `func _` を飛ばす（SA4031 は既に一致）。golden staticcheck-upstream-v081 の blank/ | S | — |
 | 18 | go/ir createRecoverBlock / dom.go | substrate | Recover ブロック（Returns() に含まれる） | guff-ssa/src/function.rs:215, dom.rs, blockopt.rs:50 | needs-port | M | — |
 
 ### staticcheck-xtinternal
 
 | # | upstream_path | kind | 要約 | guff の場所 | status | effort | upstream testdata |
 |---|---------------|------|------|-------------|--------|--------|-------------------|
-| 1 | internal/xtools-internal/versions | behavior | FileVersion の Future 化。**guff-ssa に forStmtGo122 が無い** | guff-ssa/src/builder/stmt.rs:1280 for_stmt | needs-port | S | — |
+| 1 | internal/xtools-internal/versions | behavior | FileVersion の Future 化。**guff-ssa に forStmtGo122 が無い** | guff-ssa/src/builder/stmt.rs:1280 for_stmt | needs-port（**S ではなく M**：guff-ssa に Go 1.22 の 3 節 for のイテレーション毎変数そのものが無い。loop 変数を捕まえる closure の値が変わる substrate の変更） | S | — |
 | 2 | xtools-internal typeindex | behavior | Origin 記録と Calls 拡張（現行パターンでは観測不能） | typeindex.rs:86 DEFERRED | not-applicable | S | — |
 
 ### revive（v1.15 → v1.17）
