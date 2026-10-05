@@ -674,12 +674,10 @@ fn ioutil_diagnostics(caller: &str) -> Vec<(i64, i64, String)> {
 
 #[test]
 fn inline_flags_ioutil_go_version_mismatch() {
-    // The callee side of this comparison is the *host toolchain* version, and
-    // `version_compare` only reads major.minor. A literal caller version made
-    // the test a function of which Go the machine had: on go1.24.x a "1.24.3"
-    // caller compared equal, the diagnostic never fired, and the test failed.
-    // Derive a caller one minor below the toolchain so the mismatch holds on
-    // any Go.
+    // The callee side of this comparison is the Go that built the pinned
+    // golangci-lint (`UPSTREAM_BUILD_GO`), and `version_compare` only reads
+    // major.minor. Derive a caller one minor below it so the mismatch holds
+    // whatever that version is.
     let toolchain = guff_analysis::code::toolchain_go_version();
     let caller = one_minor_below(&toolchain);
     let want: Vec<(i64, i64, String)> = IOUTIL_CALL_SITES
