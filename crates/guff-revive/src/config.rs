@@ -117,6 +117,9 @@ pub const EXTENDED_RULES: &[&str] = &[
     "enforce-repeated-arg-type-style",
     "package-directory-mismatch",
     "forbidden-call-in-wg-go",
+    // In upstream's `allRules` since before v1.15.0; guff had neither rule.
+    "redundant-build-tag",
+    "use-waitgroup-go",
     // revive v1.17.0 (golangci-lint 2.14.0).
     "use-slices-concat",
     "multiline-if-init",

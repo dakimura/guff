@@ -419,8 +419,8 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 | 5 | rule/marshal_receiver.go | new-check | 新 rule | 無し | **done (PR 10)** | S | marshal_receiver.go |
 | 6 | rule/use_slices_concat.go | new-check | 新 rule | 無し | **done (PR 10)** | M | use_slices_concat.go, go1.22/use_slices_concat.go |
 | 7 | rule/multiline_if_init.go | new-check | allRules 入り | config.rs AHEAD_OF_PIN_RULES | **done (PR 10)**: EXTENDED_RULES へ、AHEAD_OF_PIN_RULES は空 | S | multiline_if_init.go |
-| 8 | rule/redundant_build_tag.go | behavior | `//go:build go1.X` の冗長検出（rule ごと未実装） | 無し | needs-port（rule ごと未実装。2.12.2 以前からの欠落で PR 14 へ） | M | go1.21/redundant_build_tag*.go, redundant_build_tag.go |
-| 9 | rule/use_waitgroup_go.go | behavior | ループ内の go 文も（rule ごと未実装） | 無し | needs-port（rule ごと未実装。2.12.2 以前からの欠落で PR 14 へ） | M | go1.25/use_waitgroup_go.go |
+| 8 | rule/redundant_build_tag.go | behavior | `//go:build go1.X` の冗長検出（rule ごと未実装） | 無し | **done (PR 14c)**: golden `revive-v117-buildtag`（`run.build-tags: [tag]`、Go 1.21 module）。go/parser のコメントグループ境界を `scan_comment_groups` で | M | go1.21/redundant_build_tag*.go, redundant_build_tag.go |
+| 9 | rule/use_waitgroup_go.go | behavior | ループ内の go 文も（rule ごと未実装） | 無し | **done (PR 14c)**: golden `revive-v117`（go1.25 版）と `revive-v117-buildtag`（1.21 で沈黙） | M | go1.25/use_waitgroup_go.go |
 | 10 | rule/redundant_test_main_exit.go | behavior | m.Run() 由来の Exit だけ報告 | rules/redundant_test_main_exit.rs | **done (PR 10)** | M | redundant_test_main_exit_test.go |
 | 11 | rule/unexported_return.go | behavior | interface 例外を削除 | rules/unexported_return.rs | **done (PR 10)**: あわせて test ファイルの `IsImportable` を per-file に（既存の取りこぼし） | S | unexported_return_package_*.go |
 | 12 | rule/comment_spacings.go | default-change | 既定 allow-list に `//#nosec` | rules/comment_spacings.rs | **done (PR 10)** | S | comment_spacings*.go |

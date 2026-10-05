@@ -21,3 +21,4 @@ urmain/main_test.go                     crates/guff-revive/tests/testdata/revive
 urmain/maintest_test.go                 crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/unexported_return_package_maintest_test.go
 urlocal/unexported_return_interface.go  crates/guff-revive/tests/testdata/revive/unexported_return_interface.go
 testmainexit/redundant_test_main_exit_test.go  crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/go1.15/redundant_test_main_exit_test.go
+wggo/use_waitgroup_go.go  crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/go1.25/use_waitgroup_go.go

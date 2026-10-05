@@ -1,0 +1,26 @@
+# Golden case: revive's redundant-build-tag on its v1.17.0 testdata, in a
+# Go 1.21 module (the version gate) with the `tag` build tag set so the
+# `//go:build tag` files load at all. use-waitgroup-go runs too: its Go 1.25
+# gate keeps it silent here (its positive side is in revive-v117).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      severity: warning
+      rules:
+        - name: redundant-build-tag
+        - name: use-waitgroup-go
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  build-tags:
+    - tag

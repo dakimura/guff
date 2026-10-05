@@ -451,6 +451,79 @@ pub fn scan_comments(pass: &Pass<'_>, index: usize) -> Option<Vec<ScannedComment
     Some(out)
 }
 
+/// [`scan_comments`], grouped as go/parser groups them into `ast.CommentGroup`s:
+/// a blank line or any token ends a group, and a comment trailing code on its
+/// line starts a group of its own that only takes comments on that line.
+pub fn scan_comment_groups(pass: &Pass<'_>, index: usize) -> Option<Vec<Vec<ScannedComment>>> {
+    let pkg = pass.pkg();
+    let path = pkg.compiled_go_files.get(index)?;
+    let owned;
+    let src: &[u8] = match pkg.source_bytes(index) {
+        Some(b) => b,
+        None => {
+            owned = fs::read(path).ok()?;
+            &owned
+        }
+    };
+    let scratch = FileSet::new();
+    let sfile = scratch.add_file(path.file_name()?.to_str()?, scratch.base(), src.len() as i64);
+    let target = pass.fset().file(pass.files().get(index)?.pos())?;
+    let mut s: Scanner<'_> = Scanner::new();
+    s.init(Arc::clone(&sfile), src, None, SCAN_COMMENTS);
+    let line = |p: guff::Pos| sfile.position_for(p, false).line;
+    let mut groups: Vec<Vec<ScannedComment>> = Vec::new();
+    let mut open = false; // the last group can still grow
+    let mut trailing = false; // ...and started after code on its line
+    let mut last_end_line = 0i64;
+    let mut prev_tok_line = 0i64;
+    loop {
+        let (pos, tok, lit) = s.scan();
+        match tok {
+            Token::EOF => break,
+            Token::COMMENT => {
+                let offset = sfile.offset(pos);
+                if offset < 0 || offset > target.size() {
+                    continue;
+                }
+                let start = line(pos);
+                let end = start + lit.matches('\n').count() as i64;
+                let joins = open
+                    && if trailing { start == last_end_line } else { start <= last_end_line + 1 };
+                if !joins {
+                    groups.push(Vec::new());
+                    trailing = prev_tok_line == start;
+                }
+                groups.last_mut()?.push(ScannedComment {
+                    pos: target.pos(offset).0 as u32,
+                    text: lit.into_owned(),
+                });
+                open = true;
+                last_end_line = end;
+            }
+            _ => {
+                open = false;
+                prev_tok_line = line(pos);
+            }
+        }
+    }
+    Some(groups)
+}
+
+/// The Go language version the rules are gated on (`run.go`, else the
+/// module's), as `(major, minor)`; `None` when neither is known.
+pub fn go_lang_version(pass: &Pass<'_>) -> Option<(u32, u32)> {
+    let configured = crate::config::configured_go_version(pass);
+    let module = pass
+        .pkg()
+        .module
+        .as_ref()
+        .map(|m| m.go_version.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let version = configured.filter(|s| !s.trim().is_empty()).or(module)?;
+    Some(parse_go_version(&version))
+}
+
 /// Translate a position from a [`reparse_with_comments`] `FileSet` into the
 /// pass's, so a comment found only in the reparse can still be reported.
 ///

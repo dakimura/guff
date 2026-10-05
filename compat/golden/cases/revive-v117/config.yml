@@ -27,6 +27,8 @@ linters:
         - name: use-any
         - name: use-errors-new
         - name: use-slices-concat
+        - name: use-waitgroup-go
+        - name: redundant-build-tag
 
 issues:
   max-issues-per-linter: 0
