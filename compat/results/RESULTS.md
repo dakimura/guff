@@ -4,15 +4,9 @@
 |--------|-----:|---------:|-----:|--:|--:|-----------:|
 | fixture | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | local | 108 | 108 | 108 | 100.0% | 100.0% | 0 |
-| gin | 9 | 10 | 9 | 100.0% | 90.0% | 0 |
-| caddy | 0 | 6 | 0 | 100.0% | 0.0% | 0 |
-| helm | 79 | 80 | 79 | 100.0% | 98.8% | 0 |
-| k9s | 636 | 597 | 493 | 77.5% | 82.6% | 0 |
-| cobra | 157 | 152 | 149 | 94.9% | 98.0% | 0 |
-| go-client | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
-| consul | 257 | 260 | 255 | 99.2% | 98.1% | 0 |
-| grafana | 4 | 126 | 4 | 100.0% | 3.2% | 0 |
-| containerd | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
+| controller-runtime | 313 | 305 | 298 | 95.2% | 97.7% | 0 |
+| vault | 163 | 163 | 163 | 100.0% | 100.0% | 0 ** |
+| kubernetes | 5 | 5 | 5 | 100.0% | 100.0% | 0 ** |
 
 Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unexpected` counts diffs not covered by the allowlist (`compat/allowlists/`).
 
@@ -33,127 +27,87 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 | staticcheck | 72 | 72 | 72 | 100.0% | 100.0% |
 | unused | 12 | 12 | 12 | 100.0% | 100.0% |
 
-## gin
+## controller-runtime
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| gofumpt | 0 | 1 | 0 | 100.0% | 0.0% |
-| gosec | 2 | 2 | 2 | 100.0% | 100.0% |
-| govet | 7 | 7 | 7 | 100.0% | 100.0% |
-
-### Allowed known diffs (1)
-- golangci-only: `binding/json_test.go:134:gofumpt:File is not properly formatted`
-
-## caddy
-
-| Linter | guff | golangci | both | P | R |
-|--------|-----:|---------:|-----:|--:|--:|
-| gofumpt | 0 | 5 | 0 | 100.0% | 0.0% |
-| staticcheck | 0 | 1 | 0 | 100.0% | 0.0% |
-
-### Allowed known diffs (6)
-- golangci-only: `caddytest/caddytest.go:341:staticcheck:(net.Dialer).DualStack has been deprecated since Go 1.12: Fast Fallback is enabled by default. To disable, set FallbackDelay to a negative value.`
-- golangci-only: `modules/caddyhttp/fileserver/matcher.go:625:gofumpt:File is not properly formatted`
-- golangci-only: `modules/caddyhttp/server.go:638:gofumpt:File is not properly formatted`
-- golangci-only: `modules/caddytls/fileloader.go:120:gofumpt:File is not properly formatted`
-- golangci-only: `modules/caddytls/folderloader.go:178:gofumpt:File is not properly formatted`
-- golangci-only: `modules/caddytls/pemloader.go:92:gofumpt:File is not properly formatted`
-
-## helm
-
-| Linter | guff | golangci | both | P | R |
-|--------|-----:|---------:|-----:|--:|--:|
-| modernize | 79 | 79 | 79 | 100.0% | 100.0% |
-| staticcheck | 0 | 1 | 0 | 100.0% | 0.0% |
-
-### Allowed known diffs (1)
-- golangci-only: `pkg/kube/client_test.go:81:staticcheck:(k8s.io/apimachinery/pkg/apis/meta/v1.ObjectMeta).SelfLink is deprecated: selfLink is a legacy read-only field that is no longer populated by the system. +optional`
-
-## k9s
-
-| Linter | guff | golangci | both | P | R |
-|--------|-----:|---------:|-----:|--:|--:|
-| errcheck | 1 | 1 | 1 | 100.0% | 100.0% |
-| goconst | 626 | 587 | 483 | 77.2% | 82.3% |
-| gosec | 7 | 7 | 7 | 100.0% | 100.0% |
-| govet | 1 | 1 | 1 | 100.0% | 100.0% |
-| intrange | 1 | 1 | 1 | 100.0% | 100.0% |
-
-### Allowed known diffs (247)
-- guff-only: `internal/config/scans_test.go:27:goconst:string `ns-2` has 8 occurrences, make it a constant`
-- guff-only: `internal/config/scans_test.go:33:goconst:string `ns-1` has 5 occurrences, make it a constant`
-- guff-only: `internal/dao/registry.go:209:goconst:string `xrays` has 3 occurrences, make it a constant`
-- guff-only: `internal/dao/registry.go:210:goconst:string `XRays` has 3 occurrences, make it a constant`
-- guff-only: `internal/dao/registry.go:211:goconst:string `xray` has 4 occurrences, make it a constant`
-- guff-only: `internal/dao/registry.go:241:goconst:string `delete` has 6 occurrences, make it a constant`
-- guff-only: `internal/dao/registry.go:279:goconst:string `helm` has 3 occurrences, but such constant `helmCat` already exists`
-- guff-only: `internal/dao/registry.go:297:goconst:string `Rules` has 3 occurrences, make it a constant`
-- … and 239 more (see `compat/allowlists/`)
-
-## cobra
-
-| Linter | guff | golangci | both | P | R |
-|--------|-----:|---------:|-----:|--:|--:|
-| goconst | 156 | 151 | 148 | 94.9% | 98.0% |
-| gosec | 1 | 1 | 1 | 100.0% | 100.0% |
-
-### Allowed known diffs (11)
-- guff-only: `command.go:1192:goconst:string `true` has 6 occurrences, make it a constant`
-- guff-only: `completions.go:802:goconst:string `bash` has 6 occurrences, make it a constant`
-- guff-only: `completions.go:837:goconst:string `zsh` has 6 occurrences, make it a constant`
-- guff-only: `completions.go:876:goconst:string `fish` has 6 occurrences, make it a constant`
-- guff-only: `completions.go:901:goconst:string `powershell` has 6 occurrences, make it a constant`
-- guff-only: `completions_test.go:2548:goconst:string `bash` has 6 occurrences, make it a constant`
-- guff-only: `completions_test.go:3879:goconst:string `true` has 6 occurrences, make it a constant`
-- guff-only: `shell_completions.go:39:goconst:string `true` has 6 occurrences, make it a constant`
-- … and 3 more (see `compat/allowlists/`)
-
-## go-client
-
-| Linter | guff | golangci | both | P | R |
-|--------|-----:|---------:|-----:|--:|--:|
-| goconst | 1 | 1 | 1 | 100.0% | 100.0% |
-
-## consul
-
-| Linter | guff | golangci | both | P | R |
-|--------|-----:|---------:|-----:|--:|--:|
-| gofmt | 0 | 1 | 0 | 100.0% | 0.0% |
-| govet | 18 | 18 | 18 | 100.0% | 100.0% |
-| staticcheck | 239 | 241 | 237 | 99.2% | 98.3% |
-
-### Allowed known diffs (7)
-- guff-only: `agent/event_endpoint_test.go:115:staticcheck:err refers to the result of a failed type assertion and is a zero value, not the value that was being type-asserted`
-- guff-only: `agent/http_test.go:1728:staticcheck:err refers to the result of a failed type assertion and is a zero value, not the value that was being type-asserted`
-- golangci-only: `agent/agent.go:3191:staticcheck:this comparison is always true`
-- golangci-only: `agent/catalog_endpoint_test.go:1148:staticcheck:this value of req is never used`
-- golangci-only: `agent/checks/check.go:1131:staticcheck:this comparison is never true`
-- golangci-only: `agent/consul/state/config_entry.go:526:staticcheck:this comparison is always true`
-- golangci-only: `agent/proxycfg/state_test.go:3768:gofmt:File is not properly formatted`
-
-## grafana
-
-| Linter | guff | golangci | both | P | R |
-|--------|-----:|---------:|-----:|--:|--:|
-| exhaustive | 0 | 1 | 0 | 100.0% | 0.0% |
-| goimports | 0 | 4 | 0 | 100.0% | 0.0% |
-| gosec | 0 | 2 | 0 | 100.0% | 0.0% |
-| staticcheck | 4 | 119 | 4 | 100.0% | 3.4% |
-
-### Allowed known diffs (122)
-- golangci-only: `pkg/api/annotations.go:145:staticcheck:(github.com/grafana/grafana/pkg/services/annotations.Item).DashboardID is deprecated: Use DashboardUID and OrgID instead`
-- golangci-only: `pkg/api/annotations.go:420:staticcheck:(github.com/grafana/grafana/pkg/services/annotations.DeleteParams).DashboardID is deprecated: Use DashboardUID and OrgID instead`
-- golangci-only: `pkg/api/annotations.go:44:staticcheck:(github.com/grafana/grafana/pkg/services/annotations.ItemQuery).DashboardID is deprecated: Use DashboardUID and OrgID instead`
-- golangci-only: `pkg/api/annotations_test.go:331:staticcheck:(github.com/grafana/grafana/pkg/services/annotations.Item).DashboardID is deprecated: Use DashboardUID and OrgID instead`
-- golangci-only: `pkg/api/annotations_test.go:332:staticcheck:(github.com/grafana/grafana/pkg/services/annotations.Item).DashboardID is deprecated: Use DashboardUID and OrgID instead`
-- golangci-only: `pkg/api/annotations_test.go:336:staticcheck:(github.com/grafana/grafana/pkg/services/dashboards.Dashboard).FolderID is deprecated: use FolderUID instead`
-- golangci-only: `pkg/api/annotations_test.go:338:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead`
-- golangci-only: `pkg/api/annotations_test.go:369:staticcheck:(github.com/grafana/grafana/pkg/services/annotations.Item).DashboardID is deprecated: Use DashboardUID and OrgID instead`
-- … and 114 more (see `compat/allowlists/`)
-
-## containerd
-
-| Linter | guff | golangci | both | P | R |
-|--------|-----:|---------:|-----:|--:|--:|
-| gosec | 1 | 1 | 1 | 100.0% | 100.0% |
+| goconst | 294 | 286 | 279 | 94.9% | 97.6% |
+| govet | 5 | 5 | 5 | 100.0% | 100.0% |
 | modernize | 1 | 1 | 1 | 100.0% | 100.0% |
+| nolintlint | 1 | 1 | 1 | 100.0% | 100.0% |
+| staticcheck | 12 | 12 | 12 | 100.0% | 100.0% |
+
+### Allowed known diffs (22)
+- guff-only: `pkg/client/fake/client.go:1428:goconst:string `ConfigMap` has 9 occurrences, make it a constant`
+- guff-only: `pkg/client/fake/client.go:1446:goconst:string `node` has 10 occurrences, make it a constant`
+- guff-only: `pkg/client/fake/client_test.go:1595:goconst:string `node` has 10 occurrences, make it a constant`
+- guff-only: `pkg/client/fake/client_test.go:618:goconst:string `ConfigMap` has 9 occurrences, make it a constant`
+- guff-only: `pkg/envtest/crd.go:391:goconst:string `v1beta1` has 17 occurrences, make it a constant`
+- guff-only: `pkg/envtest/envtest_suite_test.go:61:goconst:string `ValidatingWebhookConfiguration` has 3 occurrences, make it a constant`
+- guff-only: `pkg/envtest/envtest_suite_test.go:84:goconst:string `default` has 4 occurrences, make it a constant`
+- guff-only: `pkg/envtest/envtest_test.go:106:goconst:string `v1beta1` has 17 occurrences, make it a constant`
+- … and 14 more (see `compat/allowlists/`)
+
+## vault
+
+| Linter | guff | golangci | both | P | R |
+|--------|-----:|---------:|-----:|--:|--:|
+| errcheck | 23 | 23 | 23 | 100.0% | 100.0% |
+| govet | 63 | 63 | 63 | 100.0% | 100.0% |
+| ineffassign | 2 | 2 | 2 | 100.0% | 100.0% |
+| staticcheck | 71 | 71 | 71 | 100.0% | 100.0% |
+| unused | 4 | 4 | 4 | 100.0% | 100.0% |
+
+### Stale allowlist entries (no longer a diff: delete them)
+- guff-only: `helper/pgpkeys/flag_test.go:118:govet:inline: cannot inline call to ioutil.TempDir (declared using go1.26) into a file using go1.24.3`
+- guff-only: `helper/pgpkeys/flag_test.go:124:govet:inline: cannot inline call to ioutil.WriteFile (declared using go1.26) into a file using go1.24.3`
+- guff-only: `helper/pgpkeys/flag_test.go:31:govet:inline: cannot inline call to ioutil.TempDir (declared using go1.26) into a file using go1.24.3`
+- guff-only: `helper/pgpkeys/flag_test.go:42:govet:inline: cannot inline call to ioutil.WriteFile (declared using go1.26) into a file using go1.24.3`
+- guff-only: `helper/pgpkeys/flag_test.go:50:govet:inline: cannot inline call to ioutil.WriteFile (declared using go1.26) into a file using go1.24.3`
+- guff-only: `helper/pgpkeys/flag_test.go:58:govet:inline: cannot inline call to ioutil.WriteFile (declared using go1.26) into a file using go1.24.3`
+- guff-only: `helper/pgpkeys/flag_test.go:81:govet:inline: cannot inline call to ioutil.TempDir (declared using go1.26) into a file using go1.24.3`
+- guff-only: `helper/pgpkeys/flag_test.go:87:govet:inline: cannot inline call to ioutil.WriteFile (declared using go1.26) into a file using go1.24.3`
+- guff-only: `helper/pgpkeys/flag_test.go:91:govet:inline: cannot inline call to ioutil.WriteFile (declared using go1.26) into a file using go1.24.3`
+- guff-only: `helper/pgpkeys/flag_test.go:95:govet:inline: cannot inline call to ioutil.WriteFile (declared using go1.26) into a file using go1.24.3`
+- guff-only: `helper/pkcs7/sign_test.go:115:govet:inline: cannot inline call to ioutil.TempFile (declared using go1.26) into a file using go1.24.3`
+- guff-only: `helper/pkcs7/sign_test.go:131:govet:inline: cannot inline call to ioutil.TempFile (declared using go1.26) into a file using go1.24.3`
+- guff-only: `helper/pkcs7/sign_test.go:163:govet:inline: cannot inline call to ioutil.TempFile (declared using go1.26) into a file using go1.24.3`
+- guff-only: `helper/pkcs7/sign_test.go:269:govet:inline: cannot inline call to ioutil.TempFile (declared using go1.26) into a file using go1.24.3`
+- guff-only: `helper/testhelpers/teststorage/teststorage.go:106:govet:inline: cannot inline call to ioutil.TempDir (declared using go1.26) into a file using go1.24.3`
+- guff-only: `helper/testhelpers/teststorage/teststorage.go:75:govet:inline: cannot inline call to ioutil.TempDir (declared using go1.26) into a file using go1.24.3`
+- guff-only: `helper/testhelpers/teststorage/teststorage_reusable.go:163:govet:inline: cannot inline call to ioutil.TempDir (declared using go1.26) into a file using go1.24.3`
+- golangci-only: `helper/pgpkeys/flag_test.go:118:govet:inline: cannot inline call to ioutil.TempDir (declared using go1.27) into a file using go1.24.3`
+- golangci-only: `helper/pgpkeys/flag_test.go:124:govet:inline: cannot inline call to ioutil.WriteFile (declared using go1.27) into a file using go1.24.3`
+- golangci-only: `helper/pgpkeys/flag_test.go:31:govet:inline: cannot inline call to ioutil.TempDir (declared using go1.27) into a file using go1.24.3`
+- golangci-only: `helper/pgpkeys/flag_test.go:42:govet:inline: cannot inline call to ioutil.WriteFile (declared using go1.27) into a file using go1.24.3`
+- golangci-only: `helper/pgpkeys/flag_test.go:50:govet:inline: cannot inline call to ioutil.WriteFile (declared using go1.27) into a file using go1.24.3`
+- golangci-only: `helper/pgpkeys/flag_test.go:58:govet:inline: cannot inline call to ioutil.WriteFile (declared using go1.27) into a file using go1.24.3`
+- golangci-only: `helper/pgpkeys/flag_test.go:81:govet:inline: cannot inline call to ioutil.TempDir (declared using go1.27) into a file using go1.24.3`
+- golangci-only: `helper/pgpkeys/flag_test.go:87:govet:inline: cannot inline call to ioutil.WriteFile (declared using go1.27) into a file using go1.24.3`
+- golangci-only: `helper/pgpkeys/flag_test.go:91:govet:inline: cannot inline call to ioutil.WriteFile (declared using go1.27) into a file using go1.24.3`
+- golangci-only: `helper/pgpkeys/flag_test.go:95:govet:inline: cannot inline call to ioutil.WriteFile (declared using go1.27) into a file using go1.24.3`
+- golangci-only: `helper/pkcs7/sign_test.go:115:govet:inline: cannot inline call to ioutil.TempFile (declared using go1.27) into a file using go1.24.3`
+- golangci-only: `helper/pkcs7/sign_test.go:131:govet:inline: cannot inline call to ioutil.TempFile (declared using go1.27) into a file using go1.24.3`
+- golangci-only: `helper/pkcs7/sign_test.go:163:govet:inline: cannot inline call to ioutil.TempFile (declared using go1.27) into a file using go1.24.3`
+- golangci-only: `helper/pkcs7/sign_test.go:269:govet:inline: cannot inline call to ioutil.TempFile (declared using go1.27) into a file using go1.24.3`
+- golangci-only: `helper/testhelpers/teststorage/teststorage.go:106:govet:inline: cannot inline call to ioutil.TempDir (declared using go1.27) into a file using go1.24.3`
+- golangci-only: `helper/testhelpers/teststorage/teststorage.go:75:govet:inline: cannot inline call to ioutil.TempDir (declared using go1.27) into a file using go1.24.3`
+- golangci-only: `helper/testhelpers/teststorage/teststorage_reusable.go:163:govet:inline: cannot inline call to ioutil.TempDir (declared using go1.27) into a file using go1.24.3`
+
+## kubernetes
+
+| Linter | guff | golangci | both | P | R |
+|--------|-----:|---------:|-----:|--:|--:|
+| govet | 5 | 5 | 5 | 100.0% | 100.0% |
+
+### Stale allowlist entries (no longer a diff: delete them)
+- guff-only: `staging/src/k8s.io/apimachinery/pkg/api/apitesting/roundtrip/compatibility.go:337:govet:inline: cannot inline call to ioutil.ReadFile (declared using go1.26) into a file using go1.24.0`
+- guff-only: `staging/src/k8s.io/apimachinery/pkg/api/apitesting/roundtrip/compatibility.go:339:govet:inline: cannot inline call to ioutil.ReadFile (declared using go1.26) into a file using go1.24.0`
+- guff-only: `staging/src/k8s.io/apimachinery/pkg/api/apitesting/roundtrip/compatibility.go:341:govet:inline: cannot inline call to ioutil.ReadFile (declared using go1.26) into a file using go1.24.0`
+- guff-only: `staging/src/k8s.io/apimachinery/pkg/api/apitesting/roundtrip/compatibility.go:363:govet:inline: cannot inline call to ioutil.WriteFile (declared using go1.26) into a file using go1.24.0`
+- guff-only: `staging/src/k8s.io/apimachinery/pkg/runtime/serializer/streaming/streaming_test.go:44:govet:inline: cannot inline call to ioutil.NopCloser (declared using go1.26) into a file using go1.24.0`
+- golangci-only: `staging/src/k8s.io/apimachinery/pkg/api/apitesting/roundtrip/compatibility.go:337:govet:inline: cannot inline call to ioutil.ReadFile (declared using go1.27) into a file using go1.24.0`
+- golangci-only: `staging/src/k8s.io/apimachinery/pkg/api/apitesting/roundtrip/compatibility.go:339:govet:inline: cannot inline call to ioutil.ReadFile (declared using go1.27) into a file using go1.24.0`
+- golangci-only: `staging/src/k8s.io/apimachinery/pkg/api/apitesting/roundtrip/compatibility.go:341:govet:inline: cannot inline call to ioutil.ReadFile (declared using go1.27) into a file using go1.24.0`
+- golangci-only: `staging/src/k8s.io/apimachinery/pkg/api/apitesting/roundtrip/compatibility.go:363:govet:inline: cannot inline call to ioutil.WriteFile (declared using go1.27) into a file using go1.24.0`
+- golangci-only: `staging/src/k8s.io/apimachinery/pkg/runtime/serializer/streaming/streaming_test.go:44:govet:inline: cannot inline call to ioutil.NopCloser (declared using go1.27) into a file using go1.24.0`
