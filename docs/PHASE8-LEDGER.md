@@ -549,12 +549,12 @@ v5 の `analyzer/testdata` は module zip に無い。GitHub の v5.2.0 タグ�
 | 4 | dupword skip-raw-strings | new-option | raw 文字列を検査しない | guff-comment/src/dupword.rs | **done (PR 2)** | S | raw_string_sql/a.go, dupword_skip_raw_strings.{go,yml} |
 | 5 | dupword raw fix | behavior | raw のまま書き戻す | dupword.rs check_string_lit | **done (PR 2)** | S | raw_string_multiline/*, raw_string_dup/a.go |
 | 6 | dupword checkOneKey 末尾 | behavior | 末尾空白直前の単語を比較（最終バイトを rune 扱い） | dupword.rs check_one_key | **done (PR 2)** | M | raw_string_multiline/* |
-| 7 | tagalign find | behavior | 離れたインライン struct フィールドもグループに | guff-style/src/tagalign.rs:166 | needs-port | S | — |
-| 8 | noinlineerr errMessage | message | `=` 代入用の文言 | guff-style/src/noinlineerr.rs:50 | needs-port | S | a/main.go{,.golden} |
-| 9 | noinlineerr shadow チェック | behavior | `:=` のときだけ（親スコープのみの Lookup） | noinlineerr.rs:193 | needs-port | S | a/main.go{,.golden} |
-| 10 | wsl checkCuddlingMaxAllowed | behavior | LabeledStmt を剥がして判定 | guff-style/src/wsl_v5.rs check_cuddle_blockish | needs-port | S | default_config/if/if.go{,.golden} |
+| 7 | tagalign find | behavior | 離れたインライン struct フィールドもグループに | guff-style/src/tagalign.rs:166 | **done (PR 14g)** | S | — |
+| 8 | noinlineerr errMessage | message | `=` 代入用の文言 | guff-style/src/noinlineerr.rs:50 | **done (PR 14g)** | S | a/main.go{,.golden} |
+| 9 | noinlineerr shadow チェック | behavior | `:=` のときだけ（親スコープのみの Lookup） | noinlineerr.rs:193 | **done (PR 14g)** | S | a/main.go{,.golden} |
+| 10 | wsl checkCuddlingMaxAllowed | behavior | LabeledStmt を剥がして判定 | guff-style/src/wsl_v5.rs check_cuddle_blockish | **done (PR 14g)**：併せて countValidCuddledStatements と cuddle-group を移植（両版にあり、guff は `i - max` 決め打ちだった） | S | default_config/if/if.go{,.golden} |
 | 11 | protogetter typesNamed | behavior | エイリアス経由のメッセージ | guff-style/src/protogetter.rs expr_named_type | **done (PR 8)** | S | — |
-| 12 | godoclint stdlib.json | behavior | 179 package / 11,183 symbol | guff-comment/src/godoclint_stdlib.rs | needs-port | S | require_stdlib_doclink/normal/missing.go |
+| 12 | godoclint stdlib.json | behavior | 179 package / 11,183 symbol | guff-comment/src/godoclint_stdlib.rs | **done (PR 14g)** | S | require_stdlib_doclink/normal/missing.go |
 | 13 | clickhouselint chbatchclose | behavior | 即時実行 defer クロージャ内の Close | guff-style/src/clickhouselint.rs | already-matches | S | chbatchclose/testdata/** |
 
 ### small-b
@@ -566,7 +566,7 @@ v5 の `analyzer/testdata` は module zip に無い。GitHub の v5.2.0 タグ�
 | 3 | gomoddirectives replace-allow-all | new-option | replace をすべて許可 | guff-import/src/gomoddirectives.rs | **done (PR 2)** | S | testdata/replace/go.mod |
 | 4 | gomoddirectives ignore-forbidden | new-option | ignore ディレクティブを禁止 | gomoddirectives.rs, gomod.rs | **done (PR 2)** | M | testdata/ignore/go.mod |
 | 5 | gomoddirectives checkIgnoreDirectives | new-check | 既定で ignore される dir の指定を報告（`..` も） | 無し | **done (PR 2)** | M | testdata/ignore_defaults/go.mod（repo から） |
-| 6 | tagliatelle report | behavior | json `embed` フラグを skip | guff-style/src/tagliatelle.rs:265 | needs-port | S | — |
+| 6 | tagliatelle report | behavior | json `embed` フラグを skip | guff-style/src/tagliatelle.rs:265 | **done (PR 14g)** | S | — |
 | 7 | recvcheck 既定除外 | default-change | Marshal 系 → Unmarshal 系 | guff-style/src/recvcheck.rs:25 | **done (PR 8)** | S | builtinmethods/valuetype.go |
 | 8 | ginkgolinter `.Error()` チェーン | behavior | ErrorMethodPayload | guff-style/src/ginkgolinter.rs（DEFERRED） | needs-port | L | — |
 | 9 | bodyclose `//bodyclose:handled` | new-check | callee の Doc ディレクティブ | guff-context/src/bodyclose.rs | needs-port | M | handledresponse/*, consumption/consumption.go |

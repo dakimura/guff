@@ -1,0 +1,17 @@
+# Golden case: AlwxSin/noinlineerr v1.0.6's own testdata (golangci-lint
+# 2.14.0), vendored verbatim (MIT, LICENSE next to it): the `=` message and
+# the shadow check that only applies to `:=`.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - noinlineerr
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

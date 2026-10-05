@@ -5,3 +5,7 @@ doclink/b.go       crates/guff-comment/tests/testdata/godoclint/doclink/b.go
 doclink/c.go       crates/guff-comment/tests/testdata/godoclint/doclink/c.go
 doclink/d.go       crates/guff-comment/tests/testdata/godoclint/doclink/d.go
 doclink/a_test.go  crates/guff-comment/tests/testdata/godoclint/doclink/a_test.go
+upstream-v0114/good_pkg_test.go  crates/guff-comment/tests/testdata/godoclint/upstream-v0.11.4/normal/good_pkg_test.go
+upstream-v0114/good_test.go  crates/guff-comment/tests/testdata/godoclint/upstream-v0.11.4/normal/good_test.go
+upstream-v0114/good.go  crates/guff-comment/tests/testdata/godoclint/upstream-v0.11.4/normal/good.go
+upstream-v0114/missing.go  crates/guff-comment/tests/testdata/godoclint/upstream-v0.11.4/normal/missing.go

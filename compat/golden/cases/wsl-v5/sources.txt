@@ -1,2 +1,3 @@
 # Shared with the isolate gate so the two cannot drift.
 bad/bad.go   compat/isolate/fixtures/wsl_v5/bad.go
+upstream/if.go  crates/guff-style/tests/testdata/wsl_v5/upstream-v5.9.0/if.go

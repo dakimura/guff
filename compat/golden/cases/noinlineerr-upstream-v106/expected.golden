@@ -1,0 +1,17 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh noinlineerr-upstream-v106
+# Produced by running golangci-lint on compat/golden/cases/noinlineerr-upstream-v106/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+main.go:65:5:noinlineerr::avoid inline error handling using `if err := ...; err != nil`; use plain assignment `err := ...`
+main.go:69:5:noinlineerr::avoid inline error handling using `if err := ...; err != nil`; use plain assignment `err := ...`
+main.go:77:8:noinlineerr::avoid inline error handling using `if err := ...; err != nil`; use plain assignment `err := ...`
+main.go:82:5:noinlineerr::avoid inline error handling using `if err := ...; err != nil`; use plain assignment `err := ...`
+main.go:86:5:noinlineerr::avoid inline error handling using `if err := ...; err != nil`; use plain assignment `err := ...`
+main.go:95:5:noinlineerr::avoid inline error handling using `if err := ...; err != nil`; use plain assignment `err := ...`
+main.go:104:5:noinlineerr::avoid inline error handling using `if err := ...; err != nil`; use plain assignment `err := ...`
+main.go:117:5:noinlineerr::avoid inline error handling using `if err = ...; err != nil`; use plain assignment `err = ...`
+main.go:121:8:noinlineerr::avoid inline error handling using `if err = ...; err != nil`; use plain assignment `err = ...`

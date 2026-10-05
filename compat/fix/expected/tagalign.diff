@@ -49,3 +49,12 @@
  }
  
  // A key only one field has.
+--- a/tagalign/v144_gap_struct.go
++++ b/tagalign/v144_gap_struct.go
+@@ -8,5 +8,5 @@
+ 	B struct {
+ 		C string `json:"c"`
+ 	} `json:"b" yaml:"b"`
+-	DLonger string `yaml:"d" json:"d"`
++	DLonger string `json:"d" yaml:"d"`
+ }

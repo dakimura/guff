@@ -45,9 +45,15 @@ use guff_analysis::{
 use guff_types::api_predicates::api_implements;
 use guff_types::arena::ObjectData;
 use guff_types::TypeId;
+use guff::token::Token;
 
-const MESSAGE: &str =
-    "avoid inline error handling using `if err := ...; err != nil`; use plain assignment `err := ...`";
+/// `errMessage(tok)` (v1.0.6): a plain `=` gets its own wording.
+fn message(tok: Option<Token>) -> &'static str {
+    if tok == Some(Token::ASSIGN) {
+        return "avoid inline error handling using `if err = ...; err != nil`; use plain assignment `err = ...`";
+    }
+    "avoid inline error handling using `if err := ...; err != nil`; use plain assignment `err := ...`"
+}
 
 fn universe_error(pass: &Pass<'_>) -> Option<TypeId> {
     let artifacts = pass.pkg().type_artifacts.as_ref()?;
@@ -162,7 +168,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "noinlineerr requires inspect analyzer".to_string())?;
 
-    let mut pending: Vec<(u32, Vec<TextEdit>)> = Vec::new();
+    let mut pending: Vec<(u32, &'static str, Vec<TextEdit>)> = Vec::new();
     for file in pass.files() {
         let else_ifs = else_if_ids(file);
         preorder(NodeRef::File(file), |n| {
@@ -190,22 +196,29 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 }
                 // Upstream reports without a fix and *returns* here, so a second
                 // error-typed name on the left is never reached.
-                if assign.lhs.len() != 1 || shadow_vars_exists(pass, if_stmt.id, &ident.name) {
-                    pending.push((ident.pos().0 as u32, Vec::new()));
+                // A shadowing conflict only arises when the init declares
+                // (v1.0.6); `if err = f(); …` can always be hoisted.
+                let msg = message(assign.tok);
+                if assign.lhs.len() != 1
+                    || (assign.tok == Some(Token::DEFINE)
+                        && shadow_vars_exists(pass, if_stmt.id, &ident.name))
+                {
+                    pending.push((ident.pos().0 as u32, msg, Vec::new()));
                     break;
                 }
                 // guff-only: see the module comment. Upstream emits its fix here
                 // and writes a file that does not parse.
                 if else_ifs.contains(&if_stmt.id) {
-                    pending.push((ident.pos().0 as u32, Vec::new()));
+                    pending.push((ident.pos().0 as u32, msg, Vec::new()));
                     continue;
                 }
                 let Some(assign_text) = stmt_text(pass, init) else {
-                    pending.push((ident.pos().0 as u32, Vec::new()));
+                    pending.push((ident.pos().0 as u32, msg, Vec::new()));
                     continue;
                 };
                 pending.push((
                     ident.pos().0 as u32,
+                    msg,
                     vec![
                         TextEdit {
                             pos: if_stmt.if_.0 as u32,
@@ -225,14 +238,14 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         });
     }
 
-    for (pos, edits) in pending {
+    for (pos, msg, edits) in pending {
         if edits.is_empty() {
-            pass.reportf(pos, MESSAGE);
+            pass.reportf(pos, msg);
             continue;
         }
         pass.report(Diagnostic {
             pos,
-            message: MESSAGE.to_string(),
+            message: msg.to_string(),
             suggested_fixes: vec![SuggestedFix {
                 message: "move err assignment outside if".to_string(),
                 text_edits: edits,

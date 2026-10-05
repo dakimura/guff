@@ -1,2 +1,3 @@
 # The isolate fixture, so the two tiers cannot drift.
 bad.go  compat/isolate/fixtures/tagliatelle/bad.go
+embed/v080_embed.go  crates/guff-style/tests/testdata/tagliatelle/v080_embed.go
