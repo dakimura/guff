@@ -14,9 +14,10 @@
 //! comments — the ordinary way to keep a name that stutters — were findings
 //! golangci-lint does not report.
 //!
-//! DEFERRED: the `directives` config — `specify-disable-reason`, which turns a
-//! directive with no trailing reason into a failure of its own, and revive
-//! v1.17.0's `specify-disable-rule`, the same for a `disable` naming no rule.
+//! The `directives` config adds two checks on a `disable`: `specify-disable-reason`
+//! (no trailing reason) and revive v1.17.0's `specify-disable-rule` (no rule
+//! named). Either is a failure of its own at the comment, and the directive it
+//! rejects is then not applied.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -118,10 +119,20 @@ fn handle_rules(
     }
 }
 
+pub const SPECIFY_DISABLE_REASON: &str = "specify-disable-reason";
+pub const SPECIFY_DISABLE_RULE: &str = "specify-disable-rule";
+
 /// Collect the directives in `pass`'s files.
 ///
 /// `all_rules` is the enabled rule set, used when a directive names none.
-pub fn collect(pass: &Pass<'_>, all_rules: &[String]) -> Directives {
+pub fn collect(
+    pass: &Pass<'_>,
+    all_rules: &[String],
+    settings: &crate::Settings,
+    failures: &mut Vec<Failure>,
+) -> Directives {
+    let must_reason = settings.directive_enabled(SPECIFY_DISABLE_REASON);
+    let must_rule = settings.directive_enabled(SPECIFY_DISABLE_RULE);
     let mut per_file: HashMap<String, HashMap<String, Vec<Interval>>> = HashMap::new();
     let pkg = pass.pkg();
     for (i, file) in pass.files().iter().enumerate() {
@@ -152,6 +163,32 @@ pub fn collect(pass: &Pass<'_>, all_rules: &[String]) -> Directives {
                     .filter(|s| !s.is_empty())
                     .map(str::to_string)
                     .collect();
+                let reason = m.get(4).map_or("", |g| g.as_str());
+                let at = || {
+                    crate::util::map_reparsed_pos(pass, file, &reparsed.fset, c.pos().0)
+                };
+                if must_reason && directive == "disable" && reason.trim_matches(' ').is_empty() {
+                    if let Some(pos) = at() {
+                        failures.push(Failure::with_confidence(
+                            SPECIFY_DISABLE_REASON,
+                            pos,
+                            "reason of lint disabling not found",
+                            1.0,
+                        ));
+                    }
+                    continue;
+                }
+                if must_rule && directive == "disable" && rule_names.is_empty() {
+                    if let Some(pos) = at() {
+                        failures.push(Failure::with_confidence(
+                            SPECIFY_DISABLE_RULE,
+                            pos,
+                            "rule name for lint disabling not found",
+                            1.0,
+                        ));
+                    }
+                    continue;
+                }
                 if rule_names.is_empty() {
                     rule_names = all_rules.to_vec();
                 }

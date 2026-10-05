@@ -1,0 +1,17 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh gosec-global-ignore
+# Produced by running golangci-lint on compat/golden/cases/gosec-global-ignore/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+global.go:9:23:gosec:high:G404: Use of weak random number generator (math/rand or math/rand/v2 instead of crypto/rand)
+global.go:10:23:gosec:high:G404: Use of weak random number generator (math/rand or math/rand/v2 instead of crypto/rand)
+global.go:11:23:gosec:high:G404: Use of weak random number generator (math/rand or math/rand/v2 instead of crypto/rand)
+global.go:12:23:gosec:high:G404: Use of weak random number generator (math/rand or math/rand/v2 instead of crypto/rand)
+global.go:13:23:gosec:high:G404: Use of weak random number generator (math/rand or math/rand/v2 instead of crypto/rand)
+global.go:14:23:gosec:high:G404: Use of weak random number generator (math/rand or math/rand/v2 instead of crypto/rand)
+global.go:15:23:gosec:high:G404: Use of weak random number generator (math/rand or math/rand/v2 instead of crypto/rand)
+global.go:16:23:gosec:high:G404: Use of weak random number generator (math/rand or math/rand/v2 instead of crypto/rand)
+global.go:17:23:gosec:high:G404: Use of weak random number generator (math/rand or math/rand/v2 instead of crypto/rand)

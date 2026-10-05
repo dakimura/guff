@@ -2165,12 +2165,17 @@ impl NosecRanges {
     /// comment map against that tree, and record the line range of every node a
     /// `#nosec` attaches to. Line numbers are the same in both parses because
     /// the bytes are.
-    fn build(pass: &Pass<'_>) -> Self {
+    fn build(pass: &Pass<'_>, nosec: &crate::options::GosecNosecOptions) -> Self {
         use guff::commentmap::{new_comment_map, node_end, node_pos};
         use guff::parser::{parse_file, PARSE_COMMENTS};
         use guff::position::FileSet;
 
         let mut out = NosecRanges::default();
+        // `ignoreNosec`: every directive is ignored.
+        if nosec.ignore_nosec() {
+            return out;
+        }
+        let tags = [nosec.default_tag(), nosec.alternative_tag()];
         for (index, path) in pass.pkg().compiled_go_files.iter().enumerate() {
             let owned;
             let src: &[u8] = match pass.pkg().source_bytes(index) {
@@ -2192,7 +2197,10 @@ impl NosecRanges {
             // `modules/livestore/live_store_background.go:270` carries
             // `//gosec:disable G404 — It doesn't require strong randomness`
             // and nothing else, and guff reported the G404 anyway.
-            if !contains_bytes(src, b"nosec") && !contains_bytes(src, b"gosec:disable") {
+            let tag_names = tags.iter().map(|t| t.trim_start_matches('#').as_bytes());
+            if !tag_names.into_iter().any(|t| contains_bytes(src, t))
+                && !contains_bytes(src, b"gosec:disable")
+            {
                 continue;
             }
             let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
@@ -2212,9 +2220,12 @@ impl NosecRanges {
                     let Some(first) = group.list.first() else {
                         continue;
                     };
-                    let Some(args) = find_nosec_directive(group) else {
+                    let Some(args) = find_nosec_directive(group, &tags) else {
                         continue;
                     };
+                    if !directive_is_valid(&args, nosec) {
+                        continue;
+                    }
                     // `updateIgnoredRulesForNode`: the recorded range is the
                     // union of the node's and the comment group's, so a
                     // directive that trails the node it belongs to still
@@ -2289,9 +2300,12 @@ fn find_nosec_tag<'a>(text: &'a str, tag: &str) -> Option<&'a str> {
 /// `findNoSecDirective`: `#nosec` anywhere the tag rule allows, or a
 /// `//gosec:disable` comment. The latter is checked over the raw comments
 /// because `CommentGroup.Text()` drops directive-shaped lines.
-fn find_nosec_directive(group: &guff::ast::CommentGroup) -> Option<String> {
-    if let Some(args) = find_nosec_tag(&group.text(), NOSEC_TAG) {
-        return Some(args.to_string());
+fn find_nosec_directive(group: &guff::ast::CommentGroup, tags: &[String; 2]) -> Option<String> {
+    let text = group.text();
+    for tag in tags {
+        if let Some(args) = find_nosec_tag(&text, tag) {
+            return Some(args.to_string());
+        }
     }
     for c in &group.list {
         if let Some(after) = c.text.strip_prefix(GOSEC_DISABLE_PREFIX) {
@@ -2301,6 +2315,30 @@ fn find_nosec_directive(group: &guff::ast::CommentGroup) -> Option<String> {
         }
     }
     None
+}
+
+/// `nosec-require-rules` / `nosec-require-justification`: a directive that
+/// names no rule, or gives no `-- reason`, is reported as invalid upstream
+/// (an analyzer error golangci-lint does not show) and suppresses nothing.
+fn directive_is_valid(args: &str, nosec: &crate::options::GosecNosecOptions) -> bool {
+    let (rules, justification) = match args.find("--") {
+        Some(idx) => (&args[..idx], Some(args[idx + 2..].trim_start_matches('-').trim())),
+        None => (args, None),
+    };
+    let directive = rules.trim();
+    let names_rule = directive != "block" && {
+        let b = directive.as_bytes();
+        (0..b.len()).any(|i| {
+            b[i] == b'G' && i + 4 <= b.len() && b[i + 1..i + 4].iter().all(|c| c.is_ascii_digit())
+        })
+    };
+    if nosec.require_rules && !names_rule {
+        return false;
+    }
+    if nosec.require_justification && justification.is_none_or(str::is_empty) {
+        return false;
+    }
+    true
 }
 
 /// The rule-id half of `astVisitor.ignore`: strip the `-- justification`,
@@ -2343,7 +2381,6 @@ fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
     haystack.len() >= needle.len() && haystack.windows(needle.len()).any(|w| w == needle)
 }
 
-const NOSEC_TAG: &str = "#nosec";
 const GOSEC_DISABLE_PREFIX: &str = "//gosec:disable";
 
 /// `goodCiphers` of `NewIntermediateTLSCheck`, which is the constructor
@@ -4404,7 +4441,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     let min_severity = threshold_score(&opts.severity);
     let min_confidence = threshold_score(&opts.confidence);
-    let nosec_ranges = NosecRanges::build(pass);
+    let nosec_ranges = NosecRanges::build(pass, &opts.nosec);
     let go_cache = guff_runner::default_go_cache_dir().ok();
     for (pos, end, msg) in pending {
         if dropped_as_cgo_output(pass.fset(), pos, go_cache.as_deref()) {
@@ -4416,7 +4453,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             .fset()
             .position(guff::position::Pos(end.max(pos) as i64))
             .line;
-        if nosec_ranges.suppresses(&start_pos.filename, start_pos.line, end_line, rule) {
+        // `show-ignored`: a suppressed finding stays in the output.
+        if !opts.nosec.show_ignored
+            && nosec_ranges.suppresses(&start_pos.filename, start_pos.line, end_line, rule)
+        {
             continue;
         }
         let (severity, confidence) = issue_scores(rule, &msg);

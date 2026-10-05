@@ -1,0 +1,21 @@
+# Golden case: gosec v2.29 config.global — nosec: true ignores every directive.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gosec
+  settings:
+    gosec:
+      includes: [G404]
+      config:
+        global:
+          nosec: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

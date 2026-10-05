@@ -185,7 +185,7 @@ pub use options::{
     GocognitOptions, GoconstExcludeType, GoconstOptions, GocriticCheckSettings, GocriticOptions, GocycloOptions,
     GoheaderOptions,
     GosmopolitanOptions,
-    FilePermOptions, G101Options, G117Options, IfaceOptions, GosecOptions, GrouperOptions, InamedparamOptions,
+    FilePermOptions, G101Options, G117Options, IfaceOptions, GosecNosecOptions, GosecOptions, GrouperOptions, InamedparamOptions,
     InterfacebloatOptions,
     IotamixingOptions, IreturnOptions, LllOptions, MaintidxOptions, LoggercheckOptions, MndOptions,
     ModernizeOptions, MusttagFunc, MusttagOptions, NakedretOptions, NestifOptions, NlreturnOptions,

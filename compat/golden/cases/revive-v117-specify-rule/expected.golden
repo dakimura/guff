@@ -1,0 +1,12 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh revive-v117-specify-rule
+# Produced by running golangci-lint on compat/golden/cases/revive-v117-specify-rule/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+fixtures.go:21:1:revive:error:specify-disable-rule: rule name for lint disabling not found
+fixtures.go:22:1:revive:warning:exported: exported function ExportedDisableRule3 should have comment or be unexported
+fixtures.go:29:1:revive:error:specify-disable-rule: rule name for lint disabling not found
+fixtures.go:30:1:revive:warning:exported: exported function ExportedDisableRule4 should have comment or be unexported

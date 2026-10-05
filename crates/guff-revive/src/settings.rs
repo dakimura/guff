@@ -53,6 +53,26 @@ pub struct Settings {
     /// directive. Not a user-settable revive key: upstream tags it
     /// `mapstructure:"-"` and the loader is the only writer.
     pub go: Option<String>,
+    /// `directives`: `(name, severity)` of each enabled directive check —
+    /// `specify-disable-reason`, `specify-disable-rule`.
+    pub directives: Vec<(String, Option<String>)>,
+}
+
+impl Settings {
+    /// Whether the directive check `name` is configured.
+    pub fn directive_enabled(&self, name: &str) -> bool {
+        self.directives.iter().any(|(n, _)| n == name)
+    }
+
+    /// `Failure.SeverityFor`'s directive arm: `error` only when the
+    /// directive's own config says so (revive does not normalize directive
+    /// severities to the global one).
+    pub fn directive_severity(&self, name: &str) -> Option<&str> {
+        self.directives
+            .iter()
+            .find(|(n, _)| n == name)
+            .and_then(|(_, s)| s.as_deref())
+    }
 }
 
 impl Default for Settings {
@@ -65,6 +85,7 @@ impl Default for Settings {
             enable_default_rules: false,
             enable_all_rules: false,
             go: None,
+            directives: Vec::new(),
         }
     }
 }

@@ -227,6 +227,19 @@ pub struct ReviveSettings {
     /// Enable every known revive rule (golangci).
     #[serde(default, rename = "enable-all-rules")]
     pub enable_all_rules: bool,
+    /// `directives`: revive's directive checks (`specify-disable-reason`,
+    /// `specify-disable-rule`), each with an optional severity.
+    #[serde(default)]
+    pub directives: Vec<ReviveDirectiveSetting>,
+}
+
+/// One `linters.settings.revive.directives` entry.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+pub struct ReviveDirectiveSetting {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub severity: Option<String>,
 }
 
 /// One revive rule entry from golangci-lint YAML.
@@ -1959,8 +1972,9 @@ pub struct GosecSettings {
     pub severity: String,
     #[serde(default)]
     pub confidence: String,
-    /// Per-rule `config` map. `G101` / `G117` sub-maps and the `G301` /
-    /// `G302` / `G306` scalars are interpreted; `global` is DEFERRED.
+    /// Per-rule `config` map. `G101` / `G117` sub-maps, the `G301` /
+    /// `G302` / `G306` scalars and the `global` nosec options are
+    /// interpreted; `global.audit` is DEFERRED.
     #[serde(default)]
     pub config: Option<serde_yaml::Value>,
     /// What golangci-lint puts in `GOSECGOVERSION`: `run.go`, or when that is
@@ -2112,8 +2126,48 @@ impl GosecSettings {
             g117,
             file_perms,
             go: self.go.clone(),
+            nosec: self.config.as_ref().map(gosec_globals).unwrap_or_default(),
         }
     }
+}
+
+/// `convertGosecGlobals`: `config.global`, keys compared without case (the
+/// loader lower-cases them), each value as `fmt.Sprintf("%v")` renders it,
+/// and `nosec: false` dropped as golangci-lint drops it.
+fn gosec_globals(config: &serde_yaml::Value) -> guff_style::GosecNosecOptions {
+    let mut out = guff_style::GosecNosecOptions::default();
+    let Some(map) = config.as_mapping() else {
+        return out;
+    };
+    let Some(global) = map
+        .iter()
+        .find(|(k, _)| k.as_str().is_some_and(|k| k.eq_ignore_ascii_case("global")))
+        .and_then(|(_, v)| v.as_mapping())
+    else {
+        return out;
+    };
+    for (k, v) in global {
+        let Some(k) = k.as_str() else {
+            continue;
+        };
+        let value = match v {
+            serde_yaml::Value::Bool(b) => b.to_string(),
+            serde_yaml::Value::Number(n) => n.to_string(),
+            serde_yaml::Value::String(s) => s.clone(),
+            _ => continue,
+        };
+        let enabled = value == "true" || value == "enabled";
+        match k.to_ascii_lowercase().as_str() {
+            "nosec" if v.as_bool() == Some(false) => {}
+            "nosec" => out.nosec = Some(value),
+            "#nosec" => out.alternative = Some(value),
+            "show-ignored" => out.show_ignored = enabled,
+            "nosec-require-rules" => out.require_rules = enabled,
+            "nosec-require-justification" => out.require_justification = enabled,
+            _ => {}
+        }
+    }
+    out
 }
 
 /// `linters.settings.nolintlint` / `linters-settings.nolintlint`.
@@ -3312,6 +3366,7 @@ impl ReviveSettings {
             && !self.ignore_generated_header
             && !self.enable_default_rules
             && !self.enable_all_rules
+            && self.directives.is_empty()
     }
 
     pub fn to_guff_revive(&self) -> guff_revive::Settings {
@@ -3351,6 +3406,11 @@ impl ReviveSettings {
             enable_default_rules: self.enable_default_rules,
             enable_all_rules: self.enable_all_rules,
             go: self.go.clone(),
+            directives: self
+                .directives
+                .iter()
+                .map(|d| (d.name.clone(), d.severity.clone()))
+                .collect(),
         }
     }
 }
