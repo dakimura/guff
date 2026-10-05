@@ -326,7 +326,7 @@ fn gosec_g124_stays_quiet_for_secure_cookie_literals() {
 
 /// G115 is the other SSA analyzer (gosec `conversion_overflow.go` +
 /// `range_analyzer.go`). The fixture marks every conversion `// FINDING` or
-/// `// silent`, and those marks are gated against golangci-lint 2.12.2 by
+/// `// silent`, and those marks are gated against golangci-lint 2.14.0 by
 /// `compat/golden/cases/gosec`; this test pins the same finding set — as a
 /// multiset of messages, since a rule that stopped bounding values would keep
 /// the count of *some* pairs and change others.
@@ -347,14 +347,14 @@ fn gosec_g115_reports_only_unbounded_conversions() {
             // closure, one after the loop — and the two guarded ones silent.
             count("G115: integer overflow conversion uint64 -> int64"),
         ),
-        (4, 2, 6, 2, 1, 4),
+        (4, 2, 5, 2, 1, 4),
         "{messages:?}"
     );
     // Nothing else: every other conversion in the fixture is bounded, and the
     // fixture's `// silent` marks say which.
     assert_eq!(
         messages.iter().filter(|m| m.starts_with("G115:")).count(),
-        19,
+        18,
         "{messages:?}"
     );
 }
@@ -419,7 +419,7 @@ fn gosec_g115_takes_each_message_from_the_first_conversion_in_source_order() {
 /// G118 is the third SSA analyzer. It is one id over three checks; the fixture
 /// marks every `context.With…` call and every `go` statement `// FINDING` or
 /// `// silent`, and `compat/golden/cases/gosec` gates those marks against
-/// golangci-lint 2.12.2.
+/// golangci-lint 2.14.0.
 #[test]
 fn gosec_g118_reports_only_uncalled_cancels_and_detached_goroutines() {
     let pkg = support::typecheck_fixture("gosec", "example.com/gosec/g118", "g118.go");
@@ -438,14 +438,14 @@ fn gosec_g118_reports_only_uncalled_cancels_and_detached_goroutines() {
             ),
             count("G118: Long-running loop performs calls without a ctx.Done() cancellation guard"),
         ),
-        (11, 2, 1),
+        (5, 2, 1),
         "{messages:?}"
     );
     // Nothing else: every other case in the fixture is one of the escapes the
     // walk has to recognise, and the `// silent` marks say which.
     assert_eq!(
         messages.iter().filter(|m| m.starts_with("G118:")).count(),
-        14,
+        8,
         "{messages:?}"
     );
 }
@@ -872,9 +872,9 @@ fn gosec_taint_rules_report_only_reachable_sources() {
         ),
         // G702 is 6, not 7, since golangci-lint 2.14.0: `g702FieldTaint`
         // went silent when x/tools v0.50 stopped writing the literal into `h`.
-        // G703 is guff's 5 until PR 9 ports gosec v2.29.0, which stops
-        // treating `filepath.Clean` as a sanitizer.
-        (6, 5, 20, 8, 5, 3),
+        // G703 is 6 since gosec v2.29.0 stopped treating `filepath.Clean`
+        // as a sanitizer.
+        (6, 6, 20, 8, 5, 3),
         "{messages:?}"
     );
 }
@@ -1048,16 +1048,19 @@ fn gosec_taint_loses_a_flow_through_a_packed_variadic_tail() {
 fn gosec_allows_strong_crypto() {
     let pkg = support::typecheck_fixture("gosec", "example.com/gosec/ok", "ok.go");
     let messages = support::run_analyzer(gosec(), &pkg);
-    // Three G304, and they are correct: golangci-lint reports the same three,
-    // and the golden records them. `ok.go` is silent for the rules its shapes
+    // Three G304 and two G404, and they are correct: golangci-lint reports
+    // the same five, and the golden records them (the G404 are `rand.Perm`
+    // and `rand.Shuffle`, on gosec's list since v2.29.0). `ok.go` is silent for the rules its shapes
     // are *about*, and three of those shapes need a non-constant path to exist
     // at all — a `filepath.Walk` callback's `path` (G122), a config file name
     // reaching a helper (G703), a `filepath.Join(dir, …)` fed to a callback
     // (G703). Making them constants would delete what they test.
     let (g304, other): (Vec<&String>, Vec<&String>) =
         messages.iter().partition(|m| m.starts_with("G304: "));
+    let (g404, other): (Vec<&String>, Vec<&String>) =
+        other.into_iter().partition(|m| m.starts_with("G404: "));
     assert!(other.is_empty(), "{other:?}");
-    assert_eq!(g304.len(), 3, "{messages:?}");
+    assert_eq!((g304.len(), g404.len()), (3, 2), "{messages:?}");
 }
 
 /// G404 matches by syntax, not by the callee's declaring package.
@@ -1066,15 +1069,17 @@ fn gosec_allows_strong_crypto() {
 /// "Int")` and resolves through the file's imports, while `s.r.Int()` gives
 /// the receiver's type string `"*math/rand.Rand"`, which matches no rule.
 /// coredns wraps `math/rand` in exactly that shape, and resolving the callee's
-/// package instead made every method on the wrapper a finding. `Perm` and
-/// `Shuffle` are not on gosec's list at all.
+/// package instead made every method on the wrapper a finding. Package-level
+/// `rand.Perm` and `rand.Shuffle` are on the list since gosec v2.29.0, so
+/// ok.go's two G404 are exactly those two and no wrapper method.
 #[test]
 fn gosec_g404_matches_only_package_qualified_calls() {
     let ok = support::typecheck_fixture("gosec", "example.com/gosec/ok", "ok.go");
     let messages = support::run_analyzer(gosec(), &ok);
-    assert!(
-        !messages.iter().any(|m| m.starts_with("G404:")),
-        "methods on *rand.Rand, rand.Perm and rand.Shuffle are not G404: {messages:?}"
+    assert_eq!(
+        messages.iter().filter(|m| m.starts_with("G404:")).count(),
+        2,
+        "only rand.Perm and rand.Shuffle; methods on *rand.Rand are not G404: {messages:?}"
     );
 
     let bad = support::typecheck_fixture("gosec", "example.com/gosec/bad", "bad.go");

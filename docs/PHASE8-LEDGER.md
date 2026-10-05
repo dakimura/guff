@@ -442,13 +442,13 @@ revive の upstream testdata は module zip に無く、手元 checkout（v1.15.
 | # | upstream_path | kind | 要約 | guff の場所 | status | effort | upstream testdata |
 |---|---------------|------|------|-------------|--------|--------|-------------------|
 | 1 | golinters/gosec + analyzers/hardcoded_nonce.go | new-check | G407 が既定で走る（878 行の SSA analyzer） | guff-style/src/gosec.rs（G407 無し） | needs-port | L | testutils/g407_samples.go |
-| 2 | analyzers/context_propagation.go | behavior | G118: IndexAddr / MapUpdate への Store を責任移譲に | guff-style/src/gosec_g118.rs:808 | needs-port | S | g118_samples.go |
-| 3 | analyzers/range_analyzer.go | behavior | G115: min/max の set フラグを OR に | gosec_g115.rs:1628 | needs-port | S | g115_samples.go |
-| 4 | analyzers/pathtraversal.go | behavior | G703 のサニタイザから Clean / Abs / PathEscape を削除 | gosec_taint.rs:293 | needs-port | S | g703_samples.go |
-| 5 | rules/rand.go | behavior | G404 に Perm / Shuffle / ExpFloat64 / v2.Uint | gosec.rs:157 | needs-port | S | g404_samples.go |
-| 6 | resolve.go TryResolve（Builder） | behavior | 定数だけで組んだ Builder の String() を定数扱い。**`try_resolve` と `g202_try_resolve` の両方に** | gosec.rs:3130, :1020 | needs-port | M | g202_samples.go |
-| 7 | analyzer.go / config.go nosec-require-* | new-option | global オプション | gosec.rs:2148, settings.rs:1906 | needs-port | M | — |
-| 8 | config.go NoSecTag | behavior | 代替タグの `#` 正規化 | gosec.rs:2336 | needs-port | S | — |
+| 2 | analyzers/context_propagation.go | behavior | G118: IndexAddr / MapUpdate への Store を責任移譲に | guff-style/src/gosec_g118.rs:808 | **done (PR 9)**: Store→IndexAddr / MapUpdate を移譲に。guff は可変長引数を pack しないので、`isCancelCalled` だけ call の packed tail を同等に扱う | S | g118_samples.go |
+| 3 | analyzers/range_analyzer.go | behavior | G115: min/max の set フラグを OR に | gosec_g115.rs:1628 | **done (PR 9)** | S | g115_samples.go |
+| 4 | analyzers/pathtraversal.go | behavior | G703 のサニタイザから Clean / Abs / PathEscape を削除 | gosec_taint.rs:293 | **done (PR 9)** | S | g703_samples.go |
+| 5 | rules/rand.go | behavior | G404 に Perm / Shuffle / ExpFloat64 / v2.Uint | gosec.rs:157 | **done (PR 9)** | S | g404_samples.go |
+| 6 | resolve.go TryResolve（Builder） | behavior | 定数だけで組んだ Builder の String() を定数扱い。**`try_resolve` と `g202_try_resolve` の両方に** | gosec.rs:3130, :1020 | **done (PR 9)**: `builder_string_is_const` を両方の TryResolve から。golden に `g202b/g202_builder.go`（全分岐） | M | g202_samples.go |
+| 7 | analyzer.go / config.go nosec-require-* | new-option | global オプション | gosec.rs:2148, settings.rs:1906 | needs-port（PR 9 で見送り: guff は gosec の `config.global` をまだ一切読まない。§3 の行と一緒に） | M | — |
+| 8 | config.go NoSecTag | behavior | 代替タグの `#` 正規化 | gosec.rs:2336 | needs-port（PR 9 で見送り: guff は gosec の `config.global` をまだ一切読まない。§3 の行と一緒に） | S | — |
 | 9 | rules/hardcoded_credentials.go | behavior | G101 に ASIA | gosec.rs:369 | already-matches | S | g101_samples.go |
 
 ### gocritic-goconst
@@ -662,7 +662,7 @@ golden を regen したら fix のベースラインも撮り直す。測定は 
 | 6 | **modernize 残り（ゴールデン側）** | stringscut の Split / SplitN 腕（**done**）。条件の各枝を fixture に足して上流と一致を確認 | modernize 2/0 → **0/0（ratchet 削除）** | S |
 | 7 | **govet 文言** | fieldalignment（**done**: 型名・size class 表は go1.27.0 から転記、全枝を fixture で確認）。composite、inline の埋め込み判定、unusedresult b.Loop、nilness cgo は golden に観測差なし（fixture 先行） | govet-fieldalignment 14/14 → **0/0（ratchet 削除）** | M |
 | 8 | **出力差の小物まとめ（done）** | nonamedreturns 位置、canonicalheader fork（文言 + initialism + exclusions 設定）、exhaustive（厳密ディレクティブ・解析エラー・alias）、recvcheck、protogetter alias、gocritic sprintfQuotedString、gofumpt 100 バイト規則と effectiveEnd | nonamedreturns 14/14、canonicalheader 10/6、exhaustive ×3、recvcheck、protogetter、gocritic、gofumpt → **すべて 0/0（ratchet 削除）** | M |
-| 9 | **gosec 既存ルール** | G118、G115、G703、G404、`%#q` 系と並べて TryResolve Builder（2 系統） | gosec 6/8 → 0/0 | M |
+| 9 | **gosec 既存ルール** — **done** | G118、G115、G703、G404、`%#q` 系と並べて TryResolve Builder（2 系統）。nosec-require-* と NoSecTag は `config.global` 未対応のため残す | gosec 6/8 → **0/0（ratchet 削除）** | M |
 | 10 | **revive** | empty-block range、multiline-if-init を enable-all に、marshal-receiver、use-slices-concat、文言 4 本、Go 版ゲート 2 本、directives | revive 1/10 → 既存 1/4 | M |
 | 11 | **unused / unparam** | Unify、unparam AnonFuncs + linkname + signRequiredBy + alias | unused 0/2、unparam 1/0 → 0 | M |
 | 12 | **modernize 残り（ゴールデンに出ない側）** | minmax ×2、atomictypes、waitgroupgo、testingcontext、rangeint、slicesbackward ×3、stringscut ×3、stringscutprefix、stringsbuilder lastEditEnd、slicesclip。**各項目で上流 testdata を fixture 化**（ratchet は動かないので fixture が唯一の検算） | ― | M〜L |

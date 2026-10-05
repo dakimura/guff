@@ -130,13 +130,13 @@ func g703EnvOpen() {
 	_ = f
 }
 
-// silent — `filepath.Clean` is a declared sanitizer.
-func g703CleanIsSanitized() {
+// fires — gosec v2.29.0 dropped `filepath.Clean` (it evaluates `..`).
+func g703CleanIsNotSanitized() {
 	f, _ := os.Open(filepath.Clean(os.Getenv("GUFF_G703")))
 	_ = f
 }
 
-// silent — so is `filepath.Base`.
+// silent — `filepath.Base` is a declared sanitizer.
 func g703BaseIsSanitized() {
 	f, _ := os.Open(filepath.Base(os.Getenv("GUFF_G703")))
 	_ = f

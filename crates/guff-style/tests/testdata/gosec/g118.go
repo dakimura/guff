@@ -43,10 +43,10 @@ type mapHolder struct {
 	cancels map[string]context.CancelFunc
 }
 
-// A cancel parked in a *map* is not tracked: `MapUpdate` is not in the walk's
-// instruction set. dapr's subscriber.retrySubscription is this shape.
+// A cancel parked in a *map*: since gosec v2.29.0 `MapUpdate` is a transfer of
+// responsibility (dapr's subscriber.retrySubscription was this shape).
 func (m *mapHolder) store(ctx context.Context, key string) {
-	_, cancel := context.WithCancel(ctx) // FINDING
+	_, cancel := context.WithCancel(ctx) // silent since gosec v2.29.0
 	m.cancels[key] = cancel
 }
 
@@ -211,10 +211,10 @@ func spinNoBlocking(ctx context.Context) {
 //
 // go/ssa packs the variadic arguments of a non-spread call into a fresh slice
 // (`Alloc`, one `IndexAddr`+`Store` per element, `Slice`), so the cancel's
-// referrer there is a *store*, never the call — `isUsedInCall` does not see it
-// and the cancel counts as lost. guff hands variadic arguments to the call
-// individually, which made every shape below silent. grafana/tempo's
-// `modules/querier/worker/processor_manager.go:68` is the `append` form.
+// referrer there is a *store*, never the call. gosec v2.26.1 called that lost
+// (grafana/tempo processor_manager.go:68); v2.29.0 calls a Store into an
+// `IndexAddr` a transfer of responsibility, so every shape below is silent.
+// guff hands variadic arguments to the call individually, hence the stand-in.
 
 type cancelHolder struct {
 	ctx     context.Context
@@ -228,7 +228,7 @@ func takesMany(fs ...func()) {}
 
 func (h *cancelHolder) appendToField(n int) {
 	for len(h.cancels) < n {
-		_, cancel := context.WithCancel(h.ctx) // FINDING
+		_, cancel := context.WithCancel(h.ctx) // silent since gosec v2.29.0: packed into a slice
 		h.cancels = append(h.cancels, cancel)
 	}
 	for len(h.cancels) > n {
@@ -239,26 +239,26 @@ func (h *cancelHolder) appendToField(n int) {
 }
 
 func (h *cancelHolder) appendToPlainFuncField() {
-	_, cancel := context.WithCancel(h.ctx) // FINDING
+	_, cancel := context.WithCancel(h.ctx) // silent since gosec v2.29.0: packed into a slice
 	h.fns = append(h.fns, cancel)
 }
 
 func (h *cancelHolder) appendToLocal() {
 	var s []context.CancelFunc
-	_, cancel := context.WithCancel(h.ctx) // FINDING
+	_, cancel := context.WithCancel(h.ctx) // silent since gosec v2.29.0: packed into a slice
 	s = append(s, cancel)
 	s[0]()
 }
 
 func (h *cancelHolder) spreadAppend() {
-	_, cancel := context.WithCancel(h.ctx) // FINDING
+	_, cancel := context.WithCancel(h.ctx) // silent since gosec v2.29.0: packed into a slice
 	// `xs...` passes the slice itself, so nothing is packed — but the cancel is
 	// inside a composite literal, which the walk does not track either.
 	h.cancels = append(h.cancels, []context.CancelFunc{cancel}...)
 }
 
 func (h *cancelHolder) variadicArg() {
-	_, cancel := context.WithCancel(h.ctx) // FINDING
+	_, cancel := context.WithCancel(h.ctx) // silent since gosec v2.29.0: packed into a slice
 	takesMany(cancel)
 }
 

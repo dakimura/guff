@@ -1,6 +1,0 @@
-{
-  "missing": 3,
-  "extra": 7,
-  "why": "gosec v2.29.0 (golangci-lint 2.14.0): G118 x5 and G115 extras, the G703 that filepath.Clean no longer sanitizes, and G404 x2 — gosec's own diff, PR 9 (docs/PHASE8-LEDGER.md gosec #2-#5). The two classes that were x/tools go/ssa (§2.1) are closed: G124 on elided value-typed cookies (every element literal now gets its own Alloc) and G702 through a struct field (the literal is built in a temporary and copied, so the field store is not on the variable).",
-  "target": "0/0 — docs/PHASE8-LEDGER.md §6 names the PR that closes it."
-}

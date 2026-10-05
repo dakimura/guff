@@ -158,11 +158,11 @@ func length(b []byte) uint32 { return uint32(len(b)) } // FINDING int -> uint32
 // gosec allows for a uint8 destination.
 func remainder(i int) uint8 { return uint8(i % 256) } // FINDING int -> uint8
 
-// `min`/`max` intersect their arguments' bounds by *and*-ing the `set` flags, so
-// one unbounded argument leaves the result unbounded.
+// Since gosec v2.29.0 `min` *or*s the upper `set` flag and `max` the lower one:
+// min(i, c) is bounded above by c, but its lower bound is still i's (none).
 func minBuiltin(i int) int32 { return int32(min(i, 2147483647)) } // FINDING int -> int32
 
-func maxAndMin(i int) uint8 { return uint8(max(0, min(i, 255))) } // FINDING int -> uint8
+func maxAndMin(i int) uint8 { return uint8(max(0, min(i, 255))) } // silent since gosec v2.29.0
 
 // `var acc int` reaches the conversion as a phi whose entry edge is the zero
 // constant, and gosec resolves that phi to [0, 0] — the loop edge's own maximum

@@ -291,13 +291,11 @@ static G703: TaintRule = TaintRule {
         Sink::func("net/http", "ServeFileFS", &[3]),
     ],
     sanitizers: &[
-        Sanitizer { pkg: "path/filepath", method: "Clean" },
-        Sanitizer { pkg: "path/filepath", method: "Abs" },
+        // gosec v2.29.0 dropped `Clean`, `filepath.Abs` and `url.PathEscape`:
+        // Clean evaluates `..` instead of rejecting it (gosec#1721).
         Sanitizer { pkg: "path/filepath", method: "Base" },
         Sanitizer { pkg: "path/filepath", method: "Rel" },
-        Sanitizer { pkg: "net/url", method: "PathEscape" },
         Sanitizer { pkg: "path", method: "Base" },
-        Sanitizer { pkg: "path", method: "Clean" },
         Sanitizer { pkg: "strconv", method: "Atoi" },
         Sanitizer { pkg: "strconv", method: "ParseInt" },
         Sanitizer { pkg: "strconv", method: "ParseUint" },

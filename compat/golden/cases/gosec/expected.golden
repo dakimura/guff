@@ -215,6 +215,13 @@ g202/g202.go:57:7:gosec:medium:G202: SQL string concatenation
 g202/g202.go:64:7:gosec:medium:G202: SQL string concatenation
 g202/g202.go:74:2:gosec:medium:G202: SQL string concatenation
 g202/g202.go:82:2:gosec:medium:G202: SQL string concatenation
+g202b/g202_builder.go:30:30:gosec:medium:G202: SQL string concatenation
+g202b/g202_builder.go:43:30:gosec:medium:G202: SQL string concatenation
+g202b/g202_builder.go:51:30:gosec:medium:G202: SQL string concatenation
+g202b/g202_builder.go:60:30:gosec:medium:G202: SQL string concatenation
+g202b/g202_builder.go:68:30:gosec:medium:G202: SQL string concatenation
+g202b/g202_builder.go:81:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
+g202b/g202_builder.go:91:30:gosec:medium:G202: SQL string concatenation
 g304/g304.go:22:49:gosec:medium:G304: Potential file inclusion via variable
 g304/g304.go:34:58:gosec:medium:G304: Potential file inclusion via variable
 g304/g304.go:46:9:gosec:medium:G304: Potential file inclusion via variable

@@ -750,11 +750,10 @@ fn is_used_in_call(prog: &Program, func: &Function, common: &CallCommon, target:
 /// individually and records only the spread form in `CallCommon::ellipsis`
 /// (`instr.rs`), so an analyzer ported from go/ssa has to drop the tail here.
 ///
-/// Measured on the three shapes that made this visible — `useVar(cancel)`,
-/// `s = append(s, cancel)` and `m.cancels = append(m.cancels, cancel)` are all
-/// G118 findings upstream and were all silent in guff, while the non-variadic
-/// `use(cancel)` is silent on both sides. grafana/tempo
-/// `modules/querier/worker/processor_manager.go:68` is the append form.
+/// `isUsedInCall` itself only sees the unpacked arguments. Since gosec v2.29.0
+/// `isCancelCalled` treats the packed tail as a transfer (the go/ssa Store is
+/// into an `IndexAddr`), so `s = append(s, cancel)` and `takesMany(cancel)`
+/// are silent; the other walks that call `isUsedInCall` still are not told.
 fn unpacked_arg_count(prog: &Program, func: &Function, common: &CallCommon) -> usize {
     let n = common.args.len();
     if common.ellipsis {
@@ -802,6 +801,14 @@ fn is_cancel_called(ctx: &Ctx<'_>, start_fn: FuncId, start: Value) -> bool {
                 if is_used_in_call(prog, func, common, current) {
                     return true;
                 }
+                // gosec v2.29.0: a packed variadic argument is, in go/ssa, a
+                // Store into the vararg array's `IndexAddr` — the transfer of
+                // responsibility below. guff has no such Store (see
+                // `unpacked_arg_count`), so the call's packed tail stands in.
+                let unpacked = unpacked_arg_count(prog, func, common);
+                if common.args[unpacked..].contains(&current) {
+                    return true;
+                }
                 continue;
             }
             match instr {
@@ -827,8 +834,19 @@ fn is_cancel_called(ctx: &Ctx<'_>, start_fn: FuncId, start: Value) -> bool {
                             return true;
                         }
                     }
+                    // gosec v2.29.0: stored into a slice/array element (e.g.
+                    // `defers = append(defers, cancel)`, a Store into the
+                    // variadic array) — responsibility moves to a collection
+                    // whose iteration sites SSA cannot trace.
+                    if let Value::Instr(ai) = st.addr {
+                        if matches!(func.instrs.get(ai), InstrData::IndexAddr(_)) {
+                            return true;
+                        }
+                    }
                     queue.push_back((fid, st.addr));
                 }
+                // gosec v2.29.0: stored as a map value (`cleanups[k] = cancel`).
+                InstrData::MapUpdate(mu) if mu.value == current => return true,
                 InstrData::UnOp(u) if u.op == Token::MUL && u.x == current => {
                     queue.push_back((fid, Value::Instr(rid)));
                 }
