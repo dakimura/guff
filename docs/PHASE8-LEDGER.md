@@ -291,7 +291,7 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 | 8 | reflect.go usesNonTypeSymbol | behavior | 非型シンボルを含む TypeOf を報告しない、DeleteUnusedVars 削除 | check_reflecttypefor, delete_newly_unused_vars | **done (PR 1)** | M | reflecttypefor.go{,.golden} |
 | 9 | slicescontains.go | behavior | needle / predicate に副作用がありうれば報告しない | slicescontains_cond, expr_may_have_effects | **done (PR 1)** | S | slicescontains.go{,.golden} |
 | 10 | stringsbuilder.go | behavior | _test.go を報告しない | check_stringsbuilder | **done (PR 1)** | S | stringsbuilder{,_test}.go{,.golden} |
-| 11 | stringscut.go stringsplitCut | new-check | `strings.Split(s, sep)[0]` → Cut | check_stringscut | needs-port | M | stringscut.go{,.golden} |
+| 11 | stringscut.go stringsplitCut | new-check | `strings.Split(s, sep)[0]` → Cut | check_stringscut | **done (PR 6)** | M | stringscut.go{,.golden} |
 | 12 | stringscut.go（LastIndex） | behavior | LastIndex 系 → Contains / CutLast（1.27） | check_stringscut FUNCS | needs-port | M | stringscut{,_go127}.go{,.golden} |
 | 13 | stringscut.go 多値代入 | behavior | 多値の宣言・代入の一部なら報告しない | cut_i_ident | needs-port | S | stringscut.go{,.golden} |
 | 14 | stringscut.go indexArgValid | behavior | IsAssignedOrAddressTaken で全使用を見る | cut_has_modifying_uses | needs-port | S | stringscut.go{,.golden} |
@@ -659,7 +659,7 @@ golden を regen したら fix のベースラインも撮り直す。測定は 
 | 4 | **honnef IR 寄せ（観測できる分）** | SA5011 の登録解除、SA4006 の `n++` / `+=`、unused の `typeutil.Unify` | staticcheck-sa 18/22 → **16/17**、unused 0/2 → **0/0** | M |
 | 4b | **honnef IR 寄せ（fixture 先行）** | SSI 模倣の撤去（sa4008 `assigned_in`、sa4006 AST hybrid）、DebugRef の監査、IsStub、`EnclosingFunction` の `_`、Recover ブロック。**今の golden に観測差が無い**ので、上流 testdata（irutil/testdata/switches、Nilness/*.go ほか）を fixture にしてから | — | L |
 | 5 | **staticcheck の文言・小移植** | SA1019 SelectorName + literal キー位置 + 引用符なし import、SA4003 の型名、SA6005 の `!`（**done**）。SA1026 / SA5008 embed / SA9010（新規）は残り | staticcheck-sa1019-* 42/42 → **0/0（ratchet 削除）**、staticcheck-sa 16/17 → **0/1**（残りは恒久の SA5005） | M |
-| 6 | **modernize 残り（ゴールデン側）** | stringscut の Split / SplitN 腕（Suite 入れ替え・reflecttypefor・slicescontains・stringsbuilder は PR 1 で済み） | modernize 2/0 → 0/0 | S |
+| 6 | **modernize 残り（ゴールデン側）** | stringscut の Split / SplitN 腕（**done**）。条件の各枝を fixture に足して上流と一致を確認 | modernize 2/0 → **0/0（ratchet 削除）** | S |
 | 7 | **govet 文言** | fieldalignment（size class 表の pin を決める）、composite、inline の埋め込み判定、unusedresult b.Loop、nilness cgo | govet-fieldalignment 14/14 → 0/0 | M |
 | 8 | **出力差の小物まとめ** | nonamedreturns 位置、canonicalheader fork（文言 + initialism + exclusions）、exhaustive ディレクティブ厳密一致 / 不正ディレクティブ / alias、recvcheck、protogetter alias、gocritic sprintfQuotedString、gofumpt 100 バイト規則 | nonamedreturns 14/14、canonicalheader 10/6、exhaustive ×3、recvcheck、protogetter、gocritic、gofumpt → 0 | M（項目は多いが各 S） |
 | 9 | **gosec 既存ルール** | G118、G115、G703、G404、`%#q` 系と並べて TryResolve Builder（2 系統） | gosec 6/8 → 0/0 | M |

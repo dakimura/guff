@@ -1026,6 +1026,14 @@
  	return x
  }
  
+@@ -69,6 +69,6 @@
+ const comma = ","
+ 
+ func splitNamedSep(s string) string {
+-	x := strings.Split(s, comma)[0] // a named constant is still a constant
++	x, _, _ := strings.Cut(s, comma) // a named constant is still a constant
+ 	return x
+ }
 --- a/stringscutprefix/stringscutprefix.go
 +++ b/stringscutprefix/stringscutprefix.go
 @@ -6,29 +6,29 @@

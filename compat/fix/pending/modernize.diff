@@ -1017,6 +1017,31 @@
  		str += "!"
  	}
  	println(str, after)
+--- a/stringscut/stringscut.go
++++ b/stringscut/stringscut.go
+@@ -6,12 +6,12 @@
+ )
+ 
+ func splitFirst(s string) string {
+-	x := strings.Split(s, ",")[0]
++	x, _, _ := strings.Cut(s, ",")
+ 	return x
+ }
+ 
+ func splitNFirst(s string) string {
+-	x := strings.SplitN(s, "=", 2)[0]
++	x, _, _ := strings.Cut(s, "=")
+ 	return x
+ }
+ 
+@@ -69,6 +69,6 @@
+ const comma = ","
+ 
+ func splitNamedSep(s string) string {
+-	x := strings.Split(s, comma)[0] // a named constant is still a constant
++	x, _, _ := strings.Cut(s, comma) // a named constant is still a constant
+ 	return x
+ }
 --- a/stringscutprefix/stringscutprefix.go
 +++ b/stringscutprefix/stringscutprefix.go
 @@ -6,29 +6,29 @@

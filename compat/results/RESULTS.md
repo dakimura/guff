@@ -6,7 +6,7 @@
 | local | 108 | 108 | 108 | 100.0% | 100.0% | 0 |
 | gin | 9 | 10 | 9 | 100.0% | 90.0% | 0 |
 | caddy | 0 | 6 | 0 | 100.0% | 0.0% | 0 |
-| helm | 76 | 80 | 76 | 100.0% | 95.0% | 0 |
+| helm | 79 | 80 | 79 | 100.0% | 98.8% | 0 |
 | k9s | 636 | 597 | 493 | 77.5% | 82.6% | 0 |
 | cobra | 157 | 152 | 149 | 94.9% | 98.0% | 0 |
 | go-client | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
@@ -63,14 +63,11 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| modernize | 76 | 79 | 76 | 100.0% | 96.2% |
+| modernize | 79 | 79 | 79 | 100.0% | 100.0% |
 | staticcheck | 0 | 1 | 0 | 100.0% | 0.0% |
 
-### Allowed known diffs (4)
-- golangci-only: `internal/chart/v3/loader/load.go:126:modernize:stringscut: strings.SplitN call can be simplified using strings.Cut`
-- golangci-only: `pkg/chart/v2/loader/load.go:156:modernize:stringscut: strings.SplitN call can be simplified using strings.Cut`
+### Allowed known diffs (1)
 - golangci-only: `pkg/kube/client_test.go:81:staticcheck:(k8s.io/apimachinery/pkg/apis/meta/v1.ObjectMeta).SelfLink is deprecated: selfLink is a legacy read-only field that is no longer populated by the system. +optional`
-- golangci-only: `pkg/registry/client.go:234:modernize:stringscut: strings.Split call can be simplified using strings.Cut`
 
 ## k9s
 
