@@ -20,3 +20,5 @@ fieldalignment/bad.go:85:16:govet::fieldalignment: ptrsSlice has 16 leading byte
 fieldalignment/bad.go:90:22:govet::fieldalignment: ptrsMapChanFunc has 32 leading bytes of pointer data but optimal value is 24
 fieldalignment/bad.go:97:17:govet::fieldalignment: ptrsString has 16 leading bytes of pointer data but optimal value is 8
 fieldalignment/bad.go:105:25:govet::fieldalignment: ptrsGeneric has 24 leading bytes of pointer data but optimal value is 16
+fieldalignment/bad.go:193:20:govet::fieldalignment: sameSizeClass has size 64 but the optimal size is 56 (allocator size class 64)
+fieldalignment/bad.go:200:25:govet::fieldalignment: pastSmallAllocator has size 40024 (uses global allocator) but the optimal size is 40016 leading to a waste of 8 bytes (0%)

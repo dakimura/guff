@@ -1,6 +1,0 @@
-{
-  "missing": 14,
-  "extra": 14,
-  "why": "x/tools v0.50.0 (golangci-lint 2.14.0) rewrote fieldalignment's messages (type name, allocator size class, waste in bytes and percent). Ledger: xtools-passes #1. The size-class table is go1.27's: 2.14.0 is built with go1.27.0. Recorded when the pin moved 2.12.2 -> 2.14.0; see docs/PHASE8-LEDGER.md §5.1.",
-  "target": "0/0 — docs/PHASE8-LEDGER.md §6 names the PR that closes it."
-}
