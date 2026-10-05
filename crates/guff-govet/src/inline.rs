@@ -817,6 +817,53 @@ fn is_known_inlinable_alias(pkg_path: &str, name: &str) -> bool {
 
 /// Names of type aliases marked `//go:fix inline` in a reparsed file.
 /// (Go: the `*ast.TypeSpec` arm of `gofixdirective.Find`.)
+/// The `//go:fix inline` aliases declared by the package at `path`, read from
+/// its source files (cached per path for the run).
+fn dependency_inlinable_aliases(pass: &Pass<'_>, path: &str) -> std::sync::Arc<HashSet<String>> {
+    use std::sync::{Arc, Mutex};
+    static CACHE: OnceLock<Mutex<HashMap<String, Arc<HashSet<String>>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(hit) = cache.lock().unwrap().get(path) {
+        return hit.clone();
+    }
+    let mut files: Vec<std::path::PathBuf> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut queue: Vec<&guff_analysis::Package> = vec![pass.pkg()];
+    while let Some(pkg) = queue.pop() {
+        if pkg.pkg_path == path {
+            files = if pkg.compiled_go_files.is_empty() {
+                pkg.go_files.clone()
+            } else {
+                pkg.compiled_go_files.clone()
+            };
+            break;
+        }
+        for imp in pkg.imports.values() {
+            if seen.insert(imp.id.clone()) {
+                queue.push(imp);
+            }
+        }
+    }
+    let mut out = HashSet::new();
+    for file in files {
+        let Ok(src) = fs::read(&file) else {
+            continue;
+        };
+        if memchr::memmem::find(&src, b"go:fix inline").is_none() {
+            continue;
+        }
+        let fset = FileSet::new();
+        let name = file.to_string_lossy();
+        let Ok(parsed) = parse_file(&fset, &name, &src, PARSE_COMMENTS) else {
+            continue;
+        };
+        out.extend(go_fix_alias_names(&parsed));
+    }
+    let out = Arc::new(out);
+    cache.lock().unwrap().insert(path.to_string(), out.clone());
+    out
+}
+
 fn go_fix_alias_names(file: &guff::ast::File) -> Vec<String> {
     let mut names = Vec::new();
     for decl in &file.decls {
@@ -934,7 +981,11 @@ fn inlinable_alias(
         return false;
     };
     if obj_pkg != type_pkg {
-        return false;
+        // Upstream exports a goFixInline fact for every alias it inlines, and
+        // golangci-lint computes facts for every dependency. guff reads the
+        // declaring package's files instead, found through the import graph.
+        let path = artifacts.packages.get(obj_pkg).path().to_string();
+        return dependency_inlinable_aliases(pass, &path).contains(name);
     }
     let set = local.get_or_insert_with(|| {
         if !package_has_go_fix_inline(pass) {
@@ -1043,6 +1094,38 @@ fn format_expr(pass: &Pass<'_>, e: &Expr) -> String {
 /// `expr_id` is the whole use expression — the `SelectorExpr` for `pkg.A`, the
 /// `IndexExpr` for `A[int]` — because that is what carries the instantiated
 /// type and what upstream spans.
+/// `inlineAlias` (x/tools v0.50): an alias naming an embedded field is not
+/// inlined when that would rename the field — `Defs[id]` is an embedded
+/// `*types.Var` and the alias's right-hand side is not a named type of the
+/// same name. (v0.44 decided this from the syntax, and missed `*pkg.A` and
+/// `A[T]` embeddings.)
+fn renames_embedded_field(pass: &Pass<'_>, ident_id: u32, alias: ObjectId) -> bool {
+    let (Some(info), Some(a)) = (pass.types_info(), pass.pkg().type_artifacts.as_ref()) else {
+        return false;
+    };
+    let Some(Some(def)) = info.defs.get(&ident_id) else {
+        return false;
+    };
+    let guff_types::arena::ObjectData::Var(v) = a.objects.get(*def) else {
+        return false;
+    };
+    if !v.embedded() {
+        return false;
+    }
+    let Some(t) = alias.typ(&a.objects) else {
+        return true;
+    };
+    let guff_types::arena::TypeData::Alias(al) = a.types.get(t) else {
+        return true;
+    };
+    let identical_name = al.rhs().is_some_and(|rhs| {
+        matches!(a.types.get(rhs), guff_types::arena::TypeData::Named(_))
+            && guff_types::named::named_obj(&a.types, rhs).name(&a.objects)
+                == alias.name(&a.objects)
+    });
+    !identical_name
+}
+
 fn report_alias_inline(
     pass: &Pass<'_>,
     expr_id: u32,
@@ -1245,7 +1328,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     return;
                 };
                 let Some(target) = inline_target(pass, obj, &mut local) else {
-                    if inlinable_alias(pass, obj, &mut local_aliases) {
+                    if inlinable_alias(pass, obj, &mut local_aliases)
+                        && !renames_embedded_field(pass, sel.sel.id, obj)
+                    {
                         let base = Expr::SelectorExpr(sel.clone());
                         let (node, expr) = match indexed.get(&sel.id) {
                             Some((_, e)) => (e.id(), e.clone()),
@@ -1284,7 +1369,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     return;
                 };
                 let Some(target) = inline_target(pass, obj, &mut local) else {
-                    if inlinable_alias(pass, obj, &mut local_aliases) {
+                    if inlinable_alias(pass, obj, &mut local_aliases)
+                        && !renames_embedded_field(pass, id.id, obj)
+                    {
                         let base = Expr::Ident(id.clone());
                         let (node, expr) = match indexed.get(&id.id) {
                             Some((_, e)) => (e.id(), e.clone()),
