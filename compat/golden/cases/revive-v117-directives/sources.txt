@@ -1,0 +1,6 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+plain/revive_disable_directives.go  crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/revive_disable_directives.go
+modified/revive_disable_directives_modified.go  crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/revive_disable_directives_modified.go
+nextline/revive_disable_directives_next_line.go  crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/revive_disable_directives_next_line.go
+insiderange/disable_line_inside_range.go  crates/guff-revive/tests/testdata/revive/disable_line_inside_range.go

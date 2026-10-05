@@ -1,0 +1,38 @@
+# Golden case: revive v1.17.0's own testdata for every rule golangci-lint
+# 2.14.0 changed or added (docs/PHASE8-LEDGER.md, revive). The files are
+# upstream's, verbatim, under crates/guff-revive/tests/testdata/revive/upstream-v1.17.0; their
+# `// MATCH` comments are upstream's expectations under revive's own runner,
+# and this golden is the same files under golangci-lint, which is what guff
+# has to match. Version-gated variants and rules that take arguments are in
+# the revive-v117-* cases next to this one.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      severity: warning
+      rules:
+        - name: comment-spacings
+        - name: deep-exit
+        - name: empty-block
+        - name: identical-switch-branches
+        - name: marshal-receiver
+        - name: multiline-if-init
+        - name: redefines-builtin-id
+        - name: redundant-test-main-exit
+        - name: unexported-return
+        - name: use-any
+        - name: use-errors-new
+        - name: use-slices-concat
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

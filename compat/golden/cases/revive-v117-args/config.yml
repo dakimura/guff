@@ -1,0 +1,33 @@
+# Golden case: the revive v1.17.0 rules whose upstream testdata runs with
+# arguments, each configured exactly as upstream's test/*_test.go does. The
+# files are upstream's, verbatim.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      severity: warning
+      rules:
+        - name: comment-spacings
+          arguments: ["myOwnDirective:", "+optional"]
+        - name: enforce-slice-style
+          arguments: ["nil"]
+        - name: identical-switch-branches
+          arguments:
+            - allow-identical-default: true
+        - name: line-length-limit
+          arguments:
+            - max: 80
+              excludes: ['^\s*//go:generate ', 'https?://']
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

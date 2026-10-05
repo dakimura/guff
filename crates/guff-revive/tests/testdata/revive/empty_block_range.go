@@ -18,7 +18,7 @@ package emptyblockrange
 
 func call() bool { return false }
 
-// The range arm itself. An empty body is one finding, at the `for`.
+// The range arm itself: a bare `for range x {}` is silent since revive v1.17.0.
 func emptyRange(ch chan int) {
 	for range ch {
 	}
@@ -29,7 +29,7 @@ func emptyRangeKeyOnly(s []int) {
 	}
 }
 
-// A non-empty range body must still be walked. Every block below is a finding.
+// A non-empty range body is still walked; each non-range block is reported.
 //
 // The shapes are spread over several small functions on purpose: the golden
 // case also runs `cognitive-complexity`, and one function holding all of them

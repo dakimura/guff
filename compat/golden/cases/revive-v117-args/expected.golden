@@ -1,0 +1,90 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh revive-v117-args
+# Produced by running golangci-lint on compat/golden/cases/revive-v117-args/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+identicaldefault/identical_switch_branches_allow_identical_default.go:16:2:revive:warning:identical-switch-branches: "switch" with identical branches (lines 17 and 21)
+identicaldefault/identical_switch_branches_allow_identical_default.go:40:3:revive:warning:identical-switch-branches: "switch" with identical branches (lines 41 and 43)
+linelength/line_length_limit_excludes.go:7:0:revive:warning:line-length-limit: line is 99 characters, out of limit 80
+linelength/line_length_limit_excludes.go:11:0:revive:warning:line-length-limit: line is 102 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:8:0:revive:warning:line-length-limit: line is 101 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:8:13:revive:warning:enforce-slice-style: use nil slice (e.g. []type(nil)) instead of make([]type, 0)
+slicestyle/enforce_slice_style_nil.go:9:0:revive:warning:line-length-limit: line is 101 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:9:13:revive:warning:enforce-slice-style: use nil slice (e.g. []type(nil)) instead of make([]type, 0)
+slicestyle/enforce_slice_style_nil.go:10:0:revive:warning:line-length-limit: line is 94 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:10:8:revive:warning:enforce-slice-style: use nil slice (e.g. []type(nil)) instead of []type{}
+slicestyle/enforce_slice_style_nil.go:15:0:revive:warning:line-length-limit: line is 126 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:15:25:revive:warning:enforce-slice-style: use nil slice declaration (e.g. var args []type) instead of make([]type, 0)
+slicestyle/enforce_slice_style_nil.go:16:0:revive:warning:line-length-limit: line is 126 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:16:17:revive:warning:enforce-slice-style: use nil slice declaration (e.g. var args []type) instead of make([]type, 0)
+slicestyle/enforce_slice_style_nil.go:18:0:revive:warning:line-length-limit: line is 113 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:18:21:revive:warning:enforce-slice-style: use nil slice declaration (e.g. var args []type) instead of []type{}
+slicestyle/enforce_slice_style_nil.go:19:0:revive:warning:line-length-limit: line is 113 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:19:12:revive:warning:enforce-slice-style: use nil slice declaration (e.g. var args []type) instead of []type{}
+slicestyle/enforce_slice_style_nil.go:23:0:revive:warning:line-length-limit: line is 98 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:23:13:revive:warning:enforce-slice-style: use nil slice (e.g. []type(nil)) instead of make([]type, 0)
+slicestyle/enforce_slice_style_nil.go:24:0:revive:warning:line-length-limit: line is 91 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:24:8:revive:warning:enforce-slice-style: use nil slice (e.g. []type(nil)) instead of []type{}
+slicestyle/enforce_slice_style_nil.go:50:0:revive:warning:line-length-limit: line is 98 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:50:13:revive:warning:enforce-slice-style: use nil slice (e.g. []type(nil)) instead of make([]type, 0)
+slicestyle/enforce_slice_style_nil.go:51:0:revive:warning:line-length-limit: line is 98 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:51:13:revive:warning:enforce-slice-style: use nil slice (e.g. []type(nil)) instead of make([]type, 0)
+slicestyle/enforce_slice_style_nil.go:52:0:revive:warning:line-length-limit: line is 91 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:52:8:revive:warning:enforce-slice-style: use nil slice (e.g. []type(nil)) instead of []type{}
+slicestyle/enforce_slice_style_nil.go:55:0:revive:warning:line-length-limit: line is 120 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:55:22:revive:warning:enforce-slice-style: use nil slice declaration (e.g. var args []type) instead of make([]type, 0)
+slicestyle/enforce_slice_style_nil.go:56:0:revive:warning:line-length-limit: line is 120 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:56:16:revive:warning:enforce-slice-style: use nil slice declaration (e.g. var args []type) instead of make([]type, 0)
+slicestyle/enforce_slice_style_nil.go:58:0:revive:warning:line-length-limit: line is 107 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:58:18:revive:warning:enforce-slice-style: use nil slice declaration (e.g. var args []type) instead of []type{}
+slicestyle/enforce_slice_style_nil.go:59:0:revive:warning:line-length-limit: line is 107 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:59:12:revive:warning:enforce-slice-style: use nil slice declaration (e.g. var args []type) instead of []type{}
+slicestyle/enforce_slice_style_nil.go:63:0:revive:warning:line-length-limit: line is 95 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:63:13:revive:warning:enforce-slice-style: use nil slice (e.g. []type(nil)) instead of make([]type, 0)
+slicestyle/enforce_slice_style_nil.go:64:0:revive:warning:line-length-limit: line is 88 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:64:8:revive:warning:enforce-slice-style: use nil slice (e.g. []type(nil)) instead of []type{}
+slicestyle/enforce_slice_style_nil.go:88:0:revive:warning:line-length-limit: line is 103 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:88:13:revive:warning:enforce-slice-style: use nil slice (e.g. []type(nil)) instead of make([]type, 0)
+slicestyle/enforce_slice_style_nil.go:89:0:revive:warning:line-length-limit: line is 103 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:89:13:revive:warning:enforce-slice-style: use nil slice (e.g. []type(nil)) instead of make([]type, 0)
+slicestyle/enforce_slice_style_nil.go:90:0:revive:warning:line-length-limit: line is 96 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:90:8:revive:warning:enforce-slice-style: use nil slice (e.g. []type(nil)) instead of []type{}
+slicestyle/enforce_slice_style_nil.go:93:0:revive:warning:line-length-limit: line is 130 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:93:27:revive:warning:enforce-slice-style: use nil slice declaration (e.g. var args []type) instead of make([]type, 0)
+slicestyle/enforce_slice_style_nil.go:94:0:revive:warning:line-length-limit: line is 130 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:94:16:revive:warning:enforce-slice-style: use nil slice declaration (e.g. var args []type) instead of make([]type, 0)
+slicestyle/enforce_slice_style_nil.go:96:0:revive:warning:line-length-limit: line is 117 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:96:23:revive:warning:enforce-slice-style: use nil slice declaration (e.g. var args []type) instead of []type{}
+slicestyle/enforce_slice_style_nil.go:97:0:revive:warning:line-length-limit: line is 117 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:97:12:revive:warning:enforce-slice-style: use nil slice declaration (e.g. var args []type) instead of []type{}
+slicestyle/enforce_slice_style_nil.go:101:0:revive:warning:line-length-limit: line is 100 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:101:13:revive:warning:enforce-slice-style: use nil slice (e.g. []type(nil)) instead of make([]type, 0)
+slicestyle/enforce_slice_style_nil.go:102:0:revive:warning:line-length-limit: line is 93 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:102:8:revive:warning:enforce-slice-style: use nil slice (e.g. []type(nil)) instead of []type{}
+slicestyle/enforce_slice_style_nil.go:122:0:revive:warning:line-length-limit: line is 86 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:122:8:revive:warning:enforce-slice-style: use nil slice (e.g. []type(nil)) instead of []type{}
+slicestyle/enforce_slice_style_nil.go:125:0:revive:warning:line-length-limit: line is 107 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:125:19:revive:warning:enforce-slice-style: use nil slice (e.g. []type(nil)) instead of make([]type, 0)
+slicestyle/enforce_slice_style_nil.go:126:0:revive:warning:line-length-limit: line is 107 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:126:19:revive:warning:enforce-slice-style: use nil slice (e.g. []type(nil)) instead of make([]type, 0)
+slicestyle/enforce_slice_style_nil.go:127:0:revive:warning:line-length-limit: line is 100 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:127:14:revive:warning:enforce-slice-style: use nil slice (e.g. []type(nil)) instead of []type{}
+slicestyle/enforce_slice_style_nil.go:135:0:revive:warning:line-length-limit: line is 92 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:135:8:revive:warning:enforce-slice-style: use nil slice (e.g. []type(nil)) instead of []type{}
+slicestyle/enforce_slice_style_nil.go:136:0:revive:warning:line-length-limit: line is 99 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:136:13:revive:warning:enforce-slice-style: use nil slice (e.g. []type(nil)) instead of make([]type, 0)
+slicestyle/enforce_slice_style_nil.go:144:0:revive:warning:line-length-limit: line is 96 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:144:12:revive:warning:enforce-slice-style: use nil slice (e.g. []type(nil)) instead of []type{}
+slicestyle/enforce_slice_style_nil.go:145:0:revive:warning:line-length-limit: line is 103 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:145:17:revive:warning:enforce-slice-style: use nil slice (e.g. []type(nil)) instead of make([]type, 0)
+slicestyle/enforce_slice_style_nil.go:154:0:revive:warning:line-length-limit: line is 115 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:154:15:revive:warning:enforce-slice-style: use nil slice (e.g. []type(nil)) instead of make([]type, 0)
+slicestyle/enforce_slice_style_nil.go:157:0:revive:warning:line-length-limit: line is 101 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:157:10:revive:warning:enforce-slice-style: use nil slice (e.g. []type(nil)) instead of []type{}
+slicestyle/enforce_slice_style_nil.go:163:0:revive:warning:line-length-limit: line is 85 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:163:9:revive:warning:enforce-slice-style: use nil slice (e.g. []type(nil)) instead of []type{}
+slicestyle/enforce_slice_style_nil.go:167:0:revive:warning:line-length-limit: line is 99 characters, out of limit 80
+slicestyle/enforce_slice_style_nil.go:167:14:revive:warning:enforce-slice-style: use nil slice (e.g. []type(nil)) instead of make([]type, 0)

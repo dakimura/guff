@@ -1,0 +1,98 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh revive-v117
+# Produced by running golangci-lint on compat/golden/cases/revive-v117/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+commentspacings/comment_spacings.go:26:1:revive:warning:comment-spacings: no space between comment delimiter and comment text
+commentspacings/comment_spacings.go:37:1:revive:warning:comment-spacings: no space between comment delimiter and comment text
+commentspacings/comment_spacings.go:54:1:revive:warning:comment-spacings: no space between comment delimiter and comment text
+commentspacings/comment_spacings.go:62:3:revive:warning:deep-exit: calls to os.Exit only in main() or init() functions
+deepexit/deep_exit.go:12:2:revive:warning:deep-exit: calls to os.Exit only in main() or init() functions
+deepexit/deep_exit.go:20:2:revive:warning:deep-exit: calls to log.Fatalf only in main() or init() functions
+deepexit/deep_exit.go:28:2:revive:warning:deep-exit: calls to log.Fatal only in main() or init() functions
+deepexit/deep_exit.go:33:2:revive:warning:deep-exit: calls to syscall.Exit only in main() or init() functions
+deepexit/deep_exit.go:38:2:revive:warning:deep-exit: calls to os.Exit only in main() or init() functions
+deepexit/deep_exit.go:42:2:revive:warning:deep-exit: calls to flag.Parse only in main() or init() functions; move the call or refactor to use flag.NewFlagSet with flag.ContinueOnError
+deepexit/deep_exit.go:46:2:revive:warning:deep-exit: calls to flag.NewFlagSet with flag.ExitOnError only in main() or init() functions
+deepexit/deep_exit.go:55:2:revive:warning:deep-exit: calls to os.Exit only in main() or init() functions
+deepexit/deep_exit_test.go:12:2:revive:warning:redundant-test-main-exit: redundant call to os.Exit in TestMain function, the test runner will handle it automatically as of Go 1.15
+deepexit/deep_exit_test.go:32:2:revive:warning:deep-exit: calls to log.Fatal only in main() or init() functions
+deepexit/deep_exit_test.go:37:2:revive:warning:deep-exit: calls to log.Fatal only in main() or init() functions
+deepexit/deep_exit_test.go:42:2:revive:warning:deep-exit: calls to log.Fatal only in main() or init() functions
+emptyblock/empty_block.go:23:2:revive:warning:empty-block: this block is empty, you can remove it
+emptyblock/empty_block.go:28:19:revive:warning:empty-block: this block is empty, you can remove it
+emptyblock/empty_block.go:36:9:revive:warning:empty-block: this block is empty, you can remove it
+emptyblock/empty_block.go:40:26:revive:warning:empty-block: this block is empty, you can remove it
+emptyblock/empty_block.go:44:6:revive:warning:empty-block: this block is empty, you can remove it
+emptyblock/empty_block.go:48:11:revive:warning:empty-block: this block is empty, you can remove it
+emptyblock/empty_block.go:52:2:revive:warning:empty-block: this block is empty, you can remove it
+emptyblock/empty_block.go:74:9:revive:warning:empty-block: this block is empty, you can remove it
+identical/identical_switch_branches.go:4:2:revive:warning:identical-switch-branches: "switch" with identical branches (lines 6 and 10)
+identical/identical_switch_branches.go:18:2:revive:warning:identical-switch-branches: "switch" with identical branches (lines 20 and 24)
+identical/identical_switch_branches.go:18:2:revive:warning:identical-switch-branches: "switch" with identical branches (lines 22 and 26)
+identical/identical_switch_branches.go:30:2:revive:warning:identical-switch-branches: "switch" with identical branches (lines 32 and 34)
+marshal/marshal_receiver.go:18:1:revive:warning:marshal-receiver: BadMarshalRecv.MarshalJSON method should use a value receiver, not a pointer receiver
+marshal/marshal_receiver.go:19:1:revive:warning:marshal-receiver: BadMarshalRecv.UnmarshalJSON method should use a pointer receiver, not a value receiver
+marshal/marshal_receiver.go:20:1:revive:warning:marshal-receiver: BadMarshalRecv.MarshalText method should use a value receiver, not a pointer receiver
+marshal/marshal_receiver.go:21:1:revive:warning:marshal-receiver: BadMarshalRecv.UnmarshalText method should use a pointer receiver, not a value receiver
+marshal/marshal_receiver.go:22:1:revive:warning:marshal-receiver: BadMarshalRecv.MarshalYAML method should use a value receiver, not a pointer receiver
+marshal/marshal_receiver.go:23:1:revive:warning:marshal-receiver: BadMarshalRecv.UnmarshalYAML method should use a pointer receiver, not a value receiver
+multilineif/multiline_if_init.go:30:2:revive:warning:multiline-if-init: if-init statement should not span multiple lines
+multilineif/multiline_if_init.go:39:2:revive:warning:multiline-if-init: if-init statement should not span multiple lines
+multilineif/multiline_if_init.go:49:3:revive:warning:multiline-if-init: if-init statement should not span multiple lines
+redefines/redefines_builtin_id.go:4:2:revive:warning:redefines-builtin-id: assignment creates a shadow of built-in identifier nil
+redefines/redefines_builtin_id.go:5:2:revive:warning:redefines-builtin-id: assignment modifies built-in identifier iota
+redefines/redefines_builtin_id.go:8:1:revive:warning:redefines-builtin-id: redefinition of the built-in function append
+redefines/redefines_builtin_id.go:12:1:revive:warning:redefines-builtin-id: redefinition of the built-in type string
+redefines/redefines_builtin_id.go:14:1:revive:warning:redefines-builtin-id: redefinition of the built-in function delete
+redefines/redefines_builtin_id.go:23:1:revive:warning:redefines-builtin-id: redefinition of the built-in type any
+redefines/redefines_builtin_id.go:25:1:revive:warning:redefines-builtin-id: redefinition of the built-in type any
+redefines/redefines_builtin_id.go:27:1:revive:warning:redefines-builtin-id: redefinition of the built-in type any
+redefines/redefines_builtin_id.go:29:1:revive:warning:redefines-builtin-id: redefinition of the built-in type any
+redefines/redefines_builtin_id.go:31:1:revive:warning:redefines-builtin-id: redefinition of the built-in function copy
+redefines/redefines_builtin_id.go:37:2:revive:warning:redefines-builtin-id: redefinition of the built-in function clear
+redefines/redefines_builtin_id.go:38:2:revive:warning:redefines-builtin-id: redefinition of the built-in function max
+redefines/redefines_builtin_id.go:39:2:revive:warning:redefines-builtin-id: redefinition of the built-in function min
+redefines/redefines_builtin_id.go:45:11:revive:warning:redefines-builtin-id: redefinition of the built-in function new
+redefines/redefines_builtin_id.go:49:14:revive:warning:redefines-builtin-id: redefinition of the built-in function new
+redefines/redefines_builtin_id.go:53:11:revive:warning:redefines-builtin-id: redefinition of the built-in function new
+redefines/redefines_builtin_id.go:56:1:revive:warning:redefines-builtin-id: redefinition of the built-in type comparable
+redefines/redefines_builtin_id.go:58:1:revive:warning:redefines-builtin-id: redefinition of the built-in type comparable
+redefines/redefines_builtin_id.go:60:1:revive:warning:redefines-builtin-id: redefinition of the built-in type comparable
+redefines/redefines_builtin_id.go:62:1:revive:warning:redefines-builtin-id: redefinition of the built-in type comparable
+redefines/redefines_builtin_id.go:64:11:revive:warning:redefines-builtin-id: redefinition of the built-in type comparable
+slicesconcat/use_slices_concat.go:4:6:revive:warning:use-slices-concat: replace nested appends by a call to slices.Concat
+slicesconcat/use_slices_concat.go:5:6:revive:warning:use-slices-concat: replace nested appends by a call to slices.Concat
+slicesconcat/use_slices_concat.go:6:6:revive:warning:use-slices-concat: replace nested appends by a call to slices.Concat
+slicesconcat/use_slices_concat.go:8:2:revive:warning:use-slices-concat: replace consecutive appends by a call to slices.Concat
+slicesconcat/use_slices_concat.go:14:3:revive:warning:use-slices-concat: replace consecutive appends by a call to slices.Concat
+slicesconcat/use_slices_concat.go:22:3:revive:warning:use-slices-concat: replace consecutive appends by a call to slices.Concat
+testmainexit/redundant_test_main_exit_test.go:16:2:revive:warning:redundant-test-main-exit: redundant call to os.Exit in TestMain function, the test runner will handle it automatically as of Go 1.15
+testmainexit/redundant_test_main_exit_test.go:17:2:revive:warning:redundant-test-main-exit: redundant call to syscall.Exit in TestMain function, the test runner will handle it automatically as of Go 1.15
+testmainexit/redundant_test_main_exit_test.go:54:2:revive:warning:deep-exit: calls to os.Exit only in main() or init() functions
+testmainexit/redundant_test_main_exit_test.go:59:2:revive:warning:deep-exit: calls to syscall.Exit only in main() or init() functions
+testmainexit/redundant_test_main_exit_test.go:63:2:revive:warning:redundant-test-main-exit: redundant call to os.Exit in TestMain function, the test runner will handle it automatically as of Go 1.15
+testmainexit/redundant_test_main_exit_test.go:69:2:revive:warning:redundant-test-main-exit: redundant call to os.Exit in TestMain function, the test runner will handle it automatically as of Go 1.15
+testmainexit/redundant_test_main_exit_test.go:74:2:revive:warning:redundant-test-main-exit: redundant call to syscall.Exit in TestMain function, the test runner will handle it automatically as of Go 1.15
+testmainexit/redundant_test_main_exit_test.go:113:2:revive:warning:redundant-test-main-exit: redundant call to os.Exit in TestMain function, the test runner will handle it automatically as of Go 1.15
+testmainexit/redundant_test_main_exit_test.go:117:2:revive:warning:redundant-test-main-exit: redundant call to os.Exit in TestMain function, the test runner will handle it automatically as of Go 1.15
+testmainexit/redundant_test_main_exit_test.go:184:2:revive:warning:redundant-test-main-exit: redundant call to os.Exit in TestMain function, the test runner will handle it automatically as of Go 1.15
+urfoo/foo.go:10:15:revive:warning:unexported-return: exported func NewFoo returns unexported type foo.foo, which can be annoying to use
+urlocal/unexported_return_interface.go:14:17:revive:warning:unexported-return: exported func NewIface returns unexported type urlocal.iface, which can be annoying to use
+urlocal/unexported_return_interface.go:16:22:revive:warning:unexported-return: exported func NewIfaceAlias returns unexported type urlocal.ifaceAlias, which can be annoying to use
+useany/use_any.go:3:7:revive:warning:use-any: since Go 1.18 'interface{}' can be replaced by 'any'
+useany/use_any.go:5:8:revive:warning:use-any: since Go 1.18 'interface{}' can be replaced by 'any'
+useany/use_any.go:6:10:revive:warning:use-any: since Go 1.18 'interface{}' can be replaced by 'any'
+useany/use_any.go:8:13:revive:warning:use-any: since Go 1.18 'interface{}' can be replaced by 'any'
+useany/use_any.go:9:12:revive:warning:use-any: since Go 1.18 'interface{}' can be replaced by 'any'
+useany/use_any.go:10:16:revive:warning:use-any: since Go 1.18 'interface{}' can be replaced by 'any'
+useany/use_any.go:11:9:revive:warning:use-any: since Go 1.18 'interface{}' can be replaced by 'any'
+useany/use_any.go:12:21:revive:warning:use-any: since Go 1.18 'interface{}' can be replaced by 'any'
+useany/use_any.go:13:15:revive:warning:use-any: since Go 1.18 'interface{}' can be replaced by 'any'
+useany/use_any.go:16:18:revive:warning:use-any: since Go 1.18 'interface{}' can be replaced by 'any'
+useerrorsnew/use_errors_new.go:6:2:revive:warning:use-errors-new: replace fmt.Errorf by errors.New
+useerrorsnew/use_errors_new.go:7:23:revive:warning:use-errors-new: replace fmt.Errorf by errors.New
+useerrorsnew/use_errors_new.go:11:12:revive:warning:use-errors-new: replace fmt.Errorf by errors.New

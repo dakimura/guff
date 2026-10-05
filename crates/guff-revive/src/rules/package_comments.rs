@@ -56,8 +56,9 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
     let mut failures = Vec::new();
 
     // Detached / form checks are per-file (upstream walks each file).
+    let mut reached_missing_check = false;
     for (fi, rp) in &files {
-        check_file_shape(
+        reached_missing_check |= check_file_shape(
             pass,
             *fi,
             &rp.file,
@@ -77,7 +78,12 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
     // carries `//nolint:revive // TODO(CINT) Fix revive linter` right above its
     // `package main`, and that alone is why upstream says nothing about the
     // package's missing comment.
-    if files.iter().any(|(_, rp)| rp.file.doc.is_some()) {
+    //
+    // And only if some file asked: upstream calls `checkPackageComment` from a
+    // file whose doc is empty, after the detached check has already returned
+    // for a file that has a detached comment. A package whose only file has a
+    // detached comment gets that one finding, not a second "missing".
+    if !reached_missing_check || files.iter().any(|(_, rp)| rp.file.doc.is_some()) {
         return failures;
     }
 
@@ -147,7 +153,7 @@ fn check_file_shape(
     pkg_name: &str,
     prefix: &str,
     failures: &mut Vec<Failure>,
-) {
+) -> bool {
     let report = &pass.files()[fi];
 
     if let Some(detached) = detached_package_comment(file, comments_fset, prefix) {
@@ -157,12 +163,12 @@ fn check_file_shape(
             message: "package comment is detached; there should be no blank lines between it and the package statement".into(),
             ..Failure::default()
         });
-        return;
+        return false;
     }
 
     if is_empty_doc(file.doc.as_ref()) {
         // Missing comment is handled package-wide in `apply`.
-        return;
+        return true;
     }
 
     let text = file.doc.as_ref().map(|d| d.text()).unwrap_or_default();
@@ -183,6 +189,7 @@ fn check_file_shape(
             ..Failure::default()
         });
     }
+    false
 }
 
 
@@ -226,12 +233,19 @@ fn detached_package_comment(file: &File, fset: &FileSet, prefix: &str) -> Option
     if !cg.text().starts_with(prefix) {
         return None;
     }
-    // Upstream: endPos.Line+1 < pkgPos.Line
-    let end_line = fset.position(cg.end()).line;
-    let pkg_line = fset.position(file.package).line;
+    // revive v1.17.0 `commentGroupEndLine`: the last comment's first line plus
+    // the newlines in its text. Not `cg.end()`: the scanner strips carriage
+    // returns from comment text, so on CRLF sources `End()` falls short of a
+    // block comment's real end (go.dev/issue/41197, revive issue 607).
+    let last = cg.list.last()?;
+    let end_line =
+        fset.position(last.slash).line as usize + last.text.matches('\n').count();
+    let pkg_line = fset.position(file.package).line as usize;
     if end_line + 1 < pkg_line {
-        // Anchor on the first blank line after the comment (upstream heuristic).
-        Some(cg.end().0 as u32)
+        // Upstream anchors at `{Line: endLine + 1, Column: 1}`: the first of
+        // the blank lines between the doc and the package statement.
+        let ft = fset.file(file.pos())?;
+        Some(ft.line_start(end_line + 1).0 as u32)
     } else {
         None
     }
