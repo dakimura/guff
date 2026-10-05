@@ -574,14 +574,14 @@ v5 の `analyzer/testdata` は module zip に無い。GitHub の v5.2.0 タグ�
 | 11 | loggercheck 引数数ガード | behavior | 多値展開で panic | loggercheck.rs:375 | already-matches | S | issue108 |
 | 12 | fatcontext 2 フラグ | new-option | check-loops / check-function-literals | settings.rs:942, fatcontext.rs:291 | already-matches | S | fatcontext*.go/yml |
 | 13 | fatcontext isRunOnce | behavior | defer IIFE と t.Cleanup を報告しない | guff-context/src/fatcontext.rs run | needs-port | M | common/example.go, no_*/example.go |
-| 14 | unparam addSrcFunc（AnonFuncs） | behavior | 到達不能な func literal も検査 | guff-style/src/unparam.rs:2048, :1117 | needs-port | M | unexported_methods.txtar |
+| 14 | unparam addSrcFunc（AnonFuncs） | behavior | 到達不能な func literal も検査 | guff-style/src/unparam.rs:2048, :1117 | **done (PR 11)**: 到達不能な文の func literal も検査（外側の dead view は literal 自身には掛けない） | M | unexported_methods.txtar |
 | 15 | unparam 非公開型のメソッド | behavior | issue #91 | unparam.rs | already-matches | S | unexported_methods.txtar |
-| 16 | unparam linknameDoc | behavior | `//go:linkname` を skip | unparam.rs check_func_decl | needs-port | S | linkname.txtar |
-| 17 | unparam signRequiredBy | behavior | go / defer 引数、MapUpdate、Send、Select | unparam.rs collect_sign_required | needs-port | S | usedas.txtar |
-| 18 | unparam returnValues / storedValue | behavior | store → load を辿る | unparam.rs collect_results_required | needs-port | M | samerets.txtar |
-| 19 | unparam eqlConsts | behavior | types.Identical で比較 | unparam.rs consts_equal | needs-port | S | typealias.txtar |
-| 20 | unparam error alias | behavior | `type E = error` を除外 | unparam.rs is_error_type | needs-port | S | typealias.txtar |
-| 21 | unparam containsTypeParam | behavior | ゼロサイズ skip（guff にサイズ gate 自体が無い） | unparam.rs check_params | needs-port | S | typealias.txtar, typeparams.txtar |
+| 16 | unparam linknameDoc | behavior | `//go:linkname` を skip | unparam.rs check_func_decl | **done (PR 11)** | S | linkname.txtar |
+| 17 | unparam signRequiredBy | behavior | go / defer 引数、MapUpdate、Send、Select | unparam.rs collect_sign_required | **done (PR 11)** | S | usedas.txtar |
+| 18 | unparam returnValues / storedValue | behavior | store → load を辿る | unparam.rs collect_results_required | **done (PR 11)** | M | samerets.txtar |
+| 19 | unparam eqlConsts | behavior | types.Identical で比較 | unparam.rs consts_equal | **done (PR 11)** | S | typealias.txtar |
+| 20 | unparam error alias | behavior | `type E = error` を除外 | unparam.rs is_error_type | **done (PR 11)** | S | typealias.txtar |
+| 21 | unparam containsTypeParam | behavior | ゼロサイズ skip（guff にサイズ gate 自体が無い） | unparam.rs check_params | **done (PR 11)**: ゼロサイズ skip ごと移植（§7 の 17） | S | typealias.txtar, typeparams.txtar |
 | 22 | unparam findNamed Origin | behavior | 実体化経由の interface 実装 | unparam.rs collect_types_implementing | already-matches | S | typeparams.txtar |
 
 ---
@@ -664,7 +664,7 @@ golden を regen したら fix のベースラインも撮り直す。測定は 
 | 8 | **出力差の小物まとめ（done）** | nonamedreturns 位置、canonicalheader fork（文言 + initialism + exclusions 設定）、exhaustive（厳密ディレクティブ・解析エラー・alias）、recvcheck、protogetter alias、gocritic sprintfQuotedString、gofumpt 100 バイト規則と effectiveEnd | nonamedreturns 14/14、canonicalheader 10/6、exhaustive ×3、recvcheck、protogetter、gocritic、gofumpt → **すべて 0/0（ratchet 削除）** | M |
 | 9 | **gosec 既存ルール** — **done** | G118、G115、G703、G404、`%#q` 系と並べて TryResolve Builder（2 系統）。nosec-require-* と NoSecTag は `config.global` 未対応のため残す | gosec 6/8 → **0/0（ratchet 削除）** | M |
 | 10 | **revive** — **done** | empty-block range、multiline-if-init を enable-all に、marshal-receiver、use-slices-concat、文言 4 本、Go 版ゲート 2 本、directives。redundant-build-tag / use-waitgroup-go（rule ごと未実装）と `directives:` 設定は残す | revive 1/10 → **1/4（恒久分のみ）**、新設 golden 7 case | M |
-| 11 | **unused / unparam** | Unify、unparam AnonFuncs + linkname + signRequiredBy + alias | unused 0/2、unparam 1/0 → 0 | M |
+| 11 | **unused / unparam** — **done** | Unify、unparam AnonFuncs + linkname + signRequiredBy + alias。あわせて既存の乖離 3 つ: 総称レシーバと literal の名前（`RelString`）、signRequiredBy の名前照合（受信者名 `g1` が関数 `g1` を固定していた）、`f[int](x)` を値の使用と見ていた | unused 0/2 → 0/0（PR 4）、unparam 1/0 → **0/0（ratchet 削除）**、新設 golden `unparam-upstream`（上流 testscript 6 本 + ゼロサイズ） | M |
 | 12 | **modernize 残り（ゴールデンに出ない側）** | minmax ×2、atomictypes、waitgroupgo、testingcontext、rangeint、slicesbackward ×3、stringscut ×3、stringscutprefix、stringsbuilder lastEditEnd、slicesclip。**各項目で上流 testdata を fixture 化**（ratchet は動かないので fixture が唯一の検算） | ― | M〜L |
 | 13 | **gofumpt v0.12 の残り + printer** | §2.4 の toolchain 確認の後。括弧除去、effectiveEnd + multi、removeParens、joinStdImports、diagnose。`omit_v010_rules` / `match_golangci` gate の撤去 | ― | L |
 | 14 | **新機能（大）を 1 本ずつ** | G407、exhaustruct_v5（3〜4 PR に分割：設定 → ディレクティブスキャナ → 欠落計算 → tag 移行）、gochecksumtype fact、iface unusedmethod / opaque / unexported、stdversion、goconst eval-const-expressions、embedlit | ― | 各 L |
@@ -693,7 +693,7 @@ PR 12 以降は ratchet が動かない（golden に形が無い）ので、fixt
 14. **goconst `exclude-types` を明示したとき viper が既定 [Call] を置換するか**を実機で確認（台帳はコードから「置換」と読んだ）。
 15. **gofumpt `extra-rules` の deprecation 警告文言と挙動の食い違い**（警告は group-params だけを案内、コードは 3 規則全部）。警告は文言どおり転記、挙動はコードに合わせる、で良いか。
 16. **upstream testdata の取得**: revive v1.17.0、exhaustruct v5.2.0 の analyzer/testdata、gomoddirectives v0.10.0 の ignore_defaults、loggercheck の issue108 は module zip に無い。各 repo のタグから取る必要がある。
-17. **unparam のゼロサイズ型 skip**（`stdSizes.Sizeof == 0`）は guff に元から無い。bump とは独立の既存乖離だが、2.14.0 の containsTypeParam 変更で乖離の形が変わるので、PR 11 で gate ごと入れるか。
+17. ~~**unparam のゼロサイズ型 skip**~~ → PR 11 で gate ごと移植（golden `unparam-upstream` の `zerosize/`）。以下は当初の問い:（`stdSizes.Sizeof == 0`）は guff に元から無い。bump とは独立の既存乖離だが、2.14.0 の containsTypeParam 変更で乖離の形が変わるので、PR 11 で gate ごと入れるか。
 18. **golines / swaggo の missing 1**: drift 実行環境に外部バイナリがあったかを確認し、無かったなら drift.py が「バイナリ不在」を区別して報告するようにする。
 
 ---

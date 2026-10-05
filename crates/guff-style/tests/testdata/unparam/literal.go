@@ -251,12 +251,12 @@ func litLiveIIFE() {
 	_ = func(used int, unused string) int { return used + 1 }(1, "x")
 }
 
-// litDeadIIFE is the same literal in a statement nothing reaches. go/ssa's
-// builder only visits statements while it holds a current block, so the
-// `MakeClosure` is never built, no `AnonFuncs` entry is appended, and
-// `ssautil.AllFunctions` cannot reach the literal — upstream criticises
-// neither its parameters nor its results, not even the unused one. guff builds
-// the literal regardless.
+// litDeadIIFE is the same literal in a statement nothing reaches. go/ssa builds
+// it into an unreachable block that is deleted later, so under 2.12.2's unparam
+// `ssautil.AllFunctions` never reached it and nothing was reported. 2.14.0's
+// unparam also walks every declared func's `AnonFuncs`, where the literal
+// stays: `unused` is reported, and `used`, used in the literal's own (live)
+// body, is not.
 func litDeadIIFE() {
 	panic("nothing below this runs")
 

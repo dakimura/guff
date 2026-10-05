@@ -10062,7 +10062,7 @@ fn unparam_reads_variadic_parameters_and_func_literals() {
     // one, so a literal held in a variable was never checked at all.
     let pkg = support::typecheck_fixture("unparam", "example.com/unparam/literal", "literal.go");
     let messages = support::run_analyzer(unparam(), &pkg);
-    assert_eq!(messages.len(), 14, "{messages:?}");
+    assert_eq!(messages.len(), 15, "{messages:?}");
 
     // Four variadic parameters that no caller ever fills, one of them reached
     // through `nil...` and one of them a method (whose SSA argument list
@@ -10082,18 +10082,19 @@ fn unparam_reads_variadic_parameters_and_func_literals() {
             "{quiet}: {messages:?}"
         );
     }
-    // Two of the fourteen literals are checkable: the capturing one held in a
-    // cell another closure captures, and the plain immediately-invoked one.
-    // `litDeadIIFE` is the same literal as `litLiveIIFE` in a statement nothing
-    // reaches: go/ssa never builds it, so upstream criticises neither its
-    // parameters nor its results — not even the unused one that its live twin
-    // is reported for. guff builds it regardless, and reported it.
+    // Three of the literals are checkable: the capturing one held in a cell
+    // another closure captures, the plain immediately-invoked one, and its
+    // twin `litDeadIIFE` in a statement nothing reaches. unparam 2fa3d841b0c8
+    // (golangci-lint 2.14.0) reaches that one through `AnonFuncs`; 2.12.2's
+    // did not. Only `unused` is reported for it: `used` is used in the
+    // literal's own body, which is live from the literal's entry.
     let mut lits: Vec<&String> = messages.iter().filter(|m| m.contains("$1 -")).collect();
     lits.sort();
     assert_eq!(
         lits,
         vec![
             "litCapturedFreeVar$1 - result 0 (error) is always nil",
+            "litDeadIIFE$1 - unused is unused",
             "litLiveIIFE$1 - unused is unused",
         ],
         "{messages:?}"

@@ -27,13 +27,14 @@
 //! DEFERRED: full SSA (`buildir`), unused/constant results, generated-file
 //! skips, recursive-only uses, `paramsRequiredBy`.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 use guff::ast::{Decl, Expr, FuncDecl, FuncLit, Stmt};
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::passes::facts::ctrlflow::{self, CtrlFlowResult, DeadCode};
+use guff_analysis::code;
 use guff_analysis::passes::{buildir, inspect};
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use crate::options::UnparamOptions;
@@ -42,10 +43,21 @@ fn is_blank_param(name: &str) -> bool {
     name.is_empty() || name.starts_with('_')
 }
 
+/// The receiver type as go/ssa's `relMethod` prints it, relative to the
+/// package: a generic receiver keeps its type parameters, `(Tuple[T1, T2]).m`.
 fn recv_type_string(expr: &Expr) -> String {
     match expr {
         Expr::Ident(id) => id.name.clone(),
         Expr::StarExpr(s) => format!("*{}", recv_type_string(&s.x)),
+        Expr::ParenExpr(p) => recv_type_string(&p.x),
+        Expr::IndexExpr(ix) => {
+            format!("{}[{}]", recv_type_string(&ix.x), recv_type_string(&ix.index))
+        }
+        Expr::IndexListExpr(ix) => format!(
+            "{}[{}]",
+            recv_type_string(&ix.x),
+            ix.indices.iter().map(recv_type_string).collect::<Vec<_>>().join(", ")
+        ),
         _ => "?".to_string(),
     }
 }
@@ -285,6 +297,7 @@ fn check_params(
     // `ir_decided_stub`: `dummy_impl` already answered for this function, so do
     // not ask `is_stub_body` as well — see its doc.
     ir_decided_stub: bool,
+    zero_size: &dyn Fn(&guff::ast::Ident) -> bool,
     pending: &mut Vec<(u32, String)>,
 ) {
     if !ir_decided_stub && is_stub_body(body, dead) {
@@ -298,6 +311,10 @@ fn check_params(
             index += 1;
             let pname = &name.name;
             if is_blank_param(pname) {
+                continue;
+            }
+            // "skip - zero size": nothing is saved by removing it.
+            if zero_size(name) {
                 continue;
             }
             // `reason` is "is unused" unless every call site passes the same
@@ -317,6 +334,81 @@ fn check_params(
                 format!("{func_name} - {pname} is unused"),
             ));
         }
+    }
+}
+
+/// `!containsTypeParam(t) && stdSizes.Sizeof(t) == 0` for the parameter
+/// `name` declares. guff never had this gate; unparam 2fa3d841b0c8 changed
+/// `containsTypeParam` to look through aliases and into a named type's
+/// underlying type instead of its type arguments.
+fn zero_size_param(pass: &Pass<'_>, name: &guff::ast::Ident) -> bool {
+    let Some(obj) = code::object_of(pass, name) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(t) = obj.typ(&artifacts.objects) else {
+        return false;
+    };
+    let (types, objects) = (&artifacts.types, &artifacts.objects);
+    !contains_type_param(types, objects, t, 0) && zero_sized(types, objects, t, 0)
+}
+
+/// `containsTypeParam`: whether sizing `t` needs a type parameter's size. It
+/// follows only what `types.Sizes` descends into.
+fn contains_type_param(
+    types: &guff_types::TypeArena,
+    objects: &guff_types::ObjectArena,
+    t: guff_types::TypeId,
+    depth: u32,
+) -> bool {
+    use guff_types::arena::TypeData;
+    if depth > 32 {
+        return false;
+    }
+    let t = guff_types::alias::unalias_readonly(types, t);
+    match types.get(t) {
+        TypeData::TypeParam(_) | TypeData::Union(_) => true,
+        TypeData::Struct(s) => (0..s.num_fields()).any(|i| {
+            s.field(i)
+                .typ(objects)
+                .is_some_and(|ft| contains_type_param(types, objects, ft, depth + 1))
+        }),
+        TypeData::Array(arr) => contains_type_param(types, objects, arr.elem(), depth + 1),
+        TypeData::Named(_) => {
+            let u = t.underlying(types);
+            u != t && contains_type_param(types, objects, u, depth + 1)
+        }
+        _ => false,
+    }
+}
+
+/// `stdSizes.Sizeof(t) == 0` (gc): an empty struct, a struct of zero-size
+/// fields, or an array of length zero or of a zero-size element.
+fn zero_sized(
+    types: &guff_types::TypeArena,
+    objects: &guff_types::ObjectArena,
+    t: guff_types::TypeId,
+    depth: u32,
+) -> bool {
+    use guff_types::arena::TypeData;
+    if depth > 32 {
+        return false;
+    }
+    let t = guff_types::alias::unalias_readonly(types, t);
+    match types.get(t) {
+        TypeData::Struct(s) => (0..s.num_fields()).all(|i| {
+            s.field(i)
+                .typ(objects)
+                .is_some_and(|ft| zero_sized(types, objects, ft, depth + 1))
+        }),
+        TypeData::Array(arr) => arr.len() == 0 || zero_sized(types, objects, arr.elem(), depth + 1),
+        TypeData::Named(_) => {
+            let u = t.underlying(types);
+            u != t && zero_sized(types, objects, u, depth + 1)
+        }
+        _ => false,
     }
 }
 
@@ -363,7 +455,19 @@ fn collect_call_sites(files: &[guff::ast::File]) -> (HashSet<u32>, HashSet<u32>)
         walk::inspect(NodeRef::File(file), |n| {
             match n {
                 Some(NodeRef::CallExpr(call)) => {
-                    match &*call.fun {
+                    // `f[int](x)` and `(f)(x)` are static calls in go/ssa just
+                    // like `f(x)`: the instantiation is called, not passed
+                    // around (unparam's typealias testscript, `use[int](…)`).
+                    let mut fun = &*call.fun;
+                    loop {
+                        fun = match fun {
+                            Expr::ParenExpr(p) => &p.x,
+                            Expr::IndexExpr(ix) => &ix.x,
+                            Expr::IndexListExpr(ix) => &ix.x,
+                            _ => break,
+                        };
+                    }
+                    match fun {
                         Expr::Ident(id) => {
                             call_fun_ids.insert(id.id);
                         }
@@ -411,10 +515,14 @@ fn collect_call_sites(files: &[guff::ast::File]) -> (HashSet<u32>, HashSet<u32>)
 
 /// Package-level (non-method) funcs referenced as values — signature required.
 fn collect_sign_required_funcs(
+    pass: &Pass<'_>,
     files: &[guff::ast::File],
     call_fun_ids: &HashSet<u32>,
 ) -> HashSet<String> {
-    let mut pkg_funcs = HashSet::new();
+    // By object, not by name: a receiver or local that happens to share a
+    // function's name (`func (g1 GenericType1[T1]) m()` next to `func g1`,
+    // unparam's typeparams testscript) is not a use of the function.
+    let mut pkg_funcs: HashMap<guff_types::ObjectId, String> = HashMap::new();
     let mut decl_name_ids = HashSet::new();
     for file in files {
         for decl in &file.decls {
@@ -424,7 +532,9 @@ fn collect_sign_required_funcs(
             if fd.recv.is_some() {
                 continue;
             }
-            pkg_funcs.insert(fd.name.name.clone());
+            if let Some(obj) = code::object_of(pass, &fd.name) {
+                pkg_funcs.insert(obj, fd.name.name.clone());
+            }
             decl_name_ids.insert(fd.name.id);
         }
     }
@@ -435,7 +545,7 @@ fn collect_sign_required_funcs(
             let Some(NodeRef::Ident(id)) = n else {
                 return true;
             };
-            if !pkg_funcs.contains(&id.name) {
+            if !code::object_of(pass, id).is_some_and(|o| pkg_funcs.contains_key(&o)) {
                 return true;
             }
             if decl_name_ids.contains(&id.id) {
@@ -918,6 +1028,34 @@ fn check_constant_results(
     }
 }
 
+/// `types.Identical` for constant types (2fa3d841b0c8 `eqlConsts`; it used
+/// `!=`, so `IntAlias(7)` and `7` differed). The arena's identity check needs
+/// it mutably, so: equal after unaliasing, or — for two unnamed types, where
+/// identity is structural — the same fully qualified spelling.
+fn types_identical(
+    prog: &guff_ssa::program::Program,
+    a: guff_types::TypeId,
+    b: guff_types::TypeId,
+) -> bool {
+    use guff_types::arena::TypeData;
+    let ta = &prog.type_arena;
+    let (a, b) = (
+        guff_types::alias::unalias_readonly(ta, a),
+        guff_types::alias::unalias_readonly(ta, b),
+    );
+    if a == b {
+        return true;
+    }
+    let named = |t| matches!(ta.get(t), TypeData::Named(_) | TypeData::Basic(_) | TypeData::TypeParam(_));
+    if named(a) || named(b) {
+        return false;
+    }
+    let s = |t| {
+        guff_types::typestring::type_string(ta, &prog.object_arena, &prog.package_arena, t, None)
+    };
+    s(a) == s(b)
+}
+
 /// `eqlConsts`, over the ids guff hands out.
 fn consts_equal(
     prog: &guff_ssa::program::Program,
@@ -928,7 +1066,7 @@ fn consts_equal(
         return a.is_none() && b.is_none();
     };
     let (ca, cb) = (prog.constants.get(a), prog.constants.get(b));
-    if ca.typ != cb.typ {
+    if !types_identical(prog, ca.typ, cb.typ) {
         return false;
     }
     match (&ca.val, &cb.val) {
@@ -1048,6 +1186,7 @@ fn check_func_decl(
         &always_const,
         dead,
         ir_decided_stub,
+        &|id| zero_size_param(pass, id),
         pending,
     );
 }
@@ -1395,7 +1534,11 @@ fn find_function(
 /// from there only when it can be resolved back to a function. `handler :=
 /// func(c Ctx) error { … }` therefore stays checkable, and a fixture that never
 /// assigned a literal to a variable could not tell the two rules apart.
-fn collect_sign_required(ir: &buildir::BuildIrResult) -> HashSet<guff_ssa::ids::FuncId> {
+/// `signRequiredBy` and `resultsRequiredBy`, from the same walk upstream makes
+/// over every function of the package.
+fn collect_required(
+    ir: &buildir::BuildIrResult,
+) -> (HashSet<guff_ssa::ids::FuncId>, HashSet<guff_ssa::ids::FuncId>) {
     use guff_ssa::instr::InstrData;
     use guff_ssa::value::Value;
 
@@ -1447,14 +1590,17 @@ fn collect_sign_required(ir: &buildir::BuildIrResult) -> HashSet<guff_ssa::ids::
     }
 
     let mut out = HashSet::new();
+    let mut results_required = HashSet::new();
     for &fid in &pkg_funcs {
         let func = ir.prog.functions.get(fid);
         for (_, block) in func.live_blocks() {
             for &iid in &block.instrs {
                 match func.instrs.get(iid) {
-                    // someFunc(fn)
-                    InstrData::Call(c) => {
-                        for &arg in &c.call.args {
+                    // someFunc(fn), also via go or defer (2fa3d841b0c8)
+                    InstrData::Call(guff_ssa::instr::Call { call, .. })
+                    | InstrData::Go(guff_ssa::instr::Go { call, .. })
+                    | InstrData::Defer(guff_ssa::instr::Defer { call, .. }) => {
+                        for &arg in &call.args {
                             if let Some(t) = find_function(&ir.prog, &free_vars, fid, arg) {
                                 out.insert(t);
                             }
@@ -1468,10 +1614,48 @@ fn collect_sign_required(ir: &buildir::BuildIrResult) -> HashSet<guff_ssa::ids::
                             }
                         }
                     }
-                    // return fn
+                    // return fn — and `return fn()` fixes fn's results. Both
+                    // read `returnValues`, which sees through the stores and
+                    // loads go/ssa puts around deferred calls.
                     InstrData::Return(ret) => {
-                        for &val in &ret.results {
+                        let results = return_values(func, &block.instrs, &ret.results);
+                        for &val in &results {
                             if let Some(t) = find_function(&ir.prog, &free_vars, fid, val) {
+                                out.insert(t);
+                            }
+                        }
+                        if let Some(call_iid) = call_extract(func, iid, &results) {
+                            if let InstrData::Call(c) = func.instrs.get(call_iid) {
+                                if let Some(t) =
+                                    find_function(&ir.prog, &free_vars, fid, c.call.value)
+                                {
+                                    results_required.insert(t);
+                                }
+                            }
+                        }
+                    }
+                    // someMap[someKey] = fn
+                    InstrData::MapUpdate(mu) => {
+                        if let Some(t) = find_function(&ir.prog, &free_vars, fid, mu.value) {
+                            out.insert(t);
+                        }
+                    }
+                    // someChan <- fn
+                    InstrData::Send(s) => {
+                        if let Some(t) = find_function(&ir.prog, &free_vars, fid, s.x) {
+                            out.insert(t);
+                        }
+                    }
+                    // select { case someChan <- fn: }
+                    InstrData::Select(sel) => {
+                        for st in &sel.states {
+                            if st.dir != guff_types::ChanDir::SendOnly {
+                                continue;
+                            }
+                            if let Some(t) = st
+                                .send
+                                .and_then(|v| find_function(&ir.prog, &free_vars, fid, v))
+                            {
                                 out.insert(t);
                             }
                         }
@@ -1521,35 +1705,49 @@ fn collect_sign_required(ir: &buildir::BuildIrResult) -> HashSet<guff_ssa::ids::
             }
         }
     }
-    out
+    (out, results_required)
 }
 
-fn collect_results_required(ir: &buildir::BuildIrResult) -> HashSet<guff_ssa::ids::FuncId> {
+/// `returnValues`: a return's values, with a load of a local replaced by the
+/// value last stored into it within the block — go/ssa stores the results of a
+/// function with deferred calls and loads them again after the defers run.
+/// Good only for suppressing reports (a deferred call may change the stored
+/// value), which is the only use either caller makes of it.
+fn return_values(
+    func: &guff_ssa::function::Function,
+    block: &[guff_ssa::ids::InstrId],
+    results: &[guff_ssa::value::Value],
+) -> Vec<guff_ssa::value::Value> {
     use guff_ssa::instr::InstrData;
     use guff_ssa::value::Value;
 
-    let mut out = HashSet::new();
-    for &fid in ir.src_funcs_with_methods() {
-        let func = ir.prog.functions.get(fid);
-        for (_, block) in func.live_blocks() {
-            for &iid in &block.instrs {
-                let InstrData::Return(ret) = func.instrs.get(iid) else {
-                    continue;
-                };
-                let Some(call_iid) = call_extract(func, iid, &ret.results) else {
-                    continue;
-                };
-                let InstrData::Call(c) = func.instrs.get(call_iid) else {
-                    continue;
-                };
-                if let Value::Function(callee) = c.call.value {
-                    out.insert(callee);
-                }
+    results
+        .iter()
+        .map(|&val| {
+            // `storedValue`.
+            let Value::Instr(load) = val else { return val };
+            let InstrData::UnOp(u) = func.instrs.get(load) else {
+                return val;
+            };
+            if u.op != Token::MUL {
+                return val;
             }
-        }
-    }
-    out
+            let Value::Instr(alloc) = u.x else { return val };
+            if !matches!(func.instrs.get(alloc), InstrData::Alloc(_)) {
+                return val;
+            }
+            block
+                .iter()
+                .filter_map(|&i| match func.instrs.get(i) {
+                    InstrData::Store(st) if st.addr == u.x => Some(st.val),
+                    _ => None,
+                })
+                .last()
+                .unwrap_or(val)
+        })
+        .collect()
 }
+
 
 /// `callExtract`: the single call these values all come out of, in order, and
 /// only when the call is *part of* the parent instruction rather than something
@@ -1795,7 +1993,10 @@ fn arg_text(expr: &Expr) -> String {
     }
 }
 
+/// `types.Unalias(res.Type()) == errorType`: since 2fa3d841b0c8 an alias of
+/// `error` is skipped like `error` itself.
 fn is_error_type(prog: &guff_ssa::program::Program, typ: guff_types::TypeId) -> bool {
+    let typ = guff_types::alias::unalias_readonly(&prog.type_arena, typ);
     guff_types::typestring::type_string(
         &prog.type_arena,
         &prog.object_arena,
@@ -1824,6 +2025,44 @@ struct SsaFuncs<'a> {
     /// The same literals by `func` keyword position, as IR functions, so
     /// `dummyImpl` can be asked about them too.
     lit_funcs: std::collections::HashMap<u32, guff_ssa::ids::FuncId>,
+}
+
+/// go/ssa `Function.RelString(fn.Package().Pkg)`, which is what upstream's
+/// `addIssue` prints: an anonymous function is its parent's string plus `$n`
+/// (and its `Name()` is already the parent's name plus that suffix), a method
+/// is `(T).m` with `T` relative to the package. `closureMethod$2` was missing
+/// its `(*closureHolder[T1]).`.
+fn rel_string(prog: &guff_ssa::program::Program, fid: guff_ssa::ids::FuncId) -> String {
+    let f = prog.functions.get(fid);
+    if let Some(parent) = f.parent {
+        let pname = &prog.functions.get(parent).name;
+        let suffix = f.name.strip_prefix(pname.as_str()).unwrap_or(&f.name);
+        return format!("{}{suffix}", rel_string(prog, parent));
+    }
+    let recv = f
+        .signature
+        .and_then(|s| guff_types::signature::signature_recv(&prog.type_arena, s))
+        .and_then(|r| r.typ(&prog.object_arena));
+    let (Some(recv), Some(pkg)) = (recv, f.pkg) else {
+        return f.name.clone();
+    };
+    let here = prog.packages.get(pkg).type_pkg();
+    // `types.RelativeTo(from)`.
+    let qf = move |p: guff_types::PackageId, pa: &guff_types::PackageArena| {
+        if p == here {
+            String::new()
+        } else {
+            pa.get(p).path().to_string()
+        }
+    };
+    let ty = guff_types::typestring::type_string(
+        &prog.type_arena,
+        &prog.object_arena,
+        &prog.package_arena,
+        recv,
+        Some(&qf),
+    );
+    format!("({ty}).{}", f.name)
 }
 
 impl<'a> SsaFuncs<'a> {
@@ -1866,16 +2105,17 @@ impl<'a> SsaFuncs<'a> {
                 continue;
             }
             if f.decl_pos != guff::NO_POS {
-                lit_names.insert(f.decl_pos.0 as u32, f.name.clone());
+                lit_names.insert(f.decl_pos.0 as u32, rel_string(&ir.prog, fid));
                 lit_funcs.insert(f.decl_pos.0 as u32, fid);
             }
         }
+        let (sign_required, results_required) = collect_required(ir);
         SsaFuncs {
             prog: &ir.prog,
             by_object,
             sites: CallSites::build(ir, dead),
-            results_required: collect_results_required(ir),
-            sign_required: collect_sign_required(ir),
+            results_required,
+            sign_required,
             call_by_pos,
             lit_names,
             lit_funcs,
@@ -2031,6 +2271,7 @@ impl<'a> SsaFuncs<'a> {
 }
 
 fn check_func_lit(
+    pass: &Pass<'_>,
     lit: &FuncLit,
     value_lits: &HashSet<u32>,
     ssa: Option<&SsaFuncs<'_>>,
@@ -2044,17 +2285,19 @@ fn check_func_lit(
         return;
     };
     let name = name.to_string();
-    // A literal written in a statement nothing reaches is not a function at
-    // all upstream: go/ssa's builder only visits statements while it has a
-    // current block, so the `MakeClosure` is never built, no `AnonFuncs` entry
-    // is appended, and `ssautil.AllFunctions` cannot reach it. Its parameters
-    // and results are therefore never criticised — not even a genuinely unused
-    // one. guff builds the literal regardless, so the check has to be declined
-    // here (thanos's `TestProxyStoreWithTSDBSelector_Acceptance`, whose body
-    // begins with `t.Skip`, is seven such findings).
-    if dead.is_some_and(|d| d.is_dead(lit.ty.func)) {
-        return;
-    }
+    // A literal in a statement nothing reaches is checked too, since unparam
+    // 2fa3d841b0c8: go/ssa builds it into an unreachable block (deleted later,
+    // so `ssautil.AllFunctions` never reached it), but its `AnonFuncs` entry
+    // stays, and `addSrcFunc` now walks `AnonFuncs` from every declared func.
+    // (Under 2.12.2 thanos's `TestProxyStoreWithTSDBSelector_Acceptance`, whose
+    // body begins with `t.Skip`, was seven findings guff had to decline.)
+    //
+    // Such a literal is a function of its own upstream, live from its entry;
+    // the enclosing function's dead range covers all of its body, which would
+    // make every use of a parameter look unreachable. So the dead view is not
+    // applied to it. (What that gives up: a `panic` *inside* the dead literal
+    // no longer hides the statements after it.)
+    let dead = dead.filter(|d| !d.is_dead(lit.ty.func));
     let lit_fid = ssa.and_then(|s| s.lit_func(lit.ty.func));
     match (ssa, lit_fid) {
         // With the IR in hand, ask `signRequiredBy` the way upstream does.
@@ -2103,8 +2346,36 @@ fn check_func_lit(
         &[],
         dead,
         ir_decided_stub,
+        &|id| zero_size_param(pass, id),
         pending,
     );
+}
+
+/// unparam 2fa3d841b0c8 `linknameDoc`: the funcs whose doc comment carries a
+/// `//go:linkname ` directive, by name position. The analysis AST has no
+/// comments, so the doc is the reparsed group ending on the line just above
+/// the `func` keyword — go/parser's lead comment.
+fn linknamed_funcs(pass: &Pass<'_>, file: &guff::ast::File) -> HashSet<u32> {
+    let mut out = HashSet::new();
+    if !guff_analysis::comments::file_source_contains(pass, file, b"//go:linkname ") {
+        return out;
+    }
+    let groups = guff_analysis::comments::file_comments(pass, file);
+    let fset = pass.fset();
+    for decl in &file.decls {
+        let Decl::FuncDecl(fd) = decl else { continue };
+        let func_pos = fd.ty.pos();
+        let func_line = fset.position(func_pos).line;
+        let doc = groups
+            .iter()
+            .filter(|g| g.end().0 <= func_pos.0)
+            .last()
+            .filter(|g| fset.position(g.end()).line + 1 == func_line);
+        if doc.is_some_and(|g| g.list.iter().any(|c| c.text.starts_with("//go:linkname "))) {
+            out.insert(fd.name.pos().0 as u32);
+        }
+    }
+    out
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -2119,7 +2390,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     let files = pass.files();
     let (call_fun_ids, value_lits) = collect_call_sites(files);
-    let sign_required = collect_sign_required_funcs(files, &call_fun_ids);
+    let sign_required = collect_sign_required_funcs(pass, files, &call_fun_ids);
     let sign_required_methods = collect_sign_required_methods(files, &call_fun_ids);
     let interface_methods = collect_interface_methods(files);
     let types_implementing = collect_types_implementing(pass);
@@ -2142,10 +2413,15 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     let mut pending: Vec<(u32, String)> = Vec::new();
     for file in files {
+        let linknamed = linknamed_funcs(pass, file);
         for decl in &file.decls {
             let Decl::FuncDecl(fd) = decl else {
                 continue;
             };
+            // `c.linknamed[fn.Pos()]`: the signature cannot change.
+            if linknamed.contains(&(fd.name.pos().0 as u32)) {
+                continue;
+            }
             check_func_decl(
                 pass,
                 fd,
@@ -2164,7 +2440,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             let Some(NodeRef::FuncLit(lit)) = n else {
                 return true;
             };
-            check_func_lit(lit, &value_lits, ssa.as_ref(), dead, &mut pending);
+            check_func_lit(pass, lit, &value_lits, ssa.as_ref(), dead, &mut pending);
             true
         });
     }

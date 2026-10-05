@@ -1,0 +1,59 @@
+package foo
+
+type A struct {
+	b struct{}
+}
+
+type Alias = A
+
+func (a Alias) bar(s string) {
+	_ = a.b // Needed for bar to not be considered a dummy implementation
+}
+
+type Box[T any] struct {
+	V T
+}
+
+// A generic type alias parameter passed by value used to make unparam
+// panic when asking go/types for the size of an unresolved type parameter.
+type GenericAlias[T any] = Box[T]
+
+var DoWork func()
+
+func use[T any](b GenericAlias[T]) {
+	DoWork()
+}
+
+// An alias of error is skipped like error itself;
+// aliasErr's second result must not be reported as never used.
+type ErrAlias = error
+
+var (
+	errSink error
+	sink    int
+)
+
+func aliasErr(n int) (int, ErrAlias) {
+	sink += n
+	return n, errSink
+}
+
+type IntAlias = int
+
+// take is reported as always receiving 7 in m even though
+// one of the constants is converted via IntAlias.
+func take(n, m int) {
+	sink += n + m
+}
+
+func test() {
+	Alias{}.bar("")
+	use[int](GenericAlias[int]{})
+	a, _ := aliasErr(1)
+	b, _ := aliasErr(2)
+	sink = a + b
+	take(1, 7)
+	take(2, 7)
+	take(3, IntAlias(7))
+	take(4, 7)
+}
