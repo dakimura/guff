@@ -1,14 +1,14 @@
-//! Port of [`github.com/lasiar/canonicalheader`](https://github.com/lasiar/canonicalheader)
+//! Port of [`github.com/golangci/canonicalheader`](https://github.com/golangci/canonicalheader),
+//! the fork golangci-lint 2.14.0 moved to from lasiar/canonicalheader
 //! (golangci-lint wrapper in `pkg/golinters/canonicalheader`).
 //!
 //! Reports non-canonical header keys passed to `net/http.Header` methods
-//! (`Get` / `Set` / `Add` / `Del` / `Values`). Default well-known initialisms
-//! (ETag, WWW-Authenticate, …) match upstream. SuggestedFix for string
-//! literals only.
+//! (`Get` / `Set` / `Add` / `Del` / `Values`). The well-known initialisms
+//! (ETag, WWW-Authenticate, X-Request-ID, …) and any configured `exclusions`
+//! are the canonical spelling. SuggestedFix for string literals only.
 //!
 //! DEFERRED (see DEVELOPMENT.md R13): method-value calls (`f := h.Get`),
-//! nested type-cast unwrapping of the key arg, `exclusions` /
-//! `useDefaultExclusion` flags (golangci exposes no YAML settings).
+//! nested type-cast unwrapping of the key arg.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -22,6 +22,8 @@ use guff_analysis::{
     AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
 };
 use guff_types::ObjectData;
+
+use crate::options::CanonicalheaderOptions;
 
 const METHODS: &[&str] = &["Get", "Set", "Add", "Del", "Values"];
 
@@ -142,27 +144,40 @@ fn initialism() -> &'static HashMap<&'static str, &'static str> {
     })
 }
 
-/// Upstream `canonicalHeaderKey`, including its second return value.
+/// `buildExclusions`: canonical form → accepted spelling. The initialism
+/// table unless `use-default-exclusions` is off, then each configured
+/// exclusion keyed by its own MIME-canonical form (overriding the table).
+/// golangci-lint joins the list with commas and the fork's flag splits on
+/// them again, trimming and dropping empties — reproduced here.
+fn build_exclusions(opts: &CanonicalheaderOptions) -> HashMap<String, String> {
+    let mut out: HashMap<String, String> = HashMap::new();
+    if opts.use_default_exclusions {
+        for (canonical, spelling) in initialism() {
+            out.insert((*canonical).to_string(), (*spelling).to_string());
+        }
+    }
+    for ex in opts.exclusions.iter().flat_map(|e| e.split(',')) {
+        let ex = ex.trim();
+        if ex.is_empty() {
+            continue;
+        }
+        out.insert(canonical_mime_header_key(ex), ex.to_string());
+    }
+    out
+}
+
+/// The fork's `canonicalHeaderKey`: the table's spelling when the
+/// MIME-canonical form is in it, else the MIME-canonical form.
 ///
-/// The bool says the MIME-canonical form was found in the initialism table —
-/// and upstream's caller treats that as a reason to **stay silent**:
-///
-/// ```go
-/// headerKeyCanonical, isWellKnown := canonicalHeaderKey(argValue, wellKnownHeaders)
-/// if argValue == headerKeyCanonical || isWellKnown {
-///     return
-/// }
-/// ```
-///
-/// So the table only ever suppresses. `h.Set("x-request-id", …)` canonicalizes
-/// to `X-Request-Id`, which is a key in the table, so upstream reports nothing
-/// at all — it never gets as far as suggesting `X-Request-ID`. Using the mapped
-/// value as the suggestion, as guff did, turns a silent case into a finding.
-fn canonical_header_key(s: &str) -> (String, bool) {
+/// lasiar's version (golangci-lint 2.12.2) also returned whether the key was
+/// in the table and treated that as a reason to stay silent, and returned
+/// early when the argument was already MIME-canonical: `x-request-id` and
+/// `X-Request-Id` were both fine. The fork suggests `X-Request-ID` for both.
+fn canonical_header_key(s: &str, exclusions: &HashMap<String, String>) -> String {
     let canonical = canonical_mime_header_key(s);
-    match initialism().get(canonical.as_str()) {
-        Some(mapped) => ((*mapped).to_string(), true),
-        None => (canonical, false),
+    match exclusions.get(&canonical) {
+        Some(spelling) => spelling.clone(),
+        None => canonical,
     }
 }
 
@@ -302,31 +317,30 @@ struct Pending {
     diag: Diagnostic,
 }
 
-fn check_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Pending>) {
+fn check_call(
+    pass: &Pass<'_>,
+    call: &CallExpr,
+    exclusions: &HashMap<String, String>,
+    pending: &mut Vec<Pending>,
+) {
     if !is_header_method(pass, call) || call.args.is_empty() {
         return;
     }
     let Some(arg) = key_arg(pass, &call.args[0]) else {
         return;
     };
-    // Upstream checks the plain MIME-canonical form first and returns when the
-    // argument already matches it, *then* consults the table.
-    if arg.value() == canonical_mime_header_key(arg.value()) {
+    let canonical = canonical_header_key(arg.value(), exclusions);
+    if arg.value() == canonical {
         return;
     }
-    let (canonical, is_well_known) = canonical_header_key(arg.value());
-    if arg.value() == canonical || is_well_known {
-        return;
-    }
-    let message = format!(
-        "non-canonical header {:?}, instead use: {canonical:?}",
-        arg.value()
-    );
+    // One message for literals and constants in the fork; lasiar had
+    // "non-canonical header %q, instead use: %q" and a third for constants.
+    let message = format!("use {canonical:?} instead of {:?}", arg.value());
     let suggested_fixes = match &arg {
         KeyArg::Literal { quote, .. } => {
             let new_text = format!("{quote}{canonical}{quote}");
             vec![SuggestedFix {
-                message: format!("should replace {:?} with {canonical:?}", arg.value()),
+                message: format!("should be replaced {:?} with {canonical:?}", arg.value()),
                 text_edits: vec![TextEdit {
                     pos: arg.pos(),
                     end: arg.end(),
@@ -422,11 +436,16 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         return Ok(None);
     }
 
+    let opts = pass
+        .settings::<CanonicalheaderOptions>("canonicalheader")
+        .cloned()
+        .unwrap_or_default();
+    let exclusions = build_exclusions(&opts);
     let mut pending = Vec::new();
     for file in pass.files() {
         preorder(NodeRef::File(file), |n| {
             if let NodeRef::CallExpr(call) = n {
-                check_call(pass, call, &mut pending);
+                check_call(pass, call, &exclusions, &mut pending);
             }
             true
         });
@@ -465,14 +484,21 @@ mod tests {
 
     #[test]
     fn initialism_overrides_etag() {
-        assert_eq!(canonical_header_key("etag"), ("ETag".to_string(), true));
-        assert_eq!(
-            canonical_header_key("www-authenticate"),
-            ("WWW-Authenticate".to_string(), true)
-        );
-        assert_eq!(
-            canonical_header_key("Test-HEader"),
-            ("Test-Header".to_string(), false)
-        );
+        let ex = build_exclusions(&CanonicalheaderOptions::default());
+        assert_eq!(canonical_header_key("etag", &ex), "ETag");
+        assert_eq!(canonical_header_key("www-authenticate", &ex), "WWW-Authenticate");
+        assert_eq!(canonical_header_key("Test-HEader", &ex), "Test-Header");
+    }
+
+    #[test]
+    fn exclusions_override_and_split_like_the_fork() {
+        let ex = build_exclusions(&CanonicalheaderOptions {
+            exclusions: vec!["X-ID, x-custom-TOKEN".into(), "".into()],
+            use_default_exclusions: false,
+        });
+        assert_eq!(canonical_header_key("x-id", &ex), "X-ID");
+        assert_eq!(canonical_header_key("X-Custom-Token", &ex), "x-custom-TOKEN");
+        // The table is off.
+        assert_eq!(canonical_header_key("etag", &ex), "Etag");
     }
 }

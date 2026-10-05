@@ -455,7 +455,7 @@ revive の upstream testdata は module zip に無く、手元 checkout（v1.15.
 
 | # | upstream_path | kind | 要約 | guff の場所 | status | effort | upstream testdata |
 |---|---------------|------|------|-------------|--------|--------|-------------------|
-| 1 | gocritic rules.go sprintfQuotedString | new-check | `` "`%s`" `` → `%#q` の 2 本目の規則 | guff-style/src/gocritic.rs:7166 | needs-port | S | sprintfQuotedString/{positive,negative}_tests.go |
+| 1 | gocritic rules.go sprintfQuotedString | new-check | `` "`%s`" `` → `%#q` の 2 本目の規則 | guff-style/src/gocritic.rs:7166 | **done (PR 8)** | S | sprintfQuotedString/{positive,negative}_tests.go |
 | 2 | gocritic utils.go goStdlib | message | importShadow の stdlib 表 | gocritic.rs:7623 | already-matches | S | — |
 | 3 | goconst api.go スコープ分割 | behavior | テスト / 非テストで件数を分ける | goconst.rs run() | needs-port | S | api_test.go |
 | 4 | goconst api.go sortPositions | position | ファイル内の最小位置で報告 | goconst.rs first_per_file | needs-port | S | — |
@@ -487,11 +487,11 @@ v5 の `analyzer/testdata` は module zip に無い。GitHub の v5.2.0 タグ�
 
 | # | upstream_path | kind | 要約 | guff の場所 | status | effort | upstream testdata |
 |---|---------------|------|------|-------------|--------|--------|-------------------|
-| 1 | exhaustive comment.go parseDirectives | behavior | ディレクティブを厳密一致に | guff-style/src/exhaustive.rs user_directives / has_comment_prefix | needs-port | S | general/x/directive.go, default-case-required/** |
-| 2 | exhaustive switch.go makeInvalidDirectiveDiagnostic | new-check | 「failed to parse directives」（switch / map で発火条件が非対称） | exhaustive.rs run | needs-port | M | enforce-comment/*.go, default-*/** |
+| 1 | exhaustive comment.go parseDirectives | behavior | ディレクティブを厳密一致に | guff-style/src/exhaustive.rs user_directives / has_comment_prefix | **done (PR 8)** | S | general/x/directive.go, default-case-required/** |
+| 2 | exhaustive switch.go makeInvalidDirectiveDiagnostic | new-check | 「failed to parse directives」（switch / map で発火条件が非対称） | exhaustive.rs run | **done (PR 8)** | M | enforce-comment/*.go, default-*/** |
 | 3 | exhaustive enum.go hasIgnoreDecl | behavior | 宣言側 `//exhaustive:ignore`（alias 経由の定数は外れない） | exhaustive.rs find_enums | needs-port | L | enum/enum.go |
 | 4 | exhaustive enum.go 宣言 doc の不正ディレクティブ | new-check | doc 先頭に診断 | find_enums | needs-port | M | enum/enum.go |
-| 5 | exhaustive common.go fromType Unalias | behavior | alias 型の switch / map key を検査 | exhaustive.rs enum_for_tag | needs-port | S | — |
+| 5 | exhaustive common.go fromType Unalias | behavior | alias 型の switch / map key を検査 | exhaustive.rs enum_for_tag | **done (PR 8)** | S | — |
 | 6 | exhaustive possibleEnumMember Unalias | behavior | alias 型で宣言した定数 | named_type_name / map_finding | already-matches | S | — |
 | 7 | gochecksumtype analyzer.go fact | behavior | 直接 import の sum type を fact で | guff-style/src/gochecksumtype.rs | needs-port | L | multiple_sumtypes{,_user}/*.go |
 | 8 | gochecksumtype def.go | behavior | alias を variant にしない | gochecksumtype.rs build_def | needs-port | S | with_alias/main.go |
@@ -502,8 +502,8 @@ v5 の `analyzer/testdata` は module zip に無い。GitHub の v5.2.0 タグ�
 
 | # | upstream_path | kind | 要約 | guff の場所 | status | effort | upstream testdata |
 |---|---------------|------|------|-------------|--------|--------|-------------------|
-| 1 | canonicalheader literal_string.go / constant_string.go | message | `use %q instead of %q` に統一 | guff-style/src/canonicalheader.rs check_call | needs-port | S | const/, common/, alias/ ほか |
-| 2 | canonicalheader analyzer.go | behavior | initialism 表が「抑制」から「正解の綴り」に | canonicalheader.rs canonical_header_key | needs-port | S | initialism/initialism.go{,.golden} |
+| 1 | canonicalheader literal_string.go / constant_string.go | message | `use %q instead of %q` に統一 | guff-style/src/canonicalheader.rs check_call | **done (PR 8)** | S | const/, common/, alias/ ほか |
+| 2 | canonicalheader analyzer.go | behavior | initialism 表が「抑制」から「正解の綴り」に | canonicalheader.rs canonical_header_key | **done (PR 8)** | S | initialism/initialism.go{,.golden} |
 | 3 | canonicalheader exclusions | new-option | exclusions / use-default-exclusions | canonicalheader.rs, settings.rs | needs-port | M | exclusions/*, canonicalheader_custom.{go,yml} |
 | 4 | canonicalheader SuggestedFix 文言 | message | `should be replaced %q with %q` | check_call | needs-port | S | — |
 | 5 | canonicalheader nil ガード | behavior | `(h.Get)("x")` で panic していた | canonicalheader.rs is_header_method | already-matches | S | — |
@@ -524,8 +524,8 @@ v5 の `analyzer/testdata` は module zip に無い。GitHub の v5.2.0 タグ�
 | 1 | format.go Options.Extra | new-option | extra の 3 規則（extra-rules は 3 つ全部） | guff-lint/src/config.rs, guff-fmt/src/gofumpt.rs, native/gofumpt/fumpter.rs | needs-port | M | func-merge-parameters / clothe-returns / diagnose.txtar |
 | 2 | format.go CallExpr | behavior | 括弧揃えが BalanceCalls 下、一方向だけ | fumpter.rs call_post | needs-port | S | call-multiline.txtar |
 | 3 | format.go ParenExpr | behavior | 括弧除去が既定有効、keepParens 再帰 | fumpter.rs can_remove_parens | needs-port | M | paren-remove.txtar |
-| 4 | format.go File（100 バイト） | behavior | 1 行 func が 100 バイト超なら multi | fumpter.rs file_rules | needs-port | S | decls-separated.txtar |
-| 5 | format.go File（effectiveEnd） | behavior | 行末コメントは前の宣言の末尾、起点は Name.End() | fumpter.rs file_rules | needs-port | S | decls-separated.txtar |
+| 4 | format.go File（100 バイト） | behavior | 1 行 func が 100 バイト超なら multi | fumpter.rs file_rules | **done (PR 8)** | S | decls-separated.txtar |
+| 5 | format.go File（effectiveEnd） | behavior | 行末コメントは前の宣言の末尾、起点は Name.End() | fumpter.rs file_rules | **done (PR 8)** | S | decls-separated.txtar |
 | 6 | format.go removeParens + join | behavior | 単一 spec の括弧外しを結合より前に、Rparen を end-1 | fumpter.rs join_lone_decls | needs-port | M | decl-group-single.txtar, decls-separated.txtar |
 | 7 | format.go AssignStmt | behavior | 間にコメントがあれば詰めない | fumpter.rs walk_stmt | needs-port | S | assignment-newlines.txtar |
 | 8 | format.go joinStdImports | behavior | コメント付き import を移さない、元の行を消す | fumpter.rs join_std_imports | needs-port | M | std-imports.txtar |
@@ -543,7 +543,7 @@ v5 の `analyzer/testdata` は module zip に無い。GitHub の v5.2.0 タグ�
 
 | # | upstream_path | kind | 要約 | guff の場所 | status | effort | upstream testdata |
 |---|---------------|------|------|-------------|--------|--------|-------------------|
-| 1 | nonamedreturns analyzer.go Reportf | position | 報告位置を名前付き戻り値の識別子に | guff-style/src/nonamedreturns.rs check_results | needs-port | S | default-config/*, report-error-in-defer/* |
+| 1 | nonamedreturns analyzer.go Reportf | position | 報告位置を名前付き戻り値の識別子に | guff-style/src/nonamedreturns.rs check_results | **done (PR 8)** | S | default-config/*, report-error-in-defer/* |
 | 2 | nonamedreturns defer 免除 | behavior | defer 内参照 + 代入 / 値付き return | nonamedreturns.rs | already-matches | S | 同上 |
 | 3 | nonamedreturns allow-unused-named-returns | new-option | 新オプション | settings.rs, nonamedreturns.rs | already-matches | S | allow-unused-named-returns/* |
 | 4 | dupword skip-raw-strings | new-option | raw 文字列を検査しない | guff-comment/src/dupword.rs | **done (PR 2)** | S | raw_string_sql/a.go, dupword_skip_raw_strings.{go,yml} |
@@ -553,7 +553,7 @@ v5 の `analyzer/testdata` は module zip に無い。GitHub の v5.2.0 タグ�
 | 8 | noinlineerr errMessage | message | `=` 代入用の文言 | guff-style/src/noinlineerr.rs:50 | needs-port | S | a/main.go{,.golden} |
 | 9 | noinlineerr shadow チェック | behavior | `:=` のときだけ（親スコープのみの Lookup） | noinlineerr.rs:193 | needs-port | S | a/main.go{,.golden} |
 | 10 | wsl checkCuddlingMaxAllowed | behavior | LabeledStmt を剥がして判定 | guff-style/src/wsl_v5.rs check_cuddle_blockish | needs-port | S | default_config/if/if.go{,.golden} |
-| 11 | protogetter typesNamed | behavior | エイリアス経由のメッセージ | guff-style/src/protogetter.rs expr_named_type | needs-port | S | — |
+| 11 | protogetter typesNamed | behavior | エイリアス経由のメッセージ | guff-style/src/protogetter.rs expr_named_type | **done (PR 8)** | S | — |
 | 12 | godoclint stdlib.json | behavior | 179 package / 11,183 symbol | guff-comment/src/godoclint_stdlib.rs | needs-port | S | require_stdlib_doclink/normal/missing.go |
 | 13 | clickhouselint chbatchclose | behavior | 即時実行 defer クロージャ内の Close | guff-style/src/clickhouselint.rs | already-matches | S | chbatchclose/testdata/** |
 
@@ -567,7 +567,7 @@ v5 の `analyzer/testdata` は module zip に無い。GitHub の v5.2.0 タグ�
 | 4 | gomoddirectives ignore-forbidden | new-option | ignore ディレクティブを禁止 | gomoddirectives.rs, gomod.rs | **done (PR 2)** | M | testdata/ignore/go.mod |
 | 5 | gomoddirectives checkIgnoreDirectives | new-check | 既定で ignore される dir の指定を報告（`..` も） | 無し | **done (PR 2)** | M | testdata/ignore_defaults/go.mod（repo から） |
 | 6 | tagliatelle report | behavior | json `embed` フラグを skip | guff-style/src/tagliatelle.rs:265 | needs-port | S | — |
-| 7 | recvcheck 既定除外 | default-change | Marshal 系 → Unmarshal 系 | guff-style/src/recvcheck.rs:25 | needs-port | S | builtinmethods/valuetype.go |
+| 7 | recvcheck 既定除外 | default-change | Marshal 系 → Unmarshal 系 | guff-style/src/recvcheck.rs:25 | **done (PR 8)** | S | builtinmethods/valuetype.go |
 | 8 | ginkgolinter `.Error()` チェーン | behavior | ErrorMethodPayload | guff-style/src/ginkgolinter.rs（DEFERRED） | needs-port | L | — |
 | 9 | bodyclose `//bodyclose:handled` | new-check | callee の Doc ディレクティブ | guff-context/src/bodyclose.rs | needs-port | M | handledresponse/*, consumption/consumption.go |
 | 10 | loggercheck checkStringerValues | new-check | nil で panic しうる Stringer 値 | guff-style/src/loggercheck.rs | needs-port | M | — |
@@ -661,7 +661,7 @@ golden を regen したら fix のベースラインも撮り直す。測定は 
 | 5 | **staticcheck の文言・小移植** | SA1019 SelectorName + literal キー位置 + 引用符なし import、SA4003 の型名、SA6005 の `!`（**done**）。SA1026 / SA5008 embed / SA9010（新規）は残り | staticcheck-sa1019-* 42/42 → **0/0（ratchet 削除）**、staticcheck-sa 16/17 → **0/1**（残りは恒久の SA5005） | M |
 | 6 | **modernize 残り（ゴールデン側）** | stringscut の Split / SplitN 腕（**done**）。条件の各枝を fixture に足して上流と一致を確認 | modernize 2/0 → **0/0（ratchet 削除）** | S |
 | 7 | **govet 文言** | fieldalignment（**done**: 型名・size class 表は go1.27.0 から転記、全枝を fixture で確認）。composite、inline の埋め込み判定、unusedresult b.Loop、nilness cgo は golden に観測差なし（fixture 先行） | govet-fieldalignment 14/14 → **0/0（ratchet 削除）** | M |
-| 8 | **出力差の小物まとめ** | nonamedreturns 位置、canonicalheader fork（文言 + initialism + exclusions）、exhaustive ディレクティブ厳密一致 / 不正ディレクティブ / alias、recvcheck、protogetter alias、gocritic sprintfQuotedString、gofumpt 100 バイト規則 | nonamedreturns 14/14、canonicalheader 10/6、exhaustive ×3、recvcheck、protogetter、gocritic、gofumpt → 0 | M（項目は多いが各 S） |
+| 8 | **出力差の小物まとめ（done）** | nonamedreturns 位置、canonicalheader fork（文言 + initialism + exclusions 設定）、exhaustive（厳密ディレクティブ・解析エラー・alias）、recvcheck、protogetter alias、gocritic sprintfQuotedString、gofumpt 100 バイト規則と effectiveEnd | nonamedreturns 14/14、canonicalheader 10/6、exhaustive ×3、recvcheck、protogetter、gocritic、gofumpt → **すべて 0/0（ratchet 削除）** | M |
 | 9 | **gosec 既存ルール** | G118、G115、G703、G404、`%#q` 系と並べて TryResolve Builder（2 系統） | gosec 6/8 → 0/0 | M |
 | 10 | **revive** | empty-block range、multiline-if-init を enable-all に、marshal-receiver、use-slices-concat、文言 4 本、Go 版ゲート 2 本、directives | revive 1/10 → 既存 1/4 | M |
 | 11 | **unused / unparam** | Unify、unparam AnonFuncs + linkname + signRequiredBy + alias | unused 0/2、unparam 1/0 → 0 | M |

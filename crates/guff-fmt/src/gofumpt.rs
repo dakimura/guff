@@ -272,17 +272,17 @@ func (f *Fake) WithActorExists(fn func(string, string) bool) *Fake { f.fn = fn; 
 
     /// v0.10.0 treats a trailing inline comment as extending the previous
     /// declaration, so a comment on the next line starts a new "decl position"
-    /// and gets a blank line before it. **golangci-lint 2.12.2 pins v0.9.2**,
-    /// which takes the position from the inline comment itself — same line as
-    /// the `}` — and so adds nothing.
+    /// and gets a blank line before it. golangci-lint 2.12.2 pinned v0.9.2,
+    /// which took the position from the inline comment itself and added
+    /// nothing; 2.14.0 pins v0.12.0, which adds the line (measured with
+    /// `golangci-lint fmt --stdin`), so the pinned and the latest answer agree.
     ///
     /// gatekeeper v3.23.0
     /// `pkg/controller/webhookconfig/webhookconfig_controller.go` is the shape:
     /// a struct closed by `} // +kubebuilder:…` with a second `// +kubebuilder:`
-    /// on the next line. Measured three ways — gofumpt v0.9.2 reports the file
-    /// as formatted, v0.10.0 wants the blank line, and guff wanted it too.
+    /// on the next line.
     #[test]
-    fn match_golangci_keeps_a_comment_after_a_trailing_comment() {
+    fn match_golangci_separates_a_comment_after_a_trailing_comment() {
         let src = b"package p
 
 type T struct {
@@ -296,28 +296,22 @@ func f(x int) int {
 	return y
 }
 ";
-        let pinned = Gofumpt::new(GofumptOptions {
-            match_golangci: true,
-            ..Default::default()
-        });
-        let out = pinned.format("p.go", src).expect("gofumpt match_golangci");
-        assert_eq!(
-            String::from_utf8(out).unwrap(),
-            String::from_utf8(src.to_vec()).unwrap(),
-            "the pinned gofumpt leaves this alone"
-        );
-
-        // Current gofumpt does insert the blank line, and `guff fmt` keeps
-        // that behaviour when it is not matching golangci-lint.
-        let latest = Gofumpt::new(GofumptOptions::default());
-        let out = latest.format("p.go", src).expect("gofumpt latest");
-        let s = String::from_utf8(out).unwrap();
-        assert!(
-            s.contains("} // +kubebuilder:one
+        for opts in [
+            GofumptOptions {
+                match_golangci: true,
+                ..Default::default()
+            },
+            GofumptOptions::default(),
+        ] {
+            let out = Gofumpt::new(opts).format("p.go", src).expect("gofumpt");
+            let s = String::from_utf8(out).unwrap();
+            assert!(
+                s.contains("} // +kubebuilder:one
 
 // +kubebuilder:two"),
-            "latest should separate the comments, got:\n{s}"
-        );
+                "both should separate the comments, got:\n{s}"
+            );
+        }
     }
 
     #[test]

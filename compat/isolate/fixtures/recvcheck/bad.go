@@ -14,17 +14,17 @@ func (rpc RPC) Result() int { // value receiver inconsistent
 	return rpc.result
 }
 
-// The built-in exclusion list golangci-lint 2.12.2 pins (recvcheck v0.2.0) is
-// the *encoding* half, so a pointer `UnmarshalJSON` beside a value method is
-// still a mix — dapr's `ReminderPeriod`. v0.3.0 swapped the list for the
-// decoding half, which inverts both of these.
+// golangci-lint 2.14.0 (recvcheck v0.3.x) excludes the *decoding* half, so a
+// pointer `UnmarshalJSON` beside a value method is no longer a mix — dapr's
+// `ReminderPeriod`. 2.12.2 (v0.2.0) excluded the encoding half instead, which
+// is the opposite answer for both of these types.
 type Period struct{ raw string }
 
 func (p Period) String() string              { return p.raw }
 func (p *Period) UnmarshalJSON([]byte) error { return nil }
 
-// With `MarshalJSON` excluded there is no value receiver left, so this one is
-// not a finding.
+// `MarshalJSON` is not excluded any more, so the value receiver mixes with the
+// pointer `Set`: a finding since 2.14.0.
 type Encoded struct{ raw string }
 
 func (e Encoded) MarshalJSON() ([]byte, error) { return nil, nil }

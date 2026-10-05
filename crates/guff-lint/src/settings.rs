@@ -43,6 +43,7 @@ pub struct LinterSettings {
     pub usestdlibvars: UsestdlibvarsSettings,
     pub unconvert: UnconvertSettings,
     pub exhaustruct: ExhaustructSettings,
+    pub canonicalheader: CanonicalheaderSettings,
     pub exhaustive: ExhaustiveSettings,
     pub musttag: MusttagSettings,
     pub loggercheck: LoggercheckSettings,
@@ -1017,6 +1018,24 @@ pub struct DupwordSettings {
     pub comments_only: Option<bool>,
     #[serde(default, rename = "skip-raw-strings")]
     pub skip_raw_strings: Option<bool>,
+}
+
+/// `linters.settings.canonicalheader` (golangci-lint 2.14.0).
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct CanonicalheaderSettings {
+    #[serde(default, deserialize_with = "string_or_seq")]
+    pub exclusions: Vec<String>,
+    #[serde(default, rename = "use-default-exclusions")]
+    pub use_default_exclusions: Option<bool>,
+}
+
+impl CanonicalheaderSettings {
+    pub fn to_guff_canonicalheader(&self) -> guff_style::CanonicalheaderOptions {
+        guff_style::CanonicalheaderOptions {
+            exclusions: self.exclusions.clone(),
+            use_default_exclusions: self.use_default_exclusions.unwrap_or(true),
+        }
+    }
 }
 
 /// `linters.settings.godoclint` / `linters-settings.godoclint`.
@@ -2531,6 +2550,11 @@ impl LinterSettings {
                 out.unconvert = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("canonicalheader".into())) {
+            if let Some(s) = parse_settings::<CanonicalheaderSettings>("canonicalheader", v) {
+                out.canonicalheader = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("exhaustruct".into())) {
             if let Some(s) = parse_settings::<ExhaustructSettings>("exhaustruct", v) {
                 out.exhaustruct = s;
@@ -2890,6 +2914,7 @@ impl LinterSettings {
         bag.insert("usestdlibvars", self.usestdlibvars.to_guff_usestdlibvars());
         bag.insert("unconvert", self.unconvert.to_guff_unconvert());
         bag.insert("exhaustruct", self.exhaustruct.to_guff_exhaustruct());
+        bag.insert("canonicalheader", self.canonicalheader.to_guff_canonicalheader());
         bag.insert("exhaustive", self.exhaustive.to_guff_exhaustive());
         bag.insert("musttag", self.musttag.to_guff_musttag());
         bag.insert("loggercheck", self.loggercheck.to_guff_loggercheck());

@@ -1763,20 +1763,22 @@ fn recvcheck_flags_mixed_receivers() {
                 && m.contains("pointer receiver and non-pointer receiver")),
         "{messages:?}"
     );
-    // `Period` too: a pointer `UnmarshalJSON` is not on the exclusion list that
-    // golangci-lint 2.12.2 pins, so it counts towards the mix.
-    assert!(
-        messages.iter().any(|m| m.contains("the methods of \"Period\"")),
-        "{messages:?}"
-    );
-    assert_eq!(messages.len(), 2, "{messages:?}");
+    // Not `Period`: its pointer `UnmarshalJSON` is on the exclusion list since
+    // recvcheck v0.3.x (golangci-lint 2.14.0), so it does not count.
+    assert_eq!(messages.len(), 1, "{messages:?}");
 }
 
+/// The exclusion list is the *decoding* half since recvcheck v0.3.x: a value
+/// `MarshalJSON` beside a pointer method is a mix again (it was excluded under
+/// golangci-lint 2.12.2), and nothing else in ok.go is.
 #[test]
 fn recvcheck_allows_consistent_and_builtin_marshal() {
     let pkg = support::typecheck_fixture("recvcheck", "example.com/recvcheck/ok", "ok.go");
     let messages = support::run_analyzer(recvcheck(), &pkg);
-    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+    assert_eq!(
+        messages,
+        vec!["the methods of \"ValueType\" use pointer receiver and non-pointer receiver.".to_string()],
+    );
 }
 
 #[test]
@@ -2696,46 +2698,20 @@ fn canonicalheader_flags_non_canonical_keys() {
     let pkg =
         support::typecheck_fixture("canonicalheader", "example.com/canonicalheader", "bad.go");
     let messages = support::run_analyzer(canonicalheader(), &pkg);
+    // The golangci/canonicalheader fork (golangci-lint 2.14.0): one message,
+    // `use <canonical> instead of <given>`, for literals and constants alike.
+    let has = |m: &str| messages.iter().any(|x| x == m);
+    assert!(has("use \"Test-Header\" instead of \"Test-HEader\""), "{messages:?}");
     assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("non-canonical header \"Test-Header\"")
-                || m.contains("non-canonical header \"Test-HEader\"")),
+        has("use \"Raw-String-Literal\" instead of \"Raw-STRING-Literal\""),
         "{messages:?}"
     );
-    assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("non-canonical header \"Raw-STRING-Literal\"")
-                || m.contains("instead use: \"Raw-String-Literal\"")),
-        "{messages:?}"
-    );
-    assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("non-canonical header \"testHeaderValue\"")
-                || m.contains("instead use: \"Testheadervalue\"")),
-        "{messages:?}"
-    );
-    // `etag` is **not** reported. Upstream's `canonicalHeaderKey` returns
-    // `isWellKnown` when the MIME-canonical form is in the initialism table,
-    // and its caller returns on that — so the table only ever suppresses:
-    //
-    //     if argValue == headerKeyCanonical || isWellKnown { return }
-    //
-    // This test used to assert the opposite, and no tier could see it: the
-    // isolate fixture reached the linter through `content-type` alone.
-    assert!(
-        !messages.iter().any(|m| m.contains("\"etag\"")),
-        "etag canonicalizes into the initialism table, so upstream is silent: {messages:?}"
-    );
-    assert!(
-        !messages
-            .iter()
-            .any(|m| m.contains("\"www-authenticate\"")),
-        "{messages:?}"
-    );
-    assert!(messages.len() >= 6, "{messages:?}");
+    assert!(has("use \"Testheadervalue\" instead of \"testHeaderValue\""), "{messages:?}");
+    // `etag` **is** reported, with the table's spelling. lasiar's version
+    // (golangci-lint 2.12.2) returned on `isWellKnown` and stayed silent; the
+    // fork makes the table the canonical spelling instead.
+    assert!(has("use \"ETag\" instead of \"etag\""), "{messages:?}");
+    assert!(messages.len() >= 7, "{messages:?}");
 }
 
 /// Upstream's `headerObject` scan decides whether the package is checked at
@@ -2783,8 +2759,8 @@ fn canonicalheader_checks_when_the_request_field_is_used() {
     assert_eq!(
         messages,
         vec![
-            "non-canonical header \"content-type\", instead use: \"Content-Type\"",
-            "non-canonical header \"if-none-match\", instead use: \"If-None-Match\"",
+            "use \"Content-Type\" instead of \"content-type\"",
+            "use \"If-None-Match\" instead of \"if-none-match\"",
         ],
         "{messages:?}"
     );
@@ -6311,8 +6287,8 @@ const EXH_MISSING_KEY: &str =
 /// The directives as they behave with neither `explicit-*` nor
 /// `default-case-required` — the shape golangci-lint runs by default.
 ///
-/// Measured against golangci-lint 2.12.2 on the same sources
-/// (`compat/golden/cases/exhaustive`).
+/// Measured against golangci-lint 2.14.0 on the same sources, under the same
+/// three configs as the three tests below.
 #[test]
 fn exhaustive_honours_ignore_directives() {
     let got = exhaustive_directive_findings(exhaustive_both());
@@ -6323,13 +6299,19 @@ fn exhaustive_honours_ignore_directives() {
         // case even though the setting is off, and that report wins over the
         // missing members.
         (52, EXH_MISSING_DEFAULT.to_string()),
+        // exhaustive v0.13.0 (golangci-lint 2.14.0) matches directives
+        // exactly: `//exhaustive:ignoreme` is an error, reported, and does not
+        // ignore the switch. v0.12.0 read it as `ignore` by prefix.
+        (90, "failed to parse directives: invalid directive \"ignoreme\"".to_string()),
+        (90, EXH_MISSING_TWO.to_string()),
         // A trailing comment on the `switch` line is associated with no node.
         (100, EXH_MISSING_TWO.to_string()),
         (108, EXH_MISSING_KEY.to_string()),
         (118, EXH_MISSING_KEY.to_string()),
-        // For a map literal the directive test is a plain prefix test, so
-        // `enforce-default-case-required` is not an ignore — while
-        // `ignore-default-case-required` on line 126 *is* one.
+        // Exact matching for map literals too: neither
+        // `ignore-default-case-required` (126) nor
+        // `enforce-default-case-required` (131) is an ignore.
+        (126, EXH_MISSING_KEY.to_string()),
         (131, EXH_MISSING_KEY.to_string()),
         (136, EXH_MISSING_KEY.to_string()),
         (143, EXH_MISSING_KEY.to_string()),
@@ -6356,13 +6338,13 @@ fn exhaustive_explicit_checks_only_enforced_nodes() {
         ..exhaustive_both()
     });
     let want: Vec<(i64, String)> = vec![
-        // Line 52's `//exhaustive:enforce-default-case-required` is *not* an
-        // enforce for a switch: `userDirectives` maps each comment to the
-        // longest directive it starts with.
+        // Line 52's `//exhaustive:enforce-default-case-required` is not an
+        // enforce, for a switch or (since v0.13.0's exact matching, line 131)
+        // a map literal.
         (40, EXH_MISSING_TWO.to_string()),
+        // The parse error is reported whatever explicit mode says.
+        (90, "failed to parse directives: invalid directive \"ignoreme\"".to_string()),
         (118, EXH_MISSING_KEY.to_string()),
-        // …but it is one for a map literal, which asks for a plain prefix.
-        (131, EXH_MISSING_KEY.to_string()),
         (136, EXH_MISSING_KEY.to_string()),
         // Line 143's enforce sits on the `FuncDecl`, which the map checker
         // does not look at; line 152's sits on a `var` two unlisted nodes
@@ -6388,9 +6370,12 @@ fn exhaustive_default_case_directives_override_the_setting() {
         // because of `//exhaustive:ignore-default-case-required`; line 76 is
         // the same switch without it.
         (76, EXH_MISSING_DEFAULT.to_string()),
+        (90, "failed to parse directives: invalid directive \"ignoreme\"".to_string()),
+        (90, EXH_MISSING_DEFAULT.to_string()),
         (100, EXH_MISSING_DEFAULT.to_string()),
         (108, EXH_MISSING_KEY.to_string()),
         (118, EXH_MISSING_KEY.to_string()),
+        (126, EXH_MISSING_KEY.to_string()),
         (131, EXH_MISSING_KEY.to_string()),
         (136, EXH_MISSING_KEY.to_string()),
         (143, EXH_MISSING_KEY.to_string()),
@@ -10370,7 +10355,8 @@ fn protogetter_flags_direct_proto_field_reads() {
 fn protogetter_ignores_getters_writes_and_non_proto() {
     let pkg = support::typecheck_fixture("protogetter", "example.com/protogetter/ok", "ok.go");
     let messages = support::run_analyzer(protogetter(), &pkg);
-    assert!(messages.is_empty(), "{messages:?}");
+    // The one finding is the alias shape, reported since protogetter v1.0.1.
+    assert_eq!(messages, vec!["avoid direct access to proto field u.Name, use u.GetName() instead".to_string()]);
 }
 
 /// `msg.Field == nil` is filtered when `GetField` returns a non-pointer.
@@ -10388,9 +10374,12 @@ fn protogetter_ignores_getters_writes_and_non_proto() {
 fn protogetter_nil_comparison_follows_the_getter_result_type() {
     let ok = support::typecheck_fixture("protogetter", "example.com/protogetter/ok", "ok.go");
     let ok_messages = support::run_analyzer(protogetter(), &ok);
-    assert!(
-        ok_messages.is_empty(),
-        "a non-pointer getter's nil comparison is filtered: {ok_messages:?}"
+    // Nothing but the alias shape (protogetter v1.0.1), which is not a nil
+    // comparison.
+    assert_eq!(
+        ok_messages,
+        vec!["avoid direct access to proto field u.Name, use u.GetName() instead".to_string()],
+        "a non-pointer getter's nil comparison is filtered"
     );
 
     let bad = support::typecheck_fixture("protogetter", "example.com/protogetter", "bad.go");
@@ -11179,10 +11168,11 @@ fn exhaustive_reads_an_imported_packages_enum() {
         },
     );
 
-    // Exact set, in report order. The five silent shapes in the fixture — a
-    // complete switch, an enum whose only missing members are unexported, an
-    // **alias** to the enum, a defined type over it, and a struct — are absent
-    // from this list, and that is what says they stayed silent.
+    // Exact set, in report order. The four silent shapes in the fixture — a
+    // complete switch, an enum whose only missing members are unexported, a
+    // defined type over it, and a struct — are absent from this list, and that
+    // is what says they stayed silent. The **alias** to the enum is reported
+    // since exhaustive v0.13.0 (golangci-lint 2.14.0) unaliases in `fromType`.
     assert_eq!(
         messages,
         vec![
@@ -11197,6 +11187,9 @@ fn exhaustive_reads_an_imported_packages_enum() {
             "missing cases in switch of type enumdep.Kind: enumdep.KindA, enumdep.KindM"
                 .to_string(),
             // The tag is a conversion to the foreign enum.
+            "missing cases in switch of type enumdep.Kind: enumdep.KindA, enumdep.KindM"
+                .to_string(),
+            // `switch k` on `enumdep.KindAlias`.
             "missing cases in switch of type enumdep.Kind: enumdep.KindA, enumdep.KindM"
                 .to_string(),
             "missing keys in map of key type enumdep.Kind: enumdep.KindA, enumdep.KindM"

@@ -714,6 +714,24 @@ impl UsestdlibvarsOptions {
     }
 }
 
+/// `linters.settings.canonicalheader` (golangci-lint 2.14.0, the
+/// golangci/canonicalheader fork): extra `exclusions` — header spellings to
+/// accept as canonical — and whether the built-in initialism table applies.
+#[derive(Debug, Clone)]
+pub struct CanonicalheaderOptions {
+    pub exclusions: Vec<String>,
+    pub use_default_exclusions: bool,
+}
+
+impl Default for CanonicalheaderOptions {
+    fn default() -> Self {
+        Self {
+            exclusions: Vec::new(),
+            use_default_exclusions: true,
+        }
+    }
+}
+
 /// `linters.settings.modernize` / `linters-settings.modernize`.
 ///
 /// By default all implemented checkers are enabled. Names in `disable` are
