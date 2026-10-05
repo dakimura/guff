@@ -55,13 +55,15 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         // duplicates carry only because the *path* is in the message. Eight
         // findings golangci-lint does not report.
         let to_name = shortest_rel_path(&issue.to.filename);
+        let dupl = format!(
+            "{}:{}-{}",
+            to_name, issue.to.line_start, issue.to.line_end
+        );
         let msg = format!(
-            "{}-{} lines are duplicate of `{}:{}-{}`",
+            "{}-{} lines are duplicate of {}",
             issue.from.line_start,
             issue.from.line_end,
-            to_name,
-            issue.to.line_start,
-            issue.to.line_end
+            guff_analysis::golinters::format_code(&dupl)
         );
         pass.report(Diagnostic {
             pos,

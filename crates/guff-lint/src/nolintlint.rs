@@ -14,6 +14,7 @@
 //! nolintlint; `//nolint:ErrCheck` is `errcheck` to the filter (which
 //! lowercases and resolves aliases) and the literal `ErrCheck` here.
 
+use guff_analysis::golinters::sharp_q;
 use std::sync::OnceLock;
 
 use regex::Regex;
@@ -203,8 +204,9 @@ pub fn messages(directive: &Directive, style: &NolintlintStyle) -> Vec<Message> 
         );
         out.push(Message {
             text: format!(
-                "directive `{}` should be written without leading space as `{expected}`",
-                directive.text
+                "directive {} should be written without leading space as {}",
+                sharp_q(&directive.text),
+                sharp_q(&expected)
             ),
             // `len("//") + len(leadingSpace)`.
             strip_to: Some(2 + space.len()),
@@ -213,16 +215,16 @@ pub fn messages(directive: &Directive, style: &NolintlintStyle) -> Vec<Message> 
 
     if directive.malformed {
         out.push(Message::plain(format!(
-            "directive `{}` should match `{prefix}[:<comma-separated-linters>] [// <explanation>]`",
-            directive.text
+            "directive {} should match `{prefix}[:<comma-separated-linters>] [// <explanation>]`",
+            sharp_q(&directive.text)
         )));
         return out;
     }
 
     if style.require_specific && directive.linters.is_empty() {
         out.push(Message::plain(format!(
-            "directive `{}` should mention specific linter such as `{prefix}:my-linter`",
-            directive.text
+            "directive {} should mention specific linter such as `{prefix}:my-linter`",
+            sharp_q(&directive.text)
         )));
     }
 
@@ -235,8 +237,8 @@ pub fn messages(directive: &Directive, style: &NolintlintStyle) -> Vec<Message> 
         if needs {
             let without = trailing_blank_explanation().replace_all(&directive.text, "");
             out.push(Message::plain(format!(
-                "directive `{}` should provide explanation such as `{without} // this is why`",
-                directive.text
+                "directive {} should provide explanation such as `{without} // this is why`",
+                sharp_q(&directive.text)
             )));
         }
     }

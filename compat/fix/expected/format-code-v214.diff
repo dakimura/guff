@@ -1,0 +1,28 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh format-code-v214
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/format-code-v214/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.14.0
+
+--- a/fc.go
++++ b/fc.go
+@@ -66,12 +66,12 @@
+ const Plain = "plain value"
+ 
+ func nolinted() int {
+-	return 1 //nolint:gocyclo // see `README`
++	return 1
+ }
+ 
+ func nolinted2() int {
+-	return 2 //nolint:gocyclo
++	return 2
+ }
+ 
+-// The recieve side.
++// The receive side.
+ func spelled() {}

@@ -6,6 +6,7 @@
 //! that needs both — "this directive suppressed nothing" — is settled here,
 //! since only the filter knows what matched.
 
+use guff_analysis::golinters::sharp_q;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
@@ -600,8 +601,8 @@ fn unused_issue(
     fix: Option<TextEdit>,
 ) -> Issue {
     let text = match specific {
-        Some(l) => format!("directive `{comment}` is unused for linter {l:?}"),
-        None => format!("directive `{comment}` is unused"),
+        Some(l) => format!("directive {} is unused for linter {l:?}", sharp_q(comment)),
+        None => format!("directive {} is unused", sharp_q(comment)),
     };
     nolintlint_issue(filename, line, column, text, fix)
 }

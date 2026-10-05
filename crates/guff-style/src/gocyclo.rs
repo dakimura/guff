@@ -36,14 +36,6 @@ fn func_name(fn_: &FuncDecl) -> String {
     fn_.name.name.clone()
 }
 
-fn format_code(code: &str) -> String {
-    if code.contains('`') {
-        code.to_string()
-    } else {
-        format!("`{code}`")
-    }
-}
-
 fn complexity(root: NodeRef<'_>) -> usize {
     let mut complexity = 1usize;
     walk::inspect(root, |n| {
@@ -83,7 +75,7 @@ fn report_if_high(
             pos,
             format!(
                 "cyclomatic complexity {c} of func {} is high (> {min_complexity})",
-                format_code(name)
+                guff_analysis::golinters::format_code(name)
             ),
         ));
     }

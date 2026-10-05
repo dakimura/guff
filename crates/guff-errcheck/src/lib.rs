@@ -207,7 +207,10 @@ impl Visitor<'_, '_> {
         let message = match call.and_then(|c| self.call_display_name(c)) {
             // Backticks match kisielk/golangci + exclusion presets like
             // `Error return value of .((...).|.*Flush|...). is not checked`.
-            Some(name) => format!("Error return value of `{name}` is not checked"),
+            Some(name) => format!(
+                "Error return value of {} is not checked",
+                guff_analysis::golinters::format_code(&name)
+            ),
             None => "Error return value is not checked".into(),
         };
         self.pending.push((pos, message));
