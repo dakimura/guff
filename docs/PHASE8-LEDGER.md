@@ -287,30 +287,30 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 | 4 | importcomment.go | new-check | canonical import comment（module モード） | check_importcomment | PR 1 で Suite 入り。golden の形は一致 | S | — |
 | 5 | reflecttypeassert.go | new-check | `v.Interface().(T)` → `reflect.TypeAssert[T]` | check_reflecttypeassert | PR 1 で Suite 入り。golden の形は一致 | S | reflecttypeassert.go{,.golden} |
 | 6 | embedlit.go | new-check | 埋め込みフィールド型の省略（Go 1.27+） | 無し | needs-port | L | embedlit*.go{,.golden} |
-| 7 | slicesclip.go | new-check | `x[:len(x):len(x)]` → slices.Clip | 無し | needs-port | S | slicesclip.go{,.golden} |
+| 7 | slicesclip.go | new-check | `x[:len(x):len(x)]` → slices.Clip | 無し | **done (PR 12)** | S | slicesclip.go{,.golden} |
 | 8 | reflect.go usesNonTypeSymbol | behavior | 非型シンボルを含む TypeOf を報告しない、DeleteUnusedVars 削除 | check_reflecttypefor, delete_newly_unused_vars | **done (PR 1)** | M | reflecttypefor.go{,.golden} |
 | 9 | slicescontains.go | behavior | needle / predicate に副作用がありうれば報告しない | slicescontains_cond, expr_may_have_effects | **done (PR 1)** | S | slicescontains.go{,.golden} |
 | 10 | stringsbuilder.go | behavior | _test.go を報告しない | check_stringsbuilder | **done (PR 1)** | S | stringsbuilder{,_test}.go{,.golden} |
 | 11 | stringscut.go stringsplitCut | new-check | `strings.Split(s, sep)[0]` → Cut | check_stringscut | **done (PR 6)** | M | stringscut.go{,.golden} |
-| 12 | stringscut.go（LastIndex） | behavior | LastIndex 系 → Contains / CutLast（1.27） | check_stringscut FUNCS | needs-port | M | stringscut{,_go127}.go{,.golden} |
-| 13 | stringscut.go 多値代入 | behavior | 多値の宣言・代入の一部なら報告しない | cut_i_ident | needs-port | S | stringscut.go{,.golden} |
-| 14 | stringscut.go indexArgValid | behavior | IsAssignedOrAddressTaken で全使用を見る | cut_has_modifying_uses | needs-port | S | stringscut.go{,.golden} |
-| 15 | minmax.go if パターン | behavior | 比較式に副作用があれば報告しない | check_minmax, check_minmax_block | needs-port | S | minmax/parametersideeffect/* |
-| 16 | minmax.go checkUserDefinedMinMax | behavior | 比較の両辺が引数名と一致することを要求 | check_user_defined_minmax | needs-port | S | minmax/userdefined/** |
-| 17 | atomictypes.go unkeyedFields | behavior | キー無しリテラルで使われる struct のフィールドを除外 | check_atomictypes | needs-port | S | atomic.go{,.golden} |
-| 18 | waitgroupgo.go cannotRecover | behavior | 本体の defer が recover しうれば末尾 Done 形を報告しない | waitgroupgo_done_span | needs-port | S | waitgroup.go{,.golden} |
-| 19 | testingcontext.go | behavior | 先行する defer があれば報告しない、fix の分割 | check_testingcontext_list | needs-port | S | testingcontext_test.go{,.golden} |
-| 20 | rangeint.go IsAssignedOrAddressTaken | behavior | ポインタレシーバのメソッド呼び出しを lvalue に | collect_scalar_lvalues | needs-port | S | rangeint.go{,.golden} |
-| 21 | slicesbackward.go init.Tok | behavior | `i = len(s)-1`（ASSIGN）を報告しない | check_slicesbackward | needs-port | S | slicesbackward.go{,.golden} |
-| 22 | slicesbackward.go s[i] lvalue | behavior | index 位置に i がある**任意の** IndexExpr が lvalue なら報告しない（X==s に限定しないこと） | index_mutated_in_body | needs-port | M | slicesbackward.go{,.golden} |
-| 23 | slicesbackward.go fix | behavior | 値変数名の選択と `name := s[i]` の削除（字句順で最初、先頭文でなくてよい） | check_slicesbackward（"v" 固定） | needs-port | M | slicesbackward.go.golden |
-| 24 | stringscutprefix.go | behavior | pattern 2 の未使用 after を `_` に（fix のみ） | check_stringscutprefix | needs-port | S | stringscutprefix.go{,.golden} |
+| 12 | stringscut.go（LastIndex） | behavior | LastIndex 系 → Contains / CutLast（1.27） | check_stringscut FUNCS | **done (PR 12)**: LastIndex 系と Contains への変換。CutLast 側は Go 1.27 の file 版が要るので golden では測れない（stringscut_go127.go は除外） | M | stringscut{,_go127}.go{,.golden} |
+| 13 | stringscut.go 多値代入 | behavior | 多値の宣言・代入の一部なら報告しない | cut_i_ident | **done (PR 12)** | S | stringscut.go{,.golden} |
+| 14 | stringscut.go indexArgValid | behavior | IsAssignedOrAddressTaken で全使用を見る | cut_has_modifying_uses | **done (PR 12)**: `typesinternal.IsAssignedOrAddressTaken` を guff-analysis に移植して共有 | S | stringscut.go{,.golden} |
+| 15 | minmax.go if パターン | behavior | 比較式に副作用があれば報告しない | check_minmax, check_minmax_block | **done (PR 12)**: あわせて `else if` の if を対象外に（既存の過剰報告） | S | minmax/parametersideeffect/* |
+| 16 | minmax.go checkUserDefinedMinMax | behavior | 比較の両辺が引数名と一致することを要求 | check_user_defined_minmax | **done (PR 12)** | S | minmax/userdefined/** |
+| 17 | atomictypes.go unkeyedFields | behavior | キー無しリテラルで使われる struct のフィールドを除外 | check_atomictypes | **done (PR 12)** | S | atomic.go{,.golden} |
+| 18 | waitgroupgo.go cannotRecover | behavior | 本体の defer が recover しうれば末尾 Done 形を報告しない | waitgroupgo_done_span | **done (PR 12)** | S | waitgroup.go{,.golden} |
+| 19 | testingcontext.go | behavior | 先行する defer があれば報告しない、fix の分割 | check_testingcontext_list | **done (PR 12)**: あわせて再宣言された ctx を対象外に（既存） | S | testingcontext_test.go{,.golden} |
+| 20 | rangeint.go IsAssignedOrAddressTaken | behavior | ポインタレシーバのメソッド呼び出しを lvalue に | collect_scalar_lvalues | **done (PR 12)**: あわせて package var / named result / defer 内の使用 / 型パラメータの term（既存の 7 件）と fix の型変換・`len("")` | S | rangeint.go{,.golden} |
+| 21 | slicesbackward.go init.Tok | behavior | `i = len(s)-1`（ASSIGN）を報告しない | check_slicesbackward | **done (PR 12)** | S | slicesbackward.go{,.golden} |
+| 22 | slicesbackward.go s[i] lvalue | behavior | index 位置に i がある**任意の** IndexExpr が lvalue なら報告しない（X==s に限定しないこと） | index_mutated_in_body | **done (PR 12)** | M | slicesbackward.go{,.golden} |
+| 23 | slicesbackward.go fix | behavior | 値変数名の選択と `name := s[i]` の削除（字句順で最初、先頭文でなくてよい） | check_slicesbackward（"v" 固定） | **done (PR 12)** | M | slicesbackward.go.golden |
+| 24 | stringscutprefix.go | behavior | pattern 2 の未使用 after を `_` に（fix のみ） | check_stringscutprefix | **done (PR 12)**: あわせて dot import と `ok` の fresh name | S | stringscutprefix.go{,.golden} |
 | 25 | sortslice.go | behavior | 引数 2 個以外・副作用ありの s を除外 | check_slicessort | already-matches | S | slicessort.go{,.golden} |
 | 26 | newexpr.go | behavior | 可変長関数を new-like としない | newexpr_signature_shape_ok | already-matches | S | newexpr.go{,.golden} |
 | 27 | stringsseq.go | behavior | 変換式で panic していた件 | split_or_fields_seq_name | already-matches | S | splitseq/conv/nobytes.go |
 | 28 | bloop.go | behavior | レシーバ一致時だけ削除 | （Suite 外） | not-applicable | S | bloop_test.go{,.golden} |
 | 29 | slices.go appendclipped | behavior | Clone を外して畳む | （Suite 外） | not-applicable | S | appendclipped.go{,.golden} |
-| 30 | stringsbuilder.go lastEditEnd | behavior | 重複回避の境界が前にずれ、2 変数交互の形で 2.14 が報告する | check_stringsbuilder（max を使う＝旧挙動） | needs-port | S | （upstream に直接の case 無し、自作） |
+| 30 | stringsbuilder.go lastEditEnd | behavior | 重複回避の境界が前にずれ、2 変数交互の形で 2.14 が報告する | check_stringsbuilder（max を使う＝旧挙動） | **done (PR 12)**: あわせて `(s).String()` の括弧位置 | S | （upstream に直接の case 無し、自作） |
 
 ### xtools-passes（govet）
 
@@ -665,7 +665,7 @@ golden を regen したら fix のベースラインも撮り直す。測定は 
 | 9 | **gosec 既存ルール** — **done** | G118、G115、G703、G404、`%#q` 系と並べて TryResolve Builder（2 系統）。nosec-require-* と NoSecTag は `config.global` 未対応のため残す | gosec 6/8 → **0/0（ratchet 削除）** | M |
 | 10 | **revive** — **done** | empty-block range、multiline-if-init を enable-all に、marshal-receiver、use-slices-concat、文言 4 本、Go 版ゲート 2 本、directives。redundant-build-tag / use-waitgroup-go（rule ごと未実装）と `directives:` 設定は残す | revive 1/10 → **1/4（恒久分のみ）**、新設 golden 7 case | M |
 | 11 | **unused / unparam** — **done** | Unify、unparam AnonFuncs + linkname + signRequiredBy + alias。あわせて既存の乖離 3 つ: 総称レシーバと literal の名前（`RelString`）、signRequiredBy の名前照合（受信者名 `g1` が関数 `g1` を固定していた）、`f[int](x)` を値の使用と見ていた | unused 0/2 → 0/0（PR 4）、unparam 1/0 → **0/0（ratchet 削除）**、新設 golden `unparam-upstream`（上流 testscript 6 本 + ゼロサイズ） | M |
-| 12 | **modernize 残り（ゴールデンに出ない側）** | minmax ×2、atomictypes、waitgroupgo、testingcontext、rangeint、slicesbackward ×3、stringscut ×3、stringscutprefix、stringsbuilder lastEditEnd、slicesclip。**各項目で上流 testdata を fixture 化**（ratchet は動かないので fixture が唯一の検算） | ― | M〜L |
+| 12 | **modernize 残り（ゴールデンに出ない側）** — **done**（embedlit は Go 1.27 なので PR 15） | minmax ×2、atomictypes、waitgroupgo、testingcontext、rangeint、slicesbackward ×3、stringscut ×3、stringscutprefix、stringsbuilder lastEditEnd、slicesclip。**各項目で上流 testdata を fixture 化**（ratchet は動かないので fixture が唯一の検算） | 新設 golden `modernize-upstream`（x/tools v0.50 の testdata 36 ファイル、179 件）と同じ case の fix tier（1797 行、golangci と byte 一致） | M〜L |
 | 13 | **gofumpt v0.12 の残り + printer** | §2.4 の toolchain 確認の後。括弧除去、effectiveEnd + multi、removeParens、joinStdImports、diagnose。`omit_v010_rules` / `match_golangci` gate の撤去 | ― | L |
 | 14 | **新機能（大）を 1 本ずつ** | G407、exhaustruct_v5（3〜4 PR に分割：設定 → ディレクティブスキャナ → 欠落計算 → tag 移行）、gochecksumtype fact、iface unusedmethod / opaque / unexported、stdversion、goconst eval-const-expressions、embedlit | ― | 各 L |
 | 15 | **Go 1.27 toolchain 対応（保留）** | export data V5、printf %d go1.27、stringscut CutLast、昇格フィールドキー。ターゲット Go が 1.27 になる日まで保留 | ― | L |

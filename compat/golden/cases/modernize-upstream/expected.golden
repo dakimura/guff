@@ -1,0 +1,187 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh modernize-upstream
+# Produced by running golangci-lint on compat/golden/cases/modernize-upstream/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+atomictypes/atomic.go:9:2:modernize::atomictypes: var x int32 may be simplified using atomic.Int32
+atomictypes/atomic.go:30:2:modernize::atomictypes: var y int64 may be simplified using atomic.Int64
+atomictypes/atomic.go:35:6:modernize::atomictypes: var x int32 may be simplified using atomic.Int32
+atomictypes/atomic_shadow.go:6:6:modernize::atomictypes: var x int32 may be simplified using atomic.Int32
+atomictypes/spansfiles/a.go:3:5:modernize::atomictypes: var v int32 may be simplified using atomic.Int32
+minmax/minmax.go:6:5:modernize::minmax: if statement can be modernized using max
+minmax/minmax.go:16:5:modernize::minmax: if statement can be modernized using min
+minmax/minmax.go:24:5:modernize::minmax: if statement can be modernized using min
+minmax/minmax.go:32:5:modernize::minmax: if statement can be modernized using min
+minmax/minmax.go:41:5:modernize::minmax: if/else statement can be modernized using min
+minmax/minmax.go:57:5:modernize::minmax: if/else statement can be modernized using max
+minmax/minmax.go:92:5:modernize::minmax: if statement can be modernized using max
+minmax/minmax.go:135:5:modernize::minmax: if statement can be modernized using max
+minmax/nonstrict/nonstrict.go:4:1:modernize::minmax: user-defined min function is equivalent to built-in min and can be removed
+minmax/nonstrict/nonstrict.go:13:1:modernize::minmax: user-defined max function is equivalent to built-in max and can be removed
+minmax/parametersideeffect/parametersideeffect.go:27:5:modernize::minmax: if statement can be modernized using max
+minmax/userdefined/userdefined.go:24:1:modernize::minmax: user-defined min function is equivalent to built-in min and can be removed
+minmax/userdefined/userdefined.go:33:1:modernize::minmax: user-defined max function is equivalent to built-in max and can be removed
+rangeint/rangeint.go:10:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:13:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:16:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:19:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:22:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:25:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:28:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:31:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:34:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:37:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:40:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:43:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:46:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:52:7:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:56:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:59:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:62:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:95:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:119:7:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:124:7:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:141:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:186:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:188:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:190:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:194:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:200:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:220:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:234:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:241:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:244:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:245:7:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:273:7:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:286:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:290:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:306:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:329:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:343:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:348:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:353:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:358:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:377:6:modernize::rangeint: for loop can be modernized using range over int
+rangeint/rangeint.go:384:6:modernize::rangeint: for loop can be modernized using range over int
+slicesbackward/slicesbackward.go:16:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:25:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:34:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:45:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:54:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:62:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:69:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:76:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:113:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:248:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:255:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:270:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:277:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:291:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesclip/slicesclip.go:10:6:modernize::slicesclip: x[:len(x):len(x)] can be simplified using slices.Clip
+slicesclip/slicesclip.go:20:6:modernize::slicesclip: x[:len(x):len(x)] can be simplified using slices.Clip
+slicesclip/slicesclip.go:27:10:modernize::slicesclip: x[:len(x):len(x)] can be simplified using slices.Clip
+slicesclip/slicesclip.go:30:20:modernize::slicesclip: x[:len(x):len(x)] can be simplified using slices.Clip
+stringsbuilder/stringsbuilder.go:10:3:modernize::stringsbuilder: using string += string in a loop is inefficient
+stringsbuilder/stringsbuilder.go:21:3:modernize::stringsbuilder: using string += string in a loop is inefficient
+stringsbuilder/stringsbuilder.go:30:3:modernize::stringsbuilder: using string += string in a loop is inefficient
+stringsbuilder/stringsbuilder.go:39:3:modernize::stringsbuilder: using string += string in a loop is inefficient
+stringsbuilder/stringsbuilder.go:48:3:modernize::stringsbuilder: using string += string in a loop is inefficient
+stringsbuilder/stringsbuilder.go:78:4:modernize::stringsbuilder: using string += string in a loop is inefficient
+stringsbuilder/stringsbuilder.go:100:3:modernize::stringsbuilder: using string += string in a loop is inefficient
+stringsbuilder/stringsbuilder.go:111:3:modernize::stringsbuilder: using string += string in a loop is inefficient
+stringsbuilder/stringsbuilder.go:128:3:modernize::stringsbuilder: using string += string in a loop is inefficient
+stringsbuilder/stringsbuilder.go:141:3:modernize::stringsbuilder: using string += string in a loop is inefficient
+stringsbuilder/stringsbuilder.go:162:3:modernize::stringsbuilder: using string += string in a loop is inefficient
+stringsbuilder/stringsbuilder.go:185:3:modernize::stringsbuilder: using string += string in a loop is inefficient
+stringsbuilder/stringsbuilder.go:193:3:modernize::stringsbuilder: using string += string in a loop is inefficient
+stringsbuilder/stringsbuilder.go:201:3:modernize::stringsbuilder: using string += string in a loop is inefficient
+stringsbuilder/stringsbuilder.go:209:3:modernize::stringsbuilder: using string += string in a loop is inefficient
+stringsbuilder/stringsbuilder.go:217:3:modernize::stringsbuilder: using string += string in a loop is inefficient
+stringscut/stringscut.go:19:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+stringscut/stringscut.go:92:7:modernize::stringscut: strings.Index can be simplified using strings.Contains
+stringscut/stringscut.go:97:7:modernize::stringscut: strings.Index can be simplified using strings.Contains
+stringscut/stringscut.go:110:7:modernize::stringscut: strings.IndexByte can be simplified using strings.Contains
+stringscut/stringscut.go:115:7:modernize::stringscut: bytes.IndexByte can be simplified using bytes.Contains
+stringscut/stringscut.go:121:7:modernize::stringscut: strings.LastIndex can be simplified using strings.Contains
+stringscut/stringscut.go:126:7:modernize::stringscut: strings.LastIndexByte can be simplified using strings.Contains
+stringscut/stringscut.go:131:7:modernize::stringscut: bytes.LastIndex can be simplified using bytes.Contains
+stringscut/stringscut.go:136:7:modernize::stringscut: bytes.LastIndexByte can be simplified using bytes.Contains
+stringscut/stringscut.go:148:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+stringscut/stringscut.go:162:7:modernize::stringscut: strings.IndexByte can be simplified using strings.Cut
+stringscut/stringscut.go:170:7:modernize::stringscut: strings.IndexByte can be simplified using strings.Cut
+stringscut/stringscut.go:179:7:modernize::stringscut: strings.IndexByte can be simplified using strings.Cut
+stringscut/stringscut.go:187:7:modernize::stringscut: bytes.Index can be simplified using bytes.Cut
+stringscut/stringscut.go:205:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+stringscut/stringscut.go:214:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+stringscut/stringscut.go:223:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+stringscut/stringscut.go:235:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+stringscut/stringscut.go:415:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+stringscut/stringscut.go:433:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+stringscut/stringscut.go:437:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+stringscut/stringscut.go:448:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+stringscut/stringscut.go:459:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+stringscut/stringscut.go:508:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+stringscut/stringscut.go:517:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+stringscut/stringscut.go:526:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+stringscut/stringscut.go:538:7:modernize::stringscut: strings.SplitN call can be simplified using strings.Cut
+stringscut/stringscut.go:544:7:modernize::stringscut: strings.Split call can be simplified using strings.Cut
+stringscutprefix/bytescutprefix/bytescutprefix.go:8:5:modernize::stringscutprefix: HasPrefix + TrimPrefix can be simplified to CutPrefix
+stringscutprefix/bytescutprefix/bytescutprefix.go:12:5:modernize::stringscutprefix: HasPrefix + TrimPrefix can be simplified to CutPrefix
+stringscutprefix/bytescutprefix/bytescutprefix.go:17:5:modernize::stringscutprefix: HasSuffix + TrimSuffix can be simplified to CutSuffix
+stringscutprefix/bytescutprefix/bytescutprefix.go:21:5:modernize::stringscutprefix: HasSuffix + TrimSuffix can be simplified to CutSuffix
+stringscutprefix/bytescutprefix/bytescutprefix_dot.go:11:5:modernize::stringscutprefix: HasPrefix + TrimPrefix can be simplified to CutPrefix
+stringscutprefix/bytescutprefix/bytescutprefix_dot.go:16:5:modernize::stringscutprefix: HasSuffix + TrimSuffix can be simplified to CutSuffix
+stringscutprefix/stringscutprefix.go:23:5:modernize::stringscutprefix: HasPrefix + TrimPrefix can be simplified to CutPrefix
+stringscutprefix/stringscutprefix.go:27:5:modernize::stringscutprefix: HasPrefix + TrimPrefix can be simplified to CutPrefix
+stringscutprefix/stringscutprefix.go:31:5:modernize::stringscutprefix: HasPrefix + TrimPrefix can be simplified to CutPrefix
+stringscutprefix/stringscutprefix.go:34:5:modernize::stringscutprefix: HasPrefix + TrimPrefix can be simplified to CutPrefix
+stringscutprefix/stringscutprefix.go:38:5:modernize::stringscutprefix: HasPrefix + TrimPrefix can be simplified to CutPrefix
+stringscutprefix/stringscutprefix.go:46:5:modernize::stringscutprefix: HasPrefix + TrimPrefix can be simplified to CutPrefix
+stringscutprefix/stringscutprefix.go:54:5:modernize::stringscutprefix: HasSuffix + TrimSuffix can be simplified to CutSuffix
+stringscutprefix/stringscutprefix.go:58:5:modernize::stringscutprefix: HasSuffix + TrimSuffix can be simplified to CutSuffix
+stringscutprefix/stringscutprefix.go:101:5:modernize::stringscutprefix: TrimPrefix can be simplified to CutPrefix
+stringscutprefix/stringscutprefix.go:104:5:modernize::stringscutprefix: TrimPrefix can be simplified to CutPrefix
+stringscutprefix/stringscutprefix.go:107:5:modernize::stringscutprefix: TrimPrefix can be simplified to CutPrefix
+stringscutprefix/stringscutprefix.go:110:5:modernize::stringscutprefix: TrimPrefix can be simplified to CutPrefix
+stringscutprefix/stringscutprefix.go:114:5:modernize::stringscutprefix: TrimPrefix can be simplified to CutPrefix
+stringscutprefix/stringscutprefix.go:119:5:modernize::stringscutprefix: TrimPrefix can be simplified to CutPrefix
+stringscutprefix/stringscutprefix.go:152:5:modernize::stringscutprefix: TrimSuffix can be simplified to CutSuffix
+stringscutprefix/stringscutprefix.go:155:5:modernize::stringscutprefix: TrimSuffix can be simplified to CutSuffix
+stringscutprefix/stringscutprefix_dot.go:9:5:modernize::stringscutprefix: HasPrefix + TrimPrefix can be simplified to CutPrefix
+stringscutprefix/stringscutprefix_dot.go:17:5:modernize::stringscutprefix: HasSuffix + TrimSuffix can be simplified to CutSuffix
+stringscutprefix/stringscutprefix_dot.go:25:5:modernize::stringscutprefix: TrimPrefix can be simplified to CutPrefix
+stringscutprefix/stringscutprefix_dot.go:28:5:modernize::stringscutprefix: TrimPrefix can be simplified to CutPrefix
+stringscutprefix/stringscutprefix_dot.go:35:5:modernize::stringscutprefix: TrimSuffix can be simplified to CutSuffix
+stringscutprefix/stringscutprefix_dot.go:38:5:modernize::stringscutprefix: TrimSuffix can be simplified to CutSuffix
+testingcontext/testingcontext_test.go:10:17:modernize::testingcontext: context.WithCancel can be modernized using t.Context
+testingcontext/testingcontext_test.go:23:18:modernize::testingcontext: context.WithCancel can be modernized using t.Context
+testingcontext/testingcontext_test.go:48:18:modernize::testingcontext: context.WithCancel can be modernized using t2.Context
+testingcontext/testingcontext_test.go:55:17:modernize::testingcontext: context.WithCancel can be modernized using t2.Context
+testingcontext/testingcontext_test.go:67:17:modernize::testingcontext: context.WithCancel can be modernized using b.Context
+testingcontext/testingcontext_test.go:72:18:modernize::testingcontext: context.WithCancel can be modernized using b2.Context
+testingcontext/testingcontext_test.go:79:17:modernize::testingcontext: context.WithCancel can be modernized using f.Context
+testingcontext/testingcontext_test.go:107:17:modernize::testingcontext: context.WithCancel can be modernized using t.Context
+testingcontext/testingcontext_test.go:124:17:modernize::testingcontext: context.WithCancel can be modernized using t.Context
+waitgroupgo/waitgroup.go:12:2:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
+waitgroupgo/waitgroup.go:18:2:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
+waitgroupgo/waitgroup.go:24:3:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
+waitgroupgo/waitgroup.go:35:2:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
+waitgroupgo/waitgroup.go:41:2:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
+waitgroupgo/waitgroup.go:47:3:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
+waitgroupgo/waitgroup.go:54:2:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
+waitgroupgo/waitgroup.go:63:2:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
+waitgroupgo/waitgroup.go:73:2:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
+waitgroupgo/waitgroup.go:84:2:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
+waitgroupgo/waitgroup.go:97:2:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
+waitgroupgo/waitgroup.go:104:2:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
+waitgroupgo/waitgroup.go:111:2:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
+waitgroupgo/waitgroup.go:235:2:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
+waitgroupgo/waitgroup.go:242:2:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
+waitgroupgo/waitgroup.go:250:2:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
+waitgroupgo/waitgroup_alias.go:11:2:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
+waitgroupgo/waitgroup_alias.go:17:2:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
+waitgroupgo/waitgroup_dot.go:12:2:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
+waitgroupgo/waitgroup_dot.go:18:2:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go

@@ -34,6 +34,11 @@ materialize_case() {
     fi
     mkdir -p "$(dirname "$work/$dest")"
     cp "$root/$src" "$work/$dest"
+    # A source vendored from the Go module cache is read-only (0444), and so
+    # is its copy. Neither tool's --fix can then write it: the fix tier records
+    # "upstream fixes nothing", guff writes nothing either, and the case passes
+    # having measured nothing.
+    chmod u+w "$work/$dest"
   done <"$case_dir/sources.txt"
 }
 

@@ -19,6 +19,7 @@ mod pattern_match;
 pub mod passes;
 pub mod refactor;
 mod settings;
+pub mod typesinternal;
 mod ssa_util;
 mod validate;
 

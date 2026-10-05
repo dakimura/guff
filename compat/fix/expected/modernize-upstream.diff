@@ -1,0 +1,1807 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh modernize-upstream
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/modernize-upstream/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.14.0
+
+--- a/atomictypes/atomic.go
++++ b/atomictypes/atomic.go
+@@ -6,7 +6,7 @@
+ )
+ 
+ type X struct {
+-	x int32 // want "var x int32 may be simplified using atomic.Int32"
++	x atomic.Int32 // want "var x int32 may be simplified using atomic.Int32"
+ }
+ 
+ type Unkeyed struct {
+@@ -27,14 +27,14 @@
+ }
+ 
+ type Z struct {
+-	y int64 // want "var y int64 may be simplified using atomic.Int64"
++	y atomic.Int64 // want "var y int64 may be simplified using atomic.Int64"
+ 	z int64
+ }
+ 
+ func (wrapper *Z) fix() {
+-	var x int32 // want "var x int32 may be simplified using atomic.Int32"
++	var x atomic.Int32 // want "var x int32 may be simplified using atomic.Int32"
+ 	for range 100 {
+-		go atomic.AddInt32(&x, 1)
++		go x.Add(1)
+ 	}
+ 
+ 	var x2 int32 = 5 // nope: can't assign an int to an atomic.Int32
+@@ -44,10 +44,10 @@
+ 
+ 	var y X
+ 	for range 100 {
+-		go atomic.CompareAndSwapInt32(&y.x, 2, 3)
++		go y.x.CompareAndSwap(2, 3)
+ 	}
+ 
+-	atomic.CompareAndSwapInt64(&wrapper.y, 2, 3)
++	wrapper.y.CompareAndSwap(2, 3)
+ 
+ 	var z int32
+ 	_ = z
+--- a/atomictypes/atomic_shadow.go
++++ b/atomictypes/atomic_shadow.go
+@@ -3,8 +3,8 @@
+ import myatomic "sync/atomic"
+ 
+ func _() {
+-	var x int32 // want "var x int32 may be simplified using atomic.Int32"
++	var x myatomic.Int32 // want "var x int32 may be simplified using atomic.Int32"
+ 	for range 100 {
+-		go myatomic.AddInt32(&x, 1)
++		go x.Add(1)
+ 	}
+ }
+--- a/atomictypes/spansfiles/a.go
++++ b/atomictypes/spansfiles/a.go
+@@ -1,3 +1,5 @@
+ package spansfiles
+ 
+-var v int32 // want `var v int32 may be simplified using atomic.Int32`
++import "sync/atomic"
++
++var v atomic.Int32 // want `var v int32 may be simplified using atomic.Int32`
+--- a/minmax/minmax.go
++++ b/minmax/minmax.go
+@@ -1,52 +1,52 @@
+ package minmax
+ 
+ func ifmin(a, b int) {
+-	x := a // A
+-	// B
+-	if a < b { // want "if statement can be modernized using max"
++	x := max(
++		// A
++		// B
++		a,
++		// want "if statement can be modernized using max"
+ 		// C
+-		x = b // D
++		// D
+ 		// E
+-	}
++		b)
+ 	print(x)
+ }
+ 
+ func ifmax(a, b int) {
+-	x := a
+-	if a > b { // want "if statement can be modernized using min"
+-		x = b
+-	}
++	x := min(a,
++		// want "if statement can be modernized using min"
++		b)
+ 	print(x)
+ }
+ 
+ func ifminvariant(a, b int) {
+-	x := a
+-	if x > b { // want "if statement can be modernized using min"
+-		x = b
+-	}
++	x := min(a,
++		// want "if statement can be modernized using min"
++		b)
+ 	print(x)
+ }
+ 
+ func ifmaxvariant(a, b int) {
+-	x := b
+-	if a < x { // want "if statement can be modernized using min"
+-		x = a
+-	}
++	x := min(a,
++		// want "if statement can be modernized using min"
++		b)
+ 	print(x)
+ }
+ 
+ func ifelsemin(a, b int) {
+ 	var x int // A
+ 	// B
+-	if a <= b { // want "if/else statement can be modernized using min"
++	x = min(
++		// want "if/else statement can be modernized using min"
+ 		// C
+-		x = a // D
++		// D
+ 		// E
+-	} else {
++		a,
+ 		// F
+-		x = b // G
++		// G
+ 		// H
+-	}
++		b)
+ 	print(x)
+ }
+ 
+@@ -54,14 +54,14 @@
+ 	// A
+ 	var x int // B
+ 	// C
+-	if a >= b { // want "if/else statement can be modernized using max"
++	x = max(
++		// want "if/else statement can be modernized using max"
+ 		// D
+-		x = a // E
++		// E
+ 		// F
+-	} else {
++		a,
+ 		// G
+-		x = b
+-	}
++		b)
+ 	print(x)
+ }
+ 
+@@ -88,10 +88,9 @@
+ // Regression test for a bug: fix was "y := max(x, y)".
+ func oops() {
+ 	x := 1
+-	y := 2
+-	if x > y { // want "if statement can be modernized using max"
+-		y = x
+-	}
++	y := max(x,
++		// want "if statement can be modernized using max"
++		2)
+ 	print(y)
+ }
+ 
+@@ -130,11 +129,11 @@
+ }
+ 
+ func fix72727(a, b int) {
+-	o := a - 42
+-	// some important comment. DO NOT REMOVE.
+-	if o < b { // want "if statement can be modernized using max"
+-		o = b
+-	}
++	o := max(
++		// some important comment. DO NOT REMOVE.
++		a-42,
++		// want "if statement can be modernized using max"
++		b)
+ }
+ 
+ type myfloat float64
+--- a/minmax/nonstrict/nonstrict.go
++++ b/minmax/nonstrict/nonstrict.go
+@@ -1,18 +1 @@
+ package nonstrict
+-
+-// min with <= operator - should be detected and removed
+-func min(a, b int) int { // want "user-defined min function is equivalent to built-in min and can be removed"
+-	if a <= b {
+-		return a
+-	} else {
+-		return b
+-	}
+-}
+-
+-// max with >= operator - should be detected and removed
+-func max(a, b int) int { // want "user-defined max function is equivalent to built-in max and can be removed"
+-	if a >= b {
+-		return a
+-	}
+-	return b
+-}
+--- a/minmax/parametersideeffect/parametersideeffect.go
++++ b/minmax/parametersideeffect/parametersideeffect.go
+@@ -23,9 +23,8 @@
+ func onlyFirstAssignmentHasSideEffect() int {
+ 	n := 0
+ 	f := func() int { n++; return n }
+-	x := f()
+-	if x < n { // want "if statement can be modernized using max"
+-		x = n
+-	}
++	x := max(f(),
++		// want "if statement can be modernized using max"
++		n)
+ 	return x
+ }
+--- a/minmax/userdefined/userdefined.go
++++ b/minmax/userdefined/userdefined.go
+@@ -19,20 +19,3 @@
+ 		return b
+ 	}
+ }
+-
+-// min returns the smaller of two values.
+-func min(a, b int) int { // want "user-defined min function is equivalent to built-in min and can be removed"
+-	if a < b {
+-		return a
+-	} else {
+-		return b
+-	}
+-}
+-
+-// max returns the larger of two values.
+-func max(a, b int) int { // want "user-defined max function is equivalent to built-in max and can be removed"
+-	if a > b {
+-		return a
+-	}
+-	return b
+-}
+--- a/rangeint/rangeint.go
++++ b/rangeint/rangeint.go
+@@ -1,65 +1,65 @@
+ package rangeint
+ 
+ import (
++	"example.com/rangeint/a"
+ 	"os"
+ 	os1 "os"
+-	"example.com/rangeint/a"
+ )
+ 
+ func _(i int, s struct{ i int }, slice []int) {
+-	for i := 0; i < 10; i++ { // want "for loop can be modernized using range over int"
++	for i := range 10 { // want "for loop can be modernized using range over int"
+ 		println(i)
+ 	}
+-	for j := int(0); j < 10; j++ { // want "for loop can be modernized using range over int"
++	for j := range 10 { // want "for loop can be modernized using range over int"
+ 		println(j)
+ 	}
+-	for j := int8(0); j < 10; j++ { // want "for loop can be modernized using range over int"
++	for j := range int8(10) { // want "for loop can be modernized using range over int"
+ 		println(j)
+ 	}
+-	for j := int16(0); j < 10; j++ { // want "for loop can be modernized using range over int"
++	for j := range int16(10) { // want "for loop can be modernized using range over int"
+ 		println(j)
+ 	}
+-	for j := int32(0); j < 10; j++ { // want "for loop can be modernized using range over int"
++	for j := range int32(10) { // want "for loop can be modernized using range over int"
+ 		println(j)
+ 	}
+-	for j := int64(0); j < 10; j++ { // want "for loop can be modernized using range over int"
++	for j := range int64(10) { // want "for loop can be modernized using range over int"
+ 		println(j)
+ 	}
+-	for j := uint8(0); j < 10; j++ { // want "for loop can be modernized using range over int"
++	for j := range uint8(10) { // want "for loop can be modernized using range over int"
+ 		println(j)
+ 	}
+-	for j := uint16(0); j < 10; j++ { // want "for loop can be modernized using range over int"
++	for j := range uint16(10) { // want "for loop can be modernized using range over int"
+ 		println(j)
+ 	}
+-	for j := uint32(0); j < 10; j++ { // want "for loop can be modernized using range over int"
++	for j := range uint32(10) { // want "for loop can be modernized using range over int"
+ 		println(j)
+ 	}
+-	for j := uint64(0); j < 10; j++ { // want "for loop can be modernized using range over int"
++	for j := range uint64(10) { // want "for loop can be modernized using range over int"
+ 		println(j)
+ 	}
+-	for j := int8(0.); j < 10; j++ { // want "for loop can be modernized using range over int"
++	for j := range int8(10) { // want "for loop can be modernized using range over int"
+ 		println(j)
+ 	}
+-	for j := int8(.0); j < 10; j++ { // want "for loop can be modernized using range over int"
++	for j := range int8(10) { // want "for loop can be modernized using range over int"
+ 		println(j)
+ 	}
+-	for j := os.FileMode(0); j < 10; j++ { // want "for loop can be modernized using range over int"
++	for j := range os1.FileMode(10) { // want "for loop can be modernized using range over int"
+ 		println(j)
+ 	}
+ 
+ 	{
+ 		var i int
+-		for i = 0; i < 10; i++ { // want "for loop can be modernized using range over int"
++		for i = range 10 { // want "for loop can be modernized using range over int"
+ 		}
+ 		// NB: no uses of i after loop.
+ 	}
+-	for i := 0; i < 10; i++ { // want "for loop can be modernized using range over int"
++	for range 10 { // want "for loop can be modernized using range over int"
+ 		// i unused within loop
+ 	}
+-	for i := 0; i < len(slice); i++ { // want "for loop can be modernized using range over int"
++	for i := range slice { // want "for loop can be modernized using range over int"
+ 		println(slice[i])
+ 	}
+-	for i := 0; i < len(""); i++ { // want "for loop can be modernized using range over int"
++	for range len("") { // want "for loop can be modernized using range over int"
+ 		// NB: not simplified to range ""
+ 	}
+ 
+@@ -92,7 +92,7 @@
+ 		i = 8
+ 	}
+ 
+-	for i := 0; i < 10; i += 1 { // want "for loop can be modernized using range over int"
++	for i := range 10 { // want "for loop can be modernized using range over int"
+ 		println(i)
+ 	}
+ 	for i := 0; i < 10; s.i += 1 { // nope: modifies another variable
+@@ -116,12 +116,12 @@
+ 	}
+ 	{
+ 		const k = 10
+-		for i := 0; i < k; i++ { // want "for loop can be modernized using range over int"
++		for range k { // want "for loop can be modernized using range over int"
+ 		}
+ 	}
+ 	{
+ 		var limit = 10
+-		for i := 0; i < limit; i++ { // want "for loop can be modernized using range over int"
++		for range limit { // want "for loop can be modernized using range over int"
+ 		}
+ 	}
+ 	{
+@@ -138,7 +138,7 @@
+ 	}
+ 	for i := 0; i < Global; i++ { // nope: limit is an exported global var; may be updated elsewhere
+ 	}
+-	for i := 0; i < len(table); i++ { // want "for loop can be modernized using range over int"
++	for range table { // want "for loop can be modernized using range over int"
+ 	}
+ 	{
+ 		s := []string{}
+@@ -182,22 +182,22 @@
+ 
+ // Non-integer untyped constants need to be explicitly converted to int.
+ func issue71847d() {
+-	const limit = 1e3            // float
+-	for i := 0; i < limit; i++ { // want "for loop can be modernized using range over int"
++	const limit = 1e3      // float
++	for range int(limit) { // want "for loop can be modernized using range over int"
+ 	}
+-	for i := int(0); i < limit; i++ { // want "for loop can be modernized using range over int"
++	for range int(limit) { // want "for loop can be modernized using range over int"
+ 	}
+-	for i := uint(0); i < limit; i++ { // want "for loop can be modernized using range over int"
++	for range uint(limit) { // want "for loop can be modernized using range over int"
+ 	}
+ 
+-	const limit2 = 1 + 0i         // complex
+-	for i := 0; i < limit2; i++ { // want "for loop can be modernized using range over int"
++	const limit2 = 1 + 0i   // complex
++	for range int(limit2) { // want "for loop can be modernized using range over int"
+ 	}
+ }
+ 
+ func issue72726() {
+ 	var n, kd int
+-	for i := 0; i < n; i++ { // want "for loop can be modernized using range over int"
++	for i := range n { // want "for loop can be modernized using range over int"
+ 		// nope: j will be invisible once it's refactored to 'for j := range min(n-j, kd+1)'
+ 		for j := 0; j < min(n-j, kd+1); j++ { // nope
+ 			_, _ = i, j
+@@ -217,7 +217,7 @@
+ }
+ 
+ func todo() {
+-	for j := os1.FileMode(0); j < 10; j++ { // want "for loop can be modernized using range over int"
++	for j := range os1.FileMode(10) { // want "for loop can be modernized using range over int"
+ 		println(j)
+ 	}
+ }
+@@ -231,18 +231,18 @@
+ 
+ func issue73037() {
+ 	var q T
+-	for a := T(0); a < q; a++ { // want "for loop can be modernized using range over int"
++	for a := range q { // want "for loop can be modernized using range over int"
+ 		println(a)
+ 	}
+ 	for a := Fn(0); a < q; a++ {
+ 		println(a)
+ 	}
+ 	var qa TAlias
+-	for a := TAlias(0); a < qa; a++ { // want "for loop can be modernized using range over int"
++	for a := range qa { // want "for loop can be modernized using range over int"
+ 		println(a)
+ 	}
+-	for a := T(0); a < 10; a++ { // want "for loop can be modernized using range over int"
+-		for b := T(0); b < 10; b++ { // want "for loop can be modernized using range over int"
++	for a := range T(10) { // want "for loop can be modernized using range over int"
++		for b := range T(10) { // want "for loop can be modernized using range over int"
+ 			println(a, b)
+ 		}
+ 	}
+@@ -270,7 +270,7 @@
+ 	// This (outer) defer is irrelevant.
+ 	defer func() {
+ 		var i int
+-		for i = 0; i < 10; i++ { // want "for loop can be modernized using range over int"
++		for i = range 10 { // want "for loop can be modernized using range over int"
+ 		}
+ 	}()
+ }
+@@ -283,11 +283,11 @@
+ }
+ 
+ func issue74687() {
+-	for i := a.ID(0); i < 10; i++ { // want "for loop can be modernized using range over int"
++	for i := range a.ID(10) { // want "for loop can be modernized using range over int"
+ 		println(i)
+ 	}
+ 
+-	for i := a.ID(0); i < a.ID(13); i++ { // want "for loop can be modernized using range over int"
++	for i := range a.ID(13) { // want "for loop can be modernized using range over int"
+ 		println(i)
+ 	}
+ }
+@@ -303,7 +303,7 @@
+ 	}
+ 
+ NotUsedAfter:
+-	for j = 0; j < 10; j++ { // want "for loop can be modernized using range over int"
++	for j = range 10 { // want "for loop can be modernized using range over int"
+ 		break NotUsedAfter
+ 	}
+ }
+@@ -324,9 +324,8 @@
+ 	}
+ }
+ 
+-
+ func issue77034_define_inner() {
+-	for i := 0; i < 5; i++ { // want "for loop can be modernized using range over int"
++	for range 5 { // want "for loop can be modernized using range over int"
+ 		for i := range 10 { // inner "i" doesn't modify outer "i"
+ 			println(i)
+ 		}
+@@ -340,22 +339,22 @@
+ func issue77891() {
+ 	const limit_float = 1e6
+ 	var i int
+-	for i = 0; i < limit_float; i++ { // want "for loop can be modernized using range over int"
++	for i = range int(limit_float) { // want "for loop can be modernized using range over int"
+ 		println(i)
+ 	}
+ 
+ 	var j int64
+-	for j = 0; j < 20; j++ { // want "for loop can be modernized using range over int"
++	for j = range 20 { // want "for loop can be modernized using range over int"
+ 		println(j)
+ 	}
+ 
+ 	var c C
+-	for c = 0; c < 10; c++ { // want "for loop can be modernized using range over int"
++	for c = range 10 { // want "for loop can be modernized using range over int"
+ 		println(c)
+ 	}
+ 
+ 	var ptr uintptr
+-	for ptr = 0; ptr < 100; ptr++ { // want "for loop can be modernized using range over int"
++	for ptr = range 100 { // want "for loop can be modernized using range over int"
+ 		println(ptr)
+ 	}
+ }
+@@ -374,14 +373,14 @@
+ 
+ func issue78571_sameunderlying[T int | MyInt](limit T) {
+ 	var i T
+-	for i = 0; i < limit; i++ { // want "for loop can be modernized using range over int"
++	for i = range limit { // want "for loop can be modernized using range over int"
+ 		println(i)
+ 	}
+ }
+ 
+ func issue78571_single[T ~int](limit T) {
+ 	var i T
+-	for i = 0; i < limit; i++ { // want "for loop can be modernized using range over int"
++	for i = range limit { // want "for loop can be modernized using range over int"
+ 		println(i)
+ 	}
+ }
+--- a/slicesbackward/slicesbackward.go
++++ b/slicesbackward/slicesbackward.go
+@@ -13,8 +13,8 @@
+ 
+ // Basic: only use of i is s[i] — should suggest "for _, v := range slices.Backward(s)"
+ func onlyIndexUse(s []int) {
+-	for i := len(s) - 1; i >= 0; i-- { // want "backward loop over slice can be modernized using slices.Backward"
+-		println(s[i])
++	for _, v := range slices.Backward(s) { // want "backward loop over slice can be modernized using slices.Backward"
++		println(v)
+ 	}
+ }
+ 
+@@ -22,18 +22,18 @@
+ 
+ // Should use "name" for the value variable, and should remove the declaration.
+ func firstUseName(s []int) {
+-	for i := len(s) - 1; i >= 0; i-- { // want "backward loop over slice can be modernized using slices.Backward"
+-		name := s[i]
++	for _, name := range slices.Backward(s) { // want "backward loop over slice can be modernized using slices.Backward"
++
+ 		println(name)
+-		name2 := s[i]
++		name2 := name
+ 		println(name2)
+ 	}
+ }
+ 
+ func useName(s []int) {
+-	for i := len(s) - 1; i >= 0; i-- { // want "backward loop over slice can be modernized using slices.Backward"
++	for i, name := range slices.Backward(s) { // want "backward loop over slice can be modernized using slices.Backward"
+ 		println(i)
+-		name := s[i]
++
+ 		println(name)
+ 	}
+ }
+@@ -42,8 +42,8 @@
+ // form of "arr", so use the first letter ("a").
+ func firstLetter(arr []int) {
+ 	name := 2
+-	for i := len(arr) - 1; i >= 0; i-- { // want "backward loop over slice can be modernized using slices.Backward"
+-		name = arr[i]
++	for _, a := range slices.Backward(arr) { // want "backward loop over slice can be modernized using slices.Backward"
++		name = a
+ 	}
+ 	println(name)
+ }
+@@ -51,29 +51,29 @@
+ // Slice expression is a selector and not a valid identifier.
+ // Should fallback to "v" instead of trying to use "s.item".
+ func indexUseSelector(s struct{ items []int }) {
+-	for i := len(s.items) - 1; i >= 0; i-- { // want "backward loop over slice can be modernized using slices.Backward"
+-		println(s.items[i])
++	for _, v := range slices.Backward(s.items) { // want "backward loop over slice can be modernized using slices.Backward"
++		println(v)
+ 	}
+ }
+ 
+ // Slice name singular form is a Go keyword ("var").
+ // Should fallback to first letter ("v").
+ func keywordSingular(vars []int) {
+-	for i := len(vars) - 1; i >= 0; i-- { // want "backward loop over slice can be modernized using slices.Backward"
+-		println(vars[i])
++	for _, v := range slices.Backward(vars) { // want "backward loop over slice can be modernized using slices.Backward"
++		println(v)
+ 	}
+ }
+ 
+ // Index used for something other than s[i] — keep both i and v.
+ func indexUsedElsewhere(s []int) {
+-	for i := len(s) - 1; i >= 0; i-- { // want "backward loop over slice can be modernized using slices.Backward"
+-		println(i, s[i])
++	for i, v := range slices.Backward(s) { // want "backward loop over slice can be modernized using slices.Backward"
++		println(i, v)
+ 	}
+ }
+ 
+ // Index used only for non-slice purpose (no s[i] at all).
+ func indexNoSliceAccess(s []int) {
+-	for i := len(s) - 1; i >= 0; i-- { // want "backward loop over slice can be modernized using slices.Backward"
++	for i := range slices.Backward(s) { // want "backward loop over slice can be modernized using slices.Backward"
+ 		println(i)
+ 	}
+ }
+@@ -110,8 +110,8 @@
+ // Should work with a named slice variable.
+ func namedSlice() {
+ 	nums := []string{"a", "b", "c"}
+-	for i := len(nums) - 1; i >= 0; i-- { // want "backward loop over slice can be modernized using slices.Backward"
+-		println(nums[i])
++	for _, num := range slices.Backward(nums) { // want "backward loop over slice can be modernized using slices.Backward"
++		println(num)
+ 	}
+ }
+ 
+@@ -245,15 +245,15 @@
+ 
+ // SHOULD fire: method call with value receiver does not mutate element
+ func indexExprValueReceiver(s []stringer) {
+-	for i := len(s) - 1; i >= 0; i-- { // want "backward loop over slice can be modernized using slices.Backward"
+-		_ = s[i].String()
++	for _, v := range slices.Backward(s) { // want "backward loop over slice can be modernized using slices.Backward"
++		_ = v.String()
+ 	}
+ }
+ 
+ // SHOULD fire: method call with pointer receiver type and pointer receiver value does not mutate
+ func indexExprPtrValueReceiver(s []*stringer) {
+-	for i := len(s) - 1; i >= 0; i-- { // want "backward loop over slice can be modernized using slices.Backward"
+-		_ = s[i].StringPtr()
++	for _, v := range slices.Backward(s) { // want "backward loop over slice can be modernized using slices.Backward"
++		_ = v.StringPtr()
+ 	}
+ }
+ 
+@@ -267,15 +267,15 @@
+ 
+ // SHOULD fire: slice of slices is indirect reference
+ func indexExprSliceOfSlices(s [][]int) {
+-	for i := len(s) - 1; i >= 0; i-- { // want "backward loop over slice can be modernized using slices.Backward"
+-		s[i][0]++
++	for _, v := range slices.Backward(s) { // want "backward loop over slice can be modernized using slices.Backward"
++		v[0]++
+ 	}
+ }
+ 
+ // SHOULD fire: slice of pointers is indirect reference
+ func indexExprPointerSlice(s []*item) {
+-	for i := len(s) - 1; i >= 0; i-- { // want "backward loop over slice can be modernized using slices.Backward"
+-		s[i].n++
++	for _, v := range slices.Backward(s) { // want "backward loop over slice can be modernized using slices.Backward"
++		v.n++
+ 	}
+ }
+ 
+@@ -288,7 +288,7 @@
+ 
+ // SHOULD fire: index expression used as index of another slice which is mutated
+ func indexExprUsedAsIndex(s []int) {
+-	for i := len(s) - 1; i >= 0; i-- { // want "backward loop over slice can be modernized using slices.Backward"
+-		s[s[i]] = 5
++	for _, v := range slices.Backward(s) { // want "backward loop over slice can be modernized using slices.Backward"
++		s[v] = 5
+ 	}
+ }
+--- a/slicesclip/slicesclip.go
++++ b/slicesclip/slicesclip.go
+@@ -1,4 +1,6 @@
+ package slicesclip
++
++import "slices"
+ 
+ var g struct{ f []int }
+ 
+@@ -7,7 +9,7 @@
+ var ch chan []int
+ 
+ func _(test, other []byte, i int) {
+-	_ = test[:len(test):len(test)] // want `x\[:len\(x\):len\(x\)\] can be simplified using slices\.Clip`
++	_ = slices.Clip(test) // want `x\[:len\(x\):len\(x\)\] can be simplified using slices\.Clip`
+ 
+ 	_ = test[1:len(test):len(test)] // non-zero low index: no match
+ 
+@@ -17,17 +19,17 @@
+ 
+ 	_ = test[:len(test):len(other)] // mismatched high/max: no match
+ 
+-	_ = g.f[:len(g.f):len(g.f)] // want `x\[:len\(x\):len\(x\)\] can be simplified using slices\.Clip`
++	_ = slices.Clip(g.f) // want `x\[:len\(x\):len\(x\)\] can be simplified using slices\.Clip`
+ 
+ 	_ = h()[:len(h()):len(h())] // potentially has side effects: no match
+ 
+ 	_ = (<-ch)[:len(<-ch):len(<-ch)] // has side effects: no match
+ 
+ 	if len(test) > 0 {
+-		test = test[:len(test):len(test)] // want `x\[:len\(x\):len\(x\)\] can be simplified using slices\.Clip`
++		test = slices.Clip(test) // want `x\[:len\(x\):len\(x\)\] can be simplified using slices\.Clip`
+ 	}
+ 
+-	_ = append(other, test[:len(test):len(test)]...) // want `x\[:len\(x\):len\(x\)\] can be simplified using slices\.Clip`
++	_ = append(other, slices.Clip(test)...) // want `x\[:len\(x\):len\(x\)\] can be simplified using slices\.Clip`
+ 
+ 	_ = i
+ }
+--- a/stringsbuilder/stringsbuilder.go
++++ b/stringsbuilder/stringsbuilder.go
+@@ -4,50 +4,52 @@
+ 
+ // basic test
+ func _() {
+-	var s string
+-	s += "before"
++	var s strings.Builder
++	s.WriteString("before")
+ 	for range 10 {
+-		s += "in" // want "using string \\+= string in a loop is inefficient"
+-		s += "in2"
++		s.WriteString("in") // want "using string \\+= string in a loop is inefficient"
++		s.WriteString("in2")
+ 	}
+-	s += "after"
+-	print(s)
++	s.WriteString("after")
++	print(s.String())
+ }
+ 
+ // with initializer
+ func _() {
+-	var s = "a"
++	var s strings.Builder
++	s.WriteString("a")
+ 	for range 10 {
+-		s += "b" // want "using string \\+= string in a loop is inefficient"
++		s.WriteString("b") // want "using string \\+= string in a loop is inefficient"
+ 	}
+-	print(s)
++	print(s.String())
+ }
+ 
+ // with empty initializer
+ func _() {
+-	var s = ""
++	var s strings.Builder
+ 	for range 10 {
+-		s += "b" // want "using string \\+= string in a loop is inefficient"
++		s.WriteString("b") // want "using string \\+= string in a loop is inefficient"
+ 	}
+-	print(s)
++	print(s.String())
+ }
+ 
+ // with short decl
+ func _() {
+-	s := "a"
++	var s strings.Builder
++	s.WriteString("a")
+ 	for range 10 {
+-		s += "b" // want "using string \\+= string in a loop is inefficient"
++		s.WriteString("b") // want "using string \\+= string in a loop is inefficient"
+ 	}
+-	print(s)
++	print(s.String())
+ }
+ 
+ // with short decl and empty initializer
+ func _() {
+-	s := ""
++	var s strings.Builder
+ 	for range 10 {
+-		s += "b" // want "using string \\+= string in a loop is inefficient"
++		s.WriteString("b") // want "using string \\+= string in a loop is inefficient"
+ 	}
+-	print(s)
++	print(s.String())
+ }
+ 
+ // nope: += must appear at least once within a loop.
+@@ -73,11 +75,12 @@
+ func _() {
+ 	switch {
+ 	default:
+-		s := "a"
++		var s strings.Builder
++		s.WriteString("a")
+ 		for range 10 {
+-			s += "b" // want "using string \\+= string in a loop is inefficient"
++			s.WriteString("b") // want "using string \\+= string in a loop is inefficient"
+ 		}
+-		print(s)
++		print(s.String())
+ 	}
+ }
+ 
+@@ -94,28 +97,29 @@
+ // Regression test for bug in a GenDecl with parens.
+ func issue75318(slice []string) string {
+ 	var (
+-		msg string
++		msg strings.Builder
+ 	)
+ 	for _, s := range slice {
+-		msg += s // want "using string \\+= string in a loop is inefficient"
++		msg.WriteString(s) // want "using string \\+= string in a loop is inefficient"
+ 	}
+-	return msg
++	return msg.String()
+ }
+ 
+ // Regression test for https://go.dev/issue/76983.
+ // We offer only the first fix if the second would overlap.
+ // This is an ad-hoc mitigation of the more general issue #76476.
+ func _(slice []string) string {
+-	a := "12"
++	var a strings.Builder
++	a.WriteString("12")
+ 	for range 2 {
+-		a += "34" // want "using string \\+= string in a loop is inefficient"
++		a.WriteString("34") // want "using string \\+= string in a loop is inefficient"
+ 	}
+ 	b := "56"
+ 	for range 2 {
+ 		b += "78"
+ 	}
+-	a += b
+-	return a
++	a.WriteString(b)
++	return a.String()
+ }
+ func _(slice []string) string {
+ 	var a strings.Builder
+@@ -123,11 +127,12 @@
+ 	for range 2 {
+ 		a.WriteString("34")
+ 	}
+-	b := "56"
++	var b strings.Builder
++	b.WriteString("56")
+ 	for range 2 {
+-		b += "78" // want "using string \\+= string in a loop is inefficient"
++		b.WriteString("78") // want "using string \\+= string in a loop is inefficient"
+ 	}
+-	a.WriteString(b)
++	a.WriteString(b.String())
+ 	return a.String()
+ }
+ 
+@@ -135,12 +140,13 @@
+ func stringDeclaredWithVarDecl() {
+ 	var (
+ 		before int // this is ok
+-		str    = "hello world"
++		str    strings.Builder
+ 	)
++	str.WriteString("hello world")
+ 	for range 100 {
+-		str += "!" // want "using string \\+= string in a loop is inefficient"
++		str.WriteString("!") // want "using string \\+= string in a loop is inefficient"
+ 	}
+-	println(before, str)
++	println(before, str.String())
+ }
+ 
+ func nopeStringIsNotLastValueSpecInVarDecl() {
+@@ -157,12 +163,13 @@
+ // Regression test for go.dev/issue/77659.
+ // Multiple rvalue uses of the accumulated string should all be converted.
+ func _() {
+-	acc := "s1"
++	var acc strings.Builder
++	acc.WriteString("s1")
+ 	for _, s := range []string{"foo", "bar"} {
+-		acc += s // want "using string \\+= string in a loop is inefficient"
++		acc.WriteString(s) // want "using string \\+= string in a loop is inefficient"
+ 	}
+-	_ = acc
+-	_ = acc + "footer2"
++	_ = acc.String()
++	_ = acc.String() + "footer2"
+ }
+ 
+ // Regression test for go.dev/issue/77659 (negative case).
+@@ -180,41 +187,46 @@
+ // Regression test for go.dev/issue/78465.
+ // Self-referencing += should be handled correctly.
+ func _() string {
+-	a := "12"
++	var a strings.Builder
++	a.WriteString("12")
+ 	for range 2 {
+-		a += a // want "using string \\+= string in a loop is inefficient"
++		a.WriteString(a.String()) // want "using string \\+= string in a loop is inefficient"
+ 	}
+-	return a
++	return a.String()
+ }
+ 
+ func _() string {
+-	a := "12"
++	var a strings.Builder
++	a.WriteString("12")
+ 	for range 2 {
+-		a += "b" + a // want "using string \\+= string in a loop is inefficient"
++		a.WriteString("b" + a.String()) // want "using string \\+= string in a loop is inefficient"
+ 	}
+-	return a
++	return a.String()
+ }
+ 
+ func _() string {
+-	a := "12"
++	var a strings.Builder
++	a.WriteString("12")
+ 	for range 2 {
+-		a += a + "b" // want "using string \\+= string in a loop is inefficient"
++		a.WriteString(a.String() + "b") // want "using string \\+= string in a loop is inefficient"
+ 	}
+-	return a
++	return a.String()
+ }
+ 
+ func _() string {
+-	a := "12"
++	var a strings.Builder
++	a.WriteString("12")
+ 	for range 2 {
+-		a += a + a // want "using string \\+= string in a loop is inefficient"
++		a.WriteString(a.String() + a.String()) // want "using string \\+= string in a loop is inefficient"
+ 	}
+-	return a
++	return a.String()
+ }
+ 
+ func _() string {
+-	a := "12"
++	var a strings.Builder
++	a.WriteString("12")
+ 	for range 2 {
+-		a += (a) // want "using string \\+= string in a loop is inefficient"
++		a.WriteString((a).String()) // want "using string \\+= string in a loop is inefficient"
+ 	}
+-	return a
++	return a.String()
+ }
+--- a/stringscut/stringscut.go
++++ b/stringscut/stringscut.go
+@@ -16,11 +16,11 @@
+ 
+ func basic() bool {
+ 	s := "value"
+-	i := strings.Index(s, "=") // want "strings.Index can be simplified using strings.Cut"
+-	if i >= 0 {
+-		print(s[:i])
++	before, _, ok := strings.Cut(s, "=") // want "strings.Index can be simplified using strings.Cut"
++	if ok {
++		print(before)
+ 	}
+-	return i >= 0
++	return ok
+ }
+ 
+ func basic_reassigned1() bool {
+@@ -89,52 +89,52 @@
+ 
+ func basic_contains() bool {
+ 	s := "value"
+-	i := strings.Index(s, "=") // want "strings.Index can be simplified using strings.Contains"
+-	return i >= 0
++	found := strings.Contains(s, "=") // want "strings.Index can be simplified using strings.Contains"
++	return found
+ }
+ 
+ func contains_variety(s, sub string) {
+-	i := strings.Index(s, sub) // want "strings.Index can be simplified using strings.Contains"
+-	if i >= 0 {
++	found := strings.Contains(s, sub) // want "strings.Index can be simplified using strings.Contains"
++	if found {
+ 		print("found")
+ 	}
+-	if i < 0 {
++	if !found {
+ 		print("not found")
+ 	}
+-	if i <= -1 {
++	if !found {
+ 		print("not found")
+ 	}
+ }
+ 
+ func basic_contains_bytes(s string) bool {
+-	i := strings.IndexByte(s, '=') // want "strings.IndexByte can be simplified using strings.Contains"
+-	return i < 0
++	found := strings.Contains(s, "=") // want "strings.IndexByte can be simplified using strings.Contains"
++	return !found
+ }
+ 
+ func basic_contains_bytes_byte(s []byte) bool {
+-	i := bytes.IndexByte(s, 22) // want "bytes.IndexByte can be simplified using bytes.Contains"
+-	return i < 0
++	found := bytes.Contains(s, []byte{22}) // want "bytes.IndexByte can be simplified using bytes.Contains"
++	return !found
+ }
+ 
+ func lastindex_contains() bool {
+ 	s := "value"
+-	i := strings.LastIndex(s, "=") // want "strings.LastIndex can be simplified using strings.Contains"
+-	return i >= 0
++	found := strings.Contains(s, "=") // want "strings.LastIndex can be simplified using strings.Contains"
++	return found
+ }
+ 
+ func lastindex_contains_byte(s string) bool {
+-	i := strings.LastIndexByte(s, '=') // want "strings.LastIndexByte can be simplified using strings.Contains"
+-	return i < 0
++	found := strings.Contains(s, "=") // want "strings.LastIndexByte can be simplified using strings.Contains"
++	return !found
+ }
+ 
+ func lastindex_contains_bytes(b []byte) bool {
+-	i := bytes.LastIndex(b, []byte("=")) // want "bytes.LastIndex can be simplified using bytes.Contains"
+-	return i >= 0
++	found := bytes.Contains(b, []byte("=")) // want "bytes.LastIndex can be simplified using bytes.Contains"
++	return found
+ }
+ 
+ func lastindex_contains_bytes_byte(b []byte) bool {
+-	i := bytes.LastIndexByte(b, 22) // want "bytes.LastIndexByte can be simplified using bytes.Contains"
+-	return i < 0
++	found := bytes.Contains(b, []byte{22}) // want "bytes.LastIndexByte can be simplified using bytes.Contains"
++	return !found
+ }
+ 
+ func skip_var_decl(s string) bool {
+@@ -145,11 +145,11 @@
+ }
+ 
+ func basic_substr_arg(s string, substr string) bool {
+-	i := strings.Index(s, substr) // want "strings.Index can be simplified using strings.Cut"
+-	if i >= 0 {
+-		print(s[i+len(substr):])
++	_, after, ok := strings.Cut(s, substr) // want "strings.Index can be simplified using strings.Cut"
++	if ok {
++		print(after)
+ 	}
+-	return i >= 0
++	return ok
+ }
+ 
+ func wrong_len_arg(s string, substr string) bool {
+@@ -159,36 +159,36 @@
+ }
+ 
+ func basic_strings_byte(s string) bool {
+-	i := strings.IndexByte(s, '+') // want "strings.IndexByte can be simplified using strings.Cut"
+-	if i >= 0 {
+-		print(s[:i])
++	before, _, ok := strings.Cut(s, "+") // want "strings.IndexByte can be simplified using strings.Cut"
++	if ok {
++		print(before)
+ 	}
+-	return i >= 0
++	return ok
+ }
+ 
+ func basic_strings_byte_int(s string) bool {
+-	i := strings.IndexByte(s, 55) // want "strings.IndexByte can be simplified using strings.Cut"
+-	if i >= 0 {
+-		print(s[:i])
++	before, _, ok := strings.Cut(s, "7") // want "strings.IndexByte can be simplified using strings.Cut"
++	if ok {
++		print(before)
+ 	}
+-	return i >= 0
++	return ok
+ }
+ 
+ func basic_strings_byte_var(s string) bool {
+ 	b := byte('b')
+-	i := strings.IndexByte(s, b) // want "strings.IndexByte can be simplified using strings.Cut"
+-	if i >= 0 {
+-		print(s[:i])
++	before, _, ok := strings.Cut(s, string(b)) // want "strings.IndexByte can be simplified using strings.Cut"
++	if ok {
++		print(before)
+ 	}
+-	return i >= 0
++	return ok
+ }
+ 
+ func basic_bytes(b []byte) []byte {
+-	i := bytes.Index(b, []byte("str")) // want "bytes.Index can be simplified using bytes.Cut"
+-	if i >= 0 {
+-		return b[:i]
++	before, after, ok := bytes.Cut(b, []byte("str")) // want "bytes.Index can be simplified using bytes.Cut"
++	if ok {
++		return before
+ 	} else {
+-		return b[i+3:]
++		return after
+ 	}
+ }
+ 
+@@ -202,44 +202,44 @@
+ }
+ 
+ func const_substr_len(s string) bool {
+-	i := strings.Index(s, "=") // want "strings.Index can be simplified using strings.Cut"
+-	if i >= 0 {
+-		r := s[i+len("="):]
++	_, after, ok := strings.Cut(s, "=") // want "strings.Index can be simplified using strings.Cut"
++	if ok {
++		r := after
+ 		return len(r) > 0
+ 	}
+ 	return false
+ }
+ 
+ func const_for_len(s string) bool {
+-	i := strings.Index(s, "=") // want "strings.Index can be simplified using strings.Cut"
+-	if i >= 0 {
+-		r := s[i+1:]
++	_, after, ok := strings.Cut(s, "=") // want "strings.Index can be simplified using strings.Cut"
++	if ok {
++		r := after
+ 		return len(r) > 0
+ 	}
+ 	return false
+ }
+ 
+ func index(s string) bool {
+-	i := strings.Index(s, "=") // want "strings.Index can be simplified using strings.Cut"
+-	if i < 0 {
++	before, _, ok := strings.Cut(s, "=") // want "strings.Index can be simplified using strings.Cut"
++	if !ok {
+ 		return false
+ 	}
+-	if i >= 0 {
++	if ok {
+ 		return true
+ 	}
+-	print(s[:i])
++	print(before)
+ 	return true
+ }
+ 
+ func index_flipped(s string) bool {
+-	i := strings.Index(s, "=") // want "strings.Index can be simplified using strings.Cut"
+-	if 0 > i {
++	before, _, ok := strings.Cut(s, "=") // want "strings.Index can be simplified using strings.Cut"
++	if !ok {
+ 		return false
+ 	}
+-	if 0 <= i {
++	if ok {
+ 		return true
+ 	}
+-	print(s[:i])
++	print(before)
+ 	return true
+ }
+ 
+@@ -412,11 +412,11 @@
+ }
+ 
+ func idx_gtr_negone(s string, sub string) string {
+-	i := strings.Index(s, sub) // want "strings.Index can be simplified using strings.Cut"
+-	if i > -1 {
+-		return s[:i]
++	before, _, ok := strings.Cut(s, sub) // want "strings.Index can be simplified using strings.Cut"
++	if ok {
++		return before
+ 	}
+-	if i != -1 {
++	if ok {
+ 		return s
+ 	}
+ 	return ""
+@@ -430,42 +430,42 @@
+ 
+ // Fix for golang/go#77566
+ func multipleCallsSameScope(s string) (bool, bool) {
+-	i := strings.Index(s, "=") // want "strings.Index can be simplified using strings.Cut"
+-	if i != -1 {
+-		print(s[:i])
++	before, _, ok := strings.Cut(s, "=") // want "strings.Index can be simplified using strings.Cut"
++	if ok {
++		print(before)
+ 	}
+-	j := strings.Index(s, "-") // want "strings.Index can be simplified using strings.Cut"
+-	if j != -1 {
+-		print(s[:j])
++	before0, _, ok0 := strings.Cut(s, "-") // want "strings.Index can be simplified using strings.Cut"
++	if ok0 {
++		print(before0)
+ 	}
+-	return i >= 0, j >= 0
++	return ok, ok0
+ }
+ 
+ func shadowing(s string) string {
+ 	ok := "true"
+ 	before := "before"
+-	print(before)              // declared within scope but not used after the index call, so no fresh name
+-	i := strings.Index(s, "=") // want "strings.Index can be simplified using strings.Cut"
++	print(before)                             // declared within scope but not used after the index call, so no fresh name
++	before, after, ok0 := strings.Cut(s, "=") // want "strings.Index can be simplified using strings.Cut"
+ 	print(ok)
+-	if i >= 0 {
+-		print(s[:i])
+-		print(i >= 0)
+-		return s[i+1:]
++	if ok0 {
++		print(before)
++		print(ok0)
++		return after
+ 	}
+ 	return ""
+ }
+ 
+ func foreshadowing(s string) string {
+-	i := strings.Index(s, "=") // want "strings.Index can be simplified using strings.Cut"
+-	if i != -1 {
+-		return s[i+1:]
++	_, after, ok0 := strings.Cut(s, "=") // want "strings.Index can be simplified using strings.Cut"
++	if ok0 {
++		return after
+ 	}
+ 	// Generate a fresh name for ok because it is used within the scope after the Index call.
+ 	ok, m := true, "m"
+ 	if ok {
+ 		return m
+ 	}
+-	if i != -1 {
++	if ok0 {
+ 		return s
+ 	}
+ 	return ""
+@@ -505,29 +505,29 @@
+ 
+ // Safe: both slice uses are inside the nonneg guard.
+ func guarded_both_slices(s string) (string, string) {
+-	i := strings.Index(s, ":") // want "strings.Index can be simplified using strings.Cut"
+-	if i >= 0 {
+-		return s[:i], s[i+1:]
++	before, after, ok := strings.Cut(s, ":") // want "strings.Index can be simplified using strings.Cut"
++	if ok {
++		return before, after
+ 	}
+ 	return "", s
+ }
+ 
+ // Safe: slice uses after early-return negative check.
+ func guarded_early_return(s string) (string, string) {
+-	i := strings.Index(s, ":") // want "strings.Index can be simplified using strings.Cut"
+-	if i < 0 {
++	before, after, ok := strings.Cut(s, ":") // want "strings.Index can be simplified using strings.Cut"
++	if !ok {
+ 		return "", s
+ 	}
+-	return s[:i], s[i+1:]
++	return before, after
+ }
+ 
+ // Safe: slice uses in else of negative check.
+ func guarded_neg_else(s string) (string, string) {
+-	i := strings.Index(s, ":") // want "strings.Index can be simplified using strings.Cut"
+-	if i == -1 {
++	before, after, ok := strings.Cut(s, ":") // want "strings.Index can be simplified using strings.Cut"
++	if !ok {
+ 		return "", s
+ 	} else {
+-		return s[:i], s[i+1:]
++		return before, after
+ 	}
+ }
+ 
+@@ -535,13 +535,13 @@
+ 
+ // Should fire: SplitN(s, ",", 2)[0] in short var decl.
+ func splitn_zero_define(s string) string {
+-	x := strings.SplitN(s, ",", 2)[0] // want `strings.SplitN call can be simplified using strings.Cut`
++	x, _, _ := strings.Cut(s, ",") // want `strings.SplitN call can be simplified using strings.Cut`
+ 	return x
+ }
+ 
+ // Should fire: Split(s, ",")[0] in short var decl.
+ func split_zero_define(s string) string {
+-	x := strings.Split(s, ",")[0] // want `strings.Split call can be simplified using strings.Cut`
++	x, _, _ := strings.Cut(s, ",") // want `strings.Split call can be simplified using strings.Cut`
+ 	return x
+ }
+ 
+--- a/stringscutprefix/bytescutprefix/bytescutprefix.go
++++ b/stringscutprefix/bytescutprefix/bytescutprefix.go
+@@ -5,21 +5,21 @@
+ )
+ 
+ func _() {
+-	if bytes.HasPrefix(bss, bspre) { // want "HasPrefix \\+ TrimPrefix can be simplified to CutPrefix"
+-		a := bytes.TrimPrefix(bss, bspre)
++	if after, ok := bytes.CutPrefix(bss, bspre); ok { // want "HasPrefix \\+ TrimPrefix can be simplified to CutPrefix"
++		a := after
+ 		_ = a
+ 	}
+-	if bytes.HasPrefix([]byte(""), []byte("")) { // want "HasPrefix \\+ TrimPrefix can be simplified to CutPrefix"
+-		a := bytes.TrimPrefix([]byte(""), []byte(""))
++	if after, ok := bytes.CutPrefix([]byte(""), []byte("")); ok { // want "HasPrefix \\+ TrimPrefix can be simplified to CutPrefix"
++		a := after
+ 		_ = a
+ 	}
+ 
+-	if bytes.HasSuffix(bss, bssuf) { // want "HasSuffix \\+ TrimSuffix can be simplified to CutSuffix"
+-		a := bytes.TrimSuffix(bss, bssuf)
++	if before, ok := bytes.CutSuffix(bss, bssuf); ok { // want "HasSuffix \\+ TrimSuffix can be simplified to CutSuffix"
++		a := before
+ 		_ = a
+ 	}
+-	if bytes.HasSuffix([]byte(""), []byte("")) { // want "HasSuffix \\+ TrimSuffix can be simplified to CutSuffix"
+-		a := bytes.TrimSuffix([]byte(""), []byte(""))
++	if before, ok := bytes.CutSuffix([]byte(""), []byte("")); ok { // want "HasSuffix \\+ TrimSuffix can be simplified to CutSuffix"
++		a := before
+ 		_ = a
+ 	}
+ }
+--- a/stringscutprefix/bytescutprefix/bytescutprefix_dot.go
++++ b/stringscutprefix/bytescutprefix/bytescutprefix_dot.go
+@@ -8,13 +8,13 @@
+ 
+ // test supported cases of pattern 1
+ func _() {
+-	if HasPrefix(bss, bspre) { // want "HasPrefix \\+ TrimPrefix can be simplified to CutPrefix"
+-		a := TrimPrefix(bss, bspre)
++	if after, ok := CutPrefix(bss, bspre); ok { // want "HasPrefix \\+ TrimPrefix can be simplified to CutPrefix"
++		a := after
+ 		_ = a
+ 	}
+ 
+-	if HasSuffix(bss, bssuf) { // want "HasSuffix \\+ TrimSuffix can be simplified to CutSuffix"
+-		b := TrimSuffix(bss, bssuf)
++	if before, ok := CutSuffix(bss, bssuf); ok { // want "HasSuffix \\+ TrimSuffix can be simplified to CutSuffix"
++		b := before
+ 		_ = b
+ 	}
+ }
+--- a/stringscutprefix/stringscutprefix.go
++++ b/stringscutprefix/stringscutprefix.go
+@@ -20,43 +20,43 @@
+ 
+ // test supported cases of pattern 1 - CutPrefix
+ func _() {
+-	if strings.HasPrefix(s, pre) { // want "HasPrefix \\+ TrimPrefix can be simplified to CutPrefix"
+-		a := strings.TrimPrefix(s, pre)
++	if after, ok := strings.CutPrefix(s, pre); ok { // want "HasPrefix \\+ TrimPrefix can be simplified to CutPrefix"
++		a := after
+ 		_ = a
+ 	}
+-	if strings.HasPrefix("", "") { // want "HasPrefix \\+ TrimPrefix can be simplified to CutPrefix"
+-		a := strings.TrimPrefix("", "")
++	if after, ok := strings.CutPrefix("", ""); ok { // want "HasPrefix \\+ TrimPrefix can be simplified to CutPrefix"
++		a := after
+ 		_ = a
+ 	}
+-	if strings.HasPrefix(s, "") { // want "HasPrefix \\+ TrimPrefix can be simplified to CutPrefix"
+-		println([]byte(strings.TrimPrefix(s, "")))
++	if after, ok := strings.CutPrefix(s, ""); ok { // want "HasPrefix \\+ TrimPrefix can be simplified to CutPrefix"
++		println([]byte(after))
+ 	}
+-	if strings.HasPrefix(s, "") { // want "HasPrefix \\+ TrimPrefix can be simplified to CutPrefix"
+-		a, b := "", strings.TrimPrefix(s, "")
++	if after, ok := strings.CutPrefix(s, ""); ok { // want "HasPrefix \\+ TrimPrefix can be simplified to CutPrefix"
++		a, b := "", after
+ 		_, _ = a, b
+ 	}
+-	if strings.HasPrefix(s, "") { // want "HasPrefix \\+ TrimPrefix can be simplified to CutPrefix"
+-		a, b := strings.TrimPrefix(s, ""), strings.TrimPrefix(s, "") // only replace the first occurrence
++	if after, ok := strings.CutPrefix(s, ""); ok { // want "HasPrefix \\+ TrimPrefix can be simplified to CutPrefix"
++		a, b := after, strings.TrimPrefix(s, "") // only replace the first occurrence
+ 		s = "123"
+ 		b = strings.TrimPrefix(s, "") // only replace the first occurrence
+ 		_, _ = a, b
+ 	}
+ 
+ 	var a, b string
+-	if strings.HasPrefix(s, "") { // want "HasPrefix \\+ TrimPrefix can be simplified to CutPrefix"
+-		a, b = "", strings.TrimPrefix(s, "")
++	if after, ok := strings.CutPrefix(s, ""); ok { // want "HasPrefix \\+ TrimPrefix can be simplified to CutPrefix"
++		a, b = "", after
+ 		_, _ = a, b
+ 	}
+ }
+ 
+ // test basic cases for CutSuffix - only covering the key differences
+ func _() {
+-	if strings.HasSuffix(s, suf) { // want "HasSuffix \\+ TrimSuffix can be simplified to CutSuffix"
+-		a := strings.TrimSuffix(s, suf)
++	if before, ok := strings.CutSuffix(s, suf); ok { // want "HasSuffix \\+ TrimSuffix can be simplified to CutSuffix"
++		a := before
+ 		_ = a
+ 	}
+-	if strings.HasSuffix(s, "") { // want "HasSuffix \\+ TrimSuffix can be simplified to CutSuffix"
+-		println([]byte(strings.TrimSuffix(s, "")))
++	if before, ok := strings.CutSuffix(s, ""); ok { // want "HasSuffix \\+ TrimSuffix can be simplified to CutSuffix"
++		println([]byte(before))
+ 	}
+ }
+ 
+@@ -98,25 +98,25 @@
+ 
+ // test supported cases of pattern2 - CutPrefix
+ func _() {
+-	if after := strings.TrimPrefix(s, pre); after != s { // want "TrimPrefix can be simplified to CutPrefix"
++	if after, ok := strings.CutPrefix(s, pre); ok { // want "TrimPrefix can be simplified to CutPrefix"
+ 		println(after)
+ 	}
+-	if after := strings.TrimPrefix(s, pre); s != after { // want "TrimPrefix can be simplified to CutPrefix"
++	if after, ok := strings.CutPrefix(s, pre); ok { // want "TrimPrefix can be simplified to CutPrefix"
+ 		println(after)
+ 	}
+-	if after := strings.TrimPrefix(s, pre); s != after { // want "TrimPrefix can be simplified to CutPrefix"
++	if _, ok := strings.CutPrefix(s, pre); ok { // want "TrimPrefix can be simplified to CutPrefix"
+ 		println(strings.TrimPrefix(s, pre)) // noop here
+ 	}
+-	if after := strings.TrimPrefix(s, ""); s != after { // want "TrimPrefix can be simplified to CutPrefix"
++	if after, ok := strings.CutPrefix(s, ""); ok { // want "TrimPrefix can be simplified to CutPrefix"
+ 		println(after)
+ 	}
+-	var ok bool                                          // define an ok variable to test the fix won't shadow it for its if stmt body
+-	if after := strings.TrimPrefix(s, pre); after != s { // want "TrimPrefix can be simplified to CutPrefix"
++	var ok bool                                       // define an ok variable to test the fix won't shadow it for its if stmt body
++	if after, ok0 := strings.CutPrefix(s, pre); ok0 { // want "TrimPrefix can be simplified to CutPrefix"
+ 		_ = ok
+ 		println(after)
+ 	}
+-	_ = ok                                               // fine to shadow, since ok is not used within the ifstmt block
+-	if after := strings.TrimPrefix(s, pre); after != s { // want "TrimPrefix can be simplified to CutPrefix"
++	_ = ok                                          // fine to shadow, since ok is not used within the ifstmt block
++	if after, ok := strings.CutPrefix(s, pre); ok { // want "TrimPrefix can be simplified to CutPrefix"
+ 		println(after)
+ 	}
+ 	var predefined string
+@@ -149,10 +149,10 @@
+ 
+ // test basic cases for pattern2 - CutSuffix
+ func _() {
+-	if before := strings.TrimSuffix(s, suf); before != s { // want "TrimSuffix can be simplified to CutSuffix"
++	if before, ok := strings.CutSuffix(s, suf); ok { // want "TrimSuffix can be simplified to CutSuffix"
+ 		println(before)
+ 	}
+-	if before := strings.TrimSuffix(s, suf); s != before { // want "TrimSuffix can be simplified to CutSuffix"
++	if before, ok := strings.CutSuffix(s, suf); ok { // want "TrimSuffix can be simplified to CutSuffix"
+ 		println(before)
+ 	}
+ }
+--- a/stringscutprefix/stringscutprefix_dot.go
++++ b/stringscutprefix/stringscutprefix_dot.go
+@@ -6,36 +6,36 @@
+ 
+ // test supported cases of pattern 1 - CutPrefix
+ func _() {
+-	if HasPrefix(s, pre) { // want "HasPrefix \\+ TrimPrefix can be simplified to CutPrefix"
+-		a := TrimPrefix(s, pre)
++	if after, ok := CutPrefix(s, pre); ok { // want "HasPrefix \\+ TrimPrefix can be simplified to CutPrefix"
++		a := after
+ 		_ = a
+ 	}
+ }
+ 
+ // test supported cases of pattern 1 - CutSuffix
+ func _() {
+-	if HasSuffix(s, suf) { // want "HasSuffix \\+ TrimSuffix can be simplified to CutSuffix"
+-		a := TrimSuffix(s, suf)
++	if before, ok := CutSuffix(s, suf); ok { // want "HasSuffix \\+ TrimSuffix can be simplified to CutSuffix"
++		a := before
+ 		_ = a
+ 	}
+ }
+ 
+ // test supported cases of pattern2 - CutPrefix
+ func _() {
+-	if after := TrimPrefix(s, pre); after != s { // want "TrimPrefix can be simplified to CutPrefix"
++	if after, ok := CutPrefix(s, pre); ok { // want "TrimPrefix can be simplified to CutPrefix"
+ 		println(after)
+ 	}
+-	if after := TrimPrefix(s, pre); s != after { // want "TrimPrefix can be simplified to CutPrefix"
++	if after, ok := CutPrefix(s, pre); ok { // want "TrimPrefix can be simplified to CutPrefix"
+ 		println(after)
+ 	}
+ }
+ 
+ // test supported cases of pattern2 - CutSuffix
+ func _() {
+-	if before := TrimSuffix(s, suf); before != s { // want "TrimSuffix can be simplified to CutSuffix"
++	if before, ok := CutSuffix(s, suf); ok { // want "TrimSuffix can be simplified to CutSuffix"
+ 		println(before)
+ 	}
+-	if before := TrimSuffix(s, suf); s != before { // want "TrimSuffix can be simplified to CutSuffix"
++	if before, ok := CutSuffix(s, suf); ok { // want "TrimSuffix can be simplified to CutSuffix"
+ 		println(before)
+ 	}
+ }
+--- a/testingcontext/testingcontext_test.go
++++ b/testingcontext/testingcontext_test.go
+@@ -7,8 +7,7 @@
+ )
+ 
+ func Test(t *testing.T) {
+-	ctx, cancel := context.WithCancel(context.Background()) // want "context.WithCancel can be modernized using t.Context"
+-	defer cancel()
++	ctx := t.Context() // want "context.WithCancel can be modernized using t.Context"
+ 	_ = ctx
+ 
+ 	func() {
+@@ -20,8 +19,7 @@
+ 
+ func TestScope(t *testing.T) {
+ 	{
+-		ctx, cancel := context.WithCancel(context.TODO()) // want "context.WithCancel can be modernized using t.Context"
+-		defer cancel()
++		ctx := t.Context() // want "context.WithCancel can be modernized using t.Context"
+ 		_ = ctx
+ 		var t int // not in scope of the call to WithCancel
+ 		_ = t
+@@ -45,15 +43,13 @@
+ 	}
+ 
+ 	t.Run("subtest", func(t2 *testing.T) {
+-		ctx, cancel := context.WithCancel(context.Background()) // want "context.WithCancel can be modernized using t2.Context"
+-		defer cancel()
++		ctx := t2.Context() // want "context.WithCancel can be modernized using t2.Context"
+ 		_ = ctx
+ 	})
+ }
+ 
+ func TestAlt(t2 *testing.T) {
+-	ctx, cancel := context.WithCancel(context.Background()) // want "context.WithCancel can be modernized using t2.Context"
+-	defer cancel()
++	ctx := t2.Context() // want "context.WithCancel can be modernized using t2.Context"
+ 	_ = ctx
+ }
+ 
+@@ -64,20 +60,17 @@
+ }
+ 
+ func Benchmark(b *testing.B) {
+-	ctx, cancel := context.WithCancel(context.Background()) // want "context.WithCancel can be modernized using b.Context"
+-	defer cancel()
++	ctx := b.Context() // want "context.WithCancel can be modernized using b.Context"
+ 	_ = ctx
+ 
+ 	b.Run("subtest", func(b2 *testing.B) {
+-		ctx, cancel := context.WithCancel(context.Background()) // want "context.WithCancel can be modernized using b2.Context"
+-		defer cancel()
++		ctx := b2.Context() // want "context.WithCancel can be modernized using b2.Context"
+ 		_ = ctx
+ 	})
+ }
+ 
+ func Fuzz(f *testing.F) {
+-	ctx, cancel := context.WithCancel(context.Background()) // want "context.WithCancel can be modernized using f.Context"
+-	defer cancel()
++	ctx := f.Context() // want "context.WithCancel can be modernized using f.Context"
+ 	_ = ctx
+ }
+ 
+@@ -104,8 +97,7 @@
+ }
+ 
+ func TestDeferredFuncsAfter(t *testing.T) {
+-	ctx, cancel := context.WithCancel(context.Background()) // want "context.WithCancel can be modernized using t.Context"
+-	defer cancel()
++	ctx := t.Context() // want "context.WithCancel can be modernized using t.Context"
+ 	_ = ctx
+ 	x := 1
+ 	defer func() {
+@@ -121,7 +113,6 @@
+ 		}()
+ 	}
+ 	f()
+-	ctx, cancel := context.WithCancel(context.Background()) // want "context.WithCancel can be modernized using t.Context"
+-	defer cancel()
++	ctx := t.Context() // want "context.WithCancel can be modernized using t.Context"
+ 	_ = ctx
+ }
+--- a/waitgroupgo/waitgroup.go
++++ b/waitgroupgo/waitgroup.go
+@@ -8,111 +8,85 @@
+ // supported case for pattern 1.
+ func _() {
+ 	var wg sync.WaitGroup
+-	wg.Add(1)
+-	go func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
+-		defer wg.Done()
++	wg.Go(func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
+ 		fmt.Println()
+-	}()
++	})
+ 
+-	wg.Add(1)
+-	go func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
+-		defer wg.Done()
+-	}()
++	wg.Go(func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
++	})
+ 
+ 	for range 10 {
+-		wg.Add(1)
+-		go func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
+-			defer wg.Done()
++		wg.Go(func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
+ 			fmt.Println()
+-		}()
++		})
+ 	}
+ }
+ 
+ // supported case for pattern 2.
+ func _() {
+ 	var wg sync.WaitGroup
+-	wg.Add(1)
+-	go func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
++	wg.Go(func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
+ 		fmt.Println()
+-		wg.Done()
+-	}()
++	})
+ 
+-	wg.Add(1)
+-	go func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
+-		wg.Done()
+-	}()
++	wg.Go(func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
++	})
+ 
+ 	for range 10 {
+-		wg.Add(1)
+-		go func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
++		wg.Go(func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
+ 			fmt.Println()
+-			wg.Done()
+-		}()
++		})
+ 	}
+ 
+-	wg.Add(1)
+-	go func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
++	wg.Go(func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
+ 		defer func() {
+ 			println("cleanup")
+ 		}()
+ 		fmt.Println()
+-		wg.Done()
+-	}()
++	})
+ 
+-	wg.Add(1)
+-	go func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
++	wg.Go(func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
+ 		defer func() {
+ 			recover := func() {}
+ 			recover()
+ 		}()
+ 		fmt.Println()
+-		wg.Done()
+-	}()
++	})
+ 
+-	wg.Add(1)
+-	go func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
++	wg.Go(func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
+ 		defer func() {
+ 			func() {
+ 				recover()
+ 			}()
+ 		}()
+ 		fmt.Println()
+-		wg.Done()
+-	}()
++	})
+ 
+-	wg.Add(1)
+-	go func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
++	wg.Go(func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
+ 		func() {
+ 			defer cleanup()
+ 		}()
+ 		fmt.Println()
+-		wg.Done()
+-	}()
++	})
+ }
+ 
+ // this function puts some wrong usages but waitgroupgo modernizer will still offer fixes.
+ func _() {
+ 	var wg sync.WaitGroup
+-	wg.Add(1)
+-	go func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
+-		defer wg.Done()
++	wg.Go(func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
+ 		defer wg.Done()
+ 		fmt.Println()
+-	}()
++	})
+ 
+-	wg.Add(1)
+-	go func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
+-		defer wg.Done()
++	wg.Go(func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
+ 		fmt.Println()
+ 		wg.Done()
+-	}()
++	})
+ 
+-	wg.Add(1)
+-	go func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
++	wg.Go(func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
+ 		fmt.Println()
+ 		wg.Done()
+-		wg.Done()
+-	}()
++	})
+ }
+ 
+ // this function puts the unsupported cases of pattern 1.
+@@ -231,24 +205,18 @@
+ 
+ func _() {
+ 	var s Server
+-	s.wg.Add(1)
+-	go func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
++	s.wg.Go(func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
+ 		print()
+-		s.wg.Done()
+-	}()
++	})
+ 
+ 	var sc ServerContainer
+-	sc.serv.wg.Add(1)
+-	go func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
++	sc.serv.wg.Go(func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
+ 		print()
+-		sc.serv.wg.Done()
+-	}()
++	})
+ 
+ 	var wg sync.WaitGroup
+ 	arr := [1]*sync.WaitGroup{&wg}
+-	arr[0].Add(1)
+-	go func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
++	arr[0].Go(func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
+ 		print()
+-		arr[0].Done()
+-	}()
++	})
+ }
+--- a/waitgroupgo/waitgroup_alias.go
++++ b/waitgroupgo/waitgroup_alias.go
+@@ -7,15 +7,11 @@
+ 
+ func _() {
+ 	var wg sync1.WaitGroup
+-	wg.Add(1)
+-	go func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
+-		defer wg.Done()
++	wg.Go(func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
+ 		fmt.Println()
+-	}()
++	})
+ 
+-	wg.Add(1)
+-	go func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
++	wg.Go(func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
+ 		fmt.Println()
+-		wg.Done()
+-	}()
++	})
+ }
+--- a/waitgroupgo/waitgroup_dot.go
++++ b/waitgroupgo/waitgroup_dot.go
+@@ -8,15 +8,11 @@
+ // supported case for pattern 1.
+ func _() {
+ 	var wg WaitGroup
+-	wg.Add(1)
+-	go func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
+-		defer wg.Done()
++	wg.Go(func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
+ 		fmt.Println()
+-	}()
++	})
+ 
+-	wg.Add(1)
+-	go func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
++	wg.Go(func() { // want "Goroutine creation can be simplified using WaitGroup.Go"
+ 		fmt.Println()
+-		wg.Done()
+-	}()
++	})
+ }

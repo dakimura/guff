@@ -7839,17 +7839,31 @@ fn modernize_waitgroupgo_fix_removes_the_goroutine_call_parens() {
 fn modernize_rangeint_drops_an_index_the_body_never_reads() {
     let pkg =
         support::typecheck_fixture("modernize", "example.com/modernize/rangeint", "rangeint.go");
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let src = std::fs::read_to_string(support::testdata("modernize").join("rangeint.go"))
+        .expect("fixture source");
     let mut headers: Vec<String> = Vec::new();
     for d in support::run_analyzer_diagnostics(modernize(), &pkg) {
         if !d.message.contains("range over int") {
             continue;
         }
-        // The loop header is the last edit; any import edits come first.
-        let edit = d.suggested_fixes[0]
+        // The fix is upstream's handful of small edits around the limit;
+        // apply them to the loop's line and read the header back.
+        let base = fset.file(guff::position::Pos(d.pos as i64)).expect("file").base() as u32;
+        let line_start = src[..(d.pos - base) as usize].rfind('\n').map_or(0, |i| i + 1);
+        let line_end = line_start + src[line_start..].find('\n').unwrap_or(src.len() - line_start);
+        let mut edits: Vec<_> = d.suggested_fixes[0]
             .text_edits
-            .last()
-            .expect("the fix rewrites the loop header");
-        headers.push(edit.new_text.clone());
+            .iter()
+            .filter(|e| (e.pos - base) as usize >= line_start && (e.end - base) as usize <= line_end)
+            .collect();
+        edits.sort_by_key(|e| std::cmp::Reverse((e.pos, e.end)));
+        let mut line = src[line_start..line_end].to_string();
+        for e in edits {
+            let (p, q) = ((e.pos - base) as usize - line_start, (e.end - base) as usize - line_start);
+            line.replace_range(p..q, &e.new_text);
+        }
+        headers.push(line.split('{').next().unwrap_or(&line).trim().to_string());
     }
 
     // `indexUnused`, `indexShadowedInBody` and `nestedShadowedIndex`'s outer
