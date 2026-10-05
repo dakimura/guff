@@ -1,0 +1,21 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh govet-upstream-x-tools-v050
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/govet-upstream-x-tools-v050/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.14.0
+
+--- a/composite/typeparams/typeparams.go
++++ b/composite/typeparams/typeparams.go
+@@ -19,7 +19,7 @@
+ ]() {
+ 	_ = T1{2}
+ 	_ = T2a{2}
+-	_ = T2b{2} // want "unkeyed fields"
++	_ = T2b{F: 2} // want "unkeyed fields"
+ 	_ = T3{1, 2}
+ 	_ = T4{1, 2}
+ 	_ = T5{1: 2}

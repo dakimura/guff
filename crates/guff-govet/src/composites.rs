@@ -163,7 +163,24 @@ fn keying_edits(
     Some(edits)
 }
 
-fn check_literal(pass: &Pass<'_>, lit: &CompositeLit) -> Option<String> {
+/// `typeparams.NormalTerms(typ)[0].Type()`: a type parameter stands for the
+/// first term of its constraint ("for a type parameter, choose an arbitrary
+/// term"); any other type is its own single term. `None` for a type set with
+/// no terms (unconstrained, empty, or invalid).
+fn first_term(types: &guff_types::arena::TypeArena, typ: guff_types::TypeId) -> Option<guff_types::TypeId> {
+    let t = guff_types::alias::unalias_readonly(types, typ);
+    let TypeData::TypeParam(tp) = types.get(t) else {
+        return Some(typ);
+    };
+    let c = tp.constraint()?;
+    let TypeData::Interface(iface) = types.get(c.underlying(types)) else {
+        return None;
+    };
+    iface.cached_typeset()?.term_types()?.first().copied()
+}
+
+/// The finding's message and the struct type whose fields key the fix.
+fn check_literal(pass: &Pass<'_>, lit: &CompositeLit) -> Option<(String, guff_types::TypeId)> {
     if lit.elts.is_empty() || has_keyed_element(lit) {
         return None;
     }
@@ -173,9 +190,13 @@ fn check_literal(pass: &Pass<'_>, lit: &CompositeLit) -> Option<String> {
     if !guff_types::predicates::is_valid(&artifacts.types, typ) {
         return None;
     }
-    if is_same_package_type(pass, typ) {
+    let term = first_term(&artifacts.types, typ)?;
+    let strct = struct_type(&artifacts.types, term)?;
+    if is_same_package_type(pass, term) {
         return None;
     }
+    // `typ.String()` — of the literal's own type, so a type parameter prints
+    // as its name (`T2b struct literal uses unkeyed fields`).
     let type_name = type_string(
         &artifacts.types,
         &artifacts.objects,
@@ -186,8 +207,7 @@ fn check_literal(pass: &Pass<'_>, lit: &CompositeLit) -> Option<String> {
     if is_whitelisted_type(&type_name) {
         return None;
     }
-    struct_type(&artifacts.types, typ)?;
-    Some(format!("{type_name} struct literal uses unkeyed fields"))
+    Some((format!("{type_name} struct literal uses unkeyed fields"), strct))
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -201,19 +221,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let NodeRef::CompositeLit(lit) = n else {
             return;
         };
-        if let Some(message) = check_literal(pass, lit) {
+        if let Some((message, strct)) = check_literal(pass, lit) {
             // Upstream reports at cl.Pos() (the literal's type, when it has
             // one), not at its opening brace.
-            let edits = pass
-                .pkg()
-                .type_artifacts
-                .as_ref()
-                .and_then(|a| {
-                    let typ = pass.types_info()?.types.get(&lit.id)?.typ;
-                    struct_type(&a.types, typ)
-                })
-                .and_then(|strct| keying_edits(pass, lit, strct))
-                .unwrap_or_default();
+            let edits = keying_edits(pass, lit, strct).unwrap_or_default();
             pending.push((
                 commentmap::node_pos(NodeRef::CompositeLit(lit)).0 as u32,
                 message,

@@ -143,8 +143,70 @@ struct TypeFacts {
     nil_consts: HashSet<ConstId>,
 }
 
+/// `hasCgoUnsafeArgs`: `fn` or a function enclosing it is declared with a
+/// `//go:cgo_unsafe_args` directive in its doc comment. `marked` holds the
+/// `func` keyword positions of those declarations (see [`cgo_unsafe_decls`]).
+fn has_cgo_unsafe_args(prog: &Program, mut fid: FuncId, marked: &HashSet<u32>) -> bool {
+    if marked.is_empty() {
+        return false;
+    }
+    loop {
+        let f = prog.functions.get(fid);
+        if f
+            .syntax_decl
+            .as_ref()
+            .is_some_and(|d| marked.contains(&(d.ty.pos().0 as u32)))
+        {
+            return true;
+        }
+        match f.parent {
+            Some(p) => fid = p,
+            None => return false,
+        }
+    }
+}
+
+/// The `func` positions of declarations whose doc comment holds
+/// `//go:cgo_unsafe_args`. The analysis AST is parsed without comments
+/// (`FuncDecl.doc` is always empty), so the doc group is found in a reparse:
+/// the comment group that ends on the line right above the `func`.
+fn cgo_unsafe_decls(pass: &Pass<'_>) -> HashSet<u32> {
+    let mut out = HashSet::new();
+    for file in pass.files() {
+        if !guff_analysis::comments::file_source_contains(pass, file, b"go:cgo_unsafe_args") {
+            continue;
+        }
+        let comments = guff_analysis::comments::file_comments(pass, file);
+        let line = |p: guff::position::Pos| pass.fset().position(p).line;
+        for decl in &file.decls {
+            let guff::ast::Decl::FuncDecl(fd) = decl else {
+                continue;
+            };
+            let at = fd.ty.pos();
+            let doc = comments
+                .iter()
+                .filter(|cg| cg.end().0 <= at.0)
+                .last()
+                .filter(|cg| line(cg.end()) + 1 == line(at));
+            // `astutil.Directives`: `//tool:name [args]`, no space after `//`.
+            let directive = doc.is_some_and(|cg| {
+                cg.list.iter().any(|c| {
+                    c.text
+                        .strip_prefix("//go:cgo_unsafe_args")
+                        .is_some_and(|rest| rest.is_empty() || rest.starts_with([' ', '\t']))
+                })
+            });
+            if directive {
+                out.insert(at.0 as u32);
+            }
+        }
+    }
+    out
+}
+
 pub(crate) fn collect_nilness(
     prog: &Program,
+    cgo_unsafe: &HashSet<u32>,
     ta: &mut TypeArena,
     src_funcs: &[FuncId],
     out: &mut Vec<(u32, String)>,
@@ -152,6 +214,11 @@ pub(crate) fn collect_nilness(
     for &fid in src_funcs {
         let f = prog.functions.get(fid);
         if f.blocks.is_empty() {
+            continue;
+        }
+        // cgo-generated functions annotated `//go:cgo_unsafe_args` (such as
+        // `_cgo_cmalloc`) behave in ways SSA does not capture.
+        if has_cgo_unsafe_args(prog, fid, cgo_unsafe) {
             continue;
         }
         // Visit the entry block. (Go: `fn.Blocks[0]`; guff's arena keeps
@@ -963,6 +1030,7 @@ pub fn analyzer() -> &'static Analyzer {
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let mut out: Vec<(u32, String)> = Vec::new();
+    let cgo_unsafe = cgo_unsafe_decls(pass);
     {
         let ir = pass
             .result_of::<buildir::BuildIrResult>(buildir::analyzer())
@@ -971,7 +1039,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         // type set is computed lazily); the SSA program itself is shared and
         // immutable, so work on a clone the way `nilnesserr` does.
         let mut ta = ir.prog.type_arena.clone();
-        collect_nilness(&ir.prog, &mut ta, ir.src_funcs_with_methods(), &mut out);
+        collect_nilness(&ir.prog, &cgo_unsafe, &mut ta, ir.src_funcs_with_methods(), &mut out);
     }
     for (pos, msg) in out {
         pass.reportf(pos, msg);

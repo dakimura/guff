@@ -1,8 +1,9 @@
 //! `unusedresult` — check for unused results of important stdlib calls.
 
+use std::collections::HashSet;
 use std::sync::OnceLock;
 
-use guff::ast::{Expr, ExprStmt};
+use guff::ast::{Expr, ExprStmt, Stmt};
 use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_analysis::passes::inspect;
@@ -168,11 +169,36 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "unusedresult requires inspect analyzer".to_string())?
         .clone();
 
+    // `inBenchmarkLoop`: a call statement directly in the body of a
+    // `for b.Loop() {…}` loop (b a *testing.B) keeps its result alive by
+    // design. Collected first, by the statement's start, since the walk below
+    // has no parent links.
+    let mut in_bench_loop: HashSet<u32> = HashSet::new();
+    inspect.preorder_typed(node_mask!(ForStmt), pass.files(), |n| {
+        let NodeRef::ForStmt(f) = n else {
+            return;
+        };
+        let Some(Expr::CallExpr(cond)) = f.cond.as_ref().map(|c| unparen(c)) else {
+            return;
+        };
+        if !crate::govet_util::is_method_named(pass, cond, "testing", "B", "Loop") {
+            return;
+        }
+        for stmt in &f.body.list {
+            if let Stmt::ExprStmt(es) = stmt {
+                in_bench_loop.insert(es.x.pos().0 as u32);
+            }
+        }
+    });
+
     let mut pending = Vec::new();
     inspect.preorder_typed(node_mask!(ExprStmt), pass.files(), |n| {
         let NodeRef::ExprStmt(ExprStmt { x, .. }) = n else {
             return;
         };
+        if in_bench_loop.contains(&(x.pos().0 as u32)) {
+            return;
+        }
         let Expr::CallExpr(call) = unparen(x) else {
             return;
         };
