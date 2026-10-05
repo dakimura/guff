@@ -11,7 +11,7 @@
 | cobra | 157 | 152 | 149 | 94.9% | 98.0% | 0 |
 | go-client | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | consul | 257 | 260 | 255 | 99.2% | 98.1% | 0 |
-| grafana | 0 | 126 | 0 | 100.0% | 0.0% | 0 |
+| grafana | 4 | 126 | 4 | 100.0% | 3.2% | 0 |
 | containerd | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 
 Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unexpected` counts diffs not covered by the allowlist (`compat/allowlists/`).
@@ -141,9 +141,9 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 | exhaustive | 0 | 1 | 0 | 100.0% | 0.0% |
 | goimports | 0 | 4 | 0 | 100.0% | 0.0% |
 | gosec | 0 | 2 | 0 | 100.0% | 0.0% |
-| staticcheck | 0 | 119 | 0 | 100.0% | 0.0% |
+| staticcheck | 4 | 119 | 4 | 100.0% | 3.4% |
 
-### Allowed known diffs (126)
+### Allowed known diffs (122)
 - golangci-only: `pkg/api/annotations.go:145:staticcheck:(github.com/grafana/grafana/pkg/services/annotations.Item).DashboardID is deprecated: Use DashboardUID and OrgID instead`
 - golangci-only: `pkg/api/annotations.go:420:staticcheck:(github.com/grafana/grafana/pkg/services/annotations.DeleteParams).DashboardID is deprecated: Use DashboardUID and OrgID instead`
 - golangci-only: `pkg/api/annotations.go:44:staticcheck:(github.com/grafana/grafana/pkg/services/annotations.ItemQuery).DashboardID is deprecated: Use DashboardUID and OrgID instead`
@@ -152,7 +152,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 - golangci-only: `pkg/api/annotations_test.go:336:staticcheck:(github.com/grafana/grafana/pkg/services/dashboards.Dashboard).FolderID is deprecated: use FolderUID instead`
 - golangci-only: `pkg/api/annotations_test.go:338:staticcheck:(github.com/grafana/grafana/pkg/services/folder.Folder).ID is deprecated: use UID instead`
 - golangci-only: `pkg/api/annotations_test.go:369:staticcheck:(github.com/grafana/grafana/pkg/services/annotations.Item).DashboardID is deprecated: Use DashboardUID and OrgID instead`
-- … and 118 more (see `compat/allowlists/`)
+- … and 114 more (see `compat/allowlists/`)
 
 ## containerd
 

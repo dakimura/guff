@@ -135,7 +135,7 @@ honnef IR は **SSI（σ ノード）をやめて go/ssa 相当の pruned SSA �
 | `IsPointerLike` → `MaybePointerLike` | `callcheck.rs:721` は Interface なら true で既に一致 | already-matches | — |
 | `CoreType` が要素型の異なる chan 項で nil | honnef CoreType の直接移植なし | unsure（極端な端例） | — |
 | `typeutil.Unify` 追加、unused の implements が完全単一化に | `guff-unused/src/lenient_implements.rs` は旧 methodsChecker | **done (PR 4)** | unused `genericiface/generic_iface.go:30,31` の extra 2 |
-| `SelectorName` の fallback 2 枝 | `code.rs knowledge_selector_name` に無い | needs-port（S） | SA1019 の文言（§4 staticcheck-checks） |
+| `SelectorName` の fallback 2 枝 | `code.rs knowledge_selector_name` に無い | **done (PR 5)** | SA1019 の文言（§4 staticcheck-checks） |
 | `EnclosingFunction` が `func _()` を見つけない | SA9008 は AST 実装で `_` を見ない。SA4031 は contextcheck 有効時だけ `_` が入る | needs-port（S） | — |
 | ジェネリクス周りを go/ssa に再同期（issue 78110 の拡幅、MethodVal の Source を Sel に） | 土台は同系譜だが 78110 は 0 件 | unsure（M） | — |
 | 宣言が Go 1.27 の昇格フィールドキー | guff-types が型検査で拒否 | not-applicable | — |
@@ -354,14 +354,14 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 
 | # | upstream_path | kind | 要約 | guff の場所 | status | effort | upstream testdata |
 |---|---------------|------|------|-------------|--------|--------|-------------------|
-| 1 | sa1019.go + code.SelectorName | message | 名前が完全修飾名に（`example.com/old.Legacy`、`(*pkg.T).M`、引用符なし import path） | guff-staticcheck/src/sa1019.rs, guff-analysis/src/code.rs | needs-port | M | go1.8/CheckDeprecated/CheckDeprecated.go |
-| 2 | sa1019.go checkIdentObj | behavior | composite literal キーの検査と、X が型のとき位置を選択名に | sa1019.rs struct_lit_diagnostics / selector_diagnostic | needs-port | S | go1.0/CheckDeprecated{,.assist_external}/* |
+| 1 | sa1019.go + code.SelectorName | message | 名前が完全修飾名に（`example.com/old.Legacy`、`(*pkg.T).M`、引用符なし import path） | guff-staticcheck/src/sa1019.rs, guff-analysis/src/code.rs | **done (PR 5)** | M | go1.8/CheckDeprecated/CheckDeprecated.go |
+| 2 | sa1019.go checkIdentObj | behavior | composite literal キーの検査と、X が型のとき位置を選択名に | sa1019.rs struct_lit_diagnostics / selector_diagnostic | **done (PR 5)** | S | go1.0/CheckDeprecated{,.assist_external}/* |
 | 3 | s1005.go | removed-check | map comma-ok の `x, _ = m[k]` を報告しない | guff-staticcheck/src/s1005.rs:35 | **done (PR 1)** | S | LintBlankOK.go{,.golden} |
-| 4 | sa4003.go | behavior | 型名を tx そのものに、型パラメータを type set で | sa4003.rs | needs-port | M | go1.18/CheckExtremeComparison.go |
+| 4 | sa4003.go | behavior | 型名を tx そのものに、型パラメータを type set で | sa4003.rs | **PR 5: 型名は done**（型パラメータの type set は DEFERRED） | M | go1.18/CheckExtremeComparison.go |
 | 5 | sa4006.go IncDec / 複合代入 | new-check | `n++` と結果が読まれない複合代入 | sa4006.rs:647 | **done (PR 4)** | M | CheckUnreadVariableValues.go |
 | 6 | sa4006.go hasUse Sigma 削除 | substrate | sigma 越しの未使用が消える | sa4006.rs has_use_rec | already-matches | S | — |
 | 7 | analysis.go / sa5011.go | removed-check | SA5011 削除 | guff-staticcheck/src/lib.rs:164,329 | needs-port | S | — |
-| 8 | sa6005.go | message | `!strings.EqualFold`、fix タイトル小文字 | sa6005.rs:70,83 | needs-port | S | CheckToLowerToUpperComparison.go{,.golden} |
+| 8 | sa6005.go | message | `!strings.EqualFold`、fix タイトル小文字 | sa6005.rs:70,83 | **done (PR 5)** | S | CheckToLowerToUpperComparison.go{,.golden} |
 | 9 | sa9010.go（新規） | new-check | `deferred return function not called` | 無し | needs-port | S | sa9010/testdata/** |
 | 10 | sa1026.go | behavior | MarshalIndent を追加 | sa1026.rs:139 | needs-port | S | CheckUnsupportedMarshal.go |
 | 11 | sa9005.go | behavior | MarshalIndent を追加 | sa9005.rs:146,148 | already-matches | S | CheckNoopMarshal.go |
@@ -392,7 +392,7 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 | 8 | typeutil MaybePointerLike | behavior | 項なし型パラメータ | callcheck.rs:721 | already-matches | S | — |
 | 9 | typeutil CoreType | behavior | 異なる chan 項 | 無し | unsure | S | — |
 | 10 | typeutil Unify | substrate | 型単一化 | lenient_implements.rs | **done (PR 4)**（上流 testdata `generic-interfaces.go` も golden に） | M | — |
-| 11 | code.SelectorName | behavior | fallback 2 枝 | code.rs:1042 | needs-port | S | — |
+| 11 | code.SelectorName | behavior | fallback 2 枝 | code.rs:1042 | **done (PR 5)** | S | — |
 | 12 | knowledge/arg.go MarshalIndent | behavior | 引数位置表 | sa9005.rs:146 | already-matches | S | — |
 | 13 | knowledge/deprecated.go | behavior | `(crypto/tls.Config).Rand` | stdlib_deprecations.rs:205 | already-matches | S | — |
 | 14 | generate.go（sa5011 無効化） | removed-check | SA5011 が Analyzers から消える | lib.rs:329 | **done (PR 4)** | S | — |
@@ -658,7 +658,7 @@ golden を regen したら fix のベースラインも撮り直す。測定は 
 | 3 | **x/tools substrate（安い方）** | wastedassign の `composite_lit_rhs` 撤去、gosec taint の「構造体コピーを遡る」guff 独自ループ撤去（G702）、G124 の「省略された値要素は map の下だけ」規則を全要素へ、nilness `nillable` に unsafe.Pointer | wastedassign 4/2 → **0/0**、gosec 6/8 → **3/7**（残りは gosec 本体、PR 9） | S |
 | 4 | **honnef IR 寄せ（観測できる分）** | SA5011 の登録解除、SA4006 の `n++` / `+=`、unused の `typeutil.Unify` | staticcheck-sa 18/22 → **16/17**、unused 0/2 → **0/0** | M |
 | 4b | **honnef IR 寄せ（fixture 先行）** | SSI 模倣の撤去（sa4008 `assigned_in`、sa4006 AST hybrid）、DebugRef の監査、IsStub、`EnclosingFunction` の `_`、Recover ブロック。**今の golden に観測差が無い**ので、上流 testdata（irutil/testdata/switches、Nilness/*.go ほか）を fixture にしてから | — | L |
-| 5 | **staticcheck の文言・小移植** | SA1019 SelectorName + literal キー位置、SA4003、SA6005、SA1026、SA5008 embed、SA9010（新規） | staticcheck-sa1019-* 42/42 → 0/0、staticcheck-sa の大半 | M |
+| 5 | **staticcheck の文言・小移植** | SA1019 SelectorName + literal キー位置 + 引用符なし import、SA4003 の型名、SA6005 の `!`（**done**）。SA1026 / SA5008 embed / SA9010（新規）は残り | staticcheck-sa1019-* 42/42 → **0/0（ratchet 削除）**、staticcheck-sa 16/17 → **0/1**（残りは恒久の SA5005） | M |
 | 6 | **modernize 残り（ゴールデン側）** | stringscut の Split / SplitN 腕（Suite 入れ替え・reflecttypefor・slicescontains・stringsbuilder は PR 1 で済み） | modernize 2/0 → 0/0 | S |
 | 7 | **govet 文言** | fieldalignment（size class 表の pin を決める）、composite、inline の埋め込み判定、unusedresult b.Loop、nilness cgo | govet-fieldalignment 14/14 → 0/0 | M |
 | 8 | **出力差の小物まとめ** | nonamedreturns 位置、canonicalheader fork（文言 + initialism + exclusions）、exhaustive ディレクティブ厳密一致 / 不正ディレクティブ / alias、recvcheck、protogetter alias、gocritic sprintfQuotedString、gofumpt 100 バイト規則 | nonamedreturns 14/14、canonicalheader 10/6、exhaustive ×3、recvcheck、protogetter、gocritic、gofumpt → 0 | M（項目は多いが各 S） |
