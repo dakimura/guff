@@ -1659,7 +1659,9 @@ fn parse_v2_iface_settings() {
         opts.enable,
         vec!["identical".to_string(), "unused".to_string()]
     );
-    assert_eq!(opts.unused_exclude, vec!["example.com/skip".to_string()]);
+    assert_eq!(opts.unused_exclude, "example.com/skip");
+    // golangci joins a list into the comma-separated flag; the analyzer trims.
+    assert_eq!(opts.unusedmethod_exclude, "example.com/a, example.com/b");
 }
 
 #[test]

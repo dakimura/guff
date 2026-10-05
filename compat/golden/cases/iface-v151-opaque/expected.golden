@@ -1,0 +1,24 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh iface-v151-opaque
+# Produced by running golangci-lint on compat/golden/cases/iface-v151-opaque/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+a/a.go:17:29:iface::opaque: 'NewServer' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '*server'
+a/a.go:21:30:iface::opaque: 'NewServer2' function return 'Server' interface at the 1st result, abstract a single concrete implementation of 'server'
+a/a.go:25:30:iface::opaque: 'NewServer3' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '*server'
+a/a.go:29:31:iface::opaque: 'NewServer4' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '*server'
+a/a.go:48:35:iface::opaque: 'NewSecureServer' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '*secureServer'
+f/f.go:26:50:iface::opaque: 'StartSpanFromContext2' function return 'Span' interface at the 1st result, abstract a single concrete implementation of '*span'
+h/h.go:20:30:iface::opaque: 'NewServer2' function return 'Server' interface at the 1st result, abstract a single concrete implementation of 'server'
+i/i.go:23:19:iface::opaque: 'WithError' function return 'MyInterface' interface at the 1st result, abstract a single concrete implementation of '*myInterfaceImpl'
+i/i.go:37:19:iface::opaque: 'GetMyError' function return 'MyError' interface at the 1st result, abstract a single concrete implementation of '*myMyError'
+j/j.go:13:17:iface::opaque: 'GetError' function return 'error' interface at the 1st result, abstract a single concrete implementation of '*myError'
+k/k.go:21:24:iface::opaque: 'FromStructField' function return 'Doer' interface at the 1st result, abstract a single concrete implementation of '*doerImpl'
+k/k.go:25:39:iface::opaque: 'FromTypeAssertion' function return 'Doer' interface at the 1st result, abstract a single concrete implementation of '*doerImpl'
+l/l.go:11:21:iface::opaque: 'NewServer' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '*server'
+n/n.go:11:21:iface::opaque: 'NewServer' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '*server'
+p/p.go:13:28:iface::opaque: 'NewServer' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '*server'
+z/z.go:30:16:iface::opaque: 'NewDoer' function return 'Doer' interface at the 1st result, abstract a single concrete implementation of '*DoerImpl'

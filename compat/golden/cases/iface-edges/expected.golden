@@ -1,0 +1,43 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh iface-edges
+# Produced by running golangci-lint on compat/golden/cases/iface-edges/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+methods.go:9:2:iface::unusedmethod: method 'Unused()' is declared on interface 'base' but not used within the package
+methods.go:24:2:iface::unusedmethod: method 'Get()' is declared on interface 'getter' but not used within the package
+methods.go:25:2:iface::unusedmethod: method 'Put()' is declared on interface 'getter' but not used within the package
+methods.go:36:3:iface::unusedmethod: method 'LocalUnused()' is declared on interface 'localIface' but not used within the package
+methods.go:45:3:iface::unusedmethod: method 'G()' is declared on interface 'grouped' but not used within the package
+methods.go:51:3:iface::unusedmethod: method 'O()' is declared on interface 'other' but not used within the package
+methods.go:58:24:iface::unusedmethod: method 'Close()' is declared on interface 'closer' but not used within the package
+methods.go:60:17:iface::unexported: unexported interface 'closer' used as parameter in exported function 'Exported'
+methods.go:60:38:iface::unexported: unexported interface 'map[string]closer' used as parameter in exported function 'Exported'
+methods.go:60:56:iface::unexported: unexported interface 'chan<- closer' used as parameter in exported function 'Exported'
+methods.go:60:69:iface::unexported: unexported interface '[2]closer' used as parameter in exported function 'Exported'
+methods.go:63:17:iface::unexported: unexported interface 'closer' used as return value in exported function 'Results'
+methods.go:63:26:iface::unexported: unexported interface '*closer' used as return value in exported function 'Results'
+methods.go:63:36:iface::unexported: unexported interface '[]closer' used as return value in exported function 'Results'
+methods.go:67:19:iface::unexported: unexported interface 'closer' used as parameter in exported method 'Repo.Use'
+methods.go:69:23:iface::unexported: unexported interface 'closer' used as parameter in exported method 'Repo.UsePtr'
+methods.go:73:26:iface::unexported: unexported interface 'closer' used as parameter in exported method 'Gen[T, U].Use'
+methods.go:75:30:iface::unexported: unexported interface 't' used as parameter in exported function 'Constrained'
+methods.go:79:25:iface::unexported: unexported interface 'closer' used as parameter in exported method 'lower.Exported'
+opaque.go:8:24:iface::unusedmethod: method 'Serve()' is declared on interface 'Server' but not used within the package
+opaque.go:23:22:iface::opaque: 'SameVar' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '*server'
+opaque.go:34:25:iface::opaque: 'SameCallee' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '*server'
+opaque.go:42:24:iface::opaque: 'CopiedVar' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '*server'
+opaque.go:61:46:iface::opaque: 'OneFieldTwoParams' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '*server'
+opaque.go:86:27:iface::opaque: 'OneAssign' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '*server'
+opaque.go:99:24:iface::opaque: 'TwoValues' function return 'Server' interface at the 1st result, abstract a single concrete implementation of 'server'
+opaque.go:108:31:iface::opaque: 'SameTupleCallee' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '*server'
+opaque.go:115:27:iface::opaque: 'AssignFromTuple' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '*server'
+opaque.go:120:38:iface::opaque: 'FromSlice' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '*server'
+opaque.go:127:30:iface::opaque: 'FromRange' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '*server'
+opaque.go:136:34:iface::opaque: 'FromField' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '*server'
+opaque.go:150:20:iface::unusedmethod: method 'Call()' is declared on interface 'Fn' but not used within the package
+opaque.go:165:15:iface::opaque: 'NewBox' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '*Box[int]'
+opaque.go:169:28:iface::opaque: 'Third' function return 'Server' interface at the 3rd result, abstract a single concrete implementation of '*server'
+opaque.go:181:14:iface::opaque: 'Paren' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '*server'

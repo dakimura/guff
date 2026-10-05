@@ -1,0 +1,10 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh iface-v151-unusedmethod
+# Produced by running golangci-lint on compat/golden/cases/iface-v151-unusedmethod/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+basic/basic.go:9:2:iface::unusedmethod: method 'Debug()' is declared on interface 'Logger' but not used within the package
+concrete/main.go:18:2:iface::unusedmethod: method 'm()' is declared on interface 'I' but not used within the package

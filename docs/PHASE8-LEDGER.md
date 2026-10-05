@@ -204,7 +204,7 @@ analyzer 本体（L）が入るまでは finding 0 件になる —— これは
 | goconst | `exclude-types`（Assignment/Binary/Case/Return/Call/CompositeLit、大小無視、未知値はエラー） / `ignore-map-keys`、`ignore-calls` は deprecated | **[Call]** / false | 無し | **done (PR 14i)**：goconst.rs を v1.11.0 visitor/api から全面移植。**ラッパの後付け規則**: ignore-calls:false かつ exclude-types がちょうど [Call] なら空。明示した exclude-types は既定を**置換**（マージしない） |
 | gomoddirectives | `replace-allow-all` / `ignore-forbidden`（struct のみ） | false / false | 無し（ignore-forbidden は DEFERRED） | **done (PR 2)**（ignore 既定ディレクトリ検査と、ブロック内の列も） |
 | gofumpt | `extra.group-params` / `extra.clothe-returns` / `extra.balance-calls`、`extra-rules` は deprecated | false ×3 | `extra-rules` だけ | needs-port。**文言とコードが食い違う**: 警告は「use extra.group-params instead」だが、`extra-rules: true` は 3 規則すべて（balance-calls 含む）を有効にする。コードに合わせる |
-| iface | `enable: [unusedmethod]`、`settings.unusedmethod.exclude` | 既定は identical のみ | 無し | needs-port |
+| iface | `enable: [unusedmethod]`、`settings.unusedmethod.exclude` | 既定は identical のみ | `IfaceSettings` の `settings.{unused,unusedmethod}.exclude`（golangci の `valueToString` どおりカンマ連結した flag 文字列を渡し、analyzer 側で分割・TrimSpace・空除去） | **done (PR 14h)** |
 | modernize | `disable` に書ける名前: fmtappendf 削除、waitgroup → waitgroupgo、7 個追加 | 旧名は warn（照合は改名しない） | 任意文字列を受理（受理は一致）、警告なし | **PR 2: 警告は done**（Suite は PR 1） |
 | gosec | `config.global` の `nosec-require-rules` / `nosec-require-justification`、代替タグの `#` 正規化 | 無効 | `config.global` 全体が DEFERRED | needs-port |
 | revive | `directives: specify-disable-rule`（と既存の specify-disable-reason） | — | directives を読まない | needs-port |
@@ -244,7 +244,7 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 | 11 | GoModDirectivesSettings | new-option | replace-allow-all / ignore-forbidden | settings.rs:2207 | needs-port | S | — |
 | 12 | NoNamedReturnsSettings | new-option | allow-unused-named-returns | settings.rs:1342, nonamedreturns.rs:1060 | already-matches | S | — |
 | 13 | formatters_settings.go GoFumptExtra | new-option | gofumpt `extra.*`、extra-rules deprecated | guff-lint/src/config.rs:590, guff-fmt/src/gofumpt.rs | needs-port | M | gofumpt_with_extra.{go,yml} |
-| 14 | jsonschema iface-analyzers | config-schema | iface `unusedmethod` と exclude | settings.rs IfaceSettings:2137, iface.rs | needs-port | M | iface_unusedmethod.{go,yml} |
+| 14 | jsonschema iface-analyzers | config-schema | iface `unusedmethod` と exclude | settings.rs IfaceSettings:2137, iface.rs | **done (PR 14h)**（`enable` に opaque / unexported / unusedmethod も受理） | M | iface_unusedmethod.{go,yml} |
 | 15 | jsonschema modernize-analyzers | config-schema | disable 名の変更と旧名警告。guff は fmtappendf を既定で走らせ続ける | settings.rs ModernizeSettings, modernize.rs:111,8305 | needs-port | M | — |
 | 16 | goformatters/gci standard_list.go | behavior | std 一覧に crypto/mldsa, uuid（guff は go1.26 分の 4 つも欠落、計 6） | guff-fmt/src/native/gci_std_packages.txt | needs-port | S | — |
 | 17 | goanalysis/runners.go isOutsideFile | behavior | ファイル外の TextEdit を捨てる（guff は end 側を検査しない） | guff-lint/src/fix.rs:267-315 | needs-port | S | — |
@@ -267,7 +267,7 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 | 7 | golinters/goconst runGoconst/toType | new-option | exclude-types の意味論（ignore-calls を変えても call が除外されないケース） | settings.rs, guff-style/src/goconst.rs:272 | **done (PR 14i)**：goconst.rs を v1.11.0 visitor/api から全面移植 | M | goconst_exclude_types.{go,yml}, goconst_eval_and_find_duplicates.go |
 | 8 | golinters/gomoddirectives | new-option | replace-allow-all / ignore-forbidden を渡す | guff-import/src/gomoddirectives.rs, options.rs:66 | **done (PR 2)** | S | — |
 | 9 | golinters/gosec New | new-check | `Excludes += "G407"` の暫定処理を削除 → G407 が既定で走る | guff-style/src/gosec.rs | **done (PR 14a)** | L | — |
-| 10 | golinters/iface | new-check | enable に unusedmethod | iface.rs | needs-port | M | iface_unusedmethod.{go,yml} |
+| 10 | golinters/iface | new-check | enable に unusedmethod | iface.rs | **done (PR 14h)**: golden `iface-gcl-*`（golangci の iface testdata 全 9 本、fix/in を含む） | M | iface_unusedmethod.{go,yml} |
 | 11 | golinters/internal/util.go FormatCode | message | `%#q` 化（CanBackquote 偽ならダブルクォート）。goconst / errcheck / dupl / gocyclo / gocognit / gochecknoinits | goconst.rs:330, gocyclo.rs:39, gocognit.rs:40, guff-errcheck/src/lib.rs:210, guff-dupl/src/dupl.rs:59 | **done (PR 14e)**：guff-analysis/src/golinters.rs `format_code` / `sharp_q` | S | — |
 | 12 | golinters/misspell | message | `%#q` 化 | guff-misspell/src/misspell.rs:30 | **done (PR 14e)**：guff-analysis/src/golinters.rs `format_code` / `sharp_q` | S | — |
 | 13 | golinters/nolintlint/internal/issues.go | message | `%#q` 化 | guff-lint/src/nolintlint.rs:206, nolint.rs:603 | **done (PR 14e)**：guff-analysis/src/golinters.rs `format_code` / `sharp_q` | S | — |
@@ -507,15 +507,15 @@ v5 の `analyzer/testdata` は module zip に無い。GitHub の v5.2.0 タグ�
 | 3 | canonicalheader exclusions | new-option | exclusions / use-default-exclusions | canonicalheader.rs, settings.rs | **done (PR 8)** | M | exclusions/*, canonicalheader_custom.{go,yml} |
 | 4 | canonicalheader SuggestedFix 文言 | message | `should be replaced %q with %q` | check_call | **done (PR 8)** | S | — |
 | 5 | canonicalheader nil ガード | behavior | `(h.Get)("x")` で panic していた | canonicalheader.rs is_header_method | already-matches | S | — |
-| 6 | iface unusedmethod（新規） | new-check | interface の未使用メソッド | guff-style/src/iface.rs | needs-port | M | unusedmethod/testdata/**, iface_unusedmethod.{go,yml} |
+| 6 | iface unusedmethod（新規） | new-check | interface の未使用メソッド | guff-style/src/iface.rs `check_unusedmethod` | **done (PR 14h)**: golden `iface-v151-unusedmethod`。インスタンス化した generic interface 経由の呼び出しは宣言側メソッドを使用扱いにしない（上流どおり、`iface-edges` で固定） | M | unusedmethod/testdata/**, iface_unusedmethod.{go,yml} |
 | 7 | iface unused 照合 | behavior | 名前一致からオブジェクト一致へ | iface.rs check_unused | already-matches | S | unused/testdata/src/basic/* |
-| 8 | iface unused TypeSpec Doc | behavior | spec 単位の `//iface:ignore`（identical でも未対応） | iface.rs | needs-port | M | unused/ignoredirective/*, identical/ignoredirective/* |
-| 9 | iface unused exclude | behavior | TrimSpace と空除去（カンマ分割は 2.12 時点から乖離） | iface.rs, settings.rs | needs-port | S | unused/excludepkg/* |
-| 10 | iface unused SuggestedFix | behavior | 削除範囲に Doc を含む | iface.rs（fix 無し） | needs-port | S | — |
-| 11 | iface opaque | behavior | named return への代入を集める | 無し | needs-port | L | opaque/testdata/** |
-| 12 | iface opaque 位置 | position | 型式の位置へ | 無し | needs-port | S | opaque/n/* |
-| 13 | iface unexported checkType | behavior | 内側の Ident まで剥がす | 無し | needs-port | M | unexported/testdata/** |
-| 14 | iface unexported formatType | message | types.TypeString 表記 | 無し | needs-port | S | unexported/method, typeparams |
+| 8 | iface unused TypeSpec Doc | behavior | spec 単位の `//iface:ignore`（identical でも未対応） | iface.rs `Comments`（解析 AST はコメント無しなので `comments::reparse_with_comments` で再パースし、GenDecl / TypeSpec / Field / FuncDecl の Doc を位置で引く） | **done (PR 14h)** | M | unused/ignoredirective/*, identical/ignoredirective/* |
+| 9 | iface unused exclude | behavior | TrimSpace と空除去（カンマ分割は 2.12 時点から乖離） | iface.rs `split_exclude`, settings.rs | **done (PR 14h)**: golden `iface-v151-unused`（`" excludepkg , ,other"`）/ `-unusedmethod`（リストに空要素） | S | unused/excludepkg/* |
+| 10 | iface unused SuggestedFix | behavior | 削除範囲に Doc を含む | iface.rs `check_unused` | **done (PR 14h)**: fix tier の `iface-v151-unused` / `iface-gcl-*` が golangci --fix と一致 | S | — |
+| 11 | iface opaque | behavior | named return への代入を集める | iface.rs `check_opaque`（analyzer ごと新規） | **done (PR 14h)**: golden `iface-v151-opaque`。上流は `map[types.Type]` で集めるので `return &T{}` 2 回は「2 実装」になる。guff は Pointer を hash-cons するので、型に go/types の生成箇所（`Origin`）を対にして同一性を再現（`iface-edges` の 22 関数で固定） | L | opaque/testdata/** |
+| 12 | iface opaque 位置 | position | 型式の位置へ | iface.rs `check_opaque_func` | **done (PR 14h)** | S | opaque/n/* |
+| 13 | iface unexported checkType | behavior | 内側の Ident まで剥がす | iface.rs `check_unexported` / `find_ident`（analyzer ごと新規） | **done (PR 14h)**: golden `iface-v151-unexported` | M | unexported/testdata/** |
+| 14 | iface unexported formatType | message | types.TypeString 表記 | iface.rs `format_type` / `recv_name` | **done (PR 14h)**。generic 受信者 `Repository[T]` の型が Info に無かったので guff-types に `recordParenthesizedRecvType` を移植 | S | unexported/method, typeparams |
 
 ### formatters（gofumpt v0.9.2/v0.10 → v0.12、gofmt）
 
@@ -667,7 +667,7 @@ golden を regen したら fix のベースラインも撮り直す。測定は 
 | 11 | **unused / unparam** — **done** | Unify、unparam AnonFuncs + linkname + signRequiredBy + alias。あわせて既存の乖離 3 つ: 総称レシーバと literal の名前（`RelString`）、signRequiredBy の名前照合（受信者名 `g1` が関数 `g1` を固定していた）、`f[int](x)` を値の使用と見ていた | unused 0/2 → 0/0（PR 4）、unparam 1/0 → **0/0（ratchet 削除）**、新設 golden `unparam-upstream`（上流 testscript 6 本 + ゼロサイズ） | M |
 | 12 | **modernize 残り（ゴールデンに出ない側）** — **done**（embedlit は Go 1.27 なので PR 15） | minmax ×2、atomictypes、waitgroupgo、testingcontext、rangeint、slicesbackward ×3、stringscut ×3、stringscutprefix、stringsbuilder lastEditEnd、slicesclip。**各項目で上流 testdata を fixture 化**（ratchet は動かないので fixture が唯一の検算） | 新設 golden `modernize-upstream`（x/tools v0.50 の testdata 36 ファイル、179 件）と同じ case の fix tier（1797 行、golangci と byte 一致） | M〜L |
 | 13 | **gofumpt v0.12 の残り + printer** — **done** | §2.4 の toolchain 確認の後。括弧除去、effectiveEnd + multi、removeParens、joinStdImports、diagnose。`omit_v010_rules` / `match_golangci` gate の撤去。あわせて既存の乖離 2 つ: gofumpt の simplify が package レベルの宣言を歩いていなかった、printer に `sanitizeImportPath` が無かった（`` import `C` ``） | fmt tier に gofumpt v0.12 の testscript 33 case と `gofmt-go127-printer`（2.12.2 と 2.14.0 で答えが違う形だけ）。fmt 50 case 全一致 | L |
-| 14 | **新機能（大）を 1 本ずつ** | G407、exhaustruct_v5（**done (PR 14b)**: 1 PR で全部。上流 testdata の golden 21 case と fix 3 case が golangci と一致、ratchet 3/0 → 0/0）、gochecksumtype fact、iface unusedmethod / opaque / unexported、stdversion、goconst eval-const-expressions、embedlit | ― | 各 L |
+| 14 | **新機能（大）を 1 本ずつ** | G407、exhaustruct_v5（**done (PR 14b)**: 1 PR で全部。上流 testdata の golden 21 case と fix 3 case が golangci と一致、ratchet 3/0 → 0/0）、gochecksumtype fact、iface unusedmethod / opaque / unexported（**done (PR 14h)**: 上流 testdata と golangci の iface testdata で golden 15 case）、stdversion、goconst eval-const-expressions、embedlit | ― | 各 L |
 | 15 | **Go 1.27 toolchain 対応（保留）** | export data V5、printf %d go1.27、stringscut CutLast、昇格フィールドキー。ターゲット Go が 1.27 になる日まで保留 | ― | L |
 
 PR 1〜11 で §5.1 の ratchet は**既存の恒久差分（revive 1/4、inline-gofix-sibling 2/0、staticcheck-qf / st の SA4017）まで戻る**見込み。

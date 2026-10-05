@@ -1,0 +1,173 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh iface-v151-opaque
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/iface-v151-opaque/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.14.0
+
+--- a/a/a.go
++++ b/a/a.go
+@@ -14,19 +14,19 @@
+ 	return nil
+ }
+ 
+-func NewServer(addr string) Server { // want "'NewServer' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '\\*server'"
++func NewServer(addr string) *server { // want "'NewServer' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '\\*server'"
+ 	return newServer(addr)
+ }
+ 
+-func NewServer2(addr string) Server { // want "'NewServer2' function return 'Server' interface at the 1st result, abstract a single concrete implementation of 'server'"
++func NewServer2(addr string) server { // want "'NewServer2' function return 'Server' interface at the 1st result, abstract a single concrete implementation of 'server'"
+ 	return server{addr: addr}
+ }
+ 
+-func NewServer3(addr string) Server { // want "'NewServer3' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '\\*server'"
++func NewServer3(addr string) *server { // want "'NewServer3' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '\\*server'"
+ 	return &server{addr: addr}
+ }
+ 
+-func NewServer4(addr string) (Server, error) { // want "'NewServer4' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '\\*server'"
++func NewServer4(addr string) (*server, error) { // want "'NewServer4' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '\\*server'"
+ 	if addr == "" {
+ 		return nil, errors.New("addr cannot be nil")
+ 	}
+@@ -45,6 +45,6 @@
+ 	return nil
+ }
+ 
+-func NewSecureServer(addr string) Server { // want "'NewSecureServer' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '\\*secureServer'"
++func NewSecureServer(addr string) *secureServer { // want "'NewSecureServer' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '\\*secureServer'"
+ 	return &secureServer{addr: addr}
+ }
+--- a/f/f.go
++++ b/f/f.go
+@@ -23,7 +23,7 @@
+ 	return nil, nil
+ }
+ 
+-func StartSpanFromContext2(ctx context.Context) (Span, error) { // want "'StartSpanFromContext2' function return 'Span' interface at the 1st result, abstract a single concrete implementation of '\\*span'"
++func StartSpanFromContext2(ctx context.Context) (*span, error) { // want "'StartSpanFromContext2' function return 'Span' interface at the 1st result, abstract a single concrete implementation of '\\*span'"
+ 	return startSpanFromContextWithTracer(ctx, GlobalTracer)
+ }
+ 
+--- a/h/h.go
++++ b/h/h.go
+@@ -17,7 +17,7 @@
+ 	return newServer(addr)
+ }
+ 
+-func NewServer2(addr string) Server { // want "'NewServer2' function return 'Server' interface at the 1st result, abstract a single concrete implementation of 'server'"
++func NewServer2(addr string) server { // want "'NewServer2' function return 'Server' interface at the 1st result, abstract a single concrete implementation of 'server'"
+ 	return server{addr: addr}
+ }
+ 
+--- a/i/i.go
++++ b/i/i.go
+@@ -20,7 +20,7 @@
+ 
+ func (m *myInterfaceImpl) Do() {}
+ 
+-func WithError() (MyInterface, error) { // want "'WithError' function return 'MyInterface' interface at the 1st result, abstract a single concrete implementation of '\\*myInterfaceImpl'"
++func WithError() (*myInterfaceImpl, error) { // want "'WithError' function return 'MyInterface' interface at the 1st result, abstract a single concrete implementation of '\\*myInterfaceImpl'"
+ 	return &myInterfaceImpl{}, nil
+ }
+ 
+@@ -34,6 +34,6 @@
+ 	return "error"
+ }
+ 
+-func GetMyError() MyError { // want "'GetMyError' function return 'MyError' interface at the 1st result, abstract a single concrete implementation of '\\*myMyError'"
++func GetMyError() *myMyError { // want "'GetMyError' function return 'MyError' interface at the 1st result, abstract a single concrete implementation of '\\*myMyError'"
+ 	return &myMyError{}
+-}
+\ No newline at end of file
++}
+--- a/j/j.go
++++ b/j/j.go
+@@ -10,6 +10,6 @@
+ 	Error() string
+ }
+ 
+-func GetError() error { // want "'GetError' function return 'error' interface at the 1st result, abstract a single concrete implementation of '\\*myError'"
++func GetError() *myError { // want "'GetError' function return 'error' interface at the 1st result, abstract a single concrete implementation of '\\*myError'"
+ 	return &myError{}
+-}
+\ No newline at end of file
++}
+--- a/k/k.go
++++ b/k/k.go
+@@ -18,14 +18,14 @@
+ 
+ var c container
+ 
+-func FromStructField() Doer { // want "'FromStructField' function return 'Doer' interface at the 1st result, abstract a single concrete implementation of '\\*doerImpl'"
++func FromStructField() *doerImpl { // want "'FromStructField' function return 'Doer' interface at the 1st result, abstract a single concrete implementation of '\\*doerImpl'"
+ 	return c.Impl
+ }
+ 
+-func FromTypeAssertion(i interface{}) Doer { // want "'FromTypeAssertion' function return 'Doer' interface at the 1st result, abstract a single concrete implementation of '\\*doerImpl'"
++func FromTypeAssertion(i interface{}) *doerImpl { // want "'FromTypeAssertion' function return 'Doer' interface at the 1st result, abstract a single concrete implementation of '\\*doerImpl'"
+ 	return i.(*doerImpl)
+ }
+ 
+ func FromInterfaceAssertion(i Doer) Doer {
+ 	return i.(Doer)
+-}
+\ No newline at end of file
++}
+--- a/l/l.go
++++ b/l/l.go
+@@ -8,7 +8,7 @@
+ 
+ func (s *server) Serve() error { return nil }
+ 
+-func NewServer() (s Server) { // want "'NewServer' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '\\*server'"
++func NewServer() (s *server) { // want "'NewServer' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '\\*server'"
+ 	s = &server{}
+ 	return
+-}
+\ No newline at end of file
++}
+--- a/n/n.go
++++ b/n/n.go
+@@ -8,7 +8,7 @@
+ 
+ func (s *server) Serve() error { return nil }
+ 
+-func NewServer() (s Server) { // want "'NewServer' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '\\*server'"
++func NewServer() (s *server) { // want "'NewServer' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '\\*server'"
+ 	s = &server{}
+ 	return s
+-}
+\ No newline at end of file
++}
+--- a/p/p.go
++++ b/p/p.go
+@@ -10,10 +10,10 @@
+ 
+ func (s *server) Serve() error { return nil }
+ 
+-func NewServer(ok bool) (s Server, err error) { // want "'NewServer' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '\\*server'"
++func NewServer(ok bool) (s *server, err error) { // want "'NewServer' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '\\*server'"
+ 	s = &server{}
+ 	if !ok {
+ 		return nil, fmt.Errorf("fail")
+ 	}
+ 	return
+-}
+\ No newline at end of file
++}
+--- a/z/z.go
++++ b/z/z.go
+@@ -27,7 +27,7 @@
+ func (d2i *DoerV2Impl) DoItAgain() {
+ }
+ 
+-func NewDoer() Doer { // want "'NewDoer' function return 'Doer' interface at the 1st result, abstract a single concrete implementation of '\\*DoerImpl'"
++func NewDoer() *DoerImpl { // want "'NewDoer' function return 'Doer' interface at the 1st result, abstract a single concrete implementation of '\\*DoerImpl'"
+ 	return &DoerImpl{}
+ }
+ 

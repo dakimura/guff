@@ -1,0 +1,22 @@
+# Golden case: iface v1.5.1's opaque/testdata (golangci-lint 2.14.0) — named
+# return assignments (i..p), the type-expression position (n), error/any.
+# The .golden fix files are measured by the fix tier.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - iface
+  settings:
+    iface:
+      enable:
+        - opaque
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

@@ -27,6 +27,7 @@ use crate::arena::{ObjectData, TypeData};
 use crate::check::Checker;
 use crate::instantiate::instantiate;
 use crate::object::var::{new_param, VarKind};
+use crate::operand::OperandMode;
 use crate::pointer::new_pointer;
 use crate::predicates::is_valid;
 use crate::signature::{
@@ -209,7 +210,7 @@ impl Checker {
     /// the base type's parameters, and the base is instantiated with them.
     ///
     /// **Deferred**: `validRecv` (later), methods on generic *aliases* error,
-    /// `mono.recordCanon`, Info recording.
+    /// `mono.recordCanon`, `recordInstance` of the base.
     fn collect_recv(&mut self, field: &Field) -> (Option<ObjectId>, Option<TypeParamList>) {
         let rtyp = match field.ty.as_ref() {
             Some(t) => t.clone(),
@@ -298,6 +299,8 @@ impl Checker {
                 if ptr && is_valid(&self.types, recv_type) {
                     recv_type = new_pointer(&mut self.types, recv_type);
                 }
+
+                self.record_parenthesized_recv_type(&rtyp, recv_type);
             } else {
                 self.error(
                     base.pos().0 as u32,
@@ -318,6 +321,30 @@ impl Checker {
             self.record_implicit(field.id, recv);
         }
         (Some(recv), rparams_list)
+    }
+
+    /// Record the type of a parameterized receiver type expression and of
+    /// each expression it parenthesizes or dereferences (`*B[P]` → `*B[P]`,
+    /// then `B[P]`).
+    ///
+    /// Equivalent to `Checker.recordParenthesizedRecvType`.
+    fn record_parenthesized_recv_type(&mut self, rtyp: &Expr, mut typ: TypeId) {
+        let mut rtyp = rtyp;
+        loop {
+            self.record_type_and_value(rtyp, OperandMode::TypeExpr, typ, None);
+            match rtyp {
+                Expr::ParenExpr(p) => rtyp = &p.x,
+                Expr::StarExpr(p) => {
+                    rtyp = &p.x;
+                    // typ must be a pointer type
+                    match self.types.get(typ) {
+                        TypeData::Pointer(ptr) => typ = ptr.elem(),
+                        _ => return,
+                    }
+                }
+                _ => return,
+            }
+        }
     }
 
     /// Unpack a receiver type expression `[*]B[P...]` into its pointer flag,

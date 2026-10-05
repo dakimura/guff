@@ -1,0 +1,18 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh iface-v151-unexported
+# Produced by running golangci-lint on compat/golden/cases/iface-v151-unexported/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+fun/fun.go:32:24:iface::unexported: unexported interface 'execer' used as return value in exported function 'ExecAdd'
+fun/fun.go:44:13:iface::unexported: unexported interface 'execer' used as parameter in exported function 'Exec'
+fun/fun.go:48:17:iface::unexported: unexported interface '*execer' used as parameter in exported function 'ExecPtr'
+fun/fun.go:56:30:iface::unexported: unexported interface 'execer' used as parameter in exported function 'DumpExec'
+fun/fun.go:69:22:iface::unexported: unexported interface '[]execer' used as parameter in exported function 'ExecAll'
+fun/fun.go:93:17:iface::unexported: unexported interface '...execer' used as parameter in exported function 'Execs'
+fun/fun.go:101:25:iface::unexported: unexported interface '<-chan execer' used as parameter in exported function 'ExecChan'
+method/method.go:18:35:iface::unexported: unexported interface 'matcher' used as parameter in exported method 'UserRepository.Query'
+typeparams/typeparams.go:11:46:iface::unexported: unexported interface 'map[string]execer[T]' used as parameter in exported function 'Exec'
+typeparams/typeparams.go:29:33:iface::unexported: unexported interface 'matcher[T]' used as parameter in exported method 'Repository[T].Query'

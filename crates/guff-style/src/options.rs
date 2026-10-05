@@ -923,11 +923,14 @@ impl Default for AsasalintOptions {
 /// `linters.settings.iface` / `linters-settings.iface`.
 ///
 /// Empty `enable` → golangci default (`identical` only).
-/// `unused_exclude` maps to `settings.unused.exclude` (exact package paths).
+/// `unused_exclude` / `unusedmethod_exclude` are the analyzers' `exclude`
+/// flags (`settings.<analyzer>.exclude`), as golangci sets them: a YAML list
+/// joined with commas. The analyzer splits and trims them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct IfaceOptions {
     pub enable: Vec<String>,
-    pub unused_exclude: Vec<String>,
+    pub unused_exclude: String,
+    pub unusedmethod_exclude: String,
 }
 
 /// `linters.settings.reassign` / `linters-settings.reassign`.

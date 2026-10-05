@@ -12,3 +12,7 @@ linters:
         unused:
           exclude:
             - example.com/skip
+        unusedmethod:
+          exclude:
+            - example.com/a
+            - " example.com/b"

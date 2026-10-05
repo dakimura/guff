@@ -1,0 +1,7 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces)
+excludepkg.go  crates/guff-style/tests/testdata/iface/upstream-v1.5.1/unusedmethod/excludepkg/excludepkg.go
+basic/basic.go  crates/guff-style/tests/testdata/iface/upstream-v1.5.1/unusedmethod/basic/basic.go
+concrete/main.go  crates/guff-style/tests/testdata/iface/upstream-v1.5.1/unusedmethod/concrete/main.go
+methodexpr/methodexpr.go  crates/guff-style/tests/testdata/iface/upstream-v1.5.1/unusedmethod/methodexpr/methodexpr.go
+methodref/methodref.go  crates/guff-style/tests/testdata/iface/upstream-v1.5.1/unusedmethod/methodref/methodref.go
