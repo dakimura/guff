@@ -266,7 +266,7 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 | 6 | golinters/gochecksumtype | substrate | Analyzer 直利用、sumTypeFact で依存パッケージの sum type を検査 | guff-style/src/gochecksumtype.rs | needs-port | M | — |
 | 7 | golinters/goconst runGoconst/toType | new-option | exclude-types の意味論（ignore-calls を変えても call が除外されないケース） | settings.rs, guff-style/src/goconst.rs:272 | needs-port | M | goconst_exclude_types.{go,yml}, goconst_eval_and_find_duplicates.go |
 | 8 | golinters/gomoddirectives | new-option | replace-allow-all / ignore-forbidden を渡す | guff-import/src/gomoddirectives.rs, options.rs:66 | **done (PR 2)** | S | — |
-| 9 | golinters/gosec New | new-check | `Excludes += "G407"` の暫定処理を削除 → G407 が既定で走る | guff-style/src/gosec.rs | needs-port | L | — |
+| 9 | golinters/gosec New | new-check | `Excludes += "G407"` の暫定処理を削除 → G407 が既定で走る | guff-style/src/gosec.rs | **done (PR 14a)** | L | — |
 | 10 | golinters/iface | new-check | enable に unusedmethod | iface.rs | needs-port | M | iface_unusedmethod.{go,yml} |
 | 11 | golinters/internal/util.go FormatCode | message | `%#q` 化（CanBackquote 偽ならダブルクォート）。goconst / errcheck / dupl / gocyclo / gocognit / gochecknoinits | goconst.rs:330, gocyclo.rs:39, gocognit.rs:40, guff-errcheck/src/lib.rs:210, guff-dupl/src/dupl.rs:59 | needs-port | S | — |
 | 12 | golinters/misspell | message | `%#q` 化 | guff-misspell/src/misspell.rs:30 | needs-port | S | — |
@@ -441,7 +441,7 @@ revive の upstream testdata は module zip に無いので、v1.17.0 タグか�
 
 | # | upstream_path | kind | 要約 | guff の場所 | status | effort | upstream testdata |
 |---|---------------|------|------|-------------|--------|--------|-------------------|
-| 1 | golinters/gosec + analyzers/hardcoded_nonce.go | new-check | G407 が既定で走る（878 行の SSA analyzer） | guff-style/src/gosec.rs（G407 無し） | needs-port | L | testutils/g407_samples.go |
+| 1 | golinters/gosec + analyzers/hardcoded_nonce.go | new-check | G407 が既定で走る（878 行の SSA analyzer） | guff-style/src/gosec.rs（G407 無し） | **done (PR 14a)**: `gosec_g407.rs`。golden `gosec-g407`（上流 testutils の 73 sample、47 件一致）。あわせて go/ssa の `make([]T, n, constM)` → `new([M]T)[:n]`（"makeslice"）を guff-ssa に | L | testutils/g407_samples.go |
 | 2 | analyzers/context_propagation.go | behavior | G118: IndexAddr / MapUpdate への Store を責任移譲に | guff-style/src/gosec_g118.rs:808 | **done (PR 9)**: Store→IndexAddr / MapUpdate を移譲に。guff は可変長引数を pack しないので、`isCancelCalled` だけ call の packed tail を同等に扱う | S | g118_samples.go |
 | 3 | analyzers/range_analyzer.go | behavior | G115: min/max の set フラグを OR に | gosec_g115.rs:1628 | **done (PR 9)** | S | g115_samples.go |
 | 4 | analyzers/pathtraversal.go | behavior | G703 のサニタイザから Clean / Abs / PathEscape を削除 | gosec_taint.rs:293 | **done (PR 9)** | S | g703_samples.go |

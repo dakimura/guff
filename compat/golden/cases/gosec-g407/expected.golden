@@ -1,0 +1,55 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh gosec-g407
+# Produced by running golangci-lint on compat/golden/cases/gosec-g407/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+g407/s00/f0.go:12:25:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing converted string by passing hardcoded constant
+g407/s01/f0.go:20:9:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing a parameter to a function and by passing converted string by passing hardcoded constant
+g407/s04/f0.go:12:25:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing hardcoded slice/array by passing hardcoded slice literal
+g407/s05/f0.go:12:25:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing converted string by passing hardcoded constant
+g407/s06/f0.go:12:25:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing hardcoded slice/array by passing hardcoded slice literal
+g407/s07/f0.go:14:27:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing converted string by passing hardcoded constant
+g407/s08/f0.go:13:27:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing hardcoded slice/array by passing hardcoded slice literal
+g407/s09/f0.go:14:27:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing hardcoded slice/array by passing hardcoded slice literal
+g407/s10/f0.go:14:27:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing a value from function which returns hardcoded value
+g407/s11/f0.go:14:27:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing a value from function which returns hardcoded value
+g407/s12/f0.go:13:29:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing a value from function which returns hardcoded value
+g407/s13/f0.go:13:29:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing a value from function which returns hardcoded value
+g407/s14/f0.go:12:34:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing converted string by passing hardcoded constant
+g407/s15/f0.go:12:34:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing hardcoded slice/array by passing hardcoded slice literal
+g407/s16/f0.go:12:34:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing converted string by passing hardcoded constant
+g407/s17/f0.go:12:34:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing hardcoded slice/array by passing hardcoded slice literal
+g407/s18/f0.go:14:32:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing converted string by passing hardcoded constant
+g407/s19/f0.go:13:25:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing hardcoded slice/array by passing hardcoded slice literal
+g407/s21/f0.go:15:27:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing pointer which points to hardcoded variable by passing hardcoded global
+g407/s23/f0.go:16:9:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing converted string by passing a parameter to a function and by passing hardcoded constant
+g407/s24/f0.go:16:9:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing a parameter to a function and by passing pointer which points to hardcoded variable by passing hardcoded global
+g407/s25/f0.go:13:11:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing converted string by passing a parameter to a function and by passing hardcoded constant
+g407/s26/f0.go:12:19:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing a zeroed buffer from make
+g407/s27/f0.go:13:19:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing a buffer from make modified with hardcoded values
+g407/s30/f0.go:16:19:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing a buffer from make modified with hardcoded values
+g407/s31/f0.go:14:19:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing a buffer from make modified with hardcoded values
+g407/s32/f0.go:13:19:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing a zeroed buffer from make
+g407/s35/f0.go:20:13:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing converted string by passing hardcoded constant
+g407/s38/f0.go:26:19:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing a buffer from make modified with hardcoded values
+g407/s39/f0.go:10:25:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing a buffer from make modified with hardcoded values
+g407/s40/f0.go:9:25:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing a zeroed buffer from make
+g407/s49/f0.go:10:25:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing a zeroed buffer from make
+g407/s53/f0.go:10:22:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing a zeroed buffer from make
+g407/s54/f0.go:14:22:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing a zeroed buffer from make
+g407/s55/f0.go:12:22:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing a buffer from make modified with hardcoded values
+g407/s56/f0.go:12:9:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing a parameter to a function and by passing a buffer from make modified with hardcoded values
+g407/s58/f0.go:10:22:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing a zeroed buffer from make
+g407/s59/f0.go:14:22:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing a zeroed buffer from make
+g407/s60/f0.go:12:22:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing a buffer from make modified with hardcoded values
+g407/s61/f0.go:12:9:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing a parameter to a function and by passing a buffer from make modified with hardcoded values
+g407/s62/f0.go:16:19:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing a buffer from make modified with hardcoded values
+g407/s64/f0.go:16:19:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing a buffer from make modified with hardcoded values
+g407/s65/f0.go:16:19:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing a buffer from make modified with hardcoded values
+g407/s66/f0.go:17:19:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing a buffer from make modified with hardcoded values
+g407/s68/f0.go:13:27:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing converted string by passing hardcoded constant
+g407/s71/f0.go:11:34:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing converted string by passing hardcoded constant
+g407/s72/f0.go:11:34:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing converted string by passing hardcoded constant

@@ -754,7 +754,7 @@ fn is_used_in_call(prog: &Program, func: &Function, common: &CallCommon, target:
 /// `isCancelCalled` treats the packed tail as a transfer (the go/ssa Store is
 /// into an `IndexAddr`), so `s = append(s, cancel)` and `takesMany(cancel)`
 /// are silent; the other walks that call `isUsedInCall` still are not told.
-fn unpacked_arg_count(prog: &Program, func: &Function, common: &CallCommon) -> usize {
+pub(crate) fn unpacked_arg_count(prog: &Program, func: &Function, common: &CallCommon) -> usize {
     let n = common.args.len();
     if common.ellipsis {
         // `f(a, xs...)` hands over the slice itself; nothing is packed.

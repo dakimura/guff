@@ -300,6 +300,8 @@ const EXTRA_RULE_IDS: &[&str] = &[
     "G119", "G123", "G201", "G202",
     "G203",
     "G204", "G301", "G302", "G303", "G304", "G305", "G306", "G402", "G403", "G601", "G602",
+    // gosec v2.29.0: runs by default in golangci-lint 2.14.0.
+    "G407",
     // The taint engine's rules (`gosec_taint`), all SSA analyzers.
     "G702", "G703", "G704", "G705", "G706", "G710",
 ];
@@ -589,6 +591,7 @@ const RULE_SCORES: &[(&str, Score, Score)] = &[
     ("G404", Score::High, Score::Medium),
     ("G405", Score::Medium, Score::High),
     ("G406", Score::Medium, Score::High),
+    ("G407", Score::High, Score::High),
     ("G501", Score::Medium, Score::High),
     ("G502", Score::Medium, Score::High),
     ("G503", Score::Medium, Score::High),

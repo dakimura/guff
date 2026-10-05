@@ -34,12 +34,19 @@ pub(crate) fn check_ssa_analyzers(
     let want_g118 = enabled.contains("G118");
     let want_g119 = enabled.contains("G119");
     let want_g123 = enabled.contains("G123");
+    let want_g407 = enabled.contains("G407");
     let taint_rules: Vec<&'static crate::gosec_taint::TaintRule> = crate::gosec_taint::TAINT_RULES
         .iter()
         .copied()
         .filter(|r| enabled.contains(r.id))
         .collect();
-    if !want_g602 && !want_g115 && !want_g118 && !want_g119 && !want_g123 && taint_rules.is_empty()
+    if !want_g602
+        && !want_g115
+        && !want_g118
+        && !want_g119
+        && !want_g123
+        && !want_g407
+        && taint_rules.is_empty()
     {
         return;
     }
@@ -90,6 +97,9 @@ pub(crate) fn check_ssa_analyzers(
     }
     if want_g123 {
         crate::gosec_g123::collect_g123(prog, &src_funcs, pending);
+    }
+    if want_g407 {
+        crate::gosec_g407::collect_g407(prog, &src_funcs, pending);
     }
     // G702 / G703 / G706 / G710 share one engine and one call graph.
     crate::gosec_taint::collect_taint(prog, &src_funcs, reachable, &taint_rules, pending);

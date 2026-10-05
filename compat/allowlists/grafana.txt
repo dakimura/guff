@@ -6,12 +6,3 @@
 # Prefer fixing guff over growing this list. Entries here are accepted
 # mismatches (message phrasing, enable-set gaps, known DEFERRED).
 
-# golangci-lint 2.12.2 -> 2.14.0 (Phase 8, 2026-10-04). Not accepted mismatches:
-# each is a ledger item still to port, and these lines go when it lands.
-# why: SA1019 now checks struct-literal keys and renders SelectorName (staticcheck-checks #1, #2); goimports/gosec/exhaustive from §2.4 and the gosec / exhaustive groups.
-grafana golangci-only pkg/services/apiserver/client/discovery.go:92:goimports:File is not properly formatted
-grafana golangci-only pkg/services/authz/rbac.go:354:goimports:File is not properly formatted
-grafana golangci-only pkg/services/encryption/provider/cipher_aescfb.go:42:gosec:G407: Use of hardcoded IV/nonce for encryption by passing hardcoded slice/array by passing a zeroed buffer from make
-grafana golangci-only pkg/services/ngalert/notifier/merge/merge.go:172:goimports:File is not properly formatted
-grafana golangci-only pkg/storage/unified/client.go:359:goimports:File is not properly formatted
-grafana golangci-only pkg/util/encryption.go:140:gosec:G407: Use of hardcoded IV/nonce for encryption by passing hardcoded slice/array by passing a zeroed buffer from make
