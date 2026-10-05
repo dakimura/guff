@@ -1,0 +1,21 @@
+# Golden case: goconst v1.11.0 under golangci-lint 2.14.0 (v214-exclude-types).
+# Sources are golangci-lint's own goconst testdata or goconst's (see sources.txt).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - goconst
+  settings:
+    goconst:
+      exclude-types:
+        - Call
+        - CompositeLit
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

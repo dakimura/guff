@@ -523,6 +523,16 @@ pub struct GoconstSettings {
     /// Deprecated single-pattern form; merged into [`Self::ignore_string_values`].
     #[serde(default, rename = "ignore-strings")]
     pub ignore_strings: Option<String>,
+    /// `exclude-types`; absent means golangci's default `[Call]` (a set list
+    /// replaces it, as viper does).
+    #[serde(default, rename = "exclude-types", deserialize_with = "opt_string_or_seq")]
+    pub exclude_types: Option<Vec<String>>,
+    #[serde(default, rename = "ignore-functions", deserialize_with = "string_or_seq")]
+    pub ignore_functions: Vec<String>,
+    #[serde(default, rename = "ignore-map-keys")]
+    pub ignore_map_keys: Option<bool>,
+    #[serde(default, rename = "eval-const-expressions")]
+    pub eval_const_expressions: Option<bool>,
 }
 
 /// `linters.settings.copyloopvar` / `linters-settings.copyloopvar`.
@@ -2369,6 +2379,15 @@ fn gocritic_param_bool(settings: &serde_yaml::Value, check: &str, param: &str) -
 /// guff dropped `linters.settings.gosec` entirely and reported every excluded
 /// rule. An empty entry matches no rule id, which is exactly what upstream does
 /// with it.
+/// [`string_or_seq`] for a key whose absence means something (a default
+/// list the value replaces).
+pub(crate) fn opt_string_or_seq<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    string_or_seq(deserializer).map(Some)
+}
+
 pub(crate) fn string_or_seq<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -3592,10 +3611,40 @@ impl GoconstSettings {
                 ignore_strings.push(legacy.clone());
             }
         }
+        // `runGoconst`: `ignore-calls` (deprecated, default true) only
+        // matters as the way to *un*-exclude calls — false with exclude-types
+        // exactly `[call]` empties the list. Any other combination is
+        // exclude-types alone.
+        let mut exclude: Vec<String> = self
+            .exclude_types
+            .clone()
+            .unwrap_or_else(|| vec!["Call".to_string()]);
+        if !self.ignore_calls.unwrap_or(true)
+            && exclude.len() == 1
+            && exclude[0].eq_ignore_ascii_case("call")
+        {
+            exclude.clear();
+        }
+        let mut exclude_types = Vec::new();
+        let mut exclude_types_error = None;
+        for k in &exclude {
+            match guff_style::GoconstExcludeType::parse(k) {
+                Some(t) => exclude_types.push(t),
+                None => {
+                    exclude_types_error.get_or_insert_with(|| k.clone());
+                }
+            }
+        }
         guff_style::GoconstOptions {
             min_len: self.min_len.unwrap_or(defaults.min_len),
             min_occurrences: self.min_occurrences.unwrap_or(defaults.min_occurrences),
-            ignore_calls: self.ignore_calls.unwrap_or(defaults.ignore_calls),
+            exclude_types,
+            exclude_types_error,
+            ignore_functions: self.ignore_functions.clone(),
+            ignore_map_keys: self.ignore_map_keys.unwrap_or(defaults.ignore_map_keys),
+            eval_const_expressions: self
+                .eval_const_expressions
+                .unwrap_or(defaults.eval_const_expressions),
             ignore_tests: self.ignore_tests.unwrap_or(defaults.ignore_tests),
             match_constant: self.match_constant.unwrap_or(defaults.match_constant),
             find_duplicates: self.find_duplicates.unwrap_or(defaults.find_duplicates),

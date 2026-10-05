@@ -54,7 +54,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         // findings matching `(?i)webhook`, which its `services/webhook/*.go`
         // duplicates carry only because the *path* is in the message. Eight
         // findings golangci-lint does not report.
-        let to_name = shortest_rel_path(&issue.to.filename);
+        let to_name = guff_analysis::golinters::shortest_rel_path(&issue.to.filename);
         let dupl = format!(
             "{}:{}-{}",
             to_name, issue.to.line_start, issue.to.line_end
@@ -78,23 +78,6 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     }
 
     Ok(None)
-}
-
-/// Port of golangci-lint's `fsutils.ShortestRelPath(path, "")`: the path
-/// relative to the process working directory, with symlinks resolved. Falls
-/// back to the path as given when either step fails, as there is nothing better
-/// to say.
-fn shortest_rel_path(path: &str) -> String {
-    let p = Path::new(path);
-    let resolved = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
-    let Ok(wd) = std::env::current_dir() else {
-        return path.to_string();
-    };
-    let wd = std::fs::canonicalize(&wd).unwrap_or(wd);
-    match resolved.strip_prefix(&wd) {
-        Ok(rel) => rel.to_string_lossy().into_owned(),
-        Err(_) => resolved.to_string_lossy().into_owned(),
-    }
 }
 
 fn line_pos(pass: &Pass<'_>, filename: &str, line: i32) -> u32 {

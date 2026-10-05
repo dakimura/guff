@@ -182,7 +182,7 @@ pub use options::{
     AsasalintOptions, BidichkOptions, CopyloopvarOptions, CyclopOptions, DecorderOptions,
     DogsledOptions, EmbeddedstructfieldcheckOptions, ExhaustiveOptions, ExhaustructOptions, ExhaustructV5Options,
     ForbidigoOptions, ForbidigoPattern, FuncorderOptions, FunlenOptions, GochecksumtypeOptions,
-    GocognitOptions, GoconstOptions, GocriticCheckSettings, GocriticOptions, GocycloOptions,
+    GocognitOptions, GoconstExcludeType, GoconstOptions, GocriticCheckSettings, GocriticOptions, GocycloOptions,
     GoheaderOptions,
     GosmopolitanOptions,
     FilePermOptions, G101Options, G117Options, IfaceOptions, GosecOptions, GrouperOptions, InamedparamOptions,
