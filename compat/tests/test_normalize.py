@@ -218,6 +218,24 @@ class DiffTests(unittest.TestCase):
         self.assertTrue(r.ok)
         self.assertEqual(r.allowed_guff, guff)
 
+    def test_stale_allowlist_entry_fails(self):
+        # The diff went away; its row stays and would let it come back.
+        allow = parse_allowlist_lines(["t guff-only pkg/a.go:1:staticcheck:gone"])
+        r = diff_sets("t", set(), set(), allow)
+        self.assertFalse(r.ok)
+        self.assertEqual(r.stale_guff, {"pkg/a.go:1:staticcheck:gone"})
+        self.assertIn("Stale allowlist entries", format_report([r]))
+
+    def test_other_targets_and_wildcards_are_not_stale_here(self):
+        allow = parse_allowlist_lines(
+            [
+                "other guff-only pkg/a.go:1:staticcheck:x",
+                "* golangci-only pkg/b.go:2:govet:y",
+            ]
+        )
+        r = diff_sets("t", set(), set(), allow)
+        self.assertTrue(r.ok)
+
     def test_unexpected_fails(self):
         r = diff_sets("t", {"a.go:1:govet:x"}, set(), [])
         self.assertFalse(r.ok)

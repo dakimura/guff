@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "golden"))
 
 from golden import (  # noqa: E402
+    check_ratchet,
     confirm,
     diff,
     escape,
@@ -119,6 +120,34 @@ class ConfirmationTests(unittest.TestCase):
         self.assertIn("did not agree", text)
         self.assertIn("a.go:2:1:l::y", text)
         self.assertNotIn("a.go:1:1:l::x", text)
+
+
+class RatchetTests(unittest.TestCase):
+    def ratchet(self, missing, extra):
+        import json
+        import tempfile
+
+        fh = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+        json.dump({"missing": missing, "extra": extra, "why": "w"}, fh)
+        fh.close()
+        return fh.name
+
+    def quiet(self, *args):
+        import contextlib
+        import io
+
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            return check_ratchet(*args)
+
+    def test_at_baseline_passes(self):
+        self.assertEqual(self.quiet("c", self.ratchet(2, 1), 2, 1), 0)
+
+    def test_growth_fails(self):
+        self.assertEqual(self.quiet("c", self.ratchet(2, 1), 3, 1), 1)
+
+    def test_improvement_without_lowering_fails(self):
+        # The slack would let the same diffs come back unnoticed.
+        self.assertEqual(self.quiet("c", self.ratchet(2, 1), 1, 1), 1)
 
 
 class GoldenFileTests(unittest.TestCase):

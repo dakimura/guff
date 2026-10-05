@@ -352,6 +352,12 @@ class DiffResult:
     unexpected_golangci: set[str] = field(default_factory=set)
     allowed_guff: set[str] = field(default_factory=set)
     allowed_golangci: set[str] = field(default_factory=set)
+    # Entries written for *this* target that no longer match a diff. A diff
+    # that went away — fixed, or upstream changed its mind — leaves its row
+    # behind, and a row that allows nothing still allows the same diff to come
+    # back unnoticed. Wildcard (`*`) rows are shared and not judged here.
+    stale_guff: set[str] = field(default_factory=set)
+    stale_golangci: set[str] = field(default_factory=set)
 
     def __post_init__(self) -> None:
         self.both = self.guff & self.golangci
@@ -371,6 +377,12 @@ class DiffResult:
         self.allowed_golangci = self.golangci_only & allow_gcl
         self.unexpected_guff = self.guff_only - allow_guff
         self.unexpected_golangci = self.golangci_only - allow_gcl
+        own_guff = {e.key for e in entries if e.target == self.target and e.side == "guff-only"}
+        own_gcl = {
+            e.key for e in entries if e.target == self.target and e.side == "golangci-only"
+        }
+        self.stale_guff = own_guff - self.guff_only
+        self.stale_golangci = own_gcl - self.golangci_only
 
     @property
     def precision(self) -> float:
@@ -382,7 +394,12 @@ class DiffResult:
 
     @property
     def ok(self) -> bool:
-        return not self.unexpected_guff and not self.unexpected_golangci
+        return (
+            not self.unexpected_guff
+            and not self.unexpected_golangci
+            and not self.stale_guff
+            and not self.stale_golangci
+        )
 
     def per_linter(self) -> dict[str, dict[str, float | int]]:
         def lint_of(key: str) -> str:
@@ -464,6 +481,13 @@ def format_report(results: list[DiffResult]) -> str:
             lines.append("### Unexpected golangci-only")
             for k in sorted(r.unexpected_golangci):
                 lines.append(f"- `{k}`")
+            lines.append("")
+        if r.stale_guff or r.stale_golangci:
+            lines.append("### Stale allowlist entries (no longer a diff: delete them)")
+            for k in sorted(r.stale_guff):
+                lines.append(f"- guff-only: `{k}`")
+            for k in sorted(r.stale_golangci):
+                lines.append(f"- golangci-only: `{k}`")
             lines.append("")
         if r.allowed_guff or r.allowed_golangci:
             n = len(r.allowed_guff) + len(r.allowed_golangci)
@@ -595,6 +619,8 @@ def main(argv: list[str] | None = None) -> int:
                         "ok": result.ok,
                         "unexpected_guff": sorted(result.unexpected_guff),
                         "unexpected_golangci": sorted(result.unexpected_golangci),
+                        "stale_guff": sorted(result.stale_guff),
+                        "stale_golangci": sorted(result.stale_golangci),
                     },
                     indent=2,
                 )

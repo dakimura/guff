@@ -275,8 +275,13 @@ every diff is fixed, or leaving CI red. A case may therefore carry a
 
 This is **not** an allowlist. Nothing is suppressed: every differing finding is
 still printed on every run, exactly as before. The only thing the file changes
-is the exit code, and only while the counts do not grow. Either count going up
-fails the gate, and so does leaving the file behind once the case reaches 0/0.
+is the exit code, and only while the counts stay exactly where the file says.
+Either count going up fails the gate; so does either count going *down* without
+the file being lowered in the same change, and so does leaving the file behind
+once the case reaches 0/0. (This paragraph said the last part long before the
+code did: until 2026-10-05 an exact match returned before the ratchet was
+read, and an improvement only printed "lower it". Six ratchets went stale
+that way in one afternoon of Phase 8.)
 `why` must name the classes of diff that remain, so the file cannot quietly
 become permanent.
 

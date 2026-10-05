@@ -163,8 +163,8 @@ def check_ratchet(case: str, path: str | None, missing: int, extra: int) -> int:
     being worked down — not one whose diff is being tolerated. It is NOT an
     allowlist: nothing is suppressed, every differing finding is still printed,
     and the only thing the file buys is that CI stays red-free while the count
-    goes *down*. Growing either count fails, and so does leaving the file in
-    place once the case reaches zero.
+    goes *down*. Growing either count fails, and so does shrinking it without
+    lowering the file — including leaving the file in place at zero.
     """
     if not path or not Path(path).exists():
         return 1
@@ -179,10 +179,17 @@ def check_ratchet(case: str, path: str | None, missing: int, extra: int) -> int:
         )
         return 1
     if missing < b_missing or extra < b_extra:
+        # A ratchet that is not lowered when the count drops stops being one:
+        # the slack lets the same number of diffs come back unnoticed. So an
+        # improvement fails the gate until the file is lowered (or deleted, at
+        # 0/0) in the same change that made it.
         print(
-            f"  {case}: ratchet improved (missing {b_missing}->{missing},"
-            f" extra {b_extra}->{extra}) — lower it in {path}."
+            f"  {case}: RATCHET NOT LOWERED — missing {b_missing}->{missing},"
+            f" extra {b_extra}->{extra}. Lower it in {path}"
+            f"{' (delete it: the case is at 0/0)' if missing == 0 and extra == 0 else ''}.",
+            file=sys.stderr,
         )
+        return 1
     else:
         print(f"  {case}: at ratchet baseline (missing {missing}, extra {extra})")
     return 0
@@ -242,6 +249,16 @@ def main(argv: list[str] | None = None) -> int:
         print(format_diff(args.case, expected, actual))
         missing, extra = diff(expected, actual)
         if not missing and not extra:
+            # An exact match used to return here without looking at the
+            # ratchet, so a file left behind at zero allowed its old count to
+            # come back. It goes in the change that closed the case.
+            if args.ratchet and Path(args.ratchet).exists():
+                print(
+                    f"  {args.case}: matches exactly, but {args.ratchet} is still"
+                    " there — delete it.",
+                    file=sys.stderr,
+                )
+                return 1
             return 0
         return check_ratchet(args.case, args.ratchet, len(missing), len(extra))
 
