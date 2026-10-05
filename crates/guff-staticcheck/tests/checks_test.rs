@@ -1428,14 +1428,13 @@ fn integer_literal_is_syntactic_not_a_folded_constant() {
 
     let sa4003 = support::run_analyzer(sa4003::analyzer(), &pkg);
     assert_eq!(sa4003.len(), 5, "{sa4003:?}");
-    // The message names the *underlying* basic type: honnef v0.7.0 formats
-    // `basic`, not the named type, so `Level` is reported as `uint32`. (A later
-    // upstream switched to the named type; the version golangci-lint 2.12.2
-    // pins did not, and the local checkout is not that version.)
+    // The message names the operand's own type since staticcheck v0.8.1
+    // (golangci-lint 2.14.0): `Level`, where v0.7.0 named the underlying
+    // `uint32`. The golden case records the package-qualified spelling.
     assert!(
         sa4003
             .iter()
-            .all(|m| m == "every value of type uint32 is >= 0"),
+            .all(|m| m.starts_with("every value of type ") && m.ends_with("Level is >= 0")),
         "{sa4003:?}"
     );
 
@@ -2608,30 +2607,27 @@ fn sa1019_flags_a_deprecated_struct_field_of_an_imported_type() {
     let pkg = typecheck_rule("sa1019", "bad.go");
     support::assert_well_typed(&pkg);
     let messages = support::run_analyzer(sa1019::analyzer(), &pkg);
-    // `starts_with`, not `contains`: the rendered selector leads every message,
-    // and "w.Old" is a substring of "pw.Old".
+    // `starts_with`, not `contains`. Since staticcheck v0.8.1 (golangci-lint
+    // 2.14.0) every message leads with `code.SelectorName` — the declaring
+    // type, package-qualified — not the source spelling, so the seven forms
+    // collapse onto three names; v0.7.0 wrote `o.Old`, `w.Old`, `pw.Old`,
+    // `h.Cfg.Old`, `w.Options.Old`.
     let count = |needle: &str| messages.iter().filter(|m| m.starts_with(needle)).count();
-    assert_eq!(count("old.Legacy is deprecated"), 1, "{messages:?}");
-    assert_eq!(count("old.OldClient is deprecated"), 1, "{messages:?}");
-    // Declared on `Options`, selected on `Options`.
-    assert_eq!(count("o.Old is deprecated"), 1, "{messages:?}");
-    // Promoted through an embedded value — written and read.
-    assert_eq!(count("w.Old is deprecated"), 2, "{messages:?}");
+    assert_eq!(count("example.com/old.Legacy is deprecated"), 1, "{messages:?}");
+    assert_eq!(count("example.com/old.OldClient is deprecated"), 1, "{messages:?}");
+    // Declared on `Options`: selected on `Options`, and with the embedding
+    // spelled out by hand (`w.Options.Old`).
+    assert_eq!(count("(example.com/old.Options).Old is deprecated"), 2, "{messages:?}");
+    // Promoted through an embedded value — written and read — and named field
+    // then promoted (buildkit's `h.Cfg.Old`).
+    assert_eq!(count("(example.com/old.Wrapper).Old is deprecated"), 3, "{messages:?}");
     // Promoted through an embedded pointer.
-    assert_eq!(count("pw.Old is deprecated"), 1, "{messages:?}");
-    // Named field, then promoted (buildkit's shape).
-    assert_eq!(count("h.Cfg.Old is deprecated"), 1, "{messages:?}");
-    // Embedding spelled out by hand.
-    assert_eq!(count("w.Options.Old is deprecated"), 1, "{messages:?}");
+    assert_eq!(count("(example.com/old.PtrWrapper).Old is deprecated"), 1, "{messages:?}");
     // A package whose deprecation notice is a paragraph of a *block-comment*
     // package doc, carrying no `//` or `*` marker of its own — which is how
     // cloud.google.com/go/pubsub writes it, and what the byte probe that
-    // decides whether to parse the file could not see.
-    assert_eq!(
-        count("\"example.com/blockdoc\" is deprecated"),
-        1,
-        "{messages:?}"
-    );
+    // decides whether to parse the file could not see. Unquoted since v0.8.1.
+    assert_eq!(count("example.com/blockdoc is deprecated"), 1, "{messages:?}");
     assert_eq!(messages.len(), 9, "{messages:?}");
 }
 
@@ -2649,23 +2645,28 @@ fn sa1019_flags_a_deprecated_method_promoted_through_embedding() {
     support::assert_well_typed(&pkg);
     let messages = support::run_analyzer(sa1019::analyzer(), &pkg);
     let count = |needle: &str| messages.iter().filter(|m| m.starts_with(needle)).count();
+    // Named by `code.SelectorName` since staticcheck v0.8.1: the receiver type
+    // of the selection, package-qualified, where v0.7.0 rendered the source.
     // Declared on the operand's type: worked before.
-    assert_eq!(count("(&oldmethod.Base{}).Text is deprecated"), 1, "{messages:?}");
-    // Promoted one level, two levels, and through an embedded pointer.
-    assert_eq!(count("(&oldmethod.Inline{}).Text is deprecated"), 1, "{messages:?}");
-    assert_eq!(count("(&oldmethod.Deep{}).Text is deprecated"), 1, "{messages:?}");
-    assert_eq!(count("(&oldmethod.PtrEmb{}).Text is deprecated"), 1, "{messages:?}");
+    assert_eq!(count("(*example.com/oldmethod.Base).Text is deprecated"), 1, "{messages:?}");
+    // Promoted one level, two levels (the call and the method value `x.Text`),
+    // and through an embedded pointer.
+    assert_eq!(count("(*example.com/oldmethod.Inline).Text is deprecated"), 1, "{messages:?}");
+    assert_eq!(count("(*example.com/oldmethod.Deep).Text is deprecated"), 2, "{messages:?}");
+    assert_eq!(count("(*example.com/oldmethod.PtrEmb).Text is deprecated"), 1, "{messages:?}");
     // Value receiver, promoted.
-    assert_eq!(count("oldmethod.Inline{}.Val is deprecated"), 1, "{messages:?}");
+    assert_eq!(count("(example.com/oldmethod.Inline).Val is deprecated"), 1, "{messages:?}");
     // Interface method: worked before.
-    assert_eq!(count("n.Text is deprecated: interface method"), 1, "{messages:?}");
-    // Method value, promoted.
-    assert_eq!(count("x.Text is deprecated"), 1, "{messages:?}");
+    assert_eq!(
+        count("(example.com/oldmethod.Node).Text is deprecated: interface method"),
+        1,
+        "{messages:?}"
+    );
     // Declared in a package the file does not import.
-    assert_eq!(count("(&oldmethod.Wrap{}).Old is deprecated: inner"), 1, "{messages:?}");
+    assert_eq!(count("(*example.com/oldmethod.Wrap).Old is deprecated: inner"), 1, "{messages:?}");
     // `Own` shadows `Text` with a live method but not `Val`.
-    assert_eq!(count("(&oldmethod.Own{}).Val is deprecated"), 1, "{messages:?}");
-    assert_eq!(count("(&oldmethod.Own{}).Text"), 0, "{messages:?}");
+    assert_eq!(count("(*example.com/oldmethod.Own).Val is deprecated"), 1, "{messages:?}");
+    assert_eq!(count("(*example.com/oldmethod.Own).Text"), 0, "{messages:?}");
     assert_eq!(messages.len(), 9, "{messages:?}");
 }
 
@@ -2680,7 +2681,7 @@ fn sa1019_lets_protoc_gen_go_output_import_golang_protobuf() {
         let pkg = typecheck_rule("sa1019", file);
         support::run_analyzer(sa1019::analyzer(), &pkg)
             .iter()
-            .filter(|m| m.contains("github.com/golang/protobuf/proto\" is deprecated"))
+            .filter(|m| m.starts_with("github.com/golang/protobuf/proto is deprecated"))
             .count()
     };
     assert_eq!(count("protogen/pb.go"), 0, "protoc-gen-go output");

@@ -49,12 +49,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         if !same_to_lower_or_upper(pass, left, right) {
             return;
         }
-        // The message is a constant upstream — `!=` does not make it
-        // `!strings.EqualFold`. guff said that until 2026-08-27, and the
-        // fixture held only the `==` spelling, so nothing measured it.
-        //
-        // The *fix* is where the negation goes: upstream wraps the rebuilt
-        // `strings.EqualFold(a, b)` in a `!` when the operator was `!=`.
+        // `method := "strings.EqualFold"`, with a `!` for `!=` — in the message
+        // and the fix's title since staticcheck v0.8.1 (golangci-lint 2.14.0).
+        // v0.7.0 kept the message constant and negated only the edit, which
+        // guff matched from 2026-08-27 until the 2.14.0 pin.
         let edit = (|| {
             let (a, b) = (left.args.first()?, right.args.first()?);
             let (at, bt) = (render_node(pass, a)?, render_node(pass, b)?);
@@ -65,13 +63,15 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 new_text: format!("{bang}strings.EqualFold({at}, {bt})"),
             })
         })();
-        pending.push((
-            match_pos(node),
-            "should use strings.EqualFold instead".to_string(),
-            edit,
-        ));
+        let method = if expr.op == Token::NEQ {
+            "!strings.EqualFold"
+        } else {
+            "strings.EqualFold"
+        };
+        pending.push((match_pos(node), method, edit));
     });
-    for (pos, message, edit) in pending {
+    for (pos, method, edit) in pending {
+        let message = format!("should use {method} instead");
         let Some(edit) = edit else {
             pass.reportf(pos, message);
             continue;
@@ -80,7 +80,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             pos,
             message,
             suggested_fixes: vec![SuggestedFix {
-                message: "Replace with strings.EqualFold".into(),
+                message: format!("replace with {method}"),
                 text_edits: vec![edit],
             }],
             ..Diagnostic::default()

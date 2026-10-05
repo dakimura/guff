@@ -28,8 +28,8 @@ use guff_analysis::{
     AnalysisResult, Analyzer, DeprecatedResult, IsDeprecated, Package, Pass, RunError, RunFn,
 };
 use guff_types::arena::{ObjectData, TypeData};
+use guff_types::OperandMode;
 
-use crate::render::render_expr;
 use crate::stdlib_deprecations::{
     stdlib_deprecated_packages, stdlib_deprecations, stdlib_package_deprecation_msg, Deprecation,
     DEPRECATED_NEVER_USE, DEPRECATED_USE_NO_LONGER,
@@ -77,17 +77,17 @@ fn handle_deprecation(
     pass: &Pass<'_>,
     deprs: &DeprecatedResult,
     depr: &IsDeprecated,
-    // Key for `knowledge.StdlibDeprecations` (honnef `SelectorName` / import path).
-    table_key: &str,
-    // Source-rendered name for the diagnostic (honnef `report.Render`).
-    display_name: &str,
+    // `deprecatedObjName`: `code.SelectorName` for a selector, the unquoted
+    // path for an import. staticcheck v0.8.1 (golangci-lint 2.14.0) keys the
+    // knowledge table *and* writes the message with it; v0.7.0 wrote the
+    // message with `report.Render(node)`, the source spelling.
+    name: &str,
     pkg_path: &str,
     pos: u32,
     current_fn: Option<guff_types::arena::ObjectId>,
 ) -> Option<String> {
     let table = stdlib_deprecations();
-    let table_key = table_key.trim_matches('"');
-    let std = table.get(table_key).or_else(|| table.get(display_name));
+    let std = table.get(name);
     if std.is_none() && is_stdlib_path(pkg_path) {
         return None;
     }
@@ -103,9 +103,9 @@ fn handle_deprecation(
         return None;
     }
     if let Some(std) = std {
-        deprecation_message(display_name, depr, Some(std))
+        deprecation_message(name, depr, Some(std))
     } else {
-        Some(format!("{display_name} is deprecated: {}", depr.msg))
+        Some(format!("{name} is deprecated: {}", depr.msg))
     }
 }
 
@@ -1002,24 +1002,22 @@ fn selector_diagnostic(
         synthetic = IsDeprecated { msg };
         &synthetic
     };
-    // Stdlib table keyed by SelectorName; message uses source rendering (report.Render).
-    let table_key = knowledge_selector_name(pass, sel);
-    let display = render_expr(&Expr::SelectorExpr(sel.clone()));
+    let name = knowledge_selector_name(pass, sel);
     // Upstream passes the whole `*ast.SelectorExpr` to `report.Report`, so the
-    // position is where `x` starts, not where the selected name does:
-    // `lib.OldFunc` is reported at `lib`, `i.GetOld` at `i`.
-    let pos = sel.x.pos().0 as u32;
-    handle_deprecation(
-        pass,
-        deprs,
-        depr,
-        &table_key,
-        &display,
-        &pkg_path,
-        pos,
-        current_fn,
-    )
-    .map(|msg| (pos, msg))
+    // position is where `x` starts: `lib.OldFunc` is reported at `lib`,
+    // `i.GetOld` at `i`. Since v0.8.1, when `x` is a *type* — a method
+    // expression, or the type of a struct literal whose key SA1019 now asks
+    // about — it reports at the selected name instead.
+    let x_is_type = info
+        .types
+        .get(&sel.x.id())
+        .is_some_and(|tv| tv.mode == OperandMode::TypeExpr);
+    let pos = if x_is_type {
+        sel.sel.pos().0 as u32
+    } else {
+        sel.x.pos().0 as u32
+    };
+    handle_deprecation(pass, deprs, depr, &name, &pkg_path, pos, current_fn).map(|msg| (pos, msg))
 }
 
 fn struct_lit_diagnostics(
@@ -1132,9 +1130,9 @@ fn import_diagnostic(
     };
     let p = spec.path.value.trim_matches('"');
     let pos = spec.path.value_pos.0 as u32;
-    // Upstream reports the quoted import path via report.Render(spec.Path).
-    let quoted = format!("\"{p}\"");
-    handle_deprecation(pass, deprs, depr, p, &quoted, path, pos, None).map(|msg| (pos, msg))
+    // `handleDeprecation(depr, spec.Path, path, path, nil)`: v0.8.1 names the
+    // package by its unquoted path; v0.7.0 rendered the quoted literal.
+    handle_deprecation(pass, deprs, depr, p, path, pos, None).map(|msg| (pos, msg))
 }
 
 fn sa1019_analyzer_impl() -> Analyzer {

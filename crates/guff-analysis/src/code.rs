@@ -1071,18 +1071,41 @@ pub fn knowledge_selector_name(pass: &Pass<'_>, sel: &SelectorExpr) -> String {
         };
         return format!("({recv_str}).{name}");
     }
-    if let Expr::Ident(pkg_ident) = &*sel.x {
-        let obj_id = info
-            .defs
-            .get(&pkg_ident.id)
-            .and_then(|o| *o)
-            .or_else(|| info.uses.get(&pkg_ident.id).copied());
-        if let Some(obj_id) = obj_id {
-            if let ObjectData::PkgName(pn) = artifacts.objects.get(obj_id) {
-                let path = artifacts.packages.get(pn.imported()).path();
-                return format!("{path}.{}", sel.sel.name);
+    // No selection: a qualified identifier, or — staticcheck v0.8.1 — a
+    // selector SA1019 builds itself for a struct literal's key (`T{F: …}` is
+    // asked as `T.F`), whose `X` is a type.
+    match &*sel.x {
+        Expr::Ident(x) => {
+            let obj_id = info
+                .defs
+                .get(&x.id)
+                .and_then(|o| *o)
+                .or_else(|| info.uses.get(&x.id).copied());
+            if let Some(obj_id) = obj_id {
+                if let ObjectData::PkgName(pn) = artifacts.objects.get(obj_id) {
+                    let path = artifacts.packages.get(pn.imported()).path();
+                    return format!("{path}.{}", sel.sel.name);
+                }
+            }
+            // `fmt.Sprintf("(%s).%s", info.TypeOf(x), expr.Sel.Name)`.
+            if let Some(tv) = info.types.get(&x.id) {
+                let ts = guff_types::typestring::type_string(
+                    &artifacts.types,
+                    &artifacts.objects,
+                    &artifacts.packages,
+                    tv.typ,
+                    None,
+                );
+                return format!("({ts}).{}", sel.sel.name);
             }
         }
+        // `fmt.Sprintf("(%s).%s", SelectorName(pass, x), expr.Sel.Name)`.
+        Expr::SelectorExpr(x) => {
+            return format!("({}).{}", knowledge_selector_name(pass, x), sel.sel.name);
+        }
+        // Upstream panics ("unsupported selector") — an instantiated generic
+        // type as the literal's type, `pkg.G[int]{F: …}`.
+        _ => {}
     }
     selector_name_for(pass, sel)
 }
