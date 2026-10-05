@@ -1,0 +1,13 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh goconst-v1110-scope
+# Produced by running golangci-lint on compat/golden/cases/goconst-v1110-scope/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+scope.go:12:7:goconst::string `shared-value` has 3 occurrences, make it a constant
+scope.go:23:7:goconst::string `test-only-const` has 3 occurrences, make it a constant
+scope.go:31:38:goconst::string `mapvalue` has 3 occurrences, make it a constant
+scope.go:43:17:goconst::string `counted-call` has 3 occurrences, make it a constant
+scope.go:57:25:goconst::string `order-value` has 3 occurrences, make it a constant

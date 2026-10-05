@@ -1,31 +1,53 @@
 //! Port of [`github.com/jgautheron/goconst`](https://github.com/jgautheron/goconst)
-//! (golangci-lint defaults).
+//! v1.11.0 (`visitor.go`, `api.go` `RunWithConfig`), as golangci-lint 2.14's
+//! wrapper drives it: one run per package, over every file of it.
 //!
-//! Defaults match golangci-lint: `min-len=3`, `min-occurrences=3`,
-//! `match-constant=true`, `find-duplicates=false`, `ignore-calls=true`,
-//! `numbers=false`, `min=3`, `max=3`.
-//!
-//! DEFERRED: `ignore-functions`, `eval-const-expressions`, and remaining
-//! settings keys.
+//! v1.11 changed what a finding *is*: occurrences are counted per scope (test
+//! files apart from the rest), each file reports its **smallest** position,
+//! a non-test finding only names a non-test constant, duplicate constants are
+//! grouped per scope by value, and `ignore-map-keys` / `eval-const-expressions`
+//! / `ignore-functions` exist.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
-use guff::ast::{BasicLit, Expr, GenDecl, Spec};
-use guff::position::Pos;
+use guff::ast::{BasicLit, CallExpr, CompositeLit, Expr, GenDecl, Spec};
+use guff::commentmap::{node_end, node_pos};
+use guff::position::{Pos, Position};
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_constant::Kind;
+use guff_types::arena::{ObjectData, TypeData};
 use regex::Regex;
 
-use crate::options::GoconstOptions;
+use crate::options::{GoconstExcludeType, GoconstOptions};
 
+const TEST_SUFFIX: &str = "_test.go";
+
+/// `ExtendedPos`: where a literal was seen, with the raw position kept for
+/// reporting.
+#[derive(Clone)]
+struct StrPos {
+    position: Position,
+    pos: u32,
+}
+
+/// `ConstType`.
 #[derive(Clone)]
 struct ConstEntry {
     name: String,
-    filename: String,
+    position: Position,
     pos: u32,
+    /// `valueKey`: the exact value, so constants whose display values are
+    /// approximations (high-precision numbers) are not grouped together.
+    value_key: String,
+}
+
+/// `lessPosition`: filename, then line, then column.
+fn position_key(p: &Position) -> (&str, i64, i64) {
+    (p.filename.as_str(), p.line, p.column)
 }
 
 /// The literal's *value*, the way upstream gets it:
@@ -42,40 +64,17 @@ struct ConstEntry {
 /// three-occurrence literal that upstream measures as one rune and drops
 /// (pyroscope `pkg/validation/validate_test.go:71`). And the value is the map
 /// key, so `"\x61bc"` and `"abc"` are one string with six occurrences upstream
-/// and two strings with three each here.
-fn unquote_lit(lit: &BasicLit) -> Option<String> {
-    let v = &lit.value;
-    if v.len() < 2 {
-        return None;
-    }
-    let quote = v.as_bytes()[0];
-    if (quote != b'"' && quote != b'`') || v.as_bytes()[v.len() - 1] != quote {
-        return None;
+/// and two strings with three each here. Anything not starting with a quote
+/// (a number, a constant's `String()`) is taken as is.
+fn unquote(v: &str) -> String {
+    if !(v.starts_with('"') || v.starts_with('`')) {
+        return v.to_string();
     }
     match guff_gostd::strconv::unquote(v) {
-        Ok(s) => Some(s),
-        Err(_) => Some(v[1..v.len() - 1].to_string()),
+        Ok(s) => s,
+        Err(_) if v.len() >= 2 => v[1..v.len() - 1].to_string(),
+        Err(_) => v.to_string(),
     }
-}
-
-fn literal_key(lit: &BasicLit) -> Option<String> {
-    match lit.kind {
-        Some(Token::STRING) => unquote_lit(lit),
-        Some(Token::INT) | Some(Token::FLOAT) => Some(lit.value.clone()),
-        _ => None,
-    }
-}
-
-fn is_supported_lit(lit: &BasicLit, numbers: bool) -> bool {
-    match lit.kind {
-        Some(Token::STRING) => true,
-        Some(Token::INT) | Some(Token::FLOAT) => numbers,
-        _ => false,
-    }
-}
-
-fn passes_min_len(value: &str, min_len: usize) -> bool {
-    !value.is_empty() && value.chars().count() >= min_len
 }
 
 /// Join ignore patterns with OR, wrapping each in `(...)` like upstream
@@ -101,229 +100,286 @@ fn compile_ignore_strings(patterns: &[String]) -> Option<Regex> {
     Regex::new(&parts.join("|")).ok()
 }
 
-fn is_ignored_string(value: &str, ignore: Option<&Regex>) -> bool {
-    ignore.is_some_and(|re| re.is_match(value))
+/// The run's state: `Parser` and `treeVisitor` in one.
+struct Goconst<'p, 'a> {
+    pass: &'p Pass<'a>,
+    options: &'p GoconstOptions,
+    ignore: Option<Regex>,
+    excluded: HashSet<GoconstExcludeType>,
+    ignore_functions: HashSet<String>,
+    strs: HashMap<String, Vec<StrPos>>,
+    string_count: HashMap<String, usize>,
+    consts: HashMap<String, Vec<ConstEntry>>,
+    /// `skipNodes`: map-key expression subtrees (by source range) the walk
+    /// prunes under `ignore-map-keys`.
+    skip: Vec<(i64, i64)>,
 }
 
-fn parse_go_int(s: &str) -> Option<i64> {
-    if let Some(rest) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-        return i64::from_str_radix(rest, 16).ok();
-    }
-    if s.starts_with('0') && s.len() > 1 && !s.contains(['.', 'e', 'E']) {
-        return i64::from_str_radix(s, 8).ok();
-    }
-    s.parse::<i64>().ok()
-}
-
-fn passes_number_range(value: &str, options: &GoconstOptions) -> bool {
-    // Upstream applies min/max to any string that ParseInt accepts — even when
-    // ParseNumbers is false (golangci defaults min=3,max=3 drop `"443"` etc.).
-    if options.number_min == 0 && options.number_max == 0 {
-        return true;
-    }
-    let Some(i) = parse_go_int(value) else {
-        return true;
-    };
-    if options.number_min != 0 && i < options.number_min {
-        return false;
-    }
-    if options.number_max != 0 && i > options.number_max {
-        return false;
-    }
-    true
-}
-
-fn add_literal(
-    lit: &BasicLit,
-    options: &GoconstOptions,
-    ignore: Option<&Regex>,
-    occurrences: &mut HashMap<String, Vec<u32>>,
-) {
-    if !is_supported_lit(lit, options.numbers) {
-        return;
-    }
-    let Some(key) = literal_key(lit) else {
-        return;
-    };
-    if !passes_min_len(&key, options.min_len) {
-        return;
-    }
-    if !passes_number_range(&key, options) {
-        return;
-    }
-    if is_ignored_string(&key, ignore) {
-        return;
-    }
-    occurrences
-        .entry(key)
-        .or_default()
-        .push(lit.value_pos.0 as u32);
-}
-
-fn add_expr_lit(
-    expr: &Expr,
-    options: &GoconstOptions,
-    ignore: Option<&Regex>,
-    occurrences: &mut HashMap<String, Vec<u32>>,
-) {
-    if let Expr::BasicLit(lit) = expr {
-        add_literal(lit, options, ignore, occurrences);
-    }
-}
-
-fn collect_constants_from_gendecl(
-    g: &GenDecl,
-    filename: &str,
-    options: &GoconstOptions,
-    constants: &mut HashMap<String, Vec<ConstEntry>>,
-) {
-    for spec in &g.specs {
-        let Spec::ValueSpec(vs) = spec else {
-            continue;
-        };
-        if vs.values.is_empty() {
-            continue;
+impl Goconst<'_, '_> {
+    /// `isSupported`: strings, and numbers when `numbers` is set.
+    fn is_supported(&self, lit: &BasicLit) -> bool {
+        match lit.kind {
+            Some(Token::STRING) => true,
+            Some(Token::INT) | Some(Token::FLOAT) => self.options.numbers,
+            _ => false,
         }
-        for (i, name) in vs.names.iter().enumerate() {
-            let value_idx = if vs.values.len() == 1 {
-                0
-            } else if i < vs.values.len() {
-                i
-            } else {
-                continue;
-            };
-            let Expr::BasicLit(lit) = &vs.values[value_idx] else {
-                continue;
-            };
-            if !is_supported_lit(lit, options.numbers) {
-                continue;
+    }
+
+    /// `isSupportedKind`.
+    fn is_supported_kind(&self, kind: Kind) -> bool {
+        match kind {
+            Kind::String => true,
+            Kind::Complex | Kind::Float | Kind::Int => self.options.numbers,
+            _ => false,
+        }
+    }
+
+    /// `numberMin`/`numberMax` against anything `strconv.ParseInt(s, 0, 0)`
+    /// accepts — even with `numbers` off, so golangci's defaults `min=3,
+    /// max=3` drop `"443"`.
+    fn out_of_number_range(&self, s: &str) -> bool {
+        let (min, max) = (self.options.number_min, self.options.number_max);
+        if min == 0 && max == 0 {
+            return false;
+        }
+        match guff_gostd::strconv::parse_int(s, 0, 64) {
+            Ok(i) => (min != 0 && i < min) || (max != 0 && i > max),
+            Err(_) => false,
+        }
+    }
+
+    fn position(&self, pos: u32) -> Position {
+        self.pass.fset().position(Pos(pos as i64))
+    }
+
+    /// `addString`.
+    fn add_string(&mut self, lit: &BasicLit, typ: GoconstExcludeType) {
+        if self.excluded.contains(&typ) {
+            return;
+        }
+        let s = unquote(&lit.value);
+        if s.is_empty() || s.chars().count() < self.options.min_len {
+            return;
+        }
+        if self.ignore.as_ref().is_some_and(|re| re.is_match(&s)) {
+            return;
+        }
+        if self.out_of_number_range(&s) {
+            return;
+        }
+        *self.string_count.entry(s.clone()).or_default() += 1;
+        let pos = lit.value_pos.0 as u32;
+        let position = self.position(pos);
+        self.strs.entry(s).or_default().push(StrPos { position, pos });
+    }
+
+    fn add_expr(&mut self, e: &Expr, typ: GoconstExcludeType) {
+        if let Expr::BasicLit(lit) = e {
+            if self.is_supported(lit) {
+                self.add_string(lit, typ);
             }
-            let Some(key) = literal_key(lit) else {
-                continue;
-            };
-            if !passes_min_len(&key, options.min_len) {
-                continue;
-            }
-            constants.entry(key).or_default().push(ConstEntry {
-                name: name.name.clone(),
-                filename: filename.to_string(),
-                pos: name.name_pos.0 as u32,
+        }
+    }
+
+    /// `addConst`.
+    fn add_const(&mut self, name: &str, val: &str, pos: u32, value_key: Option<String>) {
+        let v = unquote(val);
+        if v.chars().count() < self.options.min_len {
+            return;
+        }
+        if self.ignore.as_ref().is_some_and(|re| re.is_match(&v)) {
+            return;
+        }
+        let position = self.position(pos);
+        let value_key = value_key.filter(|k| !k.is_empty()).unwrap_or_else(|| v.clone());
+        let o = self.options;
+        let entry = self.consts.entry(v);
+        let new = matches!(entry, std::collections::hash_map::Entry::Vacant(_));
+        if new || o.find_duplicates || o.match_constant {
+            entry.or_default().push(ConstEntry {
+                name: name.to_string(),
+                position,
+                pos,
+                value_key,
             });
         }
     }
-}
 
-fn find_matching_const(
-    key: &str,
-    filename: &str,
-    constants: &HashMap<String, Vec<ConstEntry>>,
-) -> Option<String> {
-    let entries = constants.get(key)?;
-    let mut sorted = entries.clone();
-    sorted.sort_by(|a, b| (a.filename.as_str(), a.pos).cmp(&(b.filename.as_str(), b.pos)));
+    /// `constValueStrings`: the display value and the exact-value key.
+    fn const_value_strings(v: &guff_constant::Value) -> (String, String) {
+        if v.kind() == Kind::String {
+            return (
+                v.exact_string(),
+                format!("string:{}", guff_constant::string_val_lossy(v)),
+            );
+        }
+        (v.to_string(), format!("{:?}:{}", v.kind(), v.exact_string()))
+    }
 
-    let is_test = filename.ends_with("_test.go");
-    if !is_test {
-        if let Some(entry) = sorted
-            .iter()
-            .find(|entry| !entry.filename.ends_with("_test.go"))
-        {
-            return Some(entry.name.clone());
+    fn gen_decl(&mut self, g: &GenDecl) {
+        if !self.options.match_constant && !self.options.find_duplicates {
+            return;
+        }
+        if g.tok != Some(Token::CONST) {
+            return;
+        }
+        let info = self.pass.types_info();
+        let objects = self.pass.pkg().type_artifacts.as_ref().map(|a| &a.objects);
+        let eval = self.options.eval_const_expressions && info.is_some();
+        for spec in &g.specs {
+            let Spec::ValueSpec(val) = spec else {
+                continue;
+            };
+            if eval {
+                // `typeInfo.Defs[name].(*types.Const)`: every name, including
+                // the implicit repetitions of an iota block.
+                let mut added = false;
+                for name in &val.names {
+                    let c = info
+                        .and_then(|i| i.defs.get(&name.id).copied().flatten())
+                        .zip(objects)
+                        .and_then(|(o, objs)| match objs.get(o) {
+                            ObjectData::Const(c) => Some(c.val().clone()),
+                            _ => None,
+                        });
+                    let Some(c) = c else {
+                        continue;
+                    };
+                    if !self.is_supported_kind(c.kind()) {
+                        continue;
+                    }
+                    let (display, key) = Self::const_value_strings(&c);
+                    self.add_const(&name.name, &display, name.name_pos.0 as u32, Some(key));
+                    added = true;
+                }
+                if added || val.values.is_empty() {
+                    continue;
+                }
+            }
+            for (i, value) in val.values.iter().enumerate() {
+                let Some(name) = val.names.get(i) else {
+                    continue;
+                };
+                if eval {
+                    let tv = info.and_then(|inf| inf.types.get(&value.id()));
+                    let Some(c) = tv.and_then(|tv| tv.val.as_ref()) else {
+                        continue;
+                    };
+                    if !self.is_supported_kind(c.kind()) {
+                        continue;
+                    }
+                    let (display, key) = Self::const_value_strings(c);
+                    self.add_const(&name.name, &display, value.pos().0 as u32, Some(key));
+                    continue;
+                }
+                let Expr::BasicLit(lit) = value else {
+                    continue;
+                };
+                if !self.is_supported(lit) {
+                    continue;
+                }
+                self.add_const(&name.name, &lit.value, name.name_pos.0 as u32, None);
+            }
         }
     }
-    sorted.first().map(|entry| entry.name.clone())
-}
 
-fn collect(
-    pass: &Pass<'_>,
-    options: &GoconstOptions,
-    ignore: Option<&Regex>,
-    occurrences: &mut HashMap<String, Vec<u32>>,
-    constants: &mut HashMap<String, Vec<ConstEntry>>,
-) {
-    let pkg = pass.pkg();
-    let fset = pass.fset();
-    let collect_consts = options.match_constant || options.find_duplicates;
-    for (i, file) in pass.files().iter().enumerate() {
-        let fallback = fset.position(file.pos()).filename;
-        let filename = pkg
-            .compiled_go_files
-            .get(i)
-            .and_then(|p| p.file_name())
-            .and_then(|s| s.to_str())
-            .unwrap_or(fallback.as_str());
-        if options.ignore_tests && filename.ends_with("_test.go") {
-            continue;
+    /// `shouldIgnoreCall`: `f(…)` or `pkg.f(…)` named in `ignore-functions`.
+    fn should_ignore_call(&self, call: &CallExpr) -> bool {
+        if self.ignore_functions.is_empty() {
+            return false;
         }
+        let name = match call.fun.as_ref() {
+            Expr::Ident(id) => id.name.clone(),
+            Expr::SelectorExpr(sel) => match sel.x.as_ref() {
+                Expr::Ident(x) => format!("{}.{}", x.name, sel.sel.name),
+                _ => return false,
+            },
+            _ => return false,
+        };
+        self.ignore_functions.contains(&name)
+    }
 
-        walk::inspect(NodeRef::File(file), |n| {
-            let Some(n) = n else {
-                return true;
-            };
-            match n {
-                NodeRef::GenDecl(g) if g.tok == Some(Token::CONST) => {
-                    if collect_consts {
-                        collect_constants_from_gendecl(g, filename, options, constants);
-                    }
-                    false
+    /// `isMapLiteral`: by type when there is type information.
+    fn is_map_literal(&self, lit: &CompositeLit) -> bool {
+        let tv = self.pass.types_info().and_then(|i| i.types.get(&lit.id));
+        if let (Some(tv), Some(a)) = (tv, self.pass.pkg().type_artifacts.as_ref()) {
+            return matches!(a.types.get(tv.typ.underlying(&a.types)), TypeData::Map(_));
+        }
+        matches!(lit.ty.as_deref(), Some(Expr::MapType(_)))
+    }
+
+    fn composite_lit(&mut self, lit: &CompositeLit) {
+        let is_map = self.options.ignore_map_keys && self.is_map_literal(lit);
+        for item in &lit.elts {
+            match item {
+                Expr::BasicLit(l) if self.is_supported(l) => {
+                    self.add_string(l, GoconstExcludeType::CompositeLit)
                 }
-                // Upstream goconst walks into CallExpr children so nested
-                // CompositeLit (e.g. f([]string{"x"})) still counts. golangci
-                // `ignore-calls` only excludes *direct* BasicLit call args
-                // (excludeTypes[Call]), matching jgautheron/goconst.
-                NodeRef::CallExpr(c) => {
-                    if !options.ignore_calls {
-                        for arg in &c.args {
-                            add_expr_lit(arg, options, ignore, occurrences);
+                Expr::KeyValueExpr(kv) => {
+                    if let Expr::BasicLit(key) = kv.key.as_ref() {
+                        // A string literal key can only be a map key, so it
+                        // goes even without type information; numeric keys
+                        // stay.
+                        if self.is_supported(key)
+                            && (!self.options.ignore_map_keys || key.kind != Some(Token::STRING))
+                        {
+                            self.add_string(key, GoconstExcludeType::CompositeLit);
+                        }
+                    } else if self.options.ignore_map_keys && is_map {
+                        // `NamedString("key")`: the whole key subtree goes.
+                        let k = walk::expr_ref(&kv.key);
+                        self.skip.push((node_pos(k).0, node_end(k).0));
+                    }
+                    if let Expr::BasicLit(v) = kv.value.as_ref() {
+                        if self.is_supported(v) {
+                            self.add_string(v, GoconstExcludeType::CompositeLit);
                         }
                     }
-                    true
                 }
-                NodeRef::AssignStmt(a) => {
-                    for rhs in &a.rhs {
-                        add_expr_lit(rhs, options, ignore, occurrences);
-                    }
-                    true
-                }
-                NodeRef::BinaryExpr(b) if b.op == Token::EQL || b.op == Token::NEQ => {
-                    add_expr_lit(&b.x, options, ignore, occurrences);
-                    add_expr_lit(&b.y, options, ignore, occurrences);
-                    true
-                }
-                NodeRef::CaseClause(c) => {
-                    for item in &c.list {
-                        add_expr_lit(item, options, ignore, occurrences);
-                    }
-                    true
-                }
-                NodeRef::ReturnStmt(r) => {
-                    for item in &r.results {
-                        add_expr_lit(item, options, ignore, occurrences);
-                    }
-                    true
-                }
-                NodeRef::CompositeLit(cl) => {
-                    for elt in &cl.elts {
-                        match elt {
-                            Expr::BasicLit(lit) => {
-                                add_literal(lit, options, ignore, occurrences)
-                            }
-                            Expr::KeyValueExpr(kv) => {
-                                add_expr_lit(&kv.key, options, ignore, occurrences);
-                                add_expr_lit(&kv.value, options, ignore, occurrences);
-                            }
-                            _ => {}
-                        }
-                    }
-                    true
-                }
-                // Upstream has no ValueSpec occurrence path: `var x = "s"` /
-                // `const x = "s"` initializers are not counted (const names are
-                // collected separately via GenDecl CONST above). Counting them
-                // inflated occurrence totals (traefik `testScheme = "http"`).
-                _ => true,
+                _ => {}
             }
-        });
+        }
+    }
+
+    fn visit(&mut self, n: NodeRef<'_>) -> bool {
+        if !self.skip.is_empty() {
+            let (p, e) = (node_pos(n).0, node_end(n).0);
+            if self.skip.iter().any(|&(s, t)| s <= p && e <= t) {
+                return false;
+            }
+        }
+        match n {
+            NodeRef::GenDecl(g) => self.gen_decl(g),
+            NodeRef::AssignStmt(a) => {
+                for rhs in &a.rhs {
+                    self.add_expr(rhs, GoconstExcludeType::Assignment);
+                }
+            }
+            NodeRef::BinaryExpr(b) if b.op == Token::EQL || b.op == Token::NEQ => {
+                self.add_expr(&b.x, GoconstExcludeType::Binary);
+                self.add_expr(&b.y, GoconstExcludeType::Binary);
+            }
+            NodeRef::CaseClause(c) => {
+                for item in &c.list {
+                    self.add_expr(item, GoconstExcludeType::Case);
+                }
+            }
+            NodeRef::ReturnStmt(r) => {
+                for item in &r.results {
+                    self.add_expr(item, GoconstExcludeType::Return);
+                }
+            }
+            NodeRef::CallExpr(c) => {
+                if !self.should_ignore_call(c) {
+                    for arg in &c.args {
+                        self.add_expr(arg, GoconstExcludeType::Call);
+                    }
+                }
+            }
+            NodeRef::CompositeLit(cl) => self.composite_lit(cl),
+            _ => {}
+        }
+        true
     }
 }
 
@@ -341,49 +397,13 @@ fn format_message(key: &str, count: usize, matching_const: Option<&str>) -> Stri
     }
 }
 
-fn format_duplicate_message(name: &str, first_pos: &guff::position::Position) -> String {
+/// `DuplicatePos.String()` — golangci-lint prints the file relative to the
+/// working directory.
+fn format_duplicate_message(name: &str, first_pos: &Position) -> String {
     let name = guff_analysis::golinters::format_code(name);
-    format!("This constant is a duplicate of {name} at {first_pos}")
-}
-
-fn report_duplicate_consts(
-    pass: &mut Pass<'_>,
-    constants: &HashMap<String, Vec<ConstEntry>>,
-) {
-    let mut keys: Vec<_> = constants.keys().cloned().collect();
-    keys.sort();
-    for key in keys {
-        let entries = constants.get(&key).expect("key present");
-        if entries.len() < 2 {
-            continue;
-        }
-
-        let mut non_test: Vec<_> = entries
-            .iter()
-            .filter(|e| !e.filename.ends_with("_test.go"))
-            .cloned()
-            .collect();
-        let mut test: Vec<_> = entries
-            .iter()
-            .filter(|e| e.filename.ends_with("_test.go"))
-            .cloned()
-            .collect();
-
-        for scope in [&mut non_test, &mut test] {
-            scope.sort_by(|a, b| (a.filename.as_str(), a.pos).cmp(&(b.filename.as_str(), b.pos)));
-            if scope.len() < 2 {
-                continue;
-            }
-            let first = &scope[0];
-            let first_pos = pass.fset().position(Pos(first.pos as i64));
-            for dup in &scope[1..] {
-                pass.reportf(
-                    dup.pos,
-                    &format_duplicate_message(&first.name, &first_pos),
-                );
-            }
-        }
-    }
+    let mut at = first_pos.clone();
+    at.filename = guff_analysis::golinters::shortest_rel_path(&at.filename);
+    format!("This constant is a duplicate of {name} at {at}")
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -395,54 +415,143 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .settings::<GoconstOptions>("goconst")
         .cloned()
         .unwrap_or_default();
-    let ignore = compile_ignore_strings(&options.ignore_strings);
+    // golangci's `toType` fails the run on an unknown `exclude-types` entry.
+    if let Some(bad) = &options.exclude_types_error {
+        return Err(format!("unknown type {bad}").into());
+    }
 
-    let mut occurrences: HashMap<String, Vec<u32>> = HashMap::new();
-    let mut constants: HashMap<String, Vec<ConstEntry>> = HashMap::new();
-    collect(
-        pass,
-        &options,
-        ignore.as_ref(),
-        &mut occurrences,
-        &mut constants,
-    );
+    let mut issues: Vec<(u32, String)> = Vec::new();
+    {
+        let mut g = Goconst {
+            pass: &*pass,
+            options: &options,
+            ignore: compile_ignore_strings(&options.ignore_strings),
+            excluded: options.exclude_types.iter().copied().collect(),
+            ignore_functions: options
+                .ignore_functions
+                .iter()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect(),
+            strs: HashMap::new(),
+            string_count: HashMap::new(),
+            consts: HashMap::new(),
+            skip: Vec::new(),
+        };
+        let fset = pass.fset();
+        for file in pass.files() {
+            if options.ignore_tests && fset.position(file.pos()).filename.ends_with(TEST_SUFFIX) {
+                continue;
+            }
+            g.skip.clear();
+            walk::inspect(NodeRef::File(file), |n| match n {
+                Some(n) => g.visit(n),
+                None => true,
+            });
+        }
+        collect_issues(&g, &mut issues);
+    }
+    for (pos, msg) in issues {
+        pass.reportf(pos, msg);
+    }
+    Ok(None)
+}
 
-    let mut keys: Vec<_> = occurrences.keys().cloned().collect();
+/// `RunWithConfig` after the walk: `ProcessResults`, the per-scope string
+/// issues, then the per-scope duplicate constants.
+fn collect_issues(g: &Goconst<'_, '_>, out: &mut Vec<(u32, String)>) {
+    let options = g.options;
+    let mut keys: Vec<&String> = g
+        .strs
+        .keys()
+        .filter(|s| g.string_count.get(*s).copied().unwrap_or(0) >= options.min_occurrences)
+        .filter(|s| !g.out_of_number_range(s))
+        .collect();
     keys.sort();
-    for key in keys {
-        let positions = occurrences.get(&key).expect("key present");
-        let count = positions.len();
-        if count < options.min_occurrences {
+
+    for s in keys {
+        let mut positions = g.strs[s].clone();
+        if positions.is_empty() {
             continue;
         }
-        // jgautheron/goconst v1.10.0 (golangci 2.12.x) emits the first
-        // *encounter* per file (AST walk / append order), not the minimum
-        // byte offset. Nested composite lits are visited after parent
-        // KeyValue BasicLit values, so `e: "fred"` wins over
-        // `ObjectMeta{Name: "fred"}` on an earlier line.
-        let mut first_per_file: HashMap<String, u32> = HashMap::new();
-        for &pos in positions {
-            let filename = pass.fset().position(Pos(pos as i64)).filename;
-            first_per_file.entry(filename).or_insert(pos);
+        positions.sort_by(|a, b| position_key(&a.position).cmp(&position_key(&b.position)));
+        let test_count = positions
+            .iter()
+            .filter(|p| p.position.filename.ends_with(TEST_SUFFIX))
+            .count();
+        let non_test_count = positions.len() - test_count;
+
+        // A non-test issue never names a test-only constant; a test issue
+        // may name any.
+        let (mut any_const, mut non_test_const) = (None, None);
+        if options.match_constant {
+            if let Some(raw) = g.consts.get(s).filter(|c| !c.is_empty()) {
+                let mut csts = raw.clone();
+                csts.sort_by(|a, b| position_key(&a.position).cmp(&position_key(&b.position)));
+                any_const = Some(csts[0].name.clone());
+                non_test_const = csts
+                    .iter()
+                    .find(|c| !c.position.filename.ends_with(TEST_SUFFIX))
+                    .map(|c| c.name.clone());
+            }
         }
-        let mut report_positions: Vec<_> = first_per_file.into_values().collect();
-        report_positions.sort_unstable();
-        for pos in report_positions {
-            let filename = pass.fset().position(Pos(pos as i64)).filename;
-            let matching = if options.match_constant {
-                find_matching_const(&key, &filename, &constants)
-            } else {
-                None
+
+        let mut seen: HashSet<&str> = HashSet::new();
+        for p in &positions {
+            if !seen.insert(p.position.filename.as_str()) {
+                continue;
+            }
+            let is_test = p.position.filename.ends_with(TEST_SUFFIX);
+            let scope_count = if is_test { test_count } else { non_test_count };
+            if scope_count < options.min_occurrences {
+                continue;
+            }
+            let matching = match (&non_test_const, is_test) {
+                (Some(c), _) => Some(c.as_str()),
+                (None, true) => any_const.as_deref(),
+                (None, false) => None,
             };
-            pass.reportf(pos, &format_message(&key, count, matching.as_deref()));
+            out.push((p.pos, format_message(s, scope_count, matching)));
         }
     }
 
-    if options.find_duplicates {
-        report_duplicate_consts(pass, &constants);
+    if !options.find_duplicates {
+        return;
     }
-
-    Ok(None)
+    // `duplicateConstGroups`: by exact value, each group shown under its
+    // smallest display value, in key order.
+    let mut groups: HashMap<&str, (&str, Vec<&ConstEntry>)> = HashMap::new();
+    for (display, values) in &g.consts {
+        for c in values {
+            let key = if c.value_key.is_empty() { display.as_str() } else { c.value_key.as_str() };
+            let group = groups.entry(key).or_insert((display.as_str(), Vec::new()));
+            if display.as_str() < group.0 {
+                group.0 = display.as_str();
+            }
+            group.1.push(c);
+        }
+    }
+    let mut keys: Vec<&str> = groups
+        .iter()
+        .filter(|(_, (_, c))| c.len() > 1)
+        .map(|(k, _)| *k)
+        .collect();
+    keys.sort_unstable();
+    for key in keys {
+        let (_, consts) = &groups[key];
+        let (test, non_test): (Vec<&ConstEntry>, Vec<&ConstEntry>) = consts
+            .iter()
+            .partition(|c| c.position.filename.ends_with(TEST_SUFFIX));
+        for mut scope in [non_test, test] {
+            scope.sort_by(|a, b| position_key(&a.position).cmp(&position_key(&b.position)));
+            let Some(first) = scope.first() else {
+                continue;
+            };
+            for dup in &scope[1..] {
+                out.push((dup.pos, format_duplicate_message(&first.name, &first.position)));
+            }
+        }
+    }
 }
 
 pub fn analyzer() -> &'static Analyzer {

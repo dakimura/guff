@@ -1,0 +1,10 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh goconst-v214-eval
+# Produced by running golangci-lint on compat/golden/cases/goconst-v214-eval/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+goconst_eval_const_expressions.go:14:8:goconst::string `example.com/api` has 3 occurrences, but such constant `API` already exists
+goconst_eval_const_expressions.go:22:8:goconst::string `example.com/web` has 3 occurrences, but such constant `Web` already exists

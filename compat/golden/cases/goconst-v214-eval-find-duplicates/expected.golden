@@ -1,0 +1,10 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh goconst-v214-eval-find-duplicates
+# Produced by running golangci-lint on compat/golden/cases/goconst-v214-eval-find-duplicates/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+goconst_eval_and_find_duplicates.go:13:7:goconst::This constant is a duplicate of `EnvUser` at goconst_eval_and_find_duplicates.go:9:2
+goconst_eval_and_find_duplicates.go:20:8:goconst::This constant is a duplicate of `KiB` at goconst_eval_and_find_duplicates.go:15:7

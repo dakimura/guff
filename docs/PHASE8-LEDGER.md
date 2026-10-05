@@ -201,7 +201,7 @@ analyzer 本体（L）が入るまでは finding 0 件になる —— これは
 | fatcontext | `check-loops` / `check-function-literals` | true / true | 既に読む | already-matches |
 | funcorder | `function` | false | 既に読む | already-matches |
 | nonamedreturns | `allow-unused-named-returns` | false | 既に読む | already-matches |
-| goconst | `exclude-types`（Assignment/Binary/Case/Return/Call/CompositeLit、大小無視、未知値はエラー） / `ignore-map-keys`、`ignore-calls` は deprecated | **[Call]** / false | 無し | needs-port。**ラッパの後付け規則**: ignore-calls:false かつ exclude-types がちょうど [Call] なら空。明示した exclude-types は既定を**置換**（マージしない） |
+| goconst | `exclude-types`（Assignment/Binary/Case/Return/Call/CompositeLit、大小無視、未知値はエラー） / `ignore-map-keys`、`ignore-calls` は deprecated | **[Call]** / false | 無し | **done (PR 14i)**：goconst.rs を v1.11.0 visitor/api から全面移植。**ラッパの後付け規則**: ignore-calls:false かつ exclude-types がちょうど [Call] なら空。明示した exclude-types は既定を**置換**（マージしない） |
 | gomoddirectives | `replace-allow-all` / `ignore-forbidden`（struct のみ） | false / false | 無し（ignore-forbidden は DEFERRED） | **done (PR 2)**（ignore 既定ディレクトリ検査と、ブロック内の列も） |
 | gofumpt | `extra.group-params` / `extra.clothe-returns` / `extra.balance-calls`、`extra-rules` は deprecated | false ×3 | `extra-rules` だけ | needs-port。**文言とコードが食い違う**: 警告は「use extra.group-params instead」だが、`extra-rules: true` は 3 規則すべて（balance-calls 含む）を有効にする。コードに合わせる |
 | iface | `enable: [unusedmethod]`、`settings.unusedmethod.exclude` | 既定は identical のみ | 無し | needs-port |
@@ -240,7 +240,7 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 | 7 | DupWordSettings.SkipRawStrings | new-option | dupword `skip-raw-strings` | settings.rs DupwordSettings, guff-comment/src/options.rs | **done (PR 2)** | S | dupword_skip_raw_strings.{go,yml} |
 | 8 | FatcontextSettings | new-option | check-loops / check-function-literals（既定 true） | settings.rs:938, guff-context/src/fatcontext.rs:293 | already-matches | S | fatcontext_checkloops.{go,yml}, fatcontext_checkfunctionliterals.{go,yml} |
 | 9 | FuncOrderSettings.Function | new-option | funcorder `function` | settings.rs:1363, guff-style/src/funcorder.rs:229,276 | already-matches | S | — |
-| 10 | GoConstSettings ExcludeTypes / IgnoreMapKeys | new-option | goconst の新キーとラッパの互換処理 | settings.rs GoconstSettings:502 | needs-port | M | goconst_exclude_types.{go,yml} |
+| 10 | GoConstSettings ExcludeTypes / IgnoreMapKeys | new-option | goconst の新キーとラッパの互換処理 | settings.rs GoconstSettings:502 | **done (PR 14i)**：goconst.rs を v1.11.0 visitor/api から全面移植 | M | goconst_exclude_types.{go,yml} |
 | 11 | GoModDirectivesSettings | new-option | replace-allow-all / ignore-forbidden | settings.rs:2207 | needs-port | S | — |
 | 12 | NoNamedReturnsSettings | new-option | allow-unused-named-returns | settings.rs:1342, nonamedreturns.rs:1060 | already-matches | S | — |
 | 13 | formatters_settings.go GoFumptExtra | new-option | gofumpt `extra.*`、extra-rules deprecated | guff-lint/src/config.rs:590, guff-fmt/src/gofumpt.rs | needs-port | M | gofumpt_with_extra.{go,yml} |
@@ -264,7 +264,7 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 | 4 | golinters/fatcontext | new-option | 2 フラグを渡す | settings.rs, fatcontext.rs | already-matches | S | fatcontext*.go/yml |
 | 5 | golinters/funcorder | new-option | function を渡す | funcorder.rs:276 | already-matches | S | — |
 | 6 | golinters/gochecksumtype | substrate | Analyzer 直利用、sumTypeFact で依存パッケージの sum type を検査 | guff-style/src/gochecksumtype.rs | needs-port | M | — |
-| 7 | golinters/goconst runGoconst/toType | new-option | exclude-types の意味論（ignore-calls を変えても call が除外されないケース） | settings.rs, guff-style/src/goconst.rs:272 | needs-port | M | goconst_exclude_types.{go,yml}, goconst_eval_and_find_duplicates.go |
+| 7 | golinters/goconst runGoconst/toType | new-option | exclude-types の意味論（ignore-calls を変えても call が除外されないケース） | settings.rs, guff-style/src/goconst.rs:272 | **done (PR 14i)**：goconst.rs を v1.11.0 visitor/api から全面移植 | M | goconst_exclude_types.{go,yml}, goconst_eval_and_find_duplicates.go |
 | 8 | golinters/gomoddirectives | new-option | replace-allow-all / ignore-forbidden を渡す | guff-import/src/gomoddirectives.rs, options.rs:66 | **done (PR 2)** | S | — |
 | 9 | golinters/gosec New | new-check | `Excludes += "G407"` の暫定処理を削除 → G407 が既定で走る | guff-style/src/gosec.rs | **done (PR 14a)** | L | — |
 | 10 | golinters/iface | new-check | enable に unusedmethod | iface.rs | needs-port | M | iface_unusedmethod.{go,yml} |
@@ -457,13 +457,13 @@ revive の upstream testdata は module zip に無いので、v1.17.0 タグか�
 |---|---------------|------|------|-------------|--------|--------|-------------------|
 | 1 | gocritic rules.go sprintfQuotedString | new-check | `` "`%s`" `` → `%#q` の 2 本目の規則 | guff-style/src/gocritic.rs:7166 | **done (PR 8)** | S | sprintfQuotedString/{positive,negative}_tests.go |
 | 2 | gocritic utils.go goStdlib | message | importShadow の stdlib 表 | gocritic.rs:7623 | already-matches | S | — |
-| 3 | goconst api.go スコープ分割 | behavior | テスト / 非テストで件数を分ける | goconst.rs run() | needs-port | S | api_test.go |
-| 4 | goconst api.go sortPositions | position | ファイル内の最小位置で報告 | goconst.rs first_per_file | needs-port | S | — |
-| 5 | goconst match-constant | behavior | 非テスト issue に非テスト const だけ | goconst.rs find_matching_const | needs-port | S | — |
+| 3 | goconst api.go スコープ分割 | behavior | テスト / 非テストで件数を分ける | goconst.rs run() | **done (PR 14i)**：goconst.rs を v1.11.0 visitor/api から全面移植 | S | api_test.go |
+| 4 | goconst api.go sortPositions | position | ファイル内の最小位置で報告 | goconst.rs first_per_file | **done (PR 14i)**：goconst.rs を v1.11.0 visitor/api から全面移植 | S | — |
+| 5 | goconst match-constant | behavior | 非テスト issue に非テスト const だけ | goconst.rs find_matching_const | **done (PR 14i)**：goconst.rs を v1.11.0 visitor/api から全面移植 | S | — |
 | 6 | goconst find-duplicates | behavior | スコープ別、ソート | report_duplicate_consts | already-matches | S | — |
-| 7 | goconst eval-const-expressions | behavior | Defs ベース、名前位置、valueKey（オプションごと未実装） | goconst.rs（DEFERRED） | needs-port | L | goconst_eval_and_find_duplicates.go, api_test.go |
-| 8 | goconst ignore-map-keys | new-option | map のキーを数えない | settings.rs, options.rs, goconst.rs collect() | needs-port | M | visitor_test.go |
-| 9 | golangci goconst exclude-types | new-option | exclude-types（ラッパ規則込み） | settings.rs to_guff_goconst, goconst.rs | needs-port | M | goconst_exclude_types.{go,yml}, api_test.go |
+| 7 | goconst eval-const-expressions | behavior | Defs ベース、名前位置、valueKey（オプションごと未実装） | goconst.rs（DEFERRED） | **done (PR 14i)**：goconst.rs を v1.11.0 visitor/api から全面移植 | L | goconst_eval_and_find_duplicates.go, api_test.go |
+| 8 | goconst ignore-map-keys | new-option | map のキーを数えない | settings.rs, options.rs, goconst.rs collect() | **done (PR 14i)**：goconst.rs を v1.11.0 visitor/api から全面移植 | M | visitor_test.go |
+| 9 | golangci goconst exclude-types | new-option | exclude-types（ラッパ規則込み） | settings.rs to_guff_goconst, goconst.rs | **done (PR 14i)**：goconst.rs を v1.11.0 visitor/api から全面移植 | M | goconst_exclude_types.{go,yml}, api_test.go |
 
 ### exhaustruct（v4 → v5.2.0）
 

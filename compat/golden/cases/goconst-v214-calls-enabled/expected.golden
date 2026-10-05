@@ -1,0 +1,9 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh goconst-v214-calls-enabled
+# Produced by running golangci-lint on compat/golden/cases/goconst-v214-calls-enabled/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+goconst_calls_enabled.go:10:7:goconst::string `foobar` has 4 occurrences, but such constant `FooBar` already exists

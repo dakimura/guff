@@ -1611,7 +1611,9 @@ fn scalar_string_list_does_not_discard_the_whole_settings_block() {
     assert_eq!(settings.goconst.ignore_string_values, vec!["foo.+".to_string()]);
     assert_eq!(settings.goconst.ignore_calls, Some(false));
     let opts = settings.goconst.to_guff_goconst();
-    assert!(!opts.ignore_calls);
+    // `ignore-calls: false` with the default `exclude-types: [Call]` empties
+    // the list: calls are counted.
+    assert!(opts.exclude_types.is_empty());
     assert_eq!(opts.ignore_strings, vec!["foo.+".to_string()]);
 }
 

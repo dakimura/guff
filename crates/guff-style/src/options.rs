@@ -312,8 +312,11 @@ impl Default for PerfsprintOptions {
 pub struct GoconstOptions {
     pub min_len: usize,
     pub min_occurrences: usize,
-    /// golangci `ignore-calls`: when true, skip string literals in call arguments.
-    pub ignore_calls: bool,
+    /// `exclude-types` after golangci's wrapper rules (the deprecated
+    /// `ignore-calls` folded in): literal contexts goconst does not count.
+    pub exclude_types: Vec<GoconstExcludeType>,
+    /// An `exclude-types` entry golangci's `toType` rejects; the run fails.
+    pub exclude_types_error: Option<String>,
     pub ignore_tests: bool,
     /// golangci `match-constant`: match repeated literals against existing `const` values.
     pub match_constant: bool,
@@ -327,6 +330,40 @@ pub struct GoconstOptions {
     pub number_max: i64,
     /// golangci `ignore-string-values` (regex patterns; OR-joined like upstream).
     pub ignore_strings: Vec<String>,
+    /// golangci `ignore-functions`: `f` or `pkg.f` whose call arguments are
+    /// not counted.
+    pub ignore_functions: Vec<String>,
+    /// golangci `ignore-map-keys`: string keys of map literals are not counted.
+    pub ignore_map_keys: bool,
+    /// golangci `eval-const-expressions`: constants are matched by their
+    /// evaluated value, not only by a literal initializer.
+    pub eval_const_expressions: bool,
+}
+
+/// goconst's `Type`: the context a literal appears in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GoconstExcludeType {
+    Assignment,
+    Binary,
+    Case,
+    Return,
+    Call,
+    CompositeLit,
+}
+
+impl GoconstExcludeType {
+    /// golangci's `toType`: case-insensitive.
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s.to_ascii_lowercase().as_str() {
+            "assignment" => Self::Assignment,
+            "binary" => Self::Binary,
+            "case" => Self::Case,
+            "return" => Self::Return,
+            "call" => Self::Call,
+            "compositelit" => Self::CompositeLit,
+            _ => return None,
+        })
+    }
 }
 
 impl Default for GoconstOptions {
@@ -334,7 +371,8 @@ impl Default for GoconstOptions {
         Self {
             min_len: 3,
             min_occurrences: 3,
-            ignore_calls: true,
+            exclude_types: vec![GoconstExcludeType::Call],
+            exclude_types_error: None,
             ignore_tests: false,
             match_constant: true,
             find_duplicates: false,
@@ -342,6 +380,9 @@ impl Default for GoconstOptions {
             number_min: 3,
             number_max: 3,
             ignore_strings: Vec::new(),
+            ignore_functions: Vec::new(),
+            ignore_map_keys: false,
+            eval_const_expressions: false,
         }
     }
 }
