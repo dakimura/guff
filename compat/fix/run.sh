@@ -161,6 +161,12 @@ for case_dir in "$CASES_DIR"/*/; do
         break
       }
       rm -rf "$gcl_cache"
+      # golangci-lint only warns when it cannot write a fix, and an unwritten
+      # fix records as "upstream fixes nothing".
+      if grep -q "Failed to fix issues" "$RUN_DIR/fix-$name.golangci.$attempt.stderr"; then
+        echo "  $name: golangci-lint could not write its fixes; see $RUN_DIR/fix-$name.golangci.$attempt.stderr" >&2
+        break
+      fi
       gcl_diff="$RUN_DIR/fix-$name.golangci.$attempt.diff"
       python3 "$FIXDIFF" capture --before "$pristine" --after "$run_dir_case" -o "$gcl_diff"
       gcl_args+=(--run "$gcl_diff")

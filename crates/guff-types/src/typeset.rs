@@ -145,6 +145,16 @@ impl TypeSet {
         self.terms.len()
     }
 
+    /// The term types of the type set, or `None` when it is the set of all
+    /// types (no type terms). The `~` is dropped: callers compare underlying
+    /// types (`typeparams.NormalTerms` then `.Type().Underlying()`).
+    pub fn term_types(&self) -> Option<Vec<crate::TypeId>> {
+        if termlist::is_all(&self.terms) {
+            return None;
+        }
+        Some(self.terms.iter().flatten().filter_map(|t| t.typ).collect())
+    }
+
     #[allow(dead_code)] // used by TypeSet's Display impl when ported.
     pub(crate) fn has_terms(&self) -> bool {
         !termlist::is_empty(&self.terms) && !termlist::is_all(&self.terms)

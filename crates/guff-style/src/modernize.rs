@@ -483,47 +483,24 @@ thread_local! {
 /// reassigns an existing `x` records it there), and everywhere else from
 /// [`ident_obj`], which prefers `Defs`.
 fn collect_scalar_lvalues(pass: &Pass<'_>) -> HashSet<ObjectId> {
+    // x/tools v0.50: `typesinternal.IsAssignedOrAddressTaken` over every use,
+    // which also counts a pointer-receiver method call on the variable
+    // (`v.Inc()`), `x[i] = …` on an array, `x.f = …`, and `for _, x = range`.
     let mut out = HashSet::new();
     let Some(info) = pass.types_info() else {
         return out;
     };
     for file in pass.files() {
-        walk::inspect(NodeRef::File(file), |n| {
-            let Some(n) = n else {
-                return true;
-            };
-            match n {
-                NodeRef::AssignStmt(a) => {
-                    for lhs in &a.lhs {
-                        let Expr::Ident(id) = unparen_expr(lhs) else {
-                            continue;
-                        };
-                        if a.tok == Some(Token::DEFINE) {
-                            // `x, y := …` reassignment of an existing x appears in Uses.
-                            out.extend(info.uses.get(&id.id).copied());
-                        } else {
-                            out.extend(ident_obj(pass, id));
-                        }
+        let mut stack = Vec::new();
+        walk::preorder_stack(NodeRef::File(file), &mut stack, |n, anc| {
+            if let NodeRef::Ident(id) = n {
+                if let Some(&obj) = info.uses.get(&id.id) {
+                    if !out.contains(&obj)
+                        && guff_analysis::typesinternal::is_assigned_or_address_taken(pass, n, anc)
+                    {
+                        out.insert(obj);
                     }
                 }
-                NodeRef::IncDecStmt(inc) => {
-                    if let Expr::Ident(id) = unparen_expr(&inc.x) {
-                        out.extend(ident_obj(pass, id));
-                    }
-                }
-                NodeRef::UnaryExpr(u) if u.op == Token::AND => {
-                    if let Expr::Ident(id) = unparen_expr(&u.x) {
-                        out.extend(ident_obj(pass, id));
-                    }
-                }
-                NodeRef::RangeStmt(rs) if rs.tok == Some(Token::ASSIGN) => {
-                    for side in rs.key.iter().chain(rs.value.iter()) {
-                        if let Expr::Ident(id) = unparen_expr(side) {
-                            out.extend(ident_obj(pass, id));
-                        }
-                    }
-                }
-                _ => {}
             }
             true
         });
@@ -577,20 +554,24 @@ fn limit_ident_is_safe(pass: &Pass<'_>, id: &guff::ast::Ident) -> bool {
 }
 
 fn limit_is_safe(pass: &Pass<'_>, limit: &Expr) -> bool {
-    // Upstream rangeint: constant, or local/unexported Ident that is not
-    // assigned or address-taken — never field selectors like `s.size`.
-    match limit {
-        Expr::ParenExpr(p) => limit_is_safe(pass, &p.x),
-        Expr::CallExpr(call) => {
-            // Allow len(slice) only (not len(map)); then require the slice
-            // operand itself to be a safe limit (so `&chks` / `chks =` skip).
-            code::is_call_to(pass, call, "len")
+    // Upstream rangeint: `len(s)` of a slice is replaced by `s` first; then the
+    // limit must be a constant (`len("")` and `a.ID(13)` are) or an identifier
+    // for a variable that is not an exported package var and that no use
+    // assigns or takes the address of. Nothing else — not `(n)`, not `s.size`.
+    let limit = match limit {
+        Expr::CallExpr(call)
+            if code::is_call_to(pass, call, "len")
                 && call.args.len() == 1
-                && matches!(type_kind(pass, &call.args[0]), Some(TypeKind::Slice))
-                && limit_is_safe(pass, &call.args[0])
+                && matches!(type_kind(pass, &call.args[0]), Some(TypeKind::Slice)) =>
+        {
+            &call.args[0]
         }
-        Expr::BasicLit(_) => true,
-        other if expr_has_constant_value(pass, other) => true,
+        other => other,
+    };
+    if expr_has_constant_value(pass, limit) {
+        return true;
+    }
+    match limit {
         Expr::Ident(id) => limit_ident_is_safe(pass, id),
         _ => false,
     }
@@ -654,34 +635,19 @@ fn index_is_scalar_lvalue_in(
     let (Some(index_obj), Some(info)) = (ident_obj(pass, index_id), pass.types_info()) else {
         return true;
     };
-    let is_index = |e: &Expr| {
-        matches!(e, Expr::Ident(id) if info.uses.get(&id.id).copied() == Some(index_obj))
-    };
+    // x/tools v0.50: `IsAssignedOrAddressTaken` on each use in the body.
     let mut found = false;
-    walk::inspect(NodeRef::BlockStmt(body), |n| {
-        let Some(n) = n else {
-            return true;
-        };
-        match n {
-            NodeRef::AssignStmt(a) if a.tok != Some(Token::DEFINE) => {
-                if a.lhs.iter().any(&is_index) {
-                    found = true;
-                }
-            }
-            NodeRef::IncDecStmt(inc) if is_index(&inc.x) => {
+    let mut stack = Vec::new();
+    walk::preorder_stack(NodeRef::BlockStmt(body), &mut stack, |n, anc| {
+        if found {
+            return false;
+        }
+        if let NodeRef::Ident(id) = n {
+            if info.uses.get(&id.id).copied() == Some(index_obj)
+                && guff_analysis::typesinternal::is_assigned_or_address_taken(pass, n, anc)
+            {
                 found = true;
             }
-            NodeRef::UnaryExpr(u) if u.op == Token::AND && is_index(&u.x) => {
-                found = true;
-            }
-            NodeRef::RangeStmt(rs) if rs.tok == Some(Token::ASSIGN) => {
-                if rs.key.as_ref().is_some_and(&is_index)
-                    || rs.value.as_ref().is_some_and(&is_index)
-                {
-                    found = true;
-                }
-            }
-            _ => {}
         }
         true
     });
@@ -704,32 +670,87 @@ fn index_used_after_loop(pass: &Pass<'_>, for_stmt: &ForStmt, index: &Expr) -> b
     let Some(info) = pass.types_info() else {
         return false;
     };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
     let Expr::Ident(id) = index else {
         return false;
     };
     let Some(obj) = info.uses.get(&id.id).copied() else {
         return false;
     };
+    let decl_pos = obj.pos(&artifacts.objects);
     let loop_end = for_stmt.body.end().0;
+    let me = NodeRef::ForStmt(for_stmt).erased_ptr();
+    // The loop's nearest ancestor that is not a label: a use of `i` after the
+    // loop, or inside a `defer` that comes after `i`'s declaration (it runs
+    // after the loop, wherever it is written — before the loop or in it,
+    // go.dev/issue/75289), keeps the 3-clause form.
     let mut used = false;
     for file in pass.files() {
-        guff::walk::preorder(guff::walk::NodeRef::File(file), |n| {
+        let mut ancestor: Option<(u32, u32)> = None;
+        let mut stack = Vec::new();
+        walk::preorder_stack(NodeRef::File(file), &mut stack, |n, anc| {
+            if ancestor.is_some() {
+                return false;
+            }
+            if n.erased_ptr() == me {
+                let a = anc.iter().rev().find(|a| !matches!(a, NodeRef::LabeledStmt(_)));
+                ancestor = a.map(|a| (node_pos(*a).0 as u32, node_end(*a).0 as u32));
+                return false;
+            }
+            true
+        });
+        let Some((lo, hi)) = ancestor else { continue };
+        let mut stack = Vec::new();
+        walk::preorder_stack(NodeRef::File(file), &mut stack, |n, anc| {
             if used {
                 return false;
             }
-            if let guff::walk::NodeRef::Ident(ident) = n {
-                if ident.pos().0 > loop_end && info.uses.get(&ident.id).copied() == Some(obj) {
-                    used = true;
-                    return false;
+            if let NodeRef::Ident(ident) = n {
+                let p = ident.pos().0 as u32;
+                if p >= lo && p < hi && info.uses.get(&ident.id).copied() == Some(obj) {
+                    if ident.pos().0 > loop_end
+                        || anc.iter().any(|a| {
+                            matches!(a, NodeRef::DeferStmt(d) if d.defer_.0 as u32 > decl_pos)
+                        })
+                    {
+                        used = true;
+                    }
                 }
             }
             true
         });
-        if used {
-            break;
-        }
+        break;
     }
     used
+}
+
+/// `typeparams.NormalTerms(v.Type())` and the check after it: every term's
+/// underlying type is an integer, and the same one. A non-type-parameter type
+/// is its own single term; an unconstrained type set has no terms and passes.
+fn rangeint_index_type_ok(types: &guff_types::arena::TypeArena, typ: Option<TypeId>) -> bool {
+    let Some(typ) = typ else { return true };
+    let typ = unalias_readonly(types, typ);
+    let terms: Vec<TypeId> = match types.get(typ) {
+        TypeData::TypeParam(tp) => {
+            let Some(c) = tp.constraint() else { return true };
+            let TypeData::Interface(iface) = types.get(c.underlying(types)) else {
+                return true;
+            };
+            match iface.cached_typeset().and_then(|ts| ts.term_types()) {
+                Some(ts) => ts,
+                None => return true,
+            }
+        }
+        _ => vec![typ],
+    };
+    let Some(&first) = terms.first() else { return true };
+    let u = first.underlying(types);
+    if !is_integer(types, u) {
+        return false;
+    }
+    terms.iter().all(|t| t.underlying(types) == u)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -878,7 +899,7 @@ fn field_type_is_struct(pass: &Pass<'_>, field: &Field) -> bool {
     type_kind(pass, ty) == Some(TypeKind::Struct)
 }
 
-fn check_rangeint(pass: &Pass<'_>, for_stmt: &ForStmt, pending: &mut Vec<Diagnostic>) {
+fn check_rangeint(pass: &Pass<'_>, file: &File, for_stmt: &ForStmt, pending: &mut Vec<Diagnostic>) {
     let pos = for_stmt.for_.0 as u32;
     if !go_at_least(pass, pos, "go1.22") {
         return;
@@ -913,6 +934,24 @@ fn check_rangeint(pass: &Pass<'_>, for_stmt: &ForStmt, pending: &mut Vec<Diagnos
     if !limit_is_safe(pass, y) {
         return;
     }
+    // A package var may be read anywhere; a named result is read after the
+    // loop by the implicit return (go.dev/issue/76880).
+    let index_var = match &init.lhs[0] {
+        Expr::Ident(id) => ident_obj(pass, id),
+        _ => None,
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return;
+    };
+    let Some(index_var) = index_var else {
+        return;
+    };
+    let ObjectData::Var(v) = artifacts.objects.get(index_var) else {
+        return;
+    };
+    if matches!(v.kind(), VarKind::Package | VarKind::Result) {
+        return;
+    }
     // Upstream: reject if the loop index is assigned or address-taken in the body
     // (`for range int` ignores such assignments).
     if index_is_scalar_lvalue_in(pass, &for_stmt.body, &init.lhs[0]) {
@@ -922,39 +961,53 @@ fn check_rangeint(pass: &Pass<'_>, for_stmt: &ForStmt, pending: &mut Vec<Diagnos
     if init.tok == Some(Token::ASSIGN) && index_used_after_loop(pass, for_stmt, &init.lhs[0]) {
         return;
     }
-    let Some(limit_text) = expr_text_src(pass, y) else {
+    // golang/go#78571: a type-parameter index ranges only if every term of
+    // its type set has the same, integer, underlying type.
+    if !rangeint_index_type_ok(&artifacts.types, Some(v.typ())) {
+        return;
+    }
+    // `limit`: `len(s)` of a slice ranges over `s` itself.
+    let limit: &Expr = match y.as_ref() {
+        Expr::CallExpr(call)
+            if code::is_call_to(pass, call, "len")
+                && call.args.len() == 1
+                && matches!(type_kind(pass, &call.args[0]), Some(TypeKind::Slice)) =>
+        {
+            &call.args[0]
+        }
+        other => other,
+    };
+    let Some(limit_text) = expr_text_src(pass, limit) else {
         return;
     };
-    // Prefer `range slice` when limit is len(slice); otherwise range-over-int.
-    // SuggestedFix uses the concrete range operand; the diagnostic message
-    // always says "range over int" (x/tools modernize / golangci parity).
-    let range_expr = if let Expr::CallExpr(call) = y.as_ref() {
-        if code::is_call_to(pass, call, "len") && call.args.len() == 1 {
-            expr_text(&call.args[0]).unwrap_or(limit_text.clone())
-        } else {
-            limit_text.clone()
-        }
-    } else {
-        limit_text.clone()
-    };
+    // A constant limit may need converting to the index's type: `for i :=
+    // int8(0); i < 10` ranges over `int8(10)`, and `i < 1e3` over `int(1e3)`.
+    let (before_limit, after_limit) = rangeint_limit_conversion(pass, file, init, limit);
 
-    let end = for_stmt
-        .post
-        .as_ref()
-        .map(|p| p.end().0 as u32)
-        .unwrap_or(for_stmt.for_.0 as u32);
-
-    let new_text = if init.tok == Some(Token::DEFINE) {
-        if index_used_in_body(pass, &for_stmt.body, &init.lhs[0]) {
-            format!("for {index_name} := range {range_expr}")
-        } else {
-            format!("for range {range_expr}")
-        }
-    } else {
-        // `for i = 0; …` reuses a variable declared elsewhere, so there is no
-        // declaration to drop.
-        format!("for {index_name} = range {range_expr}")
-    };
+    let end = post.end().0 as u32;
+    let lim_pos = limit.pos().0 as u32;
+    let lim_end = limit.end().0 as u32;
+    let mut text_edits = Vec::new();
+    // If i is no longer used, delete "i := ".
+    if init.tok == Some(Token::DEFINE) && !index_used_in_body(pass, &for_stmt.body, &init.lhs[0]) {
+        text_edits.push(TextEdit {
+            pos: init.lhs[0].pos().0 as u32,
+            end: init.rhs[0].pos().0 as u32,
+            new_text: String::new(),
+        });
+    }
+    // for i := 0; i < limit; i++ {}
+    //     -----              ---
+    //          -------
+    // for i := range  limit      {}
+    text_edits.push(TextEdit {
+        pos: init.rhs[0].pos().0 as u32,
+        end: lim_pos,
+        new_text: "range ".into(),
+    });
+    text_edits.push(TextEdit { pos: lim_pos, end: lim_pos, new_text: before_limit });
+    text_edits.push(TextEdit { pos: lim_end, end, new_text: String::new() });
+    text_edits.push(TextEdit { pos: lim_end, end: lim_end, new_text: after_limit });
 
     // Upstream reports the *init statement*, not the `for` keyword
     // (`Pos: init.Pos()`, `End: loop.Post.End()`) — the range of text the fix
@@ -967,14 +1020,151 @@ fn check_rangeint(pass: &Pass<'_>, for_stmt: &ForStmt, pending: &mut Vec<Diagnos
         category: String::new(),
         message: "for loop can be modernized using range over int".into(),
         suggested_fixes: vec![SuggestedFix {
-            message: "Replace 3-clause for with range-over-int".into(),
-            text_edits: vec![TextEdit { pos, end, new_text }],
+            message: format!("Replace for loop with range {limit_text}"),
+            text_edits,
         }],
         related: Vec::new(),
         url: String::new(),
         severity: String::new(),
         ..Diagnostic::default()
     });
+}
+
+/// The `T(` … `)` upstream wraps a constant limit in. `T` is the type of the
+/// init's `0`, written with the file's import names; the wrap is dropped when
+/// the limit, type-checked *on its own* (`types.CheckExpr`), is an integer
+/// assignable to `T` — after defaulting, unless the loop assigns an existing
+/// variable. go/types records a constant operand at its converted type, so the
+/// standalone type is recomputed here from the syntax ([`standalone_const_type`]).
+fn rangeint_limit_conversion(
+    pass: &Pass<'_>,
+    file: &File,
+    init: &AssignStmt,
+    limit: &Expr,
+) -> (String, String) {
+    let none = (String::new(), String::new());
+    let (Some(info), Some(artifacts)) = (pass.types_info(), pass.pkg().type_artifacts.as_ref())
+    else {
+        return none;
+    };
+    if !info.types.get(&limit.id()).is_some_and(|tv| tv.val.is_some()) {
+        return none;
+    }
+    let Some(t_var) = info.types.get(&init.rhs[0].id()).map(|tv| tv.typ) else {
+        return none;
+    };
+    let types = &artifacts.types;
+    let qf = guff_analysis::typesinternal::file_qualifier(file, artifacts.type_pkg);
+    let conv = (
+        format!(
+            "{}(",
+            guff_types::typestring::type_string(types, &artifacts.objects, &artifacts.packages, t_var, Some(&qf))
+        ),
+        ")".to_string(),
+    );
+    let Some(t_limit) = standalone_const_type(pass, limit) else {
+        return conv;
+    };
+    let assignable = match t_limit {
+        ConstType::Untyped(k) if !matches!(k, BasicKind::UntypedInt | BasicKind::UntypedRune) => false,
+        // An untyped integer constant assigned to an existing variable: any
+        // integer type takes it.
+        ConstType::Untyped(_) if init.tok == Some(Token::ASSIGN) => is_integer(types, t_var),
+        // `types.Default`: int for an untyped int, rune (int32) for a rune —
+        // and only a basic type (not a named one over it) is that type.
+        ConstType::Untyped(k) => {
+            let want = if k == BasicKind::UntypedRune { BasicKind::Int32 } else { BasicKind::Int };
+            matches!(types.get(unalias_readonly(types, t_var)), TypeData::Basic(b) if b.kind() == want)
+        }
+        ConstType::Typed(tl) => {
+            is_integer(types, tl) && unalias_readonly(types, tl) == unalias_readonly(types, t_var)
+        }
+    };
+    if assignable {
+        none
+    } else {
+        conv
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ConstType {
+    Untyped(BasicKind),
+    Typed(TypeId),
+}
+
+/// The type `types.CheckExpr` gives a constant expression written alone: a
+/// literal is untyped, a named constant has its declared type, a conversion
+/// its target type, and an operator combines its operands (the typed side
+/// wins; two untyped sides take the larger kind). `None` when the shape is
+/// not one of these — the caller then keeps the conversion, as upstream does
+/// when `CheckExpr` fails.
+fn standalone_const_type(pass: &Pass<'_>, e: &Expr) -> Option<ConstType> {
+    let info = pass.types_info()?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let types = &artifacts.types;
+    let of_type = |t: TypeId| match types.get(t) {
+        TypeData::Basic(b)
+            if matches!(
+                b.kind(),
+                BasicKind::UntypedInt
+                    | BasicKind::UntypedRune
+                    | BasicKind::UntypedFloat
+                    | BasicKind::UntypedComplex
+                    | BasicKind::UntypedBool
+                    | BasicKind::UntypedString
+            ) =>
+        {
+            ConstType::Untyped(b.kind())
+        }
+        _ => ConstType::Typed(t),
+    };
+    let const_obj = |obj: ObjectId| {
+        matches!(artifacts.objects.get(obj), ObjectData::Const(_))
+            .then(|| obj.typ(&artifacts.objects).map(of_type))
+            .flatten()
+    };
+    match e {
+        Expr::ParenExpr(p) => standalone_const_type(pass, &p.x),
+        Expr::BasicLit(l) => match l.kind {
+            Some(Token::INT) => Some(ConstType::Untyped(BasicKind::UntypedInt)),
+            Some(Token::FLOAT) => Some(ConstType::Untyped(BasicKind::UntypedFloat)),
+            Some(Token::CHAR) => Some(ConstType::Untyped(BasicKind::UntypedRune)),
+            Some(Token::IMAG) => Some(ConstType::Untyped(BasicKind::UntypedComplex)),
+            _ => None,
+        },
+        Expr::Ident(id) => const_obj(*info.uses.get(&id.id)?),
+        Expr::SelectorExpr(sel) => const_obj(*info.uses.get(&sel.sel.id)?),
+        // A conversion has its target type; a constant `len`/`cap` (or
+        // `unsafe.Sizeof`…) call is typed too (`len("")` is an `int`).
+        // `real`/`imag`/`complex` of untyped operands stay untyped: not handled.
+        Expr::CallExpr(c) => {
+            let fun = info.types.get(&c.fun.id())?;
+            let typed = fun.mode == OperandMode::TypeExpr
+                || code::is_call_to_any(pass, c, &["len", "cap", "unsafe.Sizeof", "unsafe.Alignof", "unsafe.Offsetof"]);
+            typed
+                .then(|| info.types.get(&c.id).map(|tv| ConstType::Typed(tv.typ)))
+                .flatten()
+        }
+        Expr::UnaryExpr(u) => standalone_const_type(pass, &u.x),
+        Expr::BinaryExpr(b) => {
+            let (x, y) = (standalone_const_type(pass, &b.x)?, standalone_const_type(pass, &b.y)?);
+            let rank = |k: BasicKind| match k {
+                BasicKind::UntypedInt => 0,
+                BasicKind::UntypedRune => 1,
+                BasicKind::UntypedFloat => 2,
+                _ => 3,
+            };
+            Some(match (x, y) {
+                (ConstType::Untyped(kx), ConstType::Untyped(ky)) => {
+                    if rank(kx) >= rank(ky) { x } else { y }
+                }
+                (ConstType::Typed(_), _) => x,
+                (_, ConstType::Typed(_)) => y,
+            })
+        }
+        _ => None,
+    }
 }
 
 /// `isSimpleAssign` (x/tools `modernize/minmax.go:275`): `lhs = rhs` **or**
@@ -1021,7 +1211,7 @@ fn check_stmt_list(
 ) {
     if enabled(options, "minmax") {
         let before = pending.len();
-        check_minmax_block(pass, list, pending);
+        check_minmax_block(pass, file, list, pending);
         stamp_category(pending, before, "minmax");
     }
     if enabled(options, "slicescontains") {
@@ -1055,7 +1245,7 @@ fn check_stmt_list(
 /// rejects it explicitly (`edge.CommClause_Comm`); here it is excluded for
 /// free, because that assignment is the clause's `Comm` and never a member of
 /// the statement list handed to this function — see [`check_stmt_list`].
-fn check_minmax_block(pass: &Pass<'_>, list: &[Stmt], pending: &mut Vec<Diagnostic>) {
+fn check_minmax_block(pass: &Pass<'_>, file: &File, list: &[Stmt], pending: &mut Vec<Diagnostic>) {
     for i in 1..list.len() {
         let Stmt::IfStmt(if_stmt) = &list[i] else {
             continue;
@@ -1072,6 +1262,10 @@ fn check_minmax_block(pass: &Pass<'_>, list: &[Stmt], pending: &mut Vec<Diagnost
         let Some(mut sign) = inequality_sign(compare.op) else {
             continue;
         };
+        // x/tools v0.50: `typesinternal.NoEffects(info, compare)`.
+        if expr_has_effects(pass, &if_stmt.cond) {
+            continue;
+        }
         let Some(tassign) = is_assign_block(&if_stmt.body) else {
             continue;
         };
@@ -1141,7 +1335,13 @@ fn check_minmax_block(pass: &Pass<'_>, list: &[Stmt], pending: &mut Vec<Diagnost
                 text_edits: vec![TextEdit {
                     pos: fix_pos,
                     end: fix_end,
-                    new_text: format!("{lhs_text} {tok_text} {sym}({a_text}, {b_text})"),
+                    // Replace "x := a; if ... {}" with "x = min(...)", keeping
+                    // the comments of each half with its argument.
+                    new_text: format!(
+                        "{lhs_text} {tok_text} {sym}({}{})",
+                        minmax_call_arg(pass, file, &a_text, false, fix_pos, if_stmt.if_.0 as u32),
+                        minmax_call_arg(pass, file, &b_text, true, if_stmt.if_.0 as u32, fix_end),
+                    ),
                 }],
             }],
             related: Vec::new(),
@@ -1244,7 +1444,12 @@ fn minmax_maybe_nan(pass: &Pass<'_>, typ: TypeId) -> bool {
 /// `checkMinMaxPattern`: an `if cmp { return t }` whose "false" result is `f`,
 /// where `{t, f}` are the comparison's operands and the direction spells
 /// `funcName`.
-fn minmax_pattern_is(if_stmt: &IfStmt, false_result: &Expr, func_name: &str) -> bool {
+fn minmax_pattern_is(
+    if_stmt: &IfStmt,
+    false_result: &Expr,
+    func_name: &str,
+    params: (&str, &str),
+) -> bool {
     let Expr::BinaryExpr(cmp) = &if_stmt.cond else {
         return false;
     };
@@ -1262,6 +1467,16 @@ fn minmax_pattern_is(if_stmt: &IfStmt, false_result: &Expr, func_name: &str) -> 
     };
     let t = &then_ret.results[0];
     let f = false_result;
+    // x/tools v0.50: both operands are identifiers, and they are the two
+    // parameters, in either order.
+    let (Expr::Ident(xi), Expr::Ident(yi)) = (cmp.x.as_ref(), cmp.y.as_ref()) else {
+        return false;
+    };
+    if !((params.0 == xi.name && params.1 == yi.name)
+        || (params.0 == yi.name && params.1 == xi.name))
+    {
+        return false;
+    }
     let x = cmp.x.as_ref();
     let y = cmp.y.as_ref();
     if code::equal_syntax(t, x) && code::equal_syntax(f, y) {
@@ -1276,14 +1491,14 @@ fn minmax_pattern_is(if_stmt: &IfStmt, false_result: &Expr, func_name: &str) -> 
 }
 
 /// `hasMinMaxLogic`: one `if/else`, or an `if` followed by a `return`.
-fn minmax_body_is(body: &BlockStmt, func_name: &str) -> bool {
+fn minmax_body_is(body: &BlockStmt, func_name: &str, params: (&str, &str)) -> bool {
     if body.list.len() == 1 {
         if let Stmt::IfStmt(if_stmt) = &body.list[0] {
             if let Some(Stmt::BlockStmt(else_block)) = if_stmt.else_.as_deref() {
                 if else_block.list.len() == 1 {
                     if let Stmt::ReturnStmt(else_ret) = &else_block.list[0] {
                         if else_ret.results.len() == 1 {
-                            return minmax_pattern_is(if_stmt, &else_ret.results[0], func_name);
+                            return minmax_pattern_is(if_stmt, &else_ret.results[0], func_name, params);
                         }
                     }
                 }
@@ -1293,7 +1508,7 @@ fn minmax_body_is(body: &BlockStmt, func_name: &str) -> bool {
     if body.list.len() == 2 {
         if let (Stmt::IfStmt(if_stmt), Stmt::ReturnStmt(ret)) = (&body.list[0], &body.list[1]) {
             if if_stmt.else_.is_none() && ret.results.len() == 1 {
-                return minmax_pattern_is(if_stmt, &ret.results[0], func_name);
+                return minmax_pattern_is(if_stmt, &ret.results[0], func_name, params);
             }
         }
     }
@@ -1358,7 +1573,24 @@ fn check_user_defined_minmax(pass: &Pass<'_>, pending: &mut Vec<Diagnostic>) {
             if nan {
                 continue;
             }
-            if !minmax_body_is(body, name) {
+            // `sig.Params().At(i).Name()`: "" for an unnamed parameter.
+            let names: Vec<&str> = fd
+                .ty
+                .params
+                .iter()
+                .flat_map(|fl| fl.list.iter())
+                .flat_map(|f| {
+                    if f.names.is_empty() {
+                        vec![""]
+                    } else {
+                        f.names.iter().map(|n| n.name.as_str()).collect()
+                    }
+                })
+                .collect();
+            let (Some(&p0), Some(&p1)) = (names.first(), names.get(1)) else {
+                continue;
+            };
+            if !minmax_body_is(body, name, (p0, p1)) {
                 continue;
             }
             // The fix deletes the declaration, doc comment and all — which is
@@ -1390,7 +1622,49 @@ fn check_user_defined_minmax(pass: &Pass<'_>, pending: &mut Vec<Diagnostic>) {
     }
 }
 
-fn check_minmax(pass: &Pass<'_>, if_stmt: &IfStmt, pending: &mut Vec<Diagnostic>) {
+/// Every `if` that is the `else` branch of another `if`, by address.
+/// `callArg`: a min/max argument preceded by the comments written in
+/// `[start, end]` of the statements it came from (`allComments`, one per line,
+/// on a line of their own), and by `, ` when it is the second.
+fn minmax_call_arg(
+    pass: &Pass<'_>,
+    file: &File,
+    arg: &str,
+    second: bool,
+    start: u32,
+    end: u32,
+) -> String {
+    let mut comments = String::new();
+    for cg in guff_analysis::comments::file_comments(pass, file) {
+        for co in &cg.list {
+            // `astutil.Comments(file, start, end)`: overlapping the range.
+            if co.end().0 as u32 >= start && co.pos().0 as u32 <= end {
+                comments.push_str(&co.text);
+                comments.push('\n');
+            }
+        }
+    }
+    format!(
+        "{}{}{comments}{arg}",
+        if second { ", " } else { "" },
+        if comments.is_empty() { "" } else { "\n" },
+    )
+}
+
+fn else_if_stmts(file: &File) -> HashSet<*const IfStmt> {
+    let mut out = HashSet::new();
+    walk::preorder(NodeRef::File(file), |n| {
+        if let NodeRef::IfStmt(s) = n {
+            if let Some(Stmt::IfStmt(e)) = s.else_.as_deref() {
+                out.insert(&*e as *const IfStmt);
+            }
+        }
+        true
+    });
+    out
+}
+
+fn check_minmax(pass: &Pass<'_>, file: &File, if_stmt: &IfStmt, pending: &mut Vec<Diagnostic>) {
     if if_stmt.init.is_some() {
         return;
     }
@@ -1404,6 +1678,10 @@ fn check_minmax(pass: &Pass<'_>, if_stmt: &IfStmt, pending: &mut Vec<Diagnostic>
     let Some(mut sign) = inequality_sign(compare.op) else {
         return;
     };
+    // x/tools v0.50: `typesinternal.NoEffects(info, compare)`.
+    if expr_has_effects(pass, &if_stmt.cond) {
+        return;
+    }
     let Some(tassign) = is_assign_block(&if_stmt.body) else {
         return;
     };
@@ -1465,7 +1743,11 @@ fn check_minmax(pass: &Pass<'_>, if_stmt: &IfStmt, pending: &mut Vec<Diagnostic>
             text_edits: vec![TextEdit {
                 pos,
                 end,
-                new_text: format!("{lhs_text} = {sym}({a_text}, {b_text})"),
+                new_text: format!(
+                    "{lhs_text} = {sym}({}{})",
+                    minmax_call_arg(pass, file, &a_text, false, pos, fblock.lbrace.0 as u32),
+                    minmax_call_arg(pass, file, &b_text, true, fblock.lbrace.0 as u32, end),
+                ),
             }],
         }],
         related: Vec::new(),
@@ -2388,13 +2670,9 @@ fn check_stringscutprefix(
     if !go_at_least(pass, pos, "go1.20") {
         return;
     }
-    // DEFERRED: upstream handles the dot-import spelling here, using AddImport
-    // purely to compute the (empty) prefix.
-    let Expr::SelectorExpr(_) = trim_call.fun.as_ref() else {
-        return;
-    };
     // The existing import already satisfies this call, so AddImport adds
-    // nothing — it is here for the local name, which need not be `strings`.
+    // nothing — it is here for the local name, which need not be `strings`
+    // and is empty under a dot import (`TrimPrefix(s, pre)`).
     let Some((prefix, import_edits)) =
         refactor::add_import(pass, file, pkg, pkg, cut_name, trim_call.pos().0 as u32)
     else {
@@ -2412,6 +2690,20 @@ fn check_stringscutprefix(
         )
     };
     let end = if_stmt.cond.end().0 as u32;
+    // `freshName(…, info.Scopes[ifStmt], ifStmt.Pos(), curIfStmt, curIfStmt,
+    // NoPos, "ok")`.
+    let if_pos = if_stmt.if_.0 as u32;
+    let if_end = node_end(NodeRef::IfStmt(if_stmt)).0 as u32;
+    let init_pos = init.lhs[0].pos().0 as u32;
+    let ok_name = modernize_fresh_name(pass, if_pos, (if_pos, if_end), init_pos, if_pos, "ok");
+    // `moreiters.Len(index.Uses(obj))`.
+    let after_uses = match &init.lhs[0] {
+        Expr::Ident(id) => match ident_obj(pass, id) {
+            Some(obj) => pass.files().iter().map(|f| count_ident_uses_in_file(pass, f, obj)).sum(),
+            None => 2,
+        },
+        _ => 2,
+    };
     pending.push(Diagnostic {
         pos,
         end,
@@ -2421,11 +2713,12 @@ fn check_stringscutprefix(
             message: fix_message.into(),
             text_edits: with_imports(
                 &import_edits,
-                vec![
+                {
+                    let mut edits = vec![
                     TextEdit {
                         pos: init.lhs[0].end().0 as u32,
                         end: init.lhs[0].end().0 as u32,
-                        new_text: ", ok".into(),
+                        new_text: format!(", {ok_name}"),
                     },
                     // Upstream replaces the whole `pkg.TrimPrefix` selector,
                     // not just the `TrimPrefix` half, so the prefix it computed
@@ -2438,9 +2731,19 @@ fn check_stringscutprefix(
                     TextEdit {
                         pos: if_stmt.cond.pos().0 as u32,
                         end: if_stmt.cond.end().0 as u32,
-                        new_text: "ok".into(),
+                        new_text: ok_name.clone(),
                     },
-                ],
+                    ];
+                    // An `after` nothing else in the package uses becomes `_`.
+                    if after_uses < 2 {
+                        edits.push(TextEdit {
+                            pos: init.lhs[0].pos().0 as u32,
+                            end: init.lhs[0].end().0 as u32,
+                            new_text: "_".into(),
+                        });
+                    }
+                    edits
+                },
             ),
         }],
         related: Vec::new(),
@@ -3343,6 +3646,40 @@ fn waitgroup_recv(call: &CallExpr) -> Option<&Expr> {
 /// `defer wg.Done()` wins over a trailing `wg.Done()` when a body has both.
 /// The receiver has to be the same one the `Add` was called on — a
 /// `go func(){ b.Done() }()` after `a.Add(1)` is not a pair.
+/// `cannotRecover`: no `defer` directly in `body` (not in a nested func
+/// literal) can recover — each one defers a func literal that calls no
+/// `recover` outside its own nested literals. Any other deferred call (a named
+/// function) might.
+fn cannot_recover(pass: &Pass<'_>, body: &BlockStmt) -> bool {
+    let mut res = true;
+    walk::inspect(NodeRef::BlockStmt(body), |n| match n {
+        Some(NodeRef::DeferStmt(d)) => {
+            match unparen_expr(&d.call.fun) {
+                Expr::FuncLit(lit) if !contains_recover(pass, &lit.body) => {}
+                _ => res = false,
+            }
+            false
+        }
+        Some(NodeRef::FuncLit(_)) => false,
+        _ => true,
+    });
+    res
+}
+
+fn contains_recover(pass: &Pass<'_>, body: &BlockStmt) -> bool {
+    let mut found = false;
+    walk::inspect(NodeRef::BlockStmt(body), |n| match n {
+        _ if found => false,
+        Some(NodeRef::CallExpr(c)) if code::is_call_to(pass, c, "recover") => {
+            found = true;
+            false
+        }
+        Some(NodeRef::FuncLit(_)) => false,
+        _ => true,
+    });
+    found
+}
+
 fn waitgroupgo_done_span(
     pass: &Pass<'_>,
     body: &BlockStmt,
@@ -3358,7 +3695,10 @@ fn waitgroupgo_done_span(
             return Some((defer_stmt.defer_.0 as u32, defer_stmt.call.end().0 as u32));
         }
     }
-    if let Some(Stmt::ExprStmt(last)) = body.list.last() {
+    // x/tools v0.50: the trailing form only when nothing in the body can
+    // recover a panic — then `Done` at the end and `wg.Go`'s deferred `Done`
+    // behave alike.
+    if let Some(Stmt::ExprStmt(last)) = body.list.last().filter(|_| cannot_recover(pass, body)) {
         if let Expr::CallExpr(done_call) = &last.x {
             if matches_recv(done_call) {
                 return Some((last.x.pos().0 as u32, last.x.end().0 as u32));
@@ -3529,6 +3869,60 @@ fn index_mutated_in_body(pass: &Pass<'_>, body: &BlockStmt, index_obj: ObjectId)
     mutated
 }
 
+/// `slicesclip` (x/tools v0.50, new in golangci-lint 2.14.0):
+/// `x[:len(x):len(x)]` on a slice → `slices.Clip(x)`, when `x` has no effects
+/// and `len` is the builtin.
+fn check_slicesclip(pass: &Pass<'_>, file: &File, slice: &SliceExpr, pending: &mut Vec<Diagnostic>) {
+    // `within(pass, "slices", "runtime")`.
+    let path = pass.pkg().pkg_path.as_str();
+    if ["slices", "runtime"].iter().any(|p| path == *p || path.starts_with(&format!("{p}/"))) {
+        return;
+    }
+    let pos = slice.x.pos().0 as u32;
+    if !go_at_least(pass, pos, "go1.21") {
+        return;
+    }
+    if !slice.slice3 || slice.low.is_some() || type_kind(pass, &slice.x) != Some(TypeKind::Slice) {
+        return;
+    }
+    let is_len_x = |e: Option<&Expr>| {
+        matches!(e, Some(Expr::CallExpr(c))
+            if c.args.len() == 1
+                && code::is_call_to(pass, c, "len")
+                && code::equal_syntax(&c.args[0], &slice.x))
+    };
+    if !is_len_x(slice.high.as_deref()) || !is_len_x(slice.max.as_deref()) {
+        return;
+    }
+    if expr_has_effects(pass, &slice.x) {
+        return;
+    }
+    let Some(sx) = expr_text_src(pass, &slice.x) else {
+        return;
+    };
+    let Some((prefix, mut edits)) = refactor::add_import(pass, file, "slices", "slices", "Clip", pos)
+    else {
+        return;
+    };
+    let end = (slice.rbrack.0 + 1) as u32;
+    edits.push(TextEdit {
+        pos,
+        end,
+        new_text: format!("{prefix}Clip({sx})"),
+    });
+    pending.push(Diagnostic {
+        pos,
+        end,
+        category: String::new(),
+        message: "x[:len(x):len(x)] can be simplified using slices.Clip".into(),
+        suggested_fixes: vec![SuggestedFix {
+            message: format!("Replace with slices.Clip({sx})"),
+            text_edits: edits,
+        }],
+        ..Diagnostic::default()
+    });
+}
+
 fn check_slicesbackward(
     pass: &Pass<'_>,
     file: &File,
@@ -3548,7 +3942,9 @@ fn check_slicesbackward(
     if init.lhs.len() != 1 || init.rhs.len() != 1 {
         return;
     }
-    if init.tok != Some(Token::DEFINE) && init.tok != Some(Token::ASSIGN) {
+    // x/tools v0.50: only `i := len(s) - 1`. Rewriting an assignment to an
+    // existing variable would change its value after the loop (-1).
+    if init.tok != Some(Token::DEFINE) {
         return;
     }
     let Some(index_name) = ident_name(&init.lhs[0]) else {
@@ -3590,80 +3986,105 @@ fn check_slicesbackward(
     let Some(index_obj) = ident_obj(pass, index_id) else {
         return;
     };
-    if index_mutated_in_body(pass, &for_stmt.body, index_obj) {
-        return;
-    }
-
     let slice_expr = &len_call.args[0];
     let Some(slice_text) = expr_text_src(pass, slice_expr) else {
         return;
     };
 
-    // Classify body uses of i: pure s[i] vs other.
-    let mut slice_indexes: Vec<(u32, u32)> = Vec::new();
+    // One walk over the body classifies every use of i (source order is
+    // `index.Uses` order):
+    //   i assigned or address-taken            -> no fix at all
+    //   s[i] that is itself assigned/addressed  -> no fix (v would be a copy)
+    //   s[i]                                    -> replaced by the value var,
+    //                                              or, for the first
+    //                                              `name := s[i]`, deleted
+    //   s'[i] for another s', or anything else  -> other use
+    let mut bail = false;
+    let mut first_assign: Option<&guff::ast::AssignStmt> = None;
+    let mut replace: Vec<(u32, u32)> = Vec::new();
+    let mut slice_idxs = 0usize;
     let mut other_uses = 0usize;
-    walk::inspect(NodeRef::BlockStmt(&for_stmt.body), |n| {
-        let Some(n) = n else {
-            return true;
-        };
-        let NodeRef::Ident(id) = n else {
-            return true;
-        };
+    let mut stack = Vec::new();
+    walk::preorder_stack(NodeRef::BlockStmt(&for_stmt.body), &mut stack, |n, anc| {
+        if bail {
+            return false;
+        }
+        let NodeRef::Ident(id) = n else { return true };
         if ident_obj(pass, id) != Some(index_obj) {
             return true;
         }
-        // Walk parent is not available; approximate: collect all idents and
-        // separately find IndexExpr where index is this ident and x is slice.
+        if guff_analysis::typesinternal::is_assigned_or_address_taken(pass, n, anc) {
+            bail = true; // i is mutated in the loop body
+            return false;
+        }
+        let parent = anc.last().copied();
+        if let Some(NodeRef::IndexExpr(ix)) = parent {
+            if walk::expr_ref(&ix.index).erased_ptr() == n.erased_ptr() {
+                let pa = &anc[..anc.len() - 1];
+                if guff_analysis::typesinternal::is_assigned_or_address_taken(pass, parent.unwrap(), pa) {
+                    bail = true;
+                    return false;
+                }
+                if code::equal_syntax(&ix.x, slice_expr) {
+                    slice_idxs += 1;
+                    if first_assign.is_none() {
+                        if let Some(NodeRef::AssignStmt(a)) = pa.last().copied() {
+                            let in_rhs = a
+                                .rhs
+                                .iter()
+                                .any(|r| walk::expr_ref(r).erased_ptr() == parent.unwrap().erased_ptr());
+                            if in_rhs && a.lhs.len() == 1 && a.tok == Some(Token::DEFINE) {
+                                first_assign = Some(a);
+                                return true;
+                            }
+                        }
+                    }
+                    replace.push((ix.x.pos().0 as u32, (ix.rbrack.0 + 1) as u32));
+                    return true;
+                }
+            }
+        }
         other_uses += 1;
         true
     });
-    // Re-scan for s[i] patterns and subtract them from other_uses.
-    walk::inspect(NodeRef::BlockStmt(&for_stmt.body), |n| {
-        let Some(n) = n else {
-            return true;
-        };
-        if let NodeRef::IndexExpr(ix) = n {
-            if code::same_non_dynamic(pass, &ix.x, slice_expr)
-                && code::same_non_dynamic(pass, &ix.index, &init.lhs[0])
-            {
-                slice_indexes.push((ix.x.pos().0 as u32, (ix.rbrack.0 + 1) as u32));
-            }
-        }
-        true
-    });
-    other_uses = other_uses.saturating_sub(slice_indexes.len());
+    if bail {
+        return;
+    }
 
-    let end = for_stmt
-        .post
-        .as_ref()
-        .map(|p| p.end().0 as u32)
-        .unwrap_or(pos);
+    let end = post.end().0 as u32;
     let header_pos = init.lhs[0].pos().0 as u32;
-    let elem_name = "v";
     let Some((prefix, mut text_edits)) =
         refactor::add_import(pass, file, "slices", "slices", "Backward", pos)
     else {
         return;
     };
-    let header = if other_uses == 0 && !slice_indexes.is_empty() {
-        format!("_, {elem_name} := range {prefix}Backward({slice_text})")
+    let elem_name = slicesbackward_value_name(pass, for_stmt, index_obj, first_assign, &slice_text);
+    for (ipos, iend) in &replace {
+        text_edits.push(TextEdit {
+            pos: *ipos,
+            end: *iend,
+            new_text: elem_name.clone(),
+        });
+    }
+    if let Some(a) = first_assign {
+        text_edits.push(TextEdit {
+            pos: node_pos(NodeRef::AssignStmt(a)).0 as u32,
+            end: node_end(NodeRef::AssignStmt(a)).0 as u32,
+            new_text: String::new(),
+        });
+    }
+    let vars = if other_uses == 0 {
+        format!("_, {elem_name}")
+    } else if slice_idxs == 0 {
+        index_name.to_string()
     } else {
-        format!("{index_name}, {elem_name} := range {prefix}Backward({slice_text})")
+        format!("{index_name}, {elem_name}")
     };
     text_edits.push(TextEdit {
         pos: header_pos,
         end,
-        new_text: header,
+        new_text: format!("{vars} := range {prefix}Backward({slice_text})"),
     });
-    if other_uses == 0 {
-        for (ipos, iend) in &slice_indexes {
-            text_edits.push(TextEdit {
-                pos: *ipos,
-                end: *iend,
-                new_text: elem_name.into(),
-            });
-        }
-    }
     pending.push(Diagnostic {
         pos: header_pos,
         end,
@@ -3681,6 +4102,140 @@ fn check_slicesbackward(
         severity: String::new(),
         ..Diagnostic::default()
     });
+}
+
+/// `chooseValueName` then `freshName(info, index, info.Scopes[loop],
+/// loop.Pos(), bodyCur, bodyCur, NoPos, name)`: the lhs of the first
+/// `name := s[i]`, else the slice's name less a plural `s`, else its first
+/// letter, else `v` — renamed only if that name is visible at the body's start
+/// and used inside the body.
+fn slicesbackward_value_name(
+    pass: &Pass<'_>,
+    for_stmt: &ForStmt,
+    _index_obj: ObjectId,
+    first_assign: Option<&guff::ast::AssignStmt>,
+    slice_text: &str,
+) -> String {
+    let preferred = if let Some(Expr::Ident(id)) = first_assign.and_then(|a| a.lhs.first()) {
+        id.name.clone()
+    } else if is_go_identifier(slice_text) && slice_text.chars().count() > 1 {
+        match slice_text.strip_suffix('s') {
+            Some(single) if !is_go_keyword(single) => single.to_string(),
+            _ => slice_text[..1].to_string(),
+        }
+    } else {
+        "v".to_string()
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return preferred;
+    };
+    let pkg_scope = artifacts.packages.get(artifacts.type_pkg).scope();
+    let body_pos = for_stmt.body.lbrace.0 as u32;
+    let at = guff_types::scope::innermost(&artifacts.scopes, pkg_scope, body_pos).unwrap_or(pkg_scope);
+    let Some((_, obj)) = guff_types::scope::lookup_parent(
+        &artifacts.scopes,
+        &artifacts.objects,
+        at,
+        &preferred,
+        body_pos,
+    ) else {
+        return preferred;
+    };
+    let mut used = false;
+    walk::inspect(NodeRef::BlockStmt(&for_stmt.body), |n| {
+        if let Some(NodeRef::Ident(id)) = n {
+            used |= ident_obj(pass, id) == Some(obj);
+        }
+        !used
+    });
+    if !used {
+        return preferred; // shadowing an unused name is fine
+    }
+    let loop_pos = for_stmt.for_.0 as u32;
+    let loop_scope = guff_types::scope::innermost(
+        &artifacts.scopes,
+        pkg_scope,
+        for_stmt.init.as_deref().map(|s| s.pos().0 as u32).unwrap_or(loop_pos),
+    )
+    .unwrap_or(pkg_scope);
+    refactor::fresh_name(&artifacts.scopes, &artifacts.objects, loop_scope, loop_pos, &preferred)
+}
+
+/// modernize's `freshName(info, index, scope, pos, defCur, useCur,
+/// useAfterPos, preferred)`, with the cursors as source spans: `preferred`
+/// unless it is visible at `def_pos` *and* referred to within `uses`
+/// (`[lo, hi)`), in which case `refactor.FreshName` picks a new one in the
+/// scope enclosing `scope_pos`, at `pos`.
+fn modernize_fresh_name(
+    pass: &Pass<'_>,
+    def_pos: u32,
+    uses: (u32, u32),
+    scope_pos: u32,
+    pos: u32,
+    preferred: &str,
+) -> String {
+    let (Some(info), Some(artifacts)) = (pass.types_info(), pass.pkg().type_artifacts.as_ref())
+    else {
+        return preferred.to_string();
+    };
+    let pkg_scope = artifacts.packages.get(artifacts.type_pkg).scope();
+    let at = guff_types::scope::innermost(&artifacts.scopes, pkg_scope, def_pos).unwrap_or(pkg_scope);
+    let Some((_, obj)) =
+        guff_types::scope::lookup_parent(&artifacts.scopes, &artifacts.objects, at, preferred, def_pos)
+    else {
+        return preferred.to_string();
+    };
+    let mut used = false;
+    for file in pass.files() {
+        walk::preorder(NodeRef::File(file), |n| {
+            if let NodeRef::Ident(id) = n {
+                let p = id.pos().0 as u32;
+                if p >= uses.0 && p < uses.1 && info.uses.get(&id.id) == Some(&obj) {
+                    used = true;
+                }
+            }
+            !used
+        });
+        if used {
+            break;
+        }
+    }
+    if !used {
+        return preferred.to_string(); // shadowing is fine
+    }
+    let scope = guff_types::scope::innermost(&artifacts.scopes, pkg_scope, scope_pos).unwrap_or(pkg_scope);
+    refactor::fresh_name(&artifacts.scopes, &artifacts.objects, scope, pos, preferred)
+}
+
+fn count_ident_uses_in_file(pass: &Pass<'_>, file: &File, obj: ObjectId) -> usize {
+    let Some(info) = pass.types_info() else { return 0 };
+    let mut n = 0;
+    walk::preorder(NodeRef::File(file), |node| {
+        if let NodeRef::Ident(id) = node {
+            if info.uses.get(&id.id) == Some(&obj) {
+                n += 1;
+            }
+        }
+        true
+    });
+    n
+}
+
+fn is_go_identifier(s: &str) -> bool {
+    let mut chars = s.chars();
+    chars.next().is_some_and(|c| c == '_' || c.is_alphabetic())
+        && chars.all(|c| c == '_' || c.is_alphanumeric())
+        && !is_go_keyword(s)
+}
+
+fn is_go_keyword(s: &str) -> bool {
+    matches!(
+        s,
+        "break" | "case" | "chan" | "const" | "continue" | "default" | "defer" | "else"
+            | "fallthrough" | "for" | "func" | "go" | "goto" | "if" | "import" | "interface"
+            | "map" | "package" | "range" | "return" | "select" | "struct" | "switch" | "type"
+            | "var"
+    )
 }
 
 fn format_type(pass: &Pass<'_>, typ: TypeId) -> Option<String> {
@@ -4392,6 +4947,15 @@ fn check_testingcontext_list(
         if ctx_id.name == "_" || cancel_id.name == "_" {
             continue;
         }
+        // Both names are declared here, not redeclared (`info.Defs[id]`):
+        // `ctx := …; ctx, cancel := context.WithCancel(…)` reuses `ctx`.
+        let declared = |id: &Ident| {
+            pass.types_info()
+                .is_some_and(|info| matches!(info.defs.get(&id.id), Some(Some(_))))
+        };
+        if !declared(ctx_id) || !declared(cancel_id) {
+            continue;
+        }
         let Some(cancel_obj) = ident_obj(pass, cancel_id) else {
             continue;
         };
@@ -4408,6 +4972,11 @@ fn check_testingcontext_list(
         if !test_param_in_scope(pass, file, tf, ctx_id.pos().0 as u32) {
             continue;
         }
+        // x/tools v0.50: a `defer` earlier in the test function itself (not in
+        // a func literal inside it) would now run in a different order.
+        if defer_before_in_func(tf.body, defr.defer_.0) {
+            continue;
+        }
         let test_name = tf.name;
         let ctx_name = ctx_id.name.as_str();
         pending.push(Diagnostic {
@@ -4417,11 +4986,24 @@ fn check_testingcontext_list(
             message: format!("context.WithCancel can be modernized using {test_name}.Context"),
             suggested_fixes: vec![SuggestedFix {
                 message: format!("Replace context.WithCancel with {test_name}.Context"),
-                text_edits: vec![TextEdit {
-                    pos: assign.lhs[0].pos().0 as u32,
-                    end: defr.call.end().0 as u32,
-                    new_text: format!("{ctx_name} := {test_name}.Context()"),
-                }],
+                // Two edits, so a comment between the two statements stays:
+                // the assignment is rewritten and the defer deleted with its
+                // line (`refactor.DeleteStmt`).
+                text_edits: {
+                    let mut edits = vec![TextEdit {
+                        pos: assign.lhs[0].pos().0 as u32,
+                        end: with_cancel.end().0 as u32,
+                        new_text: format!("{ctx_name} := {test_name}.Context()"),
+                    }];
+                    let src = refactor::file_source(pass, file);
+                    edits.extend(refactor::delete_with_line(
+                        file,
+                        src,
+                        defr.defer_.0 as u32,
+                        defr.call.end().0 as u32,
+                    ));
+                    edits
+                },
             }],
             related: Vec::new(),
             url: String::new(),
@@ -4429,6 +5011,23 @@ fn check_testingcontext_list(
             ..Diagnostic::default()
         });
     }
+}
+
+/// Whether a `defer` before `before` sits directly in `body`'s function —
+/// anywhere in it, but not inside a func literal.
+fn defer_before_in_func(body: &BlockStmt, before: i64) -> bool {
+    let mut found = false;
+    // `preorder_prune`: skip a func literal's body, keep walking its siblings.
+    walk::preorder_prune(NodeRef::BlockStmt(body), |n| match n {
+        _ if found => false,
+        NodeRef::FuncLit(_) => false,
+        NodeRef::DeferStmt(d) if d.defer_.0 < before => {
+            found = true;
+            false
+        }
+        _ => true,
+    });
+    found
 }
 
 /// Upstream keys off the *call*, not off the function body, so the pair can sit
@@ -5188,34 +5787,11 @@ fn cut_check_idx_uses(pass: &Pass<'_>, info: &guff_types::Info, arena: &guff_typ
     Some(out)
 }
 
-/// `hasModifyingUses`: an assignment to the variable after `after` (as the
-/// *first* left-hand operand — upstream compares `Lhs[0]` only), or its
-/// address taken anywhere.
-fn cut_has_modifying_uses(info: &guff_types::Info, uses: &[CutUse<'_>], after: u32) -> bool {
-    for u in uses {
-        let me = NodeRef::Ident(u.ident).erased_ptr();
-        match u.parent() {
-            Some(NodeRef::AssignStmt(a)) if a.lhs.iter().any(|l| expr_ref(l).erased_ptr() == me) => {
-                if u.ident.name_pos.0 as u32 <= after {
-                    continue;
-                }
-                if matches!(a.lhs.first(), Some(Expr::Ident(first))
-                    if info.uses.get(&first.id).is_some() && info.uses.get(&first.id) == info.uses.get(&u.ident.id))
-                {
-                    return true;
-                }
-            }
-            Some(NodeRef::UnaryExpr(un)) if un.op == Token::AND && expr_ref(&un.x).erased_ptr() == me => return true,
-            _ => {}
-        }
-    }
-    false
-}
 
 /// `indexArgValid`: a constant, a local whose value nothing changes after the
 /// call, or `[]byte(x)` of either. Anything else might not be referentially
 /// transparent.
-fn cut_index_arg_valid(info: &guff_types::Info, arena: &guff_types::arena::TypeArena, uses: &HashMap<ObjectId, Vec<CutUse<'_>>>, expr: &Expr, after: u32) -> bool {
+fn cut_index_arg_valid(pass: &Pass<'_>, info: &guff_types::Info, arena: &guff_types::arena::TypeArena, uses: &HashMap<ObjectId, Vec<CutUse<'_>>>, expr: &Expr, after: u32) -> bool {
     let Some(tv) = info.types.get(&expr.id()) else {
         return false;
     };
@@ -5226,10 +5802,20 @@ fn cut_index_arg_valid(info: &guff_types::Info, arena: &guff_types::arena::TypeA
         Expr::CallExpr(call) => {
             is_byte_slice_type(arena, tv.typ)
                 && info.types.get(&call.fun.id()).is_some_and(|f| f.mode == OperandMode::TypeExpr)
-                && call.args.first().is_some_and(|a| cut_index_arg_valid(info, arena, uses, a, after))
+                && call.args.first().is_some_and(|a| cut_index_arg_valid(pass, info, arena, uses, a, after))
         }
+        // x/tools v0.50: no use anywhere assigns or takes the address of it
+        // (`IsAssignedOrAddressTaken`), before the call or after.
         Expr::Ident(id) => match info.uses.get(&id.id) {
-            Some(obj) => !uses.get(obj).is_some_and(|us| cut_has_modifying_uses(info, us, after)),
+            Some(obj) => !uses.get(obj).is_some_and(|us| {
+                us.iter().any(|u| {
+                    guff_analysis::typesinternal::is_assigned_or_address_taken(
+                        pass,
+                        NodeRef::Ident(u.ident),
+                        &u.stack,
+                    )
+                })
+            }),
             None => true,
         },
         _ => false,
@@ -5366,11 +5952,17 @@ fn check_stringsplit_cut(pass: &Pass<'_>, pending: &mut Vec<Diagnostic>) {
 
 fn check_stringscut(pass: &Pass<'_>, pending: &mut Vec<Diagnostic>) {
     check_stringsplit_cut(pass, pending);
-    const FUNCS: [(&str, &str, &str); 4] = [
+    // x/tools v0.50 adds the LastIndex family: `CutLast` (Go 1.27), or
+    // `Contains` when the result is only a presence check.
+    const FUNCS: [(&str, &str, &str); 8] = [
         ("strings.Index", "strings", "Index"),
         ("strings.IndexByte", "strings", "IndexByte"),
         ("bytes.Index", "bytes", "Index"),
         ("bytes.IndexByte", "bytes", "IndexByte"),
+        ("strings.LastIndex", "strings", "LastIndex"),
+        ("strings.LastIndexByte", "strings", "LastIndexByte"),
+        ("bytes.LastIndex", "bytes", "LastIndex"),
+        ("bytes.LastIndexByte", "bytes", "LastIndexByte"),
     ];
     let Some(info) = pass.types_info() else {
         return;
@@ -5458,6 +6050,18 @@ fn check_stringscut(pass: &Pass<'_>, pending: &mut Vec<Diagnostic>) {
         if !go_at_least(pass, call.lparen.0 as u32, "go1.18") {
             continue;
         }
+        // A multi-valued call may supply the complete argument list.
+        if call.args.len() != 2 {
+            continue;
+        }
+        let cut_name = if func_name.starts_with('L') { "CutLast" } else { "Cut" };
+        // Part of a multi-value declaration or assignment: the fix would not
+        // compile (golang/go#78643).
+        match c.stack.last() {
+            Some(NodeRef::ValueSpec(vs)) if vs.names.len() != 1 => continue,
+            Some(NodeRef::AssignStmt(a)) if a.lhs.len() != 1 => continue,
+            _ => {}
+        }
         let Some(i_ident) = cut_i_ident(c.call, &c.stack) else {
             continue;
         };
@@ -5468,7 +6072,7 @@ fn check_stringscut(pass: &Pass<'_>, pending: &mut Vec<Diagnostic>) {
             continue;
         };
         let call_pos = node_pos(NodeRef::CallExpr(call)).0 as u32;
-        if !cut_index_arg_valid(info, arena, &uses, s, call_pos) || !cut_index_arg_valid(info, arena, &uses, substr, call_pos) {
+        if !cut_index_arg_valid(pass, info, arena, &uses, s, call_pos) || !cut_index_arg_valid(pass, info, arena, &uses, substr, call_pos) {
             continue;
         }
         let no_uses = Vec::new();
@@ -5482,6 +6086,10 @@ fn check_stringscut(pass: &Pass<'_>, pending: &mut Vec<Diagnostic>) {
         let is_contains = (!found.negative.is_empty() || !found.nonnegative.is_empty())
             && found.before.is_empty()
             && found.after.is_empty();
+        // CutLast needs Go 1.27; a presence-only LastIndex → Contains does not.
+        if !is_contains && cut_name == "CutLast" && !go_at_least(pass, call.lparen.0 as u32, "go1.27") {
+            continue;
+        }
 
         let Some(block) = c.stack.iter().rev().find_map(|n| match n {
             NodeRef::BlockStmt(b) => Some(*b),
@@ -5572,12 +6180,12 @@ fn check_stringscut(pass: &Pass<'_>, pending: &mut Vec<Diagnostic>) {
             replace(&found.before, &before_name);
             replace(&found.after, &after_name);
             edits.push(TextEdit { pos: i_span.0, end: i_span.1, new_text: format!("{before_name}, {after_name}, {ok_name}") });
-            edits.push(TextEdit { pos: call_id.0, end: call_id.1, new_text: "Cut".into() });
-            "Cut"
+            edits.push(TextEdit { pos: call_id.0, end: call_id.1, new_text: cut_name.into() });
+            cut_name
         };
         // `IndexByte` takes a byte; `Cut` and `Contains` take a string or a
         // `[]byte`.
-        if func_name == "IndexByte" {
+        if func_name.ends_with("Byte") {
             let (sp, se) = (substr.pos().0 as u32, substr.end().0 as u32);
             if pkg_name == "strings" {
                 match code::expr_to_int(pass, substr) {
@@ -6741,9 +7349,11 @@ struct StringsBuilderUses {
     post_edits: Vec<TextEdit>,
 }
 
+/// `.String()` goes after the use with its parentheses
+/// (`astutil.UnparenEnclosingCursor`): `(s)` becomes `(s).String()`.
 fn record_rvalue_use(expr: &Expr, uses: &mut StringsBuilderUses) {
     uses.seen_rvalue = true;
-    let end = unparen_expr(expr).end().0 as u32;
+    let end = expr.end().0 as u32;
     uses.edits.push(TextEdit {
         pos: end,
         end,
@@ -6760,7 +7370,13 @@ fn walk_expr_for_var_uses(
     uses: &mut StringsBuilderUses,
 ) {
     match expr {
-        Expr::ParenExpr(p) => walk_expr_for_var_uses(pass, &p.x, obj, var_pos, in_loop, uses),
+        Expr::ParenExpr(p) => {
+            if matches!(unparen_expr(expr), Expr::Ident(id) if ident_obj(pass, id) == Some(obj)) {
+                record_rvalue_use(expr, uses);
+            } else {
+                walk_expr_for_var_uses(pass, &p.x, obj, var_pos, in_loop, uses);
+            }
+        }
         Expr::UnaryExpr(u) if u.op == Token::AND => {
             if expr_is_obj(pass, &u.x, obj) {
                 uses.reject = true;
@@ -7245,7 +7861,9 @@ fn check_stringsbuilder(pass: &Pass<'_>, file: &File, pending: &mut Vec<Diagnost
         edits.append(&mut uses.edits);
         edits.append(&mut uses.post_edits);
 
-        last_edit_end = edits.iter().map(|e| e.end).max();
+        // `lastEditEnd = edits[len(edits)-1].End` — the last edit appended (a
+        // `)` closing the last `+=`), not the furthest one.
+        last_edit_end = edits.last().map(|e| e.end);
 
         pending.push(Diagnostic {
             pos: uses.first_loop_assign_pos,
@@ -8062,6 +8680,36 @@ fn underlying_basic_name(pass: &Pass<'_>, typ: TypeId) -> Option<String> {
 
 /// Port of modernize `atomictypes`: rewrite `sync/atomic` funcs + basic vars
 /// into typed `atomic.Int32` (etc.) wrappers.
+/// Every field of a struct type built by an unkeyed composite literal
+/// (`T{1}`, or `{1}` with the type elided), through one pointer.
+fn atomictypes_unkeyed_fields(pass: &Pass<'_>) -> HashSet<ObjectId> {
+    let mut out = HashSet::new();
+    let (Some(info), Some(artifacts)) = (pass.types_info(), pass.pkg().type_artifacts.as_ref())
+    else {
+        return out;
+    };
+    let types = &artifacts.types;
+    for file in pass.files() {
+        walk::preorder(NodeRef::File(file), |n| {
+            if let NodeRef::CompositeLit(lit) = n {
+                if lit.elts.first().is_some_and(|e| !matches!(e, Expr::KeyValueExpr(_))) {
+                    if let Some(tv) = info.types.get(&lit.id) {
+                        let mut ty = unalias_readonly(types, tv.typ);
+                        if let TypeData::Pointer(p) = types.get(ty.underlying(types)) {
+                            ty = p.elem();
+                        }
+                        if let TypeData::Struct(st) = types.get(ty.underlying(types)) {
+                            out.extend((0..st.num_fields()).map(|i| st.field(i)));
+                        }
+                    }
+                }
+            }
+            true
+        });
+    }
+    out
+}
+
 fn check_atomictypes(pass: &Pass<'_>, pending: &mut Vec<Diagnostic>) {
     let mut cands: HashMap<ObjectId, AtomicCand<'_>> = HashMap::new();
     for file in pass.files() {
@@ -8103,7 +8751,15 @@ fn check_atomictypes(pass: &Pass<'_>, pending: &mut Vec<Diagnostic>) {
     // `//go:build gofuzz` file, which is what makes their `robin uint32`
     // fields silent upstream and reported here.
     let package_has_ignored_files = !pass.pkg().ignored_files.is_empty();
+    // x/tools v0.50: a field of a struct some unkeyed composite literal
+    // builds keeps its type — its positional element may not be assignable to
+    // the atomic type. Such a literal names no field, so the field's uses
+    // never show it.
+    let unkeyed_fields = atomictypes_unkeyed_fields(pass);
     for (obj, cand) in cands {
+        if unkeyed_fields.contains(&obj) {
+            continue;
+        }
         if package_has_ignored_files && !atomictypes_is_local(pass, obj) {
             continue;
         }
@@ -8271,6 +8927,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             check_stringsbuilder(pass, file, &mut pending);
             stamp_category(&mut pending, _before, "stringsbuilder");
         }
+        // The `if`s that are another `if`'s `else` branch: minmax skips them
+        // (`curIfStmt.ParentEdgeKind() == edge.IfStmt_Else`).
+        let else_ifs = else_if_stmts(file);
         walk::inspect(NodeRef::File(file), |n| {
             let Some(n) = n else {
                 return true;
@@ -8306,7 +8965,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 NodeRef::ForStmt(s) => {
                     if enabled(&options, "rangeint") {
                         let _before = pending.len();
-                        check_rangeint(pass, s, &mut pending);
+                        check_rangeint(pass, file, s, &mut pending);
                         stamp_category(&mut pending, _before, "rangeint");
                     }
                     if enabled(&options, "slicesbackward") {
@@ -8320,10 +8979,19 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         stamp_category(&mut pending, _before, "stditerators");
                     }
                 }
+                NodeRef::SliceExpr(s) => {
+                    if enabled(&options, "slicesclip") {
+                        let _before = pending.len();
+                        check_slicesclip(pass, file, s, &mut pending);
+                        stamp_category(&mut pending, _before, "slicesclip");
+                    }
+                }
                 NodeRef::IfStmt(s) => {
                     if enabled(&options, "minmax") {
                         let _before = pending.len();
-                        check_minmax(pass, s, &mut pending);
+                        if !else_ifs.contains(&(s as *const IfStmt)) {
+                            check_minmax(pass, file, s, &mut pending);
+                        }
                         stamp_category(&mut pending, _before, "minmax");
                     }
                     if enabled(&options, "stringscutprefix") {
