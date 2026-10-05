@@ -1,0 +1,11 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh staticcheck-sa1019-struct-key
+# Produced by running golangci-lint on compat/golden/cases/staticcheck-sa1019-struct-key/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+use.go:11:47:staticcheck::SA1019: (example.com/sa1019structkey/dep.Result).Requeue is deprecated: Use `RequeueAfter` instead. 
+use.go:13:43:staticcheck::SA1019: (example.com/sa1019structkey/dep.Result).Requeue is deprecated: Use `RequeueAfter` instead. 
+use.go:15:47:staticcheck::SA1019: (example.com/sa1019structkey/dep.Result).Requeue is deprecated: Use `RequeueAfter` instead. 

@@ -393,6 +393,10 @@ if not s["ok"]:
         print(f"    +guff  {k}")
     for k in s["unexpected_golangci"]:
         print(f"    +gcl   {k}")
+    for k in s.get("stale_guff", []):
+        print(f"    stale allowlist (guff-only, no longer a diff)  {k}")
+    for k in s.get("stale_golangci", []):
+        print(f"    stale allowlist (golangci-only, no longer a diff)  {k}")
 PY
 }
 

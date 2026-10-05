@@ -404,7 +404,12 @@ impl Default for Options {
 /// every `AssignStmt` left-hand side is a write — `x.f += 1` included, since
 /// the token is never examined. guff attributes field uses from a flat walk,
 /// so the write positions are collected once up front and consulted there.
-fn collect_write_positions(files: &[guff::ast::File], opts: &Options) -> HashSet<u32> {
+fn collect_write_positions(
+    files: &[guff::ast::File],
+    info: &guff_types::api::Info,
+    objects: &guff_types::arena::ObjectArena,
+    opts: &Options,
+) -> HashSet<u32> {
     let mut out = HashSet::new();
     // Every consumer of this set is a `FieldWritesAreUses` branch, and with the
     // option on upstream never takes one: `g.write(sel)` is `readSelectorExpr`,
@@ -445,6 +450,30 @@ fn collect_write_positions(files: &[guff::ast::File], opts: &Options) -> HashSet
                 }
                 guff::walk::NodeRef::IncDecStmt(inc) if !opts.post_statements_are_reads => {
                     note(&inc.x, &mut out);
+                }
+                // `g.write(kv.Key, by)`: a keyed literal's key is a write, and
+                // with the option off the `*ast.Ident` arm uses nothing. It
+                // only matters now that the type checker records the key in
+                // `Info.Uses` (`check.recordUse(key, fld)`), which it did not
+                // before 2026-10-05.
+                // Only a key that *is* a field: a map literal's key is an
+                // ordinary expression, and `m{k: v}` reads `k`.
+                guff::walk::NodeRef::CompositeLit(lit) => {
+                    for elt in &lit.elts {
+                        if let Expr::KeyValueExpr(kv) = elt {
+                            if let Expr::Ident(key) = kv.key.as_ref() {
+                                let is_field = info.uses.get(&key.id).is_some_and(|o| {
+                                    matches!(
+                                        objects.get(*o),
+                                        guff_types::arena::ObjectData::Var(v) if v.is_field()
+                                    )
+                                });
+                                if is_field {
+                                    out.insert(key.id);
+                                }
+                            }
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -586,10 +615,11 @@ fn attribute_field_uses(
                 if unkeyed && opts.field_writes_are_uses {
                     use_all(edges, owners, tv.typ);
                 }
-                // A keyed literal's keys are plain `Ident`s that `Info.Uses`
-                // resolves to the field, so `attribute_uses` already has them —
-                // except on an instantiated generic, where the object is a
-                // substituted copy. Resolve those by name.
+                // A keyed literal's keys are resolved by name here, which also
+                // covers an instantiated generic, whose field object is a
+                // substituted copy. (`Info.Uses` records keys too since the
+                // type checker's `recordUse(key, fld)` was added; the write
+                // set above keeps that from counting when writes are not uses.)
                 if let Some(ty_obj) = field_owner_obj(types, fields, tv.typ) {
                     for elt in &lit.elts {
                         if let Expr::KeyValueExpr(kv) = elt {
@@ -1391,7 +1421,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .settings::<Options>("unused")
         .copied()
         .unwrap_or_default();
-    let mut writes = collect_write_positions(pass.files(), &opts);
+    let mut writes = collect_write_positions(pass.files(), info, &artifacts.objects, &opts);
     writes.extend(collect_ident_write_positions(
         pass.files(),
         info,

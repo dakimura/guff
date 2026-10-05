@@ -42,11 +42,6 @@
 # literal whose `error` result is always nil, which points at unparam's
 # constant-result check — a guff DEFERRED (crates/guff-style/src/unparam.rs) —
 # but nobody has reproduced it in isolation yet.
-controller-runtime guff-only pkg/cluster/cluster_test.go:168:nolintlint:directive `//nolint:staticcheck` is unused for linter "staticcheck"
-controller-runtime guff-only pkg/manager/internal.go:264:nolintlint:directive `//nolint:staticcheck` is unused for linter "staticcheck"
-controller-runtime guff-only pkg/manager/manager_test.go:1819:nolintlint:directive `//nolint:staticcheck` is unused for linter "staticcheck"
-controller-runtime guff-only pkg/manager/manager_test.go:1994:nolintlint:directive `//nolint:staticcheck` is unused for linter "staticcheck"
-controller-runtime guff-only pkg/webhook/server_test.go:215:nolintlint:directive `//nolint:unparam` is unused for linter "unparam"
 
 # The two unparam entries that used to sit here (validatingwebhook.go:55 and
 # tokenreview.go:32) are gone as of 2026-08-14. They needed two SSA changes, not
@@ -77,3 +72,29 @@ controller-runtime guff-only pkg/webhook/server_test.go:215:nolintlint:directive
 # defers — so `return nil` there is a load, not an ssa.Const, and nilerr's
 # `isReturnNil` bails. guff gave a FuncLit result locals only when they were
 # named, so the closure kept a const and was reported.
+
+# golangci-lint 2.12.2 -> 2.14.0 (Phase 8, 2026-10-05; the weekly tier's first run on the new pin).
+# Not accepted mismatches: each is a ledger item still to port.
+# why: goconst v1.11.0 counts test and non-test occurrences separately and reports at each scope's first position (docs/PHASE8-LEDGER.md gocritic-goconst #3, #4).
+controller-runtime golangci-only pkg/client/fake/client_test.go:1595:goconst:string `node` has 9 occurrences, make it a constant
+controller-runtime golangci-only pkg/client/fake/client_test.go:618:goconst:string `ConfigMap` has 8 occurrences, make it a constant
+controller-runtime golangci-only pkg/envtest/envtest_suite_test.go:84:goconst:string `default` has 3 occurrences, make it a constant
+controller-runtime golangci-only pkg/envtest/envtest_test.go:106:goconst:string `v1beta1` has 16 occurrences, make it a constant
+controller-runtime golangci-only pkg/envtest/webhook_test.go:69:goconst:string `default` has 3 occurrences, make it a constant
+controller-runtime golangci-only pkg/webhook/admission/http_test.go:77:goconst:string `application/json` has 9 occurrences, make it a constant
+controller-runtime golangci-only pkg/webhook/authentication/http_test.go:74:goconst:string `application/json` has 8 occurrences, make it a constant
+controller-runtime guff-only pkg/client/fake/client.go:1428:goconst:string `ConfigMap` has 9 occurrences, make it a constant
+controller-runtime guff-only pkg/client/fake/client.go:1446:goconst:string `node` has 10 occurrences, make it a constant
+controller-runtime guff-only pkg/client/fake/client_test.go:1595:goconst:string `node` has 10 occurrences, make it a constant
+controller-runtime guff-only pkg/client/fake/client_test.go:618:goconst:string `ConfigMap` has 9 occurrences, make it a constant
+controller-runtime guff-only pkg/envtest/crd.go:391:goconst:string `v1beta1` has 17 occurrences, make it a constant
+controller-runtime guff-only pkg/envtest/envtest_suite_test.go:61:goconst:string `ValidatingWebhookConfiguration` has 3 occurrences, make it a constant
+controller-runtime guff-only pkg/envtest/envtest_suite_test.go:84:goconst:string `default` has 4 occurrences, make it a constant
+controller-runtime guff-only pkg/envtest/envtest_test.go:106:goconst:string `v1beta1` has 17 occurrences, make it a constant
+controller-runtime guff-only pkg/envtest/server.go:406:goconst:string `default` has 4 occurrences, make it a constant
+controller-runtime guff-only pkg/envtest/webhook.go:432:goconst:string `ValidatingWebhookConfiguration` has 3 occurrences, make it a constant
+controller-runtime guff-only pkg/envtest/webhook_test.go:69:goconst:string `default` has 4 occurrences, make it a constant
+controller-runtime guff-only pkg/webhook/admission/http.go:93:goconst:string `application/json` has 10 occurrences, make it a constant
+controller-runtime guff-only pkg/webhook/admission/http_test.go:77:goconst:string `application/json` has 10 occurrences, make it a constant
+controller-runtime guff-only pkg/webhook/authentication/http.go:80:goconst:string `application/json` has 9 occurrences, make it a constant
+controller-runtime guff-only pkg/webhook/authentication/http_test.go:74:goconst:string `application/json` has 9 occurrences, make it a constant

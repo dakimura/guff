@@ -571,6 +571,16 @@ fallback 2 枝（型名の `X`、入れ子の selector）を足すだけで **6 
 `!strings.EqualFold`（guff は 2026-08-27 まで**そう書いていて**、v0.7 に合わせて直したところだった）。
 staticcheck-sa は 0/1 —— 残りは §7 の SA5005 だけで、pin を上げる前の missing 3 件も一緒に消えた。
 
+**PR 6 / CI 強化（2026-10-05）**: stringscut の `Split` 腕で modernize 0/0。続けて**ゲートの穴を 3 つ塞いだ**:
+golden の ratchet は改善しても「lower it」と出すだけで通り、完全一致なら ratchet を読まずに通っていた
+（README は昔から「0/0 で残すと落ちる」と書いていた）。isolate / OSS の allowlist は、差分が消えた行が黙って残った。
+この週だけで ratchet 6 本・allowlist 7 行を手で消していたので、3 つとも「下げ忘れ／残し忘れは落ちる」にした。
+厳しくしたゲートで **pin を上げてから一度も回していなかった weekly tier** を回したら、既存の欠陥が 2 つ出た:
+型検査器が struct literal のキーを `Uses` に記録していなかった（go/types の `recordUse(key, fld)`）—— v0.8.1 の
+SA1019 キー枝が黙り、直すと grafana の差分が **115 行**消えた —— と、`inline` の版比較が golangci-lint の
+ビルド Go（go1.27.0）ではなくホストの Go を使っていた（vault / kubernetes が完全一致に）。どちらも golden に形が無く、
+2 case を足した。
+
 ---
 
 ## 3. 進捗表

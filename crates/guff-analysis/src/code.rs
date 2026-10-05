@@ -1000,9 +1000,22 @@ pub fn effective_file_go_version(pass: &Pass<'_>, pos: u32) -> String {
     }
 }
 
-/// Host toolchain version string (`go1.26.4`), memoized via GOROOT/`GOVERSION`.
+/// The Go that built the pinned golangci-lint binary (`go version -m
+/// $(which golangci-lint)`): **go1.27.0** for golangci-lint 2.14.0. Bump it
+/// with `compat/pins.json` and `GOLANGCI_LINT_COMPAT`.
+pub const UPSTREAM_BUILD_GO: &str = "go1.27.0";
+
+/// The callee-side version `inline` compares a caller file against for the
+/// standard library: upstream's `runtime.Version()`, i.e. the Go that built
+/// golangci-lint — not the toolchain on the machine.
+///
+/// This used to be the host toolchain (`GOROOT`/`GOVERSION`). With golangci-lint
+/// 2.12.2 (built with go1.26.2) on a go1.26.x host the two agreed on
+/// major.minor, which is all `version_compare` reads; 2.14.0 is built with
+/// go1.27.0, and vault / kubernetes showed every `ioutil` call site as
+/// "declared using go1.27" upstream and "go1.26" in guff.
 pub fn toolchain_go_version() -> String {
-    guff_packages::detect_go_version_string()
+    UPSTREAM_BUILD_GO.to_string()
 }
 
 /// Compares two Go versions (`-1`, `0`, `1`). Invalid versions compare as equal.

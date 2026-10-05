@@ -107,7 +107,7 @@ cargo build --release -p guff-lint
 | `smoke.sh` | Fixture-only CI entrypoint |
 | `normalize.py` | JSON → keys, diff, markdown/JSON report |
 | `standard.yml` | Shared enable-set for fixture/local only |
-| `allowlists/` | Per-target accepted diffs (`_default.txt`, `<name>.txt`) |
+| `allowlists/` | Per-target accepted diffs (`_default.txt`, `<name>.txt`). A row that no longer matches a diff fails the run as *stale* — delete it in the change that closed it |
 | `all_linters.py` / `allowlists-all/` | `--all-linters` config rewrite + its own (empty) allowlist |
 | `isolate/` | Per-linter isolate fixtures + configs ([README](isolate/README.md)) |
 | `golden/` | Check-level goldens, exact match, no allowlist ([README](golden/README.md)) |

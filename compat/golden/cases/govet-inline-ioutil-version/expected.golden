@@ -1,0 +1,24 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh govet-inline-ioutil-version
+# Produced by running golangci-lint on compat/golden/cases/govet-inline-ioutil-version/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+bad.go:13:23:govet::inline: cannot inline call to ioutil.TempDir (declared using go1.27.0) into a file using go1.24
+bad.go:14:24:govet::inline: cannot inline call to ioutil.ReadFile (declared using go1.27.0) into a file using go1.24
+bad.go:15:22:govet::inline: cannot inline call to ioutil.WriteFile (declared using go1.27.0) into a file using go1.24
+bad.go:16:23:govet::inline: cannot inline call to ioutil.ReadAll (declared using go1.27.0) into a file using go1.24
+bad.go:17:22:govet::inline: cannot inline call to ioutil.NopCloser (declared using go1.27.0) into a file using go1.24
+bad.go:18:24:govet::inline: cannot inline call to ioutil.TempFile (declared using go1.27.0) into a file using go1.24
+bad.go:24:18:govet::inline: cannot inline call to ioutil.WriteFile (declared using go1.27.0) into a file using go1.24
+bad.go:28:24:govet::inline: cannot inline call to ioutil.WriteFile (declared using go1.27.0) into a file using go1.24
+bad.go:32:21:govet::inline: cannot inline call to ioutil.WriteFile (declared using go1.27.0) into a file using go1.24
+bad.go:37:25:govet::inline: cannot inline call to ioutil.NopCloser (declared using go1.27.0) into a file using go1.24
+bad.go:42:26:govet::inline: cannot inline call to ioutil.ReadFile (declared using go1.27.0) into a file using go1.24
+bad.go:46:56:govet::inline: cannot inline call to ioutil.ReadFile (declared using go1.27.0) into a file using go1.24
+bad.go:50:41:govet::inline: cannot inline call to ioutil.NopCloser (declared using go1.27.0) into a file using go1.24
+bad.go:56:21:govet::inline: cannot inline call to ioutil.ReadFile (declared using go1.27.0) into a file using go1.24
+bad.go:61:17:govet::inline: cannot inline call to ioutil.ReadFile (declared using go1.27.0) into a file using go1.24
+bad.go:69:24:govet::inline: cannot inline call to ioutil.ReadFile (declared using go1.27.0) into a file using go1.24
