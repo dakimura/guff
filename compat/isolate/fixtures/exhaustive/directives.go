@@ -302,3 +302,33 @@ var elidedNamed = map[Color]ColorNames{
 	Green: {Red: "r"},
 	Blue:  {Red: "r"},
 }
+
+// exhaustive v0.13.0 (golangci-lint 2.14.0) parses directives on every switch
+// statement and every checked map literal, before it asks whether an enum is
+// involved, so an unparsable one is reported on a switch over an int too.
+func NonEnumSwitch(n int) int {
+	//exhaustive:ignored
+	switch n {
+	case 1:
+		return 1
+	}
+	return 0
+}
+
+// An empty directive is an invalid one: `invalid directive ""`.
+func EmptyDirective(c Color) int {
+	//exhaustive:
+	switch c {
+	case Red:
+		return 1
+	}
+	return 0
+}
+
+// `ignore-default-case-required` is not `ignore`: v0.12.0's prefix match
+// ignored this map literal, v0.13.0 checks it.
+//
+//exhaustive:ignore-default-case-required
+var notIgnoredByPrefix = map[Color]string{
+	Red: "r",
+}

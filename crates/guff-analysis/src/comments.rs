@@ -14,6 +14,42 @@ use guff::position::FileSet;
 
 use crate::Pass;
 
+/// Whether the source text of `file` contains `needle`. A cheap guard for
+/// analyzers that only need the reparse when a marker is present at all
+/// (`exhaustive` and its `//exhaustive:` directives). Unknown files answer
+/// `true`, so the caller falls back to the full reparse.
+pub fn file_source_contains(pass: &Pass<'_>, file: &File, needle: &[u8]) -> bool {
+    let Some(fname) = pass.fset().file(file.pos()).map(|f| f.name().to_string()) else {
+        return true;
+    };
+    let base = std::path::Path::new(&fname)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(fname.as_str())
+        .to_string();
+    let Some((index, path)) = pass
+        .pkg()
+        .compiled_go_files
+        .iter()
+        .enumerate()
+        .find(|(_, p)| p.file_name().and_then(|s| s.to_str()) == Some(base.as_str()))
+    else {
+        return true;
+    };
+    let owned;
+    let src: &[u8] = match pass.pkg().source_bytes(index) {
+        Some(b) => b,
+        None => match std::fs::read(path) {
+            Ok(b) => {
+                owned = b;
+                &owned
+            }
+            Err(_) => return true,
+        },
+    };
+    src.windows(needle.len()).any(|w| w == needle)
+}
+
 /// The comment groups of `file`, positioned in the analysis `FileSet`.
 ///
 /// Returns an empty vector when the file cannot be located or reparsed; every

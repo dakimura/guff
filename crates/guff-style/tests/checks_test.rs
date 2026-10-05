@@ -6287,8 +6287,8 @@ const EXH_MISSING_KEY: &str =
 /// The directives as they behave with neither `explicit-*` nor
 /// `default-case-required` — the shape golangci-lint runs by default.
 ///
-/// Measured against golangci-lint 2.12.2 on the same sources
-/// (`compat/golden/cases/exhaustive`).
+/// Measured against golangci-lint 2.14.0 on the same sources, under the same
+/// three configs as the three tests below.
 #[test]
 fn exhaustive_honours_ignore_directives() {
     let got = exhaustive_directive_findings(exhaustive_both());
@@ -6299,13 +6299,19 @@ fn exhaustive_honours_ignore_directives() {
         // case even though the setting is off, and that report wins over the
         // missing members.
         (52, EXH_MISSING_DEFAULT.to_string()),
+        // exhaustive v0.13.0 (golangci-lint 2.14.0) matches directives
+        // exactly: `//exhaustive:ignoreme` is an error, reported, and does not
+        // ignore the switch. v0.12.0 read it as `ignore` by prefix.
+        (90, "failed to parse directives: invalid directive \"ignoreme\"".to_string()),
+        (90, EXH_MISSING_TWO.to_string()),
         // A trailing comment on the `switch` line is associated with no node.
         (100, EXH_MISSING_TWO.to_string()),
         (108, EXH_MISSING_KEY.to_string()),
         (118, EXH_MISSING_KEY.to_string()),
-        // For a map literal the directive test is a plain prefix test, so
-        // `enforce-default-case-required` is not an ignore — while
-        // `ignore-default-case-required` on line 126 *is* one.
+        // Exact matching for map literals too: neither
+        // `ignore-default-case-required` (126) nor
+        // `enforce-default-case-required` (131) is an ignore.
+        (126, EXH_MISSING_KEY.to_string()),
         (131, EXH_MISSING_KEY.to_string()),
         (136, EXH_MISSING_KEY.to_string()),
         (143, EXH_MISSING_KEY.to_string()),
@@ -6332,13 +6338,13 @@ fn exhaustive_explicit_checks_only_enforced_nodes() {
         ..exhaustive_both()
     });
     let want: Vec<(i64, String)> = vec![
-        // Line 52's `//exhaustive:enforce-default-case-required` is *not* an
-        // enforce for a switch: `userDirectives` maps each comment to the
-        // longest directive it starts with.
+        // Line 52's `//exhaustive:enforce-default-case-required` is not an
+        // enforce, for a switch or (since v0.13.0's exact matching, line 131)
+        // a map literal.
         (40, EXH_MISSING_TWO.to_string()),
+        // The parse error is reported whatever explicit mode says.
+        (90, "failed to parse directives: invalid directive \"ignoreme\"".to_string()),
         (118, EXH_MISSING_KEY.to_string()),
-        // …but it is one for a map literal, which asks for a plain prefix.
-        (131, EXH_MISSING_KEY.to_string()),
         (136, EXH_MISSING_KEY.to_string()),
         // Line 143's enforce sits on the `FuncDecl`, which the map checker
         // does not look at; line 152's sits on a `var` two unlisted nodes
@@ -6364,9 +6370,12 @@ fn exhaustive_default_case_directives_override_the_setting() {
         // because of `//exhaustive:ignore-default-case-required`; line 76 is
         // the same switch without it.
         (76, EXH_MISSING_DEFAULT.to_string()),
+        (90, "failed to parse directives: invalid directive \"ignoreme\"".to_string()),
+        (90, EXH_MISSING_DEFAULT.to_string()),
         (100, EXH_MISSING_DEFAULT.to_string()),
         (108, EXH_MISSING_KEY.to_string()),
         (118, EXH_MISSING_KEY.to_string()),
+        (126, EXH_MISSING_KEY.to_string()),
         (131, EXH_MISSING_KEY.to_string()),
         (136, EXH_MISSING_KEY.to_string()),
         (143, EXH_MISSING_KEY.to_string()),
@@ -11155,10 +11164,11 @@ fn exhaustive_reads_an_imported_packages_enum() {
         },
     );
 
-    // Exact set, in report order. The five silent shapes in the fixture — a
-    // complete switch, an enum whose only missing members are unexported, an
-    // **alias** to the enum, a defined type over it, and a struct — are absent
-    // from this list, and that is what says they stayed silent.
+    // Exact set, in report order. The four silent shapes in the fixture — a
+    // complete switch, an enum whose only missing members are unexported, a
+    // defined type over it, and a struct — are absent from this list, and that
+    // is what says they stayed silent. The **alias** to the enum is reported
+    // since exhaustive v0.13.0 (golangci-lint 2.14.0) unaliases in `fromType`.
     assert_eq!(
         messages,
         vec![
@@ -11173,6 +11183,9 @@ fn exhaustive_reads_an_imported_packages_enum() {
             "missing cases in switch of type enumdep.Kind: enumdep.KindA, enumdep.KindM"
                 .to_string(),
             // The tag is a conversion to the foreign enum.
+            "missing cases in switch of type enumdep.Kind: enumdep.KindA, enumdep.KindM"
+                .to_string(),
+            // `switch k` on `enumdep.KindAlias`.
             "missing cases in switch of type enumdep.Kind: enumdep.KindA, enumdep.KindM"
                 .to_string(),
             "missing keys in map of key type enumdep.Kind: enumdep.KindA, enumdep.KindM"

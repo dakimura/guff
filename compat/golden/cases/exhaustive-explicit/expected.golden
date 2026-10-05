@@ -17,3 +17,5 @@ directives.go:191:9:exhaustive::missing keys in map of key type p.Color: p.Blue
 directives.go:199:7:exhaustive::missing keys in map of key type p.Color: p.Blue
 directives.go:208:16:exhaustive::missing keys in map of key type p.Color: p.Blue
 directives.go:236:9:exhaustive::missing keys in map of key type p.Color: p.Blue
+directives.go:311:2:exhaustive::failed to parse directives: invalid directive "ignored"
+directives.go:321:2:exhaustive::failed to parse directives: invalid directive ""

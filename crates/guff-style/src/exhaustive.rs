@@ -326,11 +326,11 @@ fn enum_for_tag(
     tag_typ: TypeId,
 ) -> Option<EnumTypeInfo> {
     let artifacts = pass.pkg().type_artifacts.as_ref()?;
-    // **No unaliasing.** Upstream's `fromType` switches on the type as
-    // recorded, and an alias is a `*types.Alias`, not a `*types.Named` — it
-    // matches no case and is not an enum. Go materializes aliases by default
-    // since go1.23, so `switch k` on a `type KindAlias = Kind` parameter is
-    // silent upstream while guff reported the whole of `Kind`'s membership.
+    // `fromType` unaliases since exhaustive v0.13.0 (golangci-lint 2.14.0):
+    // `case *types.Alias: return fromType(pass, types.Unalias(t), …)`. Through
+    // v0.12.0 an alias matched no case, so `switch k` on a `type KindAlias =
+    // Kind` parameter was silent — and guff declined to unalias to match.
+    let tag_typ = unalias_readonly(&artifacts.types, tag_typ);
     let TypeData::Named(n) = artifacts.types.get(tag_typ) else {
         return None;
     };
@@ -652,37 +652,72 @@ const ENFORCE_COMMENT: &str = "//exhaustive:enforce";
 const IGNORE_DEFAULT_CASE_REQUIRED_COMMENT: &str = "//exhaustive:ignore-default-case-required";
 const ENFORCE_DEFAULT_CASE_REQUIRED_COMMENT: &str = "//exhaustive:enforce-default-case-required";
 
-/// Upstream `userDirectives` (switch only): each comment maps to **one**
-/// directive, longest text first, so `//exhaustive:enforce-default-case-required`
-/// is not also an `//exhaustive:enforce`.
-fn user_directives(groups: &[CommentGroup]) -> Vec<&'static str> {
-    let mut out = Vec::new();
-    for g in groups {
-        for c in &g.list {
-            for d in [
-                ENFORCE_DEFAULT_CASE_REQUIRED_COMMENT,
-                IGNORE_DEFAULT_CASE_REQUIRED_COMMENT,
-                ENFORCE_COMMENT,
-                IGNORE_COMMENT,
-            ] {
-                if c.text.starts_with(d) {
-                    out.push(d);
-                    break;
-                }
+/// The four directives, as `parseDirectives` (exhaustive v0.13.0) collects them.
+#[derive(Default, Clone, Copy)]
+struct Directives {
+    ignore: bool,
+    enforce: bool,
+    ignore_default_case_required: bool,
+    enforce_default_case_required: bool,
+}
+
+/// `parseDirectives` (exhaustive v0.13.0, golangci-lint 2.14.0): a comment
+/// starting `//exhaustive:` names exactly one directive — the text up to the
+/// first space or tab — and anything else is an error that stops the scan.
+/// The directives seen so far are still returned and still apply, as upstream
+/// uses them after reporting the error. Then the two conflicting pairs.
+///
+/// v0.12.0 (golangci-lint 2.12.2) matched prefixes instead, and differently
+/// for switches (longest first) and maps (plain prefix), so `//exhaustive:
+/// ignoreme` ignored a map literal and an unknown word was never an error.
+fn parse_directives<'a>(texts: impl Iterator<Item = &'a str>) -> (Directives, Option<String>) {
+    let mut d = Directives::default();
+    for text in texts {
+        let Some(rest) = text.strip_prefix("//exhaustive:") else {
+            continue;
+        };
+        let directive = match rest.find([' ', '\t']) {
+            Some(i) => &rest[..i],
+            None => rest,
+        };
+        match directive {
+            "ignore" => d.ignore = true,
+            "enforce" => d.enforce = true,
+            "ignore-default-case-required" => d.ignore_default_case_required = true,
+            "enforce-default-case-required" => d.enforce_default_case_required = true,
+            _ => {
+                let q = guff_gostd::strconv::quote(directive);
+                return (d, Some(format!("invalid directive {q}")));
             }
         }
     }
-    out
+    if d.ignore && d.enforce {
+        return (d, Some("conflicting directives \"ignore\" and \"enforce\"".to_string()));
+    }
+    if d.ignore_default_case_required && d.enforce_default_case_required {
+        return (
+            d,
+            Some(
+                "conflicting directives \"ignore-default-case-required\" and \
+                 \"enforce-default-case-required\""
+                    .to_string(),
+            ),
+        );
+    }
+    (d, None)
 }
 
-/// Upstream `hasCommentPrefix` (map only): a plain prefix test, with no
-/// longest-first disambiguation. `//exhaustive:ignore-default-case-required`
-/// therefore *does* ignore a map literal, and `//exhaustive:ignoreme` does too
-/// — both measured against golangci-lint 2.12.2.
-fn has_comment_prefix(groups: &[&CommentGroup], prefix: &str) -> bool {
+fn group_texts<'a>(groups: impl IntoIterator<Item = &'a CommentGroup>) -> Vec<&'a str> {
     groups
-        .iter()
-        .any(|g| g.list.iter().any(|c| c.text.starts_with(prefix)))
+        .into_iter()
+        .flat_map(|g| g.list.iter().map(|c| c.text.as_str()))
+        .collect()
+}
+
+/// `makeInvalidDirectiveDiagnostic`, at the switch statement or the map
+/// literal (`node.Pos()`).
+fn invalid_directive(pos: u32, err: &str) -> (u32, String) {
+    (pos, format!("failed to parse directives: {err}"))
 }
 
 /// Node kinds whose comments upstream's map checker folds into the literal's
@@ -726,6 +761,24 @@ fn map_related_comments<'a>(cm: &'a CommentMap<'a>, stack: &[NodeRef<'a>]) -> Ve
     out
 }
 
+/// The literals the map checker gets as far as its directives for: a spelled
+/// out type that is a map (through an alias or a named type) and at least one
+/// element. Everything after that — the enum key — is `map_finding`'s.
+fn is_checked_map_literal(pass: &Pass<'_>, lit: &CompositeLit) -> bool {
+    if lit.ty.is_none() || lit.elts.is_empty() {
+        return false;
+    }
+    let (Some(artifacts), Some(info)) = (pass.pkg().type_artifacts.as_ref(), pass.types_info())
+    else {
+        return false;
+    };
+    let Some(tv) = info.types.get(&lit.id) else {
+        return false;
+    };
+    let under = unalias_readonly(&artifacts.types, tv.typ).underlying(&artifacts.types);
+    matches!(artifacts.types.get(under), TypeData::Map(_))
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
@@ -747,26 +800,25 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         // Ancestor stack, maintained the way `inspector.WithStack` does:
         // `walk::inspect` calls back with `None` on the way out of a node.
         let mut stack: Vec<NodeRef<'_>> = Vec::new();
-        let mut switches: Vec<(&SwitchStmt, SwitchFinding)> = Vec::new();
-        let mut maps: Vec<(Vec<NodeRef<'_>>, u32, String)> = Vec::new();
+        // Every switch statement, and every map literal the map checker reads
+        // directives for — not only the ones with a finding: since v0.13.0 an
+        // unparsable directive is reported wherever it sits.
+        let mut switches: Vec<(&SwitchStmt, Option<SwitchFinding>)> = Vec::new();
+        let mut maps: Vec<(Vec<NodeRef<'_>>, &CompositeLit, Option<(u32, String)>)> = Vec::new();
         walk::inspect(NodeRef::File(file), |n| {
             match n {
                 Some(node) => {
                     stack.push(node);
                     match node {
                         NodeRef::SwitchStmt(sw) if options.check_switch => {
-                            if let Some(f) =
-                                switch_finding(pass, sw, &enums, &ignore_members, &ignore_types)
-                            {
-                                switches.push((sw, f));
-                            }
+                            let f = switch_finding(pass, sw, &enums, &ignore_members, &ignore_types);
+                            switches.push((sw, f));
                         }
-                        NodeRef::CompositeLit(lit) if options.check_map => {
-                            if let Some((pos, msg)) =
-                                map_finding(pass, lit, &enums, &ignore_members, &ignore_types)
-                            {
-                                maps.push((stack.clone(), pos, msg));
-                            }
+                        NodeRef::CompositeLit(lit)
+                            if options.check_map && is_checked_map_literal(pass, lit) =>
+                        {
+                            let f = map_finding(pass, lit, &enums, &ignore_members, &ignore_types);
+                            maps.push((stack.clone(), lit, f));
                         }
                         _ => {}
                     }
@@ -777,46 +829,63 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             }
             true
         });
-        if switches.is_empty() && maps.is_empty() {
+        if switches.iter().all(|(_, f)| f.is_none()) && maps.iter().all(|(_, _, f)| f.is_none())
+            && !guff_analysis::comments::file_source_contains(pass, file, b"//exhaustive:")
+        {
             continue;
         }
 
-        // Only files that hold an enum switch or an enum-keyed map literal pay
-        // for the comment map: the analysis AST carries no comments, so it
-        // costs a reparse (`s1008` pays the same toll for the same reason).
-        let reparsed = comments_with_positions(pass, file);
+        // The analysis AST carries no comments, so the comment map costs a
+        // reparse (`s1008` pays the same toll). Skipped when the file holds
+        // no `//exhaustive:` text at all: then every directive set is empty.
+        let has_directives =
+            guff_analysis::comments::file_source_contains(pass, file, b"//exhaustive:");
+        let reparsed = if has_directives { comments_with_positions(pass, file) } else { Vec::new() };
         let cmap = new_comment_map(pass.fset(), NodeRef::File(file), &reparsed);
 
         for (sw, f) in &switches {
             let groups = cmap.get(NodeRef::SwitchStmt(sw)).unwrap_or(&[]);
-            let directives = user_directives(groups);
-            if !options.explicit_exhaustive_switch && directives.contains(&IGNORE_COMMENT) {
+            let (directives, err) = parse_directives(group_texts(groups.iter()).into_iter());
+            if let Some(err) = err {
+                pending.push(invalid_directive(sw.switch.0 as u32, &err));
+            }
+            if !options.explicit_exhaustive_switch && directives.ignore {
                 continue;
             }
-            if options.explicit_exhaustive_switch && !directives.contains(&ENFORCE_COMMENT) {
+            if options.explicit_exhaustive_switch && !directives.enforce {
                 continue;
             }
             let mut require_default_case = options.default_case_required;
-            if directives.contains(&IGNORE_DEFAULT_CASE_REQUIRED_COMMENT) {
+            if directives.ignore_default_case_required {
                 require_default_case = false;
             }
             // Upstream uses a second `if` rather than `else if`, so a switch
             // carrying both directives ends up enforcing.
-            if directives.contains(&ENFORCE_DEFAULT_CASE_REQUIRED_COMMENT) {
+            if directives.enforce_default_case_required {
                 require_default_case = true;
             }
-            report_switch(f, &options, require_default_case, &mut pending);
+            if let Some(f) = f {
+                report_switch(f, &options, require_default_case, &mut pending);
+            }
         }
 
-        for (stack, pos, msg) in &maps {
+        for (stack, lit, f) in &maps {
             let related = map_related_comments(&cmap, stack);
-            if !options.explicit_exhaustive_map && has_comment_prefix(&related, IGNORE_COMMENT) {
+            let (directives, err) = parse_directives(group_texts(related.iter().copied()).into_iter());
+            if let Some(err) = err {
+                // `CompositeLit.Pos()`: the type, which these literals spell out.
+                let pos = lit.ty.as_ref().map(|t| t.pos()).unwrap_or(lit.lbrace);
+                pending.push(invalid_directive(pos.0 as u32, &err));
+            }
+            if !options.explicit_exhaustive_map && directives.ignore {
                 continue;
             }
-            if options.explicit_exhaustive_map && !has_comment_prefix(&related, ENFORCE_COMMENT) {
+            if options.explicit_exhaustive_map && !directives.enforce {
                 continue;
             }
-            pending.push((*pos, msg.clone()));
+            if let Some((pos, msg)) = f {
+                pending.push((*pos, msg.clone()));
+            }
         }
     }
 

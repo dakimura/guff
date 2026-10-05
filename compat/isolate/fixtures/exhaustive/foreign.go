@@ -56,8 +56,8 @@ func ForeignDefault(k enumdep.Kind) string {
 	}
 }
 
-// An **alias** to the enum is a *types.Alias, which upstream's fromType does
-// not match: silent, however many members the aliased type has.
+// An **alias** to the enum: a *types.Alias, which fromType unaliases since
+// exhaustive v0.13.0 (golangci-lint 2.14.0); v0.12.0 was silent here.
 func ForeignAlias(k enumdep.KindAlias) string {
 	switch k {
 	case enumdep.KindZ:

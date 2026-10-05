@@ -1,6 +1,0 @@
-{
-  "missing": 4,
-  "extra": 2,
-  "why": "Same as cases/exhaustive: exhaustive v0.13.0 directive parsing; in explicit mode an invalid `enforce` spelling no longer enforces (golangci-lint 2.14.0). Ledger: exhaustive-sumtype #1, #2. Recorded when the pin moved 2.12.2 -> 2.14.0; see docs/PHASE8-LEDGER.md §5.1.",
-  "target": "0/0 — docs/PHASE8-LEDGER.md §6 names the PR that closes it."
-}
