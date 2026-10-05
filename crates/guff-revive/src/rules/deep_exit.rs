@@ -47,7 +47,12 @@ impl Checker {
                 return true;
             };
             if let Some((pkg, name)) = exit_call(call) {
-                let msg = if pkg == "flag"
+                let msg = if pkg == "flag" && name == "Parse" {
+                    // revive v1.17.0 points at the alternative.
+                    "calls to flag.Parse only in main() or init() functions; move the call or \
+                     refactor to use flag.NewFlagSet with flag.ContinueOnError"
+                        .into()
+                } else if pkg == "flag"
                     && name == "NewFlagSet"
                     && call.args.len() == 2
                     && is_pkg_dot_name(&call.args[1], "flag", "ExitOnError")

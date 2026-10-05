@@ -16,7 +16,8 @@ fn revive_flags_default_rule_violations() {
         "redefines-builtin-id:",
         "receiver-naming:",
         "range:",
-        "empty-block:",
+        // No `empty-block:`: bad.go's only empty block is a bare `for range`,
+        // which revive v1.17.0 skips (`revive_empty_block_*` cover the rule).
         "errorf:",
         "error-return:",
         "var-declaration:",
@@ -1734,7 +1735,8 @@ fn revive_time_equal_quotes_the_operator_not_its_token_name() {
 /// directive.
 ///
 /// Exact count: every one of these carries the same message, so only a count
-/// can tell ten from three.
+/// can tell five from three. (Ten under revive v1.15.0; v1.17.0 skips the five
+/// bare `for range x {}` drains, which compat/golden/cases/revive pins.)
 #[test]
 fn revive_empty_block_walks_into_a_non_empty_range() {
     let pkg = support::typecheck_fixture(
@@ -1747,7 +1749,7 @@ fn revive_empty_block_walks_into_a_non_empty_range() {
         .iter()
         .filter(|m| m.starts_with("empty-block:"))
         .count();
-    assert_eq!(empty, 10, "{messages:?}");
+    assert_eq!(empty, 5, "{messages:?}");
 }
 
 /// `cognitive-complexity` counts what upstream counts, and reads its limit.

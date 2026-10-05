@@ -5,6 +5,7 @@ use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
 use crate::failure::Failure;
+use crate::util::go_version_at_least;
 use crate::util::is_pkg_dot_name;
 
 pub struct Checker {
@@ -12,6 +13,15 @@ pub struct Checker {
 }
 
 impl Checker {
+    pub fn try_new(pass: &Pass<'_>) -> Option<Self> {
+        // revive v1.17.0: "for unformatted strings in Go 1.26, fmt.Errorf matches
+        // the behavior of errors.New".
+        if go_version_at_least(pass, 1, 26) {
+            return None;
+        }
+        Some(Self::new())
+    }
+
     pub fn new() -> Self {
         Self {
             failures: Vec::new(),
@@ -36,7 +46,9 @@ impl Checker {
 }
 
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut c = Checker::new();
+    let Some(mut c) = Checker::try_new(pass) else {
+        return Vec::new();
+    };
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
             if let Some(n) = n {

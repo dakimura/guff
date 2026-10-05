@@ -83,7 +83,7 @@
 | isolate-contextcheck | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-wsl | 7 | 7 | 7 | 100.0% | 100.0% | 0 |
 | isolate-gocritic | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
-| isolate-revive | 7 | 6 | 6 | 85.7% | 100.0% | 0 |
+| isolate-revive | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
 | isolate-gosec | 8 | 8 | 8 | 100.0% | 100.0% | 0 |
 | isolate-unparam | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-dupl | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
@@ -612,10 +612,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| revive | 7 | 6 | 6 | 85.7% | 100.0% |
-
-### Allowed known diffs (1)
-- guff-only: `bad.go:32:revive:empty-block: this block is empty, you can remove it`
+| revive | 6 | 6 | 6 | 100.0% | 100.0% |
 
 ## isolate-gosec
 

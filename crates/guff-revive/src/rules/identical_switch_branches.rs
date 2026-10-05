@@ -6,12 +6,28 @@ use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
 use crate::astfmt::stmts_fmt;
+use crate::config;
+use crate::settings::RuleArgument;
 use crate::failure::Failure;
 use crate::util::line_of;
 
 pub struct Checker<'a> {
     pass: &'a Pass<'a>,
     failures: Vec<Failure>,
+    allow_identical_default: bool,
+}
+
+/// revive v1.17.0 `Configure`: `allow-identical-default` (any spelling
+/// `isRuleOption` accepts) in a map as the first argument.
+fn allow_identical_default(pass: &Pass<'_>) -> bool {
+    let args = config::rule_arguments(pass, "identical-switch-branches");
+    let Some(RuleArgument::Map(map)) = args.first() else {
+        return false;
+    };
+    map.iter().any(|(k, v)| {
+        config::is_rule_option(k, "allowIdenticalDefault")
+            && matches!(v, RuleArgument::String(s) if s == "true")
+    })
 }
 
 impl<'a> Checker<'a> {
@@ -19,12 +35,13 @@ impl<'a> Checker<'a> {
         Self {
             pass,
             failures: Vec::new(),
+            allow_identical_default: allow_identical_default(pass),
         }
     }
 
     pub fn visit(&mut self, n: NodeRef<'_>) {
                     let NodeRef::SwitchStmt(sw) = n else { return; };
-                    check_switch(self.pass, sw, &mut self.failures);
+                    check_switch(self.pass, sw, self.allow_identical_default, &mut self.failures);
         
     }
 
@@ -47,7 +64,12 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
 }
 
 
-fn check_switch(pass: &Pass<'_>, sw: &SwitchStmt, failures: &mut Vec<Failure>) {
+fn check_switch(
+    pass: &Pass<'_>,
+    sw: &SwitchStmt,
+    allow_identical_default: bool,
+    failures: &mut Vec<Failure>,
+) {
     if sw.tag.is_none() {
         return;
     }
@@ -57,6 +79,12 @@ fn check_switch(pass: &Pass<'_>, sw: &SwitchStmt, failures: &mut Vec<Failure>) {
             continue;
         };
         if ends_with_fallthrough(case) {
+            continue;
+        }
+        // The default clause is neither reported nor recorded, so no later
+        // clause is reported against it either. (Nested switches inside it
+        // are still visited: the walk reaches every SwitchStmt.)
+        if allow_identical_default && case.list.is_empty() {
             continue;
         }
         let hash = stmts_fmt(&case.body);

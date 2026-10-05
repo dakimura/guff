@@ -1,0 +1,25 @@
+# Golden case: revive v1.17.0's version gate on use-any — silent below Go 1.18.
+# The version comes from go.mod (`file.Pkg.IsAtLeastGoVersion`), so the gate
+# needs a case of its own; the file is upstream's testdata, verbatim.
+# golden-may-be-empty: silence is the expected answer here; the other side of
+# the gate is pinned by revive-v117, which runs the same rule on Go 1.25.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      severity: warning
+      rules:
+        - name: use-any
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

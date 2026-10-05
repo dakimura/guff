@@ -117,6 +117,10 @@ pub const EXTENDED_RULES: &[&str] = &[
     "enforce-repeated-arg-type-style",
     "package-directory-mismatch",
     "forbidden-call-in-wg-go",
+    // revive v1.17.0 (golangci-lint 2.14.0).
+    "use-slices-concat",
+    "multiline-if-init",
+    "marshal-receiver",
 ];
 
 /// The configured Go version (`run.go`), without cloning the whole rule list.
@@ -139,13 +143,11 @@ pub fn effective_settings(pass: &Pass<'_>) -> Settings {
 
 /// Rules guff implements that the pinned upstream does not have yet.
 ///
-/// golangci-lint 2.12.2 pins revive v1.15.0, and `multiline-if-init` only
-/// exists on revive's master branch — v1.15.0 rejects the name outright
-/// ("cannot find rule: multiline-if-init") and `enable-all-rules: true` does
-/// not include it. Keeping it out of [`all_rules`] is what makes guff's
-/// enable-all set the same set as upstream's; naming the rule explicitly still
-/// runs it, for anyone who wants it before golangci-lint catches up.
-pub const AHEAD_OF_PIN_RULES: &[&str] = &["multiline-if-init"];
+/// Keeping them out of [`all_rules`] is what makes guff's enable-all set the
+/// same set as upstream's; naming one explicitly still runs it. Empty since
+/// golangci-lint 2.14.0: revive v1.17.0 has `multiline-if-init`, the one rule
+/// that was here under 2.12.2 (revive v1.15.0 rejected the name).
+pub const AHEAD_OF_PIN_RULES: &[&str] = &[];
 
 /// DEFAULT ∪ EXTENDED rule names, allocated once.
 ///
@@ -492,7 +494,11 @@ pub fn extended_test_settings() -> Settings {
         ignore_generated_header: false,
         enable_default_rules: false,
         enable_all_rules: false,
-        go: None,
+        // golangci-lint always hands revive a version; the fixtures have no
+        // module, and no version reads as "new enough" for every gate. 1.25
+        // keeps every `at least` gate open and `use-errors-new`'s "below 1.26"
+        // one too (revive v1.17.0).
+        go: Some("1.25".to_string()),
     }
 }
 

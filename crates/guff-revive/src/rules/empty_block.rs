@@ -54,6 +54,12 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                     // `ramping_arrival_rate_test.go:294` is an empty drain loop
                     // two closures deep inside `for _, tc := range tests`.
                     if r.body.list.is_empty() {
+                        if r.key.is_none() && r.value.is_none() {
+                            // revive v1.17.0: a bare `for range x {}` (a
+                            // channel drain) is skipped, and the walk goes on.
+                            ignore.push(&r.body as *const BlockStmt);
+                            return true;
+                        }
                         check_range(r, &mut failures);
                         return false;
                     }
@@ -70,10 +76,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
 }
 
 fn check_range(r: &RangeStmt, failures: &mut Vec<Failure>) {
-    // Upstream revive v1.15.0 flags every empty range body, `for range x {}`
-    // included. (revive's own main branch has since added a `Key == nil &&
-    // Value == nil` escape for channel drains; golangci-lint 2.12.2 does not
-    // pin that version, and the local checkout is not the pinned one.)
+    // An empty range body with a key or a value; the bare form is skipped by
+    // the caller (revive v1.17.0).
     debug_assert!(r.body.list.is_empty());
     // Both empty-block sites report the same text, so the confidence cannot be
     // recovered from the message: the range arm is 0.9 upstream, the plain

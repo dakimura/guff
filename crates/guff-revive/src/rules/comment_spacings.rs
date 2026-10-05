@@ -7,16 +7,24 @@ use crate::failure::Failure;
 use crate::settings::RuleArgument;
 use crate::util::scan_comments;
 
+/// `defaultAllowList`.
+const DEFAULT_ALLOW_LIST: &[&str] = &["//#nosec"];
+
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    // Upstream's allow list comes entirely from the rule's arguments, each
-    // prefixed with `//`. There is no built-in list: everything else it lets
-    // through is matched by `is_directive_comment`.
-    let allow_list: Vec<String> = config::rule_arguments(pass, "comment-spacings")
+    // Upstream's allow list is `defaultAllowList` (revive v1.17.0: just
+    // `//#nosec`) plus the rule's arguments, each prefixed with `//`.
+    // Everything else it lets through is matched by `is_directive_comment`.
+    let allow_list: Vec<String> = DEFAULT_ALLOW_LIST
         .iter()
-        .filter_map(|arg| match arg {
-            RuleArgument::String(s) => Some(format!("//{s}")),
-            _ => None,
-        })
+        .map(|s| s.to_string())
+        .chain(
+            config::rule_arguments(pass, "comment-spacings")
+                .iter()
+                .filter_map(|arg| match arg {
+                    RuleArgument::String(s) => Some(format!("//{s}")),
+                    _ => None,
+                }),
+        )
         .collect();
 
     let mut failures = Vec::new();
@@ -65,7 +73,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
 /// `^//(line |extern |export |[a-z0-9]+:[a-z0-9])`.
 ///
 /// Note what this does *not* cover, because guff used to allow them and
-/// upstream does not: a bare `//nolint` (no colon), `//sys ` and `//#nosec`.
+/// upstream does not: a bare `//nolint` (no colon) and `//sys `. (`//#nosec`
+/// is not one either; it is on `DEFAULT_ALLOW_LIST` instead.)
 fn is_directive_comment(line: &str) -> bool {
     let Some(rest) = line.strip_prefix("//") else {
         return false;

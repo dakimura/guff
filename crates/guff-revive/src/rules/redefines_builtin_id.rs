@@ -112,8 +112,10 @@ fn check_func_decl(f: &FuncDecl, failures: &mut Vec<Failure>) {
         return;
     }
     if let Some(kind) = builtin_kind(&f.name.name) {
+        // Upstream's `addFailure(n, …)` takes the FuncDecl itself, whose
+        // `Pos()` is `Type.Pos()`, the `func` keyword, not the name.
         add_failure(
-            f.name.name_pos.0 as u32,
+            f.ty.pos().0 as u32,
             failures,
             format!(
                 "redefinition of the built-in {} {}",
@@ -189,7 +191,7 @@ const BUILTIN_FUNCS: &[&str] = &[
 ];
 
 const BUILTIN_TYPES: &[&str] = &[
-    "any", "bool", "byte", "complex128", "complex64", "error", "float32", "float64", "int",
+    "any", "bool", "byte", "comparable", "complex128", "complex64", "error", "float32", "float64", "int",
     "int16", "int32", "int64", "int8", "rune", "string", "uint", "uint16", "uint32", "uint64",
     "uint8", "uintptr",
 ];

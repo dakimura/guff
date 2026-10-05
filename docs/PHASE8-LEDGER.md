@@ -412,30 +412,30 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 
 | # | upstream_path | kind | 要約 | guff の場所 | status | effort | upstream testdata |
 |---|---------------|------|------|-------------|--------|--------|-------------------|
-| 1 | rule/empty_block.go | behavior | bare な `for range x {}` を報告しない | guff-revive/src/rules/empty_block.rs check_range | needs-port | S | empty_block.go |
+| 1 | rule/empty_block.go | behavior | bare な `for range x {}` を報告しない | guff-revive/src/rules/empty_block.rs check_range | **done (PR 10)** | S | empty_block.go |
 | 2 | lint/file.go internal failure | behavior | 失敗した rule だけ読み飛ばす | rules/mod.rs run_enabled_rules | already-matches | S | — |
-| 3 | lint/file.go handleConfig | behavior | `disable-line` が範囲を閉じない | guff-revive/src/directives.rs | needs-port | S | revive_disable_directives*.go |
-| 4 | lint/file.go specify-disable-rule | new-option | 名前なし disable を報告 | directives.rs | needs-port | M | revive_disable_directives_specify_*.go |
-| 5 | rule/marshal_receiver.go | new-check | 新 rule | 無し | needs-port | S | marshal_receiver.go |
-| 6 | rule/use_slices_concat.go | new-check | 新 rule | 無し | needs-port | M | use_slices_concat.go, go1.22/use_slices_concat.go |
-| 7 | rule/multiline_if_init.go | new-check | allRules 入り | config.rs AHEAD_OF_PIN_RULES | needs-port | S | multiline_if_init.go |
-| 8 | rule/redundant_build_tag.go | behavior | `//go:build go1.X` の冗長検出（rule ごと未実装） | 無し | needs-port | M | go1.21/redundant_build_tag*.go, redundant_build_tag.go |
-| 9 | rule/use_waitgroup_go.go | behavior | ループ内の go 文も（rule ごと未実装） | 無し | needs-port | M | go1.25/use_waitgroup_go.go |
-| 10 | rule/redundant_test_main_exit.go | behavior | m.Run() 由来の Exit だけ報告 | rules/redundant_test_main_exit.rs | needs-port | M | redundant_test_main_exit_test.go |
-| 11 | rule/unexported_return.go | behavior | interface 例外を削除 | rules/unexported_return.rs | needs-port | S | unexported_return_package_*.go |
-| 12 | rule/comment_spacings.go | default-change | 既定 allow-list に `//#nosec` | rules/comment_spacings.rs | needs-port | S | comment_spacings*.go |
-| 13 | rule/deep_exit.go | message | flag.Parse の文言に案内を追加 | rules/deep_exit.rs:50 | needs-port | S | deep_exit.go |
-| 14 | rule/enforce_slice_style.go | message | 親ノードで文言を分ける | rules/enforce_slice_style.rs:43,87 | needs-port | S | enforce_slice_style_nil.go |
-| 15 | rule/identical_switch_branches.go | new-option | allow-identical-default | rules/identical_switch_branches.rs | needs-port | S | identical_switch_branches_allow_identical_default.go |
-| 16 | rule/line_length_limit.go | new-option | map 引数と excludes | rules/line_length_limit.rs | needs-port | M | line_length_limit{,_excludes}.go |
-| 17 | rule/package_comments.go | behavior | CRLF での終端行計算（判定も動く） | rules/package_comments.rs | needs-port | S | package_comments/issue607_* |
-| 18 | rule/redefines_builtin_id.go | behavior | `comparable` を追加 | rules/redefines_builtin_id.rs | needs-port | S | redefines_builtin_id.go |
-| 19 | rule/use_any.go | behavior | Go 1.18 未満は黙る | rules/use_any.rs | needs-port | S | use_any.go, go1.18/use_any.go |
-| 20 | rule/use_errors_new.go | behavior | Go 1.26 以上は黙る | rules/use_errors_new.rs | needs-port | S | go1.26/use_errors_new.go |
+| 3 | lint/file.go handleConfig | behavior | `disable-line` が範囲を閉じない | guff-revive/src/directives.rs | **done (PR 10)**: golden `revive-v117-directives`（範囲内の disable-line を自作 fixture で） | S | revive_disable_directives*.go |
+| 4 | lint/file.go specify-disable-rule | new-option | 名前なし disable を報告 | directives.rs | needs-port（PR 10 で見送り: guff は `directives:` 設定を読まない。specify-disable-reason と一緒に） | M | revive_disable_directives_specify_*.go |
+| 5 | rule/marshal_receiver.go | new-check | 新 rule | 無し | **done (PR 10)** | S | marshal_receiver.go |
+| 6 | rule/use_slices_concat.go | new-check | 新 rule | 無し | **done (PR 10)** | M | use_slices_concat.go, go1.22/use_slices_concat.go |
+| 7 | rule/multiline_if_init.go | new-check | allRules 入り | config.rs AHEAD_OF_PIN_RULES | **done (PR 10)**: EXTENDED_RULES へ、AHEAD_OF_PIN_RULES は空 | S | multiline_if_init.go |
+| 8 | rule/redundant_build_tag.go | behavior | `//go:build go1.X` の冗長検出（rule ごと未実装） | 無し | needs-port（rule ごと未実装。2.12.2 以前からの欠落で PR 14 へ） | M | go1.21/redundant_build_tag*.go, redundant_build_tag.go |
+| 9 | rule/use_waitgroup_go.go | behavior | ループ内の go 文も（rule ごと未実装） | 無し | needs-port（rule ごと未実装。2.12.2 以前からの欠落で PR 14 へ） | M | go1.25/use_waitgroup_go.go |
+| 10 | rule/redundant_test_main_exit.go | behavior | m.Run() 由来の Exit だけ報告 | rules/redundant_test_main_exit.rs | **done (PR 10)** | M | redundant_test_main_exit_test.go |
+| 11 | rule/unexported_return.go | behavior | interface 例外を削除 | rules/unexported_return.rs | **done (PR 10)**: あわせて test ファイルの `IsImportable` を per-file に（既存の取りこぼし） | S | unexported_return_package_*.go |
+| 12 | rule/comment_spacings.go | default-change | 既定 allow-list に `//#nosec` | rules/comment_spacings.rs | **done (PR 10)** | S | comment_spacings*.go |
+| 13 | rule/deep_exit.go | message | flag.Parse の文言に案内を追加 | rules/deep_exit.rs:50 | **done (PR 10)** | S | deep_exit.go |
+| 14 | rule/enforce_slice_style.go | message | 親ノードで文言を分ける | rules/enforce_slice_style.rs:43,87 | **done (PR 10)**: あわせて `isSliceType` の同一ファイル名前付き型（既存の取りこぼし） | S | enforce_slice_style_nil.go |
+| 15 | rule/identical_switch_branches.go | new-option | allow-identical-default | rules/identical_switch_branches.rs | **done (PR 10)** | S | identical_switch_branches_allow_identical_default.go |
+| 16 | rule/line_length_limit.go | new-option | map 引数と excludes | rules/line_length_limit.rs | **done (PR 10)** | M | line_length_limit{,_excludes}.go |
+| 17 | rule/package_comments.go | behavior | CRLF での終端行計算（判定も動く） | rules/package_comments.rs | **done (PR 10)**: golden `revive-v117-crlf`（CRLF のまま）。あわせて detached のときは missing を出さない（既存の過剰報告） | S | package_comments/issue607_* |
+| 18 | rule/redefines_builtin_id.go | behavior | `comparable` を追加 | rules/redefines_builtin_id.rs | **done (PR 10)**: あわせて関数の列を `func` キーワードに（既存の桁ずれ） | S | redefines_builtin_id.go |
+| 19 | rule/use_any.go | behavior | Go 1.18 未満は黙る | rules/use_any.rs | **done (PR 10)** | S | use_any.go, go1.18/use_any.go |
+| 20 | rule/use_errors_new.go | behavior | Go 1.26 以上は黙る | rules/use_errors_new.rs | **done (PR 10)** | S | go1.26/use_errors_new.go |
 | 21 | rule/add_constant.go | behavior | 空文字列リテラルを報告しない | rules/add_constant.rs | already-matches | S | add_constant_default.go |
 | 22 | rule/unhandled_error.go | behavior | `fmt.Fprintf(&buf, ...)` の例外。**ホスト依存**（importer の GOROOT が正しいホストでは 2.14 で変わる） | rules/unhandled_error.rs callee_is_local | unsure | S | unhandled_error.go |
 
-revive の upstream testdata は module zip に無く、手元 checkout（v1.15.0-59）も v1.17.0 ではない。fixture 化には v1.17.0 タグの fetch が要る。
+revive の upstream testdata は module zip に無いので、v1.17.0 タグから取得して `crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/` に転記した（MIT、LICENSE 同梱）。golden は `revive-v117`（既定設定の rule）、`revive-v117-args`（引数つき）、`revive-v117-go117` / `-go121` / `-go126`（版ゲート）、`revive-v117-directives`、`revive-v117-crlf`。
 
 ### gosec（v2.26.1 → v2.29.0）
 
@@ -663,7 +663,7 @@ golden を regen したら fix のベースラインも撮り直す。測定は 
 | 7 | **govet 文言** | fieldalignment（**done**: 型名・size class 表は go1.27.0 から転記、全枝を fixture で確認）。composite、inline の埋め込み判定、unusedresult b.Loop、nilness cgo は golden に観測差なし（fixture 先行） | govet-fieldalignment 14/14 → **0/0（ratchet 削除）** | M |
 | 8 | **出力差の小物まとめ（done）** | nonamedreturns 位置、canonicalheader fork（文言 + initialism + exclusions 設定）、exhaustive（厳密ディレクティブ・解析エラー・alias）、recvcheck、protogetter alias、gocritic sprintfQuotedString、gofumpt 100 バイト規則と effectiveEnd | nonamedreturns 14/14、canonicalheader 10/6、exhaustive ×3、recvcheck、protogetter、gocritic、gofumpt → **すべて 0/0（ratchet 削除）** | M |
 | 9 | **gosec 既存ルール** — **done** | G118、G115、G703、G404、`%#q` 系と並べて TryResolve Builder（2 系統）。nosec-require-* と NoSecTag は `config.global` 未対応のため残す | gosec 6/8 → **0/0（ratchet 削除）** | M |
-| 10 | **revive** | empty-block range、multiline-if-init を enable-all に、marshal-receiver、use-slices-concat、文言 4 本、Go 版ゲート 2 本、directives | revive 1/10 → 既存 1/4 | M |
+| 10 | **revive** — **done** | empty-block range、multiline-if-init を enable-all に、marshal-receiver、use-slices-concat、文言 4 本、Go 版ゲート 2 本、directives。redundant-build-tag / use-waitgroup-go（rule ごと未実装）と `directives:` 設定は残す | revive 1/10 → **1/4（恒久分のみ）**、新設 golden 7 case | M |
 | 11 | **unused / unparam** | Unify、unparam AnonFuncs + linkname + signRequiredBy + alias | unused 0/2、unparam 1/0 → 0 | M |
 | 12 | **modernize 残り（ゴールデンに出ない側）** | minmax ×2、atomictypes、waitgroupgo、testingcontext、rangeint、slicesbackward ×3、stringscut ×3、stringscutprefix、stringsbuilder lastEditEnd、slicesclip。**各項目で上流 testdata を fixture 化**（ratchet は動かないので fixture が唯一の検算） | ― | M〜L |
 | 13 | **gofumpt v0.12 の残り + printer** | §2.4 の toolchain 確認の後。括弧除去、effectiveEnd + multi、removeParens、joinStdImports、diagnose。`omit_v010_rules` / `match_golangci` gate の撤去 | ― | L |

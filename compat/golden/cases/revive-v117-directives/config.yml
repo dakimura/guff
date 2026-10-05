@@ -1,0 +1,27 @@
+# Golden case: revive's `//revive:disable…` directives on revive v1.17.0's own
+# testdata, where `handleConfig` changed: a `disable-line` / `disable-next-line`
+# inside a range that is already disabled no longer closes the range. Upstream
+# runs these files with `exported` and `var-naming` (test/revive_disable_
+# directives_test.go). The `directives:` config (specify-disable-reason /
+# specify-disable-rule) is not ported, so its testdata is not here.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      severity: warning
+      rules:
+        - name: exported
+        - name: var-naming
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

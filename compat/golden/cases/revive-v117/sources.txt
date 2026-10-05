@@ -1,0 +1,23 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# revive v1.17.0 testdata, one package per directory (see config.yml).
+commentspacings/comment_spacings.go     crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/comment_spacings.go
+deepexit/deep_exit.go                   crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/deep_exit.go
+deepexit/deep_exit_test.go              crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/deep_exit_test.go
+emptyblock/empty_block.go               crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/empty_block.go
+identical/identical_switch_branches.go  crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/identical_switch_branches.go
+marshal/marshal_receiver.go             crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/marshal_receiver.go
+multilineif/multiline_if_init.go        crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/multiline_if_init.go
+redefines/redefines_builtin_id.go       crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/redefines_builtin_id.go
+useany/use_any.go                       crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/go1.18/use_any.go
+useerrorsnew/use_errors_new.go          crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/use_errors_new.go
+slicesconcat/use_slices_concat.go       crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/go1.22/use_slices_concat.go
+urfoo/foo.go                            crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/unexported_return_package_foo.go
+urfoo/foo_test.go                       crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/unexported_return_package_foo_test.go
+urfoo/footest_test.go                   crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/unexported_return_package_footest_test.go
+urmain/main.go                          crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/unexported_return_package_main.go
+urmain/main_test.go                     crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/unexported_return_package_main_test.go
+urmain/maintest_test.go                 crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/unexported_return_package_maintest_test.go
+urlocal/unexported_return_interface.go  crates/guff-revive/tests/testdata/revive/unexported_return_interface.go
+testmainexit/redundant_test_main_exit_test.go  crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/go1.15/redundant_test_main_exit_test.go

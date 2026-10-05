@@ -1,7 +1,10 @@
 //! `enforce-slice-style` — enforce `make([]type, 0)`, `[]type{}`, or `var []type`.
 
-use guff::ast::{ArrayType, BasicLit, CallExpr, CompositeLit, Expr};
+use std::collections::{HashMap, HashSet};
+
+use guff::ast::{ArrayType, BasicLit, CallExpr, CompositeLit, Expr, File};
 use guff::walk::{self, NodeRef};
+use guff_analysis::code;
 use guff_analysis::Pass;
 
 use crate::config;
@@ -16,21 +19,73 @@ enum SliceStyle {
     Nil,
 }
 
-pub struct Checker {
+pub struct Checker<'a> {
+    pass: &'a Pass<'a>,
     style: SliceStyle,
     failures: Vec<Failure>,
+    /// Name positions of this file's TypeSpecs whose type is a slice, through
+    /// any chain of same-file named types: what `isSliceType` reaches by
+    /// following `Ident.Obj.Decl`, which the parser only sets within a file.
+    slice_specs: HashSet<u32>,
+    /// Ids of the expressions that are directly a ValueSpec's values — the
+    /// `parent.(*ast.ValueSpec)` of revive v1.17.0's `nilSliceFailureMessage`.
+    value_spec_values: HashSet<u32>,
 }
 
-impl Checker {
-    pub fn try_new(pass: &Pass<'_>) -> Option<Self> {
+impl<'a> Checker<'a> {
+    pub fn try_new(pass: &'a Pass<'a>) -> Option<Self> {
         let style = slice_style(pass);
         if style == SliceStyle::Any {
             return None;
         }
         Some(Self {
+            pass,
             style,
             failures: Vec::new(),
+            slice_specs: HashSet::new(),
+            value_spec_values: HashSet::new(),
         })
+    }
+
+    pub fn on_file(&mut self, file: &File) {
+        let mut specs: HashMap<u32, &Expr> = HashMap::new();
+        self.value_spec_values.clear();
+        walk::preorder(NodeRef::File(file), |n| {
+            match n {
+                NodeRef::TypeSpec(ts) => {
+                    specs.insert(ts.name.pos().0 as u32, &ts.ty);
+                }
+                NodeRef::ValueSpec(vs) => {
+                    self.value_spec_values.extend(vs.values.iter().map(|v| v.id()));
+                }
+                _ => {}
+            }
+            true
+        });
+        self.slice_specs.clear();
+        for (&pos, ty) in &specs {
+            if spec_is_slice(self.pass, &specs, ty, 0) {
+                self.slice_specs.insert(pos);
+            }
+        }
+    }
+
+    /// `isSliceType`.
+    fn is_slice_type(&self, expr: &Expr) -> bool {
+        match unparen(expr) {
+            Expr::ArrayType(ArrayType { len, .. }) => len.is_none(),
+            Expr::Ident(id) => decl_pos(self.pass, id).is_some_and(|p| self.slice_specs.contains(&p)),
+            _ => false,
+        }
+    }
+
+    /// `nilSliceFailureMessage`.
+    fn nil_message(&self, expr_id: u32, instead: &str) -> String {
+        if self.value_spec_values.contains(&expr_id) {
+            format!("use nil slice declaration (e.g. var args []type) instead of {instead}")
+        } else {
+            format!("use nil slice (e.g. []type(nil)) instead of {instead}")
+        }
     }
 
     pub fn visit(&mut self, n: NodeRef<'_>) {
@@ -38,11 +93,11 @@ impl Checker {
             NodeRef::CompositeLit(lit)
                 if matches!(self.style, SliceStyle::Make | SliceStyle::Nil) =>
             {
-                if lit.ty.as_deref().is_some_and(is_slice_type) && lit.elts.is_empty() {
+                if lit.ty.as_deref().is_some_and(|t| self.is_slice_type(t)) && lit.elts.is_empty() {
                     let message = if self.style == SliceStyle::Nil {
-                        "use nil slice declaration (e.g. var args []type) instead of []type{}"
+                        self.nil_message(lit.id, "[]type{}")
                     } else {
-                        "use make([]type) instead of []type{} (or declare nil slice)"
+                        "use make([]type) instead of []type{} (or declare nil slice)".into()
                     };
                     self.failures.push(Failure {
                         rule: "enforce-slice-style",
@@ -54,7 +109,7 @@ impl Checker {
                             .as_ref()
                             .map(|t| t.pos().0)
                             .unwrap_or(lit.lbrace.0) as u32,
-                        message: message.into(),
+                        message,
                         ..Failure::default()
                     });
                 }
@@ -65,7 +120,7 @@ impl Checker {
                 if !is_ident(&call.fun, "make") || call.args.len() < 2 {
                     return;
                 }
-                if !is_slice_type(&call.args[0]) {
+                if !self.is_slice_type(&call.args[0]) {
                     return;
                 }
                 let Expr::BasicLit(BasicLit { value, .. }) = unparen(&call.args[1]) else {
@@ -84,14 +139,14 @@ impl Checker {
                     }
                 }
                 let message = if self.style == SliceStyle::Nil {
-                    "use nil slice declaration (e.g. var args []type) instead of make([]type, 0)"
+                    self.nil_message(call.id, "make([]type, 0)")
                 } else {
-                    "use []type{} instead of make([]type, 0) (or declare nil slice)"
+                    "use []type{} instead of make([]type, 0) (or declare nil slice)".into()
                 };
                 self.failures.push(Failure {
                     rule: "enforce-slice-style",
                     pos: call.args[0].pos().0 as u32,
-                    message: message.into(),
+                    message,
                     ..Failure::default()
                 });
             }
@@ -109,6 +164,7 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
         return Vec::new();
     };
     for file in pass.files() {
+        c.on_file(file);
         walk::inspect(NodeRef::File(file), |n| {
             if let Some(n) = n {
                 c.visit(n);
@@ -128,6 +184,22 @@ fn slice_style(pass: &Pass<'_>) -> SliceStyle {
     }
 }
 
-fn is_slice_type(expr: &Expr) -> bool {
-    matches!(unparen(expr), Expr::ArrayType(ArrayType { len: None, .. }))
+/// Where `Ident.Obj.Decl` would point: the defining identifier's position.
+fn decl_pos(pass: &Pass<'_>, id: &guff::ast::Ident) -> Option<u32> {
+    let obj = code::object_of(pass, id)?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    Some(obj.pos(&artifacts.objects))
+}
+
+fn spec_is_slice(pass: &Pass<'_>, specs: &HashMap<u32, &Expr>, ty: &Expr, depth: u32) -> bool {
+    if depth > 16 {
+        return false;
+    }
+    match unparen(ty) {
+        Expr::ArrayType(ArrayType { len, .. }) => len.is_none(),
+        Expr::Ident(id) => decl_pos(pass, id)
+            .and_then(|p| specs.get(&p))
+            .is_some_and(|t| spec_is_slice(pass, specs, t, depth + 1)),
+        _ => false,
+    }
 }

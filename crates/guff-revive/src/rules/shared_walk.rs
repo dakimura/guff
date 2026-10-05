@@ -58,7 +58,7 @@ struct SharedFileRules<'a> {
     empty_lines: Option<empty_lines::Checker<'a>>,
     enforce_map_style: Option<enforce_map_style::Checker>,
     enforce_repeated_arg_type_style: Option<enforce_repeated_arg_type_style::Checker<'a>>,
-    enforce_slice_style: Option<enforce_slice_style::Checker>,
+    enforce_slice_style: Option<enforce_slice_style::Checker<'a>>,
     enforce_switch_style: Option<enforce_switch_style::Checker>,
     epoch_naming: Option<epoch_naming::Checker<'a>>,
     error_naming: Option<error_naming::Checker>,
@@ -259,8 +259,12 @@ impl<'a> SharedFileRules<'a> {
                 .then(|| unused_parameter::Checker::new(pass)),
             unused_receiver: enabled("unused-receiver")
                 .then(|| unused_receiver::Checker::new(pass)),
-            use_any: enabled("use-any").then(use_any::Checker::new),
-            use_errors_new: enabled("use-errors-new").then(use_errors_new::Checker::new),
+            use_any: enabled("use-any")
+                .then(|| use_any::Checker::try_new(pass))
+                .flatten(),
+            use_errors_new: enabled("use-errors-new")
+                .then(|| use_errors_new::Checker::try_new(pass))
+                .flatten(),
             use_fmt_print: enabled("use-fmt-print").then(|| use_fmt_print::Checker::new(pass)),
             use_slices_sort: enabled("use-slices-sort").then(use_slices_sort::Checker::new),
             useless_fallthrough: enabled("useless-fallthrough")
@@ -386,6 +390,12 @@ impl<'a> SharedFileRules<'a> {
             c.on_file(self.file_is_test);
         }
         if let Some(c) = &mut self.redundant_test_main_exit {
+            c.on_file(self.file_is_test);
+        }
+        if let Some(c) = &mut self.enforce_slice_style {
+            c.on_file(file);
+        }
+        if let Some(c) = &mut self.unexported_return {
             c.on_file(self.file_is_test);
         }
         if let Some(c) = &mut self.unnecessary_stmt {

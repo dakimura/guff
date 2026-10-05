@@ -14,8 +14,9 @@
 //! comments — the ordinary way to keep a name that stutters — were findings
 //! golangci-lint does not report.
 //!
-//! DEFERRED: `directive-specify-disable-reason`, which turns a directive with
-//! no trailing reason into a failure of its own.
+//! DEFERRED: the `directives` config — `specify-disable-reason`, which turns a
+//! directive with no trailing reason into a failure of its own, and revive
+//! v1.17.0's `specify-disable-rule`, the same for a `disable` naming no rule.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -70,16 +71,22 @@ impl Directives {
     }
 }
 
-/// Upstream `handleConfig`: a toggle is recorded only when it changes the
-/// state, and a leading `enable` for a rule that was never disabled is dropped.
-fn handle_config(map: &mut HashMap<String, Vec<Toggle>>, enabled: bool, line: i64, name: &str) {
+/// Upstream `handleConfig` (revive v1.17.0): a toggle is recorded only when it
+/// changes the state — a rule with no toggles yet is enabled — and the answer
+/// says whether it did.
+fn handle_config(
+    map: &mut HashMap<String, Vec<Toggle>>,
+    enabled: bool,
+    line: i64,
+    name: &str,
+) -> bool {
     let existing = map.entry(name.to_string()).or_default();
-    if (existing.len() > 1 && existing[existing.len() - 1].enabled == enabled)
-        || (existing.is_empty() && enabled)
-    {
-        return;
+    let currently_enabled = existing.last().is_none_or(|t| t.enabled);
+    if currently_enabled == enabled {
+        return false;
     }
     existing.push(Toggle { enabled, line });
+    true
 }
 
 fn handle_rules(
@@ -91,16 +98,22 @@ fn handle_rules(
 ) {
     for name in rule_names {
         match modifier {
-            // A one-line window: open and close it on the same line.
+            // A one-line window: open and close it on the same line — but only
+            // when opening changed anything, so a `disable-line` inside a
+            // disabled range does not end the range (revive v1.17.0).
             "line" => {
-                handle_config(map, enabled, line, name);
-                handle_config(map, !enabled, line, name);
+                if handle_config(map, enabled, line, name) {
+                    handle_config(map, !enabled, line, name);
+                }
             }
             "next-line" => {
-                handle_config(map, enabled, line + 1, name);
-                handle_config(map, !enabled, line + 1, name);
+                if handle_config(map, enabled, line + 1, name) {
+                    handle_config(map, !enabled, line + 1, name);
+                }
             }
-            _ => handle_config(map, enabled, line, name),
+            _ => {
+                handle_config(map, enabled, line, name);
+            }
         }
     }
 }
