@@ -1,0 +1,76 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh govet-printf-upstream
+# Produced by running golangci-lint on compat/golden/cases/govet-printf-upstream/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+printf/b/b.go:7:2:govet::unusedresult: result of fmt.Sprintf call not used
+printf/b/b.go:12:2:govet::unusedresult: result of fmt.Sprint call not used
+printf/b/b.go:27:3:govet::unusedresult: result of fmt.Sprintf call not used
+printf/b/b.go:60:15:govet::printf: GlobalWrapf format %s has arg 123 of wrong type int
+printf/b/b.go:67:16:govet::printf: Wrapf format %s has arg 123 of wrong type int
+printf/issue68744/issue68744.go:12:9:govet::printf: example.com/printf/issue68744.wrapf format %s has arg 123 of wrong type int
+printf/issue70572/issue70572.go:23:16:govet::printf: (example.com/printf/issue70572.A).Printf call has arguments but no formatting directives
+printf/issue70572/issue70572.go:24:16:govet::printf: (example.com/printf/issue70572.B[T]).Printf call has arguments but no formatting directives
+printf/issue72850/a_go126.go:10:19:govet::printf: fmt.Sprintf format %q has arg 123 of wrong type int
+printf/nonconst/nonconst.go:19:13:govet::printf: non-constant format string in call to fmt.Printf
+printf/nonconst/nonconst.go:21:25:govet::printf: non-constant format string in call to fmt.Fprintf
+printf/nonconst/nonconst.go:22:13:govet::printf: non-constant format string in call to log.Printf
+printf/operands/operands.go:19:14:govet::printf: fmt.Printf format %c has arg p of wrong type unsafe.Pointer (use %p for a pointer)
+printf/operands/operands.go:20:14:govet::printf: fmt.Printf format %U has arg p of wrong type unsafe.Pointer (use %p for a pointer)
+printf/operands/operands.go:24:14:govet::printf: fmt.Printf format %s has arg p of wrong type unsafe.Pointer
+printf/operands/operands.go:25:14:govet::printf: fmt.Printf format %t has arg p of wrong type unsafe.Pointer
+printf/operands/operands.go:26:14:govet::printf: fmt.Printf format %q has arg p of wrong type unsafe.Pointer
+printf/operands/operands.go:27:14:govet::printf: fmt.Printf format %c has arg ip of wrong type *int (use %p for a pointer)
+printf/operands/operands.go:28:14:govet::printf: fmt.Printf format %U has arg ip of wrong type *int (use %p for a pointer)
+printf/operands/operands.go:29:14:govet::printf: fmt.Printf format %s has arg ip of wrong type *int
+printf/operands/operands.go:30:14:govet::printf: fmt.Printf format %q has arg ip of wrong type *int
+printf/operands/operands.go:33:14:govet::printf: fmt.Printf format %c has arg pp of wrong type *example.com/printf/operands.P (use %p for a pointer)
+printf/operands/operands.go:34:14:govet::printf: fmt.Printf format %c has arg ps of wrong type []*int (use %p for a pointer)
+printf/operands/operands.go:35:14:govet::printf: fmt.Printf format %*d uses non-int ip (use %p for a pointer) as argument of *
+printf/operands/operands.go:36:14:govet::printf: fmt.Printf format %*d uses non-int p (use %p for a pointer) as argument of *
+printf/operands/operands.go:37:14:govet::printf: fmt.Printf format %.*d uses non-int ip (use %p for a pointer) as argument of *
+printf/operands/operands.go:38:14:govet::printf: fmt.Printf format %c has arg map[int]*int{} of wrong type map[int]*int (use %p for a pointer)
+printf/operands/operands.go:39:14:govet::printf: fmt.Printf format %c has arg [2]*int{} of wrong type [2]*int (use %p for a pointer)
+printf/operands/operands.go:40:14:govet::printf: fmt.Printf format %c has arg struct{ X *int }{} of wrong type struct{X *int} (use %p for a pointer)
+printf/operands/operands.go:49:14:govet::printf: fmt.Printf format %q has arg i of wrong type int
+printf/operands/operands.go:50:14:govet::printf: fmt.Printf format %q has arg i64 of wrong type int64
+printf/operands/operands.go:53:14:govet::printf: fmt.Printf format %q has arg 65 of wrong type int
+printf/operands/operands.go:55:14:govet::printf: fmt.Printf format %q has arg []int{1} of wrong type []int
+printf/operands/operands.go:57:14:govet::printf: fmt.Printf format %d has arg nil of wrong type untyped nil
+printf/operands/operands.go:58:14:govet::printf: fmt.Printf format %d has arg ps of wrong type []*example.com/printf/operands.S
+printf/operands/operands.go:59:14:govet::printf: fmt.Printf format %d has arg &ps of wrong type *[]*example.com/printf/operands.S
+printf/operands/operands.go:64:14:govet::printf: fmt.Printf format %x has arg ps of wrong type []*example.com/printf/operands.S
+printf/operands/operands.go:67:14:govet::printf: fmt.Printf format %d has arg ms of wrong type map[string]int
+printf/operands/operands.go:70:14:govet::printf: fmt.Printf format %d arg fn is a func value, not called
+printf/operands/operands.go:71:14:govet::printf: fmt.Printf format %x arg fn is a func value, not called
+printf/operands/operands.go:73:14:govet::printf: fmt.Printf format %d has arg ss of wrong type []string
+printf/operands/operands.go:78:14:govet::printf: fmt.Printf format %b has arg ss of wrong type []string
+printf/operands/operands.go:79:14:govet::printf: fmt.Printf format %o has arg [2]*S{} of wrong type [2]*example.com/printf/operands.S
+printf/typeparams/diagnostics.go:11:14:govet::printf: fmt.Printf format %s has arg t of wrong type T (contains ~int)
+printf/typeparams/diagnostics.go:13:14:govet::printf: fmt.Printf format %d has arg e of wrong type E
+printf/typeparams/diagnostics.go:15:2:govet::unusedresult: result of fmt.Errorf call not used
+printf/typeparams/diagnostics.go:21:2:govet::unusedresult: result of fmt.Errorf call not used
+printf/typeparams/diagnostics.go:21:14:govet::printf: fmt.Errorf format %w has arg s of wrong type S
+printf/typeparams/diagnostics.go:22:14:govet::printf: fmt.Printf format %d has arg a of wrong type A
+printf/typeparams/diagnostics.go:23:14:govet::printf: fmt.Printf format %s has arg a of wrong type A
+printf/typeparams/diagnostics.go:34:14:govet::printf: fmt.Printf format %s has arg t of wrong type T (contains ~int)
+printf/typeparams/diagnostics.go:43:14:govet::printf: fmt.Printf format %s has arg x of wrong type struct{f int; t T}
+printf/typeparams/diagnostics.go:48:14:govet::printf: fmt.Printf format %d has arg y of wrong type struct{f string; t S}
+printf/typeparams/diagnostics.go:52:14:govet::printf: fmt.Printf format %s has arg m1 of wrong type map[T]T
+printf/typeparams/diagnostics.go:54:14:govet::printf: fmt.Printf format %d has arg m2 of wrong type map[S]S
+printf/typeparams/diagnostics.go:104:2:govet::unusedresult: result of fmt.Errorf call not used
+printf/typeparams/diagnostics.go:105:14:govet::printf: fmt.Printf format %d has arg s of wrong type S (contains float64)
+printf/typeparams/diagnostics.go:107:2:govet::unusedresult: result of fmt.Errorf call not used
+printf/typeparams/diagnostics.go:107:14:govet::printf: fmt.Errorf format %w has arg s of wrong type S
+printf/typeparams/diagnostics.go:116:14:govet::printf: fmt.Printf format %d has arg t1 of wrong type T1 (contains string)
+printf/typeparams/diagnostics.go:117:14:govet::printf: fmt.Printf format %s has arg t1 of wrong type T1 (contains ~int)
+printf/typeparams/diagnostics.go:119:14:govet::printf: fmt.Printf format %s has arg t2 of wrong type T2 (contains example.com/printf/typeparams.myInt)
+printf/typeparams/diagnostics.go:125:2:govet::printf: fmt.Println arg u causes recursive call to (example.com/printf/typeparams.U[T]).String method
+printf/w/w.go:23:2:govet::unusedresult: result of fmt.Errorf call not used
+printf/w/w.go:24:2:govet::unusedresult: result of fmt.Errorf call not used
+printf/w/w.go:26:2:govet::unusedresult: result of fmt.Errorf call not used
+printf/w/w.go:29:2:govet::unusedresult: result of fmt.Errorf call not used
+printf/w/w.go:31:14:govet::printf: log.Printf does not support error-wrapping directive %w

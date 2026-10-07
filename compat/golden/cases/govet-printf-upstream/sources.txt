@@ -1,0 +1,16 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+printf/b/b.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/printf/b/b.go
+printf/issue62595/a_go126.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/printf/issue62595/a_go126.go
+printf/issue62595/a_go127.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/printf/issue62595/a_go127.go
+printf/issue68744/issue68744.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/printf/issue68744/issue68744.go
+printf/issue70572/issue70572.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/printf/issue70572/issue70572.go
+printf/issue72850/a_go125.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/printf/issue72850/a_go125.go
+printf/issue72850/a_go126.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/printf/issue72850/a_go126.go
+printf/issue76616/issue76616.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/printf/issue76616/issue76616.go
+printf/nofmt/nofmt.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/printf/nofmt/nofmt.go
+printf/nonconst/nonconst.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/printf/nonconst/nonconst.go
+printf/typeparams/diagnostics.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/printf/typeparams/diagnostics.go
+printf/typeparams/wrappers.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/printf/typeparams/wrappers.go
+printf/w/w.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/printf/w/w.go
+printf/operands/operands.go  crates/guff-govet/tests/testdata/printf_operands/operands.go

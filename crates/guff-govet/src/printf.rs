@@ -1,70 +1,87 @@
 //! `printf` — check Printf-like format strings against their arguments.
 //!
-//! Port of the core of `golang.org/x/tools/go/analysis/passes/printf`. Covers:
-//! - unknown verbs and `%w` outside `Errorf`,
-//! - argument count (too few / too many), honouring `*` width/precision and
-//!   explicit `%[n]` argument indexes,
-//! - argument type matching (`%d` wants an integer, `%s` a string, …),
-//!   recursing into slices/arrays/maps/pointers and accepting types that
-//!   implement `fmt.Formatter` / `fmt.Stringer` / `error`.
+//! Port of `golang.org/x/tools/go/analysis/passes/printf` (v0.50):
+//! `checkPrintf` / `okPrintfArg` for formatted calls — verbs, flags, operand
+//! counts with `*` and `%[n]`, operand types ([`crate::printf_types`]), func
+//! values and recursive `String` / `Error` calls, and the go1.24 non-constant
+//! format string with its fix — and `checkPrint` for unformatted ones.
+//! Which functions are print-like is [`crate::printf_wrappers`].
+//!
+//! Not ported: the go1.27 rules (`%d` of a pointer, `%w` of a pointer to an
+//! error type; PR 15), and wrappers declared in other packages (facts).
 
 use std::sync::OnceLock;
 
 use guff::ast::{CallExpr, Expr};
 use guff::node_mask;
 use guff::walk::NodeRef;
-use guff_analysis::code::{call_name, expr_to_bytes};
+use guff_analysis::code::{self, call_name, expr_to_bytes};
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_analysis::{
+    AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
 use guff_types::arena::{ObjectData, TypeData};
-use guff_types::basic::{basic_kind, BasicKind};
-use guff_types::predicates::{is_boolean, is_complex, is_float, is_integer, is_string, is_valid};
 use guff_types::signature::signature_params;
-use guff_types::tuple::tuple_len;
-use guff_types::TypeId;
-use guff_types::api_predicates::api_implements;
+use guff_types::tuple::{tuple_at, tuple_len};
 use guff_types::alias::unalias_readonly;
 
 use crate::govet_util::expr_type;
+use crate::printf_types::{
+    self, Scratch, ANY_TYPE, ARG_BOOL, ARG_BYTE, ARG_COMPLEX, ARG_ERROR, ARG_FLOAT, ARG_INT,
+    ARG_POINTER, ARG_RUNE, ARG_STRING,
+};
 use crate::printf_wrappers;
 
-// Argument-type categories (a bitmask). `rune` is folded into `INT`.
-const B_BOOL: u32 = 1 << 0;
-const B_INT: u32 = 1 << 1;
-const B_STRING: u32 = 1 << 2;
-const B_FLOAT: u32 = 1 << 3;
-const B_COMPLEX: u32 = 1 << 4;
-const B_POINTER: u32 = 1 << 5;
-const B_SLICE: u32 = 1 << 6;
-const B_ERROR: u32 = 1 << 7;
-const B_ANY: u32 = u32::MAX;
-
-/// Allowed argument categories for a verb, or `None` if the verb is unknown.
-fn verb_arg_type(verb: char) -> Option<u32> {
-    Some(match verb {
-        'b' => B_INT | B_FLOAT | B_COMPLEX | B_POINTER,
-        'c' => B_INT,
-        'd' => B_INT | B_POINTER,
-        'e' | 'E' | 'f' | 'F' | 'g' | 'G' => B_FLOAT | B_COMPLEX,
-        'o' | 'O' => B_INT | B_POINTER,
-        'p' => B_POINTER,
-        'q' => B_INT | B_STRING,
-        's' => B_STRING,
-        't' => B_BOOL,
-        'T' => B_ANY,
-        'U' => B_INT,
-        'v' => B_ANY,
-        'w' => B_ERROR,
-        'x' | 'X' => {
-            B_INT | B_STRING | B_FLOAT | B_COMPLEX | B_POINTER | B_SLICE
-        }
-        _ => return None,
-    })
+/// One entry of upstream's `printVerbs`: the flags a verb knows and the
+/// operand types it accepts.
+struct PrintVerb {
+    verb: char,
+    flags: &'static str,
+    typ: u32,
 }
 
-fn is_string_ish(verb: char) -> bool {
-    matches!(verb, 's' | 'q' | 'v' | 'x' | 'X')
-}
+// Common flag sets for printf verbs.
+const NO_FLAG: &str = "";
+const NUM_FLAG: &str = " -+.0";
+const SHARP_NUM_FLAG: &str = " -+.0#";
+const ALL_FLAGS: &str = " -+.0#";
+
+/// `printVerbs`, in upstream's order — the order matters: an unknown verb
+/// leaves upstream's loop variable on the last entry (`X`).
+const PRINT_VERBS: &[PrintVerb] = &[
+    PrintVerb { verb: '%', flags: NO_FLAG, typ: 0 },
+    PrintVerb { verb: 'b', flags: SHARP_NUM_FLAG, typ: ARG_INT | ARG_FLOAT | ARG_COMPLEX | ARG_POINTER },
+    PrintVerb { verb: 'c', flags: "-", typ: ARG_RUNE | ARG_INT },
+    // When analyzing go1.27+ code argPointer is disallowed (PR 15).
+    PrintVerb { verb: 'd', flags: NUM_FLAG, typ: ARG_INT | ARG_POINTER },
+    PrintVerb { verb: 'e', flags: SHARP_NUM_FLAG, typ: ARG_FLOAT | ARG_COMPLEX },
+    PrintVerb { verb: 'E', flags: SHARP_NUM_FLAG, typ: ARG_FLOAT | ARG_COMPLEX },
+    PrintVerb { verb: 'f', flags: SHARP_NUM_FLAG, typ: ARG_FLOAT | ARG_COMPLEX },
+    PrintVerb { verb: 'F', flags: SHARP_NUM_FLAG, typ: ARG_FLOAT | ARG_COMPLEX },
+    PrintVerb { verb: 'g', flags: SHARP_NUM_FLAG, typ: ARG_FLOAT | ARG_COMPLEX },
+    PrintVerb { verb: 'G', flags: SHARP_NUM_FLAG, typ: ARG_FLOAT | ARG_COMPLEX },
+    PrintVerb { verb: 'o', flags: SHARP_NUM_FLAG, typ: ARG_INT | ARG_POINTER },
+    PrintVerb { verb: 'O', flags: SHARP_NUM_FLAG, typ: ARG_INT | ARG_POINTER },
+    PrintVerb { verb: 'p', flags: "-#", typ: ARG_POINTER },
+    // When analyzing go1.26 code, argInt => argByte (see `ok_printf_arg`).
+    PrintVerb { verb: 'q', flags: " -+.0#", typ: ARG_RUNE | ARG_INT | ARG_STRING },
+    PrintVerb { verb: 's', flags: " -+.0", typ: ARG_STRING },
+    PrintVerb { verb: 't', flags: "-", typ: ARG_BOOL },
+    PrintVerb { verb: 'T', flags: "-", typ: ANY_TYPE },
+    PrintVerb { verb: 'U', flags: "-#", typ: ARG_RUNE | ARG_INT },
+    PrintVerb { verb: 'v', flags: ALL_FLAGS, typ: ANY_TYPE },
+    PrintVerb { verb: 'w', flags: ALL_FLAGS, typ: ARG_ERROR },
+    PrintVerb {
+        verb: 'x',
+        flags: SHARP_NUM_FLAG,
+        typ: ARG_RUNE | ARG_INT | ARG_STRING | ARG_POINTER | ARG_FLOAT | ARG_COMPLEX,
+    },
+    PrintVerb {
+        verb: 'X',
+        flags: SHARP_NUM_FLAG,
+        typ: ARG_RUNE | ARG_INT | ARG_STRING | ARG_POINTER | ARG_FLOAT | ARG_COMPLEX,
+    },
+];
 
 /// Index into `call.args` of the format-string argument.
 ///
@@ -102,6 +119,8 @@ fn format_index(pass: &Pass<'_>, call: &CallExpr) -> usize {
 /// `fmt.Sprintf("%[2]*[1]s", str, rawWidth)` as an `int` printed with `%s`.
 struct Directive {
     verb: char,
+    /// The flags as written, a subset of `#0+- ` (`fmtstr`'s `Flags`).
+    flags: String,
     /// `[n]` absorbed by the width `*`, e.g. `2` in `%[2]*d`.
     width_index: Option<usize>,
     has_width_star: bool,
@@ -210,8 +229,10 @@ fn scan_directive(format: &[u8], start: usize) -> (Scan, usize) {
     }
 
     // Flags.
+    let mut flags = String::new();
     while let Some(c) = at(i) {
         if matches!(c, '#' | '0' | '+' | '-' | ' ') {
+            flags.push(c);
             text.push(c);
             i += 1;
         } else {
@@ -311,6 +332,7 @@ fn scan_directive(format: &[u8], start: usize) -> (Scan, usize) {
     (
         Scan::Directive(Directive {
             verb,
+            flags,
             width_index,
             has_width_star,
             prec_index,
@@ -319,285 +341,6 @@ fn scan_directive(format: &[u8], start: usize) -> (Scan, usize) {
             text,
         }),
         i,
-    )
-}
-
-/// Whether the type has a directly-declared method with the given name.
-///
-/// Enough to recognise `fmt.Formatter` (`Format`), `fmt.Stringer` (`String`)
-/// and `error` (`Error`) for the common case; unwraps a single pointer. This
-/// deliberately errs toward accepting (avoiding false positives).
-///
-/// Aliases are unwrapped on both sides of the pointer: a method set is a
-/// property of the aliased type, so `os.FileMode` (= `io/fs.FileMode`) has to
-/// find `String` just as `fs.FileMode` does. Missing this reported
-/// `%s has arg mode of wrong type os.FileMode`.
-fn type_has_method(pass: &Pass<'_>, typ: TypeId, name: &str) -> bool {
-    let Some(art) = pass.pkg().type_artifacts.as_ref() else {
-        return false;
-    };
-    let mut t = unalias_readonly(&art.types, typ);
-    if let TypeData::Pointer(p) = art.types.get(t) {
-        t = unalias_readonly(&art.types, p.elem());
-    }
-    if let TypeData::Named(n) = art.types.get(t) {
-        for i in 0..n.num_methods() {
-            if n.method(i).name(&art.objects) == name {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-/// Whether the struct type (given by its underlying id) has an embedded field.
-/// Embedded fields can promote `String`/`Error`/`Format` methods that
-/// `type_has_method` does not see, so such structs are accepted conservatively.
-fn struct_has_embedded(pass: &Pass<'_>, underlying: TypeId) -> bool {
-    let Some(art) = pass.pkg().type_artifacts.as_ref() else {
-        return true;
-    };
-    let n = guff_types::r#struct::struct_num_fields(&art.types, underlying);
-    for i in 0..n {
-        let f = guff_types::r#struct::struct_field(&art.types, underlying, i);
-        if let ObjectData::Var(v) = art.objects.get(f) {
-            if v.embedded() {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-fn basic_bits(pass: &Pass<'_>, typ: TypeId) -> u32 {
-    let art = match pass.pkg().type_artifacts.as_ref() {
-        Some(a) => a,
-        None => return 0,
-    };
-    if is_boolean(&art.types, typ) {
-        B_BOOL
-    } else if is_integer(&art.types, typ) {
-        B_INT
-    } else if is_float(&art.types, typ) {
-        B_FLOAT
-    } else if is_complex(&art.types, typ) {
-        B_COMPLEX
-    } else if is_string(&art.types, typ) {
-        B_STRING
-    } else {
-        0
-    }
-}
-
-/// Whether an argument of type `typ` is acceptable for `verb` (bitmask `bits`).
-/// Could this argument implement `fmt.Formatter`?
-///
-/// ```go
-/// if _, ok := typ.Underlying().(*types.Interface); ok {
-///     if !typeparams.IsTypeParam(typ) {
-///         return true
-///     }
-/// }
-/// obj, _, _ := types.LookupFieldOrMethod(typ, false, nil, "Format")
-/// … signature is func(fmt.State, rune)
-/// ```
-///
-/// A value that formats itself makes every other check meaningless, so
-/// upstream skips the operand entirely. The interface arm is the one that
-/// matters in practice — an `error` or an `any` argument silences the check —
-/// and a **type parameter** is excluded, because a constraint says what the
-/// value can be.
-fn arg_may_be_formatter(pass: &Pass<'_>, arg: &Expr) -> bool {
-    let Some(typ) = expr_type(pass, arg) else {
-        return false;
-    };
-    let Some(art) = pass.pkg().type_artifacts.as_ref() else {
-        return false;
-    };
-    if matches!(art.types.get(typ), TypeData::TypeParam(_)) {
-        return false;
-    }
-    if matches!(
-        art.types.get(typ.underlying(&art.types)),
-        TypeData::Interface(_)
-    ) {
-        return true;
-    }
-    type_has_method(pass, typ, "Format")
-}
-
-fn match_arg_type(pass: &Pass<'_>, verb: char, bits: u32, typ: TypeId, depth: u32) -> bool {
-    if depth > 8 {
-        return true;
-    }
-    let Some(art) = pass.pkg().type_artifacts.as_ref() else {
-        return true;
-    };
-    if !is_valid(&art.types, typ) {
-        return true;
-    }
-    // A Formatter takes over all formatting, so any verb is fine.
-    if type_has_method(pass, typ, "Format") {
-        return true;
-    }
-    // String-like verbs accept Stringer / error.
-    if is_string_ish(verb)
-        && (type_has_method(pass, typ, "String") || type_has_method(pass, typ, "Error"))
-    {
-        return true;
-    }
-    // `%w` requires a type that implements `error` (e.g. `*os.LinkError`).
-    if bits & B_ERROR != 0 && implements_error(pass, typ) {
-        return true;
-    }
-    if bits == B_ANY {
-        return true;
-    }
-
-    let u = typ.underlying(&art.types);
-    match art.types.get(u) {
-        TypeData::Basic(b) => {
-            if b.kind() == BasicKind::Invalid {
-                return true;
-            }
-            let tb = basic_bits(pass, typ);
-            if tb == 0 {
-                // e.g. uintptr / unsafe.Pointer — accept rather than misreport.
-                return true;
-            }
-            bits & tb != 0
-        }
-        TypeData::Pointer(p) => {
-            if bits & B_POINTER != 0 {
-                return true;
-            }
-            let elem = p.elem();
-            let eu = elem.underlying(&art.types);
-            if matches!(
-                art.types.get(eu),
-                TypeData::Struct(_) | TypeData::Array(_) | TypeData::Slice(_) | TypeData::Map(_)
-            ) {
-                match_arg_type(pass, verb, bits, elem, depth + 1)
-            } else {
-                false
-            }
-        }
-        TypeData::Slice(s) => {
-            let elem = s.elem();
-            // `[]byte` prints like a string for the string verbs — and only
-            // `[]byte`. Accepting `[]rune` here as well cost the finding
-            // upstream makes for `fmt.Sprintf("%s", []rune{…})`: `fmt` prints
-            // that as a list of int32, which is exactly what the check is for.
-            if is_string_ish(verb)
-                && matches!(
-                    basic_kind(&art.types, elem.underlying(&art.types)),
-                    BasicKind::Uint8
-                )
-            {
-                return true;
-            }
-            if bits & (B_SLICE | B_POINTER) != 0 {
-                return true;
-            }
-            match_arg_type(pass, verb, bits, elem, depth + 1)
-        }
-        TypeData::Array(a) => {
-            // "Same as slice" upstream: `[N]byte` prints like a string for the
-            // string verbs. Note this is **byte only** — the slice arm above
-            // also takes rune, which upstream does not do for either.
-            let elem = a.elem();
-            if is_string_ish(verb)
-                && matches!(
-                    basic_kind(&art.types, elem.underlying(&art.types)),
-                    BasicKind::Uint8
-                )
-            {
-                return true;
-            }
-            match_arg_type(pass, verb, bits, elem, depth + 1)
-        }
-        TypeData::Map(m) => {
-            if bits & B_POINTER != 0 {
-                return true;
-            }
-            match_arg_type(pass, verb, bits, m.key(), depth + 1)
-                && match_arg_type(pass, verb, bits, m.elem(), depth + 1)
-        }
-        TypeData::Chan(_) | TypeData::Signature(_) => bits & B_POINTER != 0,
-        TypeData::Interface(_) | TypeData::TypeParam(_) | TypeData::Union(_) => true,
-        TypeData::Struct(_) => {
-            // Match x/tools printf: recurse into every field. Also accept
-            // structs with embedded fields whose promoted String/Error/Format
-            // methods `type_has_method` may miss.
-            if struct_has_embedded(pass, u) {
-                return true;
-            }
-            let n = guff_types::r#struct::struct_num_fields(&art.types, u);
-            if n == 0 {
-                return true;
-            }
-            for i in 0..n {
-                let f = guff_types::r#struct::struct_field(&art.types, u, i);
-                let ObjectData::Var(v) = art.objects.get(f) else {
-                    continue;
-                };
-                if !match_arg_type(pass, verb, bits, v.typ(), depth + 1) {
-                    return false;
-                }
-            }
-            true
-        }
-        _ => true,
-    }
-}
-
-fn universe_error(pass: &Pass<'_>) -> Option<TypeId> {
-    let artifacts = pass.pkg().type_artifacts.as_ref()?;
-    for oid in artifacts.objects.ids() {
-        let ObjectData::TypeName(tn) = artifacts.objects.get(oid) else {
-            continue;
-        };
-        if tn.name() != "error" {
-            continue;
-        }
-        if oid.pkg(&artifacts.objects).is_some() {
-            continue;
-        }
-        return tn.typ();
-    }
-    None
-}
-
-fn implements_error(pass: &Pass<'_>, typ: TypeId) -> bool {
-    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
-        return false;
-    };
-    if type_has_method(pass, typ, "Error") {
-        return true;
-    }
-    let Some(err) = universe_error(pass) else {
-        // Export data may omit methods; accept named / *named for `%w` rather
-        // than false-positive on concrete error types like `*os.LinkError`.
-        let t = unalias_readonly(&artifacts.types, typ);
-        return match artifacts.types.get(t) {
-            TypeData::Interface(_) => true,
-            TypeData::Named(_) => true,
-            TypeData::Pointer(p) => {
-                matches!(
-                    artifacts.types.get(unalias_readonly(&artifacts.types, p.elem())),
-                    TypeData::Named(_)
-                )
-            }
-            _ => false,
-        };
-    };
-    let mut types = artifacts.types.clone();
-    api_implements(
-        &mut types,
-        &artifacts.objects,
-        &artifacts.packages,
-        typ,
-        err,
     )
 }
 
@@ -620,21 +363,6 @@ fn describe_arg(pass: &Pass<'_>, arg: &Expr) -> String {
     }
 }
 
-fn type_name(pass: &Pass<'_>, typ: TypeId) -> String {
-    let Some(art) = pass.pkg().type_artifacts.as_ref() else {
-        return "?".into();
-    };
-    guff_types::typestring::type_string(&art.types, &art.objects, &art.packages, typ, None)
-}
-
-fn plural(n: usize) -> &'static str {
-    if n == 1 {
-        ""
-    } else {
-        "s"
-    }
-}
-
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let inspect = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
@@ -646,6 +374,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     // site is judged, because a wrapper's kind can be learned from a call that
     // appears later in the file than a call to the wrapper itself.
     let (mut wrappers, mut pending) = printf_wrappers::find_print_like(pass);
+    // The one diagnostic here that carries a fix.
+    let mut non_constant: Vec<Diagnostic> = Vec::new();
+    let mut scratch = Scratch::default();
 
     inspect.preorder_typed(node_mask!(CallExpr), pass.files(), |n| {
         let NodeRef::CallExpr(call) = n else {
@@ -663,30 +394,282 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             return;
         };
         let kind = wrappers.kind_of(&name, &base, callee);
-        // `Kind::Print` reaches upstream's `checkPrint`, which guff does not
-        // implement; the kind still matters, because it is what made the
-        // forwarding call inside a print wrapper well-formed.
         let is_errorf = match kind {
             printf_wrappers::Kind::Printf => false,
             printf_wrappers::Kind::Errorf => true,
-            printf_wrappers::Kind::Print | printf_wrappers::Kind::None => return,
+            printf_wrappers::Kind::Print => {
+                check_print(pass, &mut scratch, call, &name, &mut pending);
+                return;
+            }
+            printf_wrappers::Kind::None => return,
         };
         let fmt_idx = format_index(pass, call);
         let Some(format_arg) = call.args.get(fmt_idx) else {
             return;
         };
+        // `versions.Lang(versions.FileVersion(info, file))`, "" when unknown.
+        let file_version = code::effective_file_go_version(pass, call.pos().0 as u32);
         let Some(format) = expr_to_bytes(pass, format_arg) else {
-            return; // non-constant format string: skip (no false positives)
+            // It is a common mistake to call fmt.Printf(msg) with a
+            // non-constant format string and no arguments: if msg contains
+            // "%", misformatting occurs. Gated on go1.24 so as not to break
+            // existing code (golang/go#71485).
+            if fmt_idx + 1 == call.args.len()
+                && !file_version.is_empty() // fail open
+                && code::version_compare(&file_version, "go1.24") >= 0
+            {
+                let at = format_arg.pos().0 as u32;
+                non_constant.push(Diagnostic {
+                    pos: at,
+                    message: format!("non-constant format string in call to {name}"),
+                    suggested_fixes: vec![SuggestedFix {
+                        message: r#"Insert "%s" format string"#.into(),
+                        text_edits: vec![TextEdit {
+                            pos: at,
+                            end: at,
+                            new_text: r#""%s", "#.into(),
+                        }],
+                    }],
+                    ..Diagnostic::default()
+                });
+            }
+            return;
         };
 
-        check_one(pass, call, &name, is_errorf, fmt_idx, &format, &mut pending);
+        check_one(
+            pass,
+            &mut scratch,
+            &file_version,
+            call,
+            &name,
+            is_errorf,
+            fmt_idx,
+            &format,
+            &mut pending,
+        );
     });
 
-    pending.sort_by_key(|(pos, _)| *pos);
-    for (pos, message) in pending {
-        pass.reportf(pos, message);
+    let mut diags: Vec<Diagnostic> = pending
+        .into_iter()
+        .map(|(pos, message)| Diagnostic {
+            pos,
+            message,
+            ..Diagnostic::default()
+        })
+        .chain(non_constant)
+        .collect();
+    diags.sort_by_key(|d| d.pos);
+    for d in diags {
+        pass.report(d);
     }
     Ok(None)
+}
+
+/// `checkPrint`: a call to an unformatted print routine such as `Println`.
+fn check_print(
+    pass: &Pass<'_>,
+    scratch: &mut Scratch,
+    call: &CallExpr,
+    name: &str,
+    out: &mut Vec<(u32, String)>,
+) {
+    let Some(art) = pass.pkg().type_artifacts.as_ref() else {
+        return;
+    };
+    // Skip checking functions with unknown type.
+    let Some(typ) = expr_type(pass, &call.fun) else {
+        return;
+    };
+    let mut first_arg = 0;
+    if let TypeData::Signature(sig) = art.types.get(typ.underlying(&art.types)) {
+        // Skip checking non-variadic functions.
+        if !sig.variadic() {
+            return;
+        }
+        let n = tuple_len(&art.types, sig.params());
+        if n == 0 {
+            return;
+        }
+        first_arg = n - 1;
+        // Skip variadic functions accepting non-interface{} args.
+        let ObjectData::Var(last) =
+            art.objects.get(tuple_at(&art.types, sig.params().unwrap(), first_arg))
+        else {
+            return;
+        };
+        let TypeData::Slice(slice) = art.types.get(last.typ()) else {
+            return;
+        };
+        let elem = unalias_readonly(&art.types, slice.elem());
+        // `types.Unalias(typ).(*types.Interface)` and `Empty()`: the literal
+        // `interface{}` / `any`, not a named interface type.
+        let TypeData::Interface(it) = art.types.get(elem) else {
+            return;
+        };
+        if it.num_explicit_methods() != 0 || it.num_embeddeds() != 0 {
+            return;
+        }
+    }
+    // Skip calls without variadic args.
+    if call.args.len() <= first_arg {
+        return;
+    }
+    let call_pos = call.fun.pos().0 as u32;
+    let args = &call.args[first_arg..];
+
+    if first_arg == 0 {
+        if let Expr::SelectorExpr(sel) = &call.args[0] {
+            if let Expr::Ident(x) = &*sel.x {
+                if x.name == "os" && sel.sel.name.starts_with("Std") {
+                    out.push((
+                        call_pos,
+                        format!(
+                            "{name} does not take io.Writer but has first arg {}",
+                            describe_arg(pass, &call.args[0])
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
+    if let Some(s) = expr_to_bytes(pass, &args[0]) {
+        // Ignore trailing % character: the % in "abc 0.0%" couldn't be a
+        // formatting directive.
+        let s = s.strip_suffix(b"%").unwrap_or(&s);
+        if s.contains(&b'%') {
+            for m in print_format_matches(s) {
+                // Allow %XX where XX are hex digits, as this is common in URLs.
+                if m.len() >= 3 && m[1].is_ascii_hexdigit() && m[2].is_ascii_hexdigit() {
+                    continue;
+                }
+                out.push((
+                    call_pos,
+                    format!(
+                        "{name} call has possible Printf formatting directive {}",
+                        guff_constant::decode_lossy(m)
+                    ),
+                ));
+                break; // report only the first one
+            }
+        }
+    }
+    for arg in args {
+        if printf_types::is_function_value(pass, arg) {
+            out.push((
+                call_pos,
+                format!("{name} arg {} is a func value, not called", describe_arg(pass, arg)),
+            ));
+        }
+        if let Some(method) = printf_types::recursive_stringer(pass, scratch, arg) {
+            out.push((
+                call_pos,
+                format!(
+                    "{name} arg {} causes recursive call to {method} method",
+                    describe_arg(pass, arg)
+                ),
+            ));
+        }
+    }
+}
+
+/// `printFormatRE.FindAllString(s, -1)`:
+///
+/// ```text
+/// %[+\-#]*([0-9]+|(\[[0-9]+\])?\*)?\.?([0-9]+|(\[[0-9]+\])?\*)?(\[[0-9]+\])?[bcdefgopqstvxEFGTUX]
+/// ```
+///
+/// The space flag is excluded, so that printing a string like "x % y" is not
+/// reported as a format. Leftmost-first, non-overlapping, as Go's regexp
+/// returns them.
+fn print_format_matches(s: &[u8]) -> Vec<&[u8]> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < s.len() {
+        if s[i] == b'%' {
+            if let Some(end) = match_print_format(s, i) {
+                out.push(&s[i..end]);
+                i = end;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
+/// The end of a `printFormatRE` match starting at `s[start] == '%'`, if any.
+///
+/// Every part before the verb is optional and greedy, but Go's regexp
+/// backtracks: `%5*` before a verb can still match as `%5` + … only if the
+/// rest does. The parts are tried longest-first and the first combination
+/// that reaches a verb wins — the leftmost-first semantics of RE2.
+fn match_print_format(s: &[u8], start: usize) -> Option<usize> {
+    let mut i = start + 1;
+    while i < s.len() && matches!(s[i], b'+' | b'-' | b'#') {
+        i += 1;
+    }
+    // Backtracking over flags never helps: none of the later parts can start
+    // with a flag character.
+    for after_width in num_opt_ends(s, i) {
+        let mut dots = vec![];
+        if after_width < s.len() && s[after_width] == b'.' {
+            dots.push(after_width + 1);
+        }
+        dots.push(after_width);
+        for after_dot in dots {
+            for after_prec in num_opt_ends(s, after_dot) {
+                for after_index in index_opt_ends(s, after_prec) {
+                    if after_index < s.len() && b"bcdefgopqstvxEFGTUX".contains(&s[after_index]) {
+                        return Some(after_index + 1);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Where `([0-9]+|(\[[0-9]+\])?\*)?` can end when started at `i`, in the
+/// order RE2's leftmost-first search prefers them.
+fn num_opt_ends(s: &[u8], i: usize) -> Vec<usize> {
+    let mut ends = Vec::new();
+    // [0-9]+, greedy: longest first.
+    let mut j = i;
+    while j < s.len() && s[j].is_ascii_digit() {
+        j += 1;
+    }
+    let mut k = j;
+    while k > i {
+        ends.push(k);
+        k -= 1;
+    }
+    // (\[[0-9]+\])?\*
+    for idx_end in index_opt_ends(s, i) {
+        if idx_end < s.len() && s[idx_end] == b'*' {
+            ends.push(idx_end + 1);
+        }
+    }
+    // The empty alternative.
+    ends.push(i);
+    ends
+}
+
+/// Where `(\[[0-9]+\])?` can end when started at `i`: after the index, then
+/// without it.
+fn index_opt_ends(s: &[u8], i: usize) -> Vec<usize> {
+    let mut ends = Vec::new();
+    if i < s.len() && s[i] == b'[' {
+        let mut j = i + 1;
+        while j < s.len() && s[j].is_ascii_digit() {
+            j += 1;
+        }
+        if j > i + 1 && j < s.len() && s[j] == b']' {
+            ends.push(j + 1);
+        }
+    }
+    ends.push(i);
+    ends
 }
 
 /// `astutil.PosInStringLiteral`: the source position within a string literal
@@ -796,8 +779,11 @@ fn op_pos(format_arg: &Expr, offset: usize) -> u32 {
     format_arg.pos().0 as u32
 }
 
+#[allow(clippy::too_many_arguments)]
 fn check_one(
     pass: &Pass<'_>,
+    scratch: &mut Scratch,
+    file_version: &str,
     call: &CallExpr,
     name: &str,
     is_errorf: bool,
@@ -860,17 +846,19 @@ fn check_one(
         }
     }
 
+    // `fmtstr.Parse` numbers the operands as it goes: a `*` takes the next
+    // argument (or the one an index just before it names), the verb the one
+    // after, and `%` none.
     let mut arg_num = first_arg;
-    let mut max_arg_num = first_arg;
+    // Upstream's `maxArgIndex`: the highest argument index used so far.
+    let mut max_arg_index = first_arg - 1;
     let mut any_index = false;
 
     for (pos, dir) in ops {
         if dir.width_index.is_some() || dir.prec_index.is_some() || dir.verb_index.is_some() {
             any_index = true;
         }
-
-        // A `*` width or precision consumes an integer operand, and an index
-        // written just before it says which one.
+        let mut stars: Vec<usize> = Vec::new();
         for (idx, star) in [
             (dir.width_index, dir.has_width_star),
             (dir.prec_index, dir.has_prec_star),
@@ -878,103 +866,20 @@ fn check_one(
             if let Some(idx) = idx {
                 arg_num = first_arg + idx - 1;
             }
-            if !star {
-                continue;
-            }
-            if ellipsis && arg_num + 1 >= nargs {
-                return;
-            }
-            if arg_num >= nargs {
-                out.push((
-                    pos,
-                    format!(
-                        "{name} format {} reads arg #{}, but call has {} arg{}",
-                        dir.text,
-                        arg_num - first_arg + 1,
-                        nargs - first_arg,
-                        plural(nargs - first_arg)
-                    ),
-                ));
-                return;
-            }
-            let arg = &call.args[arg_num];
-            arg_num += 1;
-            max_arg_num = max_arg_num.max(arg_num);
-            if let Some(typ) = expr_type(pass, arg) {
-                // `matchArgType(pass, argInt, arg)`: the operand behind a `*`
-                // is a width, so only an integer will do.
-                if !match_arg_type(pass, 'd', B_INT, typ, 0) {
-                    out.push((
-                        pos,
-                        format!(
-                            "{name} format {} uses non-int {} as argument of *",
-                            dir.text,
-                            describe_arg(pass, arg)
-                        ),
-                    ));
-                    return;
-                }
+            if star {
+                stars.push(arg_num);
+                arg_num += 1;
             }
         }
-
         if let Some(idx) = dir.verb_index {
             arg_num = first_arg + idx - 1;
         }
-
-        if dir.verb == '%' {
-            continue;
+        let verb_arg = arg_num;
+        // Do not waste an argument for '%'.
+        if dir.verb != '%' {
+            arg_num += 1;
         }
 
-        // Every non-`%` verb consumes exactly one operand, even an unknown one
-        // (matching go vet), so counts stay consistent.
-        if ellipsis && arg_num + 1 >= nargs {
-            return;
-        }
-        if arg_num >= nargs {
-            out.push((
-                pos,
-                format!(
-                    "{name} format {} reads arg #{}, but call has {} arg{}",
-                    dir.text,
-                    arg_num - first_arg + 1,
-                    nargs - first_arg,
-                    plural(nargs - first_arg)
-                ),
-            ));
-            return;
-        }
-        let arg = &call.args[arg_num];
-        arg_num += 1;
-        max_arg_num = max_arg_num.max(arg_num);
-
-        // `isFormatter`: an argument that might implement `fmt.Formatter`
-        // prints itself, so **no check applies to this operand** — not the
-        // verb, not the type. Upstream's test is generous: any interface that
-        // is not a type parameter counts, because the dynamic value it holds
-        // could be a Formatter.
-        //
-        // That is why `t.Fatalf("err %r", err)` is silent upstream while
-        // `fmt.Sprintf("s %y", s)` is reported: the first operand is an
-        // `error`, the second a `string`.
-        //
-        // `%w` is exempt ("Skip check for the %w verb, which requires an
-        // error"): it is the only verb whose entry carries `argError`, and
-        // every `%w` operand is an interface, so testing it here would delete
-        // the "does not support error-wrapping directive %w" diagnostic
-        // outright. An *unknown* verb is not exempt — upstream reaches this
-        // line with `v` left on the last table entry (`X`), whose bits are not
-        // `argError`.
-        if dir.verb != 'w' && arg_may_be_formatter(pass, arg) {
-            continue;
-        }
-
-        let Some(bits) = verb_arg_type(dir.verb) else {
-            out.push((
-                pos,
-                format!("{name} format {} has unknown verb {}", dir.text, dir.verb),
-            ));
-            return;
-        };
         if dir.verb == 'w' && !is_errorf {
             out.push((
                 pos,
@@ -982,39 +887,244 @@ fn check_one(
             ));
             return;
         }
+        let op = Op {
+            pos,
+            dir: &dir,
+            stars: &stars,
+            verb_arg,
+        };
+        if !ok_printf_arg(pass, scratch, file_version, call, &mut max_arg_index, first_arg, name, &op, out) {
+            // One error per format is enough.
+            return;
+        }
+    }
 
-        if let Some(typ) = expr_type(pass, arg) {
-            if !match_arg_type(pass, dir.verb, bits, typ, 0) {
+    // Dotdotdot is hard.
+    if ellipsis && max_arg_index + 2 >= nargs {
+        return;
+    }
+    // If any formats are indexed, extra arguments are ignored.
+    if any_index {
+        return;
+    }
+    // There should be no leftover arguments.
+    if max_arg_index + 1 < nargs {
+        let expect = max_arg_index + 1 - first_arg;
+        let got = nargs - first_arg;
+        out.push((
+            call_pos,
+            format!("{name} call needs {} but has {}", count(expect, "arg"), count(got, "arg")),
+        ));
+    }
+}
+
+/// One parsed operation and the operands `fmtstr` assigned it.
+struct Op<'d> {
+    /// Where upstream reports: the `%v` inside the literal.
+    pos: u32,
+    dir: &'d Directive,
+    /// `Width.Dynamic`, `Prec.Dynamic`: the operands of the `*`s.
+    stars: &'d [usize],
+    /// `Verb.ArgIndex`.
+    verb_arg: usize,
+}
+
+/// `okPrintfArg`: compare one operation with the arguments actually present.
+#[allow(clippy::too_many_arguments)]
+fn ok_printf_arg(
+    pass: &Pass<'_>,
+    scratch: &mut Scratch,
+    file_version: &str,
+    call: &CallExpr,
+    max_arg_index: &mut usize,
+    first_arg: usize,
+    name: &str,
+    op: &Op<'_>,
+    out: &mut Vec<(u32, String)>,
+) -> bool {
+    let dir = op.dir;
+    let verb = dir.verb;
+    // An unknown verb leaves `v` on the last entry, as upstream's loop does.
+    let found = PRINT_VERBS.iter().find(|v| v.verb == verb);
+    let v = found.unwrap_or(&PRINT_VERBS[PRINT_VERBS.len() - 1]);
+    let mut typ = v.typ;
+
+    // When analyzing go1.26 code, rune and byte are the only %q integers
+    // (#72850).
+    if verb == 'q'
+        && !file_version.is_empty() // fail open
+        && code::version_compare(file_version, "go1.26") >= 0
+    {
+        typ = ARG_RUNE | ARG_BYTE | ARG_STRING;
+    }
+
+    // Could verb's arg implement fmt.Formatter? Skip check for the %w verb,
+    // which requires an error.
+    let mut formatter = false;
+    if typ != ARG_ERROR && op.verb_arg < call.args.len() {
+        if let Some(t) = expr_type(pass, &call.args[op.verb_arg]) {
+            formatter = printf_types::is_formatter(pass, scratch, t);
+        }
+    }
+
+    if !formatter {
+        if found.is_none() {
+            out.push((
+                op.pos,
+                format!("{name} format {} has unknown verb {verb}", dir.text),
+            ));
+            return false;
+        }
+        for flag in dir.flags.chars() {
+            // Disable complaint about '0' (issues 23598 and 23605).
+            if flag == '0' {
+                continue;
+            }
+            if !v.flags.contains(flag) {
                 out.push((
-                    pos,
-                    format!(
-                        "{name} format {} has arg {} of wrong type {}",
-                        dir.text,
-                        describe_arg(pass, arg),
-                        type_name(pass, typ)
-                    ),
+                    op.pos,
+                    format!("{name} format {} has unrecognized flag {flag}", dir.text),
                 ));
-                return;
+                return false;
             }
         }
     }
 
-    // Dotdotdot is hard: the trailing slice may supply the missing operands.
-    if ellipsis && max_arg_num + 1 >= nargs {
-        return;
+    // If there are stars, we have something like %.*s and every one of
+    // their operands must be an integer.
+    for &arg_index in op.stars {
+        if !arg_can_be_checked(call, op, arg_index, first_arg, name, out) {
+            return false;
+        }
+        let arg = &call.args[arg_index];
+        let (reason, ok) = printf_types::match_arg_type(pass, scratch, ARG_INT, arg);
+        if !ok {
+            out.push((
+                op.pos,
+                format!(
+                    "{name} format {} uses non-int {}{} as argument of *",
+                    dir.text,
+                    describe_arg(pass, arg),
+                    details(reason)
+                ),
+            ));
+            return false;
+        }
     }
-    // Too many arguments (only meaningful without explicit indexes).
-    if !any_index && max_arg_num < nargs {
-        let expect = max_arg_num - first_arg;
-        let got = nargs - first_arg;
+
+    // Collect to update maxArgIndex in one go.
+    for &i in op.stars {
+        *max_arg_index = (*max_arg_index).max(i);
+    }
+    if verb != '%' {
+        *max_arg_index = (*max_arg_index).max(op.verb_arg);
+    }
+
+    // `%` takes no operand ("%10.2%%dhello" prints "%4hello"), and a
+    // Formatter decides for itself.
+    if verb == '%' || formatter {
+        return true;
+    }
+
+    // Now check verb's type.
+    if !arg_can_be_checked(call, op, op.verb_arg, first_arg, name, out) {
+        return false;
+    }
+    let arg = &call.args[op.verb_arg];
+    // The go1.27 `%w`-of-a-pointer check is PR 15.
+    if printf_types::is_function_value(pass, arg) && verb != 'p' && verb != 'T' {
         out.push((
-            call_pos,
+            op.pos,
             format!(
-                "{name} call needs {expect} arg{} but has {got} arg{}",
-                plural(expect),
-                plural(got)
+                "{name} format {} arg {} is a func value, not called",
+                dir.text,
+                describe_arg(pass, arg)
             ),
         ));
+        return false;
+    }
+    let (reason, ok) = printf_types::match_arg_type(pass, scratch, typ, arg);
+    if !ok {
+        let type_string = expr_type(pass, arg)
+            .map(|t| printf_types::type_string(pass, t))
+            .unwrap_or_default();
+        out.push((
+            op.pos,
+            format!(
+                "{name} format {} has arg {} of wrong type {type_string}{}",
+                dir.text,
+                describe_arg(pass, arg),
+                details(reason)
+            ),
+        ));
+        return false;
+    }
+    // Detect recursive formatting via value's String/Error methods. The '#'
+    // flag suppresses the methods, except with %x, %X, and %q.
+    if typ & ARG_STRING != 0
+        && verb != 'T'
+        && (!dir.flags.contains('#') || matches!(verb, 'q' | 'x' | 'X'))
+    {
+        if let Some(method) = printf_types::recursive_stringer(pass, scratch, arg) {
+            out.push((
+                op.pos,
+                format!(
+                    "{name} format {} with arg {} causes recursive {method} method call",
+                    dir.text,
+                    describe_arg(pass, arg)
+                ),
+            ));
+            return false;
+        }
+    }
+    true
+}
+
+/// ` (reason)`, or nothing.
+fn details(reason: Option<String>) -> String {
+    reason.map(|r| format!(" ({r})")).unwrap_or_default()
+}
+
+/// `argCanBeChecked`: whether argument `arg_index` is statically present —
+/// it may be beyond the list of arguments, or inside a trailing `xs...`.
+fn arg_can_be_checked(
+    call: &CallExpr,
+    op: &Op<'_>,
+    arg_index: usize,
+    first_arg: usize,
+    name: &str,
+    out: &mut Vec<(u32, String)>,
+) -> bool {
+    let nargs = call.args.len();
+    if arg_index + 1 < nargs {
+        return true; // Always OK.
+    }
+    if call.ellipsis.is_valid() {
+        return false; // We just can't tell; there could be many more arguments.
+    }
+    if arg_index < nargs {
+        return true;
+    }
+    // There are bad indexes in the format or there are fewer arguments than
+    // the format needs. People think of arguments as 1-indexed.
+    let arg = arg_index - first_arg + 1;
+    out.push((
+        op.pos,
+        format!(
+            "{name} format {} reads arg #{arg}, but call has {}",
+            op.dir.text,
+            count(nargs - first_arg, "arg")
+        ),
+    ));
+    false
+}
+
+/// `count(n, what)`: "1 what" or "N whats".
+fn count(n: usize, what: &str) -> String {
+    if n == 1 {
+        format!("1 {what}")
+    } else {
+        format!("{n} {what}s")
     }
 }
 
@@ -1134,5 +1244,29 @@ mod tests {
             Scan::Error(msg) => assert_eq!(msg, "format %[1] is missing verb at end of string"),
             _ => panic!("expected error"),
         }
+    }
+
+    fn matches(s: &str) -> Vec<String> {
+        print_format_matches(s.as_bytes())
+            .into_iter()
+            .map(|m| String::from_utf8(m.to_vec()).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn print_format_re_matches_like_go_regexp() {
+        assert_eq!(matches("hello %s"), ["%s"]);
+        assert_eq!(matches("%-+#10.3f and %[2]*d"), ["%-+#10.3f", "%[2]*d"]);
+        // The space flag is excluded, so "x % y" is not a directive.
+        assert!(matches("x % y").is_empty());
+        // `%%d`: the first `%` starts no match, the second does.
+        assert_eq!(matches("%%d"), ["%d"]);
+        // A width of digits, then a `*` precision: the second size takes it.
+        assert_eq!(matches("%5*d"), ["%5*d"]);
+        // Backtracking out of the index: `[1]` followed by no verb.
+        assert_eq!(matches("%[1]z %v"), ["%v"]);
+        // `%XX` hex escapes are matched here; the caller skips them.
+        assert_eq!(matches("%2F"), ["%2F"]);
+        assert!(matches("50% off").is_empty());
     }
 }

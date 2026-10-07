@@ -25,6 +25,7 @@ mod lostcancel;
 mod nilfunc;
 mod nilness;
 mod printf;
+mod printf_types;
 mod printf_wrappers;
 mod shift;
 mod sigchanyzer;

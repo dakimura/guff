@@ -1,0 +1,24 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh govet-printf-upstream
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/govet-printf-upstream/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.14.0
+
+--- a/printf/nonconst/nonconst.go
++++ b/printf/nonconst/nonconst.go
+@@ -16,8 +16,8 @@
+ // As the language version is empty here, and the new check is gated on go1.24,
+ // diagnostics are suppressed here.
+ func nonConstantFormat(s string) {
+-	fmt.Printf(s)
++	fmt.Printf("%s", s)
+ 	fmt.Printf(s, "arg")
+-	fmt.Fprintf(os.Stderr, s)
+-	log.Printf(s)
++	fmt.Fprintf(os.Stderr, "%s", s)
++	log.Printf("%s", s)
+ }

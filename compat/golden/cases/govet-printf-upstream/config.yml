@@ -1,0 +1,28 @@
+# Golden case: x/tools v0.50.0's printf testdata (golangci-lint 2.14.0),
+# vendored verbatim (BSD, LICENSE in upstream-x-tools-v0.50/), plus guff's
+# own operands.go. go 1.26 so the go1.24 (non-constant format) and go1.26
+# (%q) gates are on, as upstream's tests run them.
+#
+# Not here: a/ (a.go, a2.go). Its wrappers declared in package b need facts
+# (guff has none for printf), a.go:1033's generic-struct field needs
+# Callee's Origin, a2.go's Logger needs interface-method induction, and
+# 'x' prints as int32 where go/types says rune. issue62595's a_go127.go is
+# excluded by its build tag on a go1.26 toolchain (PR 15).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+  settings:
+    govet:
+      enable:
+        - printf
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
