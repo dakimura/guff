@@ -6175,6 +6175,37 @@ fn exhaustive_flags_missing_cases() {
     );
 }
 
+/// exhaustive v0.13.0 (golangci-lint 2.14.0) `hasIgnoreDecl`: an ignoring
+/// declaration doc drops the members, an alias's constants stay with the
+/// aliased type, and an unparsable doc reports and never ignores. The full
+/// set, positions included, is the golden case `exhaustive-ignore-decl`.
+#[test]
+fn exhaustive_declaration_directives() {
+    let pkg = support::typecheck_fixture("exhaustive", "example.com/declignore", "declignore.go");
+    let mut messages = support::run_analyzer(exhaustive(), &pkg);
+    messages.sort();
+    let mut want = vec![
+        "failed to parse directives: invalid directive \"ingore\"",
+        "failed to parse directives: invalid directive \"ignore-me\"",
+        "failed to parse directives: conflicting directives \"ignore\" and \"enforce\"",
+        "failed to parse directives: invalid directive \"enfrce\"",
+        "failed to parse directives: invalid directive \"wat\"",
+        "failed to parse directives: invalid directive \"huh\"",
+        "failed to parse directives: invalid directive \"what\"",
+        "missing cases in switch of type declignore.Local: declignore.LocalB, declignore.LocalC",
+        "missing cases in switch of type declignore.Kind: declignore.KindA, declignore.KindB, \
+         declignore.BadConstA, declignore.BadConstB, declignore.KindC",
+        "missing cases in switch of type declignore.Base: declignore.BaseA",
+        "missing cases in switch of type declignore.Ignored: declignore.IgnoredB",
+        "missing cases in switch of type declignore.BadType: declignore.BadTypeA, declignore.BadTypeB",
+        "missing cases in switch of type declignore.BadSpec: declignore.BadSpecA",
+        "missing cases in switch of type declignore.Conflict: declignore.ConflictA",
+        "missing cases in switch of type declignore.Enforced: declignore.EnforcedA",
+    ];
+    want.sort();
+    assert_eq!(messages, want);
+}
+
 #[test]
 fn exhaustive_allows_complete_switch() {
     let pkg = support::typecheck_fixture("exhaustive", "example.com/exhaustive/ok", "ok.go");

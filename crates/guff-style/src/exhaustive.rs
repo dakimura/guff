@@ -17,9 +17,10 @@
 //! amounts to.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 
-use guff::ast::{CommentGroup, CompositeLit, Decl, Expr, Spec, Stmt, SwitchStmt};
+use guff::ast::{CommentGroup, CompositeLit, Decl, Expr, GenDecl, Spec, Stmt, SwitchStmt};
+use guff::position::Pos;
 use guff::commentmap::{new_comment_map, CommentMap};
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
@@ -164,34 +165,261 @@ fn possible_enum_member(
     Some((type_name, name, val))
 }
 
-fn find_enums(pass: &Pass<'_>, package_scope_only: bool) -> HashMap<ObjectId, EnumTypeInfo> {
+/// The declaration-side directives of one comment-parsed file
+/// (`findIgnoredTypes` and the `hasIgnoreDecl` calls of `findEnums`,
+/// exhaustive v0.13.0 / golangci-lint 2.14.0), positioned in that parse.
+#[derive(Default)]
+struct DeclDirectives {
+    /// The name of every type spec under an ignoring doc (its own or its
+    /// declaration's).
+    ignored_types: Vec<(Pos, String)>,
+    /// The names of every const spec under an ignoring doc.
+    ignored_consts: Vec<(Pos, String)>,
+    /// `makeInvalidDirectiveDiagnostic(doc, err)`: at `doc.Pos()`, the first
+    /// comment of the doc — directive or not.
+    errors: Vec<(Pos, String)>,
+}
+
+/// `hasIgnoreDecl`: an unparsable doc reports and never ignores, not even when
+/// it spells `ignore` (`ignore` + `enforce` conflict).
+fn has_ignore_decl(doc: Option<&CommentGroup>, errors: &mut Vec<(Pos, String)>) -> bool {
+    let Some(doc) = doc else {
+        return false;
+    };
+    let (d, err) = parse_directives(doc.list.iter().map(|c| c.text.as_str()));
+    if let Some(err) = err {
+        errors.push((doc.pos(), err));
+        return false;
+    }
+    d.ignore
+}
+
+impl DeclDirectives {
+    /// One `GenDecl`, in the order upstream parses its docs: a type
+    /// declaration's doc, then each spec's unless the declaration already
+    /// ignores; a const declaration's doc, then (unless it ignores) each
+    /// spec's. Docs upstream never reaches are never reported. Other
+    /// declarations (`var`, `import`) are not read at all.
+    fn scan(&mut self, gen: &GenDecl) {
+        match gen.tok {
+            Some(Token::TYPE) => {
+                let decl = has_ignore_decl(gen.doc.as_ref(), &mut self.errors);
+                for spec in &gen.specs {
+                    let Spec::TypeSpec(ts) = spec else {
+                        continue;
+                    };
+                    if decl || has_ignore_decl(ts.doc.as_ref(), &mut self.errors) {
+                        self.ignored_types.push((ts.name.name_pos, ts.name.name.clone()));
+                    }
+                }
+            }
+            Some(Token::CONST) => {
+                if has_ignore_decl(gen.doc.as_ref(), &mut self.errors) {
+                    for spec in &gen.specs {
+                        if let Spec::ValueSpec(vs) = spec {
+                            self.ignored_consts
+                                .extend(vs.names.iter().map(|n| (n.name_pos, n.name.clone())));
+                        }
+                    }
+                    return;
+                }
+                for spec in &gen.specs {
+                    let Spec::ValueSpec(vs) = spec else {
+                        continue;
+                    };
+                    if has_ignore_decl(vs.doc.as_ref(), &mut self.errors) {
+                        self.ignored_consts
+                            .extend(vs.names.iter().map(|n| (n.name_pos, n.name.clone())));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Every declaration of `file`, nested ones included: upstream's
+    /// `inspect.Preorder` visits the `GenDecl`s of function bodies too.
+    fn of_file(file: &guff::ast::File) -> Self {
+        let mut out = Self::default();
+        walk::inspect(NodeRef::File(file), |n| {
+            if let Some(NodeRef::GenDecl(gen)) = n {
+                out.scan(gen);
+            }
+            true
+        });
+        out
+    }
+
+    /// Only the file's top-level declarations — all a dependency's package
+    /// scope can hold.
+    fn of_file_top_level(file: &guff::ast::File) -> Self {
+        let mut out = Self::default();
+        for decl in &file.decls {
+            if let Decl::GenDecl(gen) = decl {
+                out.scan(gen);
+            }
+        }
+        out
+    }
+}
+
+/// The ignored type and const names of a dependency package, read from its
+/// source: guff imports a package it was not asked about, where upstream
+/// runs the analyzer over it and learns its enums from the fact that run
+/// exports — `findEnums` with the declaration directives already applied.
+#[derive(Default)]
+struct DepIgnores {
+    types: HashSet<String>,
+    consts: HashSet<String>,
+}
+
+fn dep_ignores(pass: &Pass<'_>, path: &str) -> Arc<DepIgnores> {
+    type Stamp = Option<(u64, std::time::SystemTime)>;
+    type Entry = (Vec<(String, Stamp)>, Arc<DepIgnores>);
+    static CACHE: OnceLock<Mutex<HashMap<String, Entry>>> = OnceLock::new();
+    fn stamp(path: &str) -> Stamp {
+        let md = std::fs::metadata(path).ok()?;
+        Some((md.len(), md.modified().ok()?))
+    }
+
+    let mut files: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut queue: Vec<&guff_analysis::Package> = vec![pass.pkg()];
+    while let Some(pkg) = queue.pop() {
+        if pkg.pkg_path == path && !std::ptr::eq(pkg, pass.pkg()) {
+            let list = if pkg.compiled_go_files.is_empty() {
+                &pkg.go_files
+            } else {
+                &pkg.compiled_go_files
+            };
+            files = list.iter().filter_map(|p| p.to_str().map(str::to_string)).collect();
+            break;
+        }
+        for imp in pkg.imports.values() {
+            if seen.insert(imp.id.clone()) {
+                queue.push(imp);
+            }
+        }
+    }
+    let stamps: Vec<(String, Stamp)> = files.iter().map(|f| (f.clone(), stamp(f))).collect();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some((s, hit)) = cache.lock().unwrap().get(path) {
+        if *s == stamps {
+            return hit.clone();
+        }
+    }
+    let mut out = DepIgnores::default();
+    for file in &files {
+        let Ok(src) = std::fs::read(file) else {
+            continue;
+        };
+        if !src.windows(DIRECTIVE_PREFIX.len()).any(|w| w == DIRECTIVE_PREFIX) {
+            continue;
+        }
+        let fset = guff::position::FileSet::new();
+        let Ok(parsed) = guff::parser::parse_file(&fset, file, &src, guff::parser::PARSE_COMMENTS)
+        else {
+            continue;
+        };
+        let d = DeclDirectives::of_file_top_level(&parsed);
+        out.types.extend(d.ignored_types.into_iter().map(|(_, n)| n));
+        out.consts.extend(d.ignored_consts.into_iter().map(|(_, n)| n));
+    }
+    let out = Arc::new(out);
+    cache
+        .lock()
+        .unwrap()
+        .insert(path.to_string(), (stamps, out.clone()));
+    out
+}
+
+const DIRECTIVE_PREFIX: &[u8] = b"//exhaustive:";
+
+/// `findEnums`, with `findIgnoredTypes` and the diagnostics of the
+/// declaration docs (returned, positioned in the analysis `FileSet`).
+fn find_enums(
+    pass: &Pass<'_>,
+    package_scope_only: bool,
+) -> (HashMap<ObjectId, EnumTypeInfo>, Vec<(u32, String)>) {
     let mut by_type: HashMap<ObjectId, EnumMembersFact> = HashMap::new();
     let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
-        return HashMap::new();
+        return (HashMap::new(), Vec::new());
     };
     let pkg_scope = pass
         .type_pkg()
         .map(|pid| artifacts.packages.get(pid).scope());
 
+    // The analysis AST carries no comments: a file spelling the prefix is
+    // reparsed, and the reparse's names are matched back by position.
+    let mut errors: Vec<(u32, String)> = Vec::new();
+    let mut ignored_type_pos: HashSet<Pos> = HashSet::new();
+    let mut ignored_const_pos: HashSet<Pos> = HashSet::new();
     for file in pass.files() {
-        for decl in &file.decls {
-            let Decl::GenDecl(gen) = decl else {
-                continue;
+        if !guff_analysis::comments::file_source_contains(pass, file, DIRECTIVE_PREFIX) {
+            continue;
+        }
+        let Some(re) = guff_analysis::comments::reparse_with_comments(pass, file) else {
+            continue;
+        };
+        let d = DeclDirectives::of_file(&re.file);
+        ignored_type_pos.extend(d.ignored_types.iter().map(|(p, _)| re.rebase(*p)));
+        ignored_const_pos.extend(d.ignored_consts.iter().map(|(p, _)| re.rebase(*p)));
+        errors.extend(
+            d.errors
+                .into_iter()
+                .map(|(p, e)| invalid_directive(re.rebase(p).0 as u32, &e)),
+        );
+    }
+
+    let defs = |ident: &guff::ast::Ident| {
+        pass.types_info()
+            .and_then(|info| info.defs.get(&ident.id).copied().flatten())
+    };
+
+    // `ignoredTypes[info.Defs[t.Name].Type()]`: the declared type itself — an
+    // alias's is the alias, so a constant spelled with the aliased type keeps
+    // its membership, and one spelled with an ignored alias loses it.
+    let mut ignored_types: HashSet<TypeId> = HashSet::new();
+    if !ignored_type_pos.is_empty() {
+        for file in pass.files() {
+            walk::inspect(NodeRef::File(file), |n| {
+                if let Some(NodeRef::TypeSpec(ts)) = n {
+                    if ignored_type_pos.contains(&ts.name.name_pos) {
+                        if let Some(t) = defs(&ts.name).and_then(|o| o.typ(&artifacts.objects)) {
+                            ignored_types.insert(t);
+                        }
+                    }
+                }
+                true
+            });
+        }
+    }
+
+    for file in pass.files() {
+        walk::inspect(NodeRef::File(file), |n| {
+            let Some(NodeRef::GenDecl(gen)) = n else {
+                return true;
             };
             if gen.tok != Some(Token::CONST) {
-                continue;
+                return true;
             }
             for spec in &gen.specs {
                 let Spec::ValueSpec(vs) = spec else {
                     continue;
                 };
                 for ident in &vs.names {
-                    let Some(obj) = pass
-                        .types_info()
-                        .and_then(|info| info.defs.get(&ident.id).copied().flatten())
-                    else {
+                    if ignored_const_pos.contains(&ident.name_pos) {
+                        continue;
+                    }
+                    let Some(obj) = defs(ident) else {
                         continue;
                     };
+                    if obj
+                        .typ(&artifacts.objects)
+                        .is_some_and(|t| ignored_types.contains(&t))
+                    {
+                        continue;
+                    }
                     let Some((type_name, member, val)) = possible_enum_member(pass, obj) else {
                         continue;
                     };
@@ -208,7 +436,8 @@ fn find_enums(pass: &Pass<'_>, package_scope_only: bool) -> HashMap<ObjectId, En
                     entry.name_to_value.insert(member, val);
                 }
             }
-        }
+            true
+        });
     }
 
     let mut out = HashMap::new();
@@ -234,7 +463,7 @@ fn find_enums(pass: &Pass<'_>, package_scope_only: bool) -> HashMap<ObjectId, En
             },
         );
     }
-    out
+    (out, errors)
 }
 
 fn export_enum_facts(pass: &mut Pass<'_>, enums: &HashMap<ObjectId, EnumTypeInfo>) {
@@ -278,11 +507,36 @@ fn enum_members_from_scope(pass: &Pass<'_>, type_name: ObjectId) -> Option<EnumM
         .packages
         .get(type_name.pkg(&artifacts.objects)?)
         .scope();
+    // The declaration directives, which the fact upstream reads already
+    // applied — matched by name in the package scope, then by the declared
+    // type exactly as `findEnums` does.
+    let ignores = dep_ignores(
+        pass,
+        artifacts.packages.get(type_name.pkg(&artifacts.objects)?).path(),
+    );
+    let ignored_types: HashSet<TypeId> = ignores
+        .types
+        .iter()
+        .filter_map(|n| artifacts.scopes.get(scope).lookup_local(n))
+        .filter_map(|o| o.typ(&artifacts.objects))
+        .collect();
     let mut found: Vec<((u32, u32), String, String)> = Vec::new();
     for name in artifacts.scopes.get(scope).names() {
         let Some(obj) = artifacts.scopes.get(scope).lookup_local(&name) else {
             continue;
         };
+        if ignores.consts.contains(name.as_str())
+            && matches!(artifacts.objects.get(obj), ObjectData::Const(_))
+        {
+            continue;
+        }
+        if obj
+            .typ(&artifacts.objects)
+            .is_some_and(|t| ignored_types.contains(&t))
+            && matches!(artifacts.objects.get(obj), ObjectData::Const(_))
+        {
+            continue;
+        }
         let Some((owner, member, val)) = possible_enum_member(pass, obj) else {
             continue;
         };
@@ -714,8 +968,8 @@ fn group_texts<'a>(groups: impl IntoIterator<Item = &'a CommentGroup>) -> Vec<&'
         .collect()
 }
 
-/// `makeInvalidDirectiveDiagnostic`, at the switch statement or the map
-/// literal (`node.Pos()`).
+/// `makeInvalidDirectiveDiagnostic`, at the switch statement, the map
+/// literal (`node.Pos()`) or the start of a declaration doc.
 fn invalid_directive(pos: u32, err: &str) -> (u32, String) {
     (pos, format!("failed to parse directives: {err}"))
 }
@@ -792,10 +1046,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let ignore_members = compile_re(&options.ignore_enum_members);
     let ignore_types = compile_re(&options.ignore_enum_types);
 
-    let enums = find_enums(pass, options.package_scope_only);
+    // `findEnums` reports an unparsable declaration doc before anything is
+    // checked, and whether or not switches or maps are.
+    let (enums, mut pending) = find_enums(pass, options.package_scope_only);
     export_enum_facts(pass, &enums);
 
-    let mut pending = Vec::new();
     for file in pass.files() {
         // Ancestor stack, maintained the way `inspector.WithStack` does:
         // `walk::inspect` calls back with `None` on the way out of a node.

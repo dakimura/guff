@@ -489,8 +489,8 @@ v5 の `analyzer/testdata` は module zip に無い。GitHub の v5.2.0 タグ�
 |---|---------------|------|------|-------------|--------|--------|-------------------|
 | 1 | exhaustive comment.go parseDirectives | behavior | ディレクティブを厳密一致に | guff-style/src/exhaustive.rs user_directives / has_comment_prefix | **done (PR 8)** | S | general/x/directive.go, default-case-required/** |
 | 2 | exhaustive switch.go makeInvalidDirectiveDiagnostic | new-check | 「failed to parse directives」（switch / map で発火条件が非対称） | exhaustive.rs run | **done (PR 8)** | M | enforce-comment/*.go, default-*/** |
-| 3 | exhaustive enum.go hasIgnoreDecl | behavior | 宣言側 `//exhaustive:ignore`（alias 経由の定数は外れない） | exhaustive.rs find_enums | needs-port | L | enum/enum.go |
-| 4 | exhaustive enum.go 宣言 doc の不正ディレクティブ | new-check | doc 先頭に診断 | find_enums | needs-port | M | enum/enum.go |
+| 3 | exhaustive enum.go hasIgnoreDecl | behavior | 宣言側 `//exhaustive:ignore`（alias 経由の定数は外れない） | exhaustive.rs find_enums / DeclDirectives / dep_ignores | **done (PR 14m)**：findIgnoredTypes は宣言した型そのもの（alias なら alias）で照合。依存パッケージは `pkg.imports` からソースを `PARSE_COMMENTS` で読み直す（`enum_members_from_scope`）。あわせて関数内の enum 宣言も拾う（上流は `inspect.Preorder` で全 GenDecl） | L | enum/enum.go（golden `exhaustive-ignore-decl`、vendored testdata/src/enum） |
+| 4 | exhaustive enum.go 宣言 doc の不正ディレクティブ | new-check | doc 先頭に診断 | find_enums | **done (PR 14m)**：type / const の宣言とスペックの doc（var は読まない、ignore 済み宣言のスペック doc も読まない）。依存パッケージ分は上流でも初期パッケージ外なので出ない | M | enum/enum.go |
 | 5 | exhaustive common.go fromType Unalias | behavior | alias 型の switch / map key を検査 | exhaustive.rs enum_for_tag | **done (PR 8)** | S | — |
 | 6 | exhaustive possibleEnumMember Unalias | behavior | alias 型で宣言した定数 | named_type_name / map_finding | already-matches | S | — |
 | 7 | gochecksumtype analyzer.go fact | behavior | 直接 import の sum type を fact で | guff-style/src/gochecksumtype.rs | **done (PR 14k)**: `sumTypeFact`（package fact、`fact_types` に登録、cache codec 付き）を export / 直接 import から import（`factToTypeDefs`）。guff が依存を解析しない import（別 module、contextcheck が無いときの同 module）は fact が無いので、**import のソースから宣言を読む** `source_type_defs`（シールされた interface への switch に既存定義が当たらないときだけ遅延で）。golden `gochecksumtype-upstream`（上流 testdata 全 package、module 名 `multiple_sumtypes` で GOPATH import をそのまま解決）、`gochecksumtype-imports`（別 module の依存・alias・generic・defined type・非公開 variant・直接 import のみ・関数内宣言・`//line`）と `-imports-facts`（contextcheck 併用で fact 経路） | L | multiple_sumtypes{,_user}/*.go |
@@ -683,7 +683,7 @@ PR 12 以降は ratchet が動かない（golden に形が無い）ので、fixt
 4. **SA5011 を `staticcheck.checks` に明示した config** を 2.14.0 がどう扱うか（無視 / エラー）。reject tier に入れるか。
 5. **SA1019 の composite literal 分岐で generic 実体化（`pkg.G[int]{F: ...}`）の型に当たると上流 SelectorName は panic する**。2.14.0 の出力（analyzer エラー？）を実測し、guff の再現方針を決める。
 6. **`GOLANGCI_LINT_CACHE=off`** を上流は通常のディレクトリ名として扱う。guff の `GUFF_CACHE=off` 拡張と上流互換のどちらを優先するか。
-7. **exhaustruct_v5 / exhaustive / gochecksumtype は依存パッケージのソース（doc コメント）を読む**。guff は依存を export data / scope から組み立てている。依存ソースを reparse する経路を 1 つ作り、3 linter で共有するか。
+7. **exhaustruct_v5 / exhaustive / gochecksumtype は依存パッケージのソース（doc コメント）を読む**。guff は依存を export data / scope から組み立てている。依存ソースを reparse する経路を 1 つ作り、3 linter で共有するか。（現状: exhaustruct_v5 `package_files`、bodyclose `handled_decls`、exhaustive `dep_ignores`（PR 14m）がそれぞれ `pkg.imports` を辿って読む。共有化は未着手）
 8. ~~**gochecksumtype の analyzer error が goanalysis_metalinter 全体を落とす**挙動を、guff の RunError で再現するか~~ → **再現する（PR 14k）**。CI で golangci を回しているリポジトリは exit 3 で落ちるので、guff だけ通ると drop-in にならない。guff 自身の RunError（ill-typed の skip など、上流に対応物が無い）は従来どおり捨て、`guff_analysis::run_failure` で作ったものだけが run を落とす。以下は当初の問い: 再現すると 1 つの壊れた `//sumtype:decl` で全 linter の issue が消える。
 9. **fieldalignment の size class 表**は golangci-lint を建てた Go runtime の表に依存する。どの Go の sizeclasses を転記するか（1. と同じ問い）。
 10. **revive の未知 rule 名**: 上流 2.12.2 はエラー。guff は無視。新 rule を実装するまでのつなぎに警告かエラーを出すか。
