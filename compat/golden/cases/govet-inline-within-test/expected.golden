@@ -1,0 +1,16 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh govet-inline-within-test
+# Produced by running golangci-lint on compat/golden/cases/govet-inline-within-test/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+a/a_x_test.go:14:8:govet::inline: Constant a.K should be inlined
+a/a_x_test.go:15:8:govet::inline: Type alias a.A should be inlined
+a/other_test.go:6:8:govet::inline: Constant K should be inlined
+a/other_test.go:7:8:govet::inline: Type alias A should be inlined
+a/other_test.go:12:8:govet::inline: Type alias A should be inlined
+a/other_test.go:20:8:govet::inline: Constant K should be inlined
+a/other_test.go:30:8:govet::inline: Constant K should be inlined
+b/b_test.go:10:8:govet::inline: Constant a.K should be inlined

@@ -1,0 +1,7 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+a/a.go  crates/guff-govet/tests/testdata/inline_within_test/a/a.go
+a/a_test.go  crates/guff-govet/tests/testdata/inline_within_test/a/a_test.go
+a/other_test.go  crates/guff-govet/tests/testdata/inline_within_test/a/other_test.go
+a/a_x_test.go  crates/guff-govet/tests/testdata/inline_within_test/a/a_x_test.go
+b/b_test.go  crates/guff-govet/tests/testdata/inline_within_test/b/b_test.go

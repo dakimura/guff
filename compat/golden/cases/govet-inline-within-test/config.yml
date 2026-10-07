@@ -1,0 +1,25 @@
+# Golden case: x/tools v0.50's inline withinTestOf (issue76190 / #79272), for
+# the constants and aliases guff inlines: a use is not inlined inside the
+# target's own test — TestK, ExampleK, TestA_comment, in-package or external —
+# nor anywhere in x_test.go when the target is declared in x.go. (guff's
+# inline does not port the general function inliner, so issue76190's call
+# sites are not here.)
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+  settings:
+    govet:
+      enable:
+        - inline
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true
