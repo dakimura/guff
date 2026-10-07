@@ -312,18 +312,26 @@ pub fn is_valid_name(s: &str) -> bool {
 // ----------------------------------------------------------------------------
 // Default / max_type
 
+/// Where a checker's predeclared table keeps `universeRune`, the `rune` alias
+/// basic: one past the `BasicKind`-indexed entries.
+pub const UNIVERSE_RUNE_SLOT: usize = crate::basic::BASIC_KIND_COUNT;
+
 /// Returns the default "typed" type for an "untyped" type; returns `t`
 /// unchanged for typed types.
 ///
-/// Equivalent to `Default`. Doesn't handle UntypedRune (returns `int32`
-/// from the predeclared table) — Go uses a distinct `universeRune`
-/// `TypeName` which we'll have once the full universe lands.
+/// Equivalent to `Default`. An untyped rune defaults to `universeRune`, the
+/// basic spelled `rune` — identical to `int32` but printed as `rune`, so `'x'`
+/// shows as `rune` in a diagnostic, as it does upstream. A table without that
+/// slot (a bare `BasicKind` table) falls back to `int32`.
 pub fn default_type(arena: &TypeArena, table: &[TypeId], t: TypeId) -> TypeId {
     match arena.get(t) {
         TypeData::Basic(b) => match b.kind() {
             BasicKind::UntypedBool => table[BasicKind::Bool as usize],
             BasicKind::UntypedInt => table[BasicKind::Int as usize],
-            BasicKind::UntypedRune => table[BasicKind::Int32 as usize], // see doc comment
+            BasicKind::UntypedRune => table
+                .get(UNIVERSE_RUNE_SLOT)
+                .copied()
+                .unwrap_or(table[BasicKind::Int32 as usize]),
             BasicKind::UntypedFloat => table[BasicKind::Float64 as usize],
             BasicKind::UntypedComplex => table[BasicKind::Complex128 as usize],
             BasicKind::UntypedString => table[BasicKind::String as usize],

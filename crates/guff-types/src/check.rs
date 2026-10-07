@@ -89,7 +89,8 @@ pub struct Checker {
 
     // ---- universe-derived predeclared data -------------------------------
     /// Predeclared `Basic` table, indexed by `BasicKind as usize`
-    /// (so `self.typ[BasicKind::Invalid as usize]` is `Typ[Invalid]`).
+    /// (so `self.typ[BasicKind::Invalid as usize]` is `Typ[Invalid]`), then
+    /// `universeRune` at [`crate::predicates::UNIVERSE_RUNE_SLOT`].
     pub typ: Vec<TypeId>,
     /// The universe scope (predeclared identifiers).
     pub universe_scope: ScopeId,
@@ -476,7 +477,8 @@ impl Checker {
         let mut u = init_universe_full();
 
         // Pull the predeclared handles out first (all Copy, or moved).
-        let typ = u.typ.to_vec();
+        let mut typ = u.typ.to_vec();
+        typ.push(crate::basic::lookup_rune(&u.type_arena).expect("universe defines rune"));
         let universe_scope = u.universe_scope;
         let unsafe_pkg = u.unsafe_pkg;
         let universe_error = u.error;
