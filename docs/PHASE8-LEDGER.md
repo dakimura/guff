@@ -342,8 +342,8 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 - 他パッケージの wrapper（`b.Wrapf`、`b.GlobalWrapf`、`b.Struct.Wrapf`）は fact が要る
 - ジェネリック struct のフィールド（`new(S[int]).printf`）は Callee の Origin（xtools-substrate row 4）
 - `Logger.Logf` は interface-method induction（`printf_wrappers.rs` の DEFERRED）
-- `'x'` が `int32` と出る：guff_types の `default_type` が untyped rune に `int32` を返す（go/types は
-  `universeRune`）。型検査器全体の変更なので golden 全体で測ってから
+- ~~`'x'` が `int32` と出る~~ → **done (PR 14r)**：`default_type` が untyped rune に `universeRune` を返すように。
+  型検査器全体の変更だが golden 全体（354 case）で変化なし
 
 ### xtools-substrate
 
