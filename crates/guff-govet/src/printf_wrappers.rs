@@ -58,10 +58,6 @@
 //!   lower-cased base name, which is empty unless the flag adds to it. guff
 //!   does not read `govet.settings.printf.funcs`, so the lookup would always
 //!   miss and is not performed.
-//! - **`checkPrint`.** guff checks formatted calls only. [`Kind::Print`] is
-//!   still modelled, because it decides whether a forwarding call is
-//!   well-formed and what `missing ...` says, but a print-kind *call site* is
-//!   not inspected — as before.
 
 use std::collections::HashMap;
 

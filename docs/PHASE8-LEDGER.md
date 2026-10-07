@@ -321,15 +321,29 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 | 3 | inline.go withinTestOf | behavior | 専用テスト内の使用を抑制（同ディレクトリ、Fuzz、const / alias） | guff-govet/src/inline.rs | **done (PR 14p)** for constants and aliases（guff の inline は一般の関数インライナを持たないので、issue76190 の関数呼び出しはそもそも報告しない＝別の大きな未移植。他パッケージの const も依存のソースから） | M | issue76190.txtar |
 | 4 | inline.go 埋め込みフィールド判定 | behavior | `Defs[id].Embedded()` に変更 | inline.rs | **done (PR 14o)**：併せて他パッケージの `//go:fix inline` alias（上流は fact）を依存のソースから | S | issue78994.txtar |
 | 5 | printf.go okPrintfArg | behavior | go1.27+ で %d からポインタを外す | guff-govet/src/printf.rs verb_arg_type | needs-port | M | issue62595/a_go126.go, a_go127.go, a/a.go |
-| 6 | printf types.go reason | message | 「(use %p for a pointer)」 | printf.rs match_arg_type | needs-port | S | issue62595/a_go127.go |
-| 7 | printf types.go UnsafePointer | behavior | unsafe.Pointer は argPointer の verb だけ受理 | printf.rs | needs-port | S | — |
+| 6 | printf types.go reason | message | 「(use %p for a pointer)」 | printf_types.rs `ArgMatcher` | **done (PR 14q)**：`%c` / `%U` / `*` の幅にも付く（go1.27 を待たない） | S | issue62595/a_go127.go |
+| 7 | printf types.go UnsafePointer | behavior | unsafe.Pointer は argPointer の verb だけ受理 | printf_types.rs | **done (PR 14q)**（guff は unsafe.Pointer を全 verb で受理していた） | S | — |
 | 8 | printf.go checkPrint | removed-check | Println の redundant newline 削除 | （元から無い） | already-matches | S | a/a.go |
-| 9 | printf.go recursiveStringer Origin | behavior | ジェネリック受信者で再帰検出（親機能ごと未移植の既存ギャップ） | 無し | needs-port | S | — |
+| 9 | printf.go recursiveStringer Origin | behavior | ジェネリック受信者で再帰検出（親機能ごと未移植の既存ギャップ） | printf_types.rs `recursive_stringer` | **done (PR 14q)**：親機能ごと移植 | S | typeparams/diagnostics.go |
 | 10 | nilness.go hasCgoUnsafeArgs | behavior | `//go:cgo_unsafe_args` 関数を対象外 | guff-govet/src/nilness.rs | **done (PR 14f)**（gc が testdata を拒むので checks_test で検証） | S | a/a.go |
 | 11 | unusedresult.go inBenchmarkLoop | behavior | `for b.Loop()` 直下を報告しない | guff-govet/src/unusedresult.rs | **done (PR 14f)**。併せて `is_method_named` がポインタ受信者を剥がすように（loopclosure の errgroup、tests の `*testing.F` も同じ理由で死んでいた）→ tests を v0.50 から全面移植 | S | a/a.go |
 | 12 | unusedresult.go（Callee Origin） | message | ジェネリック受信者表記 `[int]` → `[T]` | unusedresult.rs callee_obj | unsure | S | typeparams/typeparams.go |
 | 13 | hostport.go | behavior | 引数 2 未満で panic | hostport.rs:184 | already-matches | S | a/a.go{,.golden} |
 | 14 | stdversion.go | behavior | 文言変更 + 除外移動。**guff に analyzer が丸ごと無い**（govet 既定有効） | 無し（settings.rs:3091 に名前だけ） | needs-port | L | stdversion/testdata/test.txtar |
+
+**printf（PR 14q）**: rows 6/7 を上流 printf testdata 全体で測ったら、差は 2 行ではなく `okPrintfArg`
+丸ごとだった（guff 120 / 上流 253）。欠けていたもの：`checkPrint`（`possible Printf formatting directive`、
+`does not take io.Writer`）、go1.24 の non-constant format string（fix 付き）、func value、再帰
+`String` / `Error`、flag 検査、go1.26 の `%q`、型パラメータの term（`contains ~int`）、非公開 Stringer
+フィールド（#17798）、`LookupFieldOrMethod` によるメソッド集合（`*T` の `String` は `T` の Stringer では
+ない／昇格メソッドは Stringer）、pointer ビットを持つ verb なら何でも受理していた slice / map / func /
+入れ子ポインタの枝。すべて移植済み。OSS corpus は printf をほぼ踏まない（PR tier 全体で 1 件）ので、
+どの tier にも出ていなかった。上流 testdata は golden case `govet-printf-upstream`（68/68）に入れた。a/ だけ外:
+- 他パッケージの wrapper（`b.Wrapf`、`b.GlobalWrapf`、`b.Struct.Wrapf`）は fact が要る
+- ジェネリック struct のフィールド（`new(S[int]).printf`）は Callee の Origin（xtools-substrate row 4）
+- `Logger.Logf` は interface-method induction（`printf_wrappers.rs` の DEFERRED）
+- `'x'` が `int32` と出る：guff_types の `default_type` が untyped rune に `int32` を返す（go/types は
+  `universeRune`）。型検査器全体の変更なので golden 全体で測ってから
 
 ### xtools-substrate
 
