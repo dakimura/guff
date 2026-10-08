@@ -1,0 +1,25 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh generic-instance-methods
+# Produced by running golangci-lint on compat/golden/cases/generic-instance-methods/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+a.go:28:2:revive:warning:unhandled-error: Unhandled error in call to function inst.W[string].Errorf
+a.go:28:10:errcheck::Error return value of `w.Errorf` is not checked
+a.go:28:12:govet::printf: (example.com/inst.W[T]).Errorf format %d has arg "x" of wrong type string
+a.go:29:2:revive:warning:unhandled-error: Unhandled error in call to function inst.W[string].Fail
+a.go:29:8:errcheck::Error return value of `w.Fail` is not checked
+a.go:30:2:govet::unusedresult: result of (example.com/inst.W[T]).String call not used
+a.go:33:2:revive:warning:unhandled-error: Unhandled error in call to function inst.Pair[int, string].Close
+a.go:33:9:errcheck::Error return value of `p.Close` is not checked
+a.go:35:2:revive:warning:unhandled-error: Unhandled error in call to function inst.W[int].Fail
+a.go:35:8:errcheck::Error return value of `e.Fail` is not checked
+a.go:36:2:revive:warning:unhandled-error: Unhandled error in call to function inst.W[int].Errorf
+a.go:36:10:errcheck::Error return value of `e.Errorf` is not checked
+a.go:36:12:govet::printf: (example.com/inst.W[T]).Errorf format %s has arg 1 of wrong type int
+a.go:38:9:errcheck::Error return value of `b.Close` is not checked
+a.go:39:2:govet::unusedresult: result of (example.com/inst/lib.Box[T]).String call not used
+a.go:41:2:revive:warning:unhandled-error: Unhandled error in call to function f
+a.go:41:3:errcheck::Error return value is not checked

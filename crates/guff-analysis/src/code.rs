@@ -752,8 +752,20 @@ pub fn predeclared_bool_ident(pass: &Pass<'_>, ident: &Ident) -> Option<bool> {
 
 /// Returns the type-checker object for a call expression's function target.
 ///
-/// Peels type instantiation (`f[T]`, `f[T1, T2]`) like `typeutil.usedIdent`.
+/// Peels type instantiation (`f[T]`, `f[T1, T2]`) like `typeutil.usedIdent`,
+/// and — as `typeutil.Callee` has since x/tools v0.50 — answers a function or
+/// method with its `Origin()`: a call of `v.M()` on a `T[int]` is a call of
+/// the `M` declared on `T[T]`, so the object is the one the source declares
+/// (and the one facts and `FullName` are about). Variables are returned as
+/// they are.
 pub fn call_target_object(pass: &Pass<'_>, fun: &Expr) -> Option<ObjectId> {
+    let obj = used_object(pass, fun)?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    Some(guff_types::object::func::func_origin(&artifacts.objects, obj))
+}
+
+/// `info.Uses[typesinternal.UsedIdent(info, fun)]`.
+fn used_object(pass: &Pass<'_>, fun: &Expr) -> Option<ObjectId> {
     let info = pass.types_info()?;
     let mut e = fun;
     while let Expr::ParenExpr(p) = e {
@@ -766,9 +778,9 @@ pub fn call_target_object(pass: &Pass<'_>, fun: &Expr) -> Option<ObjectId> {
                 .get(&ix.index.id())
                 .is_some_and(|tv| tv.mode == OperandMode::TypeExpr) =>
         {
-            call_target_object(pass, &ix.x)
+            used_object(pass, &ix.x)
         }
-        Expr::IndexListExpr(ix) => call_target_object(pass, &ix.x),
+        Expr::IndexListExpr(ix) => used_object(pass, &ix.x),
         Expr::Ident(id) => info.uses.get(&id.id).copied(),
         Expr::SelectorExpr(sel) => info.uses.get(&sel.sel.id).copied(),
         _ => None,

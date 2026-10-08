@@ -107,8 +107,8 @@ linter 単位で移植を始める前に、**多くの linter を同時に動か
 | 変更 | guff | status | 説明できる drift |
 |------|------|--------|------------------|
 | `builder.assign` から複合リテラルの in-place 初期化が消え、`x := T{...}` は一時 Alloc → 1 回の Store（位置は左辺の ident） | `guff-ssa` は**既に v0.50 の形**。v0.44 を再現しているのは `guff-style/src/wastedassign.rs` の AST 近似 `composite_lit_rhs` | **done (PR 3)** | wastedassign 4 件（307:2 / 318:2 / 329:2 / 339:2）と消える 2 件（329:12 / 339:21）。**gosec の説明できない 2 系統**（G702 g7xx:73:18 の消滅、G124 g124_elided の +3）も同じ lowering 変更と推定 |
-| `typeutil.Callee` / `StaticCallee` が `fn.Origin()` を返す | `guff-analysis/src/code.rs` `call_target_object`、`guff-govet/src/govet_util.rs` `static_callee`、`passes/typeindex.rs` は**インスタンス側の ObjectId** のまま | needs-port（M。共有ヘルパなので golden 全体で実験してから） | unusedresult のジェネリック受信者表記（`[int]` → `[T]`、未測定） |
-| `typeindex.Calls` が `F[int](...)` を遡る | `used_ident` が既に剥がしている。ただし Calls の照合は Callee の Origin 化に依存 | needs-port（上と同時） | — |
+| `typeutil.Callee` / `StaticCallee` が `fn.Origin()` を返す | `call_target_object` が `func_origin` を返す | **done (PR 14s)**。実は guff の型検査器が `Uses` にインスタンスのメソッドではなく**宣言側のメソッド**を記録していたので、Callee 経由の消費者は偶然一致していた。型検査器を go/types どおり（`expandMethod` のコピーを記録）にし、Callee を Origin 化 | unusedresult の `[int]` → `[T]`（golden で確認）、revive の `W[string]` |
+| `typeindex.Calls` が `F[int](...)` を遡る | `used_ident` が既に剥がしている。照合は `Uses` の宣言側オブジェクトで、インスタンスのメソッドは型検査器が `origin` を持つ | already-matches（PR 14s で確認） | — |
 | `const.go nillable` が `unsafe.Pointer` を nil 可能型に | `guff-govet/src/nilness.rs` `nillable_under` に Basic(UnsafePointer) が無い | **done (PR 3)** | — |
 | range-over-func の yield 内ラベルから `_goto: ycont` が外れた | `guff-ssa/src/builder/range_func.rs:184` は v0.44 のまま | needs-port（M） | — |
 | `internal/stdlib/manifest.go` に Go 1.27 シンボル | goimports の `stdlib_exports.txt`（GOROOT 由来、internal を含む）に `uuid` / `crypto/mldsa` / `encoding/json/v2` / `bytes.CutLast` が無い | needs-port（M。**上流マニフェストから転記**、手元 Go で再生成しない） | — |
@@ -327,7 +327,7 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 | 9 | printf.go recursiveStringer Origin | behavior | ジェネリック受信者で再帰検出（親機能ごと未移植の既存ギャップ） | printf_types.rs `recursive_stringer` | **done (PR 14q)**：親機能ごと移植 | S | typeparams/diagnostics.go |
 | 10 | nilness.go hasCgoUnsafeArgs | behavior | `//go:cgo_unsafe_args` 関数を対象外 | guff-govet/src/nilness.rs | **done (PR 14f)**（gc が testdata を拒むので checks_test で検証） | S | a/a.go |
 | 11 | unusedresult.go inBenchmarkLoop | behavior | `for b.Loop()` 直下を報告しない | guff-govet/src/unusedresult.rs | **done (PR 14f)**。併せて `is_method_named` がポインタ受信者を剥がすように（loopclosure の errgroup、tests の `*testing.F` も同じ理由で死んでいた）→ tests を v0.50 から全面移植 | S | a/a.go |
-| 12 | unusedresult.go（Callee Origin） | message | ジェネリック受信者表記 `[int]` → `[T]` | unusedresult.rs callee_obj | unsure | S | typeparams/typeparams.go |
+| 12 | unusedresult.go（Callee Origin） | message | ジェネリック受信者表記 `[int]` → `[T]` | unusedresult.rs | **done (PR 14s)**：独自の `callee_obj` をやめ `call_target_object` に | S | typeparams/typeparams.go |
 | 13 | hostport.go | behavior | 引数 2 未満で panic | hostport.rs:184 | already-matches | S | a/a.go{,.golden} |
 | 14 | stdversion.go | behavior | 文言変更 + 除外移動。**guff に analyzer が丸ごと無い**（govet 既定有効） | 無し（settings.rs:3091 に名前だけ） | needs-port | L | stdversion/testdata/test.txtar |
 
@@ -352,8 +352,8 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 | 1 | go/ssa/builder.go assign | substrate | in-place compLit 経路の削除 | guff-style/src/wastedassign.rs composite_lit_rhs | **done (PR 3)**: wastedassign の近似撤去、gosec G124 / G702 も同じ原因で解消 | S | ssa/testdata/objlookup.go, valueforexpr.go |
 | 2 | go/ssa/const.go nillable | behavior | unsafe.Pointer を nil 可能型に | guff-govet/src/nilness.rs:935 | **done (PR 3)**（guff は別経路で既に一致していた。2.12.2 に対しては誤報だった） | S | const_test.go |
 | 3 | go/ssa buildYieldFunc lblock | behavior | range-over-func のラベル goto が親へ抜ける | guff-ssa/src/builder/range_func.rs:184 | needs-port | M | — |
-| 4 | typeutil/callee.go Callee Origin | behavior | Callee が Origin を返す | code.rs:756, govet_util.rs:132, typeindex.rs:231 | needs-port | M | callee_test.go |
-| 5 | typeindex.go Calls | behavior | 明示インスタンス化を遡る + Callee Origin で照合 | typeindex.rs:231-262 | needs-port | S | — |
+| 4 | typeutil/callee.go Callee Origin | behavior | Callee が Origin を返す | code.rs `call_target_object` | **done (PR 14s)**（xtools-substrate の上の表を参照） | M | callee_test.go |
+| 5 | typeindex.go Calls | behavior | 明示インスタンス化を遡る + Callee Origin で照合 | typeindex.rs:231-262 | already-matches（PR 14s） | S | — |
 | 6 | internal/stdlib/manifest.go | substrate | Go 1.27 シンボル（goimports 候補） | guff-fmt/src/native/goimports/stdlib_exports.txt | needs-port | M | — |
 | 7 | typesinternal/toonew.go | behavior | stdversion の除外と最短パス | 無し | needs-port | M | — |
 | 8 | gcimporter / pkgbits V5 | substrate | export data V5 | guff-exportdata/src/pkgbits/version.rs | needs-port | L | — |
@@ -693,7 +693,7 @@ PR 12 以降は ratchet が動かない（golden に形が無い）ので、fixt
 
 1. ~~**2.14.0 リリースバイナリのビルド Go**~~ → **go1.27.0**（§2.4）。以下は当初の問い:gci の std 一覧は go1.27 で生成されている。go1.27 なら gofmt / goimports / swaggo も printer 変更を受け、型エラーの文言も変わりうる。§2.4 の切り替え単位がこれで決まる。
 2. **sa6000/ok/ok.go:13:5 SA4006** と **st1005 SA4017 ×2** の消滅原因（§5.2）。前者は guff に対して extra になるので、PR 4 で IR 側を寄せた後にまだ残るか測る。
-3. **typeutil.Callee の Origin 化を guff の共有ヘルパに入れる範囲**。`call_target_object` は govet 以外でも共有されている。上流で typeutil.Callee を呼ぶ linter を数え、golden 全体で実験してから寄せる（偶然一致を壊さない）。
+3. ~~**typeutil.Callee の Origin 化を guff の共有ヘルパに入れる範囲**~~ → PR 14s で解決。golden 全体で実験したら Origin 化だけでは**何も変わらなかった**：型検査器が `Uses` に宣言側メソッドを記録していたため。型検査器を go/types どおりにしてから、Callee を使わない消費者（unusedresult の独自 callee_obj）だけが割れた。以下は当初の問い:`call_target_object` は govet 以外でも共有されている。上流で typeutil.Callee を呼ぶ linter を数え、golden 全体で実験してから寄せる（偶然一致を壊さない）。
 4. **SA5011 を `staticcheck.checks` に明示した config** を 2.14.0 がどう扱うか（無視 / エラー）。reject tier に入れるか。
 5. **SA1019 の composite literal 分岐で generic 実体化（`pkg.G[int]{F: ...}`）の型に当たると上流 SelectorName は panic する**。2.14.0 の出力（analyzer エラー？）を実測し、guff の再現方針を決める。
 6. **`GOLANGCI_LINT_CACHE=off`** を上流は通常のディレクトリ名として扱う。guff の `GUFF_CACHE=off` 拡張と上流互換のどちらを優先するか。

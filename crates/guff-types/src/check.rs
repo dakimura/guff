@@ -131,6 +131,9 @@ pub struct Checker {
     pub importing: Vec<String>,
     /// Context for de-duplicating instances.
     pub ctxt: Context,
+    /// Methods of generic-type instances, expanded once per (instance,
+    /// method) — go/types' lazily expanded `Named.Method(i)` on an instance.
+    pub instance_methods: HashMap<(TypeId, ObjectId), ObjectId>,
     /// The package being checked.
     pub pkg: PackageId,
     /// Where results are recorded.
@@ -517,6 +520,7 @@ impl Checker {
             sources: HashMap::default(),
             importing: Vec::new(),
             ctxt: Context::new(),
+            instance_methods: HashMap::default(),
             pkg,
             info: Info::default(),
             next_id: 1,
@@ -625,6 +629,7 @@ impl Checker {
             sources: HashMap::default(),
             importing: Vec::new(),
             ctxt: Context::new(),
+            instance_methods: HashMap::default(),
             pkg,
             info: Info::default(),
             next_id: 1,
