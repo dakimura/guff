@@ -116,8 +116,11 @@ impl Program {
 
     let rtargs = receiver_type_args(self, obj);
     if !targs.is_empty() || !rtargs.is_empty() {
+      // `fn := obj.Origin()`: a method selected on an instance is the type
+      // checker's expanded copy, whose origin is the declared method.
+      let declared = guff_types::object::func::func_origin(&self.object_arena, obj);
       let origin = self
-        .func_value(obj)
+        .func_value(declared)
         .or_else(|| {
           // Method object may already be an instantiated signature on a generic
           // receiver; fall back to the package member with the same name that

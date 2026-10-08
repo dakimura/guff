@@ -141,13 +141,7 @@ fn func_name(pass: &Pass<'_>, call: &CallExpr) -> String {
                     artifacts.objects.get(obj),
                     guff_types::arena::ObjectData::Func(_)
                 ) {
-                    let full = code::type_func_name(
-                        &artifacts.types,
-                        &artifacts.objects,
-                        &artifacts.packages,
-                        obj,
-                    );
-                    return full.replace(['(', ')', '*'], "");
+                    return full_name(pass, obj).replace(['(', ')', '*'], "");
                 }
             }
         }
@@ -156,5 +150,45 @@ fn func_name(pass: &Pass<'_>, call: &CallExpr) -> String {
     match guff::printer::fprint(&mut buf, pass.fset(), guff::printer::PrintNode::Expr(&call.fun)) {
         Ok(()) => String::from_utf8(buf).unwrap_or_default(),
         Err(_) => String::new(),
+    }
+}
+
+/// `fn.FullName()` as revive computes it. revive type-checks the package
+/// itself, under its *name* (`config.Check(file.Name.Name, …)`), so the
+/// package's own types print as `inst.W[string]`, not with the import path
+/// golangci-lint knows them by. Imported ones keep their path.
+fn full_name(pass: &Pass<'_>, obj: guff_types::ObjectId) -> String {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return String::new();
+    };
+    let this = artifacts.type_pkg;
+    let qualify = |pkg: guff_types::arena::PackageId, packages: &guff_types::arena::PackageArena| {
+        let p = packages.get(pkg);
+        if pkg == this {
+            p.name().to_string()
+        } else {
+            p.path().to_string()
+        }
+    };
+    let name = obj.name(&artifacts.objects);
+    let recv = obj
+        .typ(&artifacts.objects)
+        .and_then(|sig| guff_types::signature::signature_recv(&artifacts.types, sig))
+        .and_then(|r| r.typ(&artifacts.objects));
+    match recv {
+        Some(recv) => {
+            let recv_str = guff_types::typestring::type_string(
+                &artifacts.types,
+                &artifacts.objects,
+                &artifacts.packages,
+                recv,
+                Some(&qualify),
+            );
+            format!("({recv_str}).{name}")
+        }
+        None => match obj.pkg(&artifacts.objects) {
+            Some(pkg) => format!("{}.{name}", qualify(pkg, &artifacts.packages)),
+            None => name.to_string(),
+        },
     }
 }

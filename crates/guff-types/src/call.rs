@@ -1324,11 +1324,12 @@ impl Checker {
             }
 
             // recordSelection(MethodExpr) — also records the use of e.sel.
+            let sel_obj = self.instantiated_method(xtyp, &index, obj);
             self.record_selection(
                 e,
                 SelectionKind::MethodExpr,
                 xtyp,
-                obj,
+                sel_obj,
                 index.clone(),
                 indirect,
             );
@@ -1393,7 +1394,12 @@ impl Checker {
             } else {
                 SelectionKind::FieldVal
             };
-            self.record_selection(e, kind, xtyp, obj, index.clone(), indirect);
+            let sel_obj = if is_func {
+                self.instantiated_method(xtyp, &index, obj)
+            } else {
+                obj
+            };
+            self.record_selection(e, kind, xtyp, sel_obj, index.clone(), indirect);
             // For a method value, compute the (possibly instantiated) signature
             // *before* the `self.objects.get(obj)` borrow below, since
             // `method_sig_for_recv` borrows `self` mutably.
@@ -1495,6 +1501,75 @@ impl Checker {
             &mut self.ctxt,
             sig,
         )
+    }
+
+    /// The method object a selection of `method` on `recv_type` denotes: Go's
+    /// `expandMethod`.
+    ///
+    /// On an instance of a generic type (`Box[int]`), go/types selects a copy
+    /// of the declared method whose signature — receiver included — is
+    /// instantiated, and whose `Origin()` is the declared method. That copy is
+    /// what `Info.Uses` and `Info.Selections` record, so `FullName` says
+    /// `(pkg.Box[int]).Get` and `typeutil.Callee` has an `Origin()` to take.
+    /// guff used to record the declared method itself. Anything that is not
+    /// an instance gets `method` back unchanged.
+    pub(crate) fn instantiated_method(
+        &mut self,
+        recv_type: TypeId,
+        index: &[i32],
+        method: crate::ObjectId,
+    ) -> crate::ObjectId {
+        let Some(declared) = method.typ(&self.objects) else {
+            return method;
+        };
+        let recv_owner = self.walk_embedded_path(recv_type, index);
+        let (inst, _) = crate::lookup::deref(&self.types, recv_owner);
+        // Only a method of an instance is expanded — even when its signature
+        // does not mention the type parameters, its receiver does.
+        let is_instance = crate::lookup::as_named(&self.types, inst)
+            .is_some_and(|n| crate::named::named_type_args(&self.types, n).is_some());
+        if !is_instance {
+            return method;
+        }
+        if let Some(&m) = self.instance_methods.get(&(inst, method)) {
+            return m;
+        }
+        let sig = self.method_sig_for_recv(recv_type, index, method);
+        // The receiver, re-typed to the instance (`*Box[int]` for a pointer
+        // receiver).
+        let Some(orig_recv) = crate::signature::signature_recv(&self.types, declared) else {
+            return method;
+        };
+        let recv_typ = match orig_recv.typ(&self.objects).map(|t| self.types.get(t)) {
+            Some(TypeData::Pointer(_)) => crate::pointer::new_pointer(&mut self.types, inst),
+            _ => inst,
+        };
+        let recv_name = orig_recv.name(&self.objects).to_string();
+        let recv = crate::object::var::new_param(&mut self.objects, recv_name, recv_typ);
+        if let Some(pkg) = orig_recv.pkg(&self.objects) {
+            recv.set_pkg(&mut self.objects, pkg);
+        }
+        let pos = orig_recv.pos(&self.objects);
+        recv.set_pos(&mut self.objects, pos);
+        let (params, results, variadic) = match self.types.get(sig) {
+            TypeData::Signature(s) => (s.params(), s.results(), s.variadic()),
+            _ => return method,
+        };
+        let new_sig =
+            new_signature_type(&mut self.types, Some(recv), &[], &[], params, results, variadic);
+        let name = method.name(&self.objects).to_string();
+        let copy = crate::object::func::new_func(&mut self.objects, name, Some(new_sig));
+        if let Some(pkg) = method.pkg(&self.objects) {
+            copy.set_pkg(&mut self.objects, pkg);
+        }
+        let pos = method.pos(&self.objects);
+        copy.set_pos(&mut self.objects, pos);
+        let origin = crate::object::func::func_origin(&self.objects, method);
+        if let ObjectData::Func(f) = self.objects.get_mut(copy) {
+            f.set_origin(origin);
+        }
+        self.instance_methods.insert((inst, method), copy);
+        copy
     }
 
     /// Follow the embedded-field steps of a lookup `index` (every element except

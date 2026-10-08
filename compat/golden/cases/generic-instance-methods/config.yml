@@ -1,0 +1,27 @@
+# Golden case: methods selected on instances of generic types — same package,
+# another package, through an embedded generic field, and as a method
+# expression. See a.go.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+    - errcheck
+    - revive
+  settings:
+    govet:
+      enable:
+        - printf
+        - unusedresult
+    revive:
+      rules:
+        - name: unhandled-error
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

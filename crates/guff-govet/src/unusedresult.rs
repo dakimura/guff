@@ -148,21 +148,6 @@ fn must_use_message(pass: &Pass<'_>, obj: ObjectId) -> Option<String> {
         .then(|| format!("result of {path}.{name} call not used"))
 }
 
-/// The `types.Func` a call resolves to, method or function. (Go:
-/// `typeutil.Callee`.)
-fn callee_obj(pass: &Pass<'_>, fun: &Expr) -> Option<ObjectId> {
-    let info = pass.types_info()?;
-    let id = match unparen(fun) {
-        Expr::Ident(id) => id.id,
-        Expr::SelectorExpr(sel) => sel.sel.id,
-        _ => return None,
-    };
-    info.uses
-        .get(&id)
-        .copied()
-        .or_else(|| info.defs.get(&id).and_then(|o| *o))
-}
-
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let inspect = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
@@ -202,7 +187,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let Expr::CallExpr(call) = unparen(x) else {
             return;
         };
-        let Some(obj) = callee_obj(pass, &call.fun) else {
+        // `typeutil.Callee`: a method of an instance is named by its origin
+        // (`(*userdefs.SingleTypeParam[T]).String`).
+        let Some(obj) = guff_analysis::code::call_target_object(pass, &call.fun) else {
             return;
         };
         if let Some(message) = must_use_message(pass, obj) {
