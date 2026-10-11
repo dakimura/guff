@@ -492,6 +492,8 @@ fn clone_var_with_type(oarena: &mut ObjectArena, v: ObjectId, new_typ: TypeId) -
     if let Some(pkg) = v.pkg(oarena) {
         id.set_pkg(oarena, pkg);
     }
+    // `copy.origin = v.Origin()`.
+    crate::object::var::set_var_origin(oarena, id, v);
     id
 }
 

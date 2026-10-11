@@ -1551,6 +1551,7 @@ impl Checker {
         }
         let pos = orig_recv.pos(&self.objects);
         recv.set_pos(&mut self.objects, pos);
+        crate::object::var::set_var_origin(&mut self.objects, recv, orig_recv);
         let (params, results, variadic) = match self.types.get(sig) {
             TypeData::Signature(s) => (s.params(), s.results(), s.variadic()),
             _ => return method,

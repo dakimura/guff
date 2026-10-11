@@ -197,11 +197,24 @@ pub(crate) struct Wrappers {
 impl Wrappers {
     /// Upstream's `callKind`: the memo, then the allowlist. (There is no fact
     /// lookup — see the module comment.)
-    pub(crate) fn kind_of(&mut self, full_name: &str, base_name: &str, obj: ObjectId) -> Kind {
+    /// Upstream's `callKind`. `origin` is `origin(obj)`: a wrapper is
+    /// recorded against the declaration, so a call through an instance — a
+    /// method of `S[int]`, or the func-typed field `new(S[int]).printf` — is
+    /// looked up by the method or field the source declares.
+    pub(crate) fn kind_of(
+        &mut self,
+        full_name: &str,
+        base_name: &str,
+        obj: ObjectId,
+        origin: ObjectId,
+    ) -> Kind {
         if let Some(&k) = self.kinds.get(&obj) {
             return k;
         }
-        let kind = allowlist_kind(full_name, base_name);
+        let mut kind = allowlist_kind(full_name, base_name);
+        if kind == Kind::None {
+            kind = self.kinds.get(&origin).copied().unwrap_or(Kind::None);
+        }
         self.kinds.insert(obj, kind);
         kind
     }
@@ -288,6 +301,18 @@ pub(crate) fn names_of(pass: &Pass<'_>, obj: ObjectId) -> Option<(String, String
         _ => base.clone(),
     };
     Some((full, base))
+}
+
+/// Upstream's `origin`: a function or variable as the source declares it.
+pub(crate) fn origin(pass: &Pass<'_>, obj: ObjectId) -> ObjectId {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return obj;
+    };
+    match artifacts.objects.get(obj) {
+        ObjectData::Func(_) => guff_types::object::func::func_origin(&artifacts.objects, obj),
+        ObjectData::Var(_) => guff_types::object::var::var_origin(&artifacts.objects, obj),
+        _ => obj,
+    }
 }
 
 /// Upstream's `findPrintLike`.
@@ -500,7 +525,7 @@ fn do_call<'a>(
     let Some((full, base)) = names_of(pass, callee) else {
         return;
     };
-    let kind = state.kind_of(&full, &base, callee);
+    let kind = state.kind_of(&full, &base, callee, origin(pass, callee));
     if kind != Kind::None {
         propagate(pass, wi, Some(call_index), kind, calls, wrappers, state, diags);
     }
@@ -529,6 +554,10 @@ fn propagate<'a>(
         return;
     }
     state.kinds.insert(obj, kind);
+    // `pass.ExportObjectFact(origin(w.obj), …)`: the fact is about the
+    // declaration, so `new(S[bool]).printf = func…` makes `S[int]`'s field a
+    // wrapper too.
+    state.kinds.insert(origin(pass, obj), kind);
     let callers = wrappers[wi].callers.clone();
     for (caller, caller_call) in callers {
         propagate(pass, caller, caller_call, kind, calls, wrappers, state, diags);

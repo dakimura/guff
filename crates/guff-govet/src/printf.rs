@@ -393,7 +393,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let Some((name, base)) = printf_wrappers::names_of(pass, callee) else {
             return;
         };
-        let kind = wrappers.kind_of(&name, &base, callee);
+        let kind = wrappers.kind_of(&name, &base, callee, printf_wrappers::origin(pass, callee));
         let is_errorf = match kind {
             printf_wrappers::Kind::Printf => false,
             printf_wrappers::Kind::Errorf => true,

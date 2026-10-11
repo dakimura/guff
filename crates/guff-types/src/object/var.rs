@@ -42,6 +42,12 @@ pub struct Var {
     kind: VarKind,
     embedded: bool,
     pub(crate) meta: ObjectMeta,
+    /// The field or parameter this one was cloned from when a generic type or
+    /// function was instantiated (`types2.Var.origin`, filled in by
+    /// `cloneVar`); `None` for one declared as written. [`var_origin`] is
+    /// `Var.Origin()`.
+    #[serde(default)]
+    origin: Option<ObjectId>,
 }
 
 impl Var {
@@ -49,6 +55,9 @@ impl Var {
     pub(crate) fn remap_ids(&mut self, r: &crate::merge::Remapper) {
         self.typ = r.ty(self.typ);
         self.meta.remap_ids(r);
+        if let Some(o) = self.origin {
+            self.origin = Some(r.obj(o));
+        }
     }
 }
 
@@ -119,6 +128,7 @@ pub fn new_var(arena: &mut ObjectArena, name: impl Into<String>, typ: TypeId) ->
         kind: VarKind::Package,
         embedded: false,
         meta: ObjectMeta::default(),
+        origin: None,
     }))
 }
 
@@ -134,6 +144,7 @@ pub fn new_param(arena: &mut ObjectArena, name: impl Into<String>, typ: TypeId) 
         kind: VarKind::Param,
         embedded: false,
         meta: ObjectMeta::default(),
+        origin: None,
     }))
 }
 
@@ -154,5 +165,23 @@ pub fn new_field(
         kind: VarKind::Field,
         embedded,
         meta: ObjectMeta::default(),
+        origin: None,
     }))
+}
+
+/// `types2.Var.Origin()`: the field or parameter as the source declares it.
+/// A variable that was never cloned is its own origin.
+pub fn var_origin(arena: &ObjectArena, id: ObjectId) -> ObjectId {
+    match arena.get(id) {
+        ObjectData::Var(v) => v.origin.unwrap_or(id),
+        _ => id,
+    }
+}
+
+/// Record that `id` was cloned from `from` (flattened to `from`'s origin).
+pub(crate) fn set_var_origin(arena: &mut ObjectArena, id: ObjectId, from: ObjectId) {
+    let origin = var_origin(arena, from);
+    if let ObjectData::Var(v) = arena.get_mut(id) {
+        v.origin = Some(origin);
+    }
 }

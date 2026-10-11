@@ -18,6 +18,8 @@ printf/issue72850/a_go126.go:10:19:govet::printf: fmt.Sprintf format %q has arg 
 printf/nonconst/nonconst.go:19:13:govet::printf: non-constant format string in call to fmt.Printf
 printf/nonconst/nonconst.go:21:25:govet::printf: non-constant format string in call to fmt.Fprintf
 printf/nonconst/nonconst.go:22:13:govet::printf: non-constant format string in call to log.Printf
+printf/operands/generic_fields.go:21:26:govet::printf: printf format %s has arg 123 of wrong type int
+printf/operands/generic_fields.go:23:10:govet::printf: (example.com/printf/operands.GM[T]).Logf format %d has arg "x" of wrong type string
 printf/operands/operands.go:19:14:govet::printf: fmt.Printf format %c has arg p of wrong type unsafe.Pointer (use %p for a pointer)
 printf/operands/operands.go:20:14:govet::printf: fmt.Printf format %U has arg p of wrong type unsafe.Pointer (use %p for a pointer)
 printf/operands/operands.go:24:14:govet::printf: fmt.Printf format %s has arg p of wrong type unsafe.Pointer

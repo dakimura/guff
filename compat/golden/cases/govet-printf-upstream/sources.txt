@@ -14,3 +14,4 @@ printf/typeparams/diagnostics.go  crates/guff-govet/tests/testdata/upstream-x-to
 printf/typeparams/wrappers.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/printf/typeparams/wrappers.go
 printf/w/w.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/printf/w/w.go
 printf/operands/operands.go  crates/guff-govet/tests/testdata/printf_operands/operands.go
+printf/operands/generic_fields.go  crates/guff-govet/tests/testdata/printf_operands/generic_fields.go
