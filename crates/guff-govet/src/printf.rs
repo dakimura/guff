@@ -18,7 +18,8 @@ use guff::walk::NodeRef;
 use guff_analysis::code::{self, call_name, expr_to_bytes};
 use guff_analysis::passes::inspect;
 use guff_analysis::{
-    AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+    AnalysisResult, Analyzer, Diagnostic, FactTypeId, Pass, RunError, RunFn, SuggestedFix,
+    TextEdit,
 };
 use guff_types::arena::{ObjectData, TypeData};
 use guff_types::signature::signature_params;
@@ -374,6 +375,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     // site is judged, because a wrapper's kind can be learned from a call that
     // appears later in the file than a call to the wrapper itself.
     let (mut wrappers, mut pending) = printf_wrappers::find_print_like(pass);
+    // `pass.ExportObjectFact(origin(w.obj), &isWrapper{…})`, so a package
+    // that calls one of these wrappers checks the call.
+    for (obj, kind) in wrappers.declared(pass) {
+        pass.export_object_fact(obj, Box::new(printf_wrappers::IsWrapper { kind }));
+    }
     // The one diagnostic here that carries a fix.
     let mut non_constant: Vec<Diagnostic> = Vec::new();
     let mut scratch = Scratch::default();
@@ -393,7 +399,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let Some((name, base)) = printf_wrappers::names_of(pass, callee) else {
             return;
         };
-        let kind = wrappers.kind_of(&name, &base, callee, printf_wrappers::origin(pass, callee));
+        let kind = wrappers.kind_of(pass, &name, &base, callee);
         let is_errorf = match kind {
             printf_wrappers::Kind::Printf => false,
             printf_wrappers::Kind::Errorf => true,
@@ -1130,14 +1136,17 @@ fn count(n: usize, what: &str) -> String {
 
 pub fn analyzer() -> &'static Analyzer {
     static A: OnceLock<Analyzer> = OnceLock::new();
-    A.get_or_init(|| Analyzer {
-        name: "printf",
-        doc: "check Printf format strings",
-        url: "https://pkg.go.dev/golang.org/x/tools/go/analysis/passes/printf",
-        run: run as RunFn,
-        run_despite_errors: false,
-        requires: vec![inspect::analyzer()],
-        fact_types: vec![],
+    A.get_or_init(|| {
+        printf_wrappers::register_is_wrapper_decoder();
+        Analyzer {
+            name: "printf",
+            doc: "check Printf format strings",
+            url: "https://pkg.go.dev/golang.org/x/tools/go/analysis/passes/printf",
+            run: run as RunFn,
+            run_despite_errors: false,
+            requires: vec![inspect::analyzer()],
+            fact_types: vec![FactTypeId::of::<printf_wrappers::IsWrapper>()],
+        }
     })
 }
 

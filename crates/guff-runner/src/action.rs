@@ -819,6 +819,38 @@ fn typed_import<'a>(
         .unwrap_or(stub)
 }
 
+/// Which fact producers follow an import to its type-checked package.
+///
+/// Following an edge costs more than the fact: the importer's analyzers wait
+/// for every import's producer, so the results they hold — `buildir`'s SSA
+/// above all — live longer. With every producer following them, a `./...`
+/// run on prometheus and jaeger held about 190 MB more at peak, for no finding
+/// that changed. printf alone measured within noise on prometheus, jaeger and
+/// kubernetes, and its facts are the ones that change findings: a print
+/// wrapper declared in one package of the module and called from another.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TypedImports {
+    /// Every fact producer (the same-module expansion contextcheck needs).
+    #[default]
+    All,
+    /// Only the named analyzers.
+    Only(&'static [&'static str]),
+}
+
+impl TypedImports {
+    fn for_analyzer<'a>(
+        self,
+        analyzer: &Analyzer,
+        typed_by_id: Option<&'a std::collections::HashMap<String, Arc<Package>>>,
+    ) -> Option<&'a std::collections::HashMap<String, Arc<Package>>> {
+        match self {
+            TypedImports::All => typed_by_id,
+            TypedImports::Only(names) if names.contains(&analyzer.name) => typed_by_id,
+            TypedImports::Only(_) => None,
+        }
+    }
+}
+
 /// Like [`analyze`], but forwards a shared [`SettingsBag`] into every [`Pass`].
 pub fn analyze_with_settings(
     analyzers: &[&'static Analyzer],
@@ -829,7 +861,14 @@ pub fn analyze_with_settings(
     cache: Option<Arc<IssueCache>>,
 ) -> Result<Graph, ValidateError> {
     analyze_with_typed_imports(
-        analyzers, packages, sequential, concurrency, settings, cache, None,
+        analyzers,
+        packages,
+        sequential,
+        concurrency,
+        settings,
+        cache,
+        None,
+        TypedImports::All,
     )
 }
 
@@ -856,6 +895,7 @@ pub fn analyze_with_typed_imports(
     settings: Arc<SettingsBag>,
     cache: Option<Arc<IssueCache>>,
     typed_by_id: Option<Arc<std::collections::HashMap<String, Arc<Package>>>>,
+    typed_imports: TypedImports,
 ) -> Result<Graph, ValidateError> {
     validate(analyzers)?;
     ensure_builtin_fact_decoders();
@@ -873,6 +913,7 @@ pub fn analyze_with_typed_imports(
         settings: &Arc<SettingsBag>,
         cache: &Option<Arc<IssueCache>>,
         typed_by_id: Option<&std::collections::HashMap<String, Arc<Package>>>,
+        typed_imports: TypedImports,
         actions: &mut HashMap<(*const Analyzer, String), Arc<Action>>,
         all: &mut Vec<Arc<Action>>,
         on_stack: &mut HashSet<(*const Analyzer, String)>,
@@ -919,6 +960,7 @@ pub fn analyze_with_typed_imports(
                 settings,
                 cache,
                 typed_by_id,
+                typed_imports,
                 actions,
                 all,
                 on_stack,
@@ -928,7 +970,7 @@ pub fn analyze_with_typed_imports(
                 paths.sort();
                 for path in paths {
                     if let Some(dep_pkg) = package.imports.get(&path) {
-                        let dep_pkg = typed_import(typed_by_id, dep_pkg);
+                        let dep_pkg = typed_import(typed_imports.for_analyzer(req, typed_by_id), dep_pkg);
                         // Fact producers need a typechecked package (SSA). Skip
                         // export-only / not-yet-typed import stubs.
                         if dep_pkg.type_artifacts.is_none() {
@@ -940,6 +982,7 @@ pub fn analyze_with_typed_imports(
                             settings,
                             cache,
                             typed_by_id,
+                            typed_imports,
                             actions,
                             all,
                             on_stack,
@@ -954,7 +997,7 @@ pub fn analyze_with_typed_imports(
             paths.sort();
             for path in paths {
                 if let Some(dep_pkg) = package.imports.get(&path) {
-                    let dep_pkg = typed_import(typed_by_id, dep_pkg);
+                    let dep_pkg = typed_import(typed_imports.for_analyzer(analyzer, typed_by_id), dep_pkg);
                     if dep_pkg.type_artifacts.is_none() {
                         continue;
                     }
@@ -964,6 +1007,7 @@ pub fn analyze_with_typed_imports(
                         settings,
                         cache,
                         typed_by_id,
+                        typed_imports,
                         actions,
                         all,
                         on_stack,
@@ -1038,6 +1082,7 @@ pub fn analyze_with_typed_imports(
                 &settings,
                 &cache,
                 typed_by_id.as_deref(),
+                typed_imports,
                 &mut actions,
                 &mut all,
                 &mut on_stack,

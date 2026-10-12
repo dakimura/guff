@@ -586,6 +586,7 @@ dependencies = [
  "guff-ssa",
  "guff-types",
  "memchr",
+ "serde_json",
 ]
 
 [[package]]

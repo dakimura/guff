@@ -339,7 +339,12 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 ない／昇格メソッドは Stringer）、pointer ビットを持つ verb なら何でも受理していた slice / map / func /
 入れ子ポインタの枝。すべて移植済み。OSS corpus は printf をほぼ踏まない（PR tier 全体で 1 件）ので、
 どの tier にも出ていなかった。上流 testdata は golden case `govet-printf-upstream`（68/68）に入れた。a/ だけ外:
-- 他パッケージの wrapper（`b.Wrapf`、`b.GlobalWrapf`、`b.Struct.Wrapf`）は fact が要る
+- ~~他パッケージの wrapper（`b.Wrapf`、`b.GlobalWrapf`、`b.Struct.Wrapf`）は fact が要る~~ → **done (PR 14u)**：
+  printf に `isWrapper` fact。import を型検査済みパッケージに解決する表を全 run で作り、それを辿るのは printf
+  だけ（`TypedImports::Only`）。全 fact producer に辿らせると依存の fact を待つ間 `buildir` の SSA が長く生き、
+  prometheus / jaeger で peak RSS +190MB（kubernetes はノイズ内）、finding は不変だった。printf だけなら 3 repo
+  ともノイズ内。あわせて objectpath を `T.M<i>`（メソッド）、`T.UF<i>` / `V.F<i>`（フィールド）に拡張
+  （それまでは package-scope のみで、メソッドの fact は同じ run 内でも他パッケージに渡っていなかった）
 - ~~ジェネリック struct のフィールド（`new(S[int]).printf`）~~ → **done (PR 14t)**：guff_types の `Var` に `origin`（`cloneVar`）を持たせ、printf の `callKind` / fact 登録を `origin(obj)` で
 - `Logger.Logf` は interface-method induction（`printf_wrappers.rs` の DEFERRED）
 - ~~`'x'` が `int32` と出る~~ → **done (PR 14r)**：`default_type` が untyped rune に `universeRune` を返すように。
