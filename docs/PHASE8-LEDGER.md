@@ -338,7 +338,7 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 フィールド（#17798）、`LookupFieldOrMethod` によるメソッド集合（`*T` の `String` は `T` の Stringer では
 ない／昇格メソッドは Stringer）、pointer ビットを持つ verb なら何でも受理していた slice / map / func /
 入れ子ポインタの枝。すべて移植済み。OSS corpus は printf をほぼ踏まない（PR tier 全体で 1 件）ので、
-どの tier にも出ていなかった。上流 testdata は golden case `govet-printf-upstream`（68/68）に入れた。a/ だけ外:
+どの tier にも出ていなかった。上流 testdata は golden case `govet-printf-upstream`（68/68）に入れた。a/ だけ外（PR 14v で a/ も入り 325/325）:
 - ~~他パッケージの wrapper（`b.Wrapf`、`b.GlobalWrapf`、`b.Struct.Wrapf`）は fact が要る~~ → **done (PR 14u)**：
   printf に `isWrapper` fact。import を型検査済みパッケージに解決する表を全 run で作り、それを辿るのは printf
   だけ（`TypedImports::Only`）。全 fact producer に辿らせると依存の fact を待つ間 `buildir` の SSA が長く生き、
@@ -346,7 +346,16 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
   ともノイズ内。あわせて objectpath を `T.M<i>`（メソッド）、`T.UF<i>` / `V.F<i>`（フィールド）に拡張
   （それまでは package-scope のみで、メソッドの fact は同じ run 内でも他パッケージに渡っていなかった）
 - ~~ジェネリック struct のフィールド（`new(S[int]).printf`）~~ → **done (PR 14t)**：guff_types の `Var` に `origin`（`cloneVar`）を持たせ、printf の `callKind` / fact 登録を `origin(obj)` で
-- `Logger.Logf` は interface-method induction（`printf_wrappers.rs` の DEFERRED）
+- ~~`Logger.Logf` は interface-method induction~~ → **done (PR 14v)**：`refactor/satisfy` を
+  `guff_analysis::satisfy` に移植し、go1.26 以降のファイルで宣言された interface メソッドを、satisfy が見つけた
+  実装メソッドへの暗黙の呼び出しとして扱う（上流 `methodImplementations`）。a/ を golden に入れて 325/325
+  （a.go は GOPATH import `"b"` を `"example.com/printf/b"` に書き換えた 1 行だけ上流と違う）。satisfy の
+  記録箇所（引数・可変長・return・n:1 return・struct / map / slice literal・map key・比較・変換・send・
+  型アサーション・型 switch・式 switch・range 代入・append・`,ok` 代入・go/defer・埋め込み・`*T` 受信・
+  interface→interface・ジェネリック・go1.25 ファイルのゲート）を 1 形ずつ並べた `induction/`（28 件）と、無名 interface・型パラメータの map key・メソッド式・埋め込み interface フィールド・転送の循環・print / errorf を並べた `induction/shapes/`（6 件）も入れた。
+  ジェネリック実装（`var _ I = gen[int]{}`）で型検査器の欠陥が 1 つ出た：インターフェース検査で展開する
+  instance の `Named.methods`（`expand_one_method`）が Origin も位置も持たず、`LookupFieldOrMethod(gen[int])`
+  から宣言に辿れなかった。go/types の `expandMethod` と同じく両方を設定
 - ~~`'x'` が `int32` と出る~~ → **done (PR 14r)**：`default_type` が untyped rune に `universeRune` を返すように。
   型検査器全体の変更だが golden 全体（354 case）で変化なし
 
@@ -367,7 +376,7 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 | 11 | internal/refactor/imports.go | behavior | 宣言なしファイルへの AddImport | guff-analysis/src/refactor.rs:120 | already-matches | S | — |
 | 12 | internal/refactor/inline/* | behavior | 関数インライナの変更 | （インライナ無し） | not-applicable | L | — |
 | 13 | go/packages golist.go / packages.go | behavior | 重複 ID と export data 失敗の扱い | 無し | not-applicable | S | — |
-| 14 | refactor/satisfy/find.go | behavior | NormalTerms 走査、ill-typed で panic しない（printf から到達） | printf_wrappers.rs:49 DEFERRED | not-applicable | M | — |
+| 14 | refactor/satisfy/find.go | behavior | NormalTerms 走査、ill-typed で panic しない（printf から到達） | guff-analysis/src/satisfy.rs | **done (PR 14v)**：v0.50 を移植（ill-typed は panic せず型無しとして続行） | M | — |
 
 ### staticcheck-checks（honnef v0.7.0 → v0.8.1）
 

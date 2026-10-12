@@ -6,11 +6,261 @@
 
 # golangci-lint: 2.14.0
 
+printf/a/a.go:116:14:govet::printf: fmt.Printf format %b has arg "hi" of wrong type string
+printf/a/a.go:117:14:govet::printf: fmt.Printf format %t has arg c of wrong type complex64
+printf/a/a.go:118:14:govet::printf: fmt.Printf format %t has arg 1 + 2i of wrong type complex128
+printf/a/a.go:119:14:govet::printf: fmt.Printf format %c has arg 2.3 of wrong type float64
+printf/a/a.go:120:14:govet::printf: fmt.Printf format %d has arg 2.3 of wrong type float64
+printf/a/a.go:121:14:govet::printf: fmt.Printf format %e has arg "hi" of wrong type string
+printf/a/a.go:122:14:govet::printf: fmt.Printf format %E has arg true of wrong type bool
+printf/a/a.go:123:14:govet::printf: fmt.Printf format %f has arg "hi" of wrong type string
+printf/a/a.go:124:14:govet::printf: fmt.Printf format %F has arg 'x' of wrong type rune
+printf/a/a.go:125:14:govet::printf: fmt.Printf format %g has arg "hi" of wrong type string
+printf/a/a.go:126:14:govet::printf: fmt.Printf format %g has arg imap of wrong type map[int]int
+printf/a/a.go:127:14:govet::printf: fmt.Printf format %G has arg i of wrong type int
+printf/a/a.go:128:14:govet::printf: fmt.Printf format %o has arg x of wrong type float64
+printf/a/a.go:129:14:govet::printf: fmt.Printf format %O has arg x of wrong type float64
+printf/a/a.go:130:14:govet::printf: fmt.Printf format %p has arg nil of wrong type untyped nil
+printf/a/a.go:131:14:govet::printf: fmt.Printf format %p has arg 23 of wrong type int
+printf/a/a.go:132:14:govet::printf: fmt.Printf format %q has arg x of wrong type float64
+printf/a/a.go:133:14:govet::printf: fmt.Printf format %s has arg b of wrong type bool
+printf/a/a.go:134:14:govet::printf: fmt.Printf format %s has arg byte(65) of wrong type byte
+printf/a/a.go:135:14:govet::printf: fmt.Printf format %t has arg 23 of wrong type int
+printf/a/a.go:136:14:govet::printf: fmt.Printf format %U has arg x of wrong type float64
+printf/a/a.go:137:14:govet::printf: fmt.Printf format %x has arg nil of wrong type untyped nil
+printf/a/a.go:138:14:govet::printf: fmt.Printf format %s has arg stringerv of wrong type example.com/printf/a.ptrStringer
+printf/a/a.go:139:14:govet::printf: fmt.Printf format %t has arg stringerv of wrong type example.com/printf/a.ptrStringer
+printf/a/a.go:140:14:govet::printf: fmt.Printf format %s has arg embeddedStringerv of wrong type example.com/printf/a.embeddedStringer
+printf/a/a.go:141:14:govet::printf: fmt.Printf format %t has arg embeddedStringerv of wrong type example.com/printf/a.embeddedStringer
+printf/a/a.go:142:14:govet::printf: fmt.Printf format %q has arg notstringerv of wrong type example.com/printf/a.notstringer
+printf/a/a.go:143:14:govet::printf: fmt.Printf format %t has arg notstringerv of wrong type example.com/printf/a.notstringer
+printf/a/a.go:144:14:govet::printf: fmt.Printf format %t has arg stringerarrayv of wrong type example.com/printf/a.stringerarray
+printf/a/a.go:145:14:govet::printf: fmt.Printf format %t has arg notstringerarrayv of wrong type example.com/printf/a.notstringerarray
+printf/a/a.go:146:14:govet::printf: fmt.Printf format %q has arg notstringerarrayv of wrong type example.com/printf/a.notstringerarray
+printf/a/a.go:147:14:govet::printf: fmt.Printf format %d has arg BoolFormatter(true) of wrong type example.com/printf/a.BoolFormatter
+printf/a/a.go:151:22:govet::printf: fmt.Printf format %6g has arg 'x' of wrong type rune
+printf/a/a.go:153:2:govet::printf: fmt.Println call has possible Printf formatting directive %s
+printf/a/a.go:154:2:govet::printf: fmt.Println call has possible Printf formatting directive %v
+printf/a/a.go:155:2:govet::printf: fmt.Println call has possible Printf formatting directive %T
+printf/a/a.go:156:2:govet::printf: fmt.Println call has possible Printf formatting directive %s
+printf/a/a.go:158:2:govet::printf: fmt.Println call has possible Printf formatting directive %s
+printf/a/a.go:160:2:govet::printf: fmt.Printf call needs 1 arg but has 2 args
+printf/a/a.go:161:6:govet::printf: fmt.Sprintf call needs 1 arg but has 2 args
+printf/a/a.go:166:2:govet::printf: fmt.Printf call needs 2 args but has 4 args
+printf/a/a.go:167:14:govet::printf: fmt.Printf format %.*d uses non-int "hi" as argument of *
+printf/a/a.go:169:14:govet::printf: fmt.Printf format %.*d uses non-int s as argument of *
+printf/a/a.go:170:14:govet::printf: fmt.Printf format %*% uses non-int 0.22 as argument of *
+printf/a/a.go:174:14:govet::printf: fmt.Printf format %q has arg 3 of wrong type int
+printf/a/a.go:177:28:govet::printf: example.com/printf/a.Printf call has arguments but no formatting directives
+printf/a/a.go:181:9:govet::printf: example.com/printf/a.Printf format %s reads arg #2, but call has 1 arg
+printf/a/a.go:182:16:govet::printf: example.com/printf/a.Printf format %.3v reads arg #3, but call has 2 args
+printf/a/a.go:192:2:govet::printf: (*example.com/printf/a.ptrStringer).Wrap call has possible Printf formatting directive %s
+printf/a/a.go:193:2:govet::printf: (*example.com/printf/a.ptrStringer).Wrapf call needs 1 arg but has 2 args
+printf/a/a.go:194:14:govet::printf: (*example.com/printf/a.ptrStringer).Wrapf format %r has unknown verb r
+printf/a/a.go:195:14:govet::printf: (*example.com/printf/a.ptrStringer).Wrapf format %#s has unrecognized flag #
+printf/a/a.go:196:2:govet::printf: (*example.com/printf/a.ptrStringer).Wrap2 call has possible Printf formatting directive %s
+printf/a/a.go:197:2:govet::printf: (*example.com/printf/a.ptrStringer).Wrapf2 call needs 1 arg but has 2 args
+printf/a/a.go:198:15:govet::printf: (*example.com/printf/a.ptrStringer).Wrapf2 format %r has unknown verb r
+printf/a/a.go:199:15:govet::printf: (*example.com/printf/a.ptrStringer).Wrapf2 format %#s has unrecognized flag #
+printf/a/a.go:201:9:govet::printf: example.com/printf/a.Printf format % is missing verb at end of string
+printf/a/a.go:204:10:govet::printf: example.com/printf/a.Printf format %d has arg notPercentDV of wrong type example.com/printf/a.notPercentDStruct
+printf/a/a.go:205:10:govet::printf: example.com/printf/a.Printf format %d has arg &notPercentDV of wrong type *example.com/printf/a.notPercentDStruct
+printf/a/a.go:207:10:govet::printf: example.com/printf/a.Printf format %q has arg &percentDV of wrong type *example.com/printf/a.percentDStruct
+printf/a/a.go:217:9:govet::printf: example.com/printf/a.Printf format %[xd is missing closing ]
+printf/a/a.go:218:9:govet::printf: example.com/printf/a.Printf format has invalid argument index [x]
+printf/a/a.go:219:10:govet::printf: example.com/printf/a.Printf format %[3]*s reads arg #3, but call has 2 args
+printf/a/a.go:220:19:govet::printf: fmt.Sprintf format %[3]d reads arg #3, but call has 1 arg
+printf/a/a.go:221:10:govet::printf: example.com/printf/a.Printf format %[2]*.[1]*[3]d uses non-int "hi" as argument of *
+printf/a/a.go:222:9:govet::printf: example.com/printf/a.Printf format has invalid argument index [0]
+printf/a/a.go:223:9:govet::printf: example.com/printf/a.Printf format has invalid argument index [0]
+printf/a/a.go:224:9:govet::printf: example.com/printf/a.Printf format has invalid argument index [2*[1]
+printf/a/a.go:233:2:govet::printf: (*testing.common).Error call has possible Printf formatting directive %d
+printf/a/a.go:234:14:govet::printf: (*testing.common).Errorf format %s has arg 1 of wrong type int
+printf/a/a.go:247:10:govet::printf: example.com/printf/a.Printf format %d arg someFunction is a func value, not called
+printf/a/a.go:248:10:govet::printf: example.com/printf/a.Printf format %v arg someFunction is a func value, not called
+printf/a/a.go:249:2:govet::printf: example.com/printf/a.Println arg someFunction is a func value, not called
+printf/a/a.go:254:13:govet::printf: example.com/printf/a.Printf format %x has arg recursiveStruct1V.next of wrong type *example.com/printf/a.RecursiveStruct2
+printf/a/a.go:260:2:govet::printf: (*testing.common).Log call has possible Printf formatting directive %d
+printf/a/a.go:262:10:govet::printf: (*testing.common).Logf format %d has arg "hi" of wrong type string
+printf/a/a.go:265:13:govet::printf: example.com/printf/a.Errorf format %d has arg "hi" of wrong type string
+printf/a/a.go:270:19:govet::printf: example.com/printf/a.errorf format %d reads arg #1, but call has 0 args
+printf/a/a.go:273:13:govet::printf: (testing.TB).Errorf format %s has arg 1 of wrong type int
+printf/a/a.go:299:9:govet::printf: example.com/printf/a.Printf format has invalid argument index [0]
+printf/a/a.go:300:9:govet::printf: example.com/printf/a.Printf format has invalid argument index [-2]
+printf/a/a.go:301:9:govet::printf: example.com/printf/a.Printf format has invalid argument index [2234234234234]
+printf/a/a.go:302:19:govet::printf: example.com/printf/a.Printf format %-10d reads arg #4, but call has 3 args
+printf/a/a.go:303:10:govet::printf: example.com/printf/a.Printf format %[1][ has unknown verb [
+printf/a/a.go:309:2:govet::printf: example.com/printf/a.Println does not take io.Writer but has first arg os.Stdout
+printf/a/a.go:314:2:govet::printf: log.Fatal call has possible Printf formatting directive %d
+printf/a/a.go:315:17:govet::printf: log.Fatalf format %d has arg "x" of wrong type string
+printf/a/a.go:316:2:govet::printf: log.Fatalln call has possible Printf formatting directive %d
+printf/a/a.go:317:2:govet::printf: log.Panic call has possible Printf formatting directive %d
+printf/a/a.go:318:17:govet::printf: log.Panicf format %d has arg "x" of wrong type string
+printf/a/a.go:319:2:govet::printf: log.Panicln call has possible Printf formatting directive %d
+printf/a/a.go:320:2:govet::printf: log.Print call has possible Printf formatting directive %d
+printf/a/a.go:321:17:govet::printf: log.Printf format %d has arg "x" of wrong type string
+printf/a/a.go:322:2:govet::printf: log.Println call has possible Printf formatting directive %d
+printf/a/a.go:326:2:govet::printf: (*log.Logger).Fatal call has possible Printf formatting directive %d
+printf/a/a.go:327:12:govet::printf: (*log.Logger).Fatalf format %d has arg "x" of wrong type string
+printf/a/a.go:328:2:govet::printf: (*log.Logger).Fatalln call has possible Printf formatting directive %d
+printf/a/a.go:329:2:govet::printf: (*log.Logger).Panic call has possible Printf formatting directive %d
+printf/a/a.go:330:12:govet::printf: (*log.Logger).Panicf format %d has arg "x" of wrong type string
+printf/a/a.go:331:2:govet::printf: (*log.Logger).Panicln call has possible Printf formatting directive %d
+printf/a/a.go:332:2:govet::printf: (*log.Logger).Print call has possible Printf formatting directive %d
+printf/a/a.go:333:12:govet::printf: (*log.Logger).Printf format %d has arg "x" of wrong type string
+printf/a/a.go:334:2:govet::printf: (*log.Logger).Println call has possible Printf formatting directive %d
+printf/a/a.go:347:18:govet::printf: fmt.Errorf format %[2]w has arg "x" of wrong type string
+printf/a/a.go:348:18:govet::printf: fmt.Errorf format %w has arg "x" of wrong type string
+printf/a/a.go:350:18:govet::printf: fmt.Errorf format %w has arg interface{}(nil) of wrong type interface{}
+printf/a/a.go:353:14:govet::printf: fmt.Printf does not support error-wrapping directive %w
+printf/a/a.go:355:13:govet::printf: (*testing.common).Errorf does not support error-wrapping directive %w
+printf/a/a.go:356:13:govet::printf: (*testing.common).Errorf format %[1][ has unknown verb [
+printf/a/a.go:359:13:govet::printf: example.com/printf/a.Errorf does not support error-wrapping directive %w
+printf/a/a.go:367:2:govet::unusedresult: result of fmt.Appendf call not used
+printf/a/a.go:367:20:govet::printf: fmt.Appendf format %d has arg "123" of wrong type string
+printf/a/a.go:368:2:govet::printf: fmt.Append call has possible Printf formatting directive %d
+printf/a/a.go:368:2:govet::unusedresult: result of fmt.Append call not used
+printf/a/a.go:415:2:govet::unusedresult: result of fmt.Sprintf call not used
+printf/a/a.go:421:2:govet::unusedresult: result of fmt.Sprintf call not used
+printf/a/a.go:499:9:govet::printf: missing ... in args forwarded to print-like function
+printf/a/a.go:503:9:govet::printf: missing ... in args forwarded to printf-like function
+printf/a/a.go:572:19:govet::printf: fmt.Sprintf format %v with arg s causes recursive (example.com/printf/a.recursiveStringer).String method call
+printf/a/a.go:573:19:govet::printf: fmt.Sprintf format %v with arg &s causes recursive (example.com/printf/a.recursiveStringer).String method call
+printf/a/a.go:574:19:govet::printf: fmt.Sprintf format %#x with arg s causes recursive (example.com/printf/a.recursiveStringer).String method call
+printf/a/a.go:575:19:govet::printf: fmt.Sprintf format %#x with arg &s causes recursive (example.com/printf/a.recursiveStringer).String method call
+printf/a/a.go:576:19:govet::printf: fmt.Sprintf format %#X with arg s causes recursive (example.com/printf/a.recursiveStringer).String method call
+printf/a/a.go:577:19:govet::printf: fmt.Sprintf format %#X with arg &s causes recursive (example.com/printf/a.recursiveStringer).String method call
+printf/a/a.go:578:19:govet::printf: fmt.Sprintf format %#q with arg s causes recursive (example.com/printf/a.recursiveStringer).String method call
+printf/a/a.go:579:19:govet::printf: fmt.Sprintf format %#q with arg &s causes recursive (example.com/printf/a.recursiveStringer).String method call
+printf/a/a.go:581:9:govet::printf: fmt.Sprintln arg s causes recursive call to (example.com/printf/a.recursiveStringer).String method
+printf/a/a.go:589:9:govet::printf: fmt.Sprintln arg p causes recursive call to (*example.com/printf/a.recursivePtrStringer).String method
+printf/a/a.go:597:19:govet::printf: fmt.Sprintf format %v with arg s causes recursive (example.com/printf/a.recursiveError).Error method call
+printf/a/a.go:598:19:govet::printf: fmt.Sprintf format %v with arg &s causes recursive (example.com/printf/a.recursiveError).Error method call
+printf/a/a.go:599:19:govet::printf: fmt.Sprintf format %#x with arg s causes recursive (example.com/printf/a.recursiveError).Error method call
+printf/a/a.go:600:19:govet::printf: fmt.Sprintf format %#x with arg &s causes recursive (example.com/printf/a.recursiveError).Error method call
+printf/a/a.go:601:19:govet::printf: fmt.Sprintf format %#X with arg s causes recursive (example.com/printf/a.recursiveError).Error method call
+printf/a/a.go:602:19:govet::printf: fmt.Sprintf format %#X with arg &s causes recursive (example.com/printf/a.recursiveError).Error method call
+printf/a/a.go:603:19:govet::printf: fmt.Sprintf format %#q with arg s causes recursive (example.com/printf/a.recursiveError).Error method call
+printf/a/a.go:604:19:govet::printf: fmt.Sprintf format %#q with arg &s causes recursive (example.com/printf/a.recursiveError).Error method call
+printf/a/a.go:606:9:govet::printf: fmt.Sprintln arg s causes recursive call to (example.com/printf/a.recursiveError).Error method
+printf/a/a.go:614:9:govet::printf: fmt.Sprintln arg p causes recursive call to (*example.com/printf/a.recursivePtrError).Error method
+printf/a/a.go:622:19:govet::printf: fmt.Sprintf format %v with arg s causes recursive (example.com/printf/a.recursiveStringerAndError).String method call
+printf/a/a.go:623:19:govet::printf: fmt.Sprintf format %v with arg &s causes recursive (example.com/printf/a.recursiveStringerAndError).String method call
+printf/a/a.go:624:19:govet::printf: fmt.Sprintf format %#x with arg s causes recursive (example.com/printf/a.recursiveStringerAndError).String method call
+printf/a/a.go:625:19:govet::printf: fmt.Sprintf format %#x with arg &s causes recursive (example.com/printf/a.recursiveStringerAndError).String method call
+printf/a/a.go:626:19:govet::printf: fmt.Sprintf format %#X with arg s causes recursive (example.com/printf/a.recursiveStringerAndError).String method call
+printf/a/a.go:627:19:govet::printf: fmt.Sprintf format %#X with arg &s causes recursive (example.com/printf/a.recursiveStringerAndError).String method call
+printf/a/a.go:628:19:govet::printf: fmt.Sprintf format %#q with arg s causes recursive (example.com/printf/a.recursiveStringerAndError).String method call
+printf/a/a.go:629:19:govet::printf: fmt.Sprintf format %#q with arg &s causes recursive (example.com/printf/a.recursiveStringerAndError).String method call
+printf/a/a.go:631:9:govet::printf: fmt.Sprintln arg s causes recursive call to (example.com/printf/a.recursiveStringerAndError).String method
+printf/a/a.go:637:19:govet::printf: fmt.Sprintf format %v with arg s causes recursive (example.com/printf/a.recursiveStringerAndError).Error method call
+printf/a/a.go:638:19:govet::printf: fmt.Sprintf format %v with arg &s causes recursive (example.com/printf/a.recursiveStringerAndError).Error method call
+printf/a/a.go:639:19:govet::printf: fmt.Sprintf format %#x with arg s causes recursive (example.com/printf/a.recursiveStringerAndError).Error method call
+printf/a/a.go:640:19:govet::printf: fmt.Sprintf format %#x with arg &s causes recursive (example.com/printf/a.recursiveStringerAndError).Error method call
+printf/a/a.go:641:19:govet::printf: fmt.Sprintf format %#X with arg s causes recursive (example.com/printf/a.recursiveStringerAndError).Error method call
+printf/a/a.go:642:19:govet::printf: fmt.Sprintf format %#X with arg &s causes recursive (example.com/printf/a.recursiveStringerAndError).Error method call
+printf/a/a.go:643:19:govet::printf: fmt.Sprintf format %#q with arg s causes recursive (example.com/printf/a.recursiveStringerAndError).Error method call
+printf/a/a.go:644:19:govet::printf: fmt.Sprintf format %#q with arg &s causes recursive (example.com/printf/a.recursiveStringerAndError).Error method call
+printf/a/a.go:646:9:govet::printf: fmt.Sprintln arg s causes recursive call to (example.com/printf/a.recursiveStringerAndError).Error method
+printf/a/a.go:654:9:govet::printf: fmt.Sprintln arg p causes recursive call to (*example.com/printf/a.recursivePtrStringerAndError).String method
+printf/a/a.go:660:9:govet::printf: fmt.Sprintln arg p causes recursive call to (*example.com/printf/a.recursivePtrStringerAndError).Error method
+printf/a/a.go:773:14:govet::printf: fmt.Printf format %s has arg us of wrong type example.com/printf/a.unexportedStringer
+printf/a/a.go:774:14:govet::printf: fmt.Printf format %s has arg &us of wrong type *example.com/printf/a.unexportedStringer
+printf/a/a.go:780:14:govet::printf: fmt.Printf format %s has arg usf of wrong type example.com/printf/a.unexportedStringerOtherFields
+printf/a/a.go:781:14:govet::printf: fmt.Printf format %s has arg &usf of wrong type *example.com/printf/a.unexportedStringerOtherFields
+printf/a/a.go:786:14:govet::printf: fmt.Printf format %s has arg ue of wrong type example.com/printf/a.unexportedError
+printf/a/a.go:787:14:govet::printf: fmt.Printf format %s has arg &ue of wrong type *example.com/printf/a.unexportedError
+printf/a/a.go:794:14:govet::printf: fmt.Printf format %s has arg uef of wrong type example.com/printf/a.unexportedErrorOtherFields
+printf/a/a.go:795:14:govet::printf: fmt.Printf format %s has arg &uef of wrong type *example.com/printf/a.unexportedErrorOtherFields
+printf/a/a.go:800:14:govet::printf: fmt.Printf format %s has arg uce of wrong type example.com/printf/a.unexportedCustomError
+printf/a/a.go:803:14:govet::printf: fmt.Printf format %s has arg uei of wrong type example.com/printf/a.unexportedErrorInterface
+printf/a/a.go:812:14:govet::printf: fmt.Printf format %s has arg intSlice of wrong type []int
+printf/a/a.go:814:14:govet::printf: fmt.Printf format %s has arg nonStringerArray of wrong type [1]example.com/printf/a.unexportedStringer
+printf/a/a.go:838:14:govet::printf: fmt.Printf format %s has arg &intSlice of wrong type *[]int
+printf/a/a.go:844:14:govet::printf: fmt.Printf format %s has arg &intArray of wrong type *[2]int
+printf/a/a.go:850:14:govet::printf: fmt.Printf format %s has arg &intStruct of wrong type *struct{F int}
+printf/a/a.go:856:14:govet::printf: fmt.Printf format %s has arg &intMap of wrong type *map[int]int
+printf/a/a.go:864:14:govet::printf: fmt.Printf format %s has arg T1{&T2{"x"}} of wrong type example.com/printf/a.T1
+printf/a/a.go:869:11:govet::printf: example.com/printf/b.Wrapf format %s has arg 1 of wrong type int
+printf/a/a.go:870:2:govet::printf: example.com/printf/b.Wrap call has possible Printf formatting directive %s
+printf/a/a.go:872:12:govet::printf: example.com/printf/b.Wrapf2 format %s has arg 1 of wrong type int
+printf/a/a.go:906:14:govet::printf: fmt.Printf format %b arg func_ is a func value, not called
+printf/a/a.go:907:14:govet::printf: fmt.Printf format %d arg func_ is a func value, not called
+printf/a/a.go:908:14:govet::printf: fmt.Printf format %o arg func_ is a func value, not called
+printf/a/a.go:909:14:govet::printf: fmt.Printf format %O arg func_ is a func value, not called
+printf/a/a.go:910:14:govet::printf: fmt.Printf format %x arg func_ is a func value, not called
+printf/a/a.go:911:14:govet::printf: fmt.Printf format %X arg func_ is a func value, not called
+printf/a/a.go:916:14:govet::printf: fmt.Printf format %b has arg slice of wrong type []bool
+printf/a/a.go:918:14:govet::printf: fmt.Printf format %d has arg slice of wrong type []bool
+printf/a/a.go:920:14:govet::printf: fmt.Printf format %o has arg slice of wrong type []bool
+printf/a/a.go:921:14:govet::printf: fmt.Printf format %O has arg slice of wrong type []bool
+printf/a/a.go:923:14:govet::printf: fmt.Printf format %x has arg slice of wrong type []bool
+printf/a/a.go:924:14:govet::printf: fmt.Printf format %X has arg slice of wrong type []bool
+printf/a/a.go:927:14:govet::printf: fmt.Printf format %p has arg array of wrong type [3]bool
+printf/a/a.go:928:14:govet::printf: fmt.Printf format %b has arg array of wrong type [3]bool
+printf/a/a.go:929:14:govet::printf: fmt.Printf format %d has arg array of wrong type [3]bool
+printf/a/a.go:930:14:govet::printf: fmt.Printf format %o has arg array of wrong type [3]bool
+printf/a/a.go:931:14:govet::printf: fmt.Printf format %O has arg array of wrong type [3]bool
+printf/a/a.go:932:14:govet::printf: fmt.Printf format %x has arg array of wrong type [3]bool
+printf/a/a.go:933:14:govet::printf: fmt.Printf format %X has arg array of wrong type [3]bool
+printf/a/a.go:937:14:govet::printf: fmt.Printf format %b has arg map_ of wrong type map[bool]bool
+printf/a/a.go:939:14:govet::printf: fmt.Printf format %d has arg map_ of wrong type map[bool]bool
+printf/a/a.go:941:14:govet::printf: fmt.Printf format %o has arg map_ of wrong type map[bool]bool
+printf/a/a.go:942:14:govet::printf: fmt.Printf format %O has arg map_ of wrong type map[bool]bool
+printf/a/a.go:944:14:govet::printf: fmt.Printf format %x has arg map_ of wrong type map[bool]bool
+printf/a/a.go:945:14:govet::printf: fmt.Printf format %X has arg map_ of wrong type map[bool]bool
+printf/a/a.go:956:10:govet::printf: printf format %s has arg 123 of wrong type int
+printf/a/a.go:959:10:govet::printf: printf format %s has arg 123 of wrong type int
+printf/a/a.go:964:16:govet::printf: globalPrintf format %s has arg 123 of wrong type int
+printf/a/a.go:971:17:govet::printf: GlobalWrapf format %s has arg 123 of wrong type int
+printf/a/a.go:972:18:govet::printf: GlobalWrapf2 format %s has arg 123 of wrong type int
+printf/a/a.go:991:13:govet::printf: printf format %s has arg 123 of wrong type int
+printf/a/a.go:995:13:govet::printf: printf format %s has arg 123 of wrong type int
+printf/a/a.go:1003:10:govet::printf: printf format %s has arg 123 of wrong type int
+printf/a/a.go:1014:16:govet::printf: printf format %s has arg 123 of wrong type int
+printf/a/a.go:1021:18:govet::printf: Wrapf format %s has arg 123 of wrong type int
+printf/a/a.go:1022:19:govet::printf: Wrapf2 format %s has arg 123 of wrong type int
+printf/a/a.go:1033:26:govet::printf: printf format %s has arg 123 of wrong type int
+printf/a/a2.go:25:12:govet::printf: (example.com/printf/a.Logger).Logf format %s has arg 123 of wrong type int
 printf/b/b.go:7:2:govet::unusedresult: result of fmt.Sprintf call not used
 printf/b/b.go:12:2:govet::unusedresult: result of fmt.Sprint call not used
 printf/b/b.go:27:3:govet::unusedresult: result of fmt.Sprintf call not used
 printf/b/b.go:60:15:govet::printf: GlobalWrapf format %s has arg 123 of wrong type int
 printf/b/b.go:67:16:govet::printf: Wrapf format %s has arg 123 of wrong type int
+printf/induction/induction.go:25:28:govet::printf: (example.com/printf/induction.IArg).Logf format %s has arg 1 of wrong type int
+printf/induction/induction.go:31:42:govet::printf: (example.com/printf/induction.IVariadic).Logf format %s has arg 2 of wrong type int
+printf/induction/induction.go:36:37:govet::printf: (example.com/printf/induction.IReturn).Logf format %s has arg 3 of wrong type int
+printf/induction/induction.go:42:37:govet::printf: (example.com/printf/induction.IReturnN).Logf format %s has arg 4 of wrong type int
+printf/induction/induction.go:49:29:govet::printf: (example.com/printf/induction.IStruct).Logf format %s has arg 5 of wrong type int
+printf/induction/induction.go:56:32:govet::printf: (example.com/printf/induction.IStructPos).Logf format %s has arg 6 of wrong type int
+printf/induction/induction.go:62:29:govet::printf: (example.com/printf/induction.IMapVal).Logf format %s has arg 7 of wrong type int
+printf/induction/induction.go:69:29:govet::printf: (example.com/printf/induction.IMapKey).Logf format %s has arg 8 of wrong type int
+printf/induction/induction.go:75:28:govet::printf: (example.com/printf/induction.ISlice).Logf format %s has arg 9 of wrong type int
+printf/induction/induction.go:80:35:govet::printf: (example.com/printf/induction.ICompare).Logf format %s has arg 10 of wrong type int
+printf/induction/induction.go:86:30:govet::printf: (example.com/printf/induction.IConvert).Logf format %s has arg 11 of wrong type int
+printf/induction/induction.go:91:32:govet::printf: (example.com/printf/induction.ISend).Logf format %s has arg 12 of wrong type int
+printf/induction/induction.go:96:29:govet::printf: (example.com/printf/induction.IAssert).Logf format %s has arg 13 of wrong type int
+printf/induction/induction.go:105:33:govet::printf: (example.com/printf/induction.ITypeSwitch).Logf format %s has arg 14 of wrong type int
+printf/induction/induction.go:114:29:govet::printf: (example.com/printf/induction.ISwitch).Logf format %s has arg 15 of wrong type int
+printf/induction/induction.go:124:28:govet::printf: (example.com/printf/induction.IRange).Logf format %s has arg 16 of wrong type int
+printf/induction/induction.go:129:32:govet::printf: (example.com/printf/induction.IAppend).Logf format %s has arg 17 of wrong type int
+printf/induction/induction.go:138:29:govet::printf: (example.com/printf/induction.IAssign).Logf format %s has arg 18 of wrong type int
+printf/induction/induction.go:144:26:govet::printf: (example.com/printf/induction.IPtr).Logf format %s has arg 19 of wrong type int
+printf/induction/induction.go:151:28:govet::printf: (example.com/printf/induction.IEmbed).Logf format %s has arg 20 of wrong type int
+printf/induction/induction.go:157:20:govet::printf: (example.com/printf/induction.IPrint).Log call has possible Printf formatting directive %s
+printf/induction/induction.go:163:33:govet::printf: (example.com/printf/induction.IOuter).Logf format %s has arg 22 of wrong type int
+printf/induction/induction.go:174:26:govet::printf: (example.com/printf/induction.IGen).Logf format %s has arg 23 of wrong type int
+printf/induction/induction.go:192:30:govet::printf: (example.com/printf/induction.IClosure).Logf format %s has arg 25 of wrong type int
+printf/induction/induction.go:206:30:govet::printf: (example.com/printf/induction.IBase).Logf format %s has arg 26 of wrong type int
+printf/induction/induction.go:207:30:govet::printf: (example.com/printf/induction.IBase).Logf format %s has arg 27 of wrong type int
+printf/induction/induction.go:218:28:govet::printf: (example.com/printf/induction.IComma).Logf format %s has arg 28 of wrong type int
+printf/induction/induction.go:232:27:govet::printf: (example.com/printf/induction.IGo).Logf format %s has arg 30 of wrong type int
+printf/induction/shapes/shapes.go:15:10:govet::printf: (interface).Logf format %s has arg 1 of wrong type int
+printf/induction/shapes/shapes.go:25:27:govet::printf: (interface).Logf format %s has arg 2 of wrong type int
+printf/induction/shapes/shapes.go:33:53:govet::printf: (example.com/printf/induction/shapes.IGenMap).Logf format %s has arg 3 of wrong type int
+printf/induction/shapes/shapes.go:68:22:govet::printf: (example.com/printf/induction/shapes.IPrintln).Println call has possible Printf formatting directive %d
+printf/induction/shapes/shapes.go:78:32:govet::printf: (example.com/printf/induction/shapes.IErr).Errorf format %w has arg 8 of wrong type int
+printf/induction/shapes/shapes.go:87:34:govet::printf: (example.com/printf/induction/shapes.ICmpPtr).Logf format %s has arg 9 of wrong type int
 printf/issue68744/issue68744.go:12:9:govet::printf: example.com/printf/issue68744.wrapf format %s has arg 123 of wrong type int
 printf/issue70572/issue70572.go:23:16:govet::printf: (example.com/printf/issue70572.A).Printf call has arguments but no formatting directives
 printf/issue70572/issue70572.go:24:16:govet::printf: (example.com/printf/issue70572.B[T]).Printf call has arguments but no formatting directives
