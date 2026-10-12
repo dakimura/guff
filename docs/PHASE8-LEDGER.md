@@ -340,7 +340,7 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 入れ子ポインタの枝。すべて移植済み。OSS corpus は printf をほぼ踏まない（PR tier 全体で 1 件）ので、
 どの tier にも出ていなかった。上流 testdata は golden case `govet-printf-upstream`（68/68）に入れた。a/ だけ外:
 - 他パッケージの wrapper（`b.Wrapf`、`b.GlobalWrapf`、`b.Struct.Wrapf`）は fact が要る
-- ジェネリック struct のフィールド（`new(S[int]).printf`）は Callee の Origin（xtools-substrate row 4）
+- ~~ジェネリック struct のフィールド（`new(S[int]).printf`）~~ → **done (PR 14t)**：guff_types の `Var` に `origin`（`cloneVar`）を持たせ、printf の `callKind` / fact 登録を `origin(obj)` で
 - `Logger.Logf` は interface-method induction（`printf_wrappers.rs` の DEFERRED）
 - ~~`'x'` が `int32` と出る~~ → **done (PR 14r)**：`default_type` が untyped rune に `universeRune` を返すように。
   型検査器全体の変更だが golden 全体（354 case）で変化なし
