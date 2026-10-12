@@ -38,6 +38,8 @@ pub struct RunnerOptions {
     /// producer scheduled on an import gets a metadata stub, is skipped, and its
     /// package facts never reach the importer.
     pub typed_by_id: Option<Arc<std::collections::HashMap<String, Arc<Package>>>>,
+    /// Which fact producers follow [`Self::typed_by_id`].
+    pub typed_imports: crate::action::TypedImports,
 }
 
 impl std::fmt::Debug for RunnerOptions {
@@ -59,6 +61,7 @@ impl Default for RunnerOptions {
             concurrency: None,
             release_memory: false,
             typed_by_id: None,
+            typed_imports: crate::action::TypedImports::All,
             settings: Arc::new(SettingsBag::default()),
             cache: None,
         }
@@ -139,6 +142,7 @@ pub fn run_on_packages(
             Arc::clone(&opts.settings),
             opts.cache.clone(),
             opts.typed_by_id.clone(),
+            opts.typed_imports,
         )?
     };
 

@@ -14,7 +14,7 @@ mod load_mode;
 mod memory;
 mod runner;
 
-pub use action::{analyze, analyze_with_settings, Action, Graph};
+pub use action::{analyze, analyze_with_settings, Action, Graph, TypedImports};
 pub use cache::{
     build_salt, cache_dir_size, clean_cache, default_cache_dir, default_go_cache_dir,
     detect_go_version, ensure_go_cache_env, is_under_go_cache, load_from_cache, save_to_cache,

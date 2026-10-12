@@ -77,6 +77,7 @@ pub fn encode_fact_store(
         };
         let owner_path = artifacts.packages.get(owner_pkg).path().to_string();
         let Ok(object_path) = objectpath_for(
+            &artifacts.types,
             &artifacts.packages,
             &artifacts.objects,
             &artifacts.scopes,
@@ -142,7 +143,14 @@ pub fn decode_facts_into(
             continue;
         }
         let Ok(obj) =
-            objectpath_object(&artifacts.packages, &artifacts.scopes, pkg, &ef.object_path)
+            objectpath_object(
+                &artifacts.types,
+                &artifacts.packages,
+                &artifacts.objects,
+                &artifacts.scopes,
+                pkg,
+                &ef.object_path,
+            )
         else {
             continue;
         };

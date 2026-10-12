@@ -655,7 +655,11 @@ pub(crate) fn run_linters_on_graph(
     let (miss_roots, typed_by_id): (
         Vec<std::sync::Arc<guff_packages::Package>>,
         Option<std::sync::Arc<HashMap<String, std::sync::Arc<guff_packages::Package>>>>,
-    ) = if need_fact_pkgs {
+    ) = {
+        // Every run gets the table: printf's wrapper facts cross from one
+        // package of the module to another (`TypedImports` below). Only
+        // contextcheck widens it to every fact producer, and to imports that
+        // are not roots.
         let by_id: HashMap<String, std::sync::Arc<guff_packages::Package>> = typed
             .iter()
             .map(|p| (p.id.clone(), std::sync::Arc::clone(p)))
@@ -665,8 +669,11 @@ pub(crate) fn run_linters_on_graph(
             .filter_map(|id| by_id.get(id).cloned())
             .collect();
         (roots, Some(std::sync::Arc::new(by_id)))
+    };
+    let typed_imports = if need_fact_pkgs {
+        guff_runner::TypedImports::All
     } else {
-        (typed, None)
+        guff_runner::TypedImports::Only(&["printf"])
     };
     if timing {
         eprintln!(
@@ -690,6 +697,7 @@ pub(crate) fn run_linters_on_graph(
             settings: std::sync::Arc::clone(&opts.settings),
             cache,
             typed_by_id,
+            typed_imports,
             ..RunnerOptions::default()
         },
     )

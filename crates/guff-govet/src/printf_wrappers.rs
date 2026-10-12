@@ -38,13 +38,14 @@
 //!
 //! # Where the induction stops
 //!
-//! Like the no-return induction in `ctrlflow`, this runs *inside* a package:
-//! guff type-checks only the packages being linted, so there is no fact to
-//! import for a wrapper declared in a dependency, and advertising `fact_types`
-//! on `printf` would schedule it across every transitive import for facts that
-//! could not be produced anyway. What that costs is one shape in the grid above
-//! — `sub.ExportedWrapf("g %z", 1)`, a wrapper in a *sibling* package, reported
-//! by upstream and silent here. Silence is the direction guff already had.
+//! A wrapper's kind crosses packages as an [`IsWrapper`] fact, as upstream's
+//! does: `sub.ExportedWrapf("g %z", 1)` in the grid above is checked when
+//! `sub` is linted in the same run (a package of the same module under
+//! `./...`). The runner resolves printf's imports — and only printf's, see
+//! `guff_runner::TypedImports` — to their type-checked packages. A wrapper in
+//! a package that is not linted (another module, the standard library beyond
+//! `IS_PRINT`) has no fact and stays silent: guff type-checks only the
+//! packages being linted.
 //!
 //! DEFERRED, both measured rather than guessed:
 //! - **interface-method induction.** Upstream models an interface method as an
@@ -64,7 +65,7 @@ use std::collections::HashMap;
 use guff::ast::{BlockStmt, CallExpr, Expr, File};
 use guff::walk::{inspect, NodeRef};
 use guff_analysis::code::call_target_object;
-use guff_analysis::Pass;
+use guff_analysis::{Fact, FactTypeId, Pass};
 use guff_types::arena::{ObjectData, ObjectId, TypeData};
 use guff_types::basic::BasicKind;
 use guff_types::signature::{signature_params, signature_variadic};
@@ -195,29 +196,102 @@ pub(crate) struct Wrappers {
 }
 
 impl Wrappers {
-    /// Upstream's `callKind`: the memo, then the allowlist. (There is no fact
-    /// lookup — see the module comment.)
-    /// Upstream's `callKind`. `origin` is `origin(obj)`: a wrapper is
-    /// recorded against the declaration, so a call through an instance — a
-    /// method of `S[int]`, or the func-typed field `new(S[int]).printf` — is
-    /// looked up by the method or field the source declares.
+    /// Upstream's `callKind`: the memo, the allowlist, then the `isWrapper`
+    /// fact of `origin(obj)`. A wrapper is recorded against the declaration,
+    /// so a call through an instance — a method of `S[int]`, or the
+    /// func-typed field `new(S[int]).printf` — is looked up by the method or
+    /// field the source declares; one declared in another package arrives as
+    /// that package's fact.
     pub(crate) fn kind_of(
         &mut self,
+        pass: &Pass<'_>,
         full_name: &str,
         base_name: &str,
         obj: ObjectId,
-        origin: ObjectId,
     ) -> Kind {
         if let Some(&k) = self.kinds.get(&obj) {
             return k;
         }
         let mut kind = allowlist_kind(full_name, base_name);
         if kind == Kind::None {
-            kind = self.kinds.get(&origin).copied().unwrap_or(Kind::None);
+            let origin = origin(pass, obj);
+            kind = match self.kinds.get(&origin) {
+                Some(&k) => k,
+                None => {
+                    let mut fact = IsWrapper { kind: Kind::None };
+                    if pass.import_object_fact(origin, &mut fact) {
+                        fact.kind
+                    } else {
+                        Kind::None
+                    }
+                }
+            };
         }
         self.kinds.insert(obj, kind);
         kind
     }
+
+    /// The wrappers this package declares, for `ExportObjectFact`: every
+    /// object of this package classified print-like, as its declaration.
+    pub(crate) fn declared(&self, pass: &Pass<'_>) -> Vec<(ObjectId, Kind)> {
+        let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+            return Vec::new();
+        };
+        self
+            .kinds
+            .iter()
+            .filter(|&(&obj, &kind)| {
+                kind != Kind::None
+                    && origin(pass, obj) == obj
+                    && obj.pkg(&artifacts.objects) == Some(artifacts.type_pkg)
+            })
+            .map(|(&obj, &kind)| (obj, kind))
+            .collect()
+    }
+}
+
+/// Upstream's `isWrapper` fact: the function (or func-typed variable) is a
+/// print wrapper of the given kind.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct IsWrapper {
+    pub(crate) kind: Kind,
+}
+
+impl Fact for IsWrapper {
+    fn fact_type_id(&self) -> FactTypeId {
+        FactTypeId::of::<Self>()
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn clone_fact(&self) -> Box<dyn Fact> {
+        Box::new(self.clone())
+    }
+
+    fn type_name(&self) -> &'static str {
+        "printf.isWrapper"
+    }
+
+    fn encode_payload(&self) -> serde_json::Value {
+        serde_json::json!({ "kind": self.kind.as_str() })
+    }
+}
+
+fn decode_is_wrapper(payload: serde_json::Value) -> Option<Box<dyn Fact>> {
+    let kind = match payload.get("kind")?.as_str()? {
+        "print" => Kind::Print,
+        "printf" => Kind::Printf,
+        "errorf" => Kind::Errorf,
+        _ => return None,
+    };
+    Some(Box::new(IsWrapper { kind }))
+}
+
+/// Register the [`IsWrapper`] decoder, so a cached package's facts survive.
+pub(crate) fn register_is_wrapper_decoder() {
+    guff_analysis::register_fact_decoder("printf.isWrapper", decode_is_wrapper);
 }
 
 /// Upstream's `formatArgsParams`: the `format string` and `args ...any`
@@ -525,7 +599,7 @@ fn do_call<'a>(
     let Some((full, base)) = names_of(pass, callee) else {
         return;
     };
-    let kind = state.kind_of(&full, &base, callee, origin(pass, callee));
+    let kind = state.kind_of(pass, &full, &base, callee);
     if kind != Kind::None {
         propagate(pass, wi, Some(call_index), kind, calls, wrappers, state, diags);
     }

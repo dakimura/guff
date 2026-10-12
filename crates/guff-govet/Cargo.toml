@@ -19,6 +19,7 @@ guff-constant = { path = "../guff-constant" }
 guff-gostd = { path = "../guff-gostd" }
 guff-types = { path = "../guff-types" }
 guff-ssa = { path = "../guff-ssa" }
+serde_json = "1"
 
 [dev-dependencies]
 guff-packages = { path = "../guff-packages" }
