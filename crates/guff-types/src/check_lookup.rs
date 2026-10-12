@@ -685,6 +685,16 @@ impl Checker {
         if let Some(pkg) = om.pkg(&self.objects) {
             new_m.set_pkg(&mut self.objects, pkg);
         }
+        // `expandMethod`: the copy sits at the declared method's position and
+        // its Origin is that method. Without it a consumer holding the copy —
+        // printf's `LookupFieldOrMethod(gen[int], "Logf")` — could not find
+        // the declaration its facts are recorded against.
+        let pos = om.pos(&self.objects);
+        new_m.set_pos(&mut self.objects, pos);
+        let origin = crate::object::func::func_origin(&self.objects, om);
+        if let ObjectData::Func(f) = self.objects.get_mut(new_m) {
+            f.set_origin(origin);
+        }
         new_m
     }
 

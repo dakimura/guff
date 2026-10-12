@@ -1,5 +1,7 @@
 # Source files materialized into the case work dir before each run.
 # Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+printf/a/a.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/printf/a/a.go
+printf/a/a2.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/printf/a/a2.go
 printf/b/b.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/printf/b/b.go
 printf/issue62595/a_go126.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/printf/issue62595/a_go126.go
 printf/issue62595/a_go127.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/printf/issue62595/a_go127.go
@@ -17,3 +19,6 @@ printf/operands/operands.go  crates/guff-govet/tests/testdata/printf_operands/op
 printf/operands/generic_fields.go  crates/guff-govet/tests/testdata/printf_operands/generic_fields.go
 printf/operands/xpkg/wrap/wrap.go  crates/guff-govet/tests/testdata/printf_operands/xpkg/wrap/wrap.go
 printf/operands/xpkg/use/use.go  crates/guff-govet/tests/testdata/printf_operands/xpkg/use/use.go
+printf/induction/induction.go  crates/guff-govet/tests/testdata/printf_induction/induction.go
+printf/induction/induction_go125.go  crates/guff-govet/tests/testdata/printf_induction/induction_go125.go
+printf/induction/shapes/shapes.go  crates/guff-govet/tests/testdata/printf_induction/shapes/shapes.go

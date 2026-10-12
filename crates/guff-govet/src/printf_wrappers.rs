@@ -47,14 +47,15 @@
 //! `IS_PRINT`) has no fact and stays silent: guff type-checks only the
 //! packages being linted.
 //!
-//! DEFERRED, both measured rather than guessed:
-//! - **interface-method induction.** Upstream models an interface method as an
-//!   implicit call to every implementing method found by the `satisfy` pass, so
-//!   `Logger.Logf` becomes printf-like when `myLogger.Logf` is. It is gated on
-//!   the *file's* language version being go1.26, which the corpus does reach
-//!   (Tekton pipeline is `go 1.26.4`). Porting it needs `satisfy.Finder`, which
-//!   is its own pass; without it a call through such an interface is not
-//!   checked. That is the same silence as before this module existed.
+//! # Interface methods
+//!
+//! An interface method declared in a file at go1.26 or later is a candidate
+//! too. It has no body; upstream models it as an implicit call to every
+//! implementing method that [`guff_analysis::satisfy`] finds in this package,
+//! so `var _ Logger = myLogger(0)` makes `Logger.Logf` printf-like once
+//! `myLogger.Logf` is. Such a call needs no forwarding check.
+//!
+//! DEFERRED, measured rather than guessed:
 //! - **`-printf.funcs`.** Upstream's second allowlist lookup is on the
 //!   lower-cased base name, which is empty unless the flag adds to it. guff
 //!   does not read `govet.settings.printf.funcs`, so the lookup would always
@@ -64,9 +65,12 @@ use std::collections::HashMap;
 
 use guff::ast::{BlockStmt, CallExpr, Expr, File};
 use guff::walk::{inspect, NodeRef};
-use guff_analysis::code::call_target_object;
+use guff_analysis::code::{self, call_target_object};
+use guff_analysis::satisfy;
 use guff_analysis::{Fact, FactTypeId, Pass};
-use guff_types::arena::{ObjectData, ObjectId, TypeData};
+use guff_types::arena::{ObjectData, ObjectId, TypeArena, TypeData};
+use guff_types::interface::{interface_method, interface_num_methods};
+use guff_types::lookup::lookup_field_or_method;
 use guff_types::basic::BasicKind;
 use guff_types::signature::{signature_params, signature_variadic};
 use guff_types::tuple::tuple_len;
@@ -406,7 +410,16 @@ pub(crate) fn find_print_like(pass: &Pass<'_>) -> (Wrappers, Vec<(u32, String)>)
     // Pass 1: gather candidates.
     let mut wrappers: Vec<Wrapper<'_>> = Vec::new();
     let mut by_obj: HashMap<ObjectId, usize> = HashMap::new();
-    collect_candidates(pass, pass.files(), &mut wrappers, &mut by_obj);
+    let mut scratch: Option<TypeArena> = None;
+    collect_candidates(pass, pass.files(), &mut scratch, &mut wrappers, &mut by_obj);
+
+    // `methodImplementations` is only read for an interface-method candidate,
+    // and it is a walk over the whole package, so skip it when there is none.
+    let impls = if wrappers.iter().any(|w| w.body.is_none()) {
+        method_implementations(pass, &mut scratch)
+    } else {
+        HashMap::new()
+    };
 
     // Every forwarding call, kept out of the wrapper structs so that the graph
     // can be walked while the calls stay borrowed from the AST.
@@ -415,8 +428,12 @@ pub(crate) fn find_print_like(pass: &Pass<'_>) -> (Wrappers, Vec<(u32, String)>)
     // Pass 2: scan each candidate's body for calls that forward `args`.
     for wi in 0..wrappers.len() {
         let Some(body) = wrappers[wi].body else {
-            // An interface method has no body. Upstream treats it as an
-            // implicit call to each implementing method; see the DEFERRED note.
+            // An interface method has no body, but acts like an implicit call
+            // to each implementing method.
+            let obj = wrappers[wi].obj;
+            for &callee in impls.get(&obj).into_iter().flatten() {
+                do_call(pass, wi, callee, None, &calls, &mut wrappers, &by_obj, &mut state, &mut diags);
+            }
             continue;
         };
         scan_body(pass, wi, body, &mut wrappers, &by_obj, &mut calls, &mut state, &mut diags);
@@ -428,6 +445,7 @@ pub(crate) fn find_print_like(pass: &Pass<'_>) -> (Wrappers, Vec<(u32, String)>)
 fn collect_candidates<'a>(
     pass: &Pass<'_>,
     files: &'a [File],
+    scratch: &mut Option<TypeArena>,
     wrappers: &mut Vec<Wrapper<'a>>,
     by_obj: &mut HashMap<ObjectId, usize>,
 ) {
@@ -484,6 +502,32 @@ fn collect_candidates<'a>(
                         add(obj, tv.typ, Some(&lit.body));
                     }
                 }
+                // An interface method: `Logf(format string, args ...any)`.
+                // Induction through it is gated as if it were a go1.26
+                // language feature, on the version of the file declaring it.
+                NodeRef::InterfaceType(it) => {
+                    let version = code::effective_file_go_version(pass, it.interface_.0 as u32);
+                    if version.is_empty() || code::version_compare(&version, "go1.26") < 0 {
+                        return true;
+                    }
+                    let (Some(tv), Some(art)) = (info.types.get(&it.id), pass.pkg().type_artifacts.as_ref()) else {
+                        return true;
+                    };
+                    let types = scratch.get_or_insert_with(|| art.types.clone());
+                    let iface = tv.typ.underlying(types);
+                    if !matches!(types.get(iface), TypeData::Interface(_)) {
+                        return true;
+                    }
+                    let n = interface_num_methods(types, &art.objects, &art.packages, iface);
+                    let methods: Vec<ObjectId> = (0..n)
+                        .map(|i| interface_method(types, &art.objects, &art.packages, iface, i))
+                        .collect();
+                    for m in methods {
+                        if let Some(sig) = m.typ(&art.objects) {
+                            add(m, sig, None);
+                        }
+                    }
+                }
                 NodeRef::AssignStmt(stmt) => {
                     for (i, rhs) in stmt.rhs.iter().enumerate() {
                         let Expr::FuncLit(lit) = rhs else { continue };
@@ -513,6 +557,63 @@ fn collect_candidates<'a>(
             true
         });
     }
+}
+
+/// Upstream's `methodImplementations`: each printf-like interface method this
+/// package declares, mapped to the methods that implement it according to the
+/// assignments to interface types in this package. An implementation may be
+/// an interface method too.
+fn method_implementations(
+    pass: &Pass<'_>,
+    scratch: &mut Option<TypeArena>,
+) -> HashMap<ObjectId, Vec<ObjectId>> {
+    let mut impls: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
+    let (Some(info), Some(art)) = (pass.types_info(), pass.pkg().type_artifacts.as_ref()) else {
+        return impls;
+    };
+    let types = scratch.get_or_insert_with(|| art.types.clone());
+    let constraints = satisfy::find(types, &art.objects, &art.packages, info, pass.files());
+    for c in constraints {
+        // Have: LHS = RHS, where LHS is an interface type.
+        let iface = c.lhs.underlying(types);
+        if !matches!(types.get(iface), TypeData::Interface(_)) {
+            continue;
+        }
+        let n = interface_num_methods(types, &art.objects, &art.packages, iface);
+        for i in 0..n {
+            let imeth = interface_method(types, &art.objects, &art.packages, iface, i);
+            // Limit to interface methods of the current package.
+            if imeth.pkg(&art.objects) != Some(art.type_pkg) {
+                continue;
+            }
+            let Some(sig) = imeth.typ(&art.objects) else { continue };
+            if format_args_params(pass, sig).is_none() {
+                continue; // not print{,f}-like
+            }
+            let name = imeth.name(&art.objects).to_string();
+            let found = lookup_field_or_method(
+                types,
+                &art.objects,
+                &art.packages,
+                c.rhs,
+                false,
+                Some(art.type_pkg),
+                &name,
+            );
+            let Some((imp, _, _)) = found.found() else { continue };
+            if !matches!(art.objects.get(imp), ObjectData::Func(_)) {
+                continue;
+            }
+            let set = impls.entry(imeth).or_default();
+            if !set.contains(&imp) {
+                set.push(imp);
+            }
+        }
+    }
+    // Upstream's sets are maps, iterated in random order. The order decides
+    // which kind wins only when one interface method is implemented by
+    // wrappers of different kinds; source order keeps that answer stable.
+    impls
 }
 
 /// Upstream's pass-2 `scan` loop over one candidate's body.
@@ -575,18 +676,19 @@ fn scan_body<'a>(
         };
         let ci = calls.len();
         calls.push(call);
-        do_call(pass, wi, callee, ci, calls, wrappers, by_obj, state, diags);
+        do_call(pass, wi, callee, Some(ci), calls, wrappers, by_obj, state, diags);
     }
 }
 
 /// Upstream's `doCall`: record the edge, and if the callee is already known to
-/// be print-like, propagate that backwards through the graph.
+/// be print-like, propagate that backwards through the graph. `call_index` is
+/// `None` for an interface method's implicit call to an implementation.
 #[allow(clippy::too_many_arguments)]
 fn do_call<'a>(
     pass: &Pass<'_>,
     wi: usize,
     callee: ObjectId,
-    call_index: usize,
+    call_index: Option<usize>,
     calls: &[&'a CallExpr],
     wrappers: &mut Vec<Wrapper<'a>>,
     by_obj: &HashMap<ObjectId, usize>,
@@ -594,14 +696,14 @@ fn do_call<'a>(
     diags: &mut Vec<(u32, String)>,
 ) {
     if let Some(&w2) = by_obj.get(&callee) {
-        wrappers[w2].callers.push((wi, Some(call_index)));
+        wrappers[w2].callers.push((wi, call_index));
     }
     let Some((full, base)) = names_of(pass, callee) else {
         return;
     };
     let kind = state.kind_of(pass, &full, &base, callee);
     if kind != Kind::None {
-        propagate(pass, wi, Some(call_index), kind, calls, wrappers, state, diags);
+        propagate(pass, wi, call_index, kind, calls, wrappers, state, diags);
     }
 }
 
