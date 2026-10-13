@@ -37,18 +37,17 @@
 //!
 //! Upstream analyses every dependency, so the fact behind `os.Exit` is one it
 //! computed from `os`'s own source. guff type-checks only the packages being
-//! linted: an import resolves to a metadata stub with no type artifacts, and
-//! `guff_runner::action` skips scheduling a fact producer on it (the same-module
-//! expansion exists, but `guff_lint` turns it on for `contextcheck` alone —
-//! gating it on `fact_types` cost hundreds of MB of peak RSS on prometheus and
-//! changed no findings). So the induction runs *inside* a package and the base
-//! cases come from [`known_intrinsic`]'s table, which names the standard-library
-//! aborts upstream infers.
+//! linted. Between those the fact crosses as upstream's does
+//! (`guff_runner::TypedImports` names this analyzer), so `dep.Die()` ending in
+//! `os.Exit` cuts its caller in another package — golden case
+//! `cross-package-facts`. Any other import resolves to a metadata stub with no
+//! type artifacts and no fact producer runs on it, so the base cases come from
+//! [`known_intrinsic`]'s table, which names the standard-library aborts
+//! upstream infers.
 //!
-//! What is left is a no-return helper in another package: reported by upstream,
-//! silent here. Measured on a two-package module — `dep.Die()` ending in
-//! `os.Exit` — and recorded in `docs/COMPAT-HARDENING.md` §7 rather than papered
-//! over. Every other shape in that grid agrees.
+//! What is left is a no-return helper in a package outside the lint pattern
+//! (another module, or a package of this one that `./sub/...` does not name):
+//! reported by upstream, silent here. Recorded in `docs/COMPAT-HARDENING.md` §7.
 //!
 //! DEFERRED vs. `go/cfg`:
 //! - a function whose body contains a `goto` is not classified at all

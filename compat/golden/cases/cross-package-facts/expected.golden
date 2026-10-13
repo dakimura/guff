@@ -1,0 +1,16 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh cross-package-facts
+# Produced by running golangci-lint on compat/golden/cases/cross-package-facts/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+user/user.go:10:15:unparam::afterDie - p is unused
+user/user.go:17:21:unparam::afterMethodDie - p is unused
+user/user.go:24:17:unparam::afterChain - p is unused
+user/user.go:52:2:staticcheck::SA4017: Add doesn't have side effects and its return value is ignored
+user/user.go:53:2:staticcheck::SA4017: Twice doesn't have side effects and its return value is ignored
+user/user.go:54:2:staticcheck::SA4017: Sum doesn't have side effects and its return value is ignored
+user/user.go:55:2:staticcheck::SA4017: Thrice doesn't have side effects and its return value is ignored
+user/user.go:56:2:staticcheck::SA4017: local doesn't have side effects and its return value is ignored

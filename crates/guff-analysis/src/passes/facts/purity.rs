@@ -12,19 +12,19 @@
 //! because the fact was exported while analyzing `strings`, not because the
 //! caller's pass knows the name.
 //!
-//! guff builds IR for the root package only (dependencies get member shells
-//! with no blocks — see `ssautil::load::build_package_for_analysis`), so there
-//! is no body to infer from on the other side of a package boundary. The table
-//! is therefore consulted at the *call site* as well, via
-//! [`is_pure_stdlib_name`]: for the names upstream ships in `pureStdlib` the
-//! two mechanisms agree exactly, because upstream's inference on those packages
-//! short-circuits on the same table.
+//! guff analyses only the packages being linted. Between those the fact
+//! crosses as upstream's does (`guff_runner::TypedImports` names this
+//! analyzer; golden case `cross-package-facts`). Anything else — the standard
+//! library above all — gets no body to infer from, so the table is consulted at
+//! the *call site* as well, via [`is_pure_stdlib_name`]: for the names upstream
+//! ships in `pureStdlib` the two mechanisms agree exactly, because upstream's
+//! inference on those packages short-circuits on the same table.
 //!
-//! What that leaves missing is purity that upstream *infers* across a package
-//! boundary — `strings.ReplaceAll` (pure only because its body calls
-//! `strings.Replace`), `net/http.StatusText`, or a user-defined helper in an
-//! imported package. Those are recorded in
-//! `docs/COMPAT-HARDENING.md` §7 rather than papered over here.
+//! What that leaves missing is purity that upstream *infers* outside the lint
+//! pattern — `strings.ReplaceAll` (pure only because its body calls
+//! `strings.Replace`), `net/http.StatusText`, or a helper in another module.
+//! Those are recorded in `docs/COMPAT-HARDENING.md` §7 rather than papered
+//! over here.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
@@ -256,7 +256,8 @@ fn is_basic(arena: &TypeArena, objects: &guff_types::arena::ObjectArena, typ: gu
     }
 }
 
-struct Purity<'a> {
+struct Purity<'a, 'p> {
+    pass: &'a Pass<'p>,
     prog: &'a Program,
     root_pkg: guff_ssa::ids::PackageId,
     seen: HashSet<FuncId>,
@@ -266,7 +267,7 @@ struct Purity<'a> {
     answers: HashMap<FuncId, bool>,
 }
 
-impl<'a> Purity<'a> {
+impl Purity<'_, '_> {
     /// Port of the `check` closure in `purity.purity`.
     fn check(&mut self, fid: FuncId) -> bool {
         let func = self.prog.functions.get(fid);
@@ -274,15 +275,16 @@ impl<'a> Purity<'a> {
         let Some(obj) = func.object else {
             return false;
         };
-        if self.pure.contains(&obj) {
+        if self.pure.contains(&obj) || self.pass.import_object_fact(obj, &mut IsPure) {
             return true;
         }
         if func.pkg != Some(self.root_pkg) {
             // Upstream: "function is in another package but wasn't marked as
-            // pure, ergo it isn't pure" — the mark being an imported fact. guff
-            // has no dependency IR to have produced one, so the stdlib table
-            // stands in for the facts upstream would have imported. See the
-            // module doc.
+            // pure, ergo it isn't pure" — the mark being an imported fact. A
+            // package of the module being linted exports one (`TypedImports`
+            // in `guff_lint`); the standard library is never analysed, so the
+            // table stands in for the facts upstream would have imported
+            // there. See the module doc.
             return is_pure_stdlib(self.prog, obj);
         }
         if let Some(&answer) = self.answers.get(&fid) {
@@ -393,6 +395,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "purity requires buildir analyzer".to_string())?;
 
     let mut state = Purity {
+        pass,
         prog: &ir.prog,
         root_pkg: ir.pkg,
         seen: HashSet::new(),
