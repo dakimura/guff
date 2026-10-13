@@ -1,0 +1,29 @@
+# Golden case: facts that cross from one package of the module to another.
+#
+# ctrlflow's "cannot return" (read by unparam) and purity's "has no side
+# effects" (read by SA4017) are inferred per package and imported by the
+# packages that call it. user/ reaches dep/ directly and through mid/, whose
+# own facts exist only because it imported dep's. A function in the standard
+# library is never analysed by guff, so a purity inferred there
+# (strings.ReplaceAll) is left out: see COMPAT-HARDENING §7.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - staticcheck
+    - unparam
+  settings:
+    staticcheck:
+      checks:
+        - SA4017
+    unparam:
+      check-exported: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

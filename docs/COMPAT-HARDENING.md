@@ -10556,7 +10556,20 @@ guff は `guff-constant` の `Value::String(Arc<String>)` ＝ Rust の `String`�
 してしまう —— という診断そのものは正しかった。誤っていたのは「直す場所が無い」の側で、
 `Value::String` を `Arc<Vec<u8>>` にするだけで済んだ。
 
-### 依存パッケージを跨ぐ purity 推論（SA4017）
+### 依存パッケージを跨ぐ purity 推論（SA4017）`[同一モジュール内は解消 2026-10-13]`
+
+**リント対象のパッケージ同士では解消した。** `fact_purity` を `TypedImports::Only` に足し、
+`check` が上流どおり先に `ImportObjectFact` を引くようにした（golden `cross-package-facts`）。
+残るのは**リント対象の外**（stdlib、別モジュール、パターンに含まれないパッケージ）で
+推論される純粋性だけで、下の表の `strings.ReplaceAll` / `net/http.StatusText` がそれ。
+
+RSS: 単純に辿らせると jaeger で +170MB（3 回とも）だった。原因は `fact_purity@P` が
+`buildir@P` と import 側の `fact_purity` の**両方**を待つことで、`buildir@P` は
+ready になった瞬間に組まれて import の連鎖を待つ間ずっと SSA を抱える。
+`Sched::new` に**順序だけの辺**（fact producer の同パッケージ requires は、その producer の
+import 側 action の後に始める）を入れて jaeger +0、prometheus +40MB（5 回交互）。時間は不変。
+
+以下は当時の記録。
 
 上流の `analysis/facts/purity` は**解析するすべてのパッケージ**（stdlib を含む依存も）で
 関数本体を見て純粋性を推論し、object fact として伝播する。`pureStdlib` の表は
@@ -10582,7 +10595,15 @@ guff は **root パッケージの関数本体しか IR 化しない**
 構築して analyzer を走らせる必要があり、prometheus 規模では peak RSS / 実行時間の
 桁が変わる。**やるなら Phase 5（コーパス多様化）とセットで性能を測ってからにすること。**
 
-### 依存パッケージを跨ぐ noreturn 推論（unparam / `ctrlflow`）`[記録 2026-08-31（続き 108）]`
+### 依存パッケージを跨ぐ noreturn 推論（unparam / `ctrlflow`）`[記録 2026-08-31（続き 108）/ 同一モジュール内は解消 2026-10-13]`
+
+**リント対象のパッケージ同士では解消した。** `fact_ctrlflow` を `TypedImports::Only` に足した
+だけで、メソッド（objectpath、#510）と 3 段の連鎖（dep → mid → user）も上流と一致する
+（golden `cross-package-facts`）。ctrlflow は何も requires しないので RSS は測定誤差内。
+下の「片方だけ入れる意味は無い」は外れた：両者の consumer は別（unparam と SA4017）。
+残るのはリント対象の外の終端関数（別モジュールのヘルパなど）。
+
+以下は当時の記録。
 
 `purity` とまったく同じ形の穴。上流の `go/analysis/passes/ctrlflow` は解析するすべての
 パッケージで「この関数は正常に戻らない」を推論し、object fact で伝播する。`os.Exit` が

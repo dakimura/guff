@@ -825,9 +825,14 @@ fn typed_import<'a>(
 /// for every import's producer, so the results they hold — `buildir`'s SSA
 /// above all — live longer. With every producer following them, a `./...`
 /// run on prometheus and jaeger held about 190 MB more at peak, for no finding
-/// that changed. printf alone measured within noise on prometheus, jaeger and
-/// kubernetes, and its facts are the ones that change findings: a print
-/// wrapper declared in one package of the module and called from another.
+/// that changed. `Sched::new`'s ordering edges take back most of that for a
+/// producer that requires `buildir` (`fact_purity` was +170 MB on jaeger
+/// without them, +0 with them; prometheus +40 MB).
+///
+/// guff_lint names the producers whose facts change findings: a print
+/// wrapper (printf), a function that cannot return (ctrlflow, read by
+/// unparam) or a pure one (purity, read by SA4017), declared in one package of
+/// the module and called from another.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TypedImports {
     /// Every fact producer (the same-module expansion contextcheck needs).
@@ -1516,8 +1521,43 @@ impl<'a> Sched<'a> {
                 }
             }
         }
+        // Ordering-only edges: a fact producer's same-package requirements start
+        // after its import-side actions finish. `fact_purity@P` needs
+        // `buildir@P` *and* `fact_purity` of every import of P; built as soon as
+        // it is ready, `buildir@P`'s SSA would sit in memory for the whole wait
+        // down the import chain. These edges add nothing to `deps`, so they
+        // carry no facts and hold no result.
+        let mut by_key: HashMap<(usize, usize), u32> =
+            HashMap::with_capacity_and_hasher(order.len(), Default::default());
+        for (i, act) in order.iter().enumerate() {
+            by_key.insert(
+                (act.analyzer as *const Analyzer as usize, Arc::as_ptr(&act.package) as usize),
+                i as u32,
+            );
+        }
+        for act in order {
+            let horizontal: Vec<u32> = act
+                .deps
+                .iter()
+                .filter(|dep| {
+                    std::ptr::eq(dep.analyzer, act.analyzer) && !Arc::ptr_eq(&dep.package, &act.package)
+                })
+                .filter_map(|dep| index.get(&(Arc::as_ptr(dep) as usize)).copied())
+                .collect();
+            if horizontal.is_empty() {
+                continue;
+            }
+            for req in &act.analyzer.requires {
+                let key = (*req as *const Analyzer as usize, Arc::as_ptr(&act.package) as usize);
+                let Some(&r) = by_key.get(&key) else { continue };
+                for &h in &horizontal {
+                    indeg[r as usize].fetch_add(1, Ordering::Relaxed);
+                    dependents[h as usize].push(r);
+                }
+            }
+        }
         let mut initial_ready: Vec<u32> = (0..order.len() as u32)
-            .filter(|&i| order[i as usize].deps.is_empty())
+            .filter(|&i| indeg[i as usize].load(Ordering::Relaxed) == 0)
             .collect();
         // Group by package (stable within a package, packages in first-seen
         // order) so the initial fan-out does not scatter workers over every
@@ -1746,6 +1786,65 @@ mod tests {
             LoadMode::LOAD_SYNTAX,
         );
         Arc::new(pkg)
+    }
+
+    fn noop_run(_pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
+        Ok(None)
+    }
+
+    #[test]
+    fn requirement_of_a_fact_producer_waits_for_its_import_side() {
+        static BUILD: OnceLock<Analyzer> = OnceLock::new();
+        static FACT: OnceLock<Analyzer> = OnceLock::new();
+        let build = BUILD.get_or_init(|| Analyzer {
+            name: "build",
+            doc: "",
+            url: "",
+            run: noop_run,
+            run_despite_errors: false,
+            requires: vec![],
+            fact_types: vec![],
+        });
+        let fact = FACT.get_or_init(|| Analyzer {
+            name: "fact",
+            doc: "",
+            url: "",
+            run: noop_run,
+            run_despite_errors: false,
+            requires: vec![build],
+            fact_types: vec![],
+        });
+        let act = |analyzer: &'static Analyzer, package: &Arc<Package>, deps: Vec<Arc<Action>>| {
+            Arc::new(Action {
+                analyzer,
+                package: Arc::clone(package),
+                is_root: std::sync::atomic::AtomicBool::new(false),
+                deps,
+                settings: Arc::new(SettingsBag::default()),
+                cache: None,
+                state: Mutex::new(ActionState::default()),
+            })
+        };
+        let dep = pkg_stub("example.com/dep");
+        let user = pkg_stub("example.com/user");
+        let build_dep = act(build, &dep, vec![]);
+        let fact_dep = act(fact, &dep, vec![Arc::clone(&build_dep)]);
+        let build_user = act(build, &user, vec![]);
+        let fact_user = act(fact, &user, vec![Arc::clone(&build_user), Arc::clone(&fact_dep)]);
+
+        let order = topo_postorder(&[fact_user]);
+        let idx = |a: &Arc<Action>| order.iter().position(|o| Arc::ptr_eq(o, a)).unwrap() as u32;
+        let sched = Sched::new(&order, reverse_dep_counts(&order));
+
+        // build@user has no `deps`, but it must not start before fact@dep: its
+        // result would be held for the whole wait.
+        assert_eq!(sched.initial_ready, vec![idx(&build_dep)]);
+        assert!(sched.dependents[idx(&fact_dep) as usize].contains(&idx(&build_user)));
+        // Ordering only: no consumer is added, so nothing holds fact@dep longer.
+        assert_eq!(
+            sched.remaining[&(Arc::as_ptr(&fact_dep) as usize)].load(Ordering::Relaxed),
+            1
+        );
     }
 
     #[test]

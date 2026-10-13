@@ -656,10 +656,10 @@ pub(crate) fn run_linters_on_graph(
         Vec<std::sync::Arc<guff_packages::Package>>,
         Option<std::sync::Arc<HashMap<String, std::sync::Arc<guff_packages::Package>>>>,
     ) = {
-        // Every run gets the table: printf's wrapper facts cross from one
-        // package of the module to another (`TypedImports` below). Only
-        // contextcheck widens it to every fact producer, and to imports that
-        // are not roots.
+        // Every run gets the table: printf's wrapper facts, ctrlflow's
+        // no-return and purity's pure functions cross from one package of the
+        // module to another (`TypedImports` below). Only contextcheck widens
+        // it to every fact producer, and to imports that are not roots.
         let by_id: HashMap<String, std::sync::Arc<guff_packages::Package>> = typed
             .iter()
             .map(|p| (p.id.clone(), std::sync::Arc::clone(p)))
@@ -673,7 +673,7 @@ pub(crate) fn run_linters_on_graph(
     let typed_imports = if need_fact_pkgs {
         guff_runner::TypedImports::All
     } else {
-        guff_runner::TypedImports::Only(&["printf"])
+        guff_runner::TypedImports::Only(&["printf", "fact_ctrlflow", "fact_purity"])
     };
     if timing {
         eprintln!(
