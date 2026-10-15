@@ -30,7 +30,9 @@ mod printf_wrappers;
 mod shift;
 mod sigchanyzer;
 mod slog;
+mod stdlib_manifest;
 mod stdmethods;
+mod stdversion;
 mod stringintconv;
 mod structtag;
 mod testinggoroutine;
@@ -68,6 +70,7 @@ pub use shift::analyzer as shift_analyzer;
 pub use sigchanyzer::analyzer as sigchanyzer_analyzer;
 pub use slog::analyzer as slog_analyzer;
 pub use stdmethods::analyzer as stdmethods_analyzer;
+pub use stdversion::analyzer as stdversion_analyzer;
 pub use stringintconv::analyzer as stringintconv_analyzer;
 pub use structtag::analyzer as structtag_analyzer;
 pub use testinggoroutine::analyzer as testinggoroutine_analyzer;
@@ -110,6 +113,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         sigchanyzer::analyzer(),
         slog::analyzer(),
         stdmethods::analyzer(),
+        stdversion::analyzer(),
         stringintconv::analyzer(),
         structtag::analyzer(),
         testinggoroutine::analyzer(),

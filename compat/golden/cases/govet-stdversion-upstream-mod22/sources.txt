@@ -1,0 +1,4 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+notag.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/stdversion/mod22/notag.go
+tag16.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/stdversion/mod22/tag16.go

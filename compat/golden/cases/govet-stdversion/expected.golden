@@ -1,0 +1,19 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh govet-stdversion
+# Produced by running golangci-lint on compat/golden/cases/govet-stdversion/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+promoted_test.go:9:8:govet::stdversion: testing.(*B).Context requires go1.24 or later (file is go1.22)
+promoted_test.go:10:4:govet::stdversion: testing.(*T).Chdir requires go1.24 or later (file is go1.22)
+promoted_test.go:14:9:govet::stdversion: testing.(TB).Context requires go1.24 or later (file is go1.22)
+shapes.go:17:13:govet::stdversion: slices.Collect requires go1.23 or later (file is go1.22)
+shapes.go:17:28:govet::stdversion: slices.Values requires go1.23 or later (file is go1.22)
+shapes.go:20:11:govet::stdversion: slog.DiscardHandler requires go1.24 or later (file is go1.22)
+shapes.go:21:12:govet::stdversion: mlkem.SeedSize requires go1.24 or later (file is go1.22)
+shapes.go:24:19:govet::stdversion: tls.Config.EncryptedClientHelloKeys requires go1.24 or later (file is go1.22)
+shapes.go:27:13:govet::stdversion: os.OpenRoot requires go1.24 or later (file is go1.22)
+shapes.go:33:4:govet::stdversion: sync.(*WaitGroup).Go requires go1.25 or later (file is go1.22)
+tag24.go:15:4:govet::stdversion: sync.(*WaitGroup).Go requires go1.25 or later (file is go1.24)

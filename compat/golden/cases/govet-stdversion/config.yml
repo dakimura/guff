@@ -1,0 +1,25 @@
+# Golden case: govet stdversion, the shapes upstream's testdata does not
+# reach — a generic function, a var and a const, a field, a method of a new
+# type, an alias, a promoted method, an interface method, a build tag that
+# raises the file version, a generated file, and a "1.22.0" go line (which
+# turns "module is" into "file is"). Upstream's own testdata is the
+# govet-stdversion-upstream-* cases.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+  settings:
+    govet:
+      disable-all: true
+      enable:
+        - stdversion
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
