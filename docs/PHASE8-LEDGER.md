@@ -329,7 +329,7 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 | 11 | unusedresult.go inBenchmarkLoop | behavior | `for b.Loop()` 直下を報告しない | guff-govet/src/unusedresult.rs | **done (PR 14f)**。併せて `is_method_named` がポインタ受信者を剥がすように（loopclosure の errgroup、tests の `*testing.F` も同じ理由で死んでいた）→ tests を v0.50 から全面移植 | S | a/a.go |
 | 12 | unusedresult.go（Callee Origin） | message | ジェネリック受信者表記 `[int]` → `[T]` | unusedresult.rs | **done (PR 14s)**：独自の `callee_obj` をやめ `call_target_object` に | S | typeparams/typeparams.go |
 | 13 | hostport.go | behavior | 引数 2 未満で panic | hostport.rs:184 | already-matches | S | a/a.go{,.golden} |
-| 14 | stdversion.go | behavior | 文言変更 + 除外移動。**guff に analyzer が丸ごと無い**（govet 既定有効） | 無し（settings.rs:3091 に名前だけ） | needs-port | L | stdversion/testdata/test.txtar |
+| 14 | stdversion.go | behavior | 文言変更 + 除外移動。**guff に analyzer が丸ごと無い**（govet 既定有効） | guff-govet/src/stdversion.rs | **done (PR 14t)**：analyzer と TooNewStdSymbols を移植。golden `govet-stdversion`（11 件）と上流 testdata の `govet-stdversion-upstream-{mod20,mod21,mod22,old}`（5 件、上流の want と一致） | L | stdversion/testdata/test.txtar |
 
 **printf（PR 14q）**: rows 6/7 を上流 printf testdata 全体で測ったら、差は 2 行ではなく `okPrintfArg`
 丸ごとだった（guff 120 / 上流 253）。欠けていたもの：`checkPrint`（`possible Printf formatting directive`、
@@ -368,8 +368,8 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 | 3 | go/ssa buildYieldFunc lblock | behavior | range-over-func のラベル goto が親へ抜ける | guff-ssa/src/builder/range_func.rs:184 | needs-port | M | — |
 | 4 | typeutil/callee.go Callee Origin | behavior | Callee が Origin を返す | code.rs `call_target_object` | **done (PR 14s)**（xtools-substrate の上の表を参照） | M | callee_test.go |
 | 5 | typeindex.go Calls | behavior | 明示インスタンス化を遡る + Callee Origin で照合 | typeindex.rs:231-262 | already-matches（PR 14s） | S | — |
-| 6 | internal/stdlib/manifest.go | substrate | Go 1.27 シンボル（goimports 候補） | guff-fmt/src/native/goimports/stdlib_exports.txt | needs-port | M | — |
-| 7 | typesinternal/toonew.go | behavior | stdversion の除外と最短パス | 無し | needs-port | M | — |
+| 6 | internal/stdlib/manifest.go | substrate | Go 1.27 シンボル（goimports 候補） | guff-fmt/src/native/goimports/stdlib_exports.txt | 半分 done (PR 14t)：`guff-govet/src/stdlib_manifest.txt` に v0.50.0 から転記（`scripts/gen-stdlib-manifest.py`、18,247 シンボル）。**goimports はまだ自前の GOROOT 由来表**を使う | M | — |
+| 7 | typesinternal/toonew.go | behavior | stdversion の除外と最短パス | guff-govet/src/stdversion.rs | **done (PR 14t)** | M | — |
 | 8 | gcimporter / pkgbits V5 | substrate | export data V5 | guff-exportdata/src/pkgbits/version.rs | needs-port | L | — |
 | 9 | go/ssa ジェネリックメソッド一式 | substrate | Go 1.27 generic methods | guff-types/src/signature_check.rs:76 | not-applicable | L | generic_methods_test.go ほか |
 | 10 | go/ssa instantiate 名前 | renamed | `F[int, string]`、受信側型引数を名前に入れない | guff-ssa/src/instantiate.rs:29 | already-matches | S | — |
@@ -695,7 +695,7 @@ golden を regen したら fix のベースラインも撮り直す。測定は 
 | 11 | **unused / unparam** — **done** | Unify、unparam AnonFuncs + linkname + signRequiredBy + alias。あわせて既存の乖離 3 つ: 総称レシーバと literal の名前（`RelString`）、signRequiredBy の名前照合（受信者名 `g1` が関数 `g1` を固定していた）、`f[int](x)` を値の使用と見ていた | unused 0/2 → 0/0（PR 4）、unparam 1/0 → **0/0（ratchet 削除）**、新設 golden `unparam-upstream`（上流 testscript 6 本 + ゼロサイズ） | M |
 | 12 | **modernize 残り（ゴールデンに出ない側）** — **done**（embedlit は Go 1.27 なので PR 15） | minmax ×2、atomictypes、waitgroupgo、testingcontext、rangeint、slicesbackward ×3、stringscut ×3、stringscutprefix、stringsbuilder lastEditEnd、slicesclip。**各項目で上流 testdata を fixture 化**（ratchet は動かないので fixture が唯一の検算） | 新設 golden `modernize-upstream`（x/tools v0.50 の testdata 36 ファイル、179 件）と同じ case の fix tier（1797 行、golangci と byte 一致） | M〜L |
 | 13 | **gofumpt v0.12 の残り + printer** — **done** | §2.4 の toolchain 確認の後。括弧除去、effectiveEnd + multi、removeParens、joinStdImports、diagnose。`omit_v010_rules` / `match_golangci` gate の撤去。あわせて既存の乖離 2 つ: gofumpt の simplify が package レベルの宣言を歩いていなかった、printer に `sanitizeImportPath` が無かった（`` import `C` ``） | fmt tier に gofumpt v0.12 の testscript 33 case と `gofmt-go127-printer`（2.12.2 と 2.14.0 で答えが違う形だけ）。fmt 50 case 全一致 | L |
-| 14 | **新機能（大）を 1 本ずつ** | G407、exhaustruct_v5（**done (PR 14b)**: 1 PR で全部。上流 testdata の golden 21 case と fix 3 case が golangci と一致、ratchet 3/0 → 0/0）、gochecksumtype fact（**done (PR 14k)**: golden 8 case 新設、analyzer error の再現）、iface unusedmethod / opaque / unexported（**done (PR 14h)**: 上流 testdata と golangci の iface testdata で golden 15 case）、stdversion、goconst eval-const-expressions、embedlit | ― | 各 L |
+| 14 | **新機能（大）を 1 本ずつ** | G407、exhaustruct_v5（**done (PR 14b)**: 1 PR で全部。上流 testdata の golden 21 case と fix 3 case が golangci と一致、ratchet 3/0 → 0/0）、gochecksumtype fact（**done (PR 14k)**: golden 8 case 新設、analyzer error の再現）、iface unusedmethod / opaque / unexported（**done (PR 14h)**: 上流 testdata と golangci の iface testdata で golden 15 case）、stdversion（**done (PR 14t)**）、goconst eval-const-expressions、embedlit | ― | 各 L |
 | 15 | **Go 1.27 toolchain 対応（保留）** | export data V5、printf %d go1.27、stringscut CutLast、昇格フィールドキー。ターゲット Go が 1.27 になる日まで保留 | ― | L |
 
 PR 1〜11 で §5.1 の ratchet は**既存の恒久差分（revive 1/4、inline-gofix-sibling 2/0、staticcheck-qf / st の SA4017）まで戻る**見込み。

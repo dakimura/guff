@@ -1,0 +1,12 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh govet-stdversion-upstream-mod21
+# Produced by running golangci-lint on compat/golden/cases/govet-stdversion-upstream-mod21/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+notag.go:11:22:govet::stdversion: types.Info.FileVersions requires go1.22 or later (module is go1.21)
+notag.go:14:22:govet::stdversion: types.(*Info).PkgNameOf requires go1.22 or later (module is go1.21)
+notag.go:17:14:govet::stdversion: types.Alias requires go1.22 or later (module is go1.21)
+tag16.go:15:13:govet::stdversion: types.Alias requires go1.22 or later (module is go1.21)

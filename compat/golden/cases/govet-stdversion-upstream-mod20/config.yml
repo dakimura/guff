@@ -1,0 +1,31 @@
+# Golden case: module mod20 of x/tools v0.50.0's stdversion testdata
+# (test.txtar, BSD, LICENSE in upstream-x-tools-v0.50/), one case per module
+# because the txtar joins them with a go.work. Edits, each a compile error
+# golangci-lint would report as typecheck instead: mod21/notag.go assigns
+# `new(types.Info).PkgNameOf` to _, mod22/notag.go imports bytes, and
+# `var _ = types.Alias` (a type used as a value) is `var _ types.Alias`. Not
+# vendored: basic/ (identical to mod21/notag.go) and despite/ (a syntax
+# error, so golangci-lint reports typecheck and nothing else).
+#
+# golden-may-be-empty: go 1.20 is before the forward-compatibility regime, so
+# upstream's run returns before looking at a file, build tags included. The
+# positive half of the same gate is govet-stdversion-upstream-mod21.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+  settings:
+    govet:
+      disable-all: true
+      enable:
+        - stdversion
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
