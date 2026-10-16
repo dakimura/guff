@@ -11,6 +11,7 @@ members = [
     "crates/guff-types-errors",
     "crates/guff-exportdata",
     "crates/guff-gostd",
+    "crates/guff-stdlib",
     "crates/guff-pattern",
     "crates/guff-analysis",
     "crates/guff-runner",

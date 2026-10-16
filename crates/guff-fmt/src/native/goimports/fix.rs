@@ -533,21 +533,32 @@ fn is_ident_cont(c: char) -> bool {
     c == '_' || c.is_ascii_alphanumeric()
 }
 
+/// `stdlib.PackageSymbols`, each package narrowed by `symbolNameSet`: the
+/// names a selector `pkg.Name` can refer to, so no field or method.
+///
+/// The packages are x/tools' manifest ([`guff_stdlib`]), which lists only the
+/// public standard library. A table read from GOROOT carried `internal/...`
+/// as well, and goimports then answered `singleflight.Group` with
+/// `import "internal/singleflight"` — an import no module may write — where
+/// upstream finds no standard-library candidate and goes on to the module
+/// cache.
 fn stdlib_exports() -> &'static HashMap<String, HashSet<String>> {
     static EXPORTS: OnceLock<HashMap<String, HashSet<String>>> = OnceLock::new();
     EXPORTS.get_or_init(|| {
-        let mut m = HashMap::new();
-        for line in include_str!("stdlib_exports.txt").lines() {
-            if line.is_empty() {
-                continue;
-            }
-            let Some((path, names)) = line.split_once('\t') else {
-                continue;
-            };
-            let set: HashSet<String> = names.split(',').filter(|s| !s.is_empty()).map(str::to_string).collect();
-            m.insert(path.to_string(), set);
-        }
-        m
+        guff_stdlib::packages()
+            .map(|path| {
+                let names = guff_stdlib::package_symbols(path)
+                    .unwrap_or_default()
+                    .iter()
+                    .filter(|sym| {
+                        use guff_stdlib::Kind;
+                        matches!(sym.kind, Kind::Const | Kind::Var | Kind::Type | Kind::Func)
+                    })
+                    .map(|sym| sym.name.to_string())
+                    .collect();
+                (path.to_string(), names)
+            })
+            .collect()
     })
 }
 
@@ -565,5 +576,17 @@ mod tests {
     fn stdlib_has_fmt_println() {
         let e = stdlib_exports().get("fmt").expect("fmt");
         assert!(e.contains("Println"));
+    }
+
+    #[test]
+    fn stdlib_exports_are_public_package_level_names() {
+        // No internal package: upstream's manifest lists none.
+        assert!(stdlib_exports().keys().all(|p| !p.split('/').any(|s| s == "internal")));
+        assert!(!stdlib_exports().contains_key("internal/singleflight"));
+        // symbolNameSet keeps package-level names only: `Execute` is a method.
+        let t = stdlib_exports().get("text/template").expect("text/template");
+        assert!(t.contains("New") && !t.contains("Execute"));
+        // The manifest is x/tools v0.50.0's, so go1.27's `uuid` is there.
+        assert!(stdlib_exports().contains_key("uuid"));
     }
 }

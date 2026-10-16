@@ -1,0 +1,11 @@
+# goimports adding missing standard-library imports, resolved from x/tools
+# v0.50.0's manifest without a module search: `uuid` is go1.27 (absent from
+# a table read from an older GOROOT), `rand` tries crypto/rand first, and
+# `strings.Lines` / `json.Marshal` are ordinary. The internal packages and
+# method names that a GOROOT-derived table also matched (internal/singleflight,
+# `template.Execute`) fall through to the module cache upstream, which this
+# tier cannot pin; guff-fmt's unit test covers them.
+version: "2"
+formatters:
+  enable:
+    - goimports

@@ -530,6 +530,7 @@ version = "0.8.0"
 dependencies = [
  "guff-ast",
  "guff-build",
+ "guff-stdlib",
  "rayon",
  "regex",
  "sha2",
@@ -584,6 +585,7 @@ dependencies = [
  "guff-packages",
  "guff-runner",
  "guff-ssa",
+ "guff-stdlib",
  "guff-types",
  "memchr",
  "serde_json",
@@ -772,6 +774,10 @@ dependencies = [
  "regex",
  "unicode-general-category",
 ]
+
+[[package]]
+name = "guff-stdlib"
+version = "0.8.0"
 
 [[package]]
 name = "guff-style"
