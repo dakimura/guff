@@ -1,0 +1,4 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+anchored/imports.go  crates/guff-fmt/tests/testdata/anchored/imports.go
+anchored/braces.go  crates/guff-fmt/tests/testdata/anchored/braces.go

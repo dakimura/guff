@@ -1,0 +1,34 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh formatters-anchored-diff
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/formatters-anchored-diff/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.14.0
+
+--- a/anchored/braces.go
++++ b/anchored/braces.go
+@@ -9,9 +9,7 @@
+ 
+ 	if x < 0 {
+ 		return -1
+-
+ 	}
+-
+ 
+ 	return 0
+ }
+--- a/anchored/imports.go
++++ b/anchored/imports.go
+@@ -5,8 +5,8 @@
+ package anchored
+ 
+ import (
++	"fmt"
+ 	"strings"
+-	"fmt"
+ )
+ 
+ func F() string { return fmt.Sprint(strings.ToUpper("x")) }

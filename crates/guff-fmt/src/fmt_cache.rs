@@ -1,7 +1,7 @@
 //! Persistent format-check cache (PERF_TASKS Task 1 warm path).
 //!
 //! Stores per-file results of `format(src) == src` (plus first differing lines)
-//! under `${GUFF_CACHE}/fmt_check/v1/`, keyed by
+//! under `${GUFF_CACHE}/fmt_check/v2/`, keyed by
 //! `sha256(formatter \\0 options_fp \\0 content_sha256)`.
 //!
 //! On a warm `GUFF_CACHE`, check mode skips `gofumpt -l` / `gci list` / …
@@ -14,8 +14,12 @@ use std::path::PathBuf;
 
 use sha2::{Digest, Sha256};
 
-/// Schema directory name — bump when the on-disk record format changes.
-pub const FMT_CHECK_SCHEMA: &str = "v1";
+/// Schema directory name — bump when the on-disk record format changes, or
+/// when the lines a record holds would be computed differently: the key is the
+/// formatter, its options and the source, not the binary that wrote it.
+///
+/// v2: lines come from the anchored diff (`crate::godiff`), not Myers.
+pub const FMT_CHECK_SCHEMA: &str = "v2";
 
 fn hex_encode(bytes: impl AsRef<[u8]>) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
@@ -44,7 +48,7 @@ pub struct FormatCheckCache {
 }
 
 impl FormatCheckCache {
-    /// `${cache_dir}/fmt_check/v1`. Creates the directory if needed.
+    /// `${cache_dir}/fmt_check/v2`. Creates the directory if needed.
     pub fn open(cache_dir: impl Into<PathBuf>) -> io::Result<Self> {
         let root = cache_dir.into().join("fmt_check").join(FMT_CHECK_SCHEMA);
         fs::create_dir_all(&root)?;

@@ -7,7 +7,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use rayon::prelude::*;
-use similar::TextDiff;
 
 use crate::generated::{is_generated, GeneratedMode};
 use crate::meta::MetaFormatter;
@@ -348,10 +347,7 @@ impl Runner {
                                 (path.clone(), Ok(CachedCheck::Clean))
                             }
                             Ok(out) => {
-                                let old = String::from_utf8_lossy(&src);
-                                let new = String::from_utf8_lossy(&out);
-                                let diff = TextDiff::from_lines(old.as_ref(), new.as_ref());
-                                let lines = first_changed_lines(&diff);
+                                let lines = first_changed_lines(&src, &out);
                                 cache.put(
                                     formatter,
                                     opts_fp,
@@ -412,10 +408,7 @@ impl Runner {
         if output == input {
             return Ok(Vec::new());
         }
-        let old = String::from_utf8_lossy(&input);
-        let new = String::from_utf8_lossy(&output);
-        let diff = TextDiff::from_lines(old.as_ref(), new.as_ref());
-        Ok(first_changed_lines(&diff)
+        Ok(first_changed_lines(&input, &output)
             .into_iter()
             .map(|line| FormatFinding {
                 file: path_str.to_string(),
@@ -424,35 +417,48 @@ impl Runner {
             .collect())
     }
 
+    /// `goformat.Runner.walk`: `filepath.Walk` with `skipDir` and
+    /// `isGoFile`, nothing else.
+    ///
+    /// The order and the spelling of each path are both observable — they are
+    /// the order of the `--diff` patches and the names in their headers — so
+    /// this follows `filepath.Walk` exactly: `Lstat` (symlinks are not
+    /// followed), entries in lexical order, and children named by
+    /// `filepath.Join`, which is how `.` yields `a.go` and not `./a.go`.
+    ///
+    /// It does not stop at a nested module. `guff run` does
+    /// ([`collect_go_files`]), because there golangci-lint's formatters see
+    /// only what `go list ./...` loaded; `golangci-lint fmt` walks the tree
+    /// and formats `nested/n.go` too.
     fn walk(
         &self,
         root: &Path,
         stdout: &mut dyn Write,
         stats: &mut RunStats,
     ) -> Result<(), FormatError> {
-        let meta = fs::metadata(root).map_err(FormatError::Walk)?;
-        if meta.is_file() {
-            if is_go_path(root) {
-                self.process(root, stdout, stats)?;
+        let meta = fs::symlink_metadata(root).map_err(FormatError::Walk)?;
+        let name = root
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| root.to_string_lossy().into_owned());
+        if meta.is_dir() {
+            if skip_dir(&name) {
+                return Ok(());
+            }
+            let mut names: Vec<String> = fs::read_dir(root)
+                .map_err(FormatError::Walk)?
+                .map(|e| e.map(|e| e.file_name().to_string_lossy().into_owned()))
+                .collect::<Result<_, _>>()
+                .map_err(FormatError::Walk)?;
+            names.sort();
+            for child in names {
+                self.walk(&go_join(root, &child), stdout, stats)?;
             }
             return Ok(());
         }
-
-        let entries = fs::read_dir(root).map_err(FormatError::Walk)?;
-        for entry in entries {
-            let entry = entry.map_err(FormatError::Walk)?;
-            let path = entry.path();
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            let ft = entry.file_type().map_err(FormatError::Walk)?;
-            if ft.is_dir() {
-                if skip_dir(&name) || is_nested_module(&path) {
-                    continue;
-                }
-                self.walk(&path, stdout, stats)?;
-            } else if ft.is_file() && is_go_path(&path) {
-                self.process(&path, stdout, stats)?;
-            }
+        // isGoFile
+        if !name.starts_with('.') && name.ends_with(".go") {
+            self.process(root, stdout, stats)?;
         }
         Ok(())
     }
@@ -496,23 +502,18 @@ impl Runner {
         }
 
         if self.opts.diff {
-            let old = String::from_utf8_lossy(&input);
-            let new = String::from_utf8_lossy(&output);
+            // `goformat.Runner.process`: `rpdiff.Diff(name+".orig", input,
+            // name, output)` with `name = filepath.ToSlash(path)`.
             let display = path_str.replace('\\', "/");
-            let diff = TextDiff::from_lines(old.as_ref(), new.as_ref());
-            let unified = diff
-                .unified_diff()
-                .context_radius(3)
-                .header(&format!("{display}.orig"), &display)
-                .to_string();
-            let rendered = if self.opts.color {
-                colorize_diff(&unified)
+            let patch = crate::godiff::diff(&format!("{display}.orig"), &input, &display, &output);
+            if self.opts.color {
+                let rendered = colorize_diff(&String::from_utf8_lossy(&patch));
+                stdout.write_all(rendered.as_bytes())
             } else {
-                unified
-            };
-            stdout
-                .write_all(rendered.as_bytes())
-                .map_err(FormatError::Walk)?;
+                // The bytes as they are: a file need not be UTF-8.
+                stdout.write_all(&patch)
+            }
+            .map_err(FormatError::Walk)?;
             stats.exit_code = 1;
             stats.rewritten += 1;
             return Ok(());
@@ -713,12 +714,7 @@ fn check_file_multi(
         let lines = if formatted == src {
             Vec::new()
         } else {
-            timing::timed(Stage::Diff, || {
-                let old = String::from_utf8_lossy(&src);
-                let new = String::from_utf8_lossy(&formatted);
-                let diff = TextDiff::from_lines(old.as_ref(), new.as_ref());
-                first_changed_lines(&diff)
-            })
+            timing::timed(Stage::Diff, || first_changed_lines(&src, &formatted))
         };
         if let (Some(cache), Some(ch)) = (cache, ch.as_ref()) {
             let entry = if lines.is_empty() {
@@ -786,10 +782,7 @@ fn try_shared_gci_gofumpt(
         if out.as_slice() == src {
             Vec::new()
         } else {
-            let old = String::from_utf8_lossy(src);
-            let new = String::from_utf8_lossy(out);
-            let diff = TextDiff::from_lines(old.as_ref(), new.as_ref());
-            first_changed_lines(&diff)
+            first_changed_lines(src, out)
         }
     };
 
@@ -962,52 +955,72 @@ fn is_go_path(path: &Path) -> bool {
         .is_some_and(|n| n.ends_with(".go") && !n.starts_with('.'))
 }
 
+/// `filepath.Join(dir, name)` for a clean `dir` and a single-element `name`.
+fn go_join(dir: &Path, name: &str) -> PathBuf {
+    let d = dir.to_string_lossy();
+    match d.as_ref() {
+        "." => PathBuf::from(name),
+        _ if d.ends_with('/') => PathBuf::from(format!("{d}{name}")),
+        _ => PathBuf::from(format!("{d}/{name}")),
+    }
+}
+
+/// `filepath.Clean` (Unix): the shortest lexically equivalent path.
+pub fn go_clean(path: &str) -> String {
+    if path.is_empty() {
+        return ".".to_string();
+    }
+    let rooted = path.starts_with('/');
+    let mut out: Vec<&str> = Vec::new();
+    for elem in path.split('/') {
+        match elem {
+            "" | "." => {}
+            ".." => {
+                if out.last().is_some_and(|&e| e != "..") {
+                    out.pop();
+                } else if !rooted {
+                    out.push("..");
+                }
+            }
+            e => out.push(e),
+        }
+    }
+    let joined = out.join("/");
+    match (rooted, joined.is_empty()) {
+        (true, _) => format!("/{joined}"),
+        (false, true) => ".".to_string(),
+        (false, false) => joined,
+    }
+}
+
+/// `golangci-lint fmt`'s `cleanArgs`: no arguments means `.`; otherwise every
+/// `...` is deleted and the result cleaned, so `./...` is `.` and
+/// `sub/...deep` is `sub/deep`.
+pub fn clean_args(args: &[String]) -> Vec<PathBuf> {
+    if args.is_empty() {
+        return vec![PathBuf::from(".")];
+    }
+    args.iter()
+        .map(|a| PathBuf::from(go_clean(&a.replace("...", ""))))
+        .collect()
+}
+
 fn is_test_go_path(path: &Path) -> bool {
     path.file_name()
         .and_then(|n| n.to_str())
         .is_some_and(|n| n.ends_with("_test.go"))
 }
 
-/// 1-based original-file line numbers where each change group begins.
-fn first_changed_lines<'a>(diff: &TextDiff<'a, 'a, 'a, str>) -> Vec<i64> {
-    use similar::ChangeTag;
-    let mut lines = Vec::new();
-    let mut old_line: i64 = 0;
-    let mut in_change = false;
-    for change in diff.iter_all_changes() {
-        match change.tag() {
-            ChangeTag::Equal => {
-                in_change = false;
-                old_line += 1;
-            }
-            ChangeTag::Delete => {
-                if !in_change {
-                    lines.push(old_line + 1);
-                    in_change = true;
-                }
-                old_line += 1;
-            }
-            ChangeTag::Insert => {
-                if !in_change {
-                    // `hunkChangesParser.handleAddedOnlyLines`: an addition with
-                    // no deletion in front of it is *merged into the last
-                    // original line* (`From = To = lastOriginalLine`), so
-                    // upstream reports at the line above the insertion, not at
-                    // the line the insertion pushes down. With no original line
-                    // yet — an insertion at the top of the file — upstream holds
-                    // the lines in `replacementLinesToPrepend` and attaches them
-                    // to the next original or deleted line, which is line 1.
-                    // beats' `x-pack/osquerybeat/.../artifact_test.go` needs a
-                    // blank line between the third-party and the `local-prefixes`
-                    // import group: golangci-lint reports the `semver` line above
-                    // it, guff reported the `config` line below.
-                    lines.push(old_line.max(1));
-                    in_change = true;
-                }
-            }
-        }
-    }
-    lines
+/// 1-based original-file line numbers where golangci-lint reports each change:
+/// the `From` of every `Change` its formatter linters parse out of the
+/// anchored diff ([`crate::godiff::changes`]).
+///
+/// This was a Myers diff (`similar`) with `hunkChangesParser`'s anchoring
+/// rules applied to its change groups. The rules were right; the groups were
+/// not always the same ones — a minimal-edit diff may pair a repeated line
+/// (a blank, a `}`) that the anchored diff leaves alone.
+pub(crate) fn first_changed_lines(old: &[u8], new: &[u8]) -> Vec<i64> {
+    crate::godiff::changes(old, new).into_iter().map(|c| c.from).collect()
 }
 
 /// Apply ANSI colors to a unified diff (golangci-style `fmt -d`).
@@ -1140,7 +1153,68 @@ mod tests {
     /// import group: golangci-lint reports the `semver` line above it, guff
     /// reported the `config` line below.
     fn changed_lines(old: &str, new: &str) -> Vec<i64> {
-        first_changed_lines(&TextDiff::from_lines(old, new))
+        first_changed_lines(old.as_bytes(), new.as_bytes())
+    }
+
+    #[test]
+    fn clean_args_follows_golangci_fmt() {
+        let c = |a: &[&str]| -> Vec<String> {
+            clean_args(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>())
+                .into_iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect()
+        };
+        assert_eq!(c(&[]), vec!["."]);
+        assert_eq!(c(&["./..."]), vec!["."]);
+        assert_eq!(c(&["./sub/..."]), vec!["sub"]);
+        assert_eq!(c(&["sub/...deep"]), vec!["sub/deep"]);
+        assert_eq!(c(&["./sub/../a.go"]), vec!["a.go"]);
+        assert_eq!(go_clean("/.."), "/");
+        assert_eq!(go_clean("a/../.."), "..");
+        assert_eq!(go_clean(""), ".");
+    }
+
+    #[test]
+    fn fmt_walk_is_lexical_joins_like_go_and_enters_nested_modules() {
+        let dir = std::env::temp_dir().join(format!("guff-fmt-walk-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        for (p, body) in [
+            ("a.go", "package a\nvar  x = 1\n"),
+            ("sub/b.go", "package b\nvar  y = 1\n"),
+            ("sub/deep/c.go", "package c\nvar  z = 1\n"),
+            ("nested/go.mod", "module n\n"),
+            ("nested/n.go", "package n\nvar  n = 1\n"),
+            ("testdata/t.go", "package t\nvar  t = 1\n"),
+        ] {
+            let f = dir.join(p);
+            fs::create_dir_all(f.parent().unwrap()).unwrap();
+            fs::write(f, body).unwrap();
+        }
+        let runner = Runner::new(
+            MetaFormatter::new(&["gofmt".to_string()], Default::default(), Default::default(),
+                Default::default(), Default::default(), Default::default()).unwrap(),
+            RunnerOptions { diff: true, ..Default::default() },
+        );
+        let mut out = Vec::new();
+        runner.run(&[dir.clone()], &mut out).unwrap();
+        // Walked from an absolute root so the test does not touch the process
+        // cwd; the prefix is the root, joined the way `filepath.Join` does.
+        let prefix = format!("{}/", dir.to_string_lossy());
+        let headers: Vec<String> = String::from_utf8_lossy(&out)
+            .lines()
+            .filter(|l| l.starts_with("diff "))
+            .map(|l| l.replace(&prefix, ""))
+            .collect();
+        assert_eq!(
+            headers,
+            vec![
+                "diff a.go.orig a.go",
+                "diff nested/n.go.orig nested/n.go",
+                "diff sub/b.go.orig sub/b.go",
+                "diff sub/deep/c.go.orig sub/deep/c.go",
+            ]
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

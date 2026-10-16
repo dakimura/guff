@@ -1,0 +1,24 @@
+# Golden case: where a formatter finding lands. golangci-lint renders the
+# formatted file against the original with go-internal's anchored diff and
+# parses the patch back into findings; the line depends on which lines the
+# diff pairs. A reversed import block and repeated blank/`}` lines are the
+# shapes where a minimal-edit (Myers) diff pairs differently — measured on a
+# scrambled cobra checkout, 24 of 93 findings moved by a line.
+version: "2"
+
+linters:
+  default: none
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+    - gofumpt
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
