@@ -10,7 +10,7 @@ use std::sync::OnceLock;
 
 /// `stdlib.Kind`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Kind {
+pub enum Kind {
     Type,
     Func,
     Var,
@@ -23,7 +23,7 @@ pub(crate) enum Kind {
 
 /// `stdlib.Symbol` without `Signature`, which nothing here reads.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct Symbol {
+pub struct Symbol {
     pub name: &'static str,
     pub kind: Kind,
     /// N of go1.N: `stdlib.Version`.
@@ -53,11 +53,25 @@ impl Symbol {
     }
 }
 
-const MANIFEST: &str = include_str!("stdlib_manifest.txt");
+static TABLE: OnceLock<HashMap<&'static str, Vec<Symbol>>> = OnceLock::new();
+
+const MANIFEST: &str = include_str!("manifest.txt");
 
 /// `stdlib.PackageSymbols[path]`.
-pub(crate) fn package_symbols(path: &str) -> Option<&'static [Symbol]> {
-    static TABLE: OnceLock<HashMap<&'static str, Vec<Symbol>>> = OnceLock::new();
+///
+/// `None` for anything that is not a public standard-library package —
+/// `internal/...`, `vendor/...` and every other module.
+pub fn package_symbols(path: &str) -> Option<&'static [Symbol]> {
+    table().get(path).map(Vec::as_slice)
+}
+
+/// Every package in the manifest, in no particular order: the keys of
+/// `stdlib.PackageSymbols`.
+pub fn packages() -> impl Iterator<Item = &'static str> {
+    table().keys().copied()
+}
+
+fn table() -> &'static HashMap<&'static str, Vec<Symbol>> {
     TABLE
         .get_or_init(|| {
             let mut table: HashMap<&'static str, Vec<Symbol>> = HashMap::new();
@@ -87,8 +101,6 @@ pub(crate) fn package_symbols(path: &str) -> Option<&'static [Symbol]> {
             }
             table
         })
-        .get(path)
-        .map(Vec::as_slice)
 }
 
 #[cfg(test)]

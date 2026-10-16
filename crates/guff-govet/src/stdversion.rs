@@ -3,7 +3,7 @@
 //!
 //! Port of `golang.org/x/tools/go/analysis/passes/stdversion` (v0.50.0) and of
 //! the `typesinternal.TooNewStdSymbols` it calls. The symbol table is
-//! [`crate::stdlib_manifest`].
+//! [`guff_stdlib`].
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -17,7 +17,7 @@ use guff_types::arena::{ObjectArena, ObjectData, PackageId, TypeArena, TypeData}
 use guff_types::lookup::lookup_field_or_method;
 use guff_types::ObjectId;
 
-use crate::stdlib_manifest::{package_symbols, Kind, Symbol};
+use guff_stdlib::{package_symbols, Kind, Symbol};
 
 /// `versions.Lang`: `go1.22.3` → `go1.22`. Empty for anything that is not a
 /// Go version.

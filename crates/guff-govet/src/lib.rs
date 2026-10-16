@@ -30,7 +30,6 @@ mod printf_wrappers;
 mod shift;
 mod sigchanyzer;
 mod slog;
-mod stdlib_manifest;
 mod stdmethods;
 mod stdversion;
 mod stringintconv;

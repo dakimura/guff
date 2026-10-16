@@ -111,7 +111,7 @@ linter 単位で移植を始める前に、**多くの linter を同時に動か
 | `typeindex.Calls` が `F[int](...)` を遡る | `used_ident` が既に剥がしている。照合は `Uses` の宣言側オブジェクトで、インスタンスのメソッドは型検査器が `origin` を持つ | already-matches（PR 14s で確認） | — |
 | `const.go nillable` が `unsafe.Pointer` を nil 可能型に | `guff-govet/src/nilness.rs` `nillable_under` に Basic(UnsafePointer) が無い | **done (PR 3)** | — |
 | range-over-func の yield 内ラベルから `_goto: ycont` が外れた | `guff-ssa/src/builder/range_func.rs:184` は v0.44 のまま | needs-port（M） | — |
-| `internal/stdlib/manifest.go` に Go 1.27 シンボル | goimports の `stdlib_exports.txt`（GOROOT 由来、internal を含む）に `uuid` / `crypto/mldsa` / `encoding/json/v2` / `bytes.CutLast` が無い | needs-port（M。**上流マニフェストから転記**、手元 Go で再生成しない） | — |
+| `internal/stdlib/manifest.go` に Go 1.27 シンボル | goimports の `stdlib_exports.txt`（GOROOT 由来、internal を含む）に `uuid` / `crypto/mldsa` / `encoding/json/v2` / `bytes.CutLast` が無い | **done (PR 14u)**：`guff-stdlib`（上流マニフェストの転記）に置き換え | — |
 | unified IR export data V5 / indexed v3 | `guff-exportdata` は V0–V2 だけ | needs-port（L。Go 1.27 toolchain で走らせる日まで不要） | — |
 | Go 1.27 ジェネリックメソッド（SSA 全体） | `guff-types` が言語機能を拒否する | not-applicable | — |
 | SSA 関数名 `F[int, string]` | `instantiate.rs targstr` は既に一致 | already-matches | — |
@@ -368,7 +368,7 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 | 3 | go/ssa buildYieldFunc lblock | behavior | range-over-func のラベル goto が親へ抜ける | guff-ssa/src/builder/range_func.rs:184 | needs-port | M | — |
 | 4 | typeutil/callee.go Callee Origin | behavior | Callee が Origin を返す | code.rs `call_target_object` | **done (PR 14s)**（xtools-substrate の上の表を参照） | M | callee_test.go |
 | 5 | typeindex.go Calls | behavior | 明示インスタンス化を遡る + Callee Origin で照合 | typeindex.rs:231-262 | already-matches（PR 14s） | S | — |
-| 6 | internal/stdlib/manifest.go | substrate | Go 1.27 シンボル（goimports 候補） | guff-fmt/src/native/goimports/stdlib_exports.txt | 半分 done (PR 14t)：`guff-govet/src/stdlib_manifest.txt` に v0.50.0 から転記（`scripts/gen-stdlib-manifest.py`、18,247 シンボル）。**goimports はまだ自前の GOROOT 由来表**を使う | M | — |
+| 6 | internal/stdlib/manifest.go | substrate | Go 1.27 シンボル（goimports 候補） | guff-fmt/src/native/goimports/stdlib_exports.txt | **done (PR 14t / 14u)**：v0.50.0 から転記（`scripts/gen-stdlib-manifest.py`、18,247 シンボル）し `guff-stdlib` crate に置いた。stdversion と goimports の両方が使う。goimports の旧表（GOROOT 由来）は **`internal/...` 160 パッケージとフィールド・メソッド名**を含み、`singleflight.Group` に `import "internal/singleflight"` を足していた（上流は module cache へ進む）。fmt case `goimports-add-stdlib` | M | — |
 | 7 | typesinternal/toonew.go | behavior | stdversion の除外と最短パス | guff-govet/src/stdversion.rs | **done (PR 14t)** | M | — |
 | 8 | gcimporter / pkgbits V5 | substrate | export data V5 | guff-exportdata/src/pkgbits/version.rs | needs-port | L | — |
 | 9 | go/ssa ジェネリックメソッド一式 | substrate | Go 1.27 generic methods | guff-types/src/signature_check.rs:76 | not-applicable | L | generic_methods_test.go ほか |
