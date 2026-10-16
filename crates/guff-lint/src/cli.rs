@@ -951,7 +951,7 @@ fn fmt_cmd(args: FmtArgs) -> Result<i32, RunError> {
         },
     );
 
-    let paths: Vec<PathBuf> = args.paths.iter().map(PathBuf::from).collect();
+    let paths = guff_fmt::clean_args(&args.paths);
     let mut stdout = io::stdout();
     let stats = runner
         .run(&paths, &mut stdout)

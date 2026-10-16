@@ -8,6 +8,7 @@ mod gci;
 mod generated;
 mod gofmt;
 mod gofumpt;
+pub mod godiff;
 mod goimports;
 mod golines;
 mod meta;
@@ -29,7 +30,7 @@ pub use golines::{Golines, GolinesOptions};
 pub use meta::{is_formatter, MetaFormatter, KNOWN_FORMATTERS};
 pub use native::{NativeKind, NativeOptions, SharedSkipObject};
 pub use runner::{
-    check_files_multi, AttributedFinding, FormatError, FormatFinding, Runner, RunnerOptions,
+    check_files_multi, clean_args, AttributedFinding, FormatError, FormatFinding, Runner, RunnerOptions,
     RunStats,
 };
 pub use swaggo::Swaggo;

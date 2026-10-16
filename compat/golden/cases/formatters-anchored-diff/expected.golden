@@ -1,0 +1,14 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh formatters-anchored-diff
+# Produced by running golangci-lint on compat/golden/cases/formatters-anchored-diff/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+anchored/braces.go:12:1:gofumpt::File is not properly formatted
+anchored/braces.go:15:1:gofmt::File is not properly formatted
+anchored/braces.go:15:1:goimports::File is not properly formatted
+anchored/imports.go:8:1:gofmt::File is not properly formatted
+anchored/imports.go:8:1:gofumpt::File is not properly formatted
+anchored/imports.go:8:1:goimports::File is not properly formatted

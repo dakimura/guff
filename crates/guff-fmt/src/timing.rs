@@ -37,7 +37,7 @@ pub(crate) enum Stage {
     /// On the default `.golangci.yml` set that is goimports, which parses
     /// independently because it needs a different parser mode.
     Format = 4,
-    /// `TextDiff::from_lines` + `first_changed_lines`, only for files that
+    /// The anchored diff + `first_changed_lines`, only for files that
     /// actually changed.
     ///
     /// The shared path runs its own copy of that diff, and it is *not* counted
