@@ -111,7 +111,7 @@ fn labeled_break_in_switch_leaves_the_loop() {
     let f = prog.functions.get(fid);
     let lb = f.lblocks.get("outer").expect("label outer recorded");
     let done = lb.break_.expect("labelled break target recorded before the body");
-    let goto_ = lb.goto_;
+    let goto_ = lb.goto_.expect("label block");
 
     // The loop is endless, so nothing but a `break outer` can reach its exit.
     // While the target was recorded only after the body was built, the break

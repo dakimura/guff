@@ -110,7 +110,7 @@ linter 単位で移植を始める前に、**多くの linter を同時に動か
 | `typeutil.Callee` / `StaticCallee` が `fn.Origin()` を返す | `call_target_object` が `func_origin` を返す | **done (PR 14s)**。実は guff の型検査器が `Uses` にインスタンスのメソッドではなく**宣言側のメソッド**を記録していたので、Callee 経由の消費者は偶然一致していた。型検査器を go/types どおり（`expandMethod` のコピーを記録）にし、Callee を Origin 化 | unusedresult の `[int]` → `[T]`（golden で確認）、revive の `W[string]` |
 | `typeindex.Calls` が `F[int](...)` を遡る | `used_ident` が既に剥がしている。照合は `Uses` の宣言側オブジェクトで、インスタンスのメソッドは型検査器が `origin` を持つ | already-matches（PR 14s で確認） | — |
 | `const.go nillable` が `unsafe.Pointer` を nil 可能型に | `guff-govet/src/nilness.rs` `nillable_under` に Basic(UnsafePointer) が無い | **done (PR 3)** | — |
-| range-over-func の yield 内ラベルから `_goto: ycont` が外れた | `guff-ssa/src/builder/range_func.rs:184` は v0.44 のまま | needs-port（M） | — |
+| range-over-func の yield 内ラベルから `_goto: ycont` が外れた | `LBlock.goto_` を `Option` にし、yield 自身のラベルは None（`labelled_block` が親を探す） | **done (PR 14w)**：`goto L` が `continue L` になっていた（`if` ごと畳まれる）。ssadump v0.50 とブロック単位で一致。lint の観測差は 4 形で出ず、`range_func_test` で測る | — |
 | `internal/stdlib/manifest.go` に Go 1.27 シンボル | goimports の `stdlib_exports.txt`（GOROOT 由来、internal を含む）に `uuid` / `crypto/mldsa` / `encoding/json/v2` / `bytes.CutLast` が無い | **done (PR 14u)**：`guff-stdlib`（上流マニフェストの転記）に置き換え | — |
 | unified IR export data V5 / indexed v3 | `guff-exportdata` は V0–V2 だけ | needs-port（L。Go 1.27 toolchain で走らせる日まで不要） | — |
 | Go 1.27 ジェネリックメソッド（SSA 全体） | `guff-types` が言語機能を拒否する | not-applicable | — |
@@ -365,7 +365,7 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 |---|---------------|------|------|-------------|--------|--------|-------------------|
 | 1 | go/ssa/builder.go assign | substrate | in-place compLit 経路の削除 | guff-style/src/wastedassign.rs composite_lit_rhs | **done (PR 3)**: wastedassign の近似撤去、gosec G124 / G702 も同じ原因で解消 | S | ssa/testdata/objlookup.go, valueforexpr.go |
 | 2 | go/ssa/const.go nillable | behavior | unsafe.Pointer を nil 可能型に | guff-govet/src/nilness.rs:935 | **done (PR 3)**（guff は別経路で既に一致していた。2.12.2 に対しては誤報だった） | S | const_test.go |
-| 3 | go/ssa buildYieldFunc lblock | behavior | range-over-func のラベル goto が親へ抜ける | guff-ssa/src/builder/range_func.rs:184 | needs-port | M | — |
+| 3 | go/ssa buildYieldFunc lblock | behavior | range-over-func のラベル goto が親へ抜ける | guff-ssa/src/builder/range_func.rs:184 | **done (PR 14w)** | M | — |
 | 4 | typeutil/callee.go Callee Origin | behavior | Callee が Origin を返す | code.rs `call_target_object` | **done (PR 14s)**（xtools-substrate の上の表を参照） | M | callee_test.go |
 | 5 | typeindex.go Calls | behavior | 明示インスタンス化を遡る + Callee Origin で照合 | typeindex.rs:231-262 | already-matches（PR 14s） | S | — |
 | 6 | internal/stdlib/manifest.go | substrate | Go 1.27 シンボル（goimports 候補） | guff-fmt/src/native/goimports/stdlib_exports.txt | **done (PR 14t / 14u)**：v0.50.0 から転記（`scripts/gen-stdlib-manifest.py`、18,247 シンボル）し `guff-stdlib` crate に置いた。stdversion と goimports の両方が使う。goimports の旧表（GOROOT 由来）は **`internal/...` 160 パッケージとフィールド・メソッド名**を含み、`singleflight.Group` に `import "internal/singleflight"` を足していた（上流は module cache へ進む）。fmt case `goimports-add-stdlib` | M | — |

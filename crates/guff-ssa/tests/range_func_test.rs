@@ -200,3 +200,40 @@ func use(s string) {
         "expected yield body beyond bare continue:\n{yield_asm}"
     );
 }
+
+/// x/tools v0.50 (CL 2bbf4e6, `buildYieldFunc`): a yield function's lblock for
+/// its own label no longer carries `_goto: ycont`, so `goto L` naming the
+/// range statement searches the parent and restarts the loop — it used to act
+/// as `continue L`.
+#[test]
+fn range_over_func_goto_own_label_exits_to_parent() {
+    const SRC: &str = "\
+package p
+
+func Seq(yield func(int) bool) {}
+
+func use() int {
+	n := 0
+L:
+	for x := range Seq {
+		n++
+		if x > n {
+			goto L
+		}
+	}
+	return n
+}
+";
+    let asm = build(SRC);
+    let yield_asm = build_yield(SRC);
+    // The goto leaves the yield function with `return false`, and the parent
+    // dispatches its exit id back to `L`.
+    assert!(
+        yield_asm.contains("return false"),
+        "goto L must exit the yield function, not continue it:\n{yield_asm}"
+    );
+    assert!(
+        asm.contains("rangefunc.resume.exits"),
+        "the parent must dispatch the goto's exit back to L:\n{asm}"
+    );
+}

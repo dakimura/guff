@@ -96,7 +96,7 @@ impl<'a> Builder<'a> {
                     crate::function::LBlock {
                         name: name.to_string(),
                         resolved: false,
-                        goto_: loop_,
+                        goto_: None,
                         break_: None,
                         continue_: None,
                     },
@@ -182,8 +182,10 @@ impl<'a> Builder<'a> {
         };
 
         if let Some(name) = yield_label.as_deref() {
+            // x/tools v0.50 dropped `_goto: ycont` here: `goto L` searches the
+            // parent lblock and restarts the loop. With it, the goto acted as
+            // `continue L`.
             if let Some(lb) = self.prog.functions.get_mut(y_fid).lblocks.get_mut(name) {
-                lb.goto_ = ycont;
                 lb.continue_ = Some(ycont);
                 lb.resolved = true;
             }
@@ -288,7 +290,7 @@ impl<'a> Builder<'a> {
                     if lb.resolved {
                         continue;
                     }
-                    yb.set_block(Some(lb.goto_));
+                    yb.set_block(lb.goto_);
                     let exit_id = yb.int_const(e.id);
                     yb.store_jump_var(jump_obj, exit_id, e.pos);
                     let bool_ty = yb.prog.basic_type(BasicKind::Bool);
