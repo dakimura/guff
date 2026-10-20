@@ -72,7 +72,9 @@ pub struct LBlock {
     pub name: String,
     /// `_goto` block was entered (back jump or resolved forward jump).
     pub resolved: bool,
-    pub goto_: BlockId,
+    /// None only on a yield function's lblock for its own range statement's
+    /// label: `goto L` there searches the parent, which owns `L`'s block.
+    pub goto_: Option<BlockId>,
     pub break_: Option<BlockId>,
     pub continue_: Option<BlockId>,
 }

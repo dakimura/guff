@@ -13,7 +13,9 @@ impl<'a> Builder<'a> {
     pub(crate) fn lblock_of(&mut self, name: &str) -> BlockId {
         let fid = self.func_id;
         if let Some(lb) = self.prog.functions.get(fid).lblocks.get(name) {
-            return lb.goto_;
+            return lb
+                .goto_
+                .expect("a yield function's own label resolves in the parent");
         }
         let goto_ = self.new_basic_block(format!("{name}.label"));
         self.prog.functions.get_mut(fid).lblocks.insert(
@@ -21,7 +23,7 @@ impl<'a> Builder<'a> {
             LBlock {
                 name: name.to_string(),
                 resolved: false,
-                goto_,
+                goto_: Some(goto_),
                 break_: None,
                 continue_: None,
             },
@@ -76,7 +78,7 @@ impl<'a> Builder<'a> {
         match tok {
             Token::BREAK => lb.break_,
             Token::CONTINUE => lb.continue_,
-            Token::GOTO => Some(lb.goto_),
+            Token::GOTO => lb.goto_,
             _ => None,
         }
     }
