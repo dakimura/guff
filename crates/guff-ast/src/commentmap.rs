@@ -355,6 +355,15 @@ impl<'a> CommentMap<'a> {
         // created (or_insert_with runs only on miss).
     }
 
+    /// Every associated node with its groups, in insertion order (Go ranges
+    /// over the map in random order; callers that only accumulate flags may
+    /// not care, but a fixed order keeps runs reproducible).
+    pub fn iter(&self) -> impl Iterator<Item = (NodeRef<'a>, &[CommentGroup])> + '_ {
+        self.nodes
+            .iter()
+            .filter_map(|n| self.entries.get(&node_ptr(*n)).map(|v| (*n, v.as_slice())))
+    }
+
     /// Comments associated with `n`, if any.
     pub fn get(&self, n: NodeRef<'a>) -> Option<&[CommentGroup]> {
         self.entries.get(&node_ptr(n)).map(|v| v.as_slice())
