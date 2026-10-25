@@ -1,0 +1,1208 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh ginkgolinter-upstream-suppress
+# Produced by running golangci-lint on compat/golden/cases/ginkgolinter-upstream-suppress/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.14.0
+
+asyncconfig/asyncConfig.go:27:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Eventually(slowBool()).WithPolling(time.Millisecond * 100).WithTimeout(time.Second * 2).Should(BeTrue())` instead
+asyncconfig/asyncConfig.gomega.go:17:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `g.Eventually(slowBool()).WithPolling(time.Millisecond * 100).WithTimeout(time.Second * 2).Should(g.BeTrue())` instead
+boolean/bool.go:15:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(t).To(BeTrue())` instead
+boolean/bool.go:16:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(f).To(BeFalse())` instead
+boolean/bool.go:17:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(2, t).Should(BeTrue())` instead
+boolean/bool.go:18:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(2, t).Should(BeTrue())` instead
+boolean/bool.go:19:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(t).WithOffset(2).To(BeTrue())` instead
+boolean/bool.go:20:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(t).To(BeTrue())` instead
+boolean/bool.go:21:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(f).WithOffset(1).ToNot(BeTrue())` instead
+boolean/bool.go:25:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(t).WithOffset(2).To(wrappers.BeTrue())` instead
+boolean/bool.go:30:3:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(t).To(BeTrue())` instead
+boolean/bool.go:31:3:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(t).To(BeTrue())` instead
+boolean/bool.go:32:3:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(t).WithOffset(2).Should(BeTrue())` instead
+boolean/bool.go:34:3:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `wrappers.MyExpect(t).To(BeTrue())` instead
+boolean/bool.go:35:3:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `wrappers.MyExpect(t).WithOffset(2).To(BeTrue())` instead
+cap/cap.ginkgo.go:29:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `gomega.Expect(cap(slice) == 10).To(gomega.BeTrue())` instead
+cap/cap.ginkgo.go:31:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `gomega.Expect(cap(slice) != 10).To(gomega.BeFalse())` instead
+cap/cap.ginkgo.go:32:3:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `gomega.Expect(cap(slice) == 10).To(gomega.BeTrue())` instead
+cap/cap.ginkgo.go:33:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `gomega.Expect(cap(slice) == 10).To(gomega.BeTrue())` instead
+cap/cap.ginkgo.go:35:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `gomega.Expect(cap(slice) != 10).ToNot(gomega.BeTrue())` instead
+cap/cap.go:29:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(cap(slice) == 10).To(BeTrue())` instead
+cap/cap.go:31:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(cap(slice) != 10).To(BeFalse())` instead
+cap/cap.go:32:3:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(cap(slice) == 10).To(BeTrue())` instead
+cap/cap.go:33:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(cap(slice) == 10).To(BeTrue())` instead
+cap/cap.go:35:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(cap(slice) != 10).ToNot(BeTrue())` instead
+cap/cap.go:36:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(10 != cap(slice)).ToNot(BeTrue())` instead
+cap/suppress-file.go:33:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `gomega.Expect(cap(slice) == 10).To(gomega.BeTrue())` instead
+cap/suppress-file.go:35:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `gomega.Expect(cap(slice) != 10).To(gomega.BeFalse())` instead
+cap/suppress-file.go:36:3:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `gomega.Expect(cap(slice) == 10).To(gomega.BeTrue())` instead
+cap/suppress-file.go:37:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `gomega.Expect(cap(slice) == 10).To(gomega.BeTrue())` instead
+cap/suppress-file.go:39:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `gomega.Expect(cap(slice) != 10).ToNot(gomega.BeTrue())` instead
+comparison/comparison.go:30:4:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(exampleInt == 0).To(BeFalse())` instead
+comparison/comparison.go:31:4:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(0 == exampleInt).To(BeFalse())` instead
+comparison/comparison.go:34:4:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(exampleInt == constZero).To(BeFalse())` instead
+comparison/comparison.go:35:4:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(constZero == exampleInt).To(BeFalse())` instead
+comparison/comparison.go:39:4:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(exampleInt == 1).To(BeTrue())` instead
+comparison/comparison.go:40:4:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(exampleInt != 1).To(BeFalse())` instead
+comparison/comparison.go:43:4:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(retNum() == 1).To(BeTrue())` instead
+comparison/comparison.go:44:4:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(retNum() != 1).To(BeFalse())` instead
+comparison/comparison.go:48:4:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(exampleInt == 0).To(BeTrue())` instead
+comparison/comparison.go:75:4:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(constStr == s).Should(BeTrue())` instead
+comparison/comparison.go:116:4:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(2 >= exampleInt).To(BeTrue())` instead
+comparison/comparison.go:127:4:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(len(s) == 4).Should(BeTrue())` instead
+comparison/comparison.go:129:4:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(len(s) != 5).Should(BeTrue())` instead
+comparison/comparison.go:130:4:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(len(s) != 0).Should(BeTrue())` instead
+comparison/comparison.go:132:4:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(len(s) < 5).Should(BeTrue())` instead
+comparison/comparison.go:133:4:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(len(s) < 5).Should(BeTrue())` instead
+comparison/comparison.go:134:4:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(len(s) <= 5).Should(BeTrue())` instead
+comparison/comparison.go:135:4:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(len(s) > 3).Should(BeTrue())` instead
+comparison/comparison.go:136:4:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(len(s) >= 3).Should(BeTrue())` instead
+comparison/comparison.gomega.go:13:4:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `g.Expect(exampleInt == 0).To(g.BeFalse())` instead
+comparison/comparison.gomega.go:14:4:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `g.Expect(0 == exampleInt).To(g.BeFalse())` instead
+comparison/comparison.gomega.go:17:4:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `g.Expect(exampleInt == constZero).To(g.BeFalse())` instead
+comparison/comparison.gomega.go:18:4:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `g.Expect(constZero == exampleInt).To(g.BeFalse())` instead
+comparison/comparison.gomega.go:24:4:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `g.Expect(exampleInt == 1).To(g.BeTrue())` instead
+comparison/comparison.gomega.go:25:4:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `g.Expect(exampleInt != 1).To(g.BeFalse())` instead
+comparison/comparison.gomega.go:28:4:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `g.Expect(retNum() == 1).To(g.BeTrue())` instead
+comparison/comparison.gomega.go:29:4:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `g.Expect(retNum() != 1).To(g.BeFalse())` instead
+comparison/comparison.gomega.go:33:4:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `g.Expect(exampleInt == 0).To(g.BeTrue())` instead
+configcompare/a.go:13:4:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect("abcd" == abcd).To(BeTrue())` instead
+configerr/a.go:85:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(err == nil).To(BeTrue())` instead
+configerr/a.go:86:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(err == nil).To(BeFalse())` instead
+configerr/a.go:87:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(err != nil).To(BeTrue())` instead
+configerr/a.go:88:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(err != nil).To(BeFalse())` instead
+configerr/a.go:89:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == err).To(BeTrue())` instead
+configerr/a.go:90:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == errFunc()).To(BeTrue())` instead
+configerr/a.go:91:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(errFunc() != nil).To(BeTrue())` instead
+confighaveoccurred/haveoccurred.go:26:3:ginkgolinter::ginkgo-linter: asserting a non-error type with HaveOccurred matcher
+confighaveoccurred/haveoccurred.go:34:3:ginkgolinter::ginkgo-linter: asserting a non-error type with HaveOccurred matcher
+confighaveoccurred/haveoccurred.go:49:3:ginkgolinter::ginkgo-linter: asserting a non-error type with Succeed matcher
+confighaveoccurred/haveoccurred.go:53:3:ginkgolinter::ginkgo-linter: asserting a non-error type with Succeed matcher
+confighaveoccurred/haveoccurred.gomega.go:18:3:ginkgolinter::ginkgo-linter: asserting a non-error type with HaveOccurred matcher
+confighaveoccurred/haveoccurred.gomega.go:26:3:ginkgolinter::ginkgo-linter: asserting a non-error type with HaveOccurred matcher
+confighaveoccurred/haveoccurred.gomega.go:41:3:ginkgolinter::ginkgo-linter: asserting a non-error type with Succeed matcher
+confighaveoccurred/haveoccurred.gomega.go:45:3:ginkgolinter::ginkgo-linter: asserting a non-error type with Succeed matcher
+configlen/a.go:1499:4:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(cap(slice) == 10).To(BeTrue())` instead
+configlen/a.go:1501:4:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(cap(slice) != 0).To(BeFalse())` instead
+confignil/a.go:63:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x == nil).Should(BeTrue())` instead
+confignil/a.go:64:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == x).Should(BeTrue())` instead
+confignil/a.go:67:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(y != nil).Should(BeTrue())` instead
+confignil/a.go:68:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != y).Should(BeTrue())` instead
+confignil/a.go:71:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNil() == nil).Should(BeTrue())` instead
+confignil/a.go:72:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == fNil()).Should(BeTrue())` instead
+confignil/a.go:75:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNotNil() != nil).Should(BeTrue())` instead
+confignil/a.go:76:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != fNotNil()).Should(BeTrue())` instead
+confignil/a.go:81:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x != nil).Should(BeFalse())` instead
+confignil/a.go:82:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != x).Should(BeFalse())` instead
+confignil/a.go:85:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(y == nil).Should(BeFalse())` instead
+confignil/a.go:86:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == y).Should(BeFalse())` instead
+confignil/a.go:89:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNil() != nil).Should(BeFalse())` instead
+confignil/a.go:90:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != fNil()).Should(BeFalse())` instead
+confignil/a.go:93:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNotNil() == nil).Should(BeFalse())` instead
+confignil/a.go:94:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == fNotNil()).Should(BeFalse())` instead
+confignil/a.go:101:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(x == nil).Should(BeTrue())` instead
+confignil/a.go:102:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil == x).Should(BeTrue())` instead
+confignil/a.go:105:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(y != nil).Should(BeTrue())` instead
+confignil/a.go:106:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil != y).Should(BeTrue())` instead
+confignil/a.go:109:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(fNil() == nil).Should(BeTrue())` instead
+confignil/a.go:110:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil == fNil()).Should(BeTrue())` instead
+confignil/a.go:113:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(fNotNil() != nil).Should(BeTrue())` instead
+confignil/a.go:114:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil != fNotNil()).Should(BeTrue())` instead
+confignil/a.go:137:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x == nil).Should(BeTrue())` instead
+confignil/a.go:138:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == x).Should(BeTrue())` instead
+confignil/a.go:141:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(y != nil).Should(BeTrue())` instead
+confignil/a.go:142:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != y).Should(BeTrue())` instead
+confignil/a.go:145:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNil() == nil).Should(BeTrue())` instead
+confignil/a.go:146:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == fNil()).Should(BeTrue())` instead
+confignil/a.go:149:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNotNil() != nil).Should(BeTrue())` instead
+confignil/a.go:150:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != fNotNil()).Should(BeTrue())` instead
+confignil/a.go:155:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x != nil).ShouldNot(BeTrue())` instead
+confignil/a.go:156:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != x).ShouldNot(BeTrue())` instead
+confignil/a.go:159:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(y == nil).ShouldNot(BeTrue())` instead
+confignil/a.go:160:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == y).ShouldNot(BeTrue())` instead
+confignil/a.go:163:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNil() != nil).ShouldNot(BeTrue())` instead
+confignil/a.go:164:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != fNil()).ShouldNot(BeTrue())` instead
+confignil/a.go:167:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNotNil() == nil).ShouldNot(BeTrue())` instead
+confignil/a.go:168:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == fNotNil()).ShouldNot(BeTrue())` instead
+confignil/a.go:212:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x == nil).To(BeTrue())` instead
+confignil/a.go:213:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == x).To(BeTrue())` instead
+confignil/a.go:216:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(y != nil).To(BeTrue())` instead
+confignil/a.go:217:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != y).To(BeTrue())` instead
+confignil/a.go:220:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNil() == nil).To(BeTrue())` instead
+confignil/a.go:221:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == fNil()).To(BeTrue())` instead
+confignil/a.go:224:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNotNil() != nil).To(BeTrue())` instead
+confignil/a.go:225:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != fNotNil()).To(BeTrue())` instead
+confignil/a.go:230:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x != nil).To(BeFalse())` instead
+confignil/a.go:231:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != x).To(BeFalse())` instead
+confignil/a.go:234:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(y == nil).To(BeFalse())` instead
+confignil/a.go:235:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == y).To(BeFalse())` instead
+confignil/a.go:238:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNil() != nil).To(BeFalse())` instead
+confignil/a.go:239:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != fNil()).To(BeFalse())` instead
+confignil/a.go:242:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNotNil() == nil).To(BeFalse())` instead
+confignil/a.go:243:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == fNotNil()).To(BeFalse())` instead
+confignil/a.go:250:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(x == nil).To(BeTrue())` instead
+confignil/a.go:251:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil == x).To(BeTrue())` instead
+confignil/a.go:254:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(y != nil).To(BeTrue())` instead
+confignil/a.go:255:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil != y).To(BeTrue())` instead
+confignil/a.go:258:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(fNil() == nil).To(BeTrue())` instead
+confignil/a.go:259:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil == fNil()).To(BeTrue())` instead
+confignil/a.go:262:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(fNotNil() != nil).To(BeTrue())` instead
+confignil/a.go:263:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil != fNotNil()).To(BeTrue())` instead
+confignil/a.go:286:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x == nil).To(BeTrue())` instead
+confignil/a.go:287:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == x).To(BeTrue())` instead
+confignil/a.go:290:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(y != nil).To(BeTrue())` instead
+confignil/a.go:291:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != y).To(BeTrue())` instead
+confignil/a.go:294:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNil() == nil).To(BeTrue())` instead
+confignil/a.go:295:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == fNil()).To(BeTrue())` instead
+confignil/a.go:298:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNotNil() != nil).To(BeTrue())` instead
+confignil/a.go:299:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != fNotNil()).To(BeTrue())` instead
+confignil/a.go:304:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x != nil).ToNot(BeTrue())` instead
+confignil/a.go:305:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != x).ToNot(BeTrue())` instead
+confignil/a.go:308:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(y == nil).ToNot(BeTrue())` instead
+confignil/a.go:309:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == y).ToNot(BeTrue())` instead
+confignil/a.go:312:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNil() != nil).ToNot(BeTrue())` instead
+confignil/a.go:313:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != fNil()).ToNot(BeTrue())` instead
+confignil/a.go:316:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNotNil() == nil).ToNot(BeTrue())` instead
+confignil/a.go:317:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == fNotNil()).ToNot(BeTrue())` instead
+confignil/a.go:325:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(x == nil).Should(BeTrue())` instead
+confignil/a.go:326:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil == x).Should(BeTrue())` instead
+confignil/a.go:329:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(y != nil).Should(BeTrue())` instead
+confignil/a.go:330:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil != y).Should(BeTrue())` instead
+confignil/a.go:333:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(fNil() == nil).Should(BeTrue())` instead
+confignil/a.go:334:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil == fNil()).Should(BeTrue())` instead
+confignil/a.go:337:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(fNotNil() != nil).Should(BeTrue())` instead
+confignil/a.go:338:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil != fNotNil()).Should(BeTrue())` instead
+confignil/a.go:361:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x != nil).ShouldNot(BeTrue())` instead
+confignil/a.go:362:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != x).ShouldNot(BeTrue())` instead
+confignil/a.go:365:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(y == nil).ShouldNot(BeTrue())` instead
+confignil/a.go:366:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == y).ShouldNot(BeTrue())` instead
+confignil/a.go:369:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNil() != nil).ShouldNot(BeTrue())` instead
+confignil/a.go:370:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != fNil()).ShouldNot(BeTrue())` instead
+confignil/a.go:373:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNotNil() == nil).ShouldNot(BeTrue())` instead
+confignil/a.go:374:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == fNotNil()).ShouldNot(BeTrue())` instead
+confignil/a.go:379:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x == nil).Should(BeTrue())` instead
+confignil/a.go:380:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == x).Should(BeTrue())` instead
+confignil/a.go:383:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(y != nil).Should(BeTrue())` instead
+confignil/a.go:384:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != y).Should(BeTrue())` instead
+confignil/a.go:387:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNil() == nil).Should(BeTrue())` instead
+confignil/a.go:388:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == fNil()).Should(BeTrue())` instead
+confignil/a.go:391:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNotNil() != nil).Should(BeTrue())` instead
+confignil/a.go:392:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != fNotNil()).Should(BeTrue())` instead
+confignil/a.go:400:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(x == nil).To(BeTrue())` instead
+confignil/a.go:401:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil == x).To(BeTrue())` instead
+confignil/a.go:404:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(y != nil).To(BeTrue())` instead
+confignil/a.go:405:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil != y).To(BeTrue())` instead
+confignil/a.go:408:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(fNil() == nil).To(BeTrue())` instead
+confignil/a.go:409:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil == fNil()).To(BeTrue())` instead
+confignil/a.go:412:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(fNotNil() != nil).To(BeTrue())` instead
+confignil/a.go:413:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil != fNotNil()).To(BeTrue())` instead
+confignil/a.go:436:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x != nil).NotTo(BeTrue())` instead
+confignil/a.go:437:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != x).NotTo(BeTrue())` instead
+confignil/a.go:440:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(y == nil).NotTo(BeTrue())` instead
+confignil/a.go:441:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == y).NotTo(BeTrue())` instead
+confignil/a.go:444:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNil() != nil).NotTo(BeTrue())` instead
+confignil/a.go:445:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != fNil()).NotTo(BeTrue())` instead
+confignil/a.go:448:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNotNil() == nil).NotTo(BeTrue())` instead
+confignil/a.go:449:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == fNotNil()).NotTo(BeTrue())` instead
+confignil/a.go:454:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x == nil).To(BeTrue())` instead
+confignil/a.go:455:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == x).To(BeTrue())` instead
+confignil/a.go:458:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(y != nil).To(BeTrue())` instead
+confignil/a.go:459:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != y).To(BeTrue())` instead
+confignil/a.go:462:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNil() == nil).To(BeTrue())` instead
+confignil/a.go:463:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == fNil()).To(BeTrue())` instead
+confignil/a.go:466:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNotNil() != nil).To(BeTrue())` instead
+confignil/a.go:467:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != fNotNil()).To(BeTrue())` instead
+confignil/a.go:474:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(x == nil).To(BeTrue())` instead
+confignil/a.go:475:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil == x).To(BeTrue())` instead
+confignil/a.go:478:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(y != nil).To(BeTrue())` instead
+confignil/a.go:479:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil != y).To(BeTrue())` instead
+confignil/a.go:482:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(fNil() == nil).To(BeTrue())` instead
+confignil/a.go:483:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil == fNil()).To(BeTrue())` instead
+confignil/a.go:486:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(fNotNil() != nil).To(BeTrue())` instead
+confignil/a.go:487:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil != fNotNil()).To(BeTrue())` instead
+confignil/a.go:510:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x != nil).ToNot(BeTrue())` instead
+confignil/a.go:511:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != x).ToNot(BeTrue())` instead
+confignil/a.go:514:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(y == nil).ToNot(BeTrue())` instead
+confignil/a.go:515:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == y).ToNot(BeTrue())` instead
+confignil/a.go:518:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNil() != nil).ToNot(BeTrue())` instead
+confignil/a.go:519:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != fNil()).ToNot(BeTrue())` instead
+confignil/a.go:522:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNotNil() == nil).ToNot(BeTrue())` instead
+confignil/a.go:523:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == fNotNil()).ToNot(BeTrue())` instead
+confignil/a.go:528:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x == nil).To(BeTrue())` instead
+confignil/a.go:529:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == x).To(BeTrue())` instead
+confignil/a.go:532:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(y != nil).To(BeTrue())` instead
+confignil/a.go:533:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != y).To(BeTrue())` instead
+confignil/a.go:536:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNil() == nil).To(BeTrue())` instead
+confignil/a.go:537:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == fNil()).To(BeTrue())` instead
+confignil/a.go:540:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNotNil() != nil).To(BeTrue())` instead
+confignil/a.go:541:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != fNotNil()).To(BeTrue())` instead
+confignil/a.go:587:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, x == nil).Should(BeTrue())` instead
+confignil/a.go:588:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == x).Should(BeTrue())` instead
+confignil/a.go:591:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, y != nil).Should(BeTrue())` instead
+confignil/a.go:592:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != y).Should(BeTrue())` instead
+confignil/a.go:595:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNil() == nil).Should(BeTrue())` instead
+confignil/a.go:596:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == fNil()).Should(BeTrue())` instead
+confignil/a.go:599:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNotNil() != nil).Should(BeTrue())` instead
+confignil/a.go:600:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != fNotNil()).Should(BeTrue())` instead
+confignil/a.go:605:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, x != nil).Should(BeFalse())` instead
+confignil/a.go:606:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != x).Should(BeFalse())` instead
+confignil/a.go:609:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, y == nil).Should(BeFalse())` instead
+confignil/a.go:610:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == y).Should(BeFalse())` instead
+confignil/a.go:613:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNil() != nil).Should(BeFalse())` instead
+confignil/a.go:614:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != fNil()).Should(BeFalse())` instead
+confignil/a.go:617:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNotNil() == nil).Should(BeFalse())` instead
+confignil/a.go:618:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == fNotNil()).Should(BeFalse())` instead
+confignil/a.go:625:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, x == nil).Should(BeTrue())` instead
+confignil/a.go:626:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil == x).Should(BeTrue())` instead
+confignil/a.go:629:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, y != nil).Should(BeTrue())` instead
+confignil/a.go:630:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil != y).Should(BeTrue())` instead
+confignil/a.go:633:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, fNil() == nil).Should(BeTrue())` instead
+confignil/a.go:634:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil == fNil()).Should(BeTrue())` instead
+confignil/a.go:637:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, fNotNil() != nil).Should(BeTrue())` instead
+confignil/a.go:638:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil != fNotNil()).Should(BeTrue())` instead
+confignil/a.go:661:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, x == nil).Should(BeTrue())` instead
+confignil/a.go:662:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == x).Should(BeTrue())` instead
+confignil/a.go:665:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, y != nil).Should(BeTrue())` instead
+confignil/a.go:666:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != y).Should(BeTrue())` instead
+confignil/a.go:669:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNil() == nil).Should(BeTrue())` instead
+confignil/a.go:670:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == fNil()).Should(BeTrue())` instead
+confignil/a.go:673:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNotNil() != nil).Should(BeTrue())` instead
+confignil/a.go:674:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != fNotNil()).Should(BeTrue())` instead
+confignil/a.go:679:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, x != nil).ShouldNot(BeTrue())` instead
+confignil/a.go:680:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != x).ShouldNot(BeTrue())` instead
+confignil/a.go:683:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, y == nil).ShouldNot(BeTrue())` instead
+confignil/a.go:684:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == y).ShouldNot(BeTrue())` instead
+confignil/a.go:687:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNil() != nil).ShouldNot(BeTrue())` instead
+confignil/a.go:688:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != fNil()).ShouldNot(BeTrue())` instead
+confignil/a.go:691:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNotNil() == nil).ShouldNot(BeTrue())` instead
+confignil/a.go:692:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == fNotNil()).ShouldNot(BeTrue())` instead
+confignil/a.go:736:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, x == nil).To(BeTrue())` instead
+confignil/a.go:737:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == x).To(BeTrue())` instead
+confignil/a.go:740:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, y != nil).To(BeTrue())` instead
+confignil/a.go:741:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != y).To(BeTrue())` instead
+confignil/a.go:744:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNil() == nil).To(BeTrue())` instead
+confignil/a.go:745:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == fNil()).To(BeTrue())` instead
+confignil/a.go:748:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNotNil() != nil).To(BeTrue())` instead
+confignil/a.go:749:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != fNotNil()).To(BeTrue())` instead
+confignil/a.go:754:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, x != nil).To(BeFalse())` instead
+confignil/a.go:755:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != x).To(BeFalse())` instead
+confignil/a.go:758:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, y == nil).To(BeFalse())` instead
+confignil/a.go:759:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == y).To(BeFalse())` instead
+confignil/a.go:762:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNil() != nil).To(BeFalse())` instead
+confignil/a.go:763:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != fNil()).To(BeFalse())` instead
+confignil/a.go:766:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNotNil() == nil).To(BeFalse())` instead
+confignil/a.go:767:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == fNotNil()).To(BeFalse())` instead
+confignil/a.go:774:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, x == nil).To(BeTrue())` instead
+confignil/a.go:775:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil == x).To(BeTrue())` instead
+confignil/a.go:778:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, y != nil).To(BeTrue())` instead
+confignil/a.go:779:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil != y).To(BeTrue())` instead
+confignil/a.go:782:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, fNil() == nil).To(BeTrue())` instead
+confignil/a.go:783:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil == fNil()).To(BeTrue())` instead
+confignil/a.go:786:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, fNotNil() != nil).To(BeTrue())` instead
+confignil/a.go:787:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil != fNotNil()).To(BeTrue())` instead
+confignil/a.go:810:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, x == nil).To(BeTrue())` instead
+confignil/a.go:811:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == x).To(BeTrue())` instead
+confignil/a.go:814:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, y != nil).To(BeTrue())` instead
+confignil/a.go:815:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != y).To(BeTrue())` instead
+confignil/a.go:818:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNil() == nil).To(BeTrue())` instead
+confignil/a.go:819:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == fNil()).To(BeTrue())` instead
+confignil/a.go:822:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNotNil() != nil).To(BeTrue())` instead
+confignil/a.go:823:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != fNotNil()).To(BeTrue())` instead
+confignil/a.go:828:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, x != nil).ToNot(BeTrue())` instead
+confignil/a.go:829:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != x).ToNot(BeTrue())` instead
+confignil/a.go:832:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, y == nil).ToNot(BeTrue())` instead
+confignil/a.go:833:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == y).ToNot(BeTrue())` instead
+confignil/a.go:836:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNil() != nil).ToNot(BeTrue())` instead
+confignil/a.go:837:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != fNil()).ToNot(BeTrue())` instead
+confignil/a.go:840:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNotNil() == nil).ToNot(BeTrue())` instead
+confignil/a.go:841:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == fNotNil()).ToNot(BeTrue())` instead
+confignil/a.go:849:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, x == nil).Should(BeTrue())` instead
+confignil/a.go:850:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil == x).Should(BeTrue())` instead
+confignil/a.go:853:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, y != nil).Should(BeTrue())` instead
+confignil/a.go:854:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil != y).Should(BeTrue())` instead
+confignil/a.go:857:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, fNil() == nil).Should(BeTrue())` instead
+confignil/a.go:858:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil == fNil()).Should(BeTrue())` instead
+confignil/a.go:861:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, fNotNil() != nil).Should(BeTrue())` instead
+confignil/a.go:862:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil != fNotNil()).Should(BeTrue())` instead
+confignil/a.go:885:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, x != nil).ShouldNot(BeTrue())` instead
+confignil/a.go:886:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != x).ShouldNot(BeTrue())` instead
+confignil/a.go:889:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, y == nil).ShouldNot(BeTrue())` instead
+confignil/a.go:890:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == y).ShouldNot(BeTrue())` instead
+confignil/a.go:893:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNil() != nil).ShouldNot(BeTrue())` instead
+confignil/a.go:894:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != fNil()).ShouldNot(BeTrue())` instead
+confignil/a.go:897:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNotNil() == nil).ShouldNot(BeTrue())` instead
+confignil/a.go:898:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == fNotNil()).ShouldNot(BeTrue())` instead
+confignil/a.go:903:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, x == nil).Should(BeTrue())` instead
+confignil/a.go:904:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == x).Should(BeTrue())` instead
+confignil/a.go:907:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, y != nil).Should(BeTrue())` instead
+confignil/a.go:908:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != y).Should(BeTrue())` instead
+confignil/a.go:911:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNil() == nil).Should(BeTrue())` instead
+confignil/a.go:912:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == fNil()).Should(BeTrue())` instead
+confignil/a.go:915:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNotNil() != nil).Should(BeTrue())` instead
+confignil/a.go:916:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != fNotNil()).Should(BeTrue())` instead
+confignil/a.go:924:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, x == nil).To(BeTrue())` instead
+confignil/a.go:925:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil == x).To(BeTrue())` instead
+confignil/a.go:928:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, y != nil).To(BeTrue())` instead
+confignil/a.go:929:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil != y).To(BeTrue())` instead
+confignil/a.go:932:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, fNil() == nil).To(BeTrue())` instead
+confignil/a.go:933:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil == fNil()).To(BeTrue())` instead
+confignil/a.go:936:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, fNotNil() != nil).To(BeTrue())` instead
+confignil/a.go:937:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil != fNotNil()).To(BeTrue())` instead
+confignil/a.go:960:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, x != nil).NotTo(BeTrue())` instead
+confignil/a.go:961:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != x).NotTo(BeTrue())` instead
+confignil/a.go:964:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, y == nil).NotTo(BeTrue())` instead
+confignil/a.go:965:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == y).NotTo(BeTrue())` instead
+confignil/a.go:968:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNil() != nil).NotTo(BeTrue())` instead
+confignil/a.go:969:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != fNil()).NotTo(BeTrue())` instead
+confignil/a.go:972:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNotNil() == nil).NotTo(BeTrue())` instead
+confignil/a.go:973:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == fNotNil()).NotTo(BeTrue())` instead
+confignil/a.go:978:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, x == nil).To(BeTrue())` instead
+confignil/a.go:979:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == x).To(BeTrue())` instead
+confignil/a.go:982:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, y != nil).To(BeTrue())` instead
+confignil/a.go:983:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != y).To(BeTrue())` instead
+confignil/a.go:986:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNil() == nil).To(BeTrue())` instead
+confignil/a.go:987:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == fNil()).To(BeTrue())` instead
+confignil/a.go:990:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNotNil() != nil).To(BeTrue())` instead
+confignil/a.go:991:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != fNotNil()).To(BeTrue())` instead
+confignil/a.go:998:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, x == nil).To(BeTrue())` instead
+confignil/a.go:999:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil == x).To(BeTrue())` instead
+confignil/a.go:1002:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, y != nil).To(BeTrue())` instead
+confignil/a.go:1003:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil != y).To(BeTrue())` instead
+confignil/a.go:1006:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, fNil() == nil).To(BeTrue())` instead
+confignil/a.go:1007:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil == fNil()).To(BeTrue())` instead
+confignil/a.go:1010:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, fNotNil() != nil).To(BeTrue())` instead
+confignil/a.go:1011:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil != fNotNil()).To(BeTrue())` instead
+confignil/a.go:1034:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, x != nil).ToNot(BeTrue())` instead
+confignil/a.go:1035:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != x).ToNot(BeTrue())` instead
+confignil/a.go:1038:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, y == nil).ToNot(BeTrue())` instead
+confignil/a.go:1039:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == y).ToNot(BeTrue())` instead
+confignil/a.go:1042:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNil() != nil).ToNot(BeTrue())` instead
+confignil/a.go:1043:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != fNil()).ToNot(BeTrue())` instead
+confignil/a.go:1046:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNotNil() == nil).ToNot(BeTrue())` instead
+confignil/a.go:1047:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == fNotNil()).ToNot(BeTrue())` instead
+confignil/a.go:1052:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, x == nil).To(BeTrue())` instead
+confignil/a.go:1053:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == x).To(BeTrue())` instead
+confignil/a.go:1056:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, y != nil).To(BeTrue())` instead
+confignil/a.go:1057:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != y).To(BeTrue())` instead
+confignil/a.go:1060:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNil() == nil).To(BeTrue())` instead
+confignil/a.go:1061:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == fNil()).To(BeTrue())` instead
+confignil/a.go:1064:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNotNil() != nil).To(BeTrue())` instead
+confignil/a.go:1065:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != fNotNil()).To(BeTrue())` instead
+confignil/a.go:1111:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(x == nil).Should(BeTrue())` instead
+confignil/a.go:1112:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == x).Should(BeTrue())` instead
+confignil/a.go:1115:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(y != nil).Should(BeTrue())` instead
+confignil/a.go:1116:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != y).Should(BeTrue())` instead
+confignil/a.go:1119:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNil() == nil).Should(BeTrue())` instead
+confignil/a.go:1120:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == fNil()).Should(BeTrue())` instead
+confignil/a.go:1123:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNotNil() != nil).Should(BeTrue())` instead
+confignil/a.go:1124:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != fNotNil()).Should(BeTrue())` instead
+confignil/a.go:1129:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(x != nil).Should(BeFalse())` instead
+confignil/a.go:1130:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != x).Should(BeFalse())` instead
+confignil/a.go:1133:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(y == nil).Should(BeFalse())` instead
+confignil/a.go:1134:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == y).Should(BeFalse())` instead
+confignil/a.go:1137:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNil() != nil).Should(BeFalse())` instead
+confignil/a.go:1138:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != fNil()).Should(BeFalse())` instead
+confignil/a.go:1141:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNotNil() == nil).Should(BeFalse())` instead
+confignil/a.go:1142:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == fNotNil()).Should(BeFalse())` instead
+confignil/a.go:1149:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(x == nil).Should(BeTrue())` instead
+confignil/a.go:1150:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil == x).Should(BeTrue())` instead
+confignil/a.go:1153:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(y != nil).Should(BeTrue())` instead
+confignil/a.go:1154:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil != y).Should(BeTrue())` instead
+confignil/a.go:1157:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(fNil() == nil).Should(BeTrue())` instead
+confignil/a.go:1158:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil == fNil()).Should(BeTrue())` instead
+confignil/a.go:1161:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(fNotNil() != nil).Should(BeTrue())` instead
+confignil/a.go:1162:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil != fNotNil()).Should(BeTrue())` instead
+confignil/a.go:1185:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(x == nil).Should(BeTrue())` instead
+confignil/a.go:1186:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == x).Should(BeTrue())` instead
+confignil/a.go:1189:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(y != nil).Should(BeTrue())` instead
+confignil/a.go:1190:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != y).Should(BeTrue())` instead
+confignil/a.go:1193:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNil() == nil).Should(BeTrue())` instead
+confignil/a.go:1194:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == fNil()).Should(BeTrue())` instead
+confignil/a.go:1197:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNotNil() != nil).Should(BeTrue())` instead
+confignil/a.go:1198:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != fNotNil()).Should(BeTrue())` instead
+confignil/a.go:1203:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(x != nil).ShouldNot(BeTrue())` instead
+confignil/a.go:1204:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != x).ShouldNot(BeTrue())` instead
+confignil/a.go:1207:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(y == nil).ShouldNot(BeTrue())` instead
+confignil/a.go:1208:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == y).ShouldNot(BeTrue())` instead
+confignil/a.go:1211:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNil() != nil).ShouldNot(BeTrue())` instead
+confignil/a.go:1212:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != fNil()).ShouldNot(BeTrue())` instead
+confignil/a.go:1215:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNotNil() == nil).ShouldNot(BeTrue())` instead
+confignil/a.go:1216:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == fNotNil()).ShouldNot(BeTrue())` instead
+confignil/a.go:1260:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(x == nil).To(BeTrue())` instead
+confignil/a.go:1261:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == x).To(BeTrue())` instead
+confignil/a.go:1264:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(y != nil).To(BeTrue())` instead
+confignil/a.go:1265:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != y).To(BeTrue())` instead
+confignil/a.go:1268:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNil() == nil).To(BeTrue())` instead
+confignil/a.go:1269:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == fNil()).To(BeTrue())` instead
+confignil/a.go:1272:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNotNil() != nil).To(BeTrue())` instead
+confignil/a.go:1273:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != fNotNil()).To(BeTrue())` instead
+confignil/a.go:1278:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(x != nil).To(BeFalse())` instead
+confignil/a.go:1279:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != x).To(BeFalse())` instead
+confignil/a.go:1282:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(y == nil).To(BeFalse())` instead
+confignil/a.go:1283:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == y).To(BeFalse())` instead
+confignil/a.go:1286:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNil() != nil).To(BeFalse())` instead
+confignil/a.go:1287:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != fNil()).To(BeFalse())` instead
+confignil/a.go:1290:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNotNil() == nil).To(BeFalse())` instead
+confignil/a.go:1291:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == fNotNil()).To(BeFalse())` instead
+confignil/a.go:1298:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(x == nil).To(BeTrue())` instead
+confignil/a.go:1299:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil == x).To(BeTrue())` instead
+confignil/a.go:1302:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(y != nil).To(BeTrue())` instead
+confignil/a.go:1303:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil != y).To(BeTrue())` instead
+confignil/a.go:1306:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(fNil() == nil).To(BeTrue())` instead
+confignil/a.go:1307:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil == fNil()).To(BeTrue())` instead
+confignil/a.go:1310:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(fNotNil() != nil).To(BeTrue())` instead
+confignil/a.go:1311:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil != fNotNil()).To(BeTrue())` instead
+confignil/a.go:1334:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(x == nil).To(BeTrue())` instead
+confignil/a.go:1335:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == x).To(BeTrue())` instead
+confignil/a.go:1338:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(y != nil).To(BeTrue())` instead
+confignil/a.go:1339:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != y).To(BeTrue())` instead
+confignil/a.go:1342:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNil() == nil).To(BeTrue())` instead
+confignil/a.go:1343:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == fNil()).To(BeTrue())` instead
+confignil/a.go:1346:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNotNil() != nil).To(BeTrue())` instead
+confignil/a.go:1347:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != fNotNil()).To(BeTrue())` instead
+confignil/a.go:1352:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(x != nil).ToNot(BeTrue())` instead
+confignil/a.go:1353:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != x).ToNot(BeTrue())` instead
+confignil/a.go:1356:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(y == nil).ToNot(BeTrue())` instead
+confignil/a.go:1357:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == y).ToNot(BeTrue())` instead
+confignil/a.go:1360:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNil() != nil).ToNot(BeTrue())` instead
+confignil/a.go:1361:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != fNil()).ToNot(BeTrue())` instead
+confignil/a.go:1364:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNotNil() == nil).ToNot(BeTrue())` instead
+confignil/a.go:1365:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == fNotNil()).ToNot(BeTrue())` instead
+confignil/a.go:1373:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(x == nil).Should(BeTrue())` instead
+confignil/a.go:1374:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil == x).Should(BeTrue())` instead
+confignil/a.go:1377:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(y != nil).Should(BeTrue())` instead
+confignil/a.go:1378:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil != y).Should(BeTrue())` instead
+confignil/a.go:1381:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(fNil() == nil).Should(BeTrue())` instead
+confignil/a.go:1382:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil == fNil()).Should(BeTrue())` instead
+confignil/a.go:1385:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(fNotNil() != nil).Should(BeTrue())` instead
+confignil/a.go:1386:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil != fNotNil()).Should(BeTrue())` instead
+confignil/a.go:1409:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(x != nil).ShouldNot(BeTrue())` instead
+confignil/a.go:1410:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != x).ShouldNot(BeTrue())` instead
+confignil/a.go:1413:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(y == nil).ShouldNot(BeTrue())` instead
+confignil/a.go:1414:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == y).ShouldNot(BeTrue())` instead
+confignil/a.go:1417:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNil() != nil).ShouldNot(BeTrue())` instead
+confignil/a.go:1418:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != fNil()).ShouldNot(BeTrue())` instead
+confignil/a.go:1421:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNotNil() == nil).ShouldNot(BeTrue())` instead
+confignil/a.go:1422:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == fNotNil()).ShouldNot(BeTrue())` instead
+confignil/a.go:1427:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(x == nil).Should(BeTrue())` instead
+confignil/a.go:1428:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == x).Should(BeTrue())` instead
+confignil/a.go:1431:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(y != nil).Should(BeTrue())` instead
+confignil/a.go:1432:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != y).Should(BeTrue())` instead
+confignil/a.go:1435:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNil() == nil).Should(BeTrue())` instead
+confignil/a.go:1436:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == fNil()).Should(BeTrue())` instead
+confignil/a.go:1439:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNotNil() != nil).Should(BeTrue())` instead
+confignil/a.go:1440:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != fNotNil()).Should(BeTrue())` instead
+confignil/a.go:1448:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(x == nil).To(BeTrue())` instead
+confignil/a.go:1449:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil == x).To(BeTrue())` instead
+confignil/a.go:1452:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(y != nil).To(BeTrue())` instead
+confignil/a.go:1453:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil != y).To(BeTrue())` instead
+confignil/a.go:1456:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(fNil() == nil).To(BeTrue())` instead
+confignil/a.go:1457:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil == fNil()).To(BeTrue())` instead
+confignil/a.go:1460:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(fNotNil() != nil).To(BeTrue())` instead
+confignil/a.go:1461:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil != fNotNil()).To(BeTrue())` instead
+confignil/a.go:1484:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(x != nil).NotTo(BeTrue())` instead
+confignil/a.go:1485:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != x).NotTo(BeTrue())` instead
+confignil/a.go:1488:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(y == nil).NotTo(BeTrue())` instead
+confignil/a.go:1489:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == y).NotTo(BeTrue())` instead
+confignil/a.go:1492:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNil() != nil).NotTo(BeTrue())` instead
+confignil/a.go:1493:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != fNil()).NotTo(BeTrue())` instead
+confignil/a.go:1496:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNotNil() == nil).NotTo(BeTrue())` instead
+confignil/a.go:1497:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == fNotNil()).NotTo(BeTrue())` instead
+confignil/a.go:1502:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(x == nil).To(BeTrue())` instead
+confignil/a.go:1503:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == x).To(BeTrue())` instead
+confignil/a.go:1506:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(y != nil).To(BeTrue())` instead
+confignil/a.go:1507:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != y).To(BeTrue())` instead
+confignil/a.go:1510:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNil() == nil).To(BeTrue())` instead
+confignil/a.go:1511:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == fNil()).To(BeTrue())` instead
+confignil/a.go:1514:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNotNil() != nil).To(BeTrue())` instead
+confignil/a.go:1515:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != fNotNil()).To(BeTrue())` instead
+confignil/a.go:1522:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(x == nil).To(BeTrue())` instead
+confignil/a.go:1523:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil == x).To(BeTrue())` instead
+confignil/a.go:1526:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(y != nil).To(BeTrue())` instead
+confignil/a.go:1527:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil != y).To(BeTrue())` instead
+confignil/a.go:1530:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(fNil() == nil).To(BeTrue())` instead
+confignil/a.go:1531:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil == fNil()).To(BeTrue())` instead
+confignil/a.go:1534:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(fNotNil() != nil).To(BeTrue())` instead
+confignil/a.go:1535:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil != fNotNil()).To(BeTrue())` instead
+confignil/a.go:1558:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(x != nil).ToNot(BeTrue())` instead
+confignil/a.go:1559:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != x).ToNot(BeTrue())` instead
+confignil/a.go:1562:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(y == nil).ToNot(BeTrue())` instead
+confignil/a.go:1563:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == y).ToNot(BeTrue())` instead
+confignil/a.go:1566:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNil() != nil).ToNot(BeTrue())` instead
+confignil/a.go:1567:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != fNil()).ToNot(BeTrue())` instead
+confignil/a.go:1570:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNotNil() == nil).ToNot(BeTrue())` instead
+confignil/a.go:1571:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == fNotNil()).ToNot(BeTrue())` instead
+confignil/a.go:1576:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(x == nil).To(BeTrue())` instead
+confignil/a.go:1577:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == x).To(BeTrue())` instead
+confignil/a.go:1580:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(y != nil).To(BeTrue())` instead
+confignil/a.go:1581:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != y).To(BeTrue())` instead
+confignil/a.go:1584:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNil() == nil).To(BeTrue())` instead
+confignil/a.go:1585:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == fNil()).To(BeTrue())` instead
+confignil/a.go:1588:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNotNil() != nil).To(BeTrue())` instead
+confignil/a.go:1589:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != fNotNil()).To(BeTrue())` instead
+errnil/async.go:31:3:ginkgolinter::ginkgo-linter: MatchError first parameter (f1) must be error, string, GomegaMatcher or func(error)bool are allowed
+errnil/async.go:32:3:ginkgolinter::ginkgo-linter: the MatchError matcher used to assert a non error type (func() string { return "fake error" })
+errnil/at.go:116:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(err == nil).To(BeTrue())` instead
+errnil/at.go:117:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(err == nil).To(BeFalse())` instead
+errnil/at.go:118:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(err != nil).To(BeTrue())` instead
+errnil/at.go:119:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(err != nil).To(BeFalse())` instead
+errnil/at.go:120:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == err).To(BeTrue())` instead
+errnil/at.go:121:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == err).WithOffset(1).To(BeTrue())` instead
+errnil/at.go:122:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == errFunc()).To(BeTrue())` instead
+errnil/at.go:123:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(errFunc() != nil).To(BeTrue())` instead
+eventually/eventuallyFunc.go:83:3:ginkgolinter::ginkgo-linter: Success matcher only support a single error value, or function with Gomega as its first parameter
+eventually/eventuallyFunc.go:84:3:ginkgolinter::ginkgo-linter: Success matcher only support a single error value, or function with Gomega as its first parameter
+eventually/eventuallyFunc.go:104:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Eventually(func() bool { return true }()).Should(BeTrue())` instead
+eventually/eventuallyFunc.go:105:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Eventually(func() bool { return true }).Should(BeTrue())` instead
+eventually/eventuallyFunc.go:106:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Eventually(func() bool { return true }).Should(BeTrue())` instead
+eventually/eventuallyFunc.go:107:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Eventually(func() bool { return true }()).Should(BeTrue())` instead
+forceExpectTo/gomegavar.go:17:3:ginkgolinter::ginkgo-linter: "Eventually": missing assertion method. Expected "Should()" or "ShouldNot()"
+gomegaonly/gomegaonly_test.go:54:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `g.Expect(len(arr) == 3).Should(BeTrue())` instead
+haveoccurred/asyncsucceed.go:65:3:ginkgolinter::ginkgo-linter: Success matcher only support a single error value, or function with Gomega as its first parameter
+haveoccurred/asyncsucceed.go:69:3:ginkgolinter::ginkgo-linter: Success matcher only support a single error value, or function with Gomega as its first parameter
+haveoccurred/asyncsucceed.go:70:3:ginkgolinter::ginkgo-linter: Success matcher does not support multiple values
+haveoccurred/asyncsucceed.go:71:3:ginkgolinter::ginkgo-linter: Success matcher does not support multiple values
+haveoccurred/asyncsucceed.go:72:3:ginkgolinter::ginkgo-linter: Success matcher does not support multiple values
+haveoccurred/asyncsucceed.go:73:3:ginkgolinter::ginkgo-linter: Success matcher does not support multiple values
+haveoccurred/asyncsucceed.go:74:3:ginkgolinter::ginkgo-linter: Success matcher does not support multiple values
+haveoccurred/asyncsucceed.go:84:3:ginkgolinter::ginkgo-linter: Success matcher only support a single error value, or function with Gomega as its first parameter
+haveoccurred/asyncsucceed.go:90:3:ginkgolinter::ginkgo-linter: Success matcher only support a single error value, or function with Gomega as its first parameter
+haveoccurred/asyncsucceed.go:91:4:ginkgolinter::ginkgo-linter: "Expect": missing assertion method. Expected "To()", "ToNot()" or "NotTo()"
+haveoccurred/asyncsucceed.go:97:3:ginkgolinter::ginkgo-linter: Success matcher does not support multiple values
+haveoccurred/asyncsucceed.go:103:3:ginkgolinter::ginkgo-linter: Success matcher does not support multiple values
+haveoccurred/asyncsucceed.go:105:3:ginkgolinter::ginkgo-linter: Success matcher does not support multiple values
+haveoccurred/asyncsucceed.gomega.go:48:3:ginkgolinter::ginkgo-linter: Success matcher only support a single error value, or function with Gomega as its first parameter
+haveoccurred/asyncsucceed.gomega.go:52:3:ginkgolinter::ginkgo-linter: Success matcher does not support multiple values
+haveoccurred/asyncsucceed.gomega.go:53:3:ginkgolinter::ginkgo-linter: Success matcher does not support multiple values
+haveoccurred/asyncsucceed.gomega.go:54:3:ginkgolinter::ginkgo-linter: Success matcher does not support multiple values
+haveoccurred/asyncsucceed.gomega.go:55:3:ginkgolinter::ginkgo-linter: Success matcher does not support multiple values
+haveoccurred/asyncsucceed.gomega.go:56:3:ginkgolinter::ginkgo-linter: Success matcher does not support multiple values
+haveoccurred/haveoccurred.go:17:3:ginkgolinter::ginkgo-linter: asserting a non-error type with HaveOccurred matcher
+haveoccurred/haveoccurred.go:38:3:ginkgolinter::ginkgo-linter: asserting a non-error type with Succeed matcher
+haveoccurred/haveoccurred.go:42:3:ginkgolinter::ginkgo-linter: asserting a non-error type with Succeed matcher
+haveoccurred/haveoccurred.go:46:3:ginkgolinter::ginkgo-linter: the Success matcher does not support multiple values
+haveoccurred/haveoccurred.gomega.go:17:3:ginkgolinter::ginkgo-linter: asserting a non-error type with HaveOccurred matcher
+haveoccurred/haveoccurred.gomega.go:33:3:ginkgolinter::ginkgo-linter: asserting a non-error type with Succeed matcher
+len/b.go:11:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(len(s) == 4).Should(BeTrue())` instead
+len/b.go:12:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(4 == len(s)).Should(BeTrue())` instead
+len/b.go:13:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(len(s) == 4).WithOffset(1).Should(BeTrue())` instead
+len/b.go:14:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(4 == len(s)).WithOffset(1).Should(BeTrue())` instead
+len/b.go:17:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(len(s2) == len(s)).Should(BeTrue())` instead
+len/b.go:18:3:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(len(s) == 4).Should(BeTrue())` instead
+len/c.go:11:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `g.Expect(len(s) == 4).Should(g.BeTrue())` instead
+len/c.go:12:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `g.Expect(4 == len(s)).Should(g.BeTrue())` instead
+len/c.go:14:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `g.Expect(len(s) == 4).WithOffset(1).Should(g.BeTrue())` instead
+len/c.go:15:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `g.Expect(4 == len(s)).WithOffset(1).Should(g.BeTrue())` instead
+len/c.go:19:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `g.Expect(len(s) != 4).Should(g.BeFalse())` instead
+len/c.go:20:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `g.Expect(4 != len(s)).ShouldNot(g.BeTrue())` instead
+len/c.go:22:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `g.Expect(len(s) != 4).WithOffset(1).Should(g.BeFalse())` instead
+len/c.go:23:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `g.Expect(4 != len(s)).WithOffset(1).ShouldNot(g.BeTrue())` instead
+len/c.go:24:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `g.Expect(len(s) == 5).WithOffset(1).Should(g.BeFalse())` instead
+matcherror/matcherror.go:79:3:ginkgolinter::ginkgo-linter: the MatchError matcher used to assert a non error type ("example")
+matcherror/matcherror.go:81:3:ginkgolinter::ginkgo-linter: the MatchError matcher used to assert a non error type (one)
+matcherror/matcherror.go:82:3:ginkgolinter::ginkgo-linter: missing function description as second parameter of MatchError
+matcherror/matcherror.go:83:3:ginkgolinter::ginkgo-linter: MatchError first parameter (f1) must be error, string, GomegaMatcher or func(error)bool are allowed
+matcherror/matcherror.go:106:3:ginkgolinter::ginkgo-linter: redundant MatchError arguments; consider removing them
+matcherror/matcherror.go:107:3:ginkgolinter::ginkgo-linter: redundant MatchError arguments; consider removing them
+matcherror/matcherror.go:108:3:ginkgolinter::ginkgo-linter: redundant MatchError arguments; consider removing them
+matcherror/matcherror.go:112:3:ginkgolinter::ginkgo-linter: multiple issues: MatchError first parameter (1) must be error, string, GomegaMatcher or func(error)bool are allowed; redundant MatchError arguments; consider removing them
+matcherror/matcherror.go:113:3:ginkgolinter::ginkgo-linter: multiple issues: MatchError first parameter (compareString) must be error, string, GomegaMatcher or func(error)bool are allowed; redundant MatchError arguments; consider removing them
+matcherror/matcherror.go:117:3:ginkgolinter::ginkgo-linter: The second parameter of MatchError must be the function description (string)
+matcherror/matcherror.go:118:3:ginkgolinter::ginkgo-linter: The second parameter of MatchError must be the function description (string)
+matcherror/matcherror.go:119:3:ginkgolinter::ginkgo-linter: The second parameter of MatchError must be the function description (string)
+matcherror/matcherror.go:123:3:ginkgolinter::ginkgo-linter: redundant MatchError arguments; consider removing them
+matcherror/matcherror.go:124:3:ginkgolinter::ginkgo-linter: redundant MatchError arguments; consider removing them
+matcherror/matcherror.go:125:3:ginkgolinter::ginkgo-linter: redundant MatchError arguments; consider removing them
+matcherror/matcherror.go:126:3:ginkgolinter::ginkgo-linter: redundant MatchError arguments; consider removing them
+matcherror/matcherror.go:127:3:ginkgolinter::ginkgo-linter: redundant MatchError arguments; consider removing them
+matcherror/matcherror.go:137:3:ginkgolinter::ginkgo-linter: the MatchError matcher used to assert a non error type (f2())
+matcherror/matcherror.go:138:3:ginkgolinter::ginkgo-linter: the MatchError matcher used to assert a non error type (f2())
+matcherror/matcherror.go:139:3:ginkgolinter::ginkgo-linter: the MatchError matcher used to assert a non error type (f2())
+matcherror/matcherror.go:140:3:ginkgolinter::ginkgo-linter: the MatchError matcher used to assert a non error type (f3())
+matcherror/matcherror.go:141:3:ginkgolinter::ginkgo-linter: the MatchError matcher used to assert a non error type (f3())
+matcherror/matcherror.go:142:3:ginkgolinter::ginkgo-linter: the MatchError matcher used to assert a non error type (f3())
+matcherror/matcherror.go:147:3:ginkgolinter::ginkgo-linter: redundant MatchError arguments; consider removing them
+matcherror/matcherror.go:149:3:ginkgolinter::ginkgo-linter: multiple issues: redundant MatchError arguments; consider removing them; redundant MatchError arguments; consider removing them
+matcherror/matcherror.go:150:3:ginkgolinter::ginkgo-linter: redundant MatchError arguments; consider removing them
+matcherror/matcherror.go:151:3:ginkgolinter::ginkgo-linter: redundant MatchError arguments; consider removing them
+matcherror/matcherror.go:156:3:ginkgolinter::ginkgo-linter: redundant MatchError arguments; consider removing them
+matcherror/matcherror.go:158:3:ginkgolinter::ginkgo-linter: multiple issues: redundant MatchError arguments; consider removing them; redundant MatchError arguments; consider removing them
+matcherror/matcherror.go:159:3:ginkgolinter::ginkgo-linter: redundant MatchError arguments; consider removing them
+matcherror/matcherror.go:160:3:ginkgolinter::ginkgo-linter: redundant MatchError arguments; consider removing them
+matcherror/matcherror.gomega.go:33:3:ginkgolinter::ginkgo-linter: the MatchError matcher used to assert a non error type ("example")
+matcherror/matcherror.gomega.go:35:3:ginkgolinter::ginkgo-linter: the MatchError matcher used to assert a non error type (one)
+matcherror/matcherror.gomega.go:36:3:ginkgolinter::ginkgo-linter: missing function description as second parameter of MatchError
+matcherror/matcherror.gomega.go:37:3:ginkgolinter::ginkgo-linter: MatchError first parameter (f1) must be error, string, GomegaMatcher or func(error)bool are allowed
+matcherror/matcherror.gomega.go:60:3:ginkgolinter::ginkgo-linter: redundant MatchError arguments; consider removing them
+matcherror/matcherror.gomega.go:61:3:ginkgolinter::ginkgo-linter: redundant MatchError arguments; consider removing them
+matcherror/matcherror.gomega.go:62:3:ginkgolinter::ginkgo-linter: redundant MatchError arguments; consider removing them
+matcherror/matcherror.gomega.go:66:3:ginkgolinter::ginkgo-linter: multiple issues: MatchError first parameter (1) must be error, string, GomegaMatcher or func(error)bool are allowed; redundant MatchError arguments; consider removing them
+matcherror/matcherror.gomega.go:67:3:ginkgolinter::ginkgo-linter: multiple issues: MatchError first parameter (compareString) must be error, string, GomegaMatcher or func(error)bool are allowed; redundant MatchError arguments; consider removing them
+matcherror/matcherror.gomega.go:71:3:ginkgolinter::ginkgo-linter: The second parameter of MatchError must be the function description (string)
+matcherror/matcherror.gomega.go:72:3:ginkgolinter::ginkgo-linter: The second parameter of MatchError must be the function description (string)
+matcherror/matcherror.gomega.go:73:3:ginkgolinter::ginkgo-linter: The second parameter of MatchError must be the function description (string)
+matcherror/matcherror.gomega.go:77:3:ginkgolinter::ginkgo-linter: redundant MatchError arguments; consider removing them
+matcherror/matcherror.gomega.go:78:3:ginkgolinter::ginkgo-linter: redundant MatchError arguments; consider removing them
+matcherror/matcherror.gomega.go:79:3:ginkgolinter::ginkgo-linter: redundant MatchError arguments; consider removing them
+matcherror/matcherror.gomega.go:80:3:ginkgolinter::ginkgo-linter: redundant MatchError arguments; consider removing them
+matcherror/matcherror.gomega.go:81:3:ginkgolinter::ginkgo-linter: redundant MatchError arguments; consider removing them
+matcherror/matcherror.gomega.go:91:3:ginkgolinter::ginkgo-linter: the MatchError matcher used to assert a non error type (f2())
+matcherror/matcherror.gomega.go:92:3:ginkgolinter::ginkgo-linter: the MatchError matcher used to assert a non error type (f2())
+matcherror/matcherror.gomega.go:93:3:ginkgolinter::ginkgo-linter: the MatchError matcher used to assert a non error type (f2())
+matcherror/matcherror.gomega.go:94:3:ginkgolinter::ginkgo-linter: the MatchError matcher used to assert a non error type (f3())
+matcherror/matcherror.gomega.go:95:3:ginkgolinter::ginkgo-linter: the MatchError matcher used to assert a non error type (f3())
+matcherror/matcherror.gomega.go:96:3:ginkgolinter::ginkgo-linter: the MatchError matcher used to assert a non error type (f3())
+matcherror/matcherror.gomega.go:101:3:ginkgolinter::ginkgo-linter: redundant MatchError arguments; consider removing them
+matcherror/matcherror.gomega.go:103:3:ginkgolinter::ginkgo-linter: multiple issues: redundant MatchError arguments; consider removing them; redundant MatchError arguments; consider removing them
+matcherror/matcherror.gomega.go:104:3:ginkgolinter::ginkgo-linter: redundant MatchError arguments; consider removing them
+matcherror/matcherror.gomega.go:105:3:ginkgolinter::ginkgo-linter: redundant MatchError arguments; consider removing them
+matcherror/matcherror.gomega.go:110:3:ginkgolinter::ginkgo-linter: redundant MatchError arguments; consider removing them
+matcherror/matcherror.gomega.go:112:3:ginkgolinter::ginkgo-linter: multiple issues: redundant MatchError arguments; consider removing them; redundant MatchError arguments; consider removing them
+matcherror/matcherror.gomega.go:113:3:ginkgolinter::ginkgo-linter: redundant MatchError arguments; consider removing them
+matcherror/matcherror.gomega.go:114:3:ginkgolinter::ginkgo-linter: redundant MatchError arguments; consider removing them
+nil/a.go:64:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x == nil).WithOffset(1).Should(BeTrue())` instead
+nil/a.go:65:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == x).Should(BeTrue())` instead
+nil/a.go:68:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(y != nil).Should(BeTrue())` instead
+nil/a.go:69:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != y).Should(BeTrue())` instead
+nil/a.go:72:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNil() == nil).Should(BeTrue())` instead
+nil/a.go:73:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == fNil()).Should(BeTrue())` instead
+nil/a.go:76:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNotNil() != nil).Should(BeTrue())` instead
+nil/a.go:77:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != fNotNil()).Should(BeTrue())` instead
+nil/a.go:82:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x != nil).Should(BeFalse())` instead
+nil/a.go:83:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != x).Should(BeFalse())` instead
+nil/a.go:86:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(y == nil).Should(BeFalse())` instead
+nil/a.go:87:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == y).Should(BeFalse())` instead
+nil/a.go:90:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNil() != nil).Should(BeFalse())` instead
+nil/a.go:91:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != fNil()).Should(BeFalse())` instead
+nil/a.go:94:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNotNil() == nil).Should(BeFalse())` instead
+nil/a.go:95:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == fNotNil()).Should(BeFalse())` instead
+nil/a.go:102:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(x == nil).Should(BeTrue())` instead
+nil/a.go:103:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil == x).Should(BeTrue())` instead
+nil/a.go:106:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(y != nil).Should(BeTrue())` instead
+nil/a.go:107:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil != y).Should(BeTrue())` instead
+nil/a.go:110:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(fNil() == nil).Should(BeTrue())` instead
+nil/a.go:111:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil == fNil()).Should(BeTrue())` instead
+nil/a.go:114:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(fNotNil() != nil).Should(BeTrue())` instead
+nil/a.go:115:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil != fNotNil()).Should(BeTrue())` instead
+nil/a.go:138:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x == nil).Should(BeTrue())` instead
+nil/a.go:139:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == x).Should(BeTrue())` instead
+nil/a.go:142:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(y != nil).Should(BeTrue())` instead
+nil/a.go:143:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != y).Should(BeTrue())` instead
+nil/a.go:146:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNil() == nil).Should(BeTrue())` instead
+nil/a.go:147:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == fNil()).Should(BeTrue())` instead
+nil/a.go:150:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNotNil() != nil).Should(BeTrue())` instead
+nil/a.go:151:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != fNotNil()).Should(BeTrue())` instead
+nil/a.go:156:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x != nil).ShouldNot(BeTrue())` instead
+nil/a.go:157:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != x).ShouldNot(BeTrue())` instead
+nil/a.go:160:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(y == nil).ShouldNot(BeTrue())` instead
+nil/a.go:161:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == y).ShouldNot(BeTrue())` instead
+nil/a.go:164:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNil() != nil).ShouldNot(BeTrue())` instead
+nil/a.go:165:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != fNil()).ShouldNot(BeTrue())` instead
+nil/a.go:168:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNotNil() == nil).ShouldNot(BeTrue())` instead
+nil/a.go:169:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == fNotNil()).ShouldNot(BeTrue())` instead
+nil/a.go:213:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x == nil).To(BeTrue())` instead
+nil/a.go:214:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == x).To(BeTrue())` instead
+nil/a.go:217:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(y != nil).To(BeTrue())` instead
+nil/a.go:218:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != y).To(BeTrue())` instead
+nil/a.go:221:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNil() == nil).To(BeTrue())` instead
+nil/a.go:222:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == fNil()).To(BeTrue())` instead
+nil/a.go:225:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNotNil() != nil).To(BeTrue())` instead
+nil/a.go:226:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != fNotNil()).To(BeTrue())` instead
+nil/a.go:231:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x != nil).To(BeFalse())` instead
+nil/a.go:232:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != x).To(BeFalse())` instead
+nil/a.go:235:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(y == nil).To(BeFalse())` instead
+nil/a.go:236:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == y).To(BeFalse())` instead
+nil/a.go:239:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNil() != nil).To(BeFalse())` instead
+nil/a.go:240:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != fNil()).To(BeFalse())` instead
+nil/a.go:243:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNotNil() == nil).To(BeFalse())` instead
+nil/a.go:244:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == fNotNil()).To(BeFalse())` instead
+nil/a.go:251:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(x == nil).To(BeTrue())` instead
+nil/a.go:252:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil == x).To(BeTrue())` instead
+nil/a.go:255:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(y != nil).To(BeTrue())` instead
+nil/a.go:256:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil != y).To(BeTrue())` instead
+nil/a.go:259:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(fNil() == nil).To(BeTrue())` instead
+nil/a.go:260:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil == fNil()).To(BeTrue())` instead
+nil/a.go:263:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(fNotNil() != nil).To(BeTrue())` instead
+nil/a.go:264:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil != fNotNil()).To(BeTrue())` instead
+nil/a.go:287:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x == nil).To(BeTrue())` instead
+nil/a.go:288:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == x).To(BeTrue())` instead
+nil/a.go:291:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(y != nil).To(BeTrue())` instead
+nil/a.go:292:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != y).To(BeTrue())` instead
+nil/a.go:295:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNil() == nil).To(BeTrue())` instead
+nil/a.go:296:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == fNil()).To(BeTrue())` instead
+nil/a.go:299:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNotNil() != nil).To(BeTrue())` instead
+nil/a.go:300:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != fNotNil()).To(BeTrue())` instead
+nil/a.go:305:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x != nil).ToNot(BeTrue())` instead
+nil/a.go:306:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != x).ToNot(BeTrue())` instead
+nil/a.go:309:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(y == nil).ToNot(BeTrue())` instead
+nil/a.go:310:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == y).ToNot(BeTrue())` instead
+nil/a.go:313:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNil() != nil).ToNot(BeTrue())` instead
+nil/a.go:314:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != fNil()).ToNot(BeTrue())` instead
+nil/a.go:317:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNotNil() == nil).ToNot(BeTrue())` instead
+nil/a.go:318:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == fNotNil()).ToNot(BeTrue())` instead
+nil/a.go:326:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(x == nil).Should(BeTrue())` instead
+nil/a.go:327:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil == x).Should(BeTrue())` instead
+nil/a.go:330:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(y != nil).Should(BeTrue())` instead
+nil/a.go:331:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil != y).Should(BeTrue())` instead
+nil/a.go:334:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(fNil() == nil).Should(BeTrue())` instead
+nil/a.go:335:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil == fNil()).Should(BeTrue())` instead
+nil/a.go:338:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(fNotNil() != nil).Should(BeTrue())` instead
+nil/a.go:339:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil != fNotNil()).Should(BeTrue())` instead
+nil/a.go:362:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x != nil).ShouldNot(BeTrue())` instead
+nil/a.go:363:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != x).ShouldNot(BeTrue())` instead
+nil/a.go:366:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(y == nil).ShouldNot(BeTrue())` instead
+nil/a.go:367:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == y).ShouldNot(BeTrue())` instead
+nil/a.go:370:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNil() != nil).ShouldNot(BeTrue())` instead
+nil/a.go:371:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != fNil()).ShouldNot(BeTrue())` instead
+nil/a.go:374:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNotNil() == nil).ShouldNot(BeTrue())` instead
+nil/a.go:375:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == fNotNil()).ShouldNot(BeTrue())` instead
+nil/a.go:380:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x == nil).Should(BeTrue())` instead
+nil/a.go:381:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == x).Should(BeTrue())` instead
+nil/a.go:384:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(y != nil).Should(BeTrue())` instead
+nil/a.go:385:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != y).Should(BeTrue())` instead
+nil/a.go:388:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNil() == nil).Should(BeTrue())` instead
+nil/a.go:389:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == fNil()).Should(BeTrue())` instead
+nil/a.go:392:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNotNil() != nil).Should(BeTrue())` instead
+nil/a.go:393:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != fNotNil()).Should(BeTrue())` instead
+nil/a.go:401:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(x == nil).To(BeTrue())` instead
+nil/a.go:402:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil == x).To(BeTrue())` instead
+nil/a.go:405:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(y != nil).To(BeTrue())` instead
+nil/a.go:406:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil != y).To(BeTrue())` instead
+nil/a.go:409:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(fNil() == nil).To(BeTrue())` instead
+nil/a.go:410:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil == fNil()).To(BeTrue())` instead
+nil/a.go:413:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(fNotNil() != nil).To(BeTrue())` instead
+nil/a.go:414:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil != fNotNil()).To(BeTrue())` instead
+nil/a.go:437:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x != nil).NotTo(BeTrue())` instead
+nil/a.go:438:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != x).NotTo(BeTrue())` instead
+nil/a.go:441:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(y == nil).NotTo(BeTrue())` instead
+nil/a.go:442:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == y).NotTo(BeTrue())` instead
+nil/a.go:445:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNil() != nil).NotTo(BeTrue())` instead
+nil/a.go:446:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != fNil()).NotTo(BeTrue())` instead
+nil/a.go:449:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNotNil() == nil).NotTo(BeTrue())` instead
+nil/a.go:450:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == fNotNil()).NotTo(BeTrue())` instead
+nil/a.go:455:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x == nil).To(BeTrue())` instead
+nil/a.go:456:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == x).To(BeTrue())` instead
+nil/a.go:459:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(y != nil).To(BeTrue())` instead
+nil/a.go:460:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != y).To(BeTrue())` instead
+nil/a.go:463:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNil() == nil).To(BeTrue())` instead
+nil/a.go:464:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == fNil()).To(BeTrue())` instead
+nil/a.go:467:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNotNil() != nil).To(BeTrue())` instead
+nil/a.go:468:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != fNotNil()).To(BeTrue())` instead
+nil/a.go:475:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(x == nil).To(BeTrue())` instead
+nil/a.go:476:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil == x).To(BeTrue())` instead
+nil/a.go:479:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(y != nil).To(BeTrue())` instead
+nil/a.go:480:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil != y).To(BeTrue())` instead
+nil/a.go:483:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(fNil() == nil).To(BeTrue())` instead
+nil/a.go:484:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil == fNil()).To(BeTrue())` instead
+nil/a.go:487:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(fNotNil() != nil).To(BeTrue())` instead
+nil/a.go:488:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(nil != fNotNil()).To(BeTrue())` instead
+nil/a.go:511:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x != nil).ToNot(BeTrue())` instead
+nil/a.go:512:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != x).ToNot(BeTrue())` instead
+nil/a.go:515:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(y == nil).ToNot(BeTrue())` instead
+nil/a.go:516:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == y).ToNot(BeTrue())` instead
+nil/a.go:519:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNil() != nil).ToNot(BeTrue())` instead
+nil/a.go:520:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != fNil()).ToNot(BeTrue())` instead
+nil/a.go:523:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNotNil() == nil).ToNot(BeTrue())` instead
+nil/a.go:524:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == fNotNil()).ToNot(BeTrue())` instead
+nil/a.go:529:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x == nil).To(BeTrue())` instead
+nil/a.go:530:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == x).To(BeTrue())` instead
+nil/a.go:533:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(y != nil).To(BeTrue())` instead
+nil/a.go:534:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != y).To(BeTrue())` instead
+nil/a.go:537:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNil() == nil).To(BeTrue())` instead
+nil/a.go:538:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil == fNil()).To(BeTrue())` instead
+nil/a.go:541:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(fNotNil() != nil).To(BeTrue())` instead
+nil/a.go:542:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(nil != fNotNil()).To(BeTrue())` instead
+nil/a.go:588:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, x == nil).Should(BeTrue())` instead
+nil/a.go:589:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == x).Should(BeTrue())` instead
+nil/a.go:592:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, y != nil).Should(BeTrue())` instead
+nil/a.go:593:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != y).Should(BeTrue())` instead
+nil/a.go:596:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNil() == nil).Should(BeTrue())` instead
+nil/a.go:597:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == fNil()).Should(BeTrue())` instead
+nil/a.go:600:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNotNil() != nil).Should(BeTrue())` instead
+nil/a.go:601:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != fNotNil()).Should(BeTrue())` instead
+nil/a.go:606:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, x != nil).Should(BeFalse())` instead
+nil/a.go:607:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != x).Should(BeFalse())` instead
+nil/a.go:610:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, y == nil).Should(BeFalse())` instead
+nil/a.go:611:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == y).Should(BeFalse())` instead
+nil/a.go:614:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNil() != nil).Should(BeFalse())` instead
+nil/a.go:615:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != fNil()).Should(BeFalse())` instead
+nil/a.go:618:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNotNil() == nil).Should(BeFalse())` instead
+nil/a.go:619:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == fNotNil()).Should(BeFalse())` instead
+nil/a.go:626:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, x == nil).Should(BeTrue())` instead
+nil/a.go:627:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil == x).Should(BeTrue())` instead
+nil/a.go:630:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, y != nil).Should(BeTrue())` instead
+nil/a.go:631:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil != y).Should(BeTrue())` instead
+nil/a.go:634:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, fNil() == nil).Should(BeTrue())` instead
+nil/a.go:635:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil == fNil()).Should(BeTrue())` instead
+nil/a.go:638:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, fNotNil() != nil).Should(BeTrue())` instead
+nil/a.go:639:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil != fNotNil()).Should(BeTrue())` instead
+nil/a.go:662:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, x == nil).Should(BeTrue())` instead
+nil/a.go:663:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == x).Should(BeTrue())` instead
+nil/a.go:666:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, y != nil).Should(BeTrue())` instead
+nil/a.go:667:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != y).Should(BeTrue())` instead
+nil/a.go:670:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNil() == nil).Should(BeTrue())` instead
+nil/a.go:671:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == fNil()).Should(BeTrue())` instead
+nil/a.go:674:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNotNil() != nil).Should(BeTrue())` instead
+nil/a.go:675:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != fNotNil()).Should(BeTrue())` instead
+nil/a.go:680:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, x != nil).ShouldNot(BeTrue())` instead
+nil/a.go:681:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != x).ShouldNot(BeTrue())` instead
+nil/a.go:684:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, y == nil).ShouldNot(BeTrue())` instead
+nil/a.go:685:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == y).ShouldNot(BeTrue())` instead
+nil/a.go:688:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNil() != nil).ShouldNot(BeTrue())` instead
+nil/a.go:689:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != fNil()).ShouldNot(BeTrue())` instead
+nil/a.go:692:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNotNil() == nil).ShouldNot(BeTrue())` instead
+nil/a.go:693:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == fNotNil()).ShouldNot(BeTrue())` instead
+nil/a.go:737:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, x == nil).To(BeTrue())` instead
+nil/a.go:738:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == x).To(BeTrue())` instead
+nil/a.go:741:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, y != nil).To(BeTrue())` instead
+nil/a.go:742:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != y).To(BeTrue())` instead
+nil/a.go:745:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNil() == nil).To(BeTrue())` instead
+nil/a.go:746:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == fNil()).To(BeTrue())` instead
+nil/a.go:749:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNotNil() != nil).To(BeTrue())` instead
+nil/a.go:750:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != fNotNil()).To(BeTrue())` instead
+nil/a.go:755:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, x != nil).To(BeFalse())` instead
+nil/a.go:756:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != x).To(BeFalse())` instead
+nil/a.go:759:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, y == nil).To(BeFalse())` instead
+nil/a.go:760:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == y).To(BeFalse())` instead
+nil/a.go:763:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNil() != nil).To(BeFalse())` instead
+nil/a.go:764:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != fNil()).To(BeFalse())` instead
+nil/a.go:767:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNotNil() == nil).To(BeFalse())` instead
+nil/a.go:768:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == fNotNil()).To(BeFalse())` instead
+nil/a.go:775:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, x == nil).To(BeTrue())` instead
+nil/a.go:776:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil == x).To(BeTrue())` instead
+nil/a.go:779:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, y != nil).To(BeTrue())` instead
+nil/a.go:780:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil != y).To(BeTrue())` instead
+nil/a.go:783:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, fNil() == nil).To(BeTrue())` instead
+nil/a.go:784:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil == fNil()).To(BeTrue())` instead
+nil/a.go:787:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, fNotNil() != nil).To(BeTrue())` instead
+nil/a.go:788:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil != fNotNil()).To(BeTrue())` instead
+nil/a.go:811:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, x == nil).To(BeTrue())` instead
+nil/a.go:812:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == x).To(BeTrue())` instead
+nil/a.go:815:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, y != nil).To(BeTrue())` instead
+nil/a.go:816:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != y).To(BeTrue())` instead
+nil/a.go:819:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNil() == nil).To(BeTrue())` instead
+nil/a.go:820:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == fNil()).To(BeTrue())` instead
+nil/a.go:823:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNotNil() != nil).To(BeTrue())` instead
+nil/a.go:824:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != fNotNil()).To(BeTrue())` instead
+nil/a.go:829:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, x != nil).ToNot(BeTrue())` instead
+nil/a.go:830:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != x).ToNot(BeTrue())` instead
+nil/a.go:833:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, y == nil).ToNot(BeTrue())` instead
+nil/a.go:834:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == y).ToNot(BeTrue())` instead
+nil/a.go:837:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNil() != nil).ToNot(BeTrue())` instead
+nil/a.go:838:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != fNil()).ToNot(BeTrue())` instead
+nil/a.go:841:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNotNil() == nil).ToNot(BeTrue())` instead
+nil/a.go:842:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == fNotNil()).ToNot(BeTrue())` instead
+nil/a.go:850:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, x == nil).Should(BeTrue())` instead
+nil/a.go:851:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil == x).Should(BeTrue())` instead
+nil/a.go:854:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, y != nil).Should(BeTrue())` instead
+nil/a.go:855:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil != y).Should(BeTrue())` instead
+nil/a.go:858:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, fNil() == nil).Should(BeTrue())` instead
+nil/a.go:859:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil == fNil()).Should(BeTrue())` instead
+nil/a.go:862:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, fNotNil() != nil).Should(BeTrue())` instead
+nil/a.go:863:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil != fNotNil()).Should(BeTrue())` instead
+nil/a.go:886:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, x != nil).ShouldNot(BeTrue())` instead
+nil/a.go:887:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != x).ShouldNot(BeTrue())` instead
+nil/a.go:890:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, y == nil).ShouldNot(BeTrue())` instead
+nil/a.go:891:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == y).ShouldNot(BeTrue())` instead
+nil/a.go:894:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNil() != nil).ShouldNot(BeTrue())` instead
+nil/a.go:895:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != fNil()).ShouldNot(BeTrue())` instead
+nil/a.go:898:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNotNil() == nil).ShouldNot(BeTrue())` instead
+nil/a.go:899:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == fNotNil()).ShouldNot(BeTrue())` instead
+nil/a.go:904:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, x == nil).Should(BeTrue())` instead
+nil/a.go:905:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == x).Should(BeTrue())` instead
+nil/a.go:908:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, y != nil).Should(BeTrue())` instead
+nil/a.go:909:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != y).Should(BeTrue())` instead
+nil/a.go:912:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNil() == nil).Should(BeTrue())` instead
+nil/a.go:913:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == fNil()).Should(BeTrue())` instead
+nil/a.go:916:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNotNil() != nil).Should(BeTrue())` instead
+nil/a.go:917:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != fNotNil()).Should(BeTrue())` instead
+nil/a.go:925:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, x == nil).To(BeTrue())` instead
+nil/a.go:926:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil == x).To(BeTrue())` instead
+nil/a.go:929:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, y != nil).To(BeTrue())` instead
+nil/a.go:930:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil != y).To(BeTrue())` instead
+nil/a.go:933:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, fNil() == nil).To(BeTrue())` instead
+nil/a.go:934:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil == fNil()).To(BeTrue())` instead
+nil/a.go:937:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, fNotNil() != nil).To(BeTrue())` instead
+nil/a.go:938:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil != fNotNil()).To(BeTrue())` instead
+nil/a.go:961:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, x != nil).NotTo(BeTrue())` instead
+nil/a.go:962:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != x).NotTo(BeTrue())` instead
+nil/a.go:965:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, y == nil).NotTo(BeTrue())` instead
+nil/a.go:966:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == y).NotTo(BeTrue())` instead
+nil/a.go:969:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNil() != nil).NotTo(BeTrue())` instead
+nil/a.go:970:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != fNil()).NotTo(BeTrue())` instead
+nil/a.go:973:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNotNil() == nil).NotTo(BeTrue())` instead
+nil/a.go:974:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == fNotNil()).NotTo(BeTrue())` instead
+nil/a.go:979:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, x == nil).To(BeTrue())` instead
+nil/a.go:980:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == x).To(BeTrue())` instead
+nil/a.go:983:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, y != nil).To(BeTrue())` instead
+nil/a.go:984:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != y).To(BeTrue())` instead
+nil/a.go:987:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNil() == nil).To(BeTrue())` instead
+nil/a.go:988:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == fNil()).To(BeTrue())` instead
+nil/a.go:991:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNotNil() != nil).To(BeTrue())` instead
+nil/a.go:992:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != fNotNil()).To(BeTrue())` instead
+nil/a.go:999:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, x == nil).To(BeTrue())` instead
+nil/a.go:1000:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil == x).To(BeTrue())` instead
+nil/a.go:1003:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, y != nil).To(BeTrue())` instead
+nil/a.go:1004:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil != y).To(BeTrue())` instead
+nil/a.go:1007:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, fNil() == nil).To(BeTrue())` instead
+nil/a.go:1008:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil == fNil()).To(BeTrue())` instead
+nil/a.go:1011:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, fNotNil() != nil).To(BeTrue())` instead
+nil/a.go:1012:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `ExpectWithOffset(1, nil != fNotNil()).To(BeTrue())` instead
+nil/a.go:1035:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, x != nil).ToNot(BeTrue())` instead
+nil/a.go:1036:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != x).ToNot(BeTrue())` instead
+nil/a.go:1039:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, y == nil).ToNot(BeTrue())` instead
+nil/a.go:1040:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == y).ToNot(BeTrue())` instead
+nil/a.go:1043:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNil() != nil).ToNot(BeTrue())` instead
+nil/a.go:1044:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != fNil()).ToNot(BeTrue())` instead
+nil/a.go:1047:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNotNil() == nil).ToNot(BeTrue())` instead
+nil/a.go:1048:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == fNotNil()).ToNot(BeTrue())` instead
+nil/a.go:1053:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, x == nil).To(BeTrue())` instead
+nil/a.go:1054:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == x).To(BeTrue())` instead
+nil/a.go:1057:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, y != nil).To(BeTrue())` instead
+nil/a.go:1058:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != y).To(BeTrue())` instead
+nil/a.go:1061:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNil() == nil).To(BeTrue())` instead
+nil/a.go:1062:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil == fNil()).To(BeTrue())` instead
+nil/a.go:1065:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, fNotNil() != nil).To(BeTrue())` instead
+nil/a.go:1066:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `ExpectWithOffset(1, nil != fNotNil()).To(BeTrue())` instead
+nil/a.go:1112:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(x == nil).Should(BeTrue())` instead
+nil/a.go:1113:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == x).Should(BeTrue())` instead
+nil/a.go:1116:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(y != nil).Should(BeTrue())` instead
+nil/a.go:1117:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != y).Should(BeTrue())` instead
+nil/a.go:1120:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNil() == nil).Should(BeTrue())` instead
+nil/a.go:1121:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == fNil()).Should(BeTrue())` instead
+nil/a.go:1124:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNotNil() != nil).Should(BeTrue())` instead
+nil/a.go:1125:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != fNotNil()).Should(BeTrue())` instead
+nil/a.go:1130:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(x != nil).Should(BeFalse())` instead
+nil/a.go:1131:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != x).Should(BeFalse())` instead
+nil/a.go:1134:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(y == nil).Should(BeFalse())` instead
+nil/a.go:1135:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == y).Should(BeFalse())` instead
+nil/a.go:1138:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNil() != nil).Should(BeFalse())` instead
+nil/a.go:1139:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != fNil()).Should(BeFalse())` instead
+nil/a.go:1142:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNotNil() == nil).Should(BeFalse())` instead
+nil/a.go:1143:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == fNotNil()).Should(BeFalse())` instead
+nil/a.go:1150:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(x == nil).Should(BeTrue())` instead
+nil/a.go:1151:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil == x).Should(BeTrue())` instead
+nil/a.go:1154:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(y != nil).Should(BeTrue())` instead
+nil/a.go:1155:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil != y).Should(BeTrue())` instead
+nil/a.go:1158:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(fNil() == nil).Should(BeTrue())` instead
+nil/a.go:1159:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil == fNil()).Should(BeTrue())` instead
+nil/a.go:1162:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(fNotNil() != nil).Should(BeTrue())` instead
+nil/a.go:1163:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil != fNotNil()).Should(BeTrue())` instead
+nil/a.go:1186:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(x == nil).Should(BeTrue())` instead
+nil/a.go:1187:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == x).Should(BeTrue())` instead
+nil/a.go:1190:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(y != nil).Should(BeTrue())` instead
+nil/a.go:1191:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != y).Should(BeTrue())` instead
+nil/a.go:1194:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNil() == nil).Should(BeTrue())` instead
+nil/a.go:1195:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == fNil()).Should(BeTrue())` instead
+nil/a.go:1198:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNotNil() != nil).Should(BeTrue())` instead
+nil/a.go:1199:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != fNotNil()).Should(BeTrue())` instead
+nil/a.go:1204:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(x != nil).ShouldNot(BeTrue())` instead
+nil/a.go:1205:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != x).ShouldNot(BeTrue())` instead
+nil/a.go:1208:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(y == nil).ShouldNot(BeTrue())` instead
+nil/a.go:1209:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == y).ShouldNot(BeTrue())` instead
+nil/a.go:1212:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNil() != nil).ShouldNot(BeTrue())` instead
+nil/a.go:1213:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != fNil()).ShouldNot(BeTrue())` instead
+nil/a.go:1216:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNotNil() == nil).ShouldNot(BeTrue())` instead
+nil/a.go:1217:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == fNotNil()).ShouldNot(BeTrue())` instead
+nil/a.go:1261:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(x == nil).To(BeTrue())` instead
+nil/a.go:1262:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == x).To(BeTrue())` instead
+nil/a.go:1265:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(y != nil).To(BeTrue())` instead
+nil/a.go:1266:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != y).To(BeTrue())` instead
+nil/a.go:1269:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNil() == nil).To(BeTrue())` instead
+nil/a.go:1270:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == fNil()).To(BeTrue())` instead
+nil/a.go:1273:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNotNil() != nil).To(BeTrue())` instead
+nil/a.go:1274:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != fNotNil()).To(BeTrue())` instead
+nil/a.go:1279:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(x != nil).To(BeFalse())` instead
+nil/a.go:1280:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != x).To(BeFalse())` instead
+nil/a.go:1283:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(y == nil).To(BeFalse())` instead
+nil/a.go:1284:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == y).To(BeFalse())` instead
+nil/a.go:1287:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNil() != nil).To(BeFalse())` instead
+nil/a.go:1288:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != fNil()).To(BeFalse())` instead
+nil/a.go:1291:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNotNil() == nil).To(BeFalse())` instead
+nil/a.go:1292:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == fNotNil()).To(BeFalse())` instead
+nil/a.go:1299:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(x == nil).To(BeTrue())` instead
+nil/a.go:1300:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil == x).To(BeTrue())` instead
+nil/a.go:1303:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(y != nil).To(BeTrue())` instead
+nil/a.go:1304:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil != y).To(BeTrue())` instead
+nil/a.go:1307:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(fNil() == nil).To(BeTrue())` instead
+nil/a.go:1308:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil == fNil()).To(BeTrue())` instead
+nil/a.go:1311:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(fNotNil() != nil).To(BeTrue())` instead
+nil/a.go:1312:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil != fNotNil()).To(BeTrue())` instead
+nil/a.go:1335:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(x == nil).To(BeTrue())` instead
+nil/a.go:1336:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == x).To(BeTrue())` instead
+nil/a.go:1339:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(y != nil).To(BeTrue())` instead
+nil/a.go:1340:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != y).To(BeTrue())` instead
+nil/a.go:1343:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNil() == nil).To(BeTrue())` instead
+nil/a.go:1344:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == fNil()).To(BeTrue())` instead
+nil/a.go:1347:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNotNil() != nil).To(BeTrue())` instead
+nil/a.go:1348:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != fNotNil()).To(BeTrue())` instead
+nil/a.go:1353:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(x != nil).ToNot(BeTrue())` instead
+nil/a.go:1354:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != x).ToNot(BeTrue())` instead
+nil/a.go:1357:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(y == nil).ToNot(BeTrue())` instead
+nil/a.go:1358:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == y).ToNot(BeTrue())` instead
+nil/a.go:1361:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNil() != nil).ToNot(BeTrue())` instead
+nil/a.go:1362:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != fNil()).ToNot(BeTrue())` instead
+nil/a.go:1365:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNotNil() == nil).ToNot(BeTrue())` instead
+nil/a.go:1366:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == fNotNil()).ToNot(BeTrue())` instead
+nil/a.go:1374:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(x == nil).Should(BeTrue())` instead
+nil/a.go:1375:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil == x).Should(BeTrue())` instead
+nil/a.go:1378:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(y != nil).Should(BeTrue())` instead
+nil/a.go:1379:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil != y).Should(BeTrue())` instead
+nil/a.go:1382:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(fNil() == nil).Should(BeTrue())` instead
+nil/a.go:1383:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil == fNil()).Should(BeTrue())` instead
+nil/a.go:1386:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(fNotNil() != nil).Should(BeTrue())` instead
+nil/a.go:1387:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil != fNotNil()).Should(BeTrue())` instead
+nil/a.go:1410:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(x != nil).ShouldNot(BeTrue())` instead
+nil/a.go:1411:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != x).ShouldNot(BeTrue())` instead
+nil/a.go:1414:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(y == nil).ShouldNot(BeTrue())` instead
+nil/a.go:1415:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == y).ShouldNot(BeTrue())` instead
+nil/a.go:1418:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNil() != nil).ShouldNot(BeTrue())` instead
+nil/a.go:1419:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != fNil()).ShouldNot(BeTrue())` instead
+nil/a.go:1422:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNotNil() == nil).ShouldNot(BeTrue())` instead
+nil/a.go:1423:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == fNotNil()).ShouldNot(BeTrue())` instead
+nil/a.go:1428:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(x == nil).Should(BeTrue())` instead
+nil/a.go:1429:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == x).Should(BeTrue())` instead
+nil/a.go:1432:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(y != nil).Should(BeTrue())` instead
+nil/a.go:1433:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != y).Should(BeTrue())` instead
+nil/a.go:1436:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNil() == nil).Should(BeTrue())` instead
+nil/a.go:1437:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == fNil()).Should(BeTrue())` instead
+nil/a.go:1440:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNotNil() != nil).Should(BeTrue())` instead
+nil/a.go:1441:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != fNotNil()).Should(BeTrue())` instead
+nil/a.go:1449:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(x == nil).To(BeTrue())` instead
+nil/a.go:1450:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil == x).To(BeTrue())` instead
+nil/a.go:1453:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(y != nil).To(BeTrue())` instead
+nil/a.go:1454:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil != y).To(BeTrue())` instead
+nil/a.go:1457:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(fNil() == nil).To(BeTrue())` instead
+nil/a.go:1458:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil == fNil()).To(BeTrue())` instead
+nil/a.go:1461:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(fNotNil() != nil).To(BeTrue())` instead
+nil/a.go:1462:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil != fNotNil()).To(BeTrue())` instead
+nil/a.go:1485:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(x != nil).NotTo(BeTrue())` instead
+nil/a.go:1486:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != x).NotTo(BeTrue())` instead
+nil/a.go:1489:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(y == nil).NotTo(BeTrue())` instead
+nil/a.go:1490:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == y).NotTo(BeTrue())` instead
+nil/a.go:1493:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNil() != nil).NotTo(BeTrue())` instead
+nil/a.go:1494:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != fNil()).NotTo(BeTrue())` instead
+nil/a.go:1497:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNotNil() == nil).NotTo(BeTrue())` instead
+nil/a.go:1498:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == fNotNil()).NotTo(BeTrue())` instead
+nil/a.go:1503:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(x == nil).To(BeTrue())` instead
+nil/a.go:1504:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == x).To(BeTrue())` instead
+nil/a.go:1507:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(y != nil).To(BeTrue())` instead
+nil/a.go:1508:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != y).To(BeTrue())` instead
+nil/a.go:1511:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNil() == nil).To(BeTrue())` instead
+nil/a.go:1512:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == fNil()).To(BeTrue())` instead
+nil/a.go:1515:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNotNil() != nil).To(BeTrue())` instead
+nil/a.go:1516:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != fNotNil()).To(BeTrue())` instead
+nil/a.go:1523:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(x == nil).To(BeTrue())` instead
+nil/a.go:1524:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil == x).To(BeTrue())` instead
+nil/a.go:1527:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(y != nil).To(BeTrue())` instead
+nil/a.go:1528:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil != y).To(BeTrue())` instead
+nil/a.go:1531:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(fNil() == nil).To(BeTrue())` instead
+nil/a.go:1532:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil == fNil()).To(BeTrue())` instead
+nil/a.go:1535:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(fNotNil() != nil).To(BeTrue())` instead
+nil/a.go:1536:6:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Ω(nil != fNotNil()).To(BeTrue())` instead
+nil/a.go:1559:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(x != nil).ToNot(BeTrue())` instead
+nil/a.go:1560:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != x).ToNot(BeTrue())` instead
+nil/a.go:1563:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(y == nil).ToNot(BeTrue())` instead
+nil/a.go:1564:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == y).ToNot(BeTrue())` instead
+nil/a.go:1567:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNil() != nil).ToNot(BeTrue())` instead
+nil/a.go:1568:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != fNil()).ToNot(BeTrue())` instead
+nil/a.go:1571:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNotNil() == nil).ToNot(BeTrue())` instead
+nil/a.go:1572:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == fNotNil()).ToNot(BeTrue())` instead
+nil/a.go:1577:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(x == nil).To(BeTrue())` instead
+nil/a.go:1578:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == x).To(BeTrue())` instead
+nil/a.go:1581:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(y != nil).To(BeTrue())` instead
+nil/a.go:1582:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != y).To(BeTrue())` instead
+nil/a.go:1585:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNil() == nil).To(BeTrue())` instead
+nil/a.go:1586:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil == fNil()).To(BeTrue())` instead
+nil/a.go:1589:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(fNotNil() != nil).To(BeTrue())` instead
+nil/a.go:1590:6:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Ω(nil != fNotNil()).To(BeTrue())` instead
+noassersion/ginkgo.go:14:3:ginkgolinter::ginkgo-linter: "Expect": missing assertion method. Expected "To()", "ToNot()" or "NotTo()"
+noassersion/ginkgo.go:15:3:ginkgolinter::ginkgo-linter: "Eventually": missing assertion method. Expected "Should()" or "ShouldNot()"
+noassersion/ginkgo.go:16:3:ginkgolinter::ginkgo-linter: "Eventually": missing assertion method. Expected "Should()" or "ShouldNot()"
+noassersion/ginkgo.go:17:3:ginkgolinter::ginkgo-linter: "Consistently": missing assertion method. Expected "Should()" or "ShouldNot()"
+noassersion/ginkgo.go:18:3:ginkgolinter::ginkgo-linter: "EventuallyWithOffset": missing assertion method. Expected "Should()" or "ShouldNot()"
+noassersion/ginkgo.go:18:44:ginkgolinter::ginkgo-linter: "Expect": missing assertion method. Expected "To()", "ToNot()" or "NotTo()"
+noassersion/ginkgo.go:19:3:ginkgolinter::ginkgo-linter: "ConsistentlyWithOffset": missing assertion method. Expected "Should()" or "ShouldNot()"
+noassersion/ginkgo.go:20:3:ginkgolinter::ginkgo-linter: "Ω": missing assertion method. Expected "Should()", "To()", "ShouldNot()", "ToNot()" or "NotTo()"
+noassersion/ginkgo.go:21:3:ginkgolinter::ginkgo-linter: "MyExpect": missing assertion method. Expected one of "To/NotTo/ToNot" (for Expect assertions) or "Should/ShouldNot" (for Eventually/Consistently assertions)
+noassersion/ginkgo.go:22:3:ginkgolinter::ginkgo-linter: "MyEventually": missing assertion method. Expected one of "To/NotTo/ToNot" (for Expect assertions) or "Should/ShouldNot" (for Eventually/Consistently assertions)
+noassersion/ginkgo.go:23:3:ginkgolinter::ginkgo-linter: "MyConsistently": missing assertion method. Expected one of "To/NotTo/ToNot" (for Expect assertions) or "Should/ShouldNot" (for Eventually/Consistently assertions)
+noassersion/ginkgo.go:24:3:ginkgolinter::ginkgo-linter: "NewAssertion": missing assertion method. Expected one of "To/NotTo/ToNot" (for Expect assertions) or "Should/ShouldNot" (for Eventually/Consistently assertions)
+noassersion/ginkgo.go:25:3:ginkgolinter::ginkgo-linter: "NewAsyncAssertion": missing assertion method. Expected one of "To/NotTo/ToNot" (for Expect assertions) or "Should/ShouldNot" (for Eventually/Consistently assertions)
+noassersion/ginkgo.go:27:3:ginkgolinter::ginkgo-linter: "": missing assertion method. Expected one of "To/NotTo/ToNot" (for Expect assertions) or "Should/ShouldNot" (for Eventually/Consistently assertions)
+noassersion/ginkgo.go:31:3:ginkgolinter::ginkgo-linter: "Eventually": missing assertion method. Expected "Should()" or "ShouldNot()"
+noassersion/gomagaimport.go:13:3:ginkgolinter::ginkgo-linter: "Expect": missing assertion method. Expected "To()", "ToNot()" or "NotTo()"
+noassersion/gomagaimport.go:15:3:ginkgolinter::ginkgo-linter: "Eventually": missing assertion method. Expected "Should()" or "ShouldNot()"
+noassersion/gomagaimport.go:17:5:ginkgolinter::ginkgo-linter: "Expect": missing assertion method. Expected "To()", "ToNot()" or "NotTo()"
+noassersion/gomagaimport.go:24:3:ginkgolinter::ginkgo-linter: "Consistently": missing assertion method. Expected "Should()" or "ShouldNot()"
+noassersion/gomagaimport.go:24:38:ginkgolinter::ginkgo-linter: "Expect": missing assertion method. Expected "To()", "ToNot()" or "NotTo()"
+noassersion/gomagaimport.go:25:3:ginkgolinter::ginkgo-linter: "EventuallyWithOffset": missing assertion method. Expected "Should()" or "ShouldNot()"
+noassersion/gomagaimport.go:25:49:ginkgolinter::ginkgo-linter: "Expect": missing assertion method. Expected "To()", "ToNot()" or "NotTo()"
+noassersion/gomagaimport.go:26:3:ginkgolinter::ginkgo-linter: "ConsistentlyWithOffset": missing assertion method. Expected "Should()" or "ShouldNot()"
+noassersion/gomagaimport.go:26:51:ginkgolinter::ginkgo-linter: "Expect": missing assertion method. Expected "To()", "ToNot()" or "NotTo()"
+noassersion/gomega_test.go:12:2:ginkgolinter::ginkgo-linter: "Expect": missing assertion method. Expected "To()", "ToNot()" or "NotTo()"
+noassersion/gomega_test.go:13:2:ginkgolinter::ginkgo-linter: "Expect": missing assertion method. Expected "To()", "ToNot()" or "NotTo()"
+noassersion/gomega_test.go:14:2:ginkgolinter::ginkgo-linter: "Expect": missing assertion method. Expected "To()", "ToNot()" or "NotTo()"
+noassersion/gomega_test.go:16:2:ginkgolinter::ginkgo-linter: "Eventually": missing assertion method. Expected "Should()" or "ShouldNot()"
+noassersion/gomega_test.go:16:33:ginkgolinter::ginkgo-linter: "Expect": missing assertion method. Expected "To()", "ToNot()" or "NotTo()"
+noassertion/ginkgo.go:11:3:ginkgolinter::ginkgo-linter: "MyEventually": missing assertion method. Expected one of "To/NotTo/ToNot" (for Expect assertions) or "Should/ShouldNot" (for Eventually/Consistently assertions)
+noassertionindirect/ginkgo.go:11:3:ginkgolinter::ginkgo-linter: "Expect": missing assertion method. Expected "To()", "ToNot()" or "NotTo()"
+noassertionindirect/ginkgo.go:12:3:ginkgolinter::ginkgo-linter: "MyExpect": missing assertion method. Expected one of "To/NotTo/ToNot" (for Expect assertions) or "Should/ShouldNot" (for Eventually/Consistently assertions)
+noassertionindirect/ginkgo.go:13:3:ginkgolinter::ginkgo-linter: "MyEventually": missing assertion method. Expected one of "To/NotTo/ToNot" (for Expect assertions) or "Should/ShouldNot" (for Eventually/Consistently assertions)
+noassertionindirect/ginkgo.go:14:3:ginkgolinter::ginkgo-linter: "MyConsistently": missing assertion method. Expected one of "To/NotTo/ToNot" (for Expect assertions) or "Should/ShouldNot" (for Eventually/Consistently assertions)
+noassertionindirect/ginkgo.go:15:3:ginkgolinter::ginkgo-linter: "NewAssertion": missing assertion method. Expected one of "To/NotTo/ToNot" (for Expect assertions) or "Should/ShouldNot" (for Eventually/Consistently assertions)
+noassertionindirect/ginkgo.go:16:3:ginkgolinter::ginkgo-linter: "NewAsyncAssertion": missing assertion method. Expected one of "To/NotTo/ToNot" (for Expect assertions) or "Should/ShouldNot" (for Eventually/Consistently assertions)
+nodotimport/a.go:22:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `gomega.Expect(x == nil).Should(gomega.BeTrue())` instead
+nodotimport/a.go:23:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `gomega.Expect(x == nil).Should(gomega.BeTrue())` instead
+nodotimport/a.go:25:3:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `gomega.Expect(x == nil).Should(gomega.BeTrue())` instead
+nodotimport/a.go:26:3:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `gomega.Expect(x == nil).Should(gomega.BeTrue())` instead
+nodotimport/b.go:21:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `g2.Expect(x == nil).Should(g2.BeTrue())` instead
+nodotimport/b.go:22:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `g2.Expect(x == nil).Should(g2.BeTrue())` instead
+nodotimport/b.go:24:3:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `g2.Expect(x == nil).Should(g2.BeTrue())` instead
+nodotimport/b.go:25:3:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `g2.Expect(x == nil).Should(g2.BeTrue())` instead
+pointerval/pointerval.go:52:3:ginkgolinter::ginkgo-linter: comparing a pointer to a value will always fail. Consider using `Expect(&v).Should(HaveValue(Equal(c)))` instead
+pointerval/pointerval.go:54:3:ginkgolinter::ginkgo-linter: comparing a pointer to a value will always fail. Consider using `Expect(p).Should(HaveValue(Equal(v)))` instead
+pointerval/pointerval.go:58:3:ginkgolinter::ginkgo-linter: comparing a pointer to a value will always fail. Consider using `Expect(p).Should(HaveValue(Equal(v)), "%d", 3)` instead
+pointerval/pointerval.go:64:3:ginkgolinter::ginkgo-linter: comparing a pointer to a value will always fail. Consider using `Expect(p).Should(HaveValue(Equal(c)))` instead
+pointerval/pointerval.go:70:3:ginkgolinter::ginkgo-linter: comparing a pointer to a value will always fail. Consider using `Expect(retPointer()).Should(HaveValue(Equal(c)))` instead
+pointerval/pointerval.go:88:4:ginkgolinter::ginkgo-linter: comparing a pointer to a value will always fail. Consider using `Expect(s3.field).Should(HaveValue(Equal(c)))` instead
+pointerval/pointerval.go:95:4:ginkgolinter::ginkgo-linter: comparing a pointer to a value will always fail. Consider using `Expect(s4.field).Should(HaveValue(Equal(c)))` instead
+pointerval/pointerval.go:120:3:ginkgolinter::ginkgo-linter: comparing a pointer to a value will always fail. Consider using `Expect(n).ShouldNot(HaveValue(Equal(c)))` instead
+pointerval/pointerval.go:121:3:ginkgolinter::ginkgo-linter: comparing a pointer to a value will always fail. Consider using `Expect(n).ToNot(HaveValue(Equal(c)))` instead
+pointerval/pointerval.go:135:4:ginkgolinter::ginkgo-linter: multiple issues: wrong boolean assertion; comparing a pointer to a value will always fail. Consider using `Expect(pt).Should(HaveValue(BeTrue()))` instead
+pointerval/pointerval.go:136:4:ginkgolinter::ginkgo-linter: multiple issues: wrong boolean assertion; comparing a pointer to a value will always fail. Consider using `Expect(pt).Should(HaveValue(BeTrue()))` instead
+pointerval/pointerval.go:140:4:ginkgolinter::ginkgo-linter: comparing a pointer to a value will always fail. Consider using `Expect(pt).Should(HaveValue(BeTrue()))` instead
+pointerval/pointerval.go:141:4:ginkgolinter::ginkgo-linter: multiple issues: avoid double negative assertion; comparing a pointer to a value will always fail. Consider using `Expect(pt).Should(HaveValue(BeTrue()))` instead
+pointerval/pointerval.go:145:4:ginkgolinter::ginkgo-linter: multiple issues: wrong boolean assertion; comparing a pointer to a value will always fail. Consider using `Expect(pf).Should(HaveValue(BeFalse()))` instead
+pointerval/pointerval.go:146:4:ginkgolinter::ginkgo-linter: multiple issues: wrong boolean assertion; comparing a pointer to a value will always fail. Consider using `Expect(pf).ShouldNot(HaveValue(BeTrue()))` instead
+pointerval/pointerval.go:150:4:ginkgolinter::ginkgo-linter: multiple issues: wrong boolean assertion; comparing a pointer to a value will always fail. Consider using `Expect(pf).ShouldNot(HaveValue(BeTrue()))` instead
+pointerval/pointerval.go:151:4:ginkgolinter::ginkgo-linter: multiple issues: wrong boolean assertion; comparing a pointer to a value will always fail. Consider using `Expect(pt).Should(HaveValue(BeTrue()))` instead
+pointerval/pointerval.go:161:4:ginkgolinter::ginkgo-linter: comparing a pointer to a value will always fail. Consider using `Expect(px1).Should(HaveValue(BeEquivalentTo(5)))` instead
+pointerval/pointerval.go:162:4:ginkgolinter::ginkgo-linter: comparing a pointer to a value will always fail. Consider using `Expect(px1).Should(HaveValue(BeEquivalentTo(y)))` instead
+pointerval/pointerval.go:168:4:ginkgolinter::ginkgo-linter: comparing a pointer to a value will always fail. Consider using `Expect(px1).ShouldNot(HaveValue(BeIdenticalTo(5)))` instead
+pointerval/pointerval.go:171:4:ginkgolinter::ginkgo-linter: comparing a pointer to a value will always fail. Consider using `Expect(px1).Should(HaveValue(BeIdenticalTo(float64(5))))` instead
+pointerval/pointerval.go:174:4:ginkgolinter::ginkgo-linter: comparing a pointer to a value will always fail. Consider using `Expect(px1).Should(HaveValue(BeNumerically(">", 4)))` instead
+pointerval/pointerval.go:175:4:ginkgolinter::ginkgo-linter: comparing a pointer to a value will always fail. Consider using `Expect(px1).ShouldNot(HaveValue(BeNumerically(">", 6)))` instead
+pointerval/pointerval.gomega.go:13:3:ginkgolinter::ginkgo-linter: comparing a pointer to a value will always fail. Consider using `g.Expect(p).Should(g.HaveValue(g.Equal(v)))` instead
+pointerval/pointerval.gomega.go:19:3:ginkgolinter::ginkgo-linter: comparing a pointer to a value will always fail. Consider using `g.Expect(p).Should(g.HaveValue(g.Equal(c)))` instead
+pointerval/pointerval.gomega.go:25:3:ginkgolinter::ginkgo-linter: comparing a pointer to a value will always fail. Consider using `g.Expect(retPointer()).Should(g.HaveValue(g.Equal(c)))` instead
+pointerval/pointerval.gomega.go:43:4:ginkgolinter::ginkgo-linter: comparing a pointer to a value will always fail. Consider using `g.Expect(s3.field).Should(g.HaveValue(g.Equal(c)))` instead
+pointerval/pointerval.gomega.go:48:4:ginkgolinter::ginkgo-linter: comparing a pointer to a value will always fail. Consider using `g.Expect(s4.field).Should(g.HaveValue(g.Equal(c)))` instead
+pointerval/pointerval.gomega.go:64:4:ginkgolinter::ginkgo-linter: multiple issues: wrong boolean assertion; comparing a pointer to a value will always fail. Consider using `g.Expect(pt).Should(g.HaveValue(g.BeTrue()))` instead
+pointerval/pointerval.gomega.go:65:4:ginkgolinter::ginkgo-linter: multiple issues: wrong boolean assertion; comparing a pointer to a value will always fail. Consider using `g.Expect(pt).Should(g.HaveValue(g.BeTrue()))` instead
+pointerval/pointerval.gomega.go:69:4:ginkgolinter::ginkgo-linter: comparing a pointer to a value will always fail. Consider using `g.Expect(pt).Should(g.HaveValue(g.BeTrue()))` instead
+pointerval/pointerval.gomega.go:70:4:ginkgolinter::ginkgo-linter: multiple issues: avoid double negative assertion; comparing a pointer to a value will always fail. Consider using `g.Expect(pt).Should(g.HaveValue(g.BeTrue()))` instead
+pointerval/pointerval.gomega.go:74:4:ginkgolinter::ginkgo-linter: multiple issues: wrong boolean assertion; comparing a pointer to a value will always fail. Consider using `g.Expect(pf).Should(g.HaveValue(g.BeFalse()))` instead
+pointerval/pointerval.gomega.go:75:4:ginkgolinter::ginkgo-linter: multiple issues: wrong boolean assertion; comparing a pointer to a value will always fail. Consider using `g.Expect(pf).ShouldNot(g.HaveValue(g.BeTrue()))` instead
+suppress/d.go:13:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x == nil).Should(BeTrue())` instead
+suppress/e.go:29:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x == nil).Should(BeTrue())` instead
+suppress/e.go:34:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x == nil).Should(BeTrue())` instead
+suppress/eventually.comment.go:29:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Eventually(slowBool()).Should(BeTrue())` instead
+suppress/eventually.comment.go:32:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Eventually(slowBool()).Should(BeTrue())` instead
+suppress/eventually.file.go:16:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Eventually(slowBool()).Should(BeTrue())` instead
+suppress/g.go:13:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(x == nil).Should(BeTrue())` instead
+to_and_not/to_and_not.go:10:3:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Expect(true).To(BeTrue())` instead
+to_and_not/to_and_not.go:15:3:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Eventually(func() bool { return true }).Should(BeTrue())` instead
+to_and_not/to_and_not.go:17:3:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `Eventually(func() bool { return true }).To(BeTrue())` instead
+to_and_not/to_and_not.gomega.go:10:3:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `gomega.Expect(true).To(gomega.BeTrue())` instead
+to_and_not/to_and_not.gomega.go:15:3:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `gomega.Eventually(func() bool { return true }).Should(gomega.BeTrue())` instead
+to_and_not/to_and_not.gomega.go:17:3:ginkgolinter::ginkgo-linter: avoid double negative assertion. Consider using `gomega.Eventually(func() bool { return true }).To(gomega.BeTrue())` instead

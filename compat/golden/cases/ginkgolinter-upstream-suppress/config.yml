@@ -1,0 +1,28 @@
+# Golden case: ginkgolinter on upstream's testdata with every suppress-* flag
+# on (and allow-havelen-zero). What is left is what no flag turns off:
+# MatchError, HaveOccurred / Succeed misuse, missing assertions, pointer
+# comparisons, double negatives, Equal(true/false).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - ginkgolinter
+  settings:
+    ginkgolinter:
+      suppress-len-assertion: true
+      suppress-nil-assertion: true
+      suppress-err-assertion: true
+      suppress-compare-assertion: true
+      suppress-async-assertion: true
+      suppress-type-compare-assertion: true
+      allow-havelen-zero: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

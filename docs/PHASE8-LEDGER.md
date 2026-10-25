@@ -596,7 +596,7 @@ v5 の `analyzer/testdata` は module zip に無い。GitHub の v5.2.0 タグ�
 | 5 | gomoddirectives checkIgnoreDirectives | new-check | 既定で ignore される dir の指定を報告（`..` も） | 無し | **done (PR 2)** | M | testdata/ignore_defaults/go.mod（repo から） |
 | 6 | tagliatelle report | behavior | json `embed` フラグを skip | guff-style/src/tagliatelle.rs:265 | **done (PR 14g)** | S | — |
 | 7 | recvcheck 既定除外 | default-change | Marshal 系 → Unmarshal 系 | guff-style/src/recvcheck.rs:25 | **done (PR 8)** | S | builtinmethods/valuetype.go |
-| 8 | ginkgolinter `.Error()` チェーン | behavior | ErrorMethodPayload | guff-style/src/ginkgolinter.rs（DEFERRED） | needs-port | L | — |
+| 8 | ginkgolinter `.Error()` チェーン | behavior | ErrorMethodPayload | guff-style/src/ginkgolinter/ | **done (PR 14x)**：差分だけでは移植できなかった（guff は 22 規則中 6 規則の名前ベース近似で、上流 testdata では 2,693 件中 655 件一致）。v0.24 を丸ごと移植し、Gomega の 3 interface を `Implements` で引く構成に揃えた。golden case `ginkgolinter-upstream`（上流 testdata/src/a 全体、ginkgo / gomega は本体を剥いだ stub：`scripts/gen-ginkgo-stub.go`）2,693/2,693、`-force` 3,522/3,522、`-suppress` 1,200/1,200、fix tier も 3 case 一致 | L | testdata/src/a 全体 |
 | 9 | bodyclose `//bodyclose:handled` | new-check | callee の Doc ディレクティブ | guff-context/src/bodyclose.rs | **done (PR 14j)**：依存の宣言は名前で引く（guff の依存 object は位置を持たない） | M | handledresponse/*, consumption/consumption.go |
 | 10 | loggercheck checkStringerValues | new-check | nil で panic しうる Stringer 値 | guff-style/src/loggercheck.rs | **done (PR 14j)** | M | — |
 | 11 | loggercheck 引数数ガード | behavior | 多値展開で panic | loggercheck.rs:375 | already-matches | S | issue108 |

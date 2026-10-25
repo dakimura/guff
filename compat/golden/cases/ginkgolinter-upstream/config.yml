@@ -1,0 +1,17 @@
+# Golden case: ginkgolinter against upstream's own testdata, default settings.
+# See sources.txt for where the tree and the stub come from.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - ginkgolinter
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true
