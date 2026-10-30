@@ -214,9 +214,13 @@ analyzer 本体（L）が入るまでは finding 0 件になる —— これは
 
 ### 3.3 既定値・inventory 以外の config 層の挙動
 
-- **cache の DefaultDir**: `GOLANGCI_LINT_CACHE` が相対パス／UserCacheDir 不明のとき、2.14.0 の `run` は
-  `log.Fatalf("build cache is required, but could not be located: ...")` で exit 1。guff の run は `default_cache_dir()` の Err を握りつぶして続行する。
-  `cache status` で `=off` のとき上流は `Dir: off` で成功、guff は Disabled エラー。→ needs-port（S）。`GUFF_CACHE=off` 拡張をどう残すかの決定が先。
+- **cache の DefaultDir**: **done (PR 14y)**。`GOLANGCI_LINT_CACHE` が相対パス／`=off`／UserCacheDir 不明のとき、
+  `run` は上流の `initDefaultCache` と同じ文言で止まる（`build cache is required, but could not be located: …` /
+  `build cache is disabled by GOLANGCI_LINT_CACHE=off, but required as of Go 1.12`）。`cache status` は `=off` で
+  `Dir: off`（Size 行なし）、相対パスはエラー。UserCacheDir は `os.UserCacheDir` の判定と文言（linux の相対
+  `XDG_CACHE_HOME` はエラー）。残す差: `GUFF_CACHE=off` と `--no-cache` は guff 拡張として cache なしで走る／
+  exit code は guff の他のエラーと同じ 2（上流は log.Fatalf の 1、cobra の 3）／`cache clean` を `=off` で撃つと
+  上流は cwd の `off` ディレクトリを消すが guff は何もしない。
 - **SA5011 を `staticcheck.checks` に明示した config**: 上流から analyzer が消えた後に無視かエラーか未確認（§7）。
 - **revive の未知 rule 名**: 上流 2.12.2 は `cannot find rule` でエラー、guff は無視。2.14.0 で `marshal-receiver` / `use-slices-concat` を名指しした config が guff では黙って 0 件になる。
 
@@ -250,7 +254,7 @@ testdata 列は fixture にする上流ファイル（`—` は無し）。
 | 17 | goanalysis/runners.go isOutsideFile | behavior | ファイル外の TextEdit を捨てる（guff は end 側を検査しない） | guff-lint/src/fix.rs:267-315 | **done (PR 14l)** | S | — |
 | 18 | runner_action_cache.go inheritFactsFromDeps | substrate | warm cache で facts が欠ける不具合の修正 | guff-runner/src/action.rs, guff-analysis/src/fact_codec.rs:67 | already-matches | S | — |
 | 19 | internal/cache position.go / toRelativePath | substrate | issues cache を相対パス化 | guff-runner/src/cache.rs | not-applicable | S | position_test.go, cache_test.go |
-| 20 | cache DefaultDir（error を返す） | behavior | 相対パス cache で run が fatal、`cache status` の off | guff-runner/src/cache.rs:77, guff-lint/src/lib.rs:820, cli.rs:1022 | needs-port | S | — |
+| 20 | cache DefaultDir（error を返す） | behavior | 相対パス cache で run が fatal、`cache status` の off | guff-runner/src/cache.rs:77, guff-lint/src/lib.rs:820, cli.rs:1022 | **done (PR 14y)** | S | — |
 | 21 | gocheckcompilerdirectives v1.3.0→v1.4.0 | behavior | `//go:fix` を既知に（mods.txt / diffs に無かった） | guff-style/src/gocheckcompilerdirectives.rs:33 | already-matches | S | checkcompilerdirectives/testdata/code.go |
 | 22 | go.mod（mods.txt に無い依存） | other | sourcegraph/go-diff v0.9.0（revgrep の extended header 書き直し）と go 1.26 toolchain の影響が未検証 | guff-lint diff.rs（new-from-patch / new-from-rev） | unsure | M | — |
 

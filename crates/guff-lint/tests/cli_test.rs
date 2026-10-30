@@ -224,6 +224,88 @@ fn cli_cache_status_and_clean() {
     assert!(!cache_dir.exists());
 }
 
+/// `guff run` on the errcheck fixture with only `env` as the cache settings.
+fn run_with_cache_env(env: &[(&str, &str)], extra: &[&str]) -> std::process::Output {
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/testdata/run/unchecked_error");
+    let mut cmd = Command::new(bin());
+    cmd.args(["run", "--no-config", "--enable", "errcheck", "--issues-exit-code", "0"])
+        .args(extra)
+        .arg(".")
+        .current_dir(&dir)
+        .env_remove("GUFF_CACHE")
+        .env_remove("GOLANGCI_LINT_CACHE");
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    cmd.output().expect("spawn")
+}
+
+/// `internal/go/cache.initDefaultCache`: `run` without a usable cache
+/// directory stops rather than linting uncached.
+#[test]
+fn cli_run_requires_a_cache_dir() {
+    let out = run_with_cache_env(&[("GOLANGCI_LINT_CACHE", "rel/dir")], &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains(
+            "build cache is required, but could not be located: GOLANGCI_LINT_CACHE is not an absolute path"
+        ),
+        "stderr={stderr}"
+    );
+
+    let out = run_with_cache_env(&[("GOLANGCI_LINT_CACHE", "off")], &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("build cache is disabled by GOLANGCI_LINT_CACHE=off, but required as of Go 1.12"),
+        "stderr={stderr}"
+    );
+
+    // guff's own switches still run without a directory.
+    for (env, extra) in [
+        (&[("GUFF_CACHE", "off")][..], &[][..]),
+        (&[("GOLANGCI_LINT_CACHE", "off")][..], &["--no-cache"][..]),
+    ] {
+        let out = run_with_cache_env(env, extra);
+        assert!(
+            out.status.success(),
+            "env={env:?} stderr={}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(!out.stdout.is_empty());
+    }
+}
+
+/// `cache status` prints `Dir: off` for an explicit `=off`, and fails on a
+/// relative path.
+#[test]
+fn cli_cache_status_off_and_relative() {
+    for key in ["GUFF_CACHE", "GOLANGCI_LINT_CACHE"] {
+        let out = Command::new(bin())
+            .args(["cache", "status"])
+            .env_remove("GUFF_CACHE")
+            .env_remove("GOLANGCI_LINT_CACHE")
+            .env(key, "off")
+            .output()
+            .expect("spawn");
+        assert!(out.status.success(), "stderr={}", String::from_utf8_lossy(&out.stderr));
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(stdout.starts_with("Dir: off\n"), "stdout={stdout}");
+        assert!(!stdout.contains("\nSize:"), "stdout={stdout}");
+    }
+
+    let out = Command::new(bin())
+        .args(["cache", "status"])
+        .env_remove("GUFF_CACHE")
+        .env("GOLANGCI_LINT_CACHE", "rel/dir")
+        .output()
+        .expect("spawn");
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("GOLANGCI_LINT_CACHE is not an absolute path"));
+}
+
 #[test]
 fn cli_fmt_rewrites_file() {
     let tmp = tempfile::TempDir::new().unwrap();

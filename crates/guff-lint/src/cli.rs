@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use clap::{Parser, Subcommand};
 use guff_fmt::{MetaFormatter, Runner, RunnerOptions};
-use guff_runner::{cache_dir_size, clean_cache, default_cache_dir};
+use guff_runner::{cache_dir_size, clean_cache, default_cache_dir, CacheError};
 
 use crate::custom::{
     build_custom, discover_custom_config, load_custom_config, BuildCustomOptions, CustomError,
@@ -413,6 +413,13 @@ fn run_cmd(args: RunArgs, startup: Instant) -> Result<i32, RunError> {
     } else {
         resolve_out_formats(&args.out_format).map_err(RunError::Message)?
     };
+
+    // `preRunE`'s `cache.NewCache`, after the config and the printers: a
+    // relative cache path or an unknown UserCacheDir stops the run instead of
+    // linting uncached. `--no-cache` (guff only) needs no directory.
+    if !args.no_cache {
+        guff_runner::require_cache_dir().map_err(RunError::Message)?;
+    }
 
     // `--fix` and `issues.fix` are the same switch; upstream ORs them.
     let fix = args.fix || loaded.issues_fix;
@@ -1037,16 +1044,33 @@ fn migrate_cmd(args: MigrateArgs) -> Result<(), ConfigError> {
 }
 
 fn cache_cmd(args: CacheArgs) -> Result<(), RunError> {
-    let dir = default_cache_dir().map_err(|e| RunError::Message(e.to_string()))?;
+    // `DefaultDir` returns "off" without an error for an explicit `=off`.
+    let dir = match default_cache_dir() {
+        Ok(dir) => Some(dir),
+        Err(CacheError::Disabled(_)) => None,
+        Err(e) => return Err(RunError::Message(e.to_string())),
+    };
     match args.command {
         CacheCommand::Clean => {
+            // Upstream removes a directory named `off` under the working
+            // directory here; guff leaves it alone.
+            let Some(dir) = dir else {
+                return Ok(());
+            };
             clean_cache(&dir).map_err(|e| RunError::Message(e.to_string()))?;
             eprintln!("guff: cleaned cache at {}", dir.display());
         }
         CacheCommand::Status => {
-            let size = cache_dir_size(&dir);
-            println!("Dir: {}", dir.display());
-            println!("Size: {}", prettify_bytes(size));
+            match &dir {
+                Some(dir) => {
+                    println!("Dir: {}", dir.display());
+                    // `dirSizeBytes` fails on a missing directory and the line is dropped.
+                    if dir.exists() {
+                        println!("Size: {}", prettify_bytes(cache_dir_size(dir)));
+                    }
+                }
+                None => println!("Dir: off"),
+            }
             match guff_runner::default_go_cache_dir() {
                 Ok(gocache) => {
                     println!("GOCACHE: {}", gocache.display());

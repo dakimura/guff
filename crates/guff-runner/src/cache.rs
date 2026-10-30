@@ -73,7 +73,8 @@ impl From<io::Error> for CacheError {
 /// Resolve the on-disk cache directory.
 ///
 /// Precedence: `GUFF_CACHE` → `GOLANGCI_LINT_CACHE` → `{UserCacheDir}/guff`.
-/// The value `"off"` disables the cache.
+/// The value `"off"` disables the cache. A relative path and an unknown
+/// UserCacheDir are errors worded like `internal/go/cache.DefaultDir`.
 pub fn default_cache_dir() -> Result<PathBuf, CacheError> {
     for key in [ENV_GUFF_CACHE, ENV_GOLANGCI_LINT_CACHE] {
         if let Ok(v) = env::var(key) {
@@ -85,42 +86,76 @@ pub fn default_cache_dir() -> Result<PathBuf, CacheError> {
             }
             let p = PathBuf::from(&v);
             if !p.is_absolute() {
-                return Err(CacheError::Message(format!(
-                    "{key} must be an absolute path, got {v:?}"
-                )));
+                return Err(CacheError::Message(format!("{key} is not an absolute path")));
             }
             return Ok(p);
         }
     }
-    let base = user_cache_dir().ok_or_else(|| {
-        CacheError::Message(
-            "could not locate a user cache directory; set GUFF_CACHE".into(),
-        )
+    let base = user_cache_dir().map_err(|err| {
+        CacheError::Message(format!("{ENV_GOLANGCI_LINT_CACHE} is not defined and {err}"))
     })?;
     Ok(base.join("guff"))
 }
 
-fn user_cache_dir() -> Option<PathBuf> {
+/// Whether [`default_cache_dir`]'s error is guff's own `GUFF_CACHE=off`,
+/// the one way to run without a cache directory.
+pub fn is_guff_cache_off(err: &CacheError) -> bool {
+    matches!(err, CacheError::Disabled(what) if *what == format!("{ENV_GUFF_CACHE}=off"))
+}
+
+/// `internal/go/cache.initDefaultCache`: `run` needs a cache directory and
+/// stops when there is none. `GUFF_CACHE=off` is guff's extension and passes;
+/// `GOLANGCI_LINT_CACHE=off` fails as it does upstream.
+pub fn require_cache_dir() -> Result<(), String> {
+    match default_cache_dir() {
+        Ok(_) => Ok(()),
+        Err(err) if is_guff_cache_off(&err) => Ok(()),
+        Err(CacheError::Disabled(_)) => Err(format!(
+            "build cache is disabled by {ENV_GOLANGCI_LINT_CACHE}=off, but required as of Go 1.12"
+        )),
+        Err(err) => Err(format!(
+            "build cache is required, but could not be located: {err}"
+        )),
+    }
+}
+
+/// `os.UserCacheDir`, plus guff's absolute `XDG_CACHE_HOME` on every platform.
+fn user_cache_dir() -> Result<PathBuf, &'static str> {
     if let Ok(xdg) = env::var("XDG_CACHE_HOME") {
         if !xdg.is_empty() {
-            return Some(PathBuf::from(xdg));
+            if PathBuf::from(&xdg).is_absolute() {
+                return Ok(PathBuf::from(xdg));
+            }
+            #[cfg(all(unix, not(target_os = "macos")))]
+            {
+                return Err("path in $XDG_CACHE_HOME is relative");
+            }
         }
     }
     #[cfg(target_os = "macos")]
     {
-        return env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Caches"));
+        return env::var_os("HOME")
+            .filter(|h| !h.is_empty())
+            .map(|h| PathBuf::from(h).join("Library/Caches"))
+            .ok_or("$HOME is not defined");
     }
     #[cfg(target_os = "windows")]
     {
-        return env::var_os("LOCALAPPDATA").map(PathBuf::from);
+        return env::var_os("LocalAppData")
+            .filter(|h| !h.is_empty())
+            .map(PathBuf::from)
+            .ok_or("%LocalAppData% is not defined");
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        return env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache"));
+        return env::var_os("HOME")
+            .filter(|h| !h.is_empty())
+            .map(|h| PathBuf::from(h).join(".cache"))
+            .ok_or("neither $XDG_CACHE_HOME nor $HOME are defined");
     }
     #[cfg(not(any(unix, windows)))]
     {
-        None
+        Err("unsupported platform")
     }
 }
 
