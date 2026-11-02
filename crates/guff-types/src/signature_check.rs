@@ -71,18 +71,11 @@ impl Checker {
             }
         }
 
-        // Collect and declare function type parameters (chunk 35c). Methods may
-        // not have type parameters (the parser usually catches this, but we
-        // diagnose it defensively).
+        // Collect and declare function type parameters (chunk 35c). Since
+        // Go 1.27 methods may declare their own as well; the version check is
+        // in the resolver.
         let mut tparams: Option<crate::TypeParamList> = None;
         if let Some(tp) = ftyp.type_params.as_ref().filter(|fl| !fl.list.is_empty()) {
-            if recv_par.is_some() {
-                self.error(
-                    tp.pos().0 as u32,
-                    Code::InvalidMethodTypeParams,
-                    "methods cannot have type parameters",
-                );
-            }
             let (ids, field_of) = self.declare_type_params(tp);
             if !ids.is_empty() {
                 let tlist = bind_tparams(&mut self.types, ids.clone())

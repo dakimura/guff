@@ -1335,11 +1335,15 @@ impl Checker {
             );
 
             let sig_id = self.method_sig_for_recv(xtyp, &index, obj);
-            let (recv, params, results, variadic) = match self.types.get(sig_id) {
-                TypeData::Signature(sig) => {
-                    (sig.recv(), sig.params(), sig.results(), sig.variadic())
-                }
-                _ => (None, None, None, false),
+            let (recv, params, results, variadic, tparams) = match self.types.get(sig_id) {
+                TypeData::Signature(sig) => (
+                    sig.recv(),
+                    sig.params(),
+                    sig.results(),
+                    sig.variadic(),
+                    sig.tparams.clone(),
+                ),
+                _ => (None, None, None, false, None),
             };
             if recv.is_none() {
                 self.error(
@@ -1371,11 +1375,12 @@ impl Checker {
                 }
             }
             let new_params_tup = crate::tuple::new_tuple(&mut self.types, &new_params);
-            let new_sig = new_signature_type(
+            // A generic method (Go 1.27) keeps its own type parameters.
+            let new_sig = crate::signature::new_generic_signature_type(
                 &mut self.types,
                 None,
-                &[],
-                &[],
+                None,
+                tparams,
                 new_params_tup,
                 results,
                 variadic,
@@ -1422,15 +1427,18 @@ impl Checker {
                     // removed. For a generic instance receiver the signature is
                     // instantiated with the receiver's type arguments first.
                     let sig_id = method_sig.unwrap_or_else(|| self.invalid_type());
-                    let (params, results, variadic) = match self.types.get(sig_id) {
-                        TypeData::Signature(sig) => (sig.params(), sig.results(), sig.variadic()),
-                        _ => (None, None, false),
+                    let (params, results, variadic, tparams) = match self.types.get(sig_id) {
+                        TypeData::Signature(sig) => {
+                            (sig.params(), sig.results(), sig.variadic(), sig.tparams.clone())
+                        }
+                        _ => (None, None, false, None),
                     };
-                    let new_sig = new_signature_type(
+                    // A generic method (Go 1.27) keeps its own type parameters.
+                    let new_sig = crate::signature::new_generic_signature_type(
                         &mut self.types,
                         None,
-                        &[],
-                        &[],
+                        None,
+                        tparams,
                         params,
                         results,
                         variadic,
@@ -1552,12 +1560,21 @@ impl Checker {
         let pos = orig_recv.pos(&self.objects);
         recv.set_pos(&mut self.objects, pos);
         crate::object::var::set_var_origin(&mut self.objects, recv, orig_recv);
-        let (params, results, variadic) = match self.types.get(sig) {
-            TypeData::Signature(s) => (s.params(), s.results(), s.variadic()),
+        let (params, results, variadic, tparams) = match self.types.get(sig) {
+            TypeData::Signature(s) => (s.params(), s.results(), s.variadic(), s.tparams.clone()),
             _ => return method,
         };
-        let new_sig =
-            new_signature_type(&mut self.types, Some(recv), &[], &[], params, results, variadic);
+        // `expandMethod` drops the receiver type parameters but keeps a
+        // generic method's own.
+        let new_sig = crate::signature::new_generic_signature_type(
+            &mut self.types,
+            Some(recv),
+            None,
+            tparams,
+            params,
+            results,
+            variadic,
+        );
         let name = method.name(&self.objects).to_string();
         let copy = crate::object::func::new_func(&mut self.objects, name, Some(new_sig));
         if let Some(pkg) = method.pkg(&self.objects) {
