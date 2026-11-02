@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/iface-v151-unused/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 basic/basic.go:47:2:iface::unused: interface 'Executor' is declared but not used within the package
 basic/basic.go:55:2:iface::unused: interface 'Runner' is declared but not used within the package

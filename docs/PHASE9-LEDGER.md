@@ -402,7 +402,7 @@ needs-port 14 行のうち 5 行（core #5 の警告そのもの、core #10 の 
 | 15 | golinters/iface/testdata/fix/{in,out}/iface.go | behavior | iface v1.5.3：`unused` は **exported な interface に SuggestedFix を付けない**（diagnostic は出す）。fix テストの期待が「Pinger / Healthcheck / UserRepository を削除」→「残して 3 件報告、exit 1」に。**測定**（`--fix`）：2.14 は 3 つとも削除、2.15 は 3 つ残して 3 件報告（opaque の `*server` 書き換えは両方とも）、guff は 2.14 と同じく削除。`unusedmethod` の `removalFix` も同じ形に変わっている → iface グループ | guff-style/src/iface.rs:450-454（`remove_fix` を無条件に付ける）, :555 | needs-port | S | fix/in/iface.go, fix/out/iface.go, iface_fix.yml |
 | 16 | exitcodes.go / errorutil/errors.go / goutil/env.go `Get` | other | `ExitError` / `PanicError` のメソッドをポインタレシーバに。生成箇所は 2.14 から `&ExitError{}` / `NewPanicError` で `errors.AsType[*ExitError]` も同じなので挙動は変わらない | — | not-applicable | S | — |
 | 17 | .golangci.reference.yml / jsonschema（stable） | config-schema | next から stable への文書の繰り上げ：gosec の G407、exhaustruct `allow-empty-blank-assignments`、revive `specify-disable-rule` ディレクティブ、rule `marshal-receiver` / `multiline-if-init` / `use-slices-concat`、identical-switch-branches の `allow-identical-default`。どれも 2.14.0 のコードには既にあった（Go 側の settings 差分に出ない） | guff-style/src/gosec.rs:304, :594、guff-lint/src/settings.rs:602、guff-revive/src/directives.rs:123、guff-revive/src/config.rs:124-126、guff-revive/src/rules/identical_switch_branches.rs:20 | already-matches | S | — |
-| 18 | （pin 自体） | other | compat の pin を 2.15.0 へ。`GOLANGCI_LINT_COMPAT`、`compat/.tools`、golden の regen | guff-lint/src/lib.rs:72 | needs-port | S | — |
+| 18 | （pin 自体） | other | compat の pin を 2.15.0 へ。`GOLANGCI_LINT_COMPAT`、`compat/.tools`、golden の regen | guff-lint/src/lib.rs:72 | **done (P9-5)** | S | — |
 
 ###### メモ（core）
 
@@ -557,11 +557,11 @@ golangci は `gocognit.Analyzer` を**使わず** `ComplexityStats(f, fset, stat
 
 | # | upstream_path | kind | 要約 | guff の場所 | status | effort | upstream testdata |
 |---|---------------|------|------|-------------|--------|--------|-------------------|
-| 1 | unused/unused.go removalFix | behavior | **exported な interface には SuggestedFix を付けない**（診断は出す）。結果 golangci の fix testdata は `expected_exitcode 1` に | guff-style/src/iface.rs:454（常に fix） | needs-port | S | unused/testdata/src/basic（Executor / Runner / Writer は残り sender / scheduler だけ消える。scratch --fix で guff は全部消す）、golangci fix/{in,out}/iface.go |
-| 2 | unusedmethod/unusedmethod.go removalFix | behavior | exported なメソッド（`field.Names[0].IsExported()`）は fix 無し（unexported interface 上でも） | iface.rs:555（常に fix） | needs-port | S | unusedmethod/testdata/src/basic（`Debug` / `Set` が残る。scratch で guff は消す） |
-| 3 | unusedmethod.go `fn.Origin()` | behavior | 使用判定を Origin で：インスタンス化した generic interface（`Optional[int]`、`Iter[T]`、method expr `Callback[T].Call`、method value）経由の使用を宣言側の使用とみなす。**Phase 8 iface-canonicalheader #6 の「使用扱いにしない」を戻す** | iface.rs:516 insert / :533 `remove(&sel.obj())`（インスタンスのメソッド ID のまま） | needs-port | S | unusedmethod/testdata/src/typeparams（guff だけ 5 件余分）、drift `iface-edges` methods.go:24 `getter.Get` 消滅 |
+| 1 | unused/unused.go removalFix | behavior | **exported な interface には SuggestedFix を付けない**（診断は出す）。結果 golangci の fix testdata は `expected_exitcode 1` に | guff-style/src/iface.rs:454（常に fix） | **done (P9-5)** | S | unused/testdata/src/basic（Executor / Runner / Writer は残り sender / scheduler だけ消える。scratch --fix で guff は全部消す）、golangci fix/{in,out}/iface.go |
+| 2 | unusedmethod/unusedmethod.go removalFix | behavior | exported なメソッド（`field.Names[0].IsExported()`）は fix 無し（unexported interface 上でも） | iface.rs:555（常に fix） | **done (P9-5)** | S | unusedmethod/testdata/src/basic（`Debug` / `Set` が残る。scratch で guff は消す） |
+| 3 | unusedmethod.go `fn.Origin()` | behavior | 使用判定を Origin で：インスタンス化した generic interface（`Optional[int]`、`Iter[T]`、method expr `Callback[T].Call`、method value）経由の使用を宣言側の使用とみなす。**Phase 8 iface-canonicalheader #6 の「使用扱いにしない」を戻す** | iface.rs:516 insert / :533 `remove(&sel.obj())`（インスタンスのメソッド ID のまま） | **done (P9-5)** | S | unusedmethod/testdata/src/typeparams（guff だけ 5 件余分）、drift `iface-edges` methods.go:24 `getter.Get` 消滅 |
 | 4 | substrate `Func.Origin` | substrate | インスタンス化で複製したメソッドの origin | guff-types/src/object/func.rs:127 `func_origin`、subst.rs:513（`copy.origin = f.Origin()` を平坦化） | already-matches | S | — |
-| 5 | golangci testdata iface/fix | other | fix/in・out に exported の want が増えた | golden `iface-gcl-fix` / fix tier の取り直し（#1 と同じ PR） | needs-port | S（fixture） | fix/in/iface.go、fix/out/iface.go |
+| 5 | golangci testdata iface/fix | other | fix/in・out に exported の want が増えた | golden `iface-gcl-fix` / fix tier の取り直し（#1 と同じ PR） | **done (P9-5)** | S（fixture） | fix/in/iface.go、fix/out/iface.go |
 | 6 | unused/doc.go、unusedmethod/doc.go、Analyzer.Doc | other | 文書のみ | — | not-applicable | — | — |
 
 ---
@@ -679,7 +679,7 @@ golangci 側の wrapper（`pkg/golinters/<name>/`、`pkg/goformatters/golines/`�
 
 | # | upstream_path | kind | 要約 | guff の場所 | status | effort | upstream testdata |
 |---|---------------|------|------|-------------|--------|--------|-------------------|
-| L1 | staticrules.go `nilStringerRulesetNames`、checkers/checker.go `NilStringer` | behavior | 「nil で panic しうる Stringer」は **klog と logr の ruleset だけ**。zap / slog / kitlog / custom rules では出さない | guff-style/src/loggercheck.rs:422-431 | needs-port | S | testdata/src/a/all/example.go:47-52, customonly/example.go:37（v0.13.0 タグ。module zip に testdata/src 無し）、golden `loggercheck` stringer/v0120_stringer.go:28, 33 |
+| L1 | staticrules.go `nilStringerRulesetNames`、checkers/checker.go `NilStringer` | behavior | 「nil で panic しうる Stringer」は **klog と logr の ruleset だけ**。zap / slog / kitlog / custom rules では出さない | guff-style/src/loggercheck.rs:422-431 | **done (P9-5)** | S | testdata/src/a/all/example.go:47-52, customonly/example.go:37（v0.13.0 タグ。module zip に testdata/src 無し）、golden `loggercheck` stringer/v0120_stringer.go:28, 33 |
 | L2 | internal/nilness/nilness.go（新規 345 行） | behavior | 自前 SSA（`ssa.NewProgram` + `SetNoReturn`: os.Exit / runtime.Goexit / log.Fatal*・Panic* / testing の Fatal 系メソッド / klog の Fatal*・Exit*）で可変長引数の値が**証明的に非 nil** なら報告しない（Alloc/FieldAddr/IndexAddr/Global/Function/MakeClosure、支配する `!= nil` 分岐、先行する deref、phi の全辺）。call は `Lparen` で SSA call に引き、同位置に 2 つあれば信用しない。SSA 構築が panic したら全部報告 | loggercheck.rs:453（nilness 無し）。基盤: guff-ssa/src/program.rs:152 `set_no_return` | needs-port | L | testdata/src/a/nilness/{example,adversarial,testing,positions_generated,external_test}.go（91 want） |
 | L3 | .goreleaser.yml / release-please | other | リリース設定のみ | — | not-applicable | S | — |
 
@@ -709,14 +709,14 @@ golangci 側の wrapper（`pkg/golinters/<name>/`、`pkg/goformatters/golines/`�
 
 | # | upstream_path | kind | 要約 | guff の場所 | status | effort | upstream testdata |
 |---|---------------|------|------|-------------|--------|--------|-------------------|
-| C1 | analyzer.go `headerObject` 探索の削除、`isHTTPHeader` | behavior | `TypesInfo.Uses` から `net/http` の `Header` を 1 つ拾う map 順依存のゲートを撤去し、受信者型を Unalias して `net/http.Header` の Named か直接判定。`w.Header().Set(…)` だけのパッケージも報告され、「0 か 2 か乱数」も無くなる。guff のゲートと syncthing `lib/api` の allowlist は撤去、isolate fixture の methodonly.go のコメントも書き直し | guff-style/src/canonicalheader.rs:363-428 `package_has_header_typed_object`, :435-437 | needs-port | S | golden `canonicalheader` / `-exclusions` methodonly/methodonly.go:17-21（drift +5 ×2） |
+| C1 | analyzer.go `headerObject` 探索の削除、`isHTTPHeader` | behavior | `TypesInfo.Uses` から `net/http` の `Header` を 1 つ拾う map 順依存のゲートを撤去し、受信者型を Unalias して `net/http.Header` の Named か直接判定。`w.Header().Set(…)` だけのパッケージも報告され、「0 か 2 か乱数」も無くなる。guff のゲートと syncthing `lib/api` の allowlist は撤去、isolate fixture の methodonly.go のコメントも書き直し | guff-style/src/canonicalheader.rs:363-428 `package_has_header_typed_object`, :435-437 | **done (P9-5)** | S | golden `canonicalheader` / `-exclusions` methodonly/methodonly.go:17-21（drift +5 ×2） |
 | C2 | analyzer.go `outerErr` 削除 | other | 常に nil だった | — | not-applicable | S | — |
 
 ###### golines（golangci/golines v0.15.0 → v0.16.0、formatter）
 
 | # | upstream_path | kind | 要約 | guff の場所 | status | effort | upstream testdata |
 |---|---------------|------|------|-------------|--------|--------|-------------------|
-| G1 | go.mod dave/dst v0.27.3 → v0.28.0 decorator-fragment.go | behavior | 空行 2 つの並びで空行 fragment が後続の改行 fragment に上書きされて**空行が消えていた**のを修正（dst #81）。guff は golines バイナリを shell out するので、CI と手元の pin を上げる（手元の `~/go/bin/golines` は v0.15.0 / dst v0.27.3） | guff-fmt/src/golines.rs:1-13（shell out）, compat/pins.json `golines`, .github/workflows/compat.yml:94,262 | needs-port | S | dst decorator テスト（#81）。fmt case は未作成 — 空行 2 連の前後で golines が行を折る形を足す |
+| G1 | go.mod dave/dst v0.27.3 → v0.28.0 decorator-fragment.go | behavior | 空行 2 つの並びで空行 fragment が後続の改行 fragment に上書きされて**空行が消えていた**のを修正（dst #81）。guff は golines バイナリを shell out するので、CI と手元の pin を上げる（手元の `~/go/bin/golines` は v0.15.0 / dst v0.27.3） | guff-fmt/src/golines.rs:1-13（shell out）, compat/pins.json `golines`, .github/workflows/compat.yml:94,262 | **done (P9-5)** | S | dst decorator テスト（#81）。fmt case は未作成 — 空行 2 連の前後で golines が行を折る形を足す |
 | G2 | dst v0.28.0 その他（`File.GoVersion`、NoPos ガード、生成器の offset） | other | golines の出力に効かない | — | not-applicable | S | — |
 
 ###### bidichk（v0.3.3 → v0.3.4）

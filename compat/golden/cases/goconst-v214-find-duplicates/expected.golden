@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/goconst-v214-find-duplicates/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 goconst_find_duplicates.go:14:2:goconst::This constant is a duplicate of `GroupedDuplicateConst1` at goconst_find_duplicates.go:13:2
 goconst_find_duplicates.go:19:7:goconst::This constant is a duplicate of `DuplicateConst1` at goconst_find_duplicates.go:17:7

@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/iface-v151-unexported/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 fun/fun.go:32:24:iface::unexported: unexported interface 'execer' used as return value in exported function 'ExecAdd'
 fun/fun.go:44:13:iface::unexported: unexported interface 'execer' used as parameter in exported function 'Exec'

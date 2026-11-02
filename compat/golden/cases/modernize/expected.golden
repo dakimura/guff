@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/modernize/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 bad/bad.go:9:16:modernize::any: interface{} can be replaced by any
 bad/bad.go:12:6:modernize::rangeint: for loop can be modernized using range over int

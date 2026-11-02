@@ -4,53 +4,58 @@
 # Produced by running golangci-lint on compat/golden/cases/exhaustive-ignore-decl/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
-decl/declignore.go:41:1:exhaustive::failed to parse directives: invalid directive "ingore"
-decl/declignore.go:53:2:exhaustive::failed to parse directives: invalid directive "ignore-me"
-decl/declignore.go:65:1:exhaustive::failed to parse directives: conflicting directives "ignore" and "enforce"
-decl/declignore.go:83:1:exhaustive::failed to parse directives: invalid directive "enfrce"
-decl/declignore.go:86:2:exhaustive::failed to parse directives: invalid directive "wat"
-decl/declignore.go:116:2:exhaustive::failed to parse directives: invalid directive "huh"
-decl/declignore.go:126:2:exhaustive::missing cases in switch of type declignore.Local: declignore.LocalB, declignore.LocalC
-decl/declignore.go:129:2:exhaustive::failed to parse directives: invalid directive "what"
-decl/declignore.go:135:2:exhaustive::missing cases in switch of type declignore.Kind: declignore.KindA, declignore.KindB, declignore.BadConstA, declignore.BadConstB, declignore.KindC
-decl/declignore.go:137:2:exhaustive::missing cases in switch of type declignore.Base: declignore.BaseA
-decl/declignore.go:139:2:exhaustive::missing cases in switch of type declignore.Ignored: declignore.IgnoredB
-decl/declignore.go:141:2:exhaustive::missing cases in switch of type declignore.BadType: declignore.BadTypeA, declignore.BadTypeB
-decl/declignore.go:143:2:exhaustive::missing cases in switch of type declignore.BadSpec: declignore.BadSpecA
-decl/declignore.go:147:2:exhaustive::missing cases in switch of type declignore.Conflict: declignore.ConflictA
-decl/declignore.go:151:2:exhaustive::missing cases in switch of type declignore.Enforced: declignore.EnforcedA
-enum/enum_switches.go:19:2:exhaustive::missing cases in switch of type enum.DeclGroupIgnoredEnum: enum.DeclGroupIgnoredMemberC
-enum/enum_switches.go:21:2:exhaustive::missing cases in switch of type enum.DeclIgnoredEnum: enum.DeclIgnoredMemberB
-enum/enum_switches.go:27:2:exhaustive::missing cases in switch of type enum.DeclTypeInnerNotIgnore: enum.DeclTypeInnerNotIgnoreMember
-enum/enum_switches.go:29:2:exhaustive::missing cases in switch of type enum.DeclTypeIgnoredValue: enum.DeclTypeNotIgnoredValue
-enum/enum_switches.go:31:2:exhaustive::missing cases in switch of type enum.DeclTypePartialIgnore: enum.DeclTypePartialIgnoreNotIgnored
-enum/enum_switches.go:33:2:exhaustive::missing cases in switch of type enum.IotaEnum: enum.IotaA, enum.IotaB
-enum/enum_switches.go:35:2:exhaustive::missing cases in switch of type enum.PkgRequireSameLevel: enum.PA
-enum/enum_switches.go:48:2:exhaustive::missing cases in switch of type enum.T: enum.C, enum.D
-enum/enum_switches.go:58:3:exhaustive::missing cases in switch of type enum.Inner: enum.IX
-use/use.go:18:2:exhaustive::missing cases in switch of type declignore.Kind: declignore.KindA, declignore.KindB, declignore.BadConstA, declignore.BadConstB, declignore.KindC
-use/use.go:20:2:exhaustive::missing cases in switch of type declignore.Base: declignore.BaseA
-use/use.go:22:2:exhaustive::missing cases in switch of type declignore.Ignored: declignore.IgnoredB
-use/use.go:24:2:exhaustive::missing cases in switch of type declignore.BadType: declignore.BadTypeA, declignore.BadTypeB
-use/use.go:26:2:exhaustive::missing cases in switch of type declignore.BadSpec: declignore.BadSpecA
-use/use.go:30:2:exhaustive::missing cases in switch of type declignore.Conflict: declignore.ConflictA
-use/use.go:34:2:exhaustive::missing cases in switch of type declignore.Enforced: declignore.EnforcedA
-use/use.go:42:2:exhaustive::missing cases in switch of type declignore.Kind: declignore.KindA, declignore.KindB, declignore.BadConstA, declignore.BadConstB, declignore.KindC
-use/use.go:44:2:exhaustive::missing cases in switch of type declignore.Base: declignore.BaseA
-use/use.go:46:2:exhaustive::missing cases in switch of type declignore.Ignored: declignore.IgnoredB
-use/use.go:48:2:exhaustive::missing cases in switch of type declignore.BadType: declignore.BadTypeA, declignore.BadTypeB
-use/use.go:50:2:exhaustive::missing cases in switch of type declignore.BadSpec: declignore.BadSpecA
-use/use.go:54:2:exhaustive::missing cases in switch of type declignore.Conflict: declignore.ConflictA
-use/use.go:58:2:exhaustive::missing cases in switch of type declignore.Enforced: declignore.EnforcedA
-use/use.go:71:2:exhaustive::missing cases in switch of type enum.DeclGroupIgnoredEnum: enum.DeclGroupIgnoredMemberC
-use/use.go:73:2:exhaustive::missing cases in switch of type enum.DeclIgnoredEnum: enum.DeclIgnoredMemberB
-use/use.go:79:2:exhaustive::missing cases in switch of type enum.DeclTypeInnerNotIgnore: enum.DeclTypeInnerNotIgnoreMember
-use/use.go:81:2:exhaustive::missing cases in switch of type enum.DeclTypeIgnoredValue: enum.DeclTypeNotIgnoredValue
-use/use.go:83:2:exhaustive::missing cases in switch of type enum.DeclTypePartialIgnore: enum.DeclTypePartialIgnoreNotIgnored
-use/use.go:96:2:exhaustive::missing cases in switch of type enum.DeclGroupIgnoredEnum: enum.DeclGroupIgnoredMemberC
-use/use.go:98:2:exhaustive::missing cases in switch of type enum.DeclIgnoredEnum: enum.DeclIgnoredMemberB
-use/use.go:104:2:exhaustive::missing cases in switch of type enum.DeclTypeInnerNotIgnore: enum.DeclTypeInnerNotIgnoreMember
-use/use.go:106:2:exhaustive::missing cases in switch of type enum.DeclTypeIgnoredValue: enum.DeclTypeNotIgnoredValue
-use/use.go:108:2:exhaustive::missing cases in switch of type enum.DeclTypePartialIgnore: enum.DeclTypePartialIgnoreNotIgnored
+decl/declignore.go:126:2:exhaustive::missing cases in expression switch: LocalA, LocalB, LocalC
+decl/declignore.go:135:2:exhaustive::missing cases in expression switch: KindA, KindB, BadConstA, BadConstB, IgnoredConst, SpecIgnored, KindC
+decl/declignore.go:137:2:exhaustive::missing cases in expression switch: BaseA
+decl/declignore.go:139:2:exhaustive::missing cases in expression switch: IgnoredA
+decl/declignore.go:141:2:exhaustive::missing cases in expression switch: BadTypeA, BadTypeB
+decl/declignore.go:143:2:exhaustive::missing cases in expression switch: BadSpecA
+decl/declignore.go:145:2:exhaustive::missing cases in expression switch: GoodSpecIgnoredA
+decl/declignore.go:147:2:exhaustive::missing cases in expression switch: ConflictA
+decl/declignore.go:149:2:exhaustive::missing cases in expression switch: SkippedSpecA
+decl/declignore.go:151:2:exhaustive::missing cases in expression switch: EnforcedA
+enum/enum_switches.go:19:2:exhaustive::missing cases in expression switch: DeclGroupIgnoredMemberA, DeclGroupIgnoredMemberB, DeclGroupIgnoredMemberC
+enum/enum_switches.go:21:2:exhaustive::missing cases in expression switch: DeclIgnoredMemberA, DeclIgnoredMemberB
+enum/enum_switches.go:23:2:exhaustive::missing cases in expression switch: DeclTypeIgnoredMemberA, DeclTypeIgnoredMemberB
+enum/enum_switches.go:25:2:exhaustive::missing cases in expression switch: DeclTypeInnerIgnoreMemberA, DeclTypeInnerIgnoreMemberB
+enum/enum_switches.go:27:2:exhaustive::missing cases in expression switch: DeclTypeInnerNotIgnoreMember
+enum/enum_switches.go:29:2:exhaustive::missing cases in expression switch: DeclTypeNotIgnoredValue, DeclTypeIsIgnoredValue
+enum/enum_switches.go:31:2:exhaustive::missing cases in expression switch: DeclTypePartialIgnoreIgnored, DeclTypePartialIgnoreNotIgnored
+enum/enum_switches.go:33:2:exhaustive::missing cases in expression switch: IotaA, IotaB
+enum/enum_switches.go:35:2:exhaustive::missing cases in expression switch: PA
+enum/enum_switches.go:48:2:exhaustive::missing cases in expression switch: C, D
+enum/enum_switches.go:58:3:exhaustive::missing cases in expression switch: IX
+use/use.go:18:2:exhaustive::missing cases in expression switch: declignore.KindA, declignore.KindB, declignore.BadConstA, declignore.BadConstB, declignore.IgnoredConst, declignore.SpecIgnored, declignore.KindC
+use/use.go:20:2:exhaustive::missing cases in expression switch: declignore.BaseA
+use/use.go:22:2:exhaustive::missing cases in expression switch: declignore.IgnoredA
+use/use.go:24:2:exhaustive::missing cases in expression switch: declignore.BadTypeA, declignore.BadTypeB
+use/use.go:26:2:exhaustive::missing cases in expression switch: declignore.BadSpecA
+use/use.go:28:2:exhaustive::missing cases in expression switch: declignore.GoodSpecIgnoredA
+use/use.go:30:2:exhaustive::missing cases in expression switch: declignore.ConflictA
+use/use.go:32:2:exhaustive::missing cases in expression switch: declignore.SkippedSpecA
+use/use.go:34:2:exhaustive::missing cases in expression switch: declignore.EnforcedA
+use/use.go:42:2:exhaustive::missing cases in expression switch: declignore.KindA, declignore.KindB, declignore.BadConstA, declignore.BadConstB, declignore.IgnoredConst, declignore.SpecIgnored, declignore.KindC
+use/use.go:44:2:exhaustive::missing cases in expression switch: declignore.BaseA
+use/use.go:46:2:exhaustive::missing cases in expression switch: declignore.IgnoredA
+use/use.go:48:2:exhaustive::missing cases in expression switch: declignore.BadTypeA, declignore.BadTypeB
+use/use.go:50:2:exhaustive::missing cases in expression switch: declignore.BadSpecA
+use/use.go:52:2:exhaustive::missing cases in expression switch: declignore.GoodSpecIgnoredA
+use/use.go:54:2:exhaustive::missing cases in expression switch: declignore.ConflictA
+use/use.go:56:2:exhaustive::missing cases in expression switch: declignore.SkippedSpecA
+use/use.go:58:2:exhaustive::missing cases in expression switch: declignore.EnforcedA
+use/use.go:71:2:exhaustive::missing cases in expression switch: enum.DeclGroupIgnoredMemberA, enum.DeclGroupIgnoredMemberB, enum.DeclGroupIgnoredMemberC
+use/use.go:73:2:exhaustive::missing cases in expression switch: enum.DeclIgnoredMemberA, enum.DeclIgnoredMemberB
+use/use.go:75:2:exhaustive::missing cases in expression switch: enum.DeclTypeIgnoredMemberA, enum.DeclTypeIgnoredMemberB
+use/use.go:77:2:exhaustive::missing cases in expression switch: enum.DeclTypeInnerIgnoreMemberA, enum.DeclTypeInnerIgnoreMemberB
+use/use.go:79:2:exhaustive::missing cases in expression switch: enum.DeclTypeInnerNotIgnoreMember
+use/use.go:81:2:exhaustive::missing cases in expression switch: enum.DeclTypeNotIgnoredValue, enum.DeclTypeIsIgnoredValue
+use/use.go:83:2:exhaustive::missing cases in expression switch: enum.DeclTypePartialIgnoreIgnored, enum.DeclTypePartialIgnoreNotIgnored
+use/use.go:96:2:exhaustive::missing cases in expression switch: enum.DeclGroupIgnoredMemberA, enum.DeclGroupIgnoredMemberB, enum.DeclGroupIgnoredMemberC
+use/use.go:98:2:exhaustive::missing cases in expression switch: enum.DeclIgnoredMemberA, enum.DeclIgnoredMemberB
+use/use.go:100:2:exhaustive::missing cases in expression switch: enum.DeclTypeIgnoredMemberA, enum.DeclTypeIgnoredMemberB
+use/use.go:102:2:exhaustive::missing cases in expression switch: enum.DeclTypeInnerIgnoreMemberA, enum.DeclTypeInnerIgnoreMemberB
+use/use.go:104:2:exhaustive::missing cases in expression switch: enum.DeclTypeInnerNotIgnoreMember
+use/use.go:106:2:exhaustive::missing cases in expression switch: enum.DeclTypeNotIgnoredValue, enum.DeclTypeIsIgnoredValue
+use/use.go:108:2:exhaustive::missing cases in expression switch: enum.DeclTypePartialIgnoreIgnored, enum.DeclTypePartialIgnoreNotIgnored

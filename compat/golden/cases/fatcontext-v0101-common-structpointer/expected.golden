@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/fatcontext-v0101-common-structpointer/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 example.go:19:3:fatcontext::nested context in loop
 example.go:29:3:fatcontext::nested context in loop

@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/govet-inline-ioutil-version/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 bad.go:13:23:govet::inline: cannot inline call to ioutil.TempDir (declared using go1.27.0) into a file using go1.24
 bad.go:14:24:govet::inline: cannot inline call to ioutil.ReadFile (declared using go1.27.0) into a file using go1.24

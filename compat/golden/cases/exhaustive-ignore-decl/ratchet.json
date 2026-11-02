@@ -1,0 +1,6 @@
+{
+  "missing": 53,
+  "extra": 48,
+  "why": "golangci-lint 2.15.0 bumps exhaustive v0.13.0 -> v0.15.0, a rewrite: every message and directive-error text changed (\"missing cases in switch of type p.Color: p.Blue\" -> \"missing cases in expression switch: Blue\"), and empty / elided map literals are now checked. guff still implements v0.13. docs/PHASE9-LEDGER.md §3.5 exhaustive. The declaration-side //exhaustive:ignore is gone upstream too.",
+  "target": "0/0"
+}

@@ -6,7 +6,7 @@
 #
 # An absent file for a case means upstream's --fix changes nothing there, and
 # guff must change nothing either.
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 --- a/bad.go
 +++ b/bad.go
@@ -53,4 +53,21 @@
 -	_ = r.Header.Values("if-none-match")
 +	_ = r.Header.Get("Content-Type")
 +	_ = r.Header.Values("If-None-Match")
+ }
+--- a/methodonly/methodonly.go
++++ b/methodonly/methodonly.go
+@@ -12,9 +12,9 @@
+ import "net/http"
+ 
+ func Silent(w http.ResponseWriter) {
+-	w.Header().Set("x-request-id", "1")
+-	w.Header().Add("accept-encoding", "gzip")
+-	w.Header().Del("user-agent")
+-	_ = w.Header().Get("content-type")
+-	_ = w.Header().Values("if-none-match")
++	w.Header().Set("X-Request-ID", "1")
++	w.Header().Add("Accept-Encoding", "gzip")
++	w.Header().Del("User-Agent")
++	_ = w.Header().Get("Content-Type")
++	_ = w.Header().Values("If-None-Match")
  }

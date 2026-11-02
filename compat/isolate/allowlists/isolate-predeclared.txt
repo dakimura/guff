@@ -1,0 +1,26 @@
+# Known finding-set diffs for per-linter isolate runs.
+# Format: <target> <guff-only|golangci-only> <normalized-key>
+#
+# golangci-lint 2.15.0 bumps predeclared v0.2.2 -> v0.3.0, rewritten on type
+# information: "function len has same name as predeclared identifier" ->
+# "len: shadows predeclared identifier"; methods are no longer reported by
+# default, range variables are. The same set is the golden `predeclared`
+# ratchet. docs/PHASE9-LEDGER.md §3.5 predeclared.
+isolate-predeclared golangci-only bad.go:11:predeclared:cap: shadows predeclared identifier
+isolate-predeclared golangci-only bad.go:13:predeclared:recover: shadows predeclared identifier
+isolate-predeclared golangci-only bad.go:16:predeclared:error: shadows predeclared identifier
+isolate-predeclared golangci-only bad.go:19:predeclared:new: shadows predeclared identifier
+isolate-predeclared golangci-only bad.go:22:predeclared:append: shadows predeclared identifier
+isolate-predeclared golangci-only bad.go:27:predeclared:max: shadows predeclared identifier
+isolate-predeclared golangci-only bad.go:27:predeclared:min: shadows predeclared identifier
+isolate-predeclared golangci-only bad.go:7:predeclared:len: shadows predeclared identifier
+isolate-predeclared golangci-only bad.go:9:predeclared:copy: shadows predeclared identifier
+isolate-predeclared guff-only bad.go:11:predeclared:const cap has same name as predeclared identifier
+isolate-predeclared guff-only bad.go:13:predeclared:variable recover has same name as predeclared identifier
+isolate-predeclared guff-only bad.go:16:predeclared:variable error has same name as predeclared identifier
+isolate-predeclared guff-only bad.go:19:predeclared:variable new has same name as predeclared identifier
+isolate-predeclared guff-only bad.go:27:predeclared:param max has same name as predeclared identifier
+isolate-predeclared guff-only bad.go:27:predeclared:param min has same name as predeclared identifier
+isolate-predeclared guff-only bad.go:29:predeclared:method delete has same name as predeclared identifier
+isolate-predeclared guff-only bad.go:7:predeclared:function len has same name as predeclared identifier
+isolate-predeclared guff-only bad.go:9:predeclared:type copy has same name as predeclared identifier

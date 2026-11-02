@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/iface-gcl-all/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 iface_all.go:9:6:iface::identical: interface 'Pinger' contains identical methods or type constraints with another interface, causing redundancy (see: Healthcheck)
 iface_all.go:9:6:iface::unused: interface 'Pinger' is declared but not used within the package

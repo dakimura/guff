@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/staticcheck-upstream-v081/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 blank/blank.go:23:7:staticcheck::SA9008: x refers to the result of a failed type assertion and is a zero value, not the value that was being type-asserted
 blank/blank.go:26:5:staticcheck::SA4031: this nil check is always true

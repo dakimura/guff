@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/iface-v151-opaque/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 a/a.go:17:29:iface::opaque: 'NewServer' function return 'Server' interface at the 1st result, abstract a single concrete implementation of '*server'
 a/a.go:21:30:iface::opaque: 'NewServer2' function return 'Server' interface at the 1st result, abstract a single concrete implementation of 'server'

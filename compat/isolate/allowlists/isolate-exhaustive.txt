@@ -1,0 +1,84 @@
+# Known finding-set diffs for per-linter isolate runs.
+# Format: <target> <guff-only|golangci-only> <normalized-key>
+#
+# golangci-lint 2.15.0 bumps exhaustive v0.13.0 -> v0.15.0, a rewrite: every
+# message and directive-error text changed, and empty / elided map literals are
+# now checked. guff still implements v0.13. The same set is the golden
+# `exhaustive*` ratchets. docs/PHASE9-LEDGER.md §3.5 exhaustive.
+isolate-exhaustive golangci-only bad.go:16:exhaustive:missing cases in expression switch: Blue
+isolate-exhaustive golangci-only bad.go:25:exhaustive:missing keys in map literal: Blue
+isolate-exhaustive golangci-only bad.go:41:exhaustive:missing cases in expression switch: Medium, Large
+isolate-exhaustive golangci-only directives.go:104:exhaustive:error parsing comment directives: conflicting directives
+isolate-exhaustive golangci-only directives.go:116:exhaustive:error parsing comment directives: invalid name "ignoreme"
+isolate-exhaustive golangci-only directives.go:127:exhaustive:error parsing comment directives: invalid name "enforcement"
+isolate-exhaustive golangci-only directives.go:139:exhaustive:missing cases in expression switch: Blue
+isolate-exhaustive golangci-only directives.go:150:exhaustive:missing keys in map literal: Blue
+isolate-exhaustive golangci-only directives.go:162:exhaustive:missing keys in map literal: Blue
+isolate-exhaustive golangci-only directives.go:172:exhaustive:missing keys in map literal: Blue
+isolate-exhaustive golangci-only directives.go:178:exhaustive:missing keys in map literal: Blue
+isolate-exhaustive golangci-only directives.go:184:exhaustive:error parsing comment directives: invalid name "ignoreme"
+isolate-exhaustive golangci-only directives.go:191:exhaustive:missing keys in map literal: Blue
+isolate-exhaustive golangci-only directives.go:199:exhaustive:missing keys in map literal: Blue
+isolate-exhaustive golangci-only directives.go:208:exhaustive:missing keys in map literal: Blue
+isolate-exhaustive golangci-only directives.go:21:exhaustive:missing cases in expression switch: Blue
+isolate-exhaustive golangci-only directives.go:221:exhaustive:missing keys in map literal: Blue
+isolate-exhaustive golangci-only directives.go:236:exhaustive:missing keys in map literal: Blue
+isolate-exhaustive golangci-only directives.go:270:exhaustive:missing keys in map literal: Blue
+isolate-exhaustive golangci-only directives.go:274:exhaustive:missing keys in map literal: Green, Blue
+isolate-exhaustive golangci-only directives.go:277:exhaustive:missing keys in map literal: Red, Green, Blue
+isolate-exhaustive golangci-only directives.go:281:exhaustive:missing keys in map literal: Green, Blue
+isolate-exhaustive golangci-only directives.go:282:exhaustive:missing keys in map literal: Green, Blue
+isolate-exhaustive golangci-only directives.go:283:exhaustive:missing keys in map literal: Green, Blue
+isolate-exhaustive golangci-only directives.go:293:exhaustive:missing keys in map literal: Green, Blue
+isolate-exhaustive golangci-only directives.go:301:exhaustive:missing keys in map literal: Green, Blue
+isolate-exhaustive golangci-only directives.go:302:exhaustive:missing keys in map literal: Green, Blue
+isolate-exhaustive golangci-only directives.go:303:exhaustive:missing keys in map literal: Green, Blue
+isolate-exhaustive golangci-only directives.go:311:exhaustive:error parsing comment directives: invalid name "ignored"
+isolate-exhaustive golangci-only directives.go:321:exhaustive:missing cases in expression switch: Green, Blue
+isolate-exhaustive golangci-only directives.go:332:exhaustive:missing keys in map literal: Green, Blue
+isolate-exhaustive golangci-only directives.go:43:exhaustive:missing cases in expression switch: Blue
+isolate-exhaustive golangci-only directives.go:58:exhaustive:missing cases in expression switch: Blue
+isolate-exhaustive golangci-only directives.go:58:exhaustive:missing default case
+isolate-exhaustive golangci-only foreign.go:10:exhaustive:missing cases in expression switch: enumdep.KindA, enumdep.KindM
+isolate-exhaustive golangci-only foreign.go:20:exhaustive:missing cases in expression switch: enumdep.FlagTwo
+isolate-exhaustive golangci-only foreign.go:51:exhaustive:missing cases in expression switch: enumdep.KindA, enumdep.KindM
+isolate-exhaustive golangci-only foreign.go:62:exhaustive:missing cases in expression switch: enumdep.KindA, enumdep.KindM
+isolate-exhaustive golangci-only foreign.go:82:exhaustive:missing cases in expression switch: enumdep.KindA, enumdep.KindM
+isolate-exhaustive golangci-only foreign.go:99:exhaustive:missing keys in map literal: enumdep.KindA, enumdep.KindM
+isolate-exhaustive guff-only bad.go:16:exhaustive:missing cases in switch of type p.Color: p.Blue
+isolate-exhaustive guff-only bad.go:25:exhaustive:missing keys in map of key type p.Color: p.Blue
+isolate-exhaustive guff-only bad.go:41:exhaustive:missing cases in switch of type p.Size: p.Medium, p.Large
+isolate-exhaustive guff-only directives.go:104:exhaustive:failed to parse directives: conflicting directives "ignore" and "enforce"
+isolate-exhaustive guff-only directives.go:116:exhaustive:failed to parse directives: invalid directive "ignoreme"
+isolate-exhaustive guff-only directives.go:116:exhaustive:missing cases in switch of type p.Color: p.Blue
+isolate-exhaustive guff-only directives.go:127:exhaustive:failed to parse directives: invalid directive "enforcement"
+isolate-exhaustive guff-only directives.go:127:exhaustive:missing cases in switch of type p.Color: p.Blue
+isolate-exhaustive guff-only directives.go:139:exhaustive:missing cases in switch of type p.Color: p.Blue
+isolate-exhaustive guff-only directives.go:150:exhaustive:missing keys in map of key type p.Color: p.Blue
+isolate-exhaustive guff-only directives.go:162:exhaustive:missing keys in map of key type p.Color: p.Blue
+isolate-exhaustive guff-only directives.go:172:exhaustive:missing keys in map of key type p.Color: p.Blue
+isolate-exhaustive guff-only directives.go:178:exhaustive:missing keys in map of key type p.Color: p.Blue
+isolate-exhaustive guff-only directives.go:184:exhaustive:failed to parse directives: invalid directive "ignoreme"
+isolate-exhaustive guff-only directives.go:184:exhaustive:missing keys in map of key type p.Color: p.Blue
+isolate-exhaustive guff-only directives.go:191:exhaustive:missing keys in map of key type p.Color: p.Blue
+isolate-exhaustive guff-only directives.go:199:exhaustive:missing keys in map of key type p.Color: p.Blue
+isolate-exhaustive guff-only directives.go:208:exhaustive:missing keys in map of key type p.Color: p.Blue
+isolate-exhaustive guff-only directives.go:21:exhaustive:missing cases in switch of type p.Color: p.Blue
+isolate-exhaustive guff-only directives.go:221:exhaustive:missing keys in map of key type p.Color: p.Blue
+isolate-exhaustive guff-only directives.go:236:exhaustive:missing keys in map of key type p.Color: p.Blue
+isolate-exhaustive guff-only directives.go:281:exhaustive:missing keys in map of key type p.Color: p.Green, p.Blue
+isolate-exhaustive guff-only directives.go:282:exhaustive:missing keys in map of key type p.Color: p.Green, p.Blue
+isolate-exhaustive guff-only directives.go:283:exhaustive:missing keys in map of key type p.Color: p.Green, p.Blue
+isolate-exhaustive guff-only directives.go:293:exhaustive:missing keys in map of key type p.Color: p.Green, p.Blue
+isolate-exhaustive guff-only directives.go:311:exhaustive:failed to parse directives: invalid directive "ignored"
+isolate-exhaustive guff-only directives.go:321:exhaustive:failed to parse directives: invalid directive ""
+isolate-exhaustive guff-only directives.go:321:exhaustive:missing cases in switch of type p.Color: p.Green, p.Blue
+isolate-exhaustive guff-only directives.go:332:exhaustive:missing keys in map of key type p.Color: p.Green, p.Blue
+isolate-exhaustive guff-only directives.go:43:exhaustive:missing cases in switch of type p.Color: p.Blue
+isolate-exhaustive guff-only directives.go:58:exhaustive:missing default case in switch of type p.Color
+isolate-exhaustive guff-only foreign.go:10:exhaustive:missing cases in switch of type enumdep.Kind: enumdep.KindA, enumdep.KindM
+isolate-exhaustive guff-only foreign.go:20:exhaustive:missing cases in switch of type enumdep.Flag: enumdep.FlagTwo
+isolate-exhaustive guff-only foreign.go:51:exhaustive:missing cases in switch of type enumdep.Kind: enumdep.KindA, enumdep.KindM
+isolate-exhaustive guff-only foreign.go:62:exhaustive:missing cases in switch of type enumdep.Kind: enumdep.KindA, enumdep.KindM
+isolate-exhaustive guff-only foreign.go:82:exhaustive:missing cases in switch of type enumdep.Kind: enumdep.KindA, enumdep.KindM
+isolate-exhaustive guff-only foreign.go:99:exhaustive:missing keys in map of key type enumdep.Kind: enumdep.KindA, enumdep.KindM

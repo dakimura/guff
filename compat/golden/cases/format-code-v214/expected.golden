@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/format-code-v214/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 fc.go:4:9:goconst::string "line one\\nline two" has 3 occurrences, make it a constant
 fc.go:19:9:goconst::string `a	b c` has 3 occurrences, make it a constant

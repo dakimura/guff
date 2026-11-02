@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/unused/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 bad/method_bad.go:7:17:unused::func usedType.unusedMethod is unused
 deadcycle/dead_cycle.go:11:20:unused::func (*policies).recompileAll is unused

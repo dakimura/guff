@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/exhaustruct-v5-directives/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 types/directives/directives.go:67:6:exhaustruct_v5::directives.Test is missing fields A, B, C, D
 types/directives/directives.go:72:3:exhaustruct_v5::directives.Test is missing fields A, B, C, D

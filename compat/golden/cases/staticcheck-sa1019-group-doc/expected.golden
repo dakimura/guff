@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/staticcheck-sa1019-group-doc/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 use.go:12:6:staticcheck::SA1019: example.com/sa1019groupdoc/dep.KindC is deprecated: Marked as deprecated in x.proto. 
 use.go:13:6:staticcheck::SA1019: example.com/sa1019groupdoc/dep.KindD is deprecated: Marked as deprecated in x.proto. 

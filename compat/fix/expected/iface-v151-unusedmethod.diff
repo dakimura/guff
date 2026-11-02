@@ -6,18 +6,8 @@
 #
 # An absent file for a case means upstream's --fix changes nothing there, and
 # guff must change nothing either.
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
---- a/basic/basic.go
-+++ b/basic/basic.go
-@@ -6,7 +6,6 @@
- )
- 
- type Logger interface {
--	Debug(msg string, args ...any) // want "^method 'Debug\\(\\)' is declared on interface 'Logger' but not used within the package$"
- 	Info(msg string, args ...any)
- 
- 	Warn(msg string, args ...any) //iface:ignore=unusedmethod
 --- a/concrete/main.go
 +++ b/concrete/main.go
 @@ -15,7 +15,6 @@

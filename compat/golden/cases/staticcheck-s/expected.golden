@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/staticcheck-s/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 s1000/bad/bad.go:4:2:staticcheck::S1000: should use a simple channel send/receive instead of select with a single case
 s1001/bad/bad.go:4:2:staticcheck::S1001: should use copy(to, from) instead of a loop

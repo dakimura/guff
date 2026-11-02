@@ -2720,39 +2720,24 @@ fn canonicalheader_flags_non_canonical_keys() {
     assert!(messages.len() >= 7, "{messages:?}");
 }
 
-/// Upstream's `headerObject` scan decides whether the package is checked at
-/// all, and there are four `net/http` objects named `Header` to land on.
-///
-/// ```go
-/// for _, object := range pass.TypesInfo.Uses {
-///     if object.Pkg() != nil && object.Pkg().Path() == pkgPath && object.Name() == name {
-///         headerObject = object
-///         break
-///     }
-/// }
-/// ...
-/// if !types.Identical(gotType, headerObject.Type()) { return }
-/// ```
-///
-/// The type `Header` and the fields `Request.Header` / `Response.Header` all
-/// carry `http.Header`; the method `ResponseWriter.Header` carries
-/// `func() Header`, and when the map hands the loop *that*, the identity test
-/// never holds and the package reports nothing. guff had no such gate and
-/// reported everywhere. Measured with a fresh golangci-lint cache per run:
-/// method-only is always silent, field-only always reports, and a package with
-/// both is 0-or-all at random.
+/// Until golangci-lint 2.15.0, canonicalheader picked one `net/http` object
+/// named `Header` from `TypesInfo.Uses` (whichever the map handed it first) and
+/// required every receiver to be identical to its type, so a package whose only
+/// candidate was the method `ResponseWriter.Header` — type `func() Header` —
+/// was always silent. 2.15.0's fork checks the receiver itself
+/// (`isHTTPHeader`), and the method-only package reports like any other.
 #[test]
-fn canonicalheader_is_silent_when_only_the_responsewriter_method_is_used() {
+fn canonicalheader_reports_when_only_the_responsewriter_method_is_used() {
     let pkg = support::typecheck_fixture(
         "canonicalheader",
         "example.com/canonicalheader/methodonly",
         "methodonly.go",
     );
     let messages = support::run_analyzer(canonicalheader(), &pkg);
-    assert!(messages.is_empty(), "{messages:?}");
+    assert_eq!(messages.len(), 5, "{messages:?}");
 }
 
-/// The other deterministic half.
+/// The field-only package, reported before and after 2.15.0.
 #[test]
 fn canonicalheader_checks_when_the_request_field_is_used() {
     let pkg = support::typecheck_fixture(

@@ -1,14 +1,12 @@
-// Package methodonly is the shape upstream is deterministically *silent* on.
+// Package methodonly: the only `net/http` object it uses is the method
+// `ResponseWriter.Header`.
 //
-// canonicalheader opens by scanning `pass.TypesInfo.Uses` for any `net/http`
-// object named `Header` and keeping whichever one the map hands it first, then
-// requires `types.Identical(recv, headerObject.Type())` at every call site.
-// `net/http` has four such objects: the type `Header`, the fields
-// `Request.Header` and `Response.Header` — whose type *is* `http.Header` — and
-// the method `ResponseWriter.Header`, whose type is `func() Header`.
-//
-// Here the method is the only candidate, so the identity test never holds and
-// the package reports nothing, however non-canonical the keys are.
+// Until golangci-lint 2.15.0 canonicalheader opened by picking one `net/http`
+// object named `Header` from `pass.TypesInfo.Uses` (whichever the map handed it
+// first) and required every receiver to be identical to that object's type, so
+// a package whose only candidate was the method — type `func() Header` —
+// reported nothing. 2.15.0's fork checks the receiver itself
+// (`isHTTPHeader`), so these keys are reported like any other.
 package methodonly
 
 import "net/http"

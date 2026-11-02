@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/nonamedreturns-allow-unused/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 bad/bad.go:3:13:nonamedreturns::named return "n" with type "int" must not be referenced or used by a naked return
 bad/bad.go:39:27:nonamedreturns::named return "s" with type "struct{A int}" must not be referenced or used by a naked return

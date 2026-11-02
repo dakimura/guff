@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/exhaustruct-v5-derived/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 types/derived/derived.go:25:6:exhaustruct_v5::derived.Derived is missing fields A, B, c
 types/derived/derived.go:26:6:exhaustruct_v5::derived.DerivedDerived is missing fields A, B, c

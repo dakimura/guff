@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/gosec/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 bad/bad.go:5:2:gosec:medium:G502: Blocklisted import crypto/des: weak cryptographic primitive
 bad/bad.go:6:2:gosec:medium:G501: Blocklisted import crypto/md5: weak cryptographic primitive

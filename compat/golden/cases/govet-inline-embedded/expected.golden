@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/govet-inline-embedded/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 a/a.go:20:8:govet::inline: Type alias Value should be inlined
 a/a.go:20:15:govet::inline: Type alias Value should be inlined

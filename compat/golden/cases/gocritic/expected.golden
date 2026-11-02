@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/gocritic/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 bad.go:1:1:gocritic::codegenComment: comment should match `Code generated .* DO NOT EDIT.` regexp
 bad.go:14:1:gocritic::commentFormatting: put a space between `//` and comment text

@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/unparam-upstream/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 linkname/foo.go:7:18:unparam::regularFunc - f is unused
 samerets/foo.go:12:27:unparam::manyReturns - result 0 (int) is always 3

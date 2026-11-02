@@ -175,7 +175,10 @@ fn enabled_set(opts: &LoggercheckOptions) -> HashSet<&'static str> {
     s
 }
 
-fn build_rule_index(opts: &LoggercheckOptions) -> HashMap<String, CheckerKind> {
+/// Per rule: its checker, and whether its ruleset gets the nil-Stringer check
+/// (v0.13 `nilStringerRulesetNames`: klog and logr only — not zap, kitlog,
+/// slog or custom rules).
+fn build_rule_index(opts: &LoggercheckOptions) -> HashMap<String, (CheckerKind, bool)> {
     let enabled = enabled_set(opts);
     let mut map = HashMap::new();
     for r in static_rules() {
@@ -183,14 +186,14 @@ fn build_rule_index(opts: &LoggercheckOptions) -> HashMap<String, CheckerKind> {
         if !enabled.contains(name) {
             continue;
         }
-        map.insert(r.fqn.clone(), r.kind);
+        map.insert(r.fqn.clone(), (r.kind, matches!(name, "klog" | "logr")));
     }
     for line in &opts.rules {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        map.insert(line.to_string(), CheckerKind::General);
+        map.insert(line.to_string(), (CheckerKind::General, false));
     }
     map
 }
@@ -315,7 +318,7 @@ fn first_printf_like(format: &str) -> Option<&str> {
 fn check_call(
     pass: &Pass<'_>,
     call: &CallExpr,
-    rules: &HashMap<String, CheckerKind>,
+    rules: &HashMap<String, (CheckerKind, bool)>,
     opts: &LoggercheckOptions,
     pending: &mut Vec<(u32, String)>,
 ) {
@@ -326,7 +329,7 @@ fn check_call(
     let Some(name) = callee_name(pass, call) else {
         return;
     };
-    let Some(&kind) = rules.get(&name) else {
+    let Some(&(kind, nil_stringer)) = rules.get(&name) else {
         return;
     };
 
@@ -419,8 +422,9 @@ fn check_call(
         }
     }
 
-    // `checkStringerValues` (v0.12): every value position.
-    for i in (1..filtered.len()).step_by(2) {
+    // `checkStringerValues` (v0.12): every value position — since v0.13 only
+    // for the klog and logr rulesets.
+    for i in (1..filtered.len()).step_by(2).filter(|_| nil_stringer) {
         let arg = filtered[i];
         if nil_stringer_value(pass, arg) {
             pending.push((

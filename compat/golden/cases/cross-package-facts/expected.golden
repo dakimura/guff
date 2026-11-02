@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/cross-package-facts/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 user/user.go:10:15:unparam::afterDie - p is unused
 user/user.go:17:21:unparam::afterMethodDie - p is unused
