@@ -84,16 +84,9 @@ pub fn read(
         }
     };
 
-    let mut imports = HashMap::default();
-    let name = path.rsplit('/').next().unwrap_or(path);
-    let pkg = new_package(
-        ctx.packages,
-        ctx.scopes,
-        ctx.universe_scope,
-        path,
-        name,
-    );
-    imports.insert(path.to_string(), pkg);
+    // The root package is made by the reader from the export data's own
+    // name: the last path element is not it (`math/rand/v2` is `rand`).
+    let imports = HashMap::default();
 
     read_export_data(
         importer,
