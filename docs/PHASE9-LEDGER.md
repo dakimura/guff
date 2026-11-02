@@ -19,11 +19,13 @@ Phase 8（`docs/PHASE8-LEDGER.md`）と同じ作り方: 出力ではなく**上�
 
 | 測ったこと | 結果 |
 |---|---|
-| OSS pr tier を `GOTOOLCHAIN=go1.27.3` で（2.14.0 vs guff） | **8/8 target 一致**。generic method などの新構文を使わないコードは今のままで動く |
+| OSS pr tier を Go 1.27 で（2.14.0 vs guff） | **注意: 最初の測定（`GOTOOLCHAIN=go1.27.3` だけ）は無効**。guff は stdlib のソースを PATH 上の `go` の GOROOT から読む（`compat.yml` の GOTOOLCHAIN コメント）ので、`go list` は 1.27・guff の stdlib は 1.26.5 の混成になっていた。PATH に go1.27.3 を置き `GOTOOLCHAIN=local` で測り直したのは generic method 対応後のバイナリで、**8/8 target 一致** |
 | Go 1.27 の generic method（`func (T) M[U any]()`）を含むファイル | guff の parser が `method must have no type parameters` で**そのファイルを黙って捨てる**。他の linter の finding も全部消え、exit 0。golangci は普通に解析する |
 | export data | go1.27 は pkgbits **V5** を書く。guff-exportdata は V0–V2 だけ。`GUFF_DEP_SOURCE=0`（export data 経路）では go1.27 で**黙って 0 件** |
-| `math/rand/v2`（stdlib 自身が generic method を持つ）を import するだけ | 既定の経路では **1.26 / 1.27 とも正しく出る**（実測） |
+| `math/rand/v2`（stdlib 自身が generic method を持つ）を import するだけ | 上と同じ混成環境での測定だったので**無効**（guff は 1.26.5 の `math/rand/v2` を読んでいた）。本物の go1.27 環境では、対応前の parser は `rand.go:213` の `func (r *Rand) N[Int intType]` を捨てる。対応後のバイナリでは正しく出る |
 | `compat/drift.py --candidate 2.15.0`（golden 366 case） | 上流の出力が動いたのは 10 case: canonicalheader ×2、exhaustive ×4、iface-edges、loggercheck、predeclared、revive。inventory は predeclared が `fast` から外れた 1 件 |
+
+**測るときの注意**: Go 1.27 で測るときは `PATH=<go1.27 の bin>:$PATH GOTOOLCHAIN=local` にする。`GOTOOLCHAIN=go1.27.3` だけでは guff が古い stdlib を読む。
 
 ### 1.2 グループ別の行数
 
