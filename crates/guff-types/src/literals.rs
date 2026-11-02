@@ -26,7 +26,7 @@ use crate::arena::TypeData;
 use crate::array::new_array;
 use crate::array::{array_elem, array_len};
 use crate::check::Checker;
-use crate::lookup::{deref, field_index};
+use crate::lookup::deref;
 use crate::map::{map_elem, map_key};
 use crate::operand::{Operand, OperandMode};
 use crate::predicates::{identical, is_non_type_param_interface, is_valid};
@@ -241,7 +241,7 @@ impl Checker {
         let keyed = matches!(e.elts.first(), Some(Expr::KeyValueExpr(_)));
         if keyed {
             // All elements must have keys.
-            let mut visited = vec![false; field_objs.len()];
+            let mut visited: Vec<(Vec<i32>, crate::ObjectId)> = Vec::new();
             for el in &e.elts {
                 let kv = match el {
                     Expr::KeyValueExpr(kv) => kv,
@@ -269,16 +269,22 @@ impl Checker {
                         continue;
                     }
                 };
-                let i = match field_index(
+                // Since Go 1.27 a key may name a promoted field, so it is
+                // resolved like a selector.
+                let found = crate::lookup::lookup_field_or_method(
+                    &mut self.types,
                     &self.objects,
                     &self.packages,
-                    &field_objs,
+                    u,
+                    false,
                     Some(self.pkg),
                     &key.name,
-                    false,
-                ) {
-                    Some(i) => i,
-                    None => {
+                );
+                let (obj, index, indirect) = match found {
+                    crate::lookup::LookupResult::Found { obj, index, indirect } => {
+                        (obj, index, indirect)
+                    }
+                    _ => {
                         let bs = self.type_str(base);
                         self.error(
                             kv.key.pos().0 as u32,
@@ -291,7 +297,33 @@ impl Checker {
                         continue;
                     }
                 };
-                let fld = field_objs[i];
+                if !matches!(self.objects.get(obj), crate::arena::ObjectData::Var(_)) {
+                    self.error(
+                        kv.key.pos().0 as u32,
+                        Code::MissingLitField,
+                        format!("{} is not a field", key.name),
+                    );
+                    continue;
+                }
+                let fld = obj;
+                if index.len() > 1 {
+                    let msg = format!(
+                        "use of promoted field {} in struct literal of type {}",
+                        self.field_path(u, &index),
+                        self.type_str(base)
+                    );
+                    if !self.verify_versionf(kv.key.pos().0 as u32, &crate::version::go1_27(), msg) {
+                        continue;
+                    }
+                }
+                if indirect {
+                    self.error(
+                        kv.key.pos().0 as u32,
+                        Code::InvalidLitField,
+                        format!("invalid implicit pointer indirection to reach {}", key.name),
+                    );
+                    continue;
+                }
                 // `check.recordUse(key, fld)`: a struct literal's key is a use
                 // of the field. Without it `Uses` had no entry for the key, and
                 // everything that asks `ObjectOf(key)` — SA1019's struct-literal
@@ -301,15 +333,31 @@ impl Checker {
                     .typ(&self.objects)
                     .unwrap_or_else(|| self.invalid_type());
                 self.assignment(&mut xe, Some(etyp), "struct literal");
-                if visited[i] {
-                    self.error(
-                        kv.key.pos().0 as u32,
-                        Code::DuplicateLitField,
-                        format!("duplicate field name {} in struct literal", key.name),
+                // Go's `trie.insert`: a key collides with another that names
+                // the same field, an enclosing embedded field, or a field
+                // inside it.
+                if let Some((alt, n)) = trie_collision(&visited, &index) {
+                    let (fname, aname) = (
+                        fld.name(&self.objects).to_string(),
+                        alt.name(&self.objects).to_string(),
                     );
+                    let msg = if fld == alt {
+                        format!("duplicate field name {} in struct literal", fname)
+                    } else if n < index.len() {
+                        format!(
+                            "cannot specify promoted field {} and enclosing embedded field {}",
+                            fname, aname
+                        )
+                    } else {
+                        format!(
+                            "cannot specify embedded field {} and enclosed promoted field {}",
+                            fname, aname
+                        )
+                    };
+                    self.error(kv.key.pos().0 as u32, Code::DuplicateLitField, msg);
                     continue;
                 }
-                visited[i] = true;
+                visited.push((index, fld));
             }
         } else {
             // No element must have a key.
@@ -353,14 +401,37 @@ impl Checker {
             }
             if e.elts.len() < field_objs.len() {
                 let bs = self.type_str(base);
+                let hint = if field_objs.iter().any(|f| {
+                    !f.exported(&self.objects) && f.pkg(&self.objects) != Some(self.pkg)
+                }) {
+                    " (type has unexported fields - use key:value pairs)"
+                } else {
+                    ""
+                };
                 self.error(
                     e.rbrace.0 as u32,
                     Code::InvalidStructLit,
-                    format!("too few values in struct literal of type {}", bs),
+                    format!("too few values in struct literal of type {}{}", bs, hint),
                 );
             }
         }
         let _ = x;
+    }
+
+    /// `fieldPath`: the dotted field names along `index` from struct `u`.
+    fn field_path(&mut self, mut typ: TypeId, index: &[i32]) -> String {
+        let mut names = Vec::new();
+        for &i in index {
+            let (base, _) = deref(&self.types, typ);
+            let u = base.underlying(&self.types);
+            if !matches!(self.types.get(u), TypeData::Struct(_)) {
+                break;
+            }
+            let fld = struct_field(&self.types, u, i as usize);
+            names.push(fld.name(&self.objects).to_string());
+            typ = fld.typ(&self.objects).unwrap_or_else(|| self.invalid_type());
+        }
+        names.join(".")
     }
 
     /// Check the elements of a map composite literal against `u`'s key/value.
@@ -486,4 +557,26 @@ impl Checker {
         }
         max
     }
+}
+
+/// Go's `trie.insert` collision check over the field paths already keyed in a
+/// struct literal: an existing path that is a prefix of (or equal to) `key`
+/// collides at its own length; else one that `key` is a prefix of collides at
+/// `key`'s length (the smallest such path, as `pickValue` does).
+fn trie_collision(
+    visited: &[(Vec<i32>, crate::ObjectId)],
+    key: &[i32],
+) -> Option<(crate::ObjectId, usize)> {
+    visited
+        .iter()
+        .filter(|(p, _)| key.starts_with(p))
+        .min_by_key(|(p, _)| p.len())
+        .map(|(p, v)| (*v, p.len()))
+        .or_else(|| {
+            visited
+                .iter()
+                .filter(|(p, _)| p.starts_with(key))
+                .min_by(|a, b| a.0.cmp(&b.0))
+                .map(|(_, v)| (*v, key.len()))
+        })
 }

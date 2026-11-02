@@ -301,6 +301,24 @@ impl Checker {
             }
         }
 
+        // `check.nonGeneric(newTarget(T, context), x)` (Go 1.27): a generic
+        // function assigned to a function type in any assignment context —
+        // a composite-literal element, a map key, a send — has its type
+        // arguments inferred from it.
+        // A generic target is no target: guff types `g := id` by giving `g`
+        // `id`'s own (generic) type before this check, where go/types has
+        // none yet.
+        let tg = self.new_target(target).filter(|tg| {
+            !matches!(self.types.get(tg.sig), TypeData::Signature(s)
+                if s.type_params().is_some_and(|l| !l.is_empty()))
+        });
+        if let (Some(e), Some(tg)) = (x.expr, tg) {
+            self.non_generic(x, e, tg);
+            if x.mode == OperandMode::Invalid {
+                return;
+            }
+        }
+
         let xtyp = x.typ.unwrap_or_else(|| self.invalid_type());
         if is_untyped(&self.types, xtyp) {
             // Determine the conversion target.

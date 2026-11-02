@@ -1478,9 +1478,9 @@ impl<'a> Builder<'a> {
     }
 
     /// comp_lit_struct handles the struct case of [`comp_lit`]. Each element is a
-    /// field initializer, keyed (`{f: v}`) or positional (`{v0, v1}`); a
-    /// composite-literal key always names a *direct* field, so the field address
-    /// is a single `FieldAddr` on `addr` (no implicit embedded selection).
+    /// field initializer, keyed (`{f: v}`) or positional (`{v0, v1}`). A key
+    /// names a direct field, or since Go 1.27 a promoted one, whose address is
+    /// reached through the implicit embedded selections first.
     fn comp_lit_struct(
         &mut self,
         addr: crate::value::Value,
@@ -1510,19 +1510,32 @@ impl<'a> Builder<'a> {
             let element = match elt {
                 Expr::KeyValueExpr(kv) => match kv.key.as_ref() {
                     Expr::Ident(id) => self
-                        .struct_field_index(u_struct, &id.name)
-                        .map(|idx| (idx, kv.value.as_ref(), kv.colon)),
+                        .struct_field_path(u_struct, id)
+                        .map(|path| (path, kv.value.as_ref(), kv.colon)),
                     // `T{"Age": 1}` / `T{pkg.X: 1}`: not a field name at all.
                     _ => None,
                 },
                 // `T{1, 2, 3}` for a one-field `T`: more values than fields.
-                _ => (i < nfields).then(|| (i, elt, elt.pos())),
+                _ => (i < nfields).then(|| (vec![i], elt, elt.pos())),
             };
-            let Some((field_index, value_expr, pos)) = element else {
+            let Some((path, value_expr, pos)) = element else {
                 continue;
             };
 
-            let fld = guff_types::struct_field(&self.prog.type_arena, u_struct, field_index);
+            // A promoted key (Go 1.27) selects the embedded fields on the way.
+            let (last, implicit) = path.split_last().expect("non-empty field path");
+            let field_index = *last;
+            let block = self.block.expect("no current block");
+            let fid = self.func_id;
+            let base = crate::emit::emit_implicit_selections(self.prog, fid, block, addr, implicit, pos);
+            let holder = if implicit.is_empty() {
+                u_struct
+            } else {
+                let bt = crate::program::value_type_of(self.prog, self.func(), base);
+                let st = guff_types::pointer_elem(&self.prog.type_arena, bt);
+                st.underlying(&self.prog.type_arena)
+            };
+            let fld = guff_types::struct_field(&self.prog.type_arena, holder, field_index);
             let ftype = fld
                 .typ(&self.prog.object_arena)
                 .expect("struct field has a type");
@@ -1532,7 +1545,7 @@ impl<'a> Builder<'a> {
                 self.func_mut(),
                 block,
                 InstrData::FieldAddr(crate::instr::FieldAddr {
-                    x: addr,
+                    x: base,
                     field: field_index,
                     typ: ptr_ty,
                 }),
@@ -1562,6 +1575,31 @@ impl<'a> Builder<'a> {
                 .name(&self.prog.object_arena)
                 == name
         })
+    }
+
+    /// struct_field_path is the field-index path a struct-literal key names:
+    /// a direct field, or since Go 1.27 a promoted one, resolved as go/ssa
+    /// does with `types.LookupFieldOrMethod`. `None` only for an ill-typed key.
+    fn struct_field_path(&mut self, u_struct: guff_types::TypeId, key: &Ident) -> Option<Vec<usize>> {
+        if let Some(i) = self.struct_field_index(u_struct, &key.name) {
+            return Some(vec![i]);
+        }
+        let fld = self.object_of(key)?;
+        let pkg = fld.pkg(&self.prog.object_arena);
+        match guff_types::lookup_field_or_method(
+            &mut self.prog.type_arena,
+            &self.prog.object_arena,
+            &self.prog.package_arena,
+            u_struct,
+            true,
+            pkg,
+            &key.name,
+        ) {
+            guff_types::LookupResult::Found { obj, index, .. } if obj == fld => {
+                Some(index.iter().map(|&i| i as usize).collect())
+            }
+            _ => None,
+        }
     }
 
     /// comp_lit_array_slice handles the array and slice cases of [`comp_lit`].

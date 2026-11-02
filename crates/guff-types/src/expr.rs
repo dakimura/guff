@@ -60,9 +60,11 @@ pub(crate) struct Target {
 
 impl Checker {
     /// `newTarget`: a target only exists when the type is a signature.
-    pub(crate) fn new_target(&self, typ: Option<TypeId>) -> Option<Target> {
+    pub(crate) fn new_target(&mut self, typ: Option<TypeId>) -> Option<Target> {
         let typ = typ?;
-        let u = typ.underlying(&self.types);
+        // `commonUnder` (Go 1.27): a type parameter whose core type is a
+        // function type is a target too.
+        let u = crate::under::common_under(&mut self.types, &self.objects, &self.packages, typ, None).0?;
         matches!(self.types.get(u), TypeData::Signature(_)).then_some(Target { sig: u })
     }
 
@@ -72,7 +74,7 @@ impl Checker {
     /// instantiation; guff has never reported that, and adding the rejection
     /// here would be a new diagnostic rather than a new acceptance, so only the
     /// reverse-inference arm is ported.
-    fn non_generic(&mut self, x: &mut Operand, e: &Expr, t: Target) {
+    pub(crate) fn non_generic(&mut self, x: &mut Operand, e: &Expr, t: Target) {
         if x.mode == OperandMode::Invalid || x.mode == OperandMode::NoValue {
             return;
         }
