@@ -2835,14 +2835,8 @@ impl Parser {
         let ident = self.parse_ident();
         let mut tparams: Option<FieldList> = None;
         if self.tok == Token::LBRACK {
+            // Since Go 1.27 a method may declare type parameters too.
             tparams = self.parse_type_parameters();
-            if recv.is_some() && tparams.is_some() {
-                self.error(
-                    tparams.as_ref().unwrap().opening,
-                    "method must have no type parameters",
-                );
-                tparams = None;
-            }
         }
         let params = self.parse_parameters(false);
         let results = self.parse_parameters(true);

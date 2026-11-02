@@ -101,6 +101,7 @@ go_version_const!(
 );
 go_version_const!(go1_23, "go1.23", "Go 1.23 — range-over-func iterators.");
 go_version_const!(go1_26, "go1.26", "Go 1.26 — new(expr) value form.");
+go_version_const!(go1_27, "go1.27", "Go 1.27 — generic methods, promoted fields in struct literals.");
 
 /// The current (deployed) Go version — `go1.<goversion::VERSION>`. Equivalent
 /// to Go's `go_current`.

@@ -545,6 +545,15 @@ fn nify_inner(
                     _ => return false,
                 };
                 match (xm.typ(object_arena), ym.typ(object_arena)) {
+                    // A generic method never satisfies an interface method,
+                    // so fail rather than unify its own type parameter into
+                    // an inference variable.
+                    (Some(_), Some(b))
+                        if crate::signature::signature_type_params(type_arena, b)
+                            .is_some_and(|l| !l.is_empty()) =>
+                    {
+                        return false;
+                    }
                     (Some(a), Some(b)) => {
                         if !nify(
                             u,

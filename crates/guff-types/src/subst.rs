@@ -246,24 +246,77 @@ fn subst_signature(
     ctxt: &mut Context,
     typ: TypeId,
 ) -> TypeId {
-    let (recv, params, results, variadic) = match arena.get(typ) {
-        TypeData::Signature(s) => (s.recv(), s.params(), s.results(), s.variadic()),
+    let (recv, params, results, variadic, orig_tlist) = match arena.get(typ) {
+        TypeData::Signature(s) => (s.recv(), s.params(), s.results(), s.variadic(), s.tparams.clone()),
         _ => unreachable!(),
     };
+    let tparams: Vec<TypeId> = orig_tlist.as_ref().map(|l| l.list().to_vec()).unwrap_or_default();
+    // A generic method (Go 1.27) whose own type parameters are not the subject
+    // of this substitution: the receiver's are being substituted. A method
+    // type parameter's bound may refer to a receiver type parameter
+    // (`func (G[T]) M[P interface{ ~*T }]`), so make fresh type parameters
+    // with substituted bounds, and rename their uses in params and results.
+    // Fresh ones are made even when no bound changes, so that the methods of
+    // distinct instances have distinct type parameters. When the signature's
+    // own type parameters are in the map, this is the signature being
+    // instantiated, and the caller drops them.
+    let mut fresh_smap: Option<SubstMap> = None;
+    let mut new_tparams: Vec<TypeId> = Vec::new();
+    if !tparams.is_empty() && !smap.contains_key(&tparams[0]) {
+        let mut m = smap.clone();
+        let mut fresh = Vec::with_capacity(tparams.len());
+        for &tp in &tparams {
+            let old_obj = crate::typeparam::type_param_obj(arena, tp);
+            let name = old_obj.name(oarena).to_string();
+            let tname = crate::object::type_name::new_type_name(oarena, name, None);
+            let ftp = crate::typeparam::new_type_param(arena, tname, None);
+            crate::object::type_name::type_name_set_typ(oarena, tname, ftp);
+            if let Some(pkg) = old_obj.pkg(oarena) {
+                tname.set_pkg(oarena, pkg);
+            }
+            let pos = old_obj.pos(oarena);
+            tname.set_pos(oarena, pos);
+            m.insert(tp, ftp);
+            fresh.push(ftp);
+        }
+        for (i, &tp) in tparams.iter().enumerate() {
+            if let Some(bound) = crate::typeparam::type_param_constraint(arena, tp) {
+                let b = subst(arena, oarena, &m, expanding, ctxt, bound);
+                crate::typeparam::set_constraint(arena, fresh[i], b);
+            }
+        }
+        new_tparams = fresh;
+        fresh_smap = Some(m);
+    }
+    let s = fresh_smap.as_ref().unwrap_or(smap);
     let new_params = match params {
-        Some(p) => Some(subst(arena, oarena, smap, expanding, ctxt, p)),
+        Some(p) => Some(subst(arena, oarena, s, expanding, ctxt, p)),
         None => None,
     };
     let new_results = match results {
-        Some(r) => Some(subst(arena, oarena, smap, expanding, ctxt, r)),
+        Some(r) => Some(subst(arena, oarena, s, expanding, ctxt, r)),
         None => None,
     };
-    if new_params == params && new_results == results {
+    if new_params == params && new_results == results && fresh_smap.is_none() {
         return typ;
     }
-    // Note: receiver is preserved verbatim (Go does the same — Named/Interface
-    // expansion handles receiver back-fill separately).
-    crate::signature::new_signature_type(arena, recv, &[], &[], new_params, new_results, variadic)
+    // The receiver is preserved verbatim (Go does the same — Named/Interface
+    // expansion handles the receiver separately). Receiver type parameters
+    // are dropped: the one caller that substitutes them away is
+    // `method_sig_for_recv`, Go's `expandMethod`, which sets `rparams = nil`.
+    let tlist = if fresh_smap.is_some() {
+        crate::typelists::bind_tparams(arena, new_tparams)
+    } else {
+        orig_tlist
+    };
+    if tlist.is_none() {
+        return crate::signature::new_signature_type(
+            arena, recv, &[], &[], new_params, new_results, variadic,
+        );
+    }
+    crate::signature::new_generic_signature_type(
+        arena, recv, None, tlist, new_params, new_results, variadic,
+    )
 }
 
 fn subst_union(

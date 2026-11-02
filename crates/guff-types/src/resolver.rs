@@ -608,6 +608,12 @@ impl Checker {
             .as_ref()
             .map(|r| !r.list.is_empty())
             .unwrap_or(false);
+        let tparam0 = fd
+            .ty
+            .type_params
+            .as_ref()
+            .and_then(|tp| tp.list.first())
+            .map(|f| f.pos().0 as u32);
 
         if !is_method {
             // regular function
@@ -627,6 +633,13 @@ impl Checker {
                 let pkg_scope = self.packages.get(self.pkg).scope();
                 self.declare(pkg_scope, obj, 0 /* nopos */);
             }
+            // `func init` / `func main` reject type parameters outright
+            // (InvalidInitDecl / InvalidMainDecl, not ported); every other
+            // function needs go1.18.
+            let is_main = name == "main" && self.packages.get(self.pkg).name() == "main";
+            if let Some(at) = tparam0.filter(|_| name != "init" && !is_main) {
+                self.verify_versionf(at, &crate::version::go1_18(), "type parameter");
+            }
         } else {
             // method: unpack the receiver base type name and queue it.
             let recv_field = &fd.recv.as_ref().unwrap().list[0];
@@ -637,6 +650,9 @@ impl Checker {
                         methods.push(MethodInfo { obj, ptr, recv });
                     }
                 }
+            }
+            if let Some(at) = tparam0 {
+                self.verify_versionf(at, &crate::version::go1_27(), "generic method");
             }
         }
 
