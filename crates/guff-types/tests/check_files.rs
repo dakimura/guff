@@ -1963,19 +1963,21 @@ fn reverse_type_inference_matches_the_toolchain() {
             &["cannot infer the remaining type arguments (got 0, want 1)"],
         ),
 
+        // 14. a composite-literal field. go1.26 had no target there and said
+        //     "cannot use generic function id without instantiation"; go1.27
+        //     (`assignment` calls `nonGeneric(newTarget(T, ...))` itself)
+        //     infers it whatever the file's go version — measured with
+        //     go1.27.3 at go 1.21, 1.26 and 1.27. golangci-lint 2.14.0 is
+        //     built with go1.27.
+        ("type S struct{ F func(int) int }\nvar X = S{F: id}", &[]),
+
         // --- no target at all --------------------------------------------
-        // Neither position carries one, so the toolchain falls through to
-        // `nonGeneric`'s "cannot use generic function id without
-        // instantiation". A composite-literal field is rejected by guff too,
-        // by the ordinary assignment check further on; a short variable
-        // declaration has nothing to check against and guff accepts it. That
-        // last lenience is not this port's: `nonGeneric`'s rejection is a new
-        // diagnostic, and any file containing the shape fails to compile, so
-        // no repository can hold one. Measured, not assumed.
-        (
-            "type S struct{ F func(int) int }\nvar X = S{F: id}",
-            &["cannot use func[T any](v T) T value as func(int) int value in struct literal"],
-        ),
+        // The toolchain falls through to `nonGeneric`'s "cannot use generic
+        // function id without instantiation"; a short variable declaration
+        // has nothing to check against and guff accepts it. That lenience is
+        // not this port's: the rejection is a new diagnostic, and any file
+        // containing the shape fails to compile, so no repository can hold
+        // one. Measured, not assumed.
         ("func f() { g := id; _ = g }", &[]),
     ];
 

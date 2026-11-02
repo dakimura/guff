@@ -169,7 +169,10 @@ impl Checker {
                     }
                     1 => {
                         let mut arg = Operand::invalid();
-                        self.expr(&mut arg, &call.args[0]);
+                        // The conversion's type is a target for inferring a
+                        // generic function's type arguments (Go 1.27).
+                        let target = self.new_target(Some(t));
+                        self.expr_with_target(&mut arg, &call.args[0], target);
                         if arg.mode != OperandMode::Invalid {
                             if has_dots {
                                 let ts = self.type_str(t);
