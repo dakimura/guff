@@ -47,6 +47,9 @@ struct DerivedInfo {
 }
 
 struct ReaderDict {
+    /// Constraints of a generic method's receiver type parameters (V4+).
+    rtbounds: Vec<TypeInfo>,
+    rtparams: Vec<TypeId>,
     bounds: Vec<TypeInfo>,
     tparams: Vec<TypeId>,
     derived: Vec<DerivedInfo>,
@@ -138,9 +141,9 @@ pub fn read_unified_package<'a, 'imp, 'u, 'ctx>(
         *state.ctx.types = arena;
     }
 
-    {
+    let root_pkg = {
         let mut root = new_reader(&decoder, RelocKind::META, PUBLIC_ROOT_IDX, SyncMarker::PUBLIC);
-        let _root_pkg = root.pkg(&mut state);
+        let root_pkg = root.pkg(&mut state);
         if root.dec.version().has(Field::HasInit) {
             let _ = root.dec.bool();
         }
@@ -158,7 +161,8 @@ pub fn read_unified_package<'a, 'imp, 'u, 'ctx>(
         for idx in obj_indices {
             obj_idx(&decoder, &mut state, idx);
         }
-    }
+        root_pkg
+    };
 
     let mut pending_named = Vec::new();
     for deferred in std::mem::take(&mut state.later) {
@@ -213,9 +217,8 @@ pub fn read_unified_package<'a, 'imp, 'u, 'ctx>(
         obj.set_pos(state.ctx.objects, real);
     }
 
-    let root_id = *state
-        .imports
-        .get(path)
+    let root_id = root_pkg
+        .or_else(|| state.imports.get(path).copied())
         .ok_or_else(|| format!("package {path} missing from imports map after read"))?;
     state.ctx.packages.get_mut(root_id).mark_complete();
 
@@ -308,6 +311,8 @@ fn typ_idx(
     let mut r = temp_reader(decoder, RelocKind::TYPE, idx, SyncMarker::TYPE_IDX);
     if let Some((dict, _)) = derived_slot {
         r.dict = Some(ReaderDict {
+            rtbounds: dict.rtbounds.clone(),
+            rtparams: dict.rtparams.clone(),
             bounds: dict.bounds.clone(),
             tparams: dict.tparams.clone(),
             derived: dict.derived.clone(),
@@ -330,6 +335,11 @@ fn obj_idx(decoder: &PkgDecoder, state: &mut PkgState<'_, '_, '_, '_>, idx: Inde
     decoder.retire_decoder(rname.dec);
 
     if tag == CodeObj::Stub || !split_vargen_suffix(&obj_name).1.is_empty() {
+        return (obj_pkg, obj_name);
+    }
+    // A generic method promoted to package scope (`T.M`); it is read with
+    // its defining type instead.
+    if obj_name.contains('.') {
         return (obj_pkg, obj_name);
     }
 
@@ -359,7 +369,7 @@ fn read_object(
             let p = r.pos(decoder, state);
             let mut tparams = Vec::new();
             if r.dec.version().has(Field::AliasTypeParamNames) {
-                tparams = r.type_param_names(decoder, state);
+                tparams = r.type_param_names(decoder, state, false);
             }
             let typ = r.read_typ(decoder, state);
             let tn = new_type_name(state.ctx.objects, obj_name, None);
@@ -386,7 +396,11 @@ fn read_object(
         }
         CodeObj::Func => {
             let p = r.pos(decoder, state);
-            let tparams = r.type_param_names(decoder, state);
+            if r.dec.version().has(Field::GenericMethods) {
+                // Generic methods are read with their defining type.
+                assert!(!r.dec.bool());
+            }
+            let tparams = r.type_param_names(decoder, state, false);
             let sig = r.signature(decoder, state, None, &[], &tparams);
             let f = new_func(state.ctx.objects, obj_name, Some(sig));
             state.set_obj_pos(f, p);
@@ -406,16 +420,30 @@ fn read_object(
             let named = new_named(state.ctx.types, state.ctx.objects, tn, None, Vec::new());
             scope_insert(state.ctx.scopes, state.ctx.objects, scope, tn);
 
-            let tparams = r.type_param_names(decoder, state);
+            let tparams = r.type_param_names(decoder, state, false);
             if let Some(list) = bind_tparams(state.ctx.types, tparams) {
                 named_set_type_params(state.ctx.types, named, list);
             }
 
             let rhs = r.read_typ(decoder, state);
+            // (index, method): the index is -1 before V5. V4 wrote every
+            // ordinary method before every generic one, losing source order
+            // (go.dev/issue/81188); V5 writes the index to sort by.
             let n = r.dec.len();
-            let mut methods = Vec::with_capacity(n);
+            let mut methods: Vec<(i64, ObjectId)> = Vec::with_capacity(n);
             for _ in 0..n {
                 methods.push(r.method(decoder, state));
+            }
+            if r.dec.version().has(Field::GenericMethods) {
+                let n = r.dec.len();
+                for _ in 0..n {
+                    // Not a package-scope object, so not read by `obj_idx`.
+                    let idx = r.dec.reloc(RelocKind::OBJ);
+                    methods.push(read_generic_method(decoder, state, idx));
+                }
+                if r.dec.version().has(Field::PreserveMethodOrder) {
+                    methods.sort_by_key(|&(i, _)| i);
+                }
             }
 
             match state.ctx.types.get(rhs) {
@@ -428,7 +456,7 @@ fn read_object(
                     set_underlying(state.ctx.types, named, underlying);
                 }
             }
-            for m in methods {
+            for (_, m) in methods {
                 add_method(state.ctx.types, state.ctx.objects, named, m);
             }
         }
@@ -504,13 +532,24 @@ fn obj_dict_idx(decoder: &PkgDecoder, _state: &mut PkgState<'_, '_, '_, '_>, idx
     if implicits != 0 {
         decoder.retire_decoder(r.dec);
         return ReaderDict {
+            rtbounds: Vec::new(),
+            rtparams: Vec::new(),
             bounds: Vec::new(),
             tparams: Vec::new(),
             derived: Vec::new(),
             derived_types: Vec::new(),
         };
     }
+    let n_receivers = if r.dec.version().has(Field::GenericMethods) {
+        r.dec.len()
+    } else {
+        0
+    };
     let n_bounds = r.dec.len();
+    let mut rtbounds = Vec::with_capacity(n_receivers);
+    for _ in 0..n_receivers {
+        rtbounds.push(r.typ_info());
+    }
     let mut bounds = Vec::with_capacity(n_bounds);
     for _ in 0..n_bounds {
         bounds.push(r.typ_info());
@@ -527,11 +566,44 @@ fn obj_dict_idx(decoder: &PkgDecoder, _state: &mut PkgState<'_, '_, '_, '_>, idx
     }
     decoder.retire_decoder(r.dec);
     ReaderDict {
+        rtbounds,
+        rtparams: Vec::new(),
         bounds,
         tparams: Vec::new(),
         derived,
         derived_types: vec![None; n_derived],
     }
+}
+
+/// One element of a V4+ type's generic-method list: a function object of
+/// its own, with the receiver's type parameters first in its dictionary.
+fn read_generic_method(
+    decoder: &PkgDecoder,
+    state: &mut PkgState<'_, '_, '_, '_>,
+    idx: Index,
+) -> (i64, ObjectId) {
+    let dict = obj_dict_idx(decoder, state, idx);
+    let mut r = temp_reader(decoder, RelocKind::OBJ, idx, SyncMarker::OBJECT1);
+    r.dict = Some(dict);
+    let p = r.pos(decoder, state);
+    assert!(r.dec.bool(), "generic method");
+    let (pkg, name) = r.selector(state);
+    let rtparams = r.type_param_names(decoder, state, true);
+    let recv = r.param(decoder, state);
+    let index = if r.dec.version().has(Field::PreserveMethodOrder) {
+        r.dec.len() as i64
+    } else {
+        -1
+    };
+    let tparams = r.type_param_names(decoder, state, false);
+    let sig = r.signature(decoder, state, Some(recv), &rtparams, &tparams);
+    decoder.retire_decoder(r.dec);
+    let f = new_func(state.ctx.objects, name, Some(sig));
+    state.set_obj_pos(f, p);
+    if let Some(pkg) = pkg {
+        f.set_pkg(state.ctx.objects, pkg);
+    }
+    (index, f)
 }
 
 impl<'dec> Reader<'dec> {
@@ -627,7 +699,12 @@ impl<'dec> Reader<'dec> {
             }
             CodeType::TypeParam => {
                 let dict = self.dict.as_ref().expect("type param needs dict");
-                dict.tparams[self.dec.len()]
+                let n = self.dec.len();
+                if n < dict.rtbounds.len() {
+                    dict.rtparams[n]
+                } else {
+                    dict.tparams[n - dict.rtbounds.len()]
+                }
             }
             CodeType::Array => {
                 let len = self.dec.uint64() as i64;
@@ -818,10 +895,18 @@ impl<'dec> Reader<'dec> {
         (obj, targs)
     }
 
-    fn type_param_names(&mut self, decoder: &PkgDecoder, state: &mut PkgState<'_, '_, '_, '_>) -> Vec<TypeId> {
+    /// `typeParamNames`: a generic method's receiver type parameters when
+    /// `is_gen_meth`, otherwise the element's own.
+    fn type_param_names(
+        &mut self,
+        decoder: &PkgDecoder,
+        state: &mut PkgState<'_, '_, '_, '_>,
+        is_gen_meth: bool,
+    ) -> Vec<TypeId> {
         self.dec.sync(SyncMarker::TYPE_PARAM_NAMES);
         let bounds_snapshot = match self.dict.as_ref() {
-            Some(d) if !d.bounds.is_empty() => d.bounds.clone(),
+            Some(d) if is_gen_meth && !d.rtbounds.is_empty() => d.rtbounds.clone(),
+            Some(d) if !is_gen_meth && !d.bounds.is_empty() => d.bounds.clone(),
             _ => return Vec::new(),
         };
 
@@ -838,7 +923,11 @@ impl<'dec> Reader<'dec> {
         }
 
         if let Some(dict) = self.dict.as_mut() {
-            dict.tparams = tparams.clone();
+            if is_gen_meth {
+                dict.rtparams = tparams.clone();
+            } else {
+                dict.tparams = tparams.clone();
+            }
         }
 
         let bounds: Vec<TypeId> = bounds_snapshot
@@ -853,11 +942,16 @@ impl<'dec> Reader<'dec> {
         tparams
     }
 
-    fn method(&mut self, decoder: &PkgDecoder, state: &mut PkgState<'_, '_, '_, '_>) -> ObjectId {
+    fn method(&mut self, decoder: &PkgDecoder, state: &mut PkgState<'_, '_, '_, '_>) -> (i64, ObjectId) {
         self.dec.sync(SyncMarker::METHOD);
+        let index = if self.dec.version().has(Field::PreserveMethodOrder) {
+            self.dec.len() as i64
+        } else {
+            -1
+        };
         let p = self.pos(decoder, state);
         let (pkg, name) = self.selector(state);
-        let rparams = self.type_param_names(decoder, state);
+        let rparams = self.type_param_names(decoder, state, false);
         let recv = self.param(decoder, state);
         let sig = self.signature(decoder, state, Some(recv), &rparams, &[]);
         let f = new_func(state.ctx.objects, name, Some(sig));
@@ -866,7 +960,7 @@ impl<'dec> Reader<'dec> {
             f.set_pkg(state.ctx.objects, pkg);
         }
         let _ = self.pos(decoder, state);
-        f
+        (index, f)
     }
 
     fn qualified_ident(&mut self, state: &mut PkgState<'_, '_, '_, '_>) -> (Option<PackageId>, String) {

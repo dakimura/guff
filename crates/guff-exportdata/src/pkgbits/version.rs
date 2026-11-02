@@ -7,7 +7,14 @@ impl Version {
     pub const V0: Self = Self(0);
     pub const V1: Self = Self(1);
     pub const V2: Self = Self(2);
-    pub const NUM_VERSIONS: u32 = 3;
+    /// Compact composite-literal element lists (function bodies only).
+    pub const V3: Self = Self(3);
+    /// Generic methods as standalone function objects (go1.27.0).
+    pub const V4: Self = Self(4);
+    /// Method index, to keep generic and ordinary methods in source order
+    /// (go1.27.x, go.dev/issue/81188).
+    pub const V5: Self = Self(5);
+    pub const NUM_VERSIONS: u32 = 6;
 
     pub fn raw(self) -> u32 {
         self.0
@@ -30,12 +37,18 @@ pub enum Field {
     DerivedFuncInstance = 2,
     AliasTypeParamNames = 3,
     DerivedInfoNeeded = 4,
+    CompactCompLiterals = 5,
+    GenericMethods = 6,
+    PreserveMethodOrder = 7,
 }
 
 fn introduced(f: Field) -> u32 {
     match f {
         Field::Flags => 1,
         Field::AliasTypeParamNames => 2,
+        Field::CompactCompLiterals => 3,
+        Field::GenericMethods => 4,
+        Field::PreserveMethodOrder => 5,
         _ => 0,
     }
 }
