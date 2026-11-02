@@ -43,7 +43,7 @@ Phase 8（`docs/PHASE8-LEDGER.md`）と同じ作り方: 出力ではなく**上�
 
 ### 1.3 Phase 9 中に見つかった既存の差（1.27 / 2.15 の差分ではない）
 
-- **型パラメータの switch**（`func g[P T](p P){ switch p {} }`、制約が interface でない型）を含むパッケージを guff が**丸ごと黙って落とす**。golangci は普通に解析する（linters-a の付記）。
+- **型パラメータの switch**（`func g[P T](p P){ switch p {} }`、制約が interface でない型）を含むパッケージを guff が**丸ごと黙って落とす**。golangci は普通に解析する（linters-a の付記）。**done (P9-4)**：`comparable_type` が型パラメータの underlying を `iface()`（暗黙の `interface{ T }`）で取るように。残る差は exhaustive が型パラメータの switch を見ないこと（exhaustive v0.15 の作り直しで扱う）。
 - guff は import cycle を finding にしない（xtools 台帳）。
 - `linters.default: fast` が 4 linter しか有効にしない（上流は 44 個）（core #11）。
 - `guff custom` の版文字列・cache salt にプラグインの版が入らない（core #1）。

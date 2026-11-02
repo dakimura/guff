@@ -963,7 +963,16 @@ pub fn comparable_type(
     }
     seen.insert(t);
 
-    let u = t.underlying(arena);
+    // A type parameter's underlying type is its constraint interface — for a
+    // non-interface bound (`[P T]`), the implicit `interface{ T }` that
+    // `iface()` wraps it in. Taking the bound's own underlying instead made
+    // `P` incomparable when `T` was a named `int`, so `switch p {}` went
+    // ill-typed and the package was skipped.
+    let u = if is_type_param(arena, t) {
+        crate::typeparam::type_param_iface(arena, oarena, parena, t)
+    } else {
+        t.underlying(arena)
+    };
     match arena.get(u) {
         TypeData::Basic(b) => {
             if b.kind() == BasicKind::UntypedNil {
