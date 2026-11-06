@@ -1,0 +1,10 @@
+# predeclared v0.3.0's own testdata (passes/predeclared/testdata/src), plus
+# golangci's predeclared_custom.go. The module is example.org so the imports
+# of foo/ resolve as they do under upstream's GOPATH layout.
+foo/file.go                     crates/guff-style/tests/testdata/predeclared/upstream-v0.3.0/foo/file.go
+testfiles/file_test.go          crates/guff-style/tests/testdata/predeclared/upstream-v0.3.0/testfiles/file_test.go
+field/file.go                   crates/guff-style/tests/testdata/predeclared/upstream-v0.3.0/field/file.go
+syncmap/map.go                  crates/guff-style/tests/testdata/predeclared/upstream-v0.3.0/syncmap/map.go
+custom/predeclared_custom.go    crates/guff-style/tests/testdata/predeclared/upstream-v0.3.0/custom/predeclared_custom.go
+comparable/file.go              crates/guff-style/tests/testdata/predeclared/upstream-v0.3.0/example.org/comparable/file.go
+f/file.go                       crates/guff-style/tests/testdata/predeclared/upstream-v0.3.0/example.org/f/file.go

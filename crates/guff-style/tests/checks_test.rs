@@ -4786,19 +4786,19 @@ fn predeclared_flags_shadowed_identifiers() {
     assert!(
         messages
             .iter()
-            .any(|m| m.contains("function len") && m.contains("predeclared")),
+            .any(|m| m == "len: shadows predeclared identifier"),
         "{messages:?}"
     );
     assert!(
         messages
             .iter()
-            .any(|m| m.contains("variable error") && m.contains("predeclared")),
+            .any(|m| m == "error: shadows predeclared identifier"),
         "{messages:?}"
     );
     assert!(
         messages
             .iter()
-            .any(|m| m.contains("variable true") && m.contains("predeclared")),
+            .any(|m| m == "true: shadows predeclared identifier"),
         "{messages:?}"
     );
 }

@@ -1,0 +1,20 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh predeclared-ignore
+# Produced by running golangci-lint on compat/golden/cases/predeclared-ignore/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+ign/file.go:3:6:predeclared::copy: same name as predeclared identifier
+ign/file.go:3:6:predeclared::copy: shadows predeclared identifier
+ign/file.go:7:2:predeclared::nil: same name as predeclared identifier
+ign/file.go:7:2:predeclared::nil: shadows predeclared identifier
+ign/file.go:11:8:predeclared::rune: same name as predeclared identifier
+ign/file.go:11:8:predeclared::rune: shadows predeclared identifier
+ign/file.go:13:3:predeclared::int64: same name as predeclared identifier
+ign/file.go:13:3:predeclared::int64: shadows predeclared identifier
+ign/file.go:17:8:predeclared::cap: same name as predeclared identifier
+ign/file.go:17:8:predeclared::cap: shadows predeclared identifier
+ign/file.go:18:19:predeclared::any: same name as predeclared identifier
+ign/file.go:18:19:predeclared::any: shadows predeclared identifier

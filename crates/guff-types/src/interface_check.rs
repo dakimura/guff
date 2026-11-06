@@ -72,6 +72,9 @@ impl Checker {
                 continue;
             }
             let m = new_func(&mut self.objects, name.name.clone(), Some(typ));
+            // `NewFunc(name.Pos(), ..)`: predeclared v0.3.0 reports a method
+            // at `obj.Pos()`, so without it every one landed on 0:0.
+            m.set_pos(&mut self.objects, name.pos().0 as u32);
             // `check.recordDef(name, m)` in go/types' `interface.go`. Without
             // it an interface method's declaring identifier is absent from
             // `Info.Defs`, so anything that starts from `Defs` cannot see the

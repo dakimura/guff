@@ -418,6 +418,8 @@ pub struct PredeclaredSettings {
     pub ignore: Vec<String>,
     #[serde(default, rename = "q", alias = "qualified-name")]
     pub qualified: Option<bool>,
+    #[serde(default, deserialize_with = "string_or_seq")]
+    pub mode: Vec<String>,
 }
 
 /// `linters.settings.whitespace` / `linters-settings.whitespace`.
@@ -3563,7 +3565,26 @@ impl PredeclaredSettings {
                 self.ignore.clone()
             },
             qualified: self.qualified.unwrap_or(defaults.qualified),
+            mode: predeclared_mode(&self.mode),
         }
+    }
+}
+
+/// golangci `modeToString`: `declare` → `d`, `shadow` → `s`, anything else is
+/// warned about and dropped; nothing left (or no `mode:`) means `s`.
+fn predeclared_mode(modes: &[String]) -> String {
+    let mut out = String::new();
+    for m in modes {
+        match m.as_str() {
+            "declare" => out.push('d'),
+            "shadow" => out.push('s'),
+            _ => eprintln!("level=warning msg=\"[linter] predeclared: unsupported mode {m:?}\""),
+        }
+    }
+    if out.is_empty() {
+        "s".to_string()
+    } else {
+        out
     }
 }
 
