@@ -6,7 +6,7 @@
 #
 # An absent file for a case means upstream's --fix changes nothing there, and
 # guff must change nothing either.
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 --- a/atomictypes/atomic.go
 +++ b/atomictypes/atomic.go
@@ -557,10 +557,10 @@
  
  func useName(s []int) {
 -	for i := len(s) - 1; i >= 0; i-- { // want "backward loop over slice can be modernized using slices.Backward"
-+	for i, name := range slices.Backward(s) { // want "backward loop over slice can be modernized using slices.Backward"
++	for i, v := range slices.Backward(s) { // want "backward loop over slice can be modernized using slices.Backward"
  		println(i)
 -		name := s[i]
-+
++		name := v
  		println(name)
  	}
  }
@@ -1088,7 +1088,7 @@
 -	i := strings.IndexByte(s, b) // want "strings.IndexByte can be simplified using strings.Cut"
 -	if i >= 0 {
 -		print(s[:i])
-+	before, _, ok := strings.Cut(s, string(b)) // want "strings.IndexByte can be simplified using strings.Cut"
++	before, _, ok := strings.Cut(s, string([]byte{b})) // want "strings.IndexByte can be simplified using strings.Cut"
 +	if ok {
 +		print(before)
  	}

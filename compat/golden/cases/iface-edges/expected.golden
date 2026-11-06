@@ -4,10 +4,9 @@
 # Produced by running golangci-lint on compat/golden/cases/iface-edges/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 methods.go:9:2:iface::unusedmethod: method 'Unused()' is declared on interface 'base' but not used within the package
-methods.go:24:2:iface::unusedmethod: method 'Get()' is declared on interface 'getter' but not used within the package
 methods.go:25:2:iface::unusedmethod: method 'Put()' is declared on interface 'getter' but not used within the package
 methods.go:36:3:iface::unusedmethod: method 'LocalUnused()' is declared on interface 'localIface' but not used within the package
 methods.go:45:3:iface::unusedmethod: method 'G()' is declared on interface 'grouped' but not used within the package

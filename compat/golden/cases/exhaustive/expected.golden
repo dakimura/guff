@@ -4,42 +4,45 @@
 # Produced by running golangci-lint on compat/golden/cases/exhaustive/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
-bad.go:16:2:exhaustive::missing cases in switch of type p.Color: p.Blue
-bad.go:25:13:exhaustive::missing keys in map of key type p.Color: p.Blue
-bad.go:41:2:exhaustive::missing cases in switch of type p.Size: p.Medium, p.Large
-directives.go:21:2:exhaustive::missing cases in switch of type p.Color: p.Blue
-directives.go:43:2:exhaustive::missing cases in switch of type p.Color: p.Blue
-directives.go:58:2:exhaustive::missing default case in switch of type p.Color
-directives.go:104:2:exhaustive::failed to parse directives: conflicting directives "ignore" and "enforce"
-directives.go:116:2:exhaustive::failed to parse directives: invalid directive "ignoreme"
-directives.go:116:2:exhaustive::missing cases in switch of type p.Color: p.Blue
-directives.go:127:2:exhaustive::failed to parse directives: invalid directive "enforcement"
-directives.go:127:2:exhaustive::missing cases in switch of type p.Color: p.Blue
-directives.go:139:2:exhaustive::missing cases in switch of type p.Color: p.Blue
-directives.go:150:19:exhaustive::missing keys in map of key type p.Color: p.Blue
-directives.go:162:21:exhaustive::missing keys in map of key type p.Color: p.Blue
-directives.go:172:31:exhaustive::missing keys in map of key type p.Color: p.Blue
-directives.go:178:32:exhaustive::missing keys in map of key type p.Color: p.Blue
-directives.go:184:26:exhaustive::failed to parse directives: invalid directive "ignoreme"
-directives.go:184:26:exhaustive::missing keys in map of key type p.Color: p.Blue
-directives.go:191:9:exhaustive::missing keys in map of key type p.Color: p.Blue
-directives.go:199:7:exhaustive::missing keys in map of key type p.Color: p.Blue
-directives.go:208:16:exhaustive::missing keys in map of key type p.Color: p.Blue
-directives.go:221:9:exhaustive::missing keys in map of key type p.Color: p.Blue
-directives.go:236:9:exhaustive::missing keys in map of key type p.Color: p.Blue
-directives.go:281:9:exhaustive::missing keys in map of key type p.Color: p.Green, p.Blue
-directives.go:282:9:exhaustive::missing keys in map of key type p.Color: p.Green, p.Blue
-directives.go:283:9:exhaustive::missing keys in map of key type p.Color: p.Green, p.Blue
-directives.go:293:6:exhaustive::missing keys in map of key type p.Color: p.Green, p.Blue
-directives.go:311:2:exhaustive::failed to parse directives: invalid directive "ignored"
-directives.go:321:2:exhaustive::failed to parse directives: invalid directive ""
-directives.go:321:2:exhaustive::missing cases in switch of type p.Color: p.Green, p.Blue
-directives.go:332:26:exhaustive::missing keys in map of key type p.Color: p.Green, p.Blue
-foreign.go:10:2:exhaustive::missing cases in switch of type enumdep.Kind: enumdep.KindA, enumdep.KindM
-foreign.go:20:2:exhaustive::missing cases in switch of type enumdep.Flag: enumdep.FlagTwo
-foreign.go:51:2:exhaustive::missing cases in switch of type enumdep.Kind: enumdep.KindA, enumdep.KindM
-foreign.go:62:2:exhaustive::missing cases in switch of type enumdep.Kind: enumdep.KindA, enumdep.KindM
-foreign.go:82:2:exhaustive::missing cases in switch of type enumdep.Kind: enumdep.KindA, enumdep.KindM
-foreign.go:99:18:exhaustive::missing keys in map of key type enumdep.Kind: enumdep.KindA, enumdep.KindM
+bad.go:16:2:exhaustive::missing cases in expression switch: Blue
+bad.go:25:13:exhaustive::missing keys in map literal: Blue
+bad.go:41:2:exhaustive::missing cases in expression switch: Medium, Large
+directives.go:21:2:exhaustive::missing cases in expression switch: Blue
+directives.go:43:2:exhaustive::missing cases in expression switch: Blue
+directives.go:58:2:exhaustive::missing cases in expression switch: Blue
+directives.go:58:2:exhaustive::missing default case
+directives.go:104:2:exhaustive::error parsing comment directives: conflicting directives
+directives.go:116:2:exhaustive::error parsing comment directives: invalid name "ignoreme"
+directives.go:127:2:exhaustive::error parsing comment directives: invalid name "enforcement"
+directives.go:139:2:exhaustive::missing cases in expression switch: Blue
+directives.go:150:19:exhaustive::missing keys in map literal: Blue
+directives.go:162:21:exhaustive::missing keys in map literal: Blue
+directives.go:172:31:exhaustive::missing keys in map literal: Blue
+directives.go:178:32:exhaustive::missing keys in map literal: Blue
+directives.go:184:26:exhaustive::error parsing comment directives: invalid name "ignoreme"
+directives.go:191:9:exhaustive::missing keys in map literal: Blue
+directives.go:199:7:exhaustive::missing keys in map literal: Blue
+directives.go:208:16:exhaustive::missing keys in map literal: Blue
+directives.go:221:9:exhaustive::missing keys in map literal: Blue
+directives.go:236:9:exhaustive::missing keys in map literal: Blue
+directives.go:270:7:exhaustive::missing keys in map literal: Blue
+directives.go:274:9:exhaustive::missing keys in map literal: Green, Blue
+directives.go:277:8:exhaustive::missing keys in map literal: Red, Green, Blue
+directives.go:281:9:exhaustive::missing keys in map literal: Green, Blue
+directives.go:282:9:exhaustive::missing keys in map literal: Green, Blue
+directives.go:283:9:exhaustive::missing keys in map literal: Green, Blue
+directives.go:293:6:exhaustive::missing keys in map literal: Green, Blue
+directives.go:301:9:exhaustive::missing keys in map literal: Green, Blue
+directives.go:302:9:exhaustive::missing keys in map literal: Green, Blue
+directives.go:303:9:exhaustive::missing keys in map literal: Green, Blue
+directives.go:311:2:exhaustive::error parsing comment directives: invalid name "ignored"
+directives.go:321:2:exhaustive::missing cases in expression switch: Green, Blue
+directives.go:332:26:exhaustive::missing keys in map literal: Green, Blue
+foreign.go:10:2:exhaustive::missing cases in expression switch: enumdep.KindA, enumdep.KindM
+foreign.go:20:2:exhaustive::missing cases in expression switch: enumdep.FlagTwo
+foreign.go:51:2:exhaustive::missing cases in expression switch: enumdep.KindA, enumdep.KindM
+foreign.go:62:2:exhaustive::missing cases in expression switch: enumdep.KindA, enumdep.KindM
+foreign.go:82:2:exhaustive::missing cases in expression switch: enumdep.KindA, enumdep.KindM
+foreign.go:99:18:exhaustive::missing keys in map literal: enumdep.KindA, enumdep.KindM

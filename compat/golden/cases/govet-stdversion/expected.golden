@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/govet-stdversion/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 promoted_test.go:9:8:govet::stdversion: testing.(*B).Context requires go1.24 or later (file is go1.22)
 promoted_test.go:10:4:govet::stdversion: testing.(*T).Chdir requires go1.24 or later (file is go1.22)

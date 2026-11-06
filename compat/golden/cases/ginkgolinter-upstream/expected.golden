@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/ginkgolinter-upstream/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 asyncconfig/asyncConfig.go:24:3:ginkgolinter::ginkgo-linter: use a function call in Eventually. This actually checks nothing, because Eventually receives the function returned value, instead of function itself, and this value is never changed. Consider using `Eventually(slowInt).WithPolling(time.Millisecond * 100).WithTimeout(time.Second * 2).Should(Equal(42))` instead
 asyncconfig/asyncConfig.go:27:3:ginkgolinter::ginkgo-linter: multiple issues: use a function call in Eventually. This actually checks nothing, because Eventually receives the function returned value, instead of function itself, and this value is never changed; wrong boolean assertion. Consider using `Eventually(slowBool).WithPolling(time.Millisecond * 100).WithTimeout(time.Second * 2).Should(BeTrue())` instead

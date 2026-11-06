@@ -4,6 +4,6 @@
 # Produced by running golangci-lint on compat/golden/cases/revive-v117-crlf/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 match/issue607_match.go:5:1:revive:warning:package-comments: package comment is detached; there should be no blank lines between it and the package statement

@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/ginkgolinter-upstream-suppress/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 asyncconfig/asyncConfig.go:27:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Eventually(slowBool()).WithPolling(time.Millisecond * 100).WithTimeout(time.Second * 2).Should(BeTrue())` instead
 asyncconfig/asyncConfig.gomega.go:17:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `g.Eventually(slowBool()).WithPolling(time.Millisecond * 100).WithTimeout(time.Second * 2).Should(g.BeTrue())` instead

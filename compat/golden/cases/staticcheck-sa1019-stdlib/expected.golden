@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/staticcheck-sa1019-stdlib/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 stdlib.go:26:40:staticcheck::SA1019: path/filepath.HasPrefix has been deprecated since Go 1.0 because it shouldn't be used: HasPrefix does not respect path boundaries and does not ignore case when required. 
 stdlib.go:29:50:staticcheck::SA1019: (archive/zip.FileHeader).ModifiedTime has been deprecated since Go 1.10: Use Modified instead. 

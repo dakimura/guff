@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/revive-v117-buildtag/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 go120/redundant_build_tag_go120.go:1:1:revive:warning:redundant-build-tag: The build tag "//go:build go1.20" is redundant for Go 1.21 and can be removed
 go121/redundant_build_tag.go:1:1:revive:warning:redundant-build-tag: The build tag "//go:build go1.21" is redundant for Go 1.21 and can be removed

@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/revive/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 bad/revivetest/bad.go:1:1:revive:warning:comments-density: the file has a comment density of  0% (0 comment lines for 42 code lines) but expected a minimum of 10%
 bad/revivetest/bad.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
@@ -24,6 +24,7 @@ bad/revivetest/bad.go:30:7:revive:warning:add-constant: avoid magic numbers like
 bad/revivetest/bad.go:39:9:revive:warning:range: should omit 2nd value from range; this loop is equivalent to `for k := range ...`
 bad/revivetest/bad.go:45:2:revive:warning:redefines-builtin-id: redefinition of the built-in function len
 bad/revivetest/bad.go:45:9:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+bad/revivetest/bad.go:50:6:revive:warning:time-naming: var timeoutSecs is of type time.Duration; don't use unit-specific suffix "Secs"
 bad/revivetest/bad.go:55:9:revive:warning:unnecessary-format: unnecessary use of formatting function "fmt.Errorf", you can replace it with "errors.New"
 bad/revivetest/bad.go:55:9:revive:warning:use-errors-new: replace fmt.Errorf by errors.New
 bad/revivetest/bad.go:55:20:revive:warning:error-strings: error strings should not be capitalized or end with punctuation or a newline
@@ -32,7 +33,7 @@ bad/revivetest/bad.go:59:14:revive:warning:add-constant: avoid magic numbers lik
 bad/revivetest/bad.go:62:17:revive:warning:unused-parameter: parameter 'x' seems to be unused, consider removing or renaming it as _
 bad/revivetest/bad.go:62:24:revive:warning:context-as-argument: context.Context should be the first parameter of a function
 bad/revivetest/bad.go:62:24:revive:warning:unused-parameter: parameter 'ctx' seems to be unused, consider removing or renaming it as _
-bad/revivetest/bad.go:65:6:revive:warning:context-keys-type: should not use basic type untyped string as key in context.WithValue
+bad/revivetest/bad.go:65:6:revive:warning:context-keys-type: should not use basic type string as key in context.WithValue
 bad/revivetest/bad.go:65:53:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
 bad/revivetest/bad.go:69:14:revive:warning:var-declaration: should drop = 0 from declaration of var n; it is the zero value
 bad/revivetest/bad.go:73:19:revive:warning:var-declaration: should drop = 0 from declaration of var zeroVar; it is the zero value
@@ -168,10 +169,12 @@ extended/util/extended_bad.go:66:19:revive:warning:unused-parameter: parameter '
 extended/util/extended_bad.go:66:19:revive:warning:waitgroup-by-value: sync.WaitGroup passed by value, the function will get a copy of the original one
 extended/util/extended_bad.go:69:9:revive:warning:string-of-int: dubious conversion of an integer into a string, use strconv.Itoa
 extended/util/extended_bad.go:69:16:revive:warning:add-constant: avoid magic numbers like '42', create a named constant for it
+extended/util/extended_bad.go:73:9:revive:warning:time-equal: use a.Equal(b) instead of "==" operator
 extended/util/extended_bad.go:77:9:revive:warning:unchecked-type-assertion: type cast result is unchecked in v.(int) - type assertion will panic if not matched
 extended/util/extended_bad.go:81:10:revive:warning:unchecked-type-assertion: type cast result is unchecked in v.(int) - type assertion result ignored
 extended/util/extended_bad.go:86:2:revive:warning:unconditional-recursion: unconditional recursive call
 extended/util/extended_bad.go:90:2:revive:warning:if-return: redundant if ...; err != nil check, just return error instead.
+extended/util/extended_bad.go:97:2:revive:warning:unhandled-error: Unhandled error in call to function fmt.Printf
 extended/util/extended_bad.go:97:2:revive:warning:unnecessary-format: unnecessary use of formatting function "fmt.Printf", you can replace it with "fmt.Print" or "fmt.Println"
 extended/util/extended_bad.go:101:2:revive:warning:import-shadowing: The name 'fmt' shadows an import name
 extended/util/extended_bad.go:101:9:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
@@ -189,6 +192,7 @@ extended/util/extended_bad.go:110:40:revive:warning:time-date: time.Date second 
 extended/util/extended_bad.go:110:44:revive:warning:add-constant: avoid magic numbers like '1e9', create a named constant for it
 extended/util/extended_bad.go:110:44:revive:warning:time-date: use decimal digits for time.Date nanosecond argument: exponential notation found: use 1000000000 instead of 1e9
 extended/util/extended_bad.go:110:49:revive:warning:time-date: time.Date timezone argument cannot be nil, it would panic on runtime
+extended/util/extended_bad.go:114:2:revive:warning:unhandled-error: Unhandled error in call to function errors.New
 extended/util/extended_bad.go:124:2:revive:warning:unhandled-error: Unhandled error in call to function localError
 extended/util/extended_bad.go:128:2:revive:warning:struct-tag: tag on not-exported field name
 extended/util/extended_bad.go:128:14:revive:warning:struct-tag: unknown option "unknownopt" in json tag
@@ -208,6 +212,7 @@ extended/util/extended_bad.go:139:6:revive:warning:add-constant: avoid magic num
 extended/util/extended_bad.go:142:6:revive:warning:add-constant: string literal "repeat" appears, at least, 3 times, create a named constant for it
 extended/util/extended_bad.go:146:2:revive:warning:early-return: if c { ... } else { ... return } can be simplified to if !c { ... return } ...
 extended/util/extended_bad.go:146:9:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+extended/util/extended_bad.go:147:3:revive:warning:unhandled-error: Unhandled error in call to function fmt.Print
 extended/util/extended_bad.go:154:2:revive:warning:deep-exit: calls to os.Exit only in main() or init() functions
 extended/util/extended_bad.go:154:10:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
 extended/util/extended_bad.go:157:1:revive:warning:exported: exported function GetValue should have comment or be unexported
@@ -220,6 +225,7 @@ extended/util/extended_bad.go:168:18:revive:warning:add-constant: avoid magic nu
 extended/util/extended_bad.go:169:3:revive:warning:defer: prefer not to defer inside loops
 extended/util/extended_bad.go:171:2:revive:warning:defer: recover must be called inside a deferred function
 extended/util/extended_bad.go:175:22:revive:warning:flag-parameter: parameter 'enabled' seems to be a control flag, avoid control coupling
+extended/util/extended_bad.go:177:3:revive:warning:unhandled-error: Unhandled error in call to function fmt.Print
 extended/util/extended_bad.go:181:1:revive:warning:function-result-limit: maximum number of return results per function exceeded; max 3 but got 4
 extended/util/extended_bad.go:181:33:revive:warning:confusing-results: unnamed results of the same type may be confusing, consider using named results
 extended/util/extended_bad.go:182:9:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
@@ -230,35 +236,50 @@ extended/util/extended_bad.go:185:16:revive:warning:unused-parameter: parameter 
 extended/util/extended_bad.go:185:18:revive:warning:use-any: since Go 1.18 'interface{}' can be replaced by 'any'
 extended/util/extended_bad.go:188:2:revive:warning:use-fmt-print: avoid using built-in function "print", replace it by "fmt.Fprint(os.Stderr, "hello")"
 extended/util/extended_bad.go:193:7:revive:warning:unused-receiver: method receiver 'r' is not referenced in method's body, consider removing or renaming it as _
+extended/util/extended_bad.go:194:2:revive:warning:unhandled-error: Unhandled error in call to function fmt.Print
 extended/util/extended_bad.go:194:12:revive:warning:add-constant: string literal "x" appears, at least, 3 times, create a named constant for it
 extended/util/extended_bad.go:198:6:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
 extended/util/extended_bad.go:202:2:revive:warning:identical-branches: both branches of the if are identical
 extended/util/extended_bad.go:202:9:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+extended/util/extended_bad.go:203:3:revive:warning:unhandled-error: Unhandled error in call to function fmt.Print
+extended/util/extended_bad.go:205:3:revive:warning:unhandled-error: Unhandled error in call to function fmt.Print
 extended/util/extended_bad.go:210:10:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
 extended/util/extended_bad.go:210:12:revive:warning:identical-ifelseif-branches: "if...else if" chain with identical branches (lines 210 and 212)
+extended/util/extended_bad.go:211:3:revive:warning:unhandled-error: Unhandled error in call to function fmt.Print
 extended/util/extended_bad.go:211:13:revive:warning:add-constant: string literal "same" appears, at least, 3 times, create a named constant for it
 extended/util/extended_bad.go:212:17:revive:warning:add-constant: avoid magic numbers like '2', create a named constant for it
+extended/util/extended_bad.go:213:3:revive:warning:unhandled-error: Unhandled error in call to function fmt.Print
 extended/util/extended_bad.go:218:9:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+extended/util/extended_bad.go:219:3:revive:warning:unhandled-error: Unhandled error in call to function fmt.Print
 extended/util/extended_bad.go:220:9:revive:warning:identical-ifelseif-conditions: "if...else if" chain with identical conditions (lines 218 and 220)
 extended/util/extended_bad.go:220:16:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+extended/util/extended_bad.go:221:3:revive:warning:unhandled-error: Unhandled error in call to function fmt.Print
 extended/util/extended_bad.go:226:2:revive:warning:enforce-switch-style: switch must have a default case clause
 extended/util/extended_bad.go:226:2:revive:warning:identical-switch-branches: "switch" with identical branches (lines 227 and 229)
 extended/util/extended_bad.go:227:7:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+extended/util/extended_bad.go:228:3:revive:warning:unhandled-error: Unhandled error in call to function fmt.Print
 extended/util/extended_bad.go:229:7:revive:warning:add-constant: avoid magic numbers like '2', create a named constant for it
+extended/util/extended_bad.go:230:3:revive:warning:unhandled-error: Unhandled error in call to function fmt.Print
 extended/util/extended_bad.go:235:2:revive:warning:enforce-switch-style: switch must have a default case clause
+extended/util/extended_bad.go:237:3:revive:warning:unhandled-error: Unhandled error in call to function fmt.Print
 extended/util/extended_bad.go:238:2:revive:warning:identical-switch-conditions: case clause at line 236 has the same condition
+extended/util/extended_bad.go:239:3:revive:warning:unhandled-error: Unhandled error in call to function fmt.Print
 extended/util/extended_bad.go:243:0:revive:warning:line-length-limit: line is 101 characters, out of limit 80
 extended/util/extended_bad.go:245:1:revive:warning:cognitive-complexity: function badMaxControlNesting has cognitive complexity 21 (> max enabled 7)
 extended/util/extended_bad.go:251:7:revive:warning:max-control-nesting: control flow nesting exceeds 5
+extended/util/extended_bad.go:252:8:revive:warning:unhandled-error: Unhandled error in call to function fmt.Print
 extended/util/extended_bad.go:262:8:revive:warning:nested-structs: no nested structs are allowed
 extended/util/extended_bad.go:266:2:revive:warning:unexported-naming: the symbol ExportedLocal is local, its name should start with a lowercase letter
 extended/util/extended_bad.go:266:19:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
 extended/util/extended_bad.go:270:22:revive:warning:empty-lines: extra empty line at the end of a block
 extended/util/extended_bad.go:270:22:revive:warning:empty-lines: extra empty line at the start of a block
+extended/util/extended_bad.go:272:2:revive:warning:unhandled-error: Unhandled error in call to function fmt.Print
 extended/util/extended_bad.go:285:23:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+extended/util/extended_bad.go:286:15:revive:warning:unhandled-error: Unhandled error in call to function fmt.Print
 extended/util/extended_bad.go:290:34:revive:warning:confusing-results: unnamed results of the same type may be confusing, consider using named results
 extended/util/extended_bad.go:291:9:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
 extended/util/extended_bad.go:291:12:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+extended/util/extended_bad.go:294:1:revive:warning:function-length: maximum number of statements per function exceeded; max 50 but got 61
 extended/util/extended_bad.go:358:1:revive:warning:comment-spacings: no space between comment delimiter and comment text
 extended/util/extended_bad.go:359:14:revive:warning:unsecure-url-scheme: prefer secure protocol https over http in "http://example.com/path"
 extended/util/extended_bad.go:363:7:revive:warning:unused-receiver: method receiver 'c' is not referenced in method's body, consider removing or renaming it as _
@@ -269,6 +290,7 @@ extended/util/extended_bad.go:373:34:revive:warning:modifies-value-receiver: sus
 extended/util/extended_bad.go:373:40:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
 extended/util/extended_bad.go:376:11:revive:warning:unnecessary-stmt: switch with only one case can be replaced by an if-then
 extended/util/extended_bad.go:377:7:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+extended/util/extended_bad.go:378:3:revive:warning:unhandled-error: Unhandled error in call to function fmt.Print
 extended/util/extended_bad.go:378:13:revive:warning:add-constant: string literal "a" appears, at least, 3 times, create a named constant for it
 extended/util/extended_bad.go:379:3:revive:warning:unnecessary-stmt: omit unnecessary break at the end of case clause
 extended/util/extended_bad.go:379:3:revive:warning:useless-break: useless break in case clause
@@ -276,24 +298,30 @@ extended/util/extended_bad.go:387:2:revive:warning:enforce-switch-style: switch 
 extended/util/extended_bad.go:388:7:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
 extended/util/extended_bad.go:388:10:revive:warning:add-constant: avoid magic numbers like '2', create a named constant for it
 extended/util/extended_bad.go:388:13:revive:warning:add-constant: avoid magic numbers like '3', create a named constant for it
+extended/util/extended_bad.go:389:3:revive:warning:unhandled-error: Unhandled error in call to function fmt.Print
 extended/util/extended_bad.go:394:2:revive:warning:enforce-switch-style: switch must have a default case clause
 extended/util/extended_bad.go:395:7:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
 extended/util/extended_bad.go:396:3:revive:warning:useless-fallthrough: this "fallthrough" can be removed by consolidating this case clause with the next one
 extended/util/extended_bad.go:397:7:revive:warning:add-constant: avoid magic numbers like '2', create a named constant for it
+extended/util/extended_bad.go:398:3:revive:warning:unhandled-error: Unhandled error in call to function fmt.Print
 extended/util/extended_bad.go:398:13:revive:warning:add-constant: string literal "b" appears, at least, 3 times, create a named constant for it
 extended/util/extended_bad.go:403:2:revive:warning:inefficient-map-lookup: inefficient lookup of map key
 extended/util/extended_bad.go:411:14:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
 extended/util/extended_bad.go:411:17:revive:warning:add-constant: avoid magic numbers like '2', create a named constant for it
 extended/util/extended_bad.go:421:6:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
 extended/util/extended_bad.go:422:11:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+extended/util/extended_bad.go:423:3:revive:warning:unhandled-error: Unhandled error in call to function fmt.Print
 extended/util/extended_bad.go:428:16:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
 extended/util/extended_bad.go:428:19:revive:warning:add-constant: avoid magic numbers like '2', create a named constant for it
 extended/util/extended_bad.go:429:2:revive:warning:use-slices-sort: replace sort.Ints by slices.Sort
+extended/util/extended_bad.go:433:2:revive:warning:unhandled-error: Unhandled error in call to function fmt.Println
 extended/util/extended_bad.go:433:14:revive:warning:string-format: string must be ok
+extended/util/extended_bad.go:438:2:revive:warning:epoch-naming: var x should have one of these suffixes: Sec, Second, Seconds
 extended/util/extended_bad.go:442:5:revive:warning:banned-characters: banned character found: K
 extended/util/extended_bad.go:444:21:revive:warning:enforce-map-style: use make(map[type]type) instead of map[type]type{}
 extended/util/extended_bad.go:446:23:revive:warning:enforce-slice-style: use make([]type) instead of []type{} (or declare nil slice)
 extended/util/extended_bad.go:450:3:revive:warning:datarace: potential datarace: return value result is captured (by-reference) in goroutine
+extended/util/extended_bad.go:450:12:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
 extended/util/extended_bad.go:455:30:revive:warning:enforce-repeated-arg-type-style: repeated argument type "int" can be omitted
 extended/util/extended_bad.go:493:1:revive:warning:cognitive-complexity: function okRangeIsNotNesting has cognitive complexity 28 (> max enabled 7)
 extended/util/extended_bad.go:515:1:revive:warning:cognitive-complexity: function badMixedNesting has cognitive complexity 28 (> max enabled 7)
@@ -317,6 +345,7 @@ extended/util/extended_bad.go:626:27:revive:warning:datarace: potential datarace
 extended/util/extended_bad.go:628:2:revive:warning:bare-return: avoid using bare returns, please add return expressions
 extended/util/extended_bad.go:633:37:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
 extended/util/extended_bad.go:635:2:revive:warning:bare-return: avoid using bare returns, please add return expressions
+extended/util/extended_bad.go:641:8:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
 extended/util/extended_bad.go:645:2:revive:warning:bare-return: avoid using bare returns, please add return expressions
 extended/util/extended_bad.go:652:2:revive:warning:bare-return: avoid using bare returns, please add return expressions
 extended/util/extended_bad.go:657:7:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
@@ -491,6 +520,7 @@ vardeclcross/unexportedreturnalias/unexported_return_alias.go:36:7:revive:warnin
 vardeclcross/unexportedreturnalias/unexported_return_alias.go:39:7:revive:warning:unused-receiver: method receiver 'e' is not referenced in method's body, consider removing or renaming it as _
 vardeclcross/unexportedreturnalias/unexported_return_alias.go:42:7:revive:warning:unused-receiver: method receiver 'e' is not referenced in method's body, consider removing or renaming it as _
 vardeclcross/unexportedreturnalias/unexported_return_alias.go:45:7:revive:warning:unused-receiver: method receiver 'e' is not referenced in method's body, consider removing or renaming it as _
+vardeclcross/unexportedreturnalias/unexported_return_alias.go:45:31:revive:warning:unexported-return: exported method StdAlias returns unexported type *unexportedreturnalias.stdAlias, which can be annoying to use
 vardeclcross/unexportedreturnalias/unexported_return_alias.go:48:7:revive:warning:unused-receiver: method receiver 'e' is not referenced in method's body, consider removing or renaming it as _
 vardeclcross/unexportedreturnalias/unexported_return_alias.go:51:7:revive:warning:unused-receiver: method receiver 'e' is not referenced in method's body, consider removing or renaming it as _
 vardeclcross/unexportedreturnalias/unexported_return_alias.go:51:33:revive:warning:unexported-return: exported method LocalAlias returns unexported type *unexportedreturnalias.localAlias, which can be annoying to use

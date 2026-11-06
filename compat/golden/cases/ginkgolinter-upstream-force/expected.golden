@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/ginkgolinter-upstream-force/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 assertiondescription/assertiondesc.go:11:3:ginkgolinter::ginkgo-linter: missing assertion description
 assertiondescription/assertiondesc.go:14:3:ginkgolinter::ginkgo-linter: multiple issues: must not use Expect with Should; missing assertion description. Consider using `Expect(42).To(Equal(42))` instead

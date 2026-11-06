@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/gosec-g407/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 g407/s00/f0.go:12:25:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing converted string by passing hardcoded constant
 g407/s01/f0.go:20:9:gosec:high:G407: Use of hardcoded IV/nonce for encryption by passing a parameter to a function and by passing converted string by passing hardcoded constant

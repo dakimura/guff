@@ -4,6 +4,6 @@
 # Produced by running golangci-lint on compat/golden/cases/bodyclose-handled/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 a/handledresponse.go:21:21:bodyclose::response body must be closed

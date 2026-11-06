@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/gochecksumtype-upstream/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 missing_one/main.go:16:2:gochecksumtype::exhaustiveness check failed for sum type "T" (from missing_one/main.go:5:6): missing cases for B
 missing_two/main.go:20:2:gochecksumtype::exhaustiveness check failed for sum type "T" (from missing_two/main.go:5:6): missing cases for B, C

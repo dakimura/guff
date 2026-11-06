@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/revive-v117-specify-rule/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 fixtures.go:21:1:revive:error:specify-disable-rule: rule name for lint disabling not found
 fixtures.go:22:1:revive:warning:exported: exported function ExportedDisableRule3 should have comment or be unexported

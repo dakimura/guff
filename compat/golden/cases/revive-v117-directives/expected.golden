@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/revive-v117-directives/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 insiderange/disable_line_inside_range.go:13:5:revive:warning:var-naming: don't use underscores in Go names; var e_f should be eF
 insiderange/disable_line_inside_range.go:21:5:revive:warning:var-naming: don't use underscores in Go names; var k_l should be kL

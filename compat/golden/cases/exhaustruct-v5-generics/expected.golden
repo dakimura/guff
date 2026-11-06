@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/exhaustruct-v5-generics/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 types/generics/generics.go:16:6:exhaustruct_v5::generics.testGenericStruct is missing fields A, B
 types/generics/generics.go:20:6:exhaustruct_v5::generics.testGenericStruct is missing field B

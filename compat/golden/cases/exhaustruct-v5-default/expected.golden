@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/exhaustruct-v5-default/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 config/allow_empty/error_returns/error_returns.go:42:9:exhaustruct_v5::error_returns.TestStruct is missing field A
 config/allow_empty/error_returns/error_returns.go:46:24:exhaustruct_v5::error_returns.BError is missing field msg

@@ -4,5 +4,5 @@
 # Produced by running golangci-lint on compat/golden/cases/exhaustruct-v5-allow-empty/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 

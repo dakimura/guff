@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/govet-inline-within-test/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 a/a_x_test.go:14:8:govet::inline: Constant a.K should be inlined
 a/a_x_test.go:15:8:govet::inline: Type alias a.A should be inlined

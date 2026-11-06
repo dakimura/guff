@@ -451,7 +451,11 @@ fn check_unused(pass: &Pass<'_>, cm: &Comments, exclude: &str, out: &mut Vec<Dia
                 entry.name
             ),
         );
-        d.suggested_fixes = vec![remove_fix("Remove the unused interface declaration", start, end)];
+        // iface v1.5.3 `removalFix`: an exported interface is reported but
+        // never removed — another package may use it.
+        if !is_exported(&entry.name) {
+            d.suggested_fixes = vec![remove_fix("Remove the unused interface declaration", start, end)];
+        }
         out.push(d);
     }
 }
@@ -462,6 +466,7 @@ fn check_unused(pass: &Pass<'_>, cm: &Comments, exclude: &str, out: &mut Vec<Dia
 
 struct MethodEntry {
     iface_name: String,
+    exported: bool,
     fi: usize,
     pos: Pos,
     end: Pos,
@@ -517,6 +522,7 @@ fn check_unusedmethod(pass: &Pass<'_>, cm: &Comments, exclude: &str, out: &mut V
                     obj,
                     MethodEntry {
                         iface_name: ts.name.name.clone(),
+                        exported: is_exported(&name.name),
                         fi,
                         pos: field.pos(),
                         end: field.end(),
@@ -528,9 +534,12 @@ fn check_unusedmethod(pass: &Pass<'_>, cm: &Comments, exclude: &str, out: &mut V
 
     // A method is used only through a selector: a call, a method value or a
     // method expression on the interface. Implementing it does not count.
+    // iface v1.5.3 deletes `fn.Origin()`, so a call through an instance of
+    // a generic interface (`getter[int].Get`) uses the declared method.
     for sel in info.selections.values() {
         if matches!(artifacts.objects.get(sel.obj()), ObjectData::Func(_)) {
-            unused_methods.remove(&sel.obj());
+            let origin = guff_types::object::func::func_origin(&artifacts.objects, sel.obj());
+            unused_methods.remove(&origin);
         }
     }
 
@@ -552,7 +561,10 @@ fn check_unusedmethod(pass: &Pass<'_>, cm: &Comments, exclude: &str, out: &mut V
                 entry.iface_name
             ),
         );
-        d.suggested_fixes = vec![remove_fix("Remove the unused method", start, end)];
+        // iface v1.5.3: an exported method is reported but not removed.
+        if !entry.exported {
+            d.suggested_fixes = vec![remove_fix("Remove the unused method", start, end)];
+        }
         out.push(d);
     }
 }
@@ -1510,4 +1522,9 @@ mod tests {
         assert_eq!(remove_pkg_prefix("int"), "int");
         assert_eq!(remove_pkg_prefix(""), "");
     }
+}
+
+/// `ast.IsExported`.
+fn is_exported(name: &str) -> bool {
+    name.chars().next().is_some_and(char::is_uppercase)
 }

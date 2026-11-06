@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/iface-gcl-unused/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 iface_unused.go:9:6:iface::unused: interface 'Pinger' is declared but not used within the package
 iface_unused.go:13:6:iface::unused: interface 'Healthcheck' is declared but not used within the package

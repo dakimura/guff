@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/unparam/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 bad/bad.go:19:24:unparam::example - unused is unused
 bad/bad.go:41:42:unparam::sectionByType - result 1 (example.com/unparam/bad.secKind) is always 0

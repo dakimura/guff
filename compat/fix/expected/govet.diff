@@ -6,7 +6,7 @@
 #
 # An absent file for a case means upstream's --fix changes nothing there, and
 # guff must change nothing either.
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 --- a/assign/bad/bad.go
 +++ b/assign/bad/bad.go
@@ -99,7 +99,7 @@
 +
  func main() {
 -	_ = string(65)
-+	_ = fmt.Sprint(rune(65))
++	_ = fmt.Sprintf("%d", rune(65))
  }
 --- a/timeformat/bad/bad.go
 +++ b/timeformat/bad/bad.go

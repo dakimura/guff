@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/govet-printf-upstream/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 printf/a/a.go:116:14:govet::printf: fmt.Printf format %b has arg "hi" of wrong type string
 printf/a/a.go:117:14:govet::printf: fmt.Printf format %t has arg c of wrong type complex64

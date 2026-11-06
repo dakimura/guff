@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/staticcheck-sa1019-promoted-field/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 use.go:5:28:staticcheck::SA1019: (example.com/sa1019promoted/dep.Base).Old is deprecated: base field message. 
 use.go:7:38:staticcheck::SA1019: (example.com/sa1019promoted/dep.Wrapper).Old is deprecated: base field message. 

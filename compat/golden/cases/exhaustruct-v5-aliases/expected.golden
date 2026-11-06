@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/exhaustruct-v5-aliases/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 types/aliases/aliases.go:24:6:exhaustruct_v5::aliases.Alias is missing fields A, B, C, D
 types/aliases/aliases.go:25:6:exhaustruct_v5::aliases.AliasAlias is missing fields A, B, C, D

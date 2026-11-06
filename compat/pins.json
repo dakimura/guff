@@ -10,7 +10,7 @@
     "compat/drift.py has been run against the new version and its report",
     "reviewed — see docs/COMPAT-HARDENING.md Phase 7."
   ],
-  "golangci_lint": "2.14.0",
+  "golangci_lint": "2.15.0",
 
   "_shelled_out_why": [
     "Two tools golangci-lint *links* and guff *shells out to*. A different",
@@ -21,7 +21,7 @@
     "readme names the upstream swaggo/swag commit it is synced with, and that",
     "commit is what `go install` can actually fetch."
   ],
-  "golines": "v0.15.0",
+  "golines": "v0.16.0",
   "swaggoswag": "v0.0.0-20250504205917-77f2aca3143e",
   "swag_commit": "93e86851e9f22f1f2db57812cf71fc004c02159c"
 }

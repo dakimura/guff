@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/govet-fieldalignment/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 fieldalignment/bad.go:16:24:govet::fieldalignment: sizeBoolInt64Bool has size 24 but the optimal size is 16 leading to a waste of 8 bytes (33%)
 fieldalignment/bad.go:23:20:govet::fieldalignment: sizeWithArray has size 40 (allocator size class 48) but the optimal size is 32 leading to a waste of 16 bytes (33%)

@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/govet-upstream-x-tools-v050/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 composite/typeparams/typeparams.go:22:6:govet::composites: T2b struct literal uses unkeyed fields
 tests/a/a_test.go:24:1:govet::tests: Example_BadSuffix has malformed example suffix: BadSuffix

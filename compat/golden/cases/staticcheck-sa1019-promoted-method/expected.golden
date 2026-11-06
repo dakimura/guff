@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/staticcheck-sa1019-promoted-method/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 use/promoted_methods.go:9:6:staticcheck::SA1019: (*example.com/oldmethod.Base).Text is deprecated: do not use. 
 use/promoted_methods.go:10:6:staticcheck::SA1019: (*example.com/oldmethod.Inline).Text is deprecated: do not use. 

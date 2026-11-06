@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/exhaustruct-v5-allow-empty-blank-assignments/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 config/allow_empty/blank_assignments/blank_assignments.go:39:30:exhaustruct_v5::blank_assignments.Other is missing field C
 config/allow_empty/blank_assignments/blank_assignments.go:41:16:exhaustruct_v5::blank_assignments.TestStruct is missing fields A, B

@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/generic-instance-methods/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 a.go:28:2:revive:warning:unhandled-error: Unhandled error in call to function inst.W[string].Errorf
 a.go:28:10:errcheck::Error return value of `w.Errorf` is not checked

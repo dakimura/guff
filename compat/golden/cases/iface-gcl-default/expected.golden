@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/iface-gcl-default/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 iface_default.go:8:6:iface::identical: interface 'Pinger' contains identical methods or type constraints with another interface, causing redundancy (see: Healthcheck)
 iface_default.go:12:6:iface::identical: interface 'Healthcheck' contains identical methods or type constraints with another interface, causing redundancy (see: Pinger)

@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/revive-v117-args/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 identicaldefault/identical_switch_branches_allow_identical_default.go:16:2:revive:warning:identical-switch-branches: "switch" with identical branches (lines 17 and 21)
 identicaldefault/identical_switch_branches_allow_identical_default.go:40:3:revive:warning:identical-switch-branches: "switch" with identical branches (lines 41 and 43)

@@ -4,7 +4,7 @@
 # Produced by running golangci-lint on compat/golden/cases/govet-stdversion-upstream-mod21/.
 # key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
 
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
 notag.go:11:22:govet::stdversion: types.Info.FileVersions requires go1.22 or later (module is go1.21)
 notag.go:14:22:govet::stdversion: types.(*Info).PkgNameOf requires go1.22 or later (module is go1.21)

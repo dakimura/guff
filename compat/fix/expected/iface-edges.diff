@@ -6,69 +6,10 @@
 #
 # An absent file for a case means upstream's --fix changes nothing there, and
 # guff must change nothing either.
-# golangci-lint: 2.14.0
+# golangci-lint: 2.15.0
 
---- a/methods.go
-+++ b/methods.go
-@@ -6,7 +6,7 @@
- 
- type base interface {
- 	Base() // used through an embedding interface
--	Unused()
-+
- }
- 
- type derived interface {
-@@ -21,8 +21,6 @@
- 
- // A generic interface's methods are reached through an instance.
- type getter[T any] interface {
--	Get() T
--	Put(T)
- }
- 
- func useGetter(g getter[int]) int {
-@@ -33,7 +31,6 @@
- 	// A local interface declaration.
- 	type localIface interface {
- 		LocalUsed()
--		LocalUnused()
- 	}
- 	var l localIface
- 	l.LocalUsed()
-@@ -42,20 +39,17 @@
- type (
- 	// grouped is documented on its spec.
- 	grouped interface {
--		G() // trailing note
- 	}
- 
- 	// other is documented too.
- 	other interface {
--		// O is documented.
--		O()
- 	}
- )
- 
- var _ grouped
- var _ other
- 
--type closer interface{ Close() error }
-+type closer interface{}
- 
- func Exported(c closer, m map[string]closer, ch chan<- closer, a [2]closer, w io.Writer, f func(closer)) {
- }
 --- a/opaque.go
 +++ b/opaque.go
-@@ -5,7 +5,7 @@
- // *Pointer. Each function below pins one way a pointer type is (or is not)
- // the same value on two return paths.
- 
--type Server interface{ Serve() error }
-+type Server interface{}
- 
- type server struct{ a int }
- 
 @@ -20,7 +20,7 @@
  }
  
@@ -163,15 +104,6 @@
  	if x {
  		return h.s
  	}
-@@ -147,7 +147,7 @@
- 	return &server{}
- }
- 
--type Fn interface{ Call() }
-+type Fn interface{}
- 
- type fn func()
- 
 @@ -162,11 +162,11 @@
  
  func (b *Box[T]) Serve() error { return nil }
