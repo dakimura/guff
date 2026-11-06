@@ -1,0 +1,5 @@
+# predeclared v0.3.0's foo testdata in declare mode only, without
+# qualified-name: fields and methods stay unreported.
+foo/file.go                     crates/guff-style/tests/testdata/predeclared/upstream-v0.3.0/foo/file.go
+comparable/file.go              crates/guff-style/tests/testdata/predeclared/upstream-v0.3.0/example.org/comparable/file.go
+f/file.go                       crates/guff-style/tests/testdata/predeclared/upstream-v0.3.0/example.org/f/file.go

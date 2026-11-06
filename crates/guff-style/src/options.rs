@@ -147,6 +147,9 @@ impl Default for NakedretOptions {
 pub struct PredeclaredOptions {
     pub ignore: Vec<String>,
     pub qualified: bool,
+    /// The `-mode` flag golangci builds from `mode:`: `d` (declare) and/or
+    /// `s` (shadow). Upstream de-duplicates and sorts it, so `d` reports first.
+    pub mode: String,
 }
 
 impl Default for PredeclaredOptions {
@@ -154,6 +157,7 @@ impl Default for PredeclaredOptions {
         Self {
             ignore: Vec::new(),
             qualified: false,
+            mode: "s".to_string(),
         }
     }
 }

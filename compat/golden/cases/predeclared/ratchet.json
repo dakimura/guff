@@ -1,6 +1,0 @@
-{
-  "missing": 9,
-  "extra": 9,
-  "why": "golangci-lint 2.15.0 bumps predeclared v0.2.2 -> v0.3.0, rewritten on type information: \"function len has same name as predeclared identifier\" -> \"len: shadows predeclared identifier\", methods no longer reported by default, range variables are. docs/PHASE9-LEDGER.md §3.5 predeclared.",
-  "target": "0/0"
-}

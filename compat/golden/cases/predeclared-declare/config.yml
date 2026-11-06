@@ -1,0 +1,22 @@
+# Golden case: predeclared-declare.
+#
+# Declare mode alone, without qualified-name; an unknown mode is warned about and dropped.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - predeclared
+  settings:
+    predeclared:
+      mode:
+        - declare
+        - bogus
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true
