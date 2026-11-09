@@ -1,0 +1,18 @@
+# Golden case: errcheck-upstream.
+#
+# Default settings: range over iterators yielding an error, receives as statements, conversions, errors.AsType.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

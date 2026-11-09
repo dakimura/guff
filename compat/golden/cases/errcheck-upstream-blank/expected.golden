@@ -1,0 +1,159 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh errcheck-upstream-blank
+# Produced by running golangci-lint on compat/golden/cases/errcheck-upstream-blank/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+a/main.go:32:10:errcheck::Error return value is not checked
+a/main.go:33:3:errcheck::Error return value is not checked
+a/main.go:35:15:errcheck::Error return value is not checked
+a/main.go:85:2:errcheck::Error return value is not checked
+a/main.go:86:3:errcheck::Error return value is not checked
+a/main.go:89:5:errcheck::Error return value is not checked
+a/main.go:90:3:errcheck::Error return value is not checked
+a/main.go:93:2:errcheck::Error return value is not checked
+a/main.go:94:13:errcheck::Error return value is not checked
+a/main.go:97:2:errcheck::Error return value is not checked
+a/main.go:98:21:errcheck::Error return value is not checked
+a/main.go:99:5:errcheck::Error return value is not checked
+a/main.go:100:26:errcheck::Error return value is not checked
+a/main.go:103:2:errcheck::Error return value is not checked
+a/main.go:104:20:errcheck::Error return value is not checked
+a/main.go:105:5:errcheck::Error return value is not checked
+a/main.go:106:25:errcheck::Error return value is not checked
+a/main.go:110:2:errcheck::Error return value of `x.a` is not checked
+a/main.go:111:5:errcheck::Error return value of `x.a` is not checked
+a/main.go:115:2:errcheck::Error return value of `x2.a` is not checked
+a/main.go:116:6:errcheck::Error return value of `x2.a` is not checked
+a/main.go:119:2:errcheck::Error return value of `x3.a` is not checked
+a/main.go:120:6:errcheck::Error return value of `x3.a` is not checked
+a/main.go:123:2:errcheck::Error return value of `x4.a` is not checked
+a/main.go:124:6:errcheck::Error return value of `x4.a` is not checked
+a/main.go:128:2:errcheck::Error return value of `y.t.a` is not checked
+a/main.go:129:7:errcheck::Error return value of `y.t.a` is not checked
+a/main.go:132:2:errcheck::Error return value is not checked
+a/main.go:133:9:errcheck::Error return value is not checked
+a/main.go:136:5:errcheck::Error return value is not checked
+a/main.go:137:2:errcheck::Error return value is not checked
+a/main.go:146:8:errcheck::Error return value is not checked
+a/main.go:147:7:errcheck::Error return value is not checked
+a/main.go:148:6:errcheck::Error return value is not checked
+a/main.go:149:6:errcheck::Error return value is not checked
+a/main.go:159:6:errcheck::Error return value is not checked
+a/main.go:160:9:errcheck::Error return value is not checked
+a/main.go:171:13:errcheck::Error return value of `os.ReadFile` is not checked
+a/main.go:174:19:errcheck::Error return value of `emiw.MakeNilError` is not checked
+a/main.go:177:2:errcheck::Error return value is not checked
+a/main.go:180:2:errcheck::Error return value is not checked
+a/main.go:182:9:errcheck::Error return value is not checked
+a/main.go:194:2:errcheck::Error return value is not checked
+a/main.go:195:3:errcheck::Error return value is not checked
+a/main.go:196:2:errcheck::Error return value is not checked
+a/main.go:203:2:errcheck::Error return value is not checked
+a/main.go:204:2:errcheck::Error return value is not checked
+a/main.go:214:7:errcheck::Error return value is not checked
+a/main.go:217:7:errcheck::Error return value is not checked
+blank/main.go:25:2:errcheck::Error return value is not checked
+blank/main.go:26:3:errcheck::Error return value is not checked
+blank/main.go:27:3:errcheck::Error return value is not checked
+blank/main.go:36:6:errcheck::Error return value is not checked
+blank/main.go:41:10:errcheck::Error return value is not checked
+blank/main.go:45:2:errcheck::Error return value is not checked
+blank/main.go:49:9:errcheck::Error return value is not checked
+blank/main.go:60:2:errcheck::Error return value is not checked
+blank/main.go:61:2:errcheck::Error return value is not checked
+blank/main.go:62:2:errcheck::Error return value is not checked
+blank/main.go:64:6:errcheck::Error return value is not checked
+main/chan.go:10:2:errcheck::Error return value is not checked
+main/chan.go:11:3:errcheck::Error return value is not checked
+main/chan.go:12:2:errcheck::Error return value is not checked
+main/chan.go:13:2:errcheck::Error return value is not checked
+main/chan.go:39:2:errcheck::Error return value is not checked
+main/chan.go:40:2:errcheck::Error return value is not checked
+main/chan.go:41:2:errcheck::Error return value is not checked
+main/chan.go:42:2:errcheck::Error return value is not checked
+main/chan.go:43:2:errcheck::Error return value is not checked
+main/chan.go:44:2:errcheck::Error return value is not checked
+main/chan.go:45:2:errcheck::Error return value is not checked
+main/chan.go:53:6:errcheck::Error return value is not checked
+main/chan.go:54:6:errcheck::Error return value is not checked
+main/chan.go:56:6:errcheck::Error return value is not checked
+main/chan.go:57:6:errcheck::Error return value is not checked
+main/chan.go:63:2:errcheck::Error return value is not checked
+main/chan.go:72:7:errcheck::Error return value is not checked
+main/chan.go:75:7:errcheck::Error return value is not checked
+main/iter.go:32:2:errcheck::Error return value is not checked
+main/iter.go:36:2:errcheck::Error return value is not checked
+main/iter.go:39:2:errcheck::Error return value is not checked
+main/iter.go:42:9:errcheck::Error return value is not checked
+main/iter.go:46:9:errcheck::Error return value is not checked
+main/iter.go:57:2:errcheck::Error return value is not checked
+main/iter.go:60:6:errcheck::Error return value is not checked
+main/iter.go:67:2:errcheck::Error return value is not checked
+main/iter.go:71:9:errcheck::Error return value is not checked
+main/main.go:29:10:errcheck::Error return value is not checked
+main/main.go:30:3:errcheck::Error return value is not checked
+main/main.go:32:15:errcheck::Error return value is not checked
+main/main.go:79:2:errcheck::Error return value is not checked
+main/main.go:80:3:errcheck::Error return value is not checked
+main/main.go:83:5:errcheck::Error return value is not checked
+main/main.go:84:3:errcheck::Error return value is not checked
+main/main.go:87:2:errcheck::Error return value is not checked
+main/main.go:88:13:errcheck::Error return value is not checked
+main/main.go:91:2:errcheck::Error return value is not checked
+main/main.go:92:21:errcheck::Error return value is not checked
+main/main.go:93:5:errcheck::Error return value is not checked
+main/main.go:94:26:errcheck::Error return value is not checked
+main/main.go:97:2:errcheck::Error return value is not checked
+main/main.go:98:20:errcheck::Error return value is not checked
+main/main.go:99:5:errcheck::Error return value is not checked
+main/main.go:100:25:errcheck::Error return value is not checked
+main/main.go:104:2:errcheck::Error return value of `x.a` is not checked
+main/main.go:105:5:errcheck::Error return value of `x.a` is not checked
+main/main.go:109:2:errcheck::Error return value of `y.t.a` is not checked
+main/main.go:110:7:errcheck::Error return value of `y.t.a` is not checked
+main/main.go:113:2:errcheck::Error return value is not checked
+main/main.go:114:9:errcheck::Error return value is not checked
+main/main.go:117:5:errcheck::Error return value is not checked
+main/main.go:118:2:errcheck::Error return value is not checked
+main/main.go:127:8:errcheck::Error return value is not checked
+main/main.go:128:7:errcheck::Error return value is not checked
+main/main.go:129:6:errcheck::Error return value is not checked
+main/main.go:130:6:errcheck::Error return value is not checked
+main/main.go:140:6:errcheck::Error return value is not checked
+main/main.go:141:9:errcheck::Error return value is not checked
+main/main.go:153:13:errcheck::Error return value of `os.ReadFile` is not checked
+main/main.go:156:19:errcheck::Error return value of `emiw.MakeNilError` is not checked
+main/main3.go:15:14:errcheck::Error return value of `fmt.Fprintln` is not checked
+main/main_test.go:14:2:errcheck::Error return value is not checked
+main/main_test.go:15:3:errcheck::Error return value is not checked
+main/main_test.go:18:5:errcheck::Error return value is not checked
+main/main_test.go:19:3:errcheck::Error return value is not checked
+main/main_test.go:22:2:errcheck::Error return value is not checked
+main/main_test.go:23:13:errcheck::Error return value is not checked
+main/main_test.go:26:2:errcheck::Error return value is not checked
+main/main_test.go:27:21:errcheck::Error return value is not checked
+main/main_test.go:28:5:errcheck::Error return value is not checked
+main/main_test.go:29:26:errcheck::Error return value is not checked
+main/main_test.go:32:2:errcheck::Error return value is not checked
+main/main_test.go:33:20:errcheck::Error return value is not checked
+main/main_test.go:34:5:errcheck::Error return value is not checked
+main/main_test.go:35:25:errcheck::Error return value is not checked
+main/main_test.go:39:2:errcheck::Error return value of `x.a` is not checked
+main/main_test.go:40:5:errcheck::Error return value of `x.a` is not checked
+main/main_test.go:44:2:errcheck::Error return value of `y.t.a` is not checked
+main/main_test.go:45:7:errcheck::Error return value of `y.t.a` is not checked
+main/main_test.go:48:2:errcheck::Error return value is not checked
+main/main_test.go:49:9:errcheck::Error return value is not checked
+main/main_test.go:52:5:errcheck::Error return value is not checked
+main/main_test.go:53:2:errcheck::Error return value is not checked
+main/main_test.go:62:8:errcheck::Error return value is not checked
+main/main_test.go:63:7:errcheck::Error return value is not checked
+main/main_test.go:64:6:errcheck::Error return value is not checked
+main/main_test.go:65:6:errcheck::Error return value is not checked
+main/main_test.go:75:6:errcheck::Error return value is not checked
+main/main_test.go:76:9:errcheck::Error return value is not checked
+main/main_test.go:86:13:errcheck::Error return value of `os.ReadFile` is not checked
+main/main_test.go:89:19:errcheck::Error return value of `emiw.MakeNilError` is not checked

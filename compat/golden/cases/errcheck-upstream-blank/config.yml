@@ -1,0 +1,21 @@
+# Golden case: errcheck-upstream-blank.
+#
+# check-blank and check-type-assertions: blank receives (_ = <-ch, _, ok = <-ch, var _ = <-ch), blank yield variables, conversions assigned to _.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+  settings:
+    errcheck:
+      check-blank: true
+      check-type-assertions: true
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true
