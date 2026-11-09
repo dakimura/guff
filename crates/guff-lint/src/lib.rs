@@ -404,7 +404,7 @@ impl LintOptions {
 /// whole `Opts` literal unparseable, so the metric is dropped rather than
 /// mis-named.
 const AST_OBJECT_RESOLUTION_ANALYZERS: &[&str] =
-    &["ineffassign", "maintidx", "testinggoroutine", "promlinter"];
+    &["ineffassign", "maintidx", "testinggoroutine", "promlinter", "gocognit"];
 
 fn analyzers_need_ast_object_resolution(analyzers: &[&Analyzer]) -> bool {
     analyzers
