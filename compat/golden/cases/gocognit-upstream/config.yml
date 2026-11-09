@@ -1,0 +1,22 @@
+# Golden case: gocognit-upstream.
+#
+# min-complexity 0 reports every function with any increment, so each score in
+# the fixture is compared, not just the ones over a threshold.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gocognit
+  settings:
+    gocognit:
+      min-complexity: 0
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

@@ -1,16 +1,22 @@
 //! Port of [`github.com/uudashr/gocognit`](https://github.com/uudashr/gocognit)
-//! (golangci-lint wrapper in `pkg/golinters/gocognit`).
+//! v1.3.0 (golangci-lint wrapper in `pkg/golinters/gocognit`).
 //!
 //! Default matches golangci-lint: `min-complexity=30` (report when complexity
 //! is strictly greater than this).
 //!
-//! DEFERRED: `//gocognit:ignore` directive support (needs PARSE_COMMENTS).
+//! golangci calls `ComplexityStats` once per file, not the `Analyzer`, so
+//! recursion is `RecursiveFuncs(files=[f], info=nil)`: the syntactic resolver,
+//! one file at a time. That resolver reads `Ident.obj`, which is why
+//! `gocognit` is in guff-lint's `AST_OBJECT_RESOLUTION_ANALYZERS`.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 use guff::ast::{BinaryExpr, CallExpr, Decl, Expr, FuncDecl, Stmt};
+use guff::scope::ObjDecl;
 use guff::token::Token;
+use guff::walk::{preorder, NodeRef};
+use guff_analysis::comments::{file_source_contains, reparse_with_comments};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
@@ -41,18 +47,16 @@ fn expr_id(e: &Expr) -> u32 {
     e.id()
 }
 
-struct ComplexityVisitor<'a> {
-    func_name: &'a str,
+struct ComplexityVisitor {
     complexity: usize,
     nesting: usize,
     else_nodes: HashSet<u32>,
     calculated_exprs: HashSet<u32>,
 }
 
-impl<'a> ComplexityVisitor<'a> {
-    fn new(func_name: &'a str) -> Self {
+impl ComplexityVisitor {
+    fn new() -> Self {
         Self {
-            func_name,
             complexity: 0,
             nesting: 0,
             else_nodes: HashSet::new(),
@@ -249,9 +253,11 @@ impl<'a> ComplexityVisitor<'a> {
         match n.else_.as_deref() {
             Some(Stmt::BlockStmt(b)) => {
                 self.inc_complexity();
+                self.inc_nesting();
                 for s in &b.list {
                     self.walk_stmt(s);
                 }
+                self.dec_nesting();
             }
             Some(Stmt::IfStmt(else_if)) => {
                 self.mark_else(else_if.id);
@@ -342,11 +348,6 @@ impl<'a> ComplexityVisitor<'a> {
     }
 
     fn visit_call(&mut self, n: &CallExpr) {
-        if let Expr::Ident(id) = n.fun.as_ref() {
-            if id.name == self.func_name {
-                self.inc_complexity();
-            }
-        }
         self.walk_expr(&n.fun);
         for arg in &n.args {
             self.walk_expr(arg);
@@ -364,6 +365,10 @@ impl<'a> ComplexityVisitor<'a> {
 
     fn collect_binary_ops_expr(&mut self, exp: &Expr) -> Vec<Token> {
         self.mark_calculated(expr_id(exp));
+        // v1.3.0: a parenthesised operand continues the same sequence.
+        if let Expr::ParenExpr(p) = exp {
+            return self.collect_binary_ops_expr(&p.x);
+        }
         let Expr::BinaryExpr(b) = exp else {
             return Vec::new();
         };
@@ -388,15 +393,188 @@ fn merge_binary_ops(x: Vec<Token>, op: Token, y: Vec<Token>) -> Vec<Token> {
     out
 }
 
-fn complexity(fn_: &FuncDecl) -> usize {
-    let name = fn_.name.name.as_str();
-    let mut v = ComplexityVisitor::new(name);
+/// `scanComplexity`: recursion is a property of the function, worth one
+/// increment however many recursive calls it makes.
+fn complexity(fn_: &FuncDecl, recursive: bool) -> usize {
+    let mut v = ComplexityVisitor::new();
     if let Some(body) = &fn_.body {
         for s in &body.list {
             v.walk_stmt(s);
         }
     }
-    v.complexity
+    v.complexity + usize::from(recursive)
+}
+
+/// `RecursiveFuncs(files, nil)`: the functions with a body that lie on a call
+/// cycle (a self-call, or a strongly connected component of several).
+fn recursive_funcs(decls: &[&FuncDecl]) -> Vec<bool> {
+    let mut by_name: HashMap<&str, usize> = HashMap::new();
+    let mut by_pos: HashMap<i64, usize> = HashMap::new();
+    for (i, f) in decls.iter().enumerate() {
+        by_pos.insert(f.name.name_pos.0, i);
+        if f.recv.is_none() {
+            by_name.insert(f.name.name.as_str(), i);
+        }
+    }
+    let adjacency: Vec<Vec<usize>> = (0..decls.len())
+        .map(|i| {
+            let mut out = Vec::new();
+            let Some(body) = &decls[i].body else {
+                return out;
+            };
+            preorder(NodeRef::BlockStmt(body), |n| {
+                if let NodeRef::CallExpr(call) = n {
+                    if let Some(t) = resolve_call(&call.fun, i, decls, &by_name, &by_pos) {
+                        out.push(t);
+                    }
+                }
+                true
+            });
+            out
+        })
+        .collect();
+    recursive_nodes(&adjacency)
+}
+
+/// `resolveCall` without type information.
+fn resolve_call(
+    fun: &Expr,
+    current: usize,
+    decls: &[&FuncDecl],
+    by_name: &HashMap<&str, usize>,
+    by_pos: &HashMap<i64, usize>,
+) -> Option<usize> {
+    match fun {
+        Expr::ParenExpr(p) => resolve_call(&p.x, current, decls, by_name, by_pos),
+        Expr::IndexExpr(i) => resolve_call(&i.x, current, decls, by_name, by_pos),
+        Expr::IndexListExpr(i) => resolve_call(&i.x, current, decls, by_name, by_pos),
+        Expr::Ident(id) => {
+            let obj = id.obj.lock().unwrap().clone();
+            match obj {
+                // The parser bound the name: a function of this file, or a
+                // local that shadows one (not a call of it).
+                Some(obj) => match &obj.decl {
+                    ObjDecl::FuncDecl(fd) if fd.body.is_some() => by_pos.get(&fd.name.name_pos.0).copied(),
+                    _ => None,
+                },
+                None => by_name.get(id.name.as_str()).copied(),
+            }
+        }
+        // A call through the current method's own receiver, `n.Walk()` in
+        // `(n *Node) Walk`.
+        Expr::SelectorExpr(sel) => {
+            let cur = decls[current];
+            let recv = cur.recv.as_ref()?;
+            if sel.sel.name != cur.name.name {
+                return None;
+            }
+            let Expr::Ident(x) = sel.x.as_ref() else {
+                return None;
+            };
+            recv.list
+                .iter()
+                .any(|f| f.names.iter().any(|n| n.name == x.name))
+                .then_some(current)
+        }
+        _ => None,
+    }
+}
+
+/// `recursiveNodes`: Tarjan's SCC, iterative; a component of more than one
+/// node, or a node with a self-loop, is recursive.
+fn recursive_nodes(adjacency: &[Vec<usize>]) -> Vec<bool> {
+    let n = adjacency.len();
+    let mut index = 0usize;
+    let mut indices: Vec<Option<usize>> = vec![None; n];
+    let mut lowlink = vec![0usize; n];
+    let mut on_stack = vec![false; n];
+    let mut stack: Vec<usize> = Vec::new();
+    let mut recursive = vec![false; n];
+
+    for root in 0..n {
+        if indices[root].is_some() {
+            continue;
+        }
+        indices[root] = Some(index);
+        lowlink[root] = index;
+        index += 1;
+        stack.push(root);
+        on_stack[root] = true;
+        let mut work: Vec<(usize, usize)> = vec![(root, 0)];
+
+        while let Some(&(v, next)) = work.last() {
+            if next < adjacency[v].len() {
+                let w = adjacency[v][next];
+                work.last_mut().unwrap().1 += 1;
+                match indices[w] {
+                    None => {
+                        indices[w] = Some(index);
+                        lowlink[w] = index;
+                        index += 1;
+                        stack.push(w);
+                        on_stack[w] = true;
+                        work.push((w, 0));
+                    }
+                    Some(iw) if on_stack[w] && iw < lowlink[v] => lowlink[v] = iw,
+                    _ => {}
+                }
+                continue;
+            }
+
+            if Some(lowlink[v]) == indices[v] {
+                let mut component = Vec::new();
+                loop {
+                    let w = stack.pop().unwrap();
+                    on_stack[w] = false;
+                    component.push(w);
+                    if w == v {
+                        break;
+                    }
+                }
+                if component.len() > 1 {
+                    for w in component {
+                        recursive[w] = true;
+                    }
+                }
+            }
+
+            work.pop();
+            if let Some(&(parent, _)) = work.last() {
+                if lowlink[v] < lowlink[parent] {
+                    lowlink[parent] = lowlink[v];
+                }
+            }
+        }
+    }
+
+    for (v, out) in adjacency.iter().enumerate() {
+        if out.contains(&v) {
+            recursive[v] = true;
+        }
+    }
+    recursive
+}
+
+/// `parseDirective`: the analysis AST has no doc comments, so a file that
+/// mentions the directive at all is reparsed with them. Returns the `func`
+/// keyword positions of the ignored declarations.
+fn ignored_funcs(pass: &Pass<'_>, file: &guff::ast::File) -> HashSet<i64> {
+    let mut out = HashSet::new();
+    if !file_source_contains(pass, file, b"//gocognit:ignore") {
+        return out;
+    }
+    let Some(r) = reparse_with_comments(pass, file) else {
+        return out;
+    };
+    for decl in &r.file.decls {
+        let Decl::FuncDecl(f) = decl else {
+            continue;
+        };
+        if f.doc.as_ref().is_some_and(|d| d.list.iter().any(|c| c.text == "//gocognit:ignore")) {
+            out.insert(r.rebase(f.ty.pos()).0);
+        }
+    }
+    out
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -412,11 +590,27 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     let mut pending = Vec::new();
     for file in pass.files() {
-        for decl in &file.decls {
-            let Decl::FuncDecl(f) = decl else {
+        let ignored = ignored_funcs(pass, file);
+        let all: Vec<&FuncDecl> = file
+            .decls
+            .iter()
+            .filter_map(|d| match d {
+                Decl::FuncDecl(f) => Some(f),
+                _ => None,
+            })
+            .collect();
+        let with_body: Vec<&FuncDecl> = all.iter().copied().filter(|f| f.body.is_some()).collect();
+        let recursive: HashSet<i64> = recursive_funcs(&with_body)
+            .into_iter()
+            .zip(&with_body)
+            .filter(|(r, _)| *r)
+            .map(|(_, f)| f.name.name_pos.0)
+            .collect();
+        for f in all {
+            if ignored.contains(&f.ty.pos().0) {
                 continue;
-            };
-            let c = complexity(f);
+            }
+            let c = complexity(f, recursive.contains(&f.name.name_pos.0));
             if c > min_complexity {
                 let name = func_name(f);
                 pending.push((
