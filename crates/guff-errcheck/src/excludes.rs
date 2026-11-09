@@ -9,6 +9,8 @@ pub const DEFAULT_EXCLUDED_SYMBOLS: &[&str] = &[
     "(*bytes.Buffer).WriteString",
     // crypto
     "crypto/rand.Read",
+    // errors
+    "errors.AsType",
     // fmt
     "fmt.Print",
     "fmt.Printf",

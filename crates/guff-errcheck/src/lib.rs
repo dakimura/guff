@@ -10,8 +10,9 @@ use std::sync::OnceLock;
 
 use guff::ast::{
     AssignStmt, CallExpr, Expr, ExprStmt, GenDecl, GoStmt, Ident, IndexExpr, IndexListExpr,
-    ParenExpr, Spec, TypeAssertExpr,
+    ParenExpr, RangeStmt, Spec, TypeAssertExpr, UnaryExpr,
 };
+use guff::token::Token;
 use guff::node_mask;
 use guff::position::Pos;
 use guff::walk::{NodeMask, NodeRef};
@@ -139,6 +140,7 @@ fn run(pass: &mut Pass<'_>, opts: Options) -> Result<Option<AnalysisResult>, Run
         ExprStmt,
         GenDecl,
         GoStmt,
+        RangeStmt,
         TypeAssertExpr,
     );
     inspect.preorder_typed(WANTED, pass.files(), |n| {
@@ -149,6 +151,7 @@ fn run(pass: &mut Pass<'_>, opts: Options) -> Result<Option<AnalysisResult>, Run
             NodeRef::AssignStmt(s) => visitor.visit_assign(s),
             NodeRef::GenDecl(g) => visitor.visit_gendecl(g),
             NodeRef::TypeAssertExpr(t) => visitor.visit_type_assert(t),
+            NodeRef::RangeStmt(r) => visitor.visit_range(r),
             _ => {}
         }
     });
@@ -274,6 +277,109 @@ impl Visitor<'_, '_> {
             if !self.ignore_call(call) && self.call_returns_error(call) {
                 self.report_unchecked(call.lparen.0 as u32, Some(call));
             }
+        } else if let Some(unary) = unwrap_unary(x).filter(|u| u.op == Token::ARROW) {
+            // v1.30.0: a receive used as a statement, `<-errCh` (also a
+            // `case <-errCh:` of a select, which is an ExprStmt too).
+            if self.receive_returns_error(unary) {
+                self.report_unchecked(unary.op_pos.0 as u32, None);
+            }
+        }
+    }
+
+    /// v1.30.0 `checkRangeStmt`: a range over an iterator function whose yield
+    /// takes an `error` the loop does not bind. The unbound case reports at
+    /// `for` (and stops), a `_` only under `check-blank`.
+    fn visit_range(&mut self, stmt: &RangeStmt) {
+        if self.pruned(stmt.for_) {
+            return;
+        }
+        let Some(yield_params) = self.iterator_yield_params(&stmt.x) else {
+            return;
+        };
+        let call = unwrap_call(&stmt.x);
+        if call.is_some_and(|c| self.ignore_call(c)) {
+            return;
+        }
+        if yield_params.is_empty() || yield_params.len() > 2 {
+            return;
+        }
+        for (i, &param) in yield_params.iter().enumerate() {
+            if !self.is_error_type(param) {
+                continue;
+            }
+            let expr = if i == 0 { stmt.key.as_ref() } else { stmt.value.as_ref() };
+            match expr {
+                None => {
+                    self.report_unchecked(stmt.for_.0 as u32, call);
+                    break;
+                }
+                Some(Expr::Ident(id)) if id.name == "_" => {
+                    if self.opts.check_blank {
+                        self.report_unchecked(id.name_pos.0 as u32, call);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// The yield function's parameter types when `x` is `func(yield func(..)
+    /// bool)`, the shape `checkRangeStmt` accepts.
+    fn iterator_yield_params(&self, x: &Expr) -> Option<Vec<TypeId>> {
+        let info = self.pass.types_info()?;
+        let artifacts = self.pass.pkg().type_artifacts.as_ref()?;
+        let types = &artifacts.types;
+        let t = info.types.get(&x.id())?.typ;
+        let TypeData::Signature(sig) = types.get(t.underlying(types)) else {
+            return None;
+        };
+        let params = self.tuple_types(sig.params());
+        if params.len() != 1 || !self.tuple_types(sig.results()).is_empty() {
+            return None;
+        }
+        let TypeData::Signature(yield_sig) = types.get(params[0].underlying(types)) else {
+            return None;
+        };
+        let results = self.tuple_types(yield_sig.results());
+        if results.len() != 1 {
+            return None;
+        }
+        match types.get(results[0].underlying(types)) {
+            TypeData::Basic(b) if b.info().contains(guff_types::basic::IS_BOOLEAN) => {}
+            _ => return None,
+        }
+        Some(self.tuple_types(yield_sig.params()))
+    }
+
+    fn tuple_types(&self, tuple: Option<TypeId>) -> Vec<TypeId> {
+        let (Some(t), Some(artifacts)) = (tuple, self.pass.pkg().type_artifacts.as_ref()) else {
+            return Vec::new();
+        };
+        match artifacts.types.get(t) {
+            TypeData::Tuple(tp) => (0..tp.len())
+                .filter_map(|i| tp.at(i).typ(&artifacts.objects))
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// `receiveReturnsError`: `<-ch` where the channel's element type
+    /// implements `error`.
+    fn receive_returns_error(&self, unary: &UnaryExpr) -> bool {
+        let (Some(info), Some(artifacts)) = (self.pass.types_info(), self.pass.pkg().type_artifacts.as_ref())
+        else {
+            return false;
+        };
+        let t = info
+            .types
+            .get(&unwrap_parens(&unary.x).id())
+            .or_else(|| info.types.get(&unary.x.id()));
+        let Some(t) = t else {
+            return false;
+        };
+        match artifacts.types.get(t.typ.underlying(&artifacts.types)) {
+            TypeData::Chan(ch) => self.is_error_type(ch.elem()),
+            _ => false,
         }
     }
 
@@ -391,6 +497,19 @@ impl Visitor<'_, '_> {
                     }
                 }
                 return false;
+            } else if let Some(unary) = unwrap_unary(&rhs[0]).filter(|u| u.op == Token::ARROW) {
+                // v1.30.0: `_ = <-ch`, `_, ok = <-ch`, `var _ = <-ch`.
+                if !self.opts.check_blank {
+                    return true;
+                }
+                if self.receive_returns_error(unary) {
+                    if let Some(Expr::Ident(id)) = lhs.first() {
+                        if id.name == "_" {
+                            self.report_unchecked(id.name_pos.0 as u32, None);
+                        }
+                    }
+                }
+                return true;
             }
         } else {
             for (i, l) in lhs.iter().enumerate() {
@@ -416,6 +535,13 @@ impl Visitor<'_, '_> {
                         continue;
                     }
                     self.report_unchecked(id.name_pos.0 as u32, None);
+                } else if let Some(unary) = rhs.get(i).and_then(unwrap_unary).filter(|u| u.op == Token::ARROW) {
+                    if !self.opts.check_blank {
+                        continue;
+                    }
+                    if id.name == "_" && self.receive_returns_error(unary) {
+                        self.report_unchecked(id.name_pos.0 as u32, None);
+                    }
                 }
             }
         }
@@ -423,7 +549,44 @@ impl Visitor<'_, '_> {
     }
 
     fn ignore_call(&self, call: &CallExpr) -> bool {
-        self.exclude_call(call)
+        self.exclude_call(call) || self.is_errors_as_type(call)
+    }
+
+    /// v1.30.0 `isErrorsAsType`: `errors.AsType[T](err)` is never reported,
+    /// even with the default exclusions disabled. Upstream's last resort is
+    /// the spelling, so any package imported as `errors` qualifies.
+    fn is_errors_as_type(&self, call: &CallExpr) -> bool {
+        let Expr::SelectorExpr(sel) = base_call_expr(&call.fun) else {
+            return false;
+        };
+        if sel.sel.name != "AsType" {
+            return false;
+        }
+        let Expr::Ident(pkg_ident) = sel.x.as_ref() else {
+            return false;
+        };
+        pkg_ident.name == "errors"
+            || self.call_target_object(call).is_some_and(|obj| {
+                let Some(artifacts) = self.pass.pkg().type_artifacts.as_ref() else {
+                    return false;
+                };
+                obj.pkg(&artifacts.objects)
+                    .is_some_and(|p| non_vendored(artifacts.packages.get(p).path()) == "errors")
+            })
+            || self.imports_errors(pkg_ident)
+    }
+
+    fn imports_errors(&self, id: &Ident) -> bool {
+        let (Some(info), Some(artifacts)) = (self.pass.types_info(), self.pass.pkg().type_artifacts.as_ref()) else {
+            return false;
+        };
+        let Some(&obj) = info.uses.get(&id.id) else {
+            return false;
+        };
+        let ObjectData::PkgName(pn) = artifacts.objects.get(obj) else {
+            return false;
+        };
+        non_vendored(artifacts.packages.get(pn.imported()).path()) == "errors"
     }
 
     fn exclude_call(&self, call: &CallExpr) -> bool {
@@ -547,6 +710,11 @@ impl Visitor<'_, '_> {
             Some(i) => i,
             None => return vec![false],
         };
+        // v1.30.0: a conversion `(*T)(x)` is not a call, even when `*T`
+        // implements error (`var _ error = (*T)(nil)`).
+        if info.types.get(&call.fun.id()).is_some_and(|t| t.mode == OperandMode::TypeExpr) {
+            return vec![false];
+        }
         let Some(tav) = info.types.get(&call.id) else {
             return vec![false];
         };
@@ -655,6 +823,36 @@ fn selector_name(sel: &guff::ast::SelectorExpr) -> Option<String> {
             Some(format!("{}.{}", selector_name(inner)?, sel.sel.name))
         }
         _ => None,
+    }
+}
+
+fn unwrap_parens(expr: &Expr) -> &Expr {
+    let mut cur = expr;
+    while let Expr::ParenExpr(p) = cur {
+        cur = &p.x;
+    }
+    cur
+}
+
+fn unwrap_unary(expr: &Expr) -> Option<&UnaryExpr> {
+    match unwrap_parens(expr) {
+        Expr::UnaryExpr(u) => Some(u),
+        _ => None,
+    }
+}
+
+fn unwrap_call(expr: &Expr) -> Option<&CallExpr> {
+    match unwrap_parens(expr) {
+        Expr::CallExpr(c) => Some(c),
+        _ => None,
+    }
+}
+
+/// `nonVendoredPkgPath`.
+fn non_vendored(path: &str) -> &str {
+    match path.rfind("/vendor/") {
+        Some(i) => &path[i + "/vendor/".len()..],
+        None => path,
     }
 }
 
