@@ -62,36 +62,17 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
 
 fn check_file(pass: &Pass<'_>, file: &File, out: &mut Vec<Failure>) {
     let limits = limits(pass);
-    {
-        // Upstream walks `file.AST.Decls` itself and bails out of the *whole
-        // file* on the first function with an empty body:
-        //
-        //     emptyBody := body == nil || len(body.List) == 0
-        //     if emptyBody { return nil }
-        //
-        // `return nil` rather than `continue`, inside `Apply`, which runs per
-        // file — so one `func f() {}` silences function-length for every
-        // function below it *and discards the failures already collected*.
-        // It reads like a slip for `continue`, but it is what golangci-lint
-        // 2.12.2 ships, and reproducing it is the whole point of this tier:
-        // extended_bad.go has empty-bodied functions near the top, so upstream
-        // reports nothing there at all.
-        let mut per_file = Vec::new();
-        let mut aborted = false;
-        for decl in &file.decls {
-            let guff::ast::Decl::FuncDecl(f) = decl else {
-                continue;
-            };
-            let empty_body = f.body.as_ref().is_none_or(|b| b.list.is_empty());
-            if empty_body {
-                aborted = true;
-                break;
-            }
-            check_func(pass, f, limits, &mut per_file);
+    // revive v1.17.1 skips a function with an empty body (`continue`). Up to
+    // v1.17.0 it was `return nil`, which dropped function-length for the
+    // whole file — failures already collected included.
+    for decl in &file.decls {
+        let guff::ast::Decl::FuncDecl(f) = decl else {
+            continue;
+        };
+        if f.body.as_ref().is_none_or(|b| b.list.is_empty()) {
+            continue;
         }
-        if !aborted {
-            out.append(&mut per_file);
-        }
+        check_func(pass, f, limits, out);
     }
 }
 

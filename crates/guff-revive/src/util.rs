@@ -18,6 +18,29 @@ use guff_types::arena::TypeData;
 use guff_types::basic::{BasicKind, IS_INTEGER};
 use guff_types::TypeId;
 
+/// Can revive's own type check see the package at `path`?
+///
+/// revive type-checks with `importer.Default()`, which reads gc export data.
+/// Since golangci-lint 2.15.0 (`goutil.Env.Discover` keeps the `go env
+/// GOROOT` it runs) the standard library resolves and nothing else does — not
+/// another package of the same module, not a dependency. A package `go list`
+/// put in this package's imports answers by its module (the standard library
+/// has none); any other falls back to the import-path rule (no dot in the
+/// first element) minus the main module's own prefix.
+pub fn revive_can_import(pass: &Pass<'_>, path: &str) -> bool {
+    let pkg = pass.pkg();
+    if let Some(imp) = pkg.imports.get(path) {
+        return imp.module.is_none();
+    }
+    if let Some(m) = &pkg.module {
+        if path == m.path || path.starts_with(&format!("{}/", m.path)) {
+            return false;
+        }
+    }
+    let first = path.split('/').next().unwrap_or(path);
+    !first.is_empty() && !first.contains('.')
+}
+
 pub fn unparen<'a>(expr: &'a Expr) -> &'a Expr {
     match expr {
         Expr::ParenExpr(p) => unparen(&p.x),

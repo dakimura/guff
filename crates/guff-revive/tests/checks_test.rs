@@ -738,9 +738,9 @@ fn revive_flags_function_length() {
 }
 
 #[test]
-fn revive_function_length_is_silenced_by_an_empty_body() {
-    // The upstream quirk itself: one `func f() {}` above the long function and
-    // the rule reports nothing for the file.
+fn revive_function_length_skips_an_empty_body() {
+    // revive v1.17.1: a `func f() {}` above the long function is skipped
+    // (`continue`); up to v1.17.0 it silenced the rule for the whole file.
     guff_revive::with_extended_rules(|| {
         let pkg = support::typecheck_fixture(
             "revive",
@@ -749,8 +749,8 @@ fn revive_function_length_is_silenced_by_an_empty_body() {
         );
         let messages = support::run_analyzer(revive(), &pkg);
         assert!(
-            messages.iter().all(|m| !m.contains("function-length:")),
-            "function-length must be silent after an empty body: {messages:?}"
+            messages.iter().any(|m| m.contains("function-length:")),
+            "function-length must still report after an empty body: {messages:?}"
         );
     });
 }

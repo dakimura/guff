@@ -7,7 +7,7 @@ use guff_types::arena::TypeData;
 use guff_types::ObjectId;
 
 use crate::failure::Failure;
-use crate::util::{file_is_test, is_importable_package, receiver_type_key, type_string};
+use crate::util::{file_is_test, is_importable_package, receiver_type_key, revive_can_import, type_string};
 
 pub struct Checker<'a> {
     pass: &'a Pass<'a>,
@@ -111,7 +111,8 @@ fn check_func(pass: &Pass<'_>, f: &FuncDecl, failures: &mut Vec<Failure>) {
 }
 
 /// Does this alias resolve, through any chain of aliases, to a type declared in
-/// a different package? That is what revive's own type check cannot do.
+/// a package revive's own type check cannot import (anything but this package
+/// and the standard library; see [`revive_can_import`])?
 fn alias_target_is_imported(pass: &Pass<'_>, typ: guff_types::TypeId) -> bool {
     let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
         return false;
@@ -129,7 +130,9 @@ fn alias_target_is_imported(pass: &Pass<'_>, typ: guff_types::TypeId) -> bool {
         match types.get(rhs) {
             TypeData::Alias(_) => cur = rhs,
             TypeData::Named(n) => {
-                return n.obj().pkg(objects).is_some_and(|p| p != here);
+                return n.obj().pkg(objects).is_some_and(|p| {
+                    p != here && !revive_can_import(pass, artifacts.packages.get(p).path())
+                });
             }
             _ => return false,
         }
@@ -150,11 +153,12 @@ fn exported_type(pass: &Pass<'_>, typ: guff_types::TypeId) -> bool {
             if obj.pkg(objects).is_none() {
                 return true;
             }
-            // An alias whose target lives in **another package** is invisible
-            // to upstream. revive type-checks the files itself with
-            // `importer.Default()`, which resolves no import in a module
-            // build, so `Pkg.TypeOf` hands `exportedType` a nil type and nil
-            // is "exported". datadog-agent's dogstatsd reader returns
+            // An alias whose target lives in **another package** outside the
+            // standard library is invisible to upstream. revive type-checks
+            // the files itself with `importer.Default()`, which (since
+            // golangci-lint 2.15.0) resolves only the standard library, so
+            // `Pkg.TypeOf` hands `exportedType` a nil type and nil is
+            // "exported". datadog-agent's dogstatsd reader returns
             // `[]*resource` where `type resource = metrics.Resource`.
             //
             // Only the alias *target* counts: an unexported struct that merely

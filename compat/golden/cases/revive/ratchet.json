@@ -1,6 +1,6 @@
 {
-  "missing": 27,
+  "missing": 2,
   "extra": 0,
-  "why": "golangci-lint 2.15.0 fixed goutil.Env.Discover (a value receiver threw the `go env GOROOT` result away), so revive's own type check now resolves the standard library — but still not packages of the same module or of dependencies. The four permanent diffs this file used to hold (time-equal, epoch-naming, time-naming, and context-keys-type's \"untyped string\") were upstream failing to resolve *any* import; they are gone, guff's answers stand. What 2.15.0 adds and guff lacks: unhandled-error on fmt.Print / Printf / Println / errors.New (26) and one unexported-return, because guff's revive treats every import as invisible where it now needs \"only the standard library is visible\". docs/PHASE9-LEDGER.md §3.6 revive R1.",
-  "target": "0/0 after R1."
+  "why": "add-constant: revive v1.17.1's checkFunc walks a call's arguments and Fun with ast.Inspect (numbers inside composite literals, binary expressions and function literals passed as arguments), guff only looks at direct BasicLit / CallExpr arguments. docs/PHASE9-LEDGER.md §3.6 revive R4.",
+  "target": "0/0 after R4."
 }
