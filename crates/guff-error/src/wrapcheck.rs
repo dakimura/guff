@@ -4,6 +4,8 @@
 //! `ignore-sig-regexps`, `ignore-package-globs`, `ignore-interface-regexps`,
 //! `report-internal-errors`.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use guff::ast::{AssignStmt, CallExpr, Expr, Ident, ReturnStmt, SelectorExpr};
@@ -11,12 +13,14 @@ use guff::walk::{self, NodeRef};
 use guff_analysis::code;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_types::api_predicates::{api_assignable_to, api_implements};
 use guff_types::arena::{ObjectId, TypeData};
+use guff_types::TypeId;
 use guff_types::predicates::is_interface;
 use guff_types::typestring::{signature_string, type_string};
 use regex::Regex;
 
-use crate::util::{is_pure_error, type_of, unparen};
+use crate::util::{type_of, universe_error, unparen};
 
 const DEFAULT_IGNORE_SIGS: &[&str] = &[
     ".Errorf(",
@@ -141,8 +145,115 @@ fn package_glob_match(pattern: &str, path: &str) -> bool {
     Regex::new(&regex).is_ok_and(|re| re.is_match(path))
 }
 
-fn is_error_typ(pass: &Pass<'_>, typ: guff_types::TypeId) -> bool {
-    guff_analysis::code::type_with_name(pass, typ, "error")
+/// v2.13.0's two type questions, `isError` (`types.Implements(t, error)`)
+/// and `isWrappableResult`'s `types.AssignableTo(error, t)`. Both need a
+/// mutable arena, so one copy is made per run, and the answers are memoised.
+struct Arenas<'a> {
+    types: &'a guff_types::arena::TypeArena,
+    objects: &'a guff_types::arena::ObjectArena,
+    packages: &'a guff_types::arena::PackageArena,
+}
+
+struct ErrTypes<'a> {
+    arenas: Option<Arenas<'a>>,
+    error: Option<TypeId>,
+    scratch: RefCell<Option<guff_types::arena::TypeArena>>,
+    implements: RefCell<HashMap<TypeId, bool>>,
+    holds_error: RefCell<HashMap<TypeId, bool>>,
+}
+
+impl<'a> ErrTypes<'a> {
+    fn new(pass: &'a Pass<'_>) -> Self {
+        Self {
+            arenas: pass.pkg().type_artifacts.as_ref().map(|a| Arenas {
+                types: &a.types,
+                objects: &a.objects,
+                packages: &a.packages,
+            }),
+            error: universe_error(pass),
+            scratch: RefCell::default(),
+            implements: RefCell::default(),
+            holds_error: RefCell::default(),
+        }
+    }
+
+    fn with_scratch<R>(&self, f: impl FnOnce(&mut guff_types::arena::TypeArena, &Arenas<'a>) -> R) -> Option<R> {
+        let arenas = self.arenas.as_ref()?;
+        let mut scratch = self.scratch.borrow_mut();
+        let arena = scratch.get_or_insert_with(|| arenas.types.clone());
+        Some(f(arena, arenas))
+    }
+
+    /// `isError`.
+    fn is_error(&self, typ: Option<TypeId>) -> bool {
+        let (Some(typ), Some(err)) = (typ, self.error) else {
+            return false;
+        };
+        if let Some(&hit) = self.implements.borrow().get(&typ) {
+            return hit;
+        }
+        let answer = self
+            .with_scratch(|types, a| api_implements(types, a.objects, a.packages, typ, err))
+            .unwrap_or(false);
+        self.implements.borrow_mut().insert(typ, answer);
+        answer
+    }
+
+    /// `types.AssignableTo(errorType, typ)`.
+    fn can_hold_error(&self, typ: TypeId) -> bool {
+        let Some(err) = self.error else {
+            return false;
+        };
+        if let Some(&hit) = self.holds_error.borrow().get(&typ) {
+            return hit;
+        }
+        let answer = self
+            .with_scratch(|types, a| api_assignable_to(types, a.objects, a.packages, err, typ))
+            .unwrap_or(false);
+        self.holds_error.borrow_mut().insert(typ, answer);
+        answer
+    }
+
+    /// The element types of a tuple, or `None` when `typ` is not one.
+    fn tuple(&self, typ: Option<TypeId>) -> Option<Vec<Option<TypeId>>> {
+        let a = self.arenas.as_ref()?;
+        match a.types.get(typ?) {
+            TypeData::Tuple(t) => Some((0..t.len()).map(|i| t.at(i).typ(a.objects)).collect()),
+            _ => None,
+        }
+    }
+
+    /// `isWrappableResult`: the innermost enclosing function's result at
+    /// `idx` can hold an error.
+    fn is_wrappable_result(&self, pass: &Pass<'_>, stack: &[NodeRef<'_>], idx: usize) -> bool {
+        let Some(info) = pass.types_info() else {
+            return false;
+        };
+        for n in stack.iter().rev() {
+            let typ = match n {
+                NodeRef::FuncLit(lit) => info.types.get(&lit.id).map(|t| t.typ),
+                NodeRef::FuncDecl(fd) => info
+                    .defs
+                    .get(&fd.name.id)
+                    .copied()
+                    .flatten()
+                    .and_then(|obj| self.arenas.as_ref().and_then(|a| obj.typ(a.objects))),
+                _ => continue,
+            };
+            let Some(a) = self.arenas.as_ref() else {
+                return false;
+            };
+            let Some(TypeData::Signature(sig)) = typ.map(|t| a.types.get(t)) else {
+                return false;
+            };
+            let results = self.tuple(sig.results()).unwrap_or_default();
+            return match results.get(idx) {
+                Some(Some(t)) => self.can_hold_error(*t),
+                _ => false,
+            };
+        }
+        false
+    }
 }
 
 fn call_sig(pass: &Pass<'_>, call: &CallExpr) -> Option<String> {
@@ -312,50 +423,6 @@ fn report_unwrapped(
     }
 }
 
-fn call_returns_error(pass: &Pass<'_>, call: &CallExpr) -> bool {
-    let Some(typ) = type_of(pass, &Expr::CallExpr(call.clone())) else {
-        let info = match pass.types_info() {
-            Some(i) => i,
-            None => return false,
-        };
-        return info
-            .types
-            .get(&call.id)
-            .is_some_and(|tav| is_error_typ(pass, tav.typ) || is_tuple_with_error(pass, tav.typ));
-    };
-    is_error_typ(pass, typ) || is_tuple_with_error(pass, typ)
-}
-
-/// Is the call's type a `types.Tuple`? Upstream abandons the return statement
-/// when a returned call is neither an error nor a tuple.
-fn call_type_is_tuple(pass: &Pass<'_>, call: &CallExpr) -> bool {
-    let typ = type_of(pass, &Expr::CallExpr(call.clone())).or_else(|| {
-        pass.types_info()
-            .and_then(|info| info.types.get(&call.id).map(|tav| tav.typ))
-    });
-    let Some(typ) = typ else {
-        return false;
-    };
-    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
-        return false;
-    };
-    matches!(artifacts.types.get(typ), TypeData::Tuple(_))
-}
-
-fn is_tuple_with_error(pass: &Pass<'_>, typ: guff_types::TypeId) -> bool {
-    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
-        return false;
-    };
-    match artifacts.types.get(typ) {
-        TypeData::Tuple(t) => (0..t.len()).any(|i| {
-            t.at(i)
-                .typ(&artifacts.objects)
-                .is_some_and(|rt| is_error_typ(pass, rt))
-        }),
-        _ => false,
-    }
-}
-
 fn prev_err_assign<'a>(
     pass: &Pass<'_>,
     file: &'a guff::ast::File,
@@ -390,17 +457,18 @@ fn check_return(
     ret: &ReturnStmt,
     stack: &[NodeRef<'_>],
     opts: &CompiledOptions,
+    et: &ErrTypes<'_>,
     pending: &mut Vec<(u32, String)>,
 ) {
-    for expr in &ret.results {
-        if let Expr::CallExpr(call) = unparen(expr) {
+    // Nothing here unwraps parentheses: upstream's `expr.(*ast.CallExpr)` and
+    // `expr.(*ast.Ident)` do not, so `return (f())` is neither and ends the
+    // statement.
+    for (idx, expr) in ret.results.iter().enumerate() {
+        if let Expr::CallExpr(call) = expr {
             // Upstream walks the parent stack **here**, inside the call branch,
             // and nowhere else: `return f()` from a func literal is skipped,
             // but `err := f(); return err` is reported from one — the ident
-            // path below never consults the stack. guff skipped the whole
-            // return statement, so fiber's
-            // `httpReadResponse = func(…) { resp, err := http.ReadResponse(…);
-            // return resp, err }` was silent.
+            // path below never consults the stack.
             for n in stack.iter().rev() {
                 match n {
                     NodeRef::FuncLit(_) => return,
@@ -408,26 +476,29 @@ fn check_return(
                     _ => {}
                 }
             }
-            if call_returns_error(pass, call) {
-                // `call.Pos()`, which for a CallExpr is `Fun.Pos()` — the
-                // start of `flags.SetAnnotation(…)`, not its `(`. Upstream
-                // reports there, and the two only differ once the callee is a
-                // selector, so `return f()` agreed and `return x.M()` did not.
+            let typ = type_of(pass, expr);
+            // `call.Pos()`, which for a CallExpr is `Fun.Pos()` — the start of
+            // `flags.SetAnnotation(…)`, not its `(`.
+            if et.is_error(typ) && et.is_wrappable_result(pass, stack, idx) {
                 report_unwrapped(pass, call, call.pos().0 as u32, opts, pending);
                 return;
             }
             // A call whose type is not a tuple ends the whole return statement
-            // upstream (`if !ok { return true }`); a tuple without an error
-            // falls through to the error check below, which passes it over.
-            if !call_type_is_tuple(pass, call) {
+            // (`if !ok { return true }`).
+            let Some(elems) = et.tuple(typ) else {
                 return;
+            };
+            for (i, t) in elems.into_iter().enumerate() {
+                if et.is_error(t) && et.is_wrappable_result(pass, stack, i) {
+                    report_unwrapped(pass, call, call.pos().0 as u32, opts, pending);
+                    return;
+                }
             }
+        }
+        if !et.is_error(type_of(pass, expr)) || !et.is_wrappable_result(pass, stack, idx) {
             continue;
         }
-        if !is_pure_error(pass, expr) {
-            continue;
-        }
-        let Expr::Ident(ident) = unparen(expr) else {
+        let Expr::Ident(ident) = expr else {
             return;
         };
         // Upstream looks for the *most recent assignment* first, and only when
@@ -438,10 +509,7 @@ fn check_return(
         let call = if let Some(ass) = prev_err_assign(pass, file, ident) {
             // `shortAss.Rhs[0]`, not "the only Rhs": `a, err = 1, f()` reads
             // the `1` and gives up, it does not go looking for `f()`.
-            let Some(rhs) = ass.rhs.first() else {
-                return;
-            };
-            let Expr::CallExpr(call) = unparen(rhs) else {
+            let Some(Expr::CallExpr(call)) = ass.rhs.first() else {
                 return;
             };
             call
@@ -452,10 +520,7 @@ fn check_return(
             let Some(spec) = decl_value_spec(pass, file, ident) else {
                 return;
             };
-            let Some(value) = spec.values.first() else {
-                return;
-            };
-            let Expr::CallExpr(call) = unparen(value) else {
+            let Some(Expr::CallExpr(call)) = spec.values.first() else {
                 return;
             };
             call
@@ -502,12 +567,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .unwrap_or_default();
     let opts = CompiledOptions::from_options(&options);
 
+    let et = ErrTypes::new(pass);
     let mut pending = Vec::new();
     for file in pass.files() {
         let mut stack = Vec::new();
         walk::preorder_stack(NodeRef::File(file), &mut stack, |n, stack| {
             if let NodeRef::ReturnStmt(ret) = n {
-                check_return(pass, file, ret, stack, &opts, &mut pending);
+                check_return(pass, file, ret, stack, &opts, &et, &mut pending);
             }
             true
         });

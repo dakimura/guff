@@ -687,10 +687,10 @@ golangci 側の wrapper（`pkg/golinters/<name>/`、`pkg/goformatters/golines/`�
 
 | # | upstream_path | kind | 要約 | guff の場所 | status | effort | upstream testdata |
 |---|---------------|------|------|-------------|--------|--------|-------------------|
-| W1 | wrapcheck.go `isError` | behavior | `typ.String() == "error"` から `types.Implements(typ, error)` へ。独自 error 型（値・ポインタ・error を埋め込む interface）を返す外部呼び出しも対象 | guff-error/src/wrapcheck.rs:144-146 `is_error_typ` | needs-port | M | testdata/custom_error_interface/{main.go,src/ext/ext.go}（実測 9 件すべて gcl-only） |
-| W2 | wrapcheck.go `isWrappableResult` | behavior | 最も内側の FuncLit / FuncDecl の、その位置（tuple なら呼び出し側 tuple の index）の結果型に `error` が代入可能なときだけ報告。`any` 結果は報告、`ext.CustomErr` / `*ext.PtrErr` / `ext.CodedErr` 結果は報告しない。**W1 と同時に入れないと過剰報告になる**（現状の沈黙は名前比較による偶然一致） | wrapcheck.rs:387-467 `check_return` | needs-port | M | 同上（`concrete*`, `embeddedInterfaceResult`, `funcLitConcrete`） |
+| W1 | wrapcheck.go `isError` | behavior | `typ.String() == "error"` から `types.Implements(typ, error)` へ。独自 error 型（値・ポインタ・error を埋め込む interface）を返す外部呼び出しも対象 | guff-error/src/wrapcheck.rs:144-146 `is_error_typ` | **done (P9-6)** | M | testdata/custom_error_interface/{main.go,src/ext/ext.go}（実測 9 件すべて gcl-only） |
+| W2 | wrapcheck.go `isWrappableResult` | behavior | 最も内側の FuncLit / FuncDecl の、その位置（tuple なら呼び出し側 tuple の index）の結果型に `error` が代入可能なときだけ報告。`any` 結果は報告、`ext.CustomErr` / `*ext.PtrErr` / `ext.CodedErr` 結果は報告しない。**W1 と同時に入れないと過剰報告になる**（現状の沈黙は名前比較による偶然一致） | wrapcheck.rs:387-467 `check_return` | **done (P9-6)** | M | 同上（`concrete*`, `embeddedInterfaceResult`, `funcLitConcrete`） |
 | W3 | wrapcheck.go `globMatcher` / compileGlobs のエラー文言 | other | gobwas/glob は v0.2.3 のまま。エラー文言は設定エラー時のみ | wrapcheck.rs:121 | not-applicable | S | — |
-| W4 | （既存）wrapcheck.go の `expr.(*ast.CallExpr)` / `expr.(*ast.Ident)` | behavior | 上流は括弧を剥がさない（`return (f())` は call 扱いされず、ident でもないので文ごと終了）が guff は `unparen` している。2.15 の差分ではないが W1/W2 と同じ関数を触るので一緒に測る | wrapcheck.rs:398, 431 | unsure | S | — |
+| W4 | （既存）wrapcheck.go の `expr.(*ast.CallExpr)` / `expr.(*ast.Ident)` | behavior | 上流は括弧を剥がさない（`return (f())` は call 扱いされず、ident でもないので文ごと終了）が guff は `unparen` している。2.15 の差分ではないが W1/W2 と同じ関数を触るので一緒に測る | wrapcheck.rs:398, 431 | **done (P9-6)** | S | — |
 
 ###### paralleltest（v1.0.15 → v1.0.16）
 

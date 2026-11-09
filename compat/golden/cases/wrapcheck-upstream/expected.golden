@@ -1,0 +1,31 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh wrapcheck-upstream
+# Produced by running golangci-lint on compat/golden/cases/wrapcheck-upstream/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+catch_fmt_sscanf/main.go:14:10:wrapcheck::error returned from external package is unwrapped: sig: func fmt.Scanf(format string, a ...any) (n int, err error)
+custom_error_interface/main.go:11:9:wrapcheck::error returned from external package is unwrapped: sig: func example.com/wc/ext.Foo() example.com/wc/ext.CustomErr
+custom_error_interface/main.go:15:9:wrapcheck::error returned from external package is unwrapped: sig: func example.com/wc/ext.Foo() example.com/wc/ext.CustomErr
+custom_error_interface/main.go:19:9:wrapcheck::error returned from external package is unwrapped: sig: func example.com/wc/ext.Ptr() *example.com/wc/ext.PtrErr
+custom_error_interface/main.go:24:9:wrapcheck::error returned from external package is unwrapped: sig: func example.com/wc/ext.Ptr() *example.com/wc/ext.PtrErr
+custom_error_interface/main.go:28:9:wrapcheck::error returned from external package is unwrapped: sig: func example.com/wc/ext.Bar() (int, example.com/wc/ext.CustomErr)
+custom_error_interface/main.go:33:12:wrapcheck::error returned from external package is unwrapped: sig: func example.com/wc/ext.Bar() (int, example.com/wc/ext.CustomErr)
+custom_error_interface/main.go:37:9:wrapcheck::error returned from external package is unwrapped: sig: func example.com/wc/ext.Coded() example.com/wc/ext.CodedErr
+custom_error_interface/main.go:41:9:wrapcheck::error returned from external package is unwrapped: sig: func example.com/wc/ext.Foo() example.com/wc/ext.CustomErr
+custom_error_interface/main.go:47:10:wrapcheck::error returned from external package is unwrapped: sig: func example.com/wc/ext.Foo() example.com/wc/ext.CustomErr
+err_assigned_to_var/main.go:14:10:wrapcheck::error returned from external package is unwrapped: sig: func encoding/json.Marshal(v any) ([]byte, error)
+err_reassigned/main.go:35:10:wrapcheck::error returned from external package is unwrapped: sig: func encoding/json.Marshal(v any) ([]byte, error)
+interface/main.go:21:10:wrapcheck::error returned from interface method should be wrapped: sig: func (example.com/wc/interface.errorer).Decode(v interface{}) error
+interface_on_struct/main.go:21:10:wrapcheck::error returned from interface method should be wrapped: sig: func (example.com/wc/interface_on_struct.errorer).Decode(v interface{}) error
+long_select_expr/main.go:26:10:wrapcheck::error returned from external package is unwrapped: sig: func (*encoding/json.Decoder).Decode(v any) error
+multi_assign/main.go:15:14:wrapcheck::error returned from external package is unwrapped: sig: func encoding/json.Unmarshal(data []byte, v any) error
+named_error_return/main.go:12:15:wrapcheck::error returned from external package is unwrapped: sig: func crypto/aes.NewCipher(key []byte) (crypto/cipher.Block, error)
+package_assigned_to_variable/main.go:15:10:wrapcheck::error returned from external package is unwrapped: sig: func (*encoding/json.Decoder).Decode(v any) error
+parens/main.go:25:9:wrapcheck::error returned from external package is unwrapped: sig: func encoding/json.Unmarshal(data []byte, v any) error
+return_function_call/main.go:21:9:wrapcheck::error returned from external package is unwrapped: sig: func encoding/json.Marshal(v any) ([]byte, error)
+return_function_call/main.go:29:9:wrapcheck::error returned from interface method should be wrapped: sig: func (example.com/wc/return_function_call.testInt).MultipleReturn() (bool, bool, bool, bool, error)
+return_function_call/main.go:33:9:wrapcheck::error returned from interface method should be wrapped: sig: func (example.com/wc/return_function_call.testInt).ErrorReturn() error
+simple_no_wrap/main.go:14:10:wrapcheck::error returned from external package is unwrapped: sig: func encoding/json.Marshal(v any) ([]byte, error)
