@@ -1,0 +1,27 @@
+# wrapcheck v2.13.0's own testdata (wrapcheck/testdata), every directory that
+# runs with the default config and needs no module outside the standard library.
+# custom_error_interface imports its ext package by this module's path.
+catch_fmt_sscanf/main.go                          crates/guff-error/tests/testdata/wrapcheck/upstream-v2.13.0/catch_fmt_sscanf/main.go
+custom_error_interface/main.go                    crates/guff-error/tests/testdata/wrapcheck/upstream-v2.13.0/custom_error_interface/main.go
+err_assigned_to_var/main.go                       crates/guff-error/tests/testdata/wrapcheck/upstream-v2.13.0/err_assigned_to_var/main.go
+err_reassigned/main.go                            crates/guff-error/tests/testdata/wrapcheck/upstream-v2.13.0/err_reassigned/main.go
+ext/ext.go                                        crates/guff-error/tests/testdata/wrapcheck/upstream-v2.13.0/ext/ext.go
+ignore_errors_pkg/main.go                         crates/guff-error/tests/testdata/wrapcheck/upstream-v2.13.0/ignore_errors_pkg/main.go
+ignore_fmt_errorf/main.go                         crates/guff-error/tests/testdata/wrapcheck/upstream-v2.13.0/ignore_fmt_errorf/main.go
+interface_on_struct/main.go                       crates/guff-error/tests/testdata/wrapcheck/upstream-v2.13.0/interface_on_struct/main.go
+interface/main.go                                 crates/guff-error/tests/testdata/wrapcheck/upstream-v2.13.0/interface/main.go
+issue_13_named_return/main.go                     crates/guff-error/tests/testdata/wrapcheck/upstream-v2.13.0/issue_13_named_return/main.go
+issue_17_anon_function/main.go                    crates/guff-error/tests/testdata/wrapcheck/upstream-v2.13.0/issue_17_anon_function/main.go
+long_select_expr/main.go                          crates/guff-error/tests/testdata/wrapcheck/upstream-v2.13.0/long_select_expr/main.go
+multi_assign/main.go                              crates/guff-error/tests/testdata/wrapcheck/upstream-v2.13.0/multi_assign/main.go
+named_error_return/main.go                        crates/guff-error/tests/testdata/wrapcheck/upstream-v2.13.0/named_error_return/main.go
+package_assigned_to_variable/main.go              crates/guff-error/tests/testdata/wrapcheck/upstream-v2.13.0/package_assigned_to_variable/main.go
+return_function_call/main.go                      crates/guff-error/tests/testdata/wrapcheck/upstream-v2.13.0/return_function_call/main.go
+simple_no_wrap/main.go                            crates/guff-error/tests/testdata/wrapcheck/upstream-v2.13.0/simple_no_wrap/main.go
+simple_with_wrap/main.go                          crates/guff-error/tests/testdata/wrapcheck/upstream-v2.13.0/simple_with_wrap/main.go
+struct_method_call/main.go                        crates/guff-error/tests/testdata/wrapcheck/upstream-v2.13.0/struct_method_call/main.go
+var_method_call_other_file/globals.go             crates/guff-error/tests/testdata/wrapcheck/upstream-v2.13.0/var_method_call_other_file/globals.go
+var_method_call_other_file/main.go                crates/guff-error/tests/testdata/wrapcheck/upstream-v2.13.0/var_method_call_other_file/main.go
+var_sentinel_other_file/errors.go                 crates/guff-error/tests/testdata/wrapcheck/upstream-v2.13.0/var_sentinel_other_file/errors.go
+var_sentinel_other_file/main.go                   crates/guff-error/tests/testdata/wrapcheck/upstream-v2.13.0/var_sentinel_other_file/main.go
+parens/main.go                                    crates/guff-error/tests/testdata/wrapcheck/upstream-v2.13.0/parens/main.go
