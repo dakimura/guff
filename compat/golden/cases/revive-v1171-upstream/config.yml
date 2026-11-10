@@ -1,0 +1,26 @@
+# revive v1.17.1 (golangci-lint 2.15.0): unnecessary-format / -if / -stmt and
+# max-public-structs (default limit) on upstream's own testdata, plus the
+# shapes it does not reach. Upstream's testdata does not type-check; revive is
+# syntax-only and golangci runs it anyway.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      rules:
+        - name: unnecessary-format
+        - name: unnecessary-if
+        - name: unnecessary-stmt
+        - name: max-public-structs
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

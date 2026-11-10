@@ -1,0 +1,71 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh revive-v1171-upstream
+# Produced by running golangci-lint on compat/golden/cases/revive-v1171-upstream/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+shapes_format/shapes_format.go:14:6:revive:warning:unnecessary-format: unnecessary use of formatting function "fmt.Errorf", you can replace it with "errors.New"
+shapes_format/shapes_format.go:20:2:revive:warning:unnecessary-format: unnecessary use of formatting function "logger.Printf", you can replace it with "logger.Print"
+shapes_format/shapes_format.go:24:6:revive:warning:unnecessary-format: unnecessary use of formatting function "fmt.Sprintf", you can replace it with "fmt.Sprint" or just the string itself"
+shapes_if/shapes_if.go:14:2:revive:warning:unnecessary-if: replace this conditional by: return func() bool {\n	if d {\n		return true\n	} else {\n		return false\n	}\n}()
+shapes_if/shapes_if.go:26:3:revive:warning:unnecessary-if: replace this conditional by: return d
+shapes_if/shapes_if.go:35:2:revive:warning:unnecessary-if: replace this conditional by: r = (c)
+shapes_if/shapes_if.go:45:2:revive:warning:unnecessary-if: replace this conditional by: r = !((x > 1))
+shapes_if/shapes_if.go:61:3:revive:warning:unnecessary-if: replace this conditional by: r = !(d)
+shapes_mps_six/six.go:3:1:revive:warning:max-public-structs: you have exceeded the maximum number (5) of public struct declarations
+unnecessary_format/unnecessary_format.go:13:2:revive:warning:unnecessary-format: unnecessary use of formatting function "fmt.Appendf", you can replace it with "fmt.Append"
+unnecessary_format/unnecessary_format.go:14:2:revive:warning:unnecessary-format: unnecessary use of formatting function "fmt.Errorf", you can replace it with "errors.New"
+unnecessary_format/unnecessary_format.go:15:2:revive:warning:unnecessary-format: unnecessary use of formatting function "fmt.Fprintf", you can replace it with "fmt.Fprint"
+unnecessary_format/unnecessary_format.go:16:2:revive:warning:unnecessary-format: unnecessary use of formatting function "fmt.Fscanf", you can replace it with "fmt.Fscan" or "fmt.Fscanln"
+unnecessary_format/unnecessary_format.go:17:2:revive:warning:unnecessary-format: unnecessary use of formatting function "fmt.Printf", you can replace it with "fmt.Print" or "fmt.Println"
+unnecessary_format/unnecessary_format.go:18:2:revive:warning:unnecessary-format: unnecessary use of formatting function "fmt.Scanf", you can replace it with "fmt.Scan"
+unnecessary_format/unnecessary_format.go:19:2:revive:warning:unnecessary-format: unnecessary use of formatting function "fmt.Sprintf", you can replace it with "fmt.Sprint" or just the string itself"
+unnecessary_format/unnecessary_format.go:20:2:revive:warning:unnecessary-format: unnecessary use of formatting function "fmt.Sscanf", you can replace it with "fmt.Sscan"
+unnecessary_format/unnecessary_format.go:22:2:revive:warning:unnecessary-format: unnecessary use of formatting function "log.Fatalf", you can replace it with "log.Fatal"
+unnecessary_format/unnecessary_format.go:23:2:revive:warning:unnecessary-format: unnecessary use of formatting function "log.Panicf", you can replace it with "log.Panic"
+unnecessary_format/unnecessary_format.go:24:2:revive:warning:unnecessary-format: unnecessary use of formatting function "log.Printf", you can replace it with "log.Print"
+unnecessary_format/unnecessary_format.go:25:2:revive:warning:unnecessary-format: unnecessary use of formatting function "logger.Fatalf", you can replace it with "logger.Fatal"
+unnecessary_format/unnecessary_format.go:26:2:revive:warning:unnecessary-format: unnecessary use of formatting function "logger.Panicf", you can replace it with "logger.Panic"
+unnecessary_format/unnecessary_format.go:27:2:revive:warning:unnecessary-format: unnecessary use of formatting function "logger.Printf", you can replace it with "logger.Print"
+unnecessary_format/unnecessary_format.go:29:2:revive:warning:unnecessary-format: unnecessary use of formatting function "t.Errorf", you can replace it with "t.Error"
+unnecessary_format/unnecessary_format.go:30:2:revive:warning:unnecessary-format: unnecessary use of formatting function "t.Fatalf", you can replace it with "t.Fatal"
+unnecessary_format/unnecessary_format.go:31:2:revive:warning:unnecessary-format: unnecessary use of formatting function "t.Logf", you can replace it with "t.Log"
+unnecessary_format/unnecessary_format.go:32:2:revive:warning:unnecessary-format: unnecessary use of formatting function "t.Skipf", you can replace it with "t.Skip"
+unnecessary_format/unnecessary_format.go:33:2:revive:warning:unnecessary-format: unnecessary use of formatting function "b.Errorf", you can replace it with "b.Error"
+unnecessary_format/unnecessary_format.go:34:2:revive:warning:unnecessary-format: unnecessary use of formatting function "b.Fatalf", you can replace it with "b.Fatal"
+unnecessary_format/unnecessary_format.go:35:2:revive:warning:unnecessary-format: unnecessary use of formatting function "b.Logf", you can replace it with "b.Log"
+unnecessary_format/unnecessary_format.go:36:2:revive:warning:unnecessary-format: unnecessary use of formatting function "b.Skipf", you can replace it with "b.Skip"
+unnecessary_format/unnecessary_format.go:37:2:revive:warning:unnecessary-format: unnecessary use of formatting function "f.Errorf", you can replace it with "f.Error"
+unnecessary_format/unnecessary_format.go:38:2:revive:warning:unnecessary-format: unnecessary use of formatting function "f.Fatalf", you can replace it with "f.Fatal"
+unnecessary_format/unnecessary_format.go:39:2:revive:warning:unnecessary-format: unnecessary use of formatting function "f.Logf", you can replace it with "f.Log"
+unnecessary_format/unnecessary_format.go:40:2:revive:warning:unnecessary-format: unnecessary use of formatting function "f.Skipf", you can replace it with "f.Skip"
+unnecessary_format/unnecessary_format.go:42:2:revive:warning:unnecessary-format: unnecessary use of formatting function "trace.Logf", you can replace it with "trace.Log"
+unnecessary_format/unnecessary_format.go:77:2:revive:warning:unnecessary-format: unnecessary use of formatting function "fmt.Appendf", you can replace it with "fmt.Append"
+unnecessary_format/unnecessary_format.go:86:2:revive:warning:unnecessary-format: unnecessary use of formatting function "fmt.Sprintf", you can replace it with "fmt.Sprint" or just the string itself"
+unnecessary_if/unnecessary_if.go:9:2:revive:warning:unnecessary-if: replace this conditional by: return cond
+unnecessary_if/unnecessary_if.go:15:2:revive:warning:unnecessary-if: replace this conditional by: return !(cond)
+unnecessary_if/unnecessary_if.go:22:2:revive:warning:unnecessary-if: replace this conditional by: id = cond
+unnecessary_if/unnecessary_if.go:28:2:revive:warning:unnecessary-if: replace this conditional by: id = !(cond)
+unnecessary_if/unnecessary_if.go:36:2:revive:warning:unnecessary-if: replace this conditional by: id = cond == id
+unnecessary_if/unnecessary_if.go:42:2:revive:warning:unnecessary-if: replace this conditional by: id = cond != id
+unnecessary_if/unnecessary_if.go:48:2:revive:warning:unnecessary-if: replace this conditional by: id = cond != id
+unnecessary_if/unnecessary_if.go:54:2:revive:warning:unnecessary-if: replace this conditional by: id = cond == id
+unnecessary_if/unnecessary_if.go:61:2:revive:warning:unnecessary-if: replace this conditional by: return cond == id
+unnecessary_if/unnecessary_if.go:67:2:revive:warning:unnecessary-if: replace this conditional by: return cond != id
+unnecessary_if/unnecessary_if.go:73:2:revive:warning:unnecessary-if: replace this conditional by: return cond != id
+unnecessary_if/unnecessary_if.go:79:2:revive:warning:unnecessary-if: replace this conditional by: return cond == id
+unnecessary_if/unnecessary_if.go:86:2:revive:warning:unnecessary-if: replace this conditional by: id = cond <= id
+unnecessary_if/unnecessary_if.go:92:2:revive:warning:unnecessary-if: replace this conditional by: id = cond > id
+unnecessary_if/unnecessary_if.go:98:2:revive:warning:unnecessary-if: replace this conditional by: id = cond >= id
+unnecessary_if/unnecessary_if.go:104:2:revive:warning:unnecessary-if: replace this conditional by: id = cond < id
+unnecessary_if/unnecessary_if.go:110:2:revive:warning:unnecessary-if: replace this conditional by: id = cond > id
+unnecessary_if/unnecessary_if.go:116:2:revive:warning:unnecessary-if: replace this conditional by: id = cond <= id
+unnecessary_if/unnecessary_if.go:122:2:revive:warning:unnecessary-if: replace this conditional by: id = cond < id
+unnecessary_if/unnecessary_if.go:128:2:revive:warning:unnecessary-if: replace this conditional by: id = cond >= id
+unnecessary_if/unnecessary_if.go:134:2:revive:warning:unnecessary-if: replace this conditional by: id = !((something > 0) && (!id) || (something+10 <= 0))
+unnecessary_stmt/unnecessary_stmt.go:10:26:revive:warning:unnecessary-stmt: switch with only one case can be replaced by an if-then
+unnecessary_stmt/unnecessary_stmt.go:39:11:revive:warning:unnecessary-stmt: switch with only one case can be replaced by an if-then
+unnecessary_stmt/unnecessary_stmt.go:50:4:revive:warning:unnecessary-stmt: omit unnecessary break at the end of case clause
+unnecessary_stmt/unnecessary_stmt.go:59:2:revive:warning:unnecessary-stmt: omit unnecessary return statement

@@ -377,6 +377,9 @@ impl<'a> SharedFileRules<'a> {
         if let Some(c) = &mut self.function_length {
             c.on_file(file);
         }
+        if let Some(c) = &mut self.unnecessary_if {
+            c.on_file(file);
+        }
         if let Some(c) = &mut self.receiver_naming {
             c.on_file(file);
         }

@@ -88,8 +88,6 @@ fn invalid_glob(src: &str) -> bool {
     false
 }
 
-const ESCAPE_REGEX_SYMBOLS: &str = ".+{}()[]^$";
-
 fn prepare_regexp(raw: &str) -> Option<Regex> {
     let src = if raw == "TEST" { r"~_test\.go" } else { raw };
 
@@ -97,6 +95,11 @@ fn prepare_regexp(raw: &str) -> Option<Regex> {
         return Regex::new(rest).ok();
     }
 
+    // revive v1.17.1 normalizes separators before either form, and quotes
+    // every other character with `regexp.QuoteMeta` (v1.17.0 escaped only
+    // `.+{}()[]^$`, so `?` and `|` were regex syntax).
+    let src = src.replace('\\', "/");
+    let src = src.as_str();
     if src.contains('*') {
         if invalid_glob(src) {
             return None;
@@ -121,10 +124,7 @@ fn prepare_regexp(raw: &str) -> Option<Regex> {
                 out.push_str("[^/]*");
                 was_star = false;
             }
-            if ESCAPE_REGEX_SYMBOLS.contains(c) {
-                out.push('\\');
-            }
-            out.push(c);
+            out.push_str(&regex::escape(c.encode_utf8(&mut [0; 4])));
             if c == '/' && just_dir_glob {
                 out.push('?');
             }
@@ -137,10 +137,8 @@ fn prepare_regexp(raw: &str) -> Option<Regex> {
         return Regex::new(&out).ok();
     }
 
-    // Whole-file mask.
-    let mut fill = src.replace('\\', "/");
-    fill = fill.replace('.', r"\.");
-    Regex::new(&format!("^{fill}$")).ok()
+    // Whole-file mask: matched literally.
+    Regex::new(&format!("^{}$", regex::escape(src))).ok()
 }
 
 /// `RuleConfig.MustExclude`.
@@ -214,5 +212,20 @@ mod tests {
     #[test]
     fn backslashes_are_normalised_on_both_sides() {
         assert!(m("**/agent/**", r"C:\proj\agent\a.go"));
+    }
+
+    /// revive v1.17.1 lint/filefilter_test.go: metacharacters are literal in
+    /// both a whole-file mask and a glob, and a glob's `\` is a separator.
+    #[test]
+    fn metacharacters_are_literal_v1_17_1() {
+        assert!(m("pkg/a+(b)[c].go", "pkg/a+(b)[c].go"));
+        assert!(!m("pkg/a+(b)[c].go", "pkg/aa(b)c.go"));
+        assert!(m("pkg/a|b*.go", "pkg/a|bc.go"));
+        assert!(!m("pkg/a|b*.go", "pkg/alpha/unrelated.go"));
+        assert!(!m("pkg/a|b*.go", "zzz/xb.go"));
+        assert!(m(r"pkg\x*.go", "pkg/xy.go"));
+        assert!(!m(r"pkg\x*.go", "pkg/y.go"));
+        assert!(m("a/b?.go", "a/b?.go"));
+        assert!(!m("a/b?.go", "a/b.go"));
     }
 }

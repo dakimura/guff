@@ -723,6 +723,7 @@ version = "0.8.0"
 dependencies = [
  "guff-analysis",
  "guff-ast",
+ "guff-gostd",
  "guff-packages",
  "guff-runner",
  "guff-types",
