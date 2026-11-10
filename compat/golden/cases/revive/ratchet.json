@@ -1,6 +1,0 @@
-{
-  "missing": 2,
-  "extra": 0,
-  "why": "add-constant: revive v1.17.1's checkFunc walks a call's arguments and Fun with ast.Inspect (numbers inside composite literals, binary expressions and function literals passed as arguments), guff only looks at direct BasicLit / CallExpr arguments. docs/PHASE9-LEDGER.md §3.6 revive R4.",
-  "target": "0/0 after R4."
-}
