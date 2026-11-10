@@ -37,6 +37,7 @@ mod errorf;
 mod exported;
 mod file_header;
 mod file_length_limit;
+mod max_public_structs;
 mod filename_format;
 mod flag_parameter;
 mod forbidden_call_in_wg_go;
@@ -215,6 +216,7 @@ pub fn run_enabled_rules(pass: &Pass<'_>) -> Vec<Failure> {
     run("unsecure-url-scheme", unsecure_url_scheme::apply);
     run("banned-characters", banned_characters::apply);
     run("file-length-limit", file_length_limit::apply);
+    run("max-public-structs", max_public_structs::apply);
     run("filename-format", filename_format::apply);
     run("multiline-if-init", multiline_if_init::apply);
     run("marshal-receiver", marshal_receiver::apply);

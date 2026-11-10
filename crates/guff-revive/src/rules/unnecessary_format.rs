@@ -1,72 +1,59 @@
 //! `unnecessary-format` — warn on formatting functions without format verbs.
 
-use guff::ast::{BasicLit, CallExpr, Expr};
+use guff::ast::{CallExpr, Expr};
 use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
+use guff::token::Token;
+
 use crate::failure::Failure;
-use crate::util::{basic_lit_string_value, is_pkg_dot_name, unparen};
 
-struct FormatSpec {
-    format_arg: usize,
-    alternative: &'static str,
-}
+/// Upstream `formattingFuncs` (revive v1.17.1): the printed callee, the
+/// position of the format argument, and the suggested alternative. The
+/// `logger` / `t` / `b` / `f` rows match a variable of that name whatever its
+/// type, as upstream's do. `fmt.Sprintf`'s alternative carries a stray closing
+/// quote upstream, reproduced here.
+const FORMATTING_FUNCS: &[(&str, usize, &str)] = &[
+    ("fmt.Appendf", 1, r#""fmt.Append""#),
+    ("fmt.Errorf", 0, r#""errors.New""#),
+    ("fmt.Fprintf", 1, r#""fmt.Fprint""#),
+    ("fmt.Fscanf", 1, r#""fmt.Fscan" or "fmt.Fscanln""#),
+    ("fmt.Printf", 0, r#""fmt.Print" or "fmt.Println""#),
+    ("fmt.Scanf", 0, r#""fmt.Scan""#),
+    ("fmt.Sprintf", 0, r#""fmt.Sprint" or just the string itself""#),
+    ("fmt.Sscanf", 1, r#""fmt.Sscan""#),
+    ("log.Fatalf", 0, r#""log.Fatal""#),
+    ("log.Panicf", 0, r#""log.Panic""#),
+    ("log.Printf", 0, r#""log.Print""#),
+    ("logger.Fatalf", 0, r#""logger.Fatal""#),
+    ("logger.Panicf", 0, r#""logger.Panic""#),
+    ("logger.Printf", 0, r#""logger.Print""#),
+    ("t.Errorf", 0, r#""t.Error""#),
+    ("t.Fatalf", 0, r#""t.Fatal""#),
+    ("t.Logf", 0, r#""t.Log""#),
+    ("t.Skipf", 0, r#""t.Skip""#),
+    ("b.Errorf", 0, r#""b.Error""#),
+    ("b.Fatalf", 0, r#""b.Fatal""#),
+    ("b.Logf", 0, r#""b.Log""#),
+    ("b.Skipf", 0, r#""b.Skip""#),
+    ("f.Errorf", 0, r#""f.Error""#),
+    ("f.Fatalf", 0, r#""f.Fatal""#),
+    ("f.Logf", 0, r#""f.Log""#),
+    ("f.Skipf", 0, r#""f.Skip""#),
+    ("trace.Logf", 2, r#""trace.Log""#),
+];
 
-fn formatting_spec(fun: &Expr) -> Option<FormatSpec> {
-    if is_pkg_dot_name(fun, "fmt", "Errorf") {
-        return Some(FormatSpec {
-            format_arg: 0,
-            alternative: "\"errors.New\"",
-        });
-    }
-    if is_pkg_dot_name(fun, "fmt", "Printf") {
-        return Some(FormatSpec {
-            format_arg: 0,
-            alternative: "\"fmt.Print\" or \"fmt.Println\"",
-        });
-    }
-    if is_pkg_dot_name(fun, "fmt", "Sprintf") {
-        return Some(FormatSpec {
-            format_arg: 0,
-            alternative: "\"fmt.Sprint\" or just the string itself",
-        });
-    }
-    if is_pkg_dot_name(fun, "fmt", "Fprintf") {
-        return Some(FormatSpec {
-            format_arg: 1,
-            alternative: "\"fmt.Fprint\"",
-        });
-    }
-    if is_pkg_dot_name(fun, "log", "Printf") {
-        return Some(FormatSpec {
-            format_arg: 0,
-            alternative: "\"log.Print\"",
-        });
-    }
-    None
-}
-
-/// Does printing `fun` put a parenthesis in the callee's rendered name?
-fn has_parens(fun: &Expr) -> bool {
-    match fun {
-        Expr::ParenExpr(_) => true,
-        Expr::SelectorExpr(sel) => matches!(sel.x.as_ref(), Expr::ParenExpr(_)),
-        _ => false,
-    }
-}
-
-fn func_label(fun: &Expr) -> String {
-    match unparen(fun) {
-        Expr::SelectorExpr(sel) => {
-            let pkg = match unparen(&sel.x) {
-                Expr::Ident(id) => id.name.clone(),
-                _ => "?".into(),
-            };
-            format!("{pkg}.{}", sel.sel.name)
-        }
-        Expr::Ident(id) => id.name.clone(),
-        _ => "?".into(),
-    }
+/// `astutils.GoFmt(ce.Fun)` for the only shape a table key can print as:
+/// `x.Sel` with `x` a bare identifier. Anything else — a parenthesis anywhere,
+/// a longer selector chain, an index — prints as something that is no key.
+fn printed_callee(fun: &Expr) -> Option<String> {
+    let Expr::SelectorExpr(sel) = fun else {
+        return None;
+    };
+    let Expr::Ident(x) = sel.x.as_ref() else {
+        return None;
+    };
+    Some(format!("{}.{}", x.name, sel.sel.name))
 }
 
 pub struct Checker {
@@ -122,31 +109,36 @@ fn check_call(call: &CallExpr, failures: &mut Vec<Failure>) {
     // here, and reported `fmt.Errorf(("clean error"))` where upstream does not
     // (`compat/fuzz.py --allow-dirty-seeds --case revive`, COMPAT-HARDENING §4
     // 2026-08-13).
-    if has_parens(&call.fun) {
-        return;
-    }
-    let Some(spec) = formatting_spec(&call.fun) else {
+    let Some(func_name) = printed_callee(&call.fun) else {
         return;
     };
-    if call.args.len() <= spec.format_arg {
-        return;
-    }
-    let Expr::BasicLit(lit) = &call.args[spec.format_arg] else {
-        return;
-    };
-    let Some(format) = basic_lit_string_value(lit) else {
+    let Some(&(_, format_arg, alternative)) =
+        FORMATTING_FUNCS.iter().find(|(name, _, _)| *name == func_name)
+    else {
         return;
     };
-    if format.contains('%') {
+    if call.args.len() <= format_arg {
         return;
     }
-    let func_name = func_label(&call.fun);
+    let Expr::BasicLit(lit) = &call.args[format_arg] else {
+        return;
+    };
+    if lit.kind != Some(Token::STRING) {
+        return;
+    }
+    // revive v1.17.1 inspects the string's value, not its spelling, so a
+    // directive written as an escape (`"\x25d"`) counts; a literal that does
+    // not unquote is skipped.
+    match guff_gostd::strconv::unquote(&lit.value) {
+        Ok(format) if !format.contains('%') => {}
+        _ => return,
+    }
     failures.push(Failure {
         rule: "unnecessary-format",
         pos: call.fun.pos().0 as u32,
         message: format!(
             "unnecessary use of formatting function \"{func_name}\", you can replace it with {}",
-            spec.alternative
+            alternative
         ),
         ..Failure::default()
     });

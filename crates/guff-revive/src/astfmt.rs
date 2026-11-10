@@ -70,6 +70,14 @@ pub fn block_fmt(block: &BlockStmt) -> String {
     stmts_fmt(&block.list)
 }
 
+/// `astutils.GoFmt(expr)` through the real printer: binary spacing by
+/// precedence (`something+10 <= 0`), function literals laid out over lines.
+/// [`expr_fmt`] below is a smaller renderer that other rules' messages are
+/// pinned to; this one is for rules whose golden says the printer is needed.
+pub fn expr_gofmt(expr: &Expr) -> String {
+    go_fmt(PrintNode::Expr(expr))
+}
+
 /// Render an expression the way `astutils.GoFmt` does — i.e. the way
 /// `go/printer` does, which **keeps** parentheses.
 ///

@@ -124,6 +124,8 @@ pub const EXTENDED_RULES: &[&str] = &[
     "use-slices-concat",
     "multiline-if-init",
     "marshal-receiver",
+    // In upstream's `allRules` all along; guff had no such rule (Phase 9 ledger R8).
+    "max-public-structs",
 ];
 
 /// The configured Go version (`run.go`), without cloning the whole rule list.

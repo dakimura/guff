@@ -85,10 +85,10 @@ fn check_switch_body(body: &BlockStmt, failures: &mut Vec<Failure>) {
     let Stmt::CaseClause(case) = &body.list[0] else {
         return;
     };
-    // Upstream: `if len(cc.List) > 1 { return } // skip cases with multiple
-    // expressions`. `switch x { case A, B, C: … }` is not an if-then, so the
-    // suggestion would not compile — coredns writes four of them.
-    if case.list.len() > 1 {
+    // Upstream (v1.17.1): `if len(cc.List) != 1 { return }`. A `default:`
+    // alone is unconditional, and `switch x { case A, B, C: … }` is not an
+    // if-then, so the suggestion would not compile — coredns writes four of them.
+    if case.list.len() != 1 {
         return;
     }
     failures.push(Failure {
