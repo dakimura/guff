@@ -1,0 +1,26 @@
+# revive v1.17.1 test/add_constant_test.go TestAddConstantWithArguments (args spelling of the option names).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      rules:
+        - name: add-constant
+          arguments:
+            - maxLitCount: "2"
+              allowStrs: '""'
+              allowInts: "0,1,2"
+              allowFloats: "0.0,1.0"
+              ignoreFuncs: 'os\.(CreateFile|WriteFile|Chmod|FindProcess),\.Println,ignoredFunc,\.Info'
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

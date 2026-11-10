@@ -1,0 +1,21 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh revive-add-constant-upstream-args
+# Produced by running golangci-lint on compat/golden/cases/revive-add-constant-upstream-args/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+args/add_constant.go:27:17:revive:warning:add-constant: avoid magic numbers like '12', create a named constant for it
+args/add_constant.go:28:10:revive:warning:add-constant: avoid magic numbers like '12.50', create a named constant for it
+args/add_constant.go:30:8:revive:warning:add-constant: string literal "lit" appears, at least, 3 times, create a named constant for it
+args/add_constant.go:37:10:revive:warning:add-constant: avoid magic numbers like '0666', create a named constant for it
+args/add_constant.go:41:19:revive:warning:add-constant: avoid magic numbers like '100', create a named constant for it
+args/add_constant.go:42:18:revive:warning:add-constant: avoid magic numbers like '100', create a named constant for it
+args/add_constant.go:50:47:revive:warning:add-constant: avoid magic numbers like '100', create a named constant for it
+args/add_constant.go:51:56:revive:warning:add-constant: avoid magic numbers like '100', create a named constant for it
+args/extra.go:7:34:revive:warning:add-constant: avoid magic numbers like '77', create a named constant for it
+args/extra.go:8:27:revive:warning:add-constant: avoid magic numbers like '78', create a named constant for it
+args/extra.go:10:29:revive:warning:add-constant: avoid magic numbers like '79', create a named constant for it
+args/extra.go:13:7:revive:warning:add-constant: avoid magic numbers like '2.0', create a named constant for it
+args/extra.go:15:35:revive:warning:add-constant: avoid magic numbers like '82', create a named constant for it

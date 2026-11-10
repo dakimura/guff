@@ -1,0 +1,31 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh revive-add-constant-upstream
+# Produced by running golangci-lint on compat/golden/cases/revive-add-constant-upstream/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+default/add_constant_default.go:9:6:revive:warning:add-constant: string literal "match" appears, at least, 3 times, create a named constant for it
+default/add_constant_default.go:11:6:revive:warning:add-constant: avoid magic numbers like '5', create a named constant for it
+nested_call/add_constant_nested_call.go:16:16:revive:warning:add-constant: avoid magic numbers like '100', create a named constant for it
+nested_call/add_constant_nested_call.go:18:18:revive:warning:add-constant: avoid magic numbers like '101', create a named constant for it
+nested_call/add_constant_nested_call.go:20:24:revive:warning:add-constant: avoid magic numbers like '102', create a named constant for it
+nested_call/add_constant_nested_call.go:22:20:revive:warning:add-constant: avoid magic numbers like '103', create a named constant for it
+nested_call/add_constant_nested_call.go:24:32:revive:warning:add-constant: avoid magic numbers like '104', create a named constant for it
+nested_call/add_constant_nested_call.go:28:7:revive:warning:add-constant: avoid magic numbers like '105', create a named constant for it
+shapes/other.go:8:26:revive:warning:add-constant: string literal "thrice" appears, at least, 3 times, create a named constant for it
+shapes/shapes.go:18:18:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+shapes/shapes.go:19:10:revive:warning:add-constant: avoid magic numbers like '2', create a named constant for it
+shapes/shapes.go:20:6:revive:warning:add-constant: avoid magic numbers like '3', create a named constant for it
+shapes/shapes.go:20:9:revive:warning:add-constant: avoid magic numbers like '4', create a named constant for it
+shapes/shapes.go:21:9:revive:warning:add-constant: avoid magic numbers like '5', create a named constant for it
+shapes/shapes.go:21:12:revive:warning:add-constant: avoid magic numbers like '6', create a named constant for it
+shapes/shapes.go:22:6:revive:warning:add-constant: avoid magic numbers like '13', create a named constant for it
+shapes/shapes.go:23:12:revive:warning:add-constant: avoid magic numbers like '10', create a named constant for it
+shapes/shapes.go:24:9:revive:warning:add-constant: avoid magic numbers like '11', create a named constant for it
+shapes/shapes.go:25:12:revive:warning:add-constant: avoid magic numbers like '12', create a named constant for it
+shapes/shapes.go:30:8:revive:warning:add-constant: avoid magic numbers like '14', create a named constant for it
+shapes/shapes.go:32:27:revive:warning:add-constant: avoid magic numbers like '8', create a named constant for it
+shapes/shapes.go:34:12:revive:warning:add-constant: avoid magic numbers like '9', create a named constant for it
+shapes/shapes.go:35:15:revive:warning:add-constant: avoid magic numbers like '1.5', create a named constant for it
