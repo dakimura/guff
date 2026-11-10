@@ -1,0 +1,24 @@
+# Golden case: revive-std-visible.
+#
+# unhandled-error and unexported-return depend on what revive's own type check
+# can resolve: since 2.15.0 the standard library, not the module's packages.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      rules:
+        - name: unhandled-error
+        - name: unexported-return
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

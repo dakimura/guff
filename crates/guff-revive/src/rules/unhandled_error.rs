@@ -8,7 +8,7 @@ use guff_types::arena::TypeData;
 use guff_types::TypeId;
 
 use crate::failure::Failure;
-use crate::util::type_of;
+use crate::util::{revive_can_import, type_of};
 
 pub struct Checker<'a> {
     pass: &'a Pass<'a>,
@@ -33,7 +33,7 @@ impl<'a> Checker<'a> {
         let Expr::CallExpr(call) = &stmt.x else {
             return;
         };
-        if !callee_is_local(self.pass, call) {
+        if !callee_is_visible(self.pass, call) {
             return;
         }
         if returns_error(self.pass, call) {
@@ -67,23 +67,21 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
     c.into_failures()
 }
 
-/// Whether the callee is declared in the package under analysis.
+/// Whether revive can see the callee's result type.
 ///
 /// Upstream reaches this rule's decision through `w.pkg.TypeOf(fCall)`, and
-/// revive type-checks its own packages with `types.Config{Importer:
-/// importer.Default()}` — the gc export-data importer, which finds no export
-/// data for anything the compiler has not installed. Every import therefore
-/// resolves to an invalid package, the *result type* of a call into one is
-/// invalid rather than `error` or a tuple, and the rule stays silent. Only
-/// calls to functions declared in the package being linted have a result type
-/// revive can see. Measured against golangci-lint 2.12.2: `fmt.Print(…)` and
-/// `errors.New(…)` as statements are not reported; a local `func() error`
-/// called as a statement is.
+/// revive type-checks its own packages with `importer.Default()`. Up to
+/// golangci-lint 2.14 that resolved no import at all on most hosts; 2.15.0
+/// sets `build.Default.GOROOT`, so the standard library resolves and every
+/// other import still fails: the result type of a call into one is invalid
+/// and the rule stays silent. Measured against 2.15.0: `fmt.Printf(…)` and
+/// `errors.New(…)` as statements are reported, `sub.E()` from another package
+/// of the same module is not, and a local `func() error` is.
 ///
 /// guff has real type information for the whole program, so it has to put the
 /// boundary back by hand or it reports a superset of what the user sees from
 /// golangci-lint.
-fn callee_is_local(pass: &Pass<'_>, call: &CallExpr) -> bool {
+fn callee_is_visible(pass: &Pass<'_>, call: &CallExpr) -> bool {
     let Some(obj) = code::call_target_object(pass, &call.fun) else {
         // Calling a func value (a variable, a field, a literal) rather than a
         // declared function. Its signature came from wherever the value's type
@@ -91,13 +89,16 @@ fn callee_is_local(pass: &Pass<'_>, call: &CallExpr) -> bool {
         // is also when guff's own resolution above returns None. Keep quiet.
         return false;
     };
-    // Compare package *identity*, not the import path string: the object's
-    // package comes from the type-checker, and the Package metadata's path is
-    // not always the same spelling (it is empty under the unit-test harness).
     let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
         return false;
     };
-    obj.pkg(&artifacts.objects).is_some() && obj.pkg(&artifacts.objects) == pass.pkg().types
+    let Some(pkg) = obj.pkg(&artifacts.objects) else {
+        return false;
+    };
+    // Compare package *identity* for this package, not the import path
+    // string: the Package metadata's path is not always the same spelling
+    // (it is empty under the unit-test harness).
+    Some(pkg) == pass.pkg().types || revive_can_import(pass, artifacts.packages.get(pkg).path())
 }
 
 fn returns_error(pass: &Pass<'_>, call: &CallExpr) -> bool {

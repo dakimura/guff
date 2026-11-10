@@ -1,0 +1,3 @@
+# revive R1 (golangci-lint 2.15.0): only the standard library is visible.
+main.go     crates/guff-revive/tests/testdata/revive/std-visible/main.go
+sub/sub.go  crates/guff-revive/tests/testdata/revive/std-visible/sub/sub.go
