@@ -38324,6 +38324,7 @@ fmt は `gofumpt-v12-diagnose` 1 件だけ期待値を撮り直した（stdin �
 2. **grafana の exit 143**: リポジトリは 2026-11-26 の履歴作り直しで **private** になり、
    `ubuntu-latest` が private 用の小さい runner（2 vCPU / 約 7 GB）になった。free-disk で
    typecheck を越えた grafana が 34 分走ったところで外から SIGTERM（timeout も cancel も
-   発火していない）。`.github/actions/runner-memory`（swap 16 GB ＋ 30 秒ごとの `free`/RSS 上位の記録）
+   発火していない）。メモリ枯渇が最有力だが未確証（OOM killer も systemd-oomd も SIGKILL を送る）。
+   `.github/actions/runner-memory`（swap 16 GB（/mnt が別ディスクならそこ）＋ 30 秒ごとの `free`/RSS 上位の記録）
    を oss-nightly に入れ、失敗時に memwatch・dmesg・systemd-oomd を出すステップを足した。
    これで直らなければ、次はそのログで「誰が何 GB 使ったか」から始める。

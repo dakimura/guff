@@ -9,10 +9,12 @@ description: >-
 # nightly corpus was sized on the big one. Once free-disk let golangci-lint get
 # past typecheck, `oss-nightly` ran grafana for 34 minutes and was then stopped
 # from outside with exit 143 (SIGTERM) — no timeout or cancellation fired, the
-# step and the job budget both had room left. Memory pressure is the cause
-# that fits; this file does not relax any gate, it only adds room and evidence:
+# step and the job budget both had room left. Memory pressure is the leading
+# hypothesis, not a proven one (the kernel OOM killer and systemd-oomd send
+# SIGKILL, not SIGTERM); this file does not relax any gate, it only adds room and evidence:
 #
-#   * a swap file on the root filesystem (free-disk leaves ~45 GB there);
+#   * a swap file on /mnt when it is a separate disk, else on / (free-disk
+#     left 46 GB free there on 2026-11-26);
 #   * `$RUNNER_TEMP/memwatch.log`: `free -m` and the top RSS processes every
 #     30 s, printed by the job's `if: failure()` diagnostics step together with
 #     the kernel / systemd-oomd kill records.
@@ -36,13 +38,22 @@ runs:
         free -h
         swapon --show || true
         echo "::endgroup::"
-        sudo fallocate -l "${SWAP_GB}G" /guff-swapfile
-        sudo chmod 600 /guff-swapfile
-        sudo mkswap /guff-swapfile >/dev/null
-        sudo swapon /guff-swapfile
+        # Prefer the runner's separate temporary disk: the root filesystem is
+        # what ran out in this job before free-disk existed.
+        swap=/guff-swapfile
+        if mountpoint -q /mnt; then swap=/mnt/guff-swapfile; fi
+        if ! sudo fallocate -l "${SWAP_GB}G" "$swap"; then
+          sudo rm -f "$swap"
+          swap=/guff-swapfile
+          sudo fallocate -l "${SWAP_GB}G" "$swap"
+        fi
+        sudo chmod 600 "$swap"
+        sudo mkswap "$swap" >/dev/null
+        sudo swapon "$swap"
         echo "::group::memory after"
         free -h
         swapon --show || true
+        df -h / /mnt || true
         echo "::endgroup::"
         # Background processes outlive the step and are reaped at job end.
         nohup bash -c '
