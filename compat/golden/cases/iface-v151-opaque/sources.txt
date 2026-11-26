@@ -1,0 +1,19 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces)
+a/a.go  crates/guff-style/tests/testdata/iface/upstream-v1.5.1/opaque/a/a.go
+b/b.go  crates/guff-style/tests/testdata/iface/upstream-v1.5.1/opaque/b/b.go
+c/c.go  crates/guff-style/tests/testdata/iface/upstream-v1.5.1/opaque/c/c.go
+d/d.go  crates/guff-style/tests/testdata/iface/upstream-v1.5.1/opaque/d/d.go
+e/e.go  crates/guff-style/tests/testdata/iface/upstream-v1.5.1/opaque/e/e.go
+f/f.go  crates/guff-style/tests/testdata/iface/upstream-v1.5.1/opaque/f/f.go
+g/g.go  crates/guff-style/tests/testdata/iface/upstream-v1.5.1/opaque/g/g.go
+h/h.go  crates/guff-style/tests/testdata/iface/upstream-v1.5.1/opaque/h/h.go
+i/i.go  crates/guff-style/tests/testdata/iface/upstream-v1.5.1/opaque/i/i.go
+j/j.go  crates/guff-style/tests/testdata/iface/upstream-v1.5.1/opaque/j/j.go
+k/k.go  crates/guff-style/tests/testdata/iface/upstream-v1.5.1/opaque/k/k.go
+l/l.go  crates/guff-style/tests/testdata/iface/upstream-v1.5.1/opaque/l/l.go
+m/m.go  crates/guff-style/tests/testdata/iface/upstream-v1.5.1/opaque/m/m.go
+n/n.go  crates/guff-style/tests/testdata/iface/upstream-v1.5.1/opaque/n/n.go
+o/o.go  crates/guff-style/tests/testdata/iface/upstream-v1.5.1/opaque/o/o.go
+p/p.go  crates/guff-style/tests/testdata/iface/upstream-v1.5.1/opaque/p/p.go
+z/z.go  crates/guff-style/tests/testdata/iface/upstream-v1.5.1/opaque/z/z.go

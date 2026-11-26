@@ -1,0 +1,25 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - godot
+    - godox
+    - dupword
+  settings:
+    godot:
+      scope: declarations
+      period: false
+      capital: true
+      exclude:
+        - "^FIXME:"
+        - "^TODO:"
+    godox:
+      keywords:
+        - NOTE
+        - HACK
+    dupword:
+      keywords:
+        - the
+      ignore:
+        - is
+      comments-only: true

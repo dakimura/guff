@@ -1,0 +1,6 @@
+# The isolate fixture, so the two tiers cannot drift.
+bad.go      compat/isolate/fixtures/nilnil/bad.go
+
+# The stub module, replaced in so `./...` never lints it.
+bad/bad.go  crates/guff-gostaticanalysis/tests/testdata/nilnil/bad.go
+ok/ok.go    crates/guff-gostaticanalysis/tests/testdata/nilnil/ok.go

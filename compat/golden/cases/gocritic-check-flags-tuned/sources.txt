@@ -1,0 +1,9 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# The two `gocritic-check-flags-*` cases share this fixture and differ only in
+# the `settings` block: every row that appears or disappears between them is
+# one param being read.
+
+gocritic/checkflags.go        crates/guff-style/tests/testdata/gocritic/checkflags.go
+gocritic/checkflags_test.go   crates/guff-style/tests/testdata/gocritic/checkflags_test.go

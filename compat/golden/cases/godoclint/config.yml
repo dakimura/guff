@@ -1,0 +1,29 @@
+# Golden case: godoclint.
+#
+# Added for a column. guff reported every doc-comment finding at column 1,
+# because it recovers the position from the comment-preserving re-parse by
+# *line* and then takes the start of that line. That is the right answer for a
+# declaration at the left margin and the wrong one for a doc comment indented
+# inside a `const (` or `var (` group, where upstream reports where the comment
+# actually begins.
+#
+# Neither existing tier could see it. godoclint's isolate fixture is a single
+# top-level func — column 1 on both sides — and the isolate and OSS keys are
+# `path:line:linter:message`, with no column field at all (COMPAT-HARDENING §1).
+# This tier compares `path:line:col:linter:severity:text` with no normalization,
+# so the fixture below carries both shapes: declarations at the margin and
+# declarations indented inside groups.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - godoclint
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

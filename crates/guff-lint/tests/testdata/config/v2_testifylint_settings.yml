@@ -1,0 +1,28 @@
+version: "2"
+linters:
+  settings:
+    testifylint:
+      disable-all: true
+      enable:
+        - bool-compare
+        - empty
+        - expected-actual
+        - time-compare
+        - formatter
+        - suite-extra-assert-call
+      bool-compare:
+        ignore-custom-types: true
+      expected-actual:
+        pattern: "^wanted$"
+      time-compare:
+        suppress-calls-pattern: "UTC|Round"
+      formatter:
+        check-format-string: false
+        require-f-funcs: true
+        require-string-msg: false
+      suite-extra-assert-call:
+        mode: require
+      require-error:
+        fn-pattern: ^NoError$
+      go-require:
+        ignore-http-handlers: true

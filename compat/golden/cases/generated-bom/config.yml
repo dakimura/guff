@@ -1,0 +1,44 @@
+# Golden case: which generated-file mode `golangci-lint run` actually applies,
+# and whether a leading BOM hides the marker.
+#
+# Two upstream facts, both measured (COMPAT-HARDENING 2026-09-04 続き 155):
+#
+#  1. `run` filters a formatter's findings with `linters.exclusions.generated`,
+#     which `config.Loader.Load` defaults to **strict** — not with
+#     `formatters.exclusions.generated`, which `handleFormatterExclusions` never
+#     folds in (it folds only `paths`). Setting the formatters key to `disable`
+#     changes nothing here; setting the linters key to `disable` reports both
+#     files.
+#  2. golangci-lint reads comments through `parser.ParseFile`, and
+#     `go/scanner.Init` ignores a BOM at the start of a file, so a BOM before
+#     the marker changes nothing.
+#
+# The case therefore expects exactly one finding:
+#
+#   bomline/     BOM + `// Code generated ... DO NOT EDIT.` — strict matches
+#                through the BOM, so it is excluded.
+#   blockmarker/ the same marker in a `/* */` comment — `ast.IsGenerated` only
+#                matches a `//` line comment, so strict does *not* exclude it
+#                and the finding stands.
+#
+# Both files are misformatted, and `gofmt -l` lists both. A golden with zero
+# findings would mean guff had gone lax; a golden with two would mean the BOM
+# was hiding the marker again. Those were guff's two bugs, and they cancelled
+# each other on the BOM+block shape until both were fixed.
+version: "2"
+
+linters:
+  default: none
+
+formatters:
+  enable:
+    - gofmt
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

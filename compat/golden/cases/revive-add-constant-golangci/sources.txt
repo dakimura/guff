@@ -1,0 +1,2 @@
+# golangci-lint 2.15.0 pkg/golinters/revive/testdata/revive_add_constant.go.
+revive_add_constant.go                        crates/guff-revive/tests/testdata/revive/add-constant-upstream-v1.17.1/golangci/revive_add_constant.go

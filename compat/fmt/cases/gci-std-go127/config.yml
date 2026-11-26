@@ -1,0 +1,13 @@
+# golangci-lint 2.14's gci standard list is generated from go1.27: crypto/hpke,
+# crypto/mldsa, crypto/mlkem/mlkemtest, runtime/secret, testing/cryptotest and
+# uuid are standard. Each one here lands in the standard group; with the go1.26
+# list they were sorted among the third-party imports.
+version: "2"
+formatters:
+  enable:
+    - gci
+  settings:
+    gci:
+      sections:
+        - standard
+        - default

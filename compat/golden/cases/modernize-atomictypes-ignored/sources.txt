@@ -1,0 +1,5 @@
+# The fixture the Rust test uses, plus the build-excluded file that is the
+# whole point of the case.
+ignoredfiles/ignoredfiles.go          crates/guff-style/tests/testdata/modernize/ignoredfiles.go
+ignoredfiles/ignoredfiles_gofuzz.go   crates/guff-style/tests/testdata/modernize/ignoredfiles_gofuzz.go
+ignoredfiles/ignoredfiles_test.go    crates/guff-style/tests/testdata/modernize/ignoredfiles_test.go

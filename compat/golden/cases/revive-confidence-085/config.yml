@@ -1,0 +1,26 @@
+# Golden case: `revive.confidence` above the 0.8 rung (COMPAT-HARDENING Phase 4).
+#
+# The threshold is applied by golangci-lint, not by revive: `wrapper.run` drops
+# every failure whose `Confidence` is below it. 0.85 takes away
+# increment-decrement (0.8) and leaves error-naming (0.9) and errorf (1).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      confidence: 0.85
+      rules:
+        - name: increment-decrement
+        - name: error-naming
+        - name: errorf
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

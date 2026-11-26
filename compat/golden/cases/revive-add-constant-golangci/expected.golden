@@ -1,0 +1,10 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh revive-add-constant-golangci
+# Produced by running golangci-lint on compat/golden/cases/revive-add-constant-golangci/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+revive_add_constant.go:10:14:revive:warning:add-constant: string literal "dup" appears, at least, 3 times, create a named constant for it
+revive_add_constant.go:11:14:revive:warning:add-constant: avoid magic numbers like '42', create a named constant for it

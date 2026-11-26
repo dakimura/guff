@@ -1,0 +1,11 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - unqueryvet
+  settings:
+    unqueryvet:
+      check-aliased-wildcard: false
+      check-subqueries: true
+      allowed-patterns:
+        - "(?i)SELECT \\* FROM temp_.*"

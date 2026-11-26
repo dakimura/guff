@@ -1,0 +1,37 @@
+# Golden case: SA1019 against *stdlib* deprecations.
+#
+# SA1019 prints two things it has to get from two different places:
+#
+#     %s has been deprecated since Go %s and an alternative has been
+#     available since Go %s: %s
+#
+# The versions come from `knowledge.StdlibDeprecations`, which guff ports as a
+# table. The trailing prose comes from the `Deprecated:` doc comment, which
+# reaches an analyzer as a fact — and facts only exist for packages analysed
+# from source. Every stdlib package is read from export data, which carries no
+# doc comments at all, so guff had no prose, produced no message, and reported
+# *nothing* for stdlib deprecations. Reported from the field on 2026-08-17
+# (issue C) against `p.X` on a `*ecdsa.PublicKey`.
+#
+# The fixture carries one finding of each shape the lookup discriminates on —
+# package-level func, struct field, pointer method — because the field branch
+# was the broken one and the others were never exercised against GOROOT.
+#
+# `go 1.26` in the case's go.mod is load-bearing: SA1019 suppresses a
+# deprecation newer than the module's language version, so a lower directive
+# would silently drop the `ecdsa` finding from both tools and the case would
+# still pass while testing less.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - staticcheck
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

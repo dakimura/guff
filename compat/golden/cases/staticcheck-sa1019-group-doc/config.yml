@@ -1,0 +1,29 @@
+# Golden case: SA1019 against a *dependency's* `Deprecated:` docs, group by
+# group.
+#
+# The deprecated-fact pass pooled a `const (…)` group's own doc with the docs of
+# every spec inside it and then marked every name the group declared. syncthing
+# `lib/protocol/bep_fileinfo.go` reads five `bep.FileInfoType_*` constants of
+# which the generated code deprecates two; guff reported all five, upstream two.
+#
+# `contextcheck` is enabled with staticcheck and is load-bearing. With
+# staticcheck alone, SA1019 answers from its own scan of the dependency's
+# sources and never consults the fact, so the case would pass while testing
+# nothing. contextcheck makes the dependency get a full analysis, the fact pass
+# runs there, and its facts are what SA1019 reads. Measured both ways while the
+# defect was live: staticcheck alone 2 findings, staticcheck+contextcheck 5.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - staticcheck
+    - contextcheck
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

@@ -1,0 +1,6 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# The golden tier keeps no copy of the fixture: it points at the one the Rust
+# unit test already uses, so the two can never drift.
+fieldalignment/bad.go   crates/guff-govet/tests/testdata/fieldalignment/bad.go

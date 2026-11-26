@@ -1,0 +1,2 @@
+# The isolate fixture, so the two tiers cannot drift.
+bad_test.go  compat/isolate/fixtures/testpackage/bad_test.go

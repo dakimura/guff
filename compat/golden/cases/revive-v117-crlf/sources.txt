@@ -1,0 +1,5 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+notmatch/issue607_not_match.go  crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/package_comments/issue607_not_match.go
+match/issue607_match.go  crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/package_comments/issue607_match.go
+drift/issue607_drift_not_match.go  crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/package_comments/issue607_drift_not_match.go

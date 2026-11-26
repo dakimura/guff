@@ -1,0 +1,8 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# The two `gocritic-check-settings-*` cases share this fixture and differ only
+# in the `settings` block. Every struct in it sits exactly on a default, so a
+# threshold that moved shows up as a row appearing or disappearing.
+
+gocritic/checksettings.go   crates/guff-style/tests/testdata/gocritic/checksettings.go

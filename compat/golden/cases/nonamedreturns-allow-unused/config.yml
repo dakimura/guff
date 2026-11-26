@@ -1,0 +1,21 @@
+# Golden case: nonamedreturns `allow-unused-named-returns: true` (v1.0.8,
+# golangci-lint 2.14.0): a named result is reported only when the body
+# references it or a naked return uses it, with its own message. The default
+# case runs the same fixture; this is the option's only gate.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - nonamedreturns
+  settings:
+    nonamedreturns:
+      allow-unused-named-returns: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

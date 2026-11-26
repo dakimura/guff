@@ -1,0 +1,6 @@
+# Optional OSS list redirected to the shared corpus.
+# Prefer: ./benchmarks/run.sh --oss --tier pr
+#
+# Authoritative inventory: ../corpus/repos.json
+
+# (intentionally empty — use corpus/repos.json via --oss --tier)

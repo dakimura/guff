@@ -1,0 +1,32 @@
+# Golden case: exhaustruct_v5 on the exhaustruct fixture.
+#
+# golangci-lint 2.13.0 added exhaustruct_v5 (go-exhaustruct v5) and deprecated
+# exhaustruct. The v4 fixture under v5 is where the two majors part: v5 reports
+# the `exhaustruct:"optional"` tag (with a fix) and no longer honours it. v5's
+# own testdata is in the `exhaustruct-v5-*` cases.
+#
+# The original note for the v4 case:
+#
+# Seeded from the isolate fixture, which the OSS-style tiers already run — but
+# they compare `path:line:linter:message` after normalization, so this linter's
+# **column** and **severity** had never been checked by anything. Both are in
+# the key here, byte for byte.
+#
+# Widen the fixture rather than replacing it: the two tiers read the same files
+# (sources.txt), so a shape added for one is measured by both.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - exhaustruct_v5
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # Full finding-set compare (avoid SA#### vs S#### order winning uniq-by-line).
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

@@ -1,0 +1,25 @@
+# Golden case: `revive.cognitive-complexity` with `arguments: [3]`.
+#
+# The mirror of `revive-cognitive-default`. Four more of the fixture's functions
+# clear a limit of 3, and the message quotes the limit, so every row here
+# differs from that case's.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      rules:
+        - name: cognitive-complexity
+          arguments:
+            - 3
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

@@ -1,0 +1,13 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# COMPAT-HARDENING Phase 4. The nine `revive-*` settings cases share this file
+# (`revive-settings` is the baseline: the three rules named, every other key at
+# its default); only their `config.yml` differs.
+#
+# The fixture is three findings at three confidences (0.8 / 0.9 / 1) — see its
+# package comment. cases/revive cannot measure `confidence` at all: it is 291
+# findings from 99 rules, and the threshold would move an unreadable number of
+# them at once.
+
+settings/settings.go   crates/guff-revive/tests/testdata/revive/settings/settings.go

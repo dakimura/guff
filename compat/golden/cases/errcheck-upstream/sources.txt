@@ -1,0 +1,16 @@
+# errcheck v1.30.0's own testdata: testdata/ (package main) and
+# errcheck/testdata/src/{a,blank}.
+a/main.go                   crates/guff-errcheck/tests/testdata/upstream-v1.30.0/a/main.go
+a/t.go                      crates/guff-errcheck/tests/testdata/upstream-v1.30.0/a/t.go
+blank/main.go               crates/guff-errcheck/tests/testdata/upstream-v1.30.0/blank/main.go
+main/chan.go                crates/guff-errcheck/tests/testdata/upstream-v1.30.0/main/chan.go
+main/crypto_rand.go         crates/guff-errcheck/tests/testdata/upstream-v1.30.0/main/crypto_rand.go
+main/embedded_interface.go  crates/guff-errcheck/tests/testdata/upstream-v1.30.0/main/embedded_interface.go
+main/errors_astype.go       crates/guff-errcheck/tests/testdata/upstream-v1.30.0/main/errors_astype.go
+main/hash.go                crates/guff-errcheck/tests/testdata/upstream-v1.30.0/main/hash.go
+main/iter.go                crates/guff-errcheck/tests/testdata/upstream-v1.30.0/main/iter.go
+main/main_test.go           crates/guff-errcheck/tests/testdata/upstream-v1.30.0/main/main_test.go
+main/main.go                crates/guff-errcheck/tests/testdata/upstream-v1.30.0/main/main.go
+main/main2.go               crates/guff-errcheck/tests/testdata/upstream-v1.30.0/main/main2.go
+main/main3.go               crates/guff-errcheck/tests/testdata/upstream-v1.30.0/main/main3.go
+main/sha3.go                crates/guff-errcheck/tests/testdata/upstream-v1.30.0/main/sha3.go

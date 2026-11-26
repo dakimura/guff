@@ -1,0 +1,7 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# The three `revive-import-alias-*` cases share this fixture and differ only in
+# the rule argument: none, a bare string, and a map with both regexes.
+
+aliases/aliases.go   crates/guff-revive/tests/testdata/revive/import_alias/aliases.go

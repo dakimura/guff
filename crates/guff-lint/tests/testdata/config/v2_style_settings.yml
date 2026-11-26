@@ -1,0 +1,25 @@
+version: "2"
+linters:
+  enable:
+    - gocyclo
+    - dogsled
+    - funlen
+    - cyclop
+    - lll
+    - nakedret
+    - nlreturn
+  settings:
+    gocyclo:
+      min-complexity: 50
+    dogsled:
+      max-blank-identifiers: 4
+    funlen:
+      statements: 50
+    cyclop:
+      max-complexity: 20
+    lll:
+      line-length: 200
+    nakedret:
+      max-func-lines: 50
+    nlreturn:
+      block-size: 10

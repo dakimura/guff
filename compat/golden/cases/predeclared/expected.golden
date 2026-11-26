@@ -1,0 +1,17 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh predeclared
+# Produced by running golangci-lint on compat/golden/cases/predeclared/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+bad.go:7:6:predeclared::len: shadows predeclared identifier
+bad.go:9:6:predeclared::copy: shadows predeclared identifier
+bad.go:11:7:predeclared::cap: shadows predeclared identifier
+bad.go:13:5:predeclared::recover: shadows predeclared identifier
+bad.go:16:2:predeclared::error: shadows predeclared identifier
+bad.go:19:6:predeclared::new: shadows predeclared identifier
+bad.go:22:6:predeclared::append: shadows predeclared identifier
+bad.go:27:17:predeclared::min: shadows predeclared identifier
+bad.go:27:26:predeclared::max: shadows predeclared identifier

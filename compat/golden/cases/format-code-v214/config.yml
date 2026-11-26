@@ -1,0 +1,31 @@
+# Golden case: golangci-lint 2.14 renders code in messages with `%#q`
+# (internal.FormatCode, misspell, nolintlint) instead of always wrapping it in
+# backquotes. The two only differ for a string a backquoted literal cannot
+# hold — a newline, a control character, or (outside FormatCode) a backquote —
+# so this case is made of those.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - goconst
+    - misspell
+    - nolintlint
+    - gocyclo
+  settings:
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    gocyclo:
+      min-complexity: 30
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

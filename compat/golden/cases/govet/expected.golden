@@ -1,0 +1,212 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh govet
+# Produced by running golangci-lint on compat/golden/cases/govet/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+appends/bad/bad.go:4:9:govet::appends: append with no values
+assign/bad/bad.go:5:2:govet::assign: self-assignment of x
+atomic/bad/bad.go:7:2:govet::atomic: direct assignment to atomic value
+bools/bad/bad.go:4:9:govet::bools: redundant or: true || true
+bools_sel/main/main.go:17:9:govet::bools: redundant and: c.a == 0 && c.a == 0
+buildtag/double_negative/double_negative.go:2:1:govet::buildtag: invalid double negative in build constraint: !!nope
+buildtag/malformed_plus/malformed_plus.go:1:1:govet::buildtag: possible malformed +build comment
+buildtag/mismatch/mismatch.go:2:1:govet::buildtag: +build lines do not match //go:build condition
+buildtag/misplaced_plus/misplaced_plus.go:8:1:govet::buildtag: misplaced +build comment
+buildtag/non_alphanumeric/non_alphanumeric.go:2:1:govet::buildtag: invalid non-alphanumeric build constraint: @foo
+composites/bad/bad.go:6:6:govet::composites: example.com/govet/composites/other.Config struct literal uses unkeyed fields
+copylocks/bad/bad.go:5:12:govet::copylocks: bad passes lock by value: sync.Mutex
+copylocks/bad/bad.go:6:6:govet::copylocks: assignment copies lock value to _: sync.Mutex
+copylocks/bad/bad.go:15:9:govet::copylocks: return copies lock value: example.com/govet/copylocks/bad.Gen contains sync.Mutex
+copylocks/sizeof/sizeof.go:39:49:govet::copylocks: return copies lock value: example.com/govet/copylocks/sizeof.withMutex contains sync.Mutex
+defers/bad/bad.go:7:8:govet::defers: call to time.Since is not deferred
+directive/after_package/after_package.go:7:1:govet::directive: //go:debug directive only valid before package declaration
+directive/bad/bad.go:1:1:govet::directive: //go:debug directive only valid in package main or test
+directive/invalid_space/invalid_space.go:6:1:govet::directive: invalid space '\\v' in //go:generate directive
+directive/invalid_space_nbsp/invalid_space_nbsp.go:3:1:govet::directive: invalid space '\\u00a0' in //go:generate directive
+errorsas/bad/bad.go:8:2:govet::errorsas: second argument to errors.As should not be *error
+errorsas/concrete_bad/concrete_bad.go:12:2:govet::errorsas: second argument to errors.As must be a non-nil pointer to either a type that implements error, or to any interface type
+hostport/bad/bad.go:9:30:govet::hostport: address format "%s:%d" does not work with IPv6
+hostport/bad/bad.go:13:22:govet::hostport: address format "%s:%s" does not work with IPv6 (passed to net.Dial at L14)
+httpresponse/bad/bad.go:7:8:govet::httpresponse: using resp before checking for errors
+httpresponse/bad/bad.go:15:8:govet::httpresponse: using resp before checking for errors
+httpresponse/bad/bad.go:21:8:govet::httpresponse: using resp before checking for errors
+httpresponse/bad/bad.go:30:9:govet::httpresponse: using resp before checking for errors
+httpresponse/bad/bad.go:38:9:govet::httpresponse: using resp before checking for errors
+httpresponse/bad/bad.go:51:8:govet::httpresponse: using h before checking for errors
+ifaceassert/bad/bad.go:12:9:govet::ifaceassert: impossible type assertion: no type can implement both example.com/govet/ifaceassert/bad.I and example.com/govet/ifaceassert/bad.J (conflicting types for M method)
+ifaceassert/generic/generic.go:42:9:govet::ifaceassert: impossible type assertion: no type can implement both example.com/govet/ifaceassert/generic.Merge[int, string] and example.com/govet/ifaceassert/generic.Merge[string, int] (conflicting types for Receive method)
+ifaceassert/generic/generic.go:56:9:govet::ifaceassert: impossible type assertion: no type can implement both interface{Get() map[string][]int} and interface{Get() int} (conflicting types for Get method)
+inline/bad/bad.go:6:21:govet::inline: Constant reflect.Ptr should be inlined
+inline_alias/bad/bad.go:39:15:govet::inline: Type alias Ord should be inlined
+inline_alias/bad/bad.go:41:19:govet::inline: Type alias Grouped should be inlined
+inline_alias/bad/bad.go:45:16:govet::inline: Type alias Pair[string, int] should be inlined
+inline_alias/bad/bad.go:50:17:govet::inline: Type alias Ord should be inlined
+inline_local/bad/bad.go:9:9:govet::inline: Constant Legacy should be inlined
+lostcancel/bad/bad.go:6:5:govet::lostcancel: the cancel function returned by context.WithCancel should be called, not discarded, to avoid a context leak
+lostcancel/bad/bad.go:11:8:govet::lostcancel: the cancel function returned by context.WithCancel should be called, not discarded, to avoid a context leak
+lostcancel/paths/paths.go:163:2:govet::lostcancel: the cancel function is not used on all paths (possible context leak)
+lostcancel/paths/paths.go:168:2:govet::lostcancel: this return statement may be reached without using the cancel var defined on line 163
+lostcancel/paths/paths.go:173:7:govet::lostcancel: the cancel function returned by context.WithCancel should be called, not discarded, to avoid a context leak
+lostcancel/paths/paths.go:179:2:govet::lostcancel: the cancel function is not used on all paths (possible context leak)
+lostcancel/paths/paths.go:182:3:govet::lostcancel: this return statement may be reached without using the cancel var defined on line 179
+lostcancel/paths/paths.go:190:2:govet::lostcancel: the kill function is not used on all paths (possible context leak)
+lostcancel/paths/paths.go:195:2:govet::lostcancel: this return statement may be reached without using the kill var defined on line 190
+lostcancel/paths/paths.go:200:2:govet::lostcancel: the cancel function is not used on all paths (possible context leak)
+lostcancel/paths/paths.go:206:2:govet::lostcancel: this return statement may be reached without using the cancel var defined on line 200
+lostcancel/paths/paths.go:212:3:govet::lostcancel: the cancel function is not used on all paths (possible context leak)
+lostcancel/paths/paths.go:215:4:govet::lostcancel: this return statement may be reached without using the cancel var defined on line 212
+lostcancel/paths/paths.go:225:3:govet::lostcancel: the cancel function is not used on all paths (possible context leak)
+lostcancel/paths/paths.go:230:3:govet::lostcancel: this return statement may be reached without using the cancel var defined on line 225
+lostcancel/paths/paths.go:238:2:govet::lostcancel: the cancel function is not used on all paths (possible context leak)
+lostcancel/paths/paths.go:243:2:govet::lostcancel: this return statement may be reached without using the cancel var defined on line 238
+lostcancel/paths/paths.go:249:2:govet::lostcancel: the cancel function is not used on all paths (possible context leak)
+lostcancel/paths/paths.go:254:1:govet::lostcancel: this return statement may be reached without using the cancel var defined on line 249
+lostcancel/paths/paths.go:258:6:govet::lostcancel: the cancel function is not used on all paths (possible context leak)
+lostcancel/paths/paths.go:263:2:govet::lostcancel: this return statement may be reached without using the cancel var defined on line 258
+lostcancel/paths/paths.go:268:2:govet::lostcancel: the cancel function is not used on all paths (possible context leak)
+lostcancel/paths/paths.go:272:2:govet::lostcancel: this return statement may be reached without using the cancel var defined on line 268
+lostcancel/paths/paths.go:277:2:govet::lostcancel: the cancel function is not used on all paths (possible context leak)
+lostcancel/paths/paths.go:280:3:govet::lostcancel: this return statement may be reached without using the cancel var defined on line 277
+lostcancel/paths/paths.go:292:3:govet::lostcancel: the cancel function is not used on all paths (possible context leak)
+lostcancel/paths/paths.go:298:2:govet::lostcancel: this return statement may be reached without using the cancel var defined on line 292
+nilfunc/bad/bad.go:6:6:govet::nilfunc: comparison of function f == nil is always false
+nilness/bad/bad.go:20:7:govet::nilness: tautological condition: nil == nil
+nilness/bad/bad.go:27:7:govet::nilness: tautological condition: non-nil != nil
+nilness/bad/bad.go:34:7:govet::nilness: impossible condition: non-nil == nil
+nilness/bad/bad.go:41:8:govet::nilness: impossible condition: nil != nil
+nilness/bad/bad.go:49:8:govet::nilness: tautological condition: nil == nil
+nilness/bad/bad.go:59:7:govet::nilness: impossible condition: non-nil == nil
+nilness/bad/bad.go:66:7:govet::nilness: impossible condition: non-nil == nil
+nilness/bad/bad.go:75:12:govet::nilness: nil dereference in field selection
+nilness/bad/bad.go:82:10:govet::nilness: nil dereference in load
+nilness/bad/bad.go:89:3:govet::nilness: nil dereference in store
+nilness/bad/bad.go:95:4:govet::nilness: nil dereference in map update
+nilness/bad/bad.go:101:3:govet::nilness: range over nil map
+nilness/bad/bad.go:109:3:govet::nilness: receive from nil channel
+nilness/bad/bad.go:115:5:govet::nilness: send to nil channel
+nilness/bad/bad.go:121:11:govet::nilness: index of nil slice
+nilness/bad/bad.go:128:21:govet::nilness: range of nil slice
+nilness/bad/bad.go:136:11:govet::nilness: nil dereference in array index operation
+nilness/bad/bad.go:143:21:govet::nilness: nil dereference in array index operation
+nilness/bad/bad.go:151:11:govet::nilness: nil dereference in slice operation
+nilness/bad/bad.go:158:12:govet::nilness: nil dereference in type assertion
+nilness/bad/bad.go:165:6:govet::nilness: nil dereference in dynamic method call
+nilness/bad/bad.go:171:4:govet::nilness: nil dereference in dynamic function call
+nilness/bad/bad.go:177:3:govet::nilness: nil dereference in dynamic function call
+nilness/bad/bad.go:178:3:govet::nilness: nil dereference in dynamic function call
+nilness/bad/bad.go:195:7:govet::nilness: panic with nil value
+nilness/bad/bad.go:209:12:govet::nilness: nil dereference in field selection
+nilness/bad/bad.go:232:6:govet::nilness: nil dereference in dynamic method call
+nilness/bad/bad.go:278:7:govet::nilness: impossible condition: non-nil == nil
+nilness/noreturn/noreturn.go:22:9:govet::nilness: impossible condition: nil != nil
+nilness/unsafeptr/unsafeptr.go:10:8:govet::nilness: tautological condition: nil == nil
+printf/argcount/argcount.go:6:17:govet::printf: fmt.Printf format %d reads arg #2, but call has 1 arg
+printf/argcount/argcount.go:7:2:govet::printf: fmt.Printf call needs 1 arg but has 2 args
+printf/bad/bad.go:6:14:govet::printf: fmt.Printf format %z has unknown verb z
+printf/escapes/escapes.go:9:16:govet::printf: fmt.Printf format %z has unknown verb z
+printf/escapes/escapes.go:10:18:govet::printf: fmt.Printf format %z has unknown verb z
+printf/escapes/escapes.go:11:22:govet::printf: fmt.Printf format %z has unknown verb z
+printf/escapes/escapes.go:12:18:govet::printf: fmt.Printf format %z has unknown verb z
+printf/escapes/escapes.go:16:14:govet::printf: fmt.Printf format %é has unknown verb é
+printf/escapes/escapes.go:17:14:govet::printf: fmt.Printf format %☃ has unknown verb ☃
+printf/escapes/escapes.go:21:14:govet::printf: fmt.Printf format %� has unknown verb �
+printf/escapes/escapes.go:22:20:govet::printf: fmt.Printf format %d reads arg #2, but call has 1 arg
+printf/formatter/formatter.go:36:65:govet::printf: fmt.Sprintf format %y has unknown verb y
+printf/formatter/formatter.go:39:64:govet::printf: fmt.Sprintf format %y has unknown verb y
+printf/formatter/formatter.go:47:60:govet::printf: fmt.Sprintf does not support error-wrapping directive %w
+printf/formatter/formatter.go:66:58:govet::printf: fmt.Sprintf format %s has arg r of wrong type []rune
+printf/formatter/formatter.go:69:63:govet::printf: fmt.Sprintf format %s has arg a of wrong type [3]int
+printf/indexes/indexes.go:11:14:govet::printf: fmt.Printf format %[2]*[1]d has arg str of wrong type string
+printf/indexes/indexes.go:12:14:govet::printf: fmt.Printf format %[1]*[2]s uses non-int str as argument of *
+printf/indexes/indexes.go:14:14:govet::printf: fmt.Printf format %*s uses non-int str as argument of *
+printf/indexes/indexes.go:15:14:govet::printf: fmt.Printf format %.*f uses non-int str as argument of *
+printf/indexes/indexes.go:17:14:govet::printf: fmt.Printf format %[2]*d uses non-int str as argument of *
+printf/indexes/indexes.go:22:14:govet::printf: fmt.Printf format %[3]d reads arg #3, but call has 2 args
+printf/indexes/indexes.go:29:13:govet::printf: fmt.Printf format has invalid argument index [x]
+printf/indexes/indexes.go:30:13:govet::printf: fmt.Printf format has invalid argument index [0]
+printf/indexes/indexes.go:31:13:govet::printf: fmt.Printf format has invalid argument index []
+printf/indexes/indexes.go:32:13:govet::printf: fmt.Printf format has invalid argument index [-1]
+printf/indexes/indexes.go:33:13:govet::printf: fmt.Printf format has invalid argument index [999999999999]
+printf/indexes/indexes.go:34:13:govet::printf: fmt.Printf format %[3d b %s is missing closing ]
+printf/indexes/indexes.go:35:13:govet::printf: fmt.Printf format %[1] is missing verb at end of string
+printf/indexes/indexes.go:40:14:govet::printf: fmt.Printf format %d has arg str of wrong type string
+printf/indexes/indexes.go:41:14:govet::printf: fmt.Printf format %d has arg str of wrong type string
+printf/indexes/indexes.go:42:14:govet::printf: fmt.Printf format %z has unknown verb z
+printf/noverbs/noverbs.go:18:30:govet::printf: fmt.Printf call has arguments but no formatting directives
+printf/noverbs/noverbs.go:19:30:govet::printf: fmt.Printf call has arguments but no formatting directives
+printf/noverbs/noverbs.go:20:34:govet::printf: fmt.Errorf call has arguments but no formatting directives
+printf/noverbs/noverbs.go:21:35:govet::printf: fmt.Sprintf call has arguments but no formatting directives
+printf/noverbs/noverbs.go:23:17:govet::printf: fmt.Printf call has arguments but no formatting directives
+printf/noverbs/noverbs.go:25:2:govet::printf: fmt.Printf call needs 0 args but has 1 arg
+printf/noverbs/noverbs.go:27:2:govet::printf: fmt.Printf call needs 1 arg but has 2 args
+printf/noverbs/noverbs.go:33:28:govet::printf: (*log.Logger).Printf call has arguments but no formatting directives
+printf/noverbs/noverbs_test.go:9:28:govet::printf: (*testing.common).Errorf call has arguments but no formatting directives
+printf/noverbs/noverbs_test.go:10:26:govet::printf: (*testing.common).Logf call has arguments but no formatting directives
+printf/noverbs/noverbs_test.go:11:28:govet::printf: (*testing.common).Fatalf call has arguments but no formatting directives
+printf/wrappers/wrappers.go:35:33:govet::printf: example.com/govet/printf/wrappers.wrapf does not support error-wrapping directive %w
+printf/wrappers/wrappers.go:66:2:govet::printf: missing ... in args forwarded to printf-like function
+printf/wrappers/wrappers.go:72:45:govet::printf: example.com/govet/printf/wrappers.wrapf format %z has unknown verb z
+printf/wrappers/wrappers.go:80:31:govet::printf: litf format %z has unknown verb z
+printf/wrappers/wrappers.go:85:30:govet::printf: example.com/govet/printf/wrappers.hop1 format %z has unknown verb z
+printf/wrappers/wrappers.go:106:56:govet::printf: (*testing.common).Errorf does not support error-wrapping directive %w
+printf/wrappers/wrappers.go:110:2:govet::printf: missing ... in args forwarded to print-like function
+printf/wrappers/wrappers.go:120:52:govet::printf: example.com/govet/printf/wrappers.sprintfWrapper format %z has unknown verb z
+printf/wrappers/wrappers.go:131:12:govet::printf: logf format %z has unknown verb z
+printf/wrongtype/wrongtype.go:6:14:govet::printf: fmt.Printf format %d has arg "str" of wrong type string
+printf/wrongtype/wrongtype.go:7:14:govet::printf: fmt.Printf format %s has arg 42 of wrong type int
+printf/wrongtype/wrongtype.go:8:14:govet::printf: fmt.Printf format %t has arg 5 of wrong type int
+shift/bad/bad.go:5:6:govet::shift: x (8 bits) too small for shift of 8
+sigchanyzer/bad/bad.go:10:2:govet::sigchanyzer: misuse of unbuffered os.Signal channel as argument to signal.Notify
+slog/bad/bad.go:6:2:govet::slog: call to slog.Info missing a final value
+stdmethods/bad/bad.go:7:16:govet::stdmethods: method Unwrap() should have signature Unwrap() error or Unwrap() []error
+stringintconv/bad/bad.go:4:6:govet::stringintconv: conversion from untyped int to string yields a string of one rune, not a string of digits
+structtag/bad/bad.go:4:2:govet::structtag: struct field x has json tag but is not exported
+structtag/bad/bad.go:11:2:govet::structtag: struct field A2 repeats json tag "a" also at bad.go:10
+structtag/bad/bad.go:24:2:govet::structtag: struct field Kind2 repeats xml attribute tag "kind" also at bad.go:23
+structtag/bad/bad.go:39:2:govet::structtag: struct field hidden has json tag but is not exported
+structtag/bad/bad.go:52:2:govet::structtag: struct field tag `bson:_id` not compatible with reflect.StructTag.Get: bad syntax for struct tag value
+structtag/bad/bad.go:53:2:govet::structtag: struct field tag `bson: _id` not compatible with reflect.StructTag.Get: bad syntax for struct tag value
+structtag/bad/bad.go:54:2:govet::structtag: struct field tag `bson:	_id` not compatible with reflect.StructTag.Get: bad syntax for struct tag value
+structtag/bad/bad.go:55:2:govet::structtag: struct field tag `bson:"_id` not compatible with reflect.StructTag.Get: bad syntax for struct tag value
+structtag/bad/bad.go:56:2:govet::structtag: struct field tag `bson:_idé` not compatible with reflect.StructTag.Get: bad syntax for struct tag value
+structtag/bad/bad.go:59:2:govet::structtag: struct field tag `bson:\\_id` not compatible with reflect.StructTag.Get: bad syntax for struct tag value
+structtag/bad/bad.go:63:2:govet::structtag: struct field tag "bson:`_id" not compatible with reflect.StructTag.Get: bad syntax for struct tag value
+structtag/bad/bad.go:64:2:govet::structtag: struct field tag "bson:\\n_id" not compatible with reflect.StructTag.Get: bad syntax for struct tag value
+structtag/bad/bad.go:65:2:govet::structtag: struct field tag "bson:\\x7f_id" not compatible with reflect.StructTag.Get: bad syntax for struct tag value
+structtag/bad/bad.go:66:2:govet::structtag: struct field tag "bson:\\ufeff_id" not compatible with reflect.StructTag.Get: bad syntax for struct tag value
+structtag/bad/bad.go:73:2:govet::structtag: struct field Apostrophe2 repeats json tag "dup'x" also at bad.go:72
+structtag/bad/bad.go:75:2:govet::structtag: struct field Backquote2 repeats json tag "dup`y" also at bad.go:74
+structtag/bad/bad.go:77:2:govet::structtag: struct field Del2 repeats json tag "dup\\x7fz" also at bad.go:76
+structtag/bad/bad.go:79:2:govet::structtag: struct field Tab2 repeats json tag "dup\\tw" also at bad.go:78
+testinggoroutine/bad_test/bad_test.go:7:2:govet::testinggoroutine: call to (*testing.T).Fatal from a non-test goroutine
+testinggoroutine/bad_test/bad_test.go:11:3:govet::testinggoroutine: call to (*testing.T).Fatalf from a non-test goroutine
+testinggoroutine/bad_test/bad_test.go:19:2:govet::testinggoroutine: call to (*testing.T).FailNow from a non-test goroutine (fn calls (*testing.T).FailNow)
+testinggoroutine/bad_test/bad_test.go:22:2:govet::testinggoroutine: call to (*testing.T).Fatal from a non-test goroutine (helper calls (*testing.T).Fatal)
+testinggoroutine/bad_test/bad_test.go:26:3:govet::testinggoroutine: call to (*testing.T).Skip from a non-test goroutine
+testinggoroutine/bad_test/bad_test.go:27:3:govet::testinggoroutine: call to (*testing.T).Skipf from a non-test goroutine
+testinggoroutine/bad_test/bad_test.go:28:3:govet::testinggoroutine: call to (*testing.T).SkipNow from a non-test goroutine
+testinggoroutine/bad_test/bad_test.go:37:2:govet::testinggoroutine: call to (*testing.B).Fatal from a non-test goroutine
+tests/bad_test/bad_test.go:5:6:govet::tests: Testbad has malformed name: first letter after 'Test' must not be lowercase
+tests/bad_test/bad_test.go:18:1:govet::tests: Example should return nothing
+tests/bad_test/bad_test.go:20:1:govet::tests: Example_suffix should be niladic
+timeformat/bad/bad.go:6:21:govet::timeformat: 2006-02-01 should be 2006-01-02
+unmarshal/bad/bad.go:7:16:govet::unmarshal: call of Unmarshal passes non-pointer as second argument
+unreachable/bad/bad.go:5:2:govet::unreachable: unreachable code
+unsafeptr/bad/bad.go:7:6:govet::unsafeptr: possible misuse of unsafe.Pointer
+unusedresult/bad/bad.go:6:2:govet::unusedresult: result of errors.New call not used
+unusedresult/wider/wider.go:17:2:govet::unusedresult: result of errors.New call not used
+unusedresult/wider/wider.go:23:2:govet::unusedresult: result of fmt.Append call not used
+unusedresult/wider/wider.go:24:2:govet::unusedresult: result of fmt.Appendf call not used
+unusedresult/wider/wider.go:25:2:govet::unusedresult: result of fmt.Appendln call not used
+unusedresult/wider/wider.go:26:2:govet::unusedresult: result of maps.Keys call not used
+unusedresult/wider/wider.go:27:2:govet::unusedresult: result of maps.Clone call not used
+unusedresult/wider/wider.go:28:2:govet::unusedresult: result of slices.Clone call not used
+unusedresult/wider/wider.go:29:2:govet::unusedresult: result of slices.Contains call not used
+unusedresult/wider/wider.go:30:2:govet::unusedresult: result of sort.Reverse call not used
+unusedresult/wider/wider.go:50:2:govet::unusedresult: result of (example.com/govet/unusedresult/wider.stringer).String call not used
+unusedresult/wider/wider.go:51:2:govet::unusedresult: result of (example.com/govet/unusedresult/wider.stringer).Error call not used
+unusedresult/wider/wider.go:52:2:govet::unusedresult: result of (error).Error call not used
+waitgroup/bad/bad.go:7:9:govet::waitgroup: WaitGroup.Add called from inside new goroutine

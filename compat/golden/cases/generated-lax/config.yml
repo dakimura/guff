@@ -1,0 +1,30 @@
+# Golden case: `linters.exclusions.generated: lax`
+# (COMPAT-HARDENING Phase 4).
+#
+# Lax has to be asked for: `run`'s default is strict. It is still the mode
+# `golangci-lint fmt` uses (the loader defaults only the *linters* key), so it
+# is not a corner.
+#
+# The matcher is `strings.Contains` over every comment group
+# `parser.ParseFile(…, PackageClauseOnly|ParseComments)` collected, lowercased,
+# against four markers. Two things follow that a leading-comment scan does not
+# reproduce on its own: the marker may appear in ordinary prose ("do not edit
+# it by hand"), and the parser reads one token *past* the package clause, so
+# the comment group directly below `package …` is collected too — which is why
+# after/after.go is excluded here and reported under strict.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+  exclusions:
+    generated: lax
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

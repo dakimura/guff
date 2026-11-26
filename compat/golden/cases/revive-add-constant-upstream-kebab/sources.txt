@@ -1,0 +1,3 @@
+# revive v1.17.1's add_constant.go, plus extra.go (not upstream: ignoreFuncs reaches only the call's own subtree).
+args/add_constant.go                          crates/guff-revive/tests/testdata/revive/add-constant-upstream-v1.17.1/args/add_constant.go
+args/extra.go                                 crates/guff-revive/tests/testdata/revive/add-constant-upstream-v1.17.1/args/extra.go

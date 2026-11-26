@@ -1,0 +1,100 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh protogetter
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/protogetter/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.15.0
+
+--- a/bad/bad.go
++++ b/bad/bad.go
+@@ -3,42 +3,42 @@
+ import "example.com/pb"
+ 
+ func useName(u *pb.User) string {
+-	return u.Name
++	return u.GetName()
+ }
+ 
+ func useAge(u *pb.User) int32 {
+-	return u.Age
++	return u.GetAge()
+ }
+ 
+ func useChain(u *pb.User) string {
+-	return u.Address.City
++	return u.GetAddress().GetCity()
+ }
+ 
+ // A getter that *does* return a pointer is left alone by the nil-comparison
+ // filter and reported by the ordinary selector rule. The asymmetry is
+ // upstream's.
+ func nilComparePointerGetter(u *pb.User) bool {
+-	return u.Address == nil
++	return u.GetAddress() == nil
+ }
+ 
+ // Upstream filters the *left* operand's position, so the reversed spelling
+ // filters the `nil` and the field is still reported.
+ func nilCompareReversed(u *pb.User) bool {
+-	return nil == u.Meta
++	return nil == u.GetMeta()
+ }
+ 
+ // The pointer test is on the *target*, not on the field: a non-pointer target
+ // keeps the finding even when the value is an optional field, because
+ // `u.GetNickname()` fits there.
+ func optionalIntoStringField(u *pb.User) *pb.Address {
+-	return &pb.Address{City: u.Name}
++	return &pb.Address{City: u.GetName()}
+ }
+ 
+ // A func-typed variable is not an `ast.Fun`, so the optional field passed to it
+ // is reported even though the getter would not compile there.
+ func passOptionalToFuncValue(u *pb.User) {
+ 	f := func(*string) {}
+-	f(u.Nickname)
++	f(u.GetNickname())
+ }
+ 
+ // Only optional fields are filtered: a plain field passed to a method or to a
+@@ -50,12 +50,12 @@
+ func takeName(string) {}
+ 
+ func passPlainField(s nameSink, u *pb.User) {
+-	s.takeName(u.Name)
+-	takeName(u.Name)
++	s.takeName(u.GetName())
++	takeName(u.GetName())
+ }
+ 
+ // A declaration without a pointer type keeps the finding.
+ func declareValue(u *pb.User) string {
+-	var n = u.Name
++	var n = u.GetName()
+ 	return n
+ }
+--- a/crossfile/call.go
++++ b/crossfile/call.go
+@@ -8,7 +8,7 @@
+ // here even though `u.GetNickname()` would not compile. `takeNickLocal` is in
+ // this file, so the same call shape is filtered.
+ func passOptionalAcrossFiles(u *pb.User) {
+-	takeNick(u.Nickname)
++	takeNick(u.GetNickname())
+ 	takeNickLocal(u.Nickname)
+ }
+ 
+--- a/ok/ok.go
++++ b/ok/ok.go
+@@ -45,7 +45,7 @@
+ type aliasUser = pb.User
+ 
+ func viaAlias(u *aliasUser) string {
+-	return u.Name
++	return u.GetName()
+ }
+ 
+ // `Nickname: u.Nickname` in a keyed literal: the field is `*string` and

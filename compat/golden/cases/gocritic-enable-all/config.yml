@@ -1,0 +1,30 @@
+# Golden case: `gocritic.enable-all` minus one (COMPAT-HARDENING Phase 4).
+#
+# The mirror of `disable-all`: every checker, then the disable lists. Upstream
+# refuses `enable-all` combined with `enabled-tags` or `enabled-checks` (and
+# refuses the two `*-all` keys together), so `disabled-checks` is the only key
+# that can appear beside it.
+#
+# The golden is the fixture's four other findings — everything but the
+# `singleCaseSwitch` this config takes away. It stays that size only because
+# the fixture is five functions; on cases/gocritic's fixture `enable-all` would
+# be a second copy of that golden.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gocritic
+  settings:
+    gocritic:
+      enable-all: true
+      disabled-checks:
+        - singleCaseSwitch
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

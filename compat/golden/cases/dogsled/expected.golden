@@ -1,0 +1,11 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh dogsled
+# Produced by running golangci-lint on compat/golden/cases/dogsled/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+bad.go:6:2:dogsled::declaration has 4 blank identifiers
+bad.go:14:2:dogsled::declaration has 3 blank identifiers
+bad.go:20:2:dogsled::declaration has 4 blank identifiers

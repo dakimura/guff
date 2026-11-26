@@ -1,0 +1,21 @@
+# Golden case: golangci-lint 2.15.0 exhaustive_ignore_enum_members.{go,yml}.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - exhaustive
+  settings:
+    exhaustive:
+      ignore-constants:
+        - "West$"
+        - "Zero$"
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

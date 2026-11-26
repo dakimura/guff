@@ -1,0 +1,7 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# This case exists for its `go.mod`: `staticcheck-s` declares `go 1.22`, and
+# `range` over a func needs 1.23. The fixture is the one the Rust unit test
+# reads.
+s1005rangefunc/rangefunc.go   crates/guff-staticcheck/tests/testdata/s1005rangefunc/rangefunc.go

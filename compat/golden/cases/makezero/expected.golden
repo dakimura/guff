@@ -1,0 +1,11 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh makezero
+# Produced by running golangci-lint on compat/golden/cases/makezero/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+bad.go:7:2:makezero::slice `x` does not have non-zero initial length
+bad.go:8:6:makezero::append to slice `x` with non-zero initialized length
+bad.go:14:2:makezero::slice `y` does not have non-zero initial length

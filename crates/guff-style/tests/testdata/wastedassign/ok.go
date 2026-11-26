@@ -1,0 +1,288 @@
+package wastedassign_ok
+
+import "fmt"
+
+func usedAfterAssign() {
+	a := 0
+	fmt.Print(a)
+	a = 1
+	fmt.Print(a)
+}
+
+func usedBetweenReassign() {
+	b := 0
+	fmt.Print(b)
+	b = 1
+	fmt.Print(b)
+	b = 2
+	fmt.Print(b)
+}
+
+type storage interface{ List() int }
+
+func loadStorage(useCustom bool) (storage, error) {
+	return nil, nil
+}
+
+// If/else both assign `stor`, then shared use after merge (caddy storagefuncs).
+func okIfElseAssignThenUse(useCustom bool) (int, error) {
+	var stor storage
+	var err error
+	if useCustom {
+		stor, err = loadStorage(true)
+		if err != nil {
+			return 0, err
+		}
+	} else {
+		stor, err = loadStorage(false)
+		if err != nil {
+			return 0, err
+		}
+	}
+	return stor.List(), nil
+}
+
+type fileInfo struct{}
+
+func (fileInfo) IsDir() bool { return true }
+
+func stat(_ string) (fileInfo, error) { return fileInfo{}, nil }
+
+// If-init assign used only in Cond (caddy mkdirAllInherit / filewriter).
+func okIfInitUsedInCond(dir string) bool {
+	if fi, err := stat(dir); err == nil && fi.IsDir() {
+		return true
+	}
+	return false
+}
+
+// Type assert local used via method call (caddy acmeWrapper pattern).
+type acmeCapable interface{ GetACMEIssuer() int }
+
+func okTypeAssertUse(issuer any) int {
+	acmeWrapper, ok := issuer.(acmeCapable)
+	if !ok {
+		return 0
+	}
+	return acmeWrapper.GetACMEIssuer()
+}
+
+// Post-decrement whose value is still live for the loop (caddy i-- pattern).
+func okIncDecReuse(xs []int) int {
+	n := 0
+outer:
+	for i := 0; i < len(xs); i++ {
+		for j := i + 1; j < len(xs); j++ {
+			if xs[i] == xs[j] {
+				i--
+				continue outer
+			}
+		}
+		n++
+	}
+	return n
+}
+
+// Integer range (Go 1.22+) uses a synthetic SSA local `rangeint.iter`.
+func okIntegerRange(n int) int {
+	sum := 0
+	for range n {
+		sum++
+	}
+	return sum
+}
+
+// Closure captures `n` and reads it after outer assigns (traefik MinSize test).
+func okCapturedByFuncLit(min int) {
+	var n int
+	next := func() int {
+		return n
+	}
+	n = min - 1
+	_ = next()
+	n = min
+	_ = next()
+}
+
+// A labelled `break` leaves the labelled loop; the outer loop's condition then
+// reads the variable again, so the assignment before the break is live. guff's
+// SSA recorded the label's break target only *after* building the body, so the
+// break inside it resolved to nothing and `branch_stmt` fell back to the
+// label's goto block — the top of the loop being left. The next operation on
+// the variable was then that loop's own store, and this read like a wasted
+// assignment. gitea `services/gitdiff/gitdiff.go`.
+func okLabelledBreakOutOfSwitch(read func() string) int {
+	n := 0
+	line := read()
+	for {
+		if line == "" {
+			return n
+		}
+	curFileLoop:
+		for {
+			line = read()
+			n++
+			switch {
+			case line == "end":
+				line = read() + "!"
+				break curFileLoop
+			}
+		}
+	}
+}
+
+// A loop-carried accumulator: the last store in the body is read at the *top of
+// the next iteration*, so it is live. `optimizeBlocks` fuses `rangeint.loop`
+// into `rangeint.body`, which makes such a loop one block that jumps to itself,
+// and the read lives in that same block.
+//
+// Upstream reaches it because its first walk frame is a *copy* of the block
+// (`blCopy := *bl`) and `rmSameBlock` compares by pointer, so the self-edge
+// survives that first hop. guff passed the real block and filtered the edge
+// away, and every one of these read as "never used afterwards". k6
+// `lib/execution_segment_test.go:445` and
+// `lib/executor/ramping_vus_test.go:1117`.
+func okLoopCarriedIntegerRange(n int, out []int) []int {
+	from := 0
+	for i := range n {
+		to := from + 1
+		out[i] = to
+		from = to
+	}
+	return out
+}
+
+func okLoopCarriedIntegerRangeInt64(n int64, out []int) []int {
+	from := 0
+	for i := range n {
+		to := from + 1
+		out[i] = to
+		from = to
+	}
+	return out
+}
+
+type rat struct{ v int }
+
+func okLoopCarriedPointer(n int, out []int) []int {
+	from := &rat{0}
+	for i := range n {
+		to := &rat{from.v + 1}
+		out[i] = to.v
+		from = to
+	}
+	return out
+}
+
+// The same accumulator in the loop forms that never fused into a self-edge, so
+// they were right before and must stay right.
+func okLoopCarriedCounted(n int, out []int) []int {
+	from := 0
+	for i := 0; i < n; i++ {
+		to := from + 1
+		out[i] = to
+		from = to
+	}
+	return out
+}
+
+func okLoopCarriedRangeSlice(xs []int, out []int) []int {
+	from := 0
+	for i := range xs {
+		to := from + 1
+		out[i] = to
+		from = to
+	}
+	return out
+}
+
+func okLoopCarriedWhile(n int, out []int) []int {
+	from := 0
+	i := 0
+	for i < n {
+		to := from + 1
+		out[i] = to
+		from = to
+		i++
+	}
+	return out
+}
+
+// A local that is *free* in a func literal: the store looks dead in the
+// enclosing function's NaiveForm SSA because only the closure reads it. This
+// is the shape the capture guard exists for (traefik's `bodySize = …` read by
+// `for range bodySize` inside `next`), and narrowing the guard to free
+// variables must keep all four arms silent.
+func okFreeInLit(n int) func() int {
+	size := 0
+	size = n
+	return func() int { return size }
+}
+
+func okFreeInGo(n int) {
+	size := 0
+	size = n
+	go func() { _ = size }()
+}
+
+func okFreeInDefer(n int) {
+	size := 0
+	size = n
+	defer func() { _ = size }()
+}
+
+// `mid` belongs to the outer literal and only the inner one reads it, so it is
+// free in the inner literal — which is the pass that must put it in the set.
+func okFreeInNestedLit(n int) func() func() int {
+	return func() func() int {
+		mid := 0
+		mid = n
+		return func() int { return mid }
+	}
+}
+
+// A literal-local that is read inside the same literal, next to an outer local
+// the literal writes: neither is wasted.
+func okLitLocalRead(n int, f func(func())) int {
+	outer := 0
+	f(func() {
+		inner := n
+		outer = inner
+	})
+	return outer
+}
+
+// `break` and `continue` leave a loop but stay in the function, so a read after
+// the loop *is* reachable — only `return` cuts the function off.
+func okBreakThenRead(xs []int) int {
+	offset := 0
+	for _, x := range xs {
+		if x == 0 {
+			offset += 1
+			break
+		}
+	}
+	return offset
+}
+
+func okContinueThenRead(xs []int) int {
+	offset := 0
+	for _, x := range xs {
+		if x == 0 {
+			offset += 1
+			continue
+		}
+		offset += 2
+	}
+	return offset
+}
+
+// The read sits inside the returning block, before the `return`.
+func okReadInsideBeforeReturn(buf []byte) int64 {
+	var offset int64
+	if len(buf) == 0 {
+		offset += int64(len(buf))
+		return offset
+	}
+	return 0
+}

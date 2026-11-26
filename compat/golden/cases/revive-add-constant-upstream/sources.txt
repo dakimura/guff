@@ -1,0 +1,6 @@
+# revive v1.17.1's add_constant_default.go and add_constant_nested_call.go (vars.go only declares what they assign), plus shapes/.
+default/add_constant_default.go               crates/guff-revive/tests/testdata/revive/add-constant-upstream-v1.17.1/default/add_constant_default.go
+default/vars.go                               crates/guff-revive/tests/testdata/revive/add-constant-upstream-v1.17.1/default/vars.go
+nested_call/add_constant_nested_call.go       crates/guff-revive/tests/testdata/revive/add-constant-upstream-v1.17.1/nested_call/add_constant_nested_call.go
+shapes/shapes.go                              crates/guff-revive/tests/testdata/revive/add-constant-upstream-v1.17.1/shapes/shapes.go
+shapes/other.go                               crates/guff-revive/tests/testdata/revive/add-constant-upstream-v1.17.1/shapes/other.go

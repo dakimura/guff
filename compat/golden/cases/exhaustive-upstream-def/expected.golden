@@ -1,0 +1,10 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh exhaustive-upstream-def
+# Produced by running golangci-lint on compat/golden/cases/exhaustive-upstream-def/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+check/swtch/def/file.go:24:2:exhaustive::missing cases in expression switch: x0
+check/swtch/def/file.go:33:2:exhaustive::missing cases in expression switch: x0, x1

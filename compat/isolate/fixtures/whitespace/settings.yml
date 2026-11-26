@@ -1,0 +1,4 @@
+# `multi-if` gates the third message ("multi-line statement should be followed
+# by a newline"); without it two of the three are unreachable.
+multi-if: true
+multi-func: true

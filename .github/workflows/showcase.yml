@@ -1,0 +1,71 @@
+name: OSS Showcase (compat + benchmarks)
+
+on:
+  schedule:
+    # 05:15 UTC daily
+    - cron: "15 5 * * *"
+  workflow_dispatch:
+
+# Same toolchain contract as compat.yml — see the comment there for why the
+# version lives in `.go-version` and why `auto` desyncs guff's stdlib from the
+# one `go list` used.
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  nightly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: .go-version
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install golangci-lint
+        run: |
+          # master/install.sh is stale; use the current install script.
+          # The version lives in compat/pins.json, not here. It used to be a
+          # literal in five steps across two workflows, and a job left behind on
+          # an older binary compares against something nobody thinks is the
+          # baseline while still printing OK.
+          V="$(python3 -c 'import json;print(json.load(open("compat/pins.json"))["golangci_lint"])')"
+          curl -sSfL https://golangci-lint.run/install.sh \
+            | sh -s -- -b "$HOME/.local/bin" "v$V"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build guff
+        run: cargo build --release --locked -p guff-lint
+
+      - name: Cache OSS corpus clones
+        uses: actions/cache@v4
+        with:
+          path: corpus/cache
+          key: corpus-nightly-${{ hashFiles('corpus/repos.json') }}
+          restore-keys: |
+            corpus-nightly-
+            corpus-pr-
+
+      - name: Compat OSS (nightly tier, own-config)
+        run: ./compat/run.sh --oss --tier nightly
+
+      - name: Benchmarks OSS (pr + nightly, own-config)
+        run: ./benchmarks/run.sh --oss --tier pr,nightly --quick
+
+      - name: Upload showcase artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oss-showcase
+          path: |
+            compat/results/RESULTS.md
+            benchmarks/results/RESULTS.md
+            benchmarks/results/SCOREBOARD.md
+            benchmarks/results/*.md
+            benchmarks/results/*.tsv
+          if-no-files-found: warn

@@ -1,0 +1,27 @@
+# Golden case: iface v1.5.1's unused/testdata (golangci-lint 2.14.0) — the
+# per-spec //iface:ignore, the fix range including the doc comment, and the
+# exclude flag (upstream's test sets `excludepkg`; the module is named so the
+# root package has that path). Spaces and an empty entry exercise the
+# TrimSpace / empty removal.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - iface
+  settings:
+    iface:
+      enable:
+        - unused
+      settings:
+        unused:
+          exclude: " excludepkg , ,other"
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

@@ -1,0 +1,599 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh staticcheck-s
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/staticcheck-s/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.15.0
+
+--- a/s1001/bad/bad.go
++++ b/s1001/bad/bad.go
+@@ -1,9 +1,7 @@
+ package main
+ 
+ func f(dst, src []int) {
+-	for i, v := range src {
+-		dst[i] = v
+-	}
++	copy(dst, src)
+ }
+ 
+ // Until 2026-08-27 this fixture held only the slice-to-slice range above, so
+@@ -12,39 +10,27 @@
+ // by nothing.
+ 
+ func indexForm(dst, src []int) {
+-	for i := range src {
+-		dst[i] = src[i]
+-	}
++	copy(dst, src)
+ }
+ 
+ func threeClause(dst, src []int) {
+-	for i := 0; i < len(src); i++ {
+-		dst[i] = src[i]
+-	}
++	copy(dst, src)
+ }
+ 
+ func arrayToArray(dst, src [4]int) {
+-	for i, v := range src {
+-		dst[i] = v
+-	}
++	dst = src
+ }
+ 
+ func arrayToSlice(dst []int, src [4]int) {
+-	for i, v := range src {
+-		dst[i] = v
+-	}
++	copy(dst, src[:])
+ }
+ 
+ func sliceToArray(dst [4]int, src []int) {
+-	for i, v := range src {
+-		dst[i] = v
+-	}
++	copy(dst[:], src)
+ }
+ 
+ func pointerToArray(dst, src *[4]int) {
+-	for i, v := range src {
+-		dst[i] = v
+-	}
++	*dst = *src
+ }
+ 
+ // The same binding on both sides still matches when it is not a bare
+@@ -56,13 +42,9 @@
+ var c holder
+ 
+ func selectorSource(dst []int) {
+-	for i := range c.metas {
+-		dst[i] = c.metas[i]
+-	}
++	copy(dst, c.metas)
+ }
+ 
+ func valueFormOverDst(dst []int) {
+-	for i, v := range dst {
+-		dst[i] = v
+-	}
++	copy(dst, dst)
+ }
+--- a/s1001/shadow/shadow.go
++++ b/s1001/shadow/shadow.go
+@@ -13,9 +13,7 @@
+ 
+ // 1. plain: reported
+ func Plain(dst, src []string) {
+-	for i := range src {
+-		dst[i] = src[i]
+-	}
++	copy(dst, src)
+ }
+ 
+ // 2. a local named `copy` shadows the builtin: silent (datadog's DeepCopy)
+@@ -37,9 +35,7 @@
+ 
+ // 4. the shadow is declared *after* the loop: still the builtin at the loop
+ func ShadowedAfter(dst, src []string) int {
+-	for i := range src {
+-		dst[i] = src[i]
+-	}
++	copy(dst, src)
+ 	copy := 1
+ 	return copy
+ }
+@@ -50,16 +46,12 @@
+ 		copy := 2
+ 		_ = copy
+ 	}
+-	for i := range src {
+-		dst[i] = src[i]
+-	}
++	copy(dst, src)
+ }
+ 
+ // 6. arrays: the other branch, which has no builtin guard
+ func ArraysShadowed(dst, src *[4]byte) {
+ 	copy := 3
+ 	_ = copy
+-	for i := range src {
+-		dst[i] = src[i]
+-	}
++	*dst = *src
+ }
+--- a/s1002/bad/bad.go
++++ b/s1002/bad/bad.go
+@@ -1,10 +1,10 @@
+ package main
+ 
+ func f(x bool) {
+-	if x == true {
++	if x {
+ 		_ = x
+ 	}
+-	if x == false {
++	if !x {
+ 		_ = x
+ 	}
+ }
+--- a/s1002/shapes/shapes.go
++++ b/s1002/shapes/shapes.go
+@@ -20,18 +20,18 @@
+ )
+ 
+ func shapes(s S, b bool, ptr *bool, k string) {
+-	_ = b == true
+-	_ = b == false
+-	_ = !b == true
+-	_ = s.B == true
+-	_ = s.M() == true
+-	_ = g() == false
+-	_ = *ptr == false
+-	_ = arr[0] == true
+-	_ = m[k] == false
+-	_ = (<-ch) == true
+-	_ = (b && s.B) == false
+-	_ = i.(bool) == true
+-	_ = (b) == false
+-	_ = ((!b)) == true
++	_ = b
++	_ = !b
++	_ = !b
++	_ = s.B
++	_ = s.M()
++	_ = !g()
++	_ = !*ptr
++	_ = arr[0]
++	_ = !m[k]
++	_ = (<-ch)
++	_ = !(b && s.B)
++	_ = i.(bool)
++	_ = !(b)
++	_ = (!b)
+ }
+--- a/s1003/bad/bad.go
++++ b/s1003/bad/bad.go
+@@ -6,12 +6,12 @@
+ )
+ 
+ func f(s string, b []byte) {
+-	if strings.Index(s, "x") != -1 {
++	if strings.Contains(s, "x") {
+ 	}
+-	if strings.Index(s, "x") == -1 {
++	if !strings.Contains(s, "x") {
+ 	}
+-	if strings.IndexRune(s, 'x') > -1 {
++	if strings.ContainsRune(s, 'x') {
+ 	}
+-	if bytes.Index(b, []byte("x")) >= 0 {
++	if bytes.Contains(b, []byte("x")) {
+ 	}
+ }
+--- a/s1004/bad/bad.go
++++ b/s1004/bad/bad.go
+@@ -3,5 +3,5 @@
+ import "bytes"
+ 
+ func f(a, b []byte) bool {
+-	return bytes.Compare(a, b) == 0
++	return bytes.Equal(a, b)
+ }
+--- a/s1004/literal/literal.go
++++ b/s1004/literal/literal.go
+@@ -8,8 +8,8 @@
+ // a named constant that holds zero is not one.
+ func compares(a, b []byte) {
+ 	// Reported.
+-	_ = bytes.Compare(a, b) == 0
+-	_ = bytes.Compare(a, b) == (0)
++	_ = bytes.Equal(a, b)
++	_ = bytes.Equal(a, b)
+ 	// Silent.
+ 	_ = bytes.Compare(a, b) == zero
+ 	_ = bytes.Compare(a, b) == 1-1
+--- a/s1005/bad/bad.go
++++ b/s1005/bad/bad.go
+@@ -1,7 +1,7 @@
+ package main
+ 
+ func f(ch chan int) {
+-	_ = <-ch
++	<-ch
+ }
+ 
+ // The three range shapes. Until 2026-08-27 this fixture held only the channel
+@@ -12,19 +12,19 @@
+ // `for _ := range` and `for _, _ := range` with "no new variables on left side
+ // of :=". That is why upstream's `rs.TokPos + 1` deletion is safe.
+ func rangeBlankKey(xs []int) {
+-	for _ = range xs {
++	for range xs {
+ 		_ = 1
+ 	}
+ }
+ 
+ func rangeBlankBoth(xs []int) {
+-	for _, _ = range xs {
++	for range xs {
+ 		_ = 1
+ 	}
+ }
+ 
+ func rangeBlankValue(xs []int) {
+-	for i, _ := range xs {
++	for i := range xs {
+ 		_ = i
+ 	}
+ }
+@@ -50,6 +50,6 @@
+ 
+ // The receive arm in its two-name form; the file only had `_ = <-ch`.
+ func receiveDeclare(ch chan int) int {
+-	v, _ := <-ch
++	v := <-ch
+ 	return v
+ }
+--- a/s1009generated/mixed.go
++++ b/s1009generated/mixed.go
+@@ -12,7 +12,7 @@
+ type str string
+ 
+ func mixed(n named, s str, b []byte) {
+-	_ = fmt.Sprintf("%s", n)        // S1025, String(): not filtered upstream
++	_ = n.String()                  // S1025, String(): not filtered upstream
+ 	_ = fmt.Sprintf("%s", s)        // S1025, underlying string: filtered
+ 	fmt.Print(fmt.Sprintf("%d", 1)) // S1038, fmt.Print: filtered
+ 	log.Print(fmt.Sprintf("%d", 1)) // S1038, log package: not filtered
+--- a/s1010/bad/bad.go
++++ b/s1010/bad/bad.go
+@@ -1,3 +1,3 @@
+ package main
+ 
+-func f(s []int) []int { return s[1:len(s)] }
++func f(s []int) []int { return s[1:] }
+--- a/s1011/bad/bad.go
++++ b/s1011/bad/bad.go
+@@ -13,50 +13,35 @@
+ 
+ func plainIdentifier(src []string) []string {
+ 	var dst []string
+-	for _, v := range src {
+-		dst = append(dst, v)
+-	}
++	dst = append(dst, src...)
+ 	return dst
+ }
+ 
+ func selector(h *holder, src []string) {
+-	for _, v := range src {
+-		h.items = append(h.items, v)
+-	}
++	h.items = append(h.items, src...)
+ }
+ 
+ func index(m map[string][]string, k string, src []string) {
+-	for _, v := range src {
+-		m[k] = append(m[k], v)
+-	}
++	m[k] = append(m[k], src...)
+ }
+ 
+ func indexThroughAParenthesisedDeref(t *tags, k string, src []string) {
+-	for _, v := range src {
+-		(*t)[k] = append((*t)[k], v)
+-	}
++	(*t)[k] = append((*t)[k], src...)
+ }
+ 
+ // A value-based loop evaluates x once, so an impure x is fine here.
+ func rangingOverACall(h *holder) {
+-	for _, v := range makeSrc() {
+-		h.items = append(h.items, v)
+-	}
++	h.items = append(h.items, makeSrc()...)
+ }
+ 
+ // The index-based arm, on a pure operand.
+ func indexBasedLoop(src []string) []string {
+ 	var dst []string
+-	for i := range src {
+-		dst = append(dst, src[i])
+-	}
++	dst = append(dst, src...)
+ 	return dst
+ }
+ 
+ // The index-based arm with the intermediate assignment, and a selector.
+ func indexBasedLoopWithATemporary(src []string, h *holder) {
+-	for i := range src {
+-		v := src[i]
+-		h.items = append(h.items, v)
+-	}
++	h.items = append(h.items, src...)
+ }
+--- a/s1012/bad/bad.go
++++ b/s1012/bad/bad.go
+@@ -2,4 +2,4 @@
+ 
+ import "time"
+ 
+-func f(t time.Time) time.Duration { return time.Now().Sub(t) }
++func f(t time.Time) time.Duration { return time.Since(t) }
+--- a/s1016/bad/bad.go
++++ b/s1016/bad/bad.go
+@@ -1,8 +1,14 @@
+ package main
+ 
+-type T1 struct{ A int; B string }
+-type T2 struct{ A int; B string }
++type T1 struct {
++	A int
++	B string
++}
++type T2 struct {
++	A int
++	B string
++}
+ 
+ func f(x T1) T2 {
+-	return T2{A: x.A, B: x.B}
++	return T2(x)
+ }
+--- a/s1018/bad/bad.go
++++ b/s1018/bad/bad.go
+@@ -1,7 +1,5 @@
+ package main
+ 
+ func f(bs []byte, offset, n int) {
+-	for i := 0; i < n; i++ {
+-		bs[i] = bs[offset+i]
+-	}
++	copy(bs[:n], bs[offset:])
+ }
+--- a/s1021/bad/bad.go
++++ b/s1021/bad/bad.go
+@@ -1,8 +1,7 @@
+ package main
+ 
+ func f() {
+-	var x uint
+-	x = 1
++	var x uint = 1
+ 	_ = x
+ 
+ 	var y int
+--- a/s1024/bad/bad.go
++++ b/s1024/bad/bad.go
+@@ -2,4 +2,4 @@
+ 
+ import "time"
+ 
+-func f(t time.Time) time.Duration { return t.Sub(time.Now()) }
++func f(t time.Time) time.Duration { return time.Until(t) }
+--- a/s1025/bad/bad.go
++++ b/s1025/bad/bad.go
+@@ -24,26 +24,26 @@
+ 
+ // A named string type with a String method: the Stringer branch, not the
+ // underlying-string one. boundary's credential.Password is this shape.
+-func stringWithStringMethod(v strStringer) string { return fmt.Sprintf("%s", v) }
++func stringWithStringMethod(v strStringer) string { return v.String() }
+ 
+ // A named byte slice with a String method: nothing else reported this at all.
+-func byteSliceWithStringMethod(v bytesStringer) string { return fmt.Sprintf("%s", v) }
++func byteSliceWithStringMethod(v bytesStringer) string { return v.String() }
+ 
+ // A struct pointer with a String method: no other branch could apply.
+-func structPointerWithStringMethod(v *structStringer) string { return fmt.Sprintf("%s", v) }
++func structPointerWithStringMethod(v *structStringer) string { return v.String() }
+ 
+ // The interface itself — the one shape the old name test did catch.
+-func theInterfaceItself(v fmt.Stringer) string { return fmt.Sprintf("%s", v) }
++func theInterfaceItself(v fmt.Stringer) string { return v.String() }
+ 
+ // Below the Stringer branch, in upstream's order.
+ 
+-func alreadyAString(v string) string { return fmt.Sprintf("%s", v) }
++func alreadyAString(v string) string { return v }
+ 
+-func underlyingIsAString(v plainStr) string { return fmt.Sprintf("%s", v) }
++func underlyingIsAString(v plainStr) string { return string(v) }
+ 
+-func namedByteSlice(v plainBytes) string { return fmt.Sprintf("%s", v) }
++func namedByteSlice(v plainBytes) string { return string(v) }
+ 
+-func plainByteSlice(v []byte) string { return fmt.Sprintf("%s", v) }
++func plainByteSlice(v []byte) string { return string(v) }
+ 
+ type ptrFormatter struct{}
+ 
+@@ -54,4 +54,4 @@
+ // not apply and the Stringer branch reports. The pointer form is in ok.go. This
+ // pair is what pins the skip to the argument's own method set rather than to
+ // the addressable one.
+-func formatOnPointerPassedByValue(v ptrFormatter) string { return fmt.Sprintf("%s", v) }
++func formatOnPointerPassedByValue(v ptrFormatter) string { return v.String() }
+--- a/s1028/bad/bad.go
++++ b/s1028/bad/bad.go
+@@ -1,5 +1,8 @@
+ package main
+ 
+-import ("errors"; "fmt")
++import (
++	"errors"
++	"fmt"
++)
+ 
+ func f() error { return errors.New(fmt.Sprintf("x")) }
+--- a/s1030/bad/bad.go
++++ b/s1030/bad/bad.go
+@@ -2,10 +2,10 @@
+ 
+ import "bytes"
+ 
+-func f(buf bytes.Buffer) string { return string(buf.Bytes()) }
++func f(buf bytes.Buffer) string { return buf.String() }
+ 
+-func g(buf *bytes.Buffer) []byte { return []byte(buf.String()) }
++func g(buf *bytes.Buffer) []byte { return buf.Bytes() }
+ 
+-func h(buf bytes.Buffer) []byte { return []byte(buf.String()) }
++func h(buf bytes.Buffer) []byte { return buf.Bytes() }
+ 
+-func sel(w struct{ B bytes.Buffer }) string { return string(w.B.Bytes()) }
++func sel(w struct{ B bytes.Buffer }) string { return w.B.String() }
+--- a/s1033/bad/bad.go
++++ b/s1033/bad/bad.go
+@@ -1,7 +1,5 @@
+ package main
+ 
+ func f(m map[string]int, k string) {
+-	if _, ok := m[k]; ok {
+-		delete(m, k)
+-	}
++	delete(m, k)
+ }
+--- a/s1034/bad/bad.go
++++ b/s1034/bad/bad.go
+@@ -1,8 +1,8 @@
+ package main
+ 
+ func f(i interface{}) {
+-	switch i.(type) {
++	switch i := i.(type) {
+ 	case int:
+-		_ = i.(int)
++		_ = i
+ 	}
+ }
+--- a/s1035/bad/bad.go
++++ b/s1035/bad/bad.go
+@@ -2,4 +2,4 @@
+ 
+ import "net/http"
+ 
+-func f(h http.Header) { h.Set(http.CanonicalHeaderKey("X"), "v") }
++func f(h http.Header) { h.Set("X", "v") }
+--- a/s1035/receivers/receivers.go
++++ b/s1035/receivers/receivers.go
+@@ -43,15 +43,15 @@
+ 
+ // reported as (net/http.Header).Del: the callee is the promoted method
+ func promoted(w wrapper) {
+-	w.Del(http.CanonicalHeaderKey("X-Foo"))
++	w.Del("X-Foo")
+ }
+ 
+ // reported, all four
+ func direct(h http.Header) {
+-	h.Set(http.CanonicalHeaderKey("X-Foo"), "v")
+-	h.Add(http.CanonicalHeaderKey("X-Foo"), "v")
+-	_ = h.Get(http.CanonicalHeaderKey("X-Foo"))
+-	h.Del(http.CanonicalHeaderKey("X-Foo"))
++	h.Set("X-Foo", "v")
++	h.Add("X-Foo", "v")
++	_ = h.Get("X-Foo")
++	h.Del("X-Foo")
+ }
+ 
+ // silent: nothing to do with net/http
+--- a/s1036/bad/bad.go
++++ b/s1036/bad/bad.go
+@@ -1,11 +1,7 @@
+ package main
+ 
+ func f(m map[string][]int, k string, v int) {
+-	if _, ok := m[k]; ok {
+-		m[k] = append(m[k], v)
+-	} else {
+-		m[k] = []int{v}
+-	}
++	m[k] = append(m[k], v)
+ }
+ 
+ // The `+=` and `++` alternatives of upstream's query. Both were unreachable in
+@@ -13,15 +9,7 @@
+ // *node id*, which two distinct nodes never share, so the arms could not fire
+ // and no fixture noticed (COMPAT-HARDENING §4).
+ func counters(m map[string]int, k string, v int) {
+-	if _, ok := m[k]; ok {
+-		m[k] += v
+-	} else {
+-		m[k] = v
+-	}
++	m[k] += v
+ 
+-	if _, ok := m[k]; ok {
+-		m[k]++
+-	} else {
+-		m[k] = 1
+-	}
++	m[k]++
+ }
+--- a/s1037/bad/bad.go
++++ b/s1037/bad/bad.go
+@@ -7,9 +7,7 @@
+ // clause. The body may be empty or not — upstream only uses that to decide
+ // whether it can offer a fix.
+ func f() {
+-	select {
+-	case <-time.After(time.Second):
+-	}
++	time.Sleep(time.Second)
+ }
+ 
+ func g() {
+--- a/s1038/bad/bad.go
++++ b/s1038/bad/bad.go
+@@ -7,7 +7,7 @@
+ 	"testing"
+ )
+ 
+-func f() { fmt.Print(fmt.Sprintf("hi")) }
++func f() { fmt.Print("hi") }
+ 
+ // Upstream's three arms, measured against staticcheck 2.12.2 on 2026-09-21.
+ // The one line above is `fmt.Print` and nothing else: every shape below was
+@@ -60,7 +60,7 @@
+ 	t.Skip(fmt.Sprintf("a %v", err))
+ 	tb.Error(fmt.Sprintf("a %v", err))
+ 	// Silent: `Errorf` is not a key of the mapping.
+-	t.Errorf(fmt.Sprintf("a %v", err))
++	t.Error(fmt.Sprintf("a %v", err))
+ }
+ 
+ type svc struct{ logger *log.Logger }
+--- a/s1039/bad/bad.go
++++ b/s1039/bad/bad.go
+@@ -2,4 +2,4 @@
+ 
+ import "fmt"
+ 
+-func f() { _ = fmt.Sprint("hi") }
++func f() { _ = "hi" }

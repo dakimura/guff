@@ -1,0 +1,69 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/guff-ast",
+    "crates/guff-build",
+    "crates/guff-packages",
+    "crates/guff-constant",
+    "crates/guff-gover",
+    "crates/guff-goversion",
+    "crates/guff-types",
+    "crates/guff-types-errors",
+    "crates/guff-exportdata",
+    "crates/guff-gostd",
+    "crates/guff-stdlib",
+    "crates/guff-pattern",
+    "crates/guff-analysis",
+    "crates/guff-runner",
+    "crates/guff-staticcheck",
+    "crates/guff-govet",
+    "crates/guff-errcheck",
+    "crates/guff-ineffassign",
+    "crates/guff-unused",
+    "crates/guff-gostaticanalysis",
+    "crates/guff-error",
+    "crates/guff-context",
+    "crates/guff-style",
+    "crates/guff-comment",
+    "crates/guff-import",
+    "crates/guff-misspell",
+    "crates/guff-dupl",
+    "crates/guff-revive",
+    "crates/guff-fmt",
+    "crates/guff-golist",
+    "crates/guff-lint",
+    "crates/guff-plugin",
+    "crates/guff-plugin-example",
+    "crates/guff-ssa",
+    "crates/guff-version",
+]
+
+[workspace.package]
+version = "0.8.0"
+edition = "2021"
+license = "GPL-3.0-only"
+
+# Release profile tuned for a latency-sensitive CLI. `lto = "fat"` and
+# `codegen-units = 1` trade longer build times for a faster binary (measurable
+# on the parse/typecheck hot path). `panic = "unwind"` is kept deliberately:
+# guff-lint isolates linter panics with `catch_unwind`, so `"abort"` would break
+# per-linter fault isolation.
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "unwind"
+strip = true
+
+# Sampling-profiler profile (samply / Instruments). Identical codegen to
+# `release` but keeps symbols so stacks are readable. Never measure regress wall
+# times with this profile: `strip = false` / `debug = 1` change the binary size,
+# so the numbers do not match `target/release/guff`. See docs/DEVELOPMENT.md §9.3.
+[profile.profiling]
+inherits = "release"
+strip = false
+debug = 1
+
+# Faster iteration for benchmarks without full release build times.
+[profile.bench]
+inherits = "release"

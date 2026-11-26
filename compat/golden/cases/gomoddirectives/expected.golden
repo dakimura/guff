@@ -1,0 +1,12 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh gomoddirectives
+# Produced by running golangci-lint on compat/golden/cases/gomoddirectives/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+go.mod:10:1:gomoddirectives::replacement are not allowed: example.com/y
+go.mod:12:1:gomoddirectives::exclude directive is not allowed
+go.mod:14:1:gomoddirectives::a comment is mandatory to explain why the version has been retracted
+go.mod:16:1:gomoddirectives::toolchain directive is not allowed

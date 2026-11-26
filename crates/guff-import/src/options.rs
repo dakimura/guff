@@ -1,0 +1,139 @@
+//! Pass-time options for import linters (`linters.settings.*`).
+
+/// `linters.settings.depguard` / `linters-settings.depguard`.
+///
+/// Empty `rules` → golangci default: one `Main` rule allowing only `$gostd`.
+///
+/// DEFERRED: path placeholders `${base-path}` / `${config-path}`; full glob
+/// library parity for exotic `files` patterns.
+#[derive(Debug, Clone, Default)]
+pub struct DepguardOptions {
+    pub rules: Vec<DepguardRule>,
+}
+
+/// One named depguard rule (YAML map key under `rules:`).
+#[derive(Debug, Clone)]
+pub struct DepguardRule {
+    pub name: String,
+    /// `original` (default) / `strict` / `lax`.
+    pub list_mode: ListMode,
+    /// File matchers (`$all`, `$test`, `!$test`, globs). Empty → `$all`.
+    pub files: Vec<String>,
+    pub allow: Vec<String>,
+    pub deny: Vec<DenyEntry>,
+}
+
+impl Default for DepguardRule {
+    fn default() -> Self {
+        Self {
+            name: "Main".into(),
+            list_mode: ListMode::Original,
+            files: Vec::new(),
+            allow: vec!["$gostd".into()],
+            deny: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ListMode {
+    #[default]
+    Original,
+    Strict,
+    Lax,
+}
+
+impl ListMode {
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "strict" => Self::Strict,
+            "lax" => Self::Lax,
+            _ => Self::Original,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct DenyEntry {
+    pub pkg: String,
+    pub desc: String,
+}
+
+/// `linters.settings.gomoddirectives` / `linters-settings.gomoddirectives`.
+///
+/// Defaults match golangci-lint (all forbid flags false; empty allow-list).
+///
+/// DEFERRED: `ignore-forbidden`, `toolchain-pattern`, `go-version-pattern`,
+/// `check-module-path`.
+#[derive(Debug, Clone, Default)]
+pub struct GomoddirectivesOptions {
+    /// When true, every `replace` directive is allowed (gomoddirectives v0.9.0,
+    /// golangci-lint 2.13.0). Identical and duplicate replaces are still
+    /// reported: the option short-circuits only the allow / local decision.
+    pub replace_allow_all: bool,
+    /// When true, local `replace` directives are allowed.
+    pub replace_local: bool,
+    /// Module paths whose `replace` is allowed even when replaces are forbidden.
+    pub replace_allow_list: Vec<String>,
+    /// When true, `retract` without a rationale comment is allowed.
+    pub retract_allow_no_explanation: bool,
+    pub exclude_forbidden: bool,
+    pub toolchain_forbidden: bool,
+    pub tool_forbidden: bool,
+    pub go_debug_forbidden: bool,
+    /// golangci-lint 2.13.0 passes `ignore-forbidden` through; 2.12 had the
+    /// key in its config struct and dropped it on the way to the analyzer.
+    pub ignore_forbidden: bool,
+}
+
+/// `linters.settings.gomodguard` / `gomodguard_v2`.
+///
+/// Defaults (empty blocked, `local_replace_directives=false`) report nothing.
+///
+/// DEFERRED: allowed modules/domains, version constraints, `match-type`
+/// (`prefix` / `regex`).
+#[derive(Clone, Debug, Default)]
+pub struct GomodguardOptions {
+    /// Blocked module entries (exact / prefix of the import's module).
+    pub blocked_modules: Vec<BlockedModule>,
+    /// When true, imports of modules with a local `replace` are blocked.
+    pub local_replace_directives: bool,
+}
+
+/// One `gomodguard.blocked[]` entry (`blocked.modules[]` in the v1 shape).
+///
+/// `recommendations` and `reason` both feed `BlockedModule.BlockReason`, which
+/// spells them as separate sentences; see `gomodguard::block_reason`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BlockedModule {
+    /// Module path, matched against the import's module.
+    pub module: String,
+    /// Modules to use instead.
+    pub recommendations: Vec<String>,
+    /// Free text appended as its own sentence.
+    pub reason: String,
+}
+
+/// `linters.settings.importas` / `linters-settings.importas`.
+///
+/// Defaults (empty alias, flags false) report nothing until aliases are
+/// configured. Package patterns are compiled as `^pkg$` and may use capture
+/// groups with `$1`-style replacements in `alias`.
+///
+/// DEFERRED: use-site renames in SuggestedFix (`types.Info.Uses`).
+#[derive(Clone, Debug, Default)]
+pub struct ImportasOptions {
+    /// Required `(pkg pattern, alias)` pairs (order matters for first match).
+    pub alias: Vec<ImportasAlias>,
+    /// Report imports that match a rule but have no alias (`no-unaliased`).
+    pub no_unaliased: bool,
+    /// Report aliases that are not covered by any rule (`no-extra-aliases`).
+    pub no_extra_aliases: bool,
+}
+
+/// One `importas.alias[]` entry.
+#[derive(Clone, Debug, Default)]
+pub struct ImportasAlias {
+    pub pkg: String,
+    pub alias: String,
+}

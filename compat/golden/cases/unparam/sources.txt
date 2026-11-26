@@ -1,0 +1,17 @@
+# The fixtures the Rust tests use, so the two cannot drift.
+bad/bad.go   crates/guff-style/tests/testdata/unparam/bad.go
+ok/ok.go     crates/guff-style/tests/testdata/unparam/ok.go
+# Variadic parameters and func literals — two shapes `bad.go` has none of, and
+# each of the ways upstream can (and cannot) follow a literal's value back to
+# its function.
+literal/literal.go   crates/guff-style/tests/testdata/unparam/literal.go
+
+# The zero constant a call site can spell two ways.
+zeroconst/zeroconst.go   crates/guff-style/tests/testdata/unparam/zeroconst.go
+
+# Which type an interface method belongs to.
+ifacename/ifacename.go   crates/guff-style/tests/testdata/unparam/ifacename.go
+
+# The conversion that records an implementation can happen at a call to a
+# generic function, whose callee has no `Info.Types` entry.
+genericiface/genericiface.go   crates/guff-style/tests/testdata/unparam/genericiface.go

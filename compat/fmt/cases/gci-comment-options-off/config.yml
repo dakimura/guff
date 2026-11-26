@@ -1,0 +1,6 @@
+# The same input as gci-comment-options-on with neither option: the pair shows
+# the options change nothing.
+version: "2"
+formatters:
+  enable:
+    - gci

@@ -1,0 +1,12 @@
+# Source: guff testdata for ginkgolinter settings
+version: "2"
+
+linters:
+  enable:
+    - ginkgolinter
+  settings:
+    ginkgolinter:
+      suppress-len-assertion: true
+      allow-havelen-zero: true
+      forbid-focus-container: true
+      force-expect-to: true

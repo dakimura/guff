@@ -1,0 +1,5 @@
+// Stub for the third-party import group. goimports never reads the package
+// body; it only needs the path to resolve.
+package pkg
+
+const Name = "third"

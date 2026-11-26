@@ -1,0 +1,27 @@
+# Golden case: modernize's `omitzero`, and the kubebuilder package it stays out
+# of.
+#
+# kubebuilder has its own interpretation of the `omitzero` tag
+# (go.dev/issue/76649), so upstream returns before reporting as soon as any
+# comment in the *package* contains `+kubebuilder:` — for the whole package,
+# not just the fields near a marker. dapr's `pkg/apis/**` are CRD types of
+# exactly this shape, and guff reported 24 findings there that golangci-lint
+# does not make.
+#
+# Both halves are materialized so the case cannot pass by reporting nothing
+# anywhere: the marked package must be silent and the identical unmarked one
+# must not.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - modernize
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

@@ -1,0 +1,4 @@
+# A 60-column budget so a normal-looking signature is over the limit; the
+# default is 100 and the fixture would have to be absurd to cross it.
+golines:
+  max-len: 60

@@ -1,0 +1,15 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# COMPAT-HARDENING Phase 4. Same file list as the four `exclusions` cases: this
+# one measures `issues.uniq-by-line`, and the exclusions fixture is where the
+# line collisions are (a gosec G104 and an errcheck finding on the same call, a
+# govet/unsafeptr and a gosec G103 on the same conversion, revive and
+# staticcheck on the same package clause). The baseline for the diff is
+# `cases/exclusions`, which is the same config with `uniq-by-line: false`.
+
+cmd/cmd.go              crates/guff-lint/tests/testdata/exclusionsem/cmd/cmd.go
+internal/tool/tool.go   crates/guff-lint/tests/testdata/exclusionsem/internal/tool/tool.go
+source/source.go        crates/guff-lint/tests/testdata/exclusionsem/source/source.go
+presets/presets.go      crates/guff-lint/tests/testdata/exclusionsem/presets/presets.go
+presetdoc/presetdoc.go  crates/guff-lint/tests/testdata/exclusionsem/presetdoc/presetdoc.go

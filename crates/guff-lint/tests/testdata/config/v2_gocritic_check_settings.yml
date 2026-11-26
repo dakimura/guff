@@ -1,0 +1,17 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - gocritic
+  settings:
+    gocritic:
+      enabled-checks:
+        - tooManyResultsChecker
+        - unnamedResult
+      settings:
+        tooManyResultsChecker:
+          maxResults: 10
+        ifElseChain:
+          minThreshold: 4
+        unnamedResult:
+          checkExported: true

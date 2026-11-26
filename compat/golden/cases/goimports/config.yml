@@ -1,0 +1,33 @@
+# Golden case: goimports with `local-prefixes`.
+#
+# There was no goimports case at all, and the formatter tier's other cases only
+# ever delete or replace lines — so the arm that decides where a *pure
+# insertion* is reported was never measured. golangci-lint merges an addition
+# with no deletion in front of it into the last original line
+# (`pkg/goformatters/internal/diff.go`, `handleAddedOnlyLines`), so the finding
+# lands above the inserted line; guff reported the line below it.
+#
+# The third-party module is stubbed and `replace`d in so no network is needed,
+# and the local prefix sorts *after* it — otherwise plain gofmt would reorder
+# the two paths and the change would be a replacement, not an insertion.
+version: "2"
+
+linters:
+  default: none
+
+formatters:
+  enable:
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - zlocal.example
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

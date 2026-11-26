@@ -1,0 +1,5 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# The same fixture as the `perfsprint` case, read with `sprintf1: false`.
+bad.go  compat/isolate/fixtures/perfsprint/bad.go

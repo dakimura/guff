@@ -1,0 +1,35 @@
+# Golden case: both `issues.max-*` limits at once (COMPAT-HARDENING Phase 4).
+#
+# The two limits are not independent, and this case exists for the order they
+# run in. `Runner`'s pipeline is
+#
+#     UniqByLine -> MaxPerFileFromLinter -> MaxSameIssues -> MaxFromLinter
+#
+# so the per-text cut happens *first* and the per-linter counter only ever sees
+# what survived it. With `max-same-issues: 1` errcheck is already down to two
+# findings before `max-issues-per-linter: 3` looks at it, and nothing more is
+# dropped.
+#
+# Run them the other way round and the same config answers differently: the
+# per-linter cut keeps errcheck's first three findings, all of which share a
+# text, and the per-text cut then leaves exactly one. Two orders, 3 findings
+# versus 2 — which is what this golden pins.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+  settings:
+    govet:
+      enable:
+        - printf
+
+issues:
+  max-issues-per-linter: 3
+  max-same-issues: 1
+  uniq-by-line: false
+
+run:
+  timeout: 5m

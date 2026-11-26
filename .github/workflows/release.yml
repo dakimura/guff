@@ -1,0 +1,223 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  CARGO_TERM_COLOR: always
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-binaries:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            os: linux
+            arch: amd64
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            os: linux
+            arch: arm64
+          - target: x86_64-apple-darwin
+            runner: macos-14
+            os: darwin
+            arch: amd64
+          - target: aarch64-apple-darwin
+            runner: macos-14
+            os: darwin
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --locked -p guff-lint --target ${{ matrix.target }}
+
+      - name: Package
+        id: package
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          ASSET="guff_${VERSION}_${{ matrix.os }}_${{ matrix.arch }}.tar.gz"
+          BIN="target/${{ matrix.target }}/release/guff"
+          test -f "$BIN"
+          tar -czf "$ASSET" -C "$(dirname "$BIN")" guff
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$ASSET" > "${ASSET}.sha256"
+          else
+            shasum -a 256 "$ASSET" > "${ASSET}.sha256"
+          fi
+          echo "asset=${ASSET}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: guff-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            ${{ steps.package.outputs.asset }}
+            ${{ steps.package.outputs.asset }}.sha256
+          if-no-files-found: error
+
+  release:
+    name: GitHub Release
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: guff-*
+          merge-multiple: true
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Generate CycloneDX SBOM
+        run: |
+          set -euo pipefail
+          cargo install cargo-cyclonedx --locked --version 0.5.9
+          cargo cyclonedx --format json --all
+          # cargo-cyclonedx writes per-crate JSON; ship a stable release asset name.
+          if [ -f guff-lint.cdx.json ]; then
+            cp guff-lint.cdx.json dist/guff.cdx.json
+          else
+            first="$(find . -maxdepth 3 -name '*.cdx.json' | head -n1 || true)"
+            if [ -n "$first" ]; then
+              cp "$first" dist/guff.cdx.json
+            else
+              echo "warning: no CycloneDX JSON produced" >&2
+            fi
+          fi
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME}"
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release delete "$VERSION" --yes
+          fi
+          gh release create "$VERSION" dist/* \
+            --title "$VERSION" \
+            --generate-notes \
+            --verify-tag
+
+  docker:
+    name: Docker ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          push: true
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Export digest
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-digest-${{ strategy.job-index }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  docker-merge:
+    name: Docker multi-arch manifest
+    needs: docker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: docker-digest-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern=v{{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest
+
+      - name: Create manifest list
+        run: |
+          set -euo pipefail
+          IMAGE="${REGISTRY}/${IMAGE_NAME}"
+          tag_args=()
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            tag_args+=("-t" "$tag")
+          done <<< "${{ steps.meta.outputs.tags }}"
+          digests=()
+          for f in /tmp/digests/*; do
+            digests+=("${IMAGE}@sha256:$(basename "$f")")
+          done
+          docker buildx imagetools create "${tag_args[@]}" "${digests[@]}"

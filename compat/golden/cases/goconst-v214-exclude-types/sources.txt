@@ -1,0 +1,3 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+goconst_exclude_types.go  crates/guff-style/tests/testdata/goconst/golangci-v2.14.0/goconst_exclude_types.go

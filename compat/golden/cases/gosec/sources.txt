@@ -1,0 +1,79 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# The golden tier keeps no copy of the fixtures: it points at the ones the Rust
+# unit tests already use, so the two can never drift. Those tests type-check
+# each fixture as a package of its own against the stub universe under
+# testdata/gosec/stub/, so every file gets its own directory here too.
+#
+# Of guff's 39 gosec rules, four are SSA analyzers and get a file each:
+# g602/ (slice bounds), g115/ (integer overflow conversion, whose fixture is
+# mostly *silent* cases — see the header there for why those are the ones worth
+# gating), g118/ (context propagation), g123/ (TLS resumption vs
+# VerifyPeerCertificate) and g7xx/ (the taint engine's four rules, which share
+# one analysis and so want one package). g710v/ is the taint engine again, on
+# its own because what it pins is a *loss* — the variadic tail go/ssa packs into
+# an array the callee summary cannot see through — and g124e/ is G124 over the
+# composite literals that elide their element type. g115n/, g115c/ and g115f/
+# are G115's *message names*: gosec caches one message per kind pair for the
+# whole package, so each scenario needs a package of its own (g115f/ is two
+# files, for the order across them). The rest share the files below.
+bad/bad.go            crates/guff-style/tests/testdata/gosec/bad.go
+ok/ok.go              crates/guff-style/tests/testdata/gosec/ok.go
+scores/scores.go      crates/guff-style/tests/testdata/gosec/scores.go
+settings/settings.go  crates/guff-style/tests/testdata/gosec/settings.go
+g601/g601.go          crates/guff-style/tests/testdata/gosec/g601.go
+g602/g602.go          crates/guff-style/tests/testdata/gosec/g602.go
+g602v/g602_variadic.go  crates/guff-style/tests/testdata/gosec/g602_variadic.go
+g115/g115.go          crates/guff-style/tests/testdata/gosec/g115.go
+g115n/g115_names.go   crates/guff-style/tests/testdata/gosec/g115_names.go
+g115c/g115_cache.go   crates/guff-style/tests/testdata/gosec/g115_cache.go
+g115f/g115_files_a.go  crates/guff-style/tests/testdata/gosec/g115_files_a.go
+g115f/g115_files_b.go  crates/guff-style/tests/testdata/gosec/g115_files_b.go
+g118/g118.go          crates/guff-style/tests/testdata/gosec/g118.go
+g119/g119.go          crates/guff-style/tests/testdata/gosec/g119.go
+g123/g123.go          crates/guff-style/tests/testdata/gosec/g123.go
+g7xx/g7xx.go          crates/guff-style/tests/testdata/gosec/g7xx.go
+g710v/g710_variadic.go  crates/guff-style/tests/testdata/gosec/g710_variadic.go
+g124e/g124_elided.go  crates/guff-style/tests/testdata/gosec/g124_elided.go
+g117/g117.go          crates/guff-style/tests/testdata/gosec/g117.go
+g304/g304.go          crates/guff-style/tests/testdata/gosec/g304.go
+g122/g122.go          crates/guff-style/tests/testdata/gosec/g122.go
+g102/g102.go          crates/guff-style/tests/testdata/gosec/g102.go
+g402/g402.go          crates/guff-style/tests/testdata/gosec/g402.go
+g201/g201.go          crates/guff-style/tests/testdata/gosec/g201.go
+g202/g202.go          crates/guff-style/tests/testdata/gosec/g202.go
+g202b/g202_builder.go  crates/guff-style/tests/testdata/gosec/g202_builder.go
+g305/g305.go          crates/guff-style/tests/testdata/gosec/g305.go
+
+# The three dot-import fixtures. A dot-imported call is an `*ast.Ident`, which
+# `GetCallInfo` answers for with the analysed package's own name, so no
+# `ContainsPkgCallExpr` rule matches it. They are three packages rather than one
+# because dot imports collide: `net.Pipe` against `io.Pipe`, and `gzip.Reader`
+# against `io.Reader`.
+dotos/dotimport_os.go   crates/guff-style/tests/testdata/gosec/dotimport_os.go
+dotnet/dotimport_net.go  crates/guff-style/tests/testdata/gosec/dotimport_net.go
+dotio/dotimport_io.go   crates/guff-style/tests/testdata/gosec/dotimport_io.go
+
+# The stub `golang.org/x/crypto` module (see the replace in go.mod). Its go.mod
+# is case scaffolding and so lives in the case directory; the packages under it
+# are the same stubs the Rust tests load.
+xcrypto/go.mod                  compat/golden/cases/gosec/xcrypto.go.mod
+xcrypto/md4/md4.go              crates/guff-style/tests/testdata/gosec/stub/golang.org/x/crypto/md4/md4.go
+xcrypto/ripemd160/ripemd160.go  crates/guff-style/tests/testdata/gosec/stub/golang.org/x/crypto/ripemd160/ripemd160.go
+xcrypto/ssh/ssh.go              crates/guff-style/tests/testdata/gosec/stub/golang.org/x/crypto/ssh/ssh.go
+
+# The stub YAML and TOML modules G117's third-party sinks live in.
+yamlv3/go.mod                   compat/golden/cases/gosec/yamlv3.go.mod
+yamlv3/yaml.go                  crates/guff-style/tests/testdata/gosec/stub/gopkg.in/yaml.v3/yaml.go
+bstoml/go.mod                   compat/golden/cases/gosec/bstoml.go.mod
+bstoml/toml.go                  crates/guff-style/tests/testdata/gosec/stub/github.com/BurntSushi/toml/toml.go
+
+# The stub `github.com/lib/pq` module G201's `noIssueQuoted` entry names.
+libpq/go.mod                    compat/golden/cases/gosec/libpq.go.mod
+libpq/pq.go                     crates/guff-style/tests/testdata/gosec/stub/github.com/lib/pq/pq.go
+entropy/entropy.go    crates/guff-style/tests/testdata/gosec/entropy.go
+nosec/nosec.go        crates/guff-style/tests/testdata/gosec/nosec.go
+# gosec's other suppression spelling, in a file that contains the tag
+# spelling nowhere — the byte screen in front of the comment reparse.
+directiveonly/directive_only.go  crates/guff-style/tests/testdata/gosec/directive_only.go

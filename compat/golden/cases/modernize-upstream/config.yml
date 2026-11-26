@@ -1,0 +1,25 @@
+# Golden case: x/tools v0.50.0's own modernize testdata (golangci-lint 2.14.0)
+# for every analyzer the Phase 8 ledger lists as changed — minmax,
+# atomictypes, waitgroupgo, testingcontext, rangeint, slicesbackward,
+# stringscut, stringscutprefix, stringsbuilder, slicesclip. The files are
+# upstream's, verbatim (BSD-3, LICENSE next to them) except one import path:
+# rangeint.go's `"rangeint/a"` is `"example.com/rangeint/a"` here, the GOPATH
+# path made a module path. Upstream's tests run one analyzer per directory;
+# golangci-lint runs the whole suite over all of them, which is what guff
+# has to match. The fix tier replays the same case with --fix, so the
+# `.go.golden` rewrites are gated too. The Go 1.27 files are left out.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - modernize
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

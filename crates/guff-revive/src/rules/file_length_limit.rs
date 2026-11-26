@@ -1,0 +1,53 @@
+//! `file-length-limit` — enforce a maximum number of lines per file.
+
+use std::fs;
+
+use guff_analysis::Pass;
+
+use crate::config;
+use crate::failure::Failure;
+
+pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let max = config::file_length_limit_max(pass);
+    if max == 0 {
+        return Vec::new();
+    }
+
+    let mut failures = Vec::new();
+    let fset = pass.fset();
+    let pkg = pass.pkg();
+    for (i, file) in pass.files().iter().enumerate() {
+        let Some(path) = pkg.compiled_go_files.get(i) else {
+            continue;
+        };
+        let lines = if let Some(bytes) = pkg.source_bytes(i) {
+            match std::str::from_utf8(bytes) {
+                Ok(s) => s.lines().count(),
+                Err(_) => continue,
+            }
+        } else {
+            match fs::read_to_string(path) {
+                Ok(s) => s.lines().count(),
+                Err(_) => continue,
+            }
+        };
+        if lines > max {
+            // Upstream reports `token.Position{Line: <line count>, Column: 0}`,
+            // built by hand rather than from a token.Pos: the finding is about
+            // the file, so it points past its last line of code, at no column.
+            let Some(ft) = fset.file(file.pos()) else {
+                continue;
+            };
+            if lines == 0 || lines > ft.line_count() {
+                continue;
+            }
+            failures.push(Failure::at_column(
+                "file-length-limit",
+                ft.line_start(lines).0 as u32,
+                0,
+                format!("file length is {lines} lines, which exceeds the limit of {max}"),
+            ));
+        }
+    }
+    failures
+}

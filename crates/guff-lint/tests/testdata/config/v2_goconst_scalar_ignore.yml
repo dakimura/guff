@@ -1,0 +1,11 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - goconst
+  settings:
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+      ignore-calls: false
+      ignore-string-values: foo.+

@@ -1,0 +1,20 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - errcheck
+  exclusions:
+    paths:
+      - '^.*\.(l|pb|y)\.go$'
+      - 'generated\.go$'
+    rules:
+      - linters:
+          - errcheck
+        path: "bad\\.go"
+      - linters:
+          - errcheck
+        text: "Error return value of .*Close"
+    warn-unused: true
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

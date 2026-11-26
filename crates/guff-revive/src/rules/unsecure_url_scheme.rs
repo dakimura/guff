@@ -1,0 +1,93 @@
+//! `unsecure-url-scheme` — prefer https/wss over http/ws in string literals.
+
+use guff::ast::BasicLit;
+use guff::token::Token;
+use guff::walk::{self, NodeRef};
+use guff_analysis::Pass;
+
+use crate::failure::Failure;
+use crate::util::{basic_lit_string_value, file_is_test};
+
+pub struct Checker {
+    /// Set per file: upstream's `if file.IsTest() { return nil }` is a
+    /// **filename** check, so `foo_test.go` in `package foo` is skipped and the
+    /// package's other files are not.
+    skip_file: bool,
+    failures: Vec<Failure>,
+}
+
+impl Checker {
+    pub fn try_new(_pass: &Pass<'_>) -> Option<Self> {
+        Some(Self {
+            skip_file: false,
+            failures: Vec::new(),
+        })
+    }
+
+    pub fn on_file(&mut self, file_is_test: bool) {
+        self.skip_file = file_is_test;
+    }
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        if self.skip_file {
+            return;
+        }
+        let NodeRef::BasicLit(lit) = n else {
+            return;
+        };
+        if lit.kind != Some(Token::STRING) {
+            return;
+        }
+        let Some(value) = basic_lit_string_value(lit) else {
+            return;
+        };
+        let (scheme, prefix_len) = if value.starts_with("http://") {
+            ("http", 7)
+        } else if value.starts_with("ws://") {
+            ("ws", 5)
+        } else {
+            return;
+        };
+        if value.len() <= prefix_len {
+            return;
+        }
+        if value.contains("localhost")
+            || value.contains("127.0.0.1")
+            || value.contains("0.0.0.0")
+            || value.contains("//::")
+        {
+            return;
+        }
+        self.failures.push(Failure {
+            rule: "unsecure-url-scheme",
+            pos: lit.value_pos.0 as u32,
+            // `lit.value` is the literal *source*, quotes included, so `{:?}`
+            // quoted it a second time and escaped the inner quotes.
+            message: format!(
+                "prefer secure protocol {}s over {} in {}",
+                scheme, scheme, lit.value
+            ),
+            ..Failure::default()
+        });
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
+pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let Some(mut c) = Checker::try_new(pass) else {
+        return Vec::new();
+    };
+    for file in pass.files() {
+        c.on_file(file_is_test(pass, file));
+        walk::inspect(NodeRef::File(file), |n| {
+            if let Some(n) = n {
+                c.visit(n);
+            }
+            true
+        });
+    }
+    c.into_failures()
+}

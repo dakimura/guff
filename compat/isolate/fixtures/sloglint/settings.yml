@@ -1,0 +1,10 @@
+# Only `no-mixed-args` is on by default, so eleven of this linter's twelve rules
+# are unreachable without naming them. Each is its own sentence, not a variation
+# on one.
+no-mixed-args: true
+static-msg: true
+no-raw-keys: true
+key-naming-case: snake
+context: scope
+forbidden-keys:
+  - banned

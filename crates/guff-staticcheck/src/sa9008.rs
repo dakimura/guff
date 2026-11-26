@@ -1,0 +1,165 @@
+//! SA9008 — else branch of a type assertion reads the wrong value.
+//!
+//! Simplified port of `honnef.co/go/tools/staticcheck/sa9008`.
+//!
+//! Upstream's pattern is
+//! `(IfStmt (AssignStmt [obj ok] ":=" (TypeAssertExpr obj _)) ok _ elseBranch)`:
+//! the asserted expression is the identifier being shadowed, so only
+//! `if x, ok := x.(T)` qualifies.
+//!
+//! DEFERRED: the IR verification upstream runs on each read in the else branch
+//! (`irfn.ValueForExpr` + `irutil.Flatten`), which drops reads whose IR value is
+//! no longer the type-assert result. Without it guff reports a shape upstream
+//! stays quiet about — an assert nested inside an `if` inside a loop
+//! (docs/COMPAT-HARDENING.md §4, 2026-08-09, has the minimal reproduction).
+
+use std::sync::OnceLock;
+
+use guff::ast::{AssignStmt, Expr, IfStmt, Ident, Stmt, TypeAssertExpr};
+use guff::node_mask;
+use guff::token::Token;
+use guff::walk::{NodeRef, preorder, stmt_ref};
+use guff_analysis::code::object_of;
+use guff_analysis::passes::inspect;
+use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
+
+fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
+    let inspect = pass
+        .result_of::<inspect::InspectResult>(inspect::analyzer())
+        .ok_or_else(|| "SA9008 requires inspect analyzer".to_string())?
+        .clone();
+
+    // `ir.EnclosingFunction` returns nil "for functions named `_`, because we
+    // don't generate IR for them" (v0.8 looks the declaration up by its name),
+    // and upstream skips the match — closures inside them included.
+    let blank_funcs: Vec<(i64, i64)> = pass
+        .files()
+        .iter()
+        .flat_map(|f| f.decls.iter())
+        .filter_map(|d| match d {
+            guff::ast::Decl::FuncDecl(fd) if fd.name.name == "_" => {
+                let n = NodeRef::FuncDecl(fd);
+                Some((guff::commentmap::node_pos(n).0, guff::commentmap::node_end(n).0))
+            }
+            _ => None,
+        })
+        .collect();
+    let mut pending = Vec::new();
+    inspect.preorder_typed(node_mask!(IfStmt), pass.files(), |n| {
+        let NodeRef::IfStmt(ifs) = n else {
+            return;
+        };
+        let at = ifs.if_.0;
+        if blank_funcs.iter().any(|&(s, e)| s <= at && at < e) {
+            return;
+        }
+        check_if(pass, ifs, &mut pending);
+    });
+    for (pos, msg) in pending {
+        pass.reportf(pos, msg);
+    }
+    Ok(None)
+}
+
+fn cond_is_bare_ok(cond: &Expr, ok: &Ident) -> bool {
+    let mut cur = cond;
+    while let Expr::ParenExpr(p) = cur {
+        cur = &p.x;
+    }
+    matches!(cur, Expr::Ident(id) if id.name == ok.name)
+}
+
+fn check_if(pass: &Pass<'_>, ifs: &IfStmt, pending: &mut Vec<(u32, String)>) {
+    let Some(init) = ifs.init.as_deref() else {
+        return;
+    };
+    let Stmt::AssignStmt(AssignStmt { lhs, rhs, tok, .. }) = init else {
+        return;
+    };
+    // Upstream's pattern spells the operator: `[obj ok] ":=" assert`.
+    if *tok != Some(Token::DEFINE) {
+        return;
+    }
+    if lhs.len() != 2 {
+        return;
+    };
+    let Expr::Ident(obj) = &lhs[0] else {
+        return;
+    };
+    let Expr::Ident(ok) = &lhs[1] else {
+        return;
+    };
+    if ok.name != "ok" && object_of(pass, ok).is_some() {
+        return;
+    }
+    let Expr::TypeAssertExpr(TypeAssertExpr { x, .. }) = &rhs[0] else {
+        return;
+    };
+    // Upstream asserts the *shadowed* identifier itself — its pattern is
+    // `assert@(TypeAssertExpr obj _)`, with `obj` recalled from the left-hand
+    // side and compared by name. `if v, ok := x.(T); ok { … } else { use v }`
+    // shadows nothing, so reading `v` in the else is not this check's business,
+    // however zero-valued it is.
+    let mut asserted = x.as_ref();
+    while let Expr::ParenExpr(p) = asserted {
+        asserted = &p.x;
+    }
+    let Expr::Ident(asserted) = asserted else {
+        return;
+    };
+    if asserted.name != obj.name {
+        return;
+    }
+    // Upstream only flags uses in the else of `if x, ok := x.(T); ok { … }`.
+    // `if …; !ok { … } else { use x }` is the success path — not SA9008.
+    if !cond_is_bare_ok(&ifs.cond, ok) {
+        return;
+    }
+    let obj_id = object_of(pass, obj);
+    let Some(else_) = &ifs.else_ else {
+        return;
+    };
+    preorder(stmt_ref(else_.as_ref()), &mut |n| {
+        let NodeRef::Ident(id) = n else {
+            return true;
+        };
+        if object_of(pass, id) == obj_id {
+            pending.push((
+                id.name_pos.0 as u32,
+                format!(
+                    "{} refers to the result of a failed type assertion and is a zero value, not the value that was being type-asserted",
+                    id.name
+                ),
+            ));
+        }
+        true
+    });
+}
+
+fn sa9008_analyzer_impl() -> Analyzer {
+    Analyzer {
+        name: "SA9008",
+        doc: "else branch of a type assertion is probably not reading the right value",
+        url: "https://staticcheck.dev/docs/checks/#SA9008",
+        run: run as RunFn,
+        run_despite_errors: false,
+        requires: vec![inspect::analyzer()],
+        fact_types: vec![],
+    }
+}
+
+pub fn analyzer() -> &'static Analyzer {
+    static A: OnceLock<Analyzer> = OnceLock::new();
+    A.get_or_init(sa9008_analyzer_impl)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use guff_analysis::validate;
+
+    #[test]
+    fn sa9008_validates() {
+        assert!(validate(&[analyzer()]).is_ok());
+    }
+}

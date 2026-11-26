@@ -1,0 +1,30 @@
+# Golden case: `govet.enable` and `govet.disable` naming the same analyzer
+# (COMPAT-HARDENING Phase 4).
+#
+# `isAnalyzerEnabled` tests `enable` **before** `disable`, so the analyzer stays
+# on and this golden is byte-identical to `govet-settings`. Reading the two keys
+# as "the set, minus the disabled ones" gives the opposite answer — which is
+# what guff did until this case was written.
+#
+# A case whose whole content is "nothing happens" earns its place the same way
+# `severity-linter` does: that is where the quiet breakage lives.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+  settings:
+    govet:
+      enable:
+        - assign
+      disable:
+        - assign
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

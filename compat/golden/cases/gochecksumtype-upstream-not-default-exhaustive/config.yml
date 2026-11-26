@@ -1,0 +1,21 @@
+# Golden case: go-check-sumtype's `not_default_exhaustive` (cfg 0 in
+# check_test.go), with the two packages whose default clause it changes the
+# answer for, under `default-signifies-exhaustive: false`.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gochecksumtype
+  settings:
+    gochecksumtype:
+      default-signifies-exhaustive: false
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

@@ -1,0 +1,20 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh protogetter
+# Produced by running golangci-lint on compat/golden/cases/protogetter/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+bad/bad.go:6:9:protogetter::avoid direct access to proto field u.Name, use u.GetName() instead
+bad/bad.go:10:9:protogetter::avoid direct access to proto field u.Age, use u.GetAge() instead
+bad/bad.go:14:9:protogetter::avoid direct access to proto field u.Address.City, use u.GetAddress().GetCity() instead
+bad/bad.go:21:9:protogetter::avoid direct access to proto field u.Address, use u.GetAddress() instead
+bad/bad.go:27:16:protogetter::avoid direct access to proto field u.Meta, use u.GetMeta() instead
+bad/bad.go:34:27:protogetter::avoid direct access to proto field u.Name, use u.GetName() instead
+bad/bad.go:41:4:protogetter::avoid direct access to proto field u.Nickname, use u.GetNickname() instead
+bad/bad.go:53:13:protogetter::avoid direct access to proto field u.Name, use u.GetName() instead
+bad/bad.go:54:11:protogetter::avoid direct access to proto field u.Name, use u.GetName() instead
+bad/bad.go:59:10:protogetter::avoid direct access to proto field u.Name, use u.GetName() instead
+crossfile/call.go:11:11:protogetter::avoid direct access to proto field u.Nickname, use u.GetNickname() instead
+ok/ok.go:48:9:protogetter::avoid direct access to proto field u.Name, use u.GetName() instead

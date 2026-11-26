@@ -1,0 +1,32 @@
+# Golden case: exhaustive with `explicit-exhaustive-switch` /
+# `explicit-exhaustive-map`.
+#
+# Same sources as cases/exhaustive (the isolate fixture), read under the
+# inverted setting: a switch or map literal is checked **only** when it carries
+# `//exhaustive:enforce`. Almost every finding of the plain case disappears
+# here and a different, smaller set takes its place, so a directive honoured by
+# one config has to be ignored by the other — one config cannot measure that.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - exhaustive
+  settings:
+    exhaustive:
+      default-signifies-exhaustive: false
+      explicit-exhaustive-switch: true
+      explicit-exhaustive-map: true
+      check:
+      - switch
+      - map
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # Full finding-set compare (avoid SA#### vs S#### order winning uniq-by-line).
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

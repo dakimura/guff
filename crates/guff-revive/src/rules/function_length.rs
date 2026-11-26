@@ -1,0 +1,172 @@
+//! `function-length` — warn on functions exceeding statement/line limits (50/75 default).
+
+use guff::ast::{BlockStmt, Expr, File, FuncDecl, FuncLit, Stmt};
+use guff::walk::{self, NodeRef};
+use guff_analysis::Pass;
+
+use crate::failure::Failure;
+
+const DEFAULT_MAX_STMTS: i64 = 50;
+const DEFAULT_MAX_LINES: i64 = 75;
+
+/// `parseArguments`: either no arguments (50 / 75) or **exactly two**, and each
+/// check is then gated on `> 0` — `arguments: [0, 100]` turns the statement
+/// half off entirely. guff had both limits baked in as constants.
+pub fn limits(pass: &Pass<'_>) -> (i64, i64) {
+    let args = crate::config::rule_arguments(pass, "function-length");
+    if args.len() != 2 {
+        return (DEFAULT_MAX_STMTS, DEFAULT_MAX_LINES);
+    }
+    let stmts = crate::config::rule_arg_int(pass, "function-length", 0);
+    let lines = crate::config::rule_arg_int(pass, "function-length", 1);
+    match (stmts, lines) {
+        (Some(s), Some(l)) => (s, l),
+        _ => (DEFAULT_MAX_STMTS, DEFAULT_MAX_LINES),
+    }
+}
+
+pub struct Checker<'a> {
+    pass: &'a Pass<'a>,
+    failures: Vec<Failure>,
+}
+
+impl<'a> Checker<'a> {
+    pub fn new(pass: &'a Pass<'a>) -> Self {
+        Self {
+            pass,
+            failures: Vec::new(),
+        }
+    }
+
+    /// This rule is file-scoped, not node-scoped: one empty-bodied function
+    /// silences the whole file (see [`check_file`]), which a node-at-a-time
+    /// visitor cannot express. All the work happens here.
+    pub fn on_file(&mut self, file: &File) {
+        check_file(self.pass, file, &mut self.failures);
+    }
+
+    pub fn visit(&mut self, _n: NodeRef<'_>) {}
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
+pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let mut out = Vec::new();
+    for file in pass.files() {
+        check_file(pass, file, &mut out);
+    }
+    out
+}
+
+fn check_file(pass: &Pass<'_>, file: &File, out: &mut Vec<Failure>) {
+    let limits = limits(pass);
+    // revive v1.17.1 skips a function with an empty body (`continue`). Up to
+    // v1.17.0 it was `return nil`, which dropped function-length for the
+    // whole file — failures already collected included.
+    for decl in &file.decls {
+        let guff::ast::Decl::FuncDecl(f) = decl else {
+            continue;
+        };
+        if f.body.as_ref().is_none_or(|b| b.list.is_empty()) {
+            continue;
+        }
+        check_func(pass, f, limits, out);
+    }
+}
+
+fn check_func(pass: &Pass<'_>, f: &FuncDecl, limits: (i64, i64), failures: &mut Vec<Failure>) {
+    let (max_stmts, max_lines) = limits;
+    let Some(body) = &f.body else {
+        return;
+    };
+    let stmt_count = count_stmts(&body.list);
+    // `if r.maxStmt > 0` / `if r.maxLines > 0`: a zero limit turns that half of
+    // the rule off rather than reporting every function.
+    if max_stmts > 0 && stmt_count as i64 > max_stmts {
+        failures.push(Failure {
+            rule: "function-length",
+            pos: f.ty.func.0 as u32,
+            message: format!(
+                "maximum number of statements per function exceeded; max {max_stmts} but got {stmt_count}"
+            ),
+            ..Failure::default()
+        });
+    }
+    let line_count = count_lines(pass, body);
+    if max_lines > 0 && line_count as i64 > max_lines {
+        failures.push(Failure {
+            rule: "function-length",
+            pos: f.ty.func.0 as u32,
+            message: format!(
+                "maximum number of lines per function exceeded; max {max_lines} but got {line_count}"
+            ),
+            ..Failure::default()
+        });
+    }
+}
+
+fn count_lines(pass: &Pass<'_>, body: &BlockStmt) -> usize {
+    let start = pass.fset().position(body.lbrace).line;
+    let end = pass.fset().position(body.rbrace).line;
+    end.saturating_sub(start).saturating_sub(1).max(0) as usize
+}
+
+fn count_stmts(stmts: &[Stmt]) -> usize {
+    let mut count = 0;
+    for stmt in stmts {
+        match stmt {
+            Stmt::BlockStmt(b) => count += count_stmts(&b.list),
+            Stmt::IfStmt(i) => {
+                count += 1 + count_body_stmts(&i.body.list);
+                if let Some(Stmt::BlockStmt(else_block)) = i.else_.as_deref() {
+                    count += count_stmts(&else_block.list);
+                }
+            }
+            Stmt::ForStmt(f) => {
+                count += 1 + count_body_stmts(&f.body.list);
+            }
+            Stmt::RangeStmt(r) => {
+                count += 1 + count_body_stmts(&r.body.list);
+            }
+            Stmt::SwitchStmt(s) => {
+                count += 1 + count_body_stmts(&s.body.list);
+            }
+            Stmt::TypeSwitchStmt(s) => {
+                count += 1 + count_body_stmts(&s.body.list);
+            }
+            Stmt::SelectStmt(s) => {
+                count += 1 + count_body_stmts(&s.body.list);
+            }
+            Stmt::CaseClause(c) => {
+                count += count_stmts(&c.body);
+            }
+            Stmt::CommClause(c) => {
+                count += count_stmts(&c.body);
+            }
+            Stmt::AssignStmt(a) => {
+                count += 1;
+                if let Some(rhs) = a.rhs.first() {
+                    count += count_func_lit_stmts(rhs);
+                }
+            }
+            Stmt::GoStmt(g) => count += 1 + count_func_lit_stmts(&g.call.fun),
+            Stmt::DeferStmt(d) => count += 1 + count_func_lit_stmts(&d.call.fun),
+            _ => count += 1,
+        }
+    }
+    count
+}
+
+fn count_body_stmts(stmts: &[Stmt]) -> usize {
+    count_stmts(stmts)
+}
+
+fn count_func_lit_stmts(expr: &Expr) -> usize {
+    if let Expr::FuncLit(lit) = expr {
+        count_stmts(&lit.body.list)
+    } else {
+        0
+    }
+}

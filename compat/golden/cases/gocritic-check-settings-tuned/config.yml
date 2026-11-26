@@ -1,0 +1,39 @@
+# Golden case: the same five with every setting moved.
+#
+# The three size thresholds go to 1 so every struct clears them, `bodyWidth`
+# to 1, and `skipArchDependent` to false — which is the only way the `int`
+# comparison in the fixture is ever reported.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gocritic
+  settings:
+    gocritic:
+      disable-all: true
+      enabled-checks:
+        - hugeParam
+        - rangeValCopy
+        - rangeExprCopy
+        - nestingReduce
+        - truncateCmp
+      settings:
+        hugeParam:
+          sizeThreshold: 1
+        rangeValCopy:
+          sizeThreshold: 1
+        rangeExprCopy:
+          sizeThreshold: 1
+        nestingReduce:
+          bodyWidth: 1
+        truncateCmp:
+          skipArchDependent: false
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

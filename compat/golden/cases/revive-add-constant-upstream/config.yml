@@ -1,0 +1,20 @@
+# revive v1.17.1 add-constant with no arguments: upstream testdata plus the walk shapes it skips.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      rules:
+        - name: add-constant
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

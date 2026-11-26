@@ -1,0 +1,36 @@
+# Golden case: goheader against every shape its matcher can report.
+#
+# goheader walks the template and the header in parallel and reports the exact
+# byte where they diverge, so almost all of its behaviour is *positional* — and
+# position is precisely what the isolate gate cannot see (it keys on
+# path:line:linter:message). Hence a golden case.
+#
+# The template mixes literal text, two `const` values and one `regexp` value so
+# that all three of ConstValue.Read, RegexpValue.Read and the plain byte
+# comparison are exercised.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - goheader
+  settings:
+    goheader:
+      template: |-
+        Copyright {{ YEAR }} {{ COMPANY }}
+        SPDX-License-Identifier: {{ LICENSE }}
+      values:
+        const:
+          YEAR: "2020"
+          COMPANY: "Example Corp"
+        regexp:
+          LICENSE: "(Apache-2\\.0|MIT)"
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

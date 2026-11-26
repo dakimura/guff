@@ -1,0 +1,26 @@
+# Golden case: `gocritic.disable-all` plus one `enabled-checks`
+# (COMPAT-HARDENING Phase 4).
+#
+# `disable-all` revokes the default set outright. Upstream's `validate` then
+# *requires* something to be enabled — `disable-all` with neither
+# `enabled-checks` nor `enabled-tags` is a config error, not an empty run — and
+# it also refuses `disable-all` combined with either disable list.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gocritic
+  settings:
+    gocritic:
+      disable-all: true
+      enabled-checks:
+        - rangeValCopy
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

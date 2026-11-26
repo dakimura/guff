@@ -1,0 +1,31 @@
+# Golden case: exhaustive with `default-case-required`.
+#
+# Same sources as cases/exhaustive (the isolate fixture). This config is what
+# gives the `//exhaustive:ignore-default-case-required` and
+# `//exhaustive:enforce-default-case-required` directives something to do: with
+# it, a switch that lists every member but has no `default` is reported, and
+# the "missing default case" message — a second sentence this linter can say —
+# is compared byte for byte.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - exhaustive
+  settings:
+    exhaustive:
+      default-signifies-exhaustive: false
+      default-case-required: true
+      check:
+      - switch
+      - map
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # Full finding-set compare (avoid SA#### vs S#### order winning uniq-by-line).
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

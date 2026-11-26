@@ -1,0 +1,6 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+customdirective/comment_spacings_custom_directive.go  crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/comment_spacings_custom_directive.go
+slicestyle/enforce_slice_style_nil.go                 crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/enforce_slice_style_nil.go
+identicaldefault/identical_switch_branches_allow_identical_default.go  crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/identical_switch_branches_allow_identical_default.go
+linelength/line_length_limit_excludes.go  crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/line_length_limit_excludes.go

@@ -1,0 +1,9 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# COMPAT-HARDENING Phase 4. The four `staticcheck-checks-*` cases share this
+# file; only their `config.yml` differs. The fixture carries one finding from
+# each of staticcheck's four categories (S / SA / ST / QF), which is what the
+# `checks` selector grammar discriminates on.
+
+checks/checks.go   crates/guff-lint/tests/testdata/staticchecksem/checks/checks.go

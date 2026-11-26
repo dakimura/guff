@@ -1,0 +1,252 @@
+//! `package-comments` — package comments should exist and follow conventions.
+//!
+//! Load uses `Mode::NONE` (no `PARSE_COMMENTS`), so `File.doc` is empty on the
+//! type-checked AST. Re-parse with comments (same pattern as `blank-imports`)
+//! and match upstream revive: a package comment on *any* non-test file silences
+//! the missing-comment warning for the whole package.
+
+use std::fs;
+use std::path::Path;
+use std::sync::Arc;
+
+use guff::ast::{CommentGroup, File};
+use guff::parser::{parse_file, PARSE_COMMENTS};
+use guff::position::FileSet;
+use guff_analysis::Pass;
+
+use crate::failure::Failure;
+use crate::util::Reparsed;
+use crate::util::{first_comment_line, has_prefix_insensitive, is_test_package, reparse_with_comments};
+
+pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    if is_test_package(&pass.pkg().name) {
+        return Vec::new();
+    }
+
+    let paths = &pass.pkg().compiled_go_files;
+    let mut files: Vec<(usize, Arc<Reparsed>)> = Vec::new();
+    for (i, report) in pass.files().iter().enumerate() {
+        if paths
+            .get(i)
+            .is_some_and(|p| p.to_string_lossy().ends_with("_test.go"))
+        {
+            continue;
+        }
+        let Some(path) = paths.get(i) else {
+            continue;
+        };
+        match reparse_with_comments(path, pass.pkg().source_bytes(i)) {
+            Some(rp) => files.push((i, rp)),
+            // Fall back to the type-checked AST (docs likely missing).
+            None => files.push((
+                i,
+                Arc::new(Reparsed {
+                    fset: Arc::clone(pass.fset()),
+                    file: report.clone(),
+                }),
+            )),
+        }
+    }
+    if files.is_empty() {
+        return Vec::new();
+    }
+
+    let pkg_name = &pass.pkg().name;
+    let prefix = format!("Package {pkg_name} ");
+    let mut failures = Vec::new();
+
+    // Detached / form checks are per-file (upstream walks each file).
+    let mut reached_missing_check = false;
+    for (fi, rp) in &files {
+        reached_missing_check |= check_file_shape(
+            pass,
+            *fi,
+            &rp.file,
+            &rp.fset,
+            pkg_name,
+            &prefix,
+            &mut failures,
+        );
+    }
+
+    // Missing package comment: once per package, and only if **no file has a
+    // doc at all**. Upstream's `checkPackageComment` tests `file.AST.Doc !=
+    // nil`, not whether the doc says anything: a comment group that holds only
+    // directives still silences the package, even though `isEmptyDoc` — which
+    // reads `Doc.Text()`, and `go/ast` drops directives from that — calls it
+    // empty a few lines earlier. datadog-agent's `cmd/cluster-agent/klog.go`
+    // carries `//nolint:revive // TODO(CINT) Fix revive linter` right above its
+    // `package main`, and that alone is why upstream says nothing about the
+    // package's missing comment.
+    //
+    // And only if some file asked: upstream calls `checkPackageComment` from a
+    // file whose doc is empty, after the detached check has already returned
+    // for a file that has a detached comment. A package whose only file has a
+    // detached comment gets that one finding, not a second "missing".
+    if !reached_missing_check || files.iter().any(|(_, rp)| rp.file.doc.is_some()) {
+        return failures;
+    }
+
+    // Prefer doc.go, then $package.go, then lexicographically first file.
+    let report_idx = pick_missing_comment_file(&files, pkg_name);
+    let Some((fi, rp)) = files.iter().find(|(i, _)| *i == report_idx) else {
+        return failures;
+    };
+    let report = &pass.files()[*fi];
+    failures.push(Failure {
+        rule: "package-comments",
+        // Upstream reports the whole package clause (`file.AST.Name` is wrapped in
+        // a failure whose node is the file), which lands on the `package` keyword,
+        // not on the package name.
+        pos: remap_pos(pass, report, &rp.fset, rp.file.package.0 as u32),
+        message: "should have a package comment".into(),
+        ..Failure::default()
+    });
+    failures
+}
+
+fn pick_missing_comment_file(files: &[(usize, Arc<Reparsed>)], pkg_name: &str) -> usize {
+    let path_name = |i: usize, f: &File| -> String {
+        // Prefer basename from the FileSet when available; else package name.
+        let _ = f;
+        format!("{i}")
+    };
+    let mut doc_go: Option<usize> = None;
+    let mut package_go: Option<usize> = None;
+    let mut first: Option<(String, usize)> = None;
+    for (fi, rp) in files {
+        let name = rp
+            .fset
+            .file(rp.file.pos())
+            .map(|ft| {
+                Path::new(ft.name())
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_string()
+            })
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| path_name(*fi, &rp.file));
+        if name == "doc.go" {
+            doc_go = Some(*fi);
+        }
+        if name == format!("{pkg_name}.go") {
+            package_go = Some(*fi);
+        }
+        match &first {
+            None => first = Some((name, *fi)),
+            Some((prev, _)) if name < *prev => first = Some((name, *fi)),
+            _ => {}
+        }
+    }
+    doc_go
+        .or(package_go)
+        .or_else(|| first.map(|(_, i)| i))
+        .unwrap_or(0)
+}
+
+fn check_file_shape(
+    pass: &Pass<'_>,
+    fi: usize,
+    file: &File,
+    comments_fset: &FileSet,
+    pkg_name: &str,
+    prefix: &str,
+    failures: &mut Vec<Failure>,
+) -> bool {
+    let report = &pass.files()[fi];
+
+    if let Some(detached) = detached_package_comment(file, comments_fset, prefix) {
+        failures.push(Failure {
+            rule: "package-comments",
+            pos: remap_pos(pass, report, comments_fset, detached),
+            message: "package comment is detached; there should be no blank lines between it and the package statement".into(),
+            ..Failure::default()
+        });
+        return false;
+    }
+
+    if is_empty_doc(file.doc.as_ref()) {
+        // Missing comment is handled package-wide in `apply`.
+        return true;
+    }
+
+    let text = file.doc.as_ref().map(|d| d.text()).unwrap_or_default();
+    if pkg_name != "main"
+        && !text.starts_with(prefix)
+        && !is_directive_comment(&text)
+        && !has_prefix_insensitive(&first_comment_line(file.doc.as_ref()), prefix)
+    {
+        let pos = file
+            .doc
+            .as_ref()
+            .map(|d| d.pos().0 as u32)
+            .unwrap_or(file.package.0 as u32);
+        failures.push(Failure {
+            rule: "package-comments",
+            pos: remap_pos(pass, report, comments_fset, pos),
+            message: format!(r#"package comment should be of the form "{prefix}...""#),
+            ..Failure::default()
+        });
+    }
+    false
+}
+
+
+fn remap_pos(pass: &Pass<'_>, report: &File, comments_fset: &FileSet, pos: u32) -> u32 {
+    // When comments_fset is the package FileSet, positions already match.
+    if std::ptr::eq(comments_fset as *const FileSet, pass.fset().as_ref() as *const FileSet) {
+        return pos;
+    }
+    let p = comments_fset.position(guff::Pos(pos as i64));
+    let Some(ft) = pass.fset().file(report.pos()) else {
+        return pos;
+    };
+    if p.line <= 0 || p.line as usize > ft.line_count() {
+        return pos;
+    }
+    let start = ft.line_start(p.line as usize).0 as u32;
+    let col = p.column.max(1) as u32;
+    start.saturating_add(col.saturating_sub(1))
+}
+
+fn is_empty_doc(doc: Option<&CommentGroup>) -> bool {
+    doc.is_none_or(|d| d.text().trim().is_empty())
+}
+
+fn is_directive_comment(s: &str) -> bool {
+    s.lines().all(|line| {
+        let line = line.trim();
+        line.is_empty() || line.starts_with("//go:")
+    })
+}
+
+fn detached_package_comment(file: &File, fset: &FileSet, prefix: &str) -> Option<u32> {
+    let mut last_before_pkg: Option<&CommentGroup> = None;
+    for cg in &file.comments {
+        if cg.pos().0 > file.package.0 {
+            break;
+        }
+        last_before_pkg = Some(cg);
+    }
+    let cg = last_before_pkg?;
+    if !cg.text().starts_with(prefix) {
+        return None;
+    }
+    // revive v1.17.0 `commentGroupEndLine`: the last comment's first line plus
+    // the newlines in its text. Not `cg.end()`: the scanner strips carriage
+    // returns from comment text, so on CRLF sources `End()` falls short of a
+    // block comment's real end (go.dev/issue/41197, revive issue 607).
+    let last = cg.list.last()?;
+    let end_line =
+        fset.position(last.slash).line as usize + last.text.matches('\n').count();
+    let pkg_line = fset.position(file.package).line as usize;
+    if end_line + 1 < pkg_line {
+        // Upstream anchors at `{Line: endLine + 1, Column: 1}`: the first of
+        // the blank lines between the doc and the package statement.
+        let ft = fset.file(file.pos())?;
+        Some(ft.line_start(end_line + 1).0 as u32)
+    } else {
+        None
+    }
+}

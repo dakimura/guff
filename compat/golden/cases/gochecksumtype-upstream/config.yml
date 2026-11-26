@@ -1,0 +1,28 @@
+# Golden case: go-check-sumtype v0.5.1-0.20260828200218-ae6904d28606's own
+# analyzer testdata (`testdata/src`, every package), under golangci-lint's
+# default settings.
+#
+# The module is `multiple_sumtypes` so that `multiple_sumtypes_user`'s GOPATH
+# import `"multiple_sumtypes"` resolves unchanged: that package's types.go is
+# the module root, every other package a directory below it. The user package
+# is the cross-package (sumTypeFact) case — its two switches are over sum types
+# declared in the package it imports.
+#
+# `not_default_exhaustive` and `subtype_in_switch` run upstream under other
+# flags (see the -not-default-exhaustive / -shared-interfaces cases); they are
+# here too, under the defaults.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gochecksumtype
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

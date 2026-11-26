@@ -1,0 +1,43 @@
+# Golden case: which issue `uniq-by-line` (on by default) keeps when linters
+# from the two groups share a line.
+#
+# golangci's goanalysis runner returns `slices.Concat(retIssues,
+# buildIssues(diags, …))`: the issues of linters that report through
+# `WithIssuesReporter` (revive, gosec, errcheck, unused, …) first, then the
+# `analysis.Diagnostic`s of the rest (govet, staticcheck, …), each group in
+# name order. UniqByLine keeps the first. guff sorted by name alone, so on the
+# loop-closure line it kept govet's loopclosure where upstream keeps revive's
+# range-val-in-closure. The other three lines pair linters of one group
+# (gosec/revive, errcheck/gosec, govet/staticcheck) and pin that name order
+# still decides inside a group. `issues-uniq-by-line-order` pairs errcheck with
+# staticcheck, where both rules give the same answer.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - gosec
+    - govet
+    - revive
+    - staticcheck
+  settings:
+    revive:
+      rules:
+        - name: range-val-address
+        - name: range-val-in-closure
+    govet:
+      enable:
+        - loopclosure
+        - printf
+    gosec:
+      includes:
+        - G601
+        - G104
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+run:
+  timeout: 5m

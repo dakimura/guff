@@ -1,0 +1,5 @@
+# The fixture the Rust unit test reads, so the two cannot drift. Its `stub/`
+# tree is for the unit-test type-checker only — here the real toolchain
+# resolves `os/user`, `fmt` and `strings`.
+
+analyzetypes.go   crates/guff-style/tests/testdata/forbidigotypes/analyzetypes.go

@@ -1,0 +1,11 @@
+# gocognit v1.3.0's own testdata (testdata/src), plus g/ for the shapes of
+# the syntactic recursion resolver golangci uses (it calls ComplexityStats
+# per file, never the type-aware Analyzer the upstream tests run).
+a/a.go      crates/guff-style/tests/testdata/gocognit/upstream-v1.3.0/a/a.go
+b/b.go      crates/guff-style/tests/testdata/gocognit/upstream-v1.3.0/b/b.go
+c/c.go      crates/guff-style/tests/testdata/gocognit/upstream-v1.3.0/c/c.go
+d/d.go      crates/guff-style/tests/testdata/gocognit/upstream-v1.3.0/d/d.go
+e/e.go      crates/guff-style/tests/testdata/gocognit/upstream-v1.3.0/e/e.go
+f/f.go      crates/guff-style/tests/testdata/gocognit/upstream-v1.3.0/f/f.go
+f/f2.go     crates/guff-style/tests/testdata/gocognit/upstream-v1.3.0/f/f2.go
+g/g.go      crates/guff-style/tests/testdata/gocognit/upstream-v1.3.0/g/g.go

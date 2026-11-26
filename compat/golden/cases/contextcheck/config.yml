@@ -1,0 +1,23 @@
+# Golden case: contextcheck.
+#
+# The isolate fixture for this linter compared `0 == 0` — it fires nothing, so
+# it certified nothing (COMPAT-HARDENING §1). This case is the first gate that
+# holds contextcheck to an actual finding set, and it keys on the column too,
+# which is where the closure bug showed: go/ssa emits `MakeClosure` with no
+# position at all, so a diagnostic on a capturing func literal has to fall back
+# to the literal's own `func` token or it is dropped on the floor.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - contextcheck
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # Two literals on one line would otherwise collapse into one finding.
+  uniq-by-line: false
+
+run:
+  timeout: 5m

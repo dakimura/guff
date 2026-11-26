@@ -1,0 +1,129 @@
+package foo
+
+var DoWork func()
+
+func GenericFunc[GenericParamA, B any](x GenericParamA, y B) {}
+
+type GenericVector[GenericParamT any] []GenericParamT
+
+type GenericGraph[T any] struct {
+	Content T
+	Edges []GenericGraph[T]
+}
+
+type PredeclaredSignedInteger interface {
+	int | int8 | int16 | int32 | int64
+}
+
+type StringableSignedInteger interface {
+	~int | ~int8 | ~int16 | ~int32 | ~int64
+
+	String() string
+}
+
+type CombineEmbeds interface {
+	string | int
+
+	interface { EmbeddedMethod() }
+	RegularMethod()
+}
+
+type Tuple[T1 any, T2 any] struct {
+	left  T1
+	right T2
+}
+
+func (t Tuple[T1, T2]) Left() T1  { return t.left }
+func (t Tuple[T1, T2]) Right() T2 { return t.right }
+
+func (t Tuple[T1, T2]) unusedGeneric(t1 T1, t2 T2) T2 {
+	DoWork()
+	return t2
+}
+
+// otherwise Tuple isn't reachable.
+var Sink interface{} = new(Tuple[int, string])
+
+// The different number of type parameters result in different receiver AST
+// nodes on methods: IndexExpr and IndexListExpr.
+type GenericType1[T1 any] []T1
+type GenericType2[T1 any, T2 any] struct {
+	t1 T1
+	t2 T2
+}
+
+// must be able to handle parameters which are not themselves type parameters,
+// but have type parameters embedded within them
+func g1[T1 any](v GenericType1[T1]) {
+	DoWork()
+}
+func g2[T1, T2 any](v GenericType2[T1, T2]) {
+	DoWork()
+}
+func g1s[T1 any](v []GenericType1[T1]) {
+	DoWork()
+}
+func g2s[T1, T2 any](v []GenericType2[T1, T2]) {
+	DoWork()
+}
+func g1a[T1 any](v [2]GenericType1[T1]) {
+	DoWork()
+}
+func g2a[T1, T2 any](v [2]GenericType2[T1, T2]) {
+	DoWork()
+}
+func g1p[T1 any](v *GenericType1[T1]) {
+	DoWork()
+}
+func g2p[T1, T2 any](v *GenericType2[T1, T2]) {
+	DoWork()
+}
+func g1struct[T1 any](v struct{f GenericType1[T1]}) {
+	DoWork()
+}
+
+// test logic to skip non-generic functions/methods
+func nonGeneric(v any) {
+	DoWork()
+}
+func (g1 GenericType1[T1]) genericMethod(v any) {
+	DoWork()
+}
+
+// make sure nonGeneric & genericMethod are reachable
+func Expose() {
+	nonGeneric(nil)
+	(GenericType1[any])(nil).genericMethod(nil)
+}
+
+type wantsFoo interface {
+	foo(x int)
+}
+
+type FooImpl[T any] struct{}
+
+func (FooImpl[T]) foo(x int) {
+	DoWork()
+}
+
+func UseFoo() {
+	var w wantsFoo = FooImpl[int]{}
+	w.foo(1)
+}
+
+// a closure isn't generic itself, but its parameters may still use the type
+// parameters of the enclosing func or method
+type closureHolder[T1 any] struct{ t1 T1 }
+
+func (c *closureHolder[T1]) closureMethod() {
+	_ = func(t1 T1) { c.t1 = t1 }
+	_ = func(t1 T1) { DoWork() }
+}
+
+// a type declared within a generic func can contain type parameters
+// without having any type arguments of its own
+func localTypeParam[T1 any]() {
+	type local struct{ t1 T1 }
+	_ = func(l local) { DoWork() }
+}
+

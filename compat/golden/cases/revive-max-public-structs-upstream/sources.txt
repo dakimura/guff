@@ -1,0 +1,2 @@
+# revive v1.17.1 testdata/max_public_structs.go.
+max_public_structs/max_public_structs.go         crates/guff-revive/tests/testdata/revive/upstream-v1.17.1/max_public_structs/max_public_structs.go

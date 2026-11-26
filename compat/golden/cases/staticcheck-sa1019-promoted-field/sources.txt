@@ -1,0 +1,10 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# Three packages on purpose. SA1019 lets a package use its own deprecated
+# objects, so the messages have to travel from `dep` (and from `inner`, which
+# the use site does not import) to `depr`.
+
+inner/inner.go   crates/guff-staticcheck/tests/testdata/sa1019promoted/inner/inner.go
+dep/dep.go       crates/guff-staticcheck/tests/testdata/sa1019promoted/dep/dep.go
+use.go           crates/guff-staticcheck/tests/testdata/sa1019promoted/use.go

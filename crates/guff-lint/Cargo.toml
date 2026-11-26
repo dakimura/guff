@@ -1,0 +1,56 @@
+[package]
+name = "guff-lint"
+description = "Multi-linter CLI for guff — orchestrates staticcheck and future standard linters."
+keywords = ["go", "linter", "staticcheck", "golangci"]
+categories = ["development-tools"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "guff"
+path = "src/main.rs"
+
+[lib]
+name = "guff_lint"
+path = "src/lib.rs"
+
+[dependencies]
+mimalloc = "0.1"
+# Debug-only: `mi_collect` / `mi_process_info` behind `GUFF_DEBUG_RSS`, to tell
+# live memory apart from pages the allocator is holding (PERF_TASKS_V7 §1).
+# Already linked transitively by `mimalloc`; naming it adds nothing to the binary.
+libmimalloc-sys = { version = "0.1", features = ["extended"] }
+memchr = "2"
+clap = { version = "4", features = ["derive"] }
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+guff-ast = { path = "../guff-ast" }
+guff-analysis = { path = "../guff-analysis" }
+guff-packages = { path = "../guff-packages" }
+guff-runner = { path = "../guff-runner" }
+guff-staticcheck = { path = "../guff-staticcheck" }
+guff-govet = { path = "../guff-govet" }
+guff-errcheck = { path = "../guff-errcheck" }
+guff-ineffassign = { path = "../guff-ineffassign" }
+guff-unused = { path = "../guff-unused" }
+guff-gostaticanalysis = { path = "../guff-gostaticanalysis" }
+guff-error = { path = "../guff-error" }
+guff-context = { path = "../guff-context" }
+guff-style = { path = "../guff-style" }
+guff-comment = { path = "../guff-comment" }
+guff-import = { path = "../guff-import" }
+guff-misspell = { path = "../guff-misspell" }
+guff-dupl = { path = "../guff-dupl" }
+guff-revive = { path = "../guff-revive" }
+guff-fmt = { path = "../guff-fmt" }
+guff-plugin = { path = "../guff-plugin" }
+rayon = "1"
+notify-debouncer-mini = "0.5"
+
+[dev-dependencies]
+tempfile = "3"
+guff-types = { path = "../guff-types" }
+guff-plugin-example = { path = "../guff-plugin-example" }

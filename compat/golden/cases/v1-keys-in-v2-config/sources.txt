@@ -1,0 +1,13 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# The same file list as `cases/exclusions`, deliberately: this case is that
+# case's config rewritten in v1's spellings behind a v2 version line, so the two
+# goldens must come out identical. If a v1 key ever starts taking effect again,
+# the diff against `cases/exclusions/expected.golden` is where it shows.
+
+cmd/cmd.go              crates/guff-lint/tests/testdata/exclusionsem/cmd/cmd.go
+internal/tool/tool.go   crates/guff-lint/tests/testdata/exclusionsem/internal/tool/tool.go
+source/source.go        crates/guff-lint/tests/testdata/exclusionsem/source/source.go
+presets/presets.go      crates/guff-lint/tests/testdata/exclusionsem/presets/presets.go
+presetdoc/presetdoc.go  crates/guff-lint/tests/testdata/exclusionsem/presetdoc/presetdoc.go

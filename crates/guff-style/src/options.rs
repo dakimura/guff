@@ -1,0 +1,1781 @@
+//! Per-linter options from `linters.settings` (wired by `guff-lint`).
+
+use std::collections::HashSet;
+
+/// `linters.settings.gocyclo` / `linters-settings.gocyclo`.
+#[derive(Debug, Clone, Copy)]
+pub struct GocycloOptions {
+    pub min_complexity: usize,
+}
+
+impl Default for GocycloOptions {
+    fn default() -> Self {
+        Self {
+            min_complexity: 30,
+        }
+    }
+}
+
+/// `linters.settings.maintidx` / `linters-settings.maintidx`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MaintidxOptions {
+    /// Report functions with maintainability index strictly below this value.
+    /// Upstream / golangci default: 20.
+    pub under: usize,
+}
+
+impl Default for MaintidxOptions {
+    fn default() -> Self {
+        Self { under: 20 }
+    }
+}
+
+/// `linters.settings.gocognit` / `linters-settings.gocognit`.
+#[derive(Debug, Clone, Copy)]
+pub struct GocognitOptions {
+    pub min_complexity: usize,
+}
+
+impl Default for GocognitOptions {
+    fn default() -> Self {
+        Self {
+            min_complexity: 30,
+        }
+    }
+}
+
+/// `linters.settings.nestif` / `linters-settings.nestif`.
+#[derive(Debug, Clone, Copy)]
+pub struct NestifOptions {
+    pub min_complexity: usize,
+}
+
+impl Default for NestifOptions {
+    fn default() -> Self {
+        Self {
+            min_complexity: 5,
+        }
+    }
+}
+
+/// `linters.settings.dogsled` / `linters-settings.dogsled`.
+#[derive(Debug, Clone, Copy)]
+pub struct DogsledOptions {
+    pub max_blank_identifiers: usize,
+}
+
+impl Default for DogsledOptions {
+    fn default() -> Self {
+        Self {
+            max_blank_identifiers: 2,
+        }
+    }
+}
+
+/// `linters.settings.funlen` / `linters-settings.funlen`.
+#[derive(Debug, Clone, Copy)]
+pub struct FunlenOptions {
+    pub lines: usize,
+    pub statements: usize,
+    pub ignore_comments: bool,
+}
+
+impl Default for FunlenOptions {
+    fn default() -> Self {
+        Self {
+            lines: 60,
+            statements: 40,
+            ignore_comments: true,
+        }
+    }
+}
+
+/// `linters.settings.cyclop` / `linters-settings.cyclop`.
+#[derive(Debug, Clone, Copy)]
+pub struct CyclopOptions {
+    pub max_complexity: usize,
+    /// When > 0, report if package-average cyclomatic complexity exceeds this.
+    pub package_average: f64,
+    /// Skip `Test*` functions (golangci `skip-tests`).
+    pub skip_tests: bool,
+}
+
+impl Default for CyclopOptions {
+    fn default() -> Self {
+        Self {
+            max_complexity: 10,
+            package_average: 0.0,
+            skip_tests: false,
+        }
+    }
+}
+
+/// `linters.settings.lll` / `linters-settings.lll`.
+#[derive(Debug, Clone, Copy)]
+pub struct LllOptions {
+    pub line_length: usize,
+    pub tab_width: usize,
+}
+
+impl Default for LllOptions {
+    fn default() -> Self {
+        Self {
+            line_length: 120,
+            tab_width: 1,
+        }
+    }
+}
+
+/// `linters.settings.nakedret` / `linters-settings.nakedret`.
+#[derive(Debug, Clone, Copy)]
+pub struct NakedretOptions {
+    pub max_func_lines: usize,
+    pub skip_test_files: bool,
+}
+
+impl Default for NakedretOptions {
+    fn default() -> Self {
+        Self {
+            max_func_lines: 30,
+            skip_test_files: false,
+        }
+    }
+}
+
+/// `linters.settings.predeclared` / `linters-settings.predeclared`.
+#[derive(Debug, Clone)]
+pub struct PredeclaredOptions {
+    pub ignore: Vec<String>,
+    pub qualified: bool,
+    /// The `-mode` flag golangci builds from `mode:`: `d` (declare) and/or
+    /// `s` (shadow). Upstream de-duplicates and sorts it, so `d` reports first.
+    pub mode: String,
+}
+
+impl Default for PredeclaredOptions {
+    fn default() -> Self {
+        Self {
+            ignore: Vec::new(),
+            qualified: false,
+            mode: "s".to_string(),
+        }
+    }
+}
+
+/// `linters.settings.whitespace` / `linters-settings.whitespace`.
+#[derive(Debug, Clone, Copy)]
+pub struct WhitespaceOptions {
+    pub multi_if: bool,
+    pub multi_func: bool,
+}
+
+impl Default for WhitespaceOptions {
+    fn default() -> Self {
+        Self {
+            multi_if: false,
+            multi_func: false,
+        }
+    }
+}
+
+/// `linters.settings.mnd` / `linters-settings.mnd`.
+#[derive(Debug, Clone)]
+pub struct MndOptions {
+    pub checks: Vec<String>,
+    pub ignored_numbers: Vec<String>,
+    pub ignored_files: Vec<String>,
+    pub ignored_functions: Vec<String>,
+}
+
+impl Default for MndOptions {
+    fn default() -> Self {
+        Self {
+            checks: vec![
+                "argument".into(),
+                "case".into(),
+                "condition".into(),
+                "operation".into(),
+                "return".into(),
+                "assign".into(),
+            ],
+            ignored_numbers: Vec::new(),
+            ignored_files: Vec::new(),
+            ignored_functions: Vec::new(),
+        }
+    }
+}
+
+impl MndOptions {
+    pub fn check_enabled(&self, name: &str) -> bool {
+        self.checks.iter().any(|c| c == name)
+    }
+}
+
+/// `linters.settings.prealloc` / `linters-settings.prealloc`.
+#[derive(Debug, Clone, Copy)]
+pub struct PreallocOptions {
+    pub simple: bool,
+    pub range_loops: bool,
+    pub for_loops: bool,
+}
+
+impl Default for PreallocOptions {
+    fn default() -> Self {
+        Self {
+            simple: true,
+            range_loops: true,
+            for_loops: false,
+        }
+    }
+}
+
+/// `linters.settings.tagalign` / `linters-settings.tagalign`.
+#[derive(Debug, Clone)]
+pub struct TagalignOptions {
+    pub align: bool,
+    pub sort: bool,
+    pub order: Vec<String>,
+    pub strict: bool,
+}
+
+impl Default for TagalignOptions {
+    fn default() -> Self {
+        Self {
+            align: true,
+            sort: true,
+            order: Vec::new(),
+            strict: false,
+        }
+    }
+}
+
+/// `linters.settings.wsl` / `linters-settings.wsl`.
+#[derive(Debug, Clone)]
+pub struct WslOptions {
+    pub strict_append: bool,
+    pub allow_assign_and_call: bool,
+    pub allow_assign_and_anything: bool,
+    pub allow_multiline_assign: bool,
+    pub allow_cuddle_with_calls: Vec<String>,
+    pub allow_cuddle_with_rhs: Vec<String>,
+}
+
+impl Default for WslOptions {
+    fn default() -> Self {
+        Self {
+            strict_append: true,
+            allow_assign_and_call: true,
+            allow_assign_and_anything: false,
+            allow_multiline_assign: true,
+            allow_cuddle_with_calls: vec!["Lock".into(), "RLock".into()],
+            allow_cuddle_with_rhs: vec!["Unlock".into(), "RUnlock".into()],
+        }
+    }
+}
+
+/// `linters.settings.perfsprint` / `linters-settings.perfsprint`.
+#[derive(Debug, Clone, Copy)]
+pub struct PerfsprintOptions {
+    pub integer_format: bool,
+    pub int_conversion: bool,
+    pub error_format: bool,
+    pub err_error: bool,
+    pub errorf: bool,
+    pub string_format: bool,
+    pub sprintf1: bool,
+    pub strconcat: bool,
+    pub bool_format: bool,
+    pub hex_format: bool,
+    /// golangci / upstream `concat-loop` (default true).
+    pub concat_loop: bool,
+    /// golangci / upstream `loop-other-ops` (default false).
+    pub loop_other_ops: bool,
+}
+
+impl Default for PerfsprintOptions {
+    fn default() -> Self {
+        Self {
+            integer_format: true,
+            int_conversion: true,
+            error_format: true,
+            err_error: false,
+            errorf: true,
+            string_format: true,
+            sprintf1: true,
+            strconcat: true,
+            bool_format: true,
+            hex_format: true,
+            concat_loop: true,
+            loop_other_ops: false,
+        }
+    }
+}
+
+/// `linters.settings.goconst` / `linters-settings.goconst`.
+#[derive(Debug, Clone)]
+pub struct GoconstOptions {
+    pub min_len: usize,
+    pub min_occurrences: usize,
+    /// `exclude-types` after golangci's wrapper rules (the deprecated
+    /// `ignore-calls` folded in): literal contexts goconst does not count.
+    pub exclude_types: Vec<GoconstExcludeType>,
+    /// An `exclude-types` entry golangci's `toType` rejects; the run fails.
+    pub exclude_types_error: Option<String>,
+    pub ignore_tests: bool,
+    /// golangci `match-constant`: match repeated literals against existing `const` values.
+    pub match_constant: bool,
+    /// golangci `find-duplicates`: report constants that share the same value.
+    pub find_duplicates: bool,
+    /// golangci `numbers`: also report duplicated numeric literals.
+    pub numbers: bool,
+    /// golangci `min` (only when `numbers` is true).
+    pub number_min: i64,
+    /// golangci `max` (only when `numbers` is true).
+    pub number_max: i64,
+    /// golangci `ignore-string-values` (regex patterns; OR-joined like upstream).
+    pub ignore_strings: Vec<String>,
+    /// golangci `ignore-functions`: `f` or `pkg.f` whose call arguments are
+    /// not counted.
+    pub ignore_functions: Vec<String>,
+    /// golangci `ignore-map-keys`: string keys of map literals are not counted.
+    pub ignore_map_keys: bool,
+    /// golangci `eval-const-expressions`: constants are matched by their
+    /// evaluated value, not only by a literal initializer.
+    pub eval_const_expressions: bool,
+}
+
+/// goconst's `Type`: the context a literal appears in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GoconstExcludeType {
+    Assignment,
+    Binary,
+    Case,
+    Return,
+    Call,
+    CompositeLit,
+}
+
+impl GoconstExcludeType {
+    /// golangci's `toType`: case-insensitive.
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s.to_ascii_lowercase().as_str() {
+            "assignment" => Self::Assignment,
+            "binary" => Self::Binary,
+            "case" => Self::Case,
+            "return" => Self::Return,
+            "call" => Self::Call,
+            "compositelit" => Self::CompositeLit,
+            _ => return None,
+        })
+    }
+}
+
+impl Default for GoconstOptions {
+    fn default() -> Self {
+        Self {
+            min_len: 3,
+            min_occurrences: 3,
+            exclude_types: vec![GoconstExcludeType::Call],
+            exclude_types_error: None,
+            ignore_tests: false,
+            match_constant: true,
+            find_duplicates: false,
+            numbers: false,
+            number_min: 3,
+            number_max: 3,
+            ignore_strings: Vec::new(),
+            ignore_functions: Vec::new(),
+            ignore_map_keys: false,
+            eval_const_expressions: false,
+        }
+    }
+}
+
+/// `linters.settings.nlreturn` / `linters-settings.nlreturn`.
+#[derive(Debug, Clone, Copy)]
+pub struct NlreturnOptions {
+    pub block_size: i64,
+}
+
+impl Default for NlreturnOptions {
+    fn default() -> Self {
+        Self {
+            block_size: 1,
+        }
+    }
+}
+
+/// `linters.settings.copyloopvar` / `linters-settings.copyloopvar`.
+#[derive(Debug, Clone, Copy)]
+pub struct CopyloopvarOptions {
+    /// golangci `check-alias`: also report ` _i := i` alias copies (default false).
+    pub check_alias: bool,
+}
+
+impl Default for CopyloopvarOptions {
+    fn default() -> Self {
+        Self { check_alias: false }
+    }
+}
+
+/// `linters.settings.usetesting` / `linters-settings.usetesting`.
+///
+/// Defaults are golangci-lint's (`pkg/config/linters_settings.go`), which
+/// differ from ldez/usetesting's own: `os-setenv` is on here.
+#[derive(Debug, Clone, Copy)]
+pub struct UsetestingOptions {
+    pub os_create_temp: bool,
+    pub os_mkdir_temp: bool,
+    pub os_setenv: bool,
+    pub os_temp_dir: bool,
+    pub os_chdir: bool,
+    pub context_background: bool,
+    pub context_todo: bool,
+}
+
+impl Default for UsetestingOptions {
+    fn default() -> Self {
+        Self {
+            os_create_temp: true,
+            os_mkdir_temp: true,
+            os_setenv: true,
+            os_temp_dir: false,
+            os_chdir: true,
+            context_background: false,
+            context_todo: false,
+        }
+    }
+}
+
+/// `linters.settings.usestdlibvars` / `linters-settings.usestdlibvars`.
+#[derive(Debug, Clone, Copy)]
+pub struct UsestdlibvarsOptions {
+    pub http_method: bool,
+    pub http_status_code: bool,
+    /// Optional (golangci / upstream default: false).
+    pub time_weekday: bool,
+    pub time_month: bool,
+    pub time_layout: bool,
+    pub crypto_hash: bool,
+    /// YAML key: `default-rpc-path` (upstream flag: `rpc-default-path`).
+    pub default_rpc_path: bool,
+    pub sql_isolation_level: bool,
+    pub tls_signature_scheme: bool,
+    pub constant_kind: bool,
+    pub time_date_month: bool,
+}
+
+impl Default for UsestdlibvarsOptions {
+    fn default() -> Self {
+        Self {
+            http_method: true,
+            http_status_code: true,
+            time_weekday: false,
+            time_month: false,
+            time_layout: false,
+            crypto_hash: false,
+            default_rpc_path: false,
+            sql_isolation_level: false,
+            tls_signature_scheme: false,
+            constant_kind: false,
+            time_date_month: false,
+        }
+    }
+}
+
+/// `linters.settings.unconvert` / `linters-settings.unconvert`.
+#[derive(Debug, Clone, Copy)]
+pub struct UnconvertOptions {
+    /// Report float/complex identity conversions (default off; Go 1.9+ rounding).
+    pub fast_math: bool,
+    /// More conservative reporting (parent-context filtering).
+    ///
+    /// DEFERRED: full `isSafeContext` — currently ignored.
+    pub safe: bool,
+}
+
+impl Default for UnconvertOptions {
+    fn default() -> Self {
+        Self {
+            fast_math: false,
+            safe: false,
+        }
+    }
+}
+
+/// `linters.settings.exhaustive` / `linters-settings.exhaustive`, as the
+/// golangci-lint 2.15.0 wrapper hands it to exhaustive v0.15.0's flags.
+#[derive(Debug, Clone)]
+pub struct ExhaustiveOptions {
+    /// `-check` holds `switch` (the default).
+    pub check_switch: bool,
+    /// `-check` holds `mapliteral` (golangci reads `map` as `mapliteral`).
+    pub check_map: bool,
+    /// `-check` holds `typeswitch`.
+    pub check_type_switch: bool,
+    /// `-d`: a `default` case makes the switch exhaustive.
+    pub default_signifies_exhaustive: bool,
+    /// `-defrequire`: every checked expression switch needs a `default` case.
+    pub default_case_required: bool,
+    /// `-e`: check only what carries `//exhaustive:enforce` (golangci ORs
+    /// `explicit-exhaustive` with the two deprecated per-kind keys).
+    pub explicit_exhaustive: bool,
+    /// enumerated `-p`: only package-scope enum types and constants.
+    pub package_scope_only: bool,
+    /// `-typeonly` (repeated): `pkgpath.Type` patterns; when any is given only
+    /// matching types are checked.
+    pub only_types: Vec<String>,
+    /// `-typeignore` (repeated): `pkgpath.Type` patterns not checked.
+    pub ignore_types: Vec<String>,
+    /// `-constignore` (repeated): `pkgpath.Const` patterns not required.
+    pub ignore_constants: Vec<String>,
+}
+
+impl Default for ExhaustiveOptions {
+    fn default() -> Self {
+        Self {
+            check_switch: true,
+            check_map: false,
+            check_type_switch: false,
+            default_signifies_exhaustive: false,
+            default_case_required: false,
+            explicit_exhaustive: false,
+            package_scope_only: false,
+            only_types: Vec::new(),
+            ignore_types: Vec::new(),
+            ignore_constants: Vec::new(),
+        }
+    }
+}
+
+/// One custom function entry for `linters.settings.musttag.functions`.
+#[derive(Debug, Clone)]
+pub struct MusttagFunc {
+    /// Full function name, e.g. `encoding/json.Marshal` or `(*pkg.T).Method`.
+    pub name: String,
+    /// Struct tag key to require (`json`, `yaml`, …).
+    pub tag: String,
+    /// 0-based argument position to check.
+    pub arg_pos: usize,
+}
+
+/// `linters.settings.musttag` / `linters-settings.musttag`.
+#[derive(Debug, Clone, Default)]
+pub struct MusttagOptions {
+    /// Extra functions beyond upstream builtins.
+    pub functions: Vec<MusttagFunc>,
+}
+
+/// `linters.settings.loggercheck` / `linters-settings.loggercheck`.
+///
+/// Checker bools match golangci-lint (`true` = enabled). Defaults enable all
+/// five libraries (unlike standalone loggercheck which disables kitlog).
+#[derive(Debug, Clone)]
+pub struct LoggercheckOptions {
+    pub kitlog: bool,
+    pub klog: bool,
+    pub logr: bool,
+    pub slog: bool,
+    pub zap: bool,
+    pub require_string_key: bool,
+    pub no_printf_like: bool,
+    /// Extra fully-qualified function rules (upstream `-rules` / YAML `rules`).
+    pub rules: Vec<String>,
+}
+
+impl Default for LoggercheckOptions {
+    fn default() -> Self {
+        Self {
+            kitlog: true,
+            klog: true,
+            logr: true,
+            slog: true,
+            zap: true,
+            require_string_key: false,
+            no_printf_like: false,
+            rules: Vec::new(),
+        }
+    }
+}
+
+/// Custom slog-like function entry for `linters.settings.sloglint.custom-funcs`.
+#[derive(Debug, Clone)]
+pub struct SloglintFunc {
+    pub name: String,
+    pub msg_pos: i32,
+    pub args_pos: i32,
+}
+
+/// `suite-extra-assert-call.mode` (golangci / upstream).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SuiteExtraAssertCallMode {
+    /// Flag `s.Assert().Equal` → prefer `s.Equal` (upstream default).
+    #[default]
+    Remove,
+    /// Flag `s.Equal` → prefer `s.Assert().Equal`.
+    Require,
+}
+
+/// `linters.settings.testifylint` / `linters-settings.testifylint`.
+///
+/// Checker selection matches golangci-lint (`enable-all` / `disable-all` /
+/// `enable` / `disable`). Only implemented checkers are honored; unknown
+/// names are ignored.
+#[derive(Debug, Clone)]
+pub struct TestifylintOptions {
+    pub enable_all: bool,
+    pub disable_all: bool,
+    pub enable: Vec<String>,
+    pub disable: Vec<String>,
+    /// `bool-compare.ignore-custom-types` (default false).
+    pub bool_compare_ignore_custom_types: bool,
+    /// `expected-actual.pattern`. `None` → upstream default pattern.
+    pub expected_actual_pattern: Option<String>,
+    /// `time-compare.suppress-calls-pattern`. `None` → upstream default.
+    pub time_compare_suppress_calls_pattern: Option<String>,
+    /// `formatter.check-format-string` (default true). Full printf parity DEFERRED.
+    pub formatter_check_format_string: bool,
+    /// `formatter.require-f-funcs` (default false).
+    pub formatter_require_f_funcs: bool,
+    /// `formatter.require-string-msg`. Golangci injects false when unset.
+    pub formatter_require_string_msg: bool,
+    /// `suite-extra-assert-call.mode` (default `remove`).
+    pub suite_extra_assert_call_mode: SuiteExtraAssertCallMode,
+    /// `require-error.fn-pattern`. `None` → all error assertion names.
+    pub require_error_fn_pattern: Option<String>,
+    /// `go-require.ignore-http-handlers` (default false).
+    pub go_require_ignore_http_handlers: bool,
+}
+
+impl Default for TestifylintOptions {
+    fn default() -> Self {
+        Self {
+            enable_all: false,
+            disable_all: false,
+            enable: Vec::new(),
+            disable: Vec::new(),
+            bool_compare_ignore_custom_types: false,
+            expected_actual_pattern: None,
+            time_compare_suppress_calls_pattern: None,
+            formatter_check_format_string: true,
+            formatter_require_f_funcs: false,
+            // Match golangci-lint's injected zero-value (see settings.rs).
+            formatter_require_string_msg: false,
+            suite_extra_assert_call_mode: SuiteExtraAssertCallMode::Remove,
+            require_error_fn_pattern: None,
+            go_require_ignore_http_handlers: false,
+        }
+    }
+}
+
+/// `linters.settings.sloglint` / `linters-settings.sloglint`.
+///
+/// Defaults match golangci-lint (`no-mixed-args: true`; other checks off).
+#[derive(Debug, Clone)]
+pub struct SloglintOptions {
+    pub no_mixed_args: bool,
+    pub kv_only: bool,
+    pub attr_only: bool,
+    /// `"all"` or `"default"`; empty = disabled.
+    pub no_global: Option<String>,
+    /// `"all"` or `"scope"`; empty = disabled.
+    pub context: Option<String>,
+    pub static_msg: bool,
+    /// `"lowercased"` or `"capitalized"`; empty = disabled.
+    pub msg_style: Option<String>,
+    pub no_raw_keys: bool,
+    /// `"snake"`, `"kebab"`, `"camel"`, or `"pascal"`; empty = disabled.
+    pub key_naming_case: Option<String>,
+    pub allowed_keys: Vec<String>,
+    pub forbidden_keys: Vec<String>,
+    pub args_on_sep_lines: bool,
+    pub custom_funcs: Vec<SloglintFunc>,
+}
+
+impl Default for SloglintOptions {
+    fn default() -> Self {
+        Self {
+            no_mixed_args: true,
+            kv_only: false,
+            attr_only: false,
+            no_global: None,
+            context: None,
+            static_msg: false,
+            msg_style: None,
+            no_raw_keys: false,
+            key_naming_case: None,
+            allowed_keys: Vec::new(),
+            forbidden_keys: Vec::new(),
+            args_on_sep_lines: false,
+            custom_funcs: Vec::new(),
+        }
+    }
+}
+
+/// `linters.settings.exhaustruct` / `linters-settings.exhaustruct`.
+#[derive(Debug, Clone)]
+pub struct ExhaustructOptions {
+    /// Regexes matching full type names (`path.Name`) that should be checked.
+    /// Empty = check all (subject to `exclude`).
+    pub include: Vec<String>,
+    /// Regexes matching types to skip (precedence over `include`).
+    pub exclude: Vec<String>,
+    /// Allow empty struct literals globally.
+    pub allow_empty: bool,
+    /// Regexes for types allowed to be empty.
+    pub allow_empty_rx: Vec<String>,
+    /// Allow empty structs in return statements.
+    pub allow_empty_returns: bool,
+    /// Allow empty structs in `var` / `:=` declarations.
+    pub allow_empty_declarations: bool,
+}
+
+/// `linters.settings.exhaustruct_v5` (golangci-lint 2.13.0+): the keys
+/// golangci-lint's `exhaustruct.NewV5` copies into go-exhaustruct v5's
+/// `analyzer.Config`. `ReportFullTypePath` is not among them, so it is not here.
+#[derive(Debug, Clone, Default)]
+pub struct ExhaustructV5Options {
+    /// Full-path regexps selecting the checked types, and `Type#Field` ones
+    /// requiring a field.
+    pub enforce_patterns: Vec<String>,
+    /// Regexps of types skipped; outrank `enforce_patterns`.
+    pub ignore_patterns: Vec<String>,
+    /// Regexps of types whose fields are all optional, and `Type#Field` ones
+    /// making one field optional.
+    pub optional_patterns: Vec<String>,
+    pub allow_empty: bool,
+    pub allow_empty_patterns: Vec<String>,
+    pub allow_empty_returns: bool,
+    pub allow_empty_declarations: bool,
+    pub allow_empty_blank_assignments: bool,
+    /// Check only types enforced by a directive or a pattern.
+    pub explicit_mode: bool,
+}
+
+impl Default for ExhaustructOptions {
+    fn default() -> Self {
+        Self {
+            include: Vec::new(),
+            exclude: Vec::new(),
+            allow_empty: false,
+            allow_empty_rx: Vec::new(),
+            allow_empty_returns: false,
+            allow_empty_declarations: false,
+        }
+    }
+}
+
+impl UsestdlibvarsOptions {
+    /// True when any check that walks arbitrary string/int literals is enabled.
+    pub fn any_literal_table(&self) -> bool {
+        self.time_weekday
+            || self.time_month
+            || self.time_layout
+            || self.crypto_hash
+            || self.default_rpc_path
+            || self.sql_isolation_level
+            || self.tls_signature_scheme
+            || self.constant_kind
+    }
+
+    /// True when any check is enabled.
+    pub fn any_enabled(&self) -> bool {
+        self.http_method
+            || self.http_status_code
+            || self.any_literal_table()
+            || self.time_date_month
+    }
+}
+
+/// `linters.settings.canonicalheader` (golangci-lint 2.14.0, the
+/// golangci/canonicalheader fork): extra `exclusions` — header spellings to
+/// accept as canonical — and whether the built-in initialism table applies.
+#[derive(Debug, Clone)]
+pub struct CanonicalheaderOptions {
+    pub exclusions: Vec<String>,
+    pub use_default_exclusions: bool,
+}
+
+impl Default for CanonicalheaderOptions {
+    fn default() -> Self {
+        Self {
+            exclusions: Vec::new(),
+            use_default_exclusions: true,
+        }
+    }
+}
+
+/// `linters.settings.modernize` / `linters-settings.modernize`.
+///
+/// By default all implemented checkers are enabled. Names in `disable` are
+/// skipped (golangci-lint compatible). Unknown / deferred checker names are
+/// accepted so configs that disable `atomictypes` / `embedlit` etc. still parse.
+#[derive(Debug, Clone, Default)]
+pub struct ModernizeOptions {
+    pub disable: Vec<String>,
+}
+
+/// `linters.settings.gocritic` / `linters-settings.gocritic`.
+///
+/// Selection mirrors golangci-lint:
+/// - default → implemented stable checks
+/// - `enable-all` → all implemented checks
+/// - `disable-all` → none (then `enabled-checks`)
+/// - `enabled-checks` / `disabled-checks` add/remove names
+/// - `enabled-tags` / `disabled-tags` filter by go-critic tags (`style`,
+///   `diagnostic`, `performance`, `experimental`, `opinionated`)
+///
+/// Unknown / deferred check names are accepted so prometheus-style configs
+/// that disable unimplemented checks still parse.
+#[derive(Debug, Clone, Default)]
+pub struct GocriticOptions {
+    pub enable_all: bool,
+    pub disable_all: bool,
+    pub enabled_checks: Vec<String>,
+    pub disabled_checks: Vec<String>,
+    pub enabled_tags: Vec<String>,
+    pub disabled_tags: Vec<String>,
+    /// `linters.settings.gocritic.settings` — per-check parameters.
+    pub check_settings: GocriticCheckSettings,
+    /// Go version the checks are configured with (golangci `run.go`, pushed
+    /// into `Settings.Gocritic.Go` and then `linterCtx.SetGoVersion`). `None` =
+    /// use the module's own directive.
+    pub go: Option<String>,
+}
+
+/// Per-check parameters from `linters.settings.gocritic.settings`.
+///
+/// Every `info.Params` read in go-critic v0.14.3's checkers except ruleguard's.
+/// Defaults come from each checker's `linter.CheckerParams`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GocriticCheckSettings {
+    /// `tooManyResultsChecker.maxResults` — warn above this result count.
+    pub too_many_results_max: usize,
+    /// `ifElseChain.minThreshold` — if-else blocks needed to trigger.
+    pub if_else_chain_min_threshold: usize,
+    /// `unnamedResult.checkExported` — when true, only exported funcs are checked.
+    pub unnamed_result_check_exported: bool,
+    /// `hugeParam.sizeThreshold` — bytes at which a parameter is "heavy".
+    pub huge_param_size_threshold: i64,
+    /// `rangeValCopy.sizeThreshold` — bytes copied per iteration.
+    pub range_val_copy_size_threshold: i64,
+    /// `rangeExprCopy.sizeThreshold` — bytes of the ranged expression.
+    pub range_expr_copy_size_threshold: i64,
+    /// `nestingReduce.bodyWidth` — statements an `if` body needs to trigger.
+    pub nesting_reduce_body_width: usize,
+    /// `truncateCmp.skipArchDependent` — skip `int` / `uint` / `uintptr`.
+    pub truncate_cmp_skip_arch_dependent: bool,
+    /// `commentedOutCode.minLength` — shorter comments are skipped unless they
+    /// mention `print` / `fmt.` / `log.`.
+    pub commented_out_code_min_length: usize,
+    /// `captLocal.paramsOnly` — check only signature names.
+    pub capt_local_params_only: bool,
+    /// `elseif.skipBalanced` — skip when the then-body is a single `if`.
+    pub elseif_skip_balanced: bool,
+    /// `rangeValCopy.skipTestFuncs` — skip `func TestXxx(*testing.T)`.
+    pub range_val_copy_skip_test_funcs: bool,
+    /// `rangeExprCopy.skipTestFuncs` — skip `func TestXxx(*testing.T)`.
+    pub range_expr_copy_skip_test_funcs: bool,
+    /// `underef.skipRecvDeref` — leave `(*p).M()` for pointer-receiver `M`.
+    pub underef_skip_recv_deref: bool,
+}
+
+impl Default for GocriticCheckSettings {
+    fn default() -> Self {
+        Self {
+            too_many_results_max: 5,
+            if_else_chain_min_threshold: 2,
+            unnamed_result_check_exported: false,
+            // go-critic's own `checkers/*_checker.go` `Params` defaults, kept
+            // next to the checks that read them.
+            huge_param_size_threshold: crate::gocritic::DEFAULT_HUGE_PARAM_SIZE_THRESHOLD,
+            range_val_copy_size_threshold: crate::gocritic::DEFAULT_RANGE_VAL_COPY_SIZE_THRESHOLD,
+            range_expr_copy_size_threshold: crate::gocritic::DEFAULT_RANGE_EXPR_COPY_SIZE_THRESHOLD,
+            nesting_reduce_body_width: crate::gocritic::DEFAULT_NESTING_REDUCE_BODY_WIDTH,
+            truncate_cmp_skip_arch_dependent: true,
+            commented_out_code_min_length: 15,
+            capt_local_params_only: true,
+            elseif_skip_balanced: true,
+            range_val_copy_skip_test_funcs: true,
+            range_expr_copy_skip_test_funcs: true,
+            underef_skip_recv_deref: true,
+        }
+    }
+}
+
+/// One forbidigo pattern (`linters.settings.forbidigo.forbid` entry).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ForbidigoPattern {
+    pub pattern: String,
+    pub pkg: String,
+    pub msg: String,
+}
+
+/// `linters.settings.asasalint` / `linters-settings.asasalint`.
+///
+/// `use_builtin_exclusions` defaults to true (golangci-lint). Extra `exclude`
+/// regexes are merged with the builtin print/log pattern set.
+#[derive(Debug, Clone)]
+pub struct AsasalintOptions {
+    pub exclude: Vec<String>,
+    pub use_builtin_exclusions: bool,
+}
+
+impl Default for AsasalintOptions {
+    fn default() -> Self {
+        Self {
+            exclude: Vec::new(),
+            use_builtin_exclusions: true,
+        }
+    }
+}
+
+/// `linters.settings.iface` / `linters-settings.iface`.
+///
+/// Empty `enable` → golangci default (`identical` only).
+/// `unused_exclude` / `unusedmethod_exclude` are the analyzers' `exclude`
+/// flags (`settings.<analyzer>.exclude`), as golangci sets them: a YAML list
+/// joined with commas. The analyzer splits and trims them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct IfaceOptions {
+    pub enable: Vec<String>,
+    pub unused_exclude: String,
+    pub unusedmethod_exclude: String,
+}
+
+/// `linters.settings.reassign` / `linters-settings.reassign`.
+///
+/// Empty `patterns` → upstream default `^(Err.*|EOF)$`.
+/// Non-empty → golangci joins as `^(p1|p2|…)$`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ReassignOptions {
+    pub patterns: Vec<String>,
+}
+
+/// `linters.settings.recvcheck` / `linters-settings.recvcheck`.
+///
+/// `disable_builtin` false (default) keeps Unmarshal*/GobDecode excludes.
+/// `exclusions` format: `Struct.Method` or `*.Method`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RecvcheckOptions {
+    pub disable_builtin: bool,
+    pub exclusions: Vec<String>,
+}
+
+/// `linters.settings.decorder` / `linters-settings.decorder`.
+///
+/// Golangci-lint defaults disable all check families (`disable-*-check: true`).
+/// Use [`DecorderOptions::enabled`] for upstream analyzer defaults (all on).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecorderOptions {
+    /// Required order of declaration kinds (golangci `dec-order`).
+    pub dec_order: Vec<String>,
+    /// Ignore `_` vars for order/num checks.
+    pub ignore_underscore_vars: bool,
+    /// Disable all declaration-count checks.
+    pub disable_dec_num_check: bool,
+    /// Disable type declaration-count check only.
+    pub disable_type_dec_num_check: bool,
+    /// Disable const declaration-count check only.
+    pub disable_const_dec_num_check: bool,
+    /// Disable var declaration-count check only.
+    pub disable_var_dec_num_check: bool,
+    /// Disable declaration-order check.
+    pub disable_dec_order_check: bool,
+    /// Disable “init must be first function” check.
+    pub disable_init_func_first_check: bool,
+}
+
+impl Default for DecorderOptions {
+    fn default() -> Self {
+        // Match golangci-lint `DecorderSettings` defaults (all checks off).
+        Self {
+            dec_order: vec![
+                "type".into(),
+                "const".into(),
+                "var".into(),
+                "func".into(),
+            ],
+            ignore_underscore_vars: false,
+            disable_dec_num_check: true,
+            disable_type_dec_num_check: false,
+            disable_const_dec_num_check: false,
+            disable_var_dec_num_check: false,
+            disable_dec_order_check: true,
+            disable_init_func_first_check: true,
+        }
+    }
+}
+
+impl DecorderOptions {
+    /// Upstream analyzer flag defaults (all checks enabled).
+    pub fn enabled() -> Self {
+        Self {
+            disable_dec_num_check: false,
+            disable_dec_order_check: false,
+            disable_init_func_first_check: false,
+            ..Self::default()
+        }
+    }
+}
+
+/// `linters.settings.iotamixing` / `linters-settings.iotamixing`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct IotamixingOptions {
+    /// Report each valued const instead of the whole `const` block
+    /// (golangci / upstream `report-individual`, default false).
+    pub report_individual: bool,
+}
+
+/// `linters.settings.grouper` / `linters-settings.grouper`.
+///
+/// All flags default to **false** (golangci / upstream). Use [`GrouperOptions::enabled`]
+/// to turn every check on.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GrouperOptions {
+    /// Require a single global `const` declaration only.
+    pub const_require_single_const: bool,
+    /// Require grouped global `const` declarations.
+    pub const_require_grouping: bool,
+    /// Require a single `import` declaration only.
+    pub import_require_single_import: bool,
+    /// Require grouped `import` declarations.
+    pub import_require_grouping: bool,
+    /// Require a single global `type` declaration only.
+    pub type_require_single_type: bool,
+    /// Require grouped global `type` declarations.
+    pub type_require_grouping: bool,
+    /// Require a single global `var` declaration only.
+    pub var_require_single_var: bool,
+    /// Require grouped global `var` declarations.
+    pub var_require_grouping: bool,
+}
+
+impl GrouperOptions {
+    /// All checks enabled (useful for tests / explicit configs).
+    pub fn enabled() -> Self {
+        Self {
+            const_require_single_const: true,
+            const_require_grouping: true,
+            import_require_single_import: true,
+            import_require_grouping: true,
+            type_require_single_type: true,
+            type_require_grouping: true,
+            var_require_single_var: true,
+            var_require_grouping: true,
+        }
+    }
+}
+
+/// `linters.settings.interfacebloat` / `linters-settings.interfacebloat`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InterfacebloatOptions {
+    /// Maximum number of methods allowed inside an interface (upstream `max`).
+    pub max: usize,
+}
+
+impl Default for InterfacebloatOptions {
+    fn default() -> Self {
+        Self { max: 10 }
+    }
+}
+
+/// `linters.settings.embeddedstructfieldcheck` /
+/// `linters-settings.embeddedstructfieldcheck`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EmbeddedstructfieldcheckOptions {
+    /// Require a blank line between embedded and regular fields.
+    /// Upstream / golangci default: true.
+    pub empty_line: bool,
+    /// Forbid embedding `sync.Mutex` / `sync.RWMutex`.
+    /// Upstream / golangci default: false.
+    pub forbid_mutex: bool,
+}
+
+impl Default for EmbeddedstructfieldcheckOptions {
+    fn default() -> Self {
+        Self {
+            empty_line: true,
+            forbid_mutex: false,
+        }
+    }
+}
+
+/// `linters.settings.gochecksumtype` / `linters-settings.gochecksumtype`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GochecksumtypeOptions {
+    /// A non-panicking `default` case satisfies exhaustiveness.
+    /// Upstream / golangci default: true.
+    pub default_signifies_exhaustive: bool,
+    /// Treat covering shared interfaces as exhaustive (skip listing all structs).
+    /// Upstream / golangci default: false.
+    pub include_shared_interfaces: bool,
+}
+
+impl Default for GochecksumtypeOptions {
+    fn default() -> Self {
+        Self {
+            default_signifies_exhaustive: true,
+            include_shared_interfaces: false,
+        }
+    }
+}
+
+/// `linters.settings.inamedparam` / `linters-settings.inamedparam`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct InamedparamOptions {
+    /// Skip interface methods that have exactly one parameter field.
+    /// Upstream flag / golangci key: `skip-single-param` (default false).
+    pub skip_single_param: bool,
+}
+
+/// `linters.settings.ireturn` / `linters-settings.ireturn`.
+///
+/// Default (both empty): allow `anon` / `error` / `empty` / `stdlib`.
+/// `allow` and `reject` are mutually exclusive upstream; if both are set we
+/// prefer `reject` (DEFERRED: hard error).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct IreturnOptions {
+    /// Allow-list of keywords / regexes (golangci `allow`).
+    pub allow: Vec<String>,
+    /// Reject-list of keywords / regexes (golangci `reject`).
+    pub reject: Vec<String>,
+}
+
+/// `linters.settings.gosec` / `linters-settings.gosec`.
+///
+/// `includes` / `excludes` filter by rule id (`G101`, `G501`, …). Empty
+/// `includes` means all implemented rules; `excludes` removes from that set.
+/// `severity` / `confidence` drop findings scoring below the threshold
+/// (golangci `filterIssues`: `i.Severity >= severity && i.Confidence >= confidence`).
+/// Concurrency is DEFERRED.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct GosecOptions {
+    /// Only run these rule ids (golangci `includes`).
+    pub includes: Vec<String>,
+    /// Skip these rule ids (golangci `excludes`).
+    pub excludes: Vec<String>,
+    /// Minimum severity to report: `""` / `"low"` / `"medium"` / `"high"`.
+    /// Empty or unrecognized means no filtering (golangci `convertToScore`).
+    pub severity: String,
+    /// Minimum confidence to report; same spelling as [`Self::severity`].
+    pub confidence: String,
+    /// `config.G101` knobs.
+    pub g101: G101Options,
+    /// `config.G117` knobs.
+    pub g117: G117Options,
+    /// `config.G301` / `G302` / `G306` — the file-permission thresholds.
+    pub file_perms: FilePermOptions,
+    /// `GOSECGOVERSION` as golangci-lint sets it (`run.go`, else detected from
+    /// the main go.mod). `None` falls back to the package's module version.
+    /// Only G601 asks.
+    pub go: Option<String>,
+    /// `config.global`: how `#nosec` directives are read.
+    pub nosec: GosecNosecOptions,
+}
+
+/// `linters.settings.gosec.config.global`, the options that decide what a
+/// `#nosec` / `//gosec:disable` directive suppresses. golangci-lint passes
+/// each value through `fmt.Sprintf("%v")`, so a bool is `"true"`/`"false"`,
+/// and drops `nosec: false` altogether.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct GosecNosecOptions {
+    /// `nosec`: set to anything; `"true"`/`"enabled"` ignores every directive
+    /// (`ignoreNosec`), any other value renames the default tag.
+    pub nosec: Option<String>,
+    /// `#nosec`: an alternative tag, checked after the default one.
+    pub alternative: Option<String>,
+    /// `show-ignored`: a suppressed finding is still reported.
+    pub show_ignored: bool,
+    /// `nosec-require-rules`: a directive naming no rule suppresses nothing.
+    pub require_rules: bool,
+    /// `nosec-require-justification`: a directive without `-- reason`
+    /// suppresses nothing.
+    pub require_justification: bool,
+}
+
+impl GosecNosecOptions {
+    /// `IsGlobalEnabled(Nosec)`.
+    pub fn ignore_nosec(&self) -> bool {
+        matches!(self.nosec.as_deref(), Some("true" | "enabled"))
+    }
+
+    /// `NoSecTag`: one `#`, whether or not the value already had one.
+    fn tag(value: &str) -> String {
+        format!("#{}", value.strip_prefix('#').unwrap_or(value))
+    }
+
+    /// The default tag: `#nosec`, or `#<value>` when `nosec` is set.
+    pub fn default_tag(&self) -> String {
+        Self::tag(self.nosec.as_deref().unwrap_or("nosec"))
+    }
+
+    /// The alternative tag, which is the default one when unset.
+    pub fn alternative_tag(&self) -> String {
+        match &self.alternative {
+            Some(v) => Self::tag(v),
+            None => self.default_tag(),
+        }
+    }
+}
+
+/// `linters.settings.gosec.config.G301` / `G302` / `G306`.
+///
+/// The three `rules/fileperms.go` rules each take one scalar: the most
+/// permissive mode that is *not* a finding. `getConfiguredMode` reads it as
+///
+/// ```go
+/// case int64: mode = value
+/// case string:
+///     if m, e := strconv.ParseInt(value, 0, 64); e != nil { mode = defaultMode } else { mode = m }
+/// ```
+///
+/// The mode is also what the message says ("Expect ... to be `%#o` or less"),
+/// so a wrong threshold and a wrong message text are the same bug.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FilePermOptions {
+    /// `os.Mkdir` / `os.MkdirAll` (`NewMkdirPerms`, default `0750`).
+    pub g301: i64,
+    /// `os.Chmod` / `os.OpenFile` (`NewFilePerms`, default `0600`).
+    pub g302: i64,
+    /// `os.WriteFile` / `ioutil.WriteFile` (`NewWritePerms`, default `0600`).
+    pub g306: i64,
+}
+
+impl Default for FilePermOptions {
+    fn default() -> Self {
+        Self {
+            g301: 0o750,
+            g302: 0o600,
+            g306: 0o600,
+        }
+    }
+}
+
+/// `linters.settings.gosec.config.G117` — secret-serialization tuning.
+///
+/// Upstream `rules.NewSecretSerialization` reads exactly one key, `pattern`,
+/// and keeps the default when it is absent or empty.
+#[derive(Debug, Clone, PartialEq)]
+pub struct G117Options {
+    /// Field-name / serialized-key regex marking a secret.
+    pub pattern: String,
+}
+
+impl Default for G117Options {
+    fn default() -> Self {
+        Self {
+            pattern: crate::gosec_g117::G117_DEFAULT_PATTERN.to_string(),
+        }
+    }
+}
+
+/// `linters.settings.gosec.config.G101` — hardcoded-credentials tuning.
+///
+/// Mirrors upstream `rules.NewHardcodedCredentials`. Upstream reads the
+/// numeric knobs as **strings** and silently keeps the default when the value
+/// does not parse; we do the same at the settings layer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct G101Options {
+    /// Variable-name regex marking a credential (upstream `pattern`).
+    pub pattern: String,
+    /// Skip the entropy gate entirely (upstream `ignore_entropy`).
+    pub ignore_entropy: bool,
+    /// Shannon-entropy × length threshold (upstream `entropy_threshold`).
+    pub entropy_threshold: f64,
+    /// Per-character entropy threshold (upstream `per_char_threshold`).
+    pub per_char_threshold: f64,
+    /// Prefix length the entropy is computed over (upstream `truncate`).
+    pub truncate: usize,
+    /// Values shorter than this skip the entropy check (upstream `min_entropy_length`).
+    pub min_entropy_length: usize,
+}
+
+impl Default for G101Options {
+    fn default() -> Self {
+        Self {
+            pattern: r"(?i)passwd|pass|password|pwd|secret|token|pw|apiKey|bearer|cred".to_string(),
+            ignore_entropy: false,
+            entropy_threshold: 80.0,
+            per_char_threshold: 3.0,
+            truncate: 16,
+            min_entropy_length: 8,
+        }
+    }
+}
+
+/// `linters.settings.nonamedreturns` / `linters-settings.nonamedreturns`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct NonamedreturnsOptions {
+    /// Report named `error` returns even when used in defer (upstream default false).
+    pub report_error_in_defer: bool,
+    /// Allow unused named returns; report only if referenced or used by naked return.
+    pub allow_unused_named_returns: bool,
+}
+
+/// `linters.settings.funcorder` / `linters-settings.funcorder`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FuncorderOptions {
+    /// Check that constructors are placed after the struct declaration and
+    /// before the struct's methods (upstream default true).
+    pub constructor: bool,
+    /// Check that exported methods are placed before unexported methods
+    /// (upstream default true).
+    pub struct_method: bool,
+    /// Check that constructors / methods are sorted alphabetically within
+    /// their group (upstream default false).
+    pub alphabetical: bool,
+    /// Check that exported top-level functions are placed before unexported
+    /// ones (upstream default false).
+    pub function: bool,
+}
+
+impl Default for FuncorderOptions {
+    fn default() -> Self {
+        Self {
+            constructor: true,
+            struct_method: true,
+            alphabetical: false,
+            function: false,
+        }
+    }
+}
+
+/// `linters.settings.paralleltest` / `linters-settings.paralleltest`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ParalleltestOptions {
+    /// Ignore missing top-level `t.Parallel()` calls (upstream `-i`).
+    pub ignore_missing: bool,
+    /// Ignore missing `t.Parallel()` in subtests / range runs.
+    pub ignore_missing_subtests: bool,
+    /// Report `defer` used together with `t.Parallel` (prefer `t.Cleanup`).
+    pub check_cleanup: bool,
+}
+
+/// `linters.settings.tagliatelle` / `linters-settings.tagliatelle`.
+///
+/// Golangci-lint merges user `case.rules` onto defaults
+/// (`json`/`yaml` → `camel`, `header` → `header`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TagliatelleOptions {
+    /// Tag-key → case-converter name (`camel`, `snake`, `header`, …).
+    pub rules: std::collections::HashMap<String, String>,
+    /// Extended rule key → case name (ExtraInitialisms DEFERRED; treated as simple case).
+    pub extended_rules: std::collections::HashMap<String, String>,
+    /// Compare converter(fieldName) instead of converter(tagValue).
+    pub use_field_name: bool,
+    /// Field names to skip.
+    pub ignored_fields: Vec<String>,
+    /// Skip the whole package (used by package overrides; DEFERRED radix).
+    pub ignore: bool,
+}
+
+/// `linters.settings.testpackage` / `linters-settings.testpackage`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TestpackageOptions {
+    /// Regexp matched against the test file path; matches are skipped.
+    /// Upstream / golangci default: `(export|internal)_test\.go`.
+    pub skip_regexp: String,
+    /// Package names that may appear in `*_test.go` without a `_test` suffix.
+    /// Upstream / golangci default: `["main"]`.
+    pub allow_packages: Vec<String>,
+}
+
+impl Default for TestpackageOptions {
+    fn default() -> Self {
+        Self {
+            skip_regexp: r"(export|internal)_test\.go".into(),
+            allow_packages: vec!["main".into()],
+        }
+    }
+}
+
+/// Per-kind options for `linters.settings.thelper.{test,fuzz,benchmark,tb}`.
+///
+/// Defaults match kulti/thelper / golangci-lint (all checks on).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ThelperKindOptions {
+    pub first: bool,
+    pub name: bool,
+    pub begin: bool,
+}
+
+impl Default for ThelperKindOptions {
+    fn default() -> Self {
+        Self {
+            first: true,
+            name: true,
+            begin: true,
+        }
+    }
+}
+
+/// `linters.settings.thelper` / `linters-settings.thelper`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ThelperOptions {
+    pub test: ThelperKindOptions,
+    pub fuzz: ThelperKindOptions,
+    pub benchmark: ThelperKindOptions,
+    pub tb: ThelperKindOptions,
+}
+
+/// `linters.settings.gosmopolitan` / `linters-settings.gosmopolitan`.
+///
+/// `watch_for_scripts` defaults to `["Han"]` (golangci-lint). Empty → `Han`.
+/// `allow_time_local` defaults to false (i.e. `time.Local` is reported).
+#[derive(Debug, Clone)]
+pub struct GosmopolitanOptions {
+    pub allow_time_local: bool,
+    pub escape_hatches: Vec<String>,
+    pub watch_for_scripts: Vec<String>,
+}
+
+impl Default for GosmopolitanOptions {
+    fn default() -> Self {
+        Self {
+            allow_time_local: false,
+            escape_hatches: Vec::new(),
+            watch_for_scripts: vec!["Han".to_string()],
+        }
+    }
+}
+
+/// `linters.settings.goheader` / `linters-settings.goheader`.
+///
+/// Empty `template` and `template_path` → analyzer is a no-op.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GoheaderOptions {
+    pub template: String,
+    pub template_path: String,
+    pub const_values: std::collections::HashMap<String, String>,
+    pub regexp_values: std::collections::HashMap<String, String>,
+}
+
+/// `linters.settings.forbidigo` / `linters-settings.forbidigo`.
+///
+/// `linters.settings.bidichk` — full rune names to check.
+/// Empty list → all nine default dangerous runes (golangci-lint compat).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BidichkOptions {
+    pub disallowed_runes: Vec<String>,
+}
+
+/// Empty `forbid` → upstream default `^(fmt\.Print(|f|ln)|print|println)$`.
+/// `exclude_godoc_examples` defaults to true (golangci-lint).
+/// `analyze_types` is accepted but DEFERRED (literal source matching only).
+#[derive(Debug, Clone)]
+pub struct ForbidigoOptions {
+    pub forbid: Vec<ForbidigoPattern>,
+    pub exclude_godoc_examples: bool,
+    pub analyze_types: bool,
+}
+
+impl Default for ForbidigoOptions {
+    fn default() -> Self {
+        Self {
+            forbid: Vec::new(),
+            exclude_godoc_examples: true,
+            analyze_types: false,
+        }
+    }
+}
+
+/// `linters.settings.varnamelen` / `linters-settings.varnamelen`.
+///
+/// Defaults match upstream blizzy78/varnamelen / golangci-lint.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VarnamelenOptions {
+    /// Longest usage distance (in lines) still considered a "small" scope.
+    pub max_distance: usize,
+    /// Minimum name length considered "long" enough to ignore.
+    pub min_name_length: usize,
+    pub check_receiver: bool,
+    pub check_return: bool,
+    pub check_type_param: bool,
+    pub ignore_type_assert_ok: bool,
+    pub ignore_map_index_ok: bool,
+    pub ignore_chan_recv_ok: bool,
+    pub ignore_names: Vec<String>,
+    pub ignore_decls: Vec<String>,
+}
+
+impl Default for VarnamelenOptions {
+    fn default() -> Self {
+        Self {
+            max_distance: 5,
+            min_name_length: 3,
+            check_receiver: false,
+            check_return: false,
+            check_type_param: false,
+            ignore_type_assert_ok: false,
+            ignore_map_index_ok: false,
+            ignore_chan_recv_ok: false,
+            ignore_names: Vec::new(),
+            ignore_decls: Vec::new(),
+        }
+    }
+}
+
+/// `linters.settings.unparam` / `linters-settings.unparam`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnparamOptions {
+    /// Inspect exported functions (golangci `check-exported`; default false).
+    pub check_exported: bool,
+}
+
+impl Default for UnparamOptions {
+    fn default() -> Self {
+        Self {
+            check_exported: false,
+        }
+    }
+}
+
+/// `linters.settings.unqueryvet` / `linters-settings.unqueryvet`.
+///
+/// Core SELECT * detection only. SQL builders / N+1 / injection / tx-leak /
+/// custom DSL are DEFERRED (see DEVELOPMENT.md R13).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnqueryvetOptions {
+    /// Detect `SELECT t.*` patterns (upstream / golangci default: true).
+    pub check_aliased_wildcard: bool,
+    /// Detect `SELECT *` inside subqueries (upstream / golangci default: true).
+    pub check_subqueries: bool,
+    /// Regex allowlist; empty → upstream defaults (`COUNT(*)`, system catalogs, …).
+    pub allowed_patterns: Vec<String>,
+}
+
+impl Default for UnqueryvetOptions {
+    fn default() -> Self {
+        Self {
+            check_aliased_wildcard: true,
+            check_subqueries: true,
+            allowed_patterns: Vec::new(),
+        }
+    }
+}
+
+/// `linters.settings.promlinter` / `linters-settings.promlinter`.
+///
+/// `strict` parse-failure diagnostics are DEFERRED (accepted for config compat).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PromlinterOptions {
+    /// Upstream `--strict`; parse failures reported only when true (DEFERRED).
+    pub strict: bool,
+    /// Disable named promlint checks (`Help`, `Counter`, `CamelCase`, …).
+    pub disabled_linters: Vec<String>,
+}
+
+/// Individual `wsl_v5` check (bombsimon/wsl/v5 `CheckType`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum WslV5Check {
+    Assign,
+    Branch,
+    Decl,
+    Defer,
+    Expr,
+    For,
+    Go,
+    If,
+    IncDec,
+    Label,
+    Range,
+    Return,
+    Select,
+    Send,
+    Switch,
+    TypeSwitch,
+    AfterBlock,
+    AfterDecl,
+    AfterDefer,
+    AfterExpr,
+    AfterGo,
+    Append,
+    AssignExclusive,
+    AssignExpr,
+    CuddleGroup,
+    Err,
+    LeadingWhitespace,
+    TrailingWhitespace,
+}
+
+impl WslV5Check {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Assign => "assign",
+            Self::Branch => "branch",
+            Self::Decl => "decl",
+            Self::Defer => "defer",
+            Self::Expr => "expr",
+            Self::For => "for",
+            Self::Go => "go",
+            Self::If => "if",
+            Self::IncDec => "inc-dec",
+            Self::Label => "label",
+            Self::Range => "range",
+            Self::Return => "return",
+            Self::Select => "select",
+            Self::Send => "send",
+            Self::Switch => "switch",
+            Self::TypeSwitch => "type-switch",
+            Self::AfterBlock => "after-block",
+            Self::AfterDecl => "after-decl",
+            Self::AfterDefer => "after-defer",
+            Self::AfterExpr => "after-expr",
+            Self::AfterGo => "after-go",
+            Self::Append => "append",
+            Self::AssignExclusive => "assign-exclusive",
+            Self::AssignExpr => "assign-expr",
+            Self::CuddleGroup => "cuddle-group",
+            Self::Err => "err",
+            Self::LeadingWhitespace => "leading-whitespace",
+            Self::TrailingWhitespace => "trailing-whitespace",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        Some(match s.to_ascii_lowercase().as_str() {
+            "assign" => Self::Assign,
+            "branch" => Self::Branch,
+            "decl" => Self::Decl,
+            "defer" => Self::Defer,
+            "expr" => Self::Expr,
+            "for" => Self::For,
+            "go" => Self::Go,
+            "if" => Self::If,
+            "inc-dec" => Self::IncDec,
+            "label" => Self::Label,
+            "range" => Self::Range,
+            "return" => Self::Return,
+            "select" => Self::Select,
+            "send" => Self::Send,
+            "switch" => Self::Switch,
+            "type-switch" => Self::TypeSwitch,
+            "after-block" => Self::AfterBlock,
+            "after-decl" => Self::AfterDecl,
+            "after-defer" => Self::AfterDefer,
+            "after-expr" => Self::AfterExpr,
+            "after-go" => Self::AfterGo,
+            "append" => Self::Append,
+            "assign-exclusive" => Self::AssignExclusive,
+            "assign-expr" => Self::AssignExpr,
+            "cuddle-group" => Self::CuddleGroup,
+            "err" => Self::Err,
+            "leading-whitespace" => Self::LeadingWhitespace,
+            "trailing-whitespace" => Self::TrailingWhitespace,
+            _ => return None,
+        })
+    }
+}
+
+/// `linters.settings.wsl_v5` / `linters-settings.wsl_v5`.
+///
+/// Defaults match bombsimon/wsl/v5 / golangci-lint (`allow-first-in-block: true`,
+/// `allow-whole-block: false`, `branch-max-lines: 2`, `case-max-lines: 0`,
+/// `cuddle-max-statements: 1`, default check preset).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WslV5Options {
+    pub allow_first_in_block: bool,
+    pub allow_whole_block: bool,
+    pub branch_max_lines: usize,
+    pub case_max_lines: usize,
+    pub cuddle_max_statements: usize,
+    pub checks: HashSet<WslV5Check>,
+}
+
+impl WslV5Options {
+    pub fn default_checks() -> HashSet<WslV5Check> {
+        HashSet::from([
+            WslV5Check::Append,
+            WslV5Check::Assign,
+            WslV5Check::Branch,
+            WslV5Check::Decl,
+            WslV5Check::Defer,
+            WslV5Check::Err,
+            WslV5Check::Expr,
+            WslV5Check::For,
+            WslV5Check::Go,
+            WslV5Check::If,
+            WslV5Check::IncDec,
+            WslV5Check::Label,
+            WslV5Check::LeadingWhitespace,
+            WslV5Check::TrailingWhitespace,
+            WslV5Check::Range,
+            WslV5Check::Return,
+            WslV5Check::Select,
+            WslV5Check::Send,
+            WslV5Check::Switch,
+            WslV5Check::TypeSwitch,
+        ])
+    }
+
+    pub fn all_checks() -> HashSet<WslV5Check> {
+        let mut c = Self::default_checks();
+        c.insert(WslV5Check::AssignExclusive);
+        c.insert(WslV5Check::AssignExpr);
+        c.insert(WslV5Check::AfterBlock);
+        c.insert(WslV5Check::AfterDecl);
+        c.insert(WslV5Check::AfterDefer);
+        c.insert(WslV5Check::AfterExpr);
+        c.insert(WslV5Check::AfterGo);
+        c.insert(WslV5Check::CuddleGroup);
+        c
+    }
+
+    /// Build check set from golangci `default` / `enable` / `disable`.
+    pub fn resolve_checks(default: &str, enable: &[String], disable: &[String]) -> HashSet<WslV5Check> {
+        let mut checks = match default.to_ascii_lowercase().as_str() {
+            "" | "default" => Self::default_checks(),
+            "all" => Self::all_checks(),
+            "none" => HashSet::new(),
+            _ => Self::default_checks(),
+        };
+        for s in enable {
+            if let Some(c) = WslV5Check::from_str(s) {
+                checks.insert(c);
+            }
+        }
+        for s in disable {
+            if let Some(c) = WslV5Check::from_str(s) {
+                checks.remove(&c);
+            }
+        }
+        checks
+    }
+}
+
+impl Default for WslV5Options {
+    fn default() -> Self {
+        Self {
+            allow_first_in_block: true,
+            allow_whole_block: false,
+            branch_max_lines: 2,
+            case_max_lines: 0,
+            cuddle_max_statements: 1,
+            checks: Self::default_checks(),
+        }
+    }
+}
+
+/// `linters.settings.ginkgolinter` / `linters-settings.ginkgolinter`.
+///
+/// Defaults match upstream nunnatsa/ginkgolinter / golangci-lint (all suppress
+/// flags false; force/forbid flags false; `allow-havelen-zero` false).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GinkgolinterOptions {
+    pub suppress_len_assertion: bool,
+    pub suppress_nil_assertion: bool,
+    pub suppress_err_assertion: bool,
+    pub suppress_compare_assertion: bool,
+    pub suppress_async_assertion: bool,
+    pub suppress_type_compare_assertion: bool,
+    pub forbid_focus_container: bool,
+    pub allow_havelen_zero: bool,
+    pub force_expect_to: bool,
+    pub validate_async_intervals: bool,
+    pub forbid_spec_pollution: bool,
+    pub force_succeed: bool,
+    pub force_assertion_description: bool,
+    pub force_tonot: bool,
+}
+

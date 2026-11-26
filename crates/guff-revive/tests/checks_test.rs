@@ -1,0 +1,2473 @@
+mod support;
+
+use guff_analysis::validate;
+use guff_revive::revive;
+
+#[test]
+fn revive_flags_default_rule_violations() {
+    let pkg = support::typecheck_fixture("revive", "example.com/revive", "bad.go");
+    let messages = support::run_analyzer(revive(), &pkg);
+    for needle in [
+        "dot-imports:",
+        "blank-imports:",
+        "increment-decrement:",
+        "error-naming:",
+        "error-strings:",
+        "redefines-builtin-id:",
+        "receiver-naming:",
+        "range:",
+        // No `empty-block:`: bad.go's only empty block is a bare `for range`,
+        // which revive v1.17.0 skips (`revive_empty_block_*` cover the rule).
+        "errorf:",
+        "error-return:",
+        "var-declaration:",
+        "package-comments:",
+        "var-naming:",
+        "unexported-return:",
+        "unused-parameter:",
+        "unreachable-code:",
+        "indent-error-flow:",
+        "superfluous-else:",
+    ] {
+        assert!(
+            messages.iter().any(|m| m.contains(needle)),
+            "missing {needle} in {messages:?}"
+        );
+    }
+}
+
+/// `errorf` rewrites the whole line, not the call.
+///
+/// golangci-lint turns revive's `ReplacementLine` into one edit spanning the
+/// failure's lines, so the fix has to carry the indentation and the `return`
+/// around the call as well. Nothing in the finding says whether guff writes
+/// anything at all here (COMPAT-HARDENING, `compat/fix/`).
+#[test]
+fn revive_errorf_fix_replaces_the_whole_line() {
+    let pkg = support::typecheck_fixture("revive", "example.com/revive", "bad.go");
+    let mut fixes = 0;
+    for d in support::run_analyzer_diagnostics(revive(), &pkg) {
+        if !d.message.contains("errorf:") {
+            continue;
+        }
+        let edits = &d.suggested_fixes[0].text_edits;
+        assert_eq!(edits.len(), 1, "one whole-line edit: {edits:?}");
+        // The replacement is a line: it ends with the newline golangci adds,
+        // and it carries whatever preceded the call on that line.
+        assert!(edits[0].new_text.ends_with('\n'), "{edits:?}");
+        assert!(
+            edits[0].new_text.contains("fmt.Errorf("),
+            "{:?}",
+            edits[0].new_text
+        );
+        assert!(
+            !edits[0].new_text.contains("errors.New("),
+            "{:?}",
+            edits[0].new_text
+        );
+        fixes += 1;
+    }
+    assert!(fixes > 0, "the fixture has an errorf violation");
+}
+
+#[test]
+fn revive_allows_clean_code() {
+    let pkg = support::typecheck_fixture("revive", "example.com/revive/ok", "ok.go");
+    let messages = support::run_analyzer(revive(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
+}
+
+#[test]
+fn revive_blank_imports_allows_justified_contiguous_group() {
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/blank_group_ok",
+        "blank_group_ok.go",
+    );
+    let messages = support::run_analyzer(revive(), &pkg);
+    assert!(
+        messages.iter().all(|m| !m.contains("blank-imports")),
+        "justified blank-import group must be silent: {messages:?}"
+    );
+}
+
+#[test]
+fn revive_blank_imports_flags_only_first_of_unjustified_group() {
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/blank_group_bad",
+        "blank_group_bad.go",
+    );
+    let messages: Vec<_> = support::run_analyzer(revive(), &pkg)
+        .into_iter()
+        .filter(|m| m.contains("blank-imports"))
+        .collect();
+    assert_eq!(
+        messages.len(),
+        1,
+        "contiguous unjustified blank imports report once: {messages:?}"
+    );
+}
+
+#[test]
+fn revive_package_comments_accepts_sibling_file_doc() {
+    let pkg = support::typecheck_fixture_dir(
+        "revive",
+        "sibling_ok",
+        "example.com/revive/sibling_ok",
+    );
+    let messages = support::run_analyzer(revive(), &pkg);
+    assert!(
+        messages.iter().all(|m| !m.contains("package-comments")),
+        "package comment on sibling file must silence: {messages:?}"
+    );
+}
+
+/// A doc that holds only directives is still a doc: `checkPackageComment`
+/// returns at the first file with `Doc != nil` and never reads it, while
+/// `isEmptyDoc` a few lines earlier asks `Doc.Text()`, which go/ast strips
+/// directives from. datadog-agent's `cmd/cluster-agent/klog.go` silences its
+/// package with `//nolint:revive // TODO(CINT) Fix revive linter` alone. A
+/// comment detached by a blank line is not a doc and silences nothing.
+#[test]
+fn revive_package_comments_counts_a_directive_only_doc() {
+    let pkg = support::typecheck_fixture_dir(
+        "revive",
+        "sibling_directive_ok",
+        "example.com/revive/siblingdirective",
+    );
+    let messages = support::run_analyzer(revive(), &pkg);
+    assert!(
+        messages.iter().all(|m| !m.contains("package-comments")),
+        "a directive-only doc silences the package: {messages:?}"
+    );
+
+    let pkg = support::typecheck_fixture_dir(
+        "revive",
+        "sibling_detached_bad",
+        "example.com/revive/siblingdetached",
+    );
+    let messages: Vec<_> = support::run_analyzer(revive(), &pkg)
+        .into_iter()
+        .filter(|m| m.contains("package-comments"))
+        .collect();
+    assert_eq!(
+        messages,
+        vec!["package-comments: should have a package comment".to_string()],
+        "a detached comment is not a doc"
+    );
+}
+
+#[test]
+fn revive_exported_skips_methods_on_private_receivers() {
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/private_receiver_ok",
+        "private_receiver_ok.go",
+    );
+    let messages = support::run_analyzer(revive(), &pkg);
+    assert!(
+        messages.iter().all(|m| !m.contains("exported:")),
+        "private receivers / common methods must be silent: {messages:?}"
+    );
+}
+
+#[test]
+fn revive_var_declaration_does_not_descend_into_values() {
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/vardeclprune",
+        "var_decl_prune.go",
+    );
+    let messages = support::run_analyzer(revive(), &pkg);
+    let decls: Vec<&String> = messages
+        .iter()
+        .filter(|m| m.contains("var-declaration:"))
+        .collect();
+    assert!(
+        decls.iter().any(|m| m.contains("var TopLevel")),
+        "a plain declaration is still reported: {decls:?}"
+    );
+    assert!(
+        decls
+            .iter()
+            .all(|m| !m.contains("inClosure") && !m.contains("inBlank")),
+        "vars inside a declaration's value are invisible upstream: {decls:?}"
+    );
+}
+
+#[test]
+fn revive_comments_density_reports_a_ratio_below_the_minimum() {
+    use guff_analysis::SettingsBag;
+    use guff_revive::{RuleArgument, RuleSetting, Settings};
+    use guff_runner::{run_on_packages, RunnerOptions};
+    use std::sync::Arc;
+
+    // The three other files exercising this rule are all at 0%, which cannot
+    // separate "the ratio is under the threshold" from "there are no comments".
+    // This one is at 8%, and it lives alone so that a comment added to some
+    // other fixture cannot tip it over — which is exactly what happened to the
+    // near-threshold case that used to sit in extended_bad.go.
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "revive",
+        Settings {
+            severity: None,
+            rules: Some(vec![RuleSetting {
+                name: "comments-density".into(),
+                arguments: vec![RuleArgument::Integer(10)],
+                disabled: false,
+                severity: None,
+                exclude: Vec::new(),
+            }]),
+            confidence: None,
+            ignore_generated_header: false,
+            enable_default_rules: false,
+            enable_all_rules: false,
+            go: None,
+            directives: Vec::new(),
+        },
+    );
+    let bag = Arc::new(bag);
+
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/commentsdensity",
+        "comments_density_edge.go",
+    );
+    let result = run_on_packages(
+        &[revive()],
+        std::slice::from_ref(&pkg),
+        &RunnerOptions {
+            sequential: true,
+            settings: bag,
+            ..RunnerOptions::default()
+        },
+    )
+    .expect("run revive");
+    let messages: Vec<String> = result
+        .diagnostics()
+        .into_iter()
+        .map(|(_, d)| d.message.clone())
+        .collect();
+
+    assert_eq!(
+        messages,
+        vec![
+            "comments-density: the file has a comment density of  8% \
+             (5 comment lines for 56 code lines) but expected a minimum of 10%"
+        ],
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn revive_unnecessary_if_compares_the_rendered_targets() {
+    use guff_analysis::SettingsBag;
+    use guff_revive::{RuleSetting, Settings};
+    use guff_runner::{run_on_packages, RunnerOptions};
+    use std::sync::Arc;
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "revive",
+        Settings {
+            severity: None,
+            rules: Some(vec![RuleSetting {
+                name: "unnecessary-if".into(),
+                arguments: Vec::new(),
+                disabled: false,
+                severity: None,
+                exclude: Vec::new(),
+            }]),
+            confidence: None,
+            ignore_generated_header: false,
+            enable_default_rules: false,
+            enable_all_rules: false,
+            go: None,
+            directives: Vec::new(),
+        },
+    );
+    let bag = Arc::new(bag);
+
+    let pkg = support::typecheck_fixture("revive", "example.com/revive/util", "extended_bad.go");
+    let result = run_on_packages(
+        &[revive()],
+        std::slice::from_ref(&pkg),
+        &RunnerOptions {
+            sequential: true,
+            settings: bag,
+            ..RunnerOptions::default()
+        },
+    )
+    .expect("run revive");
+    let messages: Vec<String> = result
+        .diagnostics()
+        .into_iter()
+        .map(|(_, d)| d.message.clone())
+        .collect();
+
+    // Upstream renders both assignment targets with `astutils.GoFmt` and bails
+    // when they differ. Rendering a placeholder for the shapes the printer does
+    // not know made `s.Force` and `s.Disable` compare equal — fiber's
+    // `if colors { cfg.ForceColors = true } else { cfg.DisableColors = true }`.
+    // The messages are asserted whole because the rendering *is* the defect.
+    let mut found: Vec<&String> = messages
+        .iter()
+        .filter(|m| m.contains("unnecessary-if:"))
+        .collect();
+    found.sort();
+    let want = [
+        "unnecessary-if: replace this conditional by: b = n <= 1",
+        "unnecessary-if: replace this conditional by: b = n > 1",
+        "unnecessary-if: replace this conditional by: return flag",
+        "unnecessary-if: replace this conditional by: s.Force = c",
+    ];
+    assert_eq!(found.len(), want.len(), "{messages:?}");
+    for w in want {
+        assert!(found.iter().any(|m| m.contains(w)), "missing `{w}`: {found:?}");
+    }
+    // The different-target and non-boolean shapes are covered by the count.
+}
+
+#[test]
+fn revive_never_unwraps_parentheses() {
+    use guff_analysis::SettingsBag;
+    use guff_revive::{RuleSetting, Settings};
+    use guff_runner::{run_on_packages, RunnerOptions};
+    use std::sync::Arc;
+
+    let rule = |name: &str| RuleSetting {
+        name: name.into(),
+        arguments: Vec::new(),
+        disabled: false,
+        severity: None,
+        exclude: Vec::new(),
+    };
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "revive",
+        Settings {
+            severity: None,
+            rules: Some(vec![
+                rule("unnecessary-format"),
+                rule("use-fmt-print"),
+                rule("redefines-builtin-id"),
+            ]),
+            confidence: None,
+            ignore_generated_header: false,
+            enable_default_rules: false,
+            enable_all_rules: false,
+            go: None,
+            directives: Vec::new(),
+        },
+    );
+    let bag = Arc::new(bag);
+
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/parenpolarity",
+        "paren_polarity.go",
+    );
+    let result = run_on_packages(
+        &[revive()],
+        std::slice::from_ref(&pkg),
+        &RunnerOptions {
+            sequential: true,
+            settings: bag,
+            ..RunnerOptions::default()
+        },
+    )
+    .expect("run revive");
+    let messages: Vec<String> = result
+        .diagnostics()
+        .into_iter()
+        .map(|(_, d)| d.message.clone())
+        .collect();
+
+    let formats: Vec<&String> = messages
+        .iter()
+        .filter(|m| m.contains("unnecessary use of formatting function"))
+        .collect();
+    assert_eq!(
+        formats.len(),
+        1,
+        "only the bare `fmt.Errorf(\"…\")` is a finding: {messages:?}"
+    );
+
+    // `astutils.GoFmt` is `go/printer`: it keeps the parentheses.
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains(r#"fmt.Fprintln(os.Stderr, ("ok"))"#)),
+        "use-fmt-print renders with parens: {messages:?}"
+    );
+
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m.contains("redefinition of the built-in function len"))
+            .count(),
+        2,
+        "both the short and the `var` form are findings: {messages:?}"
+    );
+}
+
+#[test]
+fn revive_var_declaration_reports_untyped_constant_defaults() {
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/vardeclconst",
+        "var_decl_untyped_const.go",
+    );
+    let messages = support::run_analyzer(revive(), &pkg);
+    let decls: Vec<&String> = messages
+        .iter()
+        .filter(|m| m.contains("var-declaration:"))
+        .collect();
+    for want in ["var a", "var b", "var c", "var d", "var g"] {
+        assert!(
+            decls.iter().any(|m| m.contains(want)),
+            "{want} should be reported: {decls:?}"
+        );
+    }
+    for skip in ["var e", "var f"] {
+        assert!(
+            decls.iter().all(|m| !m.contains(skip)),
+            "{skip}'s declared type is not the constant's default type: {decls:?}"
+        );
+    }
+    // `complex(2, 3)` and friends are untyped constants too, so the same
+    // default-type gate applies to them. Reading the call as typed skipped the
+    // gate and reported all three — fiber's `state_test.go:339` is `bnr1`.
+    for skip in ["var bnr1", "var bnr2", "var bnr3"] {
+        assert!(
+            decls.iter().all(|m| !m.contains(skip)),
+            "{skip}: the builtin's default type is not the declared one: {decls:?}"
+        );
+    }
+    for want in ["var br1", "var br2", "var br3", "var br4", "var br5", "var br6", "var br7"] {
+        assert!(
+            decls.iter().any(|m| m.contains(want)),
+            "{want} should be reported: {decls:?}"
+        );
+    }
+}
+
+/// `var-declaration` asks upstream's question of **both** operands.
+///
+/// Upstream's gate is `if !validType(lhsTyp) || !validType(rhsTyp) { return }`.
+/// guff asked only the right half, so every `var x pkg.T = <local expr>` was
+/// reported by guff alone; ingress-nginx (controller-v1.15.1) has
+/// `var el ingress.Location = *location`.
+///
+/// The line is drawn at the **spelling**, not at where the type lives.
+/// Measured against golangci-lint 2.12.2 with the right-hand side held
+/// constant at a plain local identifier, in package and function scope alike:
+/// `qual.Case`, a dot-imported `Case` and `bytes.Buffer` are silent, while
+/// `type a = qual.Case`, `type a = bytes.Buffer`, `type o qual.Case` and a
+/// wholly local type are all reported. `lhsAliasVar` below is the control for
+/// that: writing the gate as "unalias, then ask where the type lives" would
+/// silence a finding upstream makes.
+/// unexported-return has the same cross-package gate as var-declaration, for
+/// the same reason: revive type-checks with `importer.Default()`, which
+/// resolves no import, so a type spelled through one comes back nil and
+/// `exportedType(nil)` is "exported". An alias to another package's type is
+/// that shape — datadog-agent returns `[]*resource` where
+/// `type resource = metrics.Resource`. The line is the alias *target*: an
+/// unexported struct that merely holds an imported field still reports.
+#[test]
+fn revive_unexported_return_gates_on_a_cross_package_alias() {
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/unexportedreturnalias",
+        "unexported_return_alias.go",
+    );
+    let messages: Vec<String> = support::run_analyzer(revive(), &pkg)
+        .into_iter()
+        .filter(|m| m.contains("unexported-return:"))
+        .collect();
+    assert_eq!(
+        messages,
+        vec![
+            "unexported-return: exported method LocalAlias returns unexported type \
+             *unexportedreturnalias.localAlias, which can be annoying to use"
+                .to_string(),
+            "unexported-return: exported method Hidden returns unexported type \
+             *unexportedreturnalias.hidden, which can be annoying to use"
+                .to_string(),
+            "unexported-return: exported method LocalStruct returns unexported type \
+             *unexportedreturnalias.localStruct, which can be annoying to use"
+                .to_string(),
+        ],
+        "the five cross-package shapes must stay silent"
+    );
+}
+
+#[test]
+fn revive_var_declaration_gates_on_the_declared_type_too() {
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/vardeclotherpkg",
+        "var_decl_other_package.go",
+    );
+    let messages = support::run_analyzer(revive(), &pkg);
+    let decls: Vec<&String> = messages
+        .iter()
+        .filter(|m| m.contains("var-declaration:"))
+        .collect();
+
+    assert_eq!(
+        decls.len(),
+        3,
+        "expected exactly localCall, lhsAliasVar and lhsOwnVar: {decls:?}"
+    );
+    for want in ["var localCall", "var lhsAliasVar", "var lhsOwnVar"] {
+        assert_eq!(
+            decls.iter().filter(|m| m.contains(want)).count(),
+            1,
+            "{want} should be reported once: {decls:?}"
+        );
+    }
+    // Written as `pkg.T` or reached through a dot import: both name another
+    // package, whatever the right-hand side is.
+    for skip in ["var lhsQualDeref", "var lhsQualVar", "var lhsDotVar"] {
+        assert_eq!(
+            decls.iter().filter(|m| m.contains(skip)).count(),
+            0,
+            "{skip}'s declared type names another package: {decls:?}"
+        );
+    }
+}
+
+#[test]
+fn revive_exported_names_generic_receivers_like_upstream() {
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/genericreceiver",
+        "generic_receiver.go",
+    );
+    let messages = support::run_analyzer(revive(), &pkg);
+    let exported: Vec<&String> = messages
+        .iter()
+        .filter(|m| m.contains("exported:"))
+        .collect();
+    assert!(
+        exported
+            .iter()
+            .any(|m| m.contains("exported method Box.Get should have comment")),
+        "pointer receiver on a generic type must read `Box.Get`: {exported:?}"
+    );
+    assert!(
+        exported
+            .iter()
+            .any(|m| m.contains("exported method Pair.First should have comment")),
+        "two-parameter receiver must read `Pair.First`: {exported:?}"
+    );
+    assert!(
+        exported.iter().all(|m| !m.contains("Exported")),
+        "methods on the unexported generic type must stay silent: {exported:?}"
+    );
+    assert!(
+        exported.iter().all(|m| !m.contains("IndexExpr") && !m.contains('*')),
+        "receiver must be the bare type name: {exported:?}"
+    );
+}
+
+#[test]
+fn revive_exported_skips_sort_interface_methods() {
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/sortable_ok",
+        "sortable_ok.go",
+    );
+    let messages = support::run_analyzer(revive(), &pkg);
+    assert!(
+        messages.iter().all(|m| !m.contains("exported:")),
+        "sort.Interface Len/Less/Swap must be silent: {messages:?}"
+    );
+}
+
+#[test]
+fn revive_analyzer_graph_is_valid() {
+    validate(&[revive()]).expect("valid analyzer graph");
+}
+
+#[test]
+fn revive_duplicated_imports_reports_the_import_spec_not_the_path() {
+    // Upstream passes `Node: imp` — the whole ImportSpec — so the column is the
+    // alias's when there is one. Only the *path* is compared for duplication,
+    // which is why `import "os"` and `import osdup "os"` are a duplicate pair
+    // at all: Go accepts them, and revive still reports the second one.
+    //
+    // extended_bad.go:14 is the bare `import "os"` and :15 the aliased one; on
+    // an unaliased spec ImportSpec.Pos() *is* the path's position, so a rule
+    // that reports the path looks correct until an alias appears.
+    guff_revive::with_extended_rules(|| {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/extended",
+            "extended_bad.go",
+        );
+        let found: Vec<String> = support::run_analyzer_at(revive(), &pkg)
+            .into_iter()
+            .filter(|m| m.contains("duplicated-imports:"))
+            .collect();
+        assert_eq!(
+            found,
+            vec!["15:8: duplicated-imports: Package \"os\" already imported".to_string()],
+            "duplicated-imports must report the ImportSpec's column (8, the alias), \
+             not the path's (14)"
+        );
+    });
+}
+
+#[test]
+fn revive_flags_extended_rule_violations() {
+    guff_revive::with_extended_rules(|| {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/extended",
+            "extended_bad.go",
+        );
+        let messages = support::run_analyzer(revive(), &pkg);
+        for needle in [
+            "atomic:",
+            "bare-return:",
+            "bool-literal-in-expr:",
+            "call-to-gc:",
+            "cyclomatic:",
+            "duplicated-imports:",
+            "use-errors-new:",
+            "waitgroup-by-value:",
+            "string-of-int:",
+            "time-equal:",
+            "unchecked-type-assertion:",
+            "unconditional-recursion:",
+            "if-return:",
+            "unnecessary-format:",
+            "cognitive-complexity:",
+            "constant-logical-expr:",
+            "import-shadowing:",
+            "struct-tag:",
+            "time-date:",
+            "unhandled-error:",
+            "unnecessary-stmt:",
+            "add-constant:",
+            "argument-limit:",
+            "early-return:",
+            "deep-exit:",
+            "get-return:",
+            "redundant-import-alias:",
+            "unnecessary-if:",
+            "defer:",
+            "flag-parameter:",
+            "function-result-limit:",
+            "use-any:",
+            "use-fmt-print:",
+            "unused-receiver:",
+            "modifies-parameter:",
+            "identical-branches:",
+            "identical-ifelseif-branches:",
+            "identical-ifelseif-conditions:",
+            "identical-switch-branches:",
+            "identical-switch-conditions:",
+            "line-length-limit:",
+            "max-control-nesting:",
+            "nested-structs:",
+            "unexported-naming:",
+            "empty-lines:",
+            "optimize-operands-order:",
+            // range-val-in-closure and range-val-address are absent on purpose:
+            // upstream returns early for packages on Go 1.22+, where each
+            // iteration already gets its own copy of the loop variable, so
+            // neither capturing it nor taking its address is a bug any more.
+            // guff does the same. The fixture has no module, which reads as
+            // "new enough".
+            "confusing-results:",
+            "confusing-naming:",
+            "imports-blocklist:",
+            "string-format:",
+            "file-header:",
+            "import-alias-naming:",
+            "useless-break:",
+            "useless-fallthrough:",
+            "modifies-value-receiver:",
+            "unsecure-url-scheme:",
+            "banned-characters:",
+            "file-length-limit:",
+            "multiline-if-init:",
+            "package-naming:",
+            "use-slices-sort:",
+            "inefficient-map-lookup:",
+            "comment-spacings:",
+            "epoch-naming:",
+            "datarace:",
+            "enforce-map-style:",
+            "enforce-slice-style:",
+            "enforce-switch-style:",
+            "forbidden-call-in-wg-go:",
+        ] {
+            assert!(
+                messages.iter().any(|m| m.contains(needle)),
+                "missing {needle} in {messages:?}"
+            );
+        }
+    });
+}
+
+#[test]
+fn revive_flags_function_length() {
+    // Not part of the extended_bad.go sweep: upstream's function-length bails
+    // out of a whole file once it meets an empty-bodied function, and
+    // extended_bad.go has one near the top. This fixture has none.
+    guff_revive::with_extended_rules(|| {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/funclen",
+            "function_length_bad.go",
+        );
+        let messages = support::run_analyzer(revive(), &pkg);
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains("function-length: maximum number of statements")),
+            "missing function-length in {messages:?}"
+        );
+    });
+}
+
+#[test]
+fn revive_function_length_skips_an_empty_body() {
+    // revive v1.17.1: a `func f() {}` above the long function is skipped
+    // (`continue`); up to v1.17.0 it silenced the rule for the whole file.
+    guff_revive::with_extended_rules(|| {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/extended",
+            "extended_bad.go",
+        );
+        let messages = support::run_analyzer(revive(), &pkg);
+        assert!(
+            messages.iter().any(|m| m.contains("function-length:")),
+            "function-length must still report after an empty body: {messages:?}"
+        );
+    });
+}
+
+#[test]
+fn revive_flags_forbidden_call_in_wg_go() {
+    // The same rule extended_bad.go covers, in a file of its own so that the
+    // golden tier can materialize it into a `go 1.25` module — the rule is
+    // gated on the *package's* Go version, which no build tag can raise.
+    guff_revive::with_extended_rules(|| {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/wggo",
+            "wg_go_bad.go",
+        );
+        let messages = support::run_analyzer(revive(), &pkg);
+        for needle in [
+            "forbidden-call-in-wg-go: do not call wg.Done inside wg.Go",
+            "forbidden-call-in-wg-go: do not call panic inside wg.Go",
+        ] {
+            assert!(
+                messages.iter().any(|m| m.contains(needle)),
+                "missing {needle} in {messages:?}"
+            );
+        }
+    });
+}
+
+#[test]
+fn revive_flags_filename_format_violation() {
+    guff_revive::with_extended_rules(|| {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/badfile",
+            "bad file.go",
+        );
+        let messages = support::run_analyzer(revive(), &pkg);
+        assert!(
+            messages.iter().any(|m| m.contains("filename-format:")),
+            "missing filename-format in {messages:?}"
+        );
+    });
+}
+
+#[test]
+fn revive_flags_redundant_test_main_exit() {
+    guff_revive::with_extended_rules(|| {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/util_test",
+            "extended_bad_test.go",
+        );
+        let messages = support::run_analyzer(revive(), &pkg);
+        assert!(
+            messages.iter().any(|m| m.contains("redundant-test-main-exit:")),
+            "missing redundant-test-main-exit in {messages:?}"
+        );
+    });
+}
+
+#[test]
+fn revive_flags_enforce_repeated_arg_type_style() {
+    let mut settings = guff_revive::extended_test_settings();
+    if let Some(rules) = settings.rules.as_mut() {
+        if let Some(rule) = rules
+            .iter_mut()
+            .find(|r| r.name == "enforce-repeated-arg-type-style")
+        {
+            rule.arguments = vec![guff_revive::RuleArgument::String("short".into())];
+        }
+    }
+    guff_revive::with_settings(settings, || {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/extended",
+            "extended_bad.go",
+        );
+        let messages = support::run_analyzer(guff_revive::revive(), &pkg);
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains("enforce-repeated-arg-type-style:")),
+            "missing enforce-repeated-arg-type-style in {messages:?}"
+        );
+    });
+}
+
+#[test]
+fn revive_flags_package_directory_mismatch() {
+    let mut settings = guff_revive::extended_test_settings();
+    if let Some(rules) = settings.rules.as_mut() {
+        if let Some(rule) = rules.iter_mut().find(|r| r.name == "package-directory-mismatch") {
+            rule.arguments = vec![guff_revive::RuleArgument::Map({
+                let mut map = std::collections::HashMap::new();
+                map.insert(
+                    "ignore-directories".into(),
+                    guff_revive::RuleArgument::List(Vec::new()),
+                );
+                map
+            })];
+        }
+    }
+    guff_revive::with_settings(settings, || {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/extended",
+            "extended_bad.go",
+        );
+        let messages = support::run_analyzer(guff_revive::revive(), &pkg);
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains("package-directory-mismatch:")),
+            "missing package-directory-mismatch in {messages:?}"
+        );
+    });
+}
+
+#[test]
+fn revive_extended_allows_clean_code() {
+    guff_revive::with_extended_rules(|| {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/extended/ok",
+            "extended_ok.go",
+        );
+        let messages = support::run_analyzer(revive(), &pkg);
+        assert!(messages.is_empty(), "{messages:?}");
+    });
+}
+
+#[test]
+fn revive_applies_per_rule_and_global_severity() {
+    use guff_analysis::SettingsBag;
+    use guff_revive::{RuleSetting, Settings};
+    use guff_runner::{run_on_packages, RunnerOptions};
+    use std::sync::Arc;
+
+    let settings = Settings {
+        severity: Some("warning".into()),
+        rules: Some(vec![
+            RuleSetting {
+                name: "dot-imports".into(),
+                arguments: Vec::new(),
+                disabled: false,
+                severity: Some("error".into()),
+                exclude: Vec::new(),
+            },
+            RuleSetting {
+                name: "blank-imports".into(),
+                arguments: Vec::new(),
+                disabled: false,
+                severity: None,
+                exclude: Vec::new(),
+            },
+        ]),
+        confidence: None,
+        ignore_generated_header: false,
+        enable_default_rules: false,
+        enable_all_rules: false,
+        go: None,
+        directives: Vec::new(),
+    };
+    let mut bag = SettingsBag::new();
+    bag.insert("revive", settings);
+    let bag = Arc::new(bag);
+
+    let pkg = support::typecheck_fixture("revive", "example.com/revive", "bad.go");
+    let result = run_on_packages(
+        &[revive()],
+        std::slice::from_ref(&pkg),
+        &RunnerOptions {
+            sequential: true,
+            settings: bag,
+            ..RunnerOptions::default()
+        },
+    )
+    .expect("run revive");
+
+    let severities: Vec<String> = result
+        .diagnostics()
+        .into_iter()
+        .map(|(_, d)| d.severity.clone())
+        .collect();
+    assert!(
+        severities.iter().any(|s| s == "error"),
+        "dot-imports should be error: {severities:?}"
+    );
+    assert!(
+        severities.iter().any(|s| s == "warning"),
+        "blank-imports should inherit global warning: {severities:?}"
+    );
+}
+
+#[test]
+fn revive_filters_failures_below_confidence_threshold() {
+    use guff_revive::{with_settings, Settings};
+
+    with_settings(Settings {
+        confidence: Some(0.9),
+        ..Settings::default()
+    }, || {
+        let pkg = support::typecheck_fixture("revive", "example.com/footest", "stutter_bad.go");
+        let messages = support::run_analyzer(revive(), &pkg);
+        assert!(
+            !messages.iter().any(|m| m.contains("stutters")),
+            "0.8-confidence stutter hints should be filtered at 0.9: {messages:?}"
+        );
+    });
+
+    with_settings(Settings {
+        confidence: Some(0.1),
+        ..Settings::default()
+    }, || {
+        let pkg = support::typecheck_fixture("revive", "example.com/footest", "stutter_bad.go");
+        let messages = support::run_analyzer(revive(), &pkg);
+        assert!(
+            messages.iter().any(|m| m.contains("stutters")),
+            "stutter hints should remain at 0.1: {messages:?}"
+        );
+    });
+}
+
+#[test]
+fn revive_skips_generated_files_when_configured() {
+    use guff_revive::{with_settings, Settings};
+
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/generated",
+        "generated_bad.go",
+    );
+    let without = support::run_analyzer(revive(), &pkg);
+    assert!(
+        without.iter().any(|m| m.contains("dot-imports:")),
+        "generated file should be linted by default: {without:?}"
+    );
+
+    with_settings(Settings {
+        ignore_generated_header: true,
+        ..Settings::default()
+    }, || {
+        let messages = support::run_analyzer(revive(), &pkg);
+        assert!(
+            messages.is_empty(),
+            "ignore-generated-header should skip generated files: {messages:?}"
+        );
+    });
+}
+
+#[test]
+fn revive_context_as_argument_respects_allow_types_before() {
+    use guff_revive::{with_settings, RuleArgument, RuleSetting, Settings};
+    use std::collections::HashMap;
+
+    let settings = Settings {
+        rules: Some(vec![RuleSetting {
+            name: "context-as-argument".into(),
+            arguments: vec![RuleArgument::Map({
+                let mut map = HashMap::new();
+                map.insert(
+                    "allowTypesBefore".into(),
+                    RuleArgument::String("*testing.T,testing.TB".into()),
+                );
+                map
+            })],
+            disabled: false,
+            severity: None,
+            exclude: Vec::new(),
+        }]),
+        ..Settings::default()
+    };
+
+    with_settings(settings, || {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/ctxallow",
+            "context_allow.go",
+        );
+        let messages = support::run_analyzer(revive(), &pkg);
+        assert!(
+            !messages.iter().any(|m| m.contains("withTestingT") || m.contains("*testing.T")),
+            "allowTypesBefore should permit *testing.T before context: {messages:?}"
+        );
+        assert!(
+            messages.iter().any(|m| m.contains("context-as-argument:")),
+            "plain int before context must still be flagged: {messages:?}"
+        );
+        assert_eq!(
+            messages
+                .iter()
+                .filter(|m| m.contains("context-as-argument:"))
+                .count(),
+            1,
+            "only stillBad should be flagged: {messages:?}"
+        );
+    });
+}
+
+/// The ifelse rules over every container revive's visitor walks into: a
+/// function body, a func literal inside one, a `for` / `range` body, a `case`
+/// clause, a plain block, a `go` func literal, a nested `if` body, a labeled
+/// loop, a var-declared and a package-level func literal — and the two it does
+/// not: the direct child of a `select` clause and a func literal inside an
+/// `if` condition. guff visited only function bodies and the `if`s directly in
+/// them, so grype's `if tt.wantErr { …; return } else { … }` inside a `t.Run`
+/// closure was silent, and so were 10 of these 13.
+///
+/// Positions as a set per rule, measured against golangci-lint 2.12.2.
+#[test]
+fn revive_ifelse_rules_reach_every_container() {
+    use guff_revive::{with_settings, RuleSetting, Settings};
+
+    let rule = |name: &str| RuleSetting {
+        name: name.into(),
+        arguments: Vec::new(),
+        disabled: false,
+        severity: None,
+        exclude: Vec::new(),
+    };
+    let settings = Settings {
+        rules: Some(vec![
+            rule("indent-error-flow"),
+            rule("superfluous-else"),
+            rule("early-return"),
+        ]),
+        ..Settings::default()
+    };
+    let findings = |pkg: &std::sync::Arc<guff_analysis::Package>| {
+        let fset = pkg.fset.clone().expect("fixture has a FileSet");
+        let mut got: Vec<(i64, i64, String)> = support::run_analyzer_diagnostics(revive(), pkg)
+            .into_iter()
+            .map(|d| {
+                let p = fset.position(guff::position::Pos(d.pos as i64));
+                let rule = d.message.split(':').next().unwrap_or("").to_string();
+                (p.line, p.column, rule)
+            })
+            .collect();
+        got.sort();
+        got
+    };
+    let ifelse = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/ifelsecontainers",
+        "ifelse_containers.go",
+    );
+    let early = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/earlyreturncontainers",
+        "early_return_containers.go",
+    );
+    let r = |line: i64, col: i64, rule: &str| (line, col, rule.to_string());
+    with_settings(settings, || {
+        assert_eq!(
+            findings(&ifelse),
+            vec![
+                r(15, 9, "indent-error-flow"),   // function body
+                r(25, 10, "indent-error-flow"),  // func literal inside a function
+                r(37, 10, "indent-error-flow"),  // for body
+                r(48, 10, "indent-error-flow"),  // range body
+                r(60, 10, "indent-error-flow"),  // case clause
+                // 72: the direct child of a select clause — not a chain
+                r(83, 10, "indent-error-flow"),  // plain block
+                // 94: a func literal inside an if condition — not visited
+                r(107, 10, "indent-error-flow"), // go func literal
+                r(118, 10, "indent-error-flow"), // nested in an if body
+                r(130, 10, "superfluous-else"),  // continue, then else
+                r(142, 10, "superfluous-else"),  // break in a case, then else
+                r(154, 10, "superfluous-else"),  // break to a label, then else
+                r(164, 10, "indent-error-flow"), // func literal in a var decl
+                r(175, 9, "indent-error-flow"),  // package-level func literal
+            ],
+        );
+        assert_eq!(
+            findings(&early),
+            vec![
+                r(10, 2, "early-return"), // last in a function
+                r(18, 2, "early-return"), // not last
+                r(28, 3, "early-return"), // last in a range body
+                r(38, 3, "early-return"), // last in an if body that is last
+                r(48, 3, "early-return"), // last in an if body that is not
+                r(60, 3, "early-return"), // last in a case clause
+                r(70, 3, "early-return"), // last in a func literal
+                // 80: if / else if / else — the jump is not in the first else
+                r(93, 3, "early-return"), // last inside an else block
+            ],
+        );
+    });
+}
+
+/// dot-imports reads its `allowedPackages` map argument (revive v1.15.0). The
+/// key is matched lowercased with hyphens removed — `allowedPackages` and
+/// `allowed-packages` count, `allowed_packages` does not — and each path is
+/// compared with the import literal as quoted. guff ignored the argument, so
+/// lima's allowed `pkg/must` dot imports were guff-only findings. Measured
+/// against golangci-lint 2.12.2.
+#[test]
+fn revive_dot_imports_honours_allowed_packages() {
+    use std::collections::HashMap;
+
+    use guff_revive::{with_settings, RuleArgument, RuleSetting, Settings};
+
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/dotimportsallowed",
+        "dot_imports_allowed.go",
+    );
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let run = |key: Option<&str>| {
+        let arguments = match key {
+            None => Vec::new(),
+            Some(k) => vec![RuleArgument::Map(HashMap::from([(
+                k.to_string(),
+                RuleArgument::List(vec![RuleArgument::String("example.com/revive/dot".into())]),
+            )]))],
+        };
+        let settings = Settings {
+            rules: Some(vec![RuleSetting {
+                name: "dot-imports".into(),
+                arguments,
+                disabled: false,
+                severity: None,
+                exclude: Vec::new(),
+            }]),
+            ..Settings::default()
+        };
+        with_settings(settings, || {
+            let mut lines: Vec<i64> = support::run_analyzer_diagnostics(revive(), &pkg)
+                .into_iter()
+                .filter(|d| d.message.starts_with("dot-imports:"))
+                .map(|d| fset.position(guff::position::Pos(d.pos as i64)).line)
+                .collect();
+            lines.sort();
+            lines
+        })
+    };
+    assert_eq!(run(None), vec![6, 7]);
+    assert_eq!(run(Some("allowedPackages")), vec![7]);
+    assert_eq!(run(Some("allowed-packages")), vec![7]);
+    // Upstream removes hyphens, not underscores.
+    assert_eq!(run(Some("allowed_packages")), vec![6, 7]);
+}
+
+/// var-declaration asks whether the right-hand side is an untyped constant and,
+/// if so, whether the declared type is its default type (revive re-evaluates
+/// the expression out of context with `types.Eval`). A shift takes the type of
+/// its left operand, so `1 << shift` is untyped int even though `shift` is a
+/// variable; guff required both operands to be untyped constants and reported
+/// nerdctl's `var val byte = 1 << shift`. Ten declarations, pinned by line.
+#[test]
+fn revive_var_declaration_types_a_shift_by_its_left_operand() {
+    use guff_revive::{with_settings, RuleSetting, Settings};
+
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/vardeclshift",
+        "var_declaration_shift.go",
+    );
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let settings = Settings {
+        rules: Some(vec![RuleSetting {
+            name: "var-declaration".into(),
+            arguments: Vec::new(),
+            disabled: false,
+            severity: None,
+            exclude: Vec::new(),
+        }]),
+        ..Settings::default()
+    };
+    with_settings(settings, || {
+        let mut lines: Vec<i64> = support::run_analyzer_diagnostics(revive(), &pkg)
+            .into_iter()
+            .filter(|d| d.message.starts_with("var-declaration:"))
+            .map(|d| fset.position(guff::position::Pos(d.pos as i64)).line)
+            .collect();
+        lines.sort();
+        assert_eq!(lines, vec![11, 13, 15, 17, 18]);
+    });
+}
+
+#[test]
+fn revive_preserve_scope_suppresses_scope_enlarging_suggestions() {
+    use guff_revive::{with_settings, RuleArgument, RuleSetting, Settings};
+
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/preservescope",
+        "preserve_scope.go",
+    );
+
+    // Default (no preserveScope): mid-block if-init + else decls is still reported.
+    let without = support::run_analyzer(revive(), &pkg);
+    assert!(
+        without.iter().any(|m| m.contains("indent-error-flow:")),
+        "without preserveScope, mid-block else should be flagged: {without:?}"
+    );
+
+    let settings = Settings {
+        rules: Some(vec![
+            RuleSetting {
+                name: "indent-error-flow".into(),
+                arguments: vec![RuleArgument::String("preserveScope".into())],
+                disabled: false,
+                severity: None,
+                exclude: Vec::new(),
+            },
+            RuleSetting {
+                name: "superfluous-else".into(),
+                arguments: vec![RuleArgument::String("preserveScope".into())],
+                disabled: false,
+                severity: None,
+                exclude: Vec::new(),
+            },
+        ]),
+        ..Settings::default()
+    };
+
+    with_settings(settings, || {
+        let messages = support::run_analyzer(revive(), &pkg);
+        // Mid-block keepScopeMidBlock suppressed; dropElseAtEnd at block end still fires.
+        assert!(
+            messages.iter().any(|m| m.contains("indent-error-flow:")),
+            "block-end else should still be flagged with preserveScope: {messages:?}"
+        );
+        assert_eq!(
+            messages
+                .iter()
+                .filter(|m| m.contains("indent-error-flow:"))
+                .count(),
+            1,
+            "only dropElseAtEnd should remain: {messages:?}"
+        );
+    });
+}
+
+#[test]
+fn revive_var_naming_skip_initialism_name_checks() {
+    use guff_revive::{with_settings, RuleArgument, RuleSetting, Settings};
+    use std::collections::HashMap;
+
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/varnamingskip",
+        "var_naming_skip_initialism.go",
+    );
+
+    // Default: initialisms enforced.
+    let without = support::run_analyzer(revive(), &pkg);
+    assert!(
+        without.iter().any(|m| m.contains("var-naming:") && m.contains("HttpRes")),
+        "default should flag HttpRes: {without:?}"
+    );
+
+    let settings = Settings {
+        rules: Some(vec![RuleSetting {
+            name: "var-naming".into(),
+            arguments: vec![
+                RuleArgument::List(Vec::new()),
+                RuleArgument::List(Vec::new()),
+                RuleArgument::List(vec![RuleArgument::Map({
+                    let mut map = HashMap::new();
+                    map.insert(
+                        "skip-initialism-name-checks".into(),
+                        RuleArgument::String("true".into()),
+                    );
+                    map
+                })]),
+            ],
+            disabled: false,
+            severity: None,
+            exclude: Vec::new(),
+        }]),
+        ..Settings::default()
+    };
+
+    with_settings(settings, || {
+        let messages = support::run_analyzer(revive(), &pkg);
+        assert!(
+            !messages.iter().any(|m| m.contains("var-naming:")),
+            "skipInitialismNameChecks should silence initialism warnings: {messages:?}"
+        );
+    });
+}
+
+#[test]
+fn revive_var_naming_upper_case_const() {
+    use guff_revive::{with_settings, RuleArgument, RuleSetting, Settings};
+    use std::collections::HashMap;
+
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/varnameupper",
+        "var_naming_upper_case_const.go",
+    );
+
+    let without = support::run_analyzer(revive(), &pkg);
+    assert!(
+        without
+            .iter()
+            .any(|m| m.contains("var-naming:") && m.contains("ALL_CAPS")),
+        "default should flag SCREAMING_SNAKE consts: {without:?}"
+    );
+
+    let settings = Settings {
+        rules: Some(vec![RuleSetting {
+            name: "var-naming".into(),
+            arguments: vec![
+                RuleArgument::List(Vec::new()),
+                RuleArgument::List(Vec::new()),
+                RuleArgument::List(vec![RuleArgument::Map({
+                    let mut map = HashMap::new();
+                    map.insert(
+                        "upper-case-const".into(),
+                        RuleArgument::String("true".into()),
+                    );
+                    // prometheus also sends this ignored key; must not break parsing.
+                    map.insert(
+                        "skip-package-name-checks".into(),
+                        RuleArgument::String("true".into()),
+                    );
+                    map
+                })]),
+            ],
+            disabled: false,
+            severity: None,
+            exclude: Vec::new(),
+        }]),
+        ..Settings::default()
+    };
+
+    with_settings(settings, || {
+        let messages = support::run_analyzer(revive(), &pkg);
+        assert!(
+            !messages
+                .iter()
+                .any(|m| m.contains("SOME_CONST") || m.contains("_SOME_PRIVATE")),
+            "upperCaseConst should allow SCREAMING_SNAKE consts: {messages:?}"
+        );
+        // BAD_VAR_NAME is still ALL_CAPS; message text does not embed the ident.
+        assert_eq!(
+            messages
+                .iter()
+                .filter(|m| m.contains("var-naming:") && m.contains("ALL_CAPS"))
+                .count(),
+            1,
+            "non-const ALL_CAPS var should still be flagged once: {messages:?}"
+        );
+    });
+}
+
+#[test]
+fn revive_var_naming_allowlist_blocklist() {
+    use guff_revive::{with_settings, RuleArgument, RuleSetting, Settings};
+
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/varnamelists",
+        "var_naming_lists.go",
+    );
+
+    let settings = Settings {
+        rules: Some(vec![RuleSetting {
+            name: "var-naming".into(),
+            arguments: vec![
+                RuleArgument::List(vec![RuleArgument::String("ID".into())]),
+                RuleArgument::List(vec![RuleArgument::String("VM".into())]),
+            ],
+            disabled: false,
+            severity: None,
+            exclude: Vec::new(),
+        }]),
+        ..Settings::default()
+    };
+
+    with_settings(settings, || {
+        let messages = support::run_analyzer(revive(), &pkg);
+        assert!(
+            !messages.iter().any(|m| m.contains("customId")),
+            "allowlist ID should keep customId: {messages:?}"
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains("var-naming:") && m.contains("customVm")),
+            "blocklist/common VM should flag customVm: {messages:?}"
+        );
+    });
+}
+
+/// `unused-parameter` / `unused-receiver` take `arguments: [{allowRegex: …}]`.
+///
+/// coredns configures `allowRegex: "^_"` and golangci-lint reports none of its
+/// `_ctx` / `_next` parameters; guff reported 229 of them, because the argument
+/// was never read. The message is part of the contract too: upstream swaps
+/// "renaming it as _" for "renaming it to match <regex>" the moment a pattern
+/// is configured.
+#[test]
+fn revive_unused_parameter_and_receiver_honour_allow_regex() {
+    use guff_revive::{with_settings, RuleArgument, RuleSetting, Settings};
+    use std::collections::HashMap;
+
+    let run = |allow_regex: Option<&str>| -> Vec<String> {
+        let arguments = match allow_regex {
+            Some(pattern) => vec![RuleArgument::Map(HashMap::from([(
+                "allowRegex".to_string(),
+                RuleArgument::String(pattern.to_string()),
+            )]))],
+            None => Vec::new(),
+        };
+        let rule = |name: &str| RuleSetting {
+            name: name.into(),
+            arguments: arguments.clone(),
+            disabled: false,
+            severity: None,
+            exclude: Vec::new(),
+        };
+        let settings = Settings {
+            rules: Some(vec![rule("unused-parameter"), rule("unused-receiver")]),
+            ..Settings::default()
+        };
+        let pkg = support::typecheck_fixture("revive", "example.com/revive/allowregex", "allow_regex.go");
+        with_settings(settings, || support::run_analyzer(revive(), &pkg))
+    };
+
+    // Default: `^_$`, so only the bare `_` is spared.
+    let default = run(None);
+    assert!(
+        default.iter().any(|m| m.contains("parameter '_ctx'")),
+        "default allowRegex is ^_$, so _ctx is a finding: {default:?}"
+    );
+    assert!(
+        default.iter().any(|m| m.contains("method receiver '_t'")),
+        "default allowRegex is ^_$, so _t is a finding: {default:?}"
+    );
+    assert!(
+        default
+            .iter()
+            .all(|m| m.contains("renaming it as _")),
+        "unconfigured rules keep the `as _` wording: {default:?}"
+    );
+
+    // Configured `^_`: every underscore-prefixed name is allowed, and the
+    // wording changes for the findings that remain.
+    let configured = run(Some("^_"));
+    assert!(
+        !configured.iter().any(|m| m.contains("'_ctx'") || m.contains("'_t'")),
+        "allowRegex ^_ spares _ctx and _t: {configured:?}"
+    );
+    assert!(
+        configured
+            .iter()
+            .any(|m| m == "unused-parameter: parameter 'ctx' seems to be unused, consider removing or renaming it to match ^_"),
+        "configured message names the regex: {configured:?}"
+    );
+    assert!(
+        configured.iter().any(|m| m
+            == "unused-receiver: method receiver 't' is not referenced in method's body, consider removing or renaming it to match ^_"),
+        "configured receiver message names the regex: {configured:?}"
+    );
+
+    // A used parameter, a used receiver, and `_` are silent either way.
+    for messages in [&default, &configured] {
+        assert!(
+            !messages.iter().any(|m| m.contains("'n'") || m.contains("'_ '")),
+            "used parameters and `_` are never findings: {messages:?}"
+        );
+    }
+
+    // An unparsable pattern falls back to the default rather than panicking.
+    let broken = run(Some("^(_"));
+    assert!(
+        broken.iter().any(|m| m.contains("parameter '_ctx'")),
+        "invalid allowRegex falls back to ^_$: {broken:?}"
+    );
+}
+
+/// `unnecessary-stmt` skips a lone case that lists several expressions.
+///
+/// Upstream's `checkSwitchBody` has both guards — one clause, and
+/// `if len(cc.List) > 1 { return }` — because `switch x { case 1, 2, 3: … }`
+/// is not an if-then and the suggestion would not compile. guff had only the
+/// first, so coredns's four multi-expression switches came back as findings
+/// golangci-lint does not report.
+#[test]
+fn revive_unnecessary_stmt_skips_a_case_with_several_expressions() {
+    guff_revive::with_extended_rules(|| {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/extended",
+            "extended_bad.go",
+        );
+        let switches: Vec<String> = support::run_analyzer_at(revive(), &pkg)
+            .into_iter()
+            .filter(|m| m.contains("switch with only one case"))
+            .collect();
+        assert_eq!(
+            switches.len(),
+            1,
+            "only the single-expression switch is a finding: {switches:?}"
+        );
+        assert!(
+            switches[0].starts_with("376:"),
+            "the finding is the `case 1:` switch, not the `case 1, 2, 3:` one: {switches:?}"
+        );
+    });
+}
+
+/// revive's `IsTest()` is a **filename** check, not a package name.
+///
+/// ```go
+/// func (f *File) IsTest() bool { return strings.HasSuffix(f.Name, "_test.go") }
+/// ```
+///
+/// `foo_test.go` declaring `package foo` — the ordinary internal test file — is
+/// a test file to every rule that asks, and asking whether the *package* name
+/// ends in `_test` answers "no" for it. That went wrong in both directions:
+/// rules that skip test files stopped skipping (unsecure-url-scheme fired on
+/// jaeger's `_test.go` constants ten times, deep-exit on a TestMain's
+/// `os.Exit`), and a rule that only runs in them stopped running
+/// (redundant-test-main-exit, which is only ever *about* a TestMain).
+#[test]
+fn revive_is_test_is_a_filename_not_a_package_name() {
+    guff_revive::with_extended_rules(|| {
+        let pkg = support::typecheck_fixture_dir("revive", "istest", "example.com/revive/istest");
+        let messages = support::run_analyzer(revive(), &pkg);
+
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains("unsecure-url-scheme") && m.contains("example.com/v1")),
+            "the non-test file is still reported: {messages:?}"
+        );
+        assert!(
+            !messages
+                .iter()
+                .any(|m| m.contains("unsecure-url-scheme") && m.contains("example.com/test")),
+            "the internal test file is skipped: {messages:?}"
+        );
+        assert!(
+            !messages.iter().any(|m| m.contains("deep-exit")),
+            "TestMain's os.Exit is exempt in a test file: {messages:?}"
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains("redundant-test-main-exit")),
+            "the rule that only runs in test files runs: {messages:?}"
+        );
+    });
+}
+
+/// revive honours its own `//revive:disable` comments.
+///
+/// Port of `lint.File.disabledIntervals` + `filterFailures`: a directive turns
+/// a rule off from its line to the end of the file, `-line` / `-next-line`
+/// narrow that to one line, and an `enable` closes the interval. Naming no rule
+/// applies it to every enabled rule.
+///
+/// guff had none of it, so gitea's fourteen `//revive:disable-line:exported`
+/// comments — the ordinary way to keep a name that stutters — were findings
+/// golangci-lint does not report.
+///
+/// The intervals are **per file**: the second fixture file is here because
+/// building them per package silences whatever line falls in the same range.
+#[test]
+fn revive_honours_its_own_disable_directives() {
+    guff_revive::with_extended_rules(|| {
+        let pkg = support::typecheck_fixture_dir(
+            "revive",
+            "directives",
+            "example.com/revive/directives",
+        );
+        let stutters: Vec<String> = support::run_analyzer(revive(), &pkg)
+            .into_iter()
+            .filter(|m| m.contains("stutters"))
+            .collect();
+
+        for kept in [
+            "DirectivesKept",
+            "DirectivesAfterEnable",
+            "DirectivesOtherRule",
+            "DirectivesSibling",
+        ] {
+            assert!(
+                stutters.iter().any(|m| m.contains(kept)),
+                "{kept} is not exempted: {stutters:?}"
+            );
+        }
+        for silenced in ["DirectivesLine", "DirectivesNextLine", "DirectivesBlock"] {
+            assert!(
+                !stutters.iter().any(|m| m.contains(silenced)),
+                "{silenced} is exempted by a directive: {stutters:?}"
+            );
+        }
+    });
+}
+
+#[test]
+fn revive_renders_types_with_go_printer_not_an_approximation() {
+    // Upstream renders a type into a message with `gofmt` (`rule/utils.go`) and
+    // `file.Render` (`lint/file.go`), both `printer.Fprint`. guff approximated
+    // that with a five-arm walker whose fallback was the literal string
+    // "<type>", so map, chan, func, variadic and generic types all came out as
+    // "<type>" and a non-empty `interface{ Foo() int }` came out as
+    // `interface{}`.
+    //
+    // Every rendering below is one of those former holes. The strings are what
+    // go/printer produces, which is also what golangci-lint 2.12.2 emits — see
+    // compat/golden/cases/revive.
+    let settings = guff_revive::extended_test_settings();
+    guff_revive::with_settings(settings, || {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/typerender",
+            "type_rendering_bad.go",
+        );
+        let messages = support::run_analyzer(revive(), &pkg);
+        let joined = messages.join("\n");
+        for needle in [
+            "repeated argument type \"map[string]int\"",
+            "repeated argument type \"chan int\"",
+            "repeated argument type \"func(int) error\"",
+            "repeated argument type \"interface{ Foo() int }\"",
+            "repeated argument type \"[]*time.Time\"",
+            "repeated argument type \"Pair[string, int]\"",
+            // `types.Identical`, not id equality: an anonymous composite type
+            // is spelled twice here and interns as two entries.
+            "should omit type map[string]int",
+            "should omit type chan struct{}",
+        ] {
+            assert!(joined.contains(needle), "missing {needle:?} in:\n{joined}");
+        }
+        // The old fallback would have shown up as this literal.
+        assert!(
+            !joined.contains("<type>"),
+            "a type rendered as the fallback placeholder:\n{joined}"
+        );
+    });
+}
+
+#[test]
+fn revive_time_equal_quotes_the_operator_not_its_token_name() {
+    // Upstream: `fmt.Sprintf("... instead of %q operator", expr.Op)`. `%q` on a
+    // `token.Token` quotes its `String()`, so the message carries `"=="`, not
+    // the token's Go identifier. guff printed `EQL`.
+    //
+    // No golden case can see this: upstream gates time-equal behind
+    // `file.Pkg.TypeCheck() != nil`, and under golangci-lint that check uses
+    // `importer.Default()`, which resolves every import to invalid — so
+    // `time.Time` is never recognised and the rule never fires upstream.
+    // compat/golden/cases/revive/ratchet.json carries guff's finding here as an
+    // accepted extra; this test is what pins its wording.
+    guff_revive::with_extended_rules(|| {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/extended",
+            "extended_bad.go",
+        );
+        let found: Vec<String> = support::run_analyzer(revive(), &pkg)
+            .into_iter()
+            .filter(|m| m.contains("time-equal:"))
+            .collect();
+        assert_eq!(
+            found,
+            vec!["time-equal: use a.Equal(b) instead of \"==\" operator".to_string()]
+        );
+    });
+}
+
+/// `empty-block` prunes a range subtree only when the range body is *empty*.
+///
+/// Upstream (revive v1.15.0, `rule/empty_block.go`):
+///
+/// ```go
+/// case *ast.RangeStmt:
+///     if len(n.Body.List) == 0 {
+///         w.onFailure(…)
+///         return nil // skip visiting the range subtree
+///     }
+/// ```
+///
+/// guff pruned at every range statement, so nothing inside a non-empty
+/// `for … range` was ever visited — an empty drain loop two closures deep
+/// inside `for _, tc := range tests` (k6 `ramping_arrival_rate_test.go:294`)
+/// went unreported, and the `//nolint:revive` over it became an unused
+/// directive.
+///
+/// Exact count: every one of these carries the same message, so only a count
+/// can tell five from three. (Ten under revive v1.15.0; v1.17.0 skips the five
+/// bare `for range x {}` drains, which compat/golden/cases/revive pins.)
+#[test]
+fn revive_empty_block_walks_into_a_non_empty_range() {
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/emptyblockrange",
+        "empty_block_range.go",
+    );
+    let messages = support::run_analyzer(revive(), &pkg);
+    let empty = messages
+        .iter()
+        .filter(|m| m.starts_with("empty-block:"))
+        .count();
+    assert_eq!(empty, 5, "{messages:?}");
+}
+
+/// `cognitive-complexity` counts what upstream counts, and reads its limit.
+///
+/// Four things were wrong. `arguments[0]` was never read — the limit was a
+/// `const` — so no configuration could move it. And the counter walked nodes
+/// upstream does not give it:
+///
+/// ```text
+/// case *ast.ForStmt:    targets := []ast.Node{n.Cond, n.Body}  // not Init/Post
+/// case *ast.RangeStmt:  v.walk(1, n.Body)                      // not Key/Value/X
+/// case *ast.SwitchStmt: v.walk(1, n.Body)                      // not Init/Tag
+/// case *ast.FuncLit:    v.walk(0, n.Body)                      // 0 + nesting
+/// ```
+///
+/// so an `&&` in a `for`'s init, a `switch`'s tag or an `if`'s init was counted
+/// where upstream ignores it; a function literal added nothing where upstream
+/// charges the nesting level; and a plain trailing `else` cost 1 where upstream
+/// charges only an `else if`.
+///
+/// The number for each shape is in the fixture's comments; the two
+/// `revive-cognitive-*` golden cases compare them against golangci-lint.
+#[test]
+fn revive_cognitive_complexity_matches_upstream_arithmetic() {
+    let settings = guff_revive::extended_test_settings();
+    guff_revive::with_settings(settings, || {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/cognitivecomplexity",
+            "cognitive_complexity.go",
+        );
+        let mut messages: Vec<String> = support::run_analyzer(revive(), &pkg)
+            .into_iter()
+            .filter(|m| m.starts_with("cognitive-complexity:"))
+            .collect();
+        messages.sort();
+        assert_eq!(
+            messages,
+            vec![
+                "cognitive-complexity: function deepMix has cognitive complexity 21 (> max enabled 7)",
+                "cognitive-complexity: function overDefault has cognitive complexity 8 (> max enabled 7)",
+            ],
+            "{messages:?}"
+        );
+    });
+}
+
+/// The same fixture with `arguments: [3]`. If the argument were still ignored
+/// this would be the previous test's two rows.
+#[test]
+fn revive_cognitive_complexity_reads_its_max_argument() {
+    let mut settings = guff_revive::extended_test_settings();
+    if let Some(rules) = settings.rules.as_mut() {
+        if let Some(rule) = rules.iter_mut().find(|r| r.name == "cognitive-complexity") {
+            rule.arguments = vec![guff_revive::RuleArgument::Integer(3)];
+        }
+    }
+    guff_revive::with_settings(settings, || {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/cognitivecomplexity",
+            "cognitive_complexity.go",
+        );
+        let mut messages: Vec<String> = support::run_analyzer(revive(), &pkg)
+            .into_iter()
+            .filter(|m| m.starts_with("cognitive-complexity:"))
+            .collect();
+        messages.sort();
+        assert_eq!(
+            messages,
+            vec![
+                "cognitive-complexity: function deepMix has cognitive complexity 21 (> max enabled 3)",
+                "cognitive-complexity: function funcLitTwoDeep has cognitive complexity 5 (> max enabled 3)",
+                "cognitive-complexity: function labeledBreak has cognitive complexity 4 (> max enabled 3)",
+                "cognitive-complexity: function nestedIf has cognitive complexity 6 (> max enabled 3)",
+                "cognitive-complexity: function overDefault has cognitive complexity 8 (> max enabled 3)",
+            ],
+            "{messages:?}"
+        );
+    });
+}
+
+const LIMIT_RULES: [&str; 6] = [
+    "argument-limit:",
+    "cyclomatic:",
+    "function-length:",
+    "function-result-limit:",
+    "line-length-limit:",
+    "max-control-nesting:",
+];
+
+fn limit_messages(settings: guff_revive::Settings) -> Vec<String> {
+    guff_revive::with_settings(settings, || {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/rulelimits",
+            "rule_limits.go",
+        );
+        let mut messages: Vec<String> = support::run_analyzer(revive(), &pkg)
+            .into_iter()
+            .filter(|m| LIMIT_RULES.iter().any(|r| m.starts_with(r)))
+            .collect();
+        messages.sort();
+        messages
+    })
+}
+
+/// The six revive rules whose limit is a number, at their defaults.
+///
+/// Every one of them takes the limit from `arguments[0]` — `function-length`
+/// takes two — and falls back to a default. guff had all of those defaults
+/// baked in as `const`s and never read the argument, so no configuration could
+/// move them. This test is the "no arguments" half; the next one moves every
+/// limit, and the two would be identical if the arguments were still ignored.
+#[test]
+fn revive_numeric_limits_default() {
+    let messages = limit_messages(guff_revive::extended_test_settings());
+    assert_eq!(
+        messages,
+        vec![
+            "argument-limit: maximum number of arguments per function exceeded; max 8 but got 10",
+            "argument-limit: maximum number of arguments per function exceeded; max 8 but got 9",
+            "cyclomatic: function complexityEleven has cyclomatic complexity 11 (> max enabled 10)",
+            "function-length: maximum number of statements per function exceeded; max 50 but got 52",
+            "function-result-limit: maximum number of return results per function exceeded; max 3 but got 4",
+            "line-length-limit: line is 100 characters, out of limit 80",
+            "max-control-nesting: control flow nesting exceeds 5",
+        ],
+        "{messages:?}"
+    );
+}
+
+/// The same fixture with every limit moved, including `function-length`'s pair.
+#[test]
+fn revive_numeric_limits_read_their_arguments() {
+    let mut settings = guff_revive::extended_test_settings();
+    if let Some(rules) = settings.rules.as_mut() {
+        for (name, args) in [
+            ("argument-limit", vec![4]),
+            ("cyclomatic", vec![3]),
+            ("function-length", vec![4, 12]),
+            ("function-result-limit", vec![1]),
+            ("line-length-limit", vec![60]),
+            ("max-control-nesting", vec![2]),
+        ] {
+            if let Some(rule) = rules.iter_mut().find(|r| r.name == name) {
+                rule.arguments = args
+                    .into_iter()
+                    .map(guff_revive::RuleArgument::Integer)
+                    .collect();
+            }
+        }
+    }
+    let messages = limit_messages(settings);
+    // Every limit moved, so no row here is a row of the previous test.
+    assert!(
+        messages
+            .iter()
+            .all(|m| !m.contains("max 8 ") && !m.contains("max enabled 10")),
+        "{messages:?}"
+    );
+    for needle in [
+        "argument-limit: maximum number of arguments per function exceeded; max 4 but got 6",
+        "cyclomatic: function complexityFour has cyclomatic complexity 4 (> max enabled 3)",
+        "function-length: maximum number of statements per function exceeded; max 4 but got 7",
+        "function-length: maximum number of lines per function exceeded; max 12 but got 14",
+        "function-result-limit: maximum number of return results per function exceeded; max 1 but got 2",
+        "line-length-limit: line is 100 characters, out of limit 60",
+        "max-control-nesting: control flow nesting exceeds 2",
+    ] {
+        assert!(messages.iter().any(|m| m == needle), "missing {needle} in {messages:?}");
+    }
+}
+
+/// `function-length` gates each half on `> 0`, so `[0, 12]` turns the statement
+/// half **off** rather than reporting every function.
+#[test]
+fn revive_function_length_zero_disables_that_half() {
+    let mut settings = guff_revive::extended_test_settings();
+    if let Some(rules) = settings.rules.as_mut() {
+        if let Some(rule) = rules.iter_mut().find(|r| r.name == "function-length") {
+            rule.arguments = vec![
+                guff_revive::RuleArgument::Integer(0),
+                guff_revive::RuleArgument::Integer(12),
+            ];
+        }
+    }
+    let messages: Vec<String> = limit_messages(settings)
+        .into_iter()
+        .filter(|m| m.starts_with("function-length:"))
+        .collect();
+    assert_eq!(
+        messages,
+        vec![
+            "function-length: maximum number of lines per function exceeded; max 12 but got 14",
+            "function-length: maximum number of lines per function exceeded; max 12 but got 31",
+            "function-length: maximum number of lines per function exceeded; max 12 but got 52",
+        ],
+        "{messages:?}"
+    );
+}
+
+fn exclude_messages(exclude: Vec<&str>) -> Vec<String> {
+    let mut settings = guff_revive::Settings {
+        severity: None,
+        rules: Some(vec![
+            guff_revive::RuleSetting {
+                name: "exported".into(),
+                arguments: Vec::new(),
+                disabled: false,
+                severity: None,
+                exclude: exclude.into_iter().map(str::to_string).collect(),
+            },
+            guff_revive::RuleSetting {
+                name: "bool-literal-in-expr".into(),
+                arguments: Vec::new(),
+                disabled: false,
+                severity: None,
+                exclude: Vec::new(),
+            },
+        ]),
+        confidence: Some(0.0),
+        ignore_generated_header: false,
+        enable_default_rules: false,
+        enable_all_rules: false,
+        go: None,
+        directives: Vec::new(),
+    };
+    settings.confidence = Some(0.0);
+    guff_revive::with_settings(settings, || {
+        let pkg = support::typecheck_fixture_dir("revive", "rule_exclude", "example.com/revive/ruleexclude");
+        let mut messages = support::run_analyzer(revive(), &pkg);
+        messages.sort();
+        messages
+    })
+}
+
+/// A rule's `exclude` list skips that rule for the files it matches.
+///
+/// `lint/file.go`, before the rule runs:
+///
+/// ```text
+/// ruleConfig := rulesConfig[currentRule.Name()]
+/// if ruleConfig.MustExclude(f.Name) { continue }
+/// ```
+///
+/// guff had `// DEFERRED: exclude.` where the config field should have been.
+/// telegraf excludes twenty-three paths from `exported` alone, and without this
+/// guff reported **2748** findings golangci-lint does not.
+///
+/// The `bool-literal-in-expr` row is the point of the second file: the filter is
+/// per *rule*, so the excluded file still reports everything else.
+#[test]
+fn revive_rule_exclude_skips_only_that_rule() {
+    assert_eq!(
+        exclude_messages(Vec::new()),
+        vec![
+            "bool-literal-in-expr: omit Boolean literal in expression",
+            "exported: comment on exported type Excluded should be of the form \"Excluded ...\" (with optional leading article)",
+            "exported: exported type Kept should have comment or be unexported",
+        ],
+    );
+    assert_eq!(
+        exclude_messages(vec!["**/excluded.go"]),
+        vec![
+            "bool-literal-in-expr: omit Boolean literal in expression",
+            "exported: exported type Kept should have comment or be unexported",
+        ],
+    );
+}
+
+fn exported_flag_messages(args: &[&str]) -> Vec<String> {
+    let settings = guff_revive::Settings {
+        severity: None,
+        rules: Some(vec![guff_revive::RuleSetting {
+            name: "exported".into(),
+            arguments: args
+                .iter()
+                .map(|a| guff_revive::RuleArgument::String((*a).into()))
+                .collect(),
+            disabled: false,
+            severity: None,
+            exclude: Vec::new(),
+        }]),
+        confidence: Some(0.0),
+        ignore_generated_header: false,
+        enable_default_rules: false,
+        enable_all_rules: false,
+        go: None,
+        directives: Vec::new(),
+    };
+    guff_revive::with_settings(settings, || {
+        let pkg = support::typecheck_fixture_dir("revive", "exported_flags", "example.com/revive/exflags");
+        let mut messages = support::run_analyzer(revive(), &pkg);
+        messages.sort();
+        messages
+    })
+}
+
+/// `exported` has seven configuration flags and guff read two.
+///
+/// ```text
+/// r.disabledChecks = disabledChecks{PrivateReceivers: true, PublicInterfaces: true}
+/// r.isRepetitiveMsg = "stutters"
+/// checkPrivateReceivers          -> PrivateReceivers = false
+/// disableStutteringCheck         -> RepetitiveNames  = true
+/// sayRepetitiveInsteadOfStutters -> isRepetitiveMsg  = "is repetitive"
+/// checkPublicInterface           -> PublicInterfaces = false
+/// disableChecksOn{Constants,Functions,Methods,Types,Variables}
+/// ```
+///
+/// telegraf writes four of them, and `disable-checks-on-types` alone was 312
+/// findings golangci-lint does not make. The three `revive-exported-*` golden
+/// cases compare the same three sets against golangci-lint.
+#[test]
+fn revive_exported_reads_all_of_its_flags() {
+    // Two of the defaults *skip* something, so the unconfigured set is small.
+    assert_eq!(
+        exported_flag_messages(&[]),
+        vec![
+            "exported: exported const UndocumentedConst should have comment or be unexported",
+            "exported: exported function UndocumentedFunc should have comment or be unexported",
+            "exported: exported method Undocumented.UndocumentedMethod should have comment or be unexported",
+            "exported: exported type Undocumented should have comment or be unexported",
+            "exported: exported var UndocumentedVar should have comment or be unexported",
+            "exported: type name will be used as exflags.ExflagsThing by other packages, and that stutters; consider calling this Thing",
+        ],
+    );
+
+    // telegraf's four: the type row goes, the wording changes, and two rows the
+    // defaults were skipping appear.
+    assert_eq!(
+        exported_flag_messages(&[
+            "check-private-receivers",
+            "say-repetitive-instead-of-stutters",
+            "check-public-interface",
+            "disable-checks-on-types",
+        ]),
+        vec![
+            "exported: comment on exported method unexportedRecv.ExportedOnPrivate should be of the form \"ExportedOnPrivate ...\"",
+            "exported: exported const UndocumentedConst should have comment or be unexported",
+            "exported: exported function UndocumentedFunc should have comment or be unexported",
+            "exported: exported method Undocumented.UndocumentedMethod should have comment or be unexported",
+            "exported: exported var UndocumentedVar should have comment or be unexported",
+            "exported: public interface method PublicIface.Undoc should be commented",
+            "exported: type name will be used as exflags.ExflagsThing by other packages, and that is repetitive; consider calling this Thing",
+        ],
+    );
+
+    // Every doc check off. What survives is the one check that is not behind
+    // `disabledChecks.isDisabled` — `checkRepetitiveNames`.
+    assert_eq!(
+        exported_flag_messages(&[
+            "disableChecksOnConstants",
+            "disableChecksOnFunctions",
+            "disableChecksOnMethods",
+            "disableChecksOnTypes",
+            "disableChecksOnVariables",
+        ]),
+        vec![
+            "exported: type name will be used as exflags.ExflagsThing by other packages, and that stutters; consider calling this Thing",
+        ],
+    );
+
+    // And `disableStutteringCheck` takes that last one away.
+    assert!(exported_flag_messages(&[
+        "disableChecksOnConstants",
+        "disableChecksOnFunctions",
+        "disableChecksOnMethods",
+        "disableChecksOnTypes",
+        "disableChecksOnVariables",
+        "disableStutteringCheck",
+    ])
+    .is_empty());
+}
+
+fn import_alias_messages(args: Vec<guff_revive::RuleArgument>) -> Vec<String> {
+    let settings = guff_revive::Settings {
+        severity: None,
+        rules: Some(vec![guff_revive::RuleSetting {
+            name: "import-alias-naming".into(),
+            arguments: args,
+            disabled: false,
+            severity: None,
+            exclude: Vec::new(),
+        }]),
+        confidence: Some(0.0),
+        ignore_generated_header: false,
+        enable_default_rules: false,
+        enable_all_rules: false,
+        go: None,
+        directives: Vec::new(),
+    };
+    guff_revive::with_settings(settings, || {
+        let pkg =
+            support::typecheck_fixture_dir("revive", "import_alias", "example.com/revive/aliases");
+        let mut messages = support::run_analyzer(revive(), &pkg);
+        messages.sort();
+        messages
+    })
+}
+
+/// `import-alias-naming` takes a string *or* a map with two expressions.
+///
+/// ```text
+/// case string:         r.setAllowRule(namingRule)
+/// case map[string]any: … isRuleOption(k, "allowRegex") / "denyRegex" …
+/// if r.allowRegexp == nil && r.denyRegexp == nil { … default … }
+/// ```
+///
+/// guff had the default `^[a-z][a-z0-9]{0,}$` baked in and **no deny side at
+/// all**. telegraf configures `^[a-z][a-z0-9_]*[a-z0-9]+$`, which allows the
+/// underscore its aliases use — 128 findings golangci-lint does not make.
+#[test]
+fn revive_import_alias_naming_reads_both_expressions() {
+    use guff_revive::RuleArgument;
+
+    assert_eq!(
+        import_alias_messages(Vec::new()),
+        vec![
+            "import-alias-naming: import name (Upper) must match the regular expression: ^[a-z][a-z0-9]{0,}$",
+            "import-alias-naming: import name (with_underscore) must match the regular expression: ^[a-z][a-z0-9]{0,}$",
+        ],
+    );
+
+    assert_eq!(
+        import_alias_messages(vec![RuleArgument::String("^[a-z][a-z0-9_]*[a-z0-9]+$".into())]),
+        vec![
+            "import-alias-naming: import name (Upper) must match the regular expression: ^[a-z][a-z0-9_]*[a-z0-9]+$",
+        ],
+    );
+
+    // Both sides can fire on one alias: upstream appends, it does not `else`.
+    let mut map = std::collections::HashMap::new();
+    map.insert("allowRegex".to_string(), RuleArgument::String("^[a-z]+$".into()));
+    map.insert("denyRegex".to_string(), RuleArgument::String("^x".into()));
+    assert_eq!(
+        import_alias_messages(vec![RuleArgument::Map(map)]),
+        vec![
+            "import-alias-naming: import name (Upper) must match the regular expression: ^[a-z]+$",
+            "import-alias-naming: import name (with_underscore) must match the regular expression: ^[a-z]+$",
+            "import-alias-naming: import name (x9) must NOT match the regular expression: ^x",
+            "import-alias-naming: import name (x9) must match the regular expression: ^[a-z]+$",
+        ],
+    );
+}
+
+/// An unnamed receiver is not "no receiver".
+///
+/// `unconditional-recursion` compares a `funcDesc` of (receiver ident,
+/// function ident), and the receiver has three cases:
+///
+/// ```text
+/// case n.Recv == nil:                    rec = nil
+/// case … len(n.Recv.List[0].Names) < 1:  rec = &ast.Ident{Name: "_"}
+/// default:                               rec = n.Recv.List[0].Names[0]
+/// ```
+///
+/// with `equal` treating nil and non-nil as different. guff collapsed the
+/// middle case into `None`, so a method with an unnamed receiver looked like a
+/// free function — and telegraf's
+/// `func (*configurationOriginal) normalizeInputDatatype(…)`, which ends with
+/// `return normalizeInputDatatype(dataType)` (the *package* function), was
+/// reported as unconditional recursion three times over.
+#[test]
+fn revive_unconditional_recursion_distinguishes_an_unnamed_receiver() {
+    let settings = guff_revive::Settings {
+        severity: None,
+        rules: Some(vec![guff_revive::RuleSetting {
+            name: "unconditional-recursion".into(),
+            arguments: Vec::new(),
+            disabled: false,
+            severity: None,
+            exclude: Vec::new(),
+        }]),
+        confidence: Some(0.0),
+        ignore_generated_header: false,
+        enable_default_rules: false,
+        enable_all_rules: false,
+        go: None,
+        directives: Vec::new(),
+    };
+    let messages = guff_revive::with_settings(settings, || {
+        let pkg = support::typecheck_fixture_dir(
+            "revive",
+            "uncond_recursion",
+            "example.com/revive/uncondrecursion",
+        );
+        support::run_analyzer_at(revive(), &pkg)
+    });
+    // Only the free function calling itself and the named receiver calling
+    // itself. The four silent shapes are the point.
+    assert_eq!(
+        messages,
+        vec![
+            "32:31: unconditional-recursion: unconditional recursive call",
+            "35:46: unconditional-recursion: unconditional recursive call",
+        ],
+        "{messages:?}"
+    );
+}
+
+/// `defer` runs the sub-checks its **argument list** names, and all six when it
+/// has none.
+///
+/// `DeferRule.allowFromArgs` builds an allow-set from `arguments[0]` and
+/// `newFailure` drops every failure whose sub-case is not in it. guff ran all
+/// six regardless, which put 55 findings on tailscale — 42 "prefer not to defer
+/// inside loops" and 13 "prefer not to defer chains of function calls" — that
+/// golangci-lint does not report, because tailscale names three sub-checks:
+///
+/// ```yaml
+/// - name: defer
+///   arguments: [["immediate-recover", "recover", "return"]]
+/// ```
+///
+/// The fixture is the one the two `revive-defer-*` golden cases read, so this
+/// test and those two cannot drift apart.
+#[test]
+fn revive_defer_runs_only_the_subcases_its_arguments_name() {
+    use guff_revive::{with_settings, RuleArgument, RuleSetting, Settings};
+
+    fn rule(arguments: Vec<RuleArgument>) -> Settings {
+        Settings {
+            rules: Some(vec![RuleSetting {
+                name: "defer".into(),
+                arguments,
+                ..RuleSetting::default()
+            }]),
+            ..Settings::default()
+        }
+    }
+
+    fn messages(settings: Settings) -> Vec<String> {
+        with_settings(settings, || {
+            let pkg = support::typecheck_fixture_dir("revive", "defer_rule", "example.com/deferrule");
+            let mut m = support::run_analyzer(revive(), &pkg);
+            m.sort();
+            m
+        })
+    }
+
+    let count = |m: &[String], needle: &str| m.iter().filter(|s| s.contains(needle)).count();
+
+    // No arguments: every sub-case.
+    let all = messages(rule(Vec::new()));
+    assert_eq!(
+        (
+            count(&all, "prefer not to defer inside loops"),
+            count(&all, "prefer not to defer chains of function calls"),
+            count(&all, "be careful when deferring calls to methods"),
+            count(&all, "return in a defer function has no effect"),
+            count(&all, "recover must be called inside a deferred function, this is executing"),
+            count(&all, "recover must be called inside a deferred function\"")
+                + all
+                    .iter()
+                    .filter(|s| s.ends_with("recover must be called inside a deferred function"))
+                    .count(),
+        ),
+        (2, 1, 1, 1, 2, 2),
+        "default (all six sub-cases): {all:?}"
+    );
+    assert_eq!(all.len(), 9, "{all:?}");
+
+    // tailscale's three. The other three sub-cases go quiet, and nothing else
+    // moves: same fixture, same findings for what stays enabled.
+    let subset = messages(rule(vec![RuleArgument::List(vec![
+        RuleArgument::String("immediate-recover".into()),
+        RuleArgument::String("recover".into()),
+        RuleArgument::String("return".into()),
+    ])]));
+    assert_eq!(
+        (
+            count(&subset, "prefer not to defer inside loops"),
+            count(&subset, "prefer not to defer chains of function calls"),
+            count(&subset, "be careful when deferring calls to methods"),
+            count(&subset, "return in a defer function has no effect"),
+        ),
+        (0, 0, 0, 1),
+        "three sub-cases named: {subset:?}"
+    );
+    assert_eq!(subset.len(), 5, "{subset:?}");
+
+    // A name upstream does not know turns nothing on: the list is an allow-set,
+    // not a deny-set, so this is five sub-cases off rather than one.
+    let unknown = messages(rule(vec![RuleArgument::List(vec![RuleArgument::String(
+        "loop".into(),
+    )])]));
+    assert_eq!(
+        (
+            count(&unknown, "prefer not to defer inside loops"),
+            unknown.len()
+        ),
+        (2, 2),
+        "only loop named: {unknown:?}"
+    );
+}
+
+/// The parse-time gate that decides whether `ast::Ident.obj` gets filled in.
+///
+/// Only `defer`'s `methodCall` reads it, so asking the analyzer list alone —
+/// "is revive enabled?" — would turn the resolution walk on for every
+/// configuration that enables revive, at about 0.2s of 5.2s on tailscale, to
+/// serve a sub-case that configuration has switched off.
+#[test]
+fn revive_asks_for_object_resolution_only_when_method_call_can_fire() {
+    use guff_revive::{needs_ast_object_resolution, RuleArgument, RuleSetting, Settings};
+
+    let with_rules = |rules: Vec<RuleSetting>| Settings {
+        rules: Some(rules),
+        ..Settings::default()
+    };
+    let defer_with = |arguments: Vec<RuleArgument>| RuleSetting {
+        name: "defer".into(),
+        arguments,
+        ..RuleSetting::default()
+    };
+
+    // No settings at all: the default rule set has no `defer`.
+    assert!(!needs_ast_object_resolution(None));
+    // Some other rule.
+    assert!(!needs_ast_object_resolution(Some(&with_rules(vec![
+        RuleSetting {
+            name: "exported".into(),
+            ..RuleSetting::default()
+        }
+    ]))));
+    // `defer` with no arguments runs every sub-case, methodCall included.
+    assert!(needs_ast_object_resolution(Some(&with_rules(vec![
+        defer_with(Vec::new())
+    ]))));
+    // tailscale's list leaves methodCall out.
+    assert!(!needs_ast_object_resolution(Some(&with_rules(vec![
+        defer_with(vec![RuleArgument::List(vec![
+            RuleArgument::String("immediate-recover".into()),
+            RuleArgument::String("recover".into()),
+            RuleArgument::String("return".into()),
+        ])])
+    ]))));
+    // Named explicitly, in either spelling upstream accepts.
+    for spelling in ["methodCall", "method-call"] {
+        assert!(
+            needs_ast_object_resolution(Some(&with_rules(vec![defer_with(vec![
+                RuleArgument::List(vec![RuleArgument::String(spelling.into())])
+            ])]))),
+            "{spelling}"
+        );
+    }
+    // Disabled outright.
+    assert!(!needs_ast_object_resolution(Some(&with_rules(vec![
+        RuleSetting {
+            name: "defer".into(),
+            disabled: true,
+            ..RuleSetting::default()
+        }
+    ]))));
+}
+
+/// `increment-decrement` renders whatever the left-hand side is.
+///
+/// Upstream's message is built from `file.Render(as)` and
+/// `file.Render(as.Lhs[0])`; guff matched an `Ident` and nothing else, so a
+/// field, an index, a map index and a parenthesised deref were all silently not
+/// findings — and with them most of where `+= 1` gets written, since a method
+/// updating its own state cannot use a bare identifier. Asserted as the exact
+/// sorted list, because the two silent cases at the end differ from the
+/// findings only in the operand.
+#[test]
+fn revive_increment_decrement_renders_any_lhs() {
+    let pkg = support::typecheck_fixture("revive", "example.com/revive/incdec", "incdec.go");
+    let mut found: Vec<String> = support::run_analyzer(revive(), &pkg)
+        .into_iter()
+        .filter(|m| m.starts_with("increment-decrement:"))
+        .collect();
+    found.sort();
+    assert_eq!(
+        found,
+        vec![
+            "increment-decrement: should replace (*m).Views += 1 with (*m).Views++",
+            "increment-decrement: should replace m.Sub.Views += 1 with m.Sub.Views++",
+            "increment-decrement: should replace m.Views += 1 with m.Views++",
+            "increment-decrement: should replace m.Xs[0] -= 1 with m.Xs[0]--",
+            "increment-decrement: should replace mm[\"k\"] += 1 with mm[\"k\"]++",
+            "increment-decrement: should replace n += 1 with n++",
+            "increment-decrement: should replace n -= 1 with n--",
+            "increment-decrement: should replace xs[i] += 1 with xs[i]++",
+        ],
+        "{found:?}"
+    );
+}
+
+/// `exported` remembers reported `GenDecl`s per **file**, not per package.
+///
+/// Upstream builds `genDeclMissingComments` inside `Apply`, which runs once per
+/// file. guff kept one map on the checker and keyed it by the `var` token's
+/// position — and those positions come from the per-file `PARSE_COMMENTS`
+/// reparse, so two files with the keyword at the same byte offset shared a key
+/// and the second file's finding was dropped. The fixture's two files are
+/// byte-identical up to that keyword on purpose; photoprism's `internal/entity`
+/// lost four findings to accidental collisions.
+#[test]
+fn revive_exported_reports_each_file_separately() {
+    let pkg = support::typecheck_fixture_dir("revive", "exported_collide", "example.com/revive/collide");
+    let mut found: Vec<String> = support::run_analyzer(revive(), &pkg)
+        .into_iter()
+        .filter(|m| m.starts_with("exported:"))
+        .collect();
+    found.sort();
+    assert_eq!(
+        found,
+        vec![
+            "exported: exported var AlphaValue should have comment or be unexported",
+            "exported: exported var BetaValue should have comment or be unexported",
+        ],
+        "{found:?}"
+    );
+}

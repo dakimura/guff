@@ -1,0 +1,29 @@
+# Golden case: two files, one dot-imported package (COMPAT-HARDENING Phase 1/5).
+#
+# Every linter enabled here needs type information, so a package that guff
+# wrongly calls ill-typed produces nothing on guff's side while golangci-lint
+# still reports — which is exactly the silent recall loss Phase 1 exists for.
+#
+# staticcheck is deliberately absent: SA5009 would report the same `%d` on the
+# same line, and its `checkType` half is unported (see the comment in
+# crates/guff-staticcheck/src/sa5009.rs). That gap belongs to SA5009's own
+# ratchet, not to this case.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errorlint
+    - govet
+  settings:
+    govet:
+      enable:
+        - printf
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

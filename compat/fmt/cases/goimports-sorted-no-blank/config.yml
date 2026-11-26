@@ -1,0 +1,12 @@
+# The other half: a block that is already in sort order but missing the group
+# separator. goimports always runs `addImportSpaces`, so it blanks before the
+# third-party import; guff's "already sorted, nothing to do" exit skipped the
+# rewrite and left the block alone.
+#
+# Paired with goimports-same-group so neither defect can be fixed by breaking
+# the other: this one requires *adding* a blank, that one requires *not*
+# adding one.
+version: "2"
+formatters:
+  enable:
+    - goimports

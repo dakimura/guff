@@ -1,0 +1,25 @@
+# Golden case: `errcheck.disable-default-exclusions` (COMPAT-HARDENING Phase 4).
+#
+# `getChecker` appends `errcheck.DefaultExcludedSymbols` unless this key is set.
+# The list is kisielk's, not golangci-lint's, and it is the reason a plain
+# `fmt.Println("hello")` is not an errcheck finding in any normal config.
+#
+# The diff against `errcheck-opts` is `defaults/bad.go`: `fmt.Println` and the
+# interface-receiver entry `(hash.Hash).Write`.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+  settings:
+    errcheck:
+      disable-default-exclusions: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

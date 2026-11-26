@@ -1,0 +1,8 @@
+package main
+
+func f(ch chan int) {
+	select {
+	case v := <-ch:
+		_ = v
+	}
+}

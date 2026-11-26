@@ -1,0 +1,22 @@
+# Golden case: exhaustive v0.13.0's declaration-side directives (golangci-lint
+# 2.14.0) — `//exhaustive:ignore` on a type or const declaration or spec, and
+# the "failed to parse directives" diagnostic at the start of a declaration
+# doc — which exhaustive v0.15.0 (golangci-lint 2.15.0) removed: every member
+# is back and no declaration doc is reported. Upstream v0.13.0's
+# testdata/src/enum is vendored verbatim; its fact assertions become empty
+# switches whose messages list the members. The same sources also sit in a
+# module the run never analyses (enumdep).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - exhaustive
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

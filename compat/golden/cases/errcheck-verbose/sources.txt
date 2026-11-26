@@ -1,0 +1,14 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# COMPAT-HARDENING Phase 4 / §5 item 1: `compat/normalize.py` canonicalizes the
+# two shapes of errcheck's message into one, so no gate before this one has
+# ever compared the name it prints. The Rust tests only assert the message
+# contains "Error return value".
+#
+# The Rust tests type-check each fixture file as a package of its own, so every
+# file gets its own directory here.
+
+names/bad.go       crates/guff-errcheck/tests/testdata/names/bad.go
+basic/bad.go       crates/guff-errcheck/tests/testdata/basic/bad.go
+defercheck/bad.go  crates/guff-errcheck/tests/testdata/defer/bad.go

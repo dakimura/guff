@@ -1,0 +1,9 @@
+# revive v1.17.1 testdata (verbatim) and shapes_* (not upstream).
+unnecessary_format/unnecessary_format.go         crates/guff-revive/tests/testdata/revive/upstream-v1.17.1/unnecessary_format/unnecessary_format.go
+unnecessary_if/unnecessary_if.go                 crates/guff-revive/tests/testdata/revive/upstream-v1.17.1/unnecessary_if/unnecessary_if.go
+unnecessary_stmt/unnecessary_stmt.go             crates/guff-revive/tests/testdata/revive/upstream-v1.17.1/unnecessary_stmt/unnecessary_stmt.go
+max_public_structs_ok/max_public_structs_ok.go   crates/guff-revive/tests/testdata/revive/upstream-v1.17.1/max_public_structs_ok/max_public_structs_ok.go
+shapes_mps_five/five.go                          crates/guff-revive/tests/testdata/revive/upstream-v1.17.1/shapes_mps_five/five.go
+shapes_mps_six/six.go                            crates/guff-revive/tests/testdata/revive/upstream-v1.17.1/shapes_mps_six/six.go
+shapes_if/shapes_if.go                           crates/guff-revive/tests/testdata/revive/upstream-v1.17.1/shapes_if/shapes_if.go
+shapes_format/shapes_format.go                   crates/guff-revive/tests/testdata/revive/upstream-v1.17.1/shapes_format/shapes_format.go

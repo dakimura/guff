@@ -1,0 +1,26 @@
+# Golden case: `revive.cognitive-complexity` with no argument.
+#
+# The pair with `revive-cognitive-max3` is what pins the argument. Upstream's
+# `Configure` reads `arguments[0]` and falls back to 7; guff had 7 baked in as a
+# constant and never read the argument, so both cases would have produced this
+# same set.
+#
+# The fixture's package comment carries the arithmetic each function measures.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      rules:
+        - name: cognitive-complexity
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

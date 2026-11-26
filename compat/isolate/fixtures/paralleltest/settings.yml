@@ -1,0 +1,4 @@
+# `check-cleanup` gates the fifth message ("uses defer with t.Parallel"), which
+# is also the only one of the five that does not end in a newline. Off by
+# default, so without this the arm is unreachable.
+check-cleanup: true

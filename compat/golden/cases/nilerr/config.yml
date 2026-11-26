@@ -1,0 +1,28 @@
+# Golden case: nilerr.
+#
+# nilerr's whole judgement is "does the `err != nil` block *use* the error
+# before returning nil", and the answer is read off `callInstr.Call.Args`,
+# peeled through `MakeInterface` / `ChangeInterface` / an invoke's receiver.
+#
+# Both directions of that rule were wrong here and neither had a gate:
+#
+#   - an error boxed into `any` for a variadic call (`logf("…: %v", err)`) is a
+#     use, and guff did not peel the box — 25 findings on dapr v1.18.3 that
+#     golangci-lint does not make;
+#   - `err.Error()` on its own is *not* a use, because an invoke call keeps its
+#     receiver in `Call.Value` rather than `Args`, and guff counted it —
+#     silencing a finding golangci-lint does make.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - nilerr
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

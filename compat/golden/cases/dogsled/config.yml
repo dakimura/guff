@@ -1,0 +1,25 @@
+# Golden case: dogsled.
+#
+# Seeded from the isolate fixture, which the OSS-style tiers already run — but
+# they compare `path:line:linter:message` after normalization, so this linter's
+# **column** and **severity** had never been checked by anything. Both are in
+# the key here, byte for byte.
+#
+# Widen the fixture rather than replacing it: the two tiers read the same files
+# (sources.txt), so a shape added for one is measured by both.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - dogsled
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # Full finding-set compare (avoid SA#### vs S#### order winning uniq-by-line).
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

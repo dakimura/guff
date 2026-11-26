@@ -1,0 +1,29 @@
+# The fixtures the Rust tests use, so the two cannot drift. One directory per
+# package: the Rust tests type-check each package on its own, and merging two of
+# them would change what is reachable.
+genericmethod/generic_method_bad.go   crates/guff-unused/tests/testdata/basic/generic_method_bad.go
+bad/method_bad.go                     crates/guff-unused/tests/testdata/basic/method_bad.go
+iface/iface_ok.go                     crates/guff-unused/tests/testdata/basic/iface_ok.go
+genericiface/generic_iface.go         crates/guff-unused/tests/testdata/basic/generic_iface.go
+ifaceinstance/iface_instance.go       crates/guff-unused/tests/testdata/basic/iface_instance.go
+exportedmethod/exported_method.go     crates/guff-unused/tests/testdata/basic/exported_method.go
+initmethod/init_method.go             crates/guff-unused/tests/testdata/basic/init_method.go
+lintignore/lint_ignore.go             crates/guff-unused/tests/testdata/basic/lint_ignore.go
+deadcycle/dead_cycle.go               crates/guff-unused/tests/testdata/basic/dead_cycle.go
+locals/locals.go                      crates/guff-unused/tests/testdata/basic/locals.go
+# Two files, one package: the directive is in the first, the methods of the
+# type it covers are in the second (nats-server's jetstream_helpers_test.go).
+fileignore/types.go                   crates/guff-unused/tests/testdata/fileignore/types.go
+fileignore/methods.go                 crates/guff-unused/tests/testdata/fileignore/methods.go
+# honnef's (9.7)/(4.9): a write is not a use, except for a global declared in a
+# test file. The `_test.go` half is the shape, not scaffolding — `run.tests` is
+# on, and the rule keys on the declaring file.
+globalwrites/globalwrites.go        crates/guff-unused/tests/testdata/globalwrites/globalwrites.go
+globalwrites/globalwrites_test.go   crates/guff-unused/tests/testdata/globalwrites/globalwrites_test.go
+
+# The struct-field rules. `fieldsunsafe` is the one package here the Rust tests
+# cannot use: its (5.2) and (6.6) shapes need imports, and the unit-test
+# type-checker has no importer.
+fields/fields.go                      crates/guff-unused/tests/testdata/fields/fields.go
+fieldsunsafe/fieldsunsafe.go          crates/guff-unused/tests/testdata/fieldsunsafe/fieldsunsafe.go
+genericifaces/generic_interfaces.go   crates/guff-unused/tests/testdata/basic/generic_interfaces_v081.go

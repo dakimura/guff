@@ -1,0 +1,25 @@
+# golangci-lint 2.15.0 pkg/golinters/revive/testdata/revive_add_constant.{go,yml}.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      rules:
+        - name: add-constant
+          arguments:
+            - maxLitCount: "2"
+              allowStrs: '""'
+              allowInts: "0,1"
+              allowFloats: "0.0,1.0"
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

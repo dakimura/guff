@@ -1,0 +1,151 @@
+# Golden case: revive.
+#
+# Every rule guff implements is listed explicitly rather than using
+# `enable-all-rules`, for the same reason the govet case lists its analyzers:
+# revive v1.15.0 (what golangci-lint 2.12.2 pins) ships more rules than guff
+# implements, and `enable-all-rules` would turn that known scope decision into
+# a permanent golden diff. Adding a rule to guff means adding it here.
+#
+# One rule is deliberately absent: `multiline-if-init` exists only on revive's
+# master branch, and v1.15.0 fails the whole run with "cannot find rule:
+# multiline-if-init". guff keeps it out of its own enable-all set for the same
+# reason (config::AHEAD_OF_PIN_RULES) — put it back here when golangci-lint
+# bumps revive.
+#
+# The arguments mirror `guff_revive::extended_test_settings`, so the rules that
+# only fire when configured (imports-blocklist, file-header, banned-characters,
+# string-format, the two enforce-*-style rules, the density/length limits) are
+# reached here exactly as the Rust tests reach them.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      # `rules` alone selects the rule set: without enable-default-rules /
+      # enable-all-rules, golangci runs the listed rules and nothing else.
+      severity: warning
+      rules:
+      - name: blank-imports
+      - name: context-as-argument
+      - name: context-keys-type
+      - name: dot-imports
+      - name: empty-block
+      - name: error-naming
+      - name: error-return
+      - name: error-strings
+      - name: errorf
+      - name: exported
+      - name: increment-decrement
+      - name: indent-error-flow
+      - name: package-comments
+      - name: range
+      - name: receiver-naming
+      - name: redefines-builtin-id
+      - name: superfluous-else
+      - name: time-naming
+      - name: unexported-return
+      - name: unreachable-code
+      - name: unused-parameter
+      - name: var-declaration
+      - name: var-naming
+      - name: atomic
+      - name: bare-return
+      - name: bool-literal-in-expr
+      - name: call-to-gc
+      - name: cyclomatic
+      - name: duplicated-imports
+      - name: if-return
+      - name: string-of-int
+      - name: time-equal
+      - name: unchecked-type-assertion
+      - name: unconditional-recursion
+      - name: unnecessary-format
+      - name: use-errors-new
+      - name: waitgroup-by-value
+      - name: cognitive-complexity
+      - name: constant-logical-expr
+      - name: import-shadowing
+      - name: struct-tag
+      - name: time-date
+      - name: unhandled-error
+      - name: unnecessary-stmt
+      - name: add-constant
+      - name: argument-limit
+      - name: early-return
+      - name: deep-exit
+      - name: get-return
+      - name: redundant-import-alias
+      - name: unnecessary-if
+      - name: defer
+      - name: flag-parameter
+      - name: function-length
+      - name: function-result-limit
+      - name: use-any
+      - name: use-fmt-print
+      - name: unused-receiver
+      - name: modifies-parameter
+      - name: identical-branches
+      - name: identical-ifelseif-branches
+      - name: identical-ifelseif-conditions
+      - name: identical-switch-branches
+      - name: identical-switch-conditions
+      - name: line-length-limit
+      - name: max-control-nesting
+      - name: nested-structs
+      - name: unexported-naming
+      - name: empty-lines
+      - name: optimize-operands-order
+      - name: range-val-in-closure
+      - name: confusing-results
+      - name: confusing-naming
+      - name: imports-blocklist
+        arguments: ["os"]
+      - name: string-format
+        arguments: [["fmt.Println", "/^ok$/", "string must be ok"]]
+      - name: file-header
+        arguments: ["Copyright"]
+      - name: import-alias-naming
+      - name: useless-break
+      - name: useless-fallthrough
+      - name: modifies-value-receiver
+      - name: range-val-address
+      - name: unsecure-url-scheme
+      - name: banned-characters
+        arguments: ["\u212a"]
+      - name: file-length-limit
+        arguments: [{ max: 350 }]
+      - name: filename-format
+      - name: package-naming
+      - name: use-slices-sort
+      - name: inefficient-map-lookup
+      - name: redundant-test-main-exit
+      - name: comment-spacings
+      - name: epoch-naming
+      - name: comments-density
+        arguments: [10]
+      - name: datarace
+      - name: enforce-map-style
+        arguments: ["make"]
+      - name: enforce-slice-style
+        arguments: ["make"]
+      - name: enforce-switch-style
+      - name: enforce-repeated-arg-type-style
+        arguments: ["short"]
+      - name: package-directory-mismatch
+        arguments: [{ ignore-directories: [] }]
+      - name: forbidden-call-in-wg-go
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # Several rules report more than once on a line (a bad import line can be
+  # both dot-imports and import-alias-naming), and all of them are wanted.
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  # extended_bad_test.go is a _test.go fixture.
+  tests: true

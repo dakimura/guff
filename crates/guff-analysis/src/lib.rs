@@ -1,0 +1,56 @@
+//! guff-analysis — a Rust port of `golang.org/x/tools/go/analysis`.
+//!
+//! Provides the `Analyzer` / `Pass` / `Diagnostic` framework expected by
+//! golangci-lint-style runners.
+//!
+//! Original Go source:
+//!   Copyright 2018 The Go Authors. All rights reserved.
+//!   Use of this source code is governed by a BSD-style license.
+
+mod analyzer;
+pub mod callcheck;
+pub mod code;
+pub mod comments;
+pub mod golinters;
+mod diagnostic;
+mod fact_codec;
+mod facts;
+mod pass;
+mod pattern_match;
+pub mod passes;
+pub mod refactor;
+pub mod satisfy;
+mod settings;
+pub mod typesinternal;
+mod ssa_util;
+mod validate;
+
+pub use passes::buildir::BuildIrResult;
+pub use passes::inspect::{
+    masks_enabled, preorder_arm_totals, preorder_null_nanos, preorder_stats_enabled,
+    preorder_thread_totals, preorder_totals,
+};
+pub use passes::facts::deprecated::{DeprecatedResult, IsDeprecated};
+pub use passes::typeindex::Index as TypeIndex;
+pub use pattern_match::{entry_mask, match_env, match_pattern, match_pos, matches};
+pub use ssa_util::{
+    append_modifies_param, block_control, call_node_starts, call_object, closure_fn_in, dominates_all_exits,
+    each_call, filter_debug, has_non_debug_referrer, is_call_to, is_call_to_any, is_in_loop,
+    iter_non_debug,
+    is_nil_const, param_value, referrers, short_call_name, store_modifies_param, terminates,
+    walk_dominated,
+};
+pub use analyzer::{as_run_failure, run_failure, AnalysisResult, Analyzer, RunError, RunFn};
+pub use diagnostic::{Diagnostic, RelatedInformation, SuggestedFix, TextEdit};
+pub use passes::facts::generated::{GeneratedResult, Generator};
+pub use fact_codec::{
+    decode_fact, decode_facts_into, encode_fact_store, register_fact_decoder, remap_facts,
+    EncodedFact,
+};
+pub use facts::{
+    ensure_builtin_fact_decoders, Fact, FactStore, FactTypeId, ObjectFact, PackageFact, StringFact,
+};
+pub use guff_packages::Package;
+pub use pass::{Pass, PassInput};
+pub use settings::SettingsBag;
+pub use validate::{validate, ValidateError};

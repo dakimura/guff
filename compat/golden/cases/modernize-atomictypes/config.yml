@@ -1,0 +1,28 @@
+# Golden case: modernize's `atomictypes`.
+#
+# The analyzer's whole job is deciding when a rewrite is *not* safe, so the
+# case is mostly negatives: an init-assigned var, an unsynchronized load, a
+# receiver / parameter / named result, and — the one this case was added for —
+# a field named as a key in a composite literal.
+#
+# That last rejection has two spellings and guff only had the first. `Z{z: 1}`
+# gives the literal the struct's own type; `[]*P{{n: 1}}` elides `&P`, so the
+# literal's type is `*P` and the field still belongs to `P`. Upstream never
+# asks what type the literal has — it walks the uses of the field object and
+# rejects any whose parent edge is a KeyValueExpr key — so both spellings are
+# the same rejection there. coredns `plugin/errors/errors_test.go` is the
+# second one, and guff reported the field as a clean candidate.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - modernize
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

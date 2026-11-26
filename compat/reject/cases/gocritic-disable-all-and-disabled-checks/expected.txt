@@ -1,0 +1,1 @@
+gocritic: invalid settings: disable-all and disabled-checks options must not be combined

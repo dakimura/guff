@@ -1,0 +1,8 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces)
+sumdep/go.mod  crates/guff-style/tests/testdata/gochecksumtype/imports/sumdep/go.mod
+sumdep/dep.go  crates/guff-style/tests/testdata/gochecksumtype/imports/sumdep/dep.go
+ops/ops.go  crates/guff-style/tests/testdata/gochecksumtype/imports/ops/ops.go
+user/user.go  crates/guff-style/tests/testdata/gochecksumtype/imports/user/user.go
+far/far.go  crates/guff-style/tests/testdata/gochecksumtype/imports/far/far.go
+linedir/linedir.go  crates/guff-style/tests/testdata/gochecksumtype/imports/linedir/linedir.go

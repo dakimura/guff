@@ -1,0 +1,150 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh modernize
+# Produced by running golangci-lint on compat/golden/cases/modernize/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+bad/bad.go:9:16:modernize::any: interface{} can be replaced by any
+bad/bad.go:12:6:modernize::rangeint: for loop can be modernized using range over int
+bad/bad.go:19:5:modernize::minmax: if/else statement can be modernized using min
+bad/bad.go:32:2:modernize::slicessort: sort.Slice can be modernized using slices.Sort
+bad/bad.go:37:3:modernize::forvar: copying variable is unneeded
+bad/bad.go:43:5:modernize::stringscutprefix: HasPrefix + TrimPrefix can be simplified to CutPrefix
+bad/bad.go:50:2:modernize::slicescontains: Loop can be simplified using slices.Contains
+bad/bad.go:59:24:modernize::omitzero: Omitempty has no effect on nested struct fields
+bloop/bloop.go:93:6:modernize::rangeint: for loop can be modernized using range over int
+errorsastype/errorsastype.go:19:6:modernize::errorsastype: errors.As can be simplified using AsType[*os.PathError]
+errorsastype/errorsastype.go:26:6:modernize::errorsastype: errors.As can be simplified using AsType[*os.PathError]
+errorsastype/errorsastype.go:33:6:modernize::errorsastype: errors.As can be simplified using AsType[*os.PathError]
+errorsastype/errorsastype.go:55:6:modernize::errorsastype: errors.As can be simplified using AsType[*os.PathError]
+errorsastype/errorsastype.go:61:6:modernize::errorsastype: errors.As can be simplified using AsType[*os.PathError]
+errorsastype/errorsastype.go:67:7:modernize::errorsastype: errors.As can be simplified using AsType[*os.PathError]
+errorsastype/errorsastype.go:74:6:modernize::errorsastype: errors.As can be simplified using AsType[*os.PathError]
+errorsastype/errorsastype.go:76:14:modernize::errorsastype: errors.As can be simplified using AsType[*os.LinkError]
+errorsastype/errorsastype.go:82:7:modernize::errorsastype: errors.As can be simplified using AsType[*os.PathError]
+errorsastype/errorsastype.go:109:6:modernize::errorsastype: errors.As can be simplified using AsType[FooError]
+importcomment/importcomment.go:1:23:modernize::importcomment: canonical import path comment is ignored in module mode
+indexcut/indexcut.go:21:11:modernize::stringscut: strings.Index can be simplified using strings.Cut
+indexcut/indexcut.go:30:12:modernize::stringscut: strings.IndexByte can be simplified using strings.Cut
+indexcut/indexcut.go:38:7:modernize::stringscut: strings.IndexByte can be simplified using strings.Cut
+indexcut/indexcut.go:47:7:modernize::stringscut: strings.Index can be simplified using strings.Contains
+indexcut/indexcut.go:56:7:modernize::stringscut: strings.Index can be simplified using strings.Contains
+indexcut/indexcut.go:57:7:modernize::stringscut: strings.Index can be simplified using strings.Contains
+indexcut/indexcut.go:58:7:modernize::stringscut: strings.Index can be simplified using strings.Contains
+indexcut/indexcut.go:59:7:modernize::stringscut: strings.Index can be simplified using strings.Contains
+indexcut/indexcut.go:65:7:modernize::stringscut: strings.Index can be simplified using strings.Contains
+indexcut/indexcut.go:66:7:modernize::stringscut: strings.Index can be simplified using strings.Contains
+indexcut/indexcut.go:67:7:modernize::stringscut: strings.Index can be simplified using strings.Contains
+indexcut/indexcut.go:114:7:modernize::stringscut: bytes.Index can be simplified using bytes.Cut
+indexcut/indexcut.go:123:7:modernize::stringscut: bytes.IndexByte can be simplified using bytes.Contains
+indexcut/indexcut.go:129:7:modernize::stringscut: strings.IndexByte can be simplified using strings.Contains
+indexcut/indexcut.go:141:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+indexcut/indexcut.go:147:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+indexcut/indexcut.go:157:10:modernize::stringscut: strings.Index can be simplified using strings.Contains
+indexcut/indexcut.go:171:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+indexcut/indexcut.go:180:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+indexcut/indexcut.go:181:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+indexcut/indexcut.go:194:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+indexcut/indexcut.go:203:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+indexcut/indexcut.go:212:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+mapsloop/mapsloop.go:7:3:modernize::mapsloop: Replace m[k]=v loop with maps.Copy
+mapsloop/mapsloop.go:22:3:modernize::mapsloop: Replace m[k]=v loop with maps.Copy
+minmax/minmax.go:8:5:modernize::minmax: if statement can be modernized using min
+minmax/minmax.go:17:5:modernize::minmax: if statement can be modernized using max
+minmax/minmax.go:29:5:modernize::minmax: if statement can be modernized using min
+minmax/minmax.go:71:5:modernize::minmax: if/else statement can be modernized using min
+minmax/minmax.go:85:5:modernize::minmax: if statement can be modernized using min
+minmax/minmax.go:96:5:modernize::minmax: if statement can be modernized using min
+minmax/minmax.go:110:5:modernize::minmax: if statement can be modernized using max
+minmaxfloat/minmaxfloat.go:18:1:modernize::minmax: user-defined max function is equivalent to built-in max and can be removed
+minmaxshadow/minmaxshadow.go:20:1:modernize::minmax: user-defined min function is equivalent to built-in min and can be removed
+minmaxshadow/minmaxshadow.go:50:5:modernize::minmax: if statement can be modernized using max
+minmaxshadow/minmaxshadow.go:59:5:modernize::minmax: if/else statement can be modernized using max
+minmaxuser/minmaxuser.go:17:1:modernize::minmax: user-defined min function is equivalent to built-in min and can be removed
+minmaxuser/minmaxuser.go:26:1:modernize::minmax: user-defined max function is equivalent to built-in max and can be removed
+plusbuild/plusbuild.go:6:1:modernize::plusbuild: +build line is no longer needed
+reflecttypeassert/reflecttypeassert.go:13:11:modernize::reflecttypeassert: Interface().(string) can be simplified using reflect.TypeAssert
+reflecttypeassert/reflecttypeassert.go:16:11:modernize::reflecttypeassert: Interface().(payload) can be simplified using reflect.TypeAssert
+reflecttypeassert/reflecttypeassert.go:19:11:modernize::reflecttypeassert: Interface().(io.Reader) can be simplified using reflect.TypeAssert
+reflecttypeassert/reflecttypeassert.go:26:10:modernize::reflecttypeassert: Interface().(int) can be simplified using reflect.TypeAssert
+reflecttypeassert/reflecttypeassert.go:31:14:modernize::reflecttypeassert: Interface().(string) can be simplified using reflect.TypeAssert
+reflecttypeassert/reflecttypeassert.go:37:11:modernize::reflecttypeassert: Interface().(error) can be simplified using reflect.TypeAssert
+reflecttypefor/reflecttypefor.go:17:9:modernize::reflecttypefor: reflect.TypeOf call can be simplified using TypeFor
+reflecttypefor/reflecttypefor.go:38:3:modernize::reflecttypefor: reflect.TypeOf call can be simplified using TypeFor
+reflecttypefor/reflecttypefor.go:39:3:modernize::reflecttypefor: reflect.TypeOf call can be simplified using TypeFor
+reflecttypefor/reflecttypefor.go:40:3:modernize::reflecttypefor: reflect.TypeOf call can be simplified using TypeFor
+reflecttypefor/reflecttypefor.go:50:3:modernize::reflecttypefor: reflect.TypeOf call can be simplified using TypeFor
+reflecttypefor/reflecttypefor.go:51:3:modernize::reflecttypefor: reflect.TypeOf call can be simplified using TypeFor
+reflecttypefor/reflecttypefor.go:86:9:modernize::reflecttypefor: reflect.TypeOf call can be simplified using TypeFor
+reflecttypefor/reflecttypefor.go:97:3:modernize::reflecttypefor: reflect.TypeOf call can be simplified using TypeFor
+reflecttypefor/reflecttypefor.go:98:3:modernize::reflecttypefor: reflect.TypeOf call can be simplified using TypeFor
+reflecttypefor/reflecttypefor.go:99:3:modernize::reflecttypefor: reflect.TypeOf call can be simplified using TypeFor
+reflecttypefor/reflecttypefor.go:126:3:modernize::reflecttypefor: reflect.TypeOf call can be simplified using TypeFor
+reflecttypefor/reflecttypefor.go:128:3:modernize::reflecttypefor: reflect.TypeOf call can be simplified using TypeFor
+reflecttypefor/reflecttypefor.go:132:3:modernize::reflecttypefor: reflect.TypeOf call can be simplified using TypeFor
+slicesbackward/slicesbackward.go:7:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicescontains/slicescontains.go:4:2:modernize::slicescontains: Loop can be simplified using slices.Contains
+slicescontains/slicescontains.go:13:2:modernize::slicescontains: Loop can be simplified using slices.Contains
+slicescontains/slicescontains.go:23:2:modernize::slicescontains: Loop can be simplified using slices.ContainsFunc
+slicescontains/slicescontains.go:32:2:modernize::slicescontains: Loop can be simplified using slices.Contains
+slicescontains/slicescontains.go:42:2:modernize::slicescontains: Loop can be simplified using slices.Contains
+slicescontains/slicescontains.go:125:2:modernize::slicescontains: Loop can be simplified using slices.ContainsFunc
+slicescontains/slicescontains.go:135:2:modernize::slicescontains: Loop can be simplified using slices.ContainsFunc
+stditerators/stditerators.go:9:2:modernize::stditerators: NumFields/Field loop can simplified using Struct.Fields iteration
+stditerators/stditerators.go:16:11:modernize::stditerators: NumFields/Field loop can simplified using Struct.Fields iteration
+stditerators/stditerators.go:23:2:modernize::stditerators: Len/At loop can simplified using Tuple.Variables iteration
+stditerators/stditerators.go:40:6:modernize::rangeint: for loop can be modernized using range over int
+stmtlist/stmtlist.go:18:5:modernize::minmax: if statement can be modernized using max
+stmtlist/stmtlist.go:29:6:modernize::minmax: if statement can be modernized using max
+stmtlist/stmtlist.go:41:6:modernize::minmax: if statement can be modernized using max
+stmtlist/stmtlist.go:69:3:modernize::slicescontains: Loop can be simplified using slices.Contains
+stmtlist/stmtlist.go:85:3:modernize::slicescontains: Loop can be simplified using slices.Contains
+stmtlist/stmtlist.go:100:3:modernize::slicescontains: Loop can be simplified using slices.Contains
+stmtlist/stmtlist.go:115:3:modernize::slicescontains: Loop can be simplified using slices.Contains
+stmtlist/stmtlist.go:128:2:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
+stmtlist/stmtlist.go:138:3:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
+stmtlist/stmtlist.go:149:3:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
+stringsbuilder/stringsbuilder.go:7:6:modernize::rangeint: for loop can be modernized using range over int
+stringsbuilder/stringsbuilder.go:8:3:modernize::stringsbuilder: using string += string in a loop is inefficient
+stringsbuilder/stringsbuilder.go:17:6:modernize::rangeint: for loop can be modernized using range over int
+stringsbuilder/stringsbuilder.go:18:3:modernize::stringsbuilder: using string += string in a loop is inefficient
+stringsbuilder/stringsbuilder.go:26:6:modernize::rangeint: for loop can be modernized using range over int
+stringsbuilder/stringsbuilder.go:27:3:modernize::stringsbuilder: using string += string in a loop is inefficient
+stringsbuilder/stringsbuilder.go:38:3:modernize::stringsbuilder: using string += string in a loop is inefficient
+stringsbuilder/stringsbuilder.go:54:7:modernize::rangeint: for loop can be modernized using range over int
+stringsbuilder/stringsbuilder.go:65:6:modernize::rangeint: for loop can be modernized using range over int
+stringsbuilder/stringsbuilder.go:77:6:modernize::rangeint: for loop can be modernized using range over int
+stringscut/stringscut.go:9:7:modernize::stringscut: strings.Split call can be simplified using strings.Cut
+stringscut/stringscut.go:14:7:modernize::stringscut: strings.SplitN call can be simplified using strings.Cut
+stringscut/stringscut.go:72:7:modernize::stringscut: strings.Split call can be simplified using strings.Cut
+stringscutprefix/stringscutprefix.go:9:5:modernize::stringscutprefix: TrimPrefix can be simplified to CutPrefix
+stringscutprefix/stringscutprefix.go:16:5:modernize::stringscutprefix: TrimSuffix can be simplified to CutSuffix
+stringscutprefix/stringscutprefix.go:23:5:modernize::stringscutprefix: HasPrefix + TrimPrefix can be simplified to CutPrefix
+stringscutprefix/stringscutprefix.go:30:5:modernize::stringscutprefix: HasSuffix + TrimSuffix can be simplified to CutSuffix
+stringscutprefixsearch/stringscutprefix_search.go:13:5:modernize::stringscutprefix: HasSuffix + TrimSuffix can be simplified to CutSuffix
+stringscutprefixsearch/stringscutprefix_search.go:20:5:modernize::stringscutprefix: HasSuffix + TrimSuffix can be simplified to CutSuffix
+stringscutprefixsearch/stringscutprefix_search.go:46:5:modernize::stringscutprefix: HasPrefix + TrimPrefix can be simplified to CutPrefix
+stringscutprefixsearch/stringscutprefix_search.go:52:5:modernize::stringscutprefix: HasSuffix + TrimSuffix can be simplified to CutSuffix
+stringscutprefixsearch/stringscutprefix_search.go:71:5:modernize::stringscutprefix: HasSuffix + TrimSuffix can be simplified to CutSuffix
+stringscutprefixsearch/stringscutprefix_search.go:77:5:modernize::stringscutprefix: HasSuffix + TrimSuffix can be simplified to CutSuffix
+stringsseq/stringsseq.go:11:23:modernize::stringsseq: Ranging over SplitSeq is more efficient
+stringsseq/stringsseq.go:17:23:modernize::stringsseq: Ranging over FieldsSeq is more efficient
+stringsseq/stringsseq.go:27:23:modernize::stringsseq: Ranging over SplitSeq is more efficient
+stringsseq/stringsseq.go:33:20:modernize::stringsseq: Ranging over FieldsSeq is more efficient
+testingcontext/testingcontext.go:25:17:modernize::testingcontext: context.WithCancel can be modernized using t.Context
+testingcontext/testingcontext.go:33:18:modernize::testingcontext: context.WithCancel can be modernized using t.Context
+testingcontext/testingcontext.go:95:18:modernize::testingcontext: context.WithCancel can be modernized using b.Context
+testingcontext/testingcontext.go:112:17:modernize::testingcontext: context.WithCancel can be modernized using t.Context
+testingcontext/testingcontext.go:131:18:modernize::testingcontext: context.WithCancel can be modernized using t.Context
+testingcontext/testingcontext.go:140:18:modernize::testingcontext: context.WithCancel can be modernized using t.Context
+testingcontext/testingcontext.go:150:18:modernize::testingcontext: context.WithCancel can be modernized using t.Context
+testingcontext/testingcontext.go:159:18:modernize::testingcontext: context.WithCancel can be modernized using sub.Context
+unsafefuncs/unsafefuncs.go:6:24:modernize::unsafefuncs: pointer + integer can be simplified using unsafe.Add
+unsafefuncs/unsafefuncs.go:10:24:modernize::unsafefuncs: pointer + integer can be simplified using unsafe.Add
+unsafefuncs/unsafefuncs.go:16:12:modernize::unsafefuncs: pointer + integer can be simplified using unsafe.Add
+waitgroupgo/waitgroupgo.go:9:2:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
+waitgroupgo/waitgroupgo.go:23:2:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
+waitgroupgo/waitgroupgo.go:32:2:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go
+waitgroupgo/waitgroupgo.go:40:2:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go

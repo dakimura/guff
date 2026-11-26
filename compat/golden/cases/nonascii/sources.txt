@@ -1,0 +1,8 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# COMPAT-HARDENING Phase 5: the "non-ASCII identifiers" shape. corpus/shapes.py
+# measures zero of it across every gated OSS target, and no mainstream Go repo
+# supplies it, so it is covered by fixture rather than by corpus.
+
+nonascii/nonascii.go    crates/guff-lint/tests/testdata/nonascii/nonascii.go

@@ -1,0 +1,59 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh fatcontext
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/fatcontext/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.15.0
+
+--- a/bad.go
++++ b/bad.go
+@@ -8,7 +8,7 @@
+ // categoryInLoop
+ func InLoop(ctx context.Context, xs []string) {
+ 	for _, x := range xs {
+-		ctx = context.WithValue(ctx, "k", x)
++		ctx := context.WithValue(ctx, "k", x)
+ 		_ = ctx
+ 	}
+ }
+@@ -16,7 +16,7 @@
+ // categoryInFuncLit
+ func InFuncLit(ctx context.Context) func() {
+ 	return func() {
+-		ctx = context.WithValue(ctx, "k", "v")
++		ctx := context.WithValue(ctx, "k", "v")
+ 		_ = ctx
+ 	}
+ }
+--- a/scope.go
++++ b/scope.go
+@@ -56,7 +56,7 @@
+ // Reported: a package-level variable is declared outside the function, so the
+ // predicate really is being asked and really can say no.
+ func PackageVarAtTopLevel() {
+-	pkgCtx = context.WithValue(pkgCtx, "k", "v")
++	pkgCtx := context.WithValue(pkgCtx, "k", "v")
+ 	_ = pkgCtx
+ }
+ 
+@@ -76,7 +76,7 @@
+ // parameter is not declared there.
+ func ParamInLoop(ctx context.Context, n int) {
+ 	for range n {
+-		ctx = context.WithValue(ctx, "k", "v")
++		ctx := context.WithValue(ctx, "k", "v")
+ 		_ = ctx
+ 	}
+ }
+@@ -84,7 +84,7 @@
+ // Reported as a loop: so is the package variable.
+ func PackageVarInLoop(n int) {
+ 	for range n {
+-		pkgCtx = context.WithValue(pkgCtx, "k", "v")
++		pkgCtx := context.WithValue(pkgCtx, "k", "v")
+ 		_ = pkgCtx
+ 	}
+ }

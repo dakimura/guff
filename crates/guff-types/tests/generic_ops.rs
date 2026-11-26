@@ -1,0 +1,481 @@
+//! Operators on type parameters — Go's `allX` predicate family.
+//!
+//! `isX` stops at `Underlying()`, so a type parameter satisfies none of them
+//! and `total += x` inside `func Sum[T ~int|~float64]` used to be rejected
+//! with "operator ADD not defined on operand". That doesn't just mis-report a
+//! type error: the package goes ill-typed and every type-dependent analyzer
+//! silently reports nothing (COMPAT-HARDENING.md Phase 1's "failure that
+//! doesn't show up as a diff").
+//!
+//! Ground truth for every case below is `go build` on go1.26 — the positive
+//! cases compile, the negative ones are the errors it prints.
+
+use guff::parser::{parse_file, Mode};
+use guff::position::FileSet;
+use guff_types::{Checker, Config};
+
+const CONSTRAINTS: &str = "\
+type Num interface{ ~int | ~float64 }\n\
+type Int interface{ ~int | ~int8 | ~uint }\n\
+type Str interface{ ~string }\n\
+type Bool interface{ ~bool }\n\
+type Ord interface{ ~int | ~string }\n\
+type IntOrStr interface{ ~int | ~string }\n\
+type IntOrBool interface{ ~int | ~bool }\n";
+
+fn check_src(src: &str) -> Checker {
+    let fset = FileSet::new();
+    let file = parse_file(&fset, "test.go", src.as_bytes(), Mode::NONE).expect("parse");
+    let mut check = Checker::new(Config::default());
+    check.check_files(vec![file]);
+    check
+}
+
+/// Type-check `decl` alongside the shared constraint declarations.
+fn check_decl(decl: &str) -> Checker {
+    check_src(&format!("package p\n{}{}\n", CONSTRAINTS, decl))
+}
+
+#[track_caller]
+fn accepts(decl: &str) {
+    let c = check_decl(decl);
+    assert!(
+        c.errors.is_empty(),
+        "{decl}\n  unexpected errors: {:?}",
+        c.errors
+    );
+}
+
+#[track_caller]
+fn rejects(decl: &str) {
+    let c = check_decl(decl);
+    assert!(
+        !c.errors.is_empty(),
+        "{decl}\n  expected an error, got none"
+    );
+}
+
+// ----------------------------------------------------------------------------
+// Accepted — the predicate holds for every term of the type set.
+
+#[test]
+fn arithmetic_on_numeric_type_param() {
+    // The form that motivated this: `+=` in a loop over a generic slice.
+    accepts(
+        "func Sum[T Num](xs []T) T {\n\
+           var total T\n\
+           for _, x := range xs { total += x }\n\
+           return total\n\
+         }",
+    );
+    accepts("func Arith[T Num](a, b T) T { return a + b - a*b/b }");
+    accepts("func Neg[T Num](a T) T { return -a }");
+    accepts("func Pos[T Num](a T) T { return +a }");
+}
+
+#[test]
+fn integer_ops_on_integer_type_param() {
+    accepts("func Bits[T Int](a, b T) T { return a%b | a&b ^ a&^b }");
+    accepts("func Compl[T Int](a T) T { return ^a }");
+}
+
+#[test]
+fn shift_with_type_param_operand_and_count() {
+    accepts("func ShiftL[T Int](a T) T { return a << 3 }");
+    accepts("func ShiftBy[T Int](n T) int { return 1 << n }");
+}
+
+#[test]
+fn string_concat_on_string_type_param() {
+    accepts("func Cat[T Str](a, b T) T { return a + b }");
+    // `~int | ~string` is allNumericOrString, so `+` is defined but `-` is not.
+    accepts("func Plus[T IntOrStr](a, b T) T { return a + b }");
+}
+
+#[test]
+fn boolean_ops_and_conditions_on_bool_type_param() {
+    accepts("func And[T Bool](a, b T) T { return a && b }");
+    accepts("func Not[T Bool](a T) T { return !a }");
+    accepts("func If[T Bool](a T) int { if a { return 1 }; for a { break }; return 0 }");
+}
+
+#[test]
+fn ordering_and_minmax_on_ordered_type_param() {
+    accepts("func Less[T Ord](a, b T) bool { return a < b && a <= b && a > b && a >= b }");
+    accepts("func MinMax[T Ord](a, b T) T { return min(a, b) + max(a, b) }");
+}
+
+#[test]
+fn incdec_on_numeric_type_param() {
+    accepts("func Inc[T Num](a T) T { a++; a--; return a }");
+}
+
+#[test]
+fn untyped_constant_converts_to_type_param_when_every_term_accepts_it() {
+    accepts("func Init[T Num]() T { var x T = 1; x += 2; return x }");
+    // Not representable in one of the terms.
+    rejects("func Big[T interface{ ~int8 }]() T { var x T = 300; return x }");
+    // `1` is fine for ~int, not for ~string — `underIs` needs every term.
+    rejects("func Mixed[T IntOrStr]() T { var x T = 1; return x }");
+    rejects("func Any[T any]() T { var x T = 0; return x }");
+}
+
+#[test]
+fn index_by_integer_type_param() {
+    accepts("func At[I Int](s []byte, i I) byte { return s[i] }");
+}
+
+#[test]
+fn append_string_type_param_to_byte_slice() {
+    accepts("func AppendStr[T Str](b []byte, s T) []byte { return append(b, s...) }");
+}
+
+// ----------------------------------------------------------------------------
+// Generic type aliases (go1.24). The Alias has to exist before its RHS is
+// checked, or the type parameters aren't in scope for it: `type A[T any] =
+// Box[T]` used to fail with "undefined: T", taking the whole package
+// ill-typed with it.
+
+#[test]
+fn generic_type_alias_declares_its_parameters_for_the_rhs() {
+    let c = check_src(
+        "package p\n\
+         type Box[T any] struct{ v T }\n\
+         func (b *Box[T]) Get() T { return b.v }\n\
+         type Alias[T any] = Box[T]\n\
+         type Pair[K comparable, V any] = map[K]V\n\
+         type Selfish[T any] = *Alias[T]\n\
+         type Plain = Box[int]\n\
+         var _ Alias[int]\n\
+         var _ Pair[string, int]\n\
+         var _ Selfish[bool]\n\
+         var _ Plain\n\
+         func Use(a Alias[int]) int { return a.Get() }\n",
+    );
+    assert!(c.errors.is_empty(), "unexpected errors: {:?}", c.errors);
+}
+
+#[test]
+fn alias_rhs_cannot_be_a_parameter_it_declares() {
+    let c = check_src("package p\ntype Bad[P any] = P\n");
+    assert_eq!(c.errors.len(), 1, "errors: {:?}", c.errors);
+    assert_eq!(
+        c.errors[0].msg,
+        "cannot use type parameter declared in alias declaration as RHS"
+    );
+}
+
+// ----------------------------------------------------------------------------
+// Rejected — `allX` needs *every* term to qualify, and a term-less type set
+// (`any`) qualifies for nothing. These are the errors go1.26 prints.
+
+#[test]
+fn unconstrained_type_param_supports_no_operator() {
+    rejects("func BadAdd[T any](a, b T) T { return a + b }");
+}
+
+#[test]
+fn one_bad_term_disqualifies_the_whole_set() {
+    rejects("func BadSub[T IntOrStr](a, b T) T { return a - b }");
+    rejects("func BadOrd[T IntOrBool](a, b T) bool { return a < b }");
+    rejects("func BadMinMax[T IntOrBool](a, b T) T { return min(a, b) }");
+}
+
+#[test]
+fn non_integer_type_param_cannot_shift() {
+    rejects("func BadShift[T Num](a T) T { return a << 1 }");
+    rejects("func BadShiftCount[T Num](a T) int { return 1 << a }");
+}
+
+#[test]
+fn non_integer_type_param_cannot_index() {
+    rejects("func BadIndex[T Num](s []byte, i T) byte { return s[i] }");
+}
+
+#[test]
+fn non_boolean_type_param_is_not_a_condition() {
+    rejects("func BadIf[T Num](a T) { if a { } }");
+    rejects("func BadNot[T Num](a T) T { return !a }");
+}
+
+#[test]
+fn non_numeric_type_param_cannot_incdec() {
+    rejects("func BadInc[T Str](a T) { a++ }");
+}
+
+#[test]
+fn non_string_type_param_cannot_be_appended_to_bytes() {
+    rejects("func BadAppend[T Num](b []byte, s T) []byte { return append(b, s...) }");
+}
+
+// ----------------------------------------------------------------------------
+// `range` and channel operations reach the type set through `commonUnder`, a
+// separate mechanism from `allX`. Both were approximated by `Underlying()`,
+// which answers `TypeParam` and rejects every declaration below — code go1.26
+// accepts — taking the whole package ill-typed with it.
+//
+// Recorded with `#[ignore]` by the 12th session; ported in the 15th.
+
+#[test]
+fn range_and_channel_ops_on_type_params() {
+    accepts(
+        "func RangeSlice[T interface{ ~[]int }](xs T) int {\n\
+           n := 0\n\
+           for i, v := range xs { n += i + v }\n\
+           return n\n\
+         }",
+    );
+    accepts(
+        "func RangeMap[T interface{ ~map[string]int }](m T) int {\n\
+           n := 0\n\
+           for _, v := range m { n += v }\n\
+           return n\n\
+         }",
+    );
+    accepts("func Recv[T interface{ ~chan int }](c T) int { return <-c }");
+    accepts("func Send[T interface{ ~chan int }](c T) { c <- 1 }");
+}
+
+// ----------------------------------------------------------------------------
+// Method sets of generic instances, at the type-assertion entry point.
+//
+// guff expands an instance's methods eagerly at the call site rather than
+// lazily like Go's `Named.Method(i)`, so **every** entry into an
+// interface-satisfaction check has to ask for the expansion. `assignable_to`
+// did; the assertion path did not, and compared the origin's `add` (bound to
+// `S`'s own `T`) with the interface's substituted one. Both render as
+// `func(item T, priority int)`, which is why the error read
+// "queueMetrics[T] does not implement queueMetrics[T]".
+//
+// Reduced from controller-runtime's pkg/controller/priorityqueue by
+// compat/reduce.py — see docs/COMPAT-HARDENING.md, 13th session.
+
+const GENERIC_IFACE: &str = "\
+type addI[T comparable] interface{ add(item T, priority int) }\n\
+type addS[T any] struct{}\n\
+func (addS[T]) add(item T, priority int) {}\n";
+
+#[track_caller]
+fn accepts_with_iface(decl: &str) {
+    let c = check_src(&format!("package p\n{}{}\n", GENERIC_IFACE, decl));
+    assert!(
+        c.errors.is_empty(),
+        "{decl}\n  unexpected errors: {:?}",
+        c.errors
+    );
+}
+
+#[test]
+fn type_assertion_sees_instantiated_method_set() {
+    // The shape the reducer produced: nothing forces the method set before the
+    // assertion does.
+    accepts_with_iface(
+        "func New[T comparable]() {\n\
+           var m addI[T]\n\
+           if _, ok := m.(addS[T]); !ok { panic(\"no\") }\n\
+         }",
+    );
+    // Fully concrete instantiation — the bug was never about the use site
+    // having type parameters of its own.
+    accepts_with_iface(
+        "func NewInt() {\n\
+           var m addI[int]\n\
+           if _, ok := m.(addS[int]); !ok { panic(\"no\") }\n\
+         }",
+    );
+    // Through a field of an instantiated generic struct, as in the original.
+    accepts_with_iface(
+        "type holder[T comparable] struct{ m addI[T] }\n\
+         func Field[T comparable](h *holder[T]) {\n\
+           if _, ok := h.m.(addS[T]); !ok { panic(\"no\") }\n\
+         }",
+    );
+    // A preceding assignment used to mask the bug by expanding the method set
+    // first; keep the masked form green too so a fix that only works after an
+    // assignment cannot pass.
+    accepts_with_iface(
+        "func Masked[T comparable]() {\n\
+           var m addI[T] = addS[T]{}\n\
+           if _, ok := m.(addS[T]); !ok { panic(\"no\") }\n\
+         }",
+    );
+    // A type switch reaches assertableTo by the same path.
+    accepts_with_iface(
+        "func Switch[T comparable](m addI[T]) int {\n\
+           switch m.(type) {\n\
+           case addS[T]: return 1\n\
+           default: return 0\n\
+           }\n\
+         }",
+    );
+}
+
+// Inference reads the *arguments'* method sets, so it is a fourth entry point
+// into a method-set comparison that has to expand an instance's methods first —
+// the same lazy-completion seam as `type_assertion_sees_instantiated_method_set`
+// above, one call deeper. And the second half of `cannot infer type arguments in
+// call` had nothing to do with method sets at all.
+//
+// Both reduced by hand from controller-runtime's pkg/source and
+// pkg/internal/source after `compat/reduce.py`'s root-set bisection — see
+// docs/COMPAT-HARDENING.md, 14th session.
+
+#[test]
+fn inference_expands_an_instance_method_set_for_every_argument() {
+    // Two parameters name the same type parameter, and one argument is a
+    // generic instance. The first argument leaves `R` free, so unifying against
+    // the origin's own `R` binds something that happens to be right; the second
+    // arrives with `R` already resolved and compares a substituted signature
+    // against an unsubstituted one. With one argument the bug is invisible.
+    let src = "package p\n\
+        type Req struct{ Key string }\n\
+        type Queue[R comparable] interface{ Add(R) }\n\
+        type Sink[R comparable] interface{ Take(R) }\n\
+        type GQ[R comparable] struct{}\n\
+        func (q *GQ[R]) Add(R) {}\n\
+        type GS[R comparable] struct{}\n\
+        func (s *GS[R]) Take(R) {}\n\
+        func New[request comparable](q Queue[request], s Sink[request]) int { return 0 }\n\
+        var _ = New(&GQ[Req]{}, &GS[Req]{})\n";
+    let c = check_src(src);
+    assert!(c.errors.is_empty(), "unexpected errors: {:?}", c.errors);
+}
+
+#[test]
+fn inference_mixes_a_plain_type_and_an_instance() {
+    // The same shape with one plain struct and one instance — how it appears in
+    // controller-runtime, where the queue is a concrete test double and the
+    // handler is `handler.Funcs`, an alias for an instantiation.
+    let src = "package p\n\
+        type Req struct{ Key string }\n\
+        type Queue[R comparable] interface{ Add(R) }\n\
+        type Sink[R comparable] interface{ Take(R) }\n\
+        type CQ struct{}\n\
+        func (q *CQ) Add(Req) {}\n\
+        type GS[R comparable] struct{}\n\
+        func (s *GS[R]) Take(R) {}\n\
+        type Alias = GS[Req]\n\
+        func New[request comparable](q Queue[request], s Sink[request]) int { return 0 }\n\
+        var _ = New(&CQ{}, &Alias{})\n";
+    let c = check_src(src);
+    assert!(c.errors.is_empty(), "unexpected errors: {:?}", c.errors);
+}
+
+#[test]
+fn untyped_nil_argument_does_not_defeat_inference() {
+    // Go withholds every *untyped* argument from step-1 unification
+    // (`isTyped(arg.typ)`), and untyped nil has no default type to promote
+    // either (`!arg.isNil()`), so it contributes nothing and inference proceeds
+    // from the other arguments. Testing the operand *mode* instead let nil
+    // through — it is a value, not a constant — and unifying a parameter type
+    // that mentions a type parameter against untyped nil fails outright.
+    //
+    // `source.Kind(ic, &corev1.Pod{}, nil)`: `object` is right there in
+    // argument 2, and argument 3 sank the call.
+    let src = "package p\n\
+        type Object interface{ GetName() string }\n\
+        type Pod struct{}\n\
+        func (p *Pod) GetName() string { return \"\" }\n\
+        type Req struct{}\n\
+        type Handler[O any, R comparable] interface{ Create(O, R) }\n\
+        type Pred[O any] interface{ Match(O) bool }\n\
+        func Kind[object Object](obj object, h Handler[object, Req], preds ...Pred[object]) int { return 0 }\n\
+        var _ = Kind(&Pod{}, nil)\n";
+    let c = check_src(src);
+    assert!(c.errors.is_empty(), "unexpected errors: {:?}", c.errors);
+}
+
+#[test]
+fn an_untyped_constant_still_infers_through_its_default_type() {
+    // The counterweight: withholding untyped *constants* from step 1 is correct,
+    // but they must still reach the type parameter. A fix that dropped every
+    // untyped argument on the floor would pass the test above and break this.
+    let src = "package p\n\
+        func Identity[T any](v T) T { return v }\n\
+        var _ = Identity(42)\n\
+        var _ = Identity(\"s\")\n";
+    let c = check_src(src);
+    assert!(c.errors.is_empty(), "unexpected errors: {:?}", c.errors);
+}
+
+// ----------------------------------------------------------------------------
+// Pointer indirection through a type parameter — Go's `underIs` branch of
+// `*ast.StarExpr`.
+//
+// `isPointer` stops at `Underlying()` too, so `*p` where `p` is a type
+// parameter whose only term is `*T` was rejected with "invalid indirect".
+// minio's `internal/config` is one ill-typed package on exactly that shape:
+//
+//     func Error[T ErrorConfig, PT interface{ *T; setMsg(string) }](…) T {
+//         pt := PT(new(T))
+//         pt.setMsg(…)
+//         return *pt
+//     }
+//
+// Ground truth is `go build` on the same five shapes.
+
+const PTR_DECLS: &str = "\
+type A struct{ n int }\n\
+type B struct{ n int }\n\
+func (a *A) setMsg(string) {}\n";
+
+#[track_caller]
+fn ptr_accepts(decl: &str) {
+    let c = check_src(&format!("package p\n{}{}\n", PTR_DECLS, decl));
+    assert!(
+        c.errors.is_empty(),
+        "{decl}\n  unexpected errors: {:?}",
+        c.errors
+    );
+}
+
+#[track_caller]
+fn ptr_rejects(decl: &str) {
+    let c = check_src(&format!("package p\n{}{}\n", PTR_DECLS, decl));
+    assert!(
+        !c.errors.is_empty(),
+        "{decl}\n  expected an error, got none"
+    );
+}
+
+/// The minio shape: a second type parameter constrained to `*T` plus a method.
+#[test]
+fn indirect_through_pointer_constrained_type_param() {
+    ptr_accepts(
+        "func Make[T A, PT interface{ *T; setMsg(string) }](s string) T {\n\
+           pt := PT(new(T))\n\
+           pt.setMsg(s)\n\
+           return *pt\n\
+         }",
+    );
+}
+
+/// A single-term pointer constraint, without the method.
+#[test]
+fn indirect_through_single_pointer_term() {
+    ptr_accepts("func Deref[P interface{ *A }](p P) A { return *p }");
+}
+
+/// Every term has to be a pointer: `*A | A` is
+/// "cannot indirect p (variable of type P constrained by interface{*A | A})".
+#[test]
+fn indirect_rejects_type_param_with_a_non_pointer_term() {
+    ptr_rejects("func Deref[P interface{ *A | A }](p P) any { return *p }");
+}
+
+/// And the bases have to agree: `*A | *B` is
+/// "pointers of p … must have identical base types".
+#[test]
+fn indirect_rejects_type_param_with_mismatched_bases() {
+    ptr_rejects("func Deref[P interface{ *A | *B }](p P) any { return *p }");
+}
+
+/// The ordinary cases still behave: a plain pointer dereferences, a non-pointer
+/// does not, and `*A` as a *type* is still the pointer type (method
+/// expressions are spelled that way).
+#[test]
+fn indirect_on_ordinary_types_is_unchanged() {
+    ptr_accepts("func Plain(p *A) A { return *p }");
+    ptr_rejects("func Bad(n int) int { return *n }");
+    ptr_accepts("func (a *A) M() int { return a.n }\nvar _ = (*A).M");
+}

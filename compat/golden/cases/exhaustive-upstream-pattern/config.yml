@@ -1,0 +1,30 @@
+# Golden case: exhaustive v0.15.0 testdata under ignore-types / ignore-constants.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - exhaustive
+  settings:
+    exhaustive:
+      check:
+        - switch
+        - mapliteral
+      ignore-types:
+        - "t1"
+        - "^test/check/swtch/pattern\\.P3$"
+        - "^test/check/swtch/typ\\.M1$"
+        - "^test/check/swtch/pattern\\.a2$"
+      ignore-constants:
+        - "^test/check/swtch/pattern\\.x2+$"
+        - "^test/check/swtch/pattern\\.Y0$"
+        - "^test/check/swtch/typnew\\.Z3$"
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

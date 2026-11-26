@@ -1,0 +1,26 @@
+# Golden case: govet `inline` on the `io/ioutil` go:fix wrappers, in a go1.24
+# module. Upstream compares the caller file's version against the Go that
+# built golangci-lint (`runtime.Version()`): go1.27.0 for 2.14.0, where the
+# host toolchain is go1.26 — so every call reads "declared using go1.27…".
+# guff compared against the host toolchain, which agreed with 2.12.2 (built
+# with go1.26.2) on major.minor and with nothing after it. No golden case
+# carried this message until vault and kubernetes showed the difference.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+  settings:
+    govet:
+      enable:
+        - inline
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

@@ -1,0 +1,31 @@
+# Golden case: godoclint's `require-pkg-doc`, alone.
+#
+# Not in the `basic` default set, so the sibling `godoclint` case cannot reach
+# it and guff answered `default: all` with silence.
+#
+# The rule reports at a file it found *nothing* in, which is what makes it
+# different from every other rule here: it needs the package clause of every
+# applicable file, not just the documented ones. The fixture pins the three
+# consequences — only the *first* file of a package is reported, one documented
+# file anywhere satisfies the package, and a documented `_test.go` does not
+# (golangci-lint pins `include-tests: false`, the opposite of what it pins for
+# `no-unused-link`).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - godoclint
+  settings:
+    godoclint:
+      default: none
+      enable:
+        - require-pkg-doc
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

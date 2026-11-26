@@ -1,0 +1,19 @@
+# Golden case: exhaustive v0.15.0 testdata under default-case-required (-defrequire).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - exhaustive
+  settings:
+    exhaustive:
+      default-case-required: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

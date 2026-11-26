@@ -1,0 +1,38 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh predeclared-declare
+# Produced by running golangci-lint on compat/golden/cases/predeclared-declare/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+foo/file.go:9:2:predeclared::comparable: same name as predeclared identifier
+foo/file.go:12:2:predeclared::clear: same name as predeclared identifier
+foo/file.go:15:6:predeclared::copy: same name as predeclared identifier
+foo/file.go:18:2:predeclared::complex: same name as predeclared identifier
+foo/file.go:19:2:predeclared::nil: same name as predeclared identifier
+foo/file.go:23:8:predeclared::rune: same name as predeclared identifier
+foo/file.go:25:3:predeclared::int64: same name as predeclared identifier
+foo/file.go:26:3:predeclared::max: same name as predeclared identifier
+foo/file.go:29:3:predeclared::len: same name as predeclared identifier
+foo/file.go:29:8:predeclared::cap: same name as predeclared identifier
+foo/file.go:30:3:predeclared::print: same name as predeclared identifier
+foo/file.go:30:19:predeclared::any: same name as predeclared identifier
+foo/file.go:43:1:predeclared::complex64: same name as predeclared identifier
+foo/file.go:45:2:predeclared::real: same name as predeclared identifier
+foo/file.go:50:9:predeclared::complex64: same name as predeclared identifier
+foo/file.go:66:2:predeclared::nil: same name as predeclared identifier
+foo/file.go:69:9:predeclared::iota: same name as predeclared identifier
+foo/file.go:71:8:predeclared::iota: same name as predeclared identifier
+foo/file.go:77:9:predeclared::iota: same name as predeclared identifier
+foo/file.go:81:3:predeclared::new: same name as predeclared identifier
+foo/file.go:84:2:predeclared::new: same name as predeclared identifier
+foo/file.go:86:3:predeclared::new: same name as predeclared identifier
+foo/file.go:96:23:predeclared::make: same name as predeclared identifier
+foo/file.go:97:9:predeclared::error: same name as predeclared identifier
+foo/file.go:98:12:predeclared::true: same name as predeclared identifier
+foo/file.go:105:9:predeclared::imag: same name as predeclared identifier
+foo/file.go:125:7:predeclared::iota: same name as predeclared identifier
+foo/file.go:126:7:predeclared::int32: same name as predeclared identifier
+foo/file.go:127:7:predeclared::byte: same name as predeclared identifier
+foo/file.go:132:7:predeclared::byte: same name as predeclared identifier

@@ -1,0 +1,3 @@
+# `os-temp-dir` is off by default upstream; gitea turns it on, and it is the
+# option whose finding lives inside a closure.
+os-temp-dir: true

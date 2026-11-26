@@ -1,0 +1,410 @@
+//! Port of `cmd/compile/internal/types2/interface.go`.
+//!
+//! Chunk 2 ported the data portion plus the "explicit" accessors. Chunk 4
+//! adds the lazy `tset` cache and the typeset-derived accessors
+//! ([`interface_num_methods`], [`interface_method`], [`interface_empty`],
+//! [`interface_is_method_set`], [`interface_is_comparable`],
+//! [`interface_typeset`]).
+
+use serde::{Deserialize, Serialize};
+
+use crate::arena::{ObjectArena, ObjectId, PackageArena, TypeArena, TypeData, TypeId};
+use crate::typeset::{compute_interface_type_set, TypeSet};
+
+/// An interface type.
+///
+/// Equivalent to `types2.Interface`. The lazily-computed type set (`tset`),
+/// embedded-element positions (`embedPos`), and `check` back-pointer are
+/// omitted until the typeset/Checker logic lands; chunk-2 callers can build
+/// and inspect the explicit-method/embedded structure.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Interface {
+    pub(crate) methods: Vec<ObjectId>, // ordered explicitly-declared methods (Func objects)
+    pub(crate) embeddeds: Vec<TypeId>, // ordered explicitly-embedded elements
+    implicit: bool,                    // wrapper for `~T`, `A|B`, or non-interface T
+    pub(crate) complete: bool,         // all fields except tset are set up
+    /// Lazily-computed by [`compute_interface_type_set`]. Public so the
+    /// typeset module can populate it.
+    pub(crate) tset: Option<TypeSet>,
+}
+
+impl Interface {
+    /// Relocate ids when merging into a shared seed base (R25). Includes the
+    /// lazily-computed `tset` cache, whose ids must move with everything else.
+    pub(crate) fn remap_ids(&mut self, r: &crate::merge::Remapper) {
+        for m in &mut self.methods {
+            *m = r.obj(*m);
+        }
+        for e in &mut self.embeddeds {
+            *e = r.ty(*e);
+        }
+        if let Some(ts) = self.tset.as_mut() {
+            ts.remap_ids(r);
+        }
+    }
+}
+
+impl Interface {
+    /// Number of explicitly declared methods. Does **not** include methods
+    /// gained via embedding — use [`interface_num_methods`] for that.
+    pub fn num_explicit_methods(&self) -> usize {
+        self.methods.len()
+    }
+
+    /// The `i`'th explicitly declared method; ordered by unique Id (Go's
+    /// `sortMethods`). The sort is the caller's responsibility in chunk 2.
+    pub fn explicit_method(&self, i: usize) -> ObjectId {
+        self.methods[i]
+    }
+
+    /// Number of embedded types.
+    pub fn num_embeddeds(&self) -> usize {
+        self.embeddeds.len()
+    }
+
+    /// The `i`'th embedded type.
+    pub fn embedded_type(&self, i: usize) -> TypeId {
+        self.embeddeds[i]
+    }
+
+    /// Reports whether this interface is a wrapper for a type set literal
+    /// (such as `~T` or `A|B`) rather than a user-written `interface{...}`.
+    pub fn is_implicit(&self) -> bool {
+        self.implicit
+    }
+
+    /// Mark the interface as implicit. Must be called before any concurrent
+    /// use of implicit interfaces (matching Go's documented requirement).
+    pub fn mark_implicit(&mut self) {
+        self.implicit = true;
+    }
+
+    /// Reports whether all non-tset fields are set up.
+    pub fn is_complete(&self) -> bool {
+        self.complete
+    }
+
+    /// Read-only access to the cached type set. `None` if it hasn't been
+    /// computed yet — use [`interface_typeset`] for lazy access.
+    pub fn cached_typeset(&self) -> Option<&TypeSet> {
+        self.tset.as_ref()
+    }
+}
+
+/// Construct a new interface type with the given explicit methods and
+/// embedded types.
+///
+/// Equivalent to `types2.NewInterfaceType` minus chunk-2-deferred bits:
+/// - **No method-receiver back-fill.** Go's `NewInterfaceType` sets each
+///   method's receiver to a newly-allocated `Var` pointing at the interface;
+///   we skip that — chunk 2 callers can leave method receivers as `None`
+///   and they'll be wired up when the Checker / scope infrastructure lands.
+/// - **No method sorting.** Caller is responsible for sorting `methods` by
+///   their unique Id (currently we don't have `Id()`).
+pub fn new_interface_type(
+    arena: &mut TypeArena,
+    methods: Vec<ObjectId>,
+    embeddeds: Vec<TypeId>,
+) -> TypeId {
+    arena.alloc(TypeData::Interface(Box::new(Interface {
+        methods,
+        embeddeds,
+        implicit: false,
+        complete: true,
+        tset: None,
+    })))
+}
+
+/// Back-fills a receiver onto every explicit method of `iface` that has none.
+///
+/// Go does this inside `types.NewInterfaceType`: a method whose signature has a
+/// nil receiver gets `NewVar(pos, pkg, "", typ)`. Which type that is decides how
+/// `types.Func.FullName` spells the method, and therefore what every
+/// name-keyed rule (errcheck's exclude list, staticcheck's call tables) matches
+/// against:
+///
+/// - `recv_type` is the **named** type for `type T interface{ M() }` —
+///   `Checker.interfaceType` uses its `def` argument — so `FullName` is
+///   `(pkg.T).M`;
+/// - `recv_type` is the **interface itself** for an interface literal and for
+///   everything read back from export data (`ureader` builds methods with a nil
+///   receiver and hands them to `NewInterfaceType`), so `FullName` is
+///   `(interface).M` — `writeFuncName` prints the literal word `interface`
+///   rather than the whole type.
+///
+/// A method that already has a receiver is left alone; use
+/// [`interface_repoint_method_receivers`] to move one that is already set.
+pub fn interface_set_method_receivers(
+    types: &mut TypeArena,
+    objects: &mut ObjectArena,
+    iface: TypeId,
+    recv_type: TypeId,
+) {
+    set_method_receivers(types, objects, iface, recv_type, None)
+}
+
+/// Moves the receivers that currently point at `from` to point at `to`.
+///
+/// This is how `type T interface{ M() }` ends up with `(pkg.T).M`: the
+/// interface literal is built first with itself as the receiver, and the
+/// declaration re-points it at the named type once the underlying is known —
+/// what Go achieves by threading `def` into `Checker.interfaceType`.
+///
+/// Filtering on `from` is what keeps it from over-reaching. A nested literal
+/// (`type T interface{ M() interface{ N() } }`) carries its *own* interface as
+/// the receiver of `N`, and `type T U` for a named interface `U` shares `U`'s
+/// underlying, whose methods already read `(pkg.U).M` — upstream keeps both.
+pub fn interface_repoint_method_receivers(
+    types: &mut TypeArena,
+    objects: &mut ObjectArena,
+    iface: TypeId,
+    from: TypeId,
+    to: TypeId,
+) {
+    set_method_receivers(types, objects, iface, to, Some(from))
+}
+
+fn set_method_receivers(
+    types: &mut TypeArena,
+    objects: &mut ObjectArena,
+    iface: TypeId,
+    recv_type: TypeId,
+    replace: Option<TypeId>,
+) {
+    let methods = match types.get(iface) {
+        TypeData::Interface(i) => i.methods.clone(),
+        _ => return,
+    };
+    for m in methods {
+        let Some(sig) = m.typ(objects) else {
+            continue;
+        };
+        let (recv, params, results, variadic, rparams, tparams) = match types.get(sig) {
+            TypeData::Signature(s) => (
+                s.recv(),
+                s.params(),
+                s.results(),
+                s.variadic(),
+                s.recv_type_params().cloned(),
+                s.type_params().cloned(),
+            ),
+            _ => continue,
+        };
+        match (recv, replace) {
+            // Fill in a missing receiver.
+            (None, None) => {}
+            // Move a receiver that points at `from`.
+            (Some(r), Some(from)) if r.typ(objects) == Some(from) => {}
+            _ => continue,
+        }
+        // The receiver is unnamed, like Go's `NewVar(pos, pkg, "", typ)`.
+        let recv = crate::object::var::new_var(objects, "", recv_type);
+        let new_sig = crate::signature::new_generic_signature_type(
+            types, Some(recv), rparams, tparams, params, results, variadic,
+        );
+        match objects.get_mut(m) {
+            crate::arena::ObjectData::Func(f) => f.set_typ(new_sig),
+            _ => continue,
+        }
+    }
+}
+
+// Free-function accessors.
+
+pub fn interface_num_explicit_methods(arena: &TypeArena, id: TypeId) -> usize {
+    as_interface(arena, id).num_explicit_methods()
+}
+
+pub fn interface_explicit_method(arena: &TypeArena, id: TypeId, i: usize) -> ObjectId {
+    as_interface(arena, id).explicit_method(i)
+}
+
+pub fn interface_num_embeddeds(arena: &TypeArena, id: TypeId) -> usize {
+    as_interface(arena, id).num_embeddeds()
+}
+
+pub fn interface_embedded_type(arena: &TypeArena, id: TypeId, i: usize) -> TypeId {
+    as_interface(arena, id).embedded_type(i)
+}
+
+pub fn interface_is_implicit(arena: &TypeArena, id: TypeId) -> bool {
+    as_interface(arena, id).is_implicit()
+}
+
+/// Mutating accessor — sets the implicit flag on the interface.
+pub fn interface_mark_implicit(arena: &mut TypeArena, id: TypeId) {
+    match arena.get_mut(id) {
+        TypeData::Interface(i) => i.mark_implicit(),
+        other => panic!(
+            "expected Interface, got {:?}",
+            std::mem::discriminant(other)
+        ),
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Typeset-derived accessors (chunk 4)
+//
+// All of these compute the lazy `tset` cache on first call. They take
+// `&mut TypeArena` for that reason; callers that want strictly-read access
+// can call [`interface_compute_typeset`] first and then use the
+// [`Interface::cached_typeset`] view.
+
+/// Force computation of the interface's type set, populating the
+/// [`Interface::cached_typeset`] cache. No-op if already cached.
+pub fn interface_compute_typeset(
+    arena: &mut TypeArena,
+    object_arena: &ObjectArena,
+    package_arena: &PackageArena,
+    id: TypeId,
+) {
+    compute_interface_type_set(arena, object_arena, package_arena, id);
+}
+
+/// Lazily compute (if needed) and return a snapshot of the type set.
+///
+/// Returns an owned `TypeSet` for borrow-checker ergonomics — the cache is
+/// kept inside the arena, but we hand back a clone so callers don't need to
+/// keep a borrow into the arena across other arena operations.
+pub fn interface_typeset(
+    arena: &mut TypeArena,
+    object_arena: &ObjectArena,
+    package_arena: &PackageArena,
+    id: TypeId,
+) -> TypeSet {
+    compute_interface_type_set(arena, object_arena, package_arena, id);
+    match arena.get(id) {
+        TypeData::Interface(i) => i
+            .tset
+            .clone()
+            .expect("compute_interface_type_set must populate tset"),
+        other => panic!(
+            "expected Interface, got {:?}",
+            std::mem::discriminant(other)
+        ),
+    }
+}
+
+/// Total number of methods (explicit + via embedded interfaces).
+///
+/// Equivalent to `Interface.NumMethods`.
+pub fn interface_num_methods(
+    arena: &mut TypeArena,
+    object_arena: &ObjectArena,
+    package_arena: &PackageArena,
+    id: TypeId,
+) -> usize {
+    compute_interface_type_set(arena, object_arena, package_arena, id);
+    match arena.get(id) {
+        TypeData::Interface(i) => i.tset.as_ref().unwrap().num_methods(),
+        _ => unreachable!(),
+    }
+}
+
+/// The `i`'th method (from the full type set), ordered by `Object.cmp`.
+///
+/// Equivalent to `Interface.Method`.
+pub fn interface_method(
+    arena: &mut TypeArena,
+    object_arena: &ObjectArena,
+    package_arena: &PackageArena,
+    id: TypeId,
+    i: usize,
+) -> ObjectId {
+    compute_interface_type_set(arena, object_arena, package_arena, id);
+    match arena.get(id) {
+        TypeData::Interface(iface) => iface.tset.as_ref().unwrap().method(i),
+        _ => unreachable!(),
+    }
+}
+
+/// Reports whether this interface is the empty interface (the set of all
+/// types, with no methods).
+///
+/// Equivalent to `Interface.Empty`.
+pub fn interface_empty(
+    arena: &mut TypeArena,
+    object_arena: &ObjectArena,
+    package_arena: &PackageArena,
+    id: TypeId,
+) -> bool {
+    compute_interface_type_set(arena, object_arena, package_arena, id);
+    match arena.get(id) {
+        TypeData::Interface(i) => i.tset.as_ref().unwrap().is_all(),
+        _ => unreachable!(),
+    }
+}
+
+/// Reports whether this interface is fully described by its method set
+/// (no `~T` / union restrictions).
+///
+/// Equivalent to `Interface.IsMethodSet`.
+pub fn interface_is_method_set(
+    arena: &mut TypeArena,
+    object_arena: &ObjectArena,
+    package_arena: &PackageArena,
+    id: TypeId,
+) -> bool {
+    compute_interface_type_set(arena, object_arena, package_arena, id);
+    match arena.get(id) {
+        TypeData::Interface(i) => i.tset.as_ref().unwrap().is_method_set(),
+        _ => unreachable!(),
+    }
+}
+
+/// Reports whether each type in this interface's type set is comparable.
+///
+/// Equivalent to `Interface.IsComparable`. The proper test requires
+/// `comparableType` from predicates.go to walk the term list; we
+/// conservatively report true only when the explicit `comparable` flag is
+/// set on the type set.
+pub fn interface_is_comparable(
+    arena: &mut TypeArena,
+    object_arena: &ObjectArena,
+    package_arena: &PackageArena,
+    id: TypeId,
+) -> bool {
+    compute_interface_type_set(arena, object_arena, package_arena, id);
+    match arena.get(id) {
+        TypeData::Interface(i) => {
+            let ts = i.tset.as_ref().unwrap();
+            ts.comparable()
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// Force the type set onto the interface and mark it as comparable.
+///
+/// Equivalent to Go's `&Interface{tset: &_TypeSet{nil, allTermlist, true}}`
+/// trick used for the predeclared `comparable` interface. Useful as a
+/// building block for [`crate::universe`].
+pub fn interface_set_comparable(
+    arena: &mut TypeArena,
+    object_arena: &ObjectArena,
+    package_arena: &PackageArena,
+    id: TypeId,
+) {
+    interface_compute_typeset(arena, object_arena, package_arena, id);
+    match arena.get_mut(id) {
+        TypeData::Interface(i) => {
+            if let Some(ts) = i.tset.as_mut() {
+                ts.set_comparable(true);
+            }
+        }
+        other => panic!(
+            "expected Interface, got {:?}",
+            std::mem::discriminant(other)
+        ),
+    }
+}
+
+fn as_interface(arena: &TypeArena, id: TypeId) -> &Interface {
+    match arena.get(id) {
+        TypeData::Interface(i) => i,
+        other => panic!(
+            "expected Interface, got {:?}",
+            std::mem::discriminant(other)
+        ),
+    }
+}

@@ -1,0 +1,32 @@
+# Golden case: gomodguard.
+#
+# Seeded from the isolate fixture. This linter reads `go.mod` rather than Go
+# source, so the blocked module is stubbed and `replace`d in: the `require`
+# line it matches on survives the replace, and no network is needed.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gomodguard
+  settings:
+    gomodguard:
+      blocked:
+        modules:
+        # The v1 shape nests the entry under the module name, and carries the
+        # same `recommendations` list as v2 — so the clause is gated on both
+        # parsers, not just the one beats uses.
+        - github.com/sirupsen/logrus:
+            recommendations:
+              - log/slog
+            reason: use log/slog
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # Full finding-set compare (avoid SA#### vs S#### order winning uniq-by-line).
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

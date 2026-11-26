@@ -1,0 +1,6 @@
+{
+  "missing": 0,
+  "extra": 1,
+  "why": "The one entry left is SA5005, an architectural difference rather than a porting gap: guff implements upstream's exact conditions (a Load of an Alloc, a MakeClosure, and a binding equal to that Alloc), and guff's IR satisfies them where honnef's does not — honnef reports SA5005 on nothing, including the example in its own documentation (docs/COMPAT-HARDENING.md §7). Everything else that the golangci-lint 2.14.0 pin opened here (18/22) was closed during Phase 8: SA5011 unregistered as upstream removed it, SA4006's `n++` / `+=`, SA1019's SelectorName and struct-literal keys, SA4003 naming the operand's own type, SA6005's `!strings.EqualFold` — and with them the 3 pre-bump missing entries.",
+  "target": "0/1 — SA5005 stays; any other diff in this case is a regression."
+}

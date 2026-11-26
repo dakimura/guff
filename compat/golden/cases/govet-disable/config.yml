@@ -1,0 +1,22 @@
+# Golden case: `govet.disable` (COMPAT-HARDENING Phase 4).
+#
+# One name taken away from the default set. The diff against `govet-settings`
+# is the `assign` finding and nothing else.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+  settings:
+    govet:
+      disable:
+        - assign
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

@@ -1,0 +1,30 @@
+# Golden case: wrapcheck.
+#
+# Two defects, and the isolate fixture could see neither. It was eight lines
+# with one finding and no method call in it:
+#
+#   - the message renders `types.Func.String()`, which writes a *method* as
+#     `func (*os.File).Close() error`. guff built the name from the object's
+#     package alone and said `func os.Close()` — a name Go never prints, so both
+#     the message and any `ignoreSigs` pattern matched against it were wrong.
+#     Same root cause as errchkjson's `(*encoding/json.Encoder).Encode`.
+#   - the position is `call.Pos()`, which for a CallExpr is `Fun.Pos()`. guff
+#     reported the `(`, so `return f()` agreed and `return x.M()` did not.
+#
+# The isolate key is `path:line:linter:message`, so it can see the first and not
+# the second. This tier compares `path:line:col:linter:severity:text` with no
+# normalization and sees both.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - wrapcheck
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

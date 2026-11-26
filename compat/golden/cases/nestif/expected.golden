@@ -1,0 +1,11 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh nestif
+# Produced by running golangci-lint on compat/golden/cases/nestif/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+bad.go:4:1:nestif::`if a` has complex nested blocks (complexity: 6)
+bad.go:18:1:nestif::`if x || y` has complex nested blocks (complexity: 6)
+bad.go:35:1:nestif::`if len(a)/2+len(b) > 0` has complex nested blocks (complexity: 10)

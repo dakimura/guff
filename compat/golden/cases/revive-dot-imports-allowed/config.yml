@@ -1,0 +1,31 @@
+# Golden case: revive dot-imports with `allowedPackages`.
+#
+# The rule's one argument is a map whose `allowedPackages` key lists import
+# paths that may be dot-imported (revive v1.15.0 rule/dot_imports.go). guff
+# ignored the argument and reported every dot import — lima allows its own
+# `pkg/must` this way, and both of its dot imports were guff-only findings.
+#
+# The key is matched after lowercasing and removing hyphens (revive
+# `isRuleOption`), so this case spells it `allowed-packages`; underscores are
+# not removed, which the Rust unit test covers.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      rules:
+        - name: dot-imports
+          arguments:
+            - allowed-packages:
+                - example.com/revive/dot
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

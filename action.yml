@@ -1,0 +1,263 @@
+name: guff
+description: Run guff, a Rust-native Go multi-linter, on your Go module.
+author: dakimura
+
+inputs:
+  version:
+    description: >
+      guff release version (e.g. v0.8.0) or latest.
+      When left as latest and this Action is pinned to a v* tag, that tag is used.
+    required: false
+    default: latest
+  args:
+    description: Arguments passed to guff (default runs the linter)
+    required: false
+    default: run ./...
+  install-dir:
+    description: Directory to install the guff binary into
+    required: false
+    default: ${{ runner.temp }}/guff/bin
+  working-directory:
+    description: Working directory for the guff invocation
+    required: false
+    default: .
+  cache:
+    description: >
+      Persist guff's analysis cache ($GUFF_CACHE) between runs via actions/cache.
+      This is what makes a CI run warm: guff re-analyzes only the packages whose
+      content changed. Set to false to always run cold.
+    required: false
+    default: "true"
+  cache-dir:
+    description: >
+      Directory used for $GUFF_CACHE. Keep it outside the checkout so the cache
+      is never linted or picked up by git.
+    required: false
+    default: ${{ runner.temp }}/guff/cache
+  cache-key-suffix:
+    description: >
+      Extra segment appended to the cache key. The working directory is already
+      part of the key; set this when two jobs lint the same directory with
+      different configs and must not share a cache.
+    required: false
+    default: ""
+  cache-invalidation-interval:
+    description: >
+      Days before the cache is abandoned and a run goes genuinely cold. Every
+      guff sub-cache is content-keyed and validates itself, so this is not how
+      correctness is maintained — it is the backstop for the bug that gets past
+      that. Without it a single bad entry could hide a finding for as long as
+      the repository keeps restoring it. Matches golangci-lint-action's default
+      of 7. `0` disables the reset.
+    required: false
+    default: "7"
+  verify-cache:
+    description: >
+      After the cached run, lint the same tree again with `--no-cache` and fail
+      if the two disagree. This is the only setting here that *detects* a cache
+      defect rather than bounding how long one could persist, and it checks the
+      property on your code rather than on guff's test fixtures. It roughly
+      doubles the job's lint time, so it belongs on a nightly or main-branch
+      build rather than on every pull request.
+    required: false
+    default: "false"
+  cache-seed:
+    description: >
+      Also carry the type-checking seed overlays ($GUFF_CACHE/seed) between runs.
+      They are by far the largest part of the cache — measured on a 113-package
+      module the archive goes from 1.2 MB compressed to 16 MB — and save one to
+      three seconds on an incremental run, depending on how widely the changed
+      package is imported. Off by default because that is a 13x upload for a
+      couple of seconds, and because a per-service matrix storing it per commit
+      would spend the repository's 10 GB cache budget on them and evict the Go
+      module cache. Turn on for a single large module where those seconds matter
+      and the budget is free.
+    required: false
+    default: "false"
+
+outputs:
+  cache-key:
+    description: >
+      The cache key this run used, empty when caching is off. Worth logging when
+      a cache is not behaving: it carries the guff version, the working-directory
+      scope and the invalidation bucket, so a key that changed unexpectedly
+      explains a miss on its own.
+    value: ${{ steps.cache-meta.outputs.key }}
+  cache-restored:
+    description: >
+      The key an entry was actually restored from — exact or prefix — or empty
+      if the run started cold.
+    value: ${{ steps.cache-restore.outputs.cache-matched-key }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install guff
+      shell: bash
+      env:
+        GUFF_INSTALL_DIR: ${{ inputs.install-dir }}
+        INPUT_VERSION: ${{ inputs.version }}
+        ACTION_REF: ${{ github.action_ref }}
+        # Needed when this Action's repo (or its Releases) are private.
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        VERSION="${INPUT_VERSION}"
+        if [ "${VERSION}" = "latest" ]; then
+          case "${ACTION_REF}" in
+            v*) VERSION="${ACTION_REF}" ;;
+          esac
+        fi
+        mkdir -p "${GUFF_INSTALL_DIR}"
+        "${{ github.action_path }}/scripts/install.sh" -b "${GUFF_INSTALL_DIR}" "${VERSION}"
+        echo "${GUFF_INSTALL_DIR}" >> "${GITHUB_PATH}"
+
+    # Cache identity is resolved from the installed binary rather than from the
+    # `version` input, so `latest` still produces a key that changes when the
+    # release does — a cache written by an older guff would otherwise be
+    # restored into a newer one and mostly miss.
+    - name: Resolve cache identity
+      id: cache-meta
+      if: inputs.cache == 'true'
+      shell: bash
+      env:
+        GUFF_BIN_DIR: ${{ inputs.install-dir }}
+        CACHE_DIR: ${{ inputs.cache-dir }}
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        KEY_SUFFIX: ${{ inputs.cache-key-suffix }}
+        CACHE_SEED: ${{ inputs.cache-seed }}
+        CACHE_INTERVAL: ${{ inputs.cache-invalidation-interval }}
+      run: |
+        set -euo pipefail
+        guff_version="$("${GUFF_BIN_DIR}/guff" version --short)"
+
+        # One workflow often lints several modules in a matrix. Without the
+        # working directory in the key those legs would overwrite each other's
+        # cache on every run and each would restore a cache built for a
+        # different module.
+        if command -v sha256sum >/dev/null 2>&1; then
+          sha256() { sha256sum; }   # Linux runners
+        else
+          sha256() { shasum -a 256; }  # macOS runners
+        fi
+        scope="$(printf '%s|%s' "${WORKING_DIRECTORY}" "${KEY_SUFFIX}" | sha256 | cut -c1-12)"
+
+        # The interval belongs in the prefix, not just the key: restore-keys
+        # match by prefix, so an interval that only appeared in the key would be
+        # matched straight past and never actually reset anything.
+        # A malformed interval falls back to the default rather than to "no
+        # reset": losing the backstop is the one outcome a typo must not buy.
+        interval="${CACHE_INTERVAL}"
+        case "${interval}" in
+          '' | *[!0-9]*)
+            echo "::warning::cache-invalidation-interval must be a whole number of days, got '${CACHE_INTERVAL}'; using 7"
+            interval=7
+            ;;
+        esac
+
+        bucket=""
+        if [ "${interval}" -gt 0 ]; then
+          bucket="-i$(( $(date +%s) / 86400 / interval ))"
+        fi
+        prefix="guff-cache-v1-${RUNNER_OS}-${RUNNER_ARCH}-${guff_version}-${scope}${bucket}"
+
+        mkdir -p "${CACHE_DIR}"
+        {
+          echo "prefix=${prefix}"
+          echo "key=${prefix}-${GITHUB_SHA}"
+          echo "paths<<GUFF_PATHS_EOF"
+          echo "${CACHE_DIR}"
+          if [ "${CACHE_SEED}" != "true" ]; then
+            echo "!${CACHE_DIR}/seed"
+          fi
+          echo "GUFF_PATHS_EOF"
+        } >> "${GITHUB_OUTPUT}"
+        echo "GUFF_CACHE=${CACHE_DIR}" >> "${GITHUB_ENV}"
+
+        # Don't spend the run writing overlays that are about to be dropped
+        # from the uploaded cache anyway.
+        if [ "${CACHE_SEED}" != "true" ]; then
+          echo "GUFF_SEED_PERSIST=0" >> "${GITHUB_ENV}"
+        fi
+
+    # restore/save rather than the combined action: the cache is worth saving
+    # even when guff exits non-zero, which is exactly the run that found
+    # something and that a developer is about to push a fix for.
+    - name: Restore guff cache
+      id: cache-restore
+      if: inputs.cache == 'true'
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ steps.cache-meta.outputs.paths }}
+        key: ${{ steps.cache-meta.outputs.key }}
+        # guff's sub-caches are content-keyed and validate themselves, so an
+        # entry from an older commit is safe: unchanged packages hit, changed
+        # ones are recomputed. A prefix match is therefore always worth taking.
+        restore-keys: ${{ steps.cache-meta.outputs.prefix }}-
+
+    - name: Run guff
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        VERIFY_CACHE: ${{ inputs.verify-cache }}
+        CACHE_ENABLED: ${{ inputs.cache }}
+        OUT_DIR: ${{ runner.temp }}/guff/out
+      run: |
+        set -uo pipefail
+        mkdir -p "${OUT_DIR}"
+
+        # Tee rather than redirect, so the log still streams and any
+        # `--out-format=github-actions` annotations still reach the UI.
+        # Intentionally unquoted so callers can pass multiple args.
+        # shellcheck disable=SC2086
+        guff ${{ inputs.args }} 2>&1 | tee "${OUT_DIR}/cached.out"
+        status=${PIPESTATUS[0]}
+
+        if [ "${VERIFY_CACHE}" = "true" ] && [ "${CACHE_ENABLED}" = "true" ]; then
+          echo "::group::verifying the cache against a cold run"
+          # shellcheck disable=SC2086
+          guff ${{ inputs.args }} --no-cache > "${OUT_DIR}/cold.out" 2>&1
+          cold_status=$?
+          echo "::endgroup::"
+
+          # Compare the SET of findings, not the transcript.
+          #
+          # A cached run and a --no-cache run can emit the same findings in a
+          # different order — measured on a 113-package module: 841 findings
+          # each, byte-for-byte equal once sorted, but not in the same sequence.
+          # Unless the config pins `output.sort-order`, emission order follows
+          # the order work completed, and serving packages from cache changes
+          # that. Diffing the raw transcripts would fail every such run and
+          # report a cache bug that is not there — a check that cries wolf gets
+          # switched off, which costs more than never having added it.
+          #
+          # Findings are the unindented `file:line:col:` lines; the source
+          # excerpt underneath each travels with it and carries no extra
+          # information.
+          findings_of() {
+            LC_ALL=C grep -E '^[^[:space:]].*:[0-9]+:[0-9]+: ' "$1" | LC_ALL=C sort
+          }
+          findings_of "${OUT_DIR}/cached.out" > "${OUT_DIR}/cached.findings"
+          findings_of "${OUT_DIR}/cold.out"   > "${OUT_DIR}/cold.findings"
+
+          if ! diff -u "${OUT_DIR}/cached.findings" "${OUT_DIR}/cold.findings"; then
+            echo "::error::guff disagreed with itself: the cached run and --no-cache produced different findings on the same tree. The diff above is the bug — please report it at https://github.com/dakimura/guff/issues"
+            exit 1
+          fi
+          if [ "${status}" -ne "${cold_status}" ]; then
+            echo "::error::cached run exited ${status} but --no-cache exited ${cold_status} on the same tree"
+            exit 1
+          fi
+          echo "cache verified: identical to a cold run"
+        fi
+
+        exit "${status}"
+
+    # Skipped on an exact key hit (a re-run of the same commit), where the
+    # upload would be rejected as a duplicate anyway.
+    - name: Save guff cache
+      if: '!cancelled() && inputs.cache == ''true'' && steps.cache-restore.outputs.cache-hit != ''true'''
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ steps.cache-meta.outputs.paths }}
+        key: ${{ steps.cache-meta.outputs.key }}

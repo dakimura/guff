@@ -1,0 +1,30 @@
+---
+description: Require compat isolate parity checks when changing guff linters
+alwaysApply: true
+---
+
+# Compat isolate gate
+
+When changing guff analyzer / linter behavior, settings wiring, diagnostic
+text, `FromLinter`, positions, or `compat/` harness code, **pass finding-set
+parity** before finishing:
+
+```bash
+cargo build --release -p guff-lint
+./compat/run.sh --isolate --linter <name>   # each touched linter
+./compat/run.sh --isolate                   # full suite (114 targets) before handoff
+```
+
+## Rules
+
+- Prefer **fixing guff** over adding `compat/isolate/allowlists/` entries.
+- Allowlists are last resort for known DEFERRED gaps only.
+- New linter → add `compat/isolate/fixtures/<name>/` + `linters.txt` row; keep
+  fixtures multi-finding when the linter has multiple rules.
+- Do not treat OSS `compat/` alone as sufficient (multi-linter configs hide holes).
+- Before claiming perf-safe: `./regress/run.sh` and
+  `./regress/run.sh --profile full` on a quiet host (`PERF_GUARD`).
+
+CI runs the full `./compat/run.sh --isolate` suite on every PR / main push
+(plus fixture smoke and OSS pr-tier). Agents must still run isolate locally
+before handoff so failures are fixed before CI.

@@ -1,0 +1,29 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh perfsprint
+# Produced by running golangci-lint on compat/golden/cases/perfsprint/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+bad.go:12:9:perfsprint::string-format: fmt.Sprintf can be replaced with just using the string
+bad.go:16:9:perfsprint::integer-format: fmt.Sprintf can be replaced with faster strconv.Itoa
+bad.go:24:9:perfsprint::error-format: fmt.Errorf can be replaced with errors.New
+bad.go:32:9:perfsprint::bool-format: fmt.Sprintf can be replaced with faster strconv.FormatBool
+bad.go:36:20:perfsprint::string-format: fmt.Sprintf can be replaced with just using the string
+bad.go:46:9:perfsprint::error-format: fmt.Sprintf can be replaced with w.errs[i*2+j].Error()
+bad.go:50:9:perfsprint::error-format: fmt.Sprintf can be replaced with f().Error()
+concat/bad.go:7:3:perfsprint::concat-loop: string concatenation in a loop
+concat/bad.go:10:3:perfsprint::concat-loop: string concatenation in a loop
+concat/bad.go:13:3:perfsprint::concat-loop: string concatenation in a loop
+concat/bad.go:17:4:perfsprint::concat-loop: string concatenation in a loop
+concat/bad.go:25:4:perfsprint::concat-loop: string concatenation in a loop
+concat/bad.go:30:4:perfsprint::concat-loop: string concatenation in a loop
+concat/bad.go:40:4:perfsprint::concat-loop: string concatenation in a loop
+concat/bad.go:45:4:perfsprint::concat-loop: string concatenation in a loop
+concat/bad.go:47:3:perfsprint::concat-loop: string concatenation in a loop
+hex.go:37:36:perfsprint::hex-format: fmt.Sprintf can be replaced with faster hex.EncodeToString
+hex.go:39:46:perfsprint::hex-format: fmt.Sprintf can be replaced with faster hex.EncodeToString
+hex.go:41:43:perfsprint::hex-format: fmt.Sprintf can be replaced with faster hex.EncodeToString
+hex.go:43:40:perfsprint::hex-format: fmt.Sprintf can be replaced with faster hex.EncodeToString
+hex.go:45:47:perfsprint::hex-format: fmt.Sprintf can be replaced with faster hex.EncodeToString

@@ -1,0 +1,1 @@
+unknown linters: 'nosuchlinter', run 'golangci-lint help linters' to see the list of supported linters

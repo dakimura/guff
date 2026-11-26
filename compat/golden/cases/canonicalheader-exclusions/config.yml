@@ -1,0 +1,28 @@
+# Golden case: canonicalheader's settings (golangci-lint 2.14.0, the
+# golangci/canonicalheader fork). With the built-in initialism table off,
+# `WWW-Authenticate` is just MIME-canonicalised, and the exclusions are the
+# canonical spelling of their own MIME-canonical form. The second entry holds a
+# comma: golangci-lint joins the list with commas and the fork splits and trims
+# it again, so it is two exclusions.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - canonicalheader
+  settings:
+    canonicalheader:
+      use-default-exclusions: false
+      exclusions:
+        - "x-request-ID"
+        - " ETAG , Test-HEADER"
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # Full finding-set compare (avoid SA#### vs S#### order winning uniq-by-line).
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

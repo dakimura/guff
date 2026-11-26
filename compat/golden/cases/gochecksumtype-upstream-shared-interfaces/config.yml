@@ -1,0 +1,23 @@
+# Golden case: go-check-sumtype's `subtype_in_switch` (cfg
+# includeSharedInterfaces in check_test.go) and `all_leaves`, under
+# `include-shared-interfaces: true`. golangci-lint passes both flags whenever
+# it has settings, so `default-signifies-exhaustive` is its default, true —
+# upstream's own test runs with it false; the switches here have no default.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gochecksumtype
+  settings:
+    gochecksumtype:
+      include-shared-interfaces: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

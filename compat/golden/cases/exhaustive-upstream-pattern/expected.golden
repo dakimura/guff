@@ -1,0 +1,17 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh exhaustive-upstream-pattern
+# Produced by running golangci-lint on compat/golden/cases/exhaustive-upstream-pattern/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+check/swtch/pattern/file.go:49:2:exhaustive::missing cases in expression switch: x0, x3
+check/swtch/pattern/file.go:53:2:exhaustive::missing cases in expression switch: Y0
+check/swtch/pattern/file.go:57:2:exhaustive::missing cases in expression switch: Z0
+check/swtch/pattern/file.go:65:2:exhaustive::missing cases in expression switch: typnew.Z0, typnew.Z2
+check/swtch/pattern/file.go:70:2:exhaustive::missing cases in expression switch: u0
+check/swtch/pattern/file.go:74:2:exhaustive::missing cases in expression switch: u0
+check/swtch/pattern/file.go:88:6:exhaustive::missing keys in map literal: x0, x3
+check/swtch/pattern/file.go:92:6:exhaustive::missing keys in map literal: u0
+check/swtch/pattern/file.go:96:6:exhaustive::missing keys in map literal: u0

@@ -1,0 +1,7 @@
+# Optional OSS list redirected to the shared corpus.
+# Prefer: ./compat/run.sh --oss --tier pr
+#
+# Authoritative inventory: ../corpus/repos.json
+# This file is kept so older docs mentioning compat/repos.txt still resolve.
+
+# (intentionally empty — use corpus/repos.json via --oss --tier)

@@ -1,0 +1,56 @@
+# Golden case: `severity.default` (COMPAT-HARDENING Phase 4).
+#
+# Same fixture and same linters as `exclusions`, plus a `severity` section, so
+# the diff between the two goldens is only ever in the severity column.
+#
+# A bare `default` overwrites *every* finding's severity — including the ones a
+# linter graded itself. gosec's `low` / `medium` and revive's `warning` are all
+# `error` here, because `Severity.transform` ends with an unconditional
+# `issue.Severity = p.defaultSeverity` for anything no rule matched. That is the
+# whole reason the field is worth gating: it is the one part of a finding that
+# a config can rewrite after the linter has spoken.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - gosec
+    - govet
+    - ineffassign
+    - revive
+    - staticcheck
+  settings:
+    gosec:
+      includes:
+        - G103
+        - G104
+        - G204
+        - G301
+        - G304
+    govet:
+      enable:
+        - printf
+        - unsafeptr
+    revive:
+      rules:
+        - name: exported
+        - name: package-comments
+    staticcheck:
+      checks:
+        - ST1000
+        - SA4011
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # Several findings deliberately share a line (a govet/printf finding and the
+  # errcheck one on the same `fmt.Printf` call), and telling a `linters:` rule
+  # from a `text:` rule depends on both surviving.
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+
+severity:
+  default: error

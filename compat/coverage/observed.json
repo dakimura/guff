@@ -1,0 +1,2686 @@
+{
+  "fire_counts": {
+    "G101": 1600,
+    "G102": 370,
+    "G103": 1333,
+    "G104": 4774,
+    "G106": 185,
+    "G107": 199,
+    "G108": 213,
+    "G109": 185,
+    "G110": 377,
+    "G111": 185,
+    "G112": 199,
+    "G114": 358,
+    "G115": 2677,
+    "G118": 346,
+    "G122": 543,
+    "G123": 166,
+    "G124": 365,
+    "G202": 214,
+    "G203": 185,
+    "G204": 1632,
+    "G301": 1518,
+    "G302": 370,
+    "G303": 555,
+    "G306": 412,
+    "G401": 1814,
+    "G402": 311,
+    "G403": 185,
+    "G404": 1386,
+    "G405": 370,
+    "G406": 370,
+    "G501": 972,
+    "G502": 185,
+    "G503": 185,
+    "G504": 185,
+    "G505": 185,
+    "G506": 185,
+    "G507": 185,
+    "G602": 940,
+    "G702": 109,
+    "G703": 692,
+    "G706": 113,
+    "G710": 33,
+    "QF1001": 330,
+    "QF1002": 495,
+    "QF1003": 8466,
+    "QF1004": 1511,
+    "QF1005": 990,
+    "QF1006": 831,
+    "QF1007": 330,
+    "QF1008": 1149,
+    "QF1009": 330,
+    "QF1010": 990,
+    "QF1011": 5538,
+    "QF1012": 17912,
+    "S1000": 846,
+    "S1001": 168,
+    "S1002": 834,
+    "S1003": 759,
+    "S1004": 168,
+    "S1005": 359,
+    "S1006": 336,
+    "S1007": 359,
+    "S1008": 2316,
+    "S1009": 765,
+    "S1010": 168,
+    "S1011": 168,
+    "S1012": 180,
+    "S1016": 168,
+    "S1017": 336,
+    "S1018": 168,
+    "S1019": 168,
+    "S1020": 168,
+    "S1021": 875,
+    "S1023": 504,
+    "S1024": 174,
+    "S1025": 168,
+    "S1028": 174,
+    "S1029": 527,
+    "S1030": 672,
+    "S1031": 199,
+    "S1032": 336,
+    "S1033": 168,
+    "S1034": 168,
+    "S1035": 168,
+    "S1036": 466,
+    "S1037": 336,
+    "S1038": 168,
+    "S1039": 678,
+    "S1040": 168,
+    "SA1000": 5539,
+    "SA1001": 2292,
+    "SA1002": 955,
+    "SA1003": 573,
+    "SA1004": 382,
+    "SA1005": 191,
+    "SA1006": 1007,
+    "SA1007": 1910,
+    "SA1008": 382,
+    "SA1010": 382,
+    "SA1011": 1146,
+    "SA1012": 209,
+    "SA1013": 191,
+    "SA1014": 573,
+    "SA1015": 191,
+    "SA1016": 382,
+    "SA1017": 188,
+    "SA1018": 547,
+    "SA1019": 1588,
+    "SA1020": 573,
+    "SA1021": 191,
+    "SA1023": 191,
+    "SA1024": 955,
+    "SA1025": 191,
+    "SA1026": 573,
+    "SA1027": 328,
+    "SA1028": 573,
+    "SA1029": 764,
+    "SA1030": 1146,
+    "SA1031": 1528,
+    "SA1032": 191,
+    "SA2000": 191,
+    "SA2001": 191,
+    "SA2002": 191,
+    "SA2003": 191,
+    "SA3000": 164,
+    "SA3001": 191,
+    "SA4000": 1337,
+    "SA4001": 382,
+    "SA4003": 382,
+    "SA4004": 191,
+    "SA4005": 191,
+    "SA4006": 1536,
+    "SA4008": 205,
+    "SA4009": 388,
+    "SA4010": 197,
+    "SA4011": 1339,
+    "SA4012": 191,
+    "SA4013": 191,
+    "SA4014": 191,
+    "SA4015": 646,
+    "SA4016": 245,
+    "SA4017": 9169,
+    "SA4018": 359,
+    "SA4019": 141,
+    "SA4020": 191,
+    "SA4021": 191,
+    "SA4022": 336,
+    "SA4023": 278,
+    "SA4024": 191,
+    "SA4025": 191,
+    "SA4026": 191,
+    "SA4027": 191,
+    "SA4028": 191,
+    "SA4029": 191,
+    "SA4030": 191,
+    "SA4031": 771,
+    "SA4032": 141,
+    "SA5000": 191,
+    "SA5001": 191,
+    "SA5002": 1031,
+    "SA5003": 191,
+    "SA5004": 191,
+    "SA5005": 191,
+    "SA5007": 191,
+    "SA5008": 542,
+    "SA5009": 191,
+    "SA5010": 202,
+    "SA5011": 526,
+    "SA5012": 191,
+    "SA6000": 191,
+    "SA6001": 306,
+    "SA6002": 219,
+    "SA6003": 527,
+    "SA6005": 191,
+    "SA6006": 191,
+    "SA9001": 191,
+    "SA9002": 191,
+    "SA9003": 7676,
+    "SA9004": 193,
+    "SA9005": 191,
+    "SA9006": 191,
+    "SA9007": 191,
+    "SA9008": 524,
+    "SA9009": 191,
+    "ST1000": 13901,
+    "ST1001": 165,
+    "ST1003": 1650,
+    "ST1005": 492,
+    "ST1006": 1008,
+    "ST1008": 330,
+    "ST1011": 1155,
+    "ST1012": 495,
+    "ST1013": 660,
+    "ST1015": 165,
+    "ST1016": 495,
+    "ST1017": 1128,
+    "ST1018": 825,
+    "ST1019": 507,
+    "ST1020": 828,
+    "ST1021": 1236,
+    "ST1022": 495,
+    "ST1023": 3346,
+    "arangolint": 85,
+    "asasalint": 85,
+    "asciicheck": 85,
+    "bidichk": 85,
+    "bodyclose": 1321,
+    "canonicalheader": 125,
+    "clickhouselint": 85,
+    "containedctx": 113,
+    "contextcheck": 1071,
+    "copyloopvar": 184,
+    "cyclop": 85,
+    "decorder": 255,
+    "depguard": 85,
+    "dogsled": 85,
+    "dupl": 392,
+    "dupword": 170,
+    "durationcheck": 85,
+    "embeddedstructfieldcheck": 85,
+    "err113": 85,
+    "errcheck": 28534,
+    "errchkjson": 138,
+    "errname": 226,
+    "errorlint": 425,
+    "exhaustive": 85,
+    "exhaustruct": 85,
+    "exptostd": 170,
+    "fatcontext": 94,
+    "forbidigo": 303,
+    "forcetypeassert": 716,
+    "funcorder": 85,
+    "funlen": 85,
+    "ginkgolinter": 510,
+    "gocheckcompilerdirectives": 170,
+    "gochecknoglobals": 85,
+    "gochecknoinits": 85,
+    "gochecksumtype": 85,
+    "gocognit": 85,
+    "goconst": 149531,
+    "gocritic/appendAssign": 1178,
+    "gocritic/appendCombine": 176,
+    "gocritic/argOrder": 176,
+    "gocritic/assignOp": 516,
+    "gocritic/badCall": 572,
+    "gocritic/badCond": 352,
+    "gocritic/badLock": 1056,
+    "gocritic/badRegexp": 528,
+    "gocritic/badSorting": 176,
+    "gocritic/badSyncOnceFunc": 352,
+    "gocritic/boolExprSimplify": 1936,
+    "gocritic/builtinShadow": 176,
+    "gocritic/builtinShadowDecl": 176,
+    "gocritic/captLocal": 366,
+    "gocritic/caseOrder": 176,
+    "gocritic/codegenComment": 176,
+    "gocritic/commentFormatting": 210,
+    "gocritic/commentedOutCode": 176,
+    "gocritic/commentedOutImport": 176,
+    "gocritic/defaultCaseOrder": 176,
+    "gocritic/deferInLoop": 176,
+    "gocritic/deferUnlambda": 176,
+    "gocritic/deprecatedComment": 176,
+    "gocritic/docStub": 176,
+    "gocritic/dupArg": 176,
+    "gocritic/dupBranchBody": 176,
+    "gocritic/dupCase": 176,
+    "gocritic/dupImport": 352,
+    "gocritic/dupOption": 176,
+    "gocritic/dupSubExpr": 176,
+    "gocritic/dynamicFmtString": 352,
+    "gocritic/elseif": 176,
+    "gocritic/emptyDecl": 528,
+    "gocritic/emptyFallthrough": 508,
+    "gocritic/emptyStringTest": 438,
+    "gocritic/equalFold": 556,
+    "gocritic/evalOrder": 176,
+    "gocritic/exitAfterDefer": 218,
+    "gocritic/exposedSyncMutex": 352,
+    "gocritic/externalErrorReassign": 176,
+    "gocritic/filepathJoin": 176,
+    "gocritic/flagDeref": 176,
+    "gocritic/flagName": 176,
+    "gocritic/hexLiteral": 352,
+    "gocritic/httpNoBody": 352,
+    "gocritic/hugeParam": 176,
+    "gocritic/ifElseChain": 367,
+    "gocritic/importShadow": 528,
+    "gocritic/indexAlloc": 176,
+    "gocritic/initClause": 176,
+    "gocritic/mapKey": 462,
+    "gocritic/methodExprCall": 176,
+    "gocritic/nestingReduce": 176,
+    "gocritic/newDeref": 752,
+    "gocritic/nilValReturn": 176,
+    "gocritic/octalLiteral": 176,
+    "gocritic/offBy1": 176,
+    "gocritic/paramTypeCombine": 508,
+    "gocritic/preferDecodeRune": 176,
+    "gocritic/preferFilepathJoin": 176,
+    "gocritic/preferFprint": 528,
+    "gocritic/preferStringWriter": 704,
+    "gocritic/preferWriteByte": 176,
+    "gocritic/ptrToRefParam": 451,
+    "gocritic/rangeAppendAll": 176,
+    "gocritic/rangeExprCopy": 352,
+    "gocritic/rangeValCopy": 1375,
+    "gocritic/redundantSprint": 704,
+    "gocritic/regexpMust": 176,
+    "gocritic/regexpPattern": 176,
+    "gocritic/regexpSimplify": 860,
+    "gocritic/returnAfterHttpError": 176,
+    "gocritic/singleCaseSwitch": 1110,
+    "gocritic/sliceClear": 176,
+    "gocritic/sloppyLen": 614,
+    "gocritic/sloppyReassign": 176,
+    "gocritic/sloppyTypeAssert": 176,
+    "gocritic/sortSlice": 176,
+    "gocritic/sprintfQuotedString": 176,
+    "gocritic/sqlQuery": 352,
+    "gocritic/stringConcatSimplify": 528,
+    "gocritic/stringXbytes": 798,
+    "gocritic/stringsCompare": 352,
+    "gocritic/switchTrue": 262,
+    "gocritic/syncMapLoadAndDelete": 176,
+    "gocritic/timeExprSimplify": 352,
+    "gocritic/todoCommentWithoutDetail": 176,
+    "gocritic/tooManyResultsChecker": 176,
+    "gocritic/truncateCmp": 176,
+    "gocritic/typeAssertChain": 176,
+    "gocritic/typeDefFirst": 176,
+    "gocritic/typeSwitchVar": 176,
+    "gocritic/typeUnparen": 176,
+    "gocritic/uncheckedInlineErr": 176,
+    "gocritic/underef": 219,
+    "gocritic/unlabelStmt": 352,
+    "gocritic/unlambda": 176,
+    "gocritic/unnamedResult": 528,
+    "gocritic/unnecessaryBlock": 176,
+    "gocritic/unnecessaryDefer": 176,
+    "gocritic/unslice": 176,
+    "gocritic/valSwap": 176,
+    "gocritic/weakCond": 176,
+    "gocritic/wrapperFunc": 176,
+    "gocritic/yodaStyleExpr": 352,
+    "gocritic/zeroByteRepeat": 176,
+    "gocyclo": 85,
+    "godoclint": 531,
+    "godot": 85,
+    "godox": 334,
+    "gofumpt": 106,
+    "goheader": 25870,
+    "goimports": 9,
+    "golines": 85,
+    "gomoddirectives": 85,
+    "gomodguard": 85,
+    "gomodguard_v2": 85,
+    "goprintffuncname": 85,
+    "gosmopolitan": 226,
+    "govet/appends": 161,
+    "govet/assign": 994,
+    "govet/atomic": 262,
+    "govet/bools": 348,
+    "govet/buildtag": 870,
+    "govet/composites": 360,
+    "govet/copylocks": 624,
+    "govet/defers": 174,
+    "govet/directive": 696,
+    "govet/errorsas": 349,
+    "govet/hostport": 318,
+    "govet/httpresponse": 567,
+    "govet/ifaceassert": 174,
+    "govet/inline": 3736,
+    "govet/loopclosure": 164,
+    "govet/lostcancel": 4704,
+    "govet/nilfunc": 174,
+    "govet/printf": 8130,
+    "govet/shift": 1486,
+    "govet/sigchanyzer": 174,
+    "govet/slog": 174,
+    "govet/stdmethods": 174,
+    "govet/stringintconv": 174,
+    "govet/structtag": 436,
+    "govet/testinggoroutine": 1247,
+    "govet/tests": 174,
+    "govet/timeformat": 174,
+    "govet/unmarshal": 174,
+    "govet/unreachable": 754,
+    "govet/unsafeptr": 1158,
+    "govet/unusedresult": 174,
+    "govet/waitgroup": 161,
+    "grouper": 340,
+    "importas": 85,
+    "inamedparam": 170,
+    "ineffassign": 4125,
+    "interfacebloat": 85,
+    "intrange": 1316,
+    "iotamixing": 85,
+    "ireturn": 85,
+    "lll": 413,
+    "loggercheck": 85,
+    "makezero": 85,
+    "misspell": 832,
+    "mnd": 255,
+    "modernize": 8588,
+    "nakedret": 99,
+    "nestif": 85,
+    "nilerr": 1089,
+    "nilnesserr": 85,
+    "nilnil": 194,
+    "nlreturn": 85,
+    "noctx": 552,
+    "noinlineerr": 85,
+    "nolintlint": 8513,
+    "nonamedreturns": 85,
+    "nosprintfhostport": 85,
+    "paralleltest": 85,
+    "perfsprint": 170,
+    "prealloc": 430,
+    "predeclared": 170,
+    "promlinter": 400,
+    "protogetter": 1018,
+    "reassign": 85,
+    "recvcheck": 125,
+    "revive/add-constant": 13820,
+    "revive/argument-limit": 171,
+    "revive/atomic": 171,
+    "revive/banned-characters": 171,
+    "revive/bare-return": 171,
+    "revive/blank-imports": 342,
+    "revive/bool-literal-in-expr": 171,
+    "revive/call-to-gc": 171,
+    "revive/cognitive-complexity": 494,
+    "revive/comment-spacings": 171,
+    "revive/comments-density": 684,
+    "revive/confusing-naming": 342,
+    "revive/confusing-results": 342,
+    "revive/constant-logical-expr": 171,
+    "revive/context-as-argument": 687,
+    "revive/context-keys-type": 171,
+    "revive/cyclomatic": 171,
+    "revive/datarace": 171,
+    "revive/deep-exit": 171,
+    "revive/defer": 342,
+    "revive/dot-imports": 171,
+    "revive/duplicated-imports": 171,
+    "revive/early-return": 171,
+    "revive/empty-block": 256,
+    "revive/empty-lines": 342,
+    "revive/enforce-map-style": 171,
+    "revive/enforce-repeated-arg-type-style": 171,
+    "revive/enforce-slice-style": 171,
+    "revive/enforce-switch-style": 619,
+    "revive/epoch-naming": 202,
+    "revive/error-naming": 1654,
+    "revive/error-return": 171,
+    "revive/error-strings": 171,
+    "revive/errorf": 1811,
+    "revive/exported": 5651,
+    "revive/file-header": 3778,
+    "revive/file-length-limit": 171,
+    "revive/filename-format": 171,
+    "revive/flag-parameter": 513,
+    "revive/forbidden-call-in-wg-go": 328,
+    "revive/function-length": 171,
+    "revive/function-result-limit": 171,
+    "revive/get-return": 171,
+    "revive/identical-branches": 555,
+    "revive/identical-ifelseif-branches": 256,
+    "revive/identical-ifelseif-conditions": 256,
+    "revive/identical-switch-branches": 260,
+    "revive/identical-switch-conditions": 255,
+    "revive/if-return": 178,
+    "revive/import-alias-naming": 171,
+    "revive/import-shadowing": 171,
+    "revive/imports-blocklist": 1119,
+    "revive/increment-decrement": 1404,
+    "revive/indent-error-flow": 684,
+    "revive/inefficient-map-lookup": 171,
+    "revive/line-length-limit": 855,
+    "revive/max-control-nesting": 430,
+    "revive/modifies-value-receiver": 171,
+    "revive/nested-structs": 171,
+    "revive/package-comments": 3585,
+    "revive/package-directory-mismatch": 171,
+    "revive/package-naming": 342,
+    "revive/range": 171,
+    "revive/range-val-address": 328,
+    "revive/range-val-in-closure": 164,
+    "revive/receiver-naming": 171,
+    "revive/redefines-builtin-id": 171,
+    "revive/redundant-import-alias": 171,
+    "revive/redundant-test-main-exit": 264,
+    "revive/string-format": 171,
+    "revive/string-of-int": 171,
+    "revive/struct-tag": 513,
+    "revive/superfluous-else": 171,
+    "revive/time-date": 1026,
+    "revive/time-equal": 171,
+    "revive/time-naming": 202,
+    "revive/unchecked-type-assertion": 342,
+    "revive/unconditional-recursion": 171,
+    "revive/unexported-naming": 171,
+    "revive/unexported-return": 336,
+    "revive/unhandled-error": 171,
+    "revive/unnecessary-format": 684,
+    "revive/unnecessary-if": 171,
+    "revive/unnecessary-stmt": 519,
+    "revive/unreachable-code": 171,
+    "revive/unsecure-url-scheme": 284,
+    "revive/unused-parameter": 3066,
+    "revive/unused-receiver": 1985,
+    "revive/use-any": 171,
+    "revive/use-errors-new": 513,
+    "revive/use-fmt-print": 684,
+    "revive/use-slices-sort": 171,
+    "revive/useless-break": 171,
+    "revive/useless-fallthrough": 171,
+    "revive/var-declaration": 508,
+    "revive/var-naming": 1966,
+    "revive/waitgroup-by-value": 171,
+    "rowserrcheck": 85,
+    "sloglint": 425,
+    "spancheck": 400,
+    "sqlclosecheck": 113,
+    "swaggo": 85,
+    "tagalign": 255,
+    "tagliatelle": 85,
+    "testableexamples": 85,
+    "testifylint": 5747,
+    "testpackage": 85,
+    "thelper": 148,
+    "tparallel": 85,
+    "unconvert": 85,
+    "unparam": 364,
+    "unqueryvet": 85,
+    "unused": 2409,
+    "usetesting": 204,
+    "wastedassign": 242,
+    "whitespace": 170,
+    "wrapcheck": 85,
+    "wsl": 255,
+    "wsl_v5": 737,
+    "zerologlint": 85
+  },
+  "ignored_tests": {
+    "govet/tests": [
+      "crates/guff-packages/tests/embed_multiroot.rs:11 \u2014 requires go on PATH; run with cargo test -p guff-packages -- --ignored"
+    ]
+  },
+  "observed": {
+    "G101": [
+      "golden",
+      "oss",
+      "unit"
+    ],
+    "G102": [
+      "golden",
+      "unit"
+    ],
+    "G103": [
+      "golden",
+      "oss",
+      "unit"
+    ],
+    "G104": [
+      "golden",
+      "isolate",
+      "oss",
+      "unit"
+    ],
+    "G106": [
+      "golden",
+      "unit"
+    ],
+    "G107": [
+      "golden",
+      "oss",
+      "unit"
+    ],
+    "G108": [
+      "golden",
+      "oss",
+      "unit"
+    ],
+    "G109": [
+      "golden",
+      "unit"
+    ],
+    "G110": [
+      "golden",
+      "oss",
+      "unit"
+    ],
+    "G111": [
+      "golden",
+      "unit"
+    ],
+    "G112": [
+      "golden",
+      "oss",
+      "unit"
+    ],
+    "G114": [
+      "golden",
+      "isolate",
+      "oss",
+      "unit"
+    ],
+    "G115": [
+      "golden",
+      "isolate",
+      "oss",
+      "unit"
+    ],
+    "G118": [
+      "golden",
+      "oss",
+      "unit"
+    ],
+    "G122": [
+      "golden",
+      "oss",
+      "unit"
+    ],
+    "G123": [
+      "golden",
+      "oss",
+      "unit"
+    ],
+    "G124": [
+      "golden",
+      "oss",
+      "unit"
+    ],
+    "G202": [
+      "golden",
+      "oss"
+    ],
+    "G203": [
+      "golden",
+      "unit"
+    ],
+    "G204": [
+      "golden",
+      "oss",
+      "unit"
+    ],
+    "G301": [
+      "golden",
+      "unit"
+    ],
+    "G302": [
+      "golden",
+      "unit"
+    ],
+    "G303": [
+      "golden",
+      "unit"
+    ],
+    "G306": [
+      "golden",
+      "oss",
+      "unit"
+    ],
+    "G401": [
+      "golden",
+      "isolate",
+      "unit"
+    ],
+    "G402": [
+      "golden",
+      "oss",
+      "unit"
+    ],
+    "G403": [
+      "golden",
+      "unit"
+    ],
+    "G404": [
+      "golden",
+      "isolate",
+      "oss",
+      "unit"
+    ],
+    "G405": [
+      "golden",
+      "unit"
+    ],
+    "G406": [
+      "golden",
+      "unit"
+    ],
+    "G501": [
+      "golden",
+      "isolate",
+      "unit"
+    ],
+    "G502": [
+      "golden",
+      "unit"
+    ],
+    "G503": [
+      "golden",
+      "unit"
+    ],
+    "G504": [
+      "golden",
+      "unit"
+    ],
+    "G505": [
+      "golden",
+      "oss",
+      "unit"
+    ],
+    "G506": [
+      "golden",
+      "unit"
+    ],
+    "G507": [
+      "golden",
+      "unit"
+    ],
+    "G602": [
+      "golden",
+      "isolate",
+      "oss",
+      "unit"
+    ],
+    "G702": [
+      "golden",
+      "oss"
+    ],
+    "G703": [
+      "golden",
+      "isolate",
+      "oss",
+      "unit"
+    ],
+    "G706": [
+      "golden",
+      "oss",
+      "unit"
+    ],
+    "G710": [
+      "golden",
+      "oss"
+    ],
+    "QF1001": [
+      "golden",
+      "oss"
+    ],
+    "QF1002": [
+      "golden",
+      "oss"
+    ],
+    "QF1003": [
+      "golden",
+      "oss"
+    ],
+    "QF1004": [
+      "golden"
+    ],
+    "QF1005": [
+      "golden"
+    ],
+    "QF1006": [
+      "golden",
+      "oss"
+    ],
+    "QF1007": [
+      "golden"
+    ],
+    "QF1008": [
+      "golden",
+      "isolate",
+      "oss",
+      "regress"
+    ],
+    "QF1009": [
+      "golden"
+    ],
+    "QF1010": [
+      "golden",
+      "oss"
+    ],
+    "QF1011": [
+      "golden",
+      "isolate",
+      "oss"
+    ],
+    "QF1012": [
+      "golden",
+      "oss"
+    ],
+    "S1000": [
+      "golden",
+      "oss"
+    ],
+    "S1001": [
+      "golden"
+    ],
+    "S1002": [
+      "golden",
+      "oss"
+    ],
+    "S1003": [
+      "golden",
+      "isolate"
+    ],
+    "S1004": [
+      "golden"
+    ],
+    "S1005": [
+      "golden"
+    ],
+    "S1006": [
+      "golden"
+    ],
+    "S1007": [
+      "golden",
+      "oss"
+    ],
+    "S1008": [
+      "golden"
+    ],
+    "S1009": [
+      "golden",
+      "isolate",
+      "oss"
+    ],
+    "S1010": [
+      "golden",
+      "regress"
+    ],
+    "S1011": [
+      "golden",
+      "oss"
+    ],
+    "S1012": [
+      "golden",
+      "oss"
+    ],
+    "S1016": [
+      "golden"
+    ],
+    "S1017": [
+      "golden"
+    ],
+    "S1018": [
+      "golden"
+    ],
+    "S1019": [
+      "golden"
+    ],
+    "S1020": [
+      "golden"
+    ],
+    "S1021": [
+      "golden",
+      "isolate",
+      "oss",
+      "regress"
+    ],
+    "S1023": [
+      "golden"
+    ],
+    "S1024": [
+      "golden",
+      "oss"
+    ],
+    "S1025": [
+      "golden"
+    ],
+    "S1028": [
+      "golden",
+      "oss"
+    ],
+    "S1029": [
+      "golden"
+    ],
+    "S1030": [
+      "golden"
+    ],
+    "S1031": [
+      "golden",
+      "oss"
+    ],
+    "S1032": [
+      "golden"
+    ],
+    "S1033": [
+      "golden"
+    ],
+    "S1034": [
+      "golden",
+      "oss"
+    ],
+    "S1035": [
+      "golden"
+    ],
+    "S1036": [
+      "golden"
+    ],
+    "S1037": [
+      "golden"
+    ],
+    "S1038": [
+      "golden"
+    ],
+    "S1039": [
+      "golden",
+      "isolate"
+    ],
+    "S1040": [
+      "golden"
+    ],
+    "SA1000": [
+      "golden",
+      "oss"
+    ],
+    "SA1001": [
+      "golden"
+    ],
+    "SA1002": [
+      "golden"
+    ],
+    "SA1003": [
+      "golden"
+    ],
+    "SA1004": [
+      "golden"
+    ],
+    "SA1005": [
+      "golden"
+    ],
+    "SA1006": [
+      "golden"
+    ],
+    "SA1007": [
+      "golden"
+    ],
+    "SA1008": [
+      "golden"
+    ],
+    "SA1010": [
+      "golden"
+    ],
+    "SA1011": [
+      "golden"
+    ],
+    "SA1012": [
+      "golden",
+      "oss"
+    ],
+    "SA1013": [
+      "golden"
+    ],
+    "SA1014": [
+      "golden"
+    ],
+    "SA1015": [
+      "golden"
+    ],
+    "SA1016": [
+      "golden"
+    ],
+    "SA1017": [
+      "golden"
+    ],
+    "SA1018": [
+      "golden"
+    ],
+    "SA1019": [
+      "golden",
+      "oss"
+    ],
+    "SA1020": [
+      "golden"
+    ],
+    "SA1021": [
+      "golden"
+    ],
+    "SA1023": [
+      "golden"
+    ],
+    "SA1024": [
+      "golden"
+    ],
+    "SA1025": [
+      "golden"
+    ],
+    "SA1026": [
+      "golden",
+      "oss"
+    ],
+    "SA1027": [
+      "golden"
+    ],
+    "SA1028": [
+      "golden"
+    ],
+    "SA1029": [
+      "golden"
+    ],
+    "SA1030": [
+      "golden"
+    ],
+    "SA1031": [
+      "golden"
+    ],
+    "SA1032": [
+      "golden"
+    ],
+    "SA2000": [
+      "golden"
+    ],
+    "SA2001": [
+      "golden"
+    ],
+    "SA2002": [
+      "golden"
+    ],
+    "SA2003": [
+      "golden"
+    ],
+    "SA3000": [
+      "golden"
+    ],
+    "SA3001": [
+      "golden"
+    ],
+    "SA4000": [
+      "golden",
+      "oss"
+    ],
+    "SA4001": [
+      "golden"
+    ],
+    "SA4003": [
+      "golden"
+    ],
+    "SA4004": [
+      "golden",
+      "oss"
+    ],
+    "SA4005": [
+      "golden",
+      "oss"
+    ],
+    "SA4006": [
+      "golden",
+      "oss",
+      "regress"
+    ],
+    "SA4008": [
+      "golden",
+      "oss"
+    ],
+    "SA4009": [
+      "golden",
+      "oss"
+    ],
+    "SA4010": [
+      "golden",
+      "oss"
+    ],
+    "SA4011": [
+      "golden"
+    ],
+    "SA4012": [
+      "golden"
+    ],
+    "SA4013": [
+      "golden"
+    ],
+    "SA4014": [
+      "golden",
+      "oss"
+    ],
+    "SA4015": [
+      "golden"
+    ],
+    "SA4016": [
+      "golden",
+      "oss"
+    ],
+    "SA4017": [
+      "golden",
+      "isolate",
+      "oss"
+    ],
+    "SA4018": [
+      "golden"
+    ],
+    "SA4019": [
+      "golden",
+      "oss"
+    ],
+    "SA4020": [
+      "golden"
+    ],
+    "SA4021": [
+      "golden"
+    ],
+    "SA4022": [
+      "golden"
+    ],
+    "SA4023": [
+      "golden",
+      "isolate",
+      "oss"
+    ],
+    "SA4024": [
+      "golden"
+    ],
+    "SA4025": [
+      "golden"
+    ],
+    "SA4026": [
+      "golden"
+    ],
+    "SA4027": [
+      "golden",
+      "oss"
+    ],
+    "SA4028": [
+      "golden"
+    ],
+    "SA4029": [
+      "golden"
+    ],
+    "SA4030": [
+      "golden"
+    ],
+    "SA4031": [
+      "golden"
+    ],
+    "SA4032": [
+      "golden",
+      "oss"
+    ],
+    "SA5000": [
+      "golden"
+    ],
+    "SA5001": [
+      "golden"
+    ],
+    "SA5002": [
+      "golden"
+    ],
+    "SA5003": [
+      "golden"
+    ],
+    "SA5004": [
+      "golden"
+    ],
+    "SA5005": [
+      "golden"
+    ],
+    "SA5007": [
+      "golden"
+    ],
+    "SA5008": [
+      "golden",
+      "oss"
+    ],
+    "SA5009": [
+      "golden",
+      "oss"
+    ],
+    "SA5010": [
+      "golden",
+      "oss"
+    ],
+    "SA5011": [
+      "golden",
+      "isolate",
+      "oss",
+      "regress"
+    ],
+    "SA5012": [
+      "golden",
+      "oss"
+    ],
+    "SA6000": [
+      "golden",
+      "oss"
+    ],
+    "SA6001": [
+      "golden",
+      "oss"
+    ],
+    "SA6002": [
+      "golden",
+      "oss"
+    ],
+    "SA6003": [
+      "golden"
+    ],
+    "SA6005": [
+      "golden"
+    ],
+    "SA6006": [
+      "golden"
+    ],
+    "SA9001": [
+      "golden"
+    ],
+    "SA9002": [
+      "golden"
+    ],
+    "SA9003": [
+      "golden",
+      "oss"
+    ],
+    "SA9004": [
+      "golden",
+      "regress"
+    ],
+    "SA9005": [
+      "golden",
+      "oss"
+    ],
+    "SA9006": [
+      "golden"
+    ],
+    "SA9007": [
+      "golden"
+    ],
+    "SA9008": [
+      "golden",
+      "oss"
+    ],
+    "SA9009": [
+      "golden"
+    ],
+    "SA9010": [
+      "golden"
+    ],
+    "ST1000": [
+      "golden"
+    ],
+    "ST1001": [
+      "golden"
+    ],
+    "ST1003": [
+      "golden"
+    ],
+    "ST1005": [
+      "golden",
+      "oss"
+    ],
+    "ST1006": [
+      "golden",
+      "oss"
+    ],
+    "ST1008": [
+      "golden"
+    ],
+    "ST1011": [
+      "golden"
+    ],
+    "ST1012": [
+      "golden",
+      "oss"
+    ],
+    "ST1013": [
+      "golden",
+      "unit"
+    ],
+    "ST1015": [
+      "golden"
+    ],
+    "ST1016": [
+      "golden"
+    ],
+    "ST1017": [
+      "golden"
+    ],
+    "ST1018": [
+      "golden"
+    ],
+    "ST1019": [
+      "golden",
+      "oss"
+    ],
+    "ST1020": [
+      "golden"
+    ],
+    "ST1021": [
+      "golden"
+    ],
+    "ST1022": [
+      "golden"
+    ],
+    "ST1023": [
+      "golden",
+      "isolate",
+      "oss",
+      "regress"
+    ],
+    "arangolint": [
+      "isolate"
+    ],
+    "asasalint": [
+      "isolate"
+    ],
+    "asciicheck": [
+      "isolate"
+    ],
+    "bidichk": [
+      "isolate"
+    ],
+    "bodyclose": [
+      "golden",
+      "isolate",
+      "oss"
+    ],
+    "canonicalheader": [
+      "isolate",
+      "oss"
+    ],
+    "clickhouselint": [
+      "isolate"
+    ],
+    "containedctx": [
+      "isolate",
+      "oss"
+    ],
+    "contextcheck": [
+      "golden",
+      "isolate",
+      "oss"
+    ],
+    "copyloopvar": [
+      "isolate",
+      "oss"
+    ],
+    "cyclop": [
+      "isolate",
+      "oss"
+    ],
+    "decorder": [
+      "isolate"
+    ],
+    "depguard": [
+      "isolate",
+      "oss"
+    ],
+    "dogsled": [
+      "isolate",
+      "oss"
+    ],
+    "dupl": [
+      "golden",
+      "isolate",
+      "oss",
+      "unit"
+    ],
+    "dupword": [
+      "isolate",
+      "oss"
+    ],
+    "durationcheck": [
+      "isolate"
+    ],
+    "embeddedstructfieldcheck": [
+      "isolate",
+      "oss"
+    ],
+    "err113": [
+      "isolate",
+      "oss"
+    ],
+    "errcheck": [
+      "golden",
+      "isolate",
+      "oss",
+      "regress",
+      "unit"
+    ],
+    "errchkjson": [
+      "isolate",
+      "oss"
+    ],
+    "errname": [
+      "isolate",
+      "oss"
+    ],
+    "errorlint": [
+      "golden",
+      "isolate",
+      "oss",
+      "regress"
+    ],
+    "exhaustive": [
+      "isolate",
+      "unit"
+    ],
+    "exhaustruct": [
+      "isolate",
+      "oss"
+    ],
+    "exptostd": [
+      "isolate"
+    ],
+    "fatcontext": [
+      "isolate",
+      "oss",
+      "regress"
+    ],
+    "forbidigo": [
+      "golden",
+      "isolate",
+      "oss"
+    ],
+    "forcetypeassert": [
+      "golden",
+      "isolate",
+      "oss"
+    ],
+    "funcorder": [
+      "isolate",
+      "oss"
+    ],
+    "funlen": [
+      "isolate",
+      "oss",
+      "unit"
+    ],
+    "gci": [
+      "oss",
+      "unit"
+    ],
+    "ginkgolinter": [
+      "isolate"
+    ],
+    "gocheckcompilerdirectives": [
+      "isolate"
+    ],
+    "gochecknoglobals": [
+      "isolate",
+      "oss"
+    ],
+    "gochecknoinits": [
+      "isolate",
+      "oss"
+    ],
+    "gochecksumtype": [
+      "isolate"
+    ],
+    "gocognit": [
+      "isolate",
+      "oss"
+    ],
+    "goconst": [
+      "isolate",
+      "oss"
+    ],
+    "gocritic/appendAssign": [
+      "golden",
+      "oss"
+    ],
+    "gocritic/appendCombine": [
+      "golden"
+    ],
+    "gocritic/argOrder": [
+      "golden",
+      "oss"
+    ],
+    "gocritic/assignOp": [
+      "golden",
+      "isolate",
+      "oss"
+    ],
+    "gocritic/badCall": [
+      "golden",
+      "isolate",
+      "oss"
+    ],
+    "gocritic/badCond": [
+      "golden"
+    ],
+    "gocritic/badLock": [
+      "golden"
+    ],
+    "gocritic/badRegexp": [
+      "golden"
+    ],
+    "gocritic/badSorting": [
+      "golden"
+    ],
+    "gocritic/badSyncOnceFunc": [
+      "golden"
+    ],
+    "gocritic/boolExprSimplify": [
+      "golden"
+    ],
+    "gocritic/builtinShadow": [
+      "golden"
+    ],
+    "gocritic/builtinShadowDecl": [
+      "golden"
+    ],
+    "gocritic/captLocal": [
+      "golden",
+      "oss"
+    ],
+    "gocritic/caseOrder": [
+      "golden"
+    ],
+    "gocritic/codegenComment": [
+      "golden"
+    ],
+    "gocritic/commentFormatting": [
+      "golden",
+      "oss"
+    ],
+    "gocritic/commentedOutCode": [
+      "golden"
+    ],
+    "gocritic/commentedOutImport": [
+      "golden"
+    ],
+    "gocritic/defaultCaseOrder": [
+      "golden"
+    ],
+    "gocritic/deferInLoop": [
+      "golden"
+    ],
+    "gocritic/deferUnlambda": [
+      "golden"
+    ],
+    "gocritic/deprecatedComment": [
+      "golden",
+      "oss"
+    ],
+    "gocritic/docStub": [
+      "golden"
+    ],
+    "gocritic/dupArg": [
+      "golden",
+      "unit"
+    ],
+    "gocritic/dupBranchBody": [
+      "golden"
+    ],
+    "gocritic/dupCase": [
+      "golden"
+    ],
+    "gocritic/dupImport": [
+      "golden"
+    ],
+    "gocritic/dupOption": [
+      "golden"
+    ],
+    "gocritic/dupSubExpr": [
+      "golden"
+    ],
+    "gocritic/dynamicFmtString": [
+      "golden"
+    ],
+    "gocritic/elseif": [
+      "golden",
+      "oss"
+    ],
+    "gocritic/emptyDecl": [
+      "golden"
+    ],
+    "gocritic/emptyFallthrough": [
+      "golden"
+    ],
+    "gocritic/emptyStringTest": [
+      "golden",
+      "isolate"
+    ],
+    "gocritic/equalFold": [
+      "golden"
+    ],
+    "gocritic/evalOrder": [
+      "golden"
+    ],
+    "gocritic/exitAfterDefer": [
+      "golden",
+      "oss",
+      "unit"
+    ],
+    "gocritic/exposedSyncMutex": [
+      "golden"
+    ],
+    "gocritic/externalErrorReassign": [
+      "golden"
+    ],
+    "gocritic/filepathJoin": [
+      "golden"
+    ],
+    "gocritic/flagDeref": [
+      "golden",
+      "unit"
+    ],
+    "gocritic/flagName": [
+      "golden"
+    ],
+    "gocritic/hexLiteral": [
+      "golden"
+    ],
+    "gocritic/httpNoBody": [
+      "golden"
+    ],
+    "gocritic/hugeParam": [
+      "golden"
+    ],
+    "gocritic/ifElseChain": [
+      "golden",
+      "oss"
+    ],
+    "gocritic/importShadow": [
+      "golden",
+      "oss"
+    ],
+    "gocritic/indexAlloc": [
+      "golden"
+    ],
+    "gocritic/initClause": [
+      "golden"
+    ],
+    "gocritic/mapKey": [
+      "golden",
+      "oss"
+    ],
+    "gocritic/methodExprCall": [
+      "golden"
+    ],
+    "gocritic/nestingReduce": [
+      "golden"
+    ],
+    "gocritic/newDeref": [
+      "golden",
+      "isolate",
+      "oss"
+    ],
+    "gocritic/nilValReturn": [
+      "golden"
+    ],
+    "gocritic/octalLiteral": [
+      "golden"
+    ],
+    "gocritic/offBy1": [
+      "golden"
+    ],
+    "gocritic/paramTypeCombine": [
+      "golden"
+    ],
+    "gocritic/preferDecodeRune": [
+      "golden"
+    ],
+    "gocritic/preferFilepathJoin": [
+      "golden"
+    ],
+    "gocritic/preferFprint": [
+      "golden",
+      "unit"
+    ],
+    "gocritic/preferStringWriter": [
+      "golden",
+      "unit"
+    ],
+    "gocritic/preferWriteByte": [
+      "golden"
+    ],
+    "gocritic/ptrToRefParam": [
+      "golden"
+    ],
+    "gocritic/rangeAppendAll": [
+      "golden"
+    ],
+    "gocritic/rangeExprCopy": [
+      "golden"
+    ],
+    "gocritic/rangeValCopy": [
+      "golden",
+      "oss"
+    ],
+    "gocritic/redundantSprint": [
+      "golden"
+    ],
+    "gocritic/regexpMust": [
+      "golden"
+    ],
+    "gocritic/regexpPattern": [
+      "golden"
+    ],
+    "gocritic/regexpSimplify": [
+      "golden",
+      "oss"
+    ],
+    "gocritic/returnAfterHttpError": [
+      "golden"
+    ],
+    "gocritic/singleCaseSwitch": [
+      "golden",
+      "isolate",
+      "oss"
+    ],
+    "gocritic/sliceClear": [
+      "golden"
+    ],
+    "gocritic/sloppyLen": [
+      "golden",
+      "isolate",
+      "oss"
+    ],
+    "gocritic/sloppyReassign": [
+      "golden"
+    ],
+    "gocritic/sloppyTypeAssert": [
+      "golden"
+    ],
+    "gocritic/sortSlice": [
+      "golden"
+    ],
+    "gocritic/sprintfQuotedString": [
+      "golden"
+    ],
+    "gocritic/sqlQuery": [
+      "golden"
+    ],
+    "gocritic/stringConcatSimplify": [
+      "golden",
+      "unit"
+    ],
+    "gocritic/stringXbytes": [
+      "golden",
+      "oss",
+      "unit"
+    ],
+    "gocritic/stringsCompare": [
+      "golden",
+      "unit"
+    ],
+    "gocritic/switchTrue": [
+      "golden",
+      "isolate"
+    ],
+    "gocritic/syncMapLoadAndDelete": [
+      "golden"
+    ],
+    "gocritic/timeExprSimplify": [
+      "golden"
+    ],
+    "gocritic/todoCommentWithoutDetail": [
+      "golden"
+    ],
+    "gocritic/tooManyResultsChecker": [
+      "golden"
+    ],
+    "gocritic/truncateCmp": [
+      "golden"
+    ],
+    "gocritic/typeAssertChain": [
+      "golden"
+    ],
+    "gocritic/typeDefFirst": [
+      "golden"
+    ],
+    "gocritic/typeSwitchVar": [
+      "golden"
+    ],
+    "gocritic/typeUnparen": [
+      "golden"
+    ],
+    "gocritic/uncheckedInlineErr": [
+      "golden"
+    ],
+    "gocritic/underef": [
+      "golden",
+      "oss"
+    ],
+    "gocritic/unlabelStmt": [
+      "golden"
+    ],
+    "gocritic/unlambda": [
+      "golden"
+    ],
+    "gocritic/unnamedResult": [
+      "golden"
+    ],
+    "gocritic/unnecessaryBlock": [
+      "golden"
+    ],
+    "gocritic/unnecessaryDefer": [
+      "golden"
+    ],
+    "gocritic/unslice": [
+      "golden",
+      "oss"
+    ],
+    "gocritic/valSwap": [
+      "golden"
+    ],
+    "gocritic/weakCond": [
+      "golden"
+    ],
+    "gocritic/wrapperFunc": [
+      "golden",
+      "unit"
+    ],
+    "gocritic/yodaStyleExpr": [
+      "golden"
+    ],
+    "gocritic/zeroByteRepeat": [
+      "golden"
+    ],
+    "gocyclo": [
+      "isolate",
+      "oss"
+    ],
+    "godoclint": [
+      "isolate",
+      "oss"
+    ],
+    "godot": [
+      "isolate",
+      "oss"
+    ],
+    "godox": [
+      "golden",
+      "isolate",
+      "oss"
+    ],
+    "gofmt": [
+      "oss",
+      "unit"
+    ],
+    "gofumpt": [
+      "golden",
+      "oss",
+      "regress",
+      "unit"
+    ],
+    "goheader": [
+      "golden",
+      "isolate",
+      "oss"
+    ],
+    "goimports": [
+      "oss",
+      "unit"
+    ],
+    "golines": [
+      "isolate",
+      "unit"
+    ],
+    "gomoddirectives": [
+      "isolate"
+    ],
+    "gomodguard": [
+      "isolate"
+    ],
+    "gomodguard_v2": [
+      "isolate"
+    ],
+    "goprintffuncname": [
+      "isolate"
+    ],
+    "gosmopolitan": [
+      "isolate",
+      "oss"
+    ],
+    "govet/appends": [
+      "golden"
+    ],
+    "govet/assign": [
+      "golden",
+      "unit"
+    ],
+    "govet/atomic": [
+      "golden",
+      "isolate",
+      "unit"
+    ],
+    "govet/bools": [
+      "golden",
+      "oss"
+    ],
+    "govet/buildtag": [
+      "golden"
+    ],
+    "govet/composites": [
+      "golden",
+      "oss"
+    ],
+    "govet/copylocks": [
+      "golden",
+      "oss"
+    ],
+    "govet/defers": [
+      "golden"
+    ],
+    "govet/directive": [
+      "golden",
+      "unit"
+    ],
+    "govet/errorsas": [
+      "golden",
+      "isolate",
+      "oss"
+    ],
+    "govet/hostport": [
+      "golden"
+    ],
+    "govet/httpresponse": [
+      "golden",
+      "oss"
+    ],
+    "govet/ifaceassert": [
+      "golden"
+    ],
+    "govet/inline": [
+      "golden",
+      "oss",
+      "regress",
+      "unit"
+    ],
+    "govet/loopclosure": [
+      "golden",
+      "oss"
+    ],
+    "govet/lostcancel": [
+      "golden",
+      "oss"
+    ],
+    "govet/nilfunc": [
+      "golden"
+    ],
+    "govet/printf": [
+      "golden",
+      "isolate",
+      "oss"
+    ],
+    "govet/shift": [
+      "golden"
+    ],
+    "govet/sigchanyzer": [
+      "golden"
+    ],
+    "govet/slog": [
+      "golden",
+      "unit"
+    ],
+    "govet/stdmethods": [
+      "golden",
+      "oss"
+    ],
+    "govet/stringintconv": [
+      "golden"
+    ],
+    "govet/structtag": [
+      "golden",
+      "oss"
+    ],
+    "govet/testinggoroutine": [
+      "golden"
+    ],
+    "govet/tests": [
+      "golden",
+      "unit"
+    ],
+    "govet/timeformat": [
+      "golden"
+    ],
+    "govet/unmarshal": [
+      "golden"
+    ],
+    "govet/unreachable": [
+      "golden",
+      "isolate"
+    ],
+    "govet/unsafeptr": [
+      "golden"
+    ],
+    "govet/unusedresult": [
+      "golden"
+    ],
+    "govet/waitgroup": [
+      "golden"
+    ],
+    "grouper": [
+      "isolate"
+    ],
+    "iface": [
+      "isolate"
+    ],
+    "importas": [
+      "isolate"
+    ],
+    "inamedparam": [
+      "isolate",
+      "oss"
+    ],
+    "ineffassign": [
+      "golden",
+      "isolate",
+      "oss",
+      "regress",
+      "unit"
+    ],
+    "interfacebloat": [
+      "isolate",
+      "oss"
+    ],
+    "intrange": [
+      "golden",
+      "isolate",
+      "oss"
+    ],
+    "iotamixing": [
+      "isolate"
+    ],
+    "ireturn": [
+      "isolate",
+      "oss"
+    ],
+    "lll": [
+      "golden",
+      "isolate",
+      "oss"
+    ],
+    "loggercheck": [
+      "isolate"
+    ],
+    "maintidx": [
+      "isolate",
+      "oss"
+    ],
+    "makezero": [
+      "isolate"
+    ],
+    "mirror": [
+      "isolate",
+      "oss"
+    ],
+    "misspell": [
+      "golden",
+      "isolate",
+      "oss",
+      "unit"
+    ],
+    "mnd": [
+      "isolate",
+      "oss"
+    ],
+    "modernize": [
+      "golden",
+      "isolate",
+      "oss",
+      "regress"
+    ],
+    "musttag": [
+      "isolate"
+    ],
+    "nakedret": [
+      "isolate",
+      "oss"
+    ],
+    "nestif": [
+      "isolate",
+      "oss"
+    ],
+    "nilerr": [
+      "golden",
+      "isolate",
+      "oss"
+    ],
+    "nilnesserr": [
+      "isolate"
+    ],
+    "nilnil": [
+      "golden",
+      "isolate",
+      "oss"
+    ],
+    "nlreturn": [
+      "isolate",
+      "oss"
+    ],
+    "noctx": [
+      "isolate",
+      "oss"
+    ],
+    "noinlineerr": [
+      "isolate",
+      "oss"
+    ],
+    "nolintlint": [
+      "golden",
+      "isolate",
+      "oss",
+      "unit"
+    ],
+    "nonamedreturns": [
+      "isolate",
+      "oss"
+    ],
+    "nosprintfhostport": [
+      "isolate"
+    ],
+    "paralleltest": [
+      "isolate",
+      "oss"
+    ],
+    "perfsprint": [
+      "isolate",
+      "oss"
+    ],
+    "prealloc": [
+      "isolate",
+      "oss"
+    ],
+    "predeclared": [
+      "isolate",
+      "oss"
+    ],
+    "promlinter": [
+      "isolate",
+      "oss"
+    ],
+    "protogetter": [
+      "golden",
+      "isolate",
+      "oss"
+    ],
+    "reassign": [
+      "isolate"
+    ],
+    "recvcheck": [
+      "isolate",
+      "oss"
+    ],
+    "revive/add-constant": [
+      "golden",
+      "unit"
+    ],
+    "revive/argument-limit": [
+      "golden",
+      "unit"
+    ],
+    "revive/atomic": [
+      "golden",
+      "unit"
+    ],
+    "revive/banned-characters": [
+      "golden",
+      "unit"
+    ],
+    "revive/bare-return": [
+      "golden",
+      "unit"
+    ],
+    "revive/blank-imports": [
+      "golden",
+      "oss",
+      "regress",
+      "unit"
+    ],
+    "revive/bool-literal-in-expr": [
+      "golden",
+      "unit"
+    ],
+    "revive/call-to-gc": [
+      "golden",
+      "unit"
+    ],
+    "revive/cognitive-complexity": [
+      "golden",
+      "unit"
+    ],
+    "revive/comment-spacings": [
+      "golden",
+      "regress",
+      "unit"
+    ],
+    "revive/comments-density": [
+      "golden",
+      "unit"
+    ],
+    "revive/confusing-naming": [
+      "golden",
+      "unit"
+    ],
+    "revive/confusing-results": [
+      "golden",
+      "unit"
+    ],
+    "revive/constant-logical-expr": [
+      "golden",
+      "unit"
+    ],
+    "revive/context-as-argument": [
+      "golden",
+      "oss",
+      "unit"
+    ],
+    "revive/context-keys-type": [
+      "golden",
+      "regress"
+    ],
+    "revive/cyclomatic": [
+      "golden",
+      "unit"
+    ],
+    "revive/datarace": [
+      "golden",
+      "unit"
+    ],
+    "revive/deep-exit": [
+      "golden",
+      "unit"
+    ],
+    "revive/defer": [
+      "golden",
+      "unit"
+    ],
+    "revive/dot-imports": [
+      "golden",
+      "unit"
+    ],
+    "revive/duplicated-imports": [
+      "golden",
+      "unit"
+    ],
+    "revive/early-return": [
+      "golden",
+      "unit"
+    ],
+    "revive/empty-block": [
+      "golden",
+      "isolate",
+      "oss",
+      "unit"
+    ],
+    "revive/empty-lines": [
+      "golden",
+      "unit"
+    ],
+    "revive/enforce-map-style": [
+      "golden",
+      "unit"
+    ],
+    "revive/enforce-repeated-arg-type-style": [
+      "golden",
+      "unit"
+    ],
+    "revive/enforce-slice-style": [
+      "golden",
+      "unit"
+    ],
+    "revive/enforce-switch-style": [
+      "golden",
+      "unit"
+    ],
+    "revive/epoch-naming": [
+      "golden",
+      "oss",
+      "unit"
+    ],
+    "revive/error-naming": [
+      "golden",
+      "unit"
+    ],
+    "revive/error-return": [
+      "golden",
+      "unit"
+    ],
+    "revive/error-strings": [
+      "golden",
+      "regress",
+      "unit"
+    ],
+    "revive/errorf": [
+      "golden",
+      "unit"
+    ],
+    "revive/exported": [
+      "golden",
+      "isolate",
+      "oss",
+      "regress",
+      "unit"
+    ],
+    "revive/file-header": [
+      "golden",
+      "unit"
+    ],
+    "revive/file-length-limit": [
+      "golden",
+      "unit"
+    ],
+    "revive/filename-format": [
+      "golden",
+      "unit"
+    ],
+    "revive/flag-parameter": [
+      "golden",
+      "unit"
+    ],
+    "revive/forbidden-call-in-wg-go": [
+      "golden",
+      "unit"
+    ],
+    "revive/function-length": [
+      "golden",
+      "unit"
+    ],
+    "revive/function-result-limit": [
+      "golden",
+      "unit"
+    ],
+    "revive/get-return": [
+      "golden",
+      "unit"
+    ],
+    "revive/identical-branches": [
+      "golden",
+      "oss",
+      "unit"
+    ],
+    "revive/identical-ifelseif-branches": [
+      "golden",
+      "unit"
+    ],
+    "revive/identical-ifelseif-conditions": [
+      "golden",
+      "unit"
+    ],
+    "revive/identical-switch-branches": [
+      "golden",
+      "oss",
+      "unit"
+    ],
+    "revive/identical-switch-conditions": [
+      "golden",
+      "unit"
+    ],
+    "revive/if-return": [
+      "golden",
+      "oss",
+      "unit"
+    ],
+    "revive/import-alias-naming": [
+      "golden",
+      "unit"
+    ],
+    "revive/import-shadowing": [
+      "golden",
+      "unit"
+    ],
+    "revive/imports-blocklist": [
+      "golden",
+      "unit"
+    ],
+    "revive/increment-decrement": [
+      "golden",
+      "isolate",
+      "unit"
+    ],
+    "revive/indent-error-flow": [
+      "golden",
+      "oss",
+      "regress",
+      "unit"
+    ],
+    "revive/inefficient-map-lookup": [
+      "golden",
+      "unit"
+    ],
+    "revive/line-length-limit": [
+      "golden",
+      "unit"
+    ],
+    "revive/max-control-nesting": [
+      "golden",
+      "oss",
+      "unit"
+    ],
+    "revive/modifies-parameter": [
+      "golden",
+      "unit"
+    ],
+    "revive/modifies-value-receiver": [
+      "golden",
+      "unit"
+    ],
+    "revive/multiline-if-init": [
+      "unit"
+    ],
+    "revive/nested-structs": [
+      "golden",
+      "unit"
+    ],
+    "revive/optimize-operands-order": [
+      "golden",
+      "unit"
+    ],
+    "revive/package-comments": [
+      "golden",
+      "isolate",
+      "oss",
+      "unit"
+    ],
+    "revive/package-directory-mismatch": [
+      "golden",
+      "unit"
+    ],
+    "revive/package-naming": [
+      "golden",
+      "unit"
+    ],
+    "revive/range": [
+      "golden",
+      "unit"
+    ],
+    "revive/range-val-address": [
+      "golden",
+      "unit"
+    ],
+    "revive/range-val-in-closure": [
+      "golden",
+      "unit"
+    ],
+    "revive/receiver-naming": [
+      "golden",
+      "oss",
+      "regress",
+      "unit"
+    ],
+    "revive/redefines-builtin-id": [
+      "golden",
+      "oss",
+      "unit"
+    ],
+    "revive/redundant-import-alias": [
+      "golden",
+      "unit"
+    ],
+    "revive/redundant-test-main-exit": [
+      "golden",
+      "unit"
+    ],
+    "revive/string-format": [
+      "golden",
+      "unit"
+    ],
+    "revive/string-of-int": [
+      "golden",
+      "unit"
+    ],
+    "revive/struct-tag": [
+      "golden",
+      "oss",
+      "unit"
+    ],
+    "revive/superfluous-else": [
+      "golden",
+      "unit"
+    ],
+    "revive/time-date": [
+      "golden",
+      "unit"
+    ],
+    "revive/time-equal": [
+      "golden",
+      "unit"
+    ],
+    "revive/time-naming": [
+      "golden",
+      "oss"
+    ],
+    "revive/unchecked-type-assertion": [
+      "golden",
+      "unit"
+    ],
+    "revive/unconditional-recursion": [
+      "golden",
+      "unit"
+    ],
+    "revive/unexported-naming": [
+      "golden",
+      "unit"
+    ],
+    "revive/unexported-return": [
+      "golden",
+      "oss",
+      "regress",
+      "unit"
+    ],
+    "revive/unhandled-error": [
+      "golden",
+      "unit"
+    ],
+    "revive/unnecessary-format": [
+      "golden",
+      "unit"
+    ],
+    "revive/unnecessary-if": [
+      "golden",
+      "unit"
+    ],
+    "revive/unnecessary-stmt": [
+      "golden",
+      "oss",
+      "unit"
+    ],
+    "revive/unreachable-code": [
+      "golden",
+      "unit"
+    ],
+    "revive/unsecure-url-scheme": [
+      "golden",
+      "oss",
+      "unit"
+    ],
+    "revive/unused-parameter": [
+      "golden",
+      "oss",
+      "unit"
+    ],
+    "revive/unused-receiver": [
+      "golden",
+      "unit"
+    ],
+    "revive/use-any": [
+      "golden",
+      "unit"
+    ],
+    "revive/use-errors-new": [
+      "golden",
+      "unit"
+    ],
+    "revive/use-fmt-print": [
+      "golden",
+      "unit"
+    ],
+    "revive/use-slices-sort": [
+      "golden",
+      "unit"
+    ],
+    "revive/useless-break": [
+      "golden",
+      "unit"
+    ],
+    "revive/useless-fallthrough": [
+      "golden",
+      "unit"
+    ],
+    "revive/var-declaration": [
+      "golden",
+      "oss",
+      "regress",
+      "unit"
+    ],
+    "revive/var-naming": [
+      "golden",
+      "isolate",
+      "oss",
+      "unit"
+    ],
+    "revive/waitgroup-by-value": [
+      "golden",
+      "unit"
+    ],
+    "rowserrcheck": [
+      "isolate"
+    ],
+    "sloglint": [
+      "isolate",
+      "oss"
+    ],
+    "spancheck": [
+      "isolate",
+      "oss"
+    ],
+    "sqlclosecheck": [
+      "isolate",
+      "oss"
+    ],
+    "swaggo": [
+      "isolate"
+    ],
+    "tagalign": [
+      "isolate",
+      "oss"
+    ],
+    "tagliatelle": [
+      "isolate",
+      "oss"
+    ],
+    "testableexamples": [
+      "isolate"
+    ],
+    "testifylint": [
+      "golden",
+      "isolate",
+      "oss",
+      "regress"
+    ],
+    "testpackage": [
+      "isolate",
+      "oss"
+    ],
+    "thelper": [
+      "isolate",
+      "oss",
+      "unit"
+    ],
+    "tparallel": [
+      "isolate",
+      "oss"
+    ],
+    "unconvert": [
+      "isolate",
+      "oss"
+    ],
+    "unparam": [
+      "golden",
+      "isolate",
+      "oss"
+    ],
+    "unqueryvet": [
+      "isolate"
+    ],
+    "unused": [
+      "golden",
+      "isolate",
+      "oss",
+      "regress",
+      "unit"
+    ],
+    "usestdlibvars": [
+      "isolate",
+      "oss"
+    ],
+    "usetesting": [
+      "isolate"
+    ],
+    "varnamelen": [
+      "isolate",
+      "oss"
+    ],
+    "wastedassign": [
+      "isolate",
+      "oss"
+    ],
+    "whitespace": [
+      "isolate",
+      "oss",
+      "regress",
+      "unit"
+    ],
+    "wrapcheck": [
+      "isolate",
+      "oss"
+    ],
+    "wsl": [
+      "isolate",
+      "oss"
+    ],
+    "wsl_v5": [
+      "golden",
+      "isolate",
+      "oss"
+    ],
+    "zerologlint": [
+      "isolate"
+    ]
+  },
+  "scanned_artifacts": {
+    "golden": 14987,
+    "isolate": 9329,
+    "oss": 1081,
+    "regress": 209
+  }
+}

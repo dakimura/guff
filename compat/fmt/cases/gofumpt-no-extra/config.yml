@@ -1,0 +1,7 @@
+# The gofumpt-extra fixture with `extra-rules` left at its default (off), so
+# the setting has both branches on the same bytes: with it on, `a string, b
+# string` becomes `a, b string`; with it off it does not.
+version: "2"
+formatters:
+  enable:
+    - gofumpt

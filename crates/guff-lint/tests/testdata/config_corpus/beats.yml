@@ -1,0 +1,181 @@
+# Snapshot based on elastic/beats (golangci-lint v2).
+# Source: https://raw.githubusercontent.com/elastic/beats/main/.golangci.yml
+# Captured: 2026-07-17. Upstream may diverge; refresh via SOURCES.md.
+version: "2"
+run:
+  build-tags:
+    - integration
+linters:
+  default: none
+  enable:
+    - asciicheck
+    - bodyclose
+    - depguard
+    - durationcheck
+    - errcheck
+    - errorlint
+    - exhaustruct
+    - forbidigo
+    - gomoddirectives
+    - gomodguard_v2
+    - gosec
+    - govet
+    - importas
+    - ineffassign
+    - misspell
+    - modernize
+    - nakedret
+    - nilerr
+    - noctx
+    - nolintlint
+    - staticcheck
+    - testifylint
+    - unconvert
+    - unused
+    - wastedassign
+  settings:
+    depguard:
+      rules:
+        apache-licensed-code:
+          list-mode: lax
+          files:
+            - '!**/x-pack/**/*.go'
+          deny:
+            - pkg: github.com/elastic/beats/v7/x-pack
+              desc: Apache 2.0 licensed code cannot depend on Elastic licensed code (x-pack/).
+            - pkg: github.com/elastic/elastic-agent-client
+              desc: Apache 2.0 licensed code cannot depend on Elastic licensed code (elastic-agent-client).
+        main:
+          list-mode: lax
+          deny:
+            - pkg: math/rand$
+              desc: superseded by math/rand/v2
+            - pkg: golang.org/x/exp/maps$
+              desc: superseded by maps
+            - pkg: golang.org/x/exp/slices$
+              desc: superseded by slices
+    errcheck:
+      check-type-assertions: true
+      check-blank: false
+      exclude-functions:
+        - (github.com/elastic/elastic-agent-libs/mapstr.M).Delete
+        - (github.com/elastic/elastic-agent-libs/mapstr.M).Put
+        - github.com/elastic/elastic-agent-libs/logp.TestingSetup
+        - github.com/elastic/elastic-agent-libs/logp.DevelopmentSetup
+    errorlint:
+      errorf: true
+      asserts: true
+      comparison: true
+    exhaustruct:
+      include:
+        # BaseMetricSet must be created via NewModule to ensure paths are set.
+        - 'github\.com/elastic/beats/v7/metricbeat/mb\.BaseMetricSet'
+    forbidigo:
+      forbid:
+        - pattern: fmt.Print.*
+        - pattern: ^paths\.Resolve$
+          msg: "use a per-beat *paths.Path instance instead of the global paths.Resolve"
+        - pattern: ^paths\.InitPaths$
+          msg: "use a per-beat *paths.Path instance instead of the global paths.InitPaths"
+        - pattern: ^paths\.Paths$
+          msg: "use a per-beat *paths.Path instance instead of the global paths.Paths"
+        - pattern: ^logp\.NewLogger$
+          msg: "accept a *logp.Logger as a parameter instead of creating one with logp.NewLogger"
+        - pattern: ^logp\.L$
+          msg: "accept a *logp.Logger as a parameter instead of using the global logp.L()"
+    gomoddirectives:
+      replace-allow-list:
+        - github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/consumption/armconsumption
+        - github.com/Shopify/sarama
+        - github.com/apoydence/eachers
+        - github.com/dop251/goja
+        - github.com/dop251/goja_nodejs
+        - github.com/fsnotify/fsevents
+        - github.com/fsnotify/fsnotify
+        - github.com/google/gopacket
+        - github.com/insomniacslk/dhcp
+        - github.com/meraki/dashboard-api-go/v3
+        - github.com/snowflakedb/gosnowflake
+      replace-local: false
+    gomodguard_v2:
+      blocked:
+        - module: github.com/pkg/errors
+          recommendations:
+            - errors
+            - fmt
+          reason: This package is deprecated, use `fmt.Errorf` with `%w` instead
+        - module: go.uber.org/multierr
+          recommendations:
+            - errors
+          reason: This package is deprecated, use `errors.Join` instead
+        - module: gotest.tools/v3
+          recommendations:
+            - github.com/stretchr/testify
+          reason: Use one assertion library consistently across the codebase
+        - module: github.com/google/uuid
+          recommendations:
+            - github.com/gofrs/uuid/v5
+          reason: Use one uuid library consistently across the codebase
+    gosec:
+      excludes:
+        - G306
+        - G404
+        - G401
+        - G501
+        - G505
+    modernize:
+      # omitzero rewrites `,omitempty` struct tags to `,omitzero`, which changes
+      # JSON marshaling semantics for struct/array fields. It is not a mechanical,
+      # behavior-preserving fix, so keep it disabled.
+      disable:
+        - omitzero
+    nolintlint:
+      require-explanation: true
+      require-specific: false
+      allow-unused: false
+    prealloc:
+      simple: false
+      range-loops: true
+      for-loops: true
+    staticcheck:
+      checks:
+        - -ST1005
+        - all
+    testifylint:
+      disable:
+        - go-require # Disabled: too many false positives, can be used to exit a goroutine
+        - require-error # Disabled: using assert for error checks lets the test continue, maximizing context on failure
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - staticcheck
+        text: 'ST1003:'
+      - linters:
+          - forbidigo
+        path: (.*magefile.go|.*dev-tools/mage/.*)
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+issues:
+  max-issues-per-linter: 50
+  max-same-issues: 3
+formatters:
+  enable:
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/elastic
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

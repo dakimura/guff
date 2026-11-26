@@ -1,0 +1,864 @@
+[
+  {
+    "name": "alertmanager",
+    "url": "https://github.com/prometheus/alertmanager.git",
+    "ref": "v0.34.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
+  },
+  {
+    "name": "argo-cd",
+    "url": "https://github.com/argoproj/argo-cd.git",
+    "ref": "v3.5.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "argo-rollouts",
+    "url": "https://github.com/argoproj/argo-rollouts.git",
+    "ref": "v1.9.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
+  },
+  {
+    "name": "atlas",
+    "url": "https://github.com/ariga/atlas.git",
+    "ref": "v1.3.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "20m"
+  },
+  {
+    "name": "authelia",
+    "url": "https://github.com/authelia/authelia.git",
+    "ref": "v4.39.20",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "20m"
+  },
+  {
+    "name": "boundary",
+    "url": "https://github.com/hashicorp/boundary.git",
+    "ref": "v0.21.3",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
+  },
+  {
+    "name": "buildah",
+    "url": "https://github.com/podman-container-tools/buildah.git",
+    "ref": "v1.45.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
+  },
+  {
+    "name": "buildkit",
+    "url": "https://github.com/moby/buildkit.git",
+    "ref": "v0.32.2",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
+  },
+  {
+    "name": "celestia-node",
+    "url": "https://github.com/celestiaorg/celestia-node.git",
+    "ref": "v0.31.4",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
+  },
+  {
+    "name": "cert-manager",
+    "url": "https://github.com/cert-manager/cert-manager.git",
+    "ref": "v1.21.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "20m"
+  },
+  {
+    "name": "cli",
+    "url": "https://github.com/cli/cli.git",
+    "ref": "v2.83.2",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "20m"
+  },
+  {
+    "name": "connect-go",
+    "url": "https://github.com/connectrpc/connect-go.git",
+    "ref": "v1.20.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "10m"
+  },
+  {
+    "name": "coredns",
+    "url": "https://github.com/coredns/coredns.git",
+    "ref": "v1.14.6",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "20m"
+  },
+  {
+    "name": "cri-o",
+    "url": "https://github.com/cri-o/cri-o.git",
+    "ref": "v1.36.4",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
+  },
+  {
+    "name": "dapr",
+    "url": "https://github.com/dapr/dapr.git",
+    "ref": "v1.18.3",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "dubbo-go",
+    "url": "https://github.com/apache/dubbo-go.git",
+    "ref": "tools/dubbogo-cli/v1.0.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
+  },
+  {
+    "name": "ebpf",
+    "url": "https://github.com/cilium/ebpf.git",
+    "ref": "v0.22.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
+  },
+  {
+    "name": "external-dns",
+    "url": "https://github.com/kubernetes-sigs/external-dns.git",
+    "ref": "v0.22.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
+  },
+  {
+    "name": "fiber",
+    "url": "https://github.com/gofiber/fiber.git",
+    "ref": "v3.5.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
+  },
+  {
+    "name": "flipt",
+    "url": "https://github.com/flipt-io/flipt.git",
+    "ref": "v2.11.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
+  },
+  {
+    "name": "gitea",
+    "url": "https://github.com/go-gitea/gitea.git",
+    "ref": "v1.27.2",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "go-redis",
+    "url": "https://github.com/redis/go-redis.git",
+    "ref": "v9.22.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
+  },
+  {
+    "name": "jaeger",
+    "url": "https://github.com/jaegertracing/jaeger.git",
+    "ref": "v2.20.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "20m"
+  },
+  {
+    "name": "k6",
+    "url": "https://github.com/grafana/k6.git",
+    "ref": "v2.2.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
+  },
+  {
+    "name": "karmada",
+    "url": "https://github.com/karmada-io/karmada.git",
+    "ref": "v1.18.2",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
+  },
+  {
+    "name": "kratos",
+    "url": "https://github.com/ory/kratos.git",
+    "ref": "v26.2.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
+  },
+  {
+    "name": "kubeshark",
+    "url": "https://github.com/kubeshark/kubeshark.git",
+    "ref": "v53.4.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
+  },
+  {
+    "name": "nats-server",
+    "url": "https://github.com/nats-io/nats-server.git",
+    "ref": "v2.14.4",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "20m"
+  },
+  {
+    "name": "packer",
+    "url": "https://github.com/hashicorp/packer.git",
+    "ref": "v1.16.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
+  },
+  {
+    "name": "pipeline",
+    "url": "https://github.com/tektoncd/pipeline.git",
+    "ref": "v1.15.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
+  },
+  {
+    "name": "prometheus",
+    "url": "https://github.com/prometheus/prometheus.git",
+    "ref": "v3.14.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "rclone",
+    "url": "https://github.com/rclone/rclone.git",
+    "ref": "v1.72.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "restic",
+    "url": "https://github.com/restic/restic.git",
+    "ref": "v0.19.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "20m"
+  },
+  {
+    "name": "scaleway-cli",
+    "url": "https://github.com/scaleway/scaleway-cli.git",
+    "ref": "v2.61.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
+  },
+  {
+    "name": "skopeo",
+    "url": "https://github.com/podman-container-tools/skopeo.git",
+    "ref": "v1.24.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m",
+    "build_tags": [
+      "exclude_graphdriver_btrfs",
+      "containers_image_openpgp"
+    ]
+  },
+  {
+    "name": "syncthing",
+    "url": "https://github.com/syncthing/syncthing.git",
+    "ref": "v2.1.3",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "20m",
+    "build_tags": [
+      "noassets"
+    ]
+  },
+  {
+    "name": "tailscale",
+    "url": "https://github.com/tailscale/tailscale.git",
+    "ref": "v1.102.3",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
+  },
+  {
+    "name": "telegraf",
+    "url": "https://github.com/influxdata/telegraf.git",
+    "ref": "v1.39.3",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
+  },
+  {
+    "name": "tetragon",
+    "url": "https://github.com/cilium/tetragon.git",
+    "ref": "v1.7.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
+  },
+  {
+    "name": "thanos",
+    "url": "https://github.com/thanos-io/thanos.git",
+    "ref": "v0.42.4",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "traefik",
+    "url": "https://github.com/traefik/traefik.git",
+    "ref": "v3.6.8",
+    "packages": "./pkg/...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "velero",
+    "url": "https://github.com/velero-io/velero.git",
+    "ref": "v1.18.2",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
+  },
+  {
+    "name": "minio",
+    "url": "https://github.com/minio/minio.git",
+    "ref": "RELEASE.2025-10-15T17-29-55Z",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
+  },
+  {
+    "name": "hydra",
+    "url": "https://github.com/ory/hydra.git",
+    "ref": "v26.2.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
+  },
+  {
+    "name": "woodpecker",
+    "url": "https://github.com/woodpecker-ci/woodpecker.git",
+    "ref": "v3.18.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
+  },
+  {
+    "name": "go-elasticsearch",
+    "url": "https://github.com/elastic/go-elasticsearch.git",
+    "ref": "v9.5.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
+  },
+  {
+    "name": "ingress-nginx",
+    "url": "https://github.com/kubernetes/ingress-nginx.git",
+    "ref": "controller-v1.15.1",
+    "packages": "./cmd/... ./internal/... ./pkg/... ./magefiles/... ./version/...",
+    "tier": "hunt",
+    "timeout": "25m"
+  },
+  {
+    "name": "lazygit",
+    "url": "https://github.com/jesseduffield/lazygit.git",
+    "ref": "v0.64.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
+  },
+  {
+    "name": "argo-workflows",
+    "url": "https://github.com/argoproj/argo-workflows.git",
+    "ref": "v4.1.2",
+    "packages": "./api/... ./config/... ./errors/... ./persist/... ./pkg/... ./test/... ./util/... ./workflow/...",
+    "tier": "hunt",
+    "timeout": "25m"
+  },
+  {
+    "name": "podman",
+    "url": "https://github.com/podman-container-tools/podman.git",
+    "ref": "v6.1.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m",
+    "build_tags": [
+      "remote",
+      "containers_image_openpgp"
+    ]
+  },
+  {
+    "name": "cometbft",
+    "url": "https://github.com/cometbft/cometbft.git",
+    "ref": "v0.40.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
+  },
+  {
+    "name": "gatekeeper",
+    "url": "https://github.com/open-policy-agent/gatekeeper.git",
+    "ref": "v3.23.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
+  },
+  {
+    "name": "cluster-api",
+    "url": "https://github.com/kubernetes-sigs/cluster-api.git",
+    "ref": "v1.14.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
+  },
+  {
+    "name": "go-ethereum",
+    "url": "https://github.com/ethereum/go-ethereum.git",
+    "ref": "v1.17.5",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
+  },
+  {
+    "name": "pyroscope",
+    "url": "https://github.com/grafana/pyroscope.git",
+    "ref": "v2.3.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
+  },
+  {
+    "name": "opentofu",
+    "url": "https://github.com/opentofu/opentofu.git",
+    "ref": "v1.12.6",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
+  },
+  {
+    "name": "victoriametrics",
+    "url": "https://github.com/VictoriaMetrics/VictoriaMetrics.git",
+    "ref": "v1.150.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
+  },
+  {
+    "name": "cosmos-sdk",
+    "url": "https://github.com/cosmos/cosmos-sdk.git",
+    "ref": "v0.55.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
+  },
+  {
+    "name": "tempo",
+    "url": "https://github.com/grafana/tempo.git",
+    "ref": "v3.0.3",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m"
+  },
+  {
+    "name": "photoprism",
+    "url": "https://github.com/photoprism/photoprism.git",
+    "ref": "260728-bbde8f452",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "25m",
+    "env": {
+      "CGO_CFLAGS": "-I/opt/homebrew/include",
+      "CGO_LDFLAGS": "-L/opt/homebrew/lib"
+    }
+  },
+  {
+    "name": "cortex",
+    "url": "https://github.com/cortexproject/cortex.git",
+    "ref": "v1.21.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "40m"
+  },
+  {
+    "name": "loki",
+    "url": "https://github.com/grafana/loki.git",
+    "ref": "v3.7.6",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "40m"
+  },
+  {
+    "name": "avalanchego",
+    "url": "https://github.com/ava-labs/avalanchego.git",
+    "ref": "v1.14.2",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "40m"
+  },
+  {
+    "name": "vitess",
+    "url": "https://github.com/vitessio/vitess.git",
+    "ref": "v24.0.2",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "40m"
+  },
+  {
+    "name": "beats",
+    "url": "https://github.com/elastic/beats.git",
+    "ref": "v9.5.2",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "40m"
+  },
+  {
+    "name": "cilium",
+    "url": "https://github.com/cilium/cilium.git",
+    "ref": "v1.20.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "40m"
+  },
+  {
+    "name": "k3s",
+    "url": "https://github.com/k3s-io/k3s.git",
+    "ref": "v1.36.3+k3s1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "40m"
+  },
+  {
+    "name": "nomad",
+    "url": "https://github.com/hashicorp/nomad.git",
+    "ref": "v2.0.5",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "40m",
+    "build_tags": [
+      "ui",
+      "hashicorpmetrics"
+    ]
+  },
+  {
+    "name": "mimir",
+    "url": "https://github.com/grafana/mimir.git",
+    "ref": "mimir-3.2.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "40m"
+  },
+  {
+    "name": "trivy",
+    "url": "https://github.com/aquasecurity/trivy.git",
+    "ref": "v0.74.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "40m",
+    "build_tags": [
+      "integration"
+    ],
+    "env": {
+      "CGO_ENABLED": "0",
+      "GOEXPERIMENT": "jsonv2"
+    }
+  },
+  {
+    "name": "datadog-agent",
+    "url": "https://github.com/DataDog/datadog-agent.git",
+    "ref": "7.82.3",
+    "packages": "./cmd/... ./comp/... ./internal/... ./pkg/... ./test/...",
+    "tier": "hunt",
+    "timeout": "60m",
+    "build_tags": [
+      "cel",
+      "clusterchecks",
+      "consul",
+      "containerd",
+      "cri",
+      "docker",
+      "ec2",
+      "etcd",
+      "fargateprocess",
+      "grpcnotrace",
+      "jmx",
+      "kubeapiserver",
+      "kubelet",
+      "ncm",
+      "oracle",
+      "orchestrator",
+      "otlp",
+      "python",
+      "retrynotrace",
+      "sharedlibrarycheck",
+      "systemprobechecks",
+      "test",
+      "trivy_no_javadb",
+      "zk",
+      "zlib",
+      "zstd"
+    ]
+  },
+  {
+    "name": "weaviate",
+    "url": "https://github.com/weaviate/weaviate.git",
+    "ref": "v1.39.2",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "60m"
+  },
+  {
+    "name": "teleport",
+    "url": "https://github.com/gravitational/teleport.git",
+    "ref": "v18.11.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "60m"
+  },
+  {
+    "name": "opa",
+    "url": "https://github.com/open-policy-agent/opa.git",
+    "ref": "v1.19.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "60m"
+  },
+  {
+    "name": "stern",
+    "url": "https://github.com/stern/stern.git",
+    "ref": "v1.34.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "open-feature-go-sdk",
+    "url": "https://github.com/open-feature/go-sdk.git",
+    "ref": "v1.19.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "logrus",
+    "url": "https://github.com/sirupsen/logrus.git",
+    "ref": "v1.10.2",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "viper",
+    "url": "https://github.com/spf13/viper.git",
+    "ref": "v1.21.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "lipgloss",
+    "url": "https://github.com/charmbracelet/lipgloss.git",
+    "ref": "v2.0.6",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "colima",
+    "url": "https://github.com/abiosoft/colima.git",
+    "ref": "v0.10.3",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "hertz",
+    "url": "https://github.com/cloudwego/hertz.git",
+    "ref": "v0.10.6",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "gotify",
+    "url": "https://github.com/gotify/server.git",
+    "ref": "v3.1.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "client_golang",
+    "url": "https://github.com/prometheus/client_golang.git",
+    "ref": "v1.24.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "bubbletea",
+    "url": "https://github.com/charmbracelet/bubbletea.git",
+    "ref": "v2.0.10",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "clickhouse-go",
+    "url": "https://github.com/ClickHouse/clickhouse-go.git",
+    "ref": "v2.48.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "echo",
+    "url": "https://github.com/labstack/echo.git",
+    "ref": "v5.4.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "go-kratos-kratos",
+    "url": "https://github.com/go-kratos/kratos.git",
+    "ref": "v3.0.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "goose",
+    "url": "https://github.com/pressly/goose.git",
+    "ref": "v3.28.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "sarama",
+    "url": "https://github.com/IBM/sarama.git",
+    "ref": "v1.61.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "node_exporter",
+    "url": "https://github.com/prometheus/node_exporter.git",
+    "ref": "v1.12.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "apache-answer",
+    "url": "https://github.com/apache/answer.git",
+    "ref": "v2.0.2",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "act",
+    "url": "https://github.com/nektos/act.git",
+    "ref": "v0.2.89",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "rekor",
+    "url": "https://github.com/sigstore/rekor.git",
+    "ref": "v1.5.4",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "soft-serve",
+    "url": "https://github.com/charmbracelet/soft-serve.git",
+    "ref": "v0.12.2",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "60m"
+  },
+  {
+    "name": "kube-state-metrics",
+    "url": "https://github.com/kubernetes/kube-state-metrics.git",
+    "ref": "v2.20.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "60m"
+  },
+  {
+    "name": "gorm",
+    "url": "https://github.com/go-gorm/gorm.git",
+    "ref": "v1.31.2",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "glamour",
+    "url": "https://github.com/charmbracelet/glamour.git",
+    "ref": "v2.0.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "grype",
+    "url": "https://github.com/anchore/grype.git",
+    "ref": "v0.119.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "gosec",
+    "url": "https://github.com/securego/gosec.git",
+    "ref": "v2.29.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "kitex",
+    "url": "https://github.com/cloudwego/kitex.git",
+    "ref": "v0.16.2",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "nerdctl",
+    "url": "https://github.com/containerd/nerdctl.git",
+    "ref": "v2.4.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  }
+]

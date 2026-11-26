@@ -1,0 +1,19 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - godoclint
+  settings:
+    godoclint:
+      default: none
+      enable:
+        - start-with-name
+        - require-doc
+        - max-len
+      options:
+        max-len:
+          length: 100
+        require-doc:
+          ignore-exported: true
+        start-with-name:
+          include-unexported: true

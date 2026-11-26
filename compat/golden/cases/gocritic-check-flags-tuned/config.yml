@@ -1,0 +1,42 @@
+# Golden case: the same six checks with every param moved.
+#
+# Two of the keys are spelled in other cases on purpose: golangci-lint finds a
+# checker's params by `strings.ToLower` of both the checker and the param name,
+# and guff looked them up verbatim.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gocritic
+  settings:
+    gocritic:
+      disable-all: true
+      enabled-checks:
+        - captLocal
+        - commentedOutCode
+        - elseif
+        - rangeExprCopy
+        - rangeValCopy
+        - underef
+      settings:
+        captlocal:
+          paramsonly: false
+        commentedOutCode:
+          minLength: 50
+        elseif:
+          skipBalanced: false
+        RangeExprCopy:
+          SkipTestFuncs: false
+        rangeValCopy:
+          skipTestFuncs: false
+        underef:
+          skipRecvDeref: false
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

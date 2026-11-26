@@ -1,0 +1,26 @@
+# Golden case: `gosec.confidence: high` (COMPAT-HARDENING Phase 4).
+#
+# Two rungs on the confidence axis: G101 (low) and G404 (medium) are gone, and
+# G104 — which `severity: medium` removed first — is still here.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gosec
+  settings:
+    gosec:
+      confidence: high
+      includes:
+        - G101
+        - G104
+        - G401
+        - G404
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

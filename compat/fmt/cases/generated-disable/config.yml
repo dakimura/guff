@@ -1,0 +1,8 @@
+# `disable`: never skip on generated-file heuristics, so even the canonical
+# marker is formatted.
+version: "2"
+formatters:
+  enable:
+    - gofmt
+  exclusions:
+    generated: disable

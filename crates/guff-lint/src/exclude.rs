@@ -1,0 +1,1958 @@
+//! Post-processing filters for lint issues (golangci `result/processors`).
+//!
+//! Pipeline order (subset of golangci-lint):
+//! GOCACHE/cgo → typecheck-overrides-everything → path (dirs/files) → text exclude →
+//! exclude-rules (+ default excludes) →
+//! nolint → generated → diff (new-from-*) → uniq-by-line → max-per-linter → max-same →
+//! severity (+ unused nolintlint).
+
+use std::borrow::Cow;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
+
+use guff::position::FileSet;
+use guff_analysis::Diagnostic;
+use guff_packages::Package;
+use guff_runner::{default_go_cache_dir, is_under_go_cache};
+use regex::Regex;
+
+use crate::config::{ExcludeRule, IssuesConfig, SeverityConfig};
+use crate::diff::{build_diff_state, DiffFilterSpec};
+use crate::nolint::NolintIndex;
+use crate::registry::linter_name_for_analyzer;
+
+/// Default directory patterns used when `exclude-dirs-use-default` is true
+/// (golangci `StdExcludeDirRegexps`).
+pub const DEFAULT_EXCLUDE_DIRS: &[&str] = &[
+    r"(^|[/\\])vendor([/\\]|$)",
+    r"(^|[/\\])third_party([/\\]|$)",
+    r"(^|[/\\])testdata([/\\]|$)",
+    r"(^|[/\\])examples([/\\]|$)",
+    r"(^|[/\\])Godeps([/\\]|$)",
+    r"(^|[/\\])builtin([/\\]|$)",
+];
+
+/// One of golangci's built-in default exclude patterns (`EXC0001`…`EXC0015`).
+#[derive(Debug, Clone, Copy)]
+pub struct DefaultExcludePattern {
+    pub id: &'static str,
+    pub pattern: &'static str,
+    pub linter: &'static str,
+}
+
+/// golangci-lint default exclude patterns for `exclude-use-default: true`.
+pub fn default_exclude_patterns() -> &'static [DefaultExcludePattern] {
+    static PATTERNS: &[DefaultExcludePattern] = &[
+        DefaultExcludePattern {
+            id: "EXC0001",
+            pattern: r"Error return value of .((os\.)?std(out|err)\..*|.*Close|.*Flush|os\.Remove(All)?|.*print(f|ln)?|os\.(Un)?Setenv). is not checked",
+            linter: "errcheck",
+        },
+        DefaultExcludePattern {
+            id: "EXC0002",
+            pattern: r"(comment on exported (method|function|type|const)|should have( a package)? comment|comment should be of the form)",
+            linter: "golint",
+        },
+        DefaultExcludePattern {
+            id: "EXC0003",
+            pattern: r"func name will be used as test\.Test.* by other packages, and that stutters; consider calling this",
+            linter: "golint",
+        },
+        DefaultExcludePattern {
+            id: "EXC0004",
+            pattern: r"(possible misuse of unsafe.Pointer|should have signature)",
+            linter: "govet",
+        },
+        DefaultExcludePattern {
+            id: "EXC0005",
+            pattern: "SA4011",
+            linter: "staticcheck",
+        },
+        DefaultExcludePattern {
+            id: "EXC0006",
+            pattern: "G103: Use of unsafe calls should be audited",
+            linter: "gosec",
+        },
+        DefaultExcludePattern {
+            id: "EXC0007",
+            pattern: "G204: Subprocess launched with variable",
+            linter: "gosec",
+        },
+        DefaultExcludePattern {
+            id: "EXC0008",
+            pattern: "G104",
+            linter: "gosec",
+        },
+        DefaultExcludePattern {
+            id: "EXC0009",
+            pattern: r"(G301|G302|G307): Expect (directory permissions to be 0750|file permissions to be 0600) or less",
+            linter: "gosec",
+        },
+        DefaultExcludePattern {
+            id: "EXC0010",
+            pattern: "G304: Potential file inclusion via variable",
+            linter: "gosec",
+        },
+        DefaultExcludePattern {
+            id: "EXC0011",
+            pattern: r"(ST1000|ST1020|ST1021|ST1022)",
+            linter: "stylecheck",
+        },
+        DefaultExcludePattern {
+            id: "EXC0012",
+            pattern: r"exported (.+) should have comment( \(or a comment on this block\))? or be unexported",
+            linter: "revive",
+        },
+        DefaultExcludePattern {
+            id: "EXC0013",
+            pattern: r#"package comment should be of the form "(.+)...""#,
+            linter: "revive",
+        },
+        DefaultExcludePattern {
+            id: "EXC0014",
+            pattern: r#"comment on exported (.+) should be of the form "(.+)...""#,
+            linter: "revive",
+        },
+        DefaultExcludePattern {
+            id: "EXC0015",
+            pattern: "should have a package comment",
+            linter: "revive",
+        },
+    ];
+    PATTERNS
+}
+
+/// The position an issue is reported at, with a `//line` directive's filename
+/// mapped back to the file that actually holds the code.
+///
+/// Port of golangci-lint's `FilenameUnadjuster` processor, whose own comment is
+/// the reason it exists:
+///
+/// > A lot of linters use `fset.Position(f.Pos())` to get filename, and they
+/// > return adjusted filename (e.g. `*.qtpl`) for an issue. We need restore
+/// > real `.go` filename to properly output it, parse it, etc.
+///
+/// quicktemplate, goyacc and ragel all emit `//line` directives, and every
+/// finding in the generated file then carries the *template's* name. Upstream
+/// maps it back before anything else looks at the issue — which is also what
+/// makes `exclusions.generated` work there, since the "Code generated … DO NOT
+/// EDIT." header is in the `.go` file and not in the template. guff reported
+/// `app/vmalert/app/vmalert/web.qtpl:194` on VictoriaMetrics where upstream
+/// reports nothing at all.
+///
+/// Upstream registers the mapping per *file*, keyed on the filename the file's
+/// own `Pos()` — its `package` clause — resolves to. An issue is mapped back
+/// only when its adjusted name is that one: a `//line` that appears only
+/// *after* the package clause (loggercheck's nilness testdata points one at a
+/// `generated.go` that does not exist) leaves its issues on the adjusted name
+/// and position, column 0 and all.
+///
+/// The `.go` suffix guard is upstream's, and it is what keeps cgo's
+/// `/caches/cgo-…` files from replacing a real path.
+fn unadjusted_position(
+    fset: &FileSet,
+    pos: guff::Pos,
+    package_clause_names: &mut HashMap<String, Option<String>>,
+) -> guff::position::Position {
+    let adjusted = fset.position(pos);
+    let raw = fset.position_for(pos, false);
+    // `goanalysis.GetFilePositionFor`, before any processor: a position
+    // adjusted to a non-`.go` file (a template) reverts to the real one.
+    if Path::new(&adjusted.filename).extension().is_none_or(|e| e != "go") {
+        return raw;
+    }
+    if raw.filename == adjusted.filename || !raw.filename.ends_with(".go") {
+        return adjusted;
+    }
+    let clause_name = package_clause_names
+        .entry(raw.filename.clone())
+        .or_insert_with(|| package_clause_adjusted_name(fset, pos, &raw.filename));
+    if clause_name.as_deref() == Some(adjusted.filename.as_str()) {
+        raw
+    } else {
+        adjusted
+    }
+}
+
+/// The name `fset.PositionFor(file.Pos(), true)` gives the file holding
+/// `pos`: the `package` keyword's adjusted filename. `None` when the file
+/// cannot be read or has no package clause.
+fn package_clause_adjusted_name(fset: &FileSet, pos: guff::Pos, filename: &str) -> Option<String> {
+    let file = fset.file(pos)?;
+    let src = std::fs::read(filename).ok()?;
+    let off = package_keyword_offset(&src)?;
+    Some(fset.position(guff::Pos(file.base() + off as i64)).filename)
+}
+
+/// Offset of the `package` keyword: the first token after whitespace and
+/// comments.
+fn package_keyword_offset(src: &[u8]) -> Option<usize> {
+    let mut i = 0;
+    while i < src.len() {
+        match src[i] {
+            b' ' | b'\t' | b'\r' | b'\n' => i += 1,
+            b'/' if src.get(i + 1) == Some(&b'/') => {
+                while i < src.len() && src[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'/' if src.get(i + 1) == Some(&b'*') => {
+                i += 2;
+                while i + 1 < src.len() && !(src[i] == b'*' && src[i + 1] == b'/') {
+                    i += 1;
+                }
+                i += 2;
+            }
+            _ => return src[i..].starts_with(b"package").then_some(i),
+        }
+    }
+    None
+}
+
+
+/// A normalized issue for filtering and output.
+#[derive(Debug, Clone)]
+pub struct Issue {
+    /// golangci linter name (`errcheck`, `staticcheck`, `govet`, …).
+    pub from_linter: String,
+    /// Analyzer pass name used in text output (`errcheck`, `SA1004`, `printf`, …).
+    pub analyzer: String,
+    pub text: String,
+    pub severity: String,
+    pub filename: String,
+    pub line: i64,
+    pub column: i64,
+    pub source_line: Option<String>,
+    pub diagnostic: Diagnostic,
+}
+
+/// Compiled issue filter built from `issues` + `severity` config.
+#[derive(Debug, Default, Clone)]
+pub struct IssueFilter {
+    exclude_dir_res: Vec<Regex>,
+    exclude_file_res: Vec<Regex>,
+    /// When non-empty (v2 `linters.exclusions.paths-except`), only matching
+    /// paths are kept.
+    paths_except_res: Vec<Regex>,
+    exclude_text_res: Vec<Regex>,
+    exclude_rules: Vec<CompiledRule>,
+    max_issues_per_linter: i32,
+    max_same_issues: i32,
+    uniq_by_line: bool,
+    default_severity: Option<String>,
+    severity_rules: Vec<(CompiledRule, String)>,
+    /// `Some` when nolintlint is enabled at all, carrying its settings.
+    ///
+    /// One field and not a `report_unused` bool beside it: the directive-shape
+    /// findings (leading space, malformed, and the two `require-*` settings)
+    /// are not optional — upstream forces `NeedsMachineOnly` on whenever the
+    /// linter runs — so "nolintlint is on" and "report unused directives" are
+    /// different questions and used to be settable inconsistently.
+    pub nolintlint: Option<crate::nolintlint::NolintlintStyle>,
+    /// Linters enabled for this run (for unused-nolintlint parity with golangci).
+    pub enabled_linters: HashSet<String>,
+    /// Go build cache directory; issues under it are dropped (cgo artifacts).
+    go_cache_dir: Option<PathBuf>,
+    /// Diff-based "new issues only" filter (golangci Diff processor).
+    diff_spec: Option<DiffFilterSpec>,
+    /// `linters.exclusions.generated` mode (`None` → do not filter).
+    generated: Option<guff_fmt::GeneratedMode>,
+    /// Base directory for path-pattern matching (golangci `relative-path-mode`,
+    /// default ≈ config-file dir). Absolute issue paths are relativized against
+    /// this before `exclusions.paths` / rule `path` regexes run — otherwise a
+    /// pattern like `.github` matches `/github.com/` in the absolute path.
+    path_base: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+struct CompiledRule {
+    /// Linter names as written in the config, compared verbatim.
+    linters: Vec<String>,
+    path: Option<Regex>,
+    path_except: Option<Regex>,
+    text: Option<Regex>,
+    source: Option<Regex>,
+}
+
+/// What `apply_with_fixer` needs to write a fix: the run's shared `FileSet`
+/// (edits are resolved through it) and the meta formatter golangci runs over
+/// every file it touched.
+pub struct FixerCtx<'a> {
+    pub fset: &'a FileSet,
+    pub formatter: Option<&'a guff_fmt::MetaFormatter>,
+}
+
+impl IssueFilter {
+    /// Build a filter from config. Invalid regexes are skipped (logged to stderr).
+    pub fn from_config(issues: &IssuesConfig, severity: &SeverityConfig) -> Self {
+        let case_prefix = if issues.exclude_case_sensitive {
+            ""
+        } else {
+            "(?i)"
+        };
+
+        let mut filter = Self {
+            max_issues_per_linter: issues.max_issues_per_linter,
+            max_same_issues: issues.max_same_issues,
+            uniq_by_line: issues.uniq_by_line.unwrap_or(true),
+            default_severity: severity.default_severity.clone(),
+            go_cache_dir: default_go_cache_dir().ok(),
+            ..Self::default()
+        };
+
+        let use_default_dirs = issues.exclude_dirs_use_default.unwrap_or(true);
+        if use_default_dirs {
+            for p in DEFAULT_EXCLUDE_DIRS {
+                push_re(&mut filter.exclude_dir_res, p, "exclude-dirs-use-default");
+            }
+        }
+        for p in &issues.exclude_dirs {
+            push_re(&mut filter.exclude_dir_res, p, "exclude-dirs");
+        }
+        for p in &issues.exclude_files {
+            push_re(&mut filter.exclude_file_res, &normalize_path_regex(p), "exclude-files");
+        }
+        for p in &issues.paths_except {
+            push_re(
+                &mut filter.paths_except_res,
+                &normalize_path_regex(p),
+                "paths-except",
+            );
+        }
+        for p in &issues.exclude {
+            let pat = format!("{case_prefix}{p}");
+            push_re(&mut filter.exclude_text_res, &pat, "exclude");
+        }
+
+        let mut rules = issues.exclude_rules.clone();
+        if issues.exclude_use_default {
+            let include: std::collections::HashSet<&str> =
+                issues.include.iter().map(|s| s.as_str()).collect();
+            for pat in default_exclude_patterns() {
+                if include.contains(pat.id) {
+                    continue;
+                }
+                rules.push(ExcludeRule {
+                    linters: vec![pat.linter.to_string()],
+                    text: Some(pat.pattern.to_string()),
+                    ..ExcludeRule::default()
+                });
+            }
+        }
+
+        for rule in &rules {
+            match compile_rule(rule, case_prefix) {
+                Ok(c) => filter.exclude_rules.push(c),
+                Err(e) => eprintln!("guff: skipping exclude-rule: {e}"),
+            }
+        }
+
+        let sev_prefix = if severity.case_sensitive {
+            ""
+        } else {
+            "(?i)"
+        };
+        for rule in &severity.rules {
+            let base = ExcludeRule {
+                linters: rule.linters.clone(),
+                path: rule.path.clone(),
+                path_except: rule.path_except.clone(),
+                text: rule.text.clone(),
+                source: rule.source.clone(),
+            };
+            match compile_rule(&base, sev_prefix) {
+                Ok(c) => filter.severity_rules.push((c, rule.severity.clone())),
+                Err(e) => eprintln!("guff: skipping severity rule: {e}"),
+            }
+        }
+
+        let diff_spec = DiffFilterSpec {
+            new: issues.new,
+            new_from_rev: issues.new_from_rev.clone(),
+            new_from_merge_base: issues.new_from_merge_base.clone(),
+            new_from_patch: issues.new_from_patch.clone(),
+            whole_files: issues.whole_files,
+        };
+        if diff_spec.enabled() {
+            filter.diff_spec = Some(diff_spec);
+        }
+
+        // v2 default for linters.exclusions.generated is lax when the key is
+        // present; when absent (None) we leave filtering off so v1 configs and
+        // tests without the key keep prior behavior. Callers that fold v2
+        // exclusions should set `issues.generated` explicitly (including
+        // `Some("lax")` when the YAML key is present).
+        if let Some(ref mode) = issues.generated {
+            filter.generated = Some(guff_fmt::GeneratedMode::parse(Some(mode.as_str())));
+        }
+
+        filter
+    }
+
+    /// Set the directory used to relativize absolute issue paths before
+    /// matching `exclusions.paths` / rule `path` patterns (golangci cfg/gomod).
+    /// The `relative-path-mode` base, if one was set.
+    pub fn path_base(&self) -> Option<&Path> {
+        self.path_base.as_deref()
+    }
+
+    pub fn with_path_base(mut self, base: impl Into<PathBuf>) -> Self {
+        self.path_base = Some(base.into());
+        self
+    }
+
+    /// Convert runner diagnostics into [`Issue`]s (before filtering).
+    pub fn collect_issues(
+        fset: &FileSet,
+        diagnostics: &[(String, Diagnostic)],
+    ) -> Vec<Issue> {
+        let mut out = Vec::with_capacity(diagnostics.len());
+        let mut package_clause_names: HashMap<String, Option<String>> = HashMap::new();
+        for (action_id, diag) in diagnostics {
+            let analyzer = action_id
+                .split('@')
+                .next()
+                .unwrap_or(action_id)
+                .to_string();
+            let from_linter = linter_name_for_analyzer(&analyzer).to_string();
+            let (filename, line, column) = if diag.pos != 0 {
+                let pos = unadjusted_position(fset, guff::Pos(diag.pos as i64), &mut package_clause_names);
+                (pos.filename, pos.line, pos.column)
+            } else {
+                (String::new(), 0, 0)
+            };
+            let column = diag.column.map_or(column, i64::from);
+            let source_line = None; // filled lazily in apply / for printing
+            // Match golangci: when the pass/check name differs from the linter
+            // name, prefix Text (`inline: …`, `SA1004: …`, category for suites).
+            let text = format_issue_text(&from_linter, &analyzer, &diag.category, &diag.message);
+            out.push(Issue {
+                from_linter: from_linter.clone(),
+                analyzer: analyzer.clone(),
+                text,
+                severity: diag.severity.clone(),
+                filename: filename.clone(),
+                line,
+                column,
+                source_line,
+                diagnostic: diag.clone(),
+            });
+            // `analysis.Diagnostic.Related` becomes one **extra issue** per
+            // entry, not a decoration on the first one
+            // (`goanalysis.buildIssues`):
+            //
+            //     Text: fmt.Sprintf("%s(related information): %s",
+            //                       diag.Analyzer.Name, info.Message)
+            //
+            // The name in front is the *analyzer's* (`ST1019`), not the
+            // linter's, and the issue carries no suggested fixes. guff built
+            // `RelatedInformation` in ST1019, SA4031 and SA5011 and then never
+            // emitted any of it: on ory/hydra that was 3 findings golangci
+            // reports and guff does not, with guff-only at 0.
+            for info in &diag.related {
+                let (rel_file, rel_line, rel_col) = if info.pos != 0 {
+                    let pos = fset.position(guff::Pos(info.pos as i64));
+                    (pos.filename, pos.line, pos.column)
+                } else {
+                    (String::new(), 0, 0)
+                };
+                // "if relatedPos.Filename != diag.Position.Filename { relatedPos
+                // = diag.Position }" — a related node in another file is
+                // reported at the primary's position, not at its own.
+                let (rel_file, rel_line, rel_col) = if rel_file == filename {
+                    (rel_file, rel_line, rel_col)
+                } else {
+                    (filename.clone(), line, column)
+                };
+                out.push(Issue {
+                    from_linter: from_linter.clone(),
+                    analyzer: analyzer.clone(),
+                    text: format!("{analyzer}(related information): {}", info.message),
+                    severity: diag.severity.clone(),
+                    filename: rel_file,
+                    line: rel_line,
+                    column: rel_col,
+                    source_line: None,
+                    // No fixes: upstream builds this issue with only
+                    // FromLinter/Text/Pos/Pkg. Cloning the primary's
+                    // `suggested_fixes` here would hand `--fix` the same edits
+                    // a second time.
+                    diagnostic: Diagnostic {
+                        pos: info.pos,
+                        end: info.end,
+                        message: info.message.clone(),
+                        suggested_fixes: Vec::new(),
+                        related: Vec::new(),
+                        ..diag.clone()
+                    },
+                });
+            }
+        }
+        out
+    }
+
+    /// Apply the post-processing pipeline. Returns filtered issues (possibly
+    /// with severity assigned).
+    ///
+    /// `packages` supplies source paths for `//nolint` indexing.
+    /// Where `--fix` writes, when it is on.
+    ///
+    /// golangci runs the Fixer as a *processor*, between `Diff` and
+    /// `UniqByLine` (`pkg/lint/runner.go:110`). That placement is observable:
+    /// `Fixer.Process` returns `notFixableIssues`, so an issue it fixed leaves
+    /// the stream before dedup and before every cap — it can lose its place in
+    /// the report and still have edited the file.
+    ///
+    /// guff used to apply fixes *after* the whole pipeline, on the survivors,
+    /// which silently left unfixed anything `uniq-by-line`,
+    /// `max-issues-per-linter` or `max-same-issues` dropped. The
+    /// `issues-uniq-by-line-order` case is built to make dedup decide
+    /// something, and it is where that showed: three `//nolint` directives
+    /// upstream deletes, whose nolintlint findings all lose their line to
+    /// revive, `unused` and errcheck (COMPAT-HARDENING 続き 78).
+    pub fn apply(&self, issues: Vec<Issue>, packages: &[Arc<Package>]) -> Vec<Issue> {
+        self.apply_with_fixer(issues, packages, None).0
+    }
+
+    /// [`apply`], with `--fix` applied at golangci's Fixer position.
+    ///
+    /// Returns the issues that remain — the ones no fix consumed — and how many
+    /// were fixed, which is the same contract as upstream's `notFixableIssues`.
+    pub fn apply_with_fixer(
+        &self,
+        mut issues: Vec<Issue>,
+        packages: &[Arc<Package>],
+        fixer: Option<FixerCtx<'_>>,
+    ) -> (Vec<Issue>, usize) {
+        // golangci attributes findings to the enabled alias name when the
+        // deprecated parent is not also enabled (e.g. enable: [gomodguard_v2]).
+        remap_enabled_alias_from_linters(&mut issues, &self.enabled_linters);
+
+        // golangci runs linters in name order (`GetOptimizedLinters` sorts, and
+        // `Runner.Run` appends each linter's issues in turn), so by the time the
+        // processors see the slice it is grouped by linter name. That order is
+        // observable: `uniq-by-line` keeps the *first* issue on a line whatever
+        // linter produced it, and `max-same-issues` keeps the first N. guff
+        // produces diagnostics in analyzer×package graph order instead, so sort
+        // here — stably, to leave each linter's own order alone.
+        //
+        // Name order is the whole rule for everything that reaches this point.
+        // Upstream's two exceptions do not apply: `DoesChangeTypes` (which
+        // would move `unused` to the end) only orders the *top-level* linter
+        // list, and in golangci-lint 2.12.2 every linter is inside the one
+        // metalinter, whose own sort is by name; and `linter.LastLinter`
+        // (nolintlint) is handled where nolintlint's findings are born, which
+        // is after this sort — see `NolintIndex::filter_issues`.
+        //
+        // Name order *within two groups*, though. The goanalysis runner returns
+        // `slices.Concat(retIssues, buildIssues(diags, …))`: the issues of the
+        // linters that report through golangci's issue reporter
+        // (`WithIssuesReporter`) first, each in turn, and only then the
+        // `analysis.Diagnostic`s of the rest. On one line, revive's
+        // range-val-in-closure therefore survives `uniq-by-line` over govet's
+        // loopclosure, though `govet` < `revive`.
+        issues.sort_by(|a, b| {
+            let group = |l: &str| u8::from(!reports_through_issue_reporter(l));
+            (group(&a.from_linter), &a.from_linter).cmp(&(group(&b.from_linter), &b.from_linter))
+        });
+
+        // golangci Cgo processor: drop issues under GOCACHE / _cgo_gotypes.go.
+        let go_cache = self.go_cache_dir.as_deref();
+        issues.retain(|issue| {
+            !is_under_go_cache(Path::new(&issue.filename), go_cache)
+        });
+
+        // golangci `InvalidIssue`, fourth in its processor list: a run with any
+        // typecheck issue reports *only* those. It is here, ahead of every
+        // exclusion, because that is where upstream puts it — an exclude rule
+        // cannot bring the silenced findings back.
+        //
+        // Remember that it fired: nolintlint's own findings are not born until
+        // `filter_issues` below, long after this point, so they have to be
+        // silenced there by hand — see the `had_typecheck` guard.
+        let had_typecheck = issues.iter().any(|i| i.from_linter == "typecheck");
+        crate::typecheck::keep_only_typecheck(&mut issues);
+
+        issues.retain(|issue| !self.is_excluded_by_path(issue));
+        issues.retain(|issue| {
+            !self
+                .exclude_text_res
+                .iter()
+                .any(|re| re.is_match(&issue.text))
+        });
+
+        // Every exclusion runs *before* the nolint processor upstream —
+        // `exclude` (the presets and `exclude` patterns) and `exclude_rules`
+        // both sit ahead of it in `Runner.Run`'s processor list — so a finding
+        // an exclusion removes never reaches a `//nolint` directive, and the
+        // directive is left unused.
+        //
+        // This used to mark matches *first*, with a comment claiming that a
+        // directive covering a preset-excluded finding still counts as used.
+        // It does not, measured both ways: with `exclusions.rules` matching
+        // `source: Rollback` (syncthing, five directives) and with the
+        // `std-error-handling` preset's EXC0001 covering `defer f.Close()`,
+        // upstream reports `directive … is unused` and guff said nothing.
+        if self.nolintlint.is_some() && !packages.is_empty() {
+            issues.retain(|issue| {
+                !self
+                    .exclude_rules
+                    .iter()
+                    .any(|rule| rule.matches(issue, self.path_base.as_deref()))
+            });
+            let mut idx =
+                NolintIndex::from_packages_for_issues(packages, &issues, self.nolintlint.as_ref());
+            idx.set_enabled_linters(self.enabled_linters.iter().cloned());
+            idx.mark_matches(&issues);
+            let report_unused = self
+                .nolintlint
+                .as_ref()
+                .is_some_and(|s| s.report_unused);
+            issues = idx.filter_issues(issues, report_unused);
+
+            // Upstream's `InvalidIssue` returns *only* the typecheck issues
+            // when the run has one, and it runs before `NolintFilter` — so a
+            // run with a typecheck error reports no nolintlint finding at all.
+            // guff's `keep_only_typecheck` above sits in the same place, but
+            // nolintlint's findings did not exist yet when it ran: they are
+            // born one line up, so they walked straight past it.
+            //
+            // Measured on woodpecker v3.18.0, whose `web` package fails to
+            // build from a clean checkout (`//go:embed all:dist/*` wants a
+            // frontend bundle that is not checked in). Upstream reported one
+            // issue for the whole repo — that typecheck error. guff reported
+            // 61: the same typecheck error plus 60 `directive is unused`,
+            // naming 13 different linters, because every finding those linters
+            // produced had already been deleted here.
+            if had_typecheck {
+                issues.retain(|issue| issue.from_linter == "typecheck");
+            }
+
+            // `filter_issues` is where nolintlint's own findings are born, and
+            // that is *after* the three exclusion filters above already ran —
+            // so until now nothing could exclude them. Upstream has no such
+            // hole: nolintlint is an ordinary linter there, its issues exist
+            // before any processor runs, and `ExclusionPaths` / exclude-text /
+            // `ExclusionRules` all see them. Re-run the three; they are
+            // idempotent for the issues that already passed.
+            //
+            // Measured on k9s, whose config excludes the path `internal/x`
+            // (an unanchored regex, so it covers `internal/xray/`): upstream
+            // drops the nolintlint finding on `internal/xray/section.go:64`
+            // along with every other finding in that tree, and guff kept it.
+            issues.retain(|issue| !self.is_excluded_by_path(issue));
+            issues.retain(|issue| {
+                !self
+                    .exclude_text_res
+                    .iter()
+                    .any(|re| re.is_match(&issue.text))
+            });
+            issues.retain(|issue| {
+                !self
+                    .exclude_rules
+                    .iter()
+                    .any(|rule| rule.matches(issue, self.path_base.as_deref()))
+            });
+        } else {
+            issues.retain(|issue| {
+                !self
+                    .exclude_rules
+                    .iter()
+                    .any(|rule| rule.matches(issue, self.path_base.as_deref()))
+            });
+            if !packages.is_empty() {
+                let mut idx = NolintIndex::from_packages_for_issues(packages, &issues, None);
+                idx.set_enabled_linters(self.enabled_linters.iter().cloned());
+                issues = idx.filter_issues(issues, false);
+            }
+        }
+
+        // Drop issues in generated files (linters.exclusions.generated).
+        //
+        // Upstream's `GeneratedFileFilter` fails on the first issue whose file
+        // it cannot read — a `//line` name that is not a file — and the runner
+        // then keeps that processor's *input*: no issue is filtered as
+        // generated at all.
+        if let Some(mode) = self.generated {
+            if mode != guff_fmt::GeneratedMode::Disable {
+                let mut cache: HashMap<String, Option<bool>> = HashMap::new();
+                let mut unreadable: Option<String> = None;
+                for issue in &issues {
+                    if issue.filename.is_empty()
+                        || Path::new(&issue.filename).file_name().is_some_and(|n| n == "go.mod")
+                    {
+                        continue;
+                    }
+                    let is_gen = *cache
+                        .entry(issue.filename.clone())
+                        .or_insert_with(|| file_is_generated(&issue.filename, mode));
+                    if is_gen.is_none() {
+                        unreadable = Some(issue.filename.clone());
+                        break;
+                    }
+                }
+                match unreadable {
+                    Some(file) => eprintln!(
+                        "level=warning msg=\"[runner] Can't process results by generated_file_filter processor: failed to get doc of file {file}\""
+                    ),
+                    None => issues.retain(|issue| {
+                        cache.get(&issue.filename).copied().flatten() != Some(true)
+                    }),
+                }
+            }
+        }
+
+        // Diff processor: keep only issues in the new/changed region.
+        // Runs after excludes/nolint and before max-* (golangci Diff order).
+        if let Some(ref spec) = self.diff_spec {
+            match build_diff_state(spec) {
+                Ok(Some(state)) => {
+                    issues.retain(|issue| state.keeps(issue));
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    eprintln!("guff: diff filter disabled: {e}");
+                }
+            }
+        }
+
+        // The Fixer sits here, between `Diff` and `UniqByLine`
+        // (golangci `pkg/lint/runner.go:107..113`). Everything below this line
+        // therefore sees only what no fix consumed — dedup and the caps count
+        // the *unfixed* remainder, as upstream's do.
+        let mut fixes_applied = 0;
+        if let Some(ctx) = fixer {
+            match crate::fix::apply_fixes(ctx.fset, &issues, ctx.formatter) {
+                Ok((remaining, n)) => {
+                    issues = remaining;
+                    fixes_applied = n;
+                }
+                Err(e) => eprintln!("guff: --fix failed: {e}"),
+            }
+        }
+
+        if self.uniq_by_line {
+            // golangci's `UniqByLine` counts per (file, line) only — not per
+            // linter, and not per column. One line yields at most one issue in
+            // the whole run, and the survivor is whichever arrived first (see
+            // the sort at the top of `apply`). Keying on the linter as well used
+            // to let, say, errcheck and staticcheck's SA4017 both report the
+            // same ignored call.
+            let mut seen = std::collections::HashSet::new();
+            issues.retain(|issue| seen.insert((issue.filename.clone(), issue.line)));
+        }
+
+        // Order matters when both limits are set, and it is `MaxSameIssues`
+        // then `MaxFromLinter` (golangci `Runner.Processors`). The per-linter
+        // counter only ever sees what survived the per-text cut, so a linter
+        // that reported the same text N times spends one slot on it, not N.
+        // Reversed — as this was — `max-issues-per-linter: 3` with
+        // `max-same-issues: 1` fills the linter's budget with three copies of
+        // one text and then drops two of them, losing the findings that would
+        // have come after.
+        if self.max_same_issues > 0 {
+            let mut counts: HashMap<String, i32> = HashMap::new();
+            issues.retain(|issue| {
+                let n = counts.entry(issue.text.clone()).or_insert(0);
+                *n += 1;
+                *n <= self.max_same_issues
+            });
+        }
+        if self.max_issues_per_linter > 0 {
+            let mut counts: HashMap<String, i32> = HashMap::new();
+            issues.retain(|issue| {
+                let n = counts.entry(issue.from_linter.clone()).or_insert(0);
+                *n += 1;
+                *n <= self.max_issues_per_linter
+            });
+        }
+
+        for issue in &mut issues {
+            self.assign_severity(issue);
+        }
+
+        // Source lines are only needed for printing / JSON SourceLines — load
+        // after filtering so we don't read ~10k files that exclude-rules drop.
+        for issue in &mut issues {
+            if issue.source_line.is_none() {
+                issue.source_line = read_source_line(&issue.filename, issue.line);
+            }
+        }
+
+        (issues, fixes_applied)
+    }
+
+    fn is_excluded_by_path(&self, issue: &Issue) -> bool {
+        let path = path_for_match(&issue.filename, self.path_base.as_deref());
+        let parent = dirname_slash(path.as_ref());
+
+        for re in &self.exclude_dir_res {
+            if re.is_match(parent) || re.is_match(path.as_ref()) {
+                return true;
+            }
+        }
+        for re in &self.exclude_file_res {
+            if re.is_match(path.as_ref()) {
+                return true;
+            }
+        }
+        // paths-except: if configured, drop anything that does not match.
+        if !self.paths_except_res.is_empty()
+            && !self
+                .paths_except_res
+                .iter()
+                .any(|re| re.is_match(path.as_ref()))
+        {
+            return true;
+        }
+        false
+    }
+
+    fn assign_severity(&self, issue: &mut Issue) {
+        for (rule, sev) in &self.severity_rules {
+            if rule.matches(issue, self.path_base.as_deref()) {
+                if sev != "@linter" {
+                    issue.severity = sev.clone();
+                }
+                return;
+            }
+        }
+        if let Some(default) = &self.default_severity {
+            if default != "@linter" {
+                issue.severity = default.clone();
+            }
+        }
+    }
+}
+
+impl CompiledRule {
+    fn matches(&self, issue: &Issue, path_base: Option<&Path>) -> bool {
+        let empty = self.linters.is_empty()
+            && self.path.is_none()
+            && self.path_except.is_none()
+            && self.text.is_none()
+            && self.source.is_none();
+        if empty {
+            return false;
+        }
+        // Linters first: most rules are linter-scoped; avoid text/path regex
+        // work on the other ~10k issues that will never match.
+        //
+        // The comparison is `slices.Contains(r.linters, issue.FromLinter)` —
+        // verbatim, against the linter name only. It is deliberately not the
+        // analyzer name: `//nolint:printf` and `linters: [printf]` both name
+        // something golangci-lint has never heard of, and both do nothing,
+        // however prominently `printf: ` is printed in the message. Matching
+        // the analyzer too (and matching alias-normalized names) silently
+        // removed findings upstream keeps.
+        if !self.linters.is_empty() && !self.linters.iter().any(|l| l == &issue.from_linter) {
+            return false;
+        }
+        if let Some(re) = &self.text {
+            if !re.is_match(&issue.text) {
+                return false;
+            }
+        }
+        if self.path.is_some() || self.path_except.is_some() {
+            let path = path_for_match(&issue.filename, path_base);
+            if let Some(re) = &self.path {
+                if !re.is_match(path.as_ref()) {
+                    return false;
+                }
+            }
+            if let Some(re) = &self.path_except {
+                if re.is_match(path.as_ref()) {
+                    return false;
+                }
+            }
+        }
+        if let Some(re) = &self.source {
+            // Prefer a pre-filled line; otherwise read just for this match so we
+            // don't force a full-tree source preload when only a few rules use
+            // `source:` (e.g. prometheus godot).
+            let owned;
+            let line = if let Some(ref l) = issue.source_line {
+                l.as_str()
+            } else {
+                owned = read_source_line(&issue.filename, issue.line).unwrap_or_default();
+                owned.as_str()
+            };
+            if !re.is_match(line) {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+fn compile_rule(rule: &ExcludeRule, case_prefix: &str) -> Result<CompiledRule, String> {
+    let path = match rule.path.as_deref() {
+        Some(p) if !p.is_empty() => {
+            let normalized = normalize_path_regex(p);
+            optional_re(Some(&normalized), "")?
+        }
+        _ => None,
+    };
+    let path_except = match rule.path_except.as_deref() {
+        Some(p) if !p.is_empty() => {
+            let normalized = normalize_path_regex(p);
+            optional_re(Some(&normalized), "")?
+        }
+        _ => None,
+    };
+    Ok(CompiledRule {
+        linters: rule.linters.clone(),
+        path,
+        path_except,
+        text: optional_re(rule.text.as_deref(), case_prefix)?,
+        source: optional_re(rule.source.as_deref(), case_prefix)?,
+    })
+}
+
+fn optional_re(pat: Option<&str>, prefix: &str) -> Result<Option<Regex>, String> {
+    match pat {
+        None | Some("") => Ok(None),
+        Some(p) => {
+            let full = format!("{prefix}{p}");
+            Regex::new(&full)
+                .map(Some)
+                .map_err(|e| format!("invalid regex `{full}`: {e}"))
+        }
+    }
+}
+
+fn push_re(out: &mut Vec<Regex>, pat: &str, what: &str) {
+    match Regex::new(pat) {
+        Ok(re) => out.push(re),
+        Err(e) => eprintln!("guff: invalid {what} regex `{pat}`: {e}"),
+    }
+}
+
+/// golangci `NormalizePathInRegex`, which has two implementations.
+///
+/// `path_unix.go` is the identity function. `path_windows.go` first removes the
+/// redundant escape in `\/` — an odd run of backslashes before a slash loses
+/// one, `golangci-lint#3277` — and only then swaps the separator.
+///
+/// guff used to run a windows-shaped rewrite everywhere, turning every `/` into
+/// `[/\\]` including the one in `\/`. A config that writes its paths as
+/// `js\/modules\/k6\/browser\/.*\.go` — k6's does, and that spelling is the
+/// reason upstream added the cleanup — came out as `js\[/\\]modules…`, which
+/// matches nothing. The rules were silently inert: k6 measured 703 guff-only
+/// findings, 596 of them from four such rules.
+#[cfg(not(windows))]
+fn normalize_path_regex(pat: &str) -> Cow<'_, str> {
+    Cow::Borrowed(pat)
+}
+
+#[cfg(windows)]
+fn normalize_path_regex(pat: &str) -> Cow<'_, str> {
+    let mut out = String::with_capacity(pat.len() + 8);
+    let bytes = pat.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            // Count the backslash run; an odd one escapes what follows.
+            let start = i;
+            while i < bytes.len() && bytes[i] == b'\\' {
+                i += 1;
+            }
+            let run = i - start;
+            if i < bytes.len() && bytes[i] == b'/' && run % 2 == 1 {
+                // Drop the escape, then normalize the slash itself.
+                out.push_str(&"\\".repeat(run - 1));
+                out.push_str(r"[/\\]");
+                i += 1;
+                continue;
+            }
+            out.push_str(&"\\".repeat(run));
+            continue;
+        }
+        if bytes[i] == b'/' {
+            out.push_str(r"[/\\]");
+        } else {
+            out.push(bytes[i] as char);
+        }
+        i += 1;
+    }
+    Cow::Owned(out)
+}
+
+/// Relativize `filename` against `base` for path-pattern matching.
+///
+/// golangci runs two processors in a row: `path_absoluter` resolves the file
+/// against the working directory, then `path_relativity` sets
+/// `RelativePath = filepath.Rel(basePath, file)`, and every `path` /
+/// `path-except` regex is matched against *that* (`base_rule.go`). The base is
+/// the config file's directory under the default `relative-path-mode: cfg`.
+///
+/// Matching the absolute path instead lets `.github` (regex `.` = any char) hit
+/// `/github.com/` in the checkout path — a nats-server OSS hunt false negative
+/// for every finding under a `github.com/...` tree.
+///
+/// `filepath.Rel` is the whole rule, `..` segments included. This used to walk
+/// up to the nearest `go.mod` whenever `base` was not a prefix of the file, on
+/// the grounds that a harness may copy the config elsewhere — but that is
+/// exactly when the two tools part company. Measured on external-dns, whose
+/// config excludes `gochecknoinits` at `^(internal/.*/init\.go|…)$`: with the
+/// config at the repo root golangci-lint reports 1 issue in `./internal/...`,
+/// with the same config one directory away it reports 2, because the path it
+/// matches has become `../../../corpus/cache/external-dns/internal/…` and the
+/// `^internal/` anchor no longer holds. A shared `-c ../shared/.golangci.yml`
+/// gets the same treatment.
+pub(crate) fn path_for_match<'a>(filename: &'a str, base: Option<&Path>) -> Cow<'a, str> {
+    let norm = normalize_slashes(filename);
+    let Some(base) = base else {
+        return norm;
+    };
+    if let Some(rel) = strip_base_prefix(norm.as_ref(), base) {
+        return Cow::Owned(rel);
+    }
+    // Both sides go through the working directory first. golangci resolves the
+    // config path before taking its directory, so `-c .golangci.yml` has the
+    // checkout as its base, not the empty path — miss that and every anchored
+    // rule stops matching for a config named relatively.
+    let base_norm = normalize_slashes(&base.to_string_lossy()).into_owned();
+    let (Some(base_abs), Some(abs)) = (absolutize(&base_norm), absolutize(norm.as_ref())) else {
+        return norm;
+    };
+    match rel_from_base(Path::new(&base_abs), &abs) {
+        Some(rel) => Cow::Owned(rel),
+        // `filepath.Rel` failing makes golangci drop the issue outright; guff
+        // keeps it and matches the path it has. Unreachable while both sides
+        // are absolute, which they are once `absolutize` has run.
+        None => norm,
+    }
+}
+
+/// Resolve a relative path against the working directory (golangci
+/// `path_absoluter`). The cwd is read once — this runs per issue.
+fn absolutize(norm: &str) -> Option<String> {
+    if Path::new(norm).is_absolute() {
+        return Some(norm.to_string());
+    }
+    static CWD: OnceLock<Option<String>> = OnceLock::new();
+    let cwd = CWD
+        .get_or_init(|| {
+            std::env::current_dir()
+                .ok()
+                .map(|p| normalize_slashes(&p.to_string_lossy()).into_owned())
+        })
+        .as_deref()?;
+    let cwd = cwd.trim_end_matches('/');
+    if norm.is_empty() || norm == "." {
+        return Some(cwd.to_string());
+    }
+    Some(format!("{cwd}/{norm}"))
+}
+
+/// Port of `filepath.Rel` for slash-separated paths.
+///
+/// Returns `None` where Go returns an error: one path relative and the other
+/// absolute, or a base that cannot be escaped (`..` left in the base after the
+/// common prefix).
+fn rel_from_base(base: &Path, target: &str) -> Option<String> {
+    let base_s = normalize_slashes(&base.to_string_lossy()).into_owned();
+    let base_c = clean_slash(&base_s);
+    let targ_c = clean_slash(target);
+    if base_c == targ_c {
+        return Some(".".to_string());
+    }
+    if base_c.starts_with('/') != targ_c.starts_with('/') {
+        return None;
+    }
+    let split = |p: &str| -> Vec<String> {
+        p.trim_start_matches('/')
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect()
+    };
+    let (b, t) = (split(&base_c), split(&targ_c));
+    let mut i = 0;
+    while i < b.len() && i < t.len() && b[i] == t[i] {
+        i += 1;
+    }
+    if b[i..].iter().any(|s| s == "..") {
+        return None;
+    }
+    let mut out: Vec<&str> = std::iter::repeat("..").take(b.len() - i).collect();
+    out.extend(t[i..].iter().map(String::as_str));
+    if out.is_empty() {
+        return Some(".".to_string());
+    }
+    Some(out.join("/"))
+}
+
+/// `path.Clean` for slash-separated paths: collapse `//`, drop `.`, resolve
+/// `..` where a real element precedes it.
+fn clean_slash(p: &str) -> String {
+    let rooted = p.starts_with('/');
+    let mut out: Vec<&str> = Vec::new();
+    for seg in p.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                if let Some(last) = out.last() {
+                    if *last != ".." {
+                        out.pop();
+                        continue;
+                    }
+                }
+                if rooted {
+                    continue;
+                }
+                out.push("..");
+            }
+            s => out.push(s),
+        }
+    }
+    let joined = out.join("/");
+    if rooted {
+        format!("/{joined}")
+    } else if joined.is_empty() {
+        ".".to_string()
+    } else {
+        joined
+    }
+}
+
+fn strip_base_prefix(norm: &str, base: &Path) -> Option<String> {
+    let base_s = normalize_slashes(&base.to_string_lossy()).into_owned();
+    let base_slash = base_s.trim_end_matches('/');
+    if base_slash.is_empty() {
+        return None;
+    }
+    let prefix = format!("{base_slash}/");
+    if let Some(rel) = norm.strip_prefix(&prefix) {
+        return Some(rel.to_string());
+    }
+    if norm == base_slash {
+        return Some(String::new());
+    }
+    None
+}
+
+/// Normalize `\` → `/` without allocating when the path already uses `/`.
+fn normalize_slashes(path: &str) -> Cow<'_, str> {
+    if path.as_bytes().contains(&b'\\') {
+        Cow::Owned(path.replace('\\', "/"))
+    } else {
+        Cow::Borrowed(path)
+    }
+}
+
+/// Parent directory of a slash-normalized path (no allocation).
+fn dirname_slash(path: &str) -> &str {
+    match path.rfind('/') {
+        Some(0) => "/",
+        Some(i) => &path[..i],
+        None => "",
+    }
+}
+
+fn read_source_line(filename: &str, line: i64) -> Option<String> {
+    if filename.is_empty() || line <= 0 {
+        return None;
+    }
+    static CACHE: OnceLock<std::sync::Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    let mut guard = cache.lock().ok()?;
+    let lines = guard.entry(filename.to_string()).or_insert_with(|| {
+        std::fs::read_to_string(filename)
+            .map(|s| s.lines().map(|l| l.to_string()).collect())
+            .unwrap_or_default()
+    });
+    let idx = (line as usize).checked_sub(1)?;
+    lines.get(idx).cloned()
+}
+
+/// Leading-bytes generated-file check (avoids reading multi-MB sources fully).
+/// `None` when the file cannot be opened.
+fn file_is_generated(path: &str, mode: guff_fmt::GeneratedMode) -> Option<bool> {
+    const PREFIX: u64 = 16 * 1024;
+    let mut f = std::fs::File::open(path).ok()?;
+    use std::io::Read;
+    let mut buf = vec![0u8; PREFIX as usize];
+    let n = f.read(&mut buf).unwrap_or(0);
+    buf.truncate(n);
+    Some(guff_fmt::is_generated(&buf, mode))
+}
+
+/// Build an [`Issue`] from a cached diagnostic's already-resolved position
+/// (filename/line/column stored in the issues cache), without a `FileSet`.
+/// The lazy warm path uses this so cache hits never need parsing/type-checking.
+#[allow(clippy::too_many_arguments)]
+pub fn issue_from_cached(
+    analyzer: &str,
+    filename: &str,
+    line: i64,
+    column: i64,
+    message: &str,
+    category: &str,
+    url: &str,
+    severity: &str,
+) -> Issue {
+    // Defer source_line to IssueFilter::apply (after exclude pipeline).
+    let from_linter = linter_name_for_analyzer(analyzer).to_string();
+    let text = format_issue_text(&from_linter, analyzer, category, message);
+    Issue {
+        from_linter,
+        analyzer: analyzer.to_string(),
+        text,
+        severity: severity.to_string(),
+        filename: filename.to_string(),
+        line,
+        column,
+        source_line: None,
+        diagnostic: Diagnostic {
+            message: message.to_string(),
+            category: category.to_string(),
+            url: url.to_string(),
+            severity: severity.to_string(),
+            ..Diagnostic::default()
+        },
+    }
+}
+
+/// When a deprecated linter and its alias share an analyzer, prefer the
+/// enabled alias name for `FromLinter` (golangci-lint v2 parity).
+fn remap_enabled_alias_from_linters(issues: &mut [Issue], enabled: &HashSet<String>) {
+    const PAIRS: &[(&str, &str)] = &[
+        ("gomodguard", "gomodguard_v2"),
+    ];
+    if enabled.is_empty() {
+        return;
+    }
+    for &(canon, alias) in PAIRS {
+        if enabled.contains(alias) && !enabled.contains(canon) {
+            for issue in issues.iter_mut() {
+                if issue.from_linter == canon {
+                    issue.from_linter = alias.to_string();
+                }
+            }
+        }
+    }
+}
+
+/// golangci-style Text: prefix with pass/check name when it differs from the linter.
+fn format_issue_text(from_linter: &str, analyzer: &str, category: &str, message: &str) -> String {
+    let pass_name = if !category.is_empty() {
+        category
+    } else {
+        analyzer
+    };
+    if pass_name != from_linter {
+        format!("{pass_name}: {message}")
+    } else {
+        message.to_string()
+    }
+}
+
+/// Convenience: build issues from diagnostics and apply `filter`.
+pub fn process_diagnostics(
+    fset: &FileSet,
+    diagnostics: &[(String, Diagnostic)],
+    filter: &IssueFilter,
+    packages: &[Arc<Package>],
+) -> Vec<Issue> {
+    filter.apply(IssueFilter::collect_issues(fset, diagnostics), packages)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Like [`issue`], but on an explicit line. `uniq-by-line` keys on
+    /// (file, line) alone, so a test that wants two issues to survive in the
+    /// same file has to put them on different lines.
+    fn issue_at(linter: &str, file: &str, line: i64, text: &str) -> Issue {
+        Issue {
+            line,
+            ..issue(linter, file, text)
+        }
+    }
+
+    fn issue(linter: &str, file: &str, text: &str) -> Issue {
+        Issue {
+            from_linter: linter.into(),
+            analyzer: linter.into(),
+            text: text.into(),
+            severity: String::new(),
+            filename: file.into(),
+            line: 1,
+            column: 1,
+            source_line: None,
+            diagnostic: Diagnostic {
+                message: text.into(),
+                ..Diagnostic::default()
+            },
+        }
+    }
+
+    #[test]
+    fn exclude_rules_by_path_and_linter() {
+        let issues_cfg = IssuesConfig {
+            exclude_use_default: false,
+            max_issues_per_linter: 0,
+            max_same_issues: 0,
+            exclude_rules: vec![ExcludeRule {
+                linters: vec!["errcheck".into()],
+                path: Some(r"bad\.go".into()),
+                ..ExcludeRule::default()
+            }],
+            ..IssuesConfig::default()
+        };
+        let filter = IssueFilter::from_config(&issues_cfg, &SeverityConfig::default());
+        let kept = filter.apply(
+            vec![
+                issue("errcheck", "/tmp/pkg/bad.go", "unchecked error"),
+                issue("errcheck", "/tmp/pkg/ok.go", "unchecked error"),
+                issue("govet", "/tmp/pkg/bad.go", "something"),
+            ],
+            &[],
+        );
+        assert_eq!(kept.len(), 2);
+        assert!(kept.iter().any(|i| i.filename.ends_with("ok.go")));
+        assert!(kept.iter().any(|i| i.from_linter == "govet"));
+    }
+
+    #[test]
+    fn exclude_rule_path_keeps_a_redundant_slash_escape() {
+        // k6 writes its exclusion paths as `js\/modules\/k6\/browser\/.*\.go`.
+        // Go's regexp reads `\/` as `/`, and upstream's `NormalizePathInRegex`
+        // is the identity function on unix. guff rewrote every `/` into
+        // `[/\\]`, including the one inside `\/`, which produced `js\[/\\]…` —
+        // a regex that matches nothing, so the rule silently stopped
+        // excluding. It was worth 596 of k6's 703 guff-only findings across
+        // four rules and four linters.
+        let issues_cfg = IssuesConfig {
+            exclude_use_default: false,
+            max_issues_per_linter: 0,
+            max_same_issues: 0,
+            exclude_rules: vec![ExcludeRule {
+                linters: vec!["revive".into()],
+                path: Some(r"js\/modules\/k6\/browser\/.*\.go".into()),
+                ..ExcludeRule::default()
+            }],
+            ..IssuesConfig::default()
+        };
+        let filter = IssueFilter::from_config(&issues_cfg, &SeverityConfig::default())
+            .with_path_base(PathBuf::from("/tmp/k6"));
+        let kept = filter.apply(
+            vec![
+                issue("revive", "/tmp/k6/internal/js/modules/k6/browser/a.go", "exported"),
+                issue("revive", "/tmp/k6/internal/js/modules/k6/http/a.go", "exported"),
+                issue("govet", "/tmp/k6/internal/js/modules/k6/browser/a.go", "something"),
+            ],
+            &[],
+        );
+        assert_eq!(kept.len(), 2, "{kept:?}");
+        assert!(kept.iter().any(|i| i.filename.ends_with("k6/http/a.go")));
+        assert!(kept.iter().any(|i| i.from_linter == "govet"));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn normalize_path_regex_is_the_identity_off_windows() {
+        // `path_unix.go` is `return path`. Anything else changes what a
+        // user-written regex means.
+        for pat in [
+            r"js\/modules\/k6\/browser\/.*\.go",
+            "third_party$",
+            r"^(internal/.*/init\.go)$",
+        ] {
+            assert_eq!(normalize_path_regex(pat).as_ref(), pat);
+        }
+    }
+
+    #[test]
+    fn exclude_text_pattern() {
+        let issues_cfg = IssuesConfig {
+            exclude_use_default: false,
+            max_issues_per_linter: 0,
+            max_same_issues: 0,
+            exclude: vec!["hidden".into()],
+            ..IssuesConfig::default()
+        };
+        let filter = IssueFilter::from_config(&issues_cfg, &SeverityConfig::default());
+        let kept = filter.apply(
+            vec![
+                issue("errcheck", "a.go", "this is hidden"),
+                issue("errcheck", "a.go", "visible"),
+            ],
+            &[],
+        );
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].text, "visible");
+    }
+
+    #[test]
+    fn max_issues_per_linter() {
+        let issues_cfg = IssuesConfig {
+            exclude_use_default: false,
+            max_issues_per_linter: 1,
+            max_same_issues: 0,
+            ..IssuesConfig::default()
+        };
+        let filter = IssueFilter::from_config(&issues_cfg, &SeverityConfig::default());
+        let kept = filter.apply(
+            vec![
+                issue_at("errcheck", "a.go", 1, "one"),
+                issue_at("errcheck", "a.go", 2, "two"),
+                issue_at("govet", "a.go", 3, "three"),
+            ],
+            &[],
+        );
+        assert_eq!(kept.len(), 2);
+        assert_eq!(kept[0].text, "one");
+        assert_eq!(kept[1].from_linter, "govet");
+    }
+
+    #[test]
+    fn max_same_issues_runs_before_max_issues_per_linter() {
+        // golangci `Runner.Processors` is MaxSameIssues then MaxFromLinter, so
+        // the per-linter budget is spent on what survived the per-text cut.
+        // Reversed, the three copies of "dup" fill errcheck's budget of 3 and
+        // the per-text cut then leaves one of them — losing "tail" outright.
+        let issues_cfg = IssuesConfig {
+            exclude_use_default: false,
+            max_issues_per_linter: 3,
+            max_same_issues: 1,
+            uniq_by_line: Some(false),
+            ..IssuesConfig::default()
+        };
+        let filter = IssueFilter::from_config(&issues_cfg, &SeverityConfig::default());
+        let kept = filter.apply(
+            vec![
+                issue_at("errcheck", "a.go", 1, "dup"),
+                issue_at("errcheck", "a.go", 2, "dup"),
+                issue_at("errcheck", "a.go", 3, "dup"),
+                issue_at("errcheck", "a.go", 4, "tail"),
+            ],
+            &[],
+        );
+        let texts: Vec<&str> = kept.iter().map(|i| i.text.as_str()).collect();
+        assert_eq!(texts, vec!["dup", "tail"]);
+    }
+
+    #[test]
+    fn uniq_by_line_keeps_one_issue_per_line_across_linters() {
+        // golangci's UniqByLine counts per (file, line) — not per linter and not
+        // per column — and keeps whichever issue arrived first. Linters run in
+        // name order there, so errcheck beats staticcheck on a shared line. This
+        // is what hides SA4017 on a call errcheck already flagged.
+        let filter =
+            IssueFilter::from_config(&IssuesConfig::default(), &SeverityConfig::default());
+        let kept = filter.apply(
+            vec![
+                issue_at("staticcheck", "a.go", 7, "SA4017: mayErr doesn't have side effects"),
+                issue_at("errcheck", "a.go", 7, "Error return value is not checked"),
+                issue_at("errcheck", "a.go", 8, "Error return value is not checked"),
+                issue_at("staticcheck", "b.go", 7, "SA4017: mayErr doesn't have side effects"),
+            ],
+            &[],
+        );
+        assert_eq!(kept.len(), 3);
+        assert_eq!(kept[0].from_linter, "errcheck");
+        assert_eq!(kept[0].line, 7);
+        assert_eq!(kept[1].line, 8);
+        assert_eq!(kept[2].filename, "b.go");
+    }
+
+    #[test]
+    fn uniq_by_line_puts_issue_reporter_linters_first() {
+        // golangci's goanalysis runner concatenates the issues of the linters
+        // that report through `WithIssuesReporter` (revive, gosec, errcheck, …)
+        // *before* the `analysis.Diagnostic`s of the rest (govet,
+        // staticcheck, …), each group in name order. So on one line revive's
+        // range-val-in-closure beats govet's loopclosure though "govet" <
+        // "revive"; within a group, name order still decides.
+        let filter =
+            IssueFilter::from_config(&IssuesConfig::default(), &SeverityConfig::default());
+        let kept = filter.apply(
+            vec![
+                issue_at("govet", "a.go", 13, "loopclosure: loop variable v captured by func literal"),
+                issue_at("revive", "a.go", 13, "range-val-in-closure: loop variable v captured by func literal"),
+                issue_at("revive", "a.go", 12, "range-val-address: suspicious assignment of 'v'"),
+                issue_at("gosec", "a.go", 12, "G601: Implicit memory aliasing in for loop."),
+                issue_at("staticcheck", "a.go", 20, "SA5009: Printf format %d has arg of wrong type string"),
+                issue_at("govet", "a.go", 20, "printf: fmt.Printf format %d has arg \"s\" of wrong type string"),
+            ],
+            &[],
+        );
+        let mut by_line: Vec<(i64, &str)> =
+            kept.iter().map(|i| (i.line as i64, i.from_linter.as_str())).collect();
+        by_line.sort();
+        assert_eq!(
+            by_line,
+            vec![(12, "gosec"), (13, "revive"), (20, "govet")],
+            "reporter over diagnostic on line 13; name order within a group on 12 and 20"
+        );
+    }
+
+    #[test]
+    fn severity_default_applied() {
+        let severity = SeverityConfig {
+            default_severity: Some("warning".into()),
+            ..SeverityConfig::default()
+        };
+        let issues_cfg = IssuesConfig {
+            exclude_use_default: false,
+            max_issues_per_linter: 0,
+            max_same_issues: 0,
+            ..IssuesConfig::default()
+        };
+        let filter = IssueFilter::from_config(&issues_cfg, &severity);
+        let kept = filter.apply(vec![issue("errcheck", "a.go", "x")], &[]);
+        assert_eq!(kept[0].severity, "warning");
+    }
+
+    #[test]
+    fn severity_rule_overrides_default() {
+        use crate::config::SeverityRule;
+        let severity = SeverityConfig {
+            default_severity: Some("warning".into()),
+            rules: vec![SeverityRule {
+                linters: vec!["errcheck".into()],
+                severity: "error".into(),
+                ..SeverityRule::default()
+            }],
+            ..SeverityConfig::default()
+        };
+        let issues_cfg = IssuesConfig {
+            exclude_use_default: false,
+            max_issues_per_linter: 0,
+            max_same_issues: 0,
+            ..IssuesConfig::default()
+        };
+        let filter = IssueFilter::from_config(&issues_cfg, &severity);
+        let kept = filter.apply(
+            vec![
+                issue_at("errcheck", "a.go", 1, "x"),
+                issue_at("govet", "a.go", 2, "y"),
+            ],
+            &[],
+        );
+        assert_eq!(kept[0].severity, "error");
+        assert_eq!(kept[1].severity, "warning");
+    }
+
+    #[test]
+    fn severity_at_linter_keeps_revive_rule_severity() {
+        let severity = SeverityConfig {
+            default_severity: Some("@linter".into()),
+            ..SeverityConfig::default()
+        };
+        let issues_cfg = IssuesConfig {
+            exclude_use_default: false,
+            max_issues_per_linter: 0,
+            max_same_issues: 0,
+            ..IssuesConfig::default()
+        };
+        let filter = IssueFilter::from_config(&issues_cfg, &severity);
+        let mut issue = issue("revive", "a.go", "dot-imports: should not use dot imports");
+        issue.severity = "warning".into();
+        let kept = filter.apply(vec![issue], &[]);
+        assert_eq!(kept[0].severity, "warning");
+    }
+
+    #[test]
+    fn drops_issues_under_go_cache() {
+        let mut filter = IssueFilter::default();
+        filter.go_cache_dir = Some(PathBuf::from("/var/gocache"));
+        let kept = filter.apply(
+            vec![
+                issue("gosec", "/var/gocache/xyz/cgo.go", "G103"),
+                issue("gosec", "/src/main.go", "G103"),
+                issue("gosec", "/tmp/_cgo_gotypes.go", "G103"),
+            ],
+            &[],
+        );
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].filename, "/src/main.go");
+    }
+
+    #[test]
+    fn comments_preset_drops_st1000_with_staticcheck_from_linter() {
+        use crate::config::parse_config_str;
+        let yaml = r#"
+version: "2"
+linters:
+  default: none
+  enable: [staticcheck]
+  exclusions:
+    presets: [comments]
+"#;
+        let cfg = parse_config_str(yaml).unwrap();
+        let filter = IssueFilter::from_config(&cfg.effective_issues(), &SeverityConfig::default());
+        let mut st = issue(
+            "staticcheck",
+            "a.go",
+            "ST1000: at least one file in a package should have a package comment",
+        );
+        st.analyzer = "ST1000".into();
+        let kept = filter.apply(vec![st, issue("errcheck", "a.go", "unchecked")], &[]);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].from_linter, "errcheck");
+    }
+
+    #[test]
+    fn exclude_rule_linters_names_the_linter_not_the_analyzer() {
+        // `baseRule.matchLinter` is `slices.Contains(r.linters, FromLinter)`.
+        // `printf` is govet's analyzer, prominent in the message and useless
+        // here — matching it as well removed findings upstream keeps.
+        let issues_cfg = IssuesConfig {
+            exclude_use_default: false,
+            max_issues_per_linter: 0,
+            max_same_issues: 0,
+            uniq_by_line: Some(false),
+            exclude_rules: vec![ExcludeRule {
+                linters: vec!["printf".into()],
+                path: Some(r"a\.go".into()),
+                ..ExcludeRule::default()
+            }],
+            ..IssuesConfig::default()
+        };
+        let filter = IssueFilter::from_config(&issues_cfg, &SeverityConfig::default());
+        let mut printf = issue("govet", "a.go", "printf: wrong type");
+        printf.analyzer = "printf".into();
+        let kept = filter.apply(vec![printf], &[]);
+        assert_eq!(kept.len(), 1, "a rule naming the analyzer matches nothing");
+    }
+
+    #[test]
+    fn v2_exclusion_rule_text_is_case_sensitive() {
+        // v2 compiles exclusion rules with an empty prefix and has no
+        // `exclude-case-sensitive` key; the v1 default of `(?i)` would widen
+        // every pattern.
+        use crate::config::parse_config_str;
+        let yaml = r#"
+version: "2"
+linters:
+  default: none
+  enable: [errcheck]
+  exclusions:
+    rules:
+      - linters: [errcheck]
+        text: ERROR RETURN VALUE
+"#;
+        let cfg = parse_config_str(yaml).unwrap();
+        let filter = IssueFilter::from_config(&cfg.effective_issues(), &cfg.effective_severity());
+        let kept = filter.apply(
+            vec![issue("errcheck", "a.go", "Error return value is not checked")],
+            &[],
+        );
+        assert_eq!(kept.len(), 1, "the pattern is used verbatim");
+    }
+
+    /// golangci's `InvalidIssue` processor returns *only* the typecheck
+    /// issues when the run produced any, and it sits ahead of `NolintFilter`.
+    /// nolintlint is an ordinary linter upstream, so its findings already
+    /// exist by then and die there with everything else — a run with a broken
+    /// package reports the typecheck error and nothing else.
+    ///
+    /// guff's copy of that filter is in the same place, but nolintlint's
+    /// findings are not born until the nolint processor one step later, so
+    /// they walked straight past it — and every finding they would have been
+    /// matched against had already been deleted, which made each surviving
+    /// directive look unused.
+    ///
+    /// Measured on woodpecker v3.18.0, whose `web` package does not build from
+    /// a clean checkout (`//go:embed all:dist/*` wants a frontend bundle that
+    /// is not checked in): upstream reported 1 issue for the whole repo, guff
+    /// reported 61 — the same typecheck error plus 60 `directive ... is
+    /// unused` naming 13 different linters.
+    #[test]
+    fn a_typecheck_issue_silences_unused_nolintlint_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let good = dir.path().join("good.go");
+        std::fs::write(&good, "package p\n\nvar x int //nolint:errcheck\n").unwrap();
+        let pkg = Arc::new(Package {
+            compiled_go_files: vec![good.clone()],
+            ..Package::default()
+        });
+
+        let mut filter = IssueFilter::from_config(
+            &IssuesConfig {
+                exclude_use_default: false,
+                max_issues_per_linter: 0,
+                max_same_issues: 0,
+                ..IssuesConfig::default()
+            },
+            &SeverityConfig::default(),
+        );
+        filter.nolintlint = Some(crate::nolintlint::NolintlintStyle {
+            report_unused: true,
+            ..crate::nolintlint::NolintlintStyle::default()
+        });
+        filter.enabled_linters = ["nolintlint".into(), "errcheck".into()].into_iter().collect();
+
+        // Control: no typecheck issue, so the directive is reported unused.
+        let kept = filter.apply(Vec::new(), std::slice::from_ref(&pkg));
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert_eq!(kept[0].from_linter, "nolintlint");
+
+        // With one, the run reports that and nothing else.
+        let kept = filter.apply(
+            vec![issue("typecheck", "/tmp/broken/broken.go", "undefined: x")],
+            std::slice::from_ref(&pkg),
+        );
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert_eq!(kept[0].from_linter, "typecheck");
+    }
+
+    /// The `is unused` findings are not the only ones born late: the
+    /// directive-shape ones are too, and upstream drops them at the same
+    /// point. Both shapes measured against golangci-lint 2.12.2 on a two
+    /// package module whose second package fails to build.
+    #[test]
+    fn a_typecheck_issue_silences_nolintlint_style_findings_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let good = dir.path().join("good.go");
+        std::fs::write(
+            &good,
+            "package p\n\nvar x int // nolint:errcheck\n\nvar y int //nolint\n",
+        )
+        .unwrap();
+        let pkg = Arc::new(Package {
+            compiled_go_files: vec![good.clone()],
+            ..Package::default()
+        });
+
+        let mut filter = IssueFilter::from_config(
+            &IssuesConfig {
+                exclude_use_default: false,
+                max_issues_per_linter: 0,
+                max_same_issues: 0,
+                ..IssuesConfig::default()
+            },
+            &SeverityConfig::default(),
+        );
+        filter.nolintlint = Some(crate::nolintlint::NolintlintStyle {
+            require_specific: true,
+            ..crate::nolintlint::NolintlintStyle::default()
+        });
+        filter.enabled_linters = ["nolintlint".into(), "errcheck".into()].into_iter().collect();
+
+        // Control: the leading space and the bare `//nolint`, one each.
+        let kept = filter.apply(Vec::new(), std::slice::from_ref(&pkg));
+        assert_eq!(kept.len(), 2, "{kept:?}");
+        assert!(kept.iter().all(|i| i.from_linter == "nolintlint"), "{kept:?}");
+
+        let kept = filter.apply(
+            vec![issue("typecheck", "/tmp/broken/broken.go", "undefined: x")],
+            std::slice::from_ref(&pkg),
+        );
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert_eq!(kept[0].from_linter, "typecheck");
+    }
+
+    #[test]
+    fn generated_lax_drops_issues_in_generated_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let gen = dir.path().join("gen.go");
+        let hand = dir.path().join("hand.go");
+        std::fs::write(
+            &gen,
+            "// Code generated by tool. DO NOT EDIT.\npackage p\n",
+        )
+        .unwrap();
+        std::fs::write(&hand, "package p\n").unwrap();
+
+        let issues_cfg = IssuesConfig {
+            exclude_use_default: false,
+            max_issues_per_linter: 0,
+            max_same_issues: 0,
+            generated: Some("lax".into()),
+            ..IssuesConfig::default()
+        };
+        let filter = IssueFilter::from_config(&issues_cfg, &SeverityConfig::default());
+        let kept = filter.apply(
+            vec![
+                issue("revive", gen.to_str().unwrap(), "unused-parameter: x"),
+                issue("revive", hand.to_str().unwrap(), "unused-parameter: y"),
+            ],
+            &[],
+        );
+        assert_eq!(kept.len(), 1);
+        assert!(kept[0].filename.ends_with("hand.go"));
+    }
+
+    /// golangci's runner keeps the generated filter's *input* when it fails,
+    /// and it fails on an issue whose file does not exist (a `//line` name):
+    /// then nothing is dropped as generated, in any file.
+    #[test]
+    fn generated_filter_keeps_everything_when_a_file_is_unreadable() {
+        let dir = tempfile::tempdir().unwrap();
+        let gen = dir.path().join("gen.go");
+        std::fs::write(&gen, "// Code generated by tool. DO NOT EDIT.\npackage p\n").unwrap();
+        let missing = dir.path().join("generated.go");
+        let issues_cfg = IssuesConfig {
+            exclude_use_default: false,
+            max_issues_per_linter: 0,
+            max_same_issues: 0,
+            generated: Some("lax".into()),
+            ..IssuesConfig::default()
+        };
+        let filter = IssueFilter::from_config(&issues_cfg, &SeverityConfig::default());
+        let kept = filter.apply(
+            vec![
+                issue("revive", gen.to_str().unwrap(), "unused-parameter: x"),
+                issue("revive", missing.to_str().unwrap(), "unused-parameter: y"),
+            ],
+            &[],
+        );
+        assert_eq!(kept.len(), 2);
+    }
+
+    #[test]
+    fn package_keyword_offset_skips_comments() {
+        assert_eq!(package_keyword_offset(b"package p\n"), Some(0));
+        assert_eq!(
+            package_keyword_offset(b"// Code generated. DO NOT EDIT.\n\n//line x.y:1\npackage p\n"),
+            Some(46)
+        );
+        assert_eq!(package_keyword_offset(b"/* a */ /*\nb */\npackage p"), Some(16));
+        assert_eq!(package_keyword_offset(b"// only a comment\n"), None);
+    }
+
+    #[test]
+    fn diff_filter_spec_wired_from_config() {
+        let issues_cfg = IssuesConfig {
+            exclude_use_default: false,
+            max_issues_per_linter: 0,
+            max_same_issues: 0,
+            whole_files: true,
+            new_from_merge_base: Some("origin/main".into()),
+            ..IssuesConfig::default()
+        };
+        let filter = IssueFilter::from_config(&issues_cfg, &SeverityConfig::default());
+        let spec = filter.diff_spec.expect("diff enabled");
+        assert!(spec.whole_files);
+        assert_eq!(
+            spec.new_from_merge_base.as_deref(),
+            Some("origin/main")
+        );
+    }
+
+    #[test]
+    fn dirname_slash_matches_path_parent() {
+        assert_eq!(dirname_slash("/tmp/pkg/a.go"), "/tmp/pkg");
+        assert_eq!(dirname_slash("/a.go"), "/");
+        assert_eq!(dirname_slash("a.go"), "");
+        assert_eq!(dirname_slash("pkg/a.go"), "pkg");
+    }
+
+    #[test]
+    fn path_for_match_strips_base_so_dot_github_does_not_hit_github_com() {
+        // Absolute checkout under github.com must not match exclusions.paths: .github
+        let abs = "/Users/me/src/github.com/nats-io/nats-server/server/test_test.go";
+        let base = Path::new("/Users/me/src/github.com/nats-io/nats-server");
+        let rel = path_for_match(abs, Some(base));
+        assert_eq!(rel.as_ref(), "server/test_test.go");
+        let re = Regex::new(&normalize_path_regex(".github")).unwrap();
+        assert!(
+            !re.is_match(rel.as_ref()),
+            ".github must not match relativized path {rel}"
+        );
+        // Without base, `.` matches `/` before `github.com`.
+        assert!(re.is_match(abs));
+    }
+
+    #[test]
+    fn path_for_match_walks_up_with_dotdot_when_the_base_is_elsewhere() {
+        // `filepath.Rel`, not "find the module root". A config one directory
+        // away from the checkout is what the hunt harness produces and what a
+        // shared `-c ../shared/.golangci.yml` produces, and upstream's answer
+        // carries `../` — which is why an anchored rule stops matching. guff
+        // used to walk up to the nearest `go.mod` here and kept excluding.
+        let file = "/Users/me/src/checkout/internal/testutils/init.go";
+        let rel = path_for_match(file, Some(Path::new("/Users/me/src/results/run-1")));
+        assert_eq!(rel.as_ref(), "../../checkout/internal/testutils/init.go");
+        let anchored = Regex::new(&normalize_path_regex("^(internal/.*/init\\.go)$")).unwrap();
+        assert!(
+            !anchored.is_match(rel.as_ref()),
+            "an anchored rule must miss a path the base cannot reach: {rel}"
+        );
+        // With the config beside the code, the same rule holds.
+        let rel = path_for_match(file, Some(Path::new("/Users/me/src/checkout")));
+        assert_eq!(rel.as_ref(), "internal/testutils/init.go");
+        assert!(anchored.is_match(rel.as_ref()));
+    }
+
+    #[test]
+    fn rel_from_base_matches_filepath_rel() {
+        let rel = |b: &str, t: &str| rel_from_base(Path::new(b), t);
+        assert_eq!(rel("/a/b", "/a/b/c"), Some("c".into()));
+        assert_eq!(rel("/a/b", "/a/b"), Some(".".into()));
+        assert_eq!(rel("/a/b/c", "/a/d"), Some("../../d".into()));
+        assert_eq!(rel("/a/b", "/x/y"), Some("../../x/y".into()));
+        // Trailing slashes and `.` segments are cleaned first.
+        assert_eq!(rel("/a/b/", "/a/./b/c"), Some("c".into()));
+        // Go returns an error when one side is relative and the other is not.
+        assert_eq!(rel("/a/b", "c/d"), None);
+        assert_eq!(rel("a/b", "/c/d"), None);
+        // …and when the base itself climbs out of the tree.
+        assert_eq!(rel("../a", "b"), None);
+    }
+
+    #[test]
+    fn exclusions_paths_dot_github_with_path_base_keeps_server_files() {
+        let issues_cfg = IssuesConfig {
+            exclude_use_default: false,
+            exclude_dirs_use_default: Some(false),
+            max_issues_per_linter: 0,
+            max_same_issues: 0,
+            exclude_files: vec![".github".into()],
+            ..IssuesConfig::default()
+        };
+        let base = PathBuf::from("/Users/me/src/github.com/nats-io/nats-server");
+        let filter =
+            IssueFilter::from_config(&issues_cfg, &SeverityConfig::default()).with_path_base(base);
+        let kept = filter.apply(
+            vec![issue(
+                "govet",
+                "/Users/me/src/github.com/nats-io/nats-server/server/test_test.go",
+                "inline: Constant reflect.Ptr should be inlined",
+            )],
+            &[],
+        );
+        assert_eq!(kept.len(), 1, "server file must not be dropped by .github");
+    }
+
+    #[test]
+    fn normalize_slashes_avoids_alloc_without_backslash() {
+        let p = "/tmp/pkg/a.go";
+        match normalize_slashes(p) {
+            Cow::Borrowed(s) => assert_eq!(s, p),
+            Cow::Owned(_) => panic!("expected borrow"),
+        }
+        assert_eq!(normalize_slashes(r"C:\tmp\a.go").as_ref(), "C:/tmp/a.go");
+    }
+}
+
+/// Linters whose golangci wrapper collects issues itself and hands them over
+/// with `WithIssuesReporter` (golangci-lint 2.14.0 `pkg/golinters`), rather
+/// than as `analysis.Diagnostic`s. Their issues come first in the runner's
+/// output — see the sort in `ExcludeConfig::apply`. `gochecksumtype` left the
+/// list in 2.14.0, when its wrapper became the module's own `Analyzer`.
+fn reports_through_issue_reporter(linter: &str) -> bool {
+    matches!(
+        linter,
+        "dupl"
+            | "errcheck"
+            | "gocognit"
+            | "goconst"
+            | "gocyclo"
+            | "gomoddirectives"
+            | "gomodguard"
+            | "gosec"
+            | "nolintlint"
+            | "promlinter"
+            | "revive"
+            | "unconvert"
+            | "unused"
+    )
+}

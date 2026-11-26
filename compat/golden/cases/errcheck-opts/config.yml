@@ -1,0 +1,27 @@
+# Golden case: errcheck with every setting at its default (COMPAT-HARDENING
+# Phase 4).
+#
+# This is the baseline of the five-case group; the other four each turn on one
+# key, and the diff between their golden and this one is that key's effect.
+# Writing no `settings.errcheck` block at all is the point — a case that spells
+# out the defaults would never notice guff shipping a different one.
+#
+# What the defaults are (upstream `getChecker`): blank assignments and type
+# assertions are *excluded* (both keys default false, and the checker's fields
+# are their negation), and `DefaultExcludedSymbols` — fmt.Println,
+# (hash.Hash).Write, … — is appended unless `disable-default-exclusions` says
+# otherwise.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

@@ -1,0 +1,1 @@
+can't load config: error in exclude rule #0: at least 2 of (text, source, path[-except], linters) should be set

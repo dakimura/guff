@@ -1,0 +1,21 @@
+# revive v1.17.1 test/max_public_structs_test.go TestMaxPublicStructs (limit 1).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      rules:
+        - name: max-public-structs
+          arguments: [1]
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

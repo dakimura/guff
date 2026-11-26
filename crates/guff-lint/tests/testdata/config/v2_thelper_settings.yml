@@ -1,0 +1,21 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - thelper
+  settings:
+    thelper:
+      test:
+        begin: false
+        first: false
+        name: true
+      benchmark:
+        begin: false
+        first: false
+      tb:
+        begin: false
+        first: false
+        name: false
+      fuzz:
+        begin: false
+        first: false

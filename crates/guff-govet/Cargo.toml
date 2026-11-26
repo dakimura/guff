@@ -1,0 +1,28 @@
+[package]
+name = "guff-govet"
+description = "Rust port of golang.org/x/tools/go/analysis/passes (go vet)."
+keywords = ["go", "govet", "vet", "analysis"]
+categories = ["development-tools"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "guff_govet"
+path = "src/lib.rs"
+
+[dependencies]
+guff-ast = { path = "../guff-ast" }
+memchr = "2"
+guff-analysis = { path = "../guff-analysis" }
+guff-constant = { path = "../guff-constant" }
+guff-gostd = { path = "../guff-gostd" }
+guff-stdlib = { path = "../guff-stdlib" }
+guff-types = { path = "../guff-types" }
+guff-ssa = { path = "../guff-ssa" }
+serde_json = "1"
+
+[dev-dependencies]
+guff-packages = { path = "../guff-packages" }
+guff-runner = { path = "../guff-runner" }
+guff-types = { path = "../guff-types" }

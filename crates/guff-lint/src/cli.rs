@@ -1,0 +1,1189 @@
+//! Shared CLI entry for `guff` and custom binaries built by `guff custom`.
+
+use std::io::{self, IsTerminal, Write};
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+use std::time::{Duration, Instant};
+
+use clap::{Parser, Subcommand};
+use guff_fmt::{MetaFormatter, Runner, RunnerOptions};
+use guff_runner::{cache_dir_size, clean_cache, default_cache_dir, CacheError};
+
+use crate::custom::{
+    build_custom, discover_custom_config, load_custom_config, BuildCustomOptions, CustomError,
+};
+use crate::{
+    default_stdout_format, discover_config, format_linters_listing, formats_from_output_config,
+    guff_version, is_meta_linter, load_config, migrate_config_file, parse_go_duration,
+    partition_linters, resolve_linters_with_settings, resolve_out_formats,
+    run_and_write_with_teardown, version_banner, ConfigError, ConfigFile, FormattersV2,
+    IssueFilter, LinterDefault, LinterSelection, LinterSettings, LintOptions, IssuesConfig,
+    OutputSpec, PrinterOptions, RunError, SeverityConfig, Teardown, DEFAULT_TIMEOUT,
+    EXIT_TIMEOUT, NOLINTLINT_NAME,
+};
+use crate::watch::run_watch;
+
+#[derive(Parser)]
+#[command(name = "guff", about = "Run Go linters through the guff analysis pipeline")]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Run enabled linters on packages.
+    Run(RunArgs),
+    /// Format Go source files (gofmt / gofumpt / goimports / gci / golines / swaggo).
+    Fmt(FmtArgs),
+    /// Migrate a golangci-lint v1 config file to v2 format.
+    Migrate(MigrateArgs),
+    /// Display the guff version.
+    Version(VersionArgs),
+    /// List enabled / disabled linters for the current configuration.
+    Linters(LintersArgs),
+    /// Cache control and information.
+    Cache(CacheArgs),
+    /// Build a custom guff binary with module plugins (golangci `custom`).
+    Custom(CustomArgs),
+}
+
+#[derive(Parser)]
+struct CustomArgs {
+    /// Path to `.custom-gcl.yml` / `.custom-guff.yml` (default: discover).
+    #[arg(short = 'c', long)]
+    config: Option<PathBuf>,
+
+    /// Verbose cargo / build logs.
+    #[arg(short = 'v', long)]
+    verbose: bool,
+}
+
+#[derive(Parser)]
+struct FmtArgs {
+    /// Paths to format (default: `.`).
+    #[arg(default_value = ".")]
+    paths: Vec<String>,
+
+    /// Read config from this path (default: discover `.golangci.yml` / `.guff.yml`).
+    #[arg(short = 'c', long)]
+    config: Option<PathBuf>,
+
+    /// Do not read a configuration file.
+    #[arg(long)]
+    no_config: bool,
+
+    /// Enable a formatter by name (repeatable; default: config `formatters.enable`, else gofmt).
+    #[arg(short = 'E', long = "enable")]
+    enable: Vec<String>,
+
+    /// Display diffs instead of rewriting files.
+    #[arg(short = 'd', long = "diff")]
+    diff: bool,
+
+    /// Disable ANSI colors in `--diff` output (colors are on by default on a TTY).
+    #[arg(long = "no-color")]
+    no_color: bool,
+
+    /// Read source from stdin; write formatted result to stdout.
+    #[arg(long)]
+    stdin: bool,
+}
+
+#[derive(Parser)]
+struct RunArgs {
+    /// Package patterns (default: `.`).
+    #[arg(default_value = ".")]
+    patterns: Vec<String>,
+
+    /// Read config from this path (default: discover `.golangci.yml` / `.guff.yml`).
+    #[arg(short = 'c', long)]
+    config: Option<PathBuf>,
+
+    /// Do not read a configuration file.
+    #[arg(long)]
+    no_config: bool,
+
+    /// Preset linter set (`standard` = golangci-lint v2 default).
+    #[arg(long, visible_alias = "default")]
+    preset: Option<String>,
+
+    /// Enable an additional linter by name (repeatable).
+    #[arg(short = 'E', long = "enable")]
+    enable: Vec<String>,
+
+    /// Disable a linter from the preset (repeatable).
+    #[arg(short = 'D', long = "disable")]
+    disable: Vec<String>,
+
+    /// Run analyzers sequentially (tests / deterministic output).
+    #[arg(long)]
+    sequential: bool,
+
+    /// Exit code when at least one issue is found (default: 1).
+    #[arg(long, default_value_t = 1)]
+    issues_exit_code: i32,
+
+    /// Build tags passed to `go list` (repeatable; merged with `run.build-tags`).
+    #[arg(long = "build-tags")]
+    build_tags: Vec<String>,
+
+    /// Timeout for the whole run (Go duration: `1m`, `5m`, `30s`). `0` disables.
+    /// Default: config `run.timeout`, else `1m`.
+    #[arg(long)]
+    timeout: Option<String>,
+
+    /// Number of concurrent workers (`run.concurrency`). `1` forces sequential.
+    #[arg(short = 'j', long = "concurrency")]
+    concurrency: Option<usize>,
+
+    /// Output format (repeatable). Default: `colored-line-number` on a TTY,
+    /// `text` otherwise (golangci-compatible).
+    /// Supported: `text`, `line-number`, `colored-line-number`, `json`,
+    /// `checkstyle`, `sarif`, `tab`, `colored-tab`, `github-actions`.
+    #[arg(long = "out-format", value_name = "FORMAT")]
+    out_format: Vec<String>,
+
+    /// Path display mode: `rel` (default, like golangci) or `abs`.
+    #[arg(long = "path-mode", value_name = "MODE")]
+    path_mode: Option<String>,
+
+    /// Disable the persistent issues cache.
+    #[arg(long = "no-cache")]
+    no_cache: bool,
+
+    /// Apply suggested fixes to source files and omit fixed issues from output.
+    #[arg(long)]
+    fix: bool,
+
+    /// Stay running and re-lint when `.go` / `go.mod` files change (C-2).
+    /// Keeps the package graph and issue-cache hashes in memory; does not
+    /// retain type/SSA arenas between passes (idle RSS stays warm-sized).
+    #[arg(long)]
+    watch: bool,
+}
+
+#[derive(Parser)]
+struct MigrateArgs {
+    /// Config file to migrate (default: discover `.golangci.yml` / `.guff.yml`).
+    #[arg(short = 'c', long)]
+    config: Option<PathBuf>,
+
+    /// Skip validation (allow re-migrating or v2 files).
+    #[arg(long)]
+    skip_validation: bool,
+}
+
+#[derive(Parser)]
+struct VersionArgs {
+    /// Display only the version number.
+    #[arg(long)]
+    short: bool,
+}
+
+#[derive(Parser)]
+struct LintersArgs {
+    /// Read config from this path (default: discover `.golangci.yml` / `.guff.yml`).
+    #[arg(short = 'c', long)]
+    config: Option<PathBuf>,
+
+    /// Do not read a configuration file.
+    #[arg(long)]
+    no_config: bool,
+
+    /// Preset linter set (`standard` = golangci-lint v2 default).
+    #[arg(long, visible_alias = "default")]
+    preset: Option<String>,
+
+    /// Enable an additional linter by name (repeatable).
+    #[arg(short = 'E', long = "enable")]
+    enable: Vec<String>,
+
+    /// Disable a linter from the preset (repeatable).
+    #[arg(short = 'D', long = "disable")]
+    disable: Vec<String>,
+}
+
+#[derive(Parser)]
+struct CacheArgs {
+    #[command(subcommand)]
+    command: CacheCommand,
+}
+
+#[derive(Subcommand)]
+enum CacheCommand {
+    /// Remove the cache directory.
+    Clean,
+    /// Show cache directory and size.
+    Status,
+}
+
+/// Run the guff CLI (also used by binaries produced by `guff custom`).
+pub fn main() -> ExitCode {
+    // A-9: wall from process entry through config+registry, before run_linters.
+    let startup = Instant::now();
+    guff_runner::init_rayon_global_stack();
+    let cli = Cli::parse();
+    match cli.command {
+        Commands::Run(args) => match run_cmd(args, startup) {
+            Ok(code) => ExitCode::from(code as u8),
+            Err(err @ RunError::Timeout) => {
+                eprintln!("guff: {err}");
+                ExitCode::from(EXIT_TIMEOUT as u8)
+            }
+            Err(err) => {
+                eprintln!("guff: {err}");
+                ExitCode::from(2)
+            }
+        },
+        Commands::Fmt(args) => match fmt_cmd(args) {
+            Ok(code) => ExitCode::from(code as u8),
+            Err(err) => {
+                eprintln!("guff: {err}");
+                ExitCode::from(2)
+            }
+        },
+        Commands::Migrate(args) => match migrate_cmd(args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("guff: {err}");
+                ExitCode::from(2)
+            }
+        },
+        Commands::Version(args) => {
+            if args.short {
+                println!("{}", guff_version());
+            } else {
+                println!("{}", version_banner());
+            }
+            ExitCode::SUCCESS
+        }
+        Commands::Linters(args) => match linters_cmd(args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("guff: {err}");
+                ExitCode::from(2)
+            }
+        },
+        Commands::Cache(args) => match cache_cmd(args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("guff: {err}");
+                ExitCode::from(2)
+            }
+        },
+        Commands::Custom(args) => match custom_cmd(args) {
+            Ok(path) => {
+                println!("{}", path.display());
+                ExitCode::SUCCESS
+            }
+            Err(err) => {
+                eprintln!("guff: {err}");
+                ExitCode::from(2)
+            }
+        },
+    }
+}
+
+fn custom_cmd(args: CustomArgs) -> Result<PathBuf, CustomError> {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let path = match args.config {
+        Some(p) => p,
+        None => discover_custom_config(&cwd).ok_or_else(|| {
+            CustomError::Message(
+                "no .custom-gcl.yml / .custom-guff.yml found (use -c)".into(),
+            )
+        })?,
+    };
+    let config = load_custom_config(&path)?;
+    let config_dir = path
+        .parent()
+        .unwrap_or(Path::new("."))
+        .to_path_buf();
+    build_custom(BuildCustomOptions {
+        config,
+        config_dir,
+        verbose: args.verbose,
+        build_dir: None,
+    })
+}
+
+fn run_cmd(args: RunArgs, startup: Instant) -> Result<i32, RunError> {
+    let loaded = load_run_config(
+        args.no_config,
+        args.config.as_ref(),
+        args.preset.as_deref(),
+        &args.enable,
+        &args.disable,
+    )?;
+    let selection = loaded.selection;
+    let linter_names = selection.resolve_names();
+    let settings = &loaded.linter_settings;
+
+    // nolintlint enables no analyzer of its own: it reports on the `//nolint`
+    // comments, which the issue filter is already parsing.
+    // `settings.nolintlint.allow-unused` rides along inside the style.
+    let nolintlint_enabled = linter_names.iter().any(|n| n == NOLINTLINT_NAME);
+
+    let mut unknown = Vec::new();
+    let real: Vec<String> = linter_names
+        .iter()
+        .filter(|n| !is_meta_linter(n))
+        .cloned()
+        .collect();
+    let analyzers = resolve_linters_with_settings(&real, settings, &mut |n| unknown.push(n.to_string()));
+
+    // Fail closed, like golangci-lint (`unknown linters: '...'`, exit 3).
+    //
+    // This used to warn and keep going, which meant a typo'd or not-yet-wired
+    // linter degraded into "silently not checked": the run exits 0 with no
+    // findings and nothing downstream can tell that apart from a clean tree.
+    // The 2026-08-17 field report (issue G) called it out as the thing that
+    // makes every other coverage gap hard to notice. guff resolves all 112
+    // golangci-lint v2 linter names plus any linked module plugin — gated by
+    // `cli_test::every_isolate_linter_name_resolves` — so a name that reaches
+    // here is genuinely not a linter.
+    if !unknown.is_empty() {
+        let names = unknown
+            .iter()
+            .map(|n| format!("'{n}'"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        eprintln!(
+            "guff: unknown linters: {names}, run 'guff linters' to see the list \
+             of supported linters"
+        );
+        return Ok(crate::EXIT_CONFIG_ERROR);
+    }
+
+    // `printDeprecatedLinterMessages`: a deprecated linter runs, with a
+    // warning. Upstream walks a map, so its order is random; guff sorts.
+    let mut deprecated: Vec<&String> = linter_names
+        .iter()
+        .filter(|n| crate::registry::deprecation(n).is_some())
+        .collect();
+    deprecated.sort();
+    for name in deprecated {
+        if let Some((since, message, replacement)) = crate::registry::deprecation(name) {
+            eprintln!(
+                "guff: The linter '{name}' is deprecated (since {since}) due to: \
+                 {message} Replaced by {replacement}."
+            );
+        }
+    }
+
+    // An empty selection means the config asked for nothing — `default: none`
+    // with no `enable`, or every default linter listed under `disable`. It used
+    // to fall back to the standard preset, which turned "disable everything"
+    // into "run everything"; golangci-lint answers
+    // `Running error: no linters enabled` and exits 3. Formatters are counted
+    // too: `linters.default: none` alongside `formatters.enable` is a valid
+    // format-only config and must still run.
+    let any_formatter = loaded
+        .formatters
+        .enable
+        .iter()
+        .any(|n| guff_fmt::is_formatter(n));
+    if analyzers.is_empty() && !nolintlint_enabled && !any_formatter {
+        eprintln!("guff: no linters enabled");
+        return Ok(crate::EXIT_NO_LINTERS);
+    }
+
+    let mut build_tags = loaded.build_tags;
+    for t in &args.build_tags {
+        if !build_tags.iter().any(|x| x == t) {
+            build_tags.push(t.clone());
+        }
+    }
+
+    let mut filter = loaded.filter;
+    filter.nolintlint = nolintlint_enabled.then(|| settings.nolintlint.to_style());
+    filter.enabled_linters = linter_names.iter().cloned().collect();
+
+    let timeout = resolve_timeout(args.timeout.as_deref(), loaded.timeout.as_deref())?;
+    let concurrency = args.concurrency.or(loaded.concurrency);
+    let sequential = args.sequential || concurrency == Some(1);
+
+    let out_formats = if args.out_format.is_empty() {
+        if loaded.out_formats.is_empty() {
+            vec![default_stdout_format(io::stdout().is_terminal())]
+        } else {
+            loaded.out_formats
+        }
+    } else {
+        resolve_out_formats(&args.out_format).map_err(RunError::Message)?
+    };
+
+    // `preRunE`'s `cache.NewCache`, after the config and the printers: a
+    // relative cache path or an unknown UserCacheDir stops the run instead of
+    // linting uncached. `--no-cache` (guff only) needs no directory.
+    if !args.no_cache {
+        guff_runner::require_cache_dir().map_err(RunError::Message)?;
+    }
+
+    // `--fix` and `issues.fix` are the same switch; upstream ORs them.
+    let fix = args.fix || loaded.issues_fix;
+
+    let formatters = build_formatter_run_config(
+        &loaded.formatters,
+        loaded.go_version.as_deref(),
+        &args.patterns,
+        fix,
+        !args.no_cache,
+        loaded.tests,
+        build_tags.clone(),
+        loaded.linters_generated,
+    );
+
+    let mut path_mode = loaded.path_mode;
+    if let Some(raw) = args.path_mode.as_deref() {
+        match crate::PathMode::parse(raw) {
+            Some(m) => path_mode = m,
+            None => {
+                return Err(RunError::Message(format!(
+                    "invalid --path-mode {raw:?}; use rel or abs"
+                )));
+            }
+        }
+    }
+
+    if crate::debug::enabled() {
+        eprintln!(
+            "guff: phase startup (config+registry) {:.2}s",
+            startup.elapsed().as_secs_f64()
+        );
+    }
+
+    let mut bag = (*settings.to_bag()).clone();
+    // contextcheck needs (1) same-module fact typecheck, (2) methods in SrcFuncs,
+    // (3) SSA on ill-typed packages. Each costs peak RSS on large corpora, so
+    // enable only when that analyzer is in the run.
+    //
+    // `buildir_src_methods` is NOT merely a cost knob: turning it on globally
+    // makes SA5011 report 6 false positives on prometheus, because guff-ssa is a
+    // go/ssa port with no σ-nodes and SA5011 tests IR value identity (see
+    // docs/COMPAT-HARDENING.md §7). Checks that need upstream's SrcFuncs and do
+    // not have that gap call `BuildIrResult::src_funcs_with_methods()` instead —
+    // same SSA program, different function list, no rebuild.
+    let need_ctx = crate::analyzers_need_same_module_fact_packages(&analyzers);
+    bag.insert("buildir_src_methods", need_ctx);
+    bag.insert("buildir_despite_errors", need_ctx);
+    let opts = LintOptions {
+        patterns: args.patterns,
+        analyzers,
+        sequential,
+        issues_exit_code: args.issues_exit_code,
+        build_tags,
+        tests: loaded.tests,
+        filter,
+        settings: std::sync::Arc::new(bag),
+        settings_fingerprint: loaded.settings_fingerprint.clone(),
+        timeout,
+        concurrency,
+        out_formats,
+        printer: loaded.printer,
+        use_cache: !args.no_cache,
+        cache_dir: None,
+        fix,
+        formatters,
+        path_mode,
+        path_prefix: loaded.path_prefix,
+    };
+    if args.watch {
+        run_watch(&opts)
+    } else {
+        // One shot: the process exits as soon as this returns, so hand the
+        // package graph and type arenas to the kernel instead of walking them.
+        run_and_write_with_teardown(&opts, &mut io::stdout(), Teardown::LeakOnProcessExit)
+    }
+}
+
+/// Build the `guff run` formatter-diagnostics config from `formatters` config.
+/// Returns `None` when no (implemented) formatter is enabled.
+fn build_formatter_run_config(
+    formatters: &FormattersV2,
+    go_version: Option<&str>,
+    patterns: &[String],
+    fix: bool,
+    use_format_cache: bool,
+    include_tests: bool,
+    build_tags: Vec<String>,
+    linters_generated: guff_fmt::GeneratedMode,
+) -> Option<crate::FormatterRunConfig> {
+    let enable: Vec<String> = formatters
+        .enable
+        .iter()
+        .filter(|n| guff_fmt::is_formatter(n))
+        .cloned()
+        .collect();
+    if enable.is_empty() {
+        return None;
+    }
+
+    let paths = resolve_format_paths(patterns);
+    if paths.is_empty() {
+        return None;
+    }
+
+    let mut gofumpt = formatters.gofumpt_options();
+    if gofumpt.lang.is_none() {
+        // golangci sets `GoFumpt.LangVersion` to `run.go`, which is never
+        // empty after `handleGoVersion` (see `detect_run_go`). Empty must not
+        // become "go1" (that disables the 0o octal rewrite — gin's
+        // `//nolint:gofumpt` on time.Date(…, 07, 01, …)).
+        gofumpt.lang = Some(
+            go_version
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(detect_run_go),
+        );
+    }
+    gofumpt.match_golangci = !std::env::var_os("GUFF_GOFUMPT_MATCH_GOLANGCI")
+        .is_some_and(|v| v == "0");
+
+    Some(crate::FormatterRunConfig {
+        enable,
+        gofmt: formatters.gofmt_options(),
+        gofumpt,
+        goimports: formatters.goimports_options(),
+        gci: formatters.gci_options(),
+        golines: formatters.golines_options(),
+        // `formatters.exclusions.generated` does **not** apply here.
+        // `handleFormatterExclusions` folds only `formatters.exclusions.paths`
+        // into the linters rules, so in `golangci-lint run` a formatter's
+        // findings are filtered by `linters.exclusions.generated` — which
+        // `config.Loader.Load` defaults to *strict*, not lax. Measured over
+        // three shapes and four configs: setting `linters.exclusions.generated:
+        // disable` changes what `run` reports, setting
+        // `formatters.exclusions.generated: disable` changes nothing.
+        //
+        // The formatters key is upstream's `golangci-lint fmt` default and is
+        // still read there (`fmt_cmd`).
+        generated: linters_generated,
+        exclude_paths: formatters.exclusion_paths(),
+        paths,
+        fix,
+        use_format_cache,
+        cache_dir: None,
+        include_tests,
+        build_tags,
+    })
+}
+
+/// Map `go list` patterns to filesystem roots for formatter checks.
+/// `./...` → `.`, `pkg/...` → `pkg`, `.`/`pkg` unchanged. Non-existent or
+/// non-path patterns (e.g. module paths) are skipped.
+fn resolve_format_paths(patterns: &[String]) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    for pat in patterns {
+        let mut p = pat.as_str();
+        if let Some(stripped) = p.strip_suffix("...") {
+            p = stripped.trim_end_matches('/');
+        }
+        let candidate = if p.is_empty() || p == "." || p == "./" {
+            PathBuf::from(".")
+        } else {
+            PathBuf::from(p)
+        };
+        if candidate.exists() && !out.contains(&candidate) {
+            out.push(candidate);
+        }
+    }
+    out
+}
+
+/// Resolve timeout: CLI > config > default `1m`. `0` disables.
+fn resolve_timeout(
+    cli: Option<&str>,
+    config: Option<&str>,
+) -> Result<Option<Duration>, RunError> {
+    let raw = cli.or(config).unwrap_or(DEFAULT_TIMEOUT);
+    let d = parse_go_duration(raw).map_err(|e| RunError::Message(format!("invalid --timeout: {e}")))?;
+    if d.is_zero() {
+        Ok(None)
+    } else {
+        Ok(Some(d))
+    }
+}
+
+struct LoadedRun {
+    selection: LinterSelection,
+    filter: IssueFilter,
+    build_tags: Vec<String>,
+    tests: bool,
+    linter_settings: LinterSettings,
+    /// Canonical fingerprint of the raw linter-settings YAML (cache salt).
+    settings_fingerprint: String,
+    timeout: Option<String>,
+    concurrency: Option<usize>,
+    /// Empty means "use CLI/TTY default" ([`default_stdout_format`]).
+    out_formats: Vec<OutputSpec>,
+    printer: PrinterOptions,
+    formatters: FormattersV2,
+    /// `linters.exclusions.generated` after the v2 fold (strict when unset).
+    ///
+    /// The formatters that run inside `guff run` are filtered by *this*, not by
+    /// `formatters.exclusions.generated` — see `build_formatter_run_config`.
+    linters_generated: guff_fmt::GeneratedMode,
+    go_version: Option<String>,
+    path_mode: crate::PathMode,
+    path_prefix: Option<String>,
+    /// `issues.fix` — the config spelling of `--fix`.
+    ///
+    /// golangci-lint applies the fix and then omits the issue, so a config
+    /// setting this rewrites the tree and reports less. guff parsed the key as
+    /// known (it is in `V2_ISSUES_KEYS`) and then ignored it, which is how
+    /// grafana/loki came out 10 findings apart from golangci-lint with no
+    /// warning on either side.
+    issues_fix: bool,
+}
+
+/// The first module plugin `linters.settings.custom` declares that this binary
+/// was not built with, in sorted order.
+///
+/// `type` values other than `module` are left alone: upstream loads those
+/// through a different path (`goplugin`, a `.so`) whose failure message guff
+/// has no port of, and inventing one would reject configs on a reason
+/// golangci-lint does not give.
+fn missing_module_plugin(settings: &LinterSettings) -> Option<String> {
+    let mut names: Vec<&String> = settings
+        .custom
+        .iter()
+        .filter(|(_, cfg)| cfg.type_.is_empty() || cfg.type_ == "module")
+        .map(|(name, _)| name)
+        .collect();
+    names.sort();
+    names
+        .into_iter()
+        .find(|n| !guff_plugin::is_registered(n))
+        .cloned()
+}
+
+/// `fsutils.GetBasePath(mode, cfgDir)`.
+///
+/// `cfg` (the default) is the config file's directory, or the working
+/// directory when there is no config file; `wd` the working directory; `gomod`
+/// the directory of the nearest `go.mod`; `gitroot` the git toplevel.
+///
+/// Kept lexical (`cwd.join(dir)`, no symlink resolution) because the issue
+/// paths it is compared with are lexical too — `path_for_match` takes
+/// `filepath.Rel` of the two, and resolving only one side would turn every
+/// path under a symlinked checkout into `../..`.
+fn relative_path_base(
+    mode: Option<&str>,
+    config_path: Option<&Path>,
+) -> Result<Option<PathBuf>, ConfigError> {
+    let Ok(cwd) = std::env::current_dir() else {
+        return Ok(None);
+    };
+    let base = match mode.unwrap_or("").trim() {
+        "" | "cfg" => match config_path.and_then(|p| p.parent()) {
+            Some(dir) if !dir.as_os_str().is_empty() => cwd.join(dir),
+            _ => cwd,
+        },
+        "gomod" => cwd
+            .ancestors()
+            .find(|d| d.join("go.mod").is_file())
+            .map(Path::to_path_buf)
+            .unwrap_or(cwd),
+        "gitroot" => {
+            let out = std::process::Command::new("git")
+                .args(["rev-parse", "--show-toplevel"])
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .ok_or_else(|| {
+                    ConfigError::Validation("get git root: git rev-parse --show-toplevel failed".into())
+                })?;
+            PathBuf::from(String::from_utf8_lossy(&out.stdout).trim())
+        }
+        // `wd`; `ConfigFile::validate` has already refused anything else.
+        _ => cwd,
+    };
+    Ok(Some(base))
+}
+
+fn load_run_config(
+    no_config: bool,
+    config: Option<&PathBuf>,
+    preset: Option<&str>,
+    enable: &[String],
+    disable: &[String],
+) -> Result<LoadedRun, ConfigError> {
+    let (file, config_path): (Option<ConfigFile>, Option<PathBuf>) = if no_config {
+        (None, None)
+    } else {
+        let path = match config {
+            Some(p) => Some(p.clone()),
+            None => discover_config(&std::env::current_dir().unwrap_or_default()),
+        };
+        match path {
+            Some(p) => {
+                let cfg = load_config(&p)?;
+                // golangci-lint validates before it runs anything, so a config
+                // in this family produces no findings there. Running it here
+                // with a silently different enable set is not compatibility.
+                cfg.validate()?;
+                (Some(cfg), Some(p))
+            }
+            None => (None, None),
+        }
+    };
+
+    let base = file
+        .as_ref()
+        .map(|c| c.linter_selection())
+        .unwrap_or_default();
+
+    let cli_default = preset.map(|p| {
+        LinterDefault::parse(p).unwrap_or_else(|| {
+            eprintln!("guff: unknown preset {p:?}, using standard");
+            LinterDefault::Standard
+        })
+    });
+
+    let selection = base.with_cli_overrides(cli_default, enable, disable);
+
+    let (issues, severity, run, output, mut linter_settings, settings_fingerprint) = match &file {
+        Some(c) => (
+            c.effective_issues(),
+            c.effective_severity(),
+            c.run().clone(),
+            c.output().clone(),
+            LinterSettings::from_yaml(c.linter_settings_raw()),
+            c.linter_settings_fingerprint(),
+        ),
+        None => (
+            IssuesConfig::default(),
+            SeverityConfig::default(),
+            Default::default(),
+            Default::default(),
+            LinterSettings::default(),
+            String::new(),
+        ),
+    };
+
+    // The generated-file mode the *linters* pipeline uses. `--no-config` has no
+    // config to read it from, so it keeps guff's unfiltered behaviour.
+    let issues_generated: Option<String> = if no_config {
+        None
+    } else {
+        issues.generated.clone()
+    };
+
+    // --no-config: still apply empty/default filter (no path excludes from file).
+    let mut filter = if no_config {
+        IssueFilter::from_config(
+            &IssuesConfig {
+                exclude_use_default: false,
+                max_issues_per_linter: 0,
+                max_same_issues: 0,
+                exclude_dirs_use_default: Some(false),
+                ..IssuesConfig::default()
+            },
+            &SeverityConfig::default(),
+        )
+    } else {
+        IssueFilter::from_config(&issues, &severity)
+    };
+    // golangci `run.relative-path-mode` (`fsutils.GetBasePath`): every issue's
+    // `RelativePath` is taken against this directory, and both the exclusion
+    // path regexes and the printed path use it.
+    if let Some(base) = relative_path_base(run.relative_path_mode.as_deref(), config_path.as_deref())? {
+        filter = filter.with_path_base(base);
+    }
+
+    // Config `output.formats` / `output.format` — CLI `--out-format` overrides.
+    // Empty → CLI applies TTY-aware default (golangci colored-line-number on TTY).
+    let out_formats = formats_from_output_config(&output.formats, output.format.as_deref());
+    let printer = PrinterOptions::from_config(output.print_issued_lines, output.print_linter_name);
+
+    let formatters = file.as_ref().map(|c| c.formatters()).unwrap_or_default();
+    let go_version = run.go.clone();
+
+    // `build linters` constructs every module plugin declared under
+    // `linters.settings.custom` before any linter name is validated, and a
+    // plugin this binary was not built with ends the process:
+    //
+    //     build linters: plugin(requiredfield): plugin "requiredfield" not found
+    //
+    // Two things here were measured against upstream rather than assumed, both
+    // on pulumi's config (the corpus target that carries two such plugins):
+    //
+    //  - it fires for a *declared* plugin, not an enabled one. A config that
+    //    declares `requiredfield` under `custom` and never names it in `enable`
+    //    still refuses upstream; guff ran it and linted with everything else,
+    //    which is the failure the reject tier exists for — a run that looks
+    //    clean while the config asked for a linter nobody has.
+    //  - it beats the unknown-linter check. With a bogus name *and* a missing
+    //    plugin in the same `enable` list, upstream names the plugin, because
+    //    the set of valid linter names is not known until the plugins are
+    //    built. So this has to run before `run_cmd`'s unknown-name check, which
+    //    is why it lives here in the shared loader rather than there.
+    //
+    // Upstream ranges over a Go map, so with two missing plugins the name it
+    // prints is whichever came out of the map first — pulumi's two alternate
+    // across runs. guff reports the first in sorted order, so its message is a
+    // function of the config rather than of the run, and the reject case
+    // declares exactly one plugin for the same reason.
+    if let Some(name) = missing_module_plugin(&linter_settings) {
+        return Err(ConfigError::LinterSettings(format!(
+            "build linters: plugin({name}): plugin {name:?} not found"
+        )));
+    }
+
+    // gocritic validates its own option combinations from the linter's context
+    // setter, so upstream only rejects them when gocritic is enabled — a stale
+    // settings block under a disabled linter starts fine there and must here.
+    if selection.resolve_names().iter().any(|n| n == "gocritic") {
+        let gc = &linter_settings.gocritic;
+        crate::config::validate_gocritic_options(
+            gc.enable_all,
+            gc.disable_all,
+            &gc.enabled_tags,
+            &gc.enabled_checks,
+            &gc.disabled_tags,
+            &gc.disabled_checks,
+        )?;
+    }
+
+    // golangci `Loader.handleGoVersion`: `run.go` is a linter setting, not a
+    // source property, and an unset one is *filled in* before anything reads
+    // it — `detectGoVersion` over the main go.mod, whose `toolchain` line wins
+    // over its `go` line (see `detect_run_go`). The result is what govet
+    // (loopclosure is dropped from 1.22), revive, gocritic, gofumpt's `-lang`
+    // and gosec's `GOSECGOVERSION` all see. guff used to pass only a
+    // configured value and let each linter fall back to the package's module
+    // version, which carries no toolchain line: a `go 1.21` + `toolchain
+    // go1.22.0` module kept loopclosure and revive's range-val rules on.
+    //
+    // It also has to reach the cache key — two runs of the same tree that
+    // differ only in `run.go` are two different analyses, and the raw
+    // `linters.settings` fingerprint cannot see the difference.
+    let run_go = go_version
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(detect_run_go);
+    linter_settings.apply_go_version(Some(&run_go));
+    linter_settings.gosec.go = Some(run_go.clone());
+    let settings_fingerprint = format!("{settings_fingerprint}\nrun.go={run_go}");
+
+    let mut path_mode = crate::PathMode::Rel;
+    if let Some(raw) = output.path_mode.as_deref() {
+        match crate::PathMode::parse(raw) {
+            Some(m) => path_mode = m,
+            None => eprintln!("guff: ignoring unknown output.path-mode {raw:?}"),
+        }
+    }
+
+    Ok(LoadedRun {
+        selection,
+        filter,
+        settings_fingerprint,
+        build_tags: run.build_tags,
+        // golangci-lint default for `run.tests` is true (analyze `*_test.go`).
+        tests: run.tests.unwrap_or(true),
+        linter_settings,
+        timeout: run.timeout,
+        concurrency: run.concurrency.map(|n| n.max(0) as usize),
+        out_formats,
+        printer,
+        formatters,
+        linters_generated: guff_fmt::GeneratedMode::parse(issues_generated.as_deref()),
+        go_version,
+        path_mode,
+        path_prefix: output.path_prefix.clone(),
+        issues_fix: issues.fix,
+    })
+}
+
+fn linters_cmd(args: LintersArgs) -> Result<(), ConfigError> {
+    let loaded = load_run_config(
+        args.no_config,
+        args.config.as_ref(),
+        args.preset.as_deref(),
+        &args.enable,
+        &args.disable,
+    )?;
+    let (enabled, disabled) = partition_linters(&loaded.selection);
+    format_linters_listing(&enabled, &disabled, &mut std::io::stdout())
+        .map_err(|e| ConfigError::Io(e))?;
+    Ok(())
+}
+
+fn fmt_cmd(args: FmtArgs) -> Result<i32, RunError> {
+    let (formatters, go_version) = load_formatters_config(args.no_config, args.config.as_ref())?;
+
+    let enable = if args.enable.is_empty() {
+        formatters.enable.clone()
+    } else {
+        args.enable.clone()
+    };
+    let enable = validate_formatters(&enable)?;
+
+    let mut gofumpt = formatters.gofumpt_options();
+    if gofumpt.lang.is_none() {
+        // `run.go` as `handleGoVersion` fills it in (see `detect_run_go`).
+        gofumpt.lang = Some(
+            go_version
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(detect_run_go),
+        );
+    }
+
+    let meta = MetaFormatter::new(
+        &enable,
+        formatters.gofmt_options(),
+        gofumpt,
+        formatters.goimports_options(),
+        formatters.gci_options(),
+        formatters.golines_options(),
+    )
+    .map_err(|e| RunError::Message(e.to_string()))?;
+
+    let color = args.diff && !args.no_color && io::stdout().is_terminal();
+    let runner = Runner::new(
+        meta,
+        RunnerOptions {
+            diff: args.diff,
+            stdin: args.stdin,
+            exclude_paths: formatters.exclusion_paths(),
+            generated: formatters.exclusion_generated(),
+            color,
+            format_cache: None,
+            ..Default::default()
+        },
+    );
+
+    let paths = guff_fmt::clean_args(&args.paths);
+    let mut stdout = io::stdout();
+    let stats = runner
+        .run(&paths, &mut stdout)
+        .map_err(|e| RunError::Message(e.to_string()))?;
+    let _ = stdout.flush();
+    Ok(stats.exit_code)
+}
+
+/// Validate formatter names (all listed formatters are implemented). Empty is OK
+/// (MetaFormatter falls back to gofmt).
+fn validate_formatters(enable: &[String]) -> Result<Vec<String>, RunError> {
+    for name in enable {
+        if !guff_fmt::is_formatter(name) {
+            return Err(RunError::Message(format!("invalid formatter {name:?}")));
+        }
+    }
+    Ok(enable.to_vec())
+}
+
+/// Load `formatters` config plus the `run.go` version (for gofumpt `-lang`).
+fn load_formatters_config(
+    no_config: bool,
+    config_path: Option<&PathBuf>,
+) -> Result<(FormattersV2, Option<String>), RunError> {
+    if no_config {
+        return Ok((FormattersV2::default(), None));
+    }
+    let path = match config_path {
+        Some(p) => Some(p.clone()),
+        None => discover_config(&std::env::current_dir().unwrap_or_default()),
+    };
+    let Some(path) = path else {
+        return Ok((FormattersV2::default(), None));
+    };
+    let cfg = load_config(&path).map_err(|e| RunError::Message(e.to_string()))?;
+    let go = cfg.run().go.clone();
+    Ok((cfg.formatters(), go))
+}
+
+fn migrate_cmd(args: MigrateArgs) -> Result<(), ConfigError> {
+    let path = match args.config {
+        Some(p) => p,
+        None => discover_config(&std::env::current_dir().unwrap_or_default())
+            .ok_or(ConfigError::NotFound)?,
+    };
+
+    let migrated = migrate_config_file(&path, args.skip_validation)?;
+    let backup = crate::backup_path(&path);
+    eprintln!(
+        "guff: migrated {} -> v2 (backup: {})",
+        path.display(),
+        backup.display()
+    );
+    if !migrated.formatters.enable.is_empty() {
+        let known: Vec<_> = migrated
+            .formatters
+            .enable
+            .iter()
+            .filter(|n| guff_fmt::is_formatter(n))
+            .cloned()
+            .collect();
+        let unknown: Vec<_> = migrated
+            .formatters
+            .enable
+            .iter()
+            .filter(|n| !guff_fmt::is_formatter(n))
+            .cloned()
+            .collect();
+        if !known.is_empty() {
+            eprintln!(
+                "guff: note: formatters ({}) available via `guff fmt`",
+                known.join(", ")
+            );
+        }
+        if !unknown.is_empty() {
+            eprintln!(
+                "guff: note: unknown formatters ({}) recorded",
+                unknown.join(", ")
+            );
+        }
+    }
+    Ok(())
+}
+
+fn cache_cmd(args: CacheArgs) -> Result<(), RunError> {
+    // `DefaultDir` returns "off" without an error for an explicit `=off`.
+    let dir = match default_cache_dir() {
+        Ok(dir) => Some(dir),
+        Err(CacheError::Disabled(_)) => None,
+        Err(e) => return Err(RunError::Message(e.to_string())),
+    };
+    match args.command {
+        CacheCommand::Clean => {
+            // Upstream removes a directory named `off` under the working
+            // directory here; guff leaves it alone.
+            let Some(dir) = dir else {
+                return Ok(());
+            };
+            clean_cache(&dir).map_err(|e| RunError::Message(e.to_string()))?;
+            eprintln!("guff: cleaned cache at {}", dir.display());
+        }
+        CacheCommand::Status => {
+            match &dir {
+                Some(dir) => {
+                    println!("Dir: {}", dir.display());
+                    // `dirSizeBytes` fails on a missing directory and the line is dropped.
+                    if dir.exists() {
+                        println!("Size: {}", prettify_bytes(cache_dir_size(dir)));
+                    }
+                }
+                None => println!("Dir: off"),
+            }
+            match guff_runner::default_go_cache_dir() {
+                Ok(gocache) => {
+                    println!("GOCACHE: {}", gocache.display());
+                    println!("GOCACHE size: {}", prettify_bytes(cache_dir_size(&gocache)));
+                }
+                Err(e) => println!("GOCACHE: ({e})"),
+            }
+        }
+    }
+    Ok(())
+}
+
+fn prettify_bytes(n: u64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    const GB: f64 = MB * 1024.0;
+    let n = n as f64;
+    if n >= GB {
+        format!("{:.1} GB", n / GB)
+    } else if n >= MB {
+        format!("{:.1} MB", n / MB)
+    } else if n >= KB {
+        format!("{:.1} KB", n / KB)
+    } else {
+        format!("{n} B")
+    }
+}
+
+/// golangci-lint's `detectGoVersion` (`pkg/config/config.go`): what `run.go`
+/// becomes when the config leaves it unset.
+///
+/// `go env GOMOD GOVERSION`; with a go.mod, its **`toolchain`** directive if it
+/// has one, else its `go` directive; without one (or when it will not read),
+/// `GOVERSION`; and `1.22` when all of that is empty. Toolchain names go
+/// through `parseGoVersion`, which drops the `go` prefix and a prerelease
+/// suffix (`go1.24rc1` → `1.24`); the `go` directive is returned as written.
+pub(crate) fn detect_run_go() -> String {
+    let out = std::process::Command::new("go")
+        .args(["env", "GOMOD", "GOVERSION"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default();
+    let mut lines = out.lines();
+    let gomod = lines.next().unwrap_or("").trim().to_string();
+    let goversion = lines.next().unwrap_or("").trim().to_string();
+    let detected = if gomod.is_empty() {
+        parse_toolchain_version(&goversion)
+    } else {
+        match std::fs::read_to_string(&gomod) {
+            Ok(text) => run_go_from_go_mod(&text).unwrap_or_else(|| parse_toolchain_version(&goversion)),
+            Err(_) => parse_toolchain_version(&goversion),
+        }
+    };
+    if detected.is_empty() {
+        "1.22".to_string()
+    } else {
+        detected
+    }
+}
+
+/// The go.mod half of [`detect_run_go`]: `toolchain` wins over `go`.
+fn run_go_from_go_mod(text: &str) -> Option<String> {
+    let mut go = None;
+    let mut toolchain = None;
+    for line in text.lines() {
+        let line = line.split("//").next().unwrap_or("").trim();
+        let mut fields = line.split_whitespace();
+        match (fields.next(), fields.next()) {
+            (Some("toolchain"), Some(name)) => toolchain = Some(name.to_string()),
+            (Some("go"), Some(v)) => go = Some(v.to_string()),
+            _ => {}
+        }
+    }
+    if let Some(name) = toolchain.filter(|n| !n.is_empty()) {
+        return Some(parse_toolchain_version(&name));
+    }
+    go.filter(|v| !v.is_empty())
+}
+
+/// golangci `parseGoVersion`: trim `go`, cut at the first rune that is neither
+/// a digit nor a dot.
+fn parse_toolchain_version(v: &str) -> String {
+    let raw = v.strip_prefix("go").unwrap_or(v);
+    let end = raw
+        .find(|c: char| !c.is_ascii_digit() && c != '.')
+        .unwrap_or(raw.len());
+    raw[..end].to_string()
+}
+
+#[cfg(test)]
+mod detect_run_go_tests {
+    use super::*;
+
+    #[test]
+    fn toolchain_directive_wins_over_go() {
+        assert_eq!(
+            run_go_from_go_mod("module m\n\ngo 1.21\n\ntoolchain go1.22.0\n").as_deref(),
+            Some("1.22.0")
+        );
+        assert_eq!(run_go_from_go_mod("module m\ngo 1.18\n").as_deref(), Some("1.18"));
+        assert_eq!(
+            run_go_from_go_mod("module m\ngo 1.21 // pinned\ntoolchain go1.24rc1\n").as_deref(),
+            Some("1.24")
+        );
+        assert_eq!(run_go_from_go_mod("module m\n"), None);
+    }
+
+    #[test]
+    fn toolchain_names_lose_prefix_and_prerelease() {
+        assert_eq!(parse_toolchain_version("go1.26.5"), "1.26.5");
+        assert_eq!(parse_toolchain_version("go1.24rc1"), "1.24");
+        assert_eq!(parse_toolchain_version(""), "");
+    }
+}

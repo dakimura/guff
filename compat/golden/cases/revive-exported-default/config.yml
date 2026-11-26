@@ -1,0 +1,23 @@
+# Golden case: `exported` with no arguments.
+#
+# The baseline for the other two `revive-exported-*` cases. Two defaults are on
+# here: `PrivateReceivers` and `PublicInterfaces`, both of which *skip*
+# something, so this set is the small one.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      rules:
+        - name: exported
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

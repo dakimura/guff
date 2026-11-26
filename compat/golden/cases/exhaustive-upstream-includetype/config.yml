@@ -1,0 +1,29 @@
+# Golden case: exhaustive v0.15.0 testdata under only-types / ignore-constants.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - exhaustive
+  settings:
+    exhaustive:
+      check:
+        - switch
+        - mapliteral
+      only-types:
+        - "t1"
+        - "^test/check/swtch/pattern/includetype\\.P3$"
+        - "^test/check/swtch/typ\\.M1$"
+        - "^test/check/swtch/pattern/includetype\\.a2$"
+      ignore-constants:
+        - "typ\\.V0$"
+        - "typ\\.V4$"
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

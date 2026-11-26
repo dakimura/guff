@@ -1,0 +1,10 @@
+// The Rust fixture is `//go:build linux`, which makes it invisible on every
+// other machine. This constraint is true everywhere the module builds, so the
+// golden records the same finding wherever it is regenerated.
+
+//go:build go1.18
+// +build go1.18
+
+package plusbuild
+
+func plusBuildOk() {}

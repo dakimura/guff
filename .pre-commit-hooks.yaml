@@ -1,0 +1,17 @@
+# Install as a pre-commit hook from this repo, or copy the snippet in docs/EDITORS.md.
+- id: guff
+  name: guff
+  description: Fast golangci-lint-compatible Go lint (requires guff on PATH)
+  entry: guff run ./...
+  language: system
+  types: [go]
+  pass_filenames: false
+  require_serial: true
+
+- id: guff-fmt
+  name: guff fmt
+  description: Format Go sources with guff fmt (requires guff on PATH)
+  entry: guff fmt .
+  language: system
+  types: [go]
+  pass_filenames: false

@@ -1,0 +1,2 @@
+# The fixture the Rust test uses, so the two cannot drift.
+atomictypes/atomictypes.go   crates/guff-style/tests/testdata/modernize/atomictypes.go

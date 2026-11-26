@@ -1,0 +1,35 @@
+# Golden case: `run.go` unset, go.mod `go 1.21` + `toolchain go1.22.0`.
+#
+# golangci-lint fills an unset `run.go` in before any linter reads it
+# (`Loader.handleGoVersion` → `detectGoVersion`), and the go.mod's
+# `toolchain` line wins over its `go` line. So this module is linted as 1.22:
+# loopclosure is dropped from govet and revive's range-val rules are off —
+# the same answer as `run-go-122`, which sets `run.go: "1.22"` by hand, and
+# not `run-go`'s, which has the same config and no toolchain line. guff passed
+# only a configured `run.go` and let each linter fall back to the package's
+# module version (1.21), which carries no toolchain line.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - revive
+  settings:
+    govet:
+      enable:
+        - loopclosure
+    revive:
+      severity: warning
+      rules:
+        - name: range-val-in-closure
+        - name: range-val-address
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

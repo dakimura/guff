@@ -1,0 +1,22 @@
+[package]
+name = "guff-dupl"
+description = "Rust port of golangci-lint's dupl linter (code clone detection)."
+keywords = ["go", "linter", "dupl", "analysis"]
+categories = ["development-tools"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "guff_dupl"
+path = "src/lib.rs"
+
+[dependencies]
+guff-ast = { path = "../guff-ast" }
+guff-analysis = { path = "../guff-analysis" }
+sha1 = "0.10"
+
+[dev-dependencies]
+guff-packages = { path = "../guff-packages" }
+guff-runner = { path = "../guff-runner" }
+guff-types = { path = "../guff-types" }

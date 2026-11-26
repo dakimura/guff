@@ -1,0 +1,8 @@
+version: "2"
+linters:
+  enable:
+    - revive
+  settings:
+    revive:
+      confidence: 0.9
+      ignore-generated-header: true

@@ -1,0 +1,44 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh wastedassign
+# Produced by running golangci-lint on compat/golden/cases/wastedassign/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+bad.go:6:2:wastedassign::assigned to n, but reassigned without using the value
+bad.go:8:3:wastedassign::assigned to n, but reassigned without using the value
+bad.go:53:5:wastedassign::assigned to line, but never used afterwards
+bad.go:103:6:wastedassign::assigned to n, but reassigned without using the value
+bad.go:177:2:wastedassign::assigned to x, but reassigned without using the value
+bad.go:204:7:wastedassign::assigned to exists, but reassigned without using the value
+bad.go:217:2:wastedassign::assigned to v, but reassigned without using the value
+bad.go:217:5:wastedassign::assigned to ok, but reassigned without using the value
+bad.go:232:2:wastedassign::assigned to name, but never used afterwards
+bad.go:238:2:wastedassign::assigned to s, but never used afterwards
+bad.go:244:2:wastedassign::assigned to s, but reassigned without using the value
+bad.go:264:2:wastedassign::assigned to x, but reassigned without using the value
+bad.go:270:2:wastedassign::assigned to x, but reassigned without using the value
+bad.go:278:7:wastedassign::assigned to exists, but reassigned without using the value
+bad.go:307:2:wastedassign::assigned to e, but reassigned without using the value
+bad.go:318:2:wastedassign::assigned to a, but reassigned without using the value
+bad.go:329:2:wastedassign::assigned to s, but reassigned without using the value
+bad.go:339:2:wastedassign::assigned to m, but reassigned without using the value
+bad.go:351:2:wastedassign::assigned to p, but reassigned without using the value
+bad.go:371:3:wastedassign::assigned to c, but reassigned without using the value
+bad.go:372:3:wastedassign::assigned to c, but reassigned without using the value
+bad.go:380:6:wastedassign::assigned to err, but reassigned without using the value
+bad.go:392:4:wastedassign::assigned to offset, but never used afterwards
+bad.go:402:3:wastedassign::assigned to mid, but reassigned without using the value
+bad.go:403:3:wastedassign::assigned to mid, but reassigned without using the value
+bad.go:439:4:wastedassign::assigned to offset, but never used afterwards
+bad.go:449:3:wastedassign::assigned to offset, but never used afterwards
+bad.go:461:4:wastedassign::assigned to offset, but never used afterwards
+blank/blank.go:75:2:wastedassign::assigned to v, but reassigned without using the value
+blank/blank.go:77:7:wastedassign::assigned to v, but reassigned without using the value
+branch/branch.go:35:4:wastedassign::assigned to offset, but never used afterwards
+branch/branch.go:57:4:wastedassign::assigned to offset, but never used afterwards
+branch/branch.go:72:4:wastedassign::assigned to offset, but never used afterwards
+branch/branch.go:100:4:wastedassign::assigned to x, but reassigned without using the value
+branch/branch.go:129:5:wastedassign::assigned to x, but never used afterwards
+branch/branch.go:157:5:wastedassign::assigned to x, but never used afterwards

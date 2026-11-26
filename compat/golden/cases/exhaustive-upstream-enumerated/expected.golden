@@ -1,0 +1,18 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh exhaustive-upstream-enumerated
+# Produced by running golangci-lint on compat/golden/cases/exhaustive-upstream-enumerated/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+enum/typ/switches.go:10:2:exhaustive::missing cases in expression switch: bit0|mask1, mask0, bit1, bit3, mask3
+enum/typ/switches.go:15:2:exhaustive::missing cases in expression switch: x1, x2, x7, x8|x08|x008, x9, x10, x11, x12, x13, x14, x15, x16
+enum/typ/switches.go:20:2:exhaustive::missing cases in expression switch: y1, y2, y5
+enum/typ/switches.go:25:2:exhaustive::missing cases in expression switch: V0|VV0, V1, V2|vv2, V3|vv3, V4, V5
+enum/typ/switches.go:30:2:exhaustive::missing cases in expression switch: Wa0|w0, Wa1|w1, Wa2|w2, w4
+enum/typ/switches.go:36:2:exhaustive::missing cases in expression switch: Wa0|w0, Wa1|w1, Wa2|w2, w4
+enum/typ/switches.go:41:2:exhaustive::missing cases in expression switch: ModeDir, ModeAppend, ModeExclusive, ModeTemporary, ModeSymlink, ModeDevice, ModeNamedPipe, ModeSocket, ModeSetuid, ModeSetgid, ModeCharDevice, ModeSticky, ModeIrregular, ModeType, ModePerm
+enum/typ/switches.go:64:2:exhaustive::missing cases in expression switch: c0, c1|c2
+enum/typ/switches.go:66:2:exhaustive::missing cases in expression switch: c1|c2
+enum/typ/switches.go:77:2:exhaustive::missing cases in expression switch: y2, y5

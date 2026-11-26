@@ -1,0 +1,19 @@
+# Golden case: fatcontext v0.10.1's own testdata (common, as its analyzer_test
+# runs it), vendored verbatim (LICENSE next to it), under golangci-lint 2.14.0.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - fatcontext
+  settings:
+    fatcontext:
+      check-struct-pointers: false
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

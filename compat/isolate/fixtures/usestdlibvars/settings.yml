@@ -1,0 +1,11 @@
+# Only `http-method` and `http-status-code` are on by default, so eight of the
+# ten mapping tables this linter carries are unreachable without saying so. Each
+# is a separate table and a separate call-site rule, not a different value in
+# the same one.
+time-weekday: true
+time-month: true
+crypto-hash: true
+sql-isolation-level: true
+tls-signature-scheme: true
+constant-kind: true
+default-rpc-path: true

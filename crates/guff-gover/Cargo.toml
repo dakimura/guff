@@ -1,0 +1,12 @@
+[package]
+name = "guff-gover"
+description = "A Rust port of Go's internal/gover package (parsing and comparing Go toolchain versions like 1.21.0, 1.21rc1)."
+keywords = ["go", "version", "port"]
+categories = ["development-tools"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "guff_gover"
+path = "src/lib.rs"

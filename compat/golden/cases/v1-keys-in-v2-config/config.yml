@@ -1,0 +1,118 @@
+# Golden case: a v1 config body behind a v2 version line.
+#
+# golangci-lint decides the version from the `version` scalar and then decodes
+# the rest with viper/mapstructure, which silently drops every key the v2
+# structs do not declare. `version: 2` on top of a v1 file is therefore a config
+# it runs with almost none of itself in effect — and real projects ship one:
+# hashicorp/packer v1.16.0 is exactly this file.
+#
+# Two things are being pinned here.
+#
+#   * The version scalar is the unquoted integer `2`. `Config.Version` is a Go
+#     string, but viper decodes with `WeaklyTypedInput`, so `2`, `2.0`, `'2'`
+#     and `"2"` all reach `checkConfigurationVersion` as `"2"`. Reading the
+#     unquoted form as "no version" makes the whole file v1, which is how guff
+#     lost 283 of packer's 287 errcheck findings.
+#
+#   * Every v1 key below is one that *would* remove findings if it were read.
+#     `issues.exclude-rules` alone excludes errcheck outright; `exclude-dirs`
+#     takes out `internal/`; `linters.disable-all` would leave nothing enabled;
+#     `linters-settings.staticcheck.checks` would widen staticcheck past the two
+#     checks the v2 block pins.
+#
+# The expected golden is byte-identical to `cases/exclusions/expected.golden`,
+# which is the case this one copies its v2 half from. That is the assertion.
+version: 2
+
+linters:
+  # v1: would disable everything and re-enable nothing this file names below.
+  disable-all: true
+  # v1: would restrict the run to the "fast" linters.
+  fast: true
+  # v1: would add every linter in the `bugs` preset.
+  presets:
+    - bugs
+
+  default: none
+  enable:
+    - errcheck
+    - gosec
+    - govet
+    - ineffassign
+    - revive
+    - staticcheck
+  settings:
+    gosec:
+      includes:
+        - G103
+        - G104
+        - G204
+        - G301
+        - G304
+    govet:
+      enable:
+        - printf
+        - unsafeptr
+    revive:
+      rules:
+        - name: exported
+        - name: package-comments
+    staticcheck:
+      checks:
+        - ST1000
+        - SA4011
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+  # Everything from here down is v1's, and none of it is read.
+  exclude:
+    - "Error return value"
+  exclude-rules:
+    - linters:
+        - errcheck
+        - gosec
+        - govet
+        - revive
+        - staticcheck
+      path: '\.go$'
+  exclude-dirs:
+    - internal
+  exclude-files:
+    - 'presets\.go$'
+  exclude-use-default: true
+  exclude-case-sensitive: true
+  exclude-dirs-use-default: true
+  include:
+    - EXC0012
+
+# v1's top-level settings section. v2 moved it under `linters.settings`, and the
+# checks list here is deliberately wider than the one above.
+linters-settings:
+  staticcheck:
+    checks:
+      - all
+  errcheck:
+    check-blank: true
+
+run:
+  timeout: 5m
+  # v1: would drop every finding in these files and dirs.
+  skip-files:
+    - 'source\.go$'
+  skip-dirs:
+    - cmd
+  skip-dirs-use-default: true
+
+output:
+  # v1 format name; v2's nine are text/json/tab/html/checkstyle/code-climate/
+  # junit-xml/teamcity/sarif, so this selects nothing and the default text
+  # output is used.
+  formats:
+    colored-line-number:
+      path: stdout
+  # v1 keys; v2 moved both under `output.formats.text`.
+  print-issued-lines: false
+  print-linter-name: false

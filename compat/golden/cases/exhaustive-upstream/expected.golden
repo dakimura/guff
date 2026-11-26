@@ -1,0 +1,82 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh exhaustive-upstream
+# Produced by running golangci-lint on compat/golden/cases/exhaustive-upstream/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+check/swtch/defrequire/directive1/file.go:13:2:exhaustive::missing cases in expression switch: x1
+check/swtch/defrequire/directive1/file.go:33:2:exhaustive::missing cases in expression switch: x1
+check/swtch/defrequire/directive1/file.go:33:2:exhaustive::missing default case
+check/swtch/defrequire/directive1/file.go:38:2:exhaustive::missing default case
+check/swtch/defrequire/directive1/file.go:53:2:exhaustive::missing cases in expression switch: x1
+check/swtch/defrequire/directive1/file.go:53:2:exhaustive::missing default case
+check/swtch/defrequire/directive1/file.go:58:2:exhaustive::missing default case
+check/swtch/directive/file.go:12:2:exhaustive::error parsing comment directives: invalid name "badname"
+check/swtch/directive/file.go:17:2:exhaustive::error parsing comment directives: conflicting directives
+check/swtch/directive/file.go:21:2:exhaustive::enforce directive present and expression switch not checked: no switch expression
+check/swtch/directive/file.go:25:2:exhaustive::enforce directive present and expression switch not checked: switch expression type is not an enumerated type
+check/swtch/directive/file.go:34:2:exhaustive::missing cases in expression switch: x1
+check/swtch/directive/file.go:41:3:exhaustive::missing cases in expression switch: x0
+check/swtch/directive/file.go:46:2:exhaustive::missing cases in expression switch: x1
+check/swtch/directive/file.go:57:6:exhaustive::error parsing comment directives: invalid name "badname"
+check/swtch/directive/file.go:61:6:exhaustive::error parsing comment directives: conflicting directives
+check/swtch/directive/file.go:66:7:exhaustive::error parsing comment directives: conflicting directives
+check/swtch/directive/file.go:73:7:exhaustive::error parsing comment directives: conflicting directives
+check/swtch/directive/file.go:74:7:exhaustive::missing keys in map literal: x0
+check/swtch/directive/file.go:78:6:exhaustive::enforce directive present and map literal not checked: key type is not an enumerated type
+check/swtch/directive/file.go:86:6:exhaustive::missing keys in map literal: x1
+check/swtch/directive/file.go:99:6:exhaustive::missing keys in map literal: x1
+check/swtch/directive/file.go:101:7:exhaustive::missing keys in map literal: x0
+check/swtch/general/file.go:55:2:exhaustive::missing cases in expression switch: X1, X3, X4
+check/swtch/general/file.go:60:2:exhaustive::missing cases in expression switch: X0, X1, X2, X3, X4
+check/swtch/general/file.go:63:6:exhaustive::missing keys in map literal: X1, X3, X4
+check/swtch/general/file.go:67:6:exhaustive::missing keys in map literal: X1, X3, X4
+check/swtch/general/file.go:68:6:exhaustive::missing keys in map literal: X0, X1, X2, X3, X4
+check/swtch/general/file.go:86:2:exhaustive::missing cases in expression switch: v0|vv0, v1, v2|vv2, v4
+check/swtch/general/file.go:91:6:exhaustive::missing keys in map literal: v0|vv0, v1, v2|vv2, v4
+check/swtch/general/file.go:98:2:exhaustive::missing cases in expression switch: typ.V0|typ.VV0, typ.V1, typ.V2, typ.V4
+check/swtch/general/file.go:103:6:exhaustive::missing keys in map literal: typ.V0|typ.VV0, typ.V1, typ.V2, typ.V4
+check/swtch/general/file.go:110:2:exhaustive::missing cases in expression switch: X2, X3
+check/swtch/general/file.go:113:3:exhaustive::missing cases in expression switch: X0, X2
+check/swtch/general/file.go:121:6:exhaustive::missing keys in map literal: X2, X3
+check/swtch/general/file.go:122:7:exhaustive::missing keys in map literal: X0, X1, X2, X3, X4
+check/swtch/general/file.go:123:7:exhaustive::missing keys in map literal: X0, X2
+check/swtch/general/file.go:137:6:exhaustive::missing keys in map literal: X2, X3
+check/swtch/general/file.go:138:7:exhaustive::missing keys in map literal: X0, X1, X2, X3, X4
+check/swtch/general/file.go:139:7:exhaustive::missing keys in map literal: X0, X2
+check/swtch/general/file.go:167:2:exhaustive::missing cases in expression switch: X0, X3
+check/swtch/general/file.go:174:2:exhaustive::missing cases in expression switch: X0, X1, X2, X3, X4
+check/swtch/general/file.go:191:2:exhaustive::missing cases in expression switch: X2
+check/swtch/general/file.go:211:2:exhaustive::missing cases in expression switch: X2
+check/swtch/general/file.go:235:6:exhaustive::missing keys in map literal: X2
+check/swtch/general/file.go:258:2:exhaustive::missing cases in expression switch: X1, X3, X4
+check/swtch/general/file.go:264:2:exhaustive::missing cases in expression switch: X1, X3, X4
+check/swtch/general/file.go:270:2:exhaustive::missing cases in expression switch: X1, X3, X4
+check/swtch/general/file.go:280:2:exhaustive::missing cases in expression switch: X0, X2
+check/swtch/general/file.go:286:2:exhaustive::missing cases in expression switch: X1, X2, X3
+check/swtch/general/file.go:307:2:exhaustive::missing cases in expression switch: X0, X3
+check/swtch/general/file.go:314:2:exhaustive::missing cases in expression switch: X0, X3
+check/swtch/general/file.go:326:2:exhaustive::missing cases in expression switch: X1, X2, X4
+check/swtch/general/file.go:333:6:exhaustive::missing keys in map literal: X1, X2, X4
+check/swtch/general/file.go:344:3:exhaustive::missing keys in map literal: X0, X2, X3, X4
+check/swtch/general/file.go:345:3:exhaustive::missing keys in map literal: X1, X2, X4
+check/swtch/general/file.go:348:3:exhaustive::missing keys in map literal: X0, X2, X3, X4
+check/swtch/general/file.go:349:3:exhaustive::missing keys in map literal: X1, X2, X4
+check/swtch/general/file.go:362:6:exhaustive::missing keys in map literal: X0, X2, X3, X4
+check/swtch/general/file.go:363:6:exhaustive::missing keys in map literal: X0, X2, X3, X4
+check/swtch/general/file.go:364:18:exhaustive::missing keys in map literal: X0, X2, X3, X4
+check/swtch/general/file.go:365:8:exhaustive::missing keys in map literal: X0, X2, X3, X4
+check/swtch/general/file.go:371:7:exhaustive::missing keys in map literal: X1, X2, X4
+check/swtch/general/file.go:372:7:exhaustive::missing keys in map literal: X1, X2, X4
+check/swtch/general/file.go:396:2:exhaustive::missing cases in expression switch: typnew.Z0, typnew.Z2, typnew.Z4
+check/swtch/general/file.go:401:2:exhaustive::missing cases in expression switch: typnew.Z0, typnew.Z2, typnew.Z4
+check/swtch/general/file.go:406:2:exhaustive::missing cases in expression switch: typnew.Z0, typnew.Z4
+check/swtch/general/file.go:414:2:exhaustive::missing cases in expression switch: typnew.Z0, typnew.Z4
+check/swtch/general/file.go:422:2:exhaustive::missing cases in expression switch: typ.Wa0, typ.Wa2
+check/swtch/general/file.go:426:6:exhaustive::missing keys in map literal: typnew.Z0, typnew.Z2, typnew.Z4
+check/swtch/general/file.go:431:6:exhaustive::missing keys in map literal: typnew.Z0, typnew.Z2, typnew.Z4
+check/swtch/general/file.go:436:6:exhaustive::missing keys in map literal: typnew.Z0, typnew.Z4
+check/swtch/general/file.go:442:6:exhaustive::missing keys in map literal: typnew.Z0, typnew.Z4
+check/swtch/general/file.go:448:6:exhaustive::missing keys in map literal: typ.Wa0, typ.Wa2

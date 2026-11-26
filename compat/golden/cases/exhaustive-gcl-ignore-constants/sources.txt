@@ -1,0 +1,3 @@
+# golangci-lint 2.15.0's pkg/golinters/exhaustive/testdata, one package per
+# file (they all declare the same Direction).
+exhaustive_ignore_enum_members.go  crates/guff-style/tests/testdata/exhaustive/golangci-v2.15.0/exhaustive_ignore_enum_members.go

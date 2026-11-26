@@ -1,0 +1,22 @@
+# Golden case: G407 (hardcoded IV/nonce), which golangci-lint 2.14.0 runs by
+# default (gosec v2.29.0; 2.12.2 excluded it). The 73 programs are gosec's
+# own `testutils/g407_samples.go`, one package each, verbatim (Apache-2.0,
+# LICENSE next to them); upstream expects 47 of them to report.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gosec
+  settings:
+    gosec:
+      includes:
+        - G407
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

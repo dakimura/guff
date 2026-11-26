@@ -1,0 +1,10 @@
+version: "2"
+linters:
+  enable:
+    - funcorder
+  settings:
+    funcorder:
+      constructor: false
+      struct-method: false
+      alphabetical: true
+      function: true

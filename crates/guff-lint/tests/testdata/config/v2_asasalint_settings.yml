@@ -1,0 +1,10 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - asasalint
+  settings:
+    asasalint:
+      exclude:
+        - Append
+      use-builtin-exclusions: false

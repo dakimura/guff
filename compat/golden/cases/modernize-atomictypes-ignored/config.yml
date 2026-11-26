@@ -1,0 +1,31 @@
+# Golden case: `atomictypes` when the package has build-excluded files.
+#
+# `if !isLocal(v) && len(pass.IgnoredFiles) > 0 { continue }` — a package-level
+# var or a struct field can be used from a file the build constraints removed,
+# and the analyzer cannot see whether the rewrite would still compile there. A
+# local var cannot be, so it is reported either way.
+#
+# The case therefore materializes a `//go:build gofuzz` file whose only job is
+# to be excluded. Deleting it would silently turn this case into a copy of
+# `modernize-atomictypes`.
+#
+# coredns's plugin/forward and plugin/grpc each carry exactly such a file, and
+# their `robin uint32` fields were guff-only findings because of it.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - modernize
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  # The test file is deliberate: `go list -test` keeps IgnoredGoFiles on
+  # `P [P.test]`, and guff used to empty it there, so a package with tests
+  # looked as though nothing was excluded.
+  tests: true

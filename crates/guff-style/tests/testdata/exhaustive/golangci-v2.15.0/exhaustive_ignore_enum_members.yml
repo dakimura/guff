@@ -1,0 +1,8 @@
+version: "2"
+
+linters:
+  settings:
+    exhaustive:
+      ignore-constants:
+        - "West$"
+        - "Zero$"

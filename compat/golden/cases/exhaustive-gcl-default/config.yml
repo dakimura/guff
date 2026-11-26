@@ -1,0 +1,21 @@
+# Golden case: golangci-lint 2.15.0 exhaustive_default.{go,yml}.
+# golden-may-be-empty: upstream's own file carries no `// want` at all —
+# the switch has a default case, which default-signifies-exhaustive accepts.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - exhaustive
+  settings:
+    exhaustive:
+      default-signifies-exhaustive: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

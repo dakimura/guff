@@ -1,0 +1,32 @@
+# Golden case: the staticcheck checks that only exist below Go 1.15.
+#
+# This case exists for its `go.mod`, not its config. `staticcheck-sa` declares
+# `go 1.22`, and SA3000 returns early when the effective language version is
+# go1.15 or newer, because from 1.15 the test framework calls `os.Exit` for you.
+# A `//go:build go1.14` line in the file does not help: `code.StdlibVersion`
+# only lets a file tag *raise* the version once the module is at 1.21+. The
+# only way to reach the check is a module whose `go` directive is below 1.15 —
+# so SA3000's fixtures live here, in a `go 1.14` module of their own.
+#
+# SA3000 was one of the eight checks in docs/COVERAGE.md that had never fired
+# in any gate. The first run of this case found guff reporting the function
+# *name* where upstream reports the `func` keyword.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - staticcheck
+  settings:
+    staticcheck:
+      checks:
+        - all
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

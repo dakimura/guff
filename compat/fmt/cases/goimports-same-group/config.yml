@@ -1,0 +1,12 @@
+# Three standard-library imports in one block, out of order. Every one of them
+# is in the same import group, so the correct answer has no blank line
+# anywhere — which makes this the case that isolates a *spurious* separator
+# from the group logic entirely.
+#
+# guff used to write a blank between two of them, because a spec that is not
+# last in its block records a source range ending `"fmt"\n\t` and the trimming
+# loop stopped at the tab.
+version: "2"
+formatters:
+  enable:
+    - goimports

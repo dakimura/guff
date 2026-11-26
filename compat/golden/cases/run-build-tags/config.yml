@@ -1,0 +1,29 @@
+# Golden case: `run.build-tags` (COMPAT-HARDENING Phase 4).
+#
+# One key different from `run-build-tags-none`, and the diff between the two
+# goldens is every finding in tagged.go.
+#
+# The tags go to go/packages as `-tags`, which is why this is not the same shape
+# of setting as an exclusion: the constrained file is absent from the package
+# rather than filtered out of the results.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+  settings:
+    govet:
+      enable:
+        - printf
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  build-tags:
+    - custom

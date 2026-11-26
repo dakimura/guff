@@ -1,0 +1,27 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh dupword
+# Produced by running golangci-lint on compat/golden/cases/dupword/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+bad.go:4:2:dupword::Duplicate words (is) found
+bad.go:5:10:dupword::Duplicate words (the) found
+bad.go:12:2:dupword::Duplicate words (and) found
+bad.go:13:7:dupword::Duplicate words (a) found
+bad.go:15:2:dupword::Duplicate words (block) found
+bad/bad.go:4:2:dupword::Duplicate words (is) found
+bad/bad.go:5:10:dupword::Duplicate words (the) found
+bad/bad.go:16:12:dupword::Duplicate words (the) found
+bad/bad.go:17:13:dupword::Duplicate words (a) found
+bad/bad.go:29:9:dupword::Duplicate words (the) found
+bad/bad.go:36:9:dupword::Duplicate words (é) found
+bad/bad.go:39:11:dupword::Duplicate words (the) found
+rawskip/skip_raw_strings.go:8:2:dupword::Duplicate words (the) found
+rawskip/skip_raw_strings.go:9:9:dupword::Duplicate words (the) found
+rawskip/skip_raw_strings.go:10:17:dupword::Duplicate words (the) found
+rawskip/skip_raw_strings.go:11:15:dupword::Duplicate words (the) found
+rawskip/skip_raw_strings.go:21:9:dupword::Duplicate words (the) found
+rawskip/skip_raw_strings.go:21:25:dupword::Duplicate words (the) found
+rawskip/skip_raw_strings.go:21:41:dupword::Duplicate words (voilà) found

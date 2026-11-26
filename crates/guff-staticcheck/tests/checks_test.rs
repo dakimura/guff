@@ -1,0 +1,5004 @@
+mod support;
+
+use guff_staticcheck::{sa4000, sa4001, sa4003, sa4004, sa4005, sa4006, sa4008, sa4009, sa4010, sa4011, sa4012, sa4013, sa4014, sa4015, sa4016, sa4017, sa4018, sa4019, sa4020, sa4021, sa4022, sa4023, sa4024, sa4025, sa4026, sa4027, sa4028, sa4029, sa4030, sa4031, sa4032, sa1000, sa1001, sa1002, sa1003, sa1004, sa1005, sa1006, sa1007, sa1008, sa1010, sa1011, sa1012, sa1013, sa1014, sa1015, sa1016, sa1017, sa1018, sa1019, sa1020, sa1021, sa1023, sa1024, sa1025, sa1026, sa1027, sa1028, sa1029, sa1030, sa1031, sa1032, sa2000, sa2001, sa2002, sa2003, sa3000, sa3001, sa5000, sa5001, sa5002, sa5003, sa5004, sa5005, sa5007, sa5008, sa5009, sa5010, sa5011, sa5012, sa6000, sa6001, sa6002, sa6003, sa6005, sa6006, sa9001, sa9002, sa9003, sa9004, sa9005, sa9006, sa9007, sa9008, sa9009, s1000, s1001, s1002, s1003, s1004, s1005, s1006, s1007, s1008, s1009, s1010, s1011, s1012, s1016, s1017, s1018, s1019, s1020, s1021, s1023, s1024, s1025, s1028, s1029, s1030, s1031, s1032, s1033, s1034, s1035, s1036, s1037, s1038, s1039, s1040, st1000, st1001, st1003, st1005, st1006, st1008, st1011, st1012, st1013, st1015, st1016, st1017, st1018, st1019, st1020, st1021, st1022, st1023, qf1001, qf1002, qf1003, qf1004, qf1005, qf1006, qf1007, qf1008, qf1009, qf1010, qf1011, qf1012};
+use guff_types::sizes_for;
+
+#[test]
+fn sa1017_flags_unbuffered_notify_channel() {
+    let dir = support::testdata("sa1017");
+    let os_stub = dir.join("stub/os/os.go");
+    let signal_stub = dir.join("stub/os/signal/signal.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1017",
+        &dir.join("bad.go"),
+        &[("os", &os_stub), ("os/signal", &signal_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa1017::analyzer(), &pkg);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].contains("should be buffered"));
+}
+
+#[test]
+fn sa1017_allows_buffered_notify_channel() {
+    let dir = support::testdata("sa1017");
+    let os_stub = dir.join("stub/os/os.go");
+    let signal_stub = dir.join("stub/os/signal/signal.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1017/ok",
+        &dir.join("ok.go"),
+        &[("os", &os_stub), ("os/signal", &signal_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa1017::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa1012_flags_nil_context_first_arg() {
+    let dir = support::testdata("sa1012");
+    let ctx_stub = dir.join("stub/context/context.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1012",
+        &dir.join("bad.go"),
+        &[("context", &ctx_stub)],
+    );
+    assert!(pkg.types_info.is_some(), "missing types info");
+    let messages = support::run_analyzer(sa1012::analyzer(), &pkg);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].contains("nil Context"));
+}
+
+#[test]
+fn sa1012_allows_todo_or_non_context_nil() {
+    let dir = support::testdata("sa1012");
+    let ctx_stub = dir.join("stub/context/context.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1012/ok",
+        &dir.join("ok.go"),
+        &[("context", &ctx_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa1012::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa1013_flags_swapped_seek_arguments() {
+    let dir = support::testdata("sa1013");
+    let io_stub = dir.join("stub/io/io.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1013",
+        &dir.join("bad.go"),
+        &[("io", &io_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa1013::analyzer(), &pkg);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].contains("io.Seek*"));
+}
+
+#[test]
+fn sa1013_allows_correct_seek_arguments() {
+    let dir = support::testdata("sa1013");
+    let io_stub = dir.join("stub/io/io.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1013/ok",
+        &dir.join("ok.go"),
+        &[("io", &io_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa1013::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa1026_flags_unmarshalable_types() {
+    let dir = support::testdata("sa1026");
+    let json_stub = dir.join("stub/encoding/json/json.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1026",
+        &dir.join("bad.go"),
+        &[("encoding/json", &json_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let mut messages = support::run_analyzer(sa1026::analyzer(), &pkg);
+    messages.sort();
+    // Counted and spelled out. `>= 3` let four different defects through at
+    // once: three interface short-circuits `newTypeEncoder` opens with, and
+    // the `types.RelativeTo` qualifier — which makes even the findings both
+    // tools agree on read differently.
+    assert_eq!(
+        messages,
+        vec![
+            "trying to marshal unsupported type chan int",
+            "trying to marshal unsupported type chan int, via x.C",
+            "trying to marshal unsupported type chan int, via x.Ch",
+            "trying to marshal unsupported type func(), via x.Run",
+            "trying to marshal unsupported type map[PlainKey][]int",
+            "trying to marshal unsupported type map[PlainKey][]int, via x.M",
+            "trying to marshal unsupported type map[PtrTextKey][]int",
+        ],
+        "the three type-parameter map shapes at the end of the fixture are \
+         silent: upstream skips the key check entirely when the key is a type \
+         parameter, because the concrete instantiation might implement \
+         TextMarshaler — {messages:?}"
+    );
+}
+
+/// Embedded fields follow encoding/json's dominance rules (fakejson is a copy
+/// of its `typeFields`): a field json would not encode — hidden by a
+/// shallower one, beaten by a tagged one, or tied with another — is not a
+/// finding. 15 shapes, 6 reports; pinned by line because every message is
+/// about the same `fn` type and a count would hold for the wrong shapes.
+#[test]
+fn sa1026_follows_json_field_dominance_through_embedding() {
+    let dir = support::testdata("sa1026");
+    let json_stub = dir.join("stub/encoding/json/json.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1026/embed",
+        &dir.join("embed.go"),
+        &[("encoding/json", &json_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, String)> = support::run_analyzer_diagnostics(sa1026::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| (fset.position(guff::position::Pos(d.pos as i64)).line, d.message))
+        .collect();
+    got.sort();
+    let via = |path: &str| format!("trying to marshal unsupported type fn, via {path}");
+    assert_eq!(
+        got,
+        vec![
+            (41, via("x.Inner.Method")),  // 3: not shadowed
+            (76, via("x.AT.Method")),     // 6: the tagged bad field wins the tie
+            (102, via("x.Inner.Method")), // 9: a tagged embedding is a field
+            (136, via("x.PM.F")),         // 13: by value, so not addressable
+            (141, via("x.F")),            // 14: `json:"-,"` is the name "-"
+            (150, via("x.inner.Method")), // 15: unexported struct, exported field
+        ]
+    );
+}
+
+#[test]
+fn sa1026_allows_marshalable_types() {
+    let dir = support::testdata("sa1026");
+    let json_stub = dir.join("stub/encoding/json/json.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1026/ok",
+        &dir.join("ok.go"),
+        &[("encoding/json", &json_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa1026::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn s1017_flags_manual_trimming() {
+    let dir = support::testdata("s1017");
+    let strings_stub = dir.join("stub/strings/strings.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1017",
+        &dir.join("bad.go"),
+        &[("strings", &strings_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(s1017::analyzer(), &pkg);
+    // A lower bound passes no matter how much guff over-reports, which is how
+    // it kept reporting an `else if` that upstream skips. Count, and name both
+    // shapes: the TrimPrefix call and the manual slice.
+    assert_eq!(messages.len(), 2, "{messages:?}");
+    assert!(messages.iter().all(|m| m.contains("TrimPrefix")), "{messages:?}");
+}
+
+#[test]
+fn s1017_allows_other_patterns() {
+    let dir = support::testdata("s1017");
+    let strings_stub = dir.join("stub/strings/strings.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1017/ok",
+        &dir.join("ok.go"),
+        &[("strings", &strings_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1017::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn s1021_flags_mergeable_decl_assign() {
+    let dir = support::testdata("s1021");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/s1021");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(s1021::analyzer(), &pkg);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].contains("merge variable declaration"));
+}
+
+#[test]
+fn s1021_allows_merged_or_reassigned() {
+    let dir = support::testdata("s1021");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/s1021/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1021::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn s1032_flags_sort_slice_wrappers() {
+    let dir = support::testdata("s1032");
+    let sort_stub = dir.join("stub/sort/sort.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1032",
+        &dir.join("bad.go"),
+        &[("sort", &sort_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(s1032::analyzer(), &pkg);
+    assert!(messages.len() >= 2, "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("sort.Ints")));
+    assert!(messages.iter().any(|m| m.contains("sort.Strings")));
+}
+
+#[test]
+fn s1032_allows_direct_helpers_or_ambiguous() {
+    let dir = support::testdata("s1032");
+    let sort_stub = dir.join("stub/sort/sort.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1032/ok",
+        &dir.join("ok.go"),
+        &[("sort", &sort_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1032::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn s1029_flags_rune_slice_range() {
+    let dir = support::testdata("s1029");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/s1029");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(s1029::analyzer(), &pkg);
+    assert!(messages.len() >= 2, "{messages:?}");
+    assert!(messages.iter().all(|m| m.contains("range over string")));
+}
+
+#[test]
+fn s1029_allows_direct_string_range() {
+    let dir = support::testdata("s1029");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/s1029/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1029::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn s1003_flags_index_comparisons() {
+    let dir = support::testdata("s1003");
+    let strings_stub = dir.join("stub/strings/strings.go");
+    let bytes_stub = dir.join("stub/bytes/bytes.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1003",
+        &dir.join("bad.go"),
+        &[("strings", &strings_stub), ("bytes", &bytes_stub)],
+    );
+    support::assert_well_typed(&pkg);
+
+    let messages = support::run_analyzer(s1003::analyzer(), &pkg);
+    assert!(messages.len() >= 4, "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("strings.Contains")));
+    assert!(messages.iter().any(|m| m.contains("!strings.Contains")));
+}
+
+#[test]
+fn s1003_allows_non_index_patterns() {
+    let dir = support::testdata("s1003");
+    let strings_stub = dir.join("stub/strings/strings.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1003/ok",
+        &dir.join("ok.go"),
+        &[("strings", &strings_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1003::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn s1006_flags_for_true_loops() {
+    let dir = support::testdata("s1006");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/s1006");
+    support::assert_well_typed(&pkg);
+
+    let messages = support::run_analyzer(s1006::analyzer(), &pkg);
+    assert_eq!(messages.len(), 2, "{messages:?}");
+    assert!(messages.iter().all(|m| m.contains("for {}")));
+}
+
+#[test]
+fn s1006_allows_other_loops() {
+    let dir = support::testdata("s1006");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/s1006/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1006::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn s1009_flags_redundant_nil_checks() {
+    let dir = support::testdata("s1009");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/s1009");
+    support::assert_well_typed(&pkg);
+
+    let messages = support::run_analyzer(s1009::analyzer(), &pkg);
+    assert!(messages.len() >= 4, "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("nil slices")));
+    assert!(messages.iter().any(|m| m.contains("nil maps")));
+    assert!(messages.iter().any(|m| m.contains("nil channels")));
+}
+
+/// The whole comparison table, with the bound pinned by *line* rather than by
+/// `any(contains(…))`.
+///
+/// Upstream's `isConstZero` answers two questions — is the bound a constant,
+/// and is it zero — and only the second picks which operator keeps the
+/// finding. guff's port folded both into `Option<bool>` where `None` meant
+/// "not a constant", so every literal other than `0` was dropped before the
+/// operator table was consulted. `bad.go` could not see it: all four of its
+/// bounds are `0`.
+#[test]
+fn s1009_covers_the_whole_comparison_table() {
+    let dir = support::testdata("s1009");
+    let pkg = support::typecheck_file(&dir, "table.go", "example.com/staticcheck/s1009/table");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<i64> = support::run_analyzer_diagnostics(s1009::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| fset.position(guff::position::Pos(d.pos as i64)).line)
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            // `x == nil || …`: `== 0`, `== zero`, `<= 0`, `<= 3`, `< 3`, `< three`
+            22, 24, 26, 27, 28, 30, //
+            // `x != nil && …`: `!= 0`, `== 3`, `== three`, `> 0`, `> 3`, `>= 3`
+            36, 39, 40, 41, 42, 44, //
+            53, 54, // a map and a channel, for the message
+            63, 64, 65, 66, // the four parenthesised spellings
+        ],
+        "{got:?}"
+    );
+}
+
+#[test]
+fn s1009_allows_needed_nil_checks() {
+    let dir = support::testdata("s1009");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/s1009/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1009::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn s1023_flags_redundant_break_and_return() {
+    let dir = support::testdata("s1023");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/s1023");
+    support::assert_well_typed(&pkg);
+
+    let messages = support::run_analyzer(s1023::analyzer(), &pkg);
+    assert!(messages.len() >= 3, "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("redundant break")));
+    assert!(messages.iter().any(|m| m.contains("redundant return")));
+}
+
+#[test]
+fn s1023_allows_needed_control_flow() {
+    let dir = support::testdata("s1023");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/s1023/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1023::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa1004_flags_small_sleep_literals() {
+    let dir = support::testdata("sa1004");
+    let time_stub = dir.join("stub/time/sleep.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1004",
+        &dir.join("bad.go"),
+        &[("time", &time_stub)],
+    );
+    support::assert_well_typed(&pkg);
+
+    let messages = support::run_analyzer(sa1004::analyzer(), &pkg);
+    assert_eq!(messages.len(), 2, "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("sleeping for 1")));
+    assert!(messages.iter().any(|m| m.contains("sleeping for 42")));
+}
+
+#[test]
+fn sa1004_allows_explicit_durations() {
+    let dir = support::testdata("sa1004");
+    let time_stub = dir.join("stub/time/sleep.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1004/ok",
+        &dir.join("ok.go"),
+        &[("time", &time_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa1004::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa1005_flags_shell_like_exec_command() {
+    let dir = support::testdata("sa1005");
+    let exec_stub = dir.join("stub/os/exec/exec.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1005",
+        &dir.join("bad.go"),
+        &[("os/exec", &exec_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa1005::analyzer(), &pkg);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].contains("shell command"));
+}
+
+#[test]
+fn sa1005_allows_program_paths() {
+    let dir = support::testdata("sa1005");
+    let exec_stub = dir.join("stub/os/exec/exec.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1005/ok",
+        &dir.join("ok.go"),
+        &[("os/exec", &exec_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa1005::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa1006_flags_dynamic_printf_format() {
+    let dir = support::testdata("sa1006");
+    let fmt_stub = dir.join("stub/fmt/fmt.go");
+    let log_stub = dir.join("stub/log/log.go");
+    let os_stub = dir.join("stub/os/os.go");
+    let testing_stub = dir.join("stub/testing/testing.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1006",
+        &dir.join("bad.go"),
+        &[
+            ("fmt", &fmt_stub),
+            ("log", &log_stub),
+            ("os", &os_stub),
+            ("testing", &testing_stub),
+        ],
+    );
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<i64> = support::run_analyzer_diagnostics(sa1006::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| {
+            assert!(d.message.contains("print-style function"), "{}", d.message);
+            fset.position(guff::position::Pos(d.pos as i64)).line
+        })
+        .collect();
+    got.sort();
+    // Eight of upstream's fifteen rows are methods, spelled the way
+    // `typeutil.FuncName` spells one. Package path plus object name turns
+    // `t.Errorf` into `testing.Errorf`, which is in no list, so lines 35-42
+    // reported nothing while line 11 kept this test green.
+    assert_eq!(
+        got,
+        vec![
+            11, // fmt.Printf, the shape this fixture used to be
+            25, 26, 27, 28, 29, 30, 31, // the package functions
+            35, 36, 37, 38, 39, 40, 41, 42, // the methods
+        ],
+        "lines 47-51 (further arguments, a constant format, a function not in \
+         the list) must stay silent",
+    );
+}
+
+#[test]
+fn sa1006_allows_static_or_multi_arg_printf() {
+    let dir = support::testdata("sa1006");
+    let fmt_stub = dir.join("stub/fmt/fmt.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1006/ok",
+        &dir.join("ok.go"),
+        &[("fmt", &fmt_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa1006::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa1008_flags_non_canonical_header_keys() {
+    let dir = support::testdata("sa1008");
+    let http_stub = dir.join("stub/net/http/http.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1008",
+        &dir.join("bad.go"),
+        &[("net/http", &http_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64)> = support::run_analyzer_diagnostics(sa1008::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| {
+            assert!(d.message.contains("not canonical"), "{}", d.message);
+            let p = fset.position(guff::position::Pos(d.pos as i64));
+            (p.line, p.column)
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            (10, 9), // a named key
+            (19, 6), // an assignment whose left side is not a header index
+            (25, 6), // a literal key
+            (27, 6), // through a selector, `r.Header["etag"]`
+        ],
+        "{got:?}"
+    );
+}
+
+/// The counterpart of the `ok.go` half: an assignment that writes an
+/// `http.Header` key takes its **whole subtree** out of the walk, which is
+/// upstream's `return false` and its own TODO — "this risks missing some Header
+/// reads, for example in `h1["foo"] = h2["foo"]`". guff skipped only the index
+/// on the left, so `h[k] = append(h[k], v)` reported the read on the right; k6
+/// `internal/output/prometheusrw/sigv4/sigv4.go` writes two of those.
+
+#[test]
+fn sa1008_allows_canonical_header_keys() {
+    let dir = support::testdata("sa1008");
+    let http_stub = dir.join("stub/net/http/http.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1008/ok",
+        &dir.join("ok.go"),
+        &[("net/http", &http_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa1008::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa1000_flags_invalid_regex_patterns() {
+    let dir = support::testdata("sa1000");
+    let regexp_stub = dir.join("stub/regexp/regexp.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1000",
+        &dir.join("bad.go"),
+        &[("regexp", &regexp_stub)],
+    );
+    support::assert_well_typed(&pkg);
+
+    // Pinned in full. SA1000 prints regexp.Compile's error verbatim, so both
+    // the code and the Expr it quotes are user-visible — and a substring check
+    // for "error parsing regexp" passed for as long as this check was an
+    // approximation that got the rest of the line wrong.
+    let messages = support::run_analyzer(sa1000::analyzer(), &pkg);
+    assert_eq!(
+        messages,
+        vec![
+            "error parsing regexp: missing closing ): `foo(`",
+            "error parsing regexp: missing closing ]: `[`",
+            "error parsing regexp: unexpected ): `a)`",
+            "error parsing regexp: missing argument to repetition operator: `*`",
+            "error parsing regexp: invalid nested repetition operator: `**`",
+            "error parsing regexp: invalid repeat count: `{2,1}`",
+            "error parsing regexp: invalid repeat count: `{1001}`",
+            "error parsing regexp: invalid repeat count: `{100}`",
+            "error parsing regexp: invalid escape sequence: `\\q`",
+            "error parsing regexp: invalid escape sequence: `\\C`",
+            "error parsing regexp: trailing backslash at end of expression: ``",
+            "error parsing regexp: invalid character class range: `z-a`",
+            "error parsing regexp: invalid character class range: `[:foo:]`",
+            "error parsing regexp: invalid character class range: `\\p{Foo}`",
+            "error parsing regexp: invalid named capture: `(?P<>`",
+            "error parsing regexp: invalid named capture: `(?<a.b>`",
+            "error parsing regexp: invalid or unsupported Perl syntax: `(?=`",
+            // A Go string is bytes, so these reach the scanner as the
+            // ill-formed bytes they name. `(\xff` reports the bad byte rather
+            // than the unclosed group: `regexp/syntax` checks UTF-8 while
+            // lexing, before it ever sees the `(`.
+            //
+            // U+FFFD, not the byte: the Expr is the ill-formed tail verbatim,
+            // and a Rust `String` cannot hold it. One replacement character per
+            // *byte*, which is also what Go's own `encoding/json` does — so the
+            // golden tier (JSON on both sides) agrees, and only golangci's text
+            // output, which passes the raw bytes through, differs. See
+            // docs/COMPAT-HARDENING.md §7.
+            "error parsing regexp: invalid UTF-8: `\u{fffd}`",
+            "error parsing regexp: invalid UTF-8: `\u{fffd}b`",
+            "error parsing regexp: invalid UTF-8: `\u{fffd}`",
+            "error parsing regexp: invalid UTF-8: `\u{fffd}\u{fffd}\u{fffd}`",
+            "error parsing regexp: invalid UTF-8: `\u{fffd}`",
+            // Truncated lead bytes: `\xc3` wants one continuation byte and
+            // `\xe2\x82` wants two, so the second one is two bytes long.
+            "error parsing regexp: invalid UTF-8: `\u{fffd}`",
+            "error parsing regexp: invalid UTF-8: `\u{fffd}\u{fffd}`",
+            // The operator is inside the quoted tail, not a second error.
+            "error parsing regexp: invalid UTF-8: `\u{fffd}*`",
+            "error parsing regexp: invalid UTF-8: `\u{fffd}{2}`",
+            "error parsing regexp: missing argument to repetition operator: `+`",
+            "error parsing regexp: invalid named capture: `(?P<>`",
+            "error parsing regexp: invalid escape sequence: `\\d`",
+        ],
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn sa1000_allows_valid_patterns() {
+    let dir = support::testdata("sa1000");
+    let regexp_stub = dir.join("stub/regexp/regexp.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1000/ok",
+        &dir.join("ok.go"),
+        &[("regexp", &regexp_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa1000::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa1002_flags_invalid_parse_layouts() {
+    let dir = support::testdata("sa1002");
+    let time_stub = dir.join("stub/time/parse.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1002",
+        &dir.join("bad.go"),
+        &[("time", &time_stub)],
+    );
+    support::assert_well_typed(&pkg);
+
+    // Upstream reports `err.Error()` verbatim, so pin the whole string: a
+    // `contains("parsing time")` assertion would pass on any wording.
+    // Expectations are Go's own output for `time.Parse(s, s)`.
+    let messages = support::run_analyzer(sa1002::analyzer(), &pkg);
+    assert_eq!(
+        messages,
+        vec![
+            r#"parsing time "12345" as "12345": cannot parse "" as "4""#.to_string(),
+            r#"parsing time "1234" as "1234": cannot parse "" as "3""#.to_string(),
+            r#"parsing time "123456": hour out of range"#.to_string(),
+            // The layout is bytes and ParseError quotes it, so an ill-formed
+            // one has to print as `\xff` — the single byte, not the three of
+            // a U+FFFD.
+            r#"parsing time "12345\xff" as "12345\xff": cannot parse "\xff" as "4""#.to_string(),
+            r#"parsing time "\xff1234" as "\xff1234": cannot parse "" as "3""#.to_string(),
+        ],
+    );
+}
+
+#[test]
+fn sa1002_allows_valid_layouts() {
+    let dir = support::testdata("sa1002");
+    let time_stub = dir.join("stub/time/parse.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1002/ok",
+        &dir.join("ok.go"),
+        &[("time", &time_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa1002::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa1024_flags_duplicate_cutsets() {
+    let dir = support::testdata("sa1024");
+    let strings_stub = dir.join("stub/strings/strings.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1024",
+        &dir.join("bad.go"),
+        &[("strings", &strings_stub)],
+    );
+    support::assert_well_typed(&pkg);
+
+    let messages = support::run_analyzer(sa1024::analyzer(), &pkg);
+    assert!(messages.len() >= 3, "{messages:?}");
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.contains("cutset contains duplicate characters"))
+    );
+}
+
+#[test]
+fn sa1024_allows_unique_cutsets() {
+    let dir = support::testdata("sa1024");
+    let strings_stub = dir.join("stub/strings/strings.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1024/ok",
+        &dir.join("ok.go"),
+        &[("strings", &strings_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa1024::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa1018_flags_replace_with_zero_count() {
+    let dir = support::testdata("sa1018");
+    let strings_stub = dir.join("stub/strings/strings.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1018",
+        &dir.join("bad.go"),
+        &[("strings", &strings_stub)],
+    );
+    support::assert_well_typed(&pkg);
+
+    let messages = support::run_analyzer(sa1018::analyzer(), &pkg);
+    assert!(messages.len() >= 2, "{messages:?}");
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.contains("n == 0 will return no results"))
+    );
+}
+
+#[test]
+fn sa1018_allows_nonzero_replace_count() {
+    let dir = support::testdata("sa1018");
+    let strings_stub = dir.join("stub/strings/strings.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1018/ok",
+        &dir.join("ok.go"),
+        &[("strings", &strings_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa1018::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa1007_flags_invalid_urls() {
+    let dir = support::testdata("sa1007");
+    let url_stub = dir.join("stub/net/url/url.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1007",
+        &dir.join("bad.go"),
+        &[("net/url", &url_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    // Pin the whole message: `contains("is not a valid URL")` only checks
+    // staticcheck's own wrapper, never the `net/url` error inside it — which
+    // is the part that used to come from a Rust crate and match nothing.
+    // Expectations are golangci-lint 2.12.2's output (compat/golden).
+    let messages = support::run_analyzer(sa1007::analyzer(), &pkg);
+    assert_eq!(
+        messages,
+        vec![
+            r#"":" is not a valid URL: parse ":": missing protocol scheme"#.to_string(),
+            r#""cache_object:foo/bar" is not a valid URL: parse "cache_object:foo/bar": first path segment in URL cannot contain colon"#.to_string(),
+            r#""http://host:port/" is not a valid URL: parse "http://host:port/": invalid port ":port" after host"#.to_string(),
+            r#""http://host/%zz" is not a valid URL: parse "http://host/%zz": invalid URL escape "%zz""#.to_string(),
+            r#""http://h|st/" is not a valid URL: parse "http://h|st/": invalid character "|" in host name"#.to_string(),
+            r#""http://[::1/" is not a valid URL: parse "http://[::1/": missing ']' in host"#.to_string(),
+            r#""http://x[::1]/" is not a valid URL: parse "http://x[::1]/": invalid IP-literal"#.to_string(),
+            r#""http://[12345::]/" is not a valid URL: parse "http://[12345::]/": invalid host: ParseAddr("12345::"): each group must have 4 or less digits (at "12345::")"#.to_string(),
+            r#""http://us er@host/" is not a valid URL: parse "http://us er@host/": net/url: invalid userinfo"#.to_string(),
+            // `%q` renders the ill-formed byte as `\xff`; a U+FFFD would have
+            // printed `\xef\xbf\xbd`, three escapes where Go writes one.
+            r#""http://example.com/\x7f\xff" is not a valid URL: parse "http://example.com/\x7f\xff": net/url: invalid control character in URL"#.to_string(),
+        ],
+    );
+}
+
+#[test]
+fn sa1007_allows_valid_urls() {
+    let dir = support::testdata("sa1007");
+    let url_stub = dir.join("stub/net/url/url.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1007/ok",
+        &dir.join("ok.go"),
+        &[("net/url", &url_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa1007::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa1014_flags_non_pointer_unmarshal_targets() {
+    let dir = support::testdata("sa1014");
+    let json_stub = dir.join("stub/encoding/json/json.go");
+    let io_stub = dir.join("stub/io/io.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1014",
+        &dir.join("bad.go"),
+        &[("encoding/json", &json_stub), ("io", &io_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa1014::analyzer(), &pkg);
+    assert!(messages.len() >= 3, "{messages:?}");
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.contains("expects to unmarshal into a pointer"))
+    );
+}
+
+#[test]
+fn sa1014_allows_pointer_unmarshal_targets() {
+    let dir = support::testdata("sa1014");
+    let json_stub = dir.join("stub/encoding/json/json.go");
+    let io_stub = dir.join("stub/io/io.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1014/ok",
+        &dir.join("ok.go"),
+        &[("encoding/json", &json_stub), ("io", &io_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa1014::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa1016_flags_untrappable_signals() {
+    let dir = support::testdata("sa1016");
+    let os_stub = dir.join("stub/os/os.go");
+    let signal_stub = dir.join("stub/os/signal/signal.go");
+    let syscall_stub = dir.join("stub/syscall/syscall.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1016",
+        &dir.join("bad.go"),
+        &[
+            ("os", &os_stub),
+            ("os/signal", &signal_stub),
+            ("syscall", &syscall_stub),
+        ],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa1016::analyzer(), &pkg);
+    assert_eq!(messages.len(), 2, "{messages:?}");
+    assert!(messages.iter().all(|m| m.contains("cannot be trapped")));
+}
+
+#[test]
+fn sa1016_allows_trappable_signals() {
+    let dir = support::testdata("sa1016");
+    let os_stub = dir.join("stub/os/os.go");
+    let signal_stub = dir.join("stub/os/signal/signal.go");
+    let syscall_stub = dir.join("stub/syscall/syscall.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1016/ok",
+        &dir.join("ok.go"),
+        &[
+            ("os", &os_stub),
+            ("os/signal", &signal_stub),
+            ("syscall", &syscall_stub),
+        ],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa1016::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa1021_flags_bytes_equal_on_net_ip() {
+    let dir = support::testdata("sa1021");
+    let bytes_stub = dir.join("stub/bytes/bytes.go");
+    let net_stub = dir.join("stub/net/ip.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1021",
+        &dir.join("bad.go"),
+        &[("bytes", &bytes_stub), ("net", &net_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa1021::analyzer(), &pkg);
+    // Four shapes fire: the implicit conversion, the written-out one, one
+    // through an alias of net.IP, and a conversion of a conversion. Counting
+    // them is the point — upstream's test is "the argument **is** a
+    // ChangeType whose operand unaliases to net.IP", and a check that merely
+    // asks whether the argument's type is net.IP passes the first shape while
+    // getting the alias wrong. See `ok.go` for the six that must stay silent.
+    assert_eq!(messages.len(), 4, "{messages:?}");
+    assert!(messages.iter().all(|m| m.contains("net.IP.Equal")));
+}
+
+#[test]
+fn sa1021_allows_other_byte_comparisons() {
+    let dir = support::testdata("sa1021");
+    let bytes_stub = dir.join("stub/bytes/bytes.go");
+    let net_stub = dir.join("stub/net/ip.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1021/ok",
+        &dir.join("ok.go"),
+        &[("bytes", &bytes_stub), ("net", &net_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa1021::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa1028_flags_non_slice_sort_slice_calls() {
+    let dir = support::testdata("sa1028");
+    let sort_stub = dir.join("stub/sort/sort.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1028",
+        &dir.join("bad.go"),
+        &[("sort", &sort_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa1028::analyzer(), &pkg);
+    assert!(messages.len() >= 3, "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("must only be called on slices")));
+}
+
+#[test]
+fn sa1028_allows_slice_sort_slice_calls() {
+    let dir = support::testdata("sa1028");
+    let sort_stub = dir.join("stub/sort/sort.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1028/ok",
+        &dir.join("ok.go"),
+        &[("sort", &sort_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa1028::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa1029_flags_bad_context_keys() {
+    let dir = support::testdata("sa1029");
+    let ctx_stub = dir.join("stub/context/context.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1029",
+        &dir.join("bad.go"),
+        &[("context", &ctx_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa1029::analyzer(), &pkg);
+    // Twenty key shapes, six of which fire. The count is the assertion: nine
+    // of the silent fourteen are named types, and guff reported two of them
+    // (`var k ctxKey = struct{}{}` and the same assigned after the fact)
+    // because `ssa_value_type` peeled the conversion `emit_store` inserts.
+    // `>= 4` was true throughout.
+    assert_eq!(messages.len(), 6, "{messages:?}");
+    let count = |needle: &str| messages.iter().filter(|m| m.contains(needle)).count();
+    assert_eq!(count("built-in type string"), 1, "{messages:?}");
+    assert_eq!(count("empty anonymous struct"), 3, "{messages:?}");
+    assert_eq!(count("not comparable"), 2, "{messages:?}");
+}
+
+/// SA1029 unaliases the key type for the built-in-type message
+/// (`types.Unalias(T).(*types.Basic)`) but not for the empty-struct one
+/// (`T.(*types.Struct)`). lima's `type launchingShellKey = struct{}` used as
+/// `launchingShellKey{}` is therefore silent upstream; guff unaliased both and
+/// reported it. Ten keys, measured against golangci-lint 2.12.2, pinned per
+/// line with the message kind.
+#[test]
+fn sa1029_does_not_unalias_the_empty_struct_key() {
+    let dir = support::testdata("sa1029");
+    let ctx_stub = dir.join("stub/context/context.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1029alias",
+        &dir.join("alias.go"),
+        &[("context", &ctx_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, String)> = support::run_analyzer_diagnostics(sa1029::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| {
+            let line = fset.position(guff::position::Pos(d.pos as i64)).line;
+            let what = if d.message.contains("empty anonymous struct") {
+                "empty struct".to_string()
+            } else if let Some(rest) = d.message.strip_prefix("should not use built-in type ") {
+                rest.split(" as key").next().unwrap_or("").to_string()
+            } else {
+                d.message.clone()
+            };
+            (line, what)
+        })
+        .collect();
+    got.sort();
+    let r = |l: i64, w: &str| (l, w.to_string());
+    assert_eq!(
+        got,
+        vec![
+            r(16, "empty struct"),
+            r(19, "string"),
+            r(20, "string (via alias aliasString)"),
+            r(22, "int (via alias aliasInt)"),
+            r(25, "int"),
+        ]
+    );
+}
+
+#[test]
+fn sa1029_allows_custom_context_keys() {
+    let dir = support::testdata("sa1029");
+    let ctx_stub = dir.join("stub/context/context.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1029/ok",
+        &dir.join("ok.go"),
+        &[("context", &ctx_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa1029::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa1010_flags_findall_with_zero_count() {
+    let dir = support::testdata("sa1010");
+    let regexp_stub = dir.join("stub/regexp/regexp.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1010",
+        &dir.join("bad.go"),
+        &[("regexp", &regexp_stub)],
+    );
+    support::assert_well_typed(&pkg);
+
+    let messages = support::run_analyzer(sa1010::analyzer(), &pkg);
+    assert!(messages.len() >= 2, "{messages:?}");
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.contains("FindAll method with n == 0"))
+    );
+}
+
+#[test]
+fn sa1010_allows_nonzero_findall_count() {
+    let dir = support::testdata("sa1010");
+    let regexp_stub = dir.join("stub/regexp/regexp.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1010/ok",
+        &dir.join("ok.go"),
+        &[("regexp", &regexp_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa1010::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa1011_flags_invalid_utf8_cutsets() {
+    let dir = support::testdata("sa1011");
+    let strings_stub = dir.join("stub/strings/strings.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1011",
+        &dir.join("bad.go"),
+        &[("strings", &strings_stub)],
+    );
+    support::assert_well_typed(&pkg);
+
+    // One per call in bad.go. This used to be `>= 2` behind an `#[ignore]`:
+    // string constants were held as Rust text, so "is this valid UTF-8?" was
+    // answered by the representation rather than by the program.
+    let messages = support::run_analyzer(sa1011::analyzer(), &pkg);
+    assert_eq!(messages.len(), 6, "{messages:?}");
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.contains("not a valid UTF-8 encoded string"))
+    );
+}
+
+#[test]
+fn sa1011_allows_valid_utf8_cutsets() {
+    let dir = support::testdata("sa1011");
+    let strings_stub = dir.join("stub/strings/strings.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1011/ok",
+        &dir.join("ok.go"),
+        &[("strings", &strings_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa1011::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa1020_flags_invalid_listen_addresses() {
+    let dir = support::testdata("sa1020");
+    let http_stub = dir.join("stub/net/http/http.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1020",
+        &dir.join("bad.go"),
+        &[("net/http", &http_stub)],
+    );
+    support::assert_well_typed(&pkg);
+
+    let messages = support::run_analyzer(sa1020::analyzer(), &pkg);
+    assert!(messages.len() >= 3, "{messages:?}");
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.contains("invalid port or service name in host:port pair"))
+    );
+}
+
+#[test]
+fn sa1020_allows_valid_listen_addresses() {
+    let dir = support::testdata("sa1020");
+    let http_stub = dir.join("stub/net/http/http.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1020/ok",
+        &dir.join("ok.go"),
+        &[("net/http", &http_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa1020::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa1030_flags_invalid_strconv_arguments() {
+    let dir = support::testdata("sa1030");
+    let strconv_stub = dir.join("stub/strconv/strconv.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1030",
+        &dir.join("bad.go"),
+        &[("strconv", &strconv_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa1030::analyzer(), &pkg);
+    assert!(messages.len() >= 4, "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("'base'")));
+    assert!(messages.iter().any(|m| m.contains("'bitSize'")));
+}
+
+#[test]
+fn sa1030_allows_valid_strconv_arguments() {
+    let dir = support::testdata("sa1030");
+    let strconv_stub = dir.join("stub/strconv/strconv.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1030/ok",
+        &dir.join("ok.go"),
+        &[("strconv", &strconv_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa1030::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa1003_flags_unsupported_binary_write_types() {
+    let dir = support::testdata("sa1003");
+    let binary_stub = dir.join("stub/encoding/binary/binary.go");
+    let io_stub = dir.join("stub/io/io.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1003",
+        &dir.join("bad.go"),
+        &[("encoding/binary", &binary_stub), ("io", &io_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa1003::analyzer(), &pkg);
+    assert!(messages.len() >= 3, "{messages:?}");
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.contains("cannot be used with binary.Write"))
+    );
+}
+
+#[test]
+fn sa1003_allows_supported_binary_write_types() {
+    let dir = support::testdata("sa1003");
+    let binary_stub = dir.join("stub/encoding/binary/binary.go");
+    let io_stub = dir.join("stub/io/io.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1003/ok",
+        &dir.join("ok.go"),
+        &[("encoding/binary", &binary_stub), ("io", &io_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa1003::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa1032_flags_swapped_errors_is_arguments() {
+    let dir = support::testdata("sa1032");
+    let errors_stub = dir.join("stub/errors/errors.go");
+    let io_stub = dir.join("stub/io/io.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1032",
+        &dir.join("bad.go"),
+        &[("errors", &errors_stub), ("io", &io_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa1032::analyzer(), &pkg);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].contains("wrong order"));
+}
+
+#[test]
+fn sa1032_allows_correct_errors_is_arguments() {
+    let dir = support::testdata("sa1032");
+    let errors_stub = dir.join("stub/errors/errors.go");
+    let io_stub = dir.join("stub/io/io.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1032/ok",
+        &dir.join("ok.go"),
+        &[("errors", &errors_stub), ("io", &io_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa1032::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa1027_flags_misaligned_atomic_fields_on_32bit() {
+    let dir = support::testdata("sa1027");
+    let atomic_stub = dir.join("stub/sync/atomic/atomic.go");
+    let sizes = sizes_for("gc", "386").expect("386 sizes");
+    let pkg = support::typecheck_with_deps_and_sizes(
+        "example.com/staticcheck/sa1027",
+        &dir.join("bad.go"),
+        &[("sync/atomic", &atomic_stub)],
+        Some(sizes),
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa1027::analyzer(), &pkg);
+    assert_eq!(messages.len(), 2, "{messages:?}");
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.contains("non 64-bit aligned field C"))
+    );
+}
+
+#[test]
+fn sa1027_skips_on_64bit_platform() {
+    let dir = support::testdata("sa1027");
+    let atomic_stub = dir.join("stub/sync/atomic/atomic.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1027",
+        &dir.join("bad.go"),
+        &[("sync/atomic", &atomic_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa1027::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa1027_allows_aligned_atomic_fields_on_32bit() {
+    let dir = support::testdata("sa1027");
+    let atomic_stub = dir.join("stub/sync/atomic/atomic.go");
+    let sizes = sizes_for("gc", "386").expect("386 sizes");
+    let pkg = support::typecheck_with_deps_and_sizes(
+        "example.com/staticcheck/sa1027/ok",
+        &dir.join("ok.go"),
+        &[("sync/atomic", &atomic_stub)],
+        Some(sizes),
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa1027::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa1031_flags_overlapping_encode_slices() {
+    let dir = support::testdata("sa1031");
+    let hex_stub = dir.join("stub/encoding/hex/hex.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1031",
+        &dir.join("bad.go"),
+        &[("encoding/hex", &hex_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa1031::analyzer(), &pkg);
+    assert_eq!(messages.len(), 8, "{messages:?}");
+    assert!(messages.iter().all(|m| m.contains("overlapping dst and src")));
+}
+
+#[test]
+fn sa1031_allows_non_overlapping_encode_slices() {
+    let dir = support::testdata("sa1031");
+    let hex_stub = dir.join("stub/encoding/hex/hex.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1031/ok",
+        &dir.join("ok.go"),
+        &[("encoding/hex", &hex_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa1031::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn s1008_flags_redundant_if_return_patterns() {
+    let dir = support::testdata("s1008");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/s1008");
+    support::assert_well_typed(&pkg);
+
+    let messages = support::run_analyzer(s1008::analyzer(), &pkg);
+    assert!(messages.len() >= 4, "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("return x'")));
+    assert!(messages.iter().any(|m| m.contains("return !fn()")));
+    assert!(messages.iter().any(|m| m.contains("return x <= 0")));
+    assert!(messages.iter().any(|m| m.contains("return len(x) == 0")));
+}
+
+#[test]
+fn s1008_allows_valid_returns() {
+    let dir = support::testdata("s1008");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/s1008/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1008::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn s1000_flags_bad_patterns() {
+    let dir = support::testdata("s1000");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/s1000");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(s1000::analyzer(), &pkg);
+    assert!(!messages.is_empty(), "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("simple channel send")));
+}
+
+#[test]
+fn s1000_allows_ok_patterns() {
+    let dir = support::testdata("s1000");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/s1000/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1000::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn s1001_flags_bad_patterns() {
+    let dir = support::testdata("s1001");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/s1001");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(s1001::analyzer(), &pkg);
+    // Nine loops, three messages. `any(contains("copy(to, from)"))` passed
+    // while every array shape said `copy(to, from)` too and the three-clause
+    // `for` said nothing at all, so the shapes are counted individually here.
+    assert_eq!(messages.len(), 9, "{messages:?}");
+    let count = |needle: &str| messages.iter().filter(|m| m.contains(needle)).count();
+    assert_eq!(count("copy(to, from) instead"), 5, "{messages:?}");
+    assert_eq!(count("copy(to, from[:])"), 1, "{messages:?}");
+    assert_eq!(count("copy(to[:], from)"), 1, "{messages:?}");
+    assert_eq!(count("arrays using assignment"), 2, "{messages:?}");
+}
+
+/// The `copy()` suggestion needs `copy` to still be the builtin at the loop
+/// (`types.Eval` + `IsBuiltin`). Seven shapes: reported for a plain loop, a
+/// shadow declared *after* the loop, a shadow confined to an inner block, and
+/// the array branch (which suggests an assignment and is not guarded); silent
+/// for a local named `copy` (datadog-agent's DeepCopy), a parameter named
+/// `copy`, and a package-level `func copy` — the last needs its own package,
+/// since it shadows the builtin for every file in it.
+#[test]
+fn s1001_skips_loops_where_copy_is_shadowed() {
+    let dir = support::testdata("s1001");
+    let pkg = support::typecheck_file(&dir, "shadow.go", "example.com/staticcheck/s1001/shadow");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, String)> = support::run_analyzer_diagnostics(s1001::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| (fset.position(guff::position::Pos(d.pos as i64)).line, d.message))
+        .collect();
+    got.sort();
+    let copy_msg = "should use copy(to, from) instead of a loop".to_string();
+    assert_eq!(
+        got,
+        vec![
+            (16, copy_msg.clone()), // plain
+            (40, copy_msg.clone()), // the shadow is declared after the loop
+            (53, copy_msg),         // the shadow is confined to an inner block
+            (62, "should copy arrays using assignment instead of using a loop".to_string()),
+        ]
+    );
+
+    let pkg = support::typecheck_file(&dir, "pkgshadow.go", "example.com/staticcheck/s1001/pkgshadow");
+    support::assert_well_typed(&pkg);
+    assert!(
+        support::run_analyzer(s1001::analyzer(), &pkg).is_empty(),
+        "a package-level `func copy` shadows the builtin for the whole package"
+    );
+}
+
+#[test]
+fn s1001_allows_ok_patterns() {
+    let dir = support::testdata("s1001");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/s1001/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1001::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn s1004_flags_bad_patterns() {
+    let dir = support::testdata("s1004");
+    let bytes_stub = dir.join("stub/bytes/bytes.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1004",
+        &dir.join("bad.go"),
+        &[("bytes", &bytes_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(s1004::analyzer(), &pkg);
+    assert!(!messages.is_empty(), "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("bytes.Equal")));
+}
+
+#[test]
+fn integer_literal_is_syntactic_not_a_folded_constant() {
+    // honnef's `IntegerLiteral` is a pattern —
+    // `(Or (BasicLit "INT" _) (UnaryExpr (Or "+" "-") (IntegerLiteral _)))` —
+    // and SA4003 explains the choice: "We only check for the math constants and
+    // integer literals, not for all constant expressions. This is to avoid
+    // false positives when constant values differ under different build tags."
+    //
+    // guff answered it with the folded constant, in the pattern engine and in
+    // `code::is_integer_literal` alike, so any named constant holding the right
+    // number matched. velero's `entry.Logger.GetLevel() >= logrus.PanicLevel`
+    // is that shape; S1004, SA4024 and SA4028 had it too.
+    //
+    // Five literal spellings fire and two constants plus a folded expression do
+    // not — the five are the control, since a fixture where nothing fires
+    // certifies nothing.
+    let dir = support::testdata("sa4003");
+    let pkg = support::typecheck_file(
+        &dir,
+        "literal.go",
+        "example.com/staticcheck/sa4003/literal",
+    );
+    support::assert_well_typed(&pkg);
+
+    let sa4003 = support::run_analyzer(sa4003::analyzer(), &pkg);
+    assert_eq!(sa4003.len(), 5, "{sa4003:?}");
+    // The message names the operand's own type since staticcheck v0.8.1
+    // (golangci-lint 2.14.0): `Level`, where v0.7.0 named the underlying
+    // `uint32`. The golden case records the package-qualified spelling.
+    assert!(
+        sa4003
+            .iter()
+            .all(|m| m.starts_with("every value of type ") && m.ends_with("Level is >= 0")),
+        "{sa4003:?}"
+    );
+
+    let sa4024 = support::run_analyzer(sa4024::analyzer(), &pkg);
+    assert_eq!(
+        sa4024,
+        vec!["builtin function len does not return negative values"],
+        "{sa4024:?}"
+    );
+
+    let sa4028 = support::run_analyzer(sa4028::analyzer(), &pkg);
+    assert_eq!(sa4028, vec!["x % 1 is always zero"], "{sa4028:?}");
+}
+
+#[test]
+fn s1004_allows_ok_patterns() {
+    let dir = support::testdata("s1004");
+    let bytes_stub = dir.join("stub/bytes/bytes.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1004/ok",
+        &dir.join("ok.go"),
+        &[("bytes", &bytes_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1004::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn s1005_flags_bad_patterns() {
+    let dir = support::testdata("s1005");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/s1005");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(s1005::analyzer(), &pkg);
+    // One channel receive plus the three range shapes. Asserting the count, not
+    // just "any": the fixture used to hold the receive alone, and `for i, _ :=
+    // range` went unreported because `is_blank` demanded an identifier with no
+    // object — which a `:=` blank has.
+    //
+    // Five: the two map comma-ok shapes in the fixture were findings at
+    // staticcheck v0.7.0 (golangci-lint 2.12.2) and are not at v0.8.1
+    // (golangci-lint 2.14.0), which dropped the pattern's IndexExpr arm.
+    assert_eq!(messages.len(), 5, "{messages:?}");
+    assert!(messages.iter().all(|m| m.contains("blank identifier")));
+    assert!(messages.iter().all(|m| m.contains("blank identifier")));
+}
+
+#[test]
+fn s1005_allows_ok_patterns() {
+    let dir = support::testdata("s1005");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/s1005/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1005::analyzer(), &pkg).is_empty());
+}
+
+/// S1005 and `range` over a func.
+///
+/// Upstream returns before reporting anything when the ranged-over expression
+/// has a `Signature` underlying — "iteration variables are not optional with
+/// rangefunc". Dropping the `_` from `for _ = range seq` does not compile, so
+/// there is no fix to offer, and guff reported three of teleport's iterators.
+///
+/// `(line, message)`, and the fixture holds the same three shapes over a slice
+/// and a map: a gate that silenced S1005 outright would look green against the
+/// iterator half alone.
+#[test]
+fn s1005_keeps_blanks_in_a_range_over_func() {
+    let dir = support::testdata("s1005rangefunc");
+    let pkg = support::typecheck_file(
+        &dir,
+        "rangefunc.go",
+        "example.com/staticcheck/s1005rangefunc",
+    );
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<i64> = support::run_analyzer_diagnostics(s1005::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| fset.position(guff::position::Pos(d.pos as i64)).line)
+        .collect();
+    got.sort();
+    // 37/42/48 are the slice and map shapes; 14, 19, 25 and 32 are iterators.
+    assert_eq!(got, vec![37, 42, 48], "{got:?}");
+}
+
+#[test]
+fn s1007_flags_bad_patterns() {
+    let dir = support::testdata("s1007");
+    let regexp_stub = dir.join("stub/regexp/regexp.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1007",
+        &dir.join("bad.go"),
+        &[("regexp", &regexp_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(s1007::analyzer(), &pkg);
+    assert!(!messages.is_empty(), "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("raw string")));
+}
+
+#[test]
+fn s1007_allows_ok_patterns() {
+    let dir = support::testdata("s1007");
+    let regexp_stub = dir.join("stub/regexp/regexp.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1007/ok",
+        &dir.join("ok.go"),
+        &[("regexp", &regexp_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1007::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn s1010_flags_bad_patterns() {
+    let dir = support::testdata("s1010");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/s1010");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(s1010::analyzer(), &pkg);
+    assert!(!messages.is_empty(), "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("omit second index")));
+}
+
+#[test]
+fn s1010_allows_ok_patterns() {
+    let dir = support::testdata("s1010");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/s1010/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1010::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn s1011_flags_bad_patterns() {
+    let dir = support::testdata("s1011");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/s1011");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(s1011::analyzer(), &pkg);
+
+    // The destination is whatever expression appears on both sides of the
+    // append, so the assertion is the set of destinations — a `contains` on one
+    // of them passes while the other six are missing, which is how a plain
+    // identifier stayed the only shape this reported.
+    let count = |needle: &str| messages.iter().filter(|m| m.contains(needle)).count();
+    assert_eq!(messages.len(), 7, "{messages:?}");
+    assert_eq!(count("dst = append(dst, src...)"), 2, "{messages:?}");
+    assert_eq!(count("h.items = append(h.items, src...)"), 2, "{messages:?}");
+    assert_eq!(count("m[k] = append(m[k], src...)"), 1, "{messages:?}");
+    assert_eq!(count("(*t)[k] = append((*t)[k], src...)"), 1, "{messages:?}");
+    assert_eq!(
+        count("h.items = append(h.items, makeSrc()...)"),
+        1,
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn s1011_allows_ok_patterns() {
+    let dir = support::testdata("s1011");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/s1011/ok");
+    support::assert_well_typed(&pkg);
+    // Two of these four are silent only because of the purity guards: a
+    // destination that is a call, and an index-based loop whose operand is one.
+    // Both became reachable when the destination stopped having to be an
+    // identifier.
+    assert!(
+        support::run_analyzer(s1011::analyzer(), &pkg).is_empty(),
+        "expected no findings"
+    );
+}
+
+#[test]
+fn s1012_flags_bad_patterns() {
+    let dir = support::testdata("s1012");
+    let time_stub = dir.join("stub/time/time.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1012",
+        &dir.join("bad.go"),
+        &[("time", &time_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(s1012::analyzer(), &pkg);
+    assert!(!messages.is_empty(), "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("time.Since")));
+}
+
+#[test]
+fn s1012_allows_ok_patterns() {
+    let dir = support::testdata("s1012");
+    let time_stub = dir.join("stub/time/time.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1012/ok",
+        &dir.join("ok.go"),
+        &[("time", &time_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1012::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn s1016_flags_bad_patterns() {
+    let dir = support::testdata("s1016");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/s1016");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(s1016::analyzer(), &pkg);
+    assert!(!messages.is_empty(), "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("should convert")));
+}
+
+#[test]
+fn s1016_allows_ok_patterns() {
+    let dir = support::testdata("s1016");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/s1016/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1016::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn s1018_flags_bad_patterns() {
+    let dir = support::testdata("s1018");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/s1018");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(s1018::analyzer(), &pkg);
+    assert!(!messages.is_empty(), "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("copy()")));
+}
+
+#[test]
+fn s1018_allows_ok_patterns() {
+    let dir = support::testdata("s1018");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/s1018/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1018::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn s1019_flags_bad_patterns() {
+    let dir = support::testdata("s1019");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/s1019");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(s1019::analyzer(), &pkg);
+    assert!(!messages.is_empty(), "{messages:?}");
+    // Upstream renders the suggested call from the source, not a `T` placeholder.
+    assert!(messages.iter().any(|m| m.contains("make(chan int)")), "{messages:?}");
+}
+
+#[test]
+fn s1019_allows_ok_patterns() {
+    let dir = support::testdata("s1019");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/s1019/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1019::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn s1020_flags_bad_patterns() {
+    let dir = support::testdata("s1020");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/s1020");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(s1020::analyzer(), &pkg);
+    assert!(!messages.is_empty(), "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("can't be nil")));
+}
+
+/// Both S1020 forms, the four near-misses, and the position of each report.
+///
+/// The old fixture held one line — the flat `ok && i != nil` — and the old test
+/// was `messages.iter().any(|m| m.contains("can't be nil"))`, which stays green
+/// while every other branch is wrong. Three were: the nested form reported on
+/// the outer `if` where upstream reports on the inner one, and neither `else`
+/// branch was checked, so guff reported two shapes upstream is silent on.
+///
+/// Every line/column below was read off golangci-lint 2.12.2 on this file.
+#[test]
+fn s1020_matches_upstream_on_every_nesting_shape() {
+    let dir = support::testdata("s1020");
+    let pkg =
+        support::typecheck_file(&dir, "shapes.go", "example.com/staticcheck/s1020/shapes");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+
+    let mut got: Vec<(i64, i64, String)> =
+        support::run_analyzer_diagnostics(s1020::analyzer(), &pkg)
+            .into_iter()
+            .map(|d| {
+                let p = fset.position(guff::position::Pos(d.pos as i64));
+                (p.line, p.column, d.message)
+            })
+            .collect();
+    got.sort();
+
+    assert_eq!(
+        got,
+        vec![
+            // 1. flat, `ok && i != nil` — reported on the `if` itself
+            (26, 2, "when ok is true, i can't be nil".to_string()),
+            // 2. flat, operands swapped
+            (33, 2, "when ok is true, i can't be nil".to_string()),
+            // 3. nested — reported on the **inner** `if`, line 41 not line 40
+            (41, 3, "when ok is true, i can't be nil".to_string()),
+            // 8. flat, `ok` renamed: upstream prints the object's own name
+            (91, 2, "when yes is true, i can't be nil".to_string()),
+        ],
+        "{got:?}"
+    );
+    // 4 (inner else), 5 (outer else), 6 (two statements), 7 (outer init) are
+    // absent above, and that is the assertion for them.
+}
+
+#[test]
+fn s1020_allows_ok_patterns() {
+    let dir = support::testdata("s1020");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/s1020/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1020::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn s1024_flags_bad_patterns() {
+    let dir = support::testdata("s1024");
+    let time_stub = dir.join("stub/time/time.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1024",
+        &dir.join("bad.go"),
+        &[("time", &time_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(s1024::analyzer(), &pkg);
+    assert!(!messages.is_empty(), "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("time.Until")));
+}
+
+#[test]
+fn s1024_allows_ok_patterns() {
+    let dir = support::testdata("s1024");
+    let time_stub = dir.join("stub/time/time.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1024/ok",
+        &dir.join("ok.go"),
+        &[("time", &time_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1024::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn s1025_flags_bad_patterns() {
+    let dir = support::testdata("s1025");
+    let fmt_stub = dir.join("stub/fmt/fmt.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1025",
+        &dir.join("bad.go"),
+        &[("fmt", &fmt_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(s1025::analyzer(), &pkg);
+
+    // Upstream's branch order decides *which* message each call gets, so a
+    // count per branch is the assertion — `any(contains(..))` passes on any
+    // subset, and this fixture used to be a single call on a plain string.
+    let count = |needle: &str| messages.iter().filter(|m| m.contains(needle)).count();
+    assert_eq!(messages.len(), 9, "{messages:?}");
+    assert_eq!(
+        count("should use String() instead of fmt.Sprintf"),
+        5,
+        "Stringer comes first: a named string, a named byte slice, a struct \
+         pointer, the interface itself, and a value whose Format is on the \
+         pointer: {messages:?}"
+    );
+    assert_eq!(count("the argument is already a string"), 1, "{messages:?}");
+    assert_eq!(
+        count("the argument's underlying type is a string"),
+        1,
+        "{messages:?}"
+    );
+    assert_eq!(
+        count("the argument's underlying type is a slice of bytes"),
+        2,
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn s1025_allows_ok_patterns() {
+    let dir = support::testdata("s1025");
+    let fmt_stub = dir.join("stub/fmt/fmt.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1025/ok",
+        &dir.join("ok.go"),
+        &[("fmt", &fmt_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    // A type with a two-parameter, no-result `Format` may render %s however it
+    // likes, so it is skipped before any branch — including through a pointer,
+    // whose method set is the one that has it. The rest are the shapes the
+    // check does not match at all: a non-string non-slice argument, another
+    // verb, and more than one argument.
+    assert!(
+        support::run_analyzer(s1025::analyzer(), &pkg).is_empty(),
+        "expected no findings"
+    );
+}
+
+#[test]
+fn s1028_flags_bad_patterns() {
+    let dir = support::testdata("s1028");
+    let errors_stub = dir.join("stub/errors/errors.go");
+    let fmt_stub = dir.join("stub/fmt/fmt.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1028",
+        &dir.join("bad.go"),
+        &[("errors", &errors_stub), ("fmt", &fmt_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(s1028::analyzer(), &pkg);
+    assert!(!messages.is_empty(), "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("fmt.Errorf")));
+}
+
+#[test]
+fn s1028_allows_ok_patterns() {
+    let dir = support::testdata("s1028");
+    let errors_stub = dir.join("stub/errors/errors.go");
+    let fmt_stub = dir.join("stub/fmt/fmt.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1028/ok",
+        &dir.join("ok.go"),
+        &[("errors", &errors_stub), ("fmt", &fmt_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1028::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn s1030_flags_bad_patterns() {
+    let dir = support::testdata("s1030");
+    let bytes_stub = dir.join("stub/bytes/buffer.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1030",
+        &dir.join("bad.go"),
+        &[("bytes", &bytes_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(s1030::analyzer(), &pkg);
+    assert!(!messages.is_empty(), "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("buf.String()")));
+}
+
+#[test]
+fn s1030_allows_ok_patterns() {
+    let dir = support::testdata("s1030");
+    let bytes_stub = dir.join("stub/bytes/buffer.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1030/ok",
+        &dir.join("ok.go"),
+        &[("bytes", &bytes_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1030::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn s1031_flags_bad_patterns() {
+    let dir = support::testdata("s1031");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/s1031");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(s1031::analyzer(), &pkg);
+    assert!(!messages.is_empty(), "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("nil check around range")));
+}
+
+#[test]
+fn s1031_allows_ok_patterns() {
+    let dir = support::testdata("s1031");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/s1031/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1031::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn s1033_flags_bad_patterns() {
+    let dir = support::testdata("s1033");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/s1033");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(s1033::analyzer(), &pkg);
+    assert!(!messages.is_empty(), "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("guard around call to delete")));
+}
+
+#[test]
+fn s1033_allows_ok_patterns() {
+    let dir = support::testdata("s1033");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/s1033/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1033::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn s1034_flags_bad_patterns() {
+    let dir = support::testdata("s1034");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/s1034");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(s1034::analyzer(), &pkg);
+    assert!(!messages.is_empty(), "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("type assertion to a variable")));
+}
+
+#[test]
+fn s1034_allows_ok_patterns() {
+    let dir = support::testdata("s1034");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/s1034/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1034::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn s1035_flags_bad_patterns() {
+    let dir = support::testdata("s1035");
+    let net_http_stub = dir.join("stub/net/http/http.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1035",
+        &dir.join("bad.go"),
+        &[("net/http", &net_http_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(s1035::analyzer(), &pkg);
+    assert!(!messages.is_empty(), "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("CanonicalHeaderKey")));
+}
+
+/// Which method the call resolves to, and what the message calls it.
+///
+/// Upstream matches the callee object — `(Symbol "(net/http.Header).Set")` —
+/// not the selector's spelling. guff matched the bare name `Set`/`Add`/`Get`/
+/// `Del` and printed the receiver expression's type, which was wrong three
+/// ways: a shadowing method on a type that embeds `http.Header` was reported
+/// (minio's `cmd/postpolicyform_test.go`, seven findings), an unrelated `Set`
+/// was reported, and a promoted method was reported under the outer type's
+/// name. The old test was `messages.iter().any(|m| m.contains(…))` over a
+/// one-line fixture and stayed green through all of it.
+#[test]
+fn s1035_matches_the_callee_not_the_selector_name() {
+    let dir = support::testdata("s1035");
+    let net_http_stub = dir.join("stub/net/http/http.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1035/receivers",
+        &dir.join("receivers.go"),
+        &[("net/http", &net_http_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64, String)> =
+        support::run_analyzer_diagnostics(s1035::analyzer(), &pkg)
+            .into_iter()
+            .map(|d| {
+                let p = fset.position(guff::position::Pos(d.pos as i64));
+                (p.line, p.column, d.message)
+            })
+            .collect();
+    got.sort();
+    let msg = |m: &str| {
+        format!("calling net/http.CanonicalHeaderKey on the 'key' argument of {m} is redundant")
+    };
+    assert_eq!(
+        got,
+        vec![
+            // the promoted method — named for where it is declared, not for
+            // the type the call went through
+            (46, 8, msg("(net/http.Header).Del")),
+            (51, 8, msg("(net/http.Header).Set")),
+            (52, 8, msg("(net/http.Header).Add")),
+            (53, 12, msg("(net/http.Header).Get")),
+            (54, 8, msg("(net/http.Header).Del")),
+        ],
+        "{got:?}"
+    );
+    // The shadowing `Set` (line 40) and the unrelated `Set` (line 59) are
+    // absent above, and that is the assertion for them.
+}
+
+#[test]
+fn s1035_allows_ok_patterns() {
+    let dir = support::testdata("s1035");
+    let net_http_stub = dir.join("stub/net/http/http.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1035/ok",
+        &dir.join("ok.go"),
+        &[("net/http", &net_http_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1035::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn s1036_flags_bad_patterns() {
+    let dir = support::testdata("s1036");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/s1036");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(s1036::analyzer(), &pkg);
+    assert!(!messages.is_empty(), "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("guard around map access")));
+}
+
+#[test]
+fn s1036_allows_ok_patterns() {
+    let dir = support::testdata("s1036");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/s1036/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1036::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn s1037_flags_bad_patterns() {
+    let dir = support::testdata("s1037");
+    let time_stub = dir.join("stub/time/time.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1037",
+        &dir.join("bad.go"),
+        &[("time", &time_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(s1037::analyzer(), &pkg);
+    // Both clauses of `bad.go`, and nothing else: `ok.go` holds the four
+    // shapes upstream declines, three of which guff used to report.
+    assert_eq!(
+        messages,
+        vec![
+            "should use time.Sleep instead of elaborate way of sleeping",
+            "should use time.Sleep instead of elaborate way of sleeping",
+        ],
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn s1037_allows_ok_patterns() {
+    let dir = support::testdata("s1037");
+    let time_stub = dir.join("stub/time/time.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1037/ok",
+        &dir.join("ok.go"),
+        &[("time", &time_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1037::analyzer(), &pkg).is_empty());
+}
+
+/// Every S1038 finding on the fixture, as (line, message).
+///
+/// Upstream is three arms over one node and the fixture used to hold a single
+/// `fmt.Print(fmt.Sprintf(...))`, so `any(contains("fmt.Printf"))` passed while
+/// the `-ln` messages were missing their suffix, `fmt.Fprintln(w, …)` was
+/// invisible, the logger *methods* spoke as the package functions, and the
+/// whole `testing` arm did not exist.
+#[test]
+fn s1038_flags_bad_patterns() {
+    let dir = support::testdata("s1038");
+    let fmt_stub = dir.join("stub/fmt/fmt.go");
+    let log_stub = dir.join("stub/log/log.go");
+    let os_stub = dir.join("stub/os/os.go");
+    let testing_stub = dir.join("stub/testing/testing.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1038",
+        &dir.join("bad.go"),
+        &[
+            ("fmt", &fmt_stub),
+            ("log", &log_stub),
+            ("os", &os_stub),
+            ("testing", &testing_stub),
+        ],
+    );
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, String)> = support::run_analyzer_diagnostics(s1038::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| {
+            (
+                fset.position(guff::position::Pos(d.pos as i64)).line,
+                d.message,
+            )
+        })
+        .collect();
+    got.sort();
+    let at = |line: i64, msg: &str| (line, msg.to_string());
+    let newline = " (but don't forget the newline)";
+    assert_eq!(
+        got,
+        vec![
+            at(10, "should use fmt.Printf instead of fmt.Print(fmt.Sprintf(...))"),
+            at(17, "should use fmt.Printf instead of fmt.Print(fmt.Sprintf(...))"),
+            at(
+                18,
+                &format!("should use fmt.Printf instead of fmt.Println(fmt.Sprintf(...)){newline}")
+            ),
+            at(19, "should use fmt.Sprintf instead of fmt.Sprint(fmt.Sprintf(...))"),
+            at(
+                20,
+                &format!("should use fmt.Sprintf instead of fmt.Sprintln(fmt.Sprintf(...)){newline}")
+            ),
+            at(29, "should use fmt.Fprintf instead of fmt.Fprint(fmt.Sprintf(...))"),
+            at(
+                30,
+                &format!("should use fmt.Fprintf instead of fmt.Fprintln(fmt.Sprintf(...)){newline}")
+            ),
+            at(36, "should use log.Printf(...) instead of log.Print(fmt.Sprintf(...))"),
+            at(37, "should use log.Printf(...) instead of log.Println(fmt.Sprintf(...))"),
+            at(38, "should use log.Fatalf(...) instead of log.Fatal(fmt.Sprintf(...))"),
+            at(39, "should use log.Fatalf(...) instead of log.Fatalln(fmt.Sprintf(...))"),
+            at(40, "should use log.Panicf(...) instead of log.Panic(fmt.Sprintf(...))"),
+            at(41, "should use log.Panicf(...) instead of log.Panicln(fmt.Sprintf(...))"),
+            at(48, "should use l.Printf(...) instead of l.Print(fmt.Sprintf(...))"),
+            at(49, "should use l.Printf(...) instead of l.Println(fmt.Sprintf(...))"),
+            at(50, "should use l.Fatalf(...) instead of l.Fatal(fmt.Sprintf(...))"),
+            at(51, "should use l.Fatalf(...) instead of l.Fatalln(fmt.Sprintf(...))"),
+            at(52, "should use l.Panicf(...) instead of l.Panic(fmt.Sprintf(...))"),
+            at(53, "should use l.Panicf(...) instead of l.Panicln(fmt.Sprintf(...))"),
+            at(57, "should use t.Errorf(...) instead of t.Error(fmt.Sprintf(...))"),
+            at(58, "should use t.Fatalf(...) instead of t.Fatal(fmt.Sprintf(...))"),
+            at(59, "should use t.Logf(...) instead of t.Log(fmt.Sprintf(...))"),
+            at(60, "should use t.Skipf(...) instead of t.Skip(fmt.Sprintf(...))"),
+            at(61, "should use tb.Errorf(...) instead of tb.Error(fmt.Sprintf(...))"),
+            at(
+                72,
+                "should use s.logger.Printf(...) instead of s.logger.Print(fmt.Sprintf(...))"
+            ),
+            at(
+                73,
+                "should use ls.list[0].Printf(...) instead of ls.list[0].Print(fmt.Sprintf(...))"
+            ),
+            at(99, "should use w.Errorf(...) instead of w.Error(fmt.Sprintf(...))"),
+        ],
+    );
+}
+
+#[test]
+fn s1038_allows_ok_patterns() {
+    let dir = support::testdata("s1038");
+    let fmt_stub = dir.join("stub/fmt/fmt.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1038/ok",
+        &dir.join("ok.go"),
+        &[("fmt", &fmt_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1038::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn s1039_flags_bad_patterns() {
+    let dir = support::testdata("s1039");
+    let fmt_stub = dir.join("stub/fmt/fmt.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1039",
+        &dir.join("bad.go"),
+        &[("fmt", &fmt_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(s1039::analyzer(), &pkg);
+    assert!(!messages.is_empty(), "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("unnecessary use of fmt.Sprint")));
+}
+
+#[test]
+fn s1039_allows_ok_patterns() {
+    let dir = support::testdata("s1039");
+    let fmt_stub = dir.join("stub/fmt/fmt.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1039/ok",
+        &dir.join("ok.go"),
+        &[("fmt", &fmt_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(s1039::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn s1040_flags_bad_patterns() {
+    let dir = support::testdata("s1040");
+    let inner_stub = dir.join("stub/example.com/s1040/inner/inner.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/s1040",
+        &dir.join("bad.go"),
+        &[("example.com/s1040/inner", &inner_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let mut messages = support::run_analyzer(s1040::analyzer(), &pkg);
+    messages.sort();
+
+    // Both halves of the message are `report.Render` upstream — the *source
+    // expressions*, not the resolved types. Rendering the type instead spelled
+    // every named one with its full import path, and the fixture was a single
+    // `i.(interface{})`, the one shape whose two renderings agree.
+    let mut want = vec![
+        "type assertion to the same type: i already has type interface{}",
+        "type assertion to the same type: x already has type msg",
+        "type assertion to the same type: x already has type msg",
+        // `alias` is `= msg`, the way proto.Message is protoreflect.ProtoMessage.
+        // Comparing rendered type strings never matched these two.
+        "type assertion to the same type: x already has type alias",
+        "type assertion to the same type: x already has type inner.Msg",
+        "type assertion to the same type: mk().get() already has type msg",
+    ];
+    want.sort();
+    assert_eq!(messages, want);
+}
+
+#[test]
+fn s1040_allows_ok_patterns() {
+    let dir = support::testdata("s1040");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/s1040/ok");
+    support::assert_well_typed(&pkg);
+    // A different interface, a concrete type (`IsInterface(t1)` is false), and a
+    // type switch (no `expr.Type`, which upstream returns early on).
+    assert!(support::run_analyzer(s1040::analyzer(), &pkg).is_empty());
+}
+
+
+#[test]
+fn sa1001_flags_invalid_template() {
+    let dir = support::testdata("sa1001");
+    let tmpl_stub = dir.join("stub/text/template/template.go");
+    let html_stub = dir.join("stub/html/template/template.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1001",
+        &dir.join("bad.go"),
+        &[
+            ("text/template", &tmpl_stub),
+            ("html/template", &html_stub),
+        ],
+    );
+    support::assert_well_typed(&pkg);
+    // Pin the whole message: `contains("unexpected")` passed for years against
+    // a brace counter that got the wording, the position and the reported set
+    // wrong. Expectations are golangci-lint 2.12.2's output (compat/golden),
+    // and the parser behind them is gated by tests/gostd_template.rs.
+    let messages = support::run_analyzer(sa1001::analyzer(), &pkg);
+    assert_eq!(
+        messages,
+        vec![
+            r#"template: :1: bad character U+007D '}'"#.to_string(),
+            r#"template: :1: bad character U+002B '+'"#.to_string(),
+            r#"template: :1: unexpected right paren"#.to_string(),
+            r#"template: :1: unexpected EOF"#.to_string(),
+            r#"template: :1: unexpected {{end}}"#.to_string(),
+            r#"template: :1: unexpected "," in command"#.to_string(),
+            r#"template: :1: unexpected . after term "true""#.to_string(),
+            r#"template: :1: unexpected "1" in template clause"#.to_string(),
+            r#"template: :1: unexpected ".3" in operand"#.to_string(),
+            r#"template: :1: unexpected {{else}} in define clause"#.to_string(),
+            r#"template: :2: unexpected {{end}}"#.to_string(),
+            r#"template: :1: unexpected {{end}}"#.to_string(),
+        ],
+    );
+}
+
+#[test]
+fn sa1001_allows_valid_template() {
+    let dir = support::testdata("sa1001");
+    let tmpl_stub = dir.join("stub/text/template/template.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa1001/ok",
+        &dir.join("ok.go"),
+        &[("text/template", &tmpl_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa1001::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa2000_flags_waitgroup_add_in_goroutine() {
+    let dir = support::testdata("sa2000");
+    let sync_stub = dir.join("stub/sync/sync.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa2000",
+        &dir.join("bad.go"),
+        &[("sync", &sync_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa2000::analyzer(), &pkg);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].contains("before starting the goroutine"));
+}
+
+#[test]
+fn sa2000_allows_waitgroup_add_before_goroutine() {
+    let dir = support::testdata("sa2000");
+    let sync_stub = dir.join("stub/sync/sync.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa2000/ok",
+        &dir.join("ok.go"),
+        &[("sync", &sync_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa2000::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa2001_flags_empty_critical_section() {
+    let dir = support::testdata("sa2001");
+    let sync_stub = dir.join("stub/sync/sync.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa2001",
+        &dir.join("bad.go"),
+        &[("sync", &sync_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa2001::analyzer(), &pkg);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].contains("empty critical section"));
+}
+
+#[test]
+fn sa2001_allows_deferred_unlock() {
+    let dir = support::testdata("sa2001");
+    let sync_stub = dir.join("stub/sync/sync.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa2001/ok",
+        &dir.join("ok.go"),
+        &[("sync", &sync_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa2001::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa2002_flags_fatal_in_goroutine() {
+    let dir = support::testdata("sa2002");
+    let testing_stub = dir.join("stub/testing/testing.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa2002",
+        &dir.join("bad.go"),
+        &[("testing", &testing_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa2002::analyzer(), &pkg);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].contains("goroutine calls T.Fatal"));
+}
+
+#[test]
+fn sa2002_allows_fatal_in_test_goroutine() {
+    let dir = support::testdata("sa2002");
+    let testing_stub = dir.join("stub/testing/testing.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa2002/ok",
+        &dir.join("ok.go"),
+        &[("testing", &testing_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa2002::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa2003_flags_deferred_lock_after_lock() {
+    let dir = support::testdata("sa2003");
+    let sync_stub = dir.join("stub/sync/sync.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa2003",
+        &dir.join("bad.go"),
+        &[("sync", &sync_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa2003::analyzer(), &pkg);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].contains("defer Unlock"));
+}
+
+#[test]
+fn sa2003_allows_deferred_unlock() {
+    let dir = support::testdata("sa2003");
+    let sync_stub = dir.join("stub/sync/sync.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa2003/ok",
+        &dir.join("ok.go"),
+        &[("sync", &sync_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa2003::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa3000_flags_testmain_without_exit() {
+    let dir = support::testdata("sa3000");
+    let testing_stub = dir.join("stub/testing/testing.go");
+    let os_stub = dir.join("stub/os/os.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa3000",
+        &dir.join("bad.go"),
+        &[("testing", &testing_stub), ("os", &os_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let pkg = support::with_go_version(pkg, "1.14");
+    let messages = support::run_analyzer(sa3000::analyzer(), &pkg);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].contains("os.Exit"));
+}
+
+#[test]
+fn sa3000_allows_testmain_with_exit() {
+    let dir = support::testdata("sa3000");
+    let testing_stub = dir.join("stub/testing/testing.go");
+    let os_stub = dir.join("stub/os/os.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa3000/ok",
+        &dir.join("ok.go"),
+        &[("testing", &testing_stub), ("os", &os_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa3000::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa3001_flags_benchmark_n_assignment() {
+    let dir = support::testdata("sa3001");
+    let testing_stub = dir.join("stub/testing/testing.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa3001",
+        &dir.join("bad.go"),
+        &[("testing", &testing_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa3001::analyzer(), &pkg);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].contains("should not assign to b.N"));
+}
+
+#[test]
+fn sa3001_allows_reading_benchmark_n() {
+    let dir = support::testdata("sa3001");
+    let testing_stub = dir.join("stub/testing/testing.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa3001/ok",
+        &dir.join("ok.go"),
+        &[("testing", &testing_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa3001::analyzer(), &pkg).is_empty());
+}
+
+/// `report.FilterGenerated` asks honnef's `generated` analyzer, which reads
+/// the raw file line by line and takes a `// Code generated … DO NOT EDIT.`
+/// line **anywhere** — after the code, inside a raw string, inside a block
+/// comment — but only at column 0 and only ending in exactly ` DO NOT EDIT.`.
+/// guff answered from the AST header unless the check required the fact, and
+/// 75 of the 78 filtering checks do not; kitex's `nphttp2/mocks_test.go`
+/// (marker at line 461) was an S1009 upstream filters.
+///
+/// Ten files, one `b != nil && len(b) > 0` each, measured against
+/// golangci-lint 2.12.2: six are generated upstream, four report.
+#[test]
+fn s1009_filters_a_file_with_a_generated_marker_on_any_line() {
+    let reported: Vec<&str> = [
+        "g01header.go",
+        "g02tail.go",
+        "g03rawstring.go",
+        "g04indented.go",
+        "g05block.go",
+        "g06noperiod.go",
+        "g07oldcgo.go",
+        "g08empty.go",
+        "g09trailingspace.go",
+        "g10plain.go",
+    ]
+    .into_iter()
+    .filter(|f| {
+        let pkg = typecheck_rule("s1009generated", f);
+        !support::run_analyzer(s1009::analyzer(), &pkg).is_empty()
+    })
+    .collect();
+    assert_eq!(
+        reported,
+        vec![
+            "g04indented.go",      // indented: not at column 0
+            "g06noperiod.go",      // `DO NOT EDIT` without the period
+            "g09trailingspace.go", // trailing space after the period
+            "g10plain.go",         // no marker
+        ]
+    );
+}
+
+/// Upstream filters generated files per *report site*, not per check. In
+/// s1025.go the "should use String()" report is the one without
+/// `report.FilterGenerated()`; in s1038.go only the `fmt.Print*` report has
+/// it, not the method or `log`-package ones. `mixed.go` ends in a
+/// `// Code generated … DO NOT EDIT.` line and holds one of each: the two
+/// unfiltered sites report, the two filtered ones do not.
+#[test]
+fn s1025_and_s1038_filter_generated_code_per_report_site() {
+    let pkg = typecheck_rule("s1009generated", "mixed.go");
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let lines = |a: &'static guff_analysis::Analyzer| {
+        let mut v: Vec<i64> = support::run_analyzer_diagnostics(a, &pkg)
+            .into_iter()
+            .map(|d| fset.position(guff::position::Pos(d.pos as i64)).line)
+            .collect();
+        v.sort();
+        v
+    };
+    assert_eq!(lines(s1025::analyzer()), vec![15]); // String(); not line 16
+    assert_eq!(lines(s1038::analyzer()), vec![18]); // log.Print; not line 17
+}
+
+fn typecheck_rule(rule: &str, file: &str) -> std::sync::Arc<guff_packages::Package> {
+    let dir = support::testdata(rule);
+    let deps_owned = support::collect_stubs(&dir);
+    let deps: Vec<(&str, &std::path::Path)> = deps_owned
+        .iter()
+        .map(|(p, path)| (p.as_str(), path.as_path()))
+        .collect();
+    support::typecheck_with_deps(
+        &format!("example.com/staticcheck/{rule}/{file}"),
+        &dir.join(file),
+        &deps,
+    )
+}
+
+macro_rules! sa_check {
+    ($rule:ident, $bad_test:ident, $ok_test:ident, $substr:expr) => {
+        #[test]
+        fn $bad_test() {
+            let pkg = typecheck_rule(stringify!($rule), "bad.go");
+            support::assert_well_typed(&pkg);
+            let messages = support::run_analyzer($rule::analyzer(), &pkg);
+            assert!(!messages.is_empty(), "{messages:?}");
+            assert!(messages[0].contains($substr), "{messages:?}");
+        }
+
+        #[test]
+        fn $ok_test() {
+            let pkg = typecheck_rule(stringify!($rule), "ok.go");
+            support::assert_well_typed(&pkg);
+            assert!(support::run_analyzer($rule::analyzer(), &pkg).is_empty());
+        }
+    };
+}
+
+macro_rules! sa_check_bad_ok {
+    ($rule:ident, $bad_test:ident, $ok_test:ident) => {
+        #[test]
+        fn $bad_test() {
+            let pkg = typecheck_rule(stringify!($rule), "bad.go");
+            support::assert_well_typed(&pkg);
+            let messages = support::run_analyzer($rule::analyzer(), &pkg);
+            assert!(!messages.is_empty(), "{messages:?}");
+        }
+
+        #[test]
+        fn $ok_test() {
+            let pkg = typecheck_rule(stringify!($rule), "ok.go");
+            support::assert_well_typed(&pkg);
+            assert!(support::run_analyzer($rule::analyzer(), &pkg).is_empty());
+        }
+    };
+}
+
+sa_check!(sa1015, sa1015_flags_leaky_time_tick, sa1015_allows_endless_time_tick, "leaks the underlying ticker");
+sa_check!(sa1019, sa1019_flags_deprecated_use, sa1019_allows_clean_code, "deprecated");
+
+#[test]
+fn sa1019_flags_a_deprecated_struct_field_of_an_imported_type() {
+    // Reported by the OSS tier the day controller-runtime's ill-typed packages
+    // went to zero: five `//nolint:staticcheck` directives turned up "unused"
+    // because the finding they suppress upstream was never made here.
+    // `o.Fine` is the control — a live field of the same struct must stay quiet.
+    //
+    // The promoted forms come from buildkit's
+    // `d.image.Config.ArgsEscaped //nolint:staticcheck`, the same symptom one
+    // level of embedding out: `ArgsEscaped` is declared on the embedded
+    // `ocispecs.ImageConfig` while the selection's receiver is
+    // `dockerspec.DockerOCIImageConfig`, so a receiver-keyed lookup asked for a
+    // key no scan writes. Counted exactly, per form: an `any(contains(…))`
+    // assertion here passed all through the defect.
+    let pkg = typecheck_rule("sa1019", "bad.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa1019::analyzer(), &pkg);
+    // `starts_with`, not `contains`. Since staticcheck v0.8.1 (golangci-lint
+    // 2.14.0) every message leads with `code.SelectorName` — the declaring
+    // type, package-qualified — not the source spelling, so the seven forms
+    // collapse onto three names; v0.7.0 wrote `o.Old`, `w.Old`, `pw.Old`,
+    // `h.Cfg.Old`, `w.Options.Old`.
+    let count = |needle: &str| messages.iter().filter(|m| m.starts_with(needle)).count();
+    assert_eq!(count("example.com/old.Legacy is deprecated"), 1, "{messages:?}");
+    assert_eq!(count("example.com/old.OldClient is deprecated"), 1, "{messages:?}");
+    // Declared on `Options`: selected on `Options`, and with the embedding
+    // spelled out by hand (`w.Options.Old`).
+    assert_eq!(count("(example.com/old.Options).Old is deprecated"), 2, "{messages:?}");
+    // Promoted through an embedded value — written and read — and named field
+    // then promoted (buildkit's `h.Cfg.Old`).
+    assert_eq!(count("(example.com/old.Wrapper).Old is deprecated"), 3, "{messages:?}");
+    // Promoted through an embedded pointer.
+    assert_eq!(count("(example.com/old.PtrWrapper).Old is deprecated"), 1, "{messages:?}");
+    // A package whose deprecation notice is a paragraph of a *block-comment*
+    // package doc, carrying no `//` or `*` marker of its own — which is how
+    // cloud.google.com/go/pubsub writes it, and what the byte probe that
+    // decides whether to parse the file could not see. Unquoted since v0.8.1.
+    assert_eq!(count("example.com/blockdoc is deprecated"), 1, "{messages:?}");
+    assert_eq!(messages.len(), 9, "{messages:?}");
+}
+
+/// The method half of the promoted-field lookup above. glamour's
+/// `n.Text(source)` on an `*ast.CodeSpan` is goldmark's deprecated
+/// `BaseNode.Text` two embeddings down; the importer's scan keys it as
+/// `Base.Text`, and a lookup keyed by the selection's receiver asked for
+/// `CodeSpan.Text`. With the defect, only the direct call and the interface
+/// method were reported — 2 of 9.
+///
+/// Counted per form, by the rendered selector each message starts with.
+#[test]
+fn sa1019_flags_a_deprecated_method_promoted_through_embedding() {
+    let pkg = typecheck_rule("sa1019", "promoted_methods.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa1019::analyzer(), &pkg);
+    let count = |needle: &str| messages.iter().filter(|m| m.starts_with(needle)).count();
+    // Named by `code.SelectorName` since staticcheck v0.8.1: the receiver type
+    // of the selection, package-qualified, where v0.7.0 rendered the source.
+    // Declared on the operand's type: worked before.
+    assert_eq!(count("(*example.com/oldmethod.Base).Text is deprecated"), 1, "{messages:?}");
+    // Promoted one level, two levels (the call and the method value `x.Text`),
+    // and through an embedded pointer.
+    assert_eq!(count("(*example.com/oldmethod.Inline).Text is deprecated"), 1, "{messages:?}");
+    assert_eq!(count("(*example.com/oldmethod.Deep).Text is deprecated"), 2, "{messages:?}");
+    assert_eq!(count("(*example.com/oldmethod.PtrEmb).Text is deprecated"), 1, "{messages:?}");
+    // Value receiver, promoted.
+    assert_eq!(count("(example.com/oldmethod.Inline).Val is deprecated"), 1, "{messages:?}");
+    // Interface method: worked before.
+    assert_eq!(
+        count("(example.com/oldmethod.Node).Text is deprecated: interface method"),
+        1,
+        "{messages:?}"
+    );
+    // Declared in a package the file does not import.
+    assert_eq!(count("(*example.com/oldmethod.Wrap).Old is deprecated: inner"), 1, "{messages:?}");
+    // `Own` shadows `Text` with a live method but not `Val`.
+    assert_eq!(count("(*example.com/oldmethod.Own).Val is deprecated"), 1, "{messages:?}");
+    assert_eq!(count("(*example.com/oldmethod.Own).Text"), 0, "{messages:?}");
+    assert_eq!(messages.len(), 9, "{messages:?}");
+}
+
+/// SA1019 lets protoc-gen-go's output import the deprecated
+/// `github.com/golang/protobuf/proto`: upstream returns when
+/// `code.Generator(pass, spec.Path.Pos()) == generated.ProtocGenGo`. Only that
+/// generator — mockgen output importing it is reported, as is plain code.
+/// Measured against golangci-lint 2.12.2 with the real module.
+#[test]
+fn sa1019_lets_protoc_gen_go_output_import_golang_protobuf() {
+    let count = |file: &str| {
+        let pkg = typecheck_rule("sa1019", file);
+        support::run_analyzer(sa1019::analyzer(), &pkg)
+            .iter()
+            .filter(|m| m.starts_with("github.com/golang/protobuf/proto is deprecated"))
+            .count()
+    };
+    assert_eq!(count("protogen/pb.go"), 0, "protoc-gen-go output");
+    assert_eq!(count("protogen/mock.go"), 1, "mockgen output");
+    assert_eq!(count("protogen/plain.go"), 1, "plain code");
+}
+
+#[test]
+fn sa1019_allows_live_fields_reached_through_embedding() {
+    // Controls for the promoted-field lookup: a live sibling of the deprecated
+    // field, a live field reached through a named-then-promoted selection, and
+    // `Other.Old` — a field with the *same name* on an unrelated type in the
+    // same package, which a lookup keyed by bare field name would report.
+    let pkg = typecheck_rule("sa1019", "ok.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa1019::analyzer(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
+}
+sa_check!(sa1023, sa1023_flags_writer_buffer_modified, sa1023_allows_readonly_write, "must not modify the provided buffer");
+sa_check!(sa1025, sa1025_flags_timer_reset_return, sa1025_allows_timer_reset_without_drain, "Reset's return value");
+
+sa_check_bad_ok!(sa4000, sa4000_flags_bad_cases, sa4000_allows_ok_cases);
+
+/// The `math/rand` exemption is a closed list of 58 names, not the prefix
+/// `math/rand.`: `math/rand/v2` is a different import path, and vitess's
+/// `rand.IntN(100) - rand.IntN(100)` was a finding upstream does not have.
+///
+/// Counted, and the count is one: six rand shapes are silent and only
+/// `plainSub` reports, so a regression that dropped the v2 half would raise
+/// this to four rather than merely changing a message.
+#[test]
+fn sa4000_exempts_math_rand_v2() {
+    let pkg = typecheck_rule("sa4000", "randfuncs.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa4000::analyzer(), &pkg);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].contains("'-' operator"), "{messages:?}");
+}
+sa_check_bad_ok!(sa4001, sa4001_flags_bad_cases, sa4001_allows_ok_cases);
+sa_check_bad_ok!(sa4003, sa4003_flags_bad_cases, sa4003_allows_ok_cases);
+sa_check_bad_ok!(sa4004, sa4004_flags_bad_cases, sa4004_allows_ok_cases);
+
+/// SA4004 walks the whole function body, and matches labelled branches against
+/// the loop they name.
+///
+/// Upstream is `ast.Inspect(body, …)`, so a loop nested in an `if` — or in any
+/// block — is examined like a top-level one; guff read only the function
+/// body's own statements and missed opentofu's
+/// `internal/legacy/helper/schema/resource_timeout.go:144`. The labelled
+/// shapes pin the other half: `stmt.Label == nil || labels[…] == loop` makes
+/// `break outer` on this loop an unconditional exit, and `continue outer` on
+/// this loop a reason not to report.
+///
+/// Positions, not a count: five of the six functions differ only in where the
+/// finding lands. Measured against golangci-lint 2.12.2.
+#[test]
+fn sa4004_examines_loops_at_any_depth() {
+    let pkg = typecheck_rule("sa4004", "nested.go");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64)> = support::run_analyzer_diagnostics(sa4004::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| {
+            let p = fset.position(guff::position::Pos(d.pos as i64));
+            (p.line, p.column)
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            (25, 4), // insideIf
+            (40, 4), // insideBareBlock
+            (54, 3), // labelledBreak
+            (99, 4), // nestedLoopInsideASilentOne — the *inner* loop
+        ],
+        "labelledContinueOuter and gotoCancels are silent"
+    );
+}
+sa_check_bad_ok!(sa4005, sa4005_flags_bad_cases, sa4005_allows_ok_cases);
+#[test]
+fn sa4006_flags_bad_cases() {
+    let pkg = typecheck_rule("sa4006", "bad.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa4006::analyzer(), &pkg);
+    assert_eq!(messages.len(), 4, "{messages:?}");
+}
+
+/// What a loop's back edge can and cannot carry.
+///
+/// guff's `read_in_enclosing_loop` guard exists because hybrid SSA drops some
+/// loads that upstream's IR keeps; it used to treat *any* read inside an
+/// enclosing loop as proof the value is live. A `:=` at the top of the body
+/// redefines the variable first, so the reads that follow it belong to this
+/// iteration and the value assigned below them is dead — which is
+/// hashicorp/packer's `hcl2template/types.packer_config.go:636`.
+///
+/// Shapes 3, 4 and 6 are the ones the guard is *for*, and they have to stay
+/// silent: reading before any redefinition (3), a redefinition inside a nested
+/// `if` that may not run (4), and a value read after the loop (6).
+/// The AST veto over the IR stands down when the statement list returns.
+///
+/// guff keeps a value alive when the source reads the object further down,
+/// because its SSA loses a use in two shapes — a read on the redefining
+/// statement's own right-hand side, and a loop back edge. Both reach the value
+/// through a *later* execution, and a `return` in the same statement list
+/// means there is none: opentofu's `internal/legacy/tofu/state.go:442` assigns
+/// to the `range` variable and returns, and the only other mention of it is
+/// the range header above.
+///
+/// The last two functions are the shapes the veto exists for, kept here so a
+/// fix that simply deletes it fails.
+/// A redefinition inside an `if` arm, when every other arm leaves the function.
+///
+/// `first_redef_after` only counts a redefinition in the assignment's own
+/// statement list, because a branch may not run — that guard is what keeps
+/// caddy's and helm's `if len(x) > 0 { y = … }` values live. But when every
+/// *other* arm of the chain ends in a `return` or a call `ctrlflow` proved
+/// cannot return, the redefining arm is the only way out and the first value
+/// is dead. beats writes exactly that in two `mtest`/`metrics` helpers, around
+/// `t.Fatal`.
+///
+/// The six silent functions are the guard's own shapes: no `else`, an arm that
+/// reads instead of leaving, an arm that calls something which does return,
+/// `break` (which stays in the function), a redefinition one level deeper than
+/// the chain, and a chain that is not in the assignment's statement list.
+#[test]
+fn sa4006_counts_a_branch_redefinition_when_the_other_arms_leave() {
+    let pkg = typecheck_rule("sa4006", "branches.go");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64)> = support::run_analyzer_diagnostics(sa4006::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| {
+            assert_eq!(d.message, "this value of config is never used");
+            let p = fset.position(guff::position::Pos(d.pos as i64));
+            (p.line, p.column)
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            (32, 2), // twoFatalArms — the beats shape
+            (46, 2), // returningArm
+            (58, 2), // redefiningArmFirst
+        ],
+        "{got:?}"
+    );
+}
+
+#[test]
+fn sa4006_ignores_later_reads_when_the_list_returns() {
+    let pkg = typecheck_rule("sa4006", "terminated.go");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64)> = support::run_analyzer_diagnostics(sa4006::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| {
+            let p = fset.position(guff::position::Pos(d.pos as i64));
+            (p.line, p.column)
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            (19, 5), // removeFromLists
+            (32, 3), // storeThenReturn
+        ],
+        "silent: storeReadBeforeTheReturn (a read between the assignment and \
+         the return), behindANoReturnCall (a block upstream's IR never builds), \
+         storeReadThenReturn, readOnOwnRhs, readAcrossBackEdge, and the three \
+         captured-variable shapes at the end — a func literal with no free \
+         variables is a `Value::Function` constant, so the liveness guard has \
+         to ask about the assignment rather than the value"
+    );
+}
+
+#[test]
+fn sa4006_loop_back_edge_shapes() {
+    let pkg = typecheck_rule("sa4006", "loops.go");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64)> = support::run_analyzer_diagnostics(sa4006::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| {
+            assert_eq!(d.message, "this value of moreDiags is never used");
+            let p = fset.position(guff::position::Pos(d.pos as i64));
+            (p.line, p.column)
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            (32, 3), // 1. loop, redefined at the top of the body then read
+            (43, 2), // 2. the same shape with no loop
+            (77, 3),  // 5. range loop, same as 1
+            (104, 3), // 7. channel range, value element
+            (117, 3), // 8. channel range, pointer element
+        ],
+        "{got:?}"
+    );
+}
+
+/// SA4006 inside a method body.
+///
+/// Upstream's `SrcFuncs` is every named function in the package, methods
+/// included. guff's `expr_values` index followed `buildir_src_methods`, which
+/// is off outside contextcheck runs so **SA5011** does not over-report — and an
+/// expression in a method body then resolved to no SSA value, so SA4006 fired
+/// in no method at all. The three bodies here are identical apart from the
+/// receiver; only `plainOverwrite` used to be reported.
+#[test]
+fn sa4006_reports_inside_methods() {
+    let pkg = typecheck_rule("sa4006", "methods.go");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64, String)> =
+        support::run_analyzer_diagnostics(sa4006::analyzer(), &pkg)
+            .into_iter()
+            .map(|d| {
+                let p = fset.position(guff::position::Pos(d.pos as i64));
+                (p.line, p.column, d.message)
+            })
+            .collect();
+    got.sort();
+    let never = |v: &str| format!("this value of {v} is never used");
+    assert_eq!(
+        got,
+        vec![
+            (33, 2, never("x")),  // plain function
+            (40, 2, never("x")),  // pointer receiver
+            (47, 2, never("x")),  // value receiver
+            (59, 3, never("v")),  // a loop inside a method
+            (67, 3, never("x")),  // a closure inside a method
+        ],
+        "{got:?}"
+    );
+}
+
+#[test]
+fn sa4006_allows_ok_cases() {
+    let pkg = typecheck_rule("sa4006", "ok.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa4006::analyzer(), &pkg);
+    // golangci-lint 2.12.2 reported nothing here, and neither did guff once
+    // `MakeInterface` gained its operand (`i = n` boxes `n`, so `n` has a
+    // referrer). 2.14.0 (staticcheck v0.8.1) reports exactly two: `n++` and
+    // `n += 1`, whose stored sums nothing reads.
+    assert_eq!(
+        messages,
+        vec![
+            "this value of n is never used".to_string(),
+            "this value of n is never used".to_string(),
+        ],
+    );
+}
+sa_check_bad_ok!(sa4008, sa4008_flags_bad_cases, sa4008_allows_ok_cases);
+sa_check_bad_ok!(sa4009, sa4009_flags_bad_cases, sa4009_allows_ok_cases);
+sa_check_bad_ok!(sa4010, sa4010_flags_bad_cases, sa4010_allows_ok_cases);
+sa_check_bad_ok!(sa4011, sa4011_flags_bad_cases, sa4011_allows_ok_cases);
+sa_check_bad_ok!(sa4012, sa4012_flags_bad_cases, sa4012_allows_ok_cases);
+sa_check_bad_ok!(sa4013, sa4013_flags_bad_cases, sa4013_allows_ok_cases);
+sa_check_bad_ok!(sa4014, sa4014_flags_bad_cases, sa4014_allows_ok_cases);
+
+/// A repeated condition is only a duplicate when evaluating it twice must give
+/// the same answer.
+///
+/// Upstream's `collectConds` abandons the whole chain when
+/// `code.MayHaveSideEffects(pass, ifstmt.Cond, nil)` is true, so
+/// `if code == <-ch { } else if code == <-ch { }` is not a finding — each
+/// receive can yield a different value — and neither is a repeated call. guff's
+/// local copy of that predicate was `matches!(expr, Expr::CallExpr(_))`, which
+/// does not see a call nested inside a comparison and never looked at `<-` at
+/// all, so it reported both.
+///
+/// `sa4014_allows_ok_cases` requires `ok.go` to be empty; this names why those
+/// two functions are in it. Found by accident: a QF1003 fixture that read the
+/// same channel twice made SA4014 fire and the golden gate caught it.
+#[test]
+fn sa4014_ignores_conditions_with_side_effects() {
+    let dir = support::testdata("sa4014");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/sa4014/ok");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa4014::analyzer(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
+    let src = std::fs::read_to_string(dir.join("ok.go")).expect("fixture readable");
+    for needle in ["sideEffectChannel", "sideEffectCall"] {
+        assert!(src.contains(needle), "ok.go lost {needle}");
+    }
+}
+sa_check_bad_ok!(sa4015, sa4015_flags_bad_cases, sa4015_allows_ok_cases);
+sa_check_bad_ok!(sa4016, sa4016_flags_bad_cases, sa4016_allows_ok_cases);
+sa_check_bad_ok!(sa4017, sa4017_flags_bad_cases, sa4017_allows_ok_cases);
+sa_check_bad_ok!(sa4018, sa4018_flags_bad_cases, sa4018_allows_ok_cases);
+sa_check_bad_ok!(sa4019, sa4019_flags_bad_cases, sa4019_allows_ok_cases);
+sa_check_bad_ok!(sa4020, sa4020_flags_bad_cases, sa4020_allows_ok_cases);
+sa_check_bad_ok!(sa4021, sa4021_flags_bad_cases, sa4021_allows_ok_cases);
+sa_check_bad_ok!(sa4022, sa4022_flags_bad_cases, sa4022_allows_ok_cases);
+#[test]
+fn sa4023_flags_every_shape_that_flattens_to_a_make_interface() {
+    // The IR path was unreachable: it asked whether the *`BinOp`* had an
+    // interface type, but a comparison's type is `bool`, so every candidate was
+    // dropped before the `MakeInterface` test. What fired instead was an AST
+    // approximation — "a concrete pointer was assigned to this variable earlier
+    // in the file" — which reports the shapes upstream is silent on and misses
+    // the ones it reports. buildkit `client/client.go:166` was the first
+    // measured instance; `ok.go` holds it and eleven more silent shapes.
+    //
+    // Counted by position, not by `any(contains(…))`: every message here is one
+    // of two strings, so a substring assertion passes with twelve of the
+    // thirteen missing.
+    let pkg = typecheck_rule("sa4023", "bad.go");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64, String)> =
+        support::run_analyzer_diagnostics(sa4023::analyzer(), &pkg)
+            .into_iter()
+            .map(|d| {
+                let p = fset.position(guff::position::Pos(d.pos as i64));
+                (p.line, p.column, d.message)
+            })
+            .collect();
+    got.sort();
+
+    let always = |line| (line, 9, "this comparison is always true".to_string());
+    let never = |line| (line, 9, "this comparison is never true".to_string());
+    assert_eq!(
+        got,
+        vec![
+            // The column is the start of the left operand, not the operator:
+            // upstream reports the `ast.BinaryExpr`, whose `Pos()` is `X.Pos()`.
+            (7, 6, "this comparison is never true".to_string()),
+            always(24),  // var d iface = &concrete{}
+            always(31),  // d = &concrete{}
+            always(37),  // d := iface(&concrete{})
+            never(43),   // ==, so "never"
+            never(51),   // assigned a typed nil pointer
+            always(57),  // the concrete value comes from a call
+            always(66),  // [T int | string]
+            always(72),  // [T ~int]
+            always(79),  // [T *concrete]
+            always(87),  // [T num], a named union
+            always(98),  // [T stringy], a method and a term
+            always(104), // [T interface{ *concrete }]
+        ],
+        "{got:?}"
+    );
+}
+
+#[test]
+fn sa4023_allows_ok_cases() {
+    // Twelve shapes upstream stays quiet on, measured against it one shape per
+    // declaration: a conditional assignment in a loop (buildkit's) and in an
+    // `if`, two branches assigning different concrete values, an assignment
+    // that only happens after the comparison, `nil` on the left, a struct
+    // field, a package-level variable, a local captured by a closure, and three
+    // type parameters whose constraint has no structural terms.
+    let pkg = typecheck_rule("sa4023", "ok.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa4023::analyzer(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
+}
+sa_check_bad_ok!(sa4024, sa4024_flags_bad_cases, sa4024_allows_ok_cases);
+sa_check_bad_ok!(sa4025, sa4025_flags_bad_cases, sa4025_allows_ok_cases);
+sa_check_bad_ok!(sa4026, sa4026_flags_bad_cases, sa4026_allows_ok_cases);
+sa_check_bad_ok!(sa4027, sa4027_flags_bad_cases, sa4027_allows_ok_cases);
+sa_check_bad_ok!(sa4028, sa4028_flags_bad_cases, sa4028_allows_ok_cases);
+sa_check_bad_ok!(sa4029, sa4029_flags_bad_cases, sa4029_allows_ok_cases);
+sa_check_bad_ok!(sa4030, sa4030_flags_bad_cases, sa4030_allows_ok_cases);
+sa_check_bad_ok!(sa4031, sa4031_flags_bad_cases, sa4031_allows_ok_cases);
+sa_check_bad_ok!(sa4032, sa4032_flags_bad_cases, sa4032_allows_ok_cases);
+
+sa_check!(sa5000, sa5000_flags_nil_map, sa5000_allows_initialized_map, "assignment to nil map");
+sa_check!(sa5002, sa5002_flags_empty_loop, sa5002_allows_nonempty_loop, "spin");
+#[test]
+fn sa5003_flags_a_defer_wherever_it_sits_in_an_infinite_loop() {
+    // The fixture used to be one line — `for { defer func(){}() }` — and the
+    // assertion was a substring match, so nothing here was measured. The body
+    // scan was a hand-written statement walker that descended only into
+    // blocks, ifs and loops, which got both directions wrong at once: it
+    // missed every `defer` written inside a `switch`, a `select`, a type
+    // switch or a labelled statement, and it reported loops whose `return` or
+    // `break` was written in one of those (kubeshark `cmd/console.go`, two
+    // findings golangci-lint does not make). Upstream is `ast.Inspect` over
+    // the whole body, pruned at `FuncLit`.
+    //
+    // Counted by position: every message this check makes is the same string.
+    let pkg = typecheck_rule("sa5003", "bad.go");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64)> = support::run_analyzer_diagnostics(sa5003::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| {
+            assert_eq!(d.message, "defers in this infinite loop will never run");
+            let p = fset.position(guff::position::Pos(d.pos as i64));
+            (p.line, p.column)
+        })
+        .collect();
+    got.sort();
+
+    assert_eq!(
+        got,
+        vec![
+            (17, 3),  // bare
+            (25, 4),  // inside a select clause
+            (34, 4),  // inside a select's default clause
+            (43, 4),  // inside a switch clause
+            (52, 4),  // inside a type switch clause
+            (60, 3),  // inside a labelled statement
+            (70, 3),  // a return in a func literal does not exit the loop
+            (80, 3),  // continue is not break
+            (88, 3),  // no condition, but a post statement
+            // Two enclosing infinite loops, so the check reports twice — as
+            // upstream's does. One line, because `Graph::root_diagnostics`
+            // collapses them on (analyzer, position, message), which is what
+            // golangci-lint's runner does before its processors ever see them.
+            // Without that step `guff run` printed this line twice, and the
+            // golden tier saw it: its diff is a multiset, not a set.
+            (98, 4),
+        ],
+        "{got:?}"
+    );
+}
+
+#[test]
+fn sa5003_allows_a_loop_that_can_be_left() {
+    // Twelve shapes upstream stays quiet on, one per declaration: a loop with
+    // a condition, a plain `break`, a `break` under an `if`, a `return` inside
+    // a `select` (kubeshark's) and inside a `switch`, a `return` nested one
+    // `if` deeper, a `break` inside a `switch` and inside a `select` (both of
+    // which leave that statement rather than the loop — upstream's own TODO
+    // keeps the false negative), a `break` in an inner loop, a labelled
+    // `break`, and a `defer` that belongs to a function literal.
+    let pkg = typecheck_rule("sa5003", "ok.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa5003::analyzer(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
+}
+sa_check!(sa5004, sa5004_flags_empty_default_select, sa5004_allows_nonempty_default_select, "empty default case");
+sa_check!(sa5005, sa5005_flags_finalizer_self_ref, sa5005_allows_safe_finalizer, "finalizer closes over");
+sa_check!(sa5007, sa5007_flags_infinite_recursion, sa5007_allows_terminating_recursion, "infinite recursive call");
+sa_check!(sa5008, sa5008_flags_invalid_struct_tag, sa5008_allows_valid_struct_tag, "invalid XML tag");
+
+/// SA5008's JSON half is the full `encoding/json/v2` tag grammar
+/// (honnef's `jsonv2.go`). The fixtures mark every case, and
+/// `compat/golden/cases/staticcheck-sa` runs golangci-lint 2.12.2 over the same
+/// files — this pins the finding set so a change to the grammar shows up here
+/// too.
+#[test]
+fn sa5008_validates_the_whole_json_tag_grammar() {
+    let pkg = typecheck_rule("sa5008", "bad.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa5008::analyzer(), &pkg);
+    let has = |needle: &str| {
+        assert!(
+            messages.iter().any(|m| m.contains(needle)),
+            "missing {needle:?} in {messages:?}"
+        );
+    };
+    // The thanos `pkg/api/api.go` shape, which guff used to miss entirely.
+    has("malformed `json` tag: invalid trailing ',' character");
+    // A mutant of a real option is named rather than called unknown.
+    has("invalid appearance of `omitEmpty` tag option; specify `omitempty` instead");
+    has("invalid appearance of unknown `bogus` tag option");
+    has("duplicate appearance of `omitempty` tag option");
+    has("field cannot have both `inline` and `unknown` specified");
+    has("missing value for `case` tag option");
+    has("invalid appearance of unknown `case:loud` tag value");
+    has("`format` tag option was not specified last");
+    has("invalid appearance of `string` tag option");
+    has("unexported struct field cannot have non-ignored `json:\"lower\"` tag");
+    // The one value that genuinely will not unquote.
+    has("unparseable struct tag: invalid syntax");
+}
+
+/// Malformed tag *structure* ends upstream's scan without a diagnostic — its
+/// `parseStructTag` breaks rather than erroring. guff reported
+/// `unparseable struct tag: malformed struct tag` on all four of these.
+#[test]
+fn sa5008_is_silent_on_tags_that_are_not_tags() {
+    let pkg = typecheck_rule("sa5008", "ok.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa5008::analyzer(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
+}
+
+/// go-flags repeats `choice` / `optional-value` / `default` by design, so
+/// upstream exempts those three in any package that imports it. Without the
+/// exemption guff reports `duplicate struct tag "choice"` — a false positive no
+/// corpus repo could catch, since none of the 14 uses go-flags.
+#[test]
+fn sa5008_exempts_go_flags_repeated_tags() {
+    let dir = support::testdata("sa5008");
+    let stub = dir.join("stub/github.com/jessevdk/go-flags/flags.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa5008/goflags",
+        &dir.join("goflags.go"),
+        &[("github.com/jessevdk/go-flags", &stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa5008::analyzer(), &pkg);
+    assert!(
+        !messages.iter().any(|m| m.contains("duplicate struct tag")),
+        "{messages:?}"
+    );
+}
+sa_check!(sa5010, sa5010_flags_impossible_assertion, sa5010_allows_possible_assertion, "type assertion");
+
+/// SA5010 gives up on any method that instantiation produced.
+///
+/// ```go
+/// if ml.Origin() != ml || mr.Origin() != mr {
+///     // Give up when we see generics.
+///     continue instrLoop
+/// }
+/// ```
+///
+/// The test is the method's `Origin()`, which makes it *wider* than
+/// `ifaceassert`'s `free.Has`: `gConcrete` asserts between two fully
+/// instantiated interfaces — nothing is free — and govet reports it while
+/// staticcheck does not. Both answers are in
+/// `compat/golden/cases/{govet,staticcheck}`.
+///
+/// Measured against golangci-lint 2.12.2 (honnef.co/go/tools v0.7.0) on all
+/// four shapes.
+#[test]
+fn sa5010_gives_up_on_instantiated_methods() {
+    let pkg = typecheck_rule("sa5010", "generic.go");
+    support::assert_well_typed(&pkg);
+    let mut messages = support::run_analyzer(sa5010::analyzer(), &pkg);
+    messages.sort();
+    assert_eq!(
+        messages.len(),
+        2,
+        "the non-generic pair and the anonymous interface are findings; the \
+         three `gMerge` shapes are not: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("gPlainA and gPlainB contradict each other")),
+        "{messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("map[string][]T")),
+        "an anonymous interface's methods are not clones: {messages:?}"
+    );
+}
+sa_check!(sa5011, sa5011_flags_possible_nil_deref, sa5011_allows_guarded_deref, "possible nil pointer dereference");
+
+/// `*in` and `**in` are two different pointers.
+///
+/// SA5011 is pure value identity, and guff's `peel_load` exists only to
+/// reconstruct the identity upstream's IR gets for free by lifting a
+/// non-escaping `Alloc` into registers. Peeled off *any* pointer it stops being
+/// reconstruction and starts erasing a dereference: `in`, `*in` and `**in` all
+/// collapse onto one key, which made all three converters in cert-manager's
+/// `internal/apis/config/shared/v1alpha1/conversion.go` a finding where
+/// golangci-lint is silent.
+///
+/// `sa_check!` above only asserts bad.go is non-empty, so it would pass with
+/// any subset. This pins the count against the `// want` markers, and ok.go —
+/// which `sa5011_allows_guarded_deref` requires to be **empty** — carries the
+/// two shapes that must not come back plus the local-alloc shape `peel_load` is
+/// still for.
+#[test]
+fn sa5011_reports_exactly_the_marked_derefs() {
+    let pkg = typecheck_rule("sa5011", "bad.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa5011::analyzer(), &pkg);
+    assert_eq!(messages.len(), want_markers("sa5011", "bad.go"), "{messages:?}");
+}
+
+/// How many lines of a rule fixture carry a `// want` marker.
+fn want_markers(rule: &str, file: &str) -> usize {
+    let path = support::testdata(rule).join(file);
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+        .lines()
+        .filter(|l| l.contains("// want"))
+        .count()
+}
+sa_check!(sa6003, sa6003_flags_rune_range, sa6003_allows_string_range, "range over string");
+sa_check!(sa9001, sa9001_flags_defer_in_channel_range, sa9001_allows_defer_outside_range, "defer");
+sa_check!(sa9003, sa9003_flags_empty_branch, sa9003_allows_nonempty_branch, "empty branch");
+sa_check!(sa9004, sa9004_flags_mixed_const_types, sa9004_allows_uniform_const_types, "only the first constant");
+sa_check!(sa9006, sa9006_flags_fixed_shift, sa9006_allows_variable_shift, "shift");
+sa_check!(sa9009, sa9009_flags_ineffectual_directive, sa9009_allows_valid_directive, "go:");
+
+/// SA9009 under a license header.
+///
+/// The rule is lexical — upstream only reads the comment's text and column —
+/// but the production parse runs without `PARSE_COMMENTS` and keeps only
+/// *some* groups: the leading one survives and the rest are dropped. guff
+/// gated its source scan on "the file has no comments at all", which is true
+/// only for a file that starts straight at `package`. Every file with a
+/// licence header went unscanned, and beats writes `// go:generate moq …`
+/// under one in `filebeat/input/net/manager.go:40`.
+///
+/// `bad.go` could not see it: its directive *is* the leading comment group.
+/// The silent lines here are the rest of upstream's filter — a block comment,
+/// an indented one, a correct `//go:` with no space, `go:` with more spaces
+/// after the colon, a capital letter after it, and `go:` with nothing at all.
+#[test]
+fn sa9009_scans_a_file_that_starts_with_a_comment() {
+    let dir = support::testdata("sa9009");
+    let pkg = support::typecheck_file(&dir, "header.go", "example.com/staticcheck/sa9009/header");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, String)> = support::run_analyzer_diagnostics(sa9009::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| {
+            (
+                fset.position(guff::position::Pos(d.pos as i64)).line,
+                d.message,
+            )
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            (
+                14,
+                "ineffectual compiler directive due to extraneous space: \
+                 \"// go:generate under a header\""
+                    .to_string()
+            ),
+            (
+                35,
+                "ineffectual compiler directive due to extraneous space: \
+                 \"// go:build ignore\""
+                    .to_string()
+            ),
+        ],
+        "{got:?}"
+    );
+}
+
+/// `if a || b { … }` renames the pointer, in both directions — and so does any
+/// other branch that separates the check from the deref.
+///
+/// honnef's IR is SSI: the `err != nil` branch decides whether the `p == nil`
+/// check is reached at all, so the check's operand is a sigma and the block
+/// below the join reads a phi merging both edges. SA5011 is pure value
+/// identity, so it cannot match across either — whatever the branch body does,
+/// and whichever side the deref is on. coredns writes fifteen of these in
+/// `test/wildcard_test.go` and they were the whole of its staticcheck diff.
+///
+/// The mirror — deref in one arm, check below the join — is the same argument
+/// with sigma and phi swapped, and it is what nats-server
+/// `jetstream_cluster_3_test.go:8707` writes. `ok.go` carries seven spellings
+/// of it (assigned before or inside the branch, parameter, switch, loop body,
+/// no else arm, sibling arms); `bad.go` keeps the control where the deref sits
+/// below the join too and nothing renames it.
+#[test]
+fn sa5011_or_guard_renames_the_pointer() {
+    let pkg = typecheck_rule("sa5011", "ok.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa5011::analyzer(), &pkg);
+    assert!(
+        messages.is_empty(),
+        "every OR-guarded shape in ok.go is silent upstream: {messages:?}"
+    );
+
+    // The single-check spelling of the deref-first shape is still a finding.
+    // Counted against the `// want` markers rather than a literal, so a shape
+    // added to bad.go for another rule change does not read as a regression
+    // here (see `sa5011_reports_exactly_the_marked_derefs`).
+    let bad = typecheck_rule("sa5011", "bad.go");
+    let bad_messages = support::run_analyzer(sa5011::analyzer(), &bad);
+    assert_eq!(
+        bad_messages.len(),
+        want_markers("sa5011", "bad.go"),
+        "bad.go keeps every marked finding: {bad_messages:?}"
+    );
+}
+
+/// `ctrlflow` proves `(*testing.T).Fatal` never returns, so the code below the
+/// `if` is entered only from the non-nil side and reads a sigma. The receiver
+/// decides whether the call aborts, not the enclosing function — nats-server
+/// dereferences inside a `func(k, v any) bool` callback after a `t.Fatalf` on a
+/// captured concrete `*testing.T`.
+#[test]
+fn sa5011_reads_the_abort_from_the_receiver() {
+    let dir = support::testdata("sa5011");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa5011/testing_abort",
+        &dir.join("testing_abort.go"),
+        &[("testing", &dir.join("stub/testing/testing.go"))],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa5011::analyzer(), &pkg);
+    assert!(
+        messages.is_empty(),
+        "an abort on a concrete *testing.T guards both shapes: {messages:?}"
+    );
+}
+
+#[test]
+fn sa5001_flags_defer_before_error_check() {
+    let pkg = typecheck_rule("sa5001", "bad.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa5001::analyzer(), &pkg);
+    assert!(!messages.is_empty(), "{messages:?}");
+    assert!(messages[0].contains("before deferring"), "{messages:?}");
+}
+
+#[test]
+fn sa5001_allows_defer_after_error_check() {
+    let pkg = typecheck_rule("sa5001", "ok.go");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa5001::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa5009_flags_invalid_printf() {
+    let pkg = typecheck_rule("sa5009", "bad.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa5009::analyzer(), &pkg);
+    // Pin the whole string: asserting only `contains("Printf")` is what let
+    // guff report the too-many-args wording ("Printf call needs 2 args but has
+    // 0 args") for a too-few-args call for as long as it did.
+    assert_eq!(
+        messages,
+        vec!["Printf format %s reads arg #1, but call has only 0 args"],
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn sa5009_allows_valid_printf() {
+    let pkg = typecheck_rule("sa5009", "ok.go");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa5009::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa5012_flags_odd_new_replacer_slice() {
+    let pkg = typecheck_rule("sa5012", "bad.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa5012::analyzer(), &pkg);
+    assert!(!messages.is_empty(), "{messages:?}");
+    assert!(messages[0].contains("even number"), "{messages:?}");
+}
+
+#[test]
+fn sa5012_allows_even_new_replacer_slice() {
+    let pkg = typecheck_rule("sa5012", "ok.go");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa5012::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa6000_flags_regexp_match_in_loop() {
+    let pkg = typecheck_rule("sa6000", "bad.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa6000::analyzer(), &pkg);
+    assert!(!messages.is_empty(), "{messages:?}");
+    assert!(messages[0].contains("regexp.Compile"), "{messages:?}");
+}
+
+#[test]
+fn sa6000_allows_regexp_compile_in_loop() {
+    let pkg = typecheck_rule("sa6000", "ok.go");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa6000::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa6001_flags_map_string_key() {
+    let pkg = typecheck_rule("sa6001", "bad.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa6001::analyzer(), &pkg);
+    assert!(!messages.is_empty(), "{messages:?}");
+    assert!(messages[0].contains("string("), "{messages:?}");
+}
+
+#[test]
+fn sa6001_allows_direct_byte_slice_key() {
+    let pkg = typecheck_rule("sa6001", "ok.go");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa6001::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa6002_flags_non_pointer_pool_put() {
+    let pkg = typecheck_rule("sa6002", "bad.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa6002::analyzer(), &pkg);
+    // Six of the sixteen measured shapes: a slice and a named slice (both
+    // pointer-like, both reported anyway — the header is three words), a
+    // struct, an array, an int and a string. `!is_empty()` was true of the
+    // slice alone, which is what let the ten in ok.go go unmeasured.
+    assert_eq!(messages.len(), 6, "{messages:?}");
+    assert!(
+        messages.iter().all(|m| m.contains("pointer-like")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn sa6002_allows_pointer_pool_put() {
+    let pkg = typecheck_rule("sa6002", "ok.go");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa6002::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa6005_flags_tolower_comparison() {
+    let pkg = typecheck_rule("sa6005", "bad.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa6005::analyzer(), &pkg);
+    assert!(!messages.is_empty(), "{messages:?}");
+    assert!(messages[0].contains("EqualFold"), "{messages:?}");
+}
+
+#[test]
+fn sa6005_allows_equal_fold_comparison() {
+    let pkg = typecheck_rule("sa6005", "ok.go");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa6005::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa6006_flags_write_string() {
+    let pkg = typecheck_rule("sa6006", "bad.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa6006::analyzer(), &pkg);
+    assert!(!messages.is_empty(), "{messages:?}");
+    assert!(messages[0].contains("WriteString"), "{messages:?}");
+}
+
+#[test]
+fn sa6006_allows_write() {
+    let pkg = typecheck_rule("sa6006", "ok.go");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa6006::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa9002_flags_file_mode_octal() {
+    let pkg = typecheck_rule("sa9002", "bad.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa9002::analyzer(), &pkg);
+    assert!(!messages.is_empty(), "{messages:?}");
+    assert!(messages[0].contains("0644"), "{messages:?}");
+}
+
+#[test]
+fn sa9002_allows_explicit_octal_file_mode() {
+    let pkg = typecheck_rule("sa9002", "ok.go");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa9002::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa9005_flags_unexported_struct_marshal() {
+    let pkg = typecheck_rule("sa9005", "bad.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa9005::analyzer(), &pkg);
+    assert!(!messages.is_empty(), "{messages:?}");
+    assert!(messages[0].contains("exported fields"), "{messages:?}");
+}
+
+/// SA9005 dereferences the argument and flattens embedded structs, so an
+/// embedded field's name never counts — only the fields it brings. Ten
+/// shapes, eight reports; pinned by (line, type) because the rest of the
+/// message is the same every time.
+#[test]
+fn sa9005_dereferences_and_flattens_embedded_structs() {
+    let pkg = typecheck_rule("sa9005", "embed.go");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let prefix = "struct type '";
+    let suffix = "' doesn't have any exported fields, nor custom marshaling";
+    let pkg_path = "example.com/staticcheck/sa9005/embed.go.";
+    let mut got: Vec<(i64, String)> = support::run_analyzer_diagnostics(sa9005::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| {
+            let line = fset.position(guff::position::Pos(d.pos as i64)).line;
+            let typ = d
+                .message
+                .strip_prefix(prefix)
+                .and_then(|m| m.strip_suffix(suffix))
+                .unwrap_or(&d.message)
+                .replace(pkg_path, "");
+            (line, typ)
+        })
+        .collect();
+    got.sort();
+    let want: Vec<(i64, String)> = [
+        (25, "onlyHidden"),              // 1: plain
+        (28, "onlyHidden"),              // 2: a pointer names its struct
+        (36, "struct{OnlyHidden}"),      // 4: the embedding's name is not a field
+        (39, "struct{*OnlyHidden}"),     // 5: …by pointer too
+        (45, "struct{ch}"),              // 7: an embedded non-struct is a field
+        (48, "Rec"),                     // 8: self-embedding terminates
+        (51, "onlyHidden"),              // 9: json.Unmarshal(b, &v)
+        (56, "onlyHidden"),              // 10: a named pointer type
+    ]
+    .into_iter()
+    .map(|(l, t)| (l, t.to_string()))
+    .collect();
+    // Silent: 3 (`struct{ inner }` brings `inner.Method`) and 6.
+    assert_eq!(got, want);
+}
+
+#[test]
+fn sa9005_allows_exported_struct_marshal() {
+    let pkg = typecheck_rule("sa9005", "ok.go");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa9005::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa9007_flags_remove_all_on_system_dir() {
+    let pkg = typecheck_rule("sa9007", "bad.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa9007::analyzer(), &pkg);
+    assert!(!messages.is_empty(), "{messages:?}");
+    assert!(messages[0].contains("RemoveAll"), "{messages:?}");
+}
+
+#[test]
+fn sa9007_allows_remove_all_on_temp_dir() {
+    let pkg = typecheck_rule("sa9007", "ok.go");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa9007::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa9008_flags_type_assertion_shadowing() {
+    let pkg = typecheck_rule("sa9008", "bad.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa9008::analyzer(), &pkg);
+    assert!(!messages.is_empty(), "{messages:?}");
+    assert!(messages[0].contains("failed type assertion"), "{messages:?}");
+}
+
+#[test]
+fn sa9008_allows_type_assertion_without_shadowing() {
+    let pkg = typecheck_rule("sa9008", "ok.go");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(sa9008::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn st1001_flags_dot_imports() {
+    let dir = support::testdata("st1001");
+    let fmt_stub = dir.join("stub/fmt/fmt.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/st1001",
+        &dir.join("bad.go"),
+        &[("fmt", &fmt_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1001::analyzer(), &pkg);
+    assert!(!messages.is_empty(), "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("dot imports")));
+}
+
+#[test]
+fn st1000_flags_missing_package_comment() {
+    let dir = support::testdata("st1000");
+    let pkg = support::typecheck_file(&dir, "bad_missing.go", "example.com/staticcheck/st1000/missing");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1000::analyzer(), &pkg);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].contains("at least one file in a package should have a package comment"));
+}
+
+#[test]
+fn st1000_flags_badly_formed_package_comment() {
+    let dir = support::testdata("st1000");
+    let pkg = support::typecheck_file(&dir, "bad_form.go", "example.com/staticcheck/st1000/form");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1000::analyzer(), &pkg);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].contains("package comment should be of the form"));
+}
+
+#[test]
+fn st1000_allows_well_formed_package_comment() {
+    let dir = support::testdata("st1000");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/st1000/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(st1000::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn st1001_allows_normal_imports() {
+    let dir = support::testdata("st1001");
+    let fmt_stub = dir.join("stub/fmt/fmt.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/st1001/ok",
+        &dir.join("ok.go"),
+        &[("fmt", &fmt_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(st1001::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn st1006_flags_bad_receiver_names() {
+    let dir = support::testdata("st1006");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/st1006");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1006::analyzer(), &pkg);
+    assert!(messages.len() >= 3, "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("underscore")));
+    assert!(messages.iter().any(|m| m.contains("self") || m.contains("this") || m.contains("identity")));
+}
+
+#[test]
+fn st1006_allows_good_receiver_names() {
+    let dir = support::testdata("st1006");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/st1006/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(st1006::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn st1012_flags_badly_named_error_vars() {
+    let dir = support::testdata("st1012");
+    let errors_stub = dir.join("stub/errors/errors.go");
+    let fmt_stub = dir.join("stub/fmt/fmt.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/st1012",
+        &dir.join("bad.go"),
+        &[("errors", &errors_stub), ("fmt", &fmt_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1012::analyzer(), &pkg);
+    assert!(messages.len() >= 3, "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("error var foo")));
+    assert!(messages.iter().any(|m| m.contains("error var abc")));
+    assert!(messages.iter().any(|m| m.contains("error var wrong")));
+}
+
+#[test]
+fn st1012_allows_well_named_error_vars() {
+    let dir = support::testdata("st1012");
+    let errors_stub = dir.join("stub/errors/errors.go");
+    let fmt_stub = dir.join("stub/fmt/fmt.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/st1012/ok",
+        &dir.join("ok.go"),
+        &[("errors", &errors_stub), ("fmt", &fmt_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(st1012::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn st1015_flags_middle_default_case() {
+    let dir = support::testdata("st1015");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/st1015");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1015::analyzer(), &pkg);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].contains("default case should be first or last"));
+}
+
+#[test]
+fn st1015_allows_first_or_last_default() {
+    let dir = support::testdata("st1015");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/st1015/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(st1015::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn st1011_flags_duration_unit_suffixes() {
+    let dir = support::testdata("st1011");
+    let time_stub = dir.join("stub/time/time.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/st1011",
+        &dir.join("bad.go"),
+        &[("time", &time_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1011::analyzer(), &pkg);
+    assert!(messages.len() >= 5, "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("BMillis")));
+    assert!(messages.iter().any(|m| m.contains("cMS")));
+    assert!(messages.iter().any(|m| m.contains("xMS")));
+    assert!(messages.iter().any(|m| m.contains("bMS")));
+}
+
+#[test]
+fn st1011_allows_duration_without_unit_suffix() {
+    let dir = support::testdata("st1011");
+    let time_stub = dir.join("stub/time/time.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/st1011/ok",
+        &dir.join("ok.go"),
+        &[("time", &time_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(st1011::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn st1017_flags_yoda_conditions() {
+    let dir = support::testdata("st1017");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/st1017");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1017::analyzer(), &pkg);
+    assert_eq!(messages.len(), 3, "{messages:?}");
+    assert!(messages.iter().all(|m| m.contains("Yoda")));
+}
+
+#[test]
+fn st1017_allows_non_yoda_conditions() {
+    let dir = support::testdata("st1017");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/st1017/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(st1017::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn st1019_flags_duplicate_imports() {
+    let dir = support::testdata("st1019");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/st1019",
+        &dir.join("bad.go"),
+        &[
+            ("fmt", &dir.join("stub/fmt/fmt.go")),
+            ("os", &dir.join("stub/os/os.go")),
+            ("net/http/pprof", &dir.join("stub/net/http/pprof/pprof.go")),
+            ("strconv", &dir.join("stub/strconv/strconv.go")),
+        ],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1019::analyzer(), &pkg);
+    assert!(messages.len() >= 3, "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("\"fmt\"")));
+    assert!(messages.iter().any(|m| m.contains("\"os\"")));
+    assert!(messages.iter().any(|m| m.contains("\"strconv\"")));
+    assert!(!messages.iter().any(|m| m.contains("pprof")));
+}
+
+#[test]
+fn st1019_allows_unique_imports() {
+    let dir = support::testdata("st1019");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/st1019/ok",
+        &dir.join("ok.go"),
+        &[
+            ("fmt", &dir.join("stub/fmt/fmt.go")),
+            ("os", &dir.join("stub/os/os.go")),
+        ],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(st1019::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn st1013_flags_http_status_magic_numbers() {
+    let dir = support::testdata("st1013");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/st1013",
+        &dir.join("bad.go"),
+        &[("net/http", &dir.join("stub/net/http/http.go"))],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1013::analyzer(), &pkg);
+    assert_eq!(messages.len(), 4, "{messages:?}");
+    assert!(messages
+        .iter()
+        .all(|m| m.contains("http.StatusVariantAlsoNegotiates")));
+}
+
+#[test]
+fn st1013_allows_whitelist_and_constants() {
+    let dir = support::testdata("st1013");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/st1013/ok",
+        &dir.join("ok.go"),
+        &[("net/http", &dir.join("stub/net/http/http.go"))],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(st1013::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn st1018_flags_invisible_and_control_chars() {
+    let dir = support::testdata("st1018");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/st1018");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1018::analyzer(), &pkg);
+    assert!(messages.len() >= 5, "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("control character U+0007")));
+    assert!(messages.iter().any(|m| m.contains("control characters")));
+    assert!(messages.iter().any(|m| m.contains("format character U+200B")));
+    assert!(messages
+        .iter()
+        .any(|m| m.contains("format and control characters")));
+}
+
+#[test]
+fn st1018_allows_escapes_and_emoji() {
+    let dir = support::testdata("st1018");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/st1018/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(st1018::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn st1020_flags_badly_formed_exported_func_docs() {
+    let dir = support::testdata("st1020");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/st1020");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1020::analyzer(), &pkg);
+    assert!(messages.len() >= 3, "{messages:?}");
+    assert!(messages
+        .iter()
+        .any(|m| m.contains("exported function Bar")));
+    assert!(messages.iter().any(|m| m.contains("exported method Bar")));
+    assert!(messages.iter().any(|m| m.contains("exported function F3")));
+    assert!(messages.iter().any(|m| m.contains("exported function F6")));
+}
+
+#[test]
+fn st1020_allows_well_formed_exported_func_docs() {
+    let dir = support::testdata("st1020");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/st1020/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(st1020::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn st1021_flags_badly_formed_exported_type_docs() {
+    let dir = support::testdata("st1021");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/st1021");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1021::analyzer(), &pkg);
+    assert!(messages.len() >= 3, "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("exported type T2")));
+    assert!(messages.iter().any(|m| m.contains("exported type T4")));
+    assert!(messages.iter().any(|m| m.contains("exported type T14")));
+}
+
+#[test]
+fn st1021_allows_well_formed_exported_type_docs() {
+    let dir = support::testdata("st1021");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/st1021/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(st1021::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn st1003_flags_poor_identifiers() {
+    let dir = support::testdata("st1003");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/st1003");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1003::analyzer(), &pkg);
+    assert!(messages.len() >= 5, "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("abc_def")));
+    assert!(messages.iter().any(|m| m.contains("ALL_CAPS")));
+    assert!(messages.iter().any(|m| m.contains("fn_1")));
+    assert!(messages.iter().any(|m| m.contains("fnId") && m.contains("fnID")));
+    assert!(messages.iter().any(|m| m.contains("a_b")));
+    assert!(messages.iter().any(|m| m.contains("e_f")));
+    assert!(messages.iter().any(|m| m.contains("bad_field")));
+}
+
+#[test]
+fn st1003_allows_good_identifiers() {
+    let dir = support::testdata("st1003");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/st1003/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(st1003::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn st1003_flags_package_name_underscore() {
+    let dir = support::testdata("st1003");
+    let pkg = support::typecheck_file(&dir, "pkg_underscore.go", "example.com/staticcheck/st1003/u");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1003::analyzer(), &pkg);
+    assert!(
+        messages.iter().any(|m| m.contains("underscores in package names")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn st1003_flags_package_name_mixed_caps() {
+    let dir = support::testdata("st1003");
+    let pkg = support::typecheck_file(&dir, "pkg_mixed.go", "example.com/staticcheck/st1003/m");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1003::analyzer(), &pkg);
+    assert!(
+        messages.iter().any(|m| m.contains("MixedCaps")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn st1022_flags_badly_formed_exported_var_docs() {
+    let dir = support::testdata("st1022");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/st1022");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1022::analyzer(), &pkg);
+    assert!(messages.len() >= 3, "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("exported var B")));
+    assert!(messages.iter().any(|m| m.contains("exported const D")));
+    assert!(messages.iter().any(|m| m.contains("exported var I")));
+}
+
+#[test]
+fn st1022_allows_well_formed_exported_var_docs() {
+    let dir = support::testdata("st1022");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/st1022/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(st1022::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn st1023_flags_redundant_types() {
+    let dir = support::testdata("st1023");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/st1023");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1023::analyzer(), &pkg);
+    assert!(messages.len() >= 4, "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("omit type int") && m.contains("inferred")));
+    assert!(messages.iter().any(|m| m.contains("omit type bool")));
+    assert!(messages.iter().any(|m| m.contains("omit type string")));
+    assert!(messages.iter().any(|m| m.contains("omit type MyInt")));
+}
+
+/// The two axes of `sharedcheck.RedundantTypeInDeclarationChecker`: what the
+/// right-hand side's type is when re-checked on its own, and — only when that
+/// is untyped — which AST shapes survive `flagHelpfulTypes = false`. Counted by
+/// declared type; `compat/golden/cases/staticcheck-st` pins the exact lines.
+#[test]
+fn st1023_isolates_the_right_hand_side() {
+    let dir = support::testdata("st1023");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/st1023/isolated",
+        &dir.join("isolated.go"),
+        &[
+            ("math", &dir.join("stub/math/math.go")),
+            ("time", &dir.join("stub/time/time.go")),
+        ],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1023::analyzer(), &pkg);
+    // 19: the seventeen the isolated-type shapes give, plus the two constant
+    // builtins whose result really is typed — `complex(floatVar, 0)` has a
+    // typed argument, and `len("abc")` is a typed `int` by the spec. The other
+    // eight builtin shapes are untyped, so the expression-kind gate skips them.
+    assert_eq!(messages.len(), 19, "{messages:?}");
+    let count = |t: &str| {
+        messages
+            .iter()
+            .filter(|m| m.contains(&format!("omit type {t} from")))
+            .count()
+    };
+    assert_eq!(count("complex64"), 0, "{messages:?}");
+    assert_eq!(count("float32"), 0, "{messages:?}");
+    // A typed right-hand side is flagged whatever its shape: `5 * time.Second`
+    // and `<-ch` are as redundant as a bare identifier.
+    assert_eq!(count("time.Duration"), 2, "{messages:?}");
+    // `var v int32 = 'a'` keeps its type — the default type of an untyped rune
+    // is the alias `rune`, not `int32` — so the only two int32s here are the
+    // typed-constant ones.
+    assert_eq!(count("int32"), 2, "{messages:?}");
+    assert_eq!(count("bool"), 2, "{messages:?}");
+    // Six from the isolated-type shapes, plus `var b10 int = len("abc")`.
+    assert_eq!(count("int"), 7, "{messages:?}");
+}
+
+/// The cgo exception, the one generator the shared body names:
+///
+/// ```go
+/// gen, _ := code.Generator(pass, decl.Pos())
+/// if gen == generated.Cgo {
+///     // TODO(dh): remove this exception once we can use UsesCgo
+///     return
+/// }
+/// ```
+///
+/// It matters because cgo's preamble writes `var _cgo0 *_Ctype_char = cPath`
+/// and the positions map back onto the call in the *original* file, so the
+/// findings escape the generated-file exclusion and land on a hand-written
+/// line — beats' `auditbeat/module/file_integrity/fileorigin_darwin.go:95`
+/// collected three guff-only rows pointing at one `C.getxattr(…)`.
+///
+/// The fixture needs no cgo: `code.Generator` reads the header comment.
+/// `compat/golden/cases/staticcheck-cgo` runs both tools over the same two
+/// files with the generated-file exclusion turned off.
+#[test]
+fn qf1011_skips_a_cgo_generated_declaration() {
+    let dir = support::testdata("qf1011");
+    let cgo = support::typecheck_file(&dir, "cgo.go", "example.com/staticcheck/qf1011/cgo");
+    support::assert_well_typed(&cgo);
+    assert!(
+        support::run_analyzer(qf1011::analyzer(), &cgo).is_empty(),
+        "a cgo-generated declaration must be skipped"
+    );
+    assert!(
+        support::run_analyzer(st1023::analyzer(), &cgo).is_empty(),
+        "ST1023 shares the body and the exception"
+    );
+
+    // The control: the identical declaration in a file nothing generated.
+    let plain =
+        support::typecheck_file(&dir, "notcgo.go", "example.com/staticcheck/qf1011/notcgo");
+    support::assert_well_typed(&plain);
+    assert_eq!(
+        support::run_analyzer(qf1011::analyzer(), &plain),
+        vec![
+            "could omit type *int from declaration; it will be inferred from the right-hand side"
+                .to_string()
+        ],
+    );
+}
+
+#[test]
+fn qf1011_isolates_the_right_hand_side() {
+    let dir = support::testdata("qf1011");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/qf1011/isolated",
+        &dir.join("isolated.go"),
+        &[
+            ("math", &dir.join("stub/math/math.go")),
+            ("time", &dir.join("stub/time/time.go")),
+        ],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(qf1011::analyzer(), &pkg);
+    // 34: QF1011 flags helpful types, so the expression-kind gate does not
+    // apply and seven of the ten constant-builtin shapes join in — every one
+    // whose declared type is the untyped result's default. `complex64`,
+    // `float32` and `int64` are not, and stay out.
+    assert_eq!(messages.len(), 34, "{messages:?}");
+    let count = |t: &str| {
+        messages
+            .iter()
+            .filter(|m| m.contains(&format!("omit type {t} from")))
+            .count()
+    };
+    assert_eq!(count("complex64"), 0, "{messages:?}");
+    assert_eq!(count("float32"), 0, "{messages:?}");
+    // Helpful types are flagged too, so untyped expressions and named
+    // constants count here — but only where the default type still matches.
+    assert_eq!(count("rune"), 3, "{messages:?}");
+    assert_eq!(count("int32"), 2, "{messages:?}");
+    // `var n uint = 1 << uint(x)` stays: a shift takes its left operand's
+    // type, so the right-hand side is an untyped int whatever the count is.
+    assert_eq!(count("uint"), 0, "{messages:?}");
+}
+
+#[test]
+fn st1023_allows_necessary_types() {
+    let dir = support::testdata("st1023");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/st1023/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(st1023::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn st1005_flags_bad_error_strings() {
+    let dir = support::testdata("st1005");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/st1005",
+        &dir.join("bad.go"),
+        &[("errors", &dir.join("stub/errors/errors.go"))],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1005::analyzer(), &pkg);
+    assert!(
+        messages.iter().any(|m| m.contains("should not be capitalized")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("should not end with punctuation")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn st1005_allows_ok_error_strings() {
+    let dir = support::testdata("st1005");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/st1005/ok",
+        &dir.join("ok.go"),
+        &[("errors", &dir.join("stub/errors/errors.go"))],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(st1005::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn st1005_ignores_non_stdlib_errors_new() {
+    let dir = support::testdata("st1005");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/st1005/localerrors",
+        &dir.join("local_errors.go"),
+        &[(
+            "example.com/local/errors",
+            &dir.join("stub/localerrors/errors.go"),
+        )],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(
+        support::run_analyzer(st1005::analyzer(), &pkg).is_empty(),
+        "non-stdlib errors.New must not trigger ST1005"
+    );
+}
+
+#[test]
+fn st1008_flags_error_not_last() {
+    let dir = support::testdata("st1008");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/st1008");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1008::analyzer(), &pkg);
+    assert_eq!(messages.len(), 2, "{messages:?}");
+    assert!(messages
+        .iter()
+        .all(|m| m.contains("error should be returned as the last argument")));
+}
+
+#[test]
+fn st1008_allows_error_last_and_comma_ok() {
+    let dir = support::testdata("st1008");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/st1008/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(st1008::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn st1016_flags_inconsistent_receiver_names() {
+    let dir = support::testdata("st1016");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/st1016");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64, String)> =
+        support::run_analyzer_diagnostics(st1016::analyzer(), &pkg)
+            .into_iter()
+            .map(|d| {
+                let p = fset.position(guff::position::Pos(d.pos as i64));
+                (p.line, p.column, d.message)
+            })
+            .collect();
+    got.sort();
+    let at = |line: i64, col: i64, seen: &str| {
+        (
+            line,
+            col,
+            format!("methods on the same type should have the same receiver name (seen {seen})"),
+        )
+    };
+    // The position is `firstFn`: the first entry of `IntuitiveMethodSet`, which
+    // is ordered by `obj.Id()` and not by source position. Every row below is a
+    // method that is *not* its type's first in the file — except T1's, which is
+    // both, and which is why this used to pass while reporting source order.
+    assert_eq!(
+        got,
+        vec![
+            at(5, 13, r#"1x "self", 1x "y", 2x "x""#), // T1.Fn1, alphabetically first too
+            at(14, 15, r#"1x "bar", 1x "meow""#),      // T3.Fn2, ditto
+            at(28, 18, r#"1x "a", 1x "m", 1x "z""#),   // Ordered.Apex, written second
+            at(37, 29, r#"1x "b", 1x "c""#),           // …Apex, whose receiver is unnamed
+            at(44, 36, r#"1x "u", 1x "v""#),           // …Apex, whose receiver is `_`
+            at(52, 26, r#"1x "e", 1x "f""#),           // Zeta: `Id` puts `apex` after it
+            at(59, 26, r#"1x "m", 1x "n", 1x "o""#),   // Apex, on a pointer receiver
+        ],
+    );
+    // The eighth shape — a method set spread over two files — needs a
+    // multi-file package, which this helper does not build.
+    // `compat/golden/cases/staticcheck-st` carries it as `st1016/bad/bad_more.go`.
+}
+
+/// A generic type is never reported: every method's receiver is an
+/// instantiation `G[T']`, and upstream's `Dereference(recv.Type()) != T.Type()`
+/// pointer comparison skips them all. Five generic shapes stay silent and the
+/// non-generic control reports — without it, deleting the check would pass.
+#[test]
+fn st1016_never_reports_a_generic_type() {
+    let dir = support::testdata("st1016");
+    let pkg = support::typecheck_file(&dir, "generic.go", "example.com/staticcheck/st1016/generic");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let got: Vec<(i64, i64, String)> = support::run_analyzer_diagnostics(st1016::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| {
+            let p = fset.position(guff::position::Pos(d.pos as i64));
+            (p.line, p.column, d.message)
+        })
+        .collect();
+    assert_eq!(
+        got,
+        vec![(
+            43,
+            19,
+            r#"methods on the same type should have the same receiver name (seen 1x "p", 1x "q")"#
+                .to_string()
+        )],
+    );
+}
+
+#[test]
+fn st1016_allows_consistent_receivers() {
+    let dir = support::testdata("st1016");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/st1016/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(st1016::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn st1001_dot_import_whitelist_allows_listed_packages() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_staticcheck::StylecheckOptions;
+
+    let dir = support::testdata("st1001");
+    let fmt_stub = dir.join("stub/fmt/fmt.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/st1001/whitelist",
+        &dir.join("bad.go"),
+        &[("fmt", &fmt_stub)],
+    );
+    support::assert_well_typed(&pkg);
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "staticcheck",
+        StylecheckOptions {
+            dot_import_whitelist: Some(vec!["fmt".into()]),
+            ..StylecheckOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        st1001::analyzer(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.is_empty(),
+        "dot-import-whitelist: fmt should allow import . \"fmt\": {messages:?}"
+    );
+}
+
+#[test]
+fn st1003_custom_initialisms_skip_id() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_staticcheck::StylecheckOptions;
+
+    let dir = support::testdata("st1003");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/st1003/init");
+    support::assert_well_typed(&pkg);
+
+    let default_msgs = support::run_analyzer(st1003::analyzer(), &pkg);
+    assert!(
+        default_msgs
+            .iter()
+            .any(|m| m.contains("fnId") && m.contains("fnID")),
+        "{default_msgs:?}"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "staticcheck",
+        StylecheckOptions {
+            // Without ID, fnId should not be rewritten.
+            initialisms: Some(vec!["HTTP".into(), "API".into()]),
+            ..StylecheckOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        st1003::analyzer(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        !messages
+            .iter()
+            .any(|m| m.contains("fnId") && m.contains("fnID")),
+        "custom initialisms without ID should not flag fnId: {messages:?}"
+    );
+    // Underscore names are still flagged.
+    assert!(
+        messages.iter().any(|m| m.contains("abc_def")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn st1013_custom_http_status_whitelist() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_staticcheck::StylecheckOptions;
+
+    let dir = support::testdata("st1013");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/st1013/whitelist",
+        &dir.join("bad.go"),
+        &[("net/http", &dir.join("stub/net/http/http.go"))],
+    );
+    support::assert_well_typed(&pkg);
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "staticcheck",
+        StylecheckOptions {
+            http_status_code_whitelist: Some(vec![
+                "200".into(),
+                "400".into(),
+                "404".into(),
+                "500".into(),
+                "506".into(),
+            ]),
+            ..StylecheckOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        st1013::analyzer(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.is_empty(),
+        "http-status-code-whitelist including 506 should silence ST1013: {messages:?}"
+    );
+}
+
+#[test]
+fn qf1009_flags_time_equality() {
+    let dir = support::testdata("qf1009");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/qf1009",
+        &dir.join("bad.go"),
+        &[("time", &dir.join("stub/time/time.go"))],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(qf1009::analyzer(), &pkg);
+    assert_eq!(messages.len(), 2, "{messages:?}");
+    assert!(messages.iter().all(|m| m.contains("time.Time.Equal")));
+}
+
+#[test]
+fn qf1009_allows_equal_method() {
+    let dir = support::testdata("qf1009");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/qf1009/ok",
+        &dir.join("ok.go"),
+        &[("time", &dir.join("stub/time/time.go"))],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(qf1009::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn qf1005_flags_expandable_pow() {
+    let dir = support::testdata("qf1005");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/qf1005",
+        &dir.join("bad.go"),
+        &[("math", &dir.join("stub/math/math.go"))],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(qf1005::analyzer(), &pkg);
+    // 33 shapes: the six this fixture held until 2026-08-27, plus the
+    // conversion and parenthesization branches it never exercised. Every one
+    // of them is a call upstream reports; the ones it does *not* report — a
+    // base that may have side effects, at any exponent — are in ok.go.
+    assert_eq!(messages.len(), 33, "{messages:?}");
+    assert!(messages.iter().all(|m| m.contains("math.Pow")));
+}
+
+#[test]
+fn qf1005_allows_non_expandable_pow() {
+    let dir = support::testdata("qf1005");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/qf1005/ok",
+        &dir.join("ok.go"),
+        &[("math", &dir.join("stub/math/math.go"))],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(qf1005::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn qf1007_flags_conditional_assignment() {
+    let dir = support::testdata("qf1007");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/qf1007");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(qf1007::analyzer(), &pkg);
+    assert_eq!(messages.len(), 2, "{messages:?}");
+    assert!(messages
+        .iter()
+        .all(|m| m.contains("merge conditional assignment")));
+}
+
+#[test]
+fn qf1007_allows_non_mergeable() {
+    let dir = support::testdata("qf1007");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/qf1007/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(qf1007::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn qf1004_flags_replace_split_with_minus_one() {
+    let dir = support::testdata("qf1004");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/qf1004",
+        &dir.join("bad.go"),
+        &[
+            ("strings", &dir.join("stub/strings/strings.go")),
+            ("bytes", &dir.join("stub/bytes/bytes.go")),
+        ],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(qf1004::analyzer(), &pkg);
+    assert_eq!(messages.len(), 6, "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("ReplaceAll")));
+    assert!(messages.iter().any(|m| m.contains("Split")));
+}
+
+#[test]
+fn qf1004_allows_replace_all_and_nonzero_n() {
+    let dir = support::testdata("qf1004");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/qf1004/ok",
+        &dir.join("ok.go"),
+        &[
+            ("strings", &dir.join("stub/strings/strings.go")),
+            ("bytes", &dir.join("stub/bytes/bytes.go")),
+        ],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(qf1004::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn qf1004_uses_renamed_import_in_suggested_fix() {
+    let dir = support::testdata("qf1004");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/qf1004/renamed",
+        &dir.join("renamed.go"),
+        &[
+            ("strings", &dir.join("stub/strings/strings.go")),
+            ("bytes", &dir.join("stub/bytes/bytes.go")),
+        ],
+    );
+    support::assert_well_typed(&pkg);
+    // The message names the canonical function; only the suggested fix uses
+    // the file's own alias (upstream behaviour, checked against golangci-lint).
+    let diags = support::run_analyzer_diagnostics(qf1004::analyzer(), &pkg);
+    assert_eq!(diags.len(), 2, "{diags:?}");
+    assert!(diags.iter().any(|d| d.message.contains("strings.ReplaceAll")));
+    assert!(diags.iter().any(|d| d.message.contains("bytes.ReplaceAll")));
+    let fixes: Vec<String> = diags
+        .iter()
+        .flat_map(|d| d.suggested_fixes.iter())
+        .flat_map(|f| f.text_edits.iter())
+        .map(|e| e.new_text.clone())
+        .collect();
+    assert!(fixes.iter().any(|t| t.contains("s.ReplaceAll")), "{fixes:?}");
+    assert!(fixes.iter().any(|t| t.contains("b.ReplaceAll")), "{fixes:?}");
+}
+
+#[test]
+fn qf1006_flags_lift_if_break() {
+    let dir = support::testdata("qf1006");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/qf1006");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(qf1006::analyzer(), &pkg);
+    assert_eq!(messages.len(), 5, "{messages:?}");
+    assert!(messages.iter().all(|m| m.contains("lift into loop condition")));
+}
+
+#[test]
+fn qf1006_allows_non_liftable() {
+    let dir = support::testdata("qf1006");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/qf1006/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(qf1006::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn qf1010_flags_byte_slice_printing() {
+    let dir = support::testdata("qf1010");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/qf1010",
+        &dir.join("bad.go"),
+        &[("fmt", &dir.join("stub/fmt/fmt.go"))],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(qf1010::analyzer(), &pkg);
+    assert_eq!(messages.len(), 6, "{messages:?}");
+    assert!(messages.iter().all(|m| m.contains("convert argument to string")));
+}
+
+#[test]
+fn qf1010_allows_non_byte_slice() {
+    let dir = support::testdata("qf1010");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/qf1010/ok",
+        &dir.join("ok.go"),
+        &[("fmt", &dir.join("stub/fmt/fmt.go"))],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(qf1010::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn qf1011_flags_redundant_types() {
+    let dir = support::testdata("qf1011");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/qf1011");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(qf1011::analyzer(), &pkg);
+    assert!(messages.len() >= 5, "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("could omit type int")));
+    assert!(messages.iter().any(|m| m.contains("could omit type bool")));
+    assert!(messages.iter().any(|m| m.contains("could omit type string")));
+    assert!(messages.iter().any(|m| m.contains("could omit type MyInt")));
+}
+
+#[test]
+fn qf1011_allows_necessary_types() {
+    let dir = support::testdata("qf1011");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/qf1011/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(qf1011::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn qf1012_flags_write_sprintf() {
+    let dir = support::testdata("qf1012");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/qf1012",
+        &dir.join("bad.go"),
+        &[
+            ("fmt", &dir.join("stub/fmt/fmt.go")),
+            ("io", &dir.join("stub/io/io.go")),
+        ],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(qf1012::analyzer(), &pkg);
+    assert_eq!(messages.len(), 6, "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("Fprint")));
+    assert!(messages.iter().any(|m| m.contains("Fprintf")));
+    assert!(messages.iter().any(|m| m.contains("Fprintln")));
+}
+
+/// The fix has to pass what the interface check accepted.
+///
+/// `Buffer`'s `Write` has a pointer receiver, so upstream checks `*Buffer` for
+/// `io.Writer` and writes `&buf` to match. guff did the check and not the `&`,
+/// so `fmt.Fprint(buf, ...)` did not compile. An interface receiver is already
+/// the right type and takes no address.
+#[test]
+fn qf1012_fix_takes_the_address_of_a_pointer_receiver_value() {
+    let dir = support::testdata("qf1012");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/qf1012",
+        &dir.join("bad.go"),
+        &[
+            ("fmt", &dir.join("stub/fmt/fmt.go")),
+            ("io", &dir.join("stub/io/io.go")),
+        ],
+    );
+    support::assert_well_typed(&pkg);
+    let mut addressed = 0;
+    let mut plain = 0;
+    for d in support::run_analyzer_diagnostics(qf1012::analyzer(), &pkg) {
+        let new_text = &d.suggested_fixes[0].text_edits[0].new_text;
+        if new_text.contains("(&buf") {
+            addressed += 1;
+        } else if new_text.contains("(w,") || new_text.contains("(w2,") {
+            // `w` is an interface value and `w2`'s Write has a value receiver:
+            // neither needs its address taken.
+            assert!(!new_text.contains('&'), "{new_text}");
+            plain += 1;
+        } else {
+            panic!("unexpected replacement: {new_text}");
+        }
+    }
+    assert_eq!(addressed, 3, "the three buf.WriteString calls");
+    assert_eq!(plain, 3, "the three w.Write calls");
+}
+
+#[test]
+fn qf1012_allows_non_writer() {
+    let dir = support::testdata("qf1012");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/qf1012/ok",
+        &dir.join("ok.go"),
+        &[
+            ("fmt", &dir.join("stub/fmt/fmt.go")),
+            ("io", &dir.join("stub/io/io.go")),
+        ],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(qf1012::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn qf1001_flags_demorgan() {
+    let dir = support::testdata("qf1001");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/qf1001");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(qf1001::analyzer(), &pkg);
+    assert_eq!(messages.len(), 2);
+    assert!(messages[0].contains("De Morgan"));
+}
+
+#[test]
+fn qf1001_skips_floats_and_ok() {
+    let dir = support::testdata("qf1001");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/qf1001/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(qf1001::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn qf1002_flags_tagless_switch() {
+    let dir = support::testdata("qf1002");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/qf1002");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(qf1002::analyzer(), &pkg);
+    assert!(messages.len() >= 2);
+    assert!(messages.iter().any(|m| m.contains("tagged switch on x")));
+    assert!(messages.iter().any(|m| m.contains("tagged switch on a")));
+}
+
+#[test]
+fn qf1002_allows_tagged_and_mixed() {
+    let dir = support::testdata("qf1002");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/qf1002/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(qf1002::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn qf1003_flags_if_else_chain() {
+    let dir = support::testdata("qf1003");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/qf1003");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(qf1003::analyzer(), &pkg);
+    assert!(messages.len() >= 3);
+    assert!(messages.iter().any(|m| m.contains("tagged switch on x")));
+    assert!(messages.iter().any(|m| m.contains("tagged switch on a")));
+}
+
+/// Taking an address is a side effect, and that is what keeps flipt's
+/// `if pr.Status == &…Abandoned { } else if pr.Status == &…Completed { }` out
+/// of QF1003.
+///
+/// `findSwitchPairs` refuses a comparison when either operand
+/// `MayHaveSideEffects`, and upstream's `*ast.UnaryExpr` arm recurses into the
+/// operand **and then** answers `expr.Op == token.ARROW || expr.Op == token.AND`.
+/// Recursing alone called `&x` pure. `ok.go` carries the address on each side
+/// and a channel receive; `qf1003_allows_non_convertible` requires the whole
+/// file to stay empty, and this names why three of its functions are there.
+#[test]
+fn qf1003_treats_address_of_and_receive_as_side_effects() {
+    let dir = support::testdata("qf1003");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/qf1003/ok");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(qf1003::analyzer(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
+    let src = std::fs::read_to_string(dir.join("ok.go")).expect("fixture readable");
+    for needle in [
+        "qfAddressOnTheRight",
+        "qfAddressOnTheLeft",
+        "qfChannelReceive",
+    ] {
+        assert!(src.contains(needle), "ok.go lost {needle}");
+    }
+}
+
+#[test]
+fn qf1003_allows_non_convertible() {
+    let dir = support::testdata("qf1003");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/qf1003/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(qf1003::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn qf1008_flags_embedded_selector() {
+    let dir = support::testdata("qf1008");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/qf1008");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(qf1008::analyzer(), &pkg);
+    assert_eq!(messages.len(), 1);
+    assert!(messages[0].contains("BasicInner"));
+}
+
+#[test]
+fn qf1008_flags_interrupted_call_chain() {
+    let dir = support::testdata("qf1008");
+    let pkg = support::typecheck_file(&dir, "call.go", "example.com/staticcheck/qf1008/call");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(qf1008::analyzer(), &pkg);
+    // `call.FunctionCallInner.F8().FunctionCallContinuedInner.F9` splits into two
+    // segments and upstream flags both (golangci-lint's default
+    // `issues.uniq-by-line` is what hides the second one in its output).
+    // Leaf call `o.MethodInner.M()` is flagged too.
+    assert!(
+        messages.iter().any(|m| m.contains("FunctionCallInner")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("FunctionCallContinuedInner")),
+        "{messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("MethodInner")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn qf1008_skips_selectors_enclosed_by_another_selector() {
+    let dir = support::testdata("qf1008");
+    let pkg = support::typecheck_file(&dir, "nested.go", "example.com/staticcheck/qf1008/nested");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(qf1008::analyzer(), &pkg);
+    // golangci-lint 2.12 with `uniq-by-line: false` reports exactly two here:
+    // the outer `sink(…).NestedInner.F1` and the one in `fnNotNested`. The two
+    // enclosed by a `harness{…}.Run` selector are skipped.
+    assert_eq!(messages.len(), 2, "{messages:?}");
+}
+
+#[test]
+fn qf1008_allows_minimal_and_non_embedded() {
+    let dir = support::testdata("qf1008");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/qf1008/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(qf1008::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn sa4010_allows_shadowed_pairs_returned() {
+    let pkg = typecheck_rule("sa4010", "shadow_return_ok.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa4010::analyzer(), &pkg);
+    assert!(
+        messages.is_empty(),
+        "SA4010 FP on returned append with inner pairs shadow: {messages:?}"
+    );
+}
+
+#[test]
+fn sa4010_allows_converter_style_returned_append() {
+    // Grafana converter.readLabelsOrExemplars: outer pairs appended in a
+    // labeled for/switch, with an inner `pairs :=` shadow in another case,
+    // then `return …, pairs, nil`. Must not flag SA4010.
+    let pkg = typecheck_rule("sa4010", "converter_fp.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa4010::analyzer(), &pkg);
+    assert!(
+        messages.is_empty(),
+        "SA4010 FP on converter-style returned append: {messages:?}"
+    );
+}
+
+/// S1002's message quotes the operand's *source*, for every operand shape.
+///
+/// Upstream builds it as `op + report.Render(pass, other)` — go/printer over
+/// the node — so there is no shape it cannot name. guff had a five-arm printer
+/// (`Ident`, `ParenExpr`, `UnaryExpr(!)`, `SelectorExpr`, `CallExpr`) and wrote
+/// the literal `<expr>` for everything else. Six of the fourteen shapes below
+/// were wrong, and one of them is real code: `*corePP.KeepInputArtifact ==
+/// false` in hashicorp/packer, where guff said `!<expr>`.
+///
+/// Every expected string here was read off golangci-lint 2.12.2 running the
+/// same file, one line at a time.
+#[test]
+fn s1002_message_renders_every_operand_shape() {
+    let dir = support::testdata("s1002");
+    let pkg = support::typecheck_file(&dir, "shapes.go", "example.com/staticcheck/s1002/shapes");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(s1002::analyzer(), &pkg);
+
+    let expected = [
+        "b",
+        "!b",
+        "!b",
+        "s.B",
+        "s.M()",
+        "!g()",
+        "!*ptr",
+        "arr[0]",
+        "!m[k]",
+        "(<-ch)",
+        "!(b && s.B)",
+        "i.(bool)",
+        "!(b)",
+        // go/printer drops the redundant outer parentheses of `((!b))`, and the
+        // parity trim leaves the inner ones alone: the `!` is not leading.
+        "(!b)",
+    ];
+    assert_eq!(messages.len(), expected.len(), "{messages:?}");
+    for (got, want) in messages.iter().zip(expected) {
+        assert_eq!(
+            got.as_str(),
+            format!("should omit comparison to bool constant, can be simplified to {want}"),
+        );
+    }
+}
+
+/// A conversion to an instantiated generic type is a conversion.
+///
+/// `index_expr`'s `DEFERRED (generics)` arm made `T[A]` in expression position
+/// an invalid operand without reporting anything, so `p := Fn[int](g)` produced
+/// an untyped value, `p.Apply` recorded no selection, and the SSA builder read
+/// `Apply` as a bare identifier — leaving `p` with no referrers and SA4006
+/// calling it dead. Only the genuinely dead store may be reported.
+#[test]
+fn sa4006_is_quiet_after_a_generic_type_conversion() {
+    let pkg = typecheck_rule("sa4006", "generic_conv.go");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64, String)> =
+        support::run_analyzer_diagnostics(sa4006::analyzer(), &pkg)
+            .into_iter()
+            .map(|d| {
+                let p = fset.position(guff::position::Pos(d.pos as i64));
+                (p.line, p.column, d.message)
+            })
+            .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![(58, 2, "this value of p is never used".to_string())],
+        "only `genericDead`"
+    );
+}
+
+/// Where `Add` has to be, and where the `go` may be (SA2000).
+///
+/// Upstream is one pattern: the `Add` must be the **first** statement of the
+/// `go func(){…}` body, descending through a leading block, and `code.Matches`
+/// finds the `go` anywhere in the file. guff scanned the whole body with a
+/// hand-rolled statement walk that entered neither `switch`/`select` cases nor
+/// function literals — so it reported a correct `Add` that merely sat inside an
+/// enclosing goroutine and missed genuinely misplaced ones.
+///
+/// Positions, not a count: every finding carries the same message modulo the
+/// receiver, so a count is true of any subset.
+#[test]
+fn sa2000_first_statement_and_goroutines_anywhere() {
+    let pkg = typecheck_rule("sa2000", "shapes.go");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64)> = support::run_analyzer_diagnostics(sa2000::analyzer(), &pkg)
+        .into_iter()
+        .map(|d| {
+            let p = fset.position(guff::position::Pos(d.pos as i64));
+            (p.line, p.column)
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            (26, 3),  // addFirst
+            (56, 4),  // addInLeadingBlock
+            (68, 5),  // addInDoubleLeadingBlock
+            (103, 4), // goInsideSwitch
+            (115, 4), // goInsideSelect
+            (146, 4), // badInsideAnotherGoroutine
+            (157, 3), // withArgs
+            (164, 3), // (holder).pointerField
+        ],
+        "silent: addSecond, addInsideIf, addInBlockButSecond, stmtThenBlock, \
+         goInsideAnotherGoroutine and namedFuncValue"
+    );
+}
+
+/// A bare type parameter never subsumes a later case clause (SA4020).
+///
+/// Upstream's `subsumes` opens with `if typeparams.IsTypeParam(T) { return
+/// false }`. Without it, `case T:` in a generic function looks like an
+/// interface everything implements, and every later clause reads as
+/// unreachable — three of grafana/loki's.
+#[test]
+fn sa4020_ignores_type_parameter_cases() {
+    let pkg = typecheck_rule("sa4020", "typeparam.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa4020::analyzer(), &pkg);
+    assert_eq!(
+        messages,
+        vec![
+            "unreachable case clause: io.Reader will always match before reader",
+            "unreachable case clause: io.Reader will always match before io.ReadCloser",
+        ],
+        "silent: both type-parameter shapes and the nil clause"
+    );
+}

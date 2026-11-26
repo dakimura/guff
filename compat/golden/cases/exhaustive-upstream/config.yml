@@ -1,0 +1,21 @@
+# Golden case: exhaustive v0.15.0 testdata, check: [switch, mapliteral].
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - exhaustive
+  settings:
+    exhaustive:
+      check:
+        - switch
+        - mapliteral
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

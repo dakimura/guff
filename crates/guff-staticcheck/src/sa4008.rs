@@ -1,0 +1,159 @@
+//! SA4008 — variable in loop condition never changes.
+//!
+//! Port of `honnef.co/go/tools/staticcheck/sa4008`.
+//!
+//! Upstream only considers loops whose post is an `IncDecStmt`. Assign-form
+//! posts (`i += 2`, `t = next()`) are skipped — flagging them was a guff FP on
+//! stepped loops in prometheus `model/textparse`.
+//!
+//! The post statement is not the whole test. Upstream asks the IR what the
+//! condition variable *is*: a Phi of exactly a `Const` and a `Sigma` of itself,
+//! i.e. a variable that receives its initial value and then nothing else, ever.
+//! A body that assigns it — `for pos := 0; pos < len(data); i++ { … pos +=
+//! runeSize }`, gitea's `escapeStreamer.detectRunes` — fails that test and is
+//! not a finding, however wrong the post statement looks. guff has no sigma
+//! node to ask, so [`assigned_in`] answers the same question from the syntax:
+//! any assignment, `++`/`--`, or address-of on the variable inside the loop.
+
+use std::sync::OnceLock;
+
+use guff::ast::{Expr, ForStmt, Stmt};
+use guff::node_mask;
+use guff::token::Token;
+use guff::walk::{preorder_prune, NodeRef};
+use guff_analysis::code::object_of;
+use guff_analysis::passes::inspect;
+use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_types::ObjectId;
+
+/// Does anything under `body` change `obj`?
+///
+/// Assignment of any form, `++`/`--`, and `&x` (which hands the variable to
+/// something that can write through it). Func literals are walked: a closure
+/// that assigns the variable changes it just as much as the body does.
+fn assigned_in(pass: &Pass<'_>, body: &guff::ast::BlockStmt, obj: ObjectId) -> bool {
+    let mut found = false;
+    let is_target = |pass: &Pass<'_>, e: &Expr| -> bool {
+        matches!(e, Expr::Ident(id) if object_of(pass, id) == Some(obj))
+    };
+    preorder_prune(NodeRef::BlockStmt(body), |node| {
+        if found {
+            return false;
+        }
+        match node {
+            NodeRef::AssignStmt(a) => {
+                if a.lhs.iter().any(|e| is_target(pass, e)) {
+                    found = true;
+                }
+            }
+            NodeRef::IncDecStmt(s) => {
+                if is_target(pass, &s.x) {
+                    found = true;
+                }
+            }
+            NodeRef::UnaryExpr(u) => {
+                if u.op == Token::AND && is_target(pass, &u.x) {
+                    found = true;
+                }
+            }
+            _ => {}
+        }
+        !found
+    });
+    found
+}
+
+fn cond_var_never_incremented(pass: &Pass<'_>, loop_: &ForStmt) -> bool {
+    let Some(init) = loop_.init.as_ref() else {
+        return false;
+    };
+    let Stmt::AssignStmt(init) = &**init else {
+        return false;
+    };
+    if init.lhs.len() != 1 {
+        return false;
+    }
+    let Expr::Ident(init_id) = &init.lhs[0] else {
+        return false;
+    };
+    let Some(init_obj) = object_of(pass, init_id) else {
+        return false;
+    };
+    let Some(Expr::BinaryExpr(cond)) = loop_.cond.as_ref() else {
+        return false;
+    };
+    let Expr::Ident(cond_id) = cond.x.as_ref() else {
+        return false;
+    };
+    if object_of(pass, cond_id) != Some(init_obj) {
+        return false;
+    }
+    let Some(post) = loop_.post.as_ref() else {
+        return false;
+    };
+    // Match upstream: only IncDec posts are candidates. `i += n` / `t = f()` are
+    // not flagged here (upstream uses IR Phi/Load for the remaining cases).
+    let Stmt::IncDecStmt(inc) = &**post else {
+        return false;
+    };
+    let Expr::Ident(inc_id) = &inc.x else {
+        return false;
+    };
+    if object_of(pass, inc_id) == Some(init_obj) {
+        return false;
+    }
+    !assigned_in(pass, &loop_.body, init_obj)
+}
+
+fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
+    let inspect = pass
+        .result_of::<inspect::InspectResult>(inspect::analyzer())
+        .ok_or_else(|| "SA4008 requires inspect analyzer".to_string())?
+        .clone();
+    let mut pending: Vec<(u32, String)> = Vec::new();
+    inspect.preorder_typed(node_mask!(ForStmt), pass.files(), |node| {
+        let NodeRef::ForStmt(loop_) = node else {
+            return;
+        };
+        if cond_var_never_incremented(pass, loop_) {
+            if let Some(Expr::BinaryExpr(cond)) = loop_.cond.as_ref() {
+                pending.push((
+                    cond.x.pos().0 as u32,
+                    "variable in loop condition never changes".into(),
+                ));
+            }
+        }
+    });
+    for (pos, msg) in pending {
+        pass.reportf(pos, msg);
+    }
+    Ok(None)
+}
+
+fn sa4008_analyzer_impl() -> Analyzer {
+    Analyzer {
+        name: "SA4008",
+        doc: "the variable in the loop condition never changes",
+        url: "https://staticcheck.dev/docs/checks/#SA4008",
+        run: run as RunFn,
+        run_despite_errors: false,
+        requires: vec![inspect::analyzer()],
+        fact_types: vec![],
+    }
+}
+
+pub fn analyzer() -> &'static Analyzer {
+    static A: OnceLock<Analyzer> = OnceLock::new();
+    A.get_or_init(sa4008_analyzer_impl)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use guff_analysis::validate;
+
+    #[test]
+    fn sa4008_validates() {
+        assert!(validate(&[analyzer()]).is_ok());
+    }
+}

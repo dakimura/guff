@@ -1,0 +1,21 @@
+# Golden case: goconst v1.11.0 under golangci-lint 2.14.0 (v1110-scope).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - goconst
+  settings:
+    goconst:
+      ignore-map-keys: true
+      ignore-calls: false
+      exclude-types: [call]
+      ignore-functions: [fmt.Println]
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

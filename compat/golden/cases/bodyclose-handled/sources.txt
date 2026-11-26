@@ -1,0 +1,4 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+a/handledresponse.go  crates/guff-context/tests/testdata/bodyclose/upstream-857993a2939c/a/handledresponse.go
+handledresponse/handledresponse.go  crates/guff-context/tests/testdata/bodyclose/upstream-857993a2939c/handledresponse/handledresponse.go

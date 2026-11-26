@@ -1,0 +1,23 @@
+# Golden case: `errcheck.check-type-assertions` (COMPAT-HARDENING Phase 4).
+#
+# Same shape as `check-blank`: `Exclusions.TypeAssertions = !CheckTypeAssertions`.
+# The diff against `errcheck-opts` is `assert/bad.go` — the one-value form
+# `i.(string)` in every position it can appear (assignment, argument,
+# comparison, return), but *not* `s, ok := i.(string)`.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+  settings:
+    errcheck:
+      check-type-assertions: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

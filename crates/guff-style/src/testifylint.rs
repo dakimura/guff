@@ -1,0 +1,4642 @@
+//! Port of [`github.com/Antonboom/testifylint`](https://github.com/Antonboom/testifylint)
+//! (golangci-lint wrapper in `pkg/golinters/testifylint`).
+//!
+//! Checks usage of `github.com/stretchr/testify` assert/require helpers.
+//!
+//! Implemented checkers (defaults match upstream except noted):
+//! `blank-import`, `bool-compare`, `compares`, `contains`, `empty`,
+//! `encoded-compare`, `equal-values`, `error-is-as`, `error-nil`, `expected-actual`,
+//! `float-compare`, `formatter`, `go-require`, `len`, `negative-positive`,
+//! `nil-compare`, `regexp`, `require-error`, `suite-broken-parallel`, `suite-dont-use-pkg`,
+//! `suite-extra-assert-call`, `suite-method-signature`, `suite-subtest-run`,
+//! `suite-thelper` (off by default), `time-compare`, `useless-assert`.
+//! (`zero` is implemented but omitted from enable-all: golangci 2.12 vendors
+//! testifylint v1.6.4 which does not include that checker.)
+//!
+//! **Suggested fixes.** Sixteen checkers carry them, and `compat/fix`'s
+//! `testifylint-mock` case matches golangci-lint byte for byte. A checker's
+//! edits are opt-in — see [`Finding`] — because testifylint rewrites the
+//! assertion's name and its arguments together, and half of that does not
+//! compile. The ones still reporting without a fix are `blank-import`,
+//! `float-compare`, `go-require`, `require-error`, `suite-method-signature`,
+//! `suite-subtest-run` and `useless-assert`, which upstream
+//! also leaves unfixed. (`time-compare`, like `zero`, has no counterpart in
+//! v1.6.4 at all and is not in enable-all.)
+//!
+//! DEFERRED: formatter full printf CheckPrintf / require-f-funcs object lookup
+//! parity, bool-compare custom-type casting in messages, compares time.Time
+//! helpers, error-is-as CollectT special-case / full ErrorAs pointer
+//! diagnostics edge cases, require-error HTTP-handler / WaitGroup.Go context
+//! detection when `net/http` / `sync.WaitGroup.Go` are unavailable in the type
+//! graph (go-require covers these when stubs/types are present).
+
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
+
+use guff::ast::{
+    ArrayType, BasicLit, BinaryExpr, BlockStmt, CallExpr, CompositeLit, Decl, Expr, ExprStmt, File,
+    FuncDecl, FuncType, Ident, IfStmt, ImportSpec, SelectorExpr, StarExpr, Stmt, UnaryExpr,
+};
+use guff::is_identifier;
+use guff::token::Token;
+use guff::walk::{self, NodeRef};
+use guff_analysis::code;
+use guff_analysis::passes::inspect;
+use guff_analysis::{
+    AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
+use guff_types::alias::unalias_readonly;
+use guff_types::api_predicates::{api_assignable_to, api_implements};
+use guff_types::arena::{ObjectArena, ObjectData, ObjectId, PackageArena, TypeArena, TypeData};
+use guff_types::basic::{BasicKind, IS_FLOAT, IS_STRING, IS_UNSIGNED, IS_UNTYPED};
+use guff_types::lookup::{lookup_field_or_method, LookupResult};
+use guff_types::named::named_obj;
+use guff_types::operand::OperandMode;
+use guff_types::predicates::identical;
+use guff_types::scope::lookup as scope_lookup;
+use guff_types::signature::{
+    signature_params, signature_recv, signature_results, signature_variadic,
+};
+use guff_types::slice::slice_elem;
+use guff_types::tuple::{tuple_at, tuple_len};
+use guff_types::{new_pointer, TypeId};
+use regex::Regex;
+
+/// Per-rayon-worker mutable type arena for predicates that intern method sets.
+///
+/// `identical` / `api_implements` / `lookup_field_or_method` / `api_assignable_to`
+/// need `&mut TypeArena`. Cloning the shared package arena on every call (the
+/// previous pattern) dominated testifylint time on large testify packages —
+/// same class of bug that `LockChecker` fixed for `copylocks`. Reset once per
+/// package in [`run`]; lazily clone on first use.
+thread_local! {
+    static TYPE_SCRATCH: RefCell<Option<TypeArena>> = const { RefCell::new(None) };
+}
+
+fn reset_type_scratch() {
+    TYPE_SCRATCH.with(|c| *c.borrow_mut() = None);
+}
+
+fn with_types_mut<R>(
+    pass: &Pass<'_>,
+    f: impl FnOnce(&mut TypeArena, &ObjectArena, &PackageArena) -> R,
+) -> Option<R> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    TYPE_SCRATCH.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(artifacts.types.clone());
+        }
+        let types = slot.as_mut().unwrap();
+        Some(f(types, &artifacts.objects, &artifacts.packages))
+    })
+}
+
+use crate::options::{SuiteExtraAssertCallMode, TestifylintOptions};
+
+const ASSERT_PKG: &str = "github.com/stretchr/testify/assert";
+const REQUIRE_PKG: &str = "github.com/stretchr/testify/require";
+const TESTIFY_ROOT: &str = "github.com/stretchr/testify";
+const HTTP_PKG: &str = "github.com/stretchr/testify/http";
+const MOCK_PKG: &str = "github.com/stretchr/testify/mock";
+const SUITE_PKG: &str = "github.com/stretchr/testify/suite";
+
+const IMPLEMENTED: &[&str] = &[
+    "blank-import",
+    "bool-compare",
+    "compares",
+    "contains",
+    "empty",
+    "encoded-compare",
+    "equal-values",
+    "error-is-as",
+    "error-nil",
+    "expected-actual",
+    "float-compare",
+    "formatter",
+    "go-require",
+    "len",
+    "negative-positive",
+    "nil-compare",
+    "regexp",
+    "require-error",
+    "suite-broken-parallel",
+    "suite-dont-use-pkg",
+    "suite-extra-assert-call",
+    "suite-method-signature",
+    "suite-subtest-run",
+    "suite-thelper",
+    "useless-assert",
+    // `mock-expect`, `time-compare` and `zero` exist in newer testifylint;
+    // golangci 2.12 vendors v1.6.4, whose registry has none of them. Keeping a
+    // name out of this list is what keeps it out of the default set *and* out
+    // of `enable-all`, so a config that matches golangci's enable-set produces
+    // golangci's findings.
+    //
+    // `mock-expect` is implemented below and reachable again the moment
+    // golangci-lint bumps testifylint — put the name back and nothing else
+    // changes. It was in this list once, and jaeger v2.20.0, which
+    // golangci-lint reports as entirely clean, came back with 354 of them.
+];
+
+/// Upstream `DefaultExpectedVarPattern`.
+const DEFAULT_EXPECTED_ACTUAL_PATTERN: &str =
+    r"(^(exp(ected)?|want(ed)?)([A-Z]\w*)?$)|(^(\w*[a-z])?(Exp(ected)?|Want(ed)?)$)";
+
+/// Upstream `DefaultTimeCompareSuppressCallsPattern`.
+const DEFAULT_TIME_COMPARE_SUPPRESS: &str = r"Add|AddDate|Date|In|Local|Round|Truncate|UTC";
+
+/// Default-on checkers in upstream (`suite-thelper` is off by default).
+fn default_enabled() -> HashSet<String> {
+    IMPLEMENTED
+        .iter()
+        .filter(|s| **s != "suite-thelper")
+        .map(|s| (*s).to_string())
+        .collect()
+}
+
+/// Checkers guff implements that the pinned upstream does not have.
+///
+/// Same shape as `guff_revive::config::AHEAD_OF_PIN_RULES`: excluded from the
+/// default set and from `enable-all`, so an enable-set that matches golangci's
+/// produces golangci's findings, but still runnable for anyone who names it.
+const AHEAD_OF_PIN: &[&str] = &["mock-expect"];
+
+fn enabled_checkers(opts: &TestifylintOptions) -> HashSet<String> {
+    let mut set = if opts.disable_all {
+        HashSet::new()
+    } else if opts.enable_all {
+        IMPLEMENTED.iter().map(|s| (*s).to_string()).collect()
+    } else {
+        default_enabled()
+    };
+    for name in &opts.enable {
+        if IMPLEMENTED.contains(&name.as_str()) || AHEAD_OF_PIN.contains(&name.as_str()) {
+            set.insert(name.clone());
+        }
+    }
+    for name in &opts.disable {
+        set.remove(name);
+    }
+    set
+}
+
+/// One reported problem, and — when the whole rewrite has been ported — the
+/// edits that fix it.
+///
+/// `edits` is empty by default on purpose. testifylint's fixes change the
+/// function name *and* the argument list together; attaching only the rename
+/// would turn `assert.Equal(t, 0, len(arr))` into `assert.Empty(t, 0, len(arr))`,
+/// which does not compile. A checker earns its edits by porting both halves.
+struct Finding {
+    pos: u32,
+    message: String,
+    edits: Vec<TextEdit>,
+}
+
+impl Finding {
+    fn new(pos: u32, message: String) -> Self {
+        Self {
+            pos,
+            message,
+            edits: Vec::new(),
+        }
+    }
+
+    fn with_edits(pos: u32, message: String, edits: Vec<TextEdit>) -> Self {
+        Self {
+            pos,
+            message,
+            edits,
+        }
+    }
+}
+
+struct CallMeta<'a> {
+    call: &'a CallExpr,
+    selector: &'a SelectorExpr,
+    #[allow(dead_code)]
+    is_assert: bool,
+    is_pkg: bool,
+    selector_x: String,
+    #[allow(dead_code)]
+    fn_name: String,
+    fn_name_trimmed: String,
+    is_fmt: bool,
+    args: &'a [Expr],
+}
+
+fn unquote_import(path: &str) -> &str {
+    path.trim_matches('"').trim_matches('`')
+}
+
+fn cut_vendor(path: &str) -> &str {
+    if let Some(idx) = path.rfind("/vendor/") {
+        &path[idx + "/vendor/".len()..]
+    } else if let Some(rest) = path.strip_prefix("vendor/") {
+        rest
+    } else {
+        path
+    }
+}
+
+fn selector_x_str(expr: &Expr) -> String {
+    match expr {
+        Expr::Ident(id) => id.name.clone(),
+        Expr::SelectorExpr(sel) => format!("{}.{}", selector_x_str(&sel.x), sel.sel.name),
+        Expr::CallExpr(c) => format!("{}()", selector_x_str(&c.fun)),
+        Expr::ParenExpr(p) => selector_x_str(&p.x),
+        _ => "?".into(),
+    }
+}
+
+/// Best-effort source pretty-printer for diagnostic messages (mock-expect).
+fn expr_pretty(expr: &Expr) -> String {
+    match expr {
+        Expr::Ident(id) => id.name.clone(),
+        Expr::SelectorExpr(sel) => format!("{}.{}", expr_pretty(&sel.x), sel.sel.name),
+        Expr::CallExpr(c) => {
+            let args: Vec<String> = c.args.iter().map(expr_pretty).collect();
+            format!("{}({})", expr_pretty(&c.fun), args.join(", "))
+        }
+        Expr::ParenExpr(p) => expr_pretty(&p.x),
+        Expr::StarExpr(s) => format!("*{}", expr_pretty(&s.x)),
+        Expr::BasicLit(lit) => lit.value.clone(),
+        Expr::CompositeLit(cl) => {
+            let ty = cl
+                .ty
+                .as_ref()
+                .map(|t| expr_pretty(t))
+                .unwrap_or_else(|| "?".into());
+            format!("{ty}{{}}")
+        }
+        _ => "?".into(),
+    }
+}
+
+/// testifylint renders with `analysisutil.NodeString`
+/// (`internal/analysisutil/format.go`), which is `format.Node` — go/printer
+/// with gofmt's config, identical to `printer.Fprint` for a one-line
+/// expression. Its own doc comment calls it "a more powerful analogue of
+/// types.ExprString".
+///
+/// The walker this replaced answered `"<expr>"` outside four arms, and its
+/// `CallExpr` arm dropped the arguments — which happens to be what err113's
+/// `rawString` does deliberately, but here it was only an approximation.
+fn expr_string(pass: &Pass<'_>, expr: &Expr) -> String {
+    guff_analysis::code::node_text(pass, expr).unwrap_or_default()
+}
+
+fn parse_testify_callee(name: &str) -> Option<(bool, bool, String)> {
+    // Returns (is_assert, is_pkg_level, fn_name).
+    let try_pkg = |pkg: &str, is_assert: bool| -> Option<(bool, bool, String)> {
+        let prefix = format!("{pkg}.");
+        if let Some(rest) = name.strip_prefix(&prefix) {
+            if !rest.contains('.') && !rest.contains(')') {
+                return Some((is_assert, true, rest.to_string()));
+            }
+        }
+        let method = format!("(*{pkg}.Assertions).");
+        if let Some(rest) = name.strip_prefix(&method) {
+            return Some((is_assert, false, rest.to_string()));
+        }
+        None
+    };
+    try_pkg(ASSERT_PKG, true).or_else(|| try_pkg(REQUIRE_PKG, false))
+}
+
+fn new_call_meta<'a>(pass: &Pass<'_>, call: &'a CallExpr) -> Option<CallMeta<'a>> {
+    let info = pass.types_info()?;
+    let Expr::SelectorExpr(sel) = &*call.fun else {
+        return None;
+    };
+    let obj_id = info.uses.get(&sel.sel.id).copied()?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    if !matches!(artifacts.objects.get(obj_id), ObjectData::Func(_)) {
+        return None;
+    }
+    // Prefer type_func_name so methods become `(*pkg.Assertions).Fn`
+    // (call_name collapses them to `pkg.Fn` and mis-classifies as package calls).
+    let name = code::type_func_name(
+        &artifacts.types,
+        &artifacts.objects,
+        &artifacts.packages,
+        obj_id,
+    );
+    let (is_assert, is_pkg, fn_name) = parse_testify_callee(&name)?;
+    let is_fmt = fn_name.ends_with('f');
+    let trimmed = fn_name.trim_end_matches('f').to_string();
+    let args = if is_pkg && !call.args.is_empty() {
+        &call.args[1..]
+    } else {
+        call.args.as_slice()
+    };
+    Some(CallMeta {
+        call,
+        selector: sel,
+        is_assert,
+        is_pkg,
+        selector_x: selector_x_str(&sel.x),
+        fn_name,
+        fn_name_trimmed: trimmed,
+        is_fmt,
+        args,
+    })
+}
+
+fn type_of(pass: &Pass<'_>, expr: &Expr) -> Option<TypeId> {
+    let info = pass.types_info()?;
+    Some(info.types.get(&expr.id())?.typ)
+}
+
+fn underlying_basic(pass: &Pass<'_>, typ: TypeId) -> Option<BasicKind> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let typ = unalias_readonly(&artifacts.types, typ);
+    let under = typ.underlying(&artifacts.types);
+    match artifacts.types.get(under) {
+        TypeData::Basic(b) => Some(b.kind()),
+        _ => None,
+    }
+}
+
+fn is_empty_interface(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    is_empty_interface_type(pass, typ)
+}
+
+fn types_identical(pass: &Pass<'_>, a: TypeId, b: TypeId) -> bool {
+    with_types_mut(pass, |types, objects, packages| {
+        identical(types, objects, packages, a, b)
+    })
+    .unwrap_or(false)
+}
+
+fn is_func(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    matches!(artifacts.types.get(typ), TypeData::Signature(_))
+}
+
+fn is_pkg_fn_call(pass: &Pass<'_>, ce: &CallExpr, pkg: &str, fn_name: &str) -> bool {
+    code::call_name(pass, &ce.fun).as_deref() == Some(&format!("{pkg}.{fn_name}"))
+}
+
+fn is_strings_contains_call(pass: &Pass<'_>, ce: &CallExpr) -> bool {
+    is_pkg_fn_call(pass, ce, "strings", "Contains")
+}
+
+fn is_regexp_must_compile_call(pass: &Pass<'_>, ce: &CallExpr) -> bool {
+    is_pkg_fn_call(pass, ce, "regexp", "MustCompile")
+}
+
+fn call_fn_string(call: &CallMeta<'_>) -> String {
+    format!("{}.{}", call.selector_x, call.fn_name)
+}
+
+fn has_bool_type(pass: &Pass<'_>, expr: &Expr) -> bool {
+    matches!(
+        type_of(pass, expr).and_then(|t| underlying_basic(pass, t)),
+        Some(BasicKind::Bool)
+    )
+}
+
+fn is_bool_override(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    match artifacts.types.get(typ) {
+        TypeData::Named(_) => named_obj(&artifacts.types, typ).name(&artifacts.objects) == "bool",
+        _ => false,
+    }
+}
+
+/// `isUntypedTrue` / `isUntypedFalse`: object identity against
+/// `types.Universe.Lookup("true")`, not "an expression whose constant value is
+/// true".
+///
+/// A package's own `const developmentDependency = true` has a bool constant
+/// value and is still not the predeclared `true`, so `assert.Equal(t,
+/// developmentDependency, x)` is not the `assert.Equal(t, true, x)` that
+/// bool-compare rewrites — gitea's nuget metadata test has two of them. The
+/// universe is the objects with no package; a local `true` shadowing the
+/// predeclared one is a different object and does not qualify.
+fn is_universe_bool(pass: &Pass<'_>, expr: &Expr, want: bool) -> bool {
+    let Expr::Ident(ident) = expr else {
+        return false;
+    };
+    let predeclared = if want { "true" } else { "false" };
+    if ident.name != predeclared {
+        return false;
+    }
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(obj_id) = info.uses.get(&ident.id).copied() else {
+        return false;
+    };
+    matches!(artifacts.objects.get(obj_id), ObjectData::Const(_))
+        && obj_id.pkg(&artifacts.objects).is_none()
+}
+
+fn is_untyped_true(pass: &Pass<'_>, expr: &Expr) -> bool {
+    is_universe_bool(pass, expr, true)
+}
+
+fn is_untyped_false(pass: &Pass<'_>, expr: &Expr) -> bool {
+    is_universe_bool(pass, expr, false)
+}
+
+fn is_nil(pass: &Pass<'_>, expr: &Expr) -> bool {
+    code::is_nil(pass, expr)
+}
+
+fn universe_error(pass: &Pass<'_>) -> Option<TypeId> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    for oid in artifacts.objects.ids() {
+        let ObjectData::TypeName(tn) = artifacts.objects.get(oid) else {
+            continue;
+        };
+        if tn.name() != "error" {
+            continue;
+        }
+        if oid.pkg(&artifacts.objects).is_some() {
+            continue;
+        }
+        return tn.typ();
+    }
+    None
+}
+
+fn is_error(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    let Some(err) = universe_error(pass) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    typ == err
+}
+
+fn has_string_type(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    let under = typ.underlying(&artifacts.types);
+    match artifacts.types.get(under) {
+        TypeData::Basic(b) => b.info().contains(IS_STRING),
+        _ => false,
+    }
+}
+
+fn has_bytes_type(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    let under = typ.underlying(&artifacts.types);
+    let TypeData::Slice(s) = artifacts.types.get(under) else {
+        return false;
+    };
+    match artifacts.types.get(s.elem()) {
+        TypeData::Basic(b) => matches!(b.kind(), BasicKind::Uint8),
+        _ => false,
+    }
+}
+
+fn is_string_or_bytes(pass: &Pass<'_>, expr: &Expr) -> bool {
+    has_string_type(pass, expr) || has_bytes_type(pass, expr)
+}
+
+/// Like [`is_string_or_bytes`], but when the expression has no type info yet
+/// (ill-typed packages), do not reject — let name/literal heuristics decide.
+///
+/// golangci 2.12's testifylint still flags `MIMEJSON`-style idents under gin
+/// even when guff's type graph is incomplete for that package.
+fn is_string_or_bytes_or_unknown(pass: &Pass<'_>, expr: &Expr) -> bool {
+    if type_of(pass, expr).is_none() {
+        return true;
+    }
+    is_string_or_bytes(pass, expr)
+}
+
+fn is_ident_with_name(expr: &Expr, name: &str) -> bool {
+    matches!(unparen(expr), Expr::Ident(Ident { name: n, .. }) if n == name)
+}
+
+fn is_byte_array(expr: &Expr) -> bool {
+    matches!(
+        unparen(expr),
+        Expr::ArrayType(ArrayType { len: None, elt, .. }) if is_ident_with_name(elt, "byte")
+    )
+}
+
+fn is_errors_is_call(pass: &Pass<'_>, ce: &CallExpr) -> bool {
+    is_pkg_fn_call(pass, ce, "errors", "Is")
+}
+
+fn is_errors_as_call(pass: &Pass<'_>, ce: &CallExpr) -> bool {
+    is_pkg_fn_call(pass, ce, "errors", "As")
+}
+
+fn is_fmt_sprintf_call<'a>(pass: &Pass<'_>, expr: &'a Expr) -> Option<&'a [Expr]> {
+    let Expr::CallExpr(ce) = unparen(expr) else {
+        return None;
+    };
+    if is_pkg_fn_call(pass, ce, "fmt", "Sprintf") {
+        Some(ce.args.as_slice())
+    } else {
+        None
+    }
+}
+
+fn is_json_raw_message_cast(pass: &Pass<'_>, ce: &CallExpr) -> bool {
+    is_pkg_fn_call(pass, ce, "encoding/json", "RawMessage")
+}
+
+/// Port of upstream `analysisutil.IsJSONLike`.
+///
+/// Deliberately *not* a JSON parser. Upstream asks two syntactic questions —
+/// does the text start with an object or an array of objects, and does it
+/// contain a `"key":` followed by a value — and its own comment says a positive
+/// answer for invalid JSON is fine, because catching typos is half the point.
+///
+/// Parsing instead (as this used to, via `serde_json`) answers a different and
+/// wider question: `["test","test2"]` is valid JSON and is not JSON-*like* by
+/// this rule, because no `":` pair appears in it. jaeger's
+/// `internal/config/string_slice_test.go` compares exactly such strings, and
+/// golangci-lint says nothing about them.
+fn is_json_object_or_array(s: &str) -> bool {
+    // `unescape`: unescape `\"`, then strip any number of leading/trailing
+    // `"` or backticks (upstream's `unquote` is TrimLeft/TrimRight, not a
+    // balanced unquote).
+    let unescaped = s.replace(r#"\""#, "\"");
+    let unquoted = unescaped
+        .trim_end_matches('"')
+        .trim_start_matches('"')
+        .trim_end_matches('`')
+        .trim_start_matches('`');
+    // `whitespaceRemover`: literal newlines/tabs/spaces and the two-character
+    // escapes for them.
+    let text: String = unquoted
+        .replace("\\n", "")
+        .replace("\\t", "")
+        .chars()
+        .filter(|c| *c != '\n' && *c != '\t' && *c != ' ')
+        .collect();
+
+    const STARTS: [&str; 6] = ["{{", "{[", "{\"", "[{{", "[{[", "[{\""];
+    if !STARTS.iter().any(|p| text.starts_with(p)) {
+        return false;
+    }
+    const KEY_VALUES: [&str; 3] = ["\":{", "\":[", "\":\""];
+    KEY_VALUES.iter().any(|kv| text.contains(kv))
+}
+
+fn words_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"[A-Z]+(?:[a-z]*|$)|[a-z]+").expect("words regex"))
+}
+
+fn json_ident_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"json|JSON|Json").expect("json ident regex"))
+}
+
+fn json_negative_word_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"(?i)^(invalid|bad|malformed|broken|corrupt|wrong)$")
+            .expect("json negative regex")
+    })
+}
+
+fn yaml_word_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"yaml|YAML|Yaml|^(yml|YML|Yml)$").expect("yaml word regex")
+    })
+}
+
+fn split_into_words(s: &str) -> Vec<&str> {
+    words_re().find_iter(s).map(|m| m.as_str()).collect()
+}
+
+fn has_word_matching(s: &str, re: &Regex) -> bool {
+    split_into_words(s).into_iter().any(|w| re.is_match(w))
+}
+
+fn is_json_style_expr(pass: &Pass<'_>, expr: &Expr) -> bool {
+    if let Some(s) = code::expr_to_string(pass, expr) {
+        if is_json_object_or_array(&s) {
+            return true;
+        }
+    }
+    if let Expr::Ident(id) = unparen(expr) {
+        if json_ident_re().is_match(&id.name)
+            && !has_word_matching(&id.name, json_negative_word_re())
+            && is_string_or_bytes_or_unknown(pass, expr)
+        {
+            return true;
+        }
+    }
+    if let Some(args) = is_fmt_sprintf_call(pass, expr) {
+        if let Some(first) = args.first() {
+            return is_json_style_expr(pass, first);
+        }
+    }
+    false
+}
+
+fn is_yaml_style_expr(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Expr::Ident(id) = unparen(expr) else {
+        return false;
+    };
+    is_string_or_bytes_or_unknown(pass, expr) && has_word_matching(&id.name, yaml_word_re())
+}
+
+fn encoded_unwrap<'a>(pass: &Pass<'_>, expr: &'a Expr) -> (&'a Expr, bool) {
+    let Expr::CallExpr(ce) = unparen(expr) else {
+        return (expr, false);
+    };
+    if ce.args.is_empty() {
+        return (expr, false);
+    }
+    if is_json_raw_message_cast(pass, ce) {
+        if is_nil(pass, &ce.args[0]) {
+            return encoded_unwrap(pass, &ce.args[0]);
+        }
+        let (inner, _) = encoded_unwrap(pass, &ce.args[0]);
+        return (inner, true);
+    }
+    if is_ident_with_name(&ce.fun, "string")
+        || is_byte_array(&ce.fun)
+        || is_pkg_fn_call(pass, ce, "strings", "Replace")
+        || is_pkg_fn_call(pass, ce, "strings", "ReplaceAll")
+        || is_pkg_fn_call(pass, ce, "strings", "Trim")
+        || is_pkg_fn_call(pass, ce, "strings", "TrimSpace")
+    {
+        return encoded_unwrap(pass, &ce.args[0]);
+    }
+    (expr, false)
+}
+
+fn is_basic_lit(expr: &Expr) -> bool {
+    match unparen(expr) {
+        Expr::UnaryExpr(UnaryExpr { op: Token::SUB, x, .. }) => is_basic_lit(x),
+        Expr::BasicLit(_) => true,
+        _ => false,
+    }
+}
+
+fn is_untyped_const(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    let under = typ.underlying(&artifacts.types);
+    matches!(
+        artifacts.types.get(under),
+        TypeData::Basic(b) if b.info().contains(IS_UNTYPED)
+    )
+}
+
+fn is_typed_const(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(tav) = info.types.get(&expr.id()) else {
+        return false;
+    };
+    tav.val.is_some()
+}
+
+fn is_ident_named_after_pattern(pattern: &Regex, expr: &Expr) -> bool {
+    matches!(unparen(expr), Expr::Ident(Ident { name, .. }) if pattern.is_match(name))
+}
+
+fn is_struct_var_named_after_pattern(pattern: &Regex, expr: &Expr) -> bool {
+    matches!(
+        unparen(expr),
+        Expr::SelectorExpr(SelectorExpr { x, .. }) if is_ident_named_after_pattern(pattern, x)
+    )
+}
+
+fn is_struct_field_named_after_pattern(pattern: &Regex, expr: &Expr) -> bool {
+    matches!(
+        unparen(expr),
+        Expr::SelectorExpr(SelectorExpr { sel, .. }) if pattern.is_match(&sel.name)
+    )
+}
+
+fn is_casted_basic_lit_or_expected(ce: &CallExpr, pattern: &Regex) -> bool {
+    if ce.args.len() != 1 {
+        return false;
+    }
+    let Expr::Ident(fn_id) = unparen(&ce.fun) else {
+        return false;
+    };
+    match fn_id.name.as_str() {
+        "complex64" | "complex128" => true,
+        "uint" | "uint8" | "uint16" | "uint32" | "uint64" | "int" | "int8" | "int16" | "int32"
+        | "int64" | "float32" | "float64" | "rune" | "string" => {
+            is_basic_lit(&ce.args[0]) || is_ident_named_after_pattern(pattern, &ce.args[0])
+        }
+        _ => false,
+    }
+}
+
+fn is_expected_value_factory(pass: &Pass<'_>, ce: &CallExpr, pattern: &Regex) -> bool {
+    match unparen(&ce.fun) {
+        Expr::Ident(id) => pattern.is_match(&id.name),
+        Expr::SelectorExpr(sel) => {
+            if is_pkg_fn_call(pass, ce, "time", "Date") {
+                return true;
+            }
+            pattern.is_match(&sel.sel.name)
+        }
+        _ => false,
+    }
+}
+
+/// A compiled pattern, built once per distinct pattern string.
+///
+/// Both callers below sit directly above the check they configure —
+/// `expected_actual_pattern` is two lines above the two
+/// `is_expected_value_candidate` calls — so the regex was being **compiled per
+/// assertion**, on every `assert.Equal`-shaped call in the package. On
+/// prometheus `./...` that made regex *construction* (`RegexBuilder::build`
+/// plus the Thompson NFA compiler and `Utf8Sequences`) ~0.53s of CPU, more than
+/// every regex match in the run put together. The pattern comes from config and
+/// does not vary within a run.
+fn cached_pattern(pat: &str, fallback: &'static str) -> std::sync::Arc<Regex> {
+    thread_local! {
+        static CACHE: RefCell<HashMap<String, std::sync::Arc<Regex>>> =
+            RefCell::new(HashMap::new());
+    }
+    CACHE.with(|c| {
+        if let Some(hit) = c.borrow().get(pat) {
+            return hit.clone();
+        }
+        let re = std::sync::Arc::new(
+            Regex::new(pat)
+                .unwrap_or_else(|_| Regex::new(fallback).expect("default testifylint pattern")),
+        );
+        c.borrow_mut().insert(pat.to_string(), re.clone());
+        re
+    })
+}
+
+fn expected_actual_pattern(opts: &TestifylintOptions) -> std::sync::Arc<Regex> {
+    let pat = opts
+        .expected_actual_pattern
+        .as_deref()
+        .unwrap_or(DEFAULT_EXPECTED_ACTUAL_PATTERN);
+    cached_pattern(pat, DEFAULT_EXPECTED_ACTUAL_PATTERN)
+}
+
+fn time_compare_suppress_pattern(opts: &TestifylintOptions) -> std::sync::Arc<Regex> {
+    let pat = opts
+        .time_compare_suppress_calls_pattern
+        .as_deref()
+        .unwrap_or(DEFAULT_TIME_COMPARE_SUPPRESS);
+    cached_pattern(pat, DEFAULT_TIME_COMPARE_SUPPRESS)
+}
+
+fn expr_source_approx(expr: &Expr) -> String {
+    match unparen(expr) {
+        Expr::Ident(id) => id.name.clone(),
+        Expr::SelectorExpr(sel) => {
+            format!("{}.{}", expr_source_approx(&sel.x), sel.sel.name)
+        }
+        Expr::CallExpr(ce) => format!("{}(...)", expr_source_approx(&ce.fun)),
+        Expr::ParenExpr(p) => expr_source_approx(&p.x),
+        Expr::StarExpr(s) => format!("*{}", expr_source_approx(&s.x)),
+        Expr::UnaryExpr(u) => format!("{:?}{}", u.op, expr_source_approx(&u.x)),
+        Expr::IndexExpr(ix) => {
+            format!("{}[{}]", expr_source_approx(&ix.x), expr_source_approx(&ix.index))
+        }
+        Expr::CompositeLit(cl) => {
+            if let Some(ty) = &cl.ty {
+                format!("{}{{...}}", expr_source_approx(ty))
+            } else {
+                "{...}".into()
+            }
+        }
+        Expr::BasicLit(lit) => lit.value.clone(),
+        _ => "?".into(),
+    }
+}
+
+fn need_suppress_time_call(expr: &Expr, pattern: &Regex) -> bool {
+    pattern.is_match(&expr_source_approx(expr))
+}
+
+fn is_expected_value_candidate(pass: &Pass<'_>, expr: &Expr, pattern: &Regex) -> bool {
+    match unparen(expr) {
+        Expr::StarExpr(StarExpr { x, .. }) => is_expected_value_candidate(pass, x, pattern),
+        Expr::UnaryExpr(UnaryExpr {
+            op: Token::AND | Token::SUB,
+            x,
+            ..
+        }) => is_expected_value_candidate(pass, x, pattern),
+        Expr::CompositeLit(_) => true,
+        Expr::CallExpr(ce) => {
+            if let Some(lv) = is_builtin_len_call(pass, expr) {
+                return is_ident_named_after_pattern(pattern, lv);
+            }
+            matches!(unparen(&ce.fun), Expr::ParenExpr(_))
+                || is_casted_basic_lit_or_expected(ce, pattern)
+                || is_expected_value_factory(pass, ce, pattern)
+        }
+        _ => {
+            is_basic_lit(expr)
+                || is_untyped_const(pass, expr)
+                || is_typed_const(pass, expr)
+                || is_ident_named_after_pattern(pattern, expr)
+                || is_struct_var_named_after_pattern(pattern, expr)
+                || is_struct_field_named_after_pattern(pattern, expr)
+        }
+    }
+}
+
+fn implements_error(pass: &Pass<'_>, typ: TypeId) -> bool {
+    let Some(err) = universe_error(pass) else {
+        return false;
+    };
+    with_types_mut(pass, |types, objects, packages| {
+        api_implements(types, objects, packages, typ, err)
+    })
+    .unwrap_or(false)
+}
+
+fn is_interface_type(pass: &Pass<'_>, typ: TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    let under = typ.underlying(&artifacts.types);
+    matches!(artifacts.types.get(under), TypeData::Interface(_))
+}
+
+fn check_error_as_target(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
+    if call.args.len() < 2 {
+        return;
+    }
+    let target = &call.args[1];
+    if is_empty_interface(pass, target) {
+        return;
+    }
+    let Some(typ) = type_of(pass, target) else {
+        return;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    let TypeData::Pointer(pt) = artifacts.types.get(typ) else {
+        report_msg(
+            "error-is-as",
+            call,
+            &format!(
+                "second argument to {} must be a non-nil pointer to either a type that implements error, or to any interface type",
+                call_fn_string(call)
+            ),
+            pending,
+        );
+        return;
+    };
+    let elem = pt.elem();
+    if let Some(err) = universe_error(pass) {
+        if elem == err {
+            report_msg(
+                "error-is-as",
+                call,
+                &format!("second argument to {} should not be *error", call_fn_string(call)),
+                pending,
+            );
+            return;
+        }
+    }
+    if !is_interface_type(pass, elem) && !implements_error(pass, elem) {
+        report_msg(
+            "error-is-as",
+            call,
+            &format!(
+                "second argument to {} must be a non-nil pointer to either a type that implements error, or to any interface type",
+                call_fn_string(call)
+            ),
+            pending,
+        );
+    }
+}
+
+fn is_float(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    let under = typ.underlying(&artifacts.types);
+    match artifacts.types.get(under) {
+        TypeData::Basic(b) => b.info().contains(IS_FLOAT),
+        _ => false,
+    }
+}
+
+fn is_pointer(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    matches!(artifacts.types.get(typ), TypeData::Pointer(_))
+}
+
+fn unparen<'a>(expr: &'a Expr) -> &'a Expr {
+    match expr {
+        Expr::ParenExpr(p) => unparen(&p.x),
+        other => other,
+    }
+}
+
+fn is_pkg_dot_type(expr: &Expr, pkg: &str, name: &str) -> bool {
+    let Expr::SelectorExpr(SelectorExpr { x, sel, .. }) = unparen(expr) else {
+        return false;
+    };
+    matches!(unparen(x), Expr::Ident(Ident { name: pkg_name, .. }) if pkg_name == pkg)
+        && sel.name == name
+}
+
+fn type_string(pass: &Pass<'_>, typ: TypeId) -> Option<String> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    Some(guff_types::typestring::type_string(
+        &artifacts.types,
+        &artifacts.objects,
+        &artifacts.packages,
+        typ,
+        None,
+    ))
+}
+
+fn is_time_instance(pass: &Pass<'_>, expr: &Expr) -> bool {
+    type_of(pass, expr).is_some_and(|t| type_string(pass, t).as_deref() == Some("time.Time"))
+}
+
+fn is_ident_named_zero_prefix(expr: &Expr) -> bool {
+    matches!(unparen(expr), Expr::Ident(Ident { name, .. }) if name.starts_with("zero"))
+}
+
+fn is_zero_time_instance(pass: &Pass<'_>, expr: &Expr) -> bool {
+    if is_time_instance(pass, expr) && is_ident_named_zero_prefix(expr) {
+        return true;
+    }
+    let Expr::CompositeLit(CompositeLit { ty: Some(ty), elts, .. }) = unparen(expr) else {
+        return false;
+    };
+    is_pkg_dot_type(ty, "time", "Time") && elts.is_empty()
+}
+
+fn is_time_is_zero_call<'a>(pass: &Pass<'_>, expr: &'a Expr) -> Option<&'a Expr> {
+    let Expr::CallExpr(ce) = unparen(expr) else {
+        return None;
+    };
+    if !ce.args.is_empty() {
+        return None;
+    }
+    let Expr::SelectorExpr(SelectorExpr { x, sel, .. }) = unparen(&ce.fun) else {
+        return None;
+    };
+    if sel.name == "IsZero" && is_time_instance(pass, x) {
+        Some(x.as_ref())
+    } else {
+        None
+    }
+}
+
+fn is_time_equal_zero_call<'a>(pass: &Pass<'_>, expr: &'a Expr) -> Option<&'a Expr> {
+    let Expr::CallExpr(ce) = unparen(expr) else {
+        return None;
+    };
+    if ce.args.len() != 1 {
+        return None;
+    }
+    let Expr::SelectorExpr(SelectorExpr { x, sel, .. }) = unparen(&ce.fun) else {
+        return None;
+    };
+    if sel.name == "Equal"
+        && is_time_instance(pass, x)
+        && is_zero_time_instance(pass, &ce.args[0])
+    {
+        Some(x.as_ref())
+    } else {
+        None
+    }
+}
+
+fn is_unsigned(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    let under = typ.underlying(&artifacts.types);
+    matches!(
+        artifacts.types.get(under),
+        TypeData::Basic(b) if b.info().contains(IS_UNSIGNED)
+    )
+}
+
+/// `int64(v)` / `uint32(v)` etc. — matches upstream `isTypedIntNumber`.
+fn is_typed_int_number(expr: &Expr, v: i64, go_types: &[&str]) -> bool {
+    let Expr::CallExpr(ce) = unparen(expr) else {
+        return false;
+    };
+    if ce.args.len() != 1 {
+        return false;
+    }
+    let Expr::Ident(id) = unparen(&ce.fun) else {
+        return false;
+    };
+    go_types.contains(&id.name.as_str()) && is_int_basic_lit(&ce.args[0]) == Some(v)
+}
+
+const SIGNED_INT_TYPES: &[&str] = &["int", "int8", "int16", "int32", "int64"];
+const UNSIGNED_INT_TYPES: &[&str] = &["uint", "uint8", "uint16", "uint32", "uint64"];
+
+fn is_any_zero(expr: &Expr) -> bool {
+    is_zero(expr)
+        || is_typed_int_number(expr, 0, SIGNED_INT_TYPES)
+        || is_typed_int_number(expr, 0, UNSIGNED_INT_TYPES)
+}
+
+fn is_not_any_zero(expr: &Expr) -> bool {
+    !is_any_zero(expr)
+}
+
+fn is_zero_or_signed_zero(expr: &Expr) -> bool {
+    is_zero(expr) || is_typed_int_number(expr, 0, SIGNED_INT_TYPES)
+}
+
+fn is_signed_not_zero(pass: &Pass<'_>, expr: &Expr) -> bool {
+    !is_unsigned(pass, expr) && !is_zero_or_signed_zero(expr)
+}
+
+fn can_be_negative(pass: &Pass<'_>, expr: &Expr) -> bool {
+    is_builtin_len_call(pass, expr).is_none() && is_signed_not_zero(pass, expr)
+}
+
+fn can_not_be_negative(pass: &Pass<'_>, expr: &Expr) -> bool {
+    is_builtin_len_call(pass, expr).is_some() || is_unsigned(pass, expr)
+}
+
+fn is_string_lit(expr: &Expr) -> bool {
+    matches!(
+        unparen(expr),
+        Expr::BasicLit(BasicLit {
+            kind: Some(Token::STRING),
+            ..
+        })
+    )
+}
+
+fn is_strict_comparison_with<'a, FL, FR>(
+    pass: &Pass<'_>,
+    expr: &'a Expr,
+    lhs_pred: FL,
+    op: Token,
+    rhs_pred: FR,
+) -> Option<(&'a Expr, &'a Expr)>
+where
+    FL: Fn(&Pass<'_>, &Expr) -> bool,
+    FR: Fn(&Pass<'_>, &Expr) -> bool,
+{
+    let Expr::BinaryExpr(be) = unparen(expr) else {
+        return None;
+    };
+    if be.op == op && lhs_pred(pass, &be.x) && rhs_pred(pass, &be.y) {
+        Some((&be.x, &be.y))
+    } else {
+        None
+    }
+}
+
+fn expr_equal(a: &Expr, b: &Expr) -> bool {
+    match (unparen(a), unparen(b)) {
+        (Expr::Ident(Ident { name: na, .. }), Expr::Ident(Ident { name: nb, .. })) => na == nb,
+        (
+            Expr::BasicLit(BasicLit {
+                value: va,
+                kind: ka,
+                ..
+            }),
+            Expr::BasicLit(BasicLit {
+                value: vb,
+                kind: kb,
+                ..
+            }),
+        ) => va == vb && ka == kb,
+        (
+            Expr::SelectorExpr(SelectorExpr { x: xa, sel: sa, .. }),
+            Expr::SelectorExpr(SelectorExpr { x: xb, sel: sb, .. }),
+        ) => sa.name == sb.name && expr_equal(xa, xb),
+        (Expr::UnaryExpr(u1), Expr::UnaryExpr(u2)) if u1.op == u2.op => expr_equal(&u1.x, &u2.x),
+        (
+            Expr::BinaryExpr(BinaryExpr {
+                op: oa,
+                x: xa,
+                y: ya,
+                ..
+            }),
+            Expr::BinaryExpr(BinaryExpr {
+                op: ob,
+                x: xb,
+                y: yb,
+                ..
+            }),
+        ) => oa == ob && expr_equal(xa, xb) && expr_equal(ya, yb),
+        (
+            Expr::CallExpr(CallExpr {
+                fun: fa,
+                args: aa,
+                ..
+            }),
+            Expr::CallExpr(CallExpr {
+                fun: fb,
+                args: ab,
+                ..
+            }),
+        ) => aa.len() == ab.len()
+            && expr_equal(fa, fb)
+            && aa.iter().zip(ab).all(|(x, y)| expr_equal(x, y)),
+        _ => false,
+    }
+}
+
+fn is_empty_interface_type(pass: &Pass<'_>, typ: TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    let under = typ.underlying(&artifacts.types);
+    match artifacts.types.get(under) {
+        TypeData::Interface(i) => i.num_explicit_methods() == 0 && i.num_embeddeds() == 0,
+        _ => false,
+    }
+}
+
+fn pointer_elem_type(pass: &Pass<'_>, expr: &Expr) -> Option<TypeId> {
+    let typ = type_of(pass, expr)?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let typ = unalias_readonly(&artifacts.types, typ);
+    match artifacts.types.get(typ) {
+        TypeData::Pointer(p) => Some(p.elem()),
+        _ => None,
+    }
+}
+
+fn is_int_basic_lit(expr: &Expr) -> Option<i64> {
+    match expr {
+        Expr::UnaryExpr(u) if u.op == Token::SUB => {
+            is_int_basic_lit(&u.x).map(|v| -v)
+        }
+        Expr::BasicLit(lit) if lit.kind == Some(Token::INT) => lit.value.parse().ok(),
+        _ => None,
+    }
+}
+
+fn is_zero(expr: &Expr) -> bool {
+    is_int_basic_lit(expr) == Some(0)
+}
+
+fn is_one(expr: &Expr) -> bool {
+    is_int_basic_lit(expr) == Some(1)
+}
+
+fn is_empty_string_lit(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::BasicLit(BasicLit {
+            kind: Some(Token::STRING),
+            value,
+            ..
+        }) if value == "\"\"" || value == "``"
+    )
+}
+
+fn is_builtin_len_call<'a>(pass: &Pass<'_>, expr: &'a Expr) -> Option<&'a Expr> {
+    let Expr::CallExpr(ce) = expr else {
+        return None;
+    };
+    if ce.args.len() != 1 {
+        return None;
+    }
+    if code::call_name(pass, &ce.fun).as_deref() == Some("len") {
+        return Some(&ce.args[0]);
+    }
+    None
+}
+
+fn is_len_call_and_zero<'a>(pass: &Pass<'_>, a: &'a Expr, b: &Expr) -> Option<&'a Expr> {
+    let len_arg = is_builtin_len_call(pass, a)?;
+    if is_zero(b) {
+        Some(len_arg)
+    } else {
+        None
+    }
+}
+
+fn xor_nil<'a>(pass: &Pass<'_>, a: &'a Expr, b: &'a Expr) -> Option<&'a Expr> {
+    let an = is_nil(pass, a);
+    let bn = is_nil(pass, b);
+    if an != bn {
+        if an {
+            Some(b)
+        } else {
+            Some(a)
+        }
+    } else {
+        None
+    }
+}
+
+fn proposed_fn_name(call: &CallMeta<'_>, base: &str) -> String {
+    if call.is_fmt {
+        format!("{base}f")
+    } else {
+        base.to_string()
+    }
+}
+
+/// `newReplaceFnTextEdit`: only the selector's `Sel` is rewritten, so
+/// `assert.` — or `s.Assert().` — survives untouched.
+fn rename_edit(call: &CallMeta<'_>, proposed: &str) -> TextEdit {
+    let sel = &call.selector.sel;
+    TextEdit {
+        pos: sel.name_pos.0 as u32,
+        end: (sel.name_pos.0 + sel.name.len() as i64) as u32,
+        new_text: proposed_fn_name(call, proposed),
+    }
+}
+
+/// `formatAsCallArgs`: the nodes printed by go/printer and joined with `", "`.
+/// `analysisutil.NodeBytes` is the same renderer for a single node, so both
+/// spellings upstream uses come through here.
+fn format_as_call_args(pass: &Pass<'_>, args: &[&Expr]) -> String {
+    args.iter()
+        .map(|a| expr_string(pass, a))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// One argument-list edit: the span from `start` to `end` becomes `with`,
+/// rendered the way `analysisutil.NodeBytes` / `formatAsCallArgs` render it.
+fn arg_edit(pass: &Pass<'_>, start: i64, end: i64, with: &[&Expr]) -> TextEdit {
+    TextEdit {
+        pos: start as u32,
+        end: end as u32,
+        new_text: format_as_call_args(pass, with),
+    }
+}
+
+/// `newUseFunctionDiagnostic` with its `newSuggestedFuncReplacement`: the rename
+/// first, then whatever the checker does to the arguments.
+fn report_use_fix(
+    checker: &str,
+    call: &CallMeta<'_>,
+    proposed: &str,
+    extra: Vec<TextEdit>,
+    pending: &mut Vec<Finding>,
+) {
+    let msg = format!(
+        "{checker}: use {}.{}",
+        call.selector_x,
+        proposed_fn_name(call, proposed)
+    );
+    let mut edits = vec![rename_edit(call, proposed)];
+    edits.extend(extra);
+    pending.push(Finding::with_edits(
+        call.call.pos().0 as u32,
+        msg,
+        edits,
+    ));
+}
+
+fn report_use(checker: &str, call: &CallMeta<'_>, proposed: &str, pending: &mut Vec<Finding>) {
+    let msg = format!(
+        "{checker}: use {}.{}",
+        call.selector_x,
+        proposed_fn_name(call, proposed)
+    );
+    pending.push(Finding::new(call.call.pos().0 as u32, msg));
+}
+
+/// `newDiagnostic(..., newSuggestedFuncReplacement(call, proposed))`: a message
+/// the checker words itself, and a fix that is only the rename.
+///
+/// Not every testifylint fix touches the arguments. `assert.Error(t, err, target)`
+/// already passes what `assert.ErrorIs` wants, so renaming is the whole edit.
+fn report_msg_rename(
+    checker: &str,
+    call: &CallMeta<'_>,
+    body: &str,
+    proposed: &str,
+    pending: &mut Vec<Finding>,
+) {
+    pending.push(Finding::with_edits(
+        call.call.pos().0 as u32,
+        format!("{checker}: {body}"),
+        vec![rename_edit(call, proposed)],
+    ));
+}
+
+fn report_msg(checker: &str, call: &CallMeta<'_>, body: &str, pending: &mut Vec<Finding>) {
+    pending.push(Finding::new(call.call.pos().0 as u32,
+        format!("{checker}: {body}"),
+    ));
+}
+
+fn is_negation(expr: &Expr) -> Option<&Expr> {
+    match expr {
+        Expr::UnaryExpr(u) if u.op == Token::NOT => Some(&u.x),
+        _ => None,
+    }
+}
+
+fn is_comparison_with<'a, F>(
+    pass: &Pass<'_>,
+    expr: &'a Expr,
+    pred: F,
+    op: Token,
+) -> Option<&'a Expr>
+where
+    F: Fn(&Pass<'_>, &Expr) -> bool,
+{
+    let Expr::BinaryExpr(be) = expr else {
+        return None;
+    };
+    if be.op != op {
+        return None;
+    }
+    let t1 = pred(pass, &be.x);
+    let t2 = pred(pass, &be.y);
+    if t1 != t2 {
+        if t1 {
+            Some(&be.y)
+        } else {
+            Some(&be.x)
+        }
+    } else {
+        None
+    }
+}
+
+fn is_comparison_with_float(pass: &Pass<'_>, expr: &Expr, op: Token) -> bool {
+    let Expr::BinaryExpr(be) = expr else {
+        return false;
+    };
+    be.op == op && (is_float(pass, &be.x) || is_float(pass, &be.y))
+}
+
+fn check_bool_compare(
+    pass: &Pass<'_>,
+    call: &CallMeta<'_>,
+    opts: &TestifylintOptions,
+    pending: &mut Vec<Finding>,
+) {
+    let ignore_custom = opts.bool_compare_ignore_custom_types;
+    let allow = |surviving: &Expr| -> bool {
+        if has_bool_type(pass, surviving) {
+            return true;
+        }
+        !ignore_custom
+    };
+    // `newBoolCast`: a surviving argument that is not `bool` keeps its own type
+    // in `assert.True(t, x)`, which would not compile, so upstream wraps it.
+    let surviving_text = |surviving: &Expr| -> String {
+        let text = expr_string(pass, surviving);
+        if has_bool_type(pass, surviving) {
+            text
+        } else {
+            format!("bool({text})")
+        }
+    };
+    let two_arg_edit = |a: &Expr, b: &Expr, surviving: &Expr| TextEdit {
+        pos: a.pos().0 as u32,
+        end: b.end().0 as u32,
+        new_text: surviving_text(surviving),
+    };
+    let one_arg_edit = |expr: &Expr, surviving: &Expr| TextEdit {
+        pos: expr.pos().0 as u32,
+        end: expr.end().0 as u32,
+        new_text: surviving_text(surviving),
+    };
+
+    match call.fn_name_trimmed.as_str() {
+        "Equal" | "EqualValues" | "Exactly" => {
+            if call.args.len() < 2 {
+                return;
+            }
+            let (a, b) = (&call.args[0], &call.args[1]);
+            if is_empty_interface(pass, a) || is_empty_interface(pass, b) {
+                return;
+            }
+            if is_bool_override(pass, a) || is_bool_override(pass, b) {
+                return;
+            }
+            let t1 = is_untyped_true(pass, a);
+            let t2 = is_untyped_true(pass, b);
+            let f1 = is_untyped_false(pass, a);
+            let f2 = is_untyped_false(pass, b);
+            if t1 != t2 {
+                let surviving = if t1 { b } else { a };
+                if call.fn_name_trimmed == "Exactly" && !has_bool_type(pass, surviving) {
+                    return;
+                }
+                if allow(surviving) {
+                    let edit = two_arg_edit(a, b, surviving);
+                    report_use_fix("bool-compare", call, "True", vec![edit], pending);
+                }
+            } else if f1 != f2 {
+                let surviving = if f1 { b } else { a };
+                if call.fn_name_trimmed == "Exactly" && !has_bool_type(pass, surviving) {
+                    return;
+                }
+                if allow(surviving) {
+                    let edit = two_arg_edit(a, b, surviving);
+                    report_use_fix("bool-compare", call, "False", vec![edit], pending);
+                }
+            }
+        }
+        "NotEqual" | "NotEqualValues" => {
+            if call.args.len() < 2 {
+                return;
+            }
+            let (a, b) = (&call.args[0], &call.args[1]);
+            if is_empty_interface(pass, a) || is_empty_interface(pass, b) {
+                return;
+            }
+            if is_bool_override(pass, a) || is_bool_override(pass, b) {
+                return;
+            }
+            let t1 = is_untyped_true(pass, a);
+            let t2 = is_untyped_true(pass, b);
+            let f1 = is_untyped_false(pass, a);
+            let f2 = is_untyped_false(pass, b);
+            if t1 != t2 {
+                let surviving = if t1 { b } else { a };
+                if allow(surviving) {
+                    let edit = two_arg_edit(a, b, surviving);
+                    report_use_fix("bool-compare", call, "False", vec![edit], pending);
+                }
+            } else if f1 != f2 {
+                let surviving = if f1 { b } else { a };
+                if allow(surviving) {
+                    let edit = two_arg_edit(a, b, surviving);
+                    report_use_fix("bool-compare", call, "True", vec![edit], pending);
+                }
+            }
+        }
+        "True" => {
+            if call.args.is_empty() {
+                return;
+            }
+            let expr = &call.args[0];
+            if let Some(surviving) = is_comparison_with(pass, expr, is_untyped_true, Token::EQL)
+                .or_else(|| is_comparison_with(pass, expr, is_untyped_false, Token::NEQ))
+            {
+                if !is_empty_interface(pass, surviving) && allow(surviving) {
+                    // `newNeedSimplifyDiagnostic`: the assertion keeps its name
+                    // and only loses the comparison.
+                    pending.push(Finding::with_edits(
+                        call.call.pos().0 as u32,
+                        "bool-compare: need to simplify the assertion".to_string(),
+                        vec![one_arg_edit(expr, surviving)],
+                    ));
+                    return;
+                }
+            }
+            if let Some(surviving) = is_comparison_with(pass, expr, is_untyped_true, Token::NEQ)
+                .or_else(|| is_comparison_with(pass, expr, is_untyped_false, Token::EQL))
+                .or_else(|| is_negation(expr))
+            {
+                if !is_empty_interface(pass, surviving) && allow(surviving) {
+                    let edit = one_arg_edit(expr, surviving);
+                    report_use_fix("bool-compare", call, "False", vec![edit], pending);
+                }
+            }
+        }
+        "False" => {
+            if call.args.is_empty() {
+                return;
+            }
+            let expr = &call.args[0];
+            if let Some(surviving) = is_comparison_with(pass, expr, is_untyped_true, Token::EQL)
+                .or_else(|| is_comparison_with(pass, expr, is_untyped_false, Token::NEQ))
+            {
+                if !is_empty_interface(pass, surviving) && allow(surviving) {
+                    // `newNeedSimplifyDiagnostic`: the assertion keeps its name
+                    // and only loses the comparison.
+                    pending.push(Finding::with_edits(
+                        call.call.pos().0 as u32,
+                        "bool-compare: need to simplify the assertion".to_string(),
+                        vec![one_arg_edit(expr, surviving)],
+                    ));
+                    return;
+                }
+            }
+            if let Some(surviving) = is_comparison_with(pass, expr, is_untyped_true, Token::NEQ)
+                .or_else(|| is_comparison_with(pass, expr, is_untyped_false, Token::EQL))
+                .or_else(|| is_negation(expr))
+            {
+                if !is_empty_interface(pass, surviving) && allow(surviving) {
+                    let edit = one_arg_edit(expr, surviving);
+                    report_use_fix("bool-compare", call, "True", vec![edit], pending);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// `newRemoveSprintfDiagnostic`: the `fmt.Sprintf(...)` wrapper goes and its own
+/// arguments take its place — `fmt.Sprintf("msg")` becomes `"msg"`, and a call
+/// with format arguments becomes `"fmt", a, b`, which the assertion's own
+/// msgAndArgs then formats.
+fn report_remove_sprintf(
+    pass: &Pass<'_>,
+    call: &CallMeta<'_>,
+    msg: &Expr,
+    args: &[Expr],
+    pending: &mut Vec<Finding>,
+) {
+    let refs: Vec<&Expr> = args.iter().collect();
+    let edit = arg_edit(pass, msg.pos().0, msg.end().0, &refs);
+    pending.push(Finding::with_edits(
+        call.call.pos().0 as u32,
+        "formatter: remove unnecessary fmt.Sprintf".to_string(),
+        vec![edit],
+    ));
+}
+
+/// `newRemoveLenDiagnostic`: no rename, just `len(x)` collapsing to `x`.
+fn report_remove_len(
+    pass: &Pass<'_>,
+    checker: &str,
+    call: &CallMeta<'_>,
+    at: &Expr,
+    len_arg: &Expr,
+    pending: &mut Vec<Finding>,
+) {
+    let edit = arg_edit(pass, at.pos().0, at.end().0, &[len_arg]);
+    pending.push(Finding::with_edits(
+        call.call.pos().0 as u32,
+        format!("{checker}: remove unnecessary len"),
+        vec![edit],
+    ));
+}
+
+fn check_empty(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
+    if call.args.is_empty() {
+        return;
+    }
+    let a = &call.args[0];
+
+    // The one-argument shapes. `Zero`/`NotZero` have two branches that differ in
+    // what survives — the string itself, or the argument of `len` — so they
+    // cannot share a condition.
+    match call.fn_name_trimmed.as_str() {
+        "Zero" => {
+            if has_string_type(pass, a) {
+                let edit = arg_edit(pass, a.pos().0, a.end().0, &[a]);
+                report_use_fix("empty", call, "Empty", vec![edit], pending);
+                return;
+            }
+            if let Some(len_arg) = is_builtin_len_call(pass, a) {
+                let edit = arg_edit(pass, a.pos().0, a.end().0, &[len_arg]);
+                report_use_fix("empty", call, "Empty", vec![edit], pending);
+                return;
+            }
+        }
+        "Empty" => {
+            if let Some(len_arg) = is_builtin_len_call(pass, a) {
+                report_remove_len(pass, "empty", call, a, len_arg, pending);
+                return;
+            }
+        }
+        "Positive" => {
+            if let Some(len_arg) = is_builtin_len_call(pass, a) {
+                let edit = arg_edit(pass, a.pos().0, a.end().0, &[len_arg]);
+                report_use_fix("empty", call, "NotEmpty", vec![edit], pending);
+                return;
+            }
+        }
+        "NotZero" => {
+            if has_string_type(pass, a) {
+                let edit = arg_edit(pass, a.pos().0, a.end().0, &[a]);
+                report_use_fix("empty", call, "NotEmpty", vec![edit], pending);
+                return;
+            }
+            if let Some(len_arg) = is_builtin_len_call(pass, a) {
+                let edit = arg_edit(pass, a.pos().0, a.end().0, &[len_arg]);
+                report_use_fix("empty", call, "NotEmpty", vec![edit], pending);
+                return;
+            }
+        }
+        "NotEmpty" => {
+            if let Some(len_arg) = is_builtin_len_call(pass, a) {
+                report_remove_len(pass, "empty", call, a, len_arg, pending);
+                return;
+            }
+        }
+        _ => {}
+    }
+
+    if call.args.len() < 2 {
+        return;
+    }
+    let b = &call.args[1];
+    // Every two-argument shape replaces the same span — both arguments — and
+    // differs only in which expression survives.
+    let use_fix = |surviving: &Expr, proposed: &str, pending: &mut Vec<Finding>| {
+        let edit = arg_edit(pass, a.pos().0, b.end().0, &[surviving]);
+        report_use_fix("empty", call, proposed, vec![edit], pending);
+    };
+
+    match call.fn_name_trimmed.as_str() {
+        "Len" if is_zero(b) => use_fix(a, "Empty", pending),
+        "Equal" | "EqualValues" | "Exactly" => {
+            if is_empty_string_lit(a) {
+                use_fix(b, "Empty", pending);
+            } else if let Some(len_arg) = is_len_call_and_zero(pass, a, b)
+                .or_else(|| is_len_call_and_zero(pass, b, a))
+            {
+                use_fix(len_arg, "Empty", pending);
+            }
+        }
+        "LessOrEqual" => {
+            if let Some(len_arg) = is_builtin_len_call(pass, a) {
+                if is_zero(b) {
+                    use_fix(len_arg, "Empty", pending);
+                }
+            }
+        }
+        "GreaterOrEqual" => {
+            if let Some(len_arg) = is_builtin_len_call(pass, b) {
+                if is_zero(a) {
+                    use_fix(len_arg, "Empty", pending);
+                }
+            }
+        }
+        "Less" => {
+            if let Some(len_arg) = is_builtin_len_call(pass, a) {
+                if is_one(b) || is_zero(b) {
+                    use_fix(len_arg, "Empty", pending);
+                    return;
+                }
+            }
+            if let Some(len_arg) = is_builtin_len_call(pass, b) {
+                if is_zero(a) {
+                    use_fix(len_arg, "NotEmpty", pending);
+                }
+            }
+        }
+        "Greater" => {
+            if let Some(len_arg) = is_builtin_len_call(pass, b) {
+                if is_one(a) || is_zero(a) {
+                    use_fix(len_arg, "Empty", pending);
+                    return;
+                }
+            }
+            if let Some(len_arg) = is_builtin_len_call(pass, a) {
+                if is_zero(b) {
+                    use_fix(len_arg, "NotEmpty", pending);
+                }
+            }
+        }
+        "NotEqual" | "NotEqualValues" => {
+            if is_empty_string_lit(a) {
+                use_fix(b, "NotEmpty", pending);
+            } else if let Some(len_arg) = is_len_call_and_zero(pass, a, b)
+                .or_else(|| is_len_call_and_zero(pass, b, a))
+            {
+                use_fix(len_arg, "NotEmpty", pending);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn check_error_nil(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
+    // The span always starts at the first argument; only its end and the
+    // surviving argument depend on the shape. `NoError(t, err)` keeps `err`
+    // whichever side the `nil` was on.
+    let (proposed, surviving, end): (&str, &Expr, i64) = match call.fn_name_trimmed.as_str() {
+        "Nil" | "Empty" | "Zero" if !call.args.is_empty() && is_error(pass, &call.args[0]) => {
+            ("NoError", &call.args[0], call.args[0].end().0)
+        }
+        "NotNil" | "NotEmpty" | "NotZero"
+            if !call.args.is_empty() && is_error(pass, &call.args[0]) =>
+        {
+            ("Error", &call.args[0], call.args[0].end().0)
+        }
+        "Equal" | "EqualValues" | "Exactly" | "ErrorIs" | "IsType" | "NotEqual"
+        | "NotEqualValues" | "NotErrorIs" | "IsNotType" => {
+            if call.args.len() < 2 {
+                return;
+            }
+            let (a, b) = (&call.args[0], &call.args[1]);
+            let negated = matches!(
+                call.fn_name_trimmed.as_str(),
+                "NotEqual" | "NotEqualValues" | "NotErrorIs" | "IsNotType"
+            );
+            let proposed = if negated { "Error" } else { "NoError" };
+            if is_error(pass, a) && is_nil(pass, b) {
+                (proposed, a, b.end().0)
+            } else if is_nil(pass, a) && is_error(pass, b) {
+                (proposed, b, b.end().0)
+            } else {
+                return;
+            }
+        }
+        _ => return,
+    };
+    let edit = arg_edit(pass, call.args[0].pos().0, end, &[surviving]);
+    report_use_fix("error-nil", call, proposed, vec![edit], pending);
+}
+
+fn check_nil_compare(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
+    if call.args.len() < 2 {
+        return;
+    }
+    let Some(surviving) = xor_nil(pass, &call.args[0], &call.args[1]) else {
+        return;
+    };
+    let proposed = match call.fn_name_trimmed.as_str() {
+        "Equal" | "EqualValues" | "Exactly" => "Nil",
+        "NotEqual" | "NotEqualValues" => "NotNil",
+        _ => return,
+    };
+    let edit = arg_edit(
+        pass,
+        call.args[0].pos().0,
+        call.args[1].end().0,
+        &[surviving],
+    );
+    report_use_fix("nil-compare", call, proposed, vec![edit], pending);
+}
+
+fn check_len(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
+    // Upstream's `checkArgs`. `inverted` swaps which argument bounds the span:
+    // `True` passes the comparison's operands the other way round, but the text
+    // being replaced still runs left to right through the source.
+    fn check_args(
+        pass: &Pass<'_>,
+        call: &CallMeta<'_>,
+        a: &Expr,
+        b: &Expr,
+        inverted: bool,
+        pending: &mut Vec<Finding>,
+    ) {
+        let first = is_builtin_len_call(pass, a);
+        let second = is_builtin_len_call(pass, b);
+        let (len_arg, expected_len): (&Expr, &Expr) = match (first, second) {
+            (Some(_), Some(arg2)) => (arg2, a),
+            (Some(arg1), None) => {
+                if is_int_basic_lit(b).is_none() {
+                    return;
+                }
+                (arg1, b)
+            }
+            (None, Some(arg2)) => (arg2, a),
+            (None, None) => return,
+        };
+        let (start, end) = if inverted {
+            (b.pos().0, a.end().0)
+        } else {
+            (a.pos().0, b.end().0)
+        };
+        // `Len` takes the container first and the length second, which is the
+        // opposite order from the `Equal` it replaces.
+        let edit = arg_edit(pass, start, end, &[len_arg, expected_len]);
+        report_use_fix("len", call, "Len", vec![edit], pending);
+    }
+
+    match call.fn_name_trimmed.as_str() {
+        "Equal" | "EqualValues" | "Exactly" => {
+            if call.args.len() >= 2 {
+                // Prefer empty when comparing to 0 (empty runs earlier in registry).
+                check_args(pass, call, &call.args[0], &call.args[1], false, pending);
+            }
+        }
+        "True" => {
+            if call.args.is_empty() {
+                return;
+            }
+            let Expr::BinaryExpr(BinaryExpr {
+                x, y, op: Token::EQL, ..
+            }) = &call.args[0]
+            else {
+                return;
+            };
+            // In True, actual is usually first → check y,x like upstream.
+            check_args(pass, call, y, x, true, pending);
+        }
+        _ => {}
+    }
+}
+
+fn check_float_compare(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
+    let invalid = match call.fn_name_trimmed.as_str() {
+        "Equal" | "EqualValues" | "Exactly" => {
+            call.args.len() > 1
+                && (is_float(pass, &call.args[0]) || is_float(pass, &call.args[1]))
+        }
+        "True" => {
+            !call.args.is_empty() && is_comparison_with_float(pass, &call.args[0], Token::EQL)
+        }
+        "False" => {
+            !call.args.is_empty() && is_comparison_with_float(pass, &call.args[0], Token::NEQ)
+        }
+        _ => false,
+    };
+    if invalid {
+        let suffix = if call.is_fmt { "f" } else { "" };
+        report_msg(
+            "float-compare",
+            call,
+            &format!(
+                "use {}.InEpsilon{} (or InDelta{})",
+                call.selector_x, suffix, suffix
+            ),
+            pending,
+        );
+    }
+}
+
+fn check_compares(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
+    if call.args.is_empty() {
+        return;
+    }
+    let Expr::BinaryExpr(be) = &call.args[0] else {
+        return;
+    };
+    let proposed = match call.fn_name_trimmed.as_str() {
+        "True" => match be.op {
+            Token::EQL => "Equal",
+            Token::NEQ => "NotEqual",
+            Token::GTR => "Greater",
+            Token::GEQ => "GreaterOrEqual",
+            Token::LSS => "Less",
+            Token::LEQ => "LessOrEqual",
+            _ => return,
+        },
+        "False" => match be.op {
+            Token::EQL => "NotEqual",
+            Token::NEQ => "Equal",
+            Token::GTR => "LessOrEqual",
+            Token::GEQ => "Less",
+            Token::LSS => "GreaterOrEqual",
+            Token::LEQ => "Greater",
+            _ => return,
+        },
+        _ => return,
+    };
+    let mut proposed = proposed.to_string();
+    if is_pointer(pass, &be.x) && is_pointer(pass, &be.y) {
+        match proposed.as_str() {
+            "Equal" => proposed = "Same".into(),
+            "NotEqual" => proposed = "NotSame".into(),
+            _ => {}
+        }
+    }
+    // The comparison collapses into the assertion's two arguments, in source
+    // order.
+    let edit = arg_edit(pass, be.x.pos().0, be.y.end().0, &[&be.x, &be.y]);
+    report_use_fix("compares", call, &proposed, vec![edit], pending);
+}
+
+fn check_contains(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
+    // Upstream v1.6.4 (golangci 2.12) only rewrites True/False+strings.Contains;
+    // the multi-arg Contains→Subset heuristic is not in that release.
+    let _ = check_contains_string(pass, call, pending);
+}
+
+fn check_contains_string(
+    pass: &Pass<'_>,
+    call: &CallMeta<'_>,
+    pending: &mut Vec<Finding>,
+) -> bool {
+    if call.args.is_empty() {
+        return false;
+    }
+    let mut expr = &call.args[0];
+    let is_neg = is_negation(expr).is_some();
+    if let Some(inner) = is_negation(expr) {
+        expr = inner;
+    }
+    let Expr::CallExpr(ce) = unparen(expr) else {
+        return false;
+    };
+    if ce.args.len() != 2 || !is_strings_contains_call(pass, ce) {
+        return false;
+    }
+    let proposed = match call.fn_name_trimmed.as_str() {
+        "True" => {
+            if is_neg {
+                "NotContains"
+            } else {
+                "Contains"
+            }
+        }
+        "False" => {
+            if is_neg {
+                "Contains"
+            } else {
+                "NotContains"
+            }
+        }
+        _ => return false,
+    };
+    // `strings.Contains(s, substr)` becomes the assertion's own two arguments.
+    // The span is the *outer* argument — `call.Args[0]` — so a leading `!` goes
+    // with it; the negation is already accounted for in `proposed`.
+    let edit = arg_edit(
+        pass,
+        call.args[0].pos().0,
+        call.args[0].end().0,
+        &[&ce.args[0], &ce.args[1]],
+    );
+    report_use_fix("contains", call, proposed, vec![edit], pending);
+    true
+}
+
+fn check_contains_subset(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
+    if call.call.ellipsis.is_valid() {
+        return;
+    }
+    if call.args.len() < 3 {
+        return;
+    }
+    if has_string_type(pass, &call.args[2]) {
+        // Possible false positives because of format string.
+        return;
+    }
+    let proposed = match call.fn_name_trimmed.as_str() {
+        "Contains" => {
+            if call.is_fmt {
+                "Subsetf"
+            } else {
+                "Subset"
+            }
+        }
+        "NotContains" => {
+            if call.is_fmt {
+                "NotSubsetf"
+            } else {
+                "NotSubset"
+            }
+        }
+        _ => return,
+    };
+    report_msg(
+        "contains",
+        call,
+        &format!(
+            "invalid usage of {}, use {}.{} for multi elements assertion",
+            call_fn_string(call),
+            call.selector_x,
+            proposed
+        ),
+        pending,
+    );
+}
+
+fn check_equal_values(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
+    let proposed = match call.fn_name_trimmed.as_str() {
+        "EqualValues" => "Equal",
+        "NotEqualValues" => "NotEqual",
+        _ => return,
+    };
+    if call.args.len() < 2 {
+        return;
+    }
+    let (first, second) = (&call.args[0], &call.args[1]);
+    if is_func(pass, first) || is_func(pass, second) {
+        // EqualValues for funcs is ok (testify#1524); Equal is not.
+        return;
+    }
+    let Some(ft) = type_of(pass, first) else {
+        return;
+    };
+    let Some(st) = type_of(pass, second) else {
+        return;
+    };
+    if !types_identical(pass, ft, st) {
+        return;
+    }
+    if is_empty_interface_type(pass, ft) || is_empty_interface_type(pass, st) {
+        // Equal would compare dynamic types and fail; EqualValues is fine.
+        return;
+    }
+    // The only checker in this family whose fix is the rename alone: `Equal`
+    // and `EqualValues` take the same arguments.
+    report_use_fix("equal-values", call, proposed, Vec::new(), pending);
+}
+
+fn check_regexp(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
+    match call.fn_name_trimmed.as_str() {
+        "Regexp" | "NotRegexp" => {}
+        _ => return,
+    }
+    if call.args.is_empty() {
+        return;
+    }
+    let Expr::CallExpr(ce) = unparen(&call.args[0]) else {
+        return;
+    };
+    if ce.args.len() == 1 && is_regexp_must_compile_call(pass, ce) {
+        // `newRemoveMustCompileDiagnostic`: no rename, the call collapses to
+        // its own pattern argument. The span is the `regexp.MustCompile(...)`
+        // node, which the pattern binding has already unparenthesized.
+        let edit = arg_edit(
+            pass,
+            Expr::CallExpr(ce.clone()).pos().0,
+            Expr::CallExpr(ce.clone()).end().0,
+            &[&ce.args[0]],
+        );
+        pending.push(Finding::with_edits(
+            call.call.pos().0 as u32,
+            "regexp: remove unnecessary regexp.MustCompile".to_string(),
+            vec![edit],
+        ));
+    }
+}
+
+fn check_error_is_as(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
+    match call.fn_name_trimmed.as_str() {
+        "Error" => {
+            if call.args.len() >= 2 && is_error(pass, &call.args[1]) {
+                // DEFERRED: skip when selector is *assert.CollectT.
+                report_msg_rename(
+                    "error-is-as",
+                    call,
+                    &format!(
+                        "invalid usage of {}.Error, use {}.ErrorIs instead",
+                        call.selector_x, call.selector_x
+                    ),
+                    "ErrorIs",
+                    pending,
+                );
+            }
+        }
+        "NoError" => {
+            if call.args.len() >= 2 && is_error(pass, &call.args[1]) {
+                report_msg_rename(
+                    "error-is-as",
+                    call,
+                    &format!(
+                        "invalid usage of {}.NoError, use {}.NotErrorIs instead",
+                        call.selector_x, call.selector_x
+                    ),
+                    "NotErrorIs",
+                    pending,
+                );
+            }
+        }
+        "IsType" => {
+            if call.args.len() >= 2
+                && (is_error(pass, &call.args[0]) || is_error(pass, &call.args[1]))
+            {
+                report_msg(
+                    "error-is-as",
+                    call,
+                    &format!(
+                        "use {}.ErrorIs or {}.ErrorAs depending on the case",
+                        call.selector_x, call.selector_x
+                    ),
+                    pending,
+                );
+            }
+        }
+        "IsNotType" => {
+            if call.args.len() >= 2
+                && (is_error(pass, &call.args[0]) || is_error(pass, &call.args[1]))
+            {
+                report_msg(
+                    "error-is-as",
+                    call,
+                    &format!(
+                        "use {}.NotErrorIs or {}.NotErrorAs depending on the case",
+                        call.selector_x, call.selector_x
+                    ),
+                    pending,
+                );
+            }
+        }
+        "True" => {
+            if call.args.is_empty() {
+                return;
+            }
+            let Expr::CallExpr(ce) = unparen(&call.args[0]) else {
+                return;
+            };
+            if ce.args.len() != 2 {
+                return;
+            }
+            let proposed = if is_errors_is_call(pass, ce) {
+                "ErrorIs"
+            } else if is_errors_as_call(pass, ce) {
+                "ErrorAs"
+            } else {
+                return;
+            };
+            let edit = arg_edit(
+                pass,
+                Expr::CallExpr(ce.clone()).pos().0,
+                Expr::CallExpr(ce.clone()).end().0,
+                &[&ce.args[0], &ce.args[1]],
+            );
+            report_use_fix("error-is-as", call, proposed, vec![edit], pending);
+        }
+        "False" => {
+            if call.args.is_empty() {
+                return;
+            }
+            let Expr::CallExpr(ce) = unparen(&call.args[0]) else {
+                return;
+            };
+            if ce.args.len() != 2 {
+                return;
+            }
+            let proposed = if is_errors_is_call(pass, ce) {
+                "NotErrorIs"
+            } else if is_errors_as_call(pass, ce) {
+                "NotErrorAs"
+            } else {
+                return;
+            };
+            let edit = arg_edit(
+                pass,
+                Expr::CallExpr(ce.clone()).pos().0,
+                Expr::CallExpr(ce.clone()).end().0,
+                &[&ce.args[0], &ce.args[1]],
+            );
+            report_use_fix("error-is-as", call, proposed, vec![edit], pending);
+        }
+        "ErrorAs" | "NotErrorAs" => check_error_as_target(pass, call, pending),
+        _ => {}
+    }
+}
+
+/// `isBufferBytesCall`: the receiver of a `.Bytes()` call on a `bytes.Buffer`.
+///
+/// Upstream calls its own type test a hack — it compares the printed type
+/// against `"bytes.Buffer"` with any leading `*` trimmed, because the `bytes`
+/// package need not be imported where the assertion lives. Matching it means
+/// comparing the same string.
+fn buffer_bytes_receiver<'a>(pass: &Pass<'_>, e: &'a Expr) -> Option<&'a Expr> {
+    let Expr::CallExpr(ce) = e else {
+        return None;
+    };
+    let Expr::SelectorExpr(se) = &*ce.fun else {
+        return None;
+    };
+    if se.sel.name != "Bytes" {
+        return None;
+    }
+    let typ = type_of(pass, &se.x)?;
+    let printed = type_string(pass, typ)?;
+    (printed.trim_start_matches('*') == "bytes.Buffer").then_some(&se.x)
+}
+
+/// `formatWithStringCastForBytes`: a `[]byte` argument has to become a string
+/// for `JSONEq` / `YAMLEq`, and a `buf.Bytes()` becomes `buf.String()` rather
+/// than `string(buf.Bytes())`.
+fn format_with_string_cast_for_bytes(pass: &Pass<'_>, e: &Expr) -> String {
+    if !has_bytes_type(pass, e) {
+        return expr_string(pass, e);
+    }
+    if let Some(recv) = buffer_bytes_receiver(pass, e) {
+        return format!("{}.String()", expr_string(pass, recv));
+    }
+    format!("string({})", expr_string(pass, e))
+}
+
+fn check_encoded_compare(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
+    match call.fn_name_trimmed.as_str() {
+        "Equal" | "EqualValues" | "Exactly" => {}
+        _ => return,
+    }
+    if call.args.len() < 2 {
+        return;
+    }
+    let (a, a_explicit_json) = encoded_unwrap(pass, &call.args[0]);
+    let (b, b_explicit_json) = encoded_unwrap(pass, &call.args[1]);
+    if !is_string_or_bytes_or_unknown(pass, a) || !is_string_or_bytes_or_unknown(pass, b) {
+        return;
+    }
+    let proposed = if a_explicit_json
+        || b_explicit_json
+        || is_json_style_expr(pass, a)
+        || is_json_style_expr(pass, b)
+    {
+        "JSONEq"
+    } else if is_yaml_style_expr(pass, a) || is_yaml_style_expr(pass, b) {
+        "YAMLEq"
+    } else {
+        return;
+    };
+    // Two edits, one per argument: each side is cast to a string where it is
+    // `[]byte`, and otherwise left exactly as written. The spans are the
+    // *original* arguments, not the unwrapped ones — `unwrap` sees through
+    // conversions that the fix deliberately deletes.
+    let (lhs, rhs) = (&call.args[0], &call.args[1]);
+    let edits = vec![
+        TextEdit {
+            pos: lhs.pos().0 as u32,
+            end: lhs.end().0 as u32,
+            new_text: format_with_string_cast_for_bytes(pass, a),
+        },
+        TextEdit {
+            pos: rhs.pos().0 as u32,
+            end: rhs.end().0 as u32,
+            new_text: format_with_string_cast_for_bytes(pass, b),
+        },
+    ];
+    report_use_fix("encoded-compare", call, proposed, edits, pending);
+}
+
+fn check_expected_actual(
+    pass: &Pass<'_>,
+    call: &CallMeta<'_>,
+    opts: &TestifylintOptions,
+    pending: &mut Vec<Finding>,
+) {
+    match call.fn_name_trimmed.as_str() {
+        "Equal"
+        | "EqualExportedValues"
+        | "EqualValues"
+        | "Exactly"
+        | "InDelta"
+        | "InDeltaMapValues"
+        | "InDeltaSlice"
+        | "InEpsilon"
+        | "InEpsilonSlice"
+        | "IsNotType"
+        | "IsType"
+        | "JSONEq"
+        | "NotEqual"
+        | "NotEqualValues"
+        | "NotSame"
+        | "Same"
+        | "WithinDuration"
+        | "YAMLEq" => {}
+        _ => return,
+    }
+    if call.args.len() < 2 {
+        return;
+    }
+    let pattern = expected_actual_pattern(opts);
+    let first = &call.args[0];
+    let second = &call.args[1];
+    let left = is_expected_value_candidate(pass, first, &pattern);
+    let right = is_expected_value_candidate(pass, second, &pattern);
+    if right && !left {
+        // The two arguments swap in place; the assertion keeps its name.
+        let edit = arg_edit(pass, first.pos().0, second.end().0, &[second, first]);
+        pending.push(Finding::with_edits(
+            call.call.pos().0 as u32,
+            "expected-actual: need to reverse actual and expected values".to_string(),
+            vec![edit],
+        ));
+    }
+}
+
+fn check_zero(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
+    match call.fn_name_trimmed.as_str() {
+        "Equal" | "EqualValues" | "Exactly" => {
+            if call.args.len() < 2 {
+                return;
+            }
+            let (a, b) = (&call.args[0], &call.args[1]);
+            let f1 = is_zero_time_instance(pass, a);
+            let f2 = is_zero_time_instance(pass, b);
+            if f1 != f2 {
+                report_use("zero", call, "Zero", pending);
+            }
+        }
+        "NotEqual" | "NotEqualValues" => {
+            if call.args.len() < 2 {
+                return;
+            }
+            let (a, b) = (&call.args[0], &call.args[1]);
+            let f1 = is_zero_time_instance(pass, a);
+            let f2 = is_zero_time_instance(pass, b);
+            if f1 != f2 {
+                report_use("zero", call, "NotZero", pending);
+            }
+        }
+        "True" => {
+            if call.args.is_empty() {
+                return;
+            }
+            if is_time_is_zero_call(pass, &call.args[0]).is_some()
+                || is_time_equal_zero_call(pass, &call.args[0]).is_some()
+            {
+                report_use("zero", call, "Zero", pending);
+            }
+        }
+        "False" => {
+            if call.args.is_empty() {
+                return;
+            }
+            if is_time_is_zero_call(pass, &call.args[0]).is_some()
+                || is_time_equal_zero_call(pass, &call.args[0]).is_some()
+            {
+                report_use("zero", call, "NotZero", pending);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn check_negative_positive(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
+    if check_negative(pass, call, pending) {
+        return;
+    }
+    check_positive(pass, call, pending);
+}
+
+fn check_negative(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) -> bool {
+    match call.fn_name_trimmed.as_str() {
+        "Less" => {
+            if call.args.len() < 2 {
+                return false;
+            }
+            let (a, b) = (&call.args[0], &call.args[1]);
+            if can_be_negative(pass, a) && is_zero_or_signed_zero(b) {
+                // Both arguments go; the one that could be negative comes back.
+                let edit = arg_edit(pass, a.pos().0, b.end().0, &[a]);
+                report_use_fix("negative-positive", call, "Negative", vec![edit], pending);
+                return true;
+            }
+        }
+        "Greater" => {
+            if call.args.len() < 2 {
+                return false;
+            }
+            let (a, b) = (&call.args[0], &call.args[1]);
+            if is_zero_or_signed_zero(a) && can_be_negative(pass, b) {
+                let edit = arg_edit(pass, a.pos().0, b.end().0, &[b]);
+                report_use_fix("negative-positive", call, "Negative", vec![edit], pending);
+                return true;
+            }
+        }
+        "True" => {
+            if call.args.is_empty() {
+                return false;
+            }
+            let expr = &call.args[0];
+            let surviving = is_strict_comparison_with(
+                pass,
+                expr,
+                |p, e| can_be_negative(p, e),
+                Token::LSS,
+                |_, e| is_zero_or_signed_zero(e),
+            )
+            .map(|(a, _)| a)
+            .or_else(|| {
+                is_strict_comparison_with(
+                    pass,
+                    expr,
+                    |_, e| is_zero_or_signed_zero(e),
+                    Token::GTR,
+                    |p, e| can_be_negative(p, e),
+                )
+                .map(|(_, b)| b)
+            });
+            if let Some(surviving) = surviving {
+                // The whole comparison collapses to its non-zero side.
+                let edit = arg_edit(pass, expr.pos().0, expr.end().0, &[surviving]);
+                report_use_fix("negative-positive", call, "Negative", vec![edit], pending);
+                return true;
+            }
+        }
+        "False" => {
+            if call.args.is_empty() {
+                return false;
+            }
+            let expr = &call.args[0];
+            // The surviving argument, not just whether one exists: the fix
+            // replaces the comparison with it.
+            let surviving = is_strict_comparison_with(
+                pass,
+                expr,
+                |p, e| can_be_negative(p, e),
+                Token::GEQ,
+                |_, e| is_zero_or_signed_zero(e),
+            )
+            .map(|(a, _)| a)
+            .or_else(|| {
+                is_strict_comparison_with(
+                    pass,
+                    expr,
+                    |_, e| is_zero_or_signed_zero(e),
+                    Token::LEQ,
+                    |p, e| can_be_negative(p, e),
+                )
+                .map(|(_, b)| b)
+            });
+            if let Some(surviving) = surviving {
+                let edit = arg_edit(pass, expr.pos().0, expr.end().0, &[surviving]);
+                report_use_fix("negative-positive", call, "Negative", vec![edit], pending);
+                return true;
+            }
+        }
+        _ => {}
+    }
+    false
+}
+
+fn check_positive(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
+    match call.fn_name_trimmed.as_str() {
+        "Greater" => {
+            if call.args.len() < 2 {
+                return;
+            }
+            let (a, b) = (&call.args[0], &call.args[1]);
+            if is_not_any_zero(a) && is_any_zero(b) {
+                let edit = arg_edit(pass, a.pos().0, b.end().0, &[a]);
+                report_use_fix("negative-positive", call, "Positive", vec![edit], pending);
+            }
+        }
+        "Less" => {
+            if call.args.len() < 2 {
+                return;
+            }
+            let (a, b) = (&call.args[0], &call.args[1]);
+            if is_any_zero(a) && is_not_any_zero(b) {
+                let edit = arg_edit(pass, a.pos().0, b.end().0, &[b]);
+                report_use_fix("negative-positive", call, "Positive", vec![edit], pending);
+            }
+        }
+        "True" => {
+            if call.args.is_empty() {
+                return;
+            }
+            let expr = &call.args[0];
+            let surviving = is_strict_comparison_with(
+                pass,
+                expr,
+                |_, e| is_not_any_zero(e),
+                Token::GTR,
+                |_, e| is_any_zero(e),
+            )
+            .map(|(a, _)| a)
+            .or_else(|| {
+                is_strict_comparison_with(
+                    pass,
+                    expr,
+                    |_, e| is_any_zero(e),
+                    Token::LSS,
+                    |_, e| is_not_any_zero(e),
+                )
+                .map(|(_, b)| b)
+            });
+            if let Some(surviving) = surviving {
+                let edit = arg_edit(pass, expr.pos().0, expr.end().0, &[surviving]);
+                report_use_fix("negative-positive", call, "Positive", vec![edit], pending);
+            }
+        }
+        "False" => {
+            if call.args.is_empty() {
+                return;
+            }
+            let expr = &call.args[0];
+            let surviving = is_strict_comparison_with(
+                pass,
+                expr,
+                |_, e| is_not_any_zero(e),
+                Token::LEQ,
+                |_, e| is_any_zero(e),
+            )
+            .map(|(a, _)| a)
+            .or_else(|| {
+                is_strict_comparison_with(
+                    pass,
+                    expr,
+                    |_, e| is_any_zero(e),
+                    Token::GEQ,
+                    |_, e| is_not_any_zero(e),
+                )
+                .map(|(_, b)| b)
+            });
+            if let Some(surviving) = surviving {
+                let edit = arg_edit(pass, expr.pos().0, expr.end().0, &[surviving]);
+                report_use_fix("negative-positive", call, "Positive", vec![edit], pending);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn check_useless_assert_same_vars(call: &CallMeta<'_>, pending: &mut Vec<Finding>) -> bool {
+    let (first, second) = match call.fn_name_trimmed.as_str() {
+        "Contains"
+        | "ElementsMatch"
+        | "Equal"
+        | "EqualExportedValues"
+        | "EqualValues"
+        | "ErrorAs"
+        | "ErrorIs"
+        | "Exactly"
+        | "Greater"
+        | "GreaterOrEqual"
+        | "Implements"
+        | "InDelta"
+        | "InDeltaMapValues"
+        | "InDeltaSlice"
+        | "InEpsilon"
+        | "InEpsilonSlice"
+        | "IsNotType"
+        | "IsType"
+        | "JSONEq"
+        | "Less"
+        | "LessOrEqual"
+        | "NotElementsMatch"
+        | "NotEqual"
+        | "NotEqualValues"
+        | "NotErrorAs"
+        | "NotErrorIs"
+        | "NotRegexp"
+        | "NotSame"
+        | "NotSubset"
+        | "Regexp"
+        | "Same"
+        | "Subset"
+        | "WithinDuration"
+        | "YAMLEq" => {
+            if call.args.len() < 2 {
+                return false;
+            }
+            (&call.args[0], &call.args[1])
+        }
+        "True" | "False" => {
+            if call.args.is_empty() {
+                return false;
+            }
+            let Expr::BinaryExpr(be) = unparen(&call.args[0]) else {
+                return false;
+            };
+            (be.x.as_ref(), be.y.as_ref())
+        }
+        _ => return false,
+    };
+    if expr_equal(first, second) {
+        report_msg(
+            "useless-assert",
+            call,
+            "asserting of the same variable",
+            pending,
+        );
+        true
+    } else {
+        false
+    }
+}
+
+fn check_useless_assert(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
+    if check_useless_assert_same_vars(call, pending) {
+        return;
+    }
+
+    let meaningless = match call.fn_name_trimmed.as_str() {
+        "False" | "True" => !call.args.is_empty()
+            && (is_untyped_true(pass, &call.args[0]) || is_untyped_false(pass, &call.args[0])),
+        "GreaterOrEqual" | "Less" => {
+            call.args.len() >= 2
+                && is_any_zero(&call.args[1])
+                && can_not_be_negative(pass, &call.args[0])
+        }
+        "Implements" | "NotImplements" => {
+            if call.args.is_empty() {
+                false
+            } else {
+                pointer_elem_type(pass, &call.args[0])
+                    .is_some_and(|elem| is_empty_interface_type(pass, elem))
+            }
+        }
+        "LessOrEqual" | "Greater" => {
+            call.args.len() >= 2
+                && is_any_zero(&call.args[0])
+                && can_not_be_negative(pass, &call.args[1])
+        }
+        "Positive" => call
+            .args
+            .first()
+            .is_some_and(|a| is_int_basic_lit(a).is_some()),
+        "Negative" => call.args.first().is_some_and(|a| {
+            is_int_basic_lit(a).is_some() || can_not_be_negative(pass, a)
+        }),
+        "Error" | "Nil" | "NoError" | "NotNil" => {
+            !call.args.is_empty() && is_nil(pass, &call.args[0])
+        }
+        "Empty" | "NotEmpty" => !call.args.is_empty() && is_string_lit(&call.args[0]),
+        "NotZero" | "Zero" => {
+            if call.args.is_empty() {
+                false
+            } else {
+                let a = &call.args[0];
+                is_int_basic_lit(a).is_some()
+                    || is_string_lit(a)
+                    || is_nil(pass, a)
+                    || is_untyped_true(pass, a)
+                    || is_untyped_false(pass, a)
+                    || is_zero_time_instance(pass, a)
+            }
+        }
+        _ => false,
+    };
+
+    if meaningless {
+        report_msg("useless-assert", call, "meaningless assertion", pending);
+    }
+}
+
+fn check_time_compare(
+    pass: &Pass<'_>,
+    call: &CallMeta<'_>,
+    opts: &TestifylintOptions,
+    pending: &mut Vec<Finding>,
+) {
+    match call.fn_name_trimmed.as_str() {
+        "Equal" | "EqualValues" | "Exactly" | "NotEqual" | "NotEqualValues" => {}
+        _ => return,
+    }
+    if call.args.len() < 2 {
+        return;
+    }
+    let lhs = &call.args[0];
+    let rhs = &call.args[1];
+    if !is_time_instance(pass, lhs) && !is_time_instance(pass, rhs) {
+        return;
+    }
+    let pattern = time_compare_suppress_pattern(opts);
+    if need_suppress_time_call(lhs, &pattern) || need_suppress_time_call(rhs, &pattern) {
+        return;
+    }
+    report_msg(
+        "time-compare",
+        call,
+        "equality-based assertion on time.Time can be flaky",
+        pending,
+    );
+}
+
+fn callee_func_obj(pass: &Pass<'_>, call: &CallMeta<'_>) -> Option<guff_types::arena::ObjectId> {
+    let info = pass.types_info()?;
+    match &*call.call.fun {
+        Expr::Ident(id) => info.uses.get(&id.id).copied(),
+        Expr::SelectorExpr(sel) => info.uses.get(&sel.sel.id).copied(),
+        _ => None,
+    }
+}
+
+fn signature_of_call(pass: &Pass<'_>, call: &CallMeta<'_>) -> Option<TypeId> {
+    let obj = callee_func_obj(pass, call)?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let typ = obj.typ(&artifacts.objects)?;
+    let typ = unalias_readonly(&artifacts.types, typ);
+    match artifacts.types.get(typ) {
+        TypeData::Signature(_) => Some(typ),
+        _ => None,
+    }
+}
+
+fn get_msg_and_args_position(pass: &Pass<'_>, call: &CallMeta<'_>) -> Option<usize> {
+    let sig = signature_of_call(pass, call)?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    if !signature_variadic(&artifacts.types, sig) {
+        return None;
+    }
+    let params = signature_params(&artifacts.types, sig)?;
+    let n = tuple_len(&artifacts.types, Some(params));
+    if n == 0 {
+        return None;
+    }
+    let last = tuple_at(&artifacts.types, params, n - 1);
+    if last.name(&artifacts.objects) != "msgAndArgs" {
+        return None;
+    }
+    let Some(last_ty) = last.typ(&artifacts.objects) else {
+        return None;
+    };
+    let last_ty = unalias_readonly(&artifacts.types, last_ty);
+    if !matches!(artifacts.types.get(last_ty), TypeData::Slice(_)) {
+        return None;
+    }
+    Some(n - 1)
+}
+
+fn get_msg_position(pass: &Pass<'_>, call: &CallMeta<'_>) -> Option<usize> {
+    let sig = signature_of_call(pass, call)?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let params = signature_params(&artifacts.types, sig)?;
+    let n = tuple_len(&artifacts.types, Some(params));
+    for i in 0..n {
+        let p = tuple_at(&artifacts.types, params, i);
+        let name = p.name(&artifacts.objects);
+        if name != "msg" && name != "format" {
+            continue;
+        }
+        let Some(ty) = p.typ(&artifacts.objects) else {
+            continue;
+        };
+        let ty = unalias_readonly(&artifacts.types, ty);
+        let under = ty.underlying(&artifacts.types);
+        if matches!(
+            artifacts.types.get(under),
+            TypeData::Basic(b) if b.info().contains(IS_STRING)
+        ) {
+            return Some(i);
+        }
+    }
+    None
+}
+
+fn assert_has_formatted_analogue(call: &CallMeta<'_>) -> bool {
+    // DEFERRED: look up `Fn+"f"` in assert/require packages / receiver methods.
+    // Stubs and real testify expose f-analogues for the assertions we care about.
+    !call.fn_name.ends_with('f')
+}
+
+fn is_printf_like_call(pass: &Pass<'_>, call: &CallMeta<'_>) -> Option<usize> {
+    if call.call.ellipsis.is_valid() {
+        return None;
+    }
+    let msg_and_args_pos = get_msg_and_args_position(pass, call)?;
+    if msg_and_args_pos >= call.call.args.len() {
+        return None;
+    }
+    if !assert_has_formatted_analogue(call) {
+        return None;
+    }
+    Some(msg_and_args_pos)
+}
+
+fn string_lit_value(expr: &Expr) -> Option<String> {
+    let Expr::BasicLit(BasicLit {
+        kind: Some(Token::STRING),
+        value,
+        ..
+    }) = unparen(expr)
+    else {
+        return None;
+    };
+    if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') {
+        serde_json::from_str(value).ok()
+    } else if value.len() >= 2 && value.starts_with('`') && value.ends_with('`') {
+        Some(value[1..value.len() - 1].to_string())
+    } else {
+        None
+    }
+}
+
+fn check_formatter(
+    pass: &Pass<'_>,
+    call: &CallMeta<'_>,
+    opts: &TestifylintOptions,
+    pending: &mut Vec<Finding>,
+) {
+    if call.is_fmt {
+        check_formatter_fmt(pass, call, pending);
+    } else {
+        check_formatter_not_fmt(pass, call, opts, pending);
+    }
+}
+
+fn check_formatter_not_fmt(
+    pass: &Pass<'_>,
+    call: &CallMeta<'_>,
+    opts: &TestifylintOptions,
+    pending: &mut Vec<Finding>,
+) {
+    let Some(msg_and_args_pos) = is_printf_like_call(pass, call) else {
+        return;
+    };
+    let last_arg_pos = call.call.args.len() - 1;
+    let is_single = msg_and_args_pos == last_arg_pos;
+    let msg_and_args = &call.call.args[msg_and_args_pos];
+
+    if matches!(call.fn_name_trimmed.as_str(), "Fail" | "FailNow") {
+        if let Some(failure_msg) = string_lit_value(&call.args[0]) {
+            if failure_msg.contains('%') {
+                report_msg(
+                    "formatter",
+                    call,
+                    "failure message is not a format string, use msgAndArgs instead",
+                    pending,
+                );
+                return;
+            }
+        }
+    }
+
+    if is_fmt_sprintf_call(pass, msg_and_args).is_some() && is_single {
+        if opts.formatter_require_f_funcs {
+            report_msg(
+                "formatter",
+                call,
+                &format!("use {}.{}f", call.selector_x, call.fn_name),
+                pending,
+            );
+        } else if let Some(args) = is_fmt_sprintf_call(pass, msg_and_args) {
+            report_remove_sprintf(pass, call, msg_and_args, &args, pending);
+        }
+        return;
+    }
+
+    if has_string_type(pass, msg_and_args) {
+        if let Some(format) = string_lit_value(msg_and_args) {
+            if format.is_empty() {
+                report_msg("formatter", call, "empty message", pending);
+                return;
+            }
+        }
+        if opts.formatter_require_f_funcs {
+            report_msg(
+                "formatter",
+                call,
+                &format!("use {}.{}f", call.selector_x, call.fn_name),
+                pending,
+            );
+        }
+    } else if is_single {
+        if opts.formatter_require_string_msg {
+            report_msg(
+                "formatter",
+                call,
+                "do not use non-string value as first element (msg) of msgAndArgs",
+                pending,
+            );
+        }
+    } else {
+        report_msg(
+            "formatter",
+            call,
+            "using msgAndArgs with non-string first element (msg) causes panic",
+            pending,
+        );
+    }
+}
+
+fn check_formatter_fmt(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<Finding>) {
+    let Some(format_pos) = get_msg_position(pass, call) else {
+        return;
+    };
+    if format_pos >= call.call.args.len() {
+        return;
+    }
+    let last_arg_pos = call.call.args.len() - 1;
+    let msg = &call.call.args[format_pos];
+    let no_format_args = format_pos == last_arg_pos;
+
+    if no_format_args {
+        if let Some(args) = is_fmt_sprintf_call(pass, msg) {
+            report_remove_sprintf(pass, call, msg, &args, pending);
+            return;
+        }
+    }
+
+    if let Some(format) = string_lit_value(msg) {
+        if format.is_empty() {
+            report_msg("formatter", call, "empty message", pending);
+        }
+        // DEFERRED: check-format-string via full printf.CheckPrintf.
+    }
+}
+
+/// Memo for [`lookup_named_type`], keyed by `(pkg_path, name)`.
+///
+/// The uncached lookup scans **every package in the type closure** — 1455 of them
+/// on prometheus `./...` — and runs `cut_vendor` on each path. It is called from
+/// inside the per-node `preorder_stack` callback (via `implements_testify_suite`
+/// / `implements_testing_t`), so the work was O(nodes x packages), and the *miss*
+/// is the expensive case: a package that does not import testify scans the whole
+/// list to return `None`, once per candidate node. samply put `cut_vendor` at
+/// 1.095s of the 1.169s testifylint spent in total — 94% of the worst
+/// per-package unit cost of any analyzer (PERF_TASKS_V2 §1.4 / B-3).
+///
+/// Safe to memoize for the lifetime of one run: the lookup only reads
+/// `type_artifacts.packages` / `.scopes`, and no analyzer mutates those during a
+/// run — `with_types_mut` clones and edits the *types* arena only. Reset per
+/// package next to [`TYPE_SCRATCH`], since rayon workers reuse threads across
+/// packages and a stale entry would answer for the wrong type closure.
+///
+/// A `Vec` rather than a map: there are six call sites and a handful of distinct
+/// keys, so a linear scan over ~5 entries beats hashing.
+thread_local! {
+    static NAMED_TYPE_MEMO: RefCell<Vec<(String, String, Option<TypeId>)>> =
+        const { RefCell::new(Vec::new()) };
+}
+
+fn reset_named_type_memo() {
+    NAMED_TYPE_MEMO.with(|c| c.borrow_mut().clear());
+}
+
+fn lookup_named_type(pass: &Pass<'_>, pkg_path: &str, name: &str) -> Option<TypeId> {
+    if let Some(hit) = NAMED_TYPE_MEMO.with(|c| {
+        c.borrow()
+            .iter()
+            .find(|(p, n, _)| p == pkg_path && n == name)
+            .map(|(_, _, typ)| *typ)
+    }) {
+        return hit;
+    }
+    let found = lookup_named_type_uncached(pass, pkg_path, name);
+    NAMED_TYPE_MEMO.with(|c| {
+        c.borrow_mut()
+            .push((pkg_path.to_string(), name.to_string(), found))
+    });
+    found
+}
+
+fn lookup_named_type_uncached(pass: &Pass<'_>, pkg_path: &str, name: &str) -> Option<TypeId> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    for i in 0..artifacts.packages.len() {
+        let pid = artifacts.packages.id_at(i);
+        let pkg = artifacts.packages.get(pid);
+        if cut_vendor(pkg.path()) != pkg_path {
+            continue;
+        }
+        let oid = scope_lookup(&artifacts.scopes, pkg.scope(), name)?;
+        let ObjectData::TypeName(tn) = artifacts.objects.get(oid) else {
+            continue;
+        };
+        return tn.typ();
+    }
+    None
+}
+
+fn implements_iface(pass: &Pass<'_>, typ: TypeId, iface: TypeId) -> bool {
+    with_types_mut(pass, |types, objects, packages| {
+        if api_implements(types, objects, packages, typ, iface) {
+            return true;
+        }
+        let ptr = new_pointer(types, typ);
+        api_implements(types, objects, packages, ptr, iface)
+    })
+    .unwrap_or(false)
+}
+
+fn implements_testify_suite(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    let Some(iface) = lookup_named_type(pass, SUITE_PKG, "TestingSuite") else {
+        return false;
+    };
+    implements_iface(pass, typ, iface)
+}
+
+fn implements_testing_t(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    if let Some(iface) = lookup_named_type(pass, ASSERT_PKG, "TestingT") {
+        if implements_iface(pass, typ, iface) {
+            return true;
+        }
+    }
+    if let Some(iface) = lookup_named_type(pass, REQUIRE_PKG, "TestingT") {
+        if implements_iface(pass, typ, iface) {
+            return true;
+        }
+    }
+    false
+}
+
+fn check_suite_dont_use_pkg(
+    pass: &Pass<'_>,
+    call: &CallMeta<'_>,
+    pending: &mut Vec<Finding>,
+) {
+    if !call.is_pkg {
+        return;
+    }
+    // Raw first arg is `t` for package-level assertions.
+    if call.call.args.len() < 2 {
+        return;
+    }
+    let t = &call.call.args[0];
+    let Expr::CallExpr(ce) = t else {
+        return;
+    };
+    let Expr::SelectorExpr(se) = &*ce.fun else {
+        return;
+    };
+    if !implements_testify_suite(pass, &se.x) {
+        return;
+    }
+    if se.sel.name != "T" {
+        return;
+    }
+    // Prefer Ident receiver (`s.T()`), matching upstream.
+    let Expr::Ident(rcv) = &*se.x else {
+        return;
+    };
+    let mut new_selector = rcv.name.clone();
+    if !call.is_assert {
+        new_selector.push_str(".Require()");
+    }
+    // Two edits: the package name becomes the receiver, and the `s.T(), `
+    // argument disappears. The deletion runs to the *next* argument's start so
+    // that the comma and the space go with it.
+    let edits = vec![
+        TextEdit {
+            pos: call.selector.x.pos().0 as u32,
+            end: call.selector.x.end().0 as u32,
+            new_text: new_selector.clone(),
+        },
+        TextEdit {
+            pos: t.pos().0 as u32,
+            end: call.call.args[1].pos().0 as u32,
+            new_text: String::new(),
+        },
+    ];
+    pending.push(Finding::with_edits(
+        call.call.pos().0 as u32,
+        format!("suite-dont-use-pkg: use {new_selector}.{}", call.fn_name),
+        edits,
+    ));
+}
+
+fn check_suite_extra_assert_call(
+    pass: &Pass<'_>,
+    call: &CallMeta<'_>,
+    opts: &TestifylintOptions,
+    pending: &mut Vec<Finding>,
+) {
+    if call.is_pkg {
+        return;
+    }
+    match opts.suite_extra_assert_call_mode {
+        SuiteExtraAssertCallMode::Require => {
+            let Expr::Ident(x) = &*call.selector.x else {
+                return;
+            };
+            if !implements_testify_suite(pass, &call.selector.x) {
+                return;
+            }
+            // Pure insertion: `s.True` becomes `s.Assert().True`.
+            let at = call.selector.x.end().0 as u32;
+            pending.push(Finding::with_edits(
+                call.call.pos().0 as u32,
+                format!(
+                    "suite-extra-assert-call: use an explicit {}.Assert().{}",
+                    x.name, call.fn_name
+                ),
+                vec![TextEdit {
+                    pos: at,
+                    end: at,
+                    new_text: ".Assert()".to_string(),
+                }],
+            ));
+        }
+        SuiteExtraAssertCallMode::Remove => {
+            let Expr::CallExpr(x) = &*call.selector.x else {
+                return;
+            };
+            let Expr::SelectorExpr(se) = &*x.fun else {
+                return;
+            };
+            if !implements_testify_suite(pass, &se.x) {
+                return;
+            }
+            if se.sel.name != "Assert" {
+                return;
+            }
+            // `Assert().` goes: from the `Assert` identifier to one past the
+            // closing paren, the `+ 1` being the dot that follows it.
+            let edit = TextEdit {
+                pos: se.sel.name_pos.0 as u32,
+                end: (call.selector.x.end().0 + 1) as u32,
+                new_text: String::new(),
+            };
+            pending.push(Finding::with_edits(
+                call.call.pos().0 as u32,
+                format!(
+                    "suite-extra-assert-call: need to simplify the assertion to {}.{}",
+                    expr_string(pass, &se.x),
+                    call.fn_name
+                ),
+                vec![edit],
+            ));
+        }
+    }
+}
+
+fn check_suite_subtest_run(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Finding>) {
+    let Expr::SelectorExpr(se) = &*call.fun else {
+        return;
+    };
+    if se.sel.name != "Run" {
+        return;
+    }
+    let Expr::CallExpr(t_call) = &*se.x else {
+        return;
+    };
+    let Expr::SelectorExpr(t_sel) = &*t_call.fun else {
+        return;
+    };
+    if t_sel.sel.name != "T" {
+        return;
+    }
+    if implements_testify_suite(pass, &t_sel.x) && implements_testing_t(pass, &se.x) {
+        pending.push(Finding::new(call.pos().0 as u32,
+            format!(
+                "suite-subtest-run: use {}.Run to run subtest",
+                expr_string(pass, &t_sel.x)
+            ),
+        ));
+    }
+}
+
+fn is_suite_method(pass: &Pass<'_>, fd: &FuncDecl) -> bool {
+    let Some(recv) = &fd.recv else {
+        return false;
+    };
+    if recv.list.len() != 1 {
+        return false;
+    }
+    let Some(ty) = &recv.list[0].ty else {
+        return false;
+    };
+    implements_testify_suite(pass, ty)
+}
+
+fn is_suite_test_method(name: &str) -> bool {
+    name.starts_with("Test")
+}
+
+fn is_suite_service_method(name: &str) -> bool {
+    matches!(
+        name,
+        "T" | "SetT"
+            | "SetS"
+            | "SetupSuite"
+            | "SetupTest"
+            | "TearDownSuite"
+            | "TearDownTest"
+            | "BeforeTest"
+            | "AfterTest"
+            | "HandleStats"
+            | "SetupSubTest"
+            | "TearDownSubTest"
+    )
+}
+
+/// Upstream `suiteMethodToInterface` (testify suite hook names → interface).
+fn suite_method_iface(name: &str) -> Option<&'static str> {
+    match name {
+        "SetupSuite" => Some("SetupAllSuite"),
+        "SetupTest" => Some("SetupTestSuite"),
+        "TearDownSuite" => Some("TearDownAllSuite"),
+        "TearDownTest" => Some("TearDownTestSuite"),
+        "BeforeTest" => Some("BeforeTest"),
+        "AfterTest" => Some("AfterTest"),
+        "HandleStats" => Some("WithStats"),
+        "SetupSubTest" => Some("SetupSubTest"),
+        "TearDownSubTest" => Some("TearDownSubTest"),
+        _ => None,
+    }
+}
+
+fn check_suite_method_signature(
+    pass: &Pass<'_>,
+    fd: &FuncDecl,
+    pending: &mut Vec<Finding>,
+) {
+    if !is_suite_method(pass, fd) {
+        return;
+    }
+    let method_name = &fd.name.name;
+    let n_params = fd
+        .ty
+        .params
+        .as_ref()
+        .map(|p| p.num_fields())
+        .unwrap_or(0);
+    let n_results = fd
+        .ty
+        .results
+        .as_ref()
+        .map(|p| p.num_fields())
+        .unwrap_or(0);
+
+    if is_suite_test_method(method_name) {
+        if n_params > 0 || n_results > 0 {
+            pending.push(Finding::new(// Upstream reports the *ast.FuncDecl, whose Pos() is the `func`
+                // keyword — not the method name.
+                fd.ty.func.0 as u32,
+                "suite-method-signature: test method should not have any arguments or returning values"
+                    .into(),
+            ));
+        }
+        return;
+    }
+
+    let Some(iface_name) = suite_method_iface(method_name) else {
+        return;
+    };
+    let Some(iface) = lookup_named_type(pass, SUITE_PKG, iface_name) else {
+        return;
+    };
+    let Some(recv_ty) = fd.recv.as_ref().and_then(|r| r.list[0].ty.as_ref()) else {
+        return;
+    };
+    let Some(typ) = type_of(pass, recv_ty) else {
+        return;
+    };
+    if !implements_iface(pass, typ, iface) {
+        pending.push(Finding::new(fd.ty.func.0 as u32,
+            format!("suite-method-signature: method conflicts with suite.{iface_name} interface"),
+        ));
+    }
+}
+
+fn check_suite_broken_parallel(
+    pass: &Pass<'_>,
+    call: &CallExpr,
+    stack: &[walk::NodeRef<'_>],
+    pending: &mut Vec<Finding>,
+) {
+    // The whole `s.T().Parallel()` line goes, up to the start of the next one,
+    // so the newline and the indentation leave with it.
+    let line_delete = |pass: &Pass<'_>| -> Option<TextEdit> {
+        let ft = pass.fset().file(call.pos())?;
+        let line = pass.fset().position(call.pos()).line as usize;
+        if line + 1 > ft.line_count() {
+            return None;
+        }
+        Some(TextEdit {
+            pos: call.pos().0 as u32,
+            end: ft.line_start(line + 1).0 as u32,
+            new_text: String::new(),
+        })
+    };
+    let Expr::SelectorExpr(se) = &*call.fun else {
+        return;
+    };
+    if se.sel.name != "Parallel" {
+        return;
+    }
+    if !implements_testing_t(pass, &se.x) {
+        return;
+    }
+    for node in stack.iter().rev() {
+        if let walk::NodeRef::FuncDecl(fd) = node {
+            if is_suite_method(pass, fd) {
+                let msg = "suite-broken-parallel: testify v1 does not support suite's parallel tests and subtests".to_string();
+                match line_delete(pass) {
+                    Some(edit) => pending.push(Finding::with_edits(
+                        call.pos().0 as u32,
+                        msg,
+                        vec![edit],
+                    )),
+                    None => pending.push(Finding::new(call.pos().0 as u32, msg)),
+                }
+                return;
+            }
+        }
+    }
+}
+
+fn is_helper_call_stmt(stmt: &Stmt, rcv_name: &str) -> bool {
+    let Stmt::ExprStmt(ExprStmt { x, .. }) = stmt else {
+        return false;
+    };
+    let Expr::CallExpr(ce) = x else {
+        return false;
+    };
+    if !ce.args.is_empty() {
+        return false;
+    }
+    let Expr::SelectorExpr(helper_sel) = &*ce.fun else {
+        return false;
+    };
+    if helper_sel.sel.name != "Helper" {
+        return false;
+    }
+    let Expr::CallExpr(t_call) = &*helper_sel.x else {
+        return false;
+    };
+    if !t_call.args.is_empty() {
+        return false;
+    }
+    let Expr::SelectorExpr(t_sel) = &*t_call.fun else {
+        return false;
+    };
+    if t_sel.sel.name != "T" {
+        return false;
+    }
+    matches!(&*t_sel.x, Expr::Ident(id) if id.name == rcv_name)
+}
+
+fn is_assertion_stmt(pass: &Pass<'_>, stmt: &Stmt) -> bool {
+    let Stmt::ExprStmt(ExprStmt { x, .. }) = stmt else {
+        return false;
+    };
+    let Expr::CallExpr(ce) = x else {
+        return false;
+    };
+    new_call_meta(pass, ce).is_some()
+}
+
+fn fn_contains_assertions(pass: &Pass<'_>, fd: &FuncDecl) -> bool {
+    let Some(body) = &fd.body else {
+        return false;
+    };
+    body.list.iter().any(|s| is_assertion_stmt(pass, s))
+}
+
+fn check_suite_thelper(pass: &Pass<'_>, fd: &FuncDecl, pending: &mut Vec<Finding>) {
+    if !is_suite_method(pass, fd) {
+        return;
+    }
+    let name = &fd.name.name;
+    if is_suite_test_method(name) || is_suite_service_method(name) {
+        return;
+    }
+    if !fn_contains_assertions(pass, fd) {
+        return;
+    }
+    let Some(recv) = &fd.recv else {
+        return;
+    };
+    if recv.list[0].names.len() != 1 {
+        return;
+    }
+    let rcv_name = &recv.list[0].names[0].name;
+    let helper_call = format!("{rcv_name}.T().Helper()");
+    let Some(body) = &fd.body else {
+        return;
+    };
+    if body.list.is_empty() {
+        return;
+    }
+    if is_helper_call_stmt(&body.list[0], rcv_name) {
+        return;
+    }
+    // Pure insertion before the first statement, with the blank line upstream
+    // writes. The `\n\n` is not indented: the gofmt pass that follows a fix
+    // puts the new statement on the body's indentation.
+    let at = body.list[0].pos().0 as u32;
+    pending.push(Finding::with_edits(
+        fd.ty.func.0 as u32,
+        format!("suite-thelper: suite helper method must start with {helper_call}"),
+        vec![TextEdit {
+            pos: at,
+            end: at,
+            new_text: format!("{helper_call}\n\n"),
+        }],
+    ));
+}
+
+fn is_suite_after_test_method(name: &str) -> bool {
+    matches!(
+        name,
+        "TearDownSuite" | "TearDownTest" | "AfterTest" | "HandleStats" | "TearDownSubTest"
+    )
+}
+
+fn is_no_error_assertion(fn_name: &str) -> bool {
+    fn_name == "NoError" || fn_name == "NoErrorf"
+}
+
+fn is_require_error_fn(trimmed: &str) -> bool {
+    matches!(
+        trimmed,
+        "Error" | "ErrorIs" | "ErrorAs" | "EqualError" | "ErrorContains" | "NoError" | "NotErrorIs"
+    )
+}
+
+#[derive(Clone, Copy)]
+struct FuncMeta {
+    is_test_cleanup: bool,
+    is_goroutine: bool,
+    is_http_handler: bool,
+}
+
+struct ReqErrCall<'a> {
+    call: &'a CallExpr,
+    /// `(is_assert, fn_name, fn_name_trimmed)` when this is a testify assertion.
+    testify: Option<(bool, String, String)>,
+    root_if_id: Option<u32>,
+    parent_if: Option<&'a IfStmt>,
+    parent_block: Option<&'a BlockStmt>,
+    in_if_cond: bool,
+    in_bool_expr: bool,
+    in_no_error_seq: bool,
+}
+
+/// The outermost `if` of the `if`/`else if` chain this call sits in.
+///
+/// `preorder_stack` hands over the ancestors only, so the whole stack is
+/// ancestry — skipping its last entry (which upstream does because there the
+/// last entry is the call itself) hid the `if` a condition call belongs to.
+fn find_root_if<'a>(stack: &[walk::NodeRef<'a>]) -> Option<&'a IfStmt> {
+    let mut nearest: Option<&IfStmt> = None;
+    let mut nearest_idx = 0usize;
+    for (i, n) in stack.iter().enumerate().rev() {
+        if let walk::NodeRef::IfStmt(s) = n {
+            nearest = Some(s);
+            nearest_idx = i;
+            break;
+        }
+    }
+    let mut cur = nearest?;
+    let mut i = nearest_idx;
+    while i > 0 {
+        if let walk::NodeRef::IfStmt(parent) = stack[i - 1] {
+            cur = parent;
+            i -= 1;
+        } else {
+            break;
+        }
+    }
+    Some(cur)
+}
+
+fn find_nearest_if<'a>(stack: &[walk::NodeRef<'a>]) -> Option<&'a IfStmt> {
+    for n in stack.iter().rev() {
+        if let walk::NodeRef::IfStmt(s) = n {
+            return Some(s);
+        }
+    }
+    None
+}
+
+fn find_nearest_block<'a>(stack: &[walk::NodeRef<'a>]) -> Option<&'a BlockStmt> {
+    for n in stack.iter().rev() {
+        if let walk::NodeRef::BlockStmt(b) = n {
+            return Some(b);
+        }
+    }
+    None
+}
+
+fn find_surrounding_func_meta(pass: &Pass<'_>, stack: &[walk::NodeRef<'_>]) -> Option<(u32, FuncMeta)> {
+    for (i, n) in stack.iter().enumerate().rev() {
+        match n {
+            walk::NodeRef::FuncDecl(fd) => {
+                let mut meta = FuncMeta {
+                    is_test_cleanup: false,
+                    is_goroutine: false,
+                    is_http_handler: mimic_http_handler(pass, &fd.ty),
+                };
+                if is_suite_method(pass, fd) && is_suite_after_test_method(&fd.name.name) {
+                    meta.is_test_cleanup = true;
+                }
+                return Some((fd.ty.id, meta));
+            }
+            walk::NodeRef::FuncLit(fl) => {
+                let mut meta = FuncMeta {
+                    is_test_cleanup: false,
+                    is_goroutine: false,
+                    is_http_handler: mimic_http_handler(pass, &fl.ty),
+                };
+                if i >= 2 {
+                    if let walk::NodeRef::CallExpr(ce) = stack[i - 1] {
+                        if let Expr::SelectorExpr(se) = &*ce.fun {
+                            if se.sel.name == "Cleanup" && implements_testing_t(pass, &se.x) {
+                                meta.is_test_cleanup = true;
+                            }
+                        }
+                        if matches!(stack[i - 2], walk::NodeRef::GoStmt(_)) {
+                            meta.is_goroutine = true;
+                        }
+                    }
+                }
+                return Some((fl.ty.id, meta));
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn call_in_stmt_tree(root: &Stmt, target_id: u32) -> bool {
+    let mut found = false;
+    walk::preorder(walk::stmt_ref(root), |n| {
+        if let walk::NodeRef::CallExpr(ce) = n {
+            if ce.id == target_id {
+                found = true;
+                return false;
+            }
+        }
+        true
+    });
+    found
+}
+
+fn mark_calls_in_no_error_sequence(calls_by_block: &HashMap<u32, Vec<usize>>, calls: &mut [ReqErrCall<'_>]) {
+    for idxs in calls_by_block.values() {
+        for (pos, &ci) in idxs.iter().enumerate() {
+            let Some((_, fn_name, _)) = calls[ci].testify.as_ref() else {
+                continue;
+            };
+            let prev_is = pos
+                .checked_sub(1)
+                .and_then(|p| idxs.get(p).copied())
+                .and_then(|pi| calls[pi].testify.as_ref())
+                .is_some_and(|( _, n, _)| is_no_error_assertion(n));
+            let next_is = idxs
+                .get(pos + 1)
+                .copied()
+                .and_then(|ni| calls[ni].testify.as_ref())
+                .is_some_and(|(_, n, _)| is_no_error_assertion(n));
+            if is_no_error_assertion(fn_name) && (prev_is || next_is) {
+                calls[ci].in_no_error_seq = true;
+            }
+        }
+    }
+}
+
+/// Upstream `needToSkipBasedOnContext`.
+///
+/// `func_idxs` is the enclosing function's calls in walk order and `pos_in_func`
+/// the current call's place in it — upstream's `otherCalls` / `currCallIndex`.
+/// Both halves of the final rule count **every** recorded call, not only the
+/// testify ones: `isLastCallInBlock` compares against `blockCalls[len-1]`, and
+/// the "anything after me" scan breaks on the first later call of any kind.
+///
+/// Filtering to testify calls (as this used to) makes an assertion look like
+/// the last thing the test does whenever the statements after it are ordinary
+/// calls — `assert.ErrorIs(t, err, errSentinel)` followed by `nop()` and three
+/// `go`/`wg.Go`/`http.HandlerFunc` closures was silent here and reported by
+/// golangci-lint. What upstream keeps out of the list instead is *nested*
+/// calls: it stops descending once a call is recognized as testify, so
+/// `assert.NoError(t, f())` never records `f()`.
+fn need_skip_require_error(
+    calls: &[ReqErrCall<'_>],
+    func_idxs: &[usize],
+    pos_in_func: usize,
+    block_idxs: &HashMap<u32, Vec<usize>>,
+) -> bool {
+    let curr_idx = func_idxs[pos_in_func];
+    let curr = &calls[curr_idx];
+    if curr.in_if_cond || curr.in_bool_expr || curr.in_no_error_seq {
+        return true;
+    }
+
+    if let Some(root_id) = curr.root_if_id {
+        for &i in func_idxs {
+            let c = &calls[i];
+            if c.root_if_id == Some(root_id) && c.in_if_cond {
+                return true;
+            }
+        }
+    }
+
+    let Some(block) = curr.parent_block else {
+        return false;
+    };
+    let Some(block_calls) = block_idxs.get(&block.id) else {
+        return false;
+    };
+    let is_last = block_calls.last().copied() == Some(curr_idx);
+
+    let mut no_calls_after = true;
+    let block_ends_with_return = matches!(block.list.last(), Some(Stmt::ReturnStmt(_)));
+    if !block_ends_with_return {
+        for &next_idx in &func_idxs[pos_in_func + 1..] {
+            let next = &calls[next_idx];
+            let mut next_in_else = false;
+            if let Some(p_if) = curr.parent_if {
+                if let Some(else_stmt) = &p_if.else_ {
+                    next_in_else = call_in_stmt_tree(else_stmt, next.call.id);
+                }
+            }
+            if !next_in_else {
+                no_calls_after = false;
+                break;
+            }
+        }
+    }
+
+    is_last && no_calls_after
+}
+
+fn check_require_error(
+    pass: &Pass<'_>,
+    file: &File,
+    opts: &TestifylintOptions,
+    pending: &mut Vec<Finding>,
+) {
+    let fn_pat = opts
+        .require_error_fn_pattern
+        .as_deref()
+        .and_then(|p| Regex::new(p).ok());
+
+    let mut calls_by_func: HashMap<u32, Vec<usize>> = HashMap::new();
+    let mut func_meta: HashMap<u32, FuncMeta> = HashMap::new();
+    let mut calls: Vec<ReqErrCall<'_>> = Vec::new();
+
+    let mut stack = Vec::new();
+    walk::preorder_stack(NodeRef::File(file), &mut stack, |n, stk| {
+        let walk::NodeRef::CallExpr(ce) = n else {
+            return true;
+        };
+        let Some((fkey, meta)) = find_surrounding_func_meta(pass, stk) else {
+            return true;
+        };
+        func_meta.entry(fkey).or_insert(meta);
+
+        // Upstream indexes a stack whose last entry is the call itself
+        // (`stack[len(stack)-2]` is its parent); `preorder_stack` hands over
+        // the ancestors only, so the parent is the last entry. Reading it as
+        // upstream does made every `if assert.NoError(t, err) {` a finding —
+        // and, through `root_if`, every assertion in that `if` body too
+        // (dapr `tests/integration/framework/process/daprd`).
+        let prev_is_if = matches!(stk.last(), Some(walk::NodeRef::IfStmt(_)));
+        let prev_is_assign = matches!(stk.last(), Some(walk::NodeRef::AssignStmt(_)));
+        let prev_prev_is_if = matches!(stk.iter().rev().nth(1), Some(walk::NodeRef::IfStmt(_)));
+        let in_if_cond = prev_is_if || (prev_prev_is_if && prev_is_assign);
+        let in_bool_expr = matches!(stk.last(), Some(walk::NodeRef::BinaryExpr(_)));
+
+        let parent_if = find_nearest_if(stk);
+        let root_if = find_root_if(stk);
+        let parent_block = find_nearest_block(stk);
+
+        let testify = new_call_meta(pass, ce).map(|m| {
+            (m.is_assert, m.fn_name.clone(), m.fn_name_trimmed.clone())
+        });
+
+        let idx = calls.len();
+        calls.push(ReqErrCall {
+            call: ce,
+            testify,
+            root_if_id: root_if.map(|i| i.id),
+            parent_if,
+            parent_block,
+            in_if_cond,
+            in_bool_expr,
+            in_no_error_seq: false,
+        });
+        calls_by_func.entry(fkey).or_default().push(idx);
+        // Upstream: `return testifyCall == nil` — "do not support asserts in
+        // asserts". `preorder_stack` prunes the subtree on false, so the walk
+        // continues with the siblings; what it stops is recording `f()` in
+        // `assert.NoError(t, f())` as a call of its own.
+        calls[idx].testify.is_none()
+    });
+
+    let mut calls_by_block: HashMap<u32, Vec<usize>> = HashMap::new();
+    for (i, c) in calls.iter().enumerate() {
+        if let Some(b) = c.parent_block {
+            calls_by_block.entry(b.id).or_default().push(i);
+        }
+    }
+    mark_calls_in_no_error_sequence(&calls_by_block, &mut calls);
+
+    for (fkey, idxs) in &calls_by_func {
+        let meta = func_meta.get(fkey).copied().unwrap_or(FuncMeta {
+            is_test_cleanup: false,
+            is_goroutine: false,
+            is_http_handler: false,
+        });
+        if meta.is_test_cleanup || meta.is_goroutine || meta.is_http_handler {
+            continue;
+        }
+        for (pos, &i) in idxs.iter().enumerate() {
+            let c = &calls[i];
+            let Some((is_assert, fn_name, trimmed)) = c.testify.as_ref() else {
+                continue;
+            };
+            if !is_assert {
+                continue;
+            }
+            // Upstream skips CollectT (`Obj.Name() != "Assertions"`). Package
+            // and Assertions methods are accepted; CollectT is not modeled yet.
+            if !is_require_error_fn(trimmed) {
+                continue;
+            }
+            if need_skip_require_error(&calls, idxs, pos, &calls_by_block) {
+                continue;
+            }
+            if let Some(pat) = &fn_pat {
+                if !pat.is_match(fn_name) {
+                    continue;
+                }
+            }
+            pending.push(Finding::new(c.call.pos().0 as u32,
+                "require-error: for error assertions use require".into(),
+            ));
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GoRequireVerdict {
+    NoExit,
+    Require,
+    AssertFailNow,
+}
+
+fn go_require_verdict(call: &CallMeta<'_>) -> GoRequireVerdict {
+    if !call.is_assert {
+        return GoRequireVerdict::Require;
+    }
+    if call.fn_name_trimmed == "FailNow" {
+        return GoRequireVerdict::AssertFailNow;
+    }
+    GoRequireVerdict::NoExit
+}
+
+fn has_testing_t_param(pass: &Pass<'_>, ft: &FuncType) -> bool {
+    let Some(params) = &ft.params else {
+        return false;
+    };
+    for field in &params.list {
+        let Some(ty) = &field.ty else {
+            continue;
+        };
+        if implements_testing_t(pass, ty) {
+            return true;
+        }
+    }
+    false
+}
+
+fn is_testing_func_or_method(pass: &Pass<'_>, fd: &FuncDecl) -> bool {
+    has_testing_t_param(pass, &fd.ty) || is_suite_method(pass, fd)
+}
+
+fn is_subtest_run(pass: &Pass<'_>, ce: &CallExpr) -> bool {
+    let Expr::SelectorExpr(se) = &*ce.fun else {
+        return false;
+    };
+    if se.sel.name != "Run" {
+        return false;
+    }
+    implements_testing_t(pass, &se.x) || implements_testify_suite(pass, &se.x)
+}
+
+fn is_named_pkg_type(pass: &Pass<'_>, typ: TypeId, pkg_path: &str, name: &str) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    let typ = match artifacts.types.get(typ) {
+        TypeData::Pointer(p) => unalias_readonly(&artifacts.types, p.elem()),
+        _ => typ,
+    };
+    let TypeData::Named(_) = artifacts.types.get(typ) else {
+        return false;
+    };
+    let obj = named_obj(&artifacts.types, typ);
+    if obj.name(&artifacts.objects) != name {
+        return false;
+    }
+    let Some(pkg_id) = obj.pkg(&artifacts.objects) else {
+        return false;
+    };
+    cut_vendor(artifacts.packages.get(pkg_id).path()) == pkg_path
+}
+
+fn is_waitgroup_go(pass: &Pass<'_>, ce: &CallExpr) -> bool {
+    let Expr::SelectorExpr(se) = &*ce.fun else {
+        return false;
+    };
+    if se.sel.name != "Go" {
+        return false;
+    }
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(obj_id) = info.uses.get(&se.sel.id).copied() else {
+        return false;
+    };
+    if !matches!(artifacts.objects.get(obj_id), ObjectData::Func(_)) {
+        return false;
+    }
+    let Some(sig_id) = obj_id.typ(&artifacts.objects) else {
+        return false;
+    };
+    let Some(recv) = signature_recv(&artifacts.types, sig_id) else {
+        return false;
+    };
+    let Some(recv_typ) = recv.typ(&artifacts.objects) else {
+        return false;
+    };
+    is_named_pkg_type(pass, recv_typ, "sync", "WaitGroup")
+}
+
+/// Whether `stack` places us in the goroutine that runs the test function.
+/// `None` = not inside a testing function (insufficient context).
+fn in_goroutine_running_test_func(pass: &Pass<'_>, stack: &[NodeRef<'_>]) -> Option<bool> {
+    let mut status: Option<bool> = None;
+    for n in stack {
+        match n {
+            NodeRef::FuncDecl(fd) if is_testing_func_or_method(pass, fd) => {
+                status = Some(true);
+            }
+            NodeRef::FuncLit(fl) if has_testing_t_param(pass, &fl.ty) => {
+                status = Some(true);
+            }
+            NodeRef::GoStmt(_) => {
+                if status.is_some() {
+                    status = Some(false);
+                }
+            }
+            NodeRef::CallExpr(ce) => {
+                // Only a `go` statement leaves the test's goroutine upstream.
+                // `wg.Go(func(){…})` does too in fact, but testifylint v1.6.4
+                // does not know it — its walk names `*ast.GoStmt` and nothing
+                // else — and knowing better here is a finding golangci-lint
+                // does not produce (jaeger `bad_test.go`).
+                if status.is_some() && is_subtest_run(pass, ce) {
+                    status = Some(true);
+                }
+            }
+            _ => {}
+        }
+    }
+    status
+}
+
+fn func_type_param_exprs(ft: &FuncType) -> Vec<&Expr> {
+    let mut out = Vec::new();
+    let Some(params) = &ft.params else {
+        return out;
+    };
+    for field in &params.list {
+        let Some(ty) = &field.ty else {
+            continue;
+        };
+        if field.names.is_empty() {
+            out.push(ty);
+        } else {
+            for _ in &field.names {
+                out.push(ty);
+            }
+        }
+    }
+    out
+}
+
+fn mimic_http_handler(pass: &Pass<'_>, ft: &FuncType) -> bool {
+    let Some(hf) = lookup_named_type(pass, "net/http", "HandlerFunc") else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let hf = unalias_readonly(&artifacts.types, hf);
+    let under = hf.underlying(&artifacts.types);
+    let TypeData::Signature(_) = artifacts.types.get(under) else {
+        return false;
+    };
+    let Some(params_tup) = signature_params(&artifacts.types, under) else {
+        return false;
+    };
+    let n = tuple_len(&artifacts.types, Some(params_tup));
+    let ast_params = func_type_param_exprs(ft);
+    if ast_params.len() != n {
+        return false;
+    }
+    for (i, ast_ty) in ast_params.iter().enumerate() {
+        let want = tuple_at(&artifacts.types, params_tup, i);
+        let Some(want_ty) = want.typ(&artifacts.objects) else {
+            return false;
+        };
+        let Some(got_ty) = type_of(pass, ast_ty) else {
+            return false;
+        };
+        if !types_identical(pass, got_ty, want_ty) {
+            return false;
+        }
+    }
+    true
+}
+
+fn surrounding_func_is_http_handler(pass: &Pass<'_>, stack: &[NodeRef<'_>]) -> bool {
+    for n in stack.iter().rev() {
+        match n {
+            NodeRef::FuncDecl(fd) => return mimic_http_handler(pass, &fd.ty),
+            NodeRef::FuncLit(fl) => return mimic_http_handler(pass, &fl.ty),
+            _ => {}
+        }
+    }
+    false
+}
+
+fn collect_test_decls<'a>(pass: &Pass<'_>, file: &'a File) -> HashMap<ObjectId, &'a FuncDecl> {
+    let mut map = HashMap::new();
+    let Some(info) = pass.types_info() else {
+        return map;
+    };
+    for decl in &file.decls {
+        let Decl::FuncDecl(fd) = decl else {
+            continue;
+        };
+        if !is_testing_func_or_method(pass, fd) {
+            continue;
+        }
+        if let Some(oid) = info.defs.get(&fd.name.id).copied().flatten() {
+            map.insert(oid, fd);
+        }
+    }
+    map
+}
+
+fn called_func_obj(pass: &Pass<'_>, ce: &CallExpr) -> Option<ObjectId> {
+    let info = pass.types_info()?;
+    match &*ce.fun {
+        Expr::Ident(id) => info
+            .uses
+            .get(&id.id)
+            .copied()
+            .or_else(|| info.defs.get(&id.id).copied().flatten()),
+        Expr::SelectorExpr(sel) => info.uses.get(&sel.sel.id).copied(),
+        Expr::IndexExpr(ix) => {
+            let Expr::Ident(id) = &*ix.x else {
+                return None;
+            };
+            info.uses
+                .get(&id.id)
+                .copied()
+                .or_else(|| info.defs.get(&id.id).copied().flatten())
+        }
+        Expr::IndexListExpr(ix) => {
+            let Expr::Ident(id) = &*ix.x else {
+                return None;
+            };
+            info.uses
+                .get(&id.id)
+                .copied()
+                .or_else(|| info.defs.get(&id.id).copied().flatten())
+        }
+        _ => None,
+    }
+}
+
+fn check_go_require_func(
+    pass: &Pass<'_>,
+    fd: &FuncDecl,
+    tests: &HashMap<ObjectId, &FuncDecl>,
+    processed: &mut HashMap<ObjectId, GoRequireVerdict>,
+) -> GoRequireVerdict {
+    let Some(info) = pass.types_info() else {
+        return GoRequireVerdict::NoExit;
+    };
+    let Some(self_oid) = info.defs.get(&fd.name.id).copied().flatten() else {
+        return GoRequireVerdict::NoExit;
+    };
+    if let Some(v) = processed.get(&self_oid).copied() {
+        return v;
+    }
+
+    let mut result = GoRequireVerdict::NoExit;
+    let body = match &fd.body {
+        Some(b) => b,
+        None => {
+            processed.insert(self_oid, result);
+            return result;
+        }
+    };
+
+    // Upstream is `ast.Inspect`: every `return false` here prunes one subtree
+    // and the walk goes on. `go func(){…}()` and a testify call that has been
+    // classified are both pruned rather than terminal, so anything after them
+    // in the same body is still examined.
+    walk::preorder_prune(NodeRef::BlockStmt(body), |n| {
+        if result != GoRequireVerdict::NoExit {
+            return false;
+        }
+        match n {
+            NodeRef::GoStmt(_) => return false,
+            NodeRef::CallExpr(ce) => {
+                if let Some(meta) = new_call_meta(pass, ce) {
+                    let v = go_require_verdict(&meta);
+                    if v != GoRequireVerdict::NoExit {
+                        result = v;
+                        processed.insert(self_oid, v);
+                    }
+                    return false;
+                }
+                if let Some(oid) = called_func_obj(pass, ce) {
+                    if oid == self_oid {
+                        return true;
+                    }
+                    if let Some(called) = tests.get(&oid).copied() {
+                        let v = check_go_require_func(pass, called, tests, processed);
+                        if v != GoRequireVerdict::NoExit {
+                            result = v;
+                            return false;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        true
+    });
+
+    processed.entry(self_oid).or_insert(result);
+    result
+}
+
+fn report_go_require_call(
+    call: &CallMeta<'_>,
+    http_handler: bool,
+    pending: &mut Vec<Finding>,
+) {
+    match go_require_verdict(call) {
+        GoRequireVerdict::Require => {
+            let msg = if http_handler {
+                "go-require: do not use require in http handlers"
+            } else {
+                "go-require: require must only be used in the goroutine running the test function"
+            };
+            pending.push(Finding::new(call.call.pos().0 as u32, msg.into()));
+        }
+        GoRequireVerdict::AssertFailNow => {
+            let target = call_fn_string(call);
+            let msg = if http_handler {
+                format!("go-require: do not use {target} in http handlers")
+            } else {
+                format!(
+                    "go-require: {target} must only be used in the goroutine running the test function"
+                )
+            };
+            pending.push(Finding::new(call.call.pos().0 as u32, msg));
+        }
+        GoRequireVerdict::NoExit => {}
+    }
+}
+
+fn check_go_require(
+    pass: &Pass<'_>,
+    file: &File,
+    opts: &TestifylintOptions,
+    pending: &mut Vec<Finding>,
+) {
+    let tests = collect_test_decls(pass, file);
+    let mut processed: HashMap<ObjectId, GoRequireVerdict> = HashMap::new();
+
+    let mut stack = Vec::new();
+    walk::preorder_stack(NodeRef::File(file), &mut stack, |n, stk| {
+        let NodeRef::CallExpr(ce) = n else {
+            return true;
+        };
+
+        let in_test_go = in_goroutine_running_test_func(pass, stk);
+        if in_test_go == Some(false) {
+            if let Some(meta) = new_call_meta(pass, ce) {
+                report_go_require_call(&meta, false, pending);
+                return true;
+            }
+            if let Some(oid) = called_func_obj(pass, ce) {
+                if let Some(fd) = tests.get(&oid).copied() {
+                    if check_go_require_func(pass, fd, &tests, &mut processed)
+                        != GoRequireVerdict::NoExit
+                    {
+                        let caller = expr_string(pass, &ce.fun);
+                        pending.push(Finding::new(ce.pos().0 as u32,
+                            format!(
+                                "go-require: {caller} contains assertions that must only be used in the goroutine running the test function"
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
+        true
+    });
+
+    if !opts.go_require_ignore_http_handlers {
+        let mut stack = Vec::new();
+        walk::preorder_stack(NodeRef::File(file), &mut stack, |n, stk| {
+            let NodeRef::CallExpr(ce) = n else {
+                return true;
+            };
+            if !surrounding_func_is_http_handler(pass, stk) {
+                return true;
+            }
+            if let Some(meta) = new_call_meta(pass, ce) {
+                report_go_require_call(&meta, true, pending);
+            }
+            true
+        });
+    }
+}
+
+fn is_testify_mock_method(pass: &Pass<'_>, call: &CallExpr, method_name: &str, receiver_name: &str) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Expr::SelectorExpr(sel) = &*call.fun else {
+        return false;
+    };
+    let Some(obj_id) = info.uses.get(&sel.sel.id).copied() else {
+        return false;
+    };
+    if !matches!(artifacts.objects.get(obj_id), ObjectData::Func(_)) {
+        return false;
+    }
+    if obj_id.name(&artifacts.objects) != method_name {
+        return false;
+    }
+    let Some(pkg_path) = code::object_pkg_path(pass, obj_id) else {
+        return false;
+    };
+    if cut_vendor(&pkg_path) != MOCK_PKG {
+        return false;
+    }
+    let Some(sig_id) = obj_id.typ(&artifacts.objects) else {
+        return false;
+    };
+    let Some(recv) = signature_recv(&artifacts.types, sig_id) else {
+        return false;
+    };
+    let Some(recv_typ) = recv.typ(&artifacts.objects) else {
+        return false;
+    };
+    is_named_pkg_type(pass, recv_typ, MOCK_PKG, receiver_name)
+}
+
+fn mock_method_name(pass: &Pass<'_>, call: &CallExpr) -> Option<String> {
+    let first = call.args.first()?;
+    let name = code::expr_to_string(pass, first)?;
+    is_identifier(&name).then_some(name)
+}
+
+fn expr_addressable(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    info.types
+        .get(&expr.id())
+        .is_some_and(|tav| tav.mode == OperandMode::Variable)
+}
+
+fn lookup_method_on_type(
+    pass: &Pass<'_>,
+    typ: TypeId,
+    addressable: bool,
+    name: &str,
+) -> Option<ObjectId> {
+    with_types_mut(pass, |types, objects, packages| {
+        match lookup_field_or_method(types, objects, packages, typ, addressable, None, name) {
+            LookupResult::Found { obj, .. } => {
+                matches!(objects.get(obj), ObjectData::Func(_)).then_some(obj)
+            }
+            _ => None,
+        }
+    })
+    .flatten()
+}
+
+fn func_signature(pass: &Pass<'_>, obj: ObjectId) -> Option<TypeId> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    obj.typ(&artifacts.objects)
+}
+
+fn is_assignable_expr(pass: &Pass<'_>, expr: &Expr, target: TypeId) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    with_types_mut(pass, |types, objects, packages| {
+        api_assignable_to(types, objects, packages, typ, target)
+    })
+    .unwrap_or(false)
+}
+
+fn call_args_match(pass: &Pass<'_>, sig: TypeId, args: &[Expr], ellipsis_call: bool) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let params = signature_params(&artifacts.types, sig);
+    let variadic = signature_variadic(&artifacts.types, sig);
+    let nparams = tuple_len(&artifacts.types, params);
+
+    if ellipsis_call {
+        if !variadic || args.len() != nparams {
+            return false;
+        }
+        // Non-variadic prefix + final slice arg assignable to `...T` param.
+        for (i, arg) in args.iter().enumerate() {
+            let Some(params_id) = params else {
+                return false;
+            };
+            let param = tuple_at(&artifacts.types, params_id, i);
+            let Some(param_ty) = param.typ(&artifacts.objects) else {
+                return false;
+            };
+            if !is_assignable_expr(pass, arg, param_ty) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    if variadic {
+        if nparams == 0 || args.len() < nparams - 1 {
+            return false;
+        }
+        let Some(params_id) = params else {
+            return false;
+        };
+        let fixed = nparams - 1;
+        for (i, arg) in args.iter().take(fixed).enumerate() {
+            let param = tuple_at(&artifacts.types, params_id, i);
+            let Some(param_ty) = param.typ(&artifacts.objects) else {
+                return false;
+            };
+            if !is_assignable_expr(pass, arg, param_ty) {
+                return false;
+            }
+        }
+        let variadic_param = tuple_at(&artifacts.types, params_id, fixed);
+        let Some(slice_ty) = variadic_param.typ(&artifacts.objects) else {
+            return false;
+        };
+        let slice_ty = unalias_readonly(&artifacts.types, slice_ty);
+        if !matches!(artifacts.types.get(slice_ty), TypeData::Slice(_)) {
+            return false;
+        }
+        let elem = slice_elem(&artifacts.types, slice_ty);
+        for arg in &args[fixed..] {
+            if !is_assignable_expr(pass, arg, elem) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    if args.len() != nparams {
+        return false;
+    }
+    let Some(params_id) = params else {
+        return nparams == 0;
+    };
+    for (i, arg) in args.iter().enumerate() {
+        let param = tuple_at(&artifacts.types, params_id, i);
+        let Some(param_ty) = param.typ(&artifacts.objects) else {
+            return false;
+        };
+        if !is_assignable_expr(pass, arg, param_ty) {
+            return false;
+        }
+    }
+    true
+}
+
+fn check_mock_expect(
+    pass: &Pass<'_>,
+    call: &CallExpr,
+    pending: &mut Vec<Finding>,
+) {
+    if !is_testify_mock_method(pass, call, "On", "Mock") {
+        return;
+    }
+    let Some(method_name) = mock_method_name(pass, call) else {
+        return;
+    };
+    let Expr::SelectorExpr(sel) = &*call.fun else {
+        return;
+    };
+    let Some(recv_typ) = type_of(pass, &sel.x) else {
+        return;
+    };
+    let addressable = expr_addressable(pass, &sel.x);
+    let Some(expect_method) = lookup_method_on_type(pass, recv_typ, addressable, "EXPECT") else {
+        return;
+    };
+    let Some(expect_sig) = func_signature(pass, expect_method) else {
+        return;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return;
+    };
+    if tuple_len(&artifacts.types, signature_params(&artifacts.types, expect_sig)) != 0 {
+        return;
+    }
+    if tuple_len(&artifacts.types, signature_results(&artifacts.types, expect_sig)) != 1 {
+        return;
+    }
+    let Some(results) = signature_results(&artifacts.types, expect_sig) else {
+        return;
+    };
+    let result_var = tuple_at(&artifacts.types, results, 0);
+    let Some(result_typ) = result_var.typ(&artifacts.objects) else {
+        return;
+    };
+    let Some(method) = lookup_method_on_type(pass, result_typ, false, &method_name) else {
+        return;
+    };
+    let Some(method_sig) = func_signature(pass, method) else {
+        return;
+    };
+    let on_args = if call.args.len() > 1 {
+        &call.args[1..]
+    } else {
+        &[][..]
+    };
+    if !call_args_match(pass, method_sig, on_args, call.ellipsis.is_valid()) {
+        return;
+    }
+    let receiver = expr_pretty(&sel.x);
+    pending.push(Finding::new(call.pos().0 as u32,
+        format!("mock-expect: use {receiver}.EXPECT().{method_name}(...)"),
+    ));
+}
+
+fn check_blank_import(file: &File, pending: &mut Vec<Finding>) {
+    const BAD: &[&str] = &[
+        TESTIFY_ROOT,
+        ASSERT_PKG,
+        HTTP_PKG,
+        MOCK_PKG,
+        REQUIRE_PKG,
+        SUITE_PKG,
+    ];
+    for imp in &file.imports {
+        let ImportSpec { name: Some(name), path, .. } = imp else {
+            continue;
+        };
+        if name.name != "_" {
+            continue;
+        }
+        let pkg = unquote_import(&path.value);
+        if BAD.contains(&pkg) {
+            pending.push(Finding::new(path.value_pos.0 as u32,
+                format!("blank-import: avoid blank import of {pkg} as it does nothing"),
+            ));
+        }
+    }
+}
+
+fn check_call(
+    pass: &Pass<'_>,
+    call: &CallMeta<'_>,
+    enabled: &HashSet<String>,
+    opts: &TestifylintOptions,
+    pending: &mut Vec<Finding>,
+) {
+    // Priority mirrors upstream registry order among implemented checkers.
+    let before = pending.len();
+    if enabled.contains("zero") {
+        check_zero(pass, call, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
+    if enabled.contains("time-compare") {
+        check_time_compare(pass, call, opts, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
+    if enabled.contains("float-compare") {
+        check_float_compare(pass, call, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
+    if enabled.contains("bool-compare") {
+        check_bool_compare(pass, call, opts, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
+    if enabled.contains("empty") {
+        check_empty(pass, call, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
+    if enabled.contains("negative-positive") {
+        check_negative_positive(pass, call, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
+    if enabled.contains("compares") {
+        check_compares(pass, call, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
+    if enabled.contains("contains") {
+        check_contains(pass, call, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
+    if enabled.contains("error-nil") {
+        check_error_nil(pass, call, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
+    if enabled.contains("nil-compare") {
+        check_nil_compare(pass, call, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
+    if enabled.contains("error-is-as") {
+        check_error_is_as(pass, call, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
+    if enabled.contains("encoded-compare") {
+        check_encoded_compare(pass, call, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
+    if enabled.contains("expected-actual") {
+        check_expected_actual(pass, call, opts, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
+    if enabled.contains("len") {
+        check_len(pass, call, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
+    if enabled.contains("equal-values") {
+        check_equal_values(pass, call, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
+    if enabled.contains("regexp") {
+        check_regexp(pass, call, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
+    if enabled.contains("suite-extra-assert-call") {
+        check_suite_extra_assert_call(pass, call, opts, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
+    if enabled.contains("suite-dont-use-pkg") {
+        check_suite_dont_use_pkg(pass, call, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
+    if enabled.contains("useless-assert") {
+        check_useless_assert(pass, call, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
+    if enabled.contains("formatter") {
+        check_formatter(pass, call, opts, pending);
+    }
+}
+
+fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
+    let _ = pass
+        .result_of::<inspect::InspectResult>(inspect::analyzer())
+        .ok_or_else(|| "testifylint requires inspect analyzer".to_string())?;
+
+    // Fresh scratch for this package (rayon workers reuse threads across pkgs).
+    reset_type_scratch();
+    reset_named_type_memo();
+
+    let options = pass
+        .settings::<TestifylintOptions>("testifylint")
+        .cloned()
+        .unwrap_or_default();
+    let enabled = enabled_checkers(&options);
+    let mut pending = Vec::new();
+
+    for file in pass.files() {
+        if enabled.contains("blank-import") {
+            check_blank_import(file, &mut pending);
+        }
+        for decl in &file.decls {
+            let Decl::FuncDecl(fd) = decl else {
+                continue;
+            };
+            if enabled.contains("suite-method-signature") {
+                check_suite_method_signature(pass, fd, &mut pending);
+            }
+            if enabled.contains("suite-thelper") {
+                check_suite_thelper(pass, fd, &mut pending);
+            }
+        }
+        let mut stack = Vec::new();
+        walk::preorder_stack(NodeRef::File(file), &mut stack, |n, stk| {
+            if let NodeRef::CallExpr(ce) = n {
+                if enabled.contains("suite-broken-parallel") {
+                    check_suite_broken_parallel(pass, ce, stk, &mut pending);
+                }
+                if enabled.contains("suite-subtest-run") {
+                    check_suite_subtest_run(pass, ce, &mut pending);
+                }
+                if enabled.contains("mock-expect") {
+                    check_mock_expect(pass, ce, &mut pending);
+                }
+                if let Some(meta) = new_call_meta(pass, ce) {
+                    check_call(pass, &meta, &enabled, &options, &mut pending);
+                }
+            }
+            true
+        });
+        if enabled.contains("require-error") {
+            check_require_error(pass, file, &options, &mut pending);
+        }
+        if enabled.contains("go-require") {
+            check_go_require(pass, file, &options, &mut pending);
+        }
+    }
+
+    for finding in pending {
+        let Finding {
+            pos,
+            message,
+            edits,
+        } = finding;
+        if edits.is_empty() {
+            pass.reportf(pos, &message);
+            continue;
+        }
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: String::new(),
+                text_edits: edits,
+            }],
+            ..Diagnostic::default()
+        });
+    }
+    Ok(None)
+}
+
+pub fn analyzer() -> &'static Analyzer {
+    static A: OnceLock<Analyzer> = OnceLock::new();
+    A.get_or_init(|| Analyzer {
+        name: "testifylint",
+        doc: "Checks usage of github.com/stretchr/testify",
+        url: "https://github.com/Antonboom/testifylint",
+        run: run as RunFn,
+        run_despite_errors: false,
+        requires: vec![inspect::analyzer()],
+        fact_types: Vec::new(),
+    })
+}

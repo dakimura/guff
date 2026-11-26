@@ -1,0 +1,57 @@
+# Rust build artifacts
+/target/
+**/target/
+
+# Backtraces
+*.rs.bk
+
+# macOS
+.DS_Store
+
+# Environment
+.env
+
+# Shared OSS corpus clones
+/corpus/cache/
+
+# Benchmark corpus clones and raw run artifacts (keep RESULTS.md / SCOREBOARD.md)
+/benchmarks/corpus/
+/benchmarks/results/*.tsv
+/benchmarks/results/*.md
+!/benchmarks/results/RESULTS.md
+!/benchmarks/results/SCOREBOARD.md
+
+# Compat harness clones and raw run artifacts (keep RESULTS.md)
+/compat/corpus/
+/compat/results/*
+!/compat/results/RESULTS.md
+!/compat/results/RESULTS.isolate.md
+!/compat/results/.gitkeep
+
+# Golden cases are materialized from their canonical sources on every run.
+/compat/golden/.work/
+/compat/fix/.work/
+
+# golangci-lint binaries compat/drift.py downloads to compare versions.
+/compat/.tools/
+
+# Prometheus regress harness raw run artifacts (keep RESULTS*.md + baseline*.json)
+/regress/results/*
+!/regress/results/RESULTS.md
+!/regress/results/RESULTS.full.md
+# Local prometheus checkout symlink used by regress/run.sh
+/prometheus
+
+# Local agent scratch
+/agent.log
+/loop-agent.sh
+
+__pycache__/
+*.pyc
+
+# `go build ./...` inside compat/gospans drops its binary next to the source.
+/compat/gospans/gospans
+
+# Claude Code session state: worktrees, local settings.
+.claude/
+

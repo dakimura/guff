@@ -1,0 +1,40 @@
+# Golden case: nolintlint with every requirement turned on
+# (COMPAT-HARDENING Phase 4).
+#
+# Same fixtures as the `nolint` case, so the diff between the two goldens is
+# exactly what these three settings buy:
+#
+#   require-specific     — a bare `//nolint` must name its linters
+#   require-explanation  — a directive must carry a `// why` comment
+#   allow-no-explanation — …except for the linters listed here
+#
+# `errcheck` is in allow-no-explanation and `ineffassign` is not, which is what
+# makes the fixture's `//nolint:errcheck,ineffassign` still report: upstream
+# requires an explanation as soon as *one* named linter is outside the list.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - misspell
+    - nolintlint
+  settings:
+    govet:
+      enable:
+        - printf
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-no-explanation:
+        - errcheck
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

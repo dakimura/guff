@@ -1,0 +1,8 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# COMPAT-HARDENING Phase 4. The four `issues-*max*` cases share this one file;
+# only their `config.yml` differs, so the diff between two of their goldens is
+# the limit's effect. `cases/issues-limits` is the unlimited baseline.
+
+limits/limits.go   crates/guff-lint/tests/testdata/issuesem/limits/limits.go

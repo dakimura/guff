@@ -1,0 +1,10 @@
+# `formatters.enable` empty. golangci-lint's `MetaFormatter.Format` then calls
+# `go/format.Source` directly — plain gofmt, *not* the gofmt formatter — so the
+# `simplify: true` config default never reaches it.
+#
+# This case exists to pin that distinction. Every `--fix` run with no formatter
+# configured takes this path, which is all 193 cases in compat/fix; a tool that
+# fixed the simplify default by flipping one shared constant would start
+# simplifying here too, and rewrite those 193 expectations.
+version: "2"
+formatters: {}

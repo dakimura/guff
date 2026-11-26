@@ -1,0 +1,10 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - unconvert
+  settings:
+    unconvert:
+      fast-math: true
+      safe: true

@@ -1,0 +1,25 @@
+# Golden case: gocritic with every checker enabled.
+#
+# enable-all reaches the experimental / opinionated / performance tiers that the
+# default enable-set leaves off — that is the whole point of this case, since
+# 90 of gocritic's 107 checkers had never fired in any gate (docs/COVERAGE.md).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gocritic
+  settings:
+    gocritic:
+      enable-all: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # Compare the full finding set. With uniq-by-line on, a second checker firing
+  # on an already-reported line would be dropped before we ever see it.
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

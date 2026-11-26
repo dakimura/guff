@@ -1,0 +1,29 @@
+# Golden case: `gocritic.enabled-tags` (COMPAT-HARDENING Phase 4).
+#
+# **A union, not a filter.** `inferEnabledChecks` starts from the default set
+# and *adds* every checker carrying the tag, so this golden is the baseline
+# plus `rangeValCopy`. Reading the key as "only checkers with these tags"
+# instead produces an empty set — no default-on checker carries an opt-in tag,
+# by construction — and that is what guff did until this case was written: zero
+# findings where upstream has three.
+#
+# The corpus configs that use this key (k9s, fxamacker/cbor) list all four
+# tags at once, which is why the OSS gate never showed it.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gocritic
+  settings:
+    gocritic:
+      enabled-tags:
+        - performance
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

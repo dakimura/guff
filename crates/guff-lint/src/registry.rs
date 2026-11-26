@@ -1,0 +1,862 @@
+//! Analyzer registry: linter name → `go/analysis` passes.
+
+use std::collections::HashMap;
+use std::sync::OnceLock;
+
+use guff_analysis::Analyzer;
+
+use crate::settings::LinterSettings;
+
+/// Names in the golangci-lint v2 `standard` preset.
+pub const STANDARD_LINTER_NAMES: &[&str] = &[
+    "staticcheck",
+    "govet",
+    "errcheck",
+    "ineffassign",
+    "unused",
+];
+
+/// Names in the golangci-lint v2 `fast` preset (standard minus slow linters).
+pub const FAST_LINTER_NAMES: &[&str] = &["govet", "errcheck", "ineffassign", "unused"];
+
+/// Returns analyzers registered under `name`, if any.
+pub fn analyzers_for_linter(name: &str) -> Option<Vec<&'static Analyzer>> {
+    analyzers_for_linter_with_settings(name, &LinterSettings::default())
+}
+
+/// Every analyzer registered under `name`, with no `linters.settings` filter.
+///
+/// Ownership — which linter an analyzer's findings are attributed to — does
+/// not depend on configuration. golangci-lint's table is static: `printf`
+/// belongs to `govet` whether or not this run enables it. Asking
+/// [`analyzers_for_linter`] instead answers through
+/// `LinterSettings::default()`, which for govet is `cmd/vet`'s default set —
+/// so the ten passes outside it (fieldalignment and friends) had no owner and
+/// were reported under their own name, with no `fieldalignment: ` prefix and
+/// no match for an exclude rule naming `govet`.
+fn all_analyzers_for_linter(name: &str) -> Option<Vec<&'static Analyzer>> {
+    let unfiltered = LinterSettings::unfiltered();
+    analyzers_for_linter_with_settings(name, &unfiltered)
+}
+
+/// Like [`analyzers_for_linter`], applying `linters.settings` (govet/staticcheck filters).
+pub fn analyzers_for_linter_with_settings(
+    name: &str,
+    settings: &LinterSettings,
+) -> Option<Vec<&'static Analyzer>> {
+    let analyzers = match name {
+        "staticcheck" => Some(guff_staticcheck::analyzers()),
+        "govet" => Some(guff_govet::analyzers()),
+        "errcheck" => Some(guff_errcheck::analyzers()),
+        "ineffassign" => Some(guff_ineffassign::analyzers()),
+        "unused" => Some(guff_unused::analyzers()),
+        "forcetypeassert" => Some(vec![guff_gostaticanalysis::forcetypeassert()]),
+        "nilnil" => Some(vec![guff_gostaticanalysis::nilnil()]),
+        "nilnesserr" => Some(vec![guff_gostaticanalysis::nilnesserr()]),
+        "nilerr" => Some(vec![guff_gostaticanalysis::nilerr()]),
+        "makezero" => Some(vec![guff_gostaticanalysis::makezero()]),
+        "mirror" => Some(vec![guff_gostaticanalysis::mirror()]),
+        "errname" => Some(vec![guff_error::errname()]),
+        "err113" => Some(vec![guff_error::err113()]),
+        "durationcheck" => Some(vec![guff_error::durationcheck()]),
+        "errorlint" => Some(vec![guff_error::errorlint()]),
+        "wrapcheck" => Some(vec![guff_error::wrapcheck()]),
+        "errchkjson" => Some(vec![guff_error::errchkjson()]),
+        "rowserrcheck" => Some(vec![guff_error::rowserrcheck()]),
+        "noctx" => Some(vec![guff_context::noctx()]),
+        "fatcontext" => Some(vec![guff_context::fatcontext()]),
+        "bodyclose" => Some(vec![guff_context::bodyclose()]),
+        "sqlclosecheck" => Some(vec![guff_context::sqlclosecheck()]),
+        "contextcheck" => Some(vec![guff_context::contextcheck()]),
+        "copyloopvar" => Some(vec![guff_style::copyloopvar()]),
+        "usetesting" => Some(vec![guff_style::usetesting()]),
+        "usestdlibvars" => Some(vec![guff_style::usestdlibvars()]),
+        "perfsprint" => Some(vec![guff_style::perfsprint()]),
+        "goconst" => Some(vec![guff_style::goconst()]),
+        "dogsled" => Some(vec![guff_style::dogsled()]),
+        "asciicheck" => Some(vec![guff_style::asciicheck()]),
+        "arangolint" => Some(vec![guff_style::arangolint()]),
+        "asasalint" => Some(vec![guff_style::asasalint()]),
+        "bidichk" => Some(vec![guff_style::bidichk()]),
+        "canonicalheader" => Some(vec![guff_style::canonicalheader()]),
+        "clickhouselint" => Some(vec![guff_style::clickhouselint()]),
+        "gochecknoinits" => Some(vec![guff_style::gochecknoinits()]),
+        "gochecknoglobals" => Some(vec![guff_style::gochecknoglobals()]),
+        "gosmopolitan" => Some(vec![guff_style::gosmopolitan()]),
+        "goheader" => Some(vec![guff_style::goheader()]),
+        "gocheckcompilerdirectives" => Some(vec![guff_style::gocheckcompilerdirectives()]),
+        "forbidigo" => Some(vec![guff_style::forbidigo()]),
+        "reassign" => Some(vec![guff_style::reassign()]),
+        "recvcheck" => Some(vec![guff_style::recvcheck()]),
+        "thelper" => Some(vec![guff_style::thelper()]),
+        "iface" => Some(vec![guff_style::iface()]),
+        "interfacebloat" => Some(vec![guff_style::interfacebloat()]),
+        "embeddedstructfieldcheck" => Some(vec![guff_style::embeddedstructfieldcheck()]),
+        "gochecksumtype" => Some(vec![guff_style::gochecksumtype()]),
+        "inamedparam" => Some(vec![guff_style::inamedparam()]),
+        "containedctx" => Some(vec![guff_style::containedctx()]),
+        "decorder" => Some(vec![guff_style::decorder()]),
+        "nonamedreturns" => Some(vec![guff_style::nonamedreturns()]),
+        "noinlineerr" => Some(vec![guff_style::noinlineerr()]),
+        "paralleltest" => Some(vec![guff_style::paralleltest()]),
+        "protogetter" => Some(vec![guff_style::protogetter()]),
+        "testableexamples" => Some(vec![guff_style::testableexamples()]),
+        "testpackage" => Some(vec![guff_style::testpackage()]),
+        "tparallel" => Some(vec![guff_style::tparallel()]),
+        "intrange" => Some(vec![guff_style::intrange()]),
+        "iotamixing" => Some(vec![guff_style::iotamixing()]),
+        "grouper" => Some(vec![guff_style::grouper()]),
+        "ireturn" => Some(vec![guff_style::ireturn()]),
+        "gosec" => Some(vec![guff_style::gosec()]),
+        "tagliatelle" => Some(vec![guff_style::tagliatelle()]),
+        "goprintffuncname" => Some(vec![guff_style::goprintffuncname()]),
+        "funcorder" => Some(vec![guff_style::funcorder()]),
+        "varnamelen" => Some(vec![guff_style::varnamelen()]),
+        "unparam" => Some(vec![guff_style::unparam()]),
+        "unqueryvet" => Some(vec![guff_style::unqueryvet()]),
+        "promlinter" => Some(vec![guff_style::promlinter()]),
+        "ginkgolinter" => Some(vec![guff_style::ginkgolinter()]),
+        "funlen" => Some(vec![guff_style::funlen()]),
+        "gocyclo" => Some(vec![guff_style::gocyclo()]),
+        "maintidx" => Some(vec![guff_style::maintidx()]),
+        "lll" => Some(vec![guff_style::lll()]),
+        "gocognit" => Some(vec![guff_style::gocognit()]),
+        "nestif" => Some(vec![guff_style::nestif()]),
+        "cyclop" => Some(vec![guff_style::cyclop()]),
+        "nakedret" => Some(vec![guff_style::nakedret()]),
+        "nosprintfhostport" => Some(vec![guff_style::nosprintfhostport()]),
+        "predeclared" => Some(vec![guff_style::predeclared()]),
+        "whitespace" => Some(vec![guff_style::whitespace()]),
+        "nlreturn" => Some(vec![guff_style::nlreturn()]),
+        "mnd" => Some(vec![guff_style::mnd()]),
+        "prealloc" => Some(vec![guff_style::prealloc()]),
+        "tagalign" => Some(vec![guff_style::tagalign()]),
+        "wsl" => Some(vec![guff_style::wsl()]),
+        "wsl_v5" => Some(vec![guff_style::wsl_v5()]),
+        "unconvert" => Some(vec![guff_style::unconvert()]),
+        "exhaustruct" => Some(vec![guff_style::exhaustruct()]),
+        // `exhaustruct_v5` (golangci-lint 2.13.0) is go-exhaustruct v5, a
+        // rewrite with an analyzer of its own: comment directives instead of
+        // the `exhaustruct:"optional"` tag, `Type#Field` patterns, explicit mode.
+        "exhaustruct_v5" => Some(vec![guff_style::exhaustruct_v5()]),
+        "exhaustive" => Some(vec![guff_style::exhaustive()]),
+        "musttag" => Some(vec![guff_style::musttag()]),
+        "loggercheck" => Some(vec![guff_style::loggercheck()]),
+        "sloglint" => Some(vec![guff_style::sloglint()]),
+        "testifylint" => Some(vec![guff_style::testifylint()]),
+        "exptostd" => Some(vec![guff_style::exptostd()]),
+        "modernize" => Some(vec![guff_style::modernize()]),
+        "gocritic" => Some(vec![guff_style::gocritic()]),
+        "wastedassign" => Some(vec![guff_style::wastedassign()]),
+        "zerologlint" => Some(vec![guff_style::zerologlint()]),
+        "spancheck" => Some(vec![guff_style::spancheck()]),
+        "godot" => Some(vec![guff_comment::godot()]),
+        "godox" => Some(vec![guff_comment::godox()]),
+        "dupword" => Some(vec![guff_comment::dupword()]),
+        "godoclint" => Some(vec![guff_comment::godoclint()]),
+        "misspell" => Some(vec![guff_misspell::misspell()]),
+        "dupl" => Some(vec![guff_dupl::dupl()]),
+        "revive" => Some(vec![guff_revive::revive()]),
+        "depguard" => Some(vec![guff_import::depguard()]),
+        "gomoddirectives" => Some(vec![guff_import::gomoddirectives()]),
+        "gomodguard" => Some(vec![guff_import::gomodguard()]),
+        // `gomodguard` is deprecated in golangci-lint v2 in favor of the
+        // `gomodguard_v2` name; both drive the same analyzer (settings for
+        // either YAML key populate the shared `gomodguard` bag).
+        "gomodguard_v2" => Some(vec![guff_import::gomodguard()]),
+        "importas" => Some(vec![guff_import::importas()]),
+        // Meta / post-processor linters (no go/analysis passes).
+        "nolintlint" => Some(Vec::new()),
+        _ => {
+            // Module plugins (golangci `linters.settings.custom`).
+            if let Some(analyzers) = guff_plugin::instantiated_analyzers(name) {
+                Some(analyzers)
+            } else if guff_plugin::is_registered(name) {
+                if let Some(cfg) = settings.custom.get(name) {
+                    if !cfg.type_.is_empty() && cfg.type_ != "module" {
+                        eprintln!(
+                            "guff: plugin {name:?}: type {:?} unsupported (need \"module\")",
+                            cfg.type_
+                        );
+                        return None;
+                    }
+                    match guff_plugin::instantiate_with_description(
+                        name,
+                        &cfg.settings,
+                        &cfg.description,
+                    ) {
+                        Ok(a) => Some(a),
+                        Err(e) => {
+                            eprintln!("guff: plugin {name:?}: {e}");
+                            None
+                        }
+                    }
+                } else {
+                    match guff_plugin::instantiate(name, &serde_yaml::Value::Null) {
+                        Ok(a) => Some(a),
+                        Err(e) => {
+                            eprintln!("guff: plugin {name:?}: {e}");
+                            None
+                        }
+                    }
+                }
+            } else {
+                None
+            }
+        }
+    }?;
+    Some(settings.apply_to_analyzers(name, analyzers))
+}
+
+/// golangci-lint's `DeprecatedWarning` linters: `(since, message, replacement)`.
+///
+/// A deprecated linter still runs — this only drives the warning `run` prints
+/// for it (`printDeprecatedLinterMessages`). Upstream also prints a suggested
+/// replacement config for `gomodguard` and `wsl` (their `Migration`); guff does
+/// not yet.
+pub fn deprecation(name: &str) -> Option<(&'static str, &'static str, &'static str)> {
+    match name {
+        "exhaustruct" => Some(("v2.13.0", "new major version.", "exhaustruct_v5")),
+        "gomodguard" => Some(("v2.12.0", "new major version.", "gomodguard_v2")),
+        "wsl" => Some(("v2.2.0", "new major version.", "wsl_v5")),
+        _ => None,
+    }
+}
+
+/// True for linters implemented as post-processors (no Analyzer DAG nodes).
+pub fn is_meta_linter(name: &str) -> bool {
+    matches!(name, "nolintlint")
+}
+
+/// All linter names known to the registry (including meta / post-processor ones).
+pub const KNOWN_LINTER_NAMES: &[&str] = &[
+    "arangolint",
+    "asasalint",
+    "asciicheck",
+    "bidichk",
+    "bodyclose",
+    "canonicalheader",
+    "clickhouselint",
+    "containedctx",
+    "contextcheck",
+    "copyloopvar",
+    "cyclop",
+    "decorder",
+    "depguard",
+    "dogsled",
+    "dupl",
+    "dupword",
+    "durationcheck",
+    "embeddedstructfieldcheck",
+    "err113",
+    "errcheck",
+    "errchkjson",
+    "errname",
+    "errorlint",
+    "exhaustruct",
+    "exhaustruct_v5",
+    "exhaustive",
+    "exptostd",
+    "fatcontext",
+    "forbidigo",
+    "forcetypeassert",
+    "funcorder",
+    "funlen",
+    "ginkgolinter",
+    "gocheckcompilerdirectives",
+    "gochecknoglobals",
+    "gochecknoinits",
+    "gochecksumtype",
+    "gocognit",
+    "goconst",
+    "gocritic",
+    "gocyclo",
+    "gosmopolitan",
+    "goheader",
+    "godoclint",
+    "godot",
+    "godox",
+    "gomoddirectives",
+    "gomodguard",
+    "gomodguard_v2",
+    "goprintffuncname",
+    "gosec",
+    "govet",
+    "grouper",
+    "iface",
+    "importas",
+    "ineffassign",
+    "interfacebloat",
+    "inamedparam",
+    "intrange",
+    "iotamixing",
+    "ireturn",
+    "lll",
+    "loggercheck",
+    "maintidx",
+    "makezero",
+    "mirror",
+    "mnd",
+    "misspell",
+    "modernize",
+    "musttag",
+    "nakedret",
+    "nestif",
+    "nilerr",
+    "nilnesserr",
+    "nilnil",
+    "nlreturn",
+    "noctx",
+    "noinlineerr",
+    "nolintlint",
+    "nonamedreturns",
+    "nosprintfhostport",
+    "paralleltest",
+    "perfsprint",
+    "prealloc",
+    "predeclared",
+    "promlinter",
+    "ginkgolinter",
+    "protogetter",
+    "reassign",
+    "recvcheck",
+    "revive",
+    "rowserrcheck",
+    "sloglint",
+    "sqlclosecheck",
+    "spancheck",
+    "staticcheck",
+    "tagalign",
+    "tagliatelle",
+    "testableexamples",
+    "testifylint",
+    "testpackage",
+    "thelper",
+    "tparallel",
+    "unconvert",
+    "unparam",
+    "unqueryvet",
+    "unused",
+    "usestdlibvars",
+    "usetesting",
+    "varnamelen",
+    "wastedassign",
+    "whitespace",
+    "wrapcheck",
+    "wsl",
+    "wsl_v5",
+    "zerologlint",
+];
+
+/// All linter names known to the registry (built-in + linked module plugins).
+pub fn known_linter_names() -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = KNOWN_LINTER_NAMES.to_vec();
+    for n in guff_plugin::registered_names() {
+        if !names.contains(&n) {
+            names.push(n);
+        }
+    }
+    names
+}
+
+/// One-line description for `guff linters` (golangci-style).
+pub fn linter_description(name: &str) -> String {
+    let builtin = builtin_linter_description(name);
+    if !builtin.is_empty() {
+        return builtin.to_string();
+    }
+    if let Some(d) = guff_plugin::instantiated_description(name) {
+        if !d.is_empty() {
+            return d;
+        }
+    }
+    String::new()
+}
+
+fn builtin_linter_description(name: &str) -> &'static str {
+    match name {
+        "arangolint" => "Opinionated best practices for arangodb client.",
+        "asasalint" => "Checks for pass []any as any in variadic func(...any).",
+        "asciicheck" => "Checks that identifiers do not contain non-ASCII characters.",
+        "bidichk" => "Checks for dangerous unicode character sequences.",
+        "canonicalheader" => "canonicalheader checks whether net/http.Header uses canonical header",
+        "clickhouselint" => "Detects common mistakes with the ClickHouse native Go driver API.",
+        "copyloopvar" => "Detects unnecessary copies of loop variables (Go 1.22+).",
+        "cyclop" => "Checks function and package cyclomatic complexity.",
+        "decorder" => "Check declaration order and count of types, constants, variables and functions.",
+        "depguard" => "Go linter that checks if package imports are in a list of acceptable packages.",
+        "dogsled" => "Checks assignments with too many blank identifiers.",
+        "dupl" => "Detects duplicate fragments of code.",
+        "dupword" => "Checks for duplicate words in the source code.",
+        "durationcheck" => "Checks for multiplying duration by duration.",
+        "embeddedstructfieldcheck" => "Embedded types should be at the top of the field list of a struct, and there must be an empty line separating embedded fields from regular fields.",
+        "err113" => "Checks the errors handling expressions according to Go 1.13.",
+        "errcheck" => "Checks for unchecked errors.",
+        "errchkjson" => "Checks types passed to json encoding functions and their error handling.",
+        "errname" => "Checks that sentinel errors are prefixed with Err and types with Error.",
+        "errorlint" => "Finds error comparison and type assertion issues with wrapped errors.",
+        "exhaustruct" => "Checks if all structure fields are initialized.",
+        "exhaustruct_v5" => "Checks if all structure fields are initialized.",
+        "exhaustive" => "Check exhaustiveness of enum switch statements.",
+        "exptostd" => "Detects functions from golang.org/x/exp/ that can be replaced by std functions.",
+        "fatcontext" => "Detects nested contexts in loops and function literals.",
+        "bodyclose" => "Checks whether HTTP response body is closed successfully",
+        "sqlclosecheck" => "Checks that sql.Rows, sql.Stmt, sqlx.NamedStmt, pgx.Query are closed",
+        "forbidigo" => "Forbids identifiers",
+        "forcetypeassert" => "Finds forced type assertions that may panic.",
+        "funcorder" => "Checks the order of functions, methods, and constructors.",
+        "funlen" => "Checks for long functions.",
+        "gocheckcompilerdirectives" => "Checks that go compiler directive comments (//go:) are valid.",
+        "gochecknoglobals" => "Checks that no global variables exist in Go code.",
+        "gochecknoinits" => "Checks that no init functions are present in Go code.",
+        "gochecksumtype" => "Run exhaustiveness checks on Go \"sum types\".",
+        "gocognit" => "Computes and checks the cognitive complexity of functions.",
+        "goconst" => "Finds repeated strings that could be replaced by a constant.",
+        "gocritic" => "Provides diagnostics that check for bugs, performance and style issues.",
+        "gocyclo" => "Computes and checks the cyclomatic complexity of functions.",
+        "maintidx" => "Measures the maintainability index of each function.",
+        "godoclint" => "Checks Golang's documentation practice (godoc).",
+        "godot" => "Checks that comments end in a period.",
+        "godox" => "Detects FIXME, TODO and other keywords inside comments.",
+        "gomoddirectives" => "Manage the use of 'replace', 'retract', and 'excludes' directives in go.mod.",
+        "gomodguard" => "Allow and blocklist linter for direct Go module dependencies.",
+        "gomodguard_v2" => "Allow and blocklist linter for direct Go module dependencies.",
+        "goprintffuncname" => "Checks that printf-like functions are named with an f suffix.",
+        "gosec" => "Inspects source code for security problems.",
+        "gosmopolitan" => "Report certain i18n/l10n anti-patterns in your Go codebase.",
+        "goheader" => "Check if file header matches to pattern",
+        "govet" => "Vet examines Go source code and reports suspicious constructs.",
+        "iface" => "Detect the incorrect use of interfaces, helping developers avoid interface pollution.",
+        "interfacebloat" => "A linter that checks the number of methods inside an interface.",
+        "inamedparam" => "Reports interfaces with unnamed method parameters.",
+        "intrange" => "intrange is a linter to find places where for loops could make use of an integer range.",
+        "iotamixing" => "checks if iotas are being used in const blocks with other non-iota declarations",
+        "grouper" => "Analyze expression groups; require grouped/single import/const/var/type decls.",
+        "ireturn" => "Accept Interfaces, Return Concrete Types.",
+        "tagliatelle" => "Checks the struct tags.",
+        "containedctx" => "A linter that detects structs containing a context.Context field.",
+        "nonamedreturns" => "Reports all named returns.",
+        "paralleltest" => "Detects missing usage of t.Parallel() method in your Go test codes.",
+        "testableexamples" => "Checks if examples are testable (have an expected output).",
+        "testpackage" => "linter that makes you use a separate _test package",
+        "tparallel" => "tparallel detects inappropriate usage of t.Parallel() method in your Go test codes",
+        "importas" => "Enforces consistent import aliases.",
+        "ineffassign" => "Detects when assignments to existing variables are not used.",
+        "lll" => "Reports long lines.",
+        "loggercheck" => "Checks key value pairs for common logger libraries (kitlog,klog,logr,slog,zap).",
+        "makezero" => "Finds slice declarations with non-zero initial length and later appends.",
+        "mirror" => "Reports wrong mirror patterns of bytes/strings usage.",
+        "mnd" => "An analyzer to detect magic numbers.",
+        "misspell" => "Finds commonly misspelled English words.",
+        "modernize" => "Suggests simplifications to Go code using modern language and library features.",
+        "musttag" => "Enforce field tags in (un)marshaled structs.",
+        "nakedret" => "Checks that functions with naked returns are not longer than a maximum size.",
+        "nestif" => "Reports deeply nested if statements.",
+        "nilerr" => "Finds code that returns nil even though it checks that error is not nil.",
+        "nilnesserr" => "Reports returning a different nil error after checking err != nil.",
+        "nilnil" => "Checks that there is no simultaneous return of nil error and an invalid value.",
+        "nlreturn" => "Checks for a new line before return and branch statements to increase code clarity.",
+        "noctx" => "Finds HTTP/DB/network calls that should take a context.",
+        "contextcheck" => "Checks whether a function uses a non-inherited context.",
+        "noinlineerr" => "Disallows inline error handling (if err := ...; err != nil {).",
+        "nolintlint" => "Reports unused //nolint directives.",
+        "nosprintfhostport" => "Checks for misuse of Sprintf to construct a host with port in a URL.",
+        "perfsprint" => "Checks that fmt.Sprintf can be replaced with a faster alternative.",
+        "prealloc" => "Finds slice declarations that could potentially be pre-allocated.",
+        "spancheck" => "Checks for mistakes with OpenTelemetry/Census spans.",
+        "wastedassign" => "Finds wasted assignment statements.",
+        "zerologlint" => "Detects the wrong usage of zerolog that a user forgets to dispatch with Send or Msg.",
+        "predeclared" => "Finds code that shadows one of Go's predeclared identifiers.",
+        "promlinter" => "Check Prometheus metrics naming via promlint",
+        "ginkgolinter" => "Enforces standards of using ginkgo and gomega.",
+        "protogetter" => "Reports direct reads from proto message fields when getters should be used.",
+        "reassign" => "Checks that package variables are not reassigned.",
+        "recvcheck" => "Checks for receiver type consistency.",
+        "revive" => "Fast, configurable, extensible, flexible, and beautiful linter for Go. Drop-in replacement of golint.",
+        "sloglint" => "Ensures consistent code style when using log/slog.",
+        "staticcheck" => "Checks for bugs, performance and style issues.",
+        "tagalign" => "Checks that struct tags are well aligned.",
+        "testifylint" => "Checks usage of github.com/stretchr/testify.",
+        "thelper" => "Detects test helpers without t.Helper() call and checks the consistency of test helpers.",
+        "unconvert" => "Remove unnecessary type conversions.",
+        "unparam" => "Reports unused function parameters.",
+        "unqueryvet" => "Detects SELECT * in SQL queries and encourages explicit column selection.",
+        "unused" => "Checks Go code for unused constants, variables, functions and types.",
+        "usestdlibvars" => "Suggests replacing magic literals with stdlib constants.",
+        "usetesting" => "Reports uses of functions with replacements in the testing package.",
+        "varnamelen" => "checks that the length of a variable's name matches its scope",
+        "whitespace" => "Checks for unnecessary newlines at the start and end of blocks.",
+        "rowserrcheck" => "Checks whether Rows.Err is checked",
+        "wrapcheck" => "Checks that errors returned from external packages are wrapped.",
+        "wsl" => "Add or remove empty lines.",
+        "wsl_v5" => "Add or remove empty lines.",
+        _ => "",
+    }
+}
+
+/// Split known linters into enabled / disabled sets for the current selection.
+///
+/// Unknown names in the selection (not yet implemented) are listed under enabled
+/// so `guff linters` still reflects the config; they may not run.
+pub fn partition_linters(selection: &crate::config::LinterSelection) -> (Vec<String>, Vec<String>) {
+    let mut enabled = selection.resolve_names();
+    enabled.sort();
+    let enabled_set: std::collections::HashSet<String> = enabled.iter().cloned().collect();
+
+    let mut disabled: Vec<String> = known_linter_names()
+        .into_iter()
+        .filter(|n| !enabled_set.contains(*n))
+        .map(|s| s.to_string())
+        .collect();
+    disabled.sort();
+
+    (enabled, disabled)
+}
+
+/// Format golangci-lint–style enabled/disabled listing to `out`.
+pub fn format_linters_listing(
+    enabled: &[String],
+    disabled: &[String],
+    out: &mut dyn std::io::Write,
+) -> std::io::Result<()> {
+    writeln!(out, "Enabled by your configuration linters:")?;
+    for name in enabled {
+        let desc = linter_description(name);
+        if desc.is_empty() {
+            writeln!(out, "{name}")?;
+        } else {
+            writeln!(out, "{name}: {desc}")?;
+        }
+    }
+    writeln!(out)?;
+    writeln!(out, "Disabled by your configuration linters:")?;
+    for name in disabled {
+        let desc = linter_description(name);
+        if desc.is_empty() {
+            writeln!(out, "{name}")?;
+        } else {
+            writeln!(out, "{name}: {desc}")?;
+        }
+    }
+    Ok(())
+}
+
+/// Resolves a list of linter names to analyzers. Unknown names are skipped with
+/// a warning via `on_unknown`.
+pub fn resolve_linters(
+    names: &[String],
+    on_unknown: &mut dyn FnMut(&str),
+) -> Vec<&'static Analyzer> {
+    resolve_linters_with_settings(names, &LinterSettings::default(), on_unknown)
+}
+
+/// Like [`resolve_linters`], applying per-linter settings filters.
+pub fn resolve_linters_with_settings(
+    names: &[String],
+    settings: &LinterSettings,
+    on_unknown: &mut dyn FnMut(&str),
+) -> Vec<&'static Analyzer> {
+    // unused + nolintlint: run unused despite type errors so live refs on
+    // false-`ill_typed` packages still suppress `//nolint:unused` (restic).
+    // Without nolintlint, skip ill_typed — faster and avoids unused FPs when
+    // guff's checker is stricter than go/types (prometheus tsdb/web).
+    let unused_despite_errors = names.iter().any(|n| n == "unused")
+        && names.iter().any(|n| n == "nolintlint")
+        && !settings.nolintlint.allow_unused;
+
+    let mut out = Vec::new();
+    let mut seen = HashMap::<&str, ()>::new();
+    for name in names {
+        let analyzers = if name == "unused" && unused_despite_errors {
+            guff_unused::analyzers_despite_errors()
+        } else {
+            match analyzers_for_linter_with_settings(name, settings) {
+                Some(a) => a,
+                None => {
+                    on_unknown(name);
+                    continue;
+                }
+            }
+        };
+        for a in analyzers {
+            if seen.insert(a.name, ()).is_none() {
+                out.push(a);
+            }
+        }
+    }
+    out
+}
+
+/// Analyzers for the `standard` preset (all five linters).
+pub fn standard_analyzers() -> Vec<&'static Analyzer> {
+    let mut warnings = Vec::new();
+    let mut on_unknown = |name: &str| warnings.push(name.to_string());
+    let analyzers = resolve_linters(
+        &STANDARD_LINTER_NAMES
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect::<Vec<_>>(),
+        &mut on_unknown,
+    );
+    debug_assert!(warnings.is_empty(), "unknown standard linter: {warnings:?}");
+    analyzers
+}
+
+/// Map an analyzer pass name (`errcheck`, `SA1004`, `printf`, …) to its
+/// golangci linter name (`errcheck`, `staticcheck`, `govet`, …).
+///
+/// Unknown analyzers are returned unchanged (so exclude-rules that name a
+/// pass directly still work).
+pub fn linter_name_for_analyzer(analyzer: &str) -> &str {
+    static MAP: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+    let map = MAP.get_or_init(|| {
+        let mut m = HashMap::new();
+        for &linter in KNOWN_LINTER_NAMES {
+            if is_meta_linter(linter) {
+                continue;
+            }
+            // Default settings omit opinionated ST* from the staticcheck
+            // filter; those IDs are mapped via [`is_staticcheck_check_id`].
+            if let Some(analyzers) = all_analyzers_for_linter(linter) {
+                for a in analyzers {
+                    // Keep the first (alphabetically earliest) owner so shared
+                    // analyzers — e.g. `gomodguard` vs its `gomodguard_v2`
+                    // alias — attribute issues to the canonical linter name.
+                    m.entry(a.name).or_insert(linter);
+                }
+            }
+        }
+        m
+    });
+    if let Some(name) = map.get(analyzer).copied() {
+        return name;
+    }
+    // Heuristic fallback for staticcheck check IDs not in the default map
+    // (ST1000 and other opinionated checks filtered by default settings).
+    if is_staticcheck_check_id(analyzer) {
+        return "staticcheck";
+    }
+    for pname in guff_plugin::registered_names() {
+        if let Some(analyzers) = guff_plugin::instantiated_analyzers(pname) {
+            if analyzers.iter().any(|a| a.name == analyzer) {
+                return pname;
+            }
+        }
+    }
+    analyzer
+}
+
+fn is_staticcheck_check_id(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    if bytes.len() < 2 {
+        return false;
+    }
+    match bytes[0] {
+        b'S' | b'Q' => {
+            // SA#### / ST#### / S1### / QF####
+            name.len() >= 2
+                && name[1..]
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || c.is_ascii_uppercase())
+                && name.chars().skip(1).any(|c| c.is_ascii_digit())
+        }
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings::{GovetSettings, LinterSettings, StaticcheckSettings};
+
+    #[test]
+    fn st1000_maps_to_staticcheck() {
+        assert_eq!(linter_name_for_analyzer("ST1000"), "staticcheck");
+        assert_eq!(linter_name_for_analyzer("SA1004"), "staticcheck");
+        assert_eq!(linter_name_for_analyzer("QF1008"), "staticcheck");
+    }
+
+    #[test]
+    fn standard_includes_staticcheck() {
+        let analyzers = standard_analyzers();
+        assert!(!analyzers.is_empty());
+        assert!(analyzers.iter().any(|a| a.name == "SA1004"));
+    }
+
+    #[test]
+    fn unused_despite_errors_only_with_nolintlint() {
+        let settings = LinterSettings::default();
+        let alone = resolve_linters_with_settings(
+            &["unused".into()],
+            &settings,
+            &mut |_| {},
+        );
+        let u = alone.iter().find(|a| a.name == "unused").expect("unused");
+        assert!(!u.run_despite_errors);
+
+        let with_nolint = resolve_linters_with_settings(
+            &["unused".into(), "nolintlint".into()],
+            &settings,
+            &mut |_| {},
+        );
+        let u = with_nolint
+            .iter()
+            .find(|a| a.name == "unused")
+            .expect("unused");
+        assert!(u.run_despite_errors);
+
+        let mut allow = LinterSettings::default();
+        allow.nolintlint.allow_unused = true;
+        let allow_unused = resolve_linters_with_settings(
+            &["unused".into(), "nolintlint".into()],
+            &allow,
+            &mut |_| {},
+        );
+        let u = allow_unused
+            .iter()
+            .find(|a| a.name == "unused")
+            .expect("unused");
+        assert!(!u.run_despite_errors);
+    }
+
+    #[test]
+    fn standard_includes_all_five_linters() {
+        let analyzers = standard_analyzers();
+        assert!(analyzers.iter().any(|a| a.name == "assign"));
+        assert!(analyzers.iter().any(|a| a.name == "errcheck"));
+        assert!(analyzers.iter().any(|a| a.name == "ineffassign"));
+        assert!(analyzers.iter().any(|a| a.name == "unused"));
+    }
+
+    #[test]
+    fn unknown_linter_is_skipped() {
+        let mut unknown = Vec::new();
+        let analyzers = resolve_linters(&["nope".into()], &mut |n| unknown.push(n.to_string()));
+        assert!(analyzers.is_empty());
+        assert_eq!(unknown, vec!["nope"]);
+    }
+
+    #[test]
+    fn govet_settings_disable_all_enable_printf() {
+        let settings = LinterSettings {
+            govet: GovetSettings {
+                disable_all: true,
+                enable: vec!["printf".into()],
+                ..GovetSettings::default()
+            },
+            ..LinterSettings::default()
+        };
+        let analyzers =
+            analyzers_for_linter_with_settings("govet", &settings).expect("govet");
+        assert_eq!(analyzers.len(), 1);
+        assert_eq!(analyzers[0].name, "printf");
+    }
+
+    #[test]
+    fn gomodguard_v2_alias_resolves_to_shared_analyzer() {
+        let v1 = analyzers_for_linter("gomodguard").expect("gomodguard");
+        let v2 = analyzers_for_linter("gomodguard_v2").expect("gomodguard_v2");
+        assert_eq!(v1.len(), 1);
+        assert_eq!(v2.len(), 1);
+        assert_eq!(v1[0].name, v2[0].name);
+        // Issues from the shared analyzer stay attributed to the canonical name.
+        assert_eq!(linter_name_for_analyzer(v2[0].name), "gomodguard");
+    }
+
+    #[test]
+    fn gomodguard_v2_is_known() {
+        assert!(known_linter_names().contains(&"gomodguard_v2"));
+        assert!(!linter_description("gomodguard_v2").is_empty());
+    }
+
+    #[test]
+    fn exhaustruct_v5_is_known_and_attributed_to_itself() {
+        assert!(known_linter_names().contains(&"exhaustruct_v5"));
+        assert!(!linter_description("exhaustruct_v5").is_empty());
+        assert!(analyzers_for_linter("exhaustruct_v5").is_some());
+        // v4 and v5 are separate analyzers, each reporting under its own
+        // name, so `//nolint:exhaustruct` does not silence v5.
+        assert_eq!(linter_name_for_analyzer("exhaustruct"), "exhaustruct");
+        assert_eq!(linter_name_for_analyzer("exhaustruct_v5"), "exhaustruct_v5");
+        assert_eq!(deprecation("exhaustruct").map(|d| d.2), Some("exhaustruct_v5"));
+        assert_eq!(deprecation("exhaustruct_v5"), None);
+    }
+
+    #[test]
+    fn staticcheck_settings_disable_check() {
+        let settings = LinterSettings {
+            staticcheck: StaticcheckSettings {
+                checks: Some(vec!["all".into(), "-SA1004".into()]),
+                ..StaticcheckSettings::default()
+            },
+            ..LinterSettings::default()
+        };
+        let analyzers =
+            analyzers_for_linter_with_settings("staticcheck", &settings).expect("staticcheck");
+        assert!(!analyzers.iter().any(|a| a.name == "SA1004"));
+        assert!(analyzers.iter().any(|a| a.name == "SA1000"));
+    }
+
+    #[test]
+    fn module_plugin_resolves_via_registry() {
+        use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+        use guff_plugin::{LinterPlugin, PluginError};
+        use std::sync::OnceLock;
+
+        struct P;
+        impl LinterPlugin for P {
+            fn build_analyzers(&self) -> Result<Vec<&'static Analyzer>, PluginError> {
+                Ok(vec![plug_analyzer()])
+            }
+            fn description(&self) -> &'static str {
+                "registry plugin test"
+            }
+        }
+        fn new_p(_: &serde_yaml::Value) -> Result<Box<dyn LinterPlugin>, PluginError> {
+            Ok(Box::new(P))
+        }
+        fn run(_: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
+            Ok(None)
+        }
+        fn plug_analyzer() -> &'static Analyzer {
+            static A: OnceLock<Analyzer> = OnceLock::new();
+            A.get_or_init(|| Analyzer {
+                name: "plug_test_pass",
+                doc: "t",
+                url: "",
+                run: run as RunFn,
+                run_despite_errors: false,
+                requires: vec![],
+                fact_types: vec![],
+            })
+        }
+
+        guff_plugin::clear_instances();
+        guff_plugin::clear_manual_factories();
+        guff_plugin::register_factory("plugtest", new_p);
+
+        let settings = LinterSettings {
+            custom: [(
+                "plugtest".into(),
+                crate::settings::CustomLinterConfig {
+                    type_: "module".into(),
+                    description: "from config".into(),
+                    settings: serde_yaml::Value::Null,
+                    ..Default::default()
+                },
+            )]
+            .into_iter()
+            .collect(),
+            ..LinterSettings::default()
+        };
+        let analyzers =
+            analyzers_for_linter_with_settings("plugtest", &settings).expect("plugtest");
+        assert_eq!(analyzers.len(), 1);
+        assert_eq!(analyzers[0].name, "plug_test_pass");
+        assert!(known_linter_names().contains(&"plugtest"));
+        assert_eq!(linter_description("plugtest"), "registry plugin test");
+
+        guff_plugin::clear_instances();
+        guff_plugin::clear_manual_factories();
+    }
+}

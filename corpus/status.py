@@ -1,0 +1,427 @@
+#!/usr/bin/env python3
+"""corpus/status.py — how far the corpus is from 100 compatible targets.
+
+Three questions a session starting from nothing has to answer, and one place
+that answers all three:
+
+    ./corpus/status.py check    exit 0 when the goal is reached
+    ./corpus/status.py next     the single next task, one line
+    ./corpus/status.py report   the table a person reads
+
+`probe` regenerates `corpus/status.json` from whatever measurements are on
+disk under `compat/results/`. Those result directories are gitignored, so the
+ledger is what survives — it is the only durable record of "which targets are
+at zero", and every iteration of the loop commits it.
+
+The ledger is *generated*, never hand-written. A row nobody measured says
+`unmeasured`, not `0`: an absent measurement and a clean one are different
+answers, and the whole point of this file is that a fresh session can tell
+them apart
+(compat/README.md, and the `health.json` baselines for the same rule one level
+down).
+"""
+
+from __future__ import annotations
+
+import argparse
+import collections
+import json
+import pathlib
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+REPOS = ROOT / "corpus" / "repos.json"
+HUNT = ROOT / "corpus" / "hunt.json"
+CANDIDATES = ROOT / "corpus" / "candidates-100.json"
+RESULTS = ROOT / "compat" / "results"
+LEDGER = ROOT / "corpus" / "status.json"
+
+GOAL = 100
+
+# Targets that are surveyed and deliberately not adopted, with the reason.
+# `corpus/README.md` carries the same table in prose; this copy is the one
+# `next` reads, so a repo excluded there must be excluded here or it will keep
+# being proposed.
+EXCLUDED = {
+    "pulumi": "declares module plugins; a stock golangci-lint refuses to start "
+    "(compat/reject/cases/custom-module-plugin-missing)",
+    "lnd": "declares a `ll` module plugin (a custom line-length linter whose source is in "
+    "tools/linters/ll.go and whose binary the Makefile builds with `golangci-lint custom`); "
+    "a stock golangci-lint refuses to start, and guff refuses with the same message — the "
+    "parity compat/reject/cases/custom-module-plugin-missing pins. Same shape as pulumi. "
+    "With the custom block removed by hand ./build/... gives golangci 10 / guff 10 / both 10, "
+    "so the repository is measurable and this is reachable if patch_unlimited_issues.py ever "
+    "strips type: module entries the way it strips .so goplugins. Measured 2026-09-08 at "
+    "v0.21.2-beta",
+    "milvus": "**cgo needs milvus's own C++ core, and upstream's report is a race.** "
+    "internal/util/cgo/errors.go opens with `#cgo pkg-config: milvus_core` under no "
+    "build tag, and milvus_core.pc comes from building internal/core with CMake — not "
+    "from any package manager — so `pkg-config --cflags milvus_core` fails here and 24 "
+    "of the root module's 347 packages are ill-typed (every cgo binding plus its "
+    "dependents: analyzecgowrapper, segcore, indexcgowrapper, initcore, proxy, "
+    "querynodev2, …). golangci-lint's whole report collapses to typecheck, and because "
+    "more than one package is ill-typed it collapses to a *different* set each time — "
+    "three runs with a fresh cache gave {cgo/logging/logging_benchmark_test.go:1}, "
+    "{cgo/errors.go:9, cgo/futures.go:28} and {cgo/logging/logging_benchmark_test.go:1}. "
+    "Same shape as dagger: there is no reference set to be compatible with. guff "
+    "analyses the ill-typed packages and reports 20 findings nothing can be compared "
+    "against (guff 20 / golangci 2 / both 0). Not scopable either — pkg/ and client/ are "
+    "separate modules, so `./...` from the root does not reach them and `./pkg/...` is "
+    "\"main module does not contain package\". Re-adoptable on a machine where milvus's "
+    "core is built and installed (their own CI does that). Measured 2026-09-14 at v3.0.0",
+    "moby": "public tree has no root go.mod",
+    "hugo": "no .golangci.yml on the default branch",
+    "etcd": "no .golangci.yml on the default branch",
+    "terraform": "no .golangci.yml on the default branch",
+    "istio": "no .golangci.yml on the default branch",
+    "cockroach": "no .golangci.yml on the default branch",
+    "harness": "no tag carries a v2 config (newest tag v3.3.0 is 2025-08-14; the "
+    "config went version: \"2\" on 2025-10-17, and no tag has been cut since), and "
+    "./... on main measures only typecheck: one //go:embed of an unbuilt frontend "
+    "deletes the whole report",
+    "ollama": "app/ui/app.go embeds app/dist, a React build output that is in "
+    ".gitignore and so exists in no tag or clone. go list ./... fails with "
+    "\"pattern app/dist: no matching files found\", golangci-lint's whole report "
+    "collapses to that one typecheck finding, and a typecheck finding deletes "
+    "every other issue in the run — the same shape as harness. Stubbing the "
+    "embed by hand loads 104 packages and gives golangci 0 / guff 10, so the "
+    "repository itself is measurable; reachable if the schema ever grows a "
+    "prepare step. Measured 2026-09-06 at v0.33.1",
+    "signoz": "the host toolchain cannot build it. go.mod says go 1.25.7 with no toolchain line, so GOTOOLCHAIN=auto (which only upgrades) runs the host's go1.26.5 — and github.com/bytedance/sonic v1.14.1 declares rt.GoMapIterator in three files that are all excluded on go1.26 (!go1.24, and two go1.24 && !go1.26). go build ./... fails with \"undefined: GoMapIterator\" and golangci-lint's whole report collapses to 1 typecheck finding, so 15 linters over 356 packages measure nothing. GOTOOLCHAIN=go1.25.7 go build ./... exits 0, so this is toolchain-version-bound, not platform-bound like cri-o: measurable on a Go 1.24/1.25 host, and re-checkable when signoz bumps sonic. Measured 2026-09-06 at v0.139.0",
+    "inspektor-gadget": "Linux only. pkg/utils/host and pkg/symbolizer/symtab are //go:build linux on every file, so go list reports GoFiles=0 for both on darwin and 33 files import the first directly. golangci-lint's whole report collapses to 1 typecheck finding, guff reports 1 gofumpt finding, and the two do not overlap: guff 1 / golangci 1 / both 0. 128 of 252 packages are tainted and the 124 clean ones are scattered across six top-level directories — ./pkg/... collapses the same way because pkg/process-helpers is inside it, so there is no subtree to scope to. Platform-bound like cri-o and tetragon, not toolchain-bound like signoz. Measured 2026-09-07 at v0.55.1",
+    "kubevirt": "Linux only, and `./...` does not even start. cmd/container-disk-v2alpha holds a main.c and nothing but _test.go files, so `go list` refuses the whole pattern with \"C source files not allowed when not using cgo or SWIG: main.c\" (CGO_ENABLED=1 — a property of the repo, not the host). kubevirt never lints `./...` either: hack/golangci-lint.sh reads 105 paths out of hack/linter/lint-paths.txt. Measured against those, **39 of the 105 paths fail `go build` on darwin, covering 85 of their 166 packages** — cmd/virt-api, cmd/virt-controller, cmd/virt-operator, pkg/instancetype, pkg/network/driver/netlink and six tests/ directories among them. Two representative causes: vendor/github.com/containernetworking/plugins/pkg/ns ships only ns_linux.go (\"build constraints exclude all Go files\"), and pkg/safepath calls syscall.Getxattr, touchat and mknodat. golangci-lint's whole report then collapses to 1 typecheck finding while guff keeps going and reports 130 mnd findings: guff 130 / golangci 1 / both 0, with 8 packages ill-typed on guff's side — the milvus and dagger shape. The 66 buildable paths are scattered across cmd/, pkg/ and tests/, so there is no subtree to scope to and any subset would be a package set neither the repo nor upstream uses. Platform-bound like cri-o and inspektor-gadget. Measured 2026-09-15 at v1.9.0",
+    "dagger": "**upstream's report is a race, not a set.** 228 doc snippets under "
+    "docs/ import dagger/my-module/internal/dagger, a module path that exists on no "
+    "platform, so 244 of 481 packages are ill-typed on darwin (228 of them everywhere). "
+    "golangci-lint's loadingPackage.analyze calls the run-wide cancel() the moment one "
+    "package's actions fail with IllTypedError, so the typecheck issues it prints are "
+    "whichever ill-typed packages won the race — and a typecheck issue deletes every "
+    "other issue in the run. Four ./... runs gave 2, 4, 2 and 8 issues (the adoption run "
+    "recorded a fifth set of 6) and the four smaller sets share no file at all; a "
+    "12-package minimal repro gave 8 different sets in 8 runs, and --concurrency=1 does "
+    "not settle it. With exactly one ill-typed package the same repro is stable 6 times "
+    "out of 6 — the line is at two, and dagger has 186. "
+    "A tool cannot be compatible with a reference that is not a function of the tree. "
+    "Scoping away from docs/ does not rescue it on this host: the other 16 ill-typed "
+    "packages are all linux-only (util/layercopy's cleanRel lives in a //go:build linux "
+    "file while its caller filter.go carries no tag, engine/engineutil wants "
+    "unix.OpenTree, network/netinst wants syscall.Mount, and cmd/engine + engine/server "
+    "pull containerd's overlay snapshotter). On Linux a docs-free packages pattern would "
+    "measure, and the entry schema has that field, so this is re-adoptable there. "
+    "Measured 2026-09-08 and 2026-09-10 at v0.21.9",
+    "opentelemetry-collector": "100 go.mod files and no go.work: ./... at the "
+    "checkout root reaches exactly one package (internal/statusutil), and a "
+    "submodule cannot be named from there (go list ./pdata/... -> \"directory "
+    "prefix pdata does not contain main module\"). Upstream lints it as 100 runs "
+    "(make golint cds into each module); the harness runs one",
+    "zitadel": "the protobuf / OpenAPI code is generated at build time (buf generate "
+    "over buf.gen.yaml, with zitadel's own authoption / zitadel protoc plugins) and "
+    "committed nowhere: pkg/grpc/message holds message.go alone, naming a "
+    "LocalizedMessage the missing message.pb.go declares, and openapi/handler.go embeds "
+    "v2/zitadel/*. 123 of 330 packages fail to load, and golangci-lint's whole report is "
+    "1 typecheck issue. Host-independent (ollama's shape). Measured 2026-09-22 at v4.17.1",
+    "tidb": "golangci-lint crashes on it: at v26.3.17 (the first tag with a v2 config; the "
+    "candidate's v8.5.7 is v1 and refused) golangci-lint 2.12.2 panics in go/types "
+    "(Checker.builtin -> TypeParam.typeset -> isString(nil)) while type-checking a "
+    "dependency from source, two runs out of two. Measured 2026-09-22",
+    "opentelemetry-collector-contrib": "346 go.mod files and no go.work, and the root "
+    "module holds no Go file at all: every one of the 7,621 .go files at v0.159.0 sits "
+    "under the other 345 modules, so ./... at the checkout root matches nothing "
+    "(opentelemetry-collector's shape, one step further). Upstream dispatches its targets "
+    "module by module through the Makefile's FOR_GROUP_TARGET over ALL_MODS. Measured "
+    "2026-09-22 from the tag's git tree",
+}
+
+# Targets whose numbers this host cannot produce. Measuring them anywhere but
+# Linux records the platform, not the compatibility — cri-o is Linux-only and
+# both tools go ill-typed on darwin (COMPAT-HARDENING 2026-08-30 続き 103).
+#
+# tetragon is the same shape and the clearest case of it: four of its packages
+# (pkg/asm, pkg/constants, pkg/observer/observertesthelper, pkg/reader/namespace)
+# ship only `_linux.go` / `_windows.go`, so `go build ./...` fails on darwin and
+# **70 of its 219 packages** cannot be loaded at all (2026-09-06 続き 217).
+#
+# cilium is tetragon's parent project and the same again: 16 packages use
+# Linux-only `unix.*` / `netlink.*` names from files with no build tag
+# (`pkg/datapath/maps`, `pkg/datapath/link`, `pkg/fqdn/proxy/ipfamily`, …), and
+# **224 of its 787 packages** are or import one of them (2026-09-22 続き 334).
+#
+# k3s ships two packages with no darwin file at all (`pkg/cgroups`,
+# `pkg/proctitle`), and `pkg/agent`, every `pkg/cli/*`, every `cmd/*` and the
+# root import them: 16 of 150 packages fail to load, and they are its core
+# (2026-09-22 続き 335).
+PLATFORM_BOUND = {
+    "cri-o": "linux",
+    "buildah": "linux",
+    "tetragon": "linux",
+    "cilium": "linux",
+    "k3s": "linux",
+}
+
+# Targets whose remaining open findings are a scoped-out **feature**, not a
+# defect to chase. `next` skips them so the queue does not hand the same
+# already-answered task to every session; `report` still shows the open count,
+# because the findings are really missing and hiding that would overstate
+# compatibility.
+#
+# This is not `compat/allowlists/`. An allowlist entry says "the divergence is
+# accepted and the target counts as clean"; a row here stays **open** and keeps
+# the ledger honest. Only put a target here with the measurement written down in
+# docs/COMPAT-HARDENING.md §4, and take it out the moment the feature lands.
+DEFERRED_OPEN = {
+    "loki": "the 4 remaining findings are `//go:fix inline` on a *function*, and "
+    "upstream decides both whether to report and what to report by running the "
+    "inliner (`passes/inline/inline.go`: the error string becomes the diagnostic; "
+    "`Literalized` / `BindingDecl` mean silence). That is "
+    "golang.org/x/tools/internal/refactor/inline, 9,222 lines, and none of the "
+    "three answers can be approximated without the substitution analysis itself. "
+    "Measured 2026-09-15 at v3.7.6 — see docs/COMPAT-HARDENING.md §4 (続き 292)",
+    "datadog-agent": "the 76 remaining findings are all revive, and all of one mechanism: "
+    "golangci hands revive only *file names* (GetGoFileNames resolves each file's "
+    "position with PositionFor(adjusted), so a cgo package yields the original .go), "
+    "and revive re-reads, re-parses and re-type-checks them itself. Upstream's revive "
+    "never sees cgo's generated declarations; guff's runs on the typed AST of "
+    "compiled_go_files. Per-rule patches cannot fix it — guff reports at offsets in the "
+    "shared FileSet, which for a cgo package holds the generated file, so reporting an "
+    "original line needs a reverse //line lookup. Closing it means a revive-local file "
+    "set (parse the adjusted names), a position path for it, and a type policy matching "
+    "revive's importer-less check; 98 rule files read pass.files() today. Measured "
+    "2026-09-23 at 7.82.3 (guff=90 golangci=14 both=14, R=100%) — see "
+    "docs/COMPAT-HARDENING.md §4 (続き 347)"
+}
+
+
+def defined_targets() -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    for path in (REPOS, HUNT):
+        for entry in json.loads(path.read_text()):
+            out[entry["name"]] = entry
+    return out
+
+
+def latest_measurements() -> dict[str, dict]:
+    """The newest `<target>.summary.json` per target, across every results dir.
+
+    `compat/run.sh` and `compat/hunt.sh` write the same schema into differently
+    named directories; both are timestamped, so sorting the directory names
+    sorts by time.
+    """
+    best: dict[str, tuple[str, dict]] = {}
+    if not RESULTS.is_dir():
+        return {}
+    for run_dir in sorted(p for p in RESULTS.iterdir() if p.is_dir()):
+        stamp = run_dir.name.replace("hunt-", "")
+        for summary in run_dir.glob("*.summary.json"):
+            try:
+                data = json.loads(summary.read_text())
+            except (OSError, json.JSONDecodeError):
+                continue
+            name = data.get("target")
+            if not name:
+                continue
+            if name not in best or stamp >= best[name][0]:
+                best[name] = (stamp, data)
+    return {name: {"at": stamp, **data} for name, (stamp, data) in best.items()}
+
+
+def by_linter(keys: list[str]) -> dict[str, int]:
+    """`path:line:linter:message` — the third field is the linter."""
+    counter: collections.Counter[str] = collections.Counter()
+    for key in keys:
+        parts = key.split(":")
+        counter[parts[2] if len(parts) >= 3 else "?"] += 1
+    return dict(counter.most_common())
+
+
+def host_platform() -> str:
+    """`linux` / `darwin` / … — the key `PLATFORM_BOUND` values are written in."""
+    return "linux" if sys.platform.startswith("linux") else sys.platform
+
+
+def previous_rows() -> dict[str, dict]:
+    """The rows already in the ledger, so a skipped probe keeps what CI wrote."""
+    if not LEDGER.exists():
+        return {}
+    try:
+        return json.loads(LEDGER.read_text()).get("targets", {})
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def build() -> dict:
+    defined = defined_targets()
+    measured = latest_measurements()
+    previous = previous_rows()
+    host = host_platform()
+    rows = {}
+    for name, entry in sorted(defined.items()):
+        row: dict = {"tier": entry.get("tier", "?")}
+        if name in PLATFORM_BOUND:
+            row["needs_platform"] = PLATFORM_BOUND[name]
+            if PLATFORM_BOUND[name] != host:
+                # A measurement taken on the wrong platform describes the
+                # platform, not the compatibility: buildah does not even
+                # `go build` on darwin (a vendored dependency has no darwin
+                # files), and the findings that do appear are in `!linux` stub
+                # files that Linux never compiles.
+                #
+                # Keep only a row the *right* platform wrote — `measured_on`
+                # says which one did. A row without that stamp predates this
+                # guard and was taken here, so it is dropped rather than
+                # frozen; CI runs on ubuntu and will fill it in properly.
+                keep = previous.get(name, {})
+                if keep.get("measured_on") == PLATFORM_BOUND[name]:
+                    row.update({k: v for k, v in keep.items() if k != "tier"})
+                else:
+                    row["state"] = "unmeasured"
+                row["skipped_on"] = host
+                rows[name] = row
+                continue
+        m = measured.get(name)
+        if m is None:
+            row["state"] = "unmeasured"
+        else:
+            guff_only = m.get("unexpected_guff") or []
+            gcl_only = m.get("unexpected_golangci") or []
+            row["state"] = "clean" if not guff_only and not gcl_only else "open"
+            row["at"] = m["at"]
+            if name in PLATFORM_BOUND:
+                row["measured_on"] = host
+            row["open"] = len(guff_only) + len(gcl_only)
+            row["guff_only"] = len(guff_only)
+            row["gcl_only"] = len(gcl_only)
+            if guff_only or gcl_only:
+                row["by_linter"] = by_linter(guff_only + gcl_only)
+        rows[name] = row
+    return {
+        "_comment": [
+            "Generated by ./corpus/status.py probe — do not hand-edit.",
+            "compat/results/ is gitignored, so this ledger is the durable record",
+            "of which targets have been measured and which are at zero.",
+            "`unmeasured` is not `clean`: an absent measurement is a question.",
+        ],
+        "goal": GOAL,
+        "defined": len(rows),
+        "clean": sum(1 for r in rows.values() if r["state"] == "clean"),
+        "open": sum(1 for r in rows.values() if r["state"] == "open"),
+        "unmeasured": sum(1 for r in rows.values() if r["state"] == "unmeasured"),
+        "targets": rows,
+    }
+
+
+def load_or_build() -> dict:
+    if LEDGER.exists():
+        return json.loads(LEDGER.read_text())
+    return build()
+
+
+def next_task(ledger: dict) -> tuple[str, str]:
+    """(kind, description). Kinds: close, measure, adopt, done."""
+    rows = ledger["targets"]
+
+    # 1. Close an open target before adopting new ones — a corpus of targets
+    #    nobody has brought to zero is a longer list, not more compatibility.
+    #    Fewest diffs first: it closes targets soonest, and one bug standing in
+    #    several repos gets found either way (gocritic appendAssign was 4
+    #    findings across 3 targets).
+    open_rows = [
+        (r.get("open", 0), n)
+        for n, r in rows.items()
+        if r["state"] == "open" and "needs_platform" not in r and n not in DEFERRED_OPEN
+    ]
+    if open_rows:
+        count, name = min(open_rows)
+        linters = rows[name].get("by_linter", {})
+        detail = ", ".join(f"{k}={v}" for k, v in linters.items())
+        return "close", f"close {name} ({count} open: {detail})"
+
+    unmeasured = [
+        n for n, r in rows.items() if r["state"] == "unmeasured" and "needs_platform" not in r
+    ]
+    if unmeasured:
+        return "measure", f"measure {sorted(unmeasured)[0]}"
+
+    if ledger["defined"] < ledger["goal"]:
+        pick = next_candidate(set(rows))
+        if pick is None:
+            return "adopt", "adopt (no candidate left in candidates-100.json — refresh the survey)"
+        return "adopt", f"adopt {pick['name']} ({pick.get('_size_mb', '?')}MB, {pick['url']})"
+
+    return "done", f"done — {ledger['clean']}/{ledger['goal']} targets at zero"
+
+
+def next_candidate(taken: set[str]) -> dict | None:
+    """Smallest unadopted candidate. Small first: a cheap target measured is
+    worth more than a large one queued, and every adoption pays a clone plus its
+    module downloads."""
+    if not CANDIDATES.exists():
+        return None
+    rows = [
+        c
+        for c in json.loads(CANDIDATES.read_text())
+        if c["name"] not in taken and c["name"] not in EXCLUDED
+    ]
+    if not rows:
+        return None
+    return min(rows, key=lambda c: (c.get("_size_mb") or 1e9, c["name"]))
+
+
+def report(ledger: dict) -> str:
+    rows = ledger["targets"]
+    out = [
+        f"# Corpus status — {ledger['clean']}/{ledger['goal']} at zero "
+        f"({ledger['defined']} defined, {ledger['open']} open, "
+        f"{ledger['unmeasured']} unmeasured)",
+        "",
+        "| target | tier | state | open | by linter | measured |",
+        "|---|---|---|--:|---|---|",
+    ]
+    for name, r in sorted(rows.items(), key=lambda kv: (kv[1]["state"], kv[0])):
+        linters = ", ".join(f"{k}={v}" for k, v in (r.get("by_linter") or {}).items())
+        note = f" ({r['needs_platform']} only)" if "needs_platform" in r else ""
+        if name in DEFERRED_OPEN:
+            note += " (deferred)"
+        out.append(
+            f"| {name}{note} | {r['tier']} | {r['state']} | "
+            f"{r.get('open', '')} | {linters} | {r.get('at', '—')} |"
+        )
+    kind, task = next_task(ledger)
+    out += ["", f"**next**: `{task}` ({kind})"]
+    return "\n".join(out) + "\n"
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("command", choices=["probe", "report", "next", "check"])
+    args = ap.parse_args()
+
+    if args.command == "probe":
+        ledger = build()
+        LEDGER.write_text(json.dumps(ledger, indent=2, ensure_ascii=False) + "\n")
+        print(
+            f"wrote {LEDGER.relative_to(ROOT)}: {ledger['defined']} defined, "
+            f"{ledger['clean']} clean, {ledger['open']} open, "
+            f"{ledger['unmeasured']} unmeasured"
+        )
+        return 0
+
+    ledger = load_or_build()
+    if args.command == "report":
+        print(report(ledger), end="")
+        return 0
+    if args.command == "next":
+        kind, task = next_task(ledger)
+        print(task)
+        return 0 if kind != "done" else 0
+
+    # check
+    kind, task = next_task(ledger)
+    if kind == "done":
+        print(task)
+        return 0
+    print(f"not done: {task}", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

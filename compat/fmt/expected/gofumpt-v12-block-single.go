@@ -1,0 +1,50 @@
+package p
+
+func f() {
+	if true {
+		println()
+	}
+
+	for true {
+		println()
+	}
+
+	{
+		println(1, 2,
+			3, 4, `foo
+			bar`)
+	}
+
+	{
+		// comment directly before
+		println()
+
+		// comment after
+	}
+
+	{
+		// comment before
+
+		println()
+		// comment directly after
+	}
+
+	// For readability; the empty line helps separate the multi-line
+	// condition from the body.
+	if true &&
+		true {
+
+		println()
+	}
+	for true &&
+		true {
+
+		println()
+	}
+	if true &&
+		true {
+
+		// documented single statement
+		println()
+	}
+}

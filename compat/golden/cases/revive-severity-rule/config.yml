@@ -1,0 +1,29 @@
+# Golden case: a per-rule `severity` overriding the global one
+# (COMPAT-HARDENING Phase 4).
+#
+# The global severity is only a fallback: `normalizeConfig` writes it into the
+# rules that left theirs empty, so a rule that set its own keeps it. Here
+# increment-decrement is `error` and the other two stay `warning` — the mixed
+# state neither of the two whole-run severity cases can produce.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      severity: warning
+      rules:
+        - name: increment-decrement
+          severity: error
+        - name: error-naming
+        - name: errorf
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

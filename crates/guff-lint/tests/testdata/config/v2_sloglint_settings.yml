@@ -1,0 +1,24 @@
+version: "2"
+
+linters:
+  settings:
+    sloglint:
+      no-mixed-args: true
+      kv-only: false
+      attr-only: true
+      no-global: all
+      context: scope
+      static-msg: true
+      msg-style: lowercased
+      no-raw-keys: true
+      key-naming-case: snake
+      allowed-keys:
+        - user_id
+      forbidden-keys:
+        - time
+        - level
+      args-on-sep-lines: true
+      custom-funcs:
+        - name: example.com/sloglint.MyLog
+          msg-pos: 0
+          args-pos: 1

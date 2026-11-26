@@ -1,0 +1,13 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh exhaustive-upstream-includetype
+# Produced by running golangci-lint on compat/golden/cases/exhaustive-upstream-includetype/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+check/swtch/pattern/includetype/file.go:39:2:exhaustive::missing cases in expression switch: w0
+check/swtch/pattern/includetype/file.go:51:2:exhaustive::missing cases in expression switch: typ.VV0, typ.V2, typ.V3, typ.V5
+check/swtch/pattern/includetype/file.go:68:2:exhaustive::missing cases in expression switch: u0
+check/swtch/pattern/includetype/file.go:74:6:exhaustive::missing keys in map literal: w0
+check/swtch/pattern/includetype/file.go:90:6:exhaustive::missing keys in map literal: u0

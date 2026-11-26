@@ -1,0 +1,9 @@
+version: "2"
+linters:
+  default: none
+  enable: [errcheck]
+  exclusions:
+    rules:
+      - path: '_test\.go'
+        path-except: 'main\.go'
+        text: 'unchecked'

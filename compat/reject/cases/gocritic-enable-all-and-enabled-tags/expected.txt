@@ -1,0 +1,1 @@
+gocritic: invalid settings: enable-all and enabled-tags options must not be combined

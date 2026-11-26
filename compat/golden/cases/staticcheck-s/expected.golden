@@ -1,0 +1,230 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh staticcheck-s
+# Produced by running golangci-lint on compat/golden/cases/staticcheck-s/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+s1000/bad/bad.go:4:2:staticcheck::S1000: should use a simple channel send/receive instead of select with a single case
+s1001/bad/bad.go:4:2:staticcheck::S1001: should use copy(to, from) instead of a loop
+s1001/bad/bad.go:15:2:staticcheck::S1001: should use copy(to, from) instead of a loop
+s1001/bad/bad.go:21:2:staticcheck::S1001: should use copy(to, from) instead of a loop
+s1001/bad/bad.go:27:2:staticcheck::S1001: should copy arrays using assignment instead of using a loop
+s1001/bad/bad.go:33:2:staticcheck::S1001: should use copy(to, from[:]) instead of a loop
+s1001/bad/bad.go:39:2:staticcheck::S1001: should use copy(to[:], from) instead of a loop
+s1001/bad/bad.go:45:2:staticcheck::S1001: should copy arrays using assignment instead of using a loop
+s1001/bad/bad.go:59:2:staticcheck::S1001: should use copy(to, from) instead of a loop
+s1001/bad/bad.go:65:2:staticcheck::S1001: should use copy(to, from) instead of a loop
+s1001/pkgshadow/pkgshadow.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+s1001/pkgshadow/pkgshadow.go:8:1:staticcheck::ST1020: comment on exported function Loop should be of the form "Loop ..."
+s1001/shadow/shadow.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+s1001/shadow/shadow.go:14:1:staticcheck::ST1020: comment on exported function Plain should be of the form "Plain ..."
+s1001/shadow/shadow.go:16:2:staticcheck::S1001: should use copy(to, from) instead of a loop
+s1001/shadow/shadow.go:21:1:staticcheck::ST1020: comment on exported function ShadowedLocal should be of the form "ShadowedLocal ..."
+s1001/shadow/shadow.go:31:1:staticcheck::ST1020: comment on exported function ShadowedParam should be of the form "ShadowedParam ..."
+s1001/shadow/shadow.go:38:1:staticcheck::ST1020: comment on exported function ShadowedAfter should be of the form "ShadowedAfter ..."
+s1001/shadow/shadow.go:40:2:staticcheck::S1001: should use copy(to, from) instead of a loop
+s1001/shadow/shadow.go:47:1:staticcheck::ST1020: comment on exported function ShadowedInnerBlock should be of the form "ShadowedInnerBlock ..."
+s1001/shadow/shadow.go:53:2:staticcheck::S1001: should use copy(to, from) instead of a loop
+s1001/shadow/shadow.go:58:1:staticcheck::ST1020: comment on exported function ArraysShadowed should be of the form "ArraysShadowed ..."
+s1001/shadow/shadow.go:62:2:staticcheck::S1001: should copy arrays using assignment instead of using a loop
+s1002/bad/bad.go:4:5:staticcheck::S1002: should omit comparison to bool constant, can be simplified to x
+s1002/bad/bad.go:7:5:staticcheck::S1002: should omit comparison to bool constant, can be simplified to !x
+s1002/ok/ok.go:12:1:staticcheck::ST1021: comment on exported type TokenSource should be of the form "TokenSource ..." (with optional leading article)
+s1002/shapes/shapes.go:23:6:staticcheck::S1002: should omit comparison to bool constant, can be simplified to b
+s1002/shapes/shapes.go:24:6:staticcheck::S1002: should omit comparison to bool constant, can be simplified to !b
+s1002/shapes/shapes.go:25:6:staticcheck::S1002: should omit comparison to bool constant, can be simplified to !b
+s1002/shapes/shapes.go:26:6:staticcheck::S1002: should omit comparison to bool constant, can be simplified to s.B
+s1002/shapes/shapes.go:27:6:staticcheck::S1002: should omit comparison to bool constant, can be simplified to s.M()
+s1002/shapes/shapes.go:28:6:staticcheck::S1002: should omit comparison to bool constant, can be simplified to !g()
+s1002/shapes/shapes.go:29:6:staticcheck::S1002: should omit comparison to bool constant, can be simplified to !*ptr
+s1002/shapes/shapes.go:30:6:staticcheck::S1002: should omit comparison to bool constant, can be simplified to arr[0]
+s1002/shapes/shapes.go:31:6:staticcheck::S1002: should omit comparison to bool constant, can be simplified to !m[k]
+s1002/shapes/shapes.go:32:6:staticcheck::S1002: should omit comparison to bool constant, can be simplified to (<-ch)
+s1002/shapes/shapes.go:33:6:staticcheck::S1002: should omit comparison to bool constant, can be simplified to !(b && s.B)
+s1002/shapes/shapes.go:34:6:staticcheck::S1002: should omit comparison to bool constant, can be simplified to i.(bool)
+s1002/shapes/shapes.go:35:6:staticcheck::S1002: should omit comparison to bool constant, can be simplified to !(b)
+s1002/shapes/shapes.go:36:6:staticcheck::S1002: should omit comparison to bool constant, can be simplified to (!b)
+s1003/bad/bad.go:9:2:staticcheck::SA9003: empty branch
+s1003/bad/bad.go:9:5:staticcheck::S1003: should use strings.Contains(s, "x") instead
+s1003/bad/bad.go:11:2:staticcheck::SA9003: empty branch
+s1003/bad/bad.go:11:5:staticcheck::S1003: should use !strings.Contains(s, "x") instead
+s1003/bad/bad.go:13:2:staticcheck::SA9003: empty branch
+s1003/bad/bad.go:13:5:staticcheck::S1003: should use strings.ContainsRune(s, 'x') instead
+s1003/bad/bad.go:15:2:staticcheck::SA9003: empty branch
+s1003/bad/bad.go:15:5:staticcheck::S1003: should use bytes.Contains(b, []byte("x")) instead
+s1003/ok/ok.go:6:2:staticcheck::SA9003: empty branch
+s1003/ok/ok.go:8:2:staticcheck::SA9003: empty branch
+s1004/bad/bad.go:6:9:staticcheck::S1004: should use bytes.Equal(a, b) instead
+s1004/literal/literal.go:11:6:staticcheck::S1004: should use bytes.Equal(a, b) instead
+s1004/literal/literal.go:12:6:staticcheck::S1004: should use bytes.Equal(a, b) instead
+s1004/literal/literal.go:15:29:staticcheck::SA4000: identical expressions on the left and right side of the '-' operator
+s1004/literal/literal.go:20:21:staticcheck::S1019: should use make(chan int) instead
+s1005/bad/bad.go:4:2:staticcheck::S1005: unnecessary assignment to the blank identifier
+s1005/bad/bad.go:15:6:staticcheck::S1005: unnecessary assignment to the blank identifier
+s1005/bad/bad.go:21:6:staticcheck::S1005: unnecessary assignment to the blank identifier
+s1005/bad/bad.go:27:9:staticcheck::S1005: unnecessary assignment to the blank identifier
+s1005/bad/bad.go:53:2:staticcheck::S1005: unnecessary assignment to the blank identifier
+s1006/bad/bad.go:4:2:staticcheck::S1006: should use for {} instead of for true {}
+s1006/bad/bad.go:4:2:staticcheck::SA5002: loop condition never changes or has a race condition
+s1006/bad/bad.go:4:2:staticcheck::SA5002: this loop will spin, using 100% CPU
+s1006/bad/bad.go:9:2:staticcheck::S1006: should use for {} instead of for true {}
+s1006/ok/ok.go:4:2:staticcheck::SA5002: this loop will spin, using 100% CPU
+s1006/ok/ok.go:9:2:staticcheck::SA5002: loop condition never changes or has a race condition
+s1006/ok/ok.go:9:2:staticcheck::SA5002: this loop will spin, using 100% CPU
+s1007/bad/bad.go:5:34:staticcheck::S1007: should use raw string (`...`) with regexp.Compile to avoid having to escape twice
+s1008/bad/bad.go:7:2:staticcheck::S1008: should use 'return x' instead of 'if x { return true }; return false'
+s1008/bad/bad.go:14:2:staticcheck::S1008: should use 'return !fn()' instead of 'if fn() { return false }; return true'
+s1008/bad/bad.go:21:2:staticcheck::S1008: should use 'return x <= 0' instead of 'if x > 0 { return false }; return true'
+s1008/bad/bad.go:28:2:staticcheck::S1008: should use 'return !x' instead of 'if x { return false }; return true'
+s1008/bad/bad.go:35:2:staticcheck::S1008: should use 'return len(x) == 0' instead of 'if len(x) > 0 { return false }; return true'
+s1009/bad/bad.go:7:2:staticcheck::SA9003: empty branch
+s1009/bad/bad.go:7:5:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/bad/bad.go:9:2:staticcheck::SA9003: empty branch
+s1009/bad/bad.go:9:5:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/bad/bad.go:11:2:staticcheck::SA9003: empty branch
+s1009/bad/bad.go:11:5:staticcheck::S1009: should omit nil check; len() for nil maps is defined as zero
+s1009/bad/bad.go:13:2:staticcheck::SA9003: empty branch
+s1009/bad/bad.go:13:5:staticcheck::S1009: should omit nil check; len() for nil channels is defined as zero
+s1009/ok/ok.go:6:2:staticcheck::SA9003: empty branch
+s1009/ok/ok.go:8:2:staticcheck::SA9003: empty branch
+s1009/table/table.go:22:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/table/table.go:24:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/table/table.go:26:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/table/table.go:27:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/table/table.go:28:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/table/table.go:30:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/table/table.go:36:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/table/table.go:39:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/table/table.go:40:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/table/table.go:41:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/table/table.go:42:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/table/table.go:44:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/table/table.go:53:3:staticcheck::S1009: should omit nil check; len() for nil maps is defined as zero
+s1009/table/table.go:54:3:staticcheck::S1009: should omit nil check; len() for nil channels is defined as zero
+s1009/table/table.go:63:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/table/table.go:64:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/table/table.go:65:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/table/table.go:66:3:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009generated/g02tail.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+s1009generated/g03rawstring.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+s1009generated/g04indented.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+s1009generated/g04indented.go:4:5:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009generated/g05block.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+s1009generated/g06noperiod.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+s1009generated/g06noperiod.go:4:5:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009generated/g07oldcgo.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+s1009generated/g08empty.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+s1009generated/g09trailingspace.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+s1009generated/g09trailingspace.go:4:5:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009generated/g10plain.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+s1009generated/g10plain.go:4:5:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009generated/mixed.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+s1009generated/mixed.go:15:6:staticcheck::S1025: should use String() instead of fmt.Sprintf
+s1009generated/mixed.go:18:2:staticcheck::S1038: should use log.Printf(...) instead of log.Print(fmt.Sprintf(...))
+s1010/bad/bad.go:3:36:staticcheck::S1010: should omit second index in slice, s[a:len(s)] is identical to s[a:]
+s1011/bad/bad.go:16:2:staticcheck::S1011: should replace loop with dst = append(dst, src...)
+s1011/bad/bad.go:23:2:staticcheck::S1011: should replace loop with h.items = append(h.items, src...)
+s1011/bad/bad.go:29:2:staticcheck::S1011: should replace loop with m[k] = append(m[k], src...)
+s1011/bad/bad.go:35:2:staticcheck::S1011: should replace loop with (*t)[k] = append((*t)[k], src...)
+s1011/bad/bad.go:42:2:staticcheck::S1011: should replace loop with h.items = append(h.items, makeSrc()...)
+s1011/bad/bad.go:50:2:staticcheck::S1011: should replace loop with dst = append(dst, src...)
+s1011/bad/bad.go:58:2:staticcheck::S1011: should replace loop with h.items = append(h.items, src...)
+s1012/bad/bad.go:5:44:staticcheck::S1012: should use time.Since instead of time.Now().Sub
+s1016/bad/bad.go:7:9:staticcheck::S1016: should convert x (type T1) to T2 instead of using struct literal
+s1016/ok/ok.go:13:1:staticcheck::ST1020: comment on exported method Copy should be of the form "Copy ..."
+s1017/bad/bad.go:6:2:staticcheck::S1017: should replace this if statement with an unconditional strings.TrimPrefix
+s1017/bad/bad.go:9:2:staticcheck::S1017: should replace this if statement with an unconditional strings.TrimPrefix
+s1017/bad/bad.go:10:3:staticcheck::SA4006: this value of s is never used
+s1017/ok/ok.go:7:3:staticcheck::SA4018: self-assignment of s to s
+s1018/bad/bad.go:4:2:staticcheck::S1018: should use copy() instead of loop for sliding slice elements
+s1019/bad/bad.go:3:31:staticcheck::S1019: should use make(chan int) instead
+s1020/bad/bad.go:4:2:staticcheck::S1020: when ok is true, i can't be nil
+s1020/bad/bad.go:4:2:staticcheck::SA9003: empty branch
+s1020/ok/ok.go:3:25:staticcheck::SA9003: empty branch
+s1020/ok/ok.go:3:28:staticcheck::SA4006: this value of ok is never used
+s1020/shapes/shapes.go:26:2:staticcheck::S1020: when ok is true, i can't be nil
+s1020/shapes/shapes.go:33:2:staticcheck::S1020: when ok is true, i can't be nil
+s1020/shapes/shapes.go:41:3:staticcheck::S1020: when ok is true, i can't be nil
+s1020/shapes/shapes.go:91:2:staticcheck::S1020: when yes is true, i can't be nil
+s1021/bad/bad.go:4:2:staticcheck::S1021: should merge variable declaration with assignment on next line
+s1023/bad/bad.go:7:3:staticcheck::S1023: redundant break statement
+s1023/bad/bad.go:9:2:staticcheck::S1023: redundant return statement
+s1023/bad/bad.go:14:3:staticcheck::S1023: redundant return statement
+s1024/bad/bad.go:5:44:staticcheck::S1024: should use time.Until instead of t.Sub(time.Now())
+s1025/bad/bad.go:27:60:staticcheck::S1025: should use String() instead of fmt.Sprintf
+s1025/bad/bad.go:30:65:staticcheck::S1025: should use String() instead of fmt.Sprintf
+s1025/bad/bad.go:33:71:staticcheck::S1025: should use String() instead of fmt.Sprintf
+s1025/bad/bad.go:36:57:staticcheck::S1025: should use String() instead of fmt.Sprintf
+s1025/bad/bad.go:40:47:staticcheck::S1025: the argument is already a string, there's no need to use fmt.Sprintf
+s1025/bad/bad.go:42:54:staticcheck::S1025: the argument's underlying type is a string, should use a simple conversion instead of fmt.Sprintf
+s1025/bad/bad.go:44:51:staticcheck::S1025: the argument's underlying type is a slice of bytes, should use a simple conversion instead of fmt.Sprintf
+s1025/bad/bad.go:46:47:staticcheck::S1025: the argument's underlying type is a slice of bytes, should use a simple conversion instead of fmt.Sprintf
+s1025/bad/bad.go:57:67:staticcheck::S1025: should use String() instead of fmt.Sprintf
+s1028/bad/bad.go:5:25:staticcheck::S1028: should use fmt.Errorf(...) instead of errors.New(fmt.Sprintf(...))
+s1028/bad/bad.go:5:36:staticcheck::S1039: unnecessary use of fmt.Sprintf
+s1029/bad/bad.go:4:2:staticcheck::S1029: should range over string, not []rune(string)
+s1029/bad/bad.go:4:2:staticcheck::SA6003: should range over string, not []rune(string)
+s1029/bad/bad.go:10:2:staticcheck::S1029: should range over string, not []rune(string)
+s1029/bad/bad.go:10:2:staticcheck::SA6003: should range over string, not []rune(string)
+s1030/bad/bad.go:5:42:staticcheck::S1030: should use buf.String() instead of string(buf.Bytes())
+s1030/bad/bad.go:7:43:staticcheck::S1030: should use buf.Bytes() instead of []byte(buf.String())
+s1030/bad/bad.go:9:42:staticcheck::S1030: should use buf.Bytes() instead of []byte(buf.String())
+s1030/bad/bad.go:11:54:staticcheck::S1030: should use w.B.String() instead of string(w.B.Bytes())
+s1031/bad/bad.go:4:2:staticcheck::S1031: unnecessary nil check around range
+s1032/bad/bad.go:6:2:staticcheck::S1032: should use sort.Ints(...) instead of sort.Sort(sort.IntSlice(...))
+s1032/bad/bad.go:10:2:staticcheck::S1032: should use sort.Strings(...) instead of sort.Sort(sort.StringSlice(...))
+s1033/bad/bad.go:4:2:staticcheck::S1033: unnecessary guard around call to delete
+s1034/bad/bad.go:4:9:staticcheck::S1034: assigning the result of this type assertion to a variable (switch i := i.(type)) could eliminate type assertions in switch cases
+s1035/bad/bad.go:5:31:staticcheck::S1035: calling net/http.CanonicalHeaderKey on the 'key' argument of (net/http.Header).Set is redundant
+s1035/receivers/receivers.go:46:8:staticcheck::S1035: calling net/http.CanonicalHeaderKey on the 'key' argument of (net/http.Header).Del is redundant
+s1035/receivers/receivers.go:51:8:staticcheck::S1035: calling net/http.CanonicalHeaderKey on the 'key' argument of (net/http.Header).Set is redundant
+s1035/receivers/receivers.go:52:8:staticcheck::S1035: calling net/http.CanonicalHeaderKey on the 'key' argument of (net/http.Header).Add is redundant
+s1035/receivers/receivers.go:53:12:staticcheck::S1035: calling net/http.CanonicalHeaderKey on the 'key' argument of (net/http.Header).Get is redundant
+s1035/receivers/receivers.go:54:8:staticcheck::S1035: calling net/http.CanonicalHeaderKey on the 'key' argument of (net/http.Header).Del is redundant
+s1036/bad/bad.go:4:2:staticcheck::S1036: unnecessary guard around map access
+s1036/bad/bad.go:16:2:staticcheck::S1036: unnecessary guard around map access
+s1036/bad/bad.go:22:2:staticcheck::S1036: unnecessary guard around map access
+s1037/bad/bad.go:10:2:staticcheck::S1000: should use a simple channel send/receive instead of select with a single case
+s1037/bad/bad.go:10:2:staticcheck::S1037: should use time.Sleep instead of elaborate way of sleeping
+s1037/bad/bad.go:16:2:staticcheck::S1000: should use a simple channel send/receive instead of select with a single case
+s1037/bad/bad.go:16:2:staticcheck::S1037: should use time.Sleep instead of elaborate way of sleeping
+s1037/ok/ok.go:15:2:staticcheck::S1000: should use a simple channel send/receive instead of select with a single case
+s1037/ok/ok.go:25:2:staticcheck::S1000: should use a simple channel send/receive instead of select with a single case
+s1038/bad/bad.go:10:12:staticcheck::S1038: should use fmt.Printf instead of fmt.Print(fmt.Sprintf(...))
+s1038/bad/bad.go:10:22:staticcheck::S1039: unnecessary use of fmt.Sprintf
+s1038/bad/bad.go:17:2:staticcheck::S1038: should use fmt.Printf instead of fmt.Print(fmt.Sprintf(...))
+s1038/bad/bad.go:18:2:staticcheck::S1038: should use fmt.Printf instead of fmt.Println(fmt.Sprintf(...)) (but don't forget the newline)
+s1038/bad/bad.go:19:6:staticcheck::S1038: should use fmt.Sprintf instead of fmt.Sprint(fmt.Sprintf(...))
+s1038/bad/bad.go:20:6:staticcheck::S1038: should use fmt.Sprintf instead of fmt.Sprintln(fmt.Sprintf(...)) (but don't forget the newline)
+s1038/bad/bad.go:29:2:staticcheck::S1038: should use fmt.Fprintf instead of fmt.Fprint(fmt.Sprintf(...))
+s1038/bad/bad.go:30:2:staticcheck::S1038: should use fmt.Fprintf instead of fmt.Fprintln(fmt.Sprintf(...)) (but don't forget the newline)
+s1038/bad/bad.go:36:2:staticcheck::S1038: should use log.Printf(...) instead of log.Print(fmt.Sprintf(...))
+s1038/bad/bad.go:37:2:staticcheck::S1038: should use log.Printf(...) instead of log.Println(fmt.Sprintf(...))
+s1038/bad/bad.go:38:2:staticcheck::S1038: should use log.Fatalf(...) instead of log.Fatal(fmt.Sprintf(...))
+s1038/bad/bad.go:39:2:staticcheck::S1038: should use log.Fatalf(...) instead of log.Fatalln(fmt.Sprintf(...))
+s1038/bad/bad.go:40:2:staticcheck::S1038: should use log.Panicf(...) instead of log.Panic(fmt.Sprintf(...))
+s1038/bad/bad.go:41:2:staticcheck::S1038: should use log.Panicf(...) instead of log.Panicln(fmt.Sprintf(...))
+s1038/bad/bad.go:48:2:staticcheck::S1038: should use l.Printf(...) instead of l.Print(fmt.Sprintf(...))
+s1038/bad/bad.go:49:2:staticcheck::S1038: should use l.Printf(...) instead of l.Println(fmt.Sprintf(...))
+s1038/bad/bad.go:50:2:staticcheck::S1038: should use l.Fatalf(...) instead of l.Fatal(fmt.Sprintf(...))
+s1038/bad/bad.go:51:2:staticcheck::S1038: should use l.Fatalf(...) instead of l.Fatalln(fmt.Sprintf(...))
+s1038/bad/bad.go:52:2:staticcheck::S1038: should use l.Panicf(...) instead of l.Panic(fmt.Sprintf(...))
+s1038/bad/bad.go:53:2:staticcheck::S1038: should use l.Panicf(...) instead of l.Panicln(fmt.Sprintf(...))
+s1038/bad/bad.go:57:2:staticcheck::S1038: should use t.Errorf(...) instead of t.Error(fmt.Sprintf(...))
+s1038/bad/bad.go:58:2:staticcheck::S1038: should use t.Fatalf(...) instead of t.Fatal(fmt.Sprintf(...))
+s1038/bad/bad.go:59:2:staticcheck::S1038: should use t.Logf(...) instead of t.Log(fmt.Sprintf(...))
+s1038/bad/bad.go:60:2:staticcheck::S1038: should use t.Skipf(...) instead of t.Skip(fmt.Sprintf(...))
+s1038/bad/bad.go:61:2:staticcheck::S1038: should use tb.Errorf(...) instead of tb.Error(fmt.Sprintf(...))
+s1038/bad/bad.go:63:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+s1038/bad/bad.go:72:2:staticcheck::S1038: should use s.logger.Printf(...) instead of s.logger.Print(fmt.Sprintf(...))
+s1038/bad/bad.go:73:2:staticcheck::S1038: should use ls.list[0].Printf(...) instead of ls.list[0].Print(fmt.Sprintf(...))
+s1038/bad/bad.go:99:2:staticcheck::S1038: should use w.Errorf(...) instead of w.Error(fmt.Sprintf(...))
+s1039/bad/bad.go:5:16:staticcheck::S1039: unnecessary use of fmt.Sprint
+s1040/bad/bad.go:16:29:staticcheck::S1040: type assertion to the same type: i already has type interface{}
+s1040/bad/bad.go:18:33:staticcheck::S1040: type assertion to the same type: x already has type msg
+s1040/bad/bad.go:21:11:staticcheck::S1040: type assertion to the same type: x already has type msg
+s1040/bad/bad.go:28:11:staticcheck::S1040: type assertion to the same type: x already has type alias
+s1040/bad/bad.go:34:11:staticcheck::S1040: type assertion to the same type: x already has type inner.Msg
+s1040/bad/bad.go:40:11:staticcheck::S1040: type assertion to the same type: mk().get() already has type msg

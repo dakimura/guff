@@ -1,0 +1,15 @@
+# exhaustive v0.15.0's enumerated testdata (passes/enumerated/testdata/test,
+# MIT, LICENSE next to it), plus guff-written switches (switches.go) that
+# print each enum's member set, which upstream asserts as facts.
+enum/typ/file.go                      crates/guff-style/tests/testdata/exhaustive/upstream-v0.15.0/enumerated/enum/typ/file.go
+enum/typ/file_generated.go            crates/guff-style/tests/testdata/exhaustive/upstream-v0.15.0/enumerated/enum/typ/file_generated.go
+enum/typ/filemode.go                  crates/guff-style/tests/testdata/exhaustive/upstream-v0.15.0/enumerated/enum/typ/filemode.go
+enum/typ/switches.go                  crates/guff-style/tests/testdata/exhaustive/enumerated-golden/typ_switches.go
+enum/iotavalue/file.go                crates/guff-style/tests/testdata/exhaustive/upstream-v0.15.0/enumerated/enum/iotavalue/file.go
+enum/iotavalue/filemode.go            crates/guff-style/tests/testdata/exhaustive/upstream-v0.15.0/enumerated/enum/iotavalue/filemode.go
+enum/nobitwise/file.go                crates/guff-style/tests/testdata/exhaustive/upstream-v0.15.0/enumerated/enum/nobitwise/file.go
+enum/nobitwise/filemode.go            crates/guff-style/tests/testdata/exhaustive/upstream-v0.15.0/enumerated/enum/nobitwise/filemode.go
+enum/iotavalue_nobitwise/filemode.go  crates/guff-style/tests/testdata/exhaustive/upstream-v0.15.0/enumerated/enum/iotavalue_nobitwise/filemode.go
+enum/pkglevel/file.go                 crates/guff-style/tests/testdata/exhaustive/upstream-v0.15.0/enumerated/enum/pkglevel/file.go
+enum/scope/file.go                    crates/guff-style/tests/testdata/exhaustive/upstream-v0.15.0/enumerated/enum/scope/file.go
+enum/scope/sub/file.go                crates/guff-style/tests/testdata/exhaustive/upstream-v0.15.0/enumerated/enum/scope/sub/file.go

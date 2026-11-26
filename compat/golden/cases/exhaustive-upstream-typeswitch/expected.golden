@@ -1,0 +1,49 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh exhaustive-upstream-typeswitch
+# Produced by running golangci-lint on compat/golden/cases/exhaustive-upstream-typeswitch/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+check/typeswitch/alias/file.go:34:2:exhaustive::missing cases in type switch: t or a, *u or *c or cc
+check/typeswitch/alias/file.go:38:2:exhaustive::missing cases in type switch: t or a, *u or *c or cc
+check/typeswitch/alias/file.go:42:2:exhaustive::missing cases in type switch: *t or *a or aa or aa2
+check/typeswitch/alias/file.go:47:2:exhaustive::missing cases in type switch: t or a, *t or *a or aa or aa2, *u or *c or cc
+check/typeswitch/alias/file.go:54:2:exhaustive::missing cases in type switch: sub.V, *sub.V or sub.VV
+check/typeswitch/alias/file.go:57:2:exhaustive::missing cases in type switch: *sub.V or sub.VV
+check/typeswitch/alias/file.go:61:2:exhaustive::missing cases in type switch: sub.V
+check/typeswitch/alias/file.go:65:2:exhaustive::missing cases in type switch: sub.V
+check/typeswitch/casenil/file.go:18:2:exhaustive::missing cases in type switch: t, *t, *u
+check/typeswitch/casenil/file.go:21:2:exhaustive::missing cases in type switch: *t, *u
+check/typeswitch/casenil/file.go:36:2:exhaustive::missing cases in type switch: t, *t, *u
+check/typeswitch/casenil/file.go:40:2:exhaustive::missing cases in type switch: *t, *u
+check/typeswitch/general/file.go:29:2:exhaustive::missing cases in type switch: t, *t, *u
+check/typeswitch/general/file.go:32:2:exhaustive::missing cases in type switch: *t, *u
+check/typeswitch/general/file.go:36:2:exhaustive::missing cases in type switch: t, *u
+check/typeswitch/general/file.go:40:2:exhaustive::missing cases in type switch: t, *t
+check/typeswitch/general/file.go:44:2:exhaustive::missing cases in type switch: t
+check/typeswitch/general/file.go:49:2:exhaustive::missing cases in type switch: *t
+check/typeswitch/general/file.go:54:2:exhaustive::missing cases in type switch: *u
+check/typeswitch/general/file.go:72:2:exhaustive::missing cases in type switch: t, *t, *u
+check/typeswitch/general/file.go:75:2:exhaustive::missing cases in type switch: *t, *u
+check/typeswitch/general/file.go:91:2:exhaustive::missing cases in type switch: *t, *u
+check/typeswitch/general/file.go:94:2:exhaustive::missing cases in type switch: *t
+check/typeswitch/general/file.go:117:2:exhaustive::missing cases in type switch: *v or *av, dpkg.T, *dpkg.T or dpkg.A
+check/typeswitch/general/file.go:120:2:exhaustive::missing cases in type switch: *v or *av, *dpkg.T or dpkg.A
+check/typeswitch/general/file.go:124:2:exhaustive::missing cases in type switch: *v or *av, dpkg.T
+check/typeswitch/general/file.go:128:2:exhaustive::missing cases in type switch: *dpkg.T or dpkg.A
+check/typeswitch/general/file.go:149:2:exhaustive::missing cases in type switch: t, *u
+check/typeswitch/general/file.go:170:2:exhaustive::missing cases in type switch: *k
+check/typeswitch/general/file.go:177:2:exhaustive::missing cases in type switch: *sub.K
+check/typeswitch/general/file.go:192:2:exhaustive::missing cases in type switch: *t, *u
+check/typeswitch/general/file.go:196:2:exhaustive::missing cases in type switch: *t, *u
+check/typeswitch/general/file.go:201:2:exhaustive::missing cases in type switch: *t, *u
+check/typeswitch/general/file.go:207:2:exhaustive::missing cases in type switch: *t, *u
+check/typeswitch/general/file.go:212:2:exhaustive::missing cases in type switch: *t, *u
+check/typeswitch/general/file.go:218:2:exhaustive::missing cases in type switch: *t, *u
+check/typeswitch/general/file.go:259:2:exhaustive::missing cases in type switch: *reflectlite.ValueError, strconv.Error, *strconv.Error, *runtime.PanicNilError, *runtime.TypeAssertionError
+check/typeswitch/general/file.go:261:2:exhaustive::missing cases in type switch: *reflectlite.ValueError, strconv.Error, *strconv.Error, *runtime.PanicNilError, *runtime.TypeAssertionError
+check/typeswitch/gostd/file.go:37:2:exhaustive::missing cases in type switch: *types.Basic, *types.Pointer
+check/typeswitch/gostd/file.go:69:2:exhaustive::missing cases in type switch: *net.IPAddr, *net.IPNet, *net.TCPAddr, *net.UDPAddr, *net.UnixAddr
+check/typeswitch/gostd/file.go:72:2:exhaustive::missing cases in type switch: *net.IPNet

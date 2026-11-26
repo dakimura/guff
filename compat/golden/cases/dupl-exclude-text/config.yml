@@ -1,0 +1,37 @@
+# Golden case: dupl's message is a path, and a config can exclude on it.
+#
+# Upstream renders the duplicate's location with
+# `fsutils.ShortestRelPath(i.To.Filename(), "")` — relative to the working
+# directory. guff used the basename, which is invisible in a finding-set diff
+# keyed on the message *of the reporting site* right up until a config excludes
+# by `text`: gitea drops dupl findings matching `(?i)webhook`, and its
+# `services/webhook/*.go` duplicates carry that word only because the path is in
+# the message. Eight findings golangci-lint does not report.
+#
+# So the case does both halves. `pkg/plain` keeps its duplicate — the positive
+# key, and the one that pins the path format. `pkg/webhook` has the same
+# duplicate and is excluded by the rule below, which can only fire if the
+# message names the directory.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - dupl
+  settings:
+    dupl:
+      threshold: 30
+  exclusions:
+    generated: lax
+    rules:
+      - linters:
+          - dupl
+        text: (?i)webhook
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

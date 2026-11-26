@@ -1,0 +1,338 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh staticcheck-sa
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/staticcheck-sa/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.15.0
+
+--- a/sa1006/bad/bad.go
++++ b/sa1006/bad/bad.go
+@@ -8,7 +8,7 @@
+ )
+ 
+ func fn(s string) {
+-	fmt.Printf(s)
++	fmt.Print(s)
+ }
+ 
+ func main() { fn("x") }
+@@ -22,24 +22,24 @@
+ type svc struct{ logger *log.Logger }
+ 
+ func pkgFuncs(s string, w *os.File) {
+-	fmt.Printf(s)
+-	_ = fmt.Sprintf(s)
+-	_ = fmt.Errorf(s)
+-	log.Printf(s)
+-	log.Fatalf(s)
+-	log.Panicf(s)
+-	fmt.Fprintf(w, s)
++	fmt.Print(s)
++	_ = fmt.Sprint(s)
++	_ = errors.New(s)
++	log.Print(s)
++	log.Fatal(s)
++	log.Panic(s)
++	fmt.Fprint(w, s)
+ }
+ 
+ func methods(l *log.Logger, t *testing.T, tb testing.TB, sv svc, s string) {
+-	l.Printf(s)
+-	t.Errorf(s)
+-	t.Fatalf(s)
+-	t.Logf(s)
+-	t.Skipf(s)
+-	tb.Errorf(s)
+-	tb.Logf(s)
+-	sv.logger.Printf(s)
++	l.Print(s)
++	t.Error(s)
++	t.Fatal(s)
++	t.Log(s)
++	t.Skip(s)
++	tb.Error(s)
++	tb.Log(s)
++	sv.logger.Print(s)
+ }
+ 
+ func silent(s string, n int, w *os.File) {
+--- a/sa1008/bad/bad.go
++++ b/sa1008/bad/bad.go
+@@ -7,7 +7,7 @@
+ // A named non-canonical key: upstream wraps it in `http.CanonicalHeaderKey`
+ // rather than rewriting the constant.
+ func readNamed(h http.Header) []string {
+-	return h[hostHeader]
++	return h[http.CanonicalHeaderKey(hostHeader)]
+ }
+ 
+ // An assignment with no `http.Header` index on its left is walked into, so the
+@@ -16,15 +16,15 @@
+ // golangci-lint's fixer then rewrites neither, which would quietly retire this
+ // file from the `--fix` tier.
+ func assignFromHeader(h http.Header, v []string) []string {
+-	v = h[hostHeader]
++	v = h[http.CanonicalHeaderKey(hostHeader)]
+ 	return v
+ }
+ 
+ func main() {
+ 	h := http.Header{}
+-	_ = h["foo"]
++	_ = h["Foo"]
+ 	var r http.Request
+-	_ = r.Header["etag"]
++	_ = r.Header["Etag"]
+ 	_ = readNamed(h)
+ 	_ = assignFromHeader(h, nil)
+ }
+--- a/sa1013/bad/bad.go
++++ b/sa1013/bad/bad.go
+@@ -4,5 +4,5 @@
+ 
+ func main() {
+ 	var s io.Seeker
+-	s.Seek(io.SeekStart, 0)
++	s.Seek(0, io.SeekStart)
+ }
+--- a/sa1018/ok/ok.go
++++ b/sa1018/ok/ok.go
+@@ -3,6 +3,6 @@
+ import "strings"
+ 
+ func main() {
+-	strings.Replace("abc", "a", "b", -1)
++	strings.ReplaceAll("abc", "a", "b")
+ 	strings.Replace("abc", "a", "b", 1)
+ }
+--- a/sa1019/bad/bad.go
++++ b/sa1019/bad/bad.go
+@@ -29,7 +29,7 @@
+ 	h.Cfg.Old = 4
+ 
+ 	// Writing the embedding out by hand selects the same field.
+-	w.Options.Old = 5
++	w.Old = 5
+ }
+ 
+ // A package whose deprecation notice lives in a block-comment package doc.
+--- a/sa1025/bad/bad.go
++++ b/sa1025/bad/bad.go
+@@ -5,6 +5,6 @@
+ func fn() {
+ 	t := time.NewTimer(time.Second)
+ 	if t.Reset(time.Second) {
+-		_ = <-t.C
++		<-t.C
+ 	}
+ }
+--- a/sa1029/bad/bad.go
++++ b/sa1029/bad/bad.go
+@@ -40,12 +40,11 @@
+ 	// reported both; fiber had one of each.
+ 	var k2 ctxKey = struct{}{}
+ 	context.WithValue(ctx, k2, val)
+-	var k5 ctxKey
+-	k5 = struct{}{}
++	var k5 ctxKey = struct{}{}
+ 	context.WithValue(ctx, k5, val)
+ 
+ 	// The same named type, spelled the ordinary ways.
+-	var k1 ctxKey = ctxKey{}
++	var k1 = ctxKey{}
+ 	context.WithValue(ctx, k1, val)
+ 	k3 := ctxKey{}
+ 	context.WithValue(ctx, k3, val)
+@@ -56,7 +55,7 @@
+ 
+ 	// A named struct with a field, and a named built-in type: neither is a
+ 	// `*types.Struct` with no fields, and neither is a `*types.Basic`.
+-	var k12 ctxKeyField = ctxKeyField{n: 1}
++	var k12 = ctxKeyField{n: 1}
+ 	context.WithValue(ctx, k12, val)
+ 	var k11 namedInt = 3
+ 	context.WithValue(ctx, k11, val)
+--- a/sa4013/bad/bad.go
++++ b/sa4013/bad/bad.go
+@@ -1,2 +1,3 @@
+ package main
++
+ func main() { _ = !!true }
+--- a/sa4014/bad/bad.go
++++ b/sa4014/bad/bad.go
+@@ -1,7 +1,9 @@
+ package main
++
+ func main() {
+-    x := 1
+-    if x == 1 {
+-    } else if x == 1 {
+-    }
++	x := 1
++	switch x {
++	case 1:
++	case 1:
++	}
+ }
+--- a/sa4014/ok/ok.go
++++ b/sa4014/ok/ok.go
+@@ -1,9 +1,11 @@
+ package main
++
+ func main() {
+-    x := 1
+-    if x == 1 {
+-    } else if x == 2 {
+-    }
++	x := 1
++	switch x {
++	case 1:
++	case 2:
++	}
+ }
+ 
+ // Upstream bails on the whole chain when `code.MayHaveSideEffects(cond, nil)`
+--- a/sa4023/bad/bad.go
++++ b/sa4023/bad/bad.go
+@@ -2,8 +2,7 @@
+ 
+ func main() {
+ 	var p *int
+-	var i any
+-	i = p
++	var i any = p
+ 	_ = i == nil
+ }
+ 
+@@ -26,8 +25,7 @@
+ 
+ // A plain assignment, unconditional.
+ func plainAssign() bool {
+-	var d iface
+-	d = &concrete{}
++	var d iface = &concrete{}
+ 	return d != nil
+ }
+ 
+@@ -46,8 +44,7 @@
+ // A typed nil pointer held in a variable — still a concrete type.
+ func typedNilPointer() bool {
+ 	var p *concrete
+-	var d iface
+-	d = p
++	var d iface = p
+ 	return d == nil
+ }
+ 
+--- a/sa4026/bad/bad.go
++++ b/sa4026/bad/bad.go
+@@ -1,2 +1,3 @@
+ package main
+-func main() { _ = -0.0 }
++
++func main() { _ = math.Copysign(0, -1) }
+--- a/sa4029/bad/bad.go
++++ b/sa4029/bad/bad.go
+@@ -1,6 +1,8 @@
+ package main
++
+ import "sort"
++
+ func main() {
+-    x := []string{"b", "a"}
+-    x = sort.StringSlice(x)
++	x := []string{"b", "a"}
++	sort.Strings(x)
+ }
+--- a/sa4032/ok/ok.go
++++ b/sa4032/ok/ok.go
+@@ -1,12 +1,13 @@
+ //go:build !plan9
+ 
+ package main
++
+ import "runtime"
+ 
+ const plan9 = "plan9"
+ 
+ func main() {
+-    _ = runtime.GOOS == "linux"
+-    _ = "plan9" == runtime.GOOS
+-    _ = runtime.GOOS == plan9
++	_ = runtime.GOOS == "linux"
++	_ = runtime.GOOS == "plan9"
++	_ = runtime.GOOS == plan9
+ }
+--- a/sa5004/bad/bad.go
++++ b/sa5004/bad/bad.go
+@@ -6,7 +6,7 @@
+ 		select {
+ 		case i := <-ch:
+ 			_ = i
+-		default:
++
+ 		}
+ 	}
+ }
+--- a/sa5011/bad/bad.go
++++ b/sa5011/bad/bad.go
+@@ -58,8 +58,7 @@
+ }
+ 
+ func varDeclDerefThenCheck(get func() *int32) int32 {
+-	var x *int32
+-	x = get()
++	var x *int32 = get()
+ 	v := *x // want
+ 	if x == nil {
+ 		return 0
+--- a/sa5011/ok/ok.go
++++ b/sa5011/ok/ok.go
+@@ -294,8 +294,7 @@
+ // `peel_load` exists for, and it must stay guarded rather than become a
+ // finding.
+ func okLocalPointerGuarded(get func() *int32) int32 {
+-	var x *int32
+-	x = get()
++	var x *int32 = get()
+ 	if x == nil {
+ 		return 0
+ 	}
+--- a/sa6005/bad/bad.go
++++ b/sa6005/bad/bad.go
+@@ -2,10 +2,10 @@
+ 
+ import "strings"
+ 
+-func f(a, b string) bool { return strings.ToLower(a) == strings.ToLower(b) }
++func f(a, b string) bool { return strings.EqualFold(a, b) }
+ 
+ // The `!=` spelling. Until 2026-08-27 the fixture held only `==`, so guff's
+ // message for this one — and the negation its fix has to add — went unmeasured.
+ // `ToLower`, not `ToUpper`: the unit-test harness stubs `strings` with the
+ // functions the fixtures use, and only the operator matters here.
+-func g(a, b string) bool { return strings.ToLower(a) != strings.ToLower(b) }
++func g(a, b string) bool { return !strings.EqualFold(a, b) }
+--- a/sa9002/bad/bad.go
++++ b/sa9002/bad/bad.go
+@@ -1,3 +1,5 @@
+ package main
++
+ import "os"
+-func f() { os.Chmod("x", 644) }
++
++func f() { os.Chmod("x", 0644) }
+--- a/sa9004/bad/bad.go
++++ b/sa9004/bad/bad.go
+@@ -10,7 +10,7 @@
+ // which are the ones that leave the group with a single member.
+ const (
+ 	A E = 1
+-	B   = 2
++	B E = 2
+ )
+ 
+ func main() {

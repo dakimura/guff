@@ -1,0 +1,618 @@
+//! Native package driver (PERF_TASKS_V2 §C-3c) wrapping `guff-golist`.
+//!
+//! Feature flag: `GUFF_NATIVE_LIST`
+//! - unset / `1` / `on` / `true` — try native first; bail → `go list` (**default**)
+//! - `0` / `off` / `false` — prefer `go list` when available
+//! - `verify` — run both when native succeeds; print graph diffs; use `go list`
+//! - `force` — native only (error on bail; for tests / go-less CI)
+//!
+//! Default is on once warm disk cache + full `-test` variants land (C-3c).
+//! `GUFF_NATIVE_LIST=off` restores the previous `go list`-first path.
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use guff_golist::{
+    list_packages, Bail, BailReason, ListConfig, ListModule, ListPackage, ListResponse,
+};
+
+use crate::config::Config;
+use crate::golist::{go_available, go_list_driver, uses_export_data};
+use crate::load_mode::LoadMode;
+use crate::package::{DriverResponse, Error, ErrorKind, Module, Package};
+use crate::typecheck::TypecheckEnv;
+use crate::LoadError;
+
+/// How [`native_or_golist`] chooses the driver.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativeListMode {
+    /// Always `go list` when available.
+    Off,
+    /// Prefer native; fall back on [`Bail`].
+    On,
+    /// Run both; report diffs; keep `go list` result.
+    Verify,
+    /// Native only (tests / go-less CI).
+    Force,
+}
+
+impl NativeListMode {
+    pub fn from_env() -> Self {
+        match std::env::var("GUFF_NATIVE_LIST") {
+            Ok(v) => match v.trim().to_ascii_lowercase().as_str() {
+                "" | "1" | "true" | "on" | "yes" => Self::On,
+                "0" | "false" | "off" | "no" => Self::Off,
+                "verify" => Self::Verify,
+                "force" => Self::Force,
+                other => {
+                    eprintln!(
+                        "guff: warning: unknown GUFF_NATIVE_LIST={other:?}; treating as on"
+                    );
+                    Self::On
+                }
+            },
+            // Default on: warm native_list disk cache + full `-test` variants.
+            Err(_) => Self::On,
+        }
+    }
+}
+
+/// Loads packages via native list and/or `go list` according to [`NativeListMode`].
+pub fn native_or_golist(cfg: &Config, patterns: &[String]) -> Result<DriverResponse, LoadError> {
+    let mode = NativeListMode::from_env();
+    match mode {
+        NativeListMode::Off => {
+            if go_available() {
+                go_list_driver(cfg, patterns).map_err(LoadError::from)
+            } else {
+                // Go-less: native is the only option that can see GOMODCACHE.
+                load_native(cfg, patterns).or_else(|bail| {
+                    Err(LoadError::Driver(format!(
+                        "native list failed and go is unavailable: {bail}"
+                    )))
+                })
+            }
+        }
+        NativeListMode::On => match load_native(cfg, patterns) {
+            Ok(native) => {
+                if go_available() {
+                    Ok(attach_hybrid_exports(cfg, native)?)
+                } else {
+                    Ok(native)
+                }
+            }
+            Err(bail) => {
+                if crate::debug::enabled() {
+                    eprintln!("guff:   native list bail → go list ({bail})");
+                }
+                if go_available() {
+                    go_list_driver(cfg, patterns).map_err(LoadError::from)
+                } else {
+                    Err(LoadError::Driver(format!(
+                        "native list bail and go unavailable: {bail}"
+                    )))
+                }
+            }
+        },
+        NativeListMode::Verify => {
+            let go_resp = if go_available() {
+                go_list_driver(cfg, patterns).map_err(LoadError::from)?
+            } else {
+                return Err(LoadError::Driver(
+                    "GUFF_NATIVE_LIST=verify requires go on PATH".into(),
+                ));
+            };
+            match load_native(cfg, patterns) {
+                Ok(native) => {
+                    let native = if cfg.dep_source {
+                        attach_hybrid_exports(cfg, native)?
+                    } else {
+                        native
+                    };
+                    let diffs = diff_responses(&native, &go_resp);
+                    if diffs.is_empty() {
+                        if crate::debug::enabled() {
+                            eprintln!(
+                                "guff:   native list verify OK ({} pkgs)",
+                                go_resp.packages.len()
+                            );
+                        }
+                    } else {
+                        eprintln!(
+                            "guff: native list verify DIFF ({} issues); using go list",
+                            diffs.len()
+                        );
+                        for d in diffs.iter().take(40) {
+                            eprintln!("guff:   native≠golist: {d}");
+                        }
+                        if diffs.len() > 40 {
+                            eprintln!("guff:   ... and {} more", diffs.len() - 40);
+                        }
+                    }
+                    Ok(go_resp)
+                }
+                Err(bail) => {
+                    eprintln!("guff: native list verify bail → go list ({bail})");
+                    Ok(go_resp)
+                }
+            }
+        }
+        NativeListMode::Force => load_native(cfg, patterns).map_err(|bail| {
+            LoadError::Driver(format!("GUFF_NATIVE_LIST=force: {bail}"))
+        }),
+    }
+}
+
+fn load_native(cfg: &Config, patterns: &[String]) -> Result<DriverResponse, Bail> {
+    // Before the cache lookup, not after: a cached native response has no export
+    // paths either, so serving one would reproduce the same empty answer faster.
+    //
+    // Nothing used to check this. `list_config_from` looks at build flags and
+    // `NEED_DEPS` and never at export data, and `attach_hybrid_exports` returns
+    // early when `dep_source` is off — so `GUFF_DEP_SOURCE=0`, the documented
+    // way to ask for the export-data path, produced packages with an empty
+    // `export_file` and no error. On benchmarks/fixture that silently cost two
+    // of four findings: with no `.a` files the dependent packages type-check to
+    // nothing, and an ill-typed package is skipped whole, so `ineffassign` and
+    // `unused` reported zero rather than reporting wrong.
+    if uses_export_data(cfg) {
+        return Err(Bail::new(
+            BailReason::ExportData,
+            "export data requested (dep_source off); only `go list -export` produces it",
+        ));
+    }
+    if let Some(cached) = crate::native_cache::try_load(cfg, patterns) {
+        if crate::debug::enabled() {
+            eprintln!(
+                "guff:   native list cache hit ({} pkgs)",
+                cached.packages.len()
+            );
+        }
+        return Ok(cached);
+    }
+    let list_cfg = list_config_from(cfg)?;
+    let t0 = std::time::Instant::now();
+    let resp = list_packages(&list_cfg, patterns)?;
+    let response = to_driver_response(cfg, resp);
+    if crate::debug::enabled() {
+        eprintln!(
+            "guff:   native list {:.2}s ({} pkgs)",
+            t0.elapsed().as_secs_f64(),
+            response.packages.len()
+        );
+    }
+    crate::native_cache::store(cfg, patterns, &response);
+    Ok(response)
+}
+
+fn list_config_from(cfg: &Config) -> Result<ListConfig, Bail> {
+    let mut build_tags = Vec::new();
+    for flag in &cfg.build_flags {
+        if let Some(tags) = flag.strip_prefix("-tags=") {
+            for tag in tags.split(',') {
+                let tag = tag.trim();
+                if !tag.is_empty() {
+                    build_tags.push(tag.to_string());
+                }
+            }
+        } else if flag == "-tags" {
+            return Err(Bail::new(
+                BailReason::UnsupportedBuildFlags,
+                "-tags must be -tags=...",
+            ));
+        } else if flag.starts_with('-') {
+            return Err(Bail::new(
+                BailReason::UnsupportedBuildFlags,
+                format!("unsupported build flag {flag:?}"),
+            ));
+        }
+    }
+    let mode = cfg.effective_mode();
+    let need_deps = mode.contains(LoadMode::NEED_DEPS)
+        || mode.contains(LoadMode::NEED_TYPES)
+        || mode.contains(LoadMode::NEED_TYPES_INFO);
+    Ok(ListConfig {
+        dir: cfg.dir.clone(),
+        build_tags,
+        tests: cfg.tests,
+        need_deps,
+        gomodcache: None,
+        goroot: None,
+    })
+}
+
+fn to_driver_response(cfg: &Config, resp: ListResponse) -> DriverResponse {
+    let env = cfg.resolved_env();
+    let arch = TypecheckEnv::from_env(&env, "gc").arch;
+    DriverResponse {
+        compiler: resp.compiler,
+        arch,
+        roots: resp.roots,
+        packages: resp
+            .packages
+            .into_iter()
+            .map(|p| Arc::new(to_package(p)))
+            .collect(),
+        ..DriverResponse::default()
+    }
+}
+
+fn to_package(p: ListPackage) -> Package {
+    let mut imports = std::collections::HashMap::new();
+    for (src, id) in &p.imports {
+        imports.insert(
+            src.clone(),
+            Arc::new(Package {
+                id: id.clone(),
+                pkg_path: id.clone(),
+                ..Package::default()
+            }),
+        );
+    }
+    let pkg_path = if let Some(space) = p.id.find(' ') {
+        p.id[..space].to_string()
+    } else {
+        p.pkg_path.clone()
+    };
+    let dir = p.dir;
+    Package {
+        id: p.id,
+        name: p.name,
+        pkg_path,
+        dir: dir.clone(),
+        go_files: p.go_files,
+        compiled_go_files: p.compiled_go_files,
+        ignored_files: p.ignored_files,
+        imports,
+        deps: p.deps,
+        module: p.module.map(to_module),
+        for_test: p.for_test,
+        has_cgo: p.has_cgo,
+        // `go list`'s converter joins patterns onto the package dir
+        // (`abs_join`), odd as that is for a glob; match it so the two routes
+        // are comparable under `GUFF_NATIVE_LIST=verify`.
+        embed_patterns: p.embed_patterns.iter().map(|pat| dir.join(pat)).collect(),
+        embed_files: p.embed_files.iter().map(|f| dir.join(f)).collect(),
+        // `go list -e` errors reach the report as golangci-lint's `typecheck`
+        // pseudo linter (`pkg/goanalysis/pkgerrors`), so they must survive the
+        // conversion — dropping them here is what kept guff silent on
+        // alertmanager's missing `//go:embed app/dist`.
+        errors: p
+            .errors
+            .into_iter()
+            .map(|e| Error {
+                pos: e.pos,
+                msg: e.msg,
+                kind: ErrorKind::List,
+            })
+            .collect(),
+        ..Package::default()
+    }
+}
+
+fn to_module(m: ListModule) -> Module {
+    Module {
+        path: m.path,
+        version: m.version,
+        replace: None,
+        main: m.main,
+        indirect: m.indirect,
+        dir: m.dir,
+        go_mod: m.go_mod,
+        go_version: m.go_version,
+        error: None,
+    }
+}
+
+/// Native graphs keep stdlib on the source path (C-3d). Cgo packages get real
+/// `CompiledGoFiles` (including GOCACHE `_cgo_*.go`) via a scoped
+/// `go list -compiled=true` — same second call as C-3a, only for packages with
+/// `has_cgo`. Non-cgo repos never invoke `go`.
+fn attach_hybrid_exports(
+    cfg: &Config,
+    mut response: DriverResponse,
+) -> Result<DriverResponse, LoadError> {
+    if !cfg.dep_source {
+        return Ok(response);
+    }
+    let mut want: Vec<String> = response
+        .packages
+        .iter()
+        .filter(|p| p.has_cgo && p.errors.is_empty() && !p.id.contains(' '))
+        .map(|p| {
+            // `go list` args are import paths; test-variant ids are excluded above.
+            if p.pkg_path.is_empty() {
+                p.id.clone()
+            } else {
+                p.pkg_path.clone()
+            }
+        })
+        .collect();
+    want.sort();
+    want.dedup();
+    if want.is_empty() {
+        return Ok(response);
+    }
+    match crate::golist::attach_compiled_files_for_paths(cfg, &mut response.packages, &want) {
+        Ok(n) => {
+            if crate::debug::enabled() && n > 0 {
+                eprintln!("guff:   native cgo compiled-files attached ({n} pkgs)");
+            }
+        }
+        Err(e) => {
+            // Non-fatal: keep GoFiles fallback (same policy as C-3a).
+            if crate::debug::enabled() {
+                eprintln!("guff:   native cgo compiled-files skipped: {e}");
+            }
+        }
+    }
+    Ok(response)
+}
+
+/// Normalize + diff two driver responses for `GUFF_NATIVE_LIST=verify`.
+pub fn diff_responses(native: &DriverResponse, golist: &DriverResponse) -> Vec<String> {
+    let mut diffs = Vec::new();
+
+    let mut native_roots = native.roots.clone();
+    let mut go_roots = golist.roots.clone();
+    native_roots.sort();
+    go_roots.sort();
+    if native_roots != go_roots {
+        diffs.push(format!(
+            "roots: native={native_roots:?} golist={go_roots:?}"
+        ));
+    }
+
+    let native_by: std::collections::BTreeMap<&str, &Package> = native
+        .packages
+        .iter()
+        .map(|p| (p.id.as_str(), p.as_ref()))
+        .collect();
+    let go_by: std::collections::BTreeMap<&str, &Package> = golist
+        .packages
+        .iter()
+        .map(|p| (p.id.as_str(), p.as_ref()))
+        .collect();
+
+    for id in go_by.keys() {
+        if !native_by.contains_key(id) {
+            // go list includes more (e.g. incomplete packages); only flag
+            // packages that matter for typecheck of roots' closure.
+            diffs.push(format!("missing in native: {id}"));
+        }
+    }
+    for id in native_by.keys() {
+        if !go_by.contains_key(id) {
+            diffs.push(format!("extra in native: {id}"));
+        }
+    }
+
+    for (id, np) in &native_by {
+        let Some(gp) = go_by.get(id) else {
+            continue;
+        };
+        // Testmain (`P.test`) from native is a stub without GOCACHE-generated
+        // sources — skip file / import detail diffs; ID presence still checked.
+        if is_testmain_id(id) && (np.name == "main" || gp.name == "main") {
+            continue;
+        }
+        if np.name != gp.name {
+            diffs.push(format!("{id}: name {:?} vs {:?}", np.name, gp.name));
+        }
+        if np.pkg_path != gp.pkg_path {
+            diffs.push(format!(
+                "{id}: pkg_path {:?} vs {:?}",
+                np.pkg_path, gp.pkg_path
+            ));
+        }
+        if norm_files(&np.compiled_go_files) != norm_files(&gp.compiled_go_files) {
+            // After C-3e, cgo packages should match. Soft-ignore only when the
+            // native side still has the GoFiles fallback (attach failed / no go).
+            let go_same = norm_files(&np.go_files) == norm_files(&gp.go_files);
+            let native_is_fallback = norm_files(&np.compiled_go_files) == norm_files(&np.go_files);
+            if !(go_same && native_is_fallback)
+                && norm_files(&np.go_files) != norm_files(&gp.compiled_go_files)
+                && norm_files(&np.compiled_go_files) != norm_files(&gp.go_files)
+            {
+                diffs.push(format!(
+                    "{id}: compiled_go_files native={} golist={}",
+                    np.compiled_go_files.len(),
+                    gp.compiled_go_files.len()
+                ));
+            }
+        }
+        let ni: std::collections::BTreeSet<_> = np.imports.keys().collect();
+        let gi: std::collections::BTreeSet<_> = gp.imports.keys().collect();
+        if ni != gi {
+            diffs.push(format!("{id}: imports native={ni:?} golist={gi:?}"));
+        }
+        let nd = norm_deps(&np.deps);
+        let gd = norm_deps(&gp.deps);
+        if nd != gd {
+            // Transitive deps sets can differ in ordering only — already sorted.
+            // Also ignore "unsafe" presence mismatches (both paths handle it).
+            let nd2: std::collections::BTreeSet<_> =
+                nd.iter().filter(|d| d.as_str() != "unsafe").cloned().collect();
+            let gd2: std::collections::BTreeSet<_> =
+                gd.iter().filter(|d| d.as_str() != "unsafe").cloned().collect();
+            if nd2 != gd2 {
+                diffs.push(format!(
+                    "{id}: deps Δ native_only={:?} golist_only={:?}",
+                    nd2.difference(&gd2).collect::<Vec<_>>(),
+                    gd2.difference(&nd2).collect::<Vec<_>>()
+                ));
+            }
+        }
+        match (&np.module, &gp.module) {
+            (Some(nm), Some(gm)) if nm.path != gm.path || nm.main != gm.main => {
+                diffs.push(format!(
+                    "{id}: module path/main {:?} vs {:?}",
+                    (nm.path.as_str(), nm.main),
+                    (gm.path.as_str(), gm.main)
+                ));
+            }
+            (None, Some(gm)) if !gm.path.is_empty() && !is_stdlib_id(id) => {
+                diffs.push(format!("{id}: module missing in native (golist {})", gm.path));
+            }
+            _ => {}
+        }
+        // `//go:embed` resolution: patterns, the files they expand to, and the
+        // `go list` error a failed pattern produces. The error is not a graph
+        // detail — golangci-lint reports it as `typecheck`, and one such issue
+        // deletes every other finding in the run, so a native/golist mismatch
+        // here is a whole target's report.
+        let npat = norm_embed(&np.embed_patterns);
+        let gpat = norm_embed(&gp.embed_patterns);
+        if npat != gpat {
+            diffs.push(format!(
+                "{id}: embed_patterns native={npat:?} golist={gpat:?}"
+            ));
+        }
+        let nemb = norm_embed(&np.embed_files);
+        let gemb = norm_embed(&gp.embed_files);
+        if nemb != gemb {
+            diffs.push(format!(
+                "{id}: embed_files native={} golist={} Δ={:?}",
+                nemb.len(),
+                gemb.len(),
+                sym_diff(&nemb, &gemb)
+            ));
+        }
+        let nerr = list_errors(np);
+        let gerr = list_errors(gp);
+        if nerr != gerr {
+            diffs.push(format!("{id}: list errors native={nerr:?} golist={gerr:?}"));
+        }
+        // export_file intentionally ignored (C-3d).
+    }
+
+    diffs
+}
+
+/// Embed paths as sorted slash strings; the two paths agree on `dir`, so the
+/// absolute prefix carries no information.
+fn norm_embed(paths: &[PathBuf]) -> Vec<String> {
+    let mut v: Vec<String> = paths
+        .iter()
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .collect();
+    v.sort();
+    v
+}
+
+fn sym_diff(a: &[String], b: &[String]) -> Vec<String> {
+    let sa: std::collections::BTreeSet<_> = a.iter().collect();
+    let sb: std::collections::BTreeSet<_> = b.iter().collect();
+    sa.symmetric_difference(&sb).map(|s| (*s).clone()).collect()
+}
+
+fn list_errors(p: &Package) -> Vec<String> {
+    let mut v: Vec<String> = p
+        .errors
+        .iter()
+        .filter(|e| e.kind == crate::package::ErrorKind::List)
+        .map(|e| format!("{}: {}", e.pos, e.msg))
+        .collect();
+    v.sort();
+    v
+}
+
+fn norm_files(files: &[PathBuf]) -> Vec<String> {
+    let mut v: Vec<String> = files
+        .iter()
+        .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .collect();
+    v.sort();
+    v
+}
+
+fn norm_deps(deps: &[String]) -> Vec<String> {
+    let mut v = deps.to_vec();
+    v.sort();
+    v.dedup();
+    v
+}
+
+fn is_stdlib_id(id: &str) -> bool {
+    !id.contains('.')
+}
+
+/// `pkg.test` testmain id (no space) — not `pkg [pkg.test]`.
+fn is_testmain_id(id: &str) -> bool {
+    !id.contains(' ') && id.ends_with(".test")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::load_mode::LoadMode;
+
+    fn golist_testdata() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/testdata/golist")
+    }
+
+    /// The native lister has no way to produce a `.a` path, so it must refuse
+    /// rather than answer with an empty one. Needs no `go` and no listing: the
+    /// refusal happens before both, so a warm native cache cannot serve the
+    /// same empty answer either.
+    #[test]
+    fn native_bails_when_export_data_is_requested() {
+        let cfg = Config {
+            mode: LoadMode::LOAD_IMPORTS | LoadMode::NEED_EXPORT_FILE,
+            dir: golist_testdata(),
+            dep_source: false,
+            ..Config::default()
+        };
+        let bail = load_native(&cfg, &[".".to_string()]).expect_err("must bail");
+        assert_eq!(bail.reason, BailReason::ExportData);
+
+        // Hybrid is the default and does not use export data, so it must not
+        // start bailing here — that would send every cold run through `go list`.
+        let hybrid = Config {
+            dep_source: true,
+            ..cfg
+        };
+        assert!(load_native(&hybrid, &[".".to_string()]).is_ok());
+    }
+
+    #[test]
+    fn native_force_loads_mini_module() {
+        let dir = golist_testdata();
+        let cfg = Config {
+            mode: LoadMode::NEED_NAME
+                | LoadMode::NEED_FILES
+                | LoadMode::NEED_COMPILED_GO_FILES
+                | LoadMode::NEED_IMPORTS
+                | LoadMode::NEED_DEPS
+                | LoadMode::NEED_MODULE,
+            dir: dir.clone(),
+            ..Config::default()
+        };
+        let resp = load_native(&cfg, &[".".to_string()]).expect("native list");
+        assert_eq!(resp.roots, vec!["example.com/golist".to_string()]);
+        let pkg = resp
+            .packages
+            .iter()
+            .find(|p| p.id == "example.com/golist")
+            .expect("main");
+        assert_eq!(pkg.name, "main");
+        assert!(pkg.imports.contains_key("fmt"));
+        assert!(
+            resp.packages.iter().any(|p| p.id == "fmt"),
+            "fmt should be loaded from GOROOT"
+        );
+    }
+
+    #[test]
+    fn native_driver_trait() {
+        let dir = golist_testdata();
+        let cfg = Config {
+            mode: LoadMode::LOAD_IMPORTS,
+            dir,
+            ..Config::default()
+        };
+        // Force path via direct call (env not required).
+        let resp = load_native(&cfg, &[".".to_string()]).unwrap();
+        assert!(!resp.packages.is_empty());
+    }
+}

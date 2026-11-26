@@ -1,0 +1,8 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# The three `revive-limits-*` cases share this fixture and differ only in the
+# rule arguments. If the arguments were ignored — which they were — the first
+# two goldens would be identical.
+
+rulelimits/rule_limits.go   crates/guff-revive/tests/testdata/revive/rule_limits.go

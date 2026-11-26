@@ -1,0 +1,20 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# The fixtures the guff-dupl unit test reads.
+v1/a1.go  crates/guff-dupl/tests/testdata/dupl/order/v1/a1.go
+v1/a2.go  crates/guff-dupl/tests/testdata/dupl/order/v1/a2.go
+v1/u1.go  crates/guff-dupl/tests/testdata/dupl/order/v1/u1.go
+v1/u2.go  crates/guff-dupl/tests/testdata/dupl/order/v1/u2.go
+v2/a1.go  crates/guff-dupl/tests/testdata/dupl/order/v2/a1.go
+v2/a2.go  crates/guff-dupl/tests/testdata/dupl/order/v2/a2.go
+v2/u1.go  crates/guff-dupl/tests/testdata/dupl/order/v2/u1.go
+v2/u2.go  crates/guff-dupl/tests/testdata/dupl/order/v2/u2.go
+v3/a1.go  crates/guff-dupl/tests/testdata/dupl/order/v3/a1.go
+v3/a2.go  crates/guff-dupl/tests/testdata/dupl/order/v3/a2.go
+v3/u1.go  crates/guff-dupl/tests/testdata/dupl/order/v3/u1.go
+v3/u2.go  crates/guff-dupl/tests/testdata/dupl/order/v3/u2.go
+v4/a1.go  crates/guff-dupl/tests/testdata/dupl/order/v4/a1.go
+v4/a2.go  crates/guff-dupl/tests/testdata/dupl/order/v4/a2.go
+v4/u1.go  crates/guff-dupl/tests/testdata/dupl/order/v4/u1.go
+v4/u2.go  crates/guff-dupl/tests/testdata/dupl/order/v4/u2.go

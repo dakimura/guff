@@ -1,0 +1,11 @@
+# gci with an explicit three-section order.
+version: "2"
+formatters:
+  enable:
+    - gci
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(example.com/mine)

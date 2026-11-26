@@ -1,0 +1,9 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# COMPAT-HARDENING Phase 4. `run-tests` and `run-tests-off` share this list;
+# only their `config.yml` differs. The findings are split across the two files
+# so the setting's effect is a subtraction, not an empty golden.
+
+code/code.go        crates/guff-lint/tests/testdata/runsem/tests/code.go
+code/code_test.go   crates/guff-lint/tests/testdata/runsem/tests/code_test.go

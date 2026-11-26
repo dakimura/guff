@@ -1,0 +1,9 @@
+# The same bytes as generated-lax-only, under `strict`: the loose marker no
+# longer counts, so the file *is* formatted. The pair is what makes the mode
+# meaningful — a tool that ignored the setting would pass one of them.
+version: "2"
+formatters:
+  enable:
+    - gofmt
+  exclusions:
+    generated: strict

@@ -1,0 +1,26 @@
+# Golden case: the map form with both expressions.
+#
+# Upstream appends both failures rather than choosing, so one alias can be
+# reported twice — once for not matching `allowRegex` and once for matching
+# `denyRegex`. That overlap is the point of this case.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      rules:
+        - name: import-alias-naming
+          arguments:
+            - allowRegex: "^[a-z]+$"
+              denyRegex: "^x"
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

@@ -1,0 +1,3 @@
+package siblingdirective
+
+func helper() {}

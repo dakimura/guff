@@ -1,0 +1,13 @@
+version: "2"
+linters:
+  enable:
+    - misspell
+  settings:
+    misspell:
+      locale: US
+      ignore-words:
+        - amercia
+      extra-words:
+        - typo: iff
+          correction: if
+      mode: restricted

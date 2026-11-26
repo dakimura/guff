@@ -1,0 +1,5 @@
+template: |-
+  Copyright {{ YEAR }} Example Corp
+values:
+  const:
+    YEAR: "2020"

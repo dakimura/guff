@@ -1,0 +1,32 @@
+# Golden case: the four flags telegraf writes.
+#
+#   check-private-receivers            -> also check methods on unexported receivers
+#   say-repetitive-instead-of-stutters -> one word of the message changes
+#   check-public-interface             -> exported interfaces' methods are checked
+#   disable-checks-on-types            -> type doc checks off (naming stays on)
+#
+# Written in kebab-case on purpose: `isRuleOption` lowercases and strips
+# hyphens, so this is the same set as the camelCase spelling.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      rules:
+        - name: exported
+          arguments:
+            - "check-private-receivers"
+            - "say-repetitive-instead-of-stutters"
+            - "check-public-interface"
+            - "disable-checks-on-types"
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

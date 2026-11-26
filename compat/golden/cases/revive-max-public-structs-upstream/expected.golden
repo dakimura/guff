@@ -1,0 +1,9 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh revive-max-public-structs-upstream
+# Produced by running golangci-lint on compat/golden/cases/revive-max-public-structs-upstream/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+max_public_structs/max_public_structs.go:2:1:revive:warning:max-public-structs: you have exceeded the maximum number (1) of public struct declarations

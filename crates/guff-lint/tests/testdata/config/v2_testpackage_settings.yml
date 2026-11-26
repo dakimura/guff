@@ -1,0 +1,11 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - testpackage
+  settings:
+    testpackage:
+      skip-regexp: "^$"
+      allow-packages:
+        - allowed
+        - tools

@@ -1,0 +1,22 @@
+# Golden case: gocritic with no settings block (COMPAT-HARDENING Phase 4).
+#
+# The baseline of the seven-case selector group, and the only one that measures
+# the **default set**: `isEnabledByDefaultGoCriticChecker` keeps a checker only
+# if it carries none of experimental / opinionated / performance / security, so
+# the default is the plain-style and plain-diagnostic checkers and nothing else.
+# The golden here is `singleCaseSwitch` (style) and `appendAssign` (diagnostic)
+# — the fixture's other three findings are each one opt-in tag away.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gocritic
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

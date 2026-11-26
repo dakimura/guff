@@ -1,0 +1,13 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - gosmopolitan
+  settings:
+    gosmopolitan:
+      allow-time-local: true
+      escape-hatches:
+        - i18n.T
+      watch-for-scripts:
+        - Han
+        - Arabic

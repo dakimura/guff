@@ -1,0 +1,3 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+perms/perms.go  crates/guff-style/tests/testdata/gosec/fileperms/perms.go

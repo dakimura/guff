@@ -1,0 +1,12 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces)
+external/external.go  crates/guff-style/tests/testdata/exhaustruct/upstream-v5.2.0/external/external.go
+types/blank/blank.go  crates/guff-style/tests/testdata/exhaustruct/upstream-v5.2.0/types/blank/blank.go
+types/pointers/pointers.go  crates/guff-style/tests/testdata/exhaustruct/upstream-v5.2.0/types/pointers/pointers.go
+types/stdlib/stdlib.go  crates/guff-style/tests/testdata/exhaustruct/upstream-v5.2.0/types/stdlib/stdlib.go
+types/tags/tags.go  crates/guff-style/tests/testdata/exhaustruct/upstream-v5.2.0/types/tags/tags.go
+types/lined_tags/lined_tags.go  crates/guff-style/tests/testdata/exhaustruct/upstream-v5.2.0/types/lined_tags/lined_tags.go
+config/allow_empty/error_returns/error_returns.go  crates/guff-style/tests/testdata/exhaustruct/upstream-v5.2.0/config/allow_empty/error_returns/error_returns.go
+config/dep_directives/dep/dep.go  crates/guff-style/tests/testdata/exhaustruct/upstream-v5.2.0/config/dep_directives/dep/dep.go
+config/dep_directives/user/user.go  crates/guff-style/tests/testdata/exhaustruct/upstream-v5.2.0/config/dep_directives/user/user.go
+golangci/exhaustruct_v5.go  crates/guff-style/tests/testdata/exhaustruct/golangci-v2.14.0/exhaustruct_v5.go

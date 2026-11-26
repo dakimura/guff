@@ -1,0 +1,364 @@
+//! `gofumpt` formatter — native Rust port by default (PERF_TASKS Task 1c).
+//!
+//! Matches golangci-lint `pkg/goformatters/gofumpt` settings:
+//! - `extra-rules` → `-extra`
+//! - `module-path` → `-modpath`
+//! - target Go version → `-lang` (golangci sources this from `run.go`; the CLI
+//!   wires it from config `run.go`, else gofumpt reads `go.mod`).
+//!
+//! Native path is default after prometheus `gofumpt --extra` harness PASS.
+//! Set `GUFF_NATIVE_FMT=0` to force the system `gofumpt` binary.
+
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+
+use crate::native::{self, NativeOptions};
+use crate::runner::FormatError;
+use crate::Formatter;
+
+pub const NAME: &str = "gofumpt";
+
+/// Options for [`Gofumpt`] (`formatters.settings.gofumpt`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GofumptOptions {
+    /// `extra-rules`: every extra rule (deprecated upstream in favour of
+    /// `extra.*`, but still honoured — gofumpt's `Extra.Set("true")`).
+    pub extra_rules: bool,
+    /// `extra.group-params`, `extra.clothe-returns`, `extra.balance-calls`
+    /// (gofumpt v0.12, golangci-lint 2.14.0).
+    pub group_params: bool,
+    pub clothe_returns: bool,
+    pub balance_calls: bool,
+    /// Pass `-modpath` (module path containing the source).
+    pub module_path: Option<String>,
+    /// Pass `-lang` (target Go version, e.g. `go1.22` / `1.22`).
+    /// `None` → gofumpt reads the version from `go.mod`.
+    pub lang: Option<String>,
+    /// Match golangci-lint's pinned gofumpt. Since golangci-lint 2.14.0 pins
+    /// gofumpt v0.12.0 — the version this port follows — no rule reads it;
+    /// it is kept for the CLI switch and the cache fingerprint.
+    pub match_golangci: bool,
+}
+
+/// Formatter: native gofumpt port, with subprocess fallback.
+#[derive(Debug, Clone, Default)]
+pub struct Gofumpt {
+    options: GofumptOptions,
+    /// Override binary path (tests / non-standard installs / subprocess path).
+    binary: Option<String>,
+}
+
+impl Gofumpt {
+    pub fn new(options: GofumptOptions) -> Self {
+        Self {
+            options,
+            binary: std::env::var("GUFF_GOFUMPT_BIN")
+                .ok()
+                .filter(|s| !s.is_empty()),
+        }
+    }
+
+    pub fn with_binary(mut self, path: impl Into<String>) -> Self {
+        self.binary = Some(path.into());
+        self
+    }
+
+    fn use_native(&self) -> bool {
+        if self.binary.is_some() {
+            return false;
+        }
+        !std::env::var_os("GUFF_NATIVE_FMT").is_some_and(|v| v == "0")
+    }
+
+    fn native_opts(&self, filename: &str) -> NativeOptions {
+        NativeOptions {
+            extra_rules: self.options.extra_rules,
+            group_params: self.options.group_params,
+            clothe_returns: self.options.clothe_returns,
+            balance_calls: self.options.balance_calls,
+            lang: self.options.lang.as_ref().map(|l| normalize_lang(l)),
+            module_path: self.options.module_path.clone(),
+            filename: filename.to_string(),
+            match_golangci: self.options.match_golangci,
+            ..Default::default()
+        }
+    }
+}
+
+impl Formatter for Gofumpt {
+    fn name(&self) -> &str {
+        NAME
+    }
+
+    fn options_fingerprint(&self) -> String {
+        crate::fingerprint_parts(&[
+            ("extra", if self.options.extra_rules { "1" } else { "0" }),
+            ("group_params", if self.options.group_params { "1" } else { "0" }),
+            ("clothe_returns", if self.options.clothe_returns { "1" } else { "0" }),
+            ("balance_calls", if self.options.balance_calls { "1" } else { "0" }),
+            (
+                "lang",
+                self.options
+                    .lang
+                    .as_deref()
+                    .map(normalize_lang)
+                    .as_deref()
+                    .unwrap_or(""),
+            ),
+            (
+                "modpath",
+                self.options.module_path.as_deref().unwrap_or(""),
+            ),
+            (
+                "match_golangci",
+                if self.options.match_golangci { "1" } else { "0" },
+            ),
+            ("bin", self.binary.as_deref().unwrap_or("")),
+            ("native", if self.use_native() { "1" } else { "0" }),
+        ])
+    }
+
+    fn format(&self, filename: &str, src: &[u8]) -> Result<Vec<u8>, FormatError> {
+        if self.use_native() {
+            return native::format(
+                native::NativeKind::Gofumpt,
+                src,
+                &self.native_opts(filename),
+            );
+        }
+
+        let bin = self.binary.as_deref().unwrap_or("gofumpt");
+        let mut cmd = Command::new(bin);
+        if self.options.extra_rules {
+            cmd.arg("-extra");
+        }
+        if let Some(modpath) = &self.options.module_path {
+            if !modpath.is_empty() {
+                cmd.arg("-modpath").arg(modpath);
+            }
+        }
+        if let Some(lang) = &self.options.lang {
+            if !lang.is_empty() {
+                cmd.arg("-lang").arg(normalize_lang(lang));
+            }
+        }
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let mut child = cmd.spawn().map_err(|e| FormatError::Io {
+            formatter: NAME.to_string(),
+            path: filename.to_string(),
+            source: e,
+        })?;
+
+        {
+            let mut stdin = child.stdin.take().ok_or_else(|| FormatError::Message {
+                formatter: NAME.to_string(),
+                path: filename.to_string(),
+                message: "failed to open gofumpt stdin".into(),
+            })?;
+            stdin.write_all(src).map_err(|e| FormatError::Io {
+                formatter: NAME.to_string(),
+                path: filename.to_string(),
+                source: e,
+            })?;
+        }
+
+        let output = child.wait_with_output().map_err(|e| FormatError::Io {
+            formatter: NAME.to_string(),
+            path: filename.to_string(),
+            source: e,
+        })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(FormatError::Message {
+                formatter: NAME.to_string(),
+                path: filename.to_string(),
+                message: format!("gofumpt failed: {}", stderr.trim()),
+            });
+        }
+
+        Ok(output.stdout)
+    }
+
+    fn native_shared_skip_object(&self, filename: &str) -> Option<native::SharedSkipObject> {
+        if !self.use_native() {
+            return None;
+        }
+        Some(native::SharedSkipObject::Gofumpt(self.native_opts(filename)))
+    }
+
+    fn list_unformatted(&self, files: &[&Path]) -> Option<Vec<PathBuf>> {
+        // Native path: return None so the runner formats each file once via
+        // `check_file` (avoids list-then-reformat double work on flagged files).
+        // Subprocess `-l` stays for `GUFF_NATIVE_FMT=0`.
+        if self.use_native() {
+            return None;
+        }
+        // Subprocess prefilter (`GUFF_NATIVE_FMT=0`): system `gofumpt -l`.
+        let bin = self.binary.as_deref().unwrap_or("gofumpt");
+        crate::runner::batch_list(files, || {
+            let mut c = Command::new(bin);
+            c.arg("-l");
+            if self.options.extra_rules {
+                c.arg("-extra");
+            }
+            if let Some(modpath) = &self.options.module_path {
+                if !modpath.is_empty() {
+                    c.arg("-modpath").arg(modpath);
+                }
+            }
+            if let Some(lang) = &self.options.lang {
+                if !lang.is_empty() {
+                    c.arg("-lang").arg(normalize_lang(lang));
+                }
+            }
+            c
+        })
+    }
+}
+
+/// gofumpt expects `-lang go1.X`; accept bare `1.22` / `go1.22` / `1` forms.
+fn normalize_lang(lang: &str) -> String {
+    let t = lang.trim();
+    if t.starts_with("go") {
+        t.to_string()
+    } else {
+        format!("go{t}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_lang_prefixes_go() {
+        assert_eq!(normalize_lang("1.22"), "go1.22");
+        assert_eq!(normalize_lang("go1.21"), "go1.21");
+        assert_eq!(normalize_lang(" 1.20 "), "go1.20");
+    }
+
+    #[test]
+    fn native_removes_empty_line_at_block_start() {
+        let fmt = Gofumpt::new(GofumptOptions::default());
+        let src = b"package p\n\nfunc f() {\n\n\tx := 1\n\tprintln(x)\n}\n";
+        let out = fmt.format("p.go", src).expect("gofumpt");
+        let s = String::from_utf8(out).unwrap();
+        assert!(
+            s.contains("func f() {\n\tx := 1"),
+            "expected empty line removed, got:\n{s}"
+        );
+    }
+
+    /// gofumpt v0.10.0 counts a single-source-line func whose printed form
+    /// exceeds 100 bytes as multi-line, and so puts a blank line between it and
+    /// its neighbours. **golangci-lint 2.12.2 pins v0.9.2**, which does not.
+    ///
+    /// dapr `pkg/actors/table/fake/fake.go` has a 100-byte one-line method
+    /// between two multi-line ones, and golangci-lint reports the file as
+    /// formatted while guff wanted two blank lines added.
+    #[test]
+    fn native_does_not_split_a_long_single_line_func() {
+        let fmt = Gofumpt::new(GofumptOptions::default());
+        let src = b"package p
+
+type Fake struct{ fn func(string, string) bool }
+
+func (f *Fake) WithGetOrCreate(fn func(string, string) bool) *Fake {
+	f.fn = fn
+	return f
+}
+func (f *Fake) WithActorExists(fn func(string, string) bool) *Fake { f.fn = fn; return f }
+";
+        let out = fmt.format("p.go", src).expect("gofumpt");
+        let s = String::from_utf8(out).unwrap();
+        assert_eq!(
+            s,
+            String::from_utf8(src.to_vec()).unwrap(),
+            "the pinned gofumpt leaves this alone; got:\n{s}"
+        );
+    }
+
+    /// v0.10.0 treats a trailing inline comment as extending the previous
+    /// declaration, so a comment on the next line starts a new "decl position"
+    /// and gets a blank line before it. golangci-lint 2.12.2 pinned v0.9.2,
+    /// which took the position from the inline comment itself and added
+    /// nothing; 2.14.0 pins v0.12.0, which adds the line (measured with
+    /// `golangci-lint fmt --stdin`), so the pinned and the latest answer agree.
+    ///
+    /// gatekeeper v3.23.0
+    /// `pkg/controller/webhookconfig/webhookconfig_controller.go` is the shape:
+    /// a struct closed by `} // +kubebuilder:…` with a second `// +kubebuilder:`
+    /// on the next line.
+    #[test]
+    fn match_golangci_separates_a_comment_after_a_trailing_comment() {
+        let src = b"package p
+
+type T struct {
+	a int
+	b int
+} // +kubebuilder:one
+// +kubebuilder:two
+
+func f(x int) int {
+	y := x
+	return y
+}
+";
+        for opts in [
+            GofumptOptions {
+                match_golangci: true,
+                ..Default::default()
+            },
+            GofumptOptions::default(),
+        ] {
+            let out = Gofumpt::new(opts).format("p.go", src).expect("gofumpt");
+            let s = String::from_utf8(out).unwrap();
+            assert!(
+                s.contains("} // +kubebuilder:one
+
+// +kubebuilder:two"),
+                "both should separate the comments, got:\n{s}"
+            );
+        }
+    }
+
+    #[test]
+    fn native_extra_rules_clothes_naked_return() {
+        let fmt = Gofumpt::new(GofumptOptions {
+            extra_rules: true,
+            ..Default::default()
+        });
+        let src = b"package p\n\nfunc f() (x int) {\n\tx = 1\n\treturn\n}\n";
+        let out = fmt.format("p.go", src).expect("gofumpt -extra");
+        let s = String::from_utf8(out).unwrap();
+        assert!(
+            s.contains("return x"),
+            "expected clothed return, got:\n{s}"
+        );
+    }
+
+    #[test]
+    fn multiline_call_parens_are_balanced_only_under_balance_calls() {
+        // gofumpt v0.12 (golangci-lint 2.14.0): the multi-line call rule is the
+        // `balance_calls` extra rule, off by default.
+        let src = b"package p\n\nfunc f() {\n\tfoo(\n\t\ta, b)\n}\n";
+        let default = Gofumpt::new(GofumptOptions::default());
+        let out = default.format("p.go", src).expect("gofumpt default");
+        assert_eq!(out, src.to_vec(), "default leaves the parens alone");
+
+        let balanced = Gofumpt::new(GofumptOptions {
+            balance_calls: true,
+            ..Default::default()
+        });
+        let s = String::from_utf8(balanced.format("p.go", src).expect("gofumpt balance_calls")).unwrap();
+        assert!(
+            s.contains("\n\t)") && !s.contains("a, b)"),
+            "balance_calls puts ) on its own line, got:\n{s}"
+        );
+    }
+}

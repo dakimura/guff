@@ -1,0 +1,11 @@
+version: "2"
+linters:
+  enable:
+    - revive
+  settings:
+    revive:
+      rules:
+        - name: enforce-map-style
+          arguments: ["make"]
+        - name: comments-density
+          arguments: [15]

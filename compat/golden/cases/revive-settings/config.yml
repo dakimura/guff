@@ -1,0 +1,32 @@
+# Golden case: revive with `confidence` and `severity` unset (COMPAT-HARDENING
+# Phase 4).
+#
+# The baseline of the nine-case settings group. Both keys have defaults that a
+# config never sees until it omits them: `normalizeConfig` fills `confidence`
+# in with **0.8** and `severity` with **warning**, and cases/revive spells
+# `severity: warning` out, so nothing in this repo measured either default
+# before.
+#
+# Naming three rules and nothing else is also the selector under test: without
+# `enable-default-rules` or `enable-all-rules`, a `rules` list *is* the rule
+# set.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      rules:
+        - name: increment-decrement
+        - name: error-naming
+        - name: errorf
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

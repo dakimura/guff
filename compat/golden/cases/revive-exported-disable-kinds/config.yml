@@ -1,0 +1,28 @@
+# Golden case: all five `disableChecksOn*` flags at once.
+#
+# Every doc check is off, so what remains is the one check that is **not**
+# behind `disabledChecks.isDisabled` — `checkRepetitiveNames`.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      rules:
+        - name: exported
+          arguments:
+            - "disableChecksOnConstants"
+            - "disableChecksOnFunctions"
+            - "disableChecksOnMethods"
+            - "disableChecksOnTypes"
+            - "disableChecksOnVariables"
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

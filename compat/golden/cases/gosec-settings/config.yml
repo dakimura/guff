@@ -1,0 +1,29 @@
+# Golden case: gosec with `severity` and `confidence` unset (COMPAT-HARDENING
+# Phase 4).
+#
+# The baseline of the eight-case settings group. Both thresholds go through
+# `convertToScore`, where **the empty string and "low" are the same value** —
+# and Low is the bottom of the scale, so an unset threshold filters nothing.
+# The four ladder rules are named so that the other cases move one rung at a
+# time; `gosec-default-rules` is the one that leaves `includes` off.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gosec
+  settings:
+    gosec:
+      includes:
+        - G101
+        - G104
+        - G401
+        - G404
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

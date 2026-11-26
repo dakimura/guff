@@ -1,0 +1,474 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh staticcheck-sa
+# Produced by running golangci-lint on compat/golden/cases/staticcheck-sa/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+old/old.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+old/old.go:6:1:staticcheck::ST1021: comment on exported type OldClient should be of the form "OldClient ..." (with optional leading article)
+sa1000/bad/bad.go:16:17:staticcheck::SA1000: error parsing regexp: missing closing ): `foo(`
+sa1000/bad/bad.go:17:21:staticcheck::SA1000: error parsing regexp: missing closing ]: `[`
+sa1000/bad/bad.go:18:21:staticcheck::SA1000: error parsing regexp: unexpected ): `a)`
+sa1000/bad/bad.go:22:21:staticcheck::SA1000: error parsing regexp: missing argument to repetition operator: `*`
+sa1000/bad/bad.go:23:21:staticcheck::SA1000: error parsing regexp: invalid nested repetition operator: `**`
+sa1000/bad/bad.go:24:21:staticcheck::SA1000: error parsing regexp: invalid repeat count: `{2,1}`
+sa1000/bad/bad.go:25:21:staticcheck::SA1000: error parsing regexp: invalid repeat count: `{1001}`
+sa1000/bad/bad.go:28:21:staticcheck::SA1000: error parsing regexp: invalid repeat count: `{100}`
+sa1000/bad/bad.go:32:21:staticcheck::SA1000: error parsing regexp: invalid escape sequence: `\\q`
+sa1000/bad/bad.go:33:21:staticcheck::SA1000: error parsing regexp: invalid escape sequence: `\\C`
+sa1000/bad/bad.go:34:21:staticcheck::S1007: should use raw string (`...`) with regexp.MustCompile to avoid having to escape twice
+sa1000/bad/bad.go:34:21:staticcheck::SA1000: error parsing regexp: trailing backslash at end of expression: ``
+sa1000/bad/bad.go:38:21:staticcheck::SA1000: error parsing regexp: invalid character class range: `z-a`
+sa1000/bad/bad.go:39:21:staticcheck::SA1000: error parsing regexp: invalid character class range: `[:foo:]`
+sa1000/bad/bad.go:40:21:staticcheck::SA1000: error parsing regexp: invalid character class range: `\\p{Foo}`
+sa1000/bad/bad.go:44:21:staticcheck::SA1000: error parsing regexp: invalid named capture: `(?P<>`
+sa1000/bad/bad.go:45:21:staticcheck::SA1000: error parsing regexp: invalid named capture: `(?<a.b>`
+sa1000/bad/bad.go:48:21:staticcheck::SA1000: error parsing regexp: invalid or unsupported Perl syntax: `(?=`
+sa1000/bad/bad.go:54:21:staticcheck::SA1000: error parsing regexp: invalid UTF-8: `�`
+sa1000/bad/bad.go:55:21:staticcheck::SA1000: error parsing regexp: invalid UTF-8: `�b`
+sa1000/bad/bad.go:56:21:staticcheck::SA1000: error parsing regexp: invalid UTF-8: `�`
+sa1000/bad/bad.go:57:21:staticcheck::SA1000: error parsing regexp: invalid UTF-8: `���`
+sa1000/bad/bad.go:58:21:staticcheck::SA1000: error parsing regexp: invalid UTF-8: `�`
+sa1000/bad/bad.go:63:21:staticcheck::SA1000: error parsing regexp: invalid UTF-8: `�`
+sa1000/bad/bad.go:64:21:staticcheck::SA1000: error parsing regexp: invalid UTF-8: `��`
+sa1000/bad/bad.go:68:21:staticcheck::SA1000: error parsing regexp: invalid UTF-8: `�*`
+sa1000/bad/bad.go:69:21:staticcheck::SA1000: error parsing regexp: invalid UTF-8: `�{2}`
+sa1000/bad/bad.go:72:15:staticcheck::SA1000: error parsing regexp: missing argument to repetition operator: `+`
+sa1000/bad/bad.go:73:21:staticcheck::SA1000: error parsing regexp: invalid named capture: `(?P<>`
+sa1000/bad/bad.go:74:21:staticcheck::SA1000: error parsing regexp: invalid escape sequence: `\\d`
+sa1001/bad/bad.go:11:25:staticcheck::SA1001: template: :1: bad character U+007D '}'
+sa1001/bad/bad.go:12:25:staticcheck::SA1001: template: :1: bad character U+002B '+'
+sa1001/bad/bad.go:13:25:staticcheck::SA1001: template: :1: unexpected right paren
+sa1001/bad/bad.go:14:25:staticcheck::SA1001: template: :1: unexpected EOF
+sa1001/bad/bad.go:15:25:staticcheck::SA1001: template: :1: unexpected {{end}}
+sa1001/bad/bad.go:16:25:staticcheck::SA1001: template: :1: unexpected "," in command
+sa1001/bad/bad.go:17:25:staticcheck::SA1001: template: :1: unexpected . after term "true"
+sa1001/bad/bad.go:18:25:staticcheck::SA1001: template: :1: unexpected "1" in template clause
+sa1001/bad/bad.go:19:25:staticcheck::SA1001: template: :1: unexpected ".3" in operand
+sa1001/bad/bad.go:20:25:staticcheck::SA1001: template: :1: unexpected {{else}} in define clause
+sa1001/bad/bad.go:22:25:staticcheck::SA1001: template: :2: unexpected {{end}}
+sa1001/bad/bad.go:25:29:staticcheck::SA1001: template: :1: unexpected {{end}}
+sa1002/bad/bad.go:8:2:staticcheck::SA4017: Parse doesn't have side effects and its return value is ignored
+sa1002/bad/bad.go:8:13:staticcheck::SA1002: parsing time "12345" as "12345": cannot parse "" as "4"
+sa1002/bad/bad.go:9:2:staticcheck::SA4017: Parse doesn't have side effects and its return value is ignored
+sa1002/bad/bad.go:9:13:staticcheck::SA1002: parsing time "1234" as "1234": cannot parse "" as "3"
+sa1002/bad/bad.go:10:2:staticcheck::SA4017: Parse doesn't have side effects and its return value is ignored
+sa1002/bad/bad.go:10:13:staticcheck::SA1002: parsing time "123456": hour out of range
+sa1002/bad/bad.go:13:2:staticcheck::SA4017: Parse doesn't have side effects and its return value is ignored
+sa1002/bad/bad.go:13:13:staticcheck::SA1002: parsing time "12345\\xff" as "12345\\xff": cannot parse "\\xff" as "4"
+sa1002/bad/bad.go:14:2:staticcheck::SA4017: Parse doesn't have side effects and its return value is ignored
+sa1002/bad/bad.go:14:13:staticcheck::SA1002: parsing time "\\xff1234" as "\\xff1234": cannot parse "" as "3"
+sa1002/ok/ok.go:6:2:staticcheck::SA4017: Parse doesn't have side effects and its return value is ignored
+sa1002/ok/ok.go:7:2:staticcheck::SA4017: Parse doesn't have side effects and its return value is ignored
+sa1002/ok/ok.go:10:2:staticcheck::SA4017: Parse doesn't have side effects and its return value is ignored
+sa1002/ok/ok.go:11:2:staticcheck::SA4017: Parse doesn't have side effects and its return value is ignored
+sa1002/ok/ok.go:13:2:staticcheck::SA4017: Parse doesn't have side effects and its return value is ignored
+sa1002/ok/ok.go:14:2:staticcheck::SA4017: Parse doesn't have side effects and its return value is ignored
+sa1003/bad/bad.go:19:25:staticcheck::SA1003: value of type int cannot be used with binary.Write
+sa1003/bad/bad.go:20:25:staticcheck::SA1003: value of type example.com/sa1003/bad.HasInt cannot be used with binary.Write
+sa1003/bad/bad.go:21:25:staticcheck::SA1003: value of type example.com/sa1003/bad.HasString cannot be used with binary.Write
+sa1004/bad/bad.go:6:13:staticcheck::SA1004: sleeping for 1 nanoseconds is probably a bug; be explicit if it isn't
+sa1004/bad/bad.go:7:13:staticcheck::SA1004: sleeping for 42 nanoseconds is probably a bug; be explicit if it isn't
+sa1005/bad/bad.go:6:15:staticcheck::SA1005: first argument to exec.Command looks like a shell command, but a program name or path are expected
+sa1006/bad/bad.go:11:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:25:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:26:6:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:27:6:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:28:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:29:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:30:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:31:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:35:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:36:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:37:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:38:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:39:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:40:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:41:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1006/bad/bad.go:42:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+sa1007/bad/bad.go:7:12:staticcheck::SA1007: ":" is not a valid URL: parse ":": missing protocol scheme
+sa1007/bad/bad.go:8:12:staticcheck::SA1007: "cache_object:foo/bar" is not a valid URL: parse "cache_object:foo/bar": first path segment in URL cannot contain colon
+sa1007/bad/bad.go:9:12:staticcheck::SA1007: "http://host:port/" is not a valid URL: parse "http://host:port/": invalid port ":port" after host
+sa1007/bad/bad.go:10:12:staticcheck::SA1007: "http://host/%zz" is not a valid URL: parse "http://host/%zz": invalid URL escape "%zz"
+sa1007/bad/bad.go:11:12:staticcheck::SA1007: "http://h|st/" is not a valid URL: parse "http://h|st/": invalid character "|" in host name
+sa1007/bad/bad.go:12:12:staticcheck::SA1007: "http://[::1/" is not a valid URL: parse "http://[::1/": missing ']' in host
+sa1007/bad/bad.go:13:12:staticcheck::SA1007: "http://x[::1]/" is not a valid URL: parse "http://x[::1]/": invalid IP-literal
+sa1007/bad/bad.go:14:12:staticcheck::SA1007: "http://[12345::]/" is not a valid URL: parse "http://[12345::]/": invalid host: ParseAddr("12345::"): each group must have 4 or less digits (at "12345::")
+sa1007/bad/bad.go:15:12:staticcheck::SA1007: "http://us er@host/" is not a valid URL: parse "http://us er@host/": net/url: invalid userinfo
+sa1007/bad/bad.go:18:12:staticcheck::SA1007: "http://example.com/\\x7f\\xff" is not a valid URL: parse "http://example.com/\\x7f\\xff": net/url: invalid control character in URL
+sa1008/bad/bad.go:10:9:staticcheck::SA1008: keys in http.Header are canonicalized, "host" is not canonical; fix the constant or use http.CanonicalHeaderKey
+sa1008/bad/bad.go:18:38:staticcheck::SA4009: argument v is overwritten before first use
+sa1008/bad/bad.go:19:2:staticcheck::SA4009(related information): assignment to v
+sa1008/bad/bad.go:19:6:staticcheck::SA1008: keys in http.Header are canonicalized, "host" is not canonical; fix the constant or use http.CanonicalHeaderKey
+sa1008/bad/bad.go:25:6:staticcheck::SA1008: keys in http.Header are canonicalized, "foo" is not canonical; fix the constant or use http.CanonicalHeaderKey
+sa1008/bad/bad.go:27:6:staticcheck::SA1008: keys in http.Header are canonicalized, "etag" is not canonical; fix the constant or use http.CanonicalHeaderKey
+sa1010/bad/bad.go:8:19:staticcheck::SA1010: calling a FindAll method with n == 0 will return no results, did you mean -1?
+sa1010/bad/bad.go:9:37:staticcheck::SA1010: calling a FindAll method with n == 0 will return no results, did you mean -1?
+sa1011/bad/bad.go:10:2:staticcheck::SA4017: Trim doesn't have side effects and its return value is ignored
+sa1011/bad/bad.go:10:22:staticcheck::SA1011: argument is not a valid UTF-8 encoded string
+sa1011/bad/bad.go:11:29:staticcheck::SA1011: argument is not a valid UTF-8 encoded string
+sa1011/bad/bad.go:12:26:staticcheck::SA1011: argument is not a valid UTF-8 encoded string
+sa1011/bad/bad.go:13:30:staticcheck::SA1011: argument is not a valid UTF-8 encoded string
+sa1011/bad/bad.go:16:2:staticcheck::SA4017: TrimRight doesn't have side effects and its return value is ignored
+sa1011/bad/bad.go:16:28:staticcheck::SA1011: argument is not a valid UTF-8 encoded string
+sa1011/bad/bad.go:16:28:staticcheck::SA1024: cutset contains duplicate characters
+sa1011/bad/bad.go:18:2:staticcheck::SA4017: TrimLeft doesn't have side effects and its return value is ignored
+sa1011/bad/bad.go:18:28:staticcheck::SA1011: argument is not a valid UTF-8 encoded string
+sa1011/bad/bad.go:18:28:staticcheck::SA1024: cutset contains duplicate characters
+sa1011/ok/ok.go:6:2:staticcheck::SA4017: Trim doesn't have side effects and its return value is ignored
+sa1011/ok/ok.go:11:2:staticcheck::SA4017: TrimLeft doesn't have side effects and its return value is ignored
+sa1011/ok/ok.go:12:2:staticcheck::SA4017: TrimRight doesn't have side effects and its return value is ignored
+sa1012/bad/bad.go:14:6:staticcheck::SA1012: do not pass a nil Context, even if a function permits it; pass context.TODO if you are unsure about which Context to use
+sa1013/bad/bad.go:7:2:staticcheck::SA1013: the first argument of io.Seeker is the offset, but an io.Seek* constant is being used instead
+sa1014/bad/bad.go:13:23:staticcheck::SA1014: json.Unmarshal expects to unmarshal into a pointer, but the provided value is not a pointer
+sa1014/bad/bad.go:14:23:staticcheck::SA1014: json.Unmarshal expects to unmarshal into a pointer, but the provided value is not a pointer
+sa1014/bad/bad.go:15:28:staticcheck::SA1014: Decode expects to unmarshal into a pointer, but the provided value is not a pointer
+sa1015/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+sa1015/bad/bad.go:6:12:staticcheck::SA1015: using time.Tick leaks the underlying ticker, consider using it only in endless functions, tests and the main package, and use time.NewTicker here
+sa1016/bad/bad.go:11:19:staticcheck::SA1016: os.Kill cannot be trapped (did you mean syscall.SIGTERM?)
+sa1016/bad/bad.go:12:16:staticcheck::SA1016: syscall.SIGKILL cannot be trapped (did you mean syscall.SIGTERM?)
+sa1017/bad/bad.go:10:16:staticcheck::SA1017: the channel used with signal.Notify should be buffered
+sa1018/bad/bad.go:6:2:staticcheck::SA4017: Replace doesn't have side effects and its return value is ignored
+sa1018/bad/bad.go:6:35:staticcheck::SA1018: calling strings.Replace with n == 0 will return no results, did you mean -1?
+sa1018/bad/bad.go:7:2:staticcheck::SA4017: Replace doesn't have side effects and its return value is ignored
+sa1018/bad/bad.go:7:35:staticcheck::SA1018: calling strings.Replace with n == 0 will return no results, did you mean -1?
+sa1018/ok/ok.go:6:2:staticcheck::QF1004: could use strings.ReplaceAll instead
+sa1018/ok/ok.go:6:2:staticcheck::SA4017: Replace doesn't have side effects and its return value is ignored
+sa1018/ok/ok.go:7:2:staticcheck::SA4017: Replace doesn't have side effects and its return value is ignored
+sa1019/bad/bad.go:4:2:staticcheck::SA1019: example.com/blockdoc is deprecated: Please use example.com/old. 
+sa1019/bad/bad.go:9:2:staticcheck::SA1019: example.com/old.Legacy is deprecated: call New. 
+sa1019/bad/bad.go:10:8:staticcheck::SA1019: example.com/old.OldClient is deprecated: use NewClient instead. 
+sa1019/bad/bad.go:16:2:staticcheck::SA1019: (example.com/old.Options).Old is deprecated: use Fine instead. 
+sa1019/bad/bad.go:22:2:staticcheck::SA1019: (example.com/old.Wrapper).Old is deprecated: use Fine instead. 
+sa1019/bad/bad.go:23:6:staticcheck::SA1019: (example.com/old.Wrapper).Old is deprecated: use Fine instead. 
+sa1019/bad/bad.go:26:2:staticcheck::SA1019: (example.com/old.PtrWrapper).Old is deprecated: use Fine instead. 
+sa1019/bad/bad.go:29:2:staticcheck::SA1019: (example.com/old.Wrapper).Old is deprecated: use Fine instead. 
+sa1019/bad/bad.go:32:2:staticcheck::SA1019: (example.com/old.Options).Old is deprecated: use Fine instead. 
+sa1019/bad/bad.go:32:4:staticcheck::QF1008: could remove embedded field "Options" from selector
+sa1019/bad/second.go:18:8:staticcheck::SA1019: example.com/blockdoc is deprecated: Please use example.com/old. 
+sa1019/ok/ok.go:5:1:staticcheck::ST1021: comment on exported type Embedder should be of the form "Embedder ..." (with optional leading article)
+sa1020/bad/bad.go:7:22:staticcheck::SA1020: invalid port or service name in host:port pair
+sa1020/bad/bad.go:8:22:staticcheck::SA1020: invalid port or service name in host:port pair
+sa1020/bad/bad.go:9:25:staticcheck::SA1020: invalid port or service name in host:port pair
+sa1021/bad/bad.go:15:2:staticcheck::SA1021: use net.IP.Equal to compare net.IPs, not bytes.Equal
+sa1021/bad/bad.go:18:2:staticcheck::SA1021: use net.IP.Equal to compare net.IPs, not bytes.Equal
+sa1021/bad/bad.go:22:2:staticcheck::SA1021: use net.IP.Equal to compare net.IPs, not bytes.Equal
+sa1021/bad/bad.go:26:2:staticcheck::SA1021: use net.IP.Equal to compare net.IPs, not bytes.Equal
+sa1023/bad/bad.go:10:2:staticcheck::SA1023: io.Writer.Write must not modify the provided buffer, not even temporarily
+sa1024/bad/bad.go:6:2:staticcheck::SA4017: TrimLeft doesn't have side effects and its return value is ignored
+sa1024/bad/bad.go:6:26:staticcheck::SA1024: cutset contains duplicate characters
+sa1024/bad/bad.go:7:2:staticcheck::SA4017: TrimRight doesn't have side effects and its return value is ignored
+sa1024/bad/bad.go:7:27:staticcheck::SA1024: cutset contains duplicate characters
+sa1024/bad/bad.go:8:2:staticcheck::SA4017: Trim doesn't have side effects and its return value is ignored
+sa1024/bad/bad.go:8:22:staticcheck::SA1024: cutset contains duplicate characters
+sa1024/ok/ok.go:6:2:staticcheck::SA4017: TrimLeft doesn't have side effects and its return value is ignored
+sa1024/ok/ok.go:7:2:staticcheck::SA4017: TrimRight doesn't have side effects and its return value is ignored
+sa1024/ok/ok.go:8:2:staticcheck::SA4017: Trim doesn't have side effects and its return value is ignored
+sa1025/bad/bad.go:7:5:staticcheck::SA1025: it is not possible to use Reset's return value correctly, as there is a race condition between draining the channel and the new timer expiring
+sa1025/bad/bad.go:8:3:staticcheck::S1005: unnecessary assignment to the blank identifier
+sa1026/bad/bad.go:14:15:staticcheck::SA1026: trying to marshal unsupported type chan int, via x.Ch
+sa1026/bad/bad.go:15:15:staticcheck::SA1026: trying to marshal unsupported type func(), via x.Run
+sa1026/bad/bad.go:17:15:staticcheck::SA1026: trying to marshal unsupported type chan int
+sa1026/bad/bad.go:52:15:staticcheck::SA1026: trying to marshal unsupported type chan int, via x.C
+sa1026/bad/bad.go:53:15:staticcheck::SA1026: trying to marshal unsupported type map[PlainKey][]int
+sa1026/bad/bad.go:54:15:staticcheck::SA1026: trying to marshal unsupported type map[PtrTextKey][]int
+sa1026/bad/bad.go:57:15:staticcheck::SA1026: trying to marshal unsupported type map[PlainKey][]int, via x.M
+sa1026/embed/embed.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+sa1026/embed/embed.go:23:1:staticcheck::ST1020: comment on exported function ShadowPtr should be of the form "ShadowPtr ..."
+sa1026/embed/embed.go:31:1:staticcheck::ST1020: comment on exported function ShadowVal should be of the form "ShadowVal ..."
+sa1026/embed/embed.go:39:1:staticcheck::ST1020: comment on exported function NotShadowed should be of the form "NotShadowed ..."
+sa1026/embed/embed.go:41:22:staticcheck::SA1026: trying to marshal unsupported type fn, via x.Inner.Method
+sa1026/embed/embed.go:50:1:staticcheck::ST1020: comment on exported function Annihilate should be of the form "Annihilate ..."
+sa1026/embed/embed.go:62:1:staticcheck::ST1020: comment on exported function TagWins should be of the form "TagWins ..."
+sa1026/embed/embed.go:74:1:staticcheck::ST1020: comment on exported function TagWinsBad should be of the form "TagWinsBad ..."
+sa1026/embed/embed.go:76:22:staticcheck::SA1026: trying to marshal unsupported type fn, via x.AT.Method
+sa1026/embed/embed.go:82:1:staticcheck::ST1020: comment on exported function TagShadows should be of the form "TagShadows ..."
+sa1026/embed/embed.go:92:1:staticcheck::ST1020: comment on exported function UnexportedEmbedded should be of the form "UnexportedEmbedded ..."
+sa1026/embed/embed.go:100:1:staticcheck::ST1020: comment on exported function TaggedEmbedded should be of the form "TaggedEmbedded ..."
+sa1026/embed/embed.go:102:22:staticcheck::SA1026: trying to marshal unsupported type fn, via x.Inner.Method
+sa1026/embed/embed.go:107:1:staticcheck::ST1020: comment on exported function DashEmbedded should be of the form "DashEmbedded ..."
+sa1026/embed/embed.go:117:1:staticcheck::ST1020: comment on exported function TwicePromoted should be of the form "TwicePromoted ..."
+sa1026/embed/embed.go:129:1:staticcheck::ST1020: comment on exported function PtrRecvViaPtr should be of the form "PtrRecvViaPtr ..."
+sa1026/embed/embed.go:134:1:staticcheck::ST1020: comment on exported function PtrRecvViaVal should be of the form "PtrRecvViaVal ..."
+sa1026/embed/embed.go:136:22:staticcheck::SA1026: trying to marshal unsupported type fn, via x.PM.F
+sa1026/embed/embed.go:139:1:staticcheck::ST1020: comment on exported function DashComma should be of the form "DashComma ..."
+sa1026/embed/embed.go:141:22:staticcheck::SA1026: trying to marshal unsupported type fn, via x.F
+sa1026/embed/embed.go:142:8:staticcheck::SA5008: malformed `json` tag: invalid trailing ',' character
+sa1026/embed/embed.go:142:8:staticcheck::SA5008: should encoding/json ignore this field or name it "-"? Either use `json:"-"` to ignore the field or use `json:"'-',"` to specify "-" as the name
+sa1026/embed/embed.go:148:1:staticcheck::ST1020: comment on exported function UnexportedStruct should be of the form "UnexportedStruct ..."
+sa1026/embed/embed.go:150:22:staticcheck::SA1026: trying to marshal unsupported type fn, via x.inner.Method
+sa1028/bad/bad.go:13:13:staticcheck::SA1028: sort.Slice must only be called on slices, was called on [1]int
+sa1028/bad/bad.go:14:13:staticcheck::SA1028: sort.Slice must only be called on slices, was called on string
+sa1028/bad/bad.go:15:13:staticcheck::SA1028: sort.Slice must only be called on slices, was called on int
+sa1029/alias/alias.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+sa1029/alias/alias.go:16:29:staticcheck::SA1029: should not use empty anonymous struct as key for value; define your own type to avoid collisions
+sa1029/alias/alias.go:19:29:staticcheck::SA1029: should not use built-in type string as key for value; define your own type to avoid collisions
+sa1029/alias/alias.go:20:29:staticcheck::SA1029: should not use built-in type string (via alias aliasString) as key for value; define your own type to avoid collisions
+sa1029/alias/alias.go:22:29:staticcheck::SA1029: should not use built-in type int (via alias aliasInt) as key for value; define your own type to avoid collisions
+sa1029/alias/alias.go:25:29:staticcheck::SA1029: should not use built-in type int as key for value; define your own type to avoid collisions
+sa1029/bad/bad.go:16:25:staticcheck::SA1029: should not use built-in type string as key for value; define your own type to avoid collisions
+sa1029/bad/bad.go:17:25:staticcheck::SA1029: keys used with context.WithValue must be comparable, but type example.com/sa1029/bad.T3 is not comparable
+sa1029/bad/bad.go:19:25:staticcheck::SA1029: should not use empty anonymous struct as key for value; define your own type to avoid collisions
+sa1029/bad/bad.go:20:25:staticcheck::SA1029: should not use empty anonymous struct as key for value; define your own type to avoid collisions
+sa1029/bad/bad.go:24:25:staticcheck::SA1029: should not use empty anonymous struct as key for value; define your own type to avoid collisions
+sa1029/bad/bad.go:33:25:staticcheck::SA1029: keys used with context.WithValue must be comparable, but type []int is not comparable
+sa1029/bad/bad.go:43:2:staticcheck::S1021: should merge variable declaration with assignment on next line
+sa1029/bad/bad.go:48:9:staticcheck::QF1011: could omit type ctxKey from declaration; it will be inferred from the right-hand side
+sa1029/bad/bad.go:48:9:staticcheck::ST1023: should omit type ctxKey from declaration; it will be inferred from the right-hand side
+sa1029/bad/bad.go:59:10:staticcheck::QF1011: could omit type ctxKeyField from declaration; it will be inferred from the right-hand side
+sa1029/bad/bad.go:59:10:staticcheck::ST1023: should omit type ctxKeyField from declaration; it will be inferred from the right-hand side
+sa1030/bad/bad.go:6:24:staticcheck::SA1030: 'base' must not be smaller than 2, unless it is 0
+sa1030/bad/bad.go:7:27:staticcheck::SA1030: 'bitSize' argument is invalid, must be within 0 and 64
+sa1030/bad/bad.go:8:26:staticcheck::SA1030: 'bitSize' argument is invalid, must be either 32 or 64
+sa1030/bad/bad.go:9:23:staticcheck::SA1030: 'base' must not be smaller than 2
+sa1030/bad/bad.go:10:25:staticcheck::SA1030: 'fmt' argument is invalid: unknown format 'z'
+sa1030/bad/bad.go:10:33:staticcheck::SA1030: 'bitSize' argument is invalid, must be either 32 or 64
+sa1031/bad/bad.go:9:13:staticcheck::SA1031: overlapping dst and src
+sa1031/bad/bad.go:11:13:staticcheck::SA1031: overlapping dst and src
+sa1031/bad/bad.go:13:13:staticcheck::SA1031: overlapping dst and src
+sa1031/bad/bad.go:15:14:staticcheck::SA1031: overlapping dst and src
+sa1031/bad/bad.go:20:14:staticcheck::SA1031: overlapping dst and src
+sa1031/bad/bad.go:24:14:staticcheck::SA1031: overlapping dst and src
+sa1031/bad/bad.go:34:14:staticcheck::SA1031: overlapping dst and src
+sa1031/bad/bad.go:43:14:staticcheck::SA1031: overlapping dst and src
+sa1032/bad/bad.go:10:2:staticcheck::SA1032: arguments have the wrong order
+sa2000/bad/bad.go:8:3:staticcheck::SA2000: should call wg.Add(1) before starting the goroutine to avoid a race
+sa2000/shapes/shapes.go:26:3:staticcheck::SA2000: should call wg.Add(1) before starting the goroutine to avoid a race
+sa2000/shapes/shapes.go:56:4:staticcheck::SA2000: should call wg.Add(1) before starting the goroutine to avoid a race
+sa2000/shapes/shapes.go:68:5:staticcheck::SA2000: should call wg.Add(1) before starting the goroutine to avoid a race
+sa2000/shapes/shapes.go:103:4:staticcheck::SA2000: should call wg.Add(1) before starting the goroutine to avoid a race
+sa2000/shapes/shapes.go:112:2:staticcheck::S1000: should use a simple channel send/receive instead of select with a single case
+sa2000/shapes/shapes.go:115:4:staticcheck::SA2000: should call wg.Add(1) before starting the goroutine to avoid a race
+sa2000/shapes/shapes.go:146:4:staticcheck::SA2000: should call inner.Add(1) before starting the goroutine to avoid a race
+sa2000/shapes/shapes.go:157:3:staticcheck::SA2000: should call wg.Add(n) before starting the goroutine to avoid a race
+sa2000/shapes/shapes.go:164:3:staticcheck::SA2000: should call h.wg.Add(1) before starting the goroutine to avoid a race
+sa2001/bad/bad.go:8:2:staticcheck::SA2001: empty critical section
+sa2002/bad/bad.go:6:2:staticcheck::SA2002: the goroutine calls T.Fatal, which must be called in the same goroutine as the test
+sa2003/bad/bad.go:8:2:staticcheck::SA2003: deferring Lock right after having locked already; did you mean to defer Unlock?
+sa3001/bad/bad.go:6:2:staticcheck::SA3001: should not assign to b.N
+sa4000/bad/bad.go:4:9:staticcheck::SA4000: identical expressions on the left and right side of the '==' operator
+sa4000/bad/bad.go:5:9:staticcheck::SA4000: identical expressions on the left and right side of the '==' operator
+sa4000/bad/bad.go:8:9:staticcheck::SA4000: identical expressions on the left and right side of the '|' operator
+sa4000/bad/bad.go:12:9:staticcheck::SA4000: identical expressions on the left and right side of the '==' operator
+sa4001/bad/bad.go:8:6:staticcheck::SA4001: &*x will be simplified to x. It will not copy x.
+sa4001/bad/bad.go:9:6:staticcheck::SA4001: *&x will be simplified to x. It will not copy x.
+sa4003/bad/bad.go:4:9:staticcheck::SA4003: no value of type uint is less than 0
+sa4003/bad/bad.go:5:9:staticcheck::SA4003: no value of type uint is less than 0
+sa4003/literal/literal.go:27:6:staticcheck::SA4003: every value of type example.com/sa4003/literal.Level is >= 0
+sa4003/literal/literal.go:28:6:staticcheck::SA4003: every value of type example.com/sa4003/literal.Level is >= 0
+sa4003/literal/literal.go:29:6:staticcheck::SA4003: every value of type example.com/sa4003/literal.Level is >= 0
+sa4003/literal/literal.go:30:6:staticcheck::SA4003: every value of type example.com/sa4003/literal.Level is >= 0
+sa4003/literal/literal.go:31:6:staticcheck::SA4003: every value of type example.com/sa4003/literal.Level is >= 0
+sa4003/literal/literal.go:43:11:staticcheck::SA4000: identical expressions on the left and right side of the '-' operator
+sa4003/literal/literal.go:48:6:staticcheck::SA4024: builtin function len does not return negative values
+sa4003/literal/literal.go:54:6:staticcheck::SA4028: x % 1 is always zero
+sa4004/bad/bad.go:8:3:staticcheck::SA4004: the surrounding loop is unconditionally terminated
+sa4004/nested/nested.go:25:4:staticcheck::SA4004: the surrounding loop is unconditionally terminated
+sa4004/nested/nested.go:40:4:staticcheck::SA4004: the surrounding loop is unconditionally terminated
+sa4004/nested/nested.go:54:3:staticcheck::SA4004: the surrounding loop is unconditionally terminated
+sa4004/nested/nested.go:99:4:staticcheck::SA4004: the surrounding loop is unconditionally terminated
+sa4005/bad/bad.go:6:2:staticcheck::SA4005: ineffective assignment to field T.X
+sa4006/bad/bad.go:11:2:staticcheck::SA4006: this value of n is never used
+sa4006/bad/bad.go:17:2:staticcheck::SA4006: this value of f is never used
+sa4006/bad/bad.go:23:2:staticcheck::SA4006: this value of x is never used
+sa4006/bad/bad.go:29:2:staticcheck::SA4006: this value of s is never used
+sa4006/branches/branches.go:32:2:staticcheck::SA4006: this value of config is never used
+sa4006/branches/branches.go:46:2:staticcheck::SA4006: this value of config is never used
+sa4006/branches/branches.go:58:2:staticcheck::SA4006: this value of config is never used
+sa4006/generic_conv/generic_conv.go:58:2:staticcheck::SA4006: this value of p is never used
+sa4006/loops/loops.go:32:3:staticcheck::SA4006: this value of moreDiags is never used
+sa4006/loops/loops.go:43:2:staticcheck::SA4006: this value of moreDiags is never used
+sa4006/loops/loops.go:77:3:staticcheck::SA4006: this value of moreDiags is never used
+sa4006/loops/loops.go:104:3:staticcheck::SA4006: this value of moreDiags is never used
+sa4006/loops/loops.go:117:3:staticcheck::SA4006: this value of moreDiags is never used
+sa4006/methods/methods.go:33:2:staticcheck::SA4006: this value of x is never used
+sa4006/methods/methods.go:40:2:staticcheck::SA4006: this value of x is never used
+sa4006/methods/methods.go:47:2:staticcheck::SA4006: this value of x is never used
+sa4006/methods/methods.go:59:3:staticcheck::SA4006: this value of v is never used
+sa4006/methods/methods.go:67:3:staticcheck::SA4006: this value of x is never used
+sa4006/ok/ok.go:44:2:staticcheck::SA4006: this value of n is never used
+sa4006/ok/ok.go:51:2:staticcheck::SA4006: this value of n is never used
+sa4006/range_ptr/range_ptr.go:28:3:staticcheck::SA4006: this value of v is never used
+sa4006/range_ptr/range_ptr.go:38:3:staticcheck::SA4006: this value of v is never used
+sa4006/range_ptr/range_ptr.go:48:3:staticcheck::SA4006: this value of v is never used
+sa4006/terminated/terminated.go:19:5:staticcheck::SA4006: this value of is is never used
+sa4006/terminated/terminated.go:32:3:staticcheck::SA4006: this value of x is never used
+sa4008/bad/bad.go:5:15:staticcheck::SA4008: variable in loop condition never changes
+sa4009/bad/bad.go:3:8:staticcheck::SA4009: argument arg is overwritten before first use
+sa4009/bad/bad.go:4:2:staticcheck::SA4009(related information): assignment to arg
+sa4009/bad/bad.go:8:18:staticcheck::SA4009: argument ctx is overwritten before first use
+sa4009/bad/bad.go:9:2:staticcheck::SA4009(related information): assignment to ctx
+sa4009/ok/ok.go:25:1:staticcheck::ST1021: comment on exported type Logger should be of the form "Logger ..." (with optional leading article)
+sa4010/bad/bad.go:18:11:staticcheck::SA4010: this result of append is never used, except maybe in other appends
+sa4010/converter_fp/converter_fp.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+sa4010/shadow_return_ok/shadow_return_ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+sa4011/bad/bad.go:6:13:staticcheck::SA4011: ineffective break statement. Did you mean to break out of the outer loop?
+sa4012/bad/bad.go:3:19:staticcheck::SA4012: no value is equal to NaN, not even NaN itself
+sa4013/bad/bad.go:2:19:staticcheck::SA4013: negating a boolean twice has no effect; is this a typo?
+sa4014/bad/bad.go:4:5:staticcheck::QF1003: could use tagged switch on x
+sa4014/bad/bad.go:5:12:staticcheck::SA9003: empty branch
+sa4014/bad/bad.go:5:15:staticcheck::SA4014: this condition occurs multiple times in this if/else if chain
+sa4014/ok/ok.go:4:5:staticcheck::QF1003: could use tagged switch on x
+sa4014/ok/ok.go:5:12:staticcheck::SA9003: empty branch
+sa4015/bad/bad.go:14:6:staticcheck::SA4015: calling math.Ceil on a converted integer is pointless
+sa4015/bad/bad.go:15:6:staticcheck::SA4015: calling math.Floor on a converted integer is pointless
+sa4015/bad/bad.go:16:6:staticcheck::SA4015: calling math.IsNaN on a converted integer is pointless
+sa4015/bad/bad.go:17:6:staticcheck::SA4015: calling math.Ceil on a converted integer is pointless
+sa4016/bad/bad.go:18:9:staticcheck::SA4016: x | flagA always equals x; flagA is defined as iota and has value 0, maybe flagA is meant to be 1 << iota?
+sa4016/bad/bad.go:18:20:staticcheck::SA4016: x & flagA always equals 0; flagA is defined as iota and has value 0, maybe flagA is meant to be 1 << iota?
+sa4016/bad/bad.go:18:31:staticcheck::SA4016: x ^ flagA always equals x; flagA is defined as iota and has value 0, maybe flagA is meant to be 1 << iota?
+sa4016/bad/bad.go:24:9:staticcheck::SA4016: x | 0 always equals x
+sa4016/bad/bad.go:24:16:staticcheck::SA4016: x & 0 always equals 0
+sa4016/bad/bad.go:24:23:staticcheck::SA4016: x ^ 0 always equals x
+sa4016/bad/bad.go:24:30:staticcheck::SA4016: x | +0 always equals x
+sa4017/bad/bad.go:20:2:staticcheck::SA4017: ToLower doesn't have side effects and its return value is ignored
+sa4017/bad/bad.go:21:2:staticcheck::SA4017: add doesn't have side effects and its return value is ignored
+sa4017/bad/bad.go:22:2:staticcheck::SA4017: double doesn't have side effects and its return value is ignored
+sa4017/bad/bad.go:23:2:staticcheck::SA4017: trimmed doesn't have side effects and its return value is ignored
+sa4017/bad/bad.go:24:2:staticcheck::SA4017: norm doesn't have side effects and its return value is ignored
+sa4018/bad/bad.go:2:23:staticcheck::SA4018: self-assignment of x to x
+sa4019/bad/bad.go:4:1:staticcheck::SA4019: identical build constraints "!plan9" and "!plan9"
+sa4019/shapes/a01_twice.go:4:1:staticcheck::SA4019: identical build constraints "go1.10" and "go1.10"
+sa4019/shapes/a02_groups.go:5:1:staticcheck::SA4019: identical build constraints "go1.10" and "go1.10"
+sa4019/shapes/a05_doc.go:1:1:staticcheck::ST1000: package comment should be of the form "Package p..."
+sa4019/shapes/a06_nospace.go:4:1:staticcheck::SA4019: identical build constraints "go1.10" and "go1.10"
+sa4019/shapes/a07_perm.go:4:1:staticcheck::SA4019: identical build constraints "go1.10 !nothing" and "!nothing go1.10"
+sa4019/shapes/a09_three.go:5:1:staticcheck::SA4019: identical build constraints "go1.10" and "go1.10"
+sa4019/shapes/a10_docafter.go:3:1:staticcheck::ST1000: package comment should be of the form "Package p..."
+sa4019/shapes/a11_block.go:6:1:staticcheck::SA4019: identical build constraints "go1.10" and "go1.10"
+sa4020/bad/bad.go:9:2:staticcheck::SA4020: unreachable case clause: any will always match before example.com/sa4020/bad.T
+sa4020/typeparam/typeparam.go:49:2:staticcheck::SA4020: unreachable case clause: io.Reader will always match before example.com/sa4020/typeparam.reader
+sa4020/typeparam/typeparam.go:59:2:staticcheck::SA4020: unreachable case clause: io.Reader will always match before io.ReadCloser
+sa4021/bad/bad.go:4:5:staticcheck::SA4006: this value of s is never used
+sa4021/bad/bad.go:4:9:staticcheck::SA4021: x = append(y) is equivalent to x = y
+sa4021/ok/ok.go:4:5:staticcheck::SA4006: this value of s is never used
+sa4022/bad/bad.go:5:6:staticcheck::SA4022: the address of a variable cannot be nil
+sa4022/ok/ok.go:4:5:staticcheck::SA9003: empty branch
+sa4023/bad/bad.go:5:2:staticcheck::S1021: should merge variable declaration with assignment on next line
+sa4023/bad/bad.go:7:6:staticcheck::SA4023: this comparison is never true
+sa4023/bad/bad.go:24:9:staticcheck::SA4023: this comparison is always true
+sa4023/bad/bad.go:29:2:staticcheck::S1021: should merge variable declaration with assignment on next line
+sa4023/bad/bad.go:31:9:staticcheck::SA4023: this comparison is always true
+sa4023/bad/bad.go:37:9:staticcheck::SA4023: this comparison is always true
+sa4023/bad/bad.go:43:9:staticcheck::SA4023: this comparison is never true
+sa4023/bad/bad.go:49:2:staticcheck::S1021: should merge variable declaration with assignment on next line
+sa4023/bad/bad.go:51:9:staticcheck::SA4023: this comparison is never true
+sa4023/bad/bad.go:57:9:staticcheck::SA4023: this comparison is always true
+sa4023/bad/bad.go:66:9:staticcheck::SA4023: this comparison is always true
+sa4023/bad/bad.go:72:9:staticcheck::SA4023: this comparison is always true
+sa4023/bad/bad.go:79:9:staticcheck::SA4023: this comparison is always true
+sa4023/bad/bad.go:87:9:staticcheck::SA4023: this comparison is always true
+sa4023/bad/bad.go:98:9:staticcheck::SA4023: this comparison is always true
+sa4023/bad/bad.go:104:9:staticcheck::SA4023: this comparison is always true
+sa4024/bad/bad.go:4:5:staticcheck::SA9003: empty branch
+sa4024/bad/bad.go:4:8:staticcheck::SA4024: builtin function len does not return negative values
+sa4025/bad/bad.go:2:19:staticcheck::SA4025: the integer division '2 / 3' results in zero
+sa4026/bad/bad.go:2:19:staticcheck::SA4026: in Go, the floating-point literal '-0.0' is the same as '0.0', it does not produce a negative zero
+sa4027/bad/bad.go:7:2:staticcheck::SA4027: (*net/url.URL).Query returns a copy, modifying it doesn't change the URL
+sa4028/bad/bad.go:2:19:staticcheck::SA4028: x % 1 is always zero
+sa4029/bad/bad.go:5:5:staticcheck::SA4029: sort.StringSlice is a type, not a function, and sort.StringSlice(x) doesn't sort your values; consider using sort.Strings instead
+sa4030/bad/bad.go:3:15:staticcheck::SA4030: math/rand.Intn(n) generates a random value 0 <= x < n; that is, the generated values don't include n; rand.Intn(1) therefore always returns 0
+sa4031/bad/bad.go:11:5:staticcheck::SA4031: this nil check is never true
+sa4031/bad/bad.go:15:5:staticcheck::SA4031: this nil check is never true
+sa4031/bad/bad.go:19:5:staticcheck::SA4031: this nil check is never true
+sa4031/bad/bad.go:23:5:staticcheck::SA4031: the checked variable contains a function and is never nil; did you mean to call it?
+sa4031/bad/bad.go:28:5:staticcheck::SA4031: this nil check is never true
+sa4031/ok/ok.go:21:5:staticcheck::SA4022: the address of a variable cannot be nil
+sa4032/bad/bad.go:6:9:staticcheck::SA4032: due to the file's build constraints, runtime.GOOS will never equal "plan9"
+sa4032/ok/ok.go:10:9:staticcheck::ST1017: don't use Yoda conditions
+sa5000/bad/bad.go:2:31:staticcheck::SA5000: assignment to nil map
+sa5001/bad/bad.go:14:2:staticcheck::SA5001: should check error returned from fn1() before deferring rc.Close()
+sa5001/bad/bad.go:15:2:staticcheck::SA9003: empty branch
+sa5002/bad/bad.go:2:12:staticcheck::SA5002: this loop will spin, using 100% CPU
+sa5003/bad/bad.go:17:3:staticcheck::SA5003: defers in this infinite loop will never run
+sa5003/bad/bad.go:22:2:staticcheck::S1000: should use for range instead of for { select {} }
+sa5003/bad/bad.go:25:4:staticcheck::SA5003: defers in this infinite loop will never run
+sa5003/bad/bad.go:32:3:staticcheck::S1000: should use a simple channel send/receive instead of select with a single case
+sa5003/bad/bad.go:34:4:staticcheck::SA5003: defers in this infinite loop will never run
+sa5003/bad/bad.go:43:4:staticcheck::SA5003: defers in this infinite loop will never run
+sa5003/bad/bad.go:52:4:staticcheck::SA5003: defers in this infinite loop will never run
+sa5003/bad/bad.go:60:3:staticcheck::SA5003: defers in this infinite loop will never run
+sa5003/bad/bad.go:70:3:staticcheck::SA5003: defers in this infinite loop will never run
+sa5003/bad/bad.go:72:4:staticcheck::S1023: redundant return statement
+sa5003/bad/bad.go:80:3:staticcheck::SA5003: defers in this infinite loop will never run
+sa5003/bad/bad.go:88:3:staticcheck::SA5003: defers in this infinite loop will never run
+sa5003/bad/bad.go:98:4:staticcheck::SA5003: defers in this infinite loop will never run
+sa5003/ok/ok.go:38:3:staticcheck::S1000: should use a simple channel send/receive instead of select with a single case
+sa5003/ok/ok.go:48:3:staticcheck::S1000: should use a simple channel send/receive instead of select with a single case
+sa5003/ok/ok.go:75:4:staticcheck::SA4011: ineffective break statement. Did you mean to break out of the outer loop?
+sa5003/ok/ok.go:83:3:staticcheck::S1000: should use a simple channel send/receive instead of select with a single case
+sa5003/ok/ok.go:85:4:staticcheck::SA4011: ineffective break statement. Did you mean to break out of the outer loop?
+sa5003/ok/ok.go:105:3:staticcheck::S1000: should use a simple channel send/receive instead of select with a single case
+sa5004/bad/bad.go:9:3:staticcheck::SA5004: should not have an empty default case in a for+select loop; the loop will spin
+sa5007/bad/bad.go:2:12:staticcheck::SA5007: infinite recursive call
+sa5008/bad/bad.go:15:8:staticcheck::SA5008: invalid XML tag: unknown option "unknown"
+sa5008/bad/bad.go:21:11:staticcheck::SA5008: unparseable struct tag: invalid syntax
+sa5008/bad/bad.go:28:14:staticcheck::SA5008: malformed `json` tag: invalid trailing ',' character
+sa5008/bad/bad.go:34:8:staticcheck::SA5008: invalid appearance of `omitEmpty` tag option; specify `omitempty` instead
+sa5008/bad/bad.go:35:8:staticcheck::SA5008: invalid appearance of `omit_empty` tag option; specify `omitempty` instead
+sa5008/bad/bad.go:36:8:staticcheck::SA5008: invalid appearance of unknown `bogus` tag option
+sa5008/bad/bad.go:37:8:staticcheck::SA5008: duplicate appearance of `omitempty` tag option
+sa5008/bad/bad.go:38:8:staticcheck::SA5008: field cannot have both `inline` and `unknown` specified
+sa5008/bad/bad.go:39:8:staticcheck::SA5008: missing value for `case` tag option; specify `case:ignore` or `case:strict` instead
+sa5008/bad/bad.go:40:8:staticcheck::SA5008: invalid appearance of unknown `case:loud` tag value
+sa5008/bad/bad.go:41:8:staticcheck::SA5008: `format` tag option was not specified last
+sa5008/bad/bad.go:42:8:staticcheck::SA5008: missing value for `format` tag option
+sa5008/bad/bad.go:48:24:staticcheck::SA5008: invalid appearance of `string` tag option; it is only intended for fields of numeric types or pointers to those
+sa5008/bad/bad.go:49:24:staticcheck::SA5008: invalid appearance of `string` tag option; it is only intended for fields of numeric types or pointers to those
+sa5008/bad/bad.go:54:12:staticcheck::SA5008: unexported struct field cannot have non-ignored `json:"lower"` tag
+sa5008/bad/bad.go:55:12:staticcheck::SA5008: should encoding/json ignore this field or name it "-"? Either use `json:"-"` to ignore the field or use `json:"'-',omitempty"` to specify "-" as the name
+sa5009/bad/bad.go:3:23:staticcheck::SA5009: Printf format %s reads arg #1, but call has only 0 args
+sa5010/bad/bad.go:4:19:staticcheck::SA5010: impossible type assertion; A and B contradict each other:\n	wrong type for M method\n		have func()\n		want func() int
+sa5010/generic/generic.go:49:6:staticcheck::SA5010: impossible type assertion; gPlainA and gPlainB contradict each other:\n	wrong type for Get method\n		have func() int\n		want func() string
+sa5010/generic/generic.go:57:6:staticcheck::SA5010: impossible type assertion; interface{Get() map[string][]T} and interface{Get() int} contradict each other:\n	wrong type for Get method\n		have func() map[string][]T\n		want func() int
+sa5011/bad/bad.go:61:2:staticcheck::S1021: should merge variable declaration with assignment on next line
+sa5011/ok/ok.go:297:2:staticcheck::S1021: should merge variable declaration with assignment on next line
+sa5012/bad/bad.go:3:32:staticcheck::SA5012: variadic argument "oldnew" is expected to have even number of elements, but has 3 elements
+sa6000/bad/bad.go:7:3:staticcheck::SA6000: calling regexp.MatchString in a loop has poor performance, consider using regexp.Compile
+sa6001/bad/bad.go:4:7:staticcheck::SA6001: m[string(key)] would be more efficient than k := string(key); m[k]
+sa6001/bad/bad.go:12:7:staticcheck::SA6001: m[string(key)] would be more efficient than k := string(key); m[k]
+sa6002/bad/bad.go:18:39:staticcheck::SA6002: argument should be pointer-like to avoid allocations
+sa6002/bad/bad.go:20:56:staticcheck::SA6002: argument should be pointer-like to avoid allocations
+sa6002/bad/bad.go:22:45:staticcheck::SA6002: argument should be pointer-like to avoid allocations
+sa6002/bad/bad.go:24:47:staticcheck::SA6002: argument should be pointer-like to avoid allocations
+sa6002/bad/bad.go:26:42:staticcheck::SA6002: argument should be pointer-like to avoid allocations
+sa6002/bad/bad.go:28:48:staticcheck::SA6002: argument should be pointer-like to avoid allocations
+sa6003/bad/bad.go:2:20:staticcheck::S1029: should range over string, not []rune(string)
+sa6003/bad/bad.go:2:20:staticcheck::SA6003: should range over string, not []rune(string)
+sa6005/bad/bad.go:5:35:staticcheck::SA6005: should use strings.EqualFold instead
+sa6005/bad/bad.go:11:35:staticcheck::SA6005: should use !strings.EqualFold instead
+sa6006/bad/bad.go:3:33:staticcheck::SA6006: use io.Writer.Write instead of converting from []byte to string to use io.WriteString
+sa9001/bad/bad.go:2:38:staticcheck::SA9001: defers in this range loop won't run unless the channel gets closed
+sa9002/bad/bad.go:3:26:staticcheck::SA9002: file mode '644' evaluates to 01204; did you mean '0644'?
+sa9003/bad/bad.go:4:2:staticcheck::SA9003: empty branch
+sa9003/bad/bad.go:5:9:staticcheck::SA9003: empty branch
+sa9004/bad/bad.go:12:2:staticcheck::SA9004: only the first constant in this group has an explicit type
+sa9005/bad/bad.go:4:28:staticcheck::SA9005: struct type 'example.com/sa9005/bad.t' doesn't have any exported fields, nor custom marshaling
+sa9005/embed/embed.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+sa9005/embed/embed.go:24:1:staticcheck::ST1020: comment on exported function Plain should be of the form "Plain ..."
+sa9005/embed/embed.go:25:36:staticcheck::SA9005: struct type 'example.com/sa9005/embed.onlyHidden' doesn't have any exported fields, nor custom marshaling
+sa9005/embed/embed.go:27:1:staticcheck::ST1020: comment on exported function Pointer should be of the form "Pointer ..."
+sa9005/embed/embed.go:28:38:staticcheck::SA9005: struct type 'example.com/sa9005/embed.onlyHidden' doesn't have any exported fields, nor custom marshaling
+sa9005/embed/embed.go:30:1:staticcheck::ST1020: comment on exported function UnexportedEmbedsExported should be of the form "UnexportedEmbedsExported ..."
+sa9005/embed/embed.go:35:1:staticcheck::ST1020: comment on exported function ExportedEmbedsHidden should be of the form "ExportedEmbedsHidden ..."
+sa9005/embed/embed.go:36:51:staticcheck::SA9005: struct type 'struct{example.com/sa9005/embed.OnlyHidden}' doesn't have any exported fields, nor custom marshaling
+sa9005/embed/embed.go:38:1:staticcheck::ST1020: comment on exported function ExportedEmbedsHiddenPtr should be of the form "ExportedEmbedsHiddenPtr ..."
+sa9005/embed/embed.go:39:54:staticcheck::SA9005: struct type 'struct{*example.com/sa9005/embed.OnlyHidden}' doesn't have any exported fields, nor custom marshaling
+sa9005/embed/embed.go:41:1:staticcheck::ST1020: comment on exported function ExportedEmbedsVisible should be of the form "ExportedEmbedsVisible ..."
+sa9005/embed/embed.go:44:1:staticcheck::ST1020: comment on exported function EmbedsChan should be of the form "EmbedsChan ..."
+sa9005/embed/embed.go:45:41:staticcheck::SA9005: struct type 'struct{example.com/sa9005/embed.ch}' doesn't have any exported fields, nor custom marshaling
+sa9005/embed/embed.go:47:1:staticcheck::ST1020: comment on exported function Recursive should be of the form "Recursive ..."
+sa9005/embed/embed.go:48:40:staticcheck::SA9005: struct type 'example.com/sa9005/embed.Rec' doesn't have any exported fields, nor custom marshaling
+sa9005/embed/embed.go:50:1:staticcheck::ST1020: comment on exported function Unmarshal should be of the form "Unmarshal ..."
+sa9005/embed/embed.go:51:68:staticcheck::SA9005: struct type 'example.com/sa9005/embed.onlyHidden' doesn't have any exported fields, nor custom marshaling
+sa9005/embed/embed.go:53:1:staticcheck::ST1021: comment on exported type P should be of the form "P ..." (with optional leading article)
+sa9005/embed/embed.go:56:42:staticcheck::SA9005: struct type 'example.com/sa9005/embed.onlyHidden' doesn't have any exported fields, nor custom marshaling
+sa9006/bad/bad.go:2:30:staticcheck::SA9006: shifting 8-bit value by 8 bits will always clear it
+sa9007/bad/bad.go:3:12:staticcheck::SA9007: this call to os.RemoveAll deletes the user's entire temporary directory, not a subdirectory therein
+sa9008/bad/bad.go:10:20:staticcheck::SA9008: x refers to the result of a failed type assertion and is a zero value, not the value that was being type-asserted
+sa9008/bad/bad.go:23:28:staticcheck::SA9008: err refers to the result of a failed type assertion and is a zero value, not the value that was being type-asserted
+sa9009/bad/bad.go:1:1:staticcheck::SA9009: ineffectual compiler directive due to extraneous space: "//  go:noinline"
+sa9009/header/header.go:14:1:staticcheck::SA9009: ineffectual compiler directive due to extraneous space: "// go:generate under a header"
+sa9009/header/header.go:35:1:staticcheck::SA9009: ineffectual compiler directive due to extraneous space: "// go:build ignore"

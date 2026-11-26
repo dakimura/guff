@@ -1,0 +1,31 @@
+# Golden case: the staticcheck checks that only fire on a 32-bit target.
+#
+# This case exists for its `env` file. SA1027 opens with
+#
+#     if sizes.Sizeof(types.Typ[types.Uintptr]) != 4 { return }
+#
+# so on a 64-bit host neither tool can ever report it, and the check sat in
+# docs/COVERAGE.md as one of eight that had never fired anywhere. Setting
+# GOOS=linux GOARCH=386 for *both* tools makes it observable, which is worth
+# more than recording it as permanently unreachable: the alignment arithmetic
+# (`Offsetsof` over the fields up to the indexed one) is real code with a real
+# answer, and now something checks it.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - staticcheck
+  settings:
+    staticcheck:
+      checks:
+        - all
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

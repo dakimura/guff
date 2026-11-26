@@ -1,0 +1,5 @@
+// Stub for the module gomodguard blocks. The linter reads go.mod and the
+// import, never the package body.
+package logrus
+
+func Info(args ...interface{}) {}

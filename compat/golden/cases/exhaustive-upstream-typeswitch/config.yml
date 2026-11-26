@@ -1,0 +1,19 @@
+# Golden case: exhaustive v0.15.0 check/typeswitch under the flags exhaustive_test.go runs it with.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - exhaustive
+  settings:
+    exhaustive:
+      check: [typeswitch]
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

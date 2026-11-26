@@ -1,0 +1,27 @@
+# Golden case: godoclint's `single-pkg-doc` across a `_test.go` boundary.
+#
+# The sibling `godoclint` case has both package docs in non-test files, so it
+# could not tell that guff shared one `_test.go` guard between `pkg-doc`,
+# `deprecated` and `single-pkg-doc` — golangci-lint pins the first two
+# `include-tests: false` and the third **true**. A package doc in a test file
+# counts toward "more than one godoc" and is invisible to the prefix check at
+# the same time.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - godoclint
+  settings:
+    godoclint:
+      default: none
+      enable:
+        - single-pkg-doc
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

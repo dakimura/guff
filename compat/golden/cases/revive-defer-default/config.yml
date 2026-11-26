@@ -1,0 +1,29 @@
+# Golden case: `defer` with **no arguments** — every sub-check runs.
+#
+# `DeferRule.allowFromArgs` returns all six (loop, callChain, methodCall,
+# return, recover, immediateRecover) when the rule is named without arguments,
+# and `newFailure` drops any failure whose sub-case is not in that set. This
+# case is the "all six" half; `revive-defer-subset` is the other.
+#
+# `methodCall` is the one that needs the parser's per-file object resolution
+# (`Ident.Obj.Kind == ast.Typ`), which guff skips unless some enabled analyzer
+# asks for it — so this case is also what keeps that gate honest.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      enable-all-rules: false
+      rules:
+        - name: defer
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

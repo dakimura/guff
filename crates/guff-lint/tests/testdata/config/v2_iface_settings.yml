@@ -1,0 +1,18 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - iface
+  settings:
+    iface:
+      enable:
+        - identical
+        - unused
+      settings:
+        unused:
+          exclude:
+            - example.com/skip
+        unusedmethod:
+          exclude:
+            - example.com/a
+            - " example.com/b"

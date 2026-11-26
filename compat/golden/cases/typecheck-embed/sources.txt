@@ -1,0 +1,8 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# `app/dist` is deliberately not listed: materialize copies only the .go files
+# named here, so the embed pattern has nothing to match — which is the state a
+# plain checkout of alertmanager is in before `make ui`.
+embed/a.go  crates/guff-golist/tests/testdata/embed/missingdir/a.go
+other/bad.go  compat/isolate/fixtures/errorlint/bad.go

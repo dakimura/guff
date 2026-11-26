@@ -1,0 +1,4 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+a.go  crates/guff-types/tests/testdata/generic_instance_methods/a.go
+lib/lib.go  crates/guff-types/tests/testdata/generic_instance_methods/lib/lib.go

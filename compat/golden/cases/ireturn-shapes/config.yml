@@ -1,0 +1,21 @@
+# Golden case: ireturn over every spelling of a result type, in a module whose
+# path has no dot.
+#
+# guff classified an aliased interface by its underlying (unnamed) interface,
+# so `type handler = other.Handler` came out as `anon` and was allowed; and it
+# called any package whose first path element has no dot "stdlib". Both hid
+# findings upstream makes.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - ireturn
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

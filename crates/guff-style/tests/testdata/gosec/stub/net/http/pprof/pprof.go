@@ -1,0 +1,3 @@
+package pprof
+
+func init() {}

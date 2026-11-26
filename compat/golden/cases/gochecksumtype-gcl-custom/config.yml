@@ -1,0 +1,20 @@
+# Golden case: golangci-lint v2.14.0's pkg/golinters/gochecksumtype/testdata/gochecksumtype_custom.go
+# under its gochecksumtype_custom.yml (`default-signifies-exhaustive: false`).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gochecksumtype
+  settings:
+    gochecksumtype:
+      default-signifies-exhaustive: false
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

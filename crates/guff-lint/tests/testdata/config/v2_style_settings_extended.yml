@@ -1,0 +1,65 @@
+version: "2"
+linters:
+  enable:
+    - cyclop
+    - nakedret
+    - predeclared
+    - perfsprint
+    - goconst
+    - mnd
+    - prealloc
+    - tagalign
+    - wsl
+    - copyloopvar
+    - usetesting
+    - usestdlibvars
+  settings:
+    cyclop:
+      package-average: 5.0
+      skip-tests: true
+    nakedret:
+      skip-test-files: true
+    predeclared:
+      ignore:
+        - len
+      q: true
+    perfsprint:
+      integer-format: false
+      int-conversion: false
+      err-error: true
+      errorf: false
+      bool-format: false
+      concat-loop: false
+      loop-other-ops: true
+    goconst:
+      min-occurrences: 10
+      ignore-tests: true
+      numbers: true
+      min: 2
+      max: 5
+      match-constant: false
+      find-duplicates: true
+    mnd:
+      checks:
+        - case
+      ignored-numbers:
+        - "42"
+      ignored-functions:
+        - take
+    prealloc:
+      range-loops: false
+    tagalign:
+      align: false
+      sort: false
+    wsl:
+      strict-append: false
+      allow-assign-and-anything: true
+    copyloopvar:
+      check-alias: true
+    usetesting:
+      os-setenv: true
+      os-temp-dir: true
+      os-mkdir-temp: false
+    usestdlibvars:
+      http-method: false
+      http-status-code: false

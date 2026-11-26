@@ -1,0 +1,21 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh exhaustive-upstream-enforce
+# Produced by running golangci-lint on compat/golden/cases/exhaustive-upstream-enforce/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+check/mapliteral/commentassoc/file.go:20:7:exhaustive::missing keys in map literal: x1
+check/mapliteral/commentassoc/file.go:21:7:exhaustive::missing keys in map literal: x0
+check/mapliteral/commentassoc/file.go:27:10:exhaustive::missing keys in map literal: x1
+check/mapliteral/commentassoc/file.go:37:7:exhaustive::missing keys in map literal: x1
+check/mapliteral/commentassoc/file.go:46:6:exhaustive::missing keys in map literal: x1
+check/mapliteral/commentassoc/file.go:53:10:exhaustive::missing keys in map literal: x1
+check/mapliteral/commentassoc/file.go:62:6:exhaustive::missing keys in map literal: x1
+check/mapliteral/commentassoc/file.go:65:7:exhaustive::missing keys in map literal: x1
+check/mapliteral/commentassoc/file.go:68:23:exhaustive::missing keys in map literal: x1
+check/swtch/directive/enforce/file.go:18:2:exhaustive::missing cases in expression switch: x1
+check/swtch/directive/enforce/file.go:27:6:exhaustive::missing keys in map literal: x1
+check/swtch/directive/enforce/file.go:30:6:exhaustive::missing keys in map literal: x1
+check/swtch/directive/enforce/file.go:31:7:exhaustive::missing keys in map literal: x0

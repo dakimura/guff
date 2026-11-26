@@ -1,0 +1,8 @@
+version: "2"
+linters:
+  default: none
+  enable: [errcheck]
+  exclusions:
+    rules:
+      # One condition. Upstream reads this as a config error, not as a wide rule.
+      - linters: [errcheck]

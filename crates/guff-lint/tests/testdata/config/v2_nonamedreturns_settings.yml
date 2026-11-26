@@ -1,0 +1,9 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - nonamedreturns
+  settings:
+    nonamedreturns:
+      report-error-in-defer: true
+      allow-unused-named-returns: true

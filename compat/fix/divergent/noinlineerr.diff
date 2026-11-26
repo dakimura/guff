@@ -1,0 +1,49 @@
+# A case where guff deliberately writes *less* than golangci-lint does.
+#
+# Hand-written. Nothing in regen.sh creates a file here. This is the first entry
+# to use `# upstream-breaks-build:`, which is the only thing that buys the right
+# to write less: everywhere else a missing edit belongs in pending/ because it
+# is a gap that should close. This one should not close.
+#
+# upstream-writes: 24 line(s), sha256:b7d5d3a86b63b925
+#
+# upstream-breaks-build: ./elseif.go:13:9: syntax error: else must be followed
+# by if or statement block
+#
+# why: upstream inserts the hoisted assignment at `ifStmt.Pos()`, which for an
+# `else if` is the `if` keyword sitting after `else`. The edit therefore lands
+# between the two and produces `} else err := do()`, which is not Go. On this
+# fixture golangci-lint 2.12.2 logs `formatting file .../elseif.go: 13:9:
+# expected if statement or block, found err`, writes the unparseable file
+# anyway, and reports `0 issues` — the finding is counted as fixed because the
+# Fixer removes fixed issues from the report.
+#
+# This is not a bug upstream intends to fix. golangci/golangci-lint#5905 asked
+# for `--fix` to be removed from this linter after reproducing exactly this on
+# golangci-lint's own tree, and was closed 2025-06-30: "The suggested fixes are
+# not guaranteed to produce code that compiles. Also, golangci-lint cannot
+# control those suggested fixes, only the linter can handle that."
+#
+# So guff ports the two edits and the two conditions upstream withholds on
+# (`len(Lhs) != 1`, and a name already bound in the scope the assignment would
+# land in), and adds a third of its own for this shape. bad.go below is
+# byte-identical to upstream's output; the whole divergence is that elseif.go is
+# absent from it.
+#
+# The `else if` fixture is a separate file on purpose: golangci-lint gofmts per
+# file, so had it shared bad.go, the failed parse would have left bad.go's
+# *correct* fix unformatted (`if  err != nil` at column 0) and the divergence
+# would have been unreadable.
+
+--- a/bad.go
++++ b/bad.go
+@@ -3,7 +3,8 @@
+ func do() error { return nil }
+ 
+ func Bad() {
+-	if err := do(); err != nil {
++	err := do()
++	if err != nil {
+ 		panic(err)
+ 	}
+ }

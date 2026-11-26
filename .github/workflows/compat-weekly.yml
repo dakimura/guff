@@ -1,0 +1,107 @@
+name: Compat (weekly tier)
+
+# The third OSS tier, and until 2026-08-30 the one nothing ran.
+#
+# `corpus/repos.json` has named controller-runtime, vault and kubernetes as
+# `tier: weekly` since they were adopted; `corpus/README.md` described the tier
+# as "defined only (no CI yet)"; and `corpus/shapes.py` refused to count them
+# as covering an input shape, with the reason written out in the source: "a
+# gate nobody runs cannot notice a regression". They had allowlists, they had
+# been measured by hand, and a regression in any of them was datable to nothing.
+#
+# Its own workflow rather than a fifth job in compat.yml: a `schedule:` trigger
+# added there would also start smoke, unit, isolate and oss-pr (~90 minutes of
+# them) every Sunday, so keeping the tier separate costs one file and saves
+# guarding four jobs with `if: github.event_name != 'schedule'`.
+#
+# Weekly, not daily: these are the three slowest targets in the corpus and
+# their finding sets move rarely. 04:23 rather than the hour, because every
+# cron job in the world is scheduled at :00.
+on:
+  schedule:
+    - cron: "23 4 * * 0"
+  # A PR that changes analysis can ask for this tier before merging by carrying
+  # the `weekly-corpus` label — the same escape hatch oss-nightly has, and
+  # `labeled` is in the type list for the same reason (a job's `if` sees the
+  # labels the PR had when the run began, so without it, labelling an open PR
+  # does nothing until the next push).
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+
+concurrency:
+  group: compat-weekly-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Same toolchain contract as compat.yml — see the long comment there for why
+# the Go version lives in `.go-version` and why `GOTOOLCHAIN: auto` silently
+# desyncs guff's stdlib from the one `go list` used.
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  oss-weekly:
+    if: >-
+      github.event_name != 'pull_request' ||
+      contains(github.event.pull_request.labels.*.name, 'weekly-corpus')
+    runs-on: ubuntu-latest
+    # kubernetes' apimachinery tree and vault's ./helper/... are the two slowest
+    # single targets in the corpus, and golangci-lint is run until two runs
+    # agree (COMPAT_CONFIRMATIONS), so its half of the wall clock is doubled.
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: .go-version
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: guff-lint-release
+          cache-targets: true
+
+      - name: Install golangci-lint
+        run: |
+          # The version lives in compat/pins.json, not here — see compat.yml.
+          V="$(python3 -c 'import json;print(json.load(open("compat/pins.json"))["golangci_lint"])')"
+          curl -sSfL https://golangci-lint.run/install.sh \
+            | sh -s -- -b "$HOME/.local/bin" "v$V"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build guff
+        run: cargo build --release --locked -p guff-lint
+
+      # Its own cache key: the weekly checkouts are three repos the other tiers
+      # never clone, and sharing `corpus-nightly-` would let a nightly run
+      # evict them (and pay to re-clone kubernetes) on every miss.
+      - name: Cache OSS corpus clones
+        uses: actions/cache@v4
+        with:
+          path: corpus/cache
+          key: corpus-weekly-${{ hashFiles('corpus/repos.json') }}
+          restore-keys: |
+            corpus-weekly-
+
+      # Also gates worker panics and ill-typed package counts (compat/health.py).
+      - name: Compat OSS (weekly tier, own-config)
+        run: ./compat/run.sh --oss --tier weekly
+
+      - name: File-set gate (weekly tier)
+        run: ./compat/filesets.sh --tier weekly
+
+      - name: Upload OSS report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oss-weekly-results
+          path: |
+            compat/results/RESULTS.md
+            compat/results/*/REPORT.md
+          if-no-files-found: ignore
+          retention-days: 14

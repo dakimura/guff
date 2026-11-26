@@ -1,0 +1,12 @@
+[package]
+name = "guff-types-errors"
+description = "A Rust port of Go's internal/types/errors package (error codes produced during type-checking)."
+keywords = ["go", "types", "errors", "port"]
+categories = ["development-tools"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "guff_types_errors"
+path = "src/lib.rs"

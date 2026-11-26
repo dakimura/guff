@@ -1,0 +1,28 @@
+# Golden case: the `wsl_v5` linter.
+#
+# wsl_v5 had only the isolate fixture, and the isolate key is
+# `path:line:linter:message` — no column. Its `err` check reports a *removal
+# range* whose start is `file.LineStart(previousEndLine + 1)`, i.e. column 1 of
+# the first blank line, and guff was reporting the assignment above it instead.
+# The line was wrong too, so isolate did catch this one; the column would have
+# gone unmeasured either way. The two exemptions the same check has — an `if`
+# init assigning err contributes no idents, and a comment of its own line
+# between the assignment and the check — were 2 of authelia's guff-only
+# findings.
+#
+# The fixture is `compat/isolate/fixtures/wsl_v5/bad.go`, shared so the two
+# gates cannot drift, and it pairs every silent shape with a firing control.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - wsl_v5
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

@@ -1,0 +1,9 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# COMPAT-HARDENING Phase 4. `run-build-tags` and `run-build-tags-none` share
+# this list; only their `config.yml` differs. tagged.go is behind
+# `//go:build custom`, so it is in the package for exactly one of them.
+
+tags/plain.go    crates/guff-lint/tests/testdata/runsem/tags/plain.go
+tags/tagged.go   crates/guff-lint/tests/testdata/runsem/tags/tagged.go

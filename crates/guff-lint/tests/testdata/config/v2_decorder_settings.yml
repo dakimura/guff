@@ -1,0 +1,15 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - decorder
+  settings:
+    decorder:
+      dec-order:
+        - type
+        - const
+        - var
+        - func
+      disable-dec-order-check: false
+      disable-init-func-first-check: false
+      disable-dec-num-check: false

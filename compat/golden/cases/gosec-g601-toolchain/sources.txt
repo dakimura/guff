@@ -1,0 +1,4 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+g601/g601.go  crates/guff-style/tests/testdata/gosec/g601.go
+g602/g602.go  crates/guff-style/tests/testdata/gosec/g602.go

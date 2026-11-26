@@ -1,0 +1,22 @@
+# loggercheck v0.13.0's testdata/src/a/nilness (MIT, LICENSE in
+# crates/guff-style/tests/testdata/loggercheck/nilness-v0.13.0), from the upstream repo — the module zip does not ship
+# testdata/src. klog is a guff-written signature stub
+# (crates/guff-style/tests/testdata/loggercheck/nilness-v0.13.0/stub); logr is the body-stripped copy the
+# ginkgolinter-upstream case already carries.
+nilness/adversarial.go  crates/guff-style/tests/testdata/loggercheck/nilness-v0.13.0/a/nilness/adversarial.go
+nilness/example.go  crates/guff-style/tests/testdata/loggercheck/nilness-v0.13.0/a/nilness/example.go
+nilness/external_test.go  crates/guff-style/tests/testdata/loggercheck/nilness-v0.13.0/a/nilness/external_test.go
+nilness/positions_generated.go  crates/guff-style/tests/testdata/loggercheck/nilness-v0.13.0/a/nilness/positions_generated.go
+nilness/testing.go  crates/guff-style/tests/testdata/loggercheck/nilness-v0.13.0/a/nilness/testing.go
+nilness/user/log/log.go  crates/guff-style/tests/testdata/loggercheck/nilness-v0.13.0/a/nilness/user/log/log.go
+nilness/user/os/os.go  crates/guff-style/tests/testdata/loggercheck/nilness-v0.13.0/a/nilness/user/os/os.go
+_stub/k8s.io/klog/v2/go.mod  crates/guff-style/tests/testdata/loggercheck/nilness-v0.13.0/stub/k8s.io/klog/v2/go.mod
+_stub/k8s.io/klog/v2/klog.go  crates/guff-style/tests/testdata/loggercheck/nilness-v0.13.0/stub/k8s.io/klog/v2/klog.go
+_stub/github.com/go-logr/logr/context_slog.go  crates/guff-style/tests/testdata/ginkgolinter-upstream-v0.24/stub/github.com/go-logr/logr/context_slog.go
+_stub/github.com/go-logr/logr/context.go  crates/guff-style/tests/testdata/ginkgolinter-upstream-v0.24/stub/github.com/go-logr/logr/context.go
+_stub/github.com/go-logr/logr/discard.go  crates/guff-style/tests/testdata/ginkgolinter-upstream-v0.24/stub/github.com/go-logr/logr/discard.go
+_stub/github.com/go-logr/logr/go.mod  crates/guff-style/tests/testdata/ginkgolinter-upstream-v0.24/stub/github.com/go-logr/logr/go.mod
+_stub/github.com/go-logr/logr/logr.go  crates/guff-style/tests/testdata/ginkgolinter-upstream-v0.24/stub/github.com/go-logr/logr/logr.go
+_stub/github.com/go-logr/logr/sloghandler.go  crates/guff-style/tests/testdata/ginkgolinter-upstream-v0.24/stub/github.com/go-logr/logr/sloghandler.go
+_stub/github.com/go-logr/logr/slogr.go  crates/guff-style/tests/testdata/ginkgolinter-upstream-v0.24/stub/github.com/go-logr/logr/slogr.go
+_stub/github.com/go-logr/logr/slogsink.go  crates/guff-style/tests/testdata/ginkgolinter-upstream-v0.24/stub/github.com/go-logr/logr/slogsink.go

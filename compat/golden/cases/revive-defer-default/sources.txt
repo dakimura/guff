@@ -1,0 +1,8 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# The two `revive-defer-*` cases share this file and differ only in whether the
+# `defer` rule carries an argument list. One function per sub-check, so the
+# difference between the two goldens *is* the set the arguments select.
+
+deferrule/defer_rule.go  crates/guff-revive/tests/testdata/revive/defer_rule/defer_rule.go

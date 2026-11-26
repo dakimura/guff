@@ -1,0 +1,30 @@
+# Golden case: x/tools v0.50.0's printf testdata (golangci-lint 2.14.0),
+# vendored verbatim (BSD, LICENSE in upstream-x-tools-v0.50/), plus guff's
+# own operands.go and induction/. go 1.26 so the go1.24 (non-constant
+# format) and go1.26 (%q, interface-method induction) gates are on, as
+# upstream's tests run them.
+#
+# a/a.go differs from upstream in one line: its GOPATH import "b" is
+# "example.com/printf/b". induction/ relates an interface to a wrapper
+# through each place refactor/satisfy records a constraint.
+#
+# issue62595's a_go127.go is excluded by its build tag on a go1.26
+# toolchain (PR 15).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+  settings:
+    govet:
+      enable:
+        - printf
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

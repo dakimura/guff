@@ -1,0 +1,18 @@
+# exhaustive v0.13.0's own testdata/src/enum (MIT, LICENSE next to it), plus
+# guff-written switches that spell each enum's member set out in a message.
+enum/enum.go           crates/guff-style/tests/testdata/exhaustive/upstream-v0.13.0/enum/enum.go
+enum/scope.go          crates/guff-style/tests/testdata/exhaustive/upstream-v0.13.0/enum/scope.go
+enum/types.go          crates/guff-style/tests/testdata/exhaustive/upstream-v0.13.0/enum/types.go
+enum/enum_switches.go  crates/guff-style/tests/testdata/exhaustive/declignore-golden/enum_switches.go
+
+# Declaration docs: ignore, aliases, invalid and conflicting directives.
+decl/declignore.go  crates/guff-style/tests/testdata/exhaustive/declignore.go
+
+# Both, seen from another package of the run and from an out-of-run module.
+use/use.go  crates/guff-style/tests/testdata/exhaustive/declignore-golden/use.go
+
+enumdep/go.mod                    compat/golden/cases/exhaustive-ignore-decl/enumdep.go.mod
+enumdep/enum/enum.go              crates/guff-style/tests/testdata/exhaustive/upstream-v0.13.0/enum/enum.go
+enumdep/enum/scope.go             crates/guff-style/tests/testdata/exhaustive/upstream-v0.13.0/enum/scope.go
+enumdep/enum/types.go             crates/guff-style/tests/testdata/exhaustive/upstream-v0.13.0/enum/types.go
+enumdep/declignore/declignore.go  crates/guff-style/tests/testdata/exhaustive/declignore.go

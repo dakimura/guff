@@ -1,0 +1,7 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# Two packages, because `dupOption`'s cluster-api shape is a variadic call over
+# a *named* func type declared in another package.
+clusterapi/clusterapi.go   crates/guff-style/tests/testdata/gocritic/clusterapi.go
+opts/opts.go               crates/guff-style/tests/testdata/gocritic/stub/example.com/gocritic/opts/opts.go

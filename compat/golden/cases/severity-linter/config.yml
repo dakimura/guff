@@ -1,0 +1,56 @@
+# Golden case: `severity.default: "@linter"` (COMPAT-HARDENING Phase 4).
+#
+# `@linter` is a sentinel, not a severity: `Severity.transform` returns the
+# issue untouched instead of assigning it. So this golden is byte-identical to
+# `cases/exclusions` — gosec keeps `low` / `medium`, revive keeps `warning`, and
+# the four linters that grade nothing keep an empty field.
+#
+# It earns a case because "identical to the baseline" is exactly the claim that
+# breaks silently: an implementation that treats `@linter` as an ordinary string
+# writes the literal `@linter` into every finding, and one that treats it as
+# "no default" but still runs the default assignment blanks the graded ones.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - gosec
+    - govet
+    - ineffassign
+    - revive
+    - staticcheck
+  settings:
+    gosec:
+      includes:
+        - G103
+        - G104
+        - G204
+        - G301
+        - G304
+    govet:
+      enable:
+        - printf
+        - unsafeptr
+    revive:
+      rules:
+        - name: exported
+        - name: package-comments
+    staticcheck:
+      checks:
+        - ST1000
+        - SA4011
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # Several findings deliberately share a line (a govet/printf finding and the
+  # errcheck one on the same `fmt.Printf` call), and telling a `linters:` rule
+  # from a `text:` rule depends on both surviving.
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+
+severity:
+  default: "@linter"

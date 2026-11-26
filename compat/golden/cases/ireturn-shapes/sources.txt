@@ -1,0 +1,6 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+
+shapes/shapes.go  crates/guff-style/tests/testdata/ireturn/shapes/shapes.go
+shapes/dot.go     crates/guff-style/tests/testdata/ireturn/shapes/dot.go
+sub/sub.go        crates/guff-style/tests/testdata/ireturn/shapes/sub/sub.go

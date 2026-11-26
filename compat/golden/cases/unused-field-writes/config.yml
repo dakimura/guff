@@ -1,0 +1,30 @@
+# Golden case: `linters.settings.unused`.
+#
+# `field-writes-are-uses: false` (upstream default true) stops a write to a
+# struct field from keeping it alive, and `post-statements-are-reads: true`
+# (default false) makes `x.n++` a read as well as a write. ava-labs/avalanchego
+# sets both; guff read neither, so every field the repo only writes to stayed
+# silent and a `//nolint:unused` over one of them became an unused directive.
+#
+# The fixture is the one the Rust unit tests use. This case is what pins the
+# *columns* — 96:20 is the field inside `type inner struct{ b string }`, and
+# nothing else in the tree checks a column for unused.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - unused
+  settings:
+    unused:
+      field-writes-are-uses: false
+      post-statements-are-reads: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

@@ -1,0 +1,12 @@
+# `alphabetical` is off by default and carries the method-ordering message.
+#
+# `function` is **deliberately absent**. The check exists in the funcorder
+# v0.6.0 that golangci-lint 2.12.2 bundles, but `FuncOrderSettings` in 2.12.2
+# has no `function` key — it was added after the pin — so the pinned release has
+# no way to turn it on and silently ignores the key. guff parses it and honours
+# it, which is guff running ahead of the pin rather than disagreeing with it.
+# Setting it here would make the fixture report one finding upstream cannot.
+# `compat/drift.py` is what notices when the pin catches up.
+struct-method: true
+constructor: true
+alphabetical: true

@@ -1,0 +1,26 @@
+# Golden case: ginkgolinter.
+#
+# Seeded from the isolate fixture, which the OSS-style tiers already run — but
+# they compare `path:line:linter:message` after normalization, so this linter's
+# **column** and **severity** had never been checked by anything. Both are in
+# the key here, byte for byte.
+#
+# ginkgo and gomega are stubbed to the assertion surface the rules match. The stub is a nested
+# module `replace`d in, as cases/protogetter and cases/gosec do: `./...` skips a
+# nested module, so neither tool lints the stub and neither needs the network.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - ginkgolinter
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # Full finding-set compare (avoid SA#### vs S#### order winning uniq-by-line).
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

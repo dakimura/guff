@@ -1,0 +1,12 @@
+[package]
+name = "guff-stdlib"
+description = "golang.org/x/tools/internal/stdlib's manifest: every exported standard-library symbol and the Go release that introduced it."
+keywords = ["go", "stdlib", "port"]
+categories = ["development-tools"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "guff_stdlib"
+path = "src/lib.rs"

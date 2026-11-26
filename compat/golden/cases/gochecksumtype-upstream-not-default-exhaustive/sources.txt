@@ -1,0 +1,5 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces)
+not_default_exhaustive/main.go  crates/guff-style/tests/testdata/gochecksumtype/upstream-v0.5.1-0.20260828200218-ae6904d28606/src/not_default_exhaustive/main.go
+default_exhaustive/main.go  crates/guff-style/tests/testdata/gochecksumtype/upstream-v0.5.1-0.20260828200218-ae6904d28606/src/default_exhaustive/main.go
+missing_with_panic/main.go  crates/guff-style/tests/testdata/gochecksumtype/upstream-v0.5.1-0.20260828200218-ae6904d28606/src/missing_with_panic/main.go

@@ -1,0 +1,10 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# A stub of the deprecated module (the same file the Rust unit test reads),
+# reached through the case go.mod's `replace`.
+protobuf/go.mod          compat/golden/cases/staticcheck-sa1019-protoc-gen-go/protobuf.go.mod
+protobuf/proto/proto.go  crates/guff-staticcheck/tests/testdata/sa1019/stub/github.com/golang/protobuf/proto/proto.go
+use/pb.go                crates/guff-staticcheck/tests/testdata/sa1019/protogen/pb.go
+use/mock.go              crates/guff-staticcheck/tests/testdata/sa1019/protogen/mock.go
+use/plain.go             crates/guff-staticcheck/tests/testdata/sa1019/protogen/plain.go

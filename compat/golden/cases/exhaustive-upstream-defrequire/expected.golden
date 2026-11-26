@@ -1,0 +1,15 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh exhaustive-upstream-defrequire
+# Produced by running golangci-lint on compat/golden/cases/exhaustive-upstream-defrequire/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+check/swtch/defrequire/file.go:13:2:exhaustive::missing cases in expression switch: x1
+check/swtch/defrequire/file.go:13:2:exhaustive::missing default case
+check/swtch/defrequire/file.go:17:2:exhaustive::missing default case
+check/swtch/defrequire/file.go:45:2:exhaustive::missing default case
+check/swtch/defrequire/file.go:51:2:exhaustive::missing default case
+check/swtch/defrequire/file.go:62:2:exhaustive::error parsing comment directives: conflicting directives
+check/swtch/defrequire/file.go:69:2:exhaustive::error parsing comment directives: conflicting directives

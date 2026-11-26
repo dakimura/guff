@@ -1,0 +1,10 @@
+# exhaustive v0.15.0's own testdata (passes/exhaustive/testdata/test, MIT,
+# LICENSE next to it), under the flags exhaustive_test.go runs it with.
+check/swtch/general/file.go                crates/guff-style/tests/testdata/exhaustive/upstream-v0.15.0/check/swtch/general/file.go
+check/swtch/general/file_generated.go      crates/guff-style/tests/testdata/exhaustive/upstream-v0.15.0/check/swtch/general/file_generated.go
+check/swtch/directive/file.go              crates/guff-style/tests/testdata/exhaustive/upstream-v0.15.0/check/swtch/directive/file.go
+check/swtch/generated/file_generated.go    crates/guff-style/tests/testdata/exhaustive/upstream-v0.15.0/check/swtch/generated/file_generated.go
+check/swtch/unsupported/unsupported.go     crates/guff-style/tests/testdata/exhaustive/upstream-v0.15.0/check/swtch/unsupported/unsupported.go
+check/swtch/defrequire/directive1/file.go  crates/guff-style/tests/testdata/exhaustive/upstream-v0.15.0/check/swtch/defrequire/directive1/file.go
+check/swtch/typ/file.go                    crates/guff-style/tests/testdata/exhaustive/upstream-v0.15.0/check/swtch/typ/file.go
+check/swtch/typnew/file.go                 crates/guff-style/tests/testdata/exhaustive/upstream-v0.15.0/check/swtch/typnew/file.go

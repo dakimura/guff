@@ -1,0 +1,9 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+plusbuild/redundant_build_tag.go  crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/redundant_build_tag.go
+nofailure/redundant_build_tag_no_failure.go  crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/redundant_build_tag_no_failure.go
+go116/redundant_build_tag_go116.go  crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/redundant_build_tag_go116.go
+go121/redundant_build_tag.go  crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/go1.21/redundant_build_tag.go
+go120/redundant_build_tag_go120.go  crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/go1.21/redundant_build_tag_go120.go
+go122/redundant_build_tag_go122.go  crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/go1.21/redundant_build_tag_go122.go
+wggo/use_waitgroup_go.go  crates/guff-revive/tests/testdata/revive/upstream-v1.17.0/use_waitgroup_go.go

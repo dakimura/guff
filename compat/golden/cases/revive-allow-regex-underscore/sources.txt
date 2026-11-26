@@ -1,0 +1,2 @@
+# The same fixture the Rust test uses, so the two cannot drift.
+allowregex/allow_regex.go   crates/guff-revive/tests/testdata/revive/allow_regex.go

@@ -1,0 +1,9 @@
+# Only `replace-local` is on by default; the other four directives each have
+# their own message and none is reachable without asking.
+replace-allow-list: []
+replace-local: true
+exclude-forbidden: true
+retract-allow-no-explanation: false
+toolchain-forbidden: true
+tool-forbidden: true
+go-debug-forbidden: true

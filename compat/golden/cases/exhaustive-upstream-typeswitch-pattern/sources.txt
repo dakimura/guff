@@ -1,0 +1,4 @@
+# exhaustive v0.15.0's check/typeswitch testdata (MIT, LICENSE in
+# crates/guff-style/tests/testdata/exhaustive/upstream-v0.15.0), with bodies added where golangci needs them
+# (crates/guff-style/tests/testdata/exhaustive/typeswitch-golden).
+check/typeswitch/pattern/file.go  crates/guff-style/tests/testdata/exhaustive/typeswitch-golden/pattern/file.go

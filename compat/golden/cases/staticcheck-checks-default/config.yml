@@ -1,0 +1,23 @@
+# Golden case: `staticcheck.checks` unset (COMPAT-HARDENING Phase 4).
+#
+# The baseline for the other three, and the one most real configs are running:
+# unset is not "everything" and not "the safe subset" either. golangci-lint
+# substitutes `["all", "-ST1000", "-ST1003", "-ST1016", "-ST1020", "-ST1021",
+# "-ST1022"]` — six ST checks and nothing else. SA9003 ("empty branch") reads
+# like one of the opinionated ones and is not on that list, so it is on here.
+# Every other case in this group spells `checks` out, which is why this one is
+# the only place that default can be measured.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - staticcheck
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

@@ -1,0 +1,104 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh dupword
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/dupword/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.15.0
+
+--- a/bad.go
++++ b/bad.go
+@@ -1,16 +1,16 @@
+ package p
+ 
+ func process() {
+-	// This is is a duplicate
+-	line := "the the word"
++	// This is a duplicate
++	line := "the word"
+ 	_ = line
+ }
+ 
+ // dupword names the word it saw twice, so each duplicated word is a different
+ // sentence. It reads comments, strings and the raw source alike.
+ func more() {
+-	// and and again
+-	s := "a a b"
++	// and again
++	s := "a "
+ 	_ = s
+-	/* block block comment */
++	/* block comment */
+ }
+--- a/bad/bad.go
++++ b/bad/bad.go
+@@ -1,8 +1,8 @@
+ package example
+ 
+ func process() {
+-	// This is is a comment with duplicate words
+-	line := "the the duplicate"
++	// This is a comment with duplicate words
++	line := "the duplicate"
+ 	_ = line
+ }
+ 
+@@ -13,8 +13,8 @@
+ func literals() {
+ 	// The tab is a real tab by the time the scan runs, and `strconv.Quote`
+ 	// escapes it again on the way back.
+-	tabbed := "the\tthe word"
+-	newline := "a\na b"
++	tabbed := "the\tword"
++	newline := "a\n"
+ 
+ 	// `\\` unquotes to one backslash, so `the\the` is a single word and there
+ 	// is nothing to report.
+@@ -26,17 +26,17 @@
+ 	// A raw string is rewritten as an *interpreted* one: upstream re-quotes
+ 	// with `strconv.Quote`, which has no way to spell a backtick literal. The
+ 	// backticks are gone from the fixed file.
+-	raw := `the the word`
++	raw := `the word`
+ 
+ 	// ...but a raw string's `\t` is two characters, so `the\tthe` is one word
+ 	// and this one is silent — the pair above and below only differ by quoting.
+ 	rawEsc := `the\tthe word`
+ 
+ 	// Non-ASCII, to pin that the scan is not byte-indexed.
+-	uni := "é é x"
++	uni := "é "
+ 
+ 	// No trailing text after the duplicate.
+-	runes := "the the"
++	runes := "the"
+ 
+ 	_, _, _, _, _, _, _, _ = tabbed, newline, escaped, quoteInside, raw, rawEsc, uni, runes
+ }
+--- a/rawskip/skip_raw_strings.go
++++ b/rawskip/skip_raw_strings.go
+@@ -5,11 +5,11 @@
+ // pkg/golinters/dupword/testdata/dupword_skip_raw_strings.go.
+ 
+ func skipRawStrings() (string, string, string) {
+-	// this line include duplicated word the the
+-	raw := `this line include duplicated word the the`
+-	interpreted := "this line include duplicated word the the"
++	// this line include duplicated word the
++	raw := `this line include duplicated word the`
++	interpreted := "this line include duplicated word the"
+ 	multiline := `
+-SELECT the the column
++SELECT the column
+ FROM table`
+ 	return raw, interpreted, multiline
+ }
+@@ -18,5 +18,5 @@
+ // trailing space are written after the loop. Upstream asks whether the last
+ // *byte*, read as a Latin-1 rune, is a space — so `à` (C3 A0) counts as one.
+ func trailingWhitespace() (string, string, string) {
+-	return "the the end ", "end the the ", "voilà voilà"
++	return "the end ", "end the ", "voilà voilà"
+ }

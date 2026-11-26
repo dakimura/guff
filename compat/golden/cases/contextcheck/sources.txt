@@ -1,0 +1,33 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# The golden tier keeps no copy of these files: it points at the fixtures the
+# Rust unit tests already use, so the two can never drift. Each file is its own
+# package there (they are type-checked one at a time), so each gets its own
+# directory here.
+bad/bad.go                 crates/guff-context/tests/testdata/contextcheck/bad.go
+ok/ok.go                   crates/guff-context/tests/testdata/contextcheck/ok.go
+closures/closures.go       crates/guff-context/tests/testdata/contextcheck/closures.go
+closure/closure.go         crates/guff-context/tests/testdata/contextcheck_closure/closure.go
+nocapture/nocapture.go     crates/guff-context/tests/testdata/contextcheck_nocapture/nocapture.go
+httphandler_ok/ok.go       crates/guff-context/tests/testdata/contextcheck_httphandler/ok.go
+httphandler_bad/bad.go     crates/guff-context/tests/testdata/contextcheck_httphandler/bad.go
+# Two packages, because the bug is in how a fact crosses between them.
+crosspkg/inner/inner.go    crates/guff-context/tests/testdata/contextcheck_crosspkg/inner/inner.go
+crosspkg/outer/outer.go    crates/guff-context/tests/testdata/contextcheck_crosspkg/outer/outer.go
+# Seven ways to replace an inherited context, and which of them silences the
+# rest of the function. The columns are the assertion: a lifted phi reports at
+# the *parameter*, not at the assignment and not at the `func` token.
+reassign/reassign.go       crates/guff-context/tests/testdata/contextcheck_reassign/reassign.go
+# A method handed over as a value (`$bound`) or as an expression (`$thunk`) is
+# not the method.
+boundmethod/bound.go       crates/guff-context/tests/testdata/contextcheck_boundmethod/bound.go
+# contextcheck's own doc directives, which are not golangci-lint's `//nolint`.
+docflag/docflag.go         crates/guff-context/tests/testdata/contextcheck_docflag/docflag.go
+reqctx/reqctx.go           crates/guff-context/tests/testdata/contextcheck_reqctx/reqctx.go
+# A fresh context that goes nowhere is not a finding.
+background/background.go   crates/guff-context/tests/testdata/contextcheck_background/background.go
+# A closure is keyed by its parent, not by its bare `run$1` name: three `run`
+# methods here, and only the one that captures a context is a finding.
+anonkey/anonkey.go         crates/guff-context/tests/testdata/contextcheck_anonkey/anonkey.go
+generic/generic.go         crates/guff-context/tests/testdata/contextcheck_generic/generic.go

@@ -1,0 +1,21 @@
+# Golden case: bodyclose.
+#
+# The check is a walk over `ssa.Call` referrers, and what it does when it finds
+# *no* referrer to follow decides real findings: a response assigned to the
+# blank identifier has no `ssa.Extract`, so `isopen` falls through to its
+# default and reports. Nothing in the isolate tier covers that, and the column
+# — go/ssa gives a call the position of its `(` — is only compared here.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - bodyclose
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

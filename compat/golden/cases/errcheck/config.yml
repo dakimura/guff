@@ -1,0 +1,20 @@
+# Golden case: errcheck's default naming (COMPAT-HARDENING Phase 4).
+#
+# `check-blank` and `check-type-assertions` stay off so that the case is about
+# the message and nothing else; `errcheck-verbose` is the same fixture with
+# `verbose: true`, and the difference between the two goldens is exactly what
+# that setting does.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

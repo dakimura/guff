@@ -1,0 +1,29 @@
+# Golden case: `govet.enable-all` minus one (COMPAT-HARDENING Phase 4).
+#
+# `enable-all` is the first arm of `isAnalyzerEnabled` and only `disable`
+# survives it: `enable` is not consulted, and neither is the default list.
+#
+# The fixture is kept free of anything the ten non-default analyzers report
+# (see its package comment), so this golden differs from `govet-settings` by
+# the `unreachable` finding alone. If it ever grows by something else, the
+# fixture has picked up a shape guff cannot answer for — that is the signal,
+# not noise to regenerate away.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - unreachable
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

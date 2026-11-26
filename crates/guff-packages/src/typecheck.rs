@@ -1,0 +1,2155 @@
+//! Type-checking loaded packages from source with export-data dependencies.
+//!
+//! Port of golangci-lint `loadFromSource` / `loadFromExportData` and the
+//! `types.Config` wiring in `go/packages`.
+
+use crate::hash::{HashMap, HashSet};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use rayon::prelude::*;
+
+use guff::parser::{parse_file, Mode, SKIP_FUNC_BODIES, SKIP_OBJECT_RESOLUTION};
+use guff::position::FileSet;
+use guff_exportdata::ExportImporter;
+use guff_types::api::Config as TypeConfig;
+use guff_types::default_sizes;
+use guff_types::sizes_for;
+use guff_types::{Checker, ExportSeed, WorkerOverlays};
+
+use crate::load_mode::LoadMode;
+use crate::package::{Error, ErrorKind, Package, TypecheckArtifacts};
+
+/// Sub-phase accounting inside [`typecheck_package_with_seed`], summed across
+/// rayon workers (so the totals are CPU, not wall — `PERF_TASKS.md` §1.6).
+///
+/// Only written when `GUFF_DEBUG_CACHE` is at level 2. The counters are global
+/// and monotonic; callers snapshot them around the window they care about and
+/// diff (see `typecheck_roots`), which also keeps repeated calls in one process
+/// from mixing.
+mod detail {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{Duration, Instant};
+
+    pub(super) static READ_NS: AtomicU64 = AtomicU64::new(0);
+    pub(super) static PARSE_NS: AtomicU64 = AtomicU64::new(0);
+    pub(super) static SEED_NS: AtomicU64 = AtomicU64::new(0);
+    pub(super) static CHECK_NS: AtomicU64 = AtomicU64::new(0);
+
+    /// `Some(Instant)` only when level-2 accounting is on, so an unset
+    /// `GUFF_DEBUG_CACHE` costs no clock read even on the per-file paths.
+    pub(super) fn start(on: bool) -> Option<Instant> {
+        on.then(Instant::now)
+    }
+
+    pub(super) fn add(counter: &AtomicU64, since: Option<Instant>) {
+        if let Some(t) = since {
+            counter.fetch_add(t.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
+    }
+
+    /// (read, parse, seed, check) totals so far.
+    pub(super) fn snapshot() -> [Duration; 4] {
+        [&READ_NS, &PARSE_NS, &SEED_NS, &CHECK_NS]
+            .map(|c| Duration::from_nanos(c.load(Ordering::Relaxed)))
+    }
+}
+
+/// Toolchain parameters used when type-checking loaded packages.
+#[derive(Debug, Clone)]
+pub struct TypecheckEnv {
+    /// Compiler name passed to [`sizes_for`] (typically `"gc"`).
+    pub compiler: String,
+    /// Target GOARCH (e.g. `"amd64"`).
+    pub arch: String,
+    /// Accepted Go language version for the checker (e.g. `"go1.26"`).
+    pub go_version: String,
+    /// Resolve dependency type information by type-checking dependency **source**
+    /// (via the built-in source importer) instead of decoding compiler export
+    /// data (`.a`). Set on the cold path where `go list` runs without `-export`,
+    /// so the expensive dependency compilation is avoided (see the cold-speedup
+    /// work). Default `true` (hybrid); `false` forces the export-data seed.
+    pub from_source: bool,
+    /// Type-check target packages concurrently via rayon. Set `false` when the
+    /// caller runs with `--sequential` / `-j 1` so dependency seeding and
+    /// per-package checking stay on the main thread (avoids small default worker
+    /// stacks overflowing on deep hybrid type-check trees).
+    pub parallel: bool,
+    /// Skip AST object resolution ([`SKIP_OBJECT_RESOLUTION`]) when parsing
+    /// target packages. Safe when no enabled analyzer reads `Ident.obj`
+    /// (today: `ineffassign`, `maintidx`). The type checker uses stamped node
+    /// ids + `Info` maps, not `Ident.obj`. Default `false` (resolve).
+    pub skip_object_resolution: bool,
+}
+
+impl Default for TypecheckEnv {
+    fn default() -> Self {
+        Self {
+            compiler: "gc".into(),
+            arch: std::env::var("GOARCH").unwrap_or_else(|_| "amd64".into()),
+            go_version: String::new(),
+            from_source: true,
+            parallel: true,
+            skip_object_resolution: false,
+        }
+    }
+}
+
+impl TypecheckEnv {
+    /// Build from a subprocess environment slice (`KEY=value` strings).
+    pub fn from_env(env: &[String], compiler: &str) -> Self {
+        let lookup = |key: &str| -> Option<String> {
+            env.iter().find_map(|entry| {
+                let (k, v) = entry.split_once('=')?;
+                (k == key).then(|| v.to_string())
+            })
+        };
+        Self {
+            compiler: if compiler.is_empty() {
+                "gc".into()
+            } else {
+                compiler.to_string()
+            },
+            arch: lookup("GOARCH")
+                .or_else(|| std::env::var("GOARCH").ok())
+                .unwrap_or_else(|| "amd64".into()),
+            go_version: lookup("GOVERSION")
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(crate::golist::detect_go_version_string),
+            from_source: false,
+            parallel: true,
+            skip_object_resolution: false,
+        }
+    }
+
+    pub fn sizes(&self) -> guff_types::Sizes {
+        sizes_for(&self.compiler, &self.arch).unwrap_or_else(default_sizes)
+    }
+}
+
+/// `GUFF_DEBUG_SEED_ERRORS=1`: print the first type error of each *dependency*
+/// the source seed checks. Read once — `check_sources` runs per source dep, and
+/// a dependency closure is hundreds of them.
+fn seed_errors_enabled() -> bool {
+    static ON: std::sync::LazyLock<bool> =
+        std::sync::LazyLock::new(|| std::env::var_os("GUFF_DEBUG_SEED_ERRORS").is_some());
+    *ON
+}
+
+/// Returns true when the load mode requires parsing or type-checking.
+pub fn needs_typecheck(mode: LoadMode) -> bool {
+    mode.contains(LoadMode::NEED_TYPES)
+        || mode.contains(LoadMode::NEED_SYNTAX)
+        || mode.contains(LoadMode::NEED_TYPES_INFO)
+}
+
+/// Type-check packages in `by_id`, filling `Types`, `Syntax`, and related fields.
+///
+/// `root_ids` are the packages matched by the load patterns. When
+/// [`LoadMode::NEED_DEPS`] is set, every package in `by_id` is type-checked;
+/// otherwise only roots are checked from source (dependencies resolve via export
+/// data through the configured importer).
+pub fn typecheck_packages(
+    by_id: &mut HashMap<String, Arc<Package>>,
+    root_ids: &[String],
+    mode: LoadMode,
+    env: &TypecheckEnv,
+) {
+    if !needs_typecheck(mode) {
+        return;
+    }
+
+    let fset = FileSet::new();
+    let sizes = env.sizes();
+
+    let export_paths = collect_export_paths(by_id);
+    let dep_graph = crate::dedup::import_path_dep_graph(by_id);
+
+    let mut targets: Vec<String> = if mode.contains(LoadMode::NEED_DEPS) {
+        by_id.keys().cloned().collect()
+    } else {
+        root_ids.to_vec()
+    };
+    // FxHashMap iteration order is deterministic but differs from SipHash;
+    // keep sequential typecheck order stable for FileSet positions.
+    targets.sort();
+
+    // Build a shared dependency seed once (R24.3) so parallel checkers clone the
+    // already-loaded stdlib/common deps instead of reloading per package. In
+    // source mode the deps are type-checked from source; otherwise decoded from
+    // export data.
+    let seed = if env.from_source {
+        build_source_seed(&targets, by_id, &export_paths, &dep_graph, &fset, env)
+    } else {
+        build_export_seed(&targets, by_id, &export_paths, &dep_graph, &fset, env)
+    };
+
+    // Type-check targets in parallel. Each package resolves its dependencies
+    // from on-disk export data (`.a` files) via a private `Checker`/importer —
+    // it never reads sibling packages out of `by_id` — so the targets are
+    // independent and can be checked concurrently. The shared `FileSet` uses
+    // interior locking, making concurrent parsing safe. Results are cloned out,
+    // checked off-map, then written back, so the map is untouched during the
+    // parallel phase.
+    let checked: Vec<(String, Package)> = if env.parallel {
+        targets
+            .par_iter()
+            .filter_map(|id| typecheck_one_target(id, by_id, &fset, &export_paths, &dep_graph, sizes, env, mode, seed.as_deref()))
+            .collect()
+    } else {
+        targets
+            .iter()
+            .filter_map(|id| typecheck_one_target(id, by_id, &fset, &export_paths, &dep_graph, sizes, env, mode, seed.as_deref()))
+            .collect()
+    };
+
+    for (id, pkg) in checked {
+        by_id.insert(id, Arc::new(pkg));
+    }
+}
+
+/// Type-check exactly `target_ids` from source, resolving dependencies from
+/// on-disk export data. Unlike [`typecheck_packages`], this never expands to the
+/// whole graph even when `mode` contains [`LoadMode::NEED_DEPS`] — it is the
+/// lazy path used to type-check only the packages that missed the issues cache.
+///
+/// `all` must contain every loaded package (roots and transitive deps) so
+/// export paths and the dependency graph are complete. Returns the type-checked
+/// target packages, in `target_ids` order, each sharing one `FileSet`.
+pub fn typecheck_roots(
+    all: &[Arc<Package>],
+    target_ids: &[String],
+    mode: LoadMode,
+    env: &TypecheckEnv,
+) -> Vec<Arc<Package>> {
+    typecheck_roots_with_prebuilt_seed(all, target_ids, mode, env, None)
+}
+
+/// Like [`typecheck_roots`], but reuses a speculative seed when `prebuilt` is
+/// `Some` (PERF_TASKS_V2 C-7). The seed's [`FileSet`] is kept alive for import
+/// positions; targets are parsed into that same set.
+pub fn typecheck_roots_with_prebuilt_seed(
+    all: &[Arc<Package>],
+    target_ids: &[String],
+    mode: LoadMode,
+    env: &TypecheckEnv,
+    prebuilt: Option<(Arc<ExportSeed>, Arc<FileSet>)>,
+) -> Vec<Arc<Package>> {
+    if target_ids.is_empty() || !needs_typecheck(mode) {
+        return Vec::new();
+    }
+
+    let by_id: HashMap<String, Arc<Package>> =
+        all.iter().map(|p| (p.id.clone(), Arc::clone(p))).collect();
+
+    let (fset, prebuilt_seed) = match prebuilt {
+        Some((seed, fset)) => (fset, Some(seed)),
+        None => (FileSet::new(), None),
+    };
+    let sizes = env.sizes();
+    let export_paths = collect_export_paths(&by_id);
+    let dep_graph = crate::dedup::import_path_dep_graph(&by_id);
+
+    let dbg = crate::debug::enabled();
+    let acct = crate::debug::detailed();
+    let tc_start;
+    let acct_before;
+    let mut checked: HashMap<String, Arc<Package>> = {
+        let ts = std::time::Instant::now();
+        let seed = if let Some(s) = prebuilt_seed {
+            if dbg {
+                eprintln!(
+                    "guff:   typecheck_roots seed build {:.2}s (from_source={}, prebuilt)",
+                    ts.elapsed().as_secs_f64(),
+                    env.from_source,
+                );
+            }
+            Some(s)
+        } else if env.from_source {
+            let s = build_source_seed(target_ids, &by_id, &export_paths, &dep_graph, &fset, env);
+            if dbg {
+                eprintln!(
+                    "guff:   typecheck_roots seed build {:.2}s (from_source={})",
+                    ts.elapsed().as_secs_f64(),
+                    env.from_source,
+                );
+            }
+            s
+        } else {
+            let s = build_export_seed(target_ids, &by_id, &export_paths, &dep_graph, &fset, env);
+            if dbg {
+                eprintln!(
+                    "guff:   typecheck_roots seed build {:.2}s (from_source={})",
+                    ts.elapsed().as_secs_f64(),
+                    env.from_source,
+                );
+            }
+            s
+        };
+        if acct {
+            if let Some(ref s) = seed {
+                let st = s.types().structural_dup_stats();
+                eprintln!(
+                    "guff:   type arena structural dups (seed): types={} structural={} unique={} \
+                     dup_rate={:.1}%  ptr={}/{} slice={}/{} array={}/{} map={}/{} chan={}/{} sig={}/{}",
+                    st.total_types,
+                    st.structural,
+                    st.unique_structural,
+                    st.dup_rate() * 100.0,
+                    st.pointer.0,
+                    st.pointer.1,
+                    st.slice.0,
+                    st.slice.1,
+                    st.array.0,
+                    st.array.1,
+                    st.map.0,
+                    st.map.1,
+                    st.chan.0,
+                    st.chan.1,
+                    st.signature.0,
+                    st.signature.1,
+                );
+            }
+        }
+        // Taken after the seed build so the diff below covers only the target
+        // packages. The seed builders drive `Checker` directly and do not touch
+        // these counters, but `typecheck_packages` (via `refine`) does, so
+        // starting from a snapshot rather than zero is what makes this correct.
+        acct_before = detail::snapshot();
+        tc_start = std::time::Instant::now();
+        if env.parallel {
+            target_ids
+                .par_iter()
+                .filter_map(|id| {
+                    typecheck_one_target_arc(
+                        id,
+                        &by_id,
+                        &fset,
+                        &export_paths,
+                        &dep_graph,
+                        sizes,
+                        env,
+                        mode,
+                        seed.as_deref(),
+                    )
+                })
+                .collect()
+        } else {
+            target_ids
+                .iter()
+                .filter_map(|id| {
+                    typecheck_one_target_arc(
+                        id,
+                        &by_id,
+                        &fset,
+                        &export_paths,
+                        &dep_graph,
+                        sizes,
+                        env,
+                        mode,
+                        seed.as_deref(),
+                    )
+                })
+                .collect()
+        }
+    };
+    if dbg {
+        eprintln!(
+            "guff:   typecheck_roots target check {:.2}s ({} targets)",
+            tc_start.elapsed().as_secs_f64(),
+            target_ids.len(),
+        );
+    }
+    if acct {
+        let after = detail::snapshot();
+        let [read, parse, seed, check] =
+            std::array::from_fn(|i| (after[i] - acct_before[i]).as_secs_f64());
+        eprintln!(
+            "guff:     target check read {read:.2}s / parse {parse:.2}s / seed-clone {seed:.2}s \
+             / check_files {check:.2}s (summed across workers)",
+        );
+    }
+
+    target_ids
+        .iter()
+        .filter_map(|id| checked.remove(id))
+        .collect()
+}
+
+fn typecheck_one_target(
+    id: &String,
+    by_id: &HashMap<String, Arc<Package>>,
+    fset: &Arc<FileSet>,
+    export_paths: &HashMap<String, PathBuf>,
+    dep_graph: &HashMap<String, Vec<String>>,
+    sizes: guff_types::Sizes,
+    env: &TypecheckEnv,
+    mode: LoadMode,
+    seed: Option<&ExportSeed>,
+) -> Option<(String, Package)> {
+    let mut pkg = (**by_id.get(id)?).clone();
+    typecheck_package_with_seed(
+        &mut pkg,
+        fset,
+        export_paths,
+        dep_graph,
+        sizes,
+        env,
+        mode,
+        seed,
+    );
+    Some((id.clone(), pkg))
+}
+
+fn typecheck_one_target_arc(
+    id: &String,
+    by_id: &HashMap<String, Arc<Package>>,
+    fset: &Arc<FileSet>,
+    export_paths: &HashMap<String, PathBuf>,
+    dep_graph: &HashMap<String, Vec<String>>,
+    sizes: guff_types::Sizes,
+    env: &TypecheckEnv,
+    mode: LoadMode,
+    seed: Option<&ExportSeed>,
+) -> Option<(String, Arc<Package>)> {
+    typecheck_one_target(
+        id,
+        by_id,
+        fset,
+        export_paths,
+        dep_graph,
+        sizes,
+        env,
+        mode,
+        seed,
+    )
+    .map(|(id, pkg)| (id, Arc::new(pkg)))
+}
+
+fn collect_export_paths(by_id: &HashMap<String, Arc<Package>>) -> HashMap<String, PathBuf> {
+    let mut out = HashMap::default();
+    for (id, pkg) in by_id {
+        if pkg.export_file.as_os_str().is_empty() {
+            continue;
+        }
+        if Path::new(&pkg.export_file).exists() {
+            out.insert(id.clone(), pkg.export_file.clone());
+        }
+    }
+    out
+}
+
+/// Type-check a single loaded package from its `compiled_go_files`.
+///
+/// Equivalent to [`typecheck_package_with_seed`] with no shared seed.
+pub fn typecheck_package(
+    pkg: &mut Package,
+    fset: &Arc<FileSet>,
+    export_paths: &HashMap<String, PathBuf>,
+    dep_graph: &HashMap<String, Vec<String>>,
+    sizes: guff_types::Sizes,
+    env: &TypecheckEnv,
+    mode: LoadMode,
+) {
+    typecheck_package_with_seed(
+        pkg,
+        fset,
+        export_paths,
+        dep_graph,
+        sizes,
+        env,
+        mode,
+        None,
+    );
+}
+
+/// Type-check a package, optionally cloning dependency arenas from `seed` (R24.3).
+///
+/// When `seed` is provided, dependency export data is cloned from the shared
+/// seed instead of being re-decoded. An [`ExportImporter`] is still attached so
+/// unexpected late imports can fall back to on-disk `.a` files.
+///
+/// DEFERRED(R24.2): per-file incremental typecheck. Checker is whole-package;
+/// cross-file defs/methods/inits make partial `check_files` incorrect without a
+/// dedicated incremental engine.
+pub fn typecheck_package_with_seed(
+    pkg: &mut Package,
+    fset: &Arc<FileSet>,
+    export_paths: &HashMap<String, PathBuf>,
+    dep_graph: &HashMap<String, Vec<String>>,
+    sizes: guff_types::Sizes,
+    env: &TypecheckEnv,
+    mode: LoadMode,
+    seed: Option<&ExportSeed>,
+) {
+    if pkg.pkg_path == "unsafe" {
+        return;
+    }
+
+    let paths = &pkg.compiled_go_files;
+    if paths.is_empty() {
+        // Ensure `save_to_cache` can persist an empty entry (it skips pkgs
+        // without an fset). Empty packages must not perpetual-miss the cache.
+        if pkg.fset.is_none() {
+            pkg.fset = Some(FileSet::new());
+        }
+        return;
+    }
+
+    let acct = crate::debug::detailed();
+    let mut syntax = Vec::new();
+    let mut source_files: Vec<Arc<[u8]>> = Vec::new();
+    for path in paths {
+        let t_read = detail::start(acct);
+        let src = match fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                pkg.errors.push(Error {
+                    pos: path.display().to_string(),
+                    msg: err.to_string(),
+                    kind: ErrorKind::Parse,
+                });
+                pkg.ill_typed = true;
+                continue;
+            }
+        };
+        detail::add(&detail::READ_NS, t_read);
+        // Prefer a stable path string for diagnostics (compat/R21 diffs on
+        // file:line:linter). Fall back to the basename only when the path is
+        // not valid UTF-8.
+        let name = path.to_str().unwrap_or_else(|| {
+            path.file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("file.go")
+        });
+        let t_parse = detail::start(acct);
+        // Object resolution fills `Ident.obj`. Only ineffassign / maintidx read
+        // it; when the caller opts out via `env.skip_object_resolution`, skip
+        // the walk (P0-3). Type checking still stamps node ids below.
+        let parse_mode = if env.skip_object_resolution {
+            SKIP_OBJECT_RESOLUTION
+        } else {
+            Mode::NONE
+        };
+        let parsed = parse_file(fset, name, &src, parse_mode);
+        detail::add(&detail::PARSE_NS, t_parse);
+        match parsed {
+            Ok(file) => {
+                syntax.push(file);
+                source_files.push(Arc::<[u8]>::from(src));
+            }
+            Err(errs) => {
+                pkg.ill_typed = true;
+                for err in errs.iter() {
+                    pkg.errors.push(Error {
+                        pos: path.display().to_string(),
+                        msg: err.to_string(),
+                        kind: ErrorKind::Parse,
+                    });
+                }
+            }
+        }
+    }
+
+    if syntax.is_empty() {
+        pkg.ill_typed = true;
+        return;
+    }
+
+    let conf = TypeConfig {
+        sizes: Some(sizes),
+        go_version: env.go_version.clone(),
+        ..TypeConfig::default()
+    };
+    let t_seed = detail::start(acct);
+    let mut check = if let Some(seed) = seed {
+        Checker::from_seed(seed, conf)
+    } else {
+        Checker::new(conf)
+    };
+    // Checker allocates the package under check with an empty path; set the
+    // real import path so `Object.Pkg().Path()` / `type_func_name` match go/types
+    // (needed for cross-package facts like contextcheck).
+    if !pkg.pkg_path.is_empty() {
+        check.packages.get_mut(check.pkg).set_path(pkg.pkg_path.clone());
+    }
+
+    let mut importer = ExportImporter::with_fset(fset.clone());
+    for (path, file) in export_paths {
+        importer.set_path(path.clone(), file.clone());
+    }
+    check.set_importer(Box::new(importer));
+
+    if seed.is_none() {
+        let mut visiting = Vec::new();
+        let mut done = HashSet::default();
+        preload_exports(
+            &mut check,
+            &pkg.deps,
+            dep_graph,
+            export_paths,
+            &mut visiting,
+            &mut done,
+        );
+    }
+    detail::add(&detail::SEED_NS, t_seed);
+
+    let files = syntax;
+    let t_check = detail::start(acct);
+    check.check_files(files);
+    detail::add(&detail::CHECK_NS, t_check);
+
+    pkg.ill_typed = !check.errors.is_empty();
+    for err in &check.errors {
+        pkg.errors.push(Error {
+            pos: if err.pos == 0 {
+                String::new()
+            } else {
+                err.pos.to_string()
+            },
+            msg: err.msg.clone(),
+            kind: ErrorKind::Type,
+        });
+    }
+
+    if mode.contains(LoadMode::NEED_TYPES) || mode.contains(LoadMode::NEED_TYPES_INFO) {
+        // One Arc for both consumers: type_artifacts (SSA/buildir) and
+        // types_info (analyzers). Avoids the former deep-clone of Info when
+        // both flags are set (the common lint path).
+        let info = std::sync::Arc::new(std::mem::take(&mut check.info));
+        if mode.contains(LoadMode::NEED_TYPES) {
+            pkg.types = Some(check.pkg);
+            pkg.type_artifacts = Some(TypecheckArtifacts {
+                type_pkg: check.pkg,
+                types: check.types,
+                objects: check.objects,
+                scopes: check.scopes,
+                packages: check.packages,
+                info: std::sync::Arc::clone(&info),
+            });
+        }
+        if mode.contains(LoadMode::NEED_TYPES_INFO) {
+            pkg.types_info = Some(info);
+        }
+    }
+    if mode.contains(LoadMode::NEED_SYNTAX) {
+        pkg.syntax = std::mem::take(&mut check.files);
+        // Keep bytes aligned with the syntax we handed the checker (same order
+        // as successful parses). Length may differ from `compiled_go_files`
+        // when some paths failed to parse.
+        pkg.source_files = source_files;
+        if pkg.source_files.len() > pkg.syntax.len() {
+            pkg.source_files.truncate(pkg.syntax.len());
+        }
+    }
+    if mode.contains(LoadMode::NEED_TYPES)
+        || mode.contains(LoadMode::NEED_SYNTAX)
+        || mode.contains(LoadMode::NEED_TYPES_INFO)
+    {
+        pkg.fset = Some(fset.clone());
+    }
+    if mode.contains(LoadMode::NEED_TYPES_SIZES) {
+        pkg.types_sizes = Some(sizes);
+    }
+}
+
+/// Build a shared [`ExportSeed`] covering the union of `targets`' dependency
+/// graphs. Returns `None` when there is nothing useful to preload.
+fn build_export_seed(
+    targets: &[String],
+    by_id: &HashMap<String, Arc<Package>>,
+    export_paths: &HashMap<String, PathBuf>,
+    dep_graph: &HashMap<String, Vec<String>>,
+    fset: &Arc<FileSet>,
+    env: &TypecheckEnv,
+) -> Option<Arc<ExportSeed>> {
+    let mut needed: Vec<String> = Vec::new();
+    let mut seen = HashSet::default();
+    for id in targets {
+        let Some(pkg) = by_id.get(id) else {
+            continue;
+        };
+        for dep in &pkg.deps {
+            let dep = crate::dedup::import_path_of_id(dep).to_string();
+            if seen.insert(dep.clone()) {
+                needed.push(dep);
+            }
+        }
+        // Direct imports may not always appear in deps (e.g. incomplete list).
+        for path in pkg.imports.keys() {
+            let path = crate::dedup::import_path_of_id(path).to_string();
+            if seen.insert(path.clone()) {
+                needed.push(path);
+            }
+        }
+    }
+    needed.retain(|p| p != "unsafe" && p != "C" && export_paths.contains_key(p));
+    if needed.is_empty() {
+        return None;
+    }
+    needed.sort();
+
+    let conf = TypeConfig {
+        sizes: Some(env.sizes()),
+        go_version: env.go_version.clone(),
+        ..TypeConfig::default()
+    };
+    let mut check = Checker::new(conf);
+    let mut importer = ExportImporter::with_fset(fset.clone());
+    for (path, file) in export_paths {
+        importer.set_path(path.clone(), file.clone());
+    }
+    check.set_importer(Box::new(importer));
+    let mut visiting = Vec::new();
+    let mut done = HashSet::default();
+    preload_exports(
+        &mut check,
+        &needed,
+        dep_graph,
+        export_paths,
+        &mut visiting,
+        &mut done,
+    );
+    Some(Arc::new(check.capture_export_seed()))
+}
+
+/// The loaded package whose files the seed compiles for import path `path`,
+/// paired with whether its `_test.go` files are part of that compilation.
+///
+/// Production files only, with one exception. When `augment` holds `path` — the
+/// load contains `path`'s *external* test package — the seed compiles the
+/// same-package test variant `P [P.test]` instead: P's own files **plus** its
+/// in-package `_test.go`. That is the package `import ".../p"` names inside P's
+/// test binary, and widening it is the whole purpose of `export_test.go`, so a
+/// production-only P leaves `package p_test` staring at `undefined:` and the
+/// external test package goes ill-typed — which runs no analyzers at all.
+///
+/// Everything else stays production-only on purpose: `_test.go` across the
+/// whole seed roughly doubles type-arena RSS on prometheus `./...`.
+///
+/// The variant is picked by `dedup::seed_variant_for`, which is also what
+/// `import_path_dep_graph` keys its edges on, so a path's seeded files and its
+/// seeded edges are always read off the same package.
+fn seed_package_for<'a>(
+    by_id: &'a HashMap<String, Arc<Package>>,
+    path: &str,
+    augment: &HashSet<String>,
+) -> Option<(&'a Arc<Package>, bool)> {
+    let pkg = crate::dedup::seed_variant_for(by_id, path, augment)?;
+    // `seed_variant_for` puts `P [P.test]` first for an augmented path and last
+    // for every other one, where its `_test.go` entries are filtered back out
+    // below. So the tests are in the compilation exactly when the path is
+    // augmented *and* that variant is the one that won.
+    let with_tests =
+        augment.contains(path) && pkg.id == crate::dedup::same_package_test_variant_id(path);
+    Some((pkg, with_tests))
+}
+
+fn is_test_file(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.ends_with("_test.go"))
+}
+
+/// Whether [`seed_package_for`] leaves the seed anything to compile for `path`.
+fn seed_has_source_files(
+    by_id: &HashMap<String, Arc<Package>>,
+    path: &str,
+    augment: &HashSet<String>,
+) -> bool {
+    seed_package_for(by_id, path, augment).is_some_and(|(pkg, with_tests)| {
+        pkg.compiled_go_files
+            .iter()
+            .any(|f| with_tests || !is_test_file(f))
+    })
+}
+
+/// Build a shared [`ExportSeed`] by type-checking the targets' dependency
+/// closure **from source** (no export data), for the cold path where `go list`
+/// runs without `-export`. Returns `None` when there is nothing to preload.
+///
+/// The resulting seed is the same type as [`build_export_seed`]'s, so every
+/// downstream consumer ([`typecheck_package_with_seed`], the SSA layer, …) is
+/// unchanged — it simply contains source-checked dependencies instead of
+/// export-decoded ones. Diagnostics produced while checking the dependencies are
+/// intentionally dropped ([`Checker::capture_export_seed`] does not capture
+/// errors); only the target packages report issues.
+fn build_source_seed(
+    targets: &[String],
+    by_id: &HashMap<String, Arc<Package>>,
+    export_paths: &HashMap<String, PathBuf>,
+    dep_graph: &HashMap<String, Vec<String>>,
+    fset: &Arc<FileSet>,
+    env: &TypecheckEnv,
+) -> Option<Arc<ExportSeed>> {
+    build_source_seed_inner(targets, by_id, export_paths, dep_graph, fset, env)
+}
+
+/// Public entry for C-7 speculative prewarm ([`crate::speculate`]).
+pub(crate) fn build_source_seed_for_speculate(
+    targets: &[String],
+    by_id: &HashMap<String, Arc<Package>>,
+    export_paths: &HashMap<String, PathBuf>,
+    dep_graph: &HashMap<String, Vec<String>>,
+    fset: &Arc<FileSet>,
+    env: &TypecheckEnv,
+) -> Option<Arc<ExportSeed>> {
+    build_source_seed_inner(targets, by_id, export_paths, dep_graph, fset, env)
+}
+
+fn build_source_seed_inner(
+    targets: &[String],
+    by_id: &HashMap<String, Arc<Package>>,
+    export_paths: &HashMap<String, PathBuf>,
+    dep_graph: &HashMap<String, Vec<String>>,
+    fset: &Arc<FileSet>,
+    env: &TypecheckEnv,
+) -> Option<Arc<ExportSeed>> {
+    // Which import paths the seed must compile *with* their in-package tests.
+    // Derived from `by_id` rather than passed in, so every consumer of the seed
+    // agrees with `import_path_dep_graph`, which reads the same set.
+    let augment = crate::dedup::paths_with_external_test_package(by_id);
+
+    // Transitive dependency closure of the targets (leaves included).
+    let mut needed: Vec<String> = Vec::new();
+    let mut seen = HashSet::default();
+    let mut stack: Vec<String> = Vec::new();
+    for id in targets {
+        if let Some(pkg) = by_id.get(id) {
+            // `deps` holds go list **ids**, and an external test package's are
+            // bracketed (`Q [P.test]`). Everything downstream — the wave order,
+            // the seed's package registry, the importer every dependency's own
+            // `import` statement goes through — is keyed by import path, so a
+            // bracketed id here seeds a package under a name no source file can
+            // name. See `dedup::import_path_of_id`.
+            stack.extend(pkg.deps.iter().map(|d| crate::dedup::import_path_of_id(d).to_string()));
+            stack.extend(
+                pkg.imports
+                    .keys()
+                    .map(|p| crate::dedup::import_path_of_id(p).to_string()),
+            );
+        }
+    }
+    while let Some(path) = stack.pop() {
+        if path == "unsafe" || path == "C" {
+            continue;
+        }
+        if !seen.insert(path.clone()) {
+            continue;
+        }
+        needed.push(path.clone());
+        if let Some(deps) = dep_graph.get(&path) {
+            stack.extend(deps.iter().cloned());
+        }
+    }
+    // After filter_duplicate_packages, plain `P` is gone and only `P [P.test]`
+    // remains — resolve by pkg_path so importers (e.g. consul flags→QF1012) see
+    // real types. Which files that resolution yields is `seed_package_for`'s
+    // call: production only, except for the packages whose external test
+    // package is in this load.
+    needed.retain(|p| export_paths.contains_key(p) || seed_has_source_files(by_id, p, &augment));
+    needed.sort();
+    if needed.is_empty() {
+        return None;
+    }
+
+    let loadable: HashSet<String> = needed.iter().cloned().collect();
+    let timing = crate::debug::enabled();
+    // GUFF_DEBUG_CACHE=2 only: time each dep so the wave schedule can be scored
+    // against the two bounds that matter — `sum/threads` (perfectly balanced,
+    // no barriers) and the dependency critical path (the floor no schedule can
+    // beat). Without both, "the barriers cost X" is a guess. One Instant pair
+    // per dep, so it stays off the default path but costs nothing when on.
+    let acct = crate::debug::detailed();
+    let t_check_start = std::time::Instant::now();
+
+    let make_conf = || TypeConfig {
+        sizes: Some(env.sizes()),
+        go_version: env.go_version.clone(),
+        ..TypeConfig::default()
+    };
+    let make_importer = || {
+        let mut importer = ExportImporter::with_fset(fset.clone());
+        for (path, file) in export_paths {
+            importer.set_path(path.clone(), file.clone());
+        }
+        importer
+    };
+
+    // Phase A (serial): decode all export-data dependencies (stdlib in the hybrid
+    // path; the whole closure in export mode) into a base seed `S0`. Source deps
+    // resolve these from the seed's import cache, so no source worker re-decodes
+    // export data (which would duplicate a package's origin objects across
+    // workers and break cross-package type identity).
+    let mut check = Checker::new(make_conf());
+    check.set_importer(Box::new(make_importer()));
+    {
+        let mut visiting = Vec::new();
+        let mut done = HashSet::default();
+        preload_exports(
+            &mut check,
+            &needed,
+            dep_graph,
+            export_paths,
+            &mut visiting,
+            &mut done,
+        );
+    }
+    // Export-decode diagnostics are not seed output.
+    check.errors.clear();
+    check.first_err = None;
+    let mut seed = check.capture_export_seed();
+
+    // Snapshot S0 (export-data base) fingerprint inputs before any source merge.
+    let s0_lens = seed.arena_lens();
+    let s0_import_paths = seed.sorted_import_paths();
+
+    // Group the *source* dependencies into topological waves. Export-data deps
+    // are already in `S0` (treated as wave 0). Packages sharing a wave never
+    // import one another, so they can be type-checked in parallel and merged
+    // with a uniform id relocation (see `ExportSeed::merge_wave`).
+    //
+    // Waves are assigned **as late as possible**: `wave(P) = depth - height(P)`,
+    // where `height(P)` is the longest chain of source packages that depends on
+    // `P`. Assigning as *early* as possible (`1 + max(wave(dep))`) is equally
+    // valid — both put every dependency in a strictly earlier wave — but far
+    // worse balanced. A wave costs `max(total / threads, largest package)`, so a
+    // wave holding one huge package idles every other core for its duration.
+    // The expensive packages here are generated cloud SDKs that nothing else in
+    // the dependency graph imports (only the targets do), i.e. graph leaves. As
+    // early as possible scatters them across waves at their own dependency
+    // depth, where each serializes alone; as late as possible collapses all of
+    // them into the final wave so their costs overlap. On prometheus `./...`
+    // (1455 source deps, 13.1s of type-check CPU) this takes the cold seed build
+    // from 3.40s to 2.65s. Dropping the barriers entirely would only reach 2.2s
+    // — see docs/PERF_TASKS.md §1.8 for why that is not worth its cost.
+    let test_only = crate::dedup::import_path_test_only_edges(by_id);
+    let (order, back_edges, declined) = dep_load_order(&needed, dep_graph, &test_only, &loadable);
+    report_seed_cycles(&back_edges);
+    if !declined.is_empty() && crate::debug::enabled() {
+        eprintln!(
+            "guff:     seed declined {} test-only edge(s) that would close a cycle",
+            declined.len()
+        );
+    }
+    // `order` is topological for every edge the walk *kept*, and for those only.
+    // The two passes below read `dep_graph` directly, so without this they walk
+    // the declined edge as well — and a declined edge always points from a
+    // package late in `order` back to one earlier in it, which is precisely the
+    // shape `height`'s single reverse pass cannot absorb.
+    let declined_by = declined_edges_by_source(&declined);
+    let source_set: HashSet<&str> = order
+        .iter()
+        .map(String::as_str)
+        .filter(|p| {
+            !export_paths.contains_key(*p) && seed_has_source_files(by_id, p, &augment)
+        })
+        .collect();
+
+    // Pass 1 (leaves-first): dependency depth, so every source dep's deps are
+    // already resolved when we reach it. Only `depth` (the deepest chain) is
+    // needed afterwards, but the per-package values drive that maximum.
+    let mut dep_depth: HashMap<&str, u32> = HashMap::default();
+    let mut depth = 0u32;
+    for p in &order {
+        if !source_set.contains(p.as_str()) {
+            continue;
+        }
+        let mut d_max = 0u32;
+        if let Some(deps) = dep_graph.get(p) {
+            let skip = declined_by.get(p.as_str());
+            for d in deps {
+                if skip.is_some_and(|s| s.contains(&d.as_str())) {
+                    continue;
+                }
+                if source_set.contains(d.as_str()) {
+                    d_max = d_max.max(dep_depth.get(d.as_str()).copied().unwrap_or(0) + 1);
+                }
+            }
+        }
+        depth = depth.max(d_max);
+        dep_depth.insert(p.as_str(), d_max);
+    }
+
+    // Pass 2 (consumers-first): `height(P)` = longest chain of source packages
+    // that depends on `P`. Walking `order` in reverse visits every consumer of
+    // `P` before `P` itself, so `height` is final by the time we read it — no
+    // reverse graph needed.
+    //
+    // The single reverse pass is only sound while `order` is topological, so it
+    // reads `dep_graph` **minus** `declined_by`. Bracket normalization can
+    // manufacture a cycle out of an acyclic Go graph — prometheus'
+    // `util/teststorage` test variant depends on `tsdb` and `tsdb`'s test
+    // variant depends on `util/teststorage`, boundary's `internal/session` and
+    // `internal/credential/vault` do the same — and `dep_load_order` declines
+    // the test edge that closes it. Reading that edge back here undoes the
+    // decline: a declined edge runs from a package late in `order` to one
+    // earlier in it, so `height` raises the earlier package *after* its own `h`
+    // was already read as final, and it lands in the same wave as its own
+    // consumer. On the two-package repro that is `m/session` sharing a wave
+    // with `testing`, checked in parallel with it, reporting `undefined:
+    // testing`.
+    //
+    // docs/COMPAT-HARDENING.md §4 (2026-08-23, 続き 21) recorded that
+    // "restricting these passes to the edges the DFS kept reorders `promql`
+    // correctly and breaks `teststorage` instead". That was measured when the
+    // walk dropped *whichever* edge it happened to arrive on, so the kept set
+    // depended on entry order and could omit a production edge. Since the walk
+    // declines only the cycle-closing **test** edge, the kept set is every
+    // production edge plus every test edge that does not close a cycle, and
+    // restricting to it is exactly right.
+    let height = wave_heights(&order, dep_graph, &source_set, &declined_by);
+
+    let source_count = dep_depth.len();
+    if source_count == 0 {
+        if timing {
+            eprintln!(
+                "guff:     seed dep check {:.2}s (wave-parallel), 0 source deps, {} export deps",
+                t_check_start.elapsed().as_secs_f64(),
+                needed.len(),
+            );
+        }
+        return Some(Arc::new(seed));
+    }
+
+    // Bucket by wave; sort each wave by path so the merge order — and therefore
+    // the final arena layout and all downstream findings — is deterministic.
+    // Empty waves are dropped: as-late-as-possible placement can leave gaps, and
+    // merging nothing would only cost a pointless pass over the seed.
+    let mut waves: Vec<Vec<&str>> = vec![Vec::new(); (depth + 1) as usize];
+    for p in &order {
+        if !source_set.contains(p.as_str()) {
+            continue;
+        }
+        let h = height.get(p.as_str()).copied().unwrap_or(0);
+        waves[(depth - h) as usize].push(p.as_str());
+    }
+    waves.retain(|w| !w.is_empty());
+    for w in waves.iter_mut() {
+        w.sort_unstable();
+    }
+
+    // Optional per-package overlay disk cache (PERF Task 4). Enabled by default;
+    // disable with GUFF_SEED_PERSIST=0. Independent of the issues `--no-cache`
+    // flag. Each source dep's exported-API overlay is written under
+    // `${GUFF_CACHE}/seed`, keyed by (import path, content self-hash, seed-prefix
+    // fingerprint); a later run whose deps are unchanged loads the overlay
+    // instead of re-type-checking it.
+    let persist = crate::seed_cache::seed_persist_enabled()
+        .then(crate::seed_cache::seed_cache_dir)
+        .flatten();
+
+    // Background overlay writer: encode is cheap and stays on the wave workers,
+    // but the disk syscalls (create + write + rename, ×N deps) are handed to a
+    // dedicated thread so neither the wave merge nor the target type-check waits
+    // on them. On an all-miss run (e.g. a fresh cache, as the regress harness
+    // uses) this keeps persistence off the critical path entirely; writes drain
+    // while later waves compute, and the handle is joined once before returning.
+    let writer = persist.as_ref().map(|_| crate::seed_cache::OverlayWriter::spawn());
+
+    // Phase B: check each wave in parallel on top of the accumulated seed, then
+    // fold the wave's overlays back in. Each worker reads+parses its own source,
+    // checks only its own package (deps resolve from the seed cache), and drops
+    // its AST as soon as it captures its overlay — so resident dep-AST is bounded
+    // to ~num_threads regardless of wave width. `ignore_func_bodies` keeps the
+    // seed to exported API only (targets re-check with full bodies).
+    //
+    // When persistence is on, the worker hashes the source it just read and tries
+    // to load a previously saved overlay keyed by (self_hash, base_fp) before
+    // type-checking; base_fp fingerprints the seed prefix at wave start so
+    // Remapper's foreign ids stay valid across runs. The source bytes are read
+    // exactly once and reused for both the hash and (on a miss) the parser.
+    let parallel = env.parallel;
+    let check_sources = |path: &str, files: Vec<guff::ast::File>, seed: &ExportSeed| -> Option<WorkerOverlays> {
+        if files.is_empty() {
+            return None;
+        }
+        let mut check = Checker::from_seed(seed, make_conf());
+        check.set_ignore_func_bodies(true);
+        // Seed keeps only arena overlays (`into_worker_overlays`); Info maps
+        // would be allocated and then dropped. Match Go's nil-Info path.
+        check.set_record_info(false);
+        // Fallback importer only; every dep should already be in the seed cache.
+        check.set_importer(Box::new(make_importer()));
+        check.add_dependency_source(path.to_string(), files);
+        let pkg_id = check.preload_import(path)?;
+        // Dependency diagnostics are not reported (they are not the user's
+        // package), but "silently" is not the same as "unobservable": when a
+        // seed dependency fails to type-check, every target that imports it
+        // sees an incomplete type and the *target's* error names something else
+        // entirely — `manager.Manager has no field or method GetCache` for a
+        // failure in `pkg/cluster`. GUFF_DEBUG_SEED_ERRORS=1 is the only way to
+        // read the first error rather than infer it.
+        if seed_errors_enabled() && !check.errors.is_empty() {
+            eprintln!(
+                "guff:     seed dep {path} — {} error(s), first: {}",
+                check.errors.len(),
+                check
+                    .errors
+                    .first()
+                    .map(|e| e.msg.clone())
+                    .unwrap_or_default(),
+            );
+        }
+        Some(check.into_worker_overlays(path.to_string(), pkg_id))
+    };
+    let mut merge_secs = 0f64;
+    let mut widest = 0usize;
+    let mut seed_hits = 0usize;
+    let mut seed_misses = 0usize;
+    let mut wave_walls: Vec<f64> = Vec::new();
+    let mut dep_secs_by_path: HashMap<String, f64> = HashMap::default();
+    // Running fingerprint of the seed prefix. Extended after each merged pkg
+    // so wave N+1 does not re-hash the entire merged list (O(n²) SHA).
+    let mut running_fp = persist.as_ref().map(|_| {
+        crate::seed_cache::base_fingerprint(&crate::seed_cache::BaseFingerprintInput {
+            go_version: &env.go_version,
+            arch: &env.arch,
+            s0_lens,
+            s0_import_paths: &s0_import_paths,
+            merged: &[],
+        })
+    });
+    // (path, self_hash) in merge order — kept for debug / legacy callers.
+    let mut merged: Vec<(String, String)> = Vec::new();
+
+    // Under `GUFF_DEBUG_RSS`, sample the process every eighth wave. The
+    // per-package attribution can only name what it can walk, so the shape of
+    // this curve is what says whether the unnamed remainder is built here or
+    // left behind here (PERF_TASKS_V6 §4.1).
+    let rss_probe = crate::rss::enabled();
+    if rss_probe {
+        crate::rss::report_process("seed build start");
+    }
+    for (wave_idx, wave) in waves.iter().enumerate() {
+        widest = widest.max(wave.len());
+        let base_fp = running_fp.clone();
+
+        // Resolve each path to (path, overlay, from_cache, self_hash). `path` and
+        // `self_hash` are returned so `merged` bookkeeping stays aligned with
+        // merge order after filter_map drops failures.
+        let resolve_one = |path: &str| -> Option<(String, WorkerOverlays, bool, Option<String>, f64)> {
+            let t_dep = acct.then(std::time::Instant::now);
+            let dep_secs = |t: Option<std::time::Instant>| {
+                t.map(|t| t.elapsed().as_secs_f64()).unwrap_or(0.0)
+            };
+            let (pkg, with_tests) = seed_package_for(by_id, path, &augment)?;
+            let seed_files: Vec<PathBuf> = pkg
+                .compiled_go_files
+                .iter()
+                .filter(|f| with_tests || !is_test_file(f))
+                .cloned()
+                .collect();
+            if seed_files.is_empty() {
+                return None;
+            }
+            // Read each source file once; the bytes feed both the self-hash key
+            // and (on a miss) the parser, so a miss never re-reads from disk.
+            let sources = read_dep_sources(&seed_files);
+            let self_hash = persist
+                .as_ref()
+                .map(|_| crate::seed_cache::pkg_self_hash_from_sources(&pkg.pkg_path, &sources));
+
+            // Cache hit: load the persisted overlay and skip type-checking.
+            if let (Some(dir), Some(fp), Some(h)) =
+                (persist.as_ref(), base_fp.as_ref(), self_hash.as_ref())
+            {
+                if let Some(o) = crate::seed_cache::load_overlay(dir, path, h, fp) {
+                    return Some((path.to_string(), o, true, self_hash, dep_secs(t_dep)));
+                }
+            }
+
+            // Miss: parse the bytes we already read, then type-check.
+            let files = parse_dep_sources(&sources, fset);
+            let mut o = check_sources(path, files, &seed)?;
+            if persist.is_some() {
+                // Match the on-disk form so cold (all miss) and hot (all hit)
+                // seeds are identical: FileSet-absolute positions do not survive
+                // across runs.
+                o.clear_source_positions();
+                if let (Some(w), Some(dir), Some(fp), Some(h)) = (
+                    writer.as_ref(),
+                    persist.as_ref(),
+                    base_fp.as_ref(),
+                    self_hash.as_ref(),
+                ) {
+                    // Encode on the worker (cheap, parallel); the write itself
+                    // runs on the background writer thread.
+                    if let Ok(bytes) = o.encode() {
+                        w.submit(crate::seed_cache::overlay_path(dir, path, h, fp), bytes);
+                    }
+                }
+            }
+            Some((path.to_string(), o, false, self_hash, dep_secs(t_dep)))
+        };
+
+        let t_wave = acct.then(std::time::Instant::now);
+        let resolved: Vec<(String, WorkerOverlays, bool, Option<String>, f64)> = if parallel {
+            wave.par_iter().filter_map(|p| resolve_one(p)).collect()
+        } else {
+            wave.iter().filter_map(|p| resolve_one(p)).collect()
+        };
+        if let Some(t) = t_wave {
+            wave_walls.push(t.elapsed().as_secs_f64());
+        }
+
+        let mut overlays = Vec::with_capacity(resolved.len());
+        for (path, overlay, from_cache, self_hash, secs) in resolved {
+            if acct {
+                dep_secs_by_path.insert(path.clone(), secs);
+            }
+            if from_cache {
+                seed_hits += 1;
+            } else {
+                seed_misses += 1;
+            }
+            if let Some(h) = self_hash {
+                if let Some(fp) = running_fp.as_mut() {
+                    *fp = crate::seed_cache::base_fingerprint_extend(fp, &path, &h);
+                }
+                merged.push((path, h));
+            }
+            overlays.push(overlay);
+        }
+
+        let m = std::time::Instant::now();
+        seed.merge_wave(overlays);
+        merge_secs += m.elapsed().as_secs_f64();
+        if rss_probe && wave_idx % 8 == 7 {
+            crate::rss::report_process(&format!("seed wave {}", wave_idx + 1));
+        }
+    }
+    if rss_probe {
+        crate::rss::report_process("seed build done");
+    }
+
+    // Flush any in-flight overlay writes before returning so a persistent cache
+    // is fully populated for the next run. On an all-miss run most writes have
+    // already drained during later waves; this only waits on the tail.
+    if let Some(w) = writer {
+        w.finish();
+    }
+
+    if acct && !wave_walls.is_empty() {
+        // Score the wave schedule against the only two numbers that bound it.
+        //
+        //   busy/threads  — every core saturated end to end, barriers gone.
+        //   critical path — the longest chain of deps, each waiting for the one
+        //                   below it. No schedule, barriered or not, beats this.
+        //
+        // The gap between the measured wall and `max(busy/threads, crit)` is the
+        // whole prize for reworking the schedule. docs/PERF_TASKS.md §1.8 sized
+        // that prize when the seed build was 2.65s; it is worth re-reading the
+        // number before believing a barrier-removal estimate today.
+        let threads = if parallel { rayon::current_num_threads() } else { 1 };
+        let busy: f64 = dep_secs_by_path.values().sum();
+        // Guard the occupancy division: a seed whose every dep came back inside
+        // the timer's resolution would otherwise print `inf%`.
+        let wave_wall: f64 = wave_walls.iter().sum::<f64>().max(f64::MIN_POSITIVE);
+        // Longest dependency chain weighted by measured per-dep seconds.
+        // `order` is a topological order, so each dep's own path is final.
+        let mut cp: HashMap<&str, f64> = HashMap::default();
+        let mut crit = 0f64;
+        for p in &order {
+            let Some(&own) = dep_secs_by_path.get(p.as_str()) else {
+                continue;
+            };
+            let mut best = 0f64;
+            if let Some(deps) = dep_graph.get(p) {
+                for d in deps {
+                    if let Some(&c) = cp.get(d.as_str()) {
+                        best = best.max(c);
+                    }
+                }
+            }
+            let total = best + own;
+            crit = crit.max(total);
+            cp.insert(p.as_str(), total);
+        }
+        // Waves narrower than the thread count cannot fill the machine no
+        // matter how fast each dep is; they are where a barrier actually bites.
+        let narrow: usize = waves.iter().filter(|w| w.len() < threads).count();
+        let narrow_wall: f64 = waves
+            .iter()
+            .zip(&wave_walls)
+            .filter(|(w, _)| w.len() < threads)
+            .map(|(_, s)| *s)
+            .sum();
+        eprintln!(
+            "guff:     seed wave schedule: wall {wave_wall:.2}s vs busy/{threads} {:.2}s vs \
+             critical path {crit:.2}s (busy {busy:.2}s, occupancy {:.0}%); \
+             {narrow}/{} waves narrower than {threads} threads hold {narrow_wall:.2}s",
+            busy / threads as f64,
+            busy / threads as f64 / wave_wall * 100.0,
+            waves.len(),
+        );
+    }
+    if timing {
+        if persist.is_some() {
+            eprintln!(
+                "guff:     seed dep check {:.2}s (wave-parallel; merge {:.2}s serial), {} source deps in {} waves (widest {}), {} export deps; seed cache hits={} misses={}",
+                t_check_start.elapsed().as_secs_f64(),
+                merge_secs,
+                source_count,
+                waves.len(),
+                widest,
+                needed.len() - source_count,
+                seed_hits,
+                seed_misses,
+            );
+        } else {
+            eprintln!(
+                "guff:     seed dep check {:.2}s (wave-parallel; merge {:.2}s serial), {} source deps in {} waves (widest {}), {} export deps",
+                t_check_start.elapsed().as_secs_f64(),
+                merge_secs,
+                source_count,
+                waves.len(),
+                widest,
+                needed.len() - source_count,
+            );
+        }
+    }
+    Some(Arc::new(seed))
+}
+
+/// Print the back-edges [`dep_load_order`] had to drop, once per seed build.
+///
+/// Unconditional, because there is no run in which this is fine and no other
+/// symptom to notice: the packages it costs go ill-typed, and an ill-typed
+/// package produces no findings rather than wrong ones. `compat/health.py`
+/// gates on these lines the way it gates on worker panics — never baselined.
+/// Capped at three edges; one broken variant choice tends to produce a run of
+/// them all naming the same package.
+fn report_seed_cycles(back_edges: &[(String, String)]) {
+    if back_edges.is_empty() {
+        return;
+    }
+    let mut seen: Vec<&(String, String)> = back_edges.iter().collect();
+    seen.sort();
+    seen.dedup();
+    for (from, to) in seen.iter().take(3) {
+        eprintln!("guff: seed dep cycle {from} -> {to}");
+    }
+    if seen.len() > 3 {
+        eprintln!("guff: seed dep cycle ... and {} more", seen.len() - 3);
+    }
+    // Deliberately a different prefix: `compat/health.py` counts the edge lines
+    // above, and this one is prose for whoever is reading a terminal.
+    eprintln!(
+        "guff: seed order is not topological; some packages may be reported ill-typed. \
+         This is a guff bug, not a problem with the code being linted."
+    );
+}
+
+/// Leaves-first (post-order) topological order over the loadable dependency
+/// closure: a package's deps are always emitted before the package itself, and
+/// `deps` are walked in sorted order for determinism (so the seed is built in a
+/// stable order regardless of `HashMap` iteration). `unsafe`/`C` and
+/// non-loadable paths are skipped.
+///
+/// The second return value is the back-edges the walk had to drop. Go forbids
+/// import cycles, and `import_path_dep_graph` reads each path's edges off the
+/// same variant whose files the seed compiles — an in-package `_test.go` is
+/// still `package p`, so it cannot import anything that imports `p` either.
+/// The graph is therefore acyclic, and a non-empty second return value is a
+/// guff bug, not a property of the code being linted. It is worth surfacing
+/// because of what it costs downstream: the stack guard below drops an edge to
+/// finish the walk, `order` stops being topological, and the heights the wave
+/// scheduler reads off it come out inconsistent — dependencies land in the same
+/// wave as their consumers, or later, and get merged into the seed after the
+/// package that needed them has already been checked against an `invalid` type.
+/// Nothing about that reaches a finding diff: the affected packages go
+/// ill-typed and every analyzer skips them in silence.
+fn dep_load_order(
+    needed: &[String],
+    dep_graph: &HashMap<String, Vec<String>>,
+    test_only: &HashMap<String, Vec<String>>,
+    loadable: &HashSet<String>,
+) -> (Vec<String>, Vec<(String, String)>, Vec<(String, String)>) {
+    let mut walk = DepLoadWalk::default();
+    for id in needed {
+        walk.visit(id, dep_graph, test_only, loadable);
+    }
+    (walk.order, walk.back_edges, walk.declined_test_edges)
+}
+
+/// `height(P)` = the longest chain of source packages that depends on `P`, used
+/// to place `P` in a wave as late as possible (`wave(P) = depth - height(P)`).
+///
+/// One reverse pass over `order` is enough *because* `order` is topological:
+/// every consumer of `P` is visited before `P`, so `P`'s own height is final by
+/// the time it is read. `declined_by` is what keeps that true — see the comment
+/// at the call site for what reading a declined edge here costs.
+fn wave_heights<'a>(
+    order: &'a [String],
+    dep_graph: &'a HashMap<String, Vec<String>>,
+    source_set: &HashSet<&str>,
+    declined_by: &HashMap<&str, Vec<&str>>,
+) -> HashMap<&'a str, u32> {
+    let mut height: HashMap<&str, u32> = HashMap::default();
+    for p in order.iter().rev() {
+        if !source_set.contains(p.as_str()) {
+            continue;
+        }
+        let h = height.get(p.as_str()).copied().unwrap_or(0);
+        height.insert(p.as_str(), h);
+        if let Some(deps) = dep_graph.get(p) {
+            let skip = declined_by.get(p.as_str());
+            for d in deps {
+                if skip.is_some_and(|s| s.contains(&d.as_str())) {
+                    continue;
+                }
+                if source_set.contains(d.as_str()) {
+                    let e = height.entry(d.as_str()).or_insert(0);
+                    *e = (*e).max(h + 1);
+                }
+            }
+        }
+    }
+    height
+}
+
+/// Index [`dep_load_order`]'s declined edges by their source package, so the
+/// wave passes can skip exactly the edges the walk skipped.
+///
+/// A `Vec` per source rather than a `HashSet` of pairs: a package declines at
+/// most a handful of edges (boundary `./...` declines one), so a linear scan of
+/// a two-element vector beats hashing a `(String, String)` for every edge in a
+/// 1400-package closure.
+fn declined_edges_by_source(declined: &[(String, String)]) -> HashMap<&str, Vec<&str>> {
+    let mut by_source: HashMap<&str, Vec<&str>> = HashMap::default();
+    for (from, to) in declined {
+        by_source
+            .entry(from.as_str())
+            .or_default()
+            .push(to.as_str());
+    }
+    by_source
+}
+
+/// Mutable state of one [`dep_load_order`] walk.
+#[derive(Default)]
+struct DepLoadWalk {
+    done: HashSet<String>,
+    /// The current DFS stack, for cycle detection.
+    visiting: Vec<String>,
+    order: Vec<String>,
+    back_edges: Vec<(String, String)>,
+    /// Test-only edges (`from`, `to`) the walk declined because they would
+    /// have closed a cycle. Unlike `back_edges` these are expected: see
+    /// [`crate::dedup::import_path_test_only_edges`].
+    ///
+    /// They are returned rather than counted because `order` is topological
+    /// only for the edges the walk *kept*. Every later pass that reads
+    /// `dep_graph` — `dep_depth`, and above all `height` — has to skip these
+    /// same edges, or it reintroduces the cycle the walk just declined.
+    declined_test_edges: Vec<(String, String)>,
+}
+
+impl DepLoadWalk {
+    fn visit(
+        &mut self,
+        path: &str,
+        dep_graph: &HashMap<String, Vec<String>>,
+        test_only: &HashMap<String, Vec<String>>,
+        loadable: &HashSet<String>,
+    ) {
+        if path == "unsafe" || path == "C" || self.done.contains(path) || !loadable.contains(path) {
+            return;
+        }
+        if self.visiting.iter().any(|p| p == path) {
+            // Reached only through a **production** edge now: the test-only
+            // edges are filtered below before they are followed. Production
+            // edges cannot form a cycle — Go forbids import cycles, and an
+            // in-package test importing something that imports its own package
+            // is an import cycle in the test binary — so this stays a guff bug.
+            if let Some(from) = self.visiting.last() {
+                self.back_edges.push((from.clone(), path.to_string()));
+            }
+            return;
+        }
+        self.visiting.push(path.to_string());
+        if let Some(deps) = dep_graph.get(path) {
+            let test: &[String] = test_only.get(path).map(Vec::as_slice).unwrap_or(&[]);
+            let is_test_edge = |d: &str| test.iter().any(|t| t == d);
+            let mut deps: Vec<&str> = deps.iter().map(String::as_str).collect();
+            deps.sort_unstable();
+            // Production edges first, so a test edge is never the reason a
+            // production dependency is reached late.
+            for dep in deps.iter().copied().filter(|d| !is_test_edge(d)) {
+                self.visit(dep, dep_graph, test_only, loadable);
+            }
+            // Then the test-only ones, declining any that would close a cycle.
+            // `P`'s test importing `Q` while `Q`'s test imports `P` is legal Go
+            // and does happen (boundary's `session` / `credential/vault`,
+            // prometheus' `tsdb` / `util/teststorage`), so this is a shape to
+            // handle rather than a bug to report. Declining the closing edge
+            // costs the *declining* path's test files a merged view of `Q`;
+            // dropping whichever edge the walk arrived on used to cost the
+            // topological order itself, and with it every wave assignment
+            // downstream.
+            //
+            // "Would close a cycle" is not only "the target is on the stack
+            // right now", and it is not only about `path` either. cosmos-sdk's
+            // ring is four edges long and lands on a frame further up:
+            //
+            //   client/tx --test--> types/module/testutil --> x/auth/tx
+            //             --test--> x/auth/client --> client/tx
+            //
+            // Both test edges are legitimate and neither target is on the stack
+            // when it is taken; the ring only shows up at the bottom, where a
+            // **production** edge lands back on `client/tx`. That is the edge
+            // the walk used to blame — reported as a guff bug, and leaving
+            // `order` non-topological for an edge it kept. So the question has
+            // to be asked before descending, against the whole stack: can `dep`
+            // get back to anything we are still inside, without another test
+            // edge to help it?
+            for dep in deps.iter().copied().filter(|d| is_test_edge(d)) {
+                if self.visiting.iter().any(|p| p == dep)
+                    || production_reaches_stack(
+                        dep,
+                        &self.visiting,
+                        &self.done,
+                        dep_graph,
+                        test_only,
+                        loadable,
+                    )
+                {
+                    self.declined_test_edges
+                        .push((path.to_string(), dep.to_string()));
+                    continue;
+                }
+                self.visit(dep, dep_graph, test_only, loadable);
+            }
+        }
+        self.visiting.pop();
+        if self.done.insert(path.to_string()) {
+            self.order.push(path.to_string());
+        }
+    }
+}
+
+/// Can `from` reach anything in `open` following **production** edges only?
+///
+/// `open` is the walk's `visiting` stack: every package the recursion is still
+/// inside. Production edges cannot cycle — Go forbids import cycles — so this
+/// walk always terminates, and a `true` answer means descending into `from`
+/// would come back round to a frame that is not finished yet.
+///
+/// Test edges are excluded from the search on purpose: they are what the caller
+/// is deciding about, and a ring that needs a *second* one to close is the
+/// legal `P`-test-imports-`Q`-whose-test-imports-`P` shape, which the walk
+/// handles by declining whichever of the two it reaches second.
+///
+/// The search stops at anything in `done`. The walk finishes a package only
+/// after every production dependency of it is finished, so nothing a finished
+/// package reaches by production edges can still be open. Without the cut every
+/// test edge re-walked the production graph from scratch: on grafana (4549 seed
+/// deps) that was 3.5s of serial time in front of the seed build.
+fn production_reaches_stack(
+    from: &str,
+    open: &[String],
+    done: &HashSet<String>,
+    dep_graph: &HashMap<String, Vec<String>>,
+    test_only: &HashMap<String, Vec<String>>,
+    loadable: &HashSet<String>,
+) -> bool {
+    let open: HashSet<&str> = open.iter().map(String::as_str).collect();
+    let mut stack: Vec<&str> = vec![from];
+    let mut seen: HashSet<&str> = HashSet::default();
+    while let Some(p) = stack.pop() {
+        if open.contains(p) {
+            return true;
+        }
+        if done.contains(p) || !seen.insert(p) {
+            continue;
+        }
+        let Some(deps) = dep_graph.get(p) else {
+            continue;
+        };
+        let test: &[String] = test_only.get(p).map(Vec::as_slice).unwrap_or(&[]);
+        for d in deps {
+            let d = d.as_str();
+            if d == "unsafe" || d == "C" || !loadable.contains(d) {
+                continue;
+            }
+            if test.iter().any(|t| t == d) {
+                continue;
+            }
+            stack.push(d);
+        }
+    }
+    false
+}
+
+/// Read a dependency's `compiled_go_files` once, in listed order. Files that
+/// fail to read are skipped (dependency diagnostics are not reported on the
+/// source-seed path). The returned bytes feed both the persisted-overlay
+/// self-hash key and the parser, so a cache miss never reads source twice.
+fn read_dep_sources(paths: &[PathBuf]) -> Vec<(PathBuf, Vec<u8>)> {
+    let mut out = Vec::with_capacity(paths.len());
+    for path in paths {
+        if let Ok(src) = fs::read(path) {
+            out.push((path.clone(), src));
+        }
+    }
+    out
+}
+
+/// Parse pre-read dependency sources into syntax trees sharing `fset`, in the
+/// order given. Files that fail to parse are skipped (dependency diagnostics
+/// are not reported on the source-seed path).
+///
+/// Function bodies are scanned but not built into statement trees
+/// ([`SKIP_FUNC_BODIES`]): the seed only needs each dependency's exported API,
+/// and `check_sources` type-checks it with `ignore_func_bodies`, so every
+/// statement node built here would be dropped unread. Bodies are roughly half
+/// of the parse cost of a dependency closure.
+///
+/// Object resolution is also skipped ([`SKIP_OBJECT_RESOLUTION`]): `resolve_file`
+/// walks the tree filling each `Ident.obj` with a pointer to its declaration
+/// (Go's deprecated `ast.Object` mechanism). The type checker does its own scope
+/// resolution and never reads `Ident.obj`, and no analyzer runs on dependency
+/// ASTs — the only `obj` readers (ineffassign, maintidx) run on *target*
+/// packages, parsed separately. So on this path resolution is pure waste.
+fn parse_dep_sources(sources: &[(PathBuf, Vec<u8>)], fset: &Arc<FileSet>) -> Vec<guff::ast::File> {
+    let mut out = Vec::with_capacity(sources.len());
+    for (path, src) in sources {
+        let name = path.to_str().unwrap_or("file.go");
+        if let Ok(file) = parse_file(fset, name, src, SKIP_FUNC_BODIES | SKIP_OBJECT_RESOLUTION) {
+            out.push(file);
+        }
+    }
+    out
+}
+
+
+/// Depth-first preload of dependency export data so nested `read()` calls find
+/// transitive packages in the importer cache (see PL09 deferral).
+///
+/// `done` memoizes packages whose entire subtree has already been preloaded.
+/// Without it, a dependency graph with heavy fan-in (every package importing a
+/// handful of common ones) is walked an exponential number of times — each
+/// distinct root→leaf path re-descends shared subtrees. On large modules
+/// (e.g. Prometheus) that alone pushed a run past its timeout. With the memo,
+/// each node is visited once: O(V+E).
+fn preload_exports(
+    check: &mut Checker,
+    deps: &[String],
+    dep_graph: &HashMap<String, Vec<String>>,
+    export_paths: &HashMap<String, PathBuf>,
+    visiting: &mut Vec<String>,
+    done: &mut HashSet<String>,
+) {
+    for dep in deps {
+        preload_export(check, dep, dep_graph, export_paths, visiting, done);
+    }
+}
+
+fn preload_export(
+    check: &mut Checker,
+    path: &str,
+    dep_graph: &HashMap<String, Vec<String>>,
+    export_paths: &HashMap<String, PathBuf>,
+    visiting: &mut Vec<String>,
+    done: &mut HashSet<String>,
+) {
+    if path == "unsafe" || path == "C" {
+        return;
+    }
+    // Whole subtree already preloaded via another path — skip. This is what
+    // collapses the exponential DAG walk to linear.
+    if done.contains(path) {
+        return;
+    }
+    if visiting.iter().any(|p| p == path) {
+        return;
+    }
+    if !export_paths.contains_key(path) {
+        return;
+    }
+    visiting.push(path.to_string());
+    if let Some(deps) = dep_graph.get(path) {
+        preload_exports(check, deps, dep_graph, export_paths, visiting, done);
+    }
+    check.preload_import(path);
+    visiting.pop();
+    done.insert(path.to_string());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hash::{HashMap, HashSet};
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use guff::ast::Decl;
+
+    /// A graph with no test-only edges: every edge is a production edge, which
+    /// is what a path outside `paths_with_external_test_package` looks like.
+    fn no_test_edges() -> HashMap<String, Vec<String>> {
+        HashMap::default()
+    }
+
+    fn graph(edges: &[(&str, &[&str])]) -> HashMap<String, Vec<String>> {
+        let mut g: HashMap<String, Vec<String>> = HashMap::default();
+        for (from, to) in edges {
+            g.insert(
+                (*from).to_string(),
+                to.iter().map(|t| (*t).to_string()).collect(),
+            );
+        }
+        g
+    }
+
+    /// A DAG needs no back-edge, and every node comes out after its deps.
+    #[test]
+    fn dep_load_order_is_leaves_first_and_reports_no_cycle() {
+        let g = graph(&[("a", &["b", "c"]), ("b", &["c"]), ("c", &[])]);
+        let loadable: HashSet<String> =
+            ["a", "b", "c"].iter().map(|s| s.to_string()).collect();
+        let needed: Vec<String> = ["a", "b", "c"].iter().map(|s| s.to_string()).collect();
+
+        let (order, back_edges, _) = dep_load_order(&needed, &g, &no_test_edges(), &loadable);
+        assert_eq!(order, vec!["c", "b", "a"]);
+        assert!(back_edges.is_empty(), "clean graph reported {back_edges:?}");
+    }
+
+    /// `P`'s test importing `Q` while `Q`'s test imports `P` is legal Go, and
+    /// the seed must not treat it as a cycle to break arbitrarily.
+    ///
+    /// Both test binaries link the *production* copy of the other package, so
+    /// neither production package imports the other and Go is satisfied. The
+    /// seed keeps one node per import path, so the two test edges meet as a
+    /// cycle — boundary writes it between `internal/session` and
+    /// `internal/credential/vault`, prometheus between `tsdb` and
+    /// `util/teststorage`.
+    ///
+    /// Declining the closing *test* edge keeps the order topological for every
+    /// production edge, which is what the old behaviour lost: dropping
+    /// whichever edge the walk arrived on left `height` reading unfinished
+    /// consumers and took unrelated packages down with it (39 broken edges on
+    /// prometheus, and `promql/promqltest` type-checked against an invalid
+    /// `*promql.Engine`).
+    #[test]
+    fn dep_load_order_declines_a_test_edge_instead_of_breaking_the_order() {
+        // `lib` is production-imported by both; the only edges between `a` and
+        // `b` are their test edges, in both directions.
+        let g = graph(&[
+            ("a", &["lib", "b"]),
+            ("b", &["lib", "a"]),
+            ("lib", &[]),
+        ]);
+        let test_only = graph(&[("a", &["b"]), ("b", &["a"])]);
+        let loadable: HashSet<String> =
+            ["a", "b", "lib"].iter().map(|s| s.to_string()).collect();
+        let needed: Vec<String> = ["a", "b", "lib"].iter().map(|s| s.to_string()).collect();
+
+        let (order, back_edges, declined) =
+            dep_load_order(&needed, &g, &test_only, &loadable);
+
+        // No back edge is reported: this shape is not a guff bug.
+        assert!(back_edges.is_empty(), "reported {back_edges:?}");
+        // The declined edge is *named*, not just counted: `wave_heights` has to
+        // skip the same edge, and a count cannot tell it which.
+        assert_eq!(
+            declined,
+            vec![("b".to_string(), "a".to_string())],
+            "exactly one test edge closes the cycle, and it is b -> a"
+        );
+
+        // And the production edges are still respected — `lib` before both.
+        let pos = |p: &str| order.iter().position(|x| x == p).expect("in order");
+        assert!(pos("lib") < pos("a"), "{order:?}");
+        assert!(pos("lib") < pos("b"), "{order:?}");
+        assert_eq!(order.len(), 3, "{order:?}");
+    }
+
+    /// A ring that closes **below** the frame the test edge came from.
+    ///
+    /// cosmos-sdk's, in the smallest graph that shows it:
+    ///
+    ///   tx --test--> testutil --> authtx --test--> authclient --> tx
+    ///
+    /// Neither test edge's target is on the stack when the walk takes it, and
+    /// the ring only appears at the bottom — where a **production** edge lands
+    /// back on `tx`. Blaming that edge is wrong twice over: it is reported as a
+    /// guff bug (a production cycle is impossible in valid Go), and `order` is
+    /// left non-topological for an edge the walk kept.
+    #[test]
+    fn dep_load_order_declines_a_test_edge_that_closes_a_ring_further_down() {
+        let g = graph(&[
+            ("tx", &["lib", "testutil"]),
+            ("testutil", &["authtx"]),
+            ("authtx", &["lib", "authclient"]),
+            ("authclient", &["tx"]),
+            ("lib", &[]),
+        ]);
+        let test_only = graph(&[("tx", &["testutil"]), ("authtx", &["authclient"])]);
+        let names = ["tx", "testutil", "authtx", "authclient", "lib"];
+        let loadable: HashSet<String> = names.iter().map(|s| s.to_string()).collect();
+        // `tx` first, so the walk descends the test edge before anything else
+        // has ordered `authclient`.
+        let needed: Vec<String> = names.iter().map(|s| s.to_string()).collect();
+
+        let (order, back_edges, declined) =
+            dep_load_order(&needed, &g, &test_only, &loadable);
+
+        assert!(back_edges.is_empty(), "reported {back_edges:?}");
+        assert_eq!(
+            declined,
+            vec![("authtx".to_string(), "authclient".to_string())],
+            "the second test edge is the one that closes the ring"
+        );
+
+        // Every kept edge is still leaves-first, the production ones included.
+        let pos = |p: &str| order.iter().position(|x| x == p).expect("in order");
+        assert!(pos("lib") < pos("tx"), "{order:?}");
+        assert!(pos("tx") < pos("authclient"), "{order:?}");
+        assert!(pos("authtx") < pos("testutil"), "{order:?}");
+        assert!(pos("testutil") < pos("tx"), "{order:?}");
+        assert_eq!(order.len(), 5, "{order:?}");
+    }
+
+    /// The declined edge must not come back in `wave_heights`.
+    ///
+    /// This is the defect behind boundary's 11 ill-typed packages, in the
+    /// smallest graph that shows it. `a` and `b` are two packages whose
+    /// in-package tests import each other; `t` is something only `a`'s test
+    /// needs (`testing`, in the Go shape this came from). The walk visits `a`
+    /// first, declines `b -> a`, and leaves `order = [lib, t, b, a]`.
+    ///
+    /// Reading `b -> a` in the reverse pass raises `height(a)` *after* `a`'s own
+    /// height was read as final, so `a` ends up level with `t` — the package it
+    /// imports — and the two are type-checked in the same wave, in parallel. `a`
+    /// then sees no `t` at all: `undefined: t`.
+    #[test]
+    fn wave_heights_ignores_the_declined_edge() {
+        let g = graph(&[
+            ("a", &["lib", "b", "t"]),
+            ("b", &["lib", "a"]),
+            ("t", &["lib"]),
+            ("lib", &[]),
+        ]);
+        let test_only = graph(&[("a", &["b", "t"]), ("b", &["a"])]);
+        let loadable: HashSet<String> = ["a", "b", "t", "lib"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let needed: Vec<String> = ["a", "b", "t", "lib"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+
+        let (order, _, declined) = dep_load_order(&needed, &g, &test_only, &loadable);
+        let source_set: HashSet<&str> = order.iter().map(String::as_str).collect();
+        let declined_by = declined_edges_by_source(&declined);
+        let height = wave_heights(&order, &g, &source_set, &declined_by);
+
+        // `wave(P) = depth - height(P)`, so a strictly greater height is a
+        // strictly earlier wave. Every edge the walk *kept* must therefore end
+        // at a strictly greater height than it starts from — the dependency is
+        // checked, and merged into the seed, before its consumer reads it.
+        let h = |p: &str| height.get(p).copied().unwrap_or(0);
+        assert!(h("t") > h("a"), "a imports t: {height:?}");
+        assert!(h("b") > h("a"), "a's test imports b, and that edge was kept: {height:?}");
+        assert!(h("lib") > h("a"), "{height:?}");
+        assert!(h("lib") > h("b"), "{height:?}");
+        assert!(h("lib") > h("t"), "{height:?}");
+    }
+
+    /// The same graph with the declined edge fed back in — the behaviour before
+    /// this was fixed. Kept as the negative control: without it, the assertions
+    /// above pass on any graph where the heights happen to work out.
+    #[test]
+    fn wave_heights_collides_when_the_declined_edge_is_read_back() {
+        let g = graph(&[
+            ("a", &["lib", "b", "t"]),
+            ("b", &["lib", "a"]),
+            ("t", &["lib"]),
+            ("lib", &[]),
+        ]);
+        let test_only = graph(&[("a", &["b", "t"]), ("b", &["a"])]);
+        let loadable: HashSet<String> = ["a", "b", "t", "lib"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let needed: Vec<String> = ["a", "b", "t", "lib"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+
+        let (order, _, _) = dep_load_order(&needed, &g, &test_only, &loadable);
+        let source_set: HashSet<&str> = order.iter().map(String::as_str).collect();
+        let none = HashMap::default();
+        let height = wave_heights(&order, &g, &source_set, &none);
+
+        let h = |p: &str| height.get(p).copied().unwrap_or(0);
+        assert!(
+            h("a") > h("t"),
+            "reading b -> a lifts a above the package it imports, so a is \
+             scheduled in an earlier wave than t and sees no t at all: {height:?}"
+        );
+    }
+
+    /// One test edge and one production edge is **not** a production cycle.
+    ///
+    /// This is cosmos-sdk's shape with the middle taken out: `a`'s *external
+    /// test* imports `b`, and `b` imports `a`. `go vet` and `go test` accept
+    /// it — `a_test` is a separate package, so nothing in the production graph
+    /// points both ways (measured on a two-package module).
+    ///
+    /// The walk used to blame `b -> a` for it, which was wrong twice: it is
+    /// reported as a guff bug, and the order it produced (`[b, a]`) is not
+    /// topological for that very edge. Declining the test edge gives `[a, b]`,
+    /// which is.
+    ///
+    /// A cycle made only of production edges is still a bug and still reported
+    /// — `dep_load_order_reports_the_back_edge_it_had_to_drop`.
+    #[test]
+    fn dep_load_order_declines_the_test_edge_rather_than_blaming_production() {
+        let g = graph(&[("a", &["b"]), ("b", &["a"])]);
+        let test_only = graph(&[("a", &["b"])]); // only a->b is test-only
+        let loadable: HashSet<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
+        let needed: Vec<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
+
+        let (order, back_edges, declined) =
+            dep_load_order(&needed, &g, &test_only, &loadable);
+        assert!(back_edges.is_empty(), "reported {back_edges:?}");
+        assert_eq!(declined, vec![("a".to_string(), "b".to_string())]);
+        assert_eq!(order, vec!["a", "b"], "topological for the kept edge b -> a");
+    }
+
+    /// The signal `report_seed_cycles` prints and `compat/health.py` gates on.
+    /// The walk still terminates and still returns an order — that is exactly
+    /// the problem, because the order is no longer topological and nothing
+    /// downstream can tell. Before this was reported, the only symptom was a
+    /// package two hops away going ill-typed, which produces no findings rather
+    /// than wrong ones.
+    #[test]
+    fn dep_load_order_reports_the_back_edge_it_had_to_drop() {
+        let g = graph(&[("a", &["b"]), ("b", &["a"])]);
+        let loadable: HashSet<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
+        let needed: Vec<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
+
+        let (order, back_edges, _) = dep_load_order(&needed, &g, &no_test_edges(), &loadable);
+        assert_eq!(order.len(), 2, "the walk still finishes: {order:?}");
+        assert_eq!(back_edges, vec![("b".to_string(), "a".to_string())]);
+    }
+
+    /// Only cycles are reported. A path visited twice through different
+    /// consumers is ordinary sharing, not a back-edge.
+    #[test]
+    fn a_diamond_is_not_a_cycle() {
+        let g = graph(&[("top", &["l", "r"]), ("l", &["leaf"]), ("r", &["leaf"]), ("leaf", &[])]);
+        let loadable: HashSet<String> = ["top", "l", "r", "leaf"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let needed: Vec<String> = ["top"].iter().map(|s| s.to_string()).collect();
+
+        let (order, back_edges, _) = dep_load_order(&needed, &g, &no_test_edges(), &loadable);
+        assert!(back_edges.is_empty(), "diamond reported {back_edges:?}");
+        assert_eq!(order.first().map(String::as_str), Some("leaf"));
+    }
+
+    fn testdata(name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/testdata/typecheck")
+            .join(name)
+    }
+
+    fn package_from_dir(id: &str, dir: &Path) -> Package {
+        let go_files: Vec<PathBuf> = fs::read_dir(dir)
+            .expect("read dir")
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("go"))
+            .collect();
+        Package {
+            id: id.into(),
+            pkg_path: id.into(),
+            name: if id.contains("invalid") {
+                "invalid".into()
+            } else {
+                "main".into()
+            },
+            dir: dir.to_path_buf(),
+            compiled_go_files: go_files.clone(),
+            go_files,
+            ..Package::default()
+        }
+    }
+
+    #[test]
+    fn typecheck_valid_main_package() {
+        let dir = testdata("valid");
+        let mut pkg = package_from_dir("example.com/valid", &dir);
+        let fset = FileSet::new();
+        let mode = LoadMode::LOAD_SYNTAX;
+        typecheck_package(
+            &mut pkg,
+            &fset,
+            &HashMap::default(),
+            &HashMap::default(),
+            default_sizes(),
+            &TypecheckEnv::default(),
+            mode,
+        );
+        assert!(!pkg.ill_typed, "errors: {:?}", pkg.errors);
+        assert!(pkg.types.is_some());
+        let info = pkg.types_info.as_deref().expect("types info");
+        let file = pkg.syntax.first().expect("syntax");
+        let main_id = file
+            .decls
+            .iter()
+            .find_map(|d| match d {
+                Decl::FuncDecl(fd) if fd.name.name == "main" => Some(fd.name.id),
+                _ => None,
+            })
+            .expect("main func");
+        assert!(
+            info.defs.contains_key(&main_id),
+            "main should appear in TypesInfo.defs"
+        );
+    }
+
+    #[test]
+    fn typecheck_invalid_package_is_ill_typed() {
+        let dir = testdata("invalid");
+        let mut pkg = package_from_dir("example.com/invalid", &dir);
+        let fset = FileSet::new();
+        typecheck_package(
+            &mut pkg,
+            &fset,
+            &HashMap::default(),
+            &HashMap::default(),
+            default_sizes(),
+            &TypecheckEnv::default(),
+            LoadMode::LOAD_SYNTAX,
+        );
+        assert!(pkg.ill_typed);
+        assert!(pkg.errors.iter().any(|e| e.kind == ErrorKind::Type));
+    }
+
+    #[test]
+    fn typecheck_env_sizes_follows_goarch() {
+        let env = TypecheckEnv {
+            compiler: "gc".into(),
+            arch: "386".into(),
+            go_version: String::new(),
+            from_source: false,
+            parallel: true,
+            skip_object_resolution: false,
+        };
+        assert_eq!(env.sizes().word_size, 4);
+    }
+
+    #[test]
+    fn typecheck_with_export_dependency() {
+        let dep_export = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../guff-exportdata/tests/testdata/export/simple/simple.a");
+
+        let dir = testdata("withdep");
+        let mut pkg = package_from_dir("example.com/withdep", &dir);
+        let dep_id = "example.com/simple".to_string();
+        pkg.deps = vec![dep_id.clone()];
+        pkg.imports.insert(
+            dep_id.clone(),
+            Arc::new(Package {
+                id: dep_id.clone(),
+                pkg_path: dep_id.clone(),
+                ..Package::default()
+            }),
+        );
+
+        let mut export_paths = HashMap::default();
+        export_paths.insert(dep_id.clone(), dep_export);
+
+        let mut dep_graph = HashMap::default();
+        dep_graph.insert(dep_id.clone(), Vec::<String>::new());
+
+        let fset = FileSet::new();
+        typecheck_package(
+            &mut pkg,
+            &fset,
+            &export_paths,
+            &dep_graph,
+            default_sizes(),
+            &TypecheckEnv {
+                from_source: false,
+                ..TypecheckEnv::default()
+            },
+            LoadMode::LOAD_SYNTAX,
+        );
+        assert!(
+            !pkg.ill_typed,
+            "typecheck with export dep failed: {:?}",
+            pkg.errors
+        );
+    }
+
+    #[test]
+    fn export_seed_roundtrip_matches_unseeded() {
+        let dep_export = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../guff-exportdata/tests/testdata/export/simple/simple.a");
+        let dir = testdata("withdep");
+        let dep_id = "example.com/simple".to_string();
+
+        let mut export_paths = HashMap::default();
+        export_paths.insert(dep_id.clone(), dep_export);
+        let mut dep_graph = HashMap::default();
+        dep_graph.insert(dep_id.clone(), Vec::<String>::new());
+
+        let mut by_id = HashMap::default();
+        let mut pkg_a = package_from_dir("example.com/withdep_a", &dir);
+        pkg_a.id = "example.com/withdep_a".into();
+        pkg_a.pkg_path = "example.com/withdep_a".into();
+        pkg_a.deps = vec![dep_id.clone()];
+        by_id.insert(pkg_a.id.clone(), Arc::new(pkg_a));
+
+        let fset = FileSet::new();
+        let env = TypecheckEnv {
+            from_source: false,
+            ..TypecheckEnv::default()
+        };
+        let seed = build_export_seed(
+            &["example.com/withdep_a".into()],
+            &by_id,
+            &export_paths,
+            &dep_graph,
+            &fset,
+            &env,
+        )
+        .expect("seed");
+        assert!(seed.cached_import_count() >= 1);
+
+        let mut seeded = (**by_id.get("example.com/withdep_a").unwrap()).clone();
+        typecheck_package_with_seed(
+            &mut seeded,
+            &fset,
+            &export_paths,
+            &dep_graph,
+            default_sizes(),
+            &env,
+            LoadMode::LOAD_SYNTAX,
+            Some(seed.as_ref()),
+        );
+        assert!(!seeded.ill_typed, "seeded: {:?}", seeded.errors);
+
+        let mut plain = package_from_dir("example.com/withdep_b", &dir);
+        plain.deps = vec![dep_id];
+        typecheck_package(
+            &mut plain,
+            &fset,
+            &export_paths,
+            &dep_graph,
+            default_sizes(),
+            &env,
+            LoadMode::LOAD_SYNTAX,
+        );
+        assert!(!plain.ill_typed, "plain: {:?}", plain.errors);
+    }
+}

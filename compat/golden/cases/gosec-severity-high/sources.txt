@@ -1,0 +1,13 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# COMPAT-HARDENING Phase 4. The eight `gosec-*` settings cases share this file
+# (`gosec-settings` is the baseline: the four ladder rules named, both
+# thresholds unset); only their `config.yml` differs.
+#
+# The fixture is four findings whose (severity, confidence) pairs order
+# differently on each axis — see its package comment. cases/gosec cannot
+# measure either threshold: it names 35 rules in `includes`, and moving a
+# threshold there moves dozens of its 57 findings at once.
+
+ladder/scoreladder.go   crates/guff-style/tests/testdata/gosec/scoreladder.go

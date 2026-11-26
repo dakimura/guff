@@ -1,0 +1,22 @@
+# Golden case: errcheck with `verbose: true` (COMPAT-HARDENING Phase 4).
+#
+# `verbose` swaps the selector as written (`w.Emit`) for the qualified name
+# (`(example.com/errcheckverbose/names.writer).Emit`). Same fixture as the
+# `errcheck` case: the diff between the two goldens is the setting.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+  settings:
+    errcheck:
+      verbose: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

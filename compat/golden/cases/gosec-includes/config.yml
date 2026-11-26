@@ -1,0 +1,27 @@
+# Golden case: `gosec.includes` alone (COMPAT-HARDENING Phase 4).
+#
+# `createRuleFilters(includes, excludes)` builds a *whitelist* filter from
+# `includes` — `rules.NewRuleFilter(false, includes...)` — so a non-empty list
+# is the whole rule set, not an addition to the default one. The same list is
+# handed to `createAnalyzerFilters`, so it selects SSA analyzers too.
+#
+# G501 disappears here even though the fixture still imports md5: it is not on
+# the list.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gosec
+  settings:
+    gosec:
+      includes:
+        - G401
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

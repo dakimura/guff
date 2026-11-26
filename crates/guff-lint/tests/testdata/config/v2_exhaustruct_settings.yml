@@ -1,0 +1,14 @@
+version: "2"
+
+linters:
+  settings:
+    exhaustruct:
+      include:
+        - '.*\.Included$'
+      exclude:
+        - '.*\.SkipMe$'
+      allow-empty: true
+      allow-empty-rx:
+        - '.*\.OptEmpty$'
+      allow-empty-returns: true
+      allow-empty-declarations: true

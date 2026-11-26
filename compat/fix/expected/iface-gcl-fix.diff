@@ -1,0 +1,21 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh iface-gcl-fix
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/iface-gcl-fix/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.15.0
+
+--- a/iface.go
++++ b/iface.go
+@@ -29,7 +29,7 @@
+ 	return nil
+ }
+ 
+-func NewServer(addr string) Server {
++func NewServer(addr string) *server {
+ 	return &server{addr: addr}
+ }
+ 

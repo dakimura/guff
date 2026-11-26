@@ -1,0 +1,14 @@
+[package]
+name = "guff-gostd"
+description = "Go standard-library ports shared by more than one guff linter crate."
+keywords = ["go", "stdlib", "strconv", "linter"]
+categories = ["development-tools"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "guff_gostd"
+path = "src/lib.rs"
+
+[dependencies]

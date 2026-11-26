@@ -1,0 +1,33 @@
+# Golden case: the cgo exception in `RedundantTypeInDeclarationChecker`
+# (ST1023 + QF1011).
+#
+# `code.Generator(pass, decl.Pos()) == generated.Cgo` is the one generator the
+# shared body names, and it is there because cgo's preamble writes
+# `var _cgo0 *_Ctype_char = cPath` whose positions map back onto the call in the
+# *original* file — so those findings escape the generated-file exclusion and
+# land on a hand-written line. beats collected three guff-only rows that way at
+# `auditbeat/module/file_integrity/fileorigin_darwin.go:95`.
+#
+# The exclusion has to be **off** here, or neither tool would look at a
+# generated file at all and the case would be green without measuring anything.
+# That is also why this is a case of its own rather than two more files in
+# `staticcheck-qf`: with the exclusion off, honnef's own report filter suppresses
+# findings in *every* generated file, which guff's driver only does through the
+# exclusion — a separate difference this case must not drag in. The fixture
+# therefore carries exactly one declaration per file and nothing else.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - staticcheck
+  exclusions:
+    generated: disable
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

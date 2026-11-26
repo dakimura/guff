@@ -1,0 +1,36 @@
+# Golden case: the revive rules that only run on Go 1.25 or newer.
+#
+# This case exists for its `go.mod`. `forbidden-call-in-wg-go` opens with
+#
+#     if !file.Pkg.IsAtLeastGoVersion(lint.Go125) { return nil }
+#
+# and `Pkg` is the package, so the version comes from go.mod and no
+# `//go:build` tag in the file can raise it. `cases/revive` is a `go 1.22`
+# module, which is why the rule sat in docs/COVERAGE.md as `unit-only`: the
+# Rust tests reach it (their fixtures have no module at all, which reads as
+# "new enough") and no gate against golangci-lint ever did.
+#
+# Keep this case minimal. Bumping `cases/revive` to 1.25 instead would move
+# every other version-gated rule in a 290-finding golden at the same time.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      # Same as cases/revive: revive's own default severity is "warning", and
+      # golangci only puts it on the issue when the config says so.
+      severity: warning
+      rules:
+        - name: forbidden-call-in-wg-go
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

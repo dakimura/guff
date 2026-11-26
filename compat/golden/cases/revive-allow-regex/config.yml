@@ -1,0 +1,31 @@
+# Golden case: revive `unused-parameter` / `unused-receiver` with `allowRegex`.
+#
+# The two rules share one option, and it changes two things at once: which
+# names are spared, and how the findings that remain are worded. Upstream's
+# `Configure` swaps the failure message from "…renaming it as _" to "…renaming
+# it to match <regex>" the moment a pattern is given, so a case that only
+# checked the count would still pass while every message was wrong.
+#
+# coredns v1.14.6 configures `allowRegex: "^_"` repo-wide. Before this case,
+# guff ignored the argument entirely and reported 229 findings there that
+# golangci-lint does not report at all.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      rules:
+        - name: unused-parameter
+          arguments:
+            - allowRegex: "^_"
+        - name: unused-receiver
+          arguments:
+            - allowRegex: "^_"
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false

@@ -1,0 +1,15 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - errcheck
+  # `path` + `linters` is two conditions, which is the minimum v2 accepts
+  # (`excludeRuleMinConditionsCount`).
+  exclusions:
+    rules:
+      - path: "bad\\.go"
+        linters:
+          - errcheck
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

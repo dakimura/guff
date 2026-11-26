@@ -1,0 +1,7 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces)
+#
+# The same two files the guff-staticcheck unit test uses, in one package: a
+# cgo-generated declaration and the identical hand-written one.
+cgo/cgo.go        crates/guff-staticcheck/tests/testdata/qf1011/cgo.go
+cgo/notcgo.go     crates/guff-staticcheck/tests/testdata/qf1011/notcgo.go

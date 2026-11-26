@@ -1,0 +1,12 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh gochecknoglobals
+# Produced by running golangci-lint on compat/golden/cases/gochecknoglobals/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+bad.go:3:5:gochecknoglobals::MyGlobal is a global variable
+bad.go:13:2:gochecknoglobals::Second is a global variable
+bad.go:14:2:gochecknoglobals::third is a global variable
+bad.go:17:5:gochecknoglobals::table is a global variable

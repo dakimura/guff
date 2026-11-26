@@ -1,0 +1,9 @@
+# The go/printer changes golangci-lint 2.14.0 picked up by being built with
+# go1.27.0 (docs/PHASE8-LEDGER.md §2.4, formatters #13-#14): `indentList`
+# stops counting composite literals, and `intersperseComments` leaves a
+# column-1 comment before an identifier alone. Every formatter shares the
+# printer; gofmt is the plainest way in.
+version: "2"
+formatters:
+  enable:
+    - gofmt

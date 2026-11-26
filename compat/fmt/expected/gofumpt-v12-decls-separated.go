@@ -1,0 +1,48 @@
+package p
+
+func f1() { println("single line") }
+func f2() { println("single line") }
+
+func f3() {
+	println("multiline")
+}
+
+func f4() {
+	println("multiline")
+}
+
+func (v *OffsetForLeaderEpochResponse) Throttle() (int32, bool) {
+	return v.ThrottleMillis, v.Version >= 0
+}
+
+func (v *OffsetForLeaderEpochResponse) RequestKind() Request {
+	return &OffsetForLeaderEpochRequest{Version: v.Version}
+}
+
+// l1 is a var.
+var l1 = []int{
+	1, 2,
+}
+
+// l2 is a var.
+var l2 = []int{
+	3, 4,
+}
+
+var (
+	s3 = `
+		ok if grouped together
+	`
+	s4 = `
+		ok if grouped together
+	`
+)
+var _ = "ok if either isn't multiline"
+
+var v1 = []int{
+	1,
+} // trailing comment
+
+var v2 = []int{
+	2,
+}

@@ -1,0 +1,52 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+  disable:
+    - unused
+  # v2 keeps its exclusions here. The v1 spellings this file used to carry
+  # (`issues.exclude`, `issues.exclude-rules`, `issues.exclude-dirs`,
+  # `issues.exclude-files`, `issues.exclude-use-default`) are keys golangci-lint
+  # drops from a v2 file, so a fixture that used them was measuring guff against
+  # a config upstream never reads.
+  exclusions:
+    paths:
+      - third_party$
+      - ".*\\.generated\\.go$"
+    rules:
+      - path: "_test\\.go"
+        linters:
+          - errcheck
+      - path: "vendor/"
+        text: "SA1000"
+        linters:
+          - staticcheck
+      - path-except: "_test\\.go"
+        linters:
+          - funlen
+        source: "^//go:generate "
+run:
+  build-tags:
+    - integration
+  tests: true
+  timeout: 5m
+  concurrency: 4
+  go: "1.22"
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+severity:
+  # v2 spells this `default`. Written as `default-severity` (v1's key) this file
+  # was a config golangci-lint 2.12.2 refuses to load — "can't set severity rule
+  # option: no default severity defined" — which is now what
+  # `ConfigFile::validate` says too, so the fixture had to become a config that
+  # upstream can actually run.
+  default: warning
+  rules:
+    - linters:
+        - errcheck
+      severity: error
+output:
+  path-prefix: ""

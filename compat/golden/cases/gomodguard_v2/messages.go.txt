@@ -1,0 +1,12 @@
+package p
+
+// One import per message shape `BlockedModule.BlockReason` can produce; the
+// recommendation lists and reasons are in this case's config.yml.
+
+import (
+	_ "example.com/bare"
+	_ "example.com/onerec"
+	_ "example.com/threerecs"
+	_ "example.com/tworecs"
+	_ "example.com/verbs"
+)

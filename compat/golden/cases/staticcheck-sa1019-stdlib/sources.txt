@@ -1,0 +1,4 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+
+stdlib.go   crates/guff-staticcheck/tests/testdata/sa1019stdlib/stdlib.go

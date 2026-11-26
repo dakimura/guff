@@ -1,0 +1,44 @@
+# Golden case: the inter-linter order `issues.uniq-by-line` exposes.
+#
+# `cases/issues-uniq-by-line` measures the setting; this one measures the
+# *order* it depends on, which nothing else gates. Its fixture's pairs are all
+# alphabetical, so a plain name sort passes it — and a plain name sort is
+# wrong: `nolintlint` is `linter.LastLinter` and sorts behind every other
+# linter (`combineGoAnalysisLinters`, golangci-lint 2.12.2), which is why the
+# linter set here spans the name on both sides of it.
+#
+# The order became worth a case of its own when hunt-tier diffs on syncthing
+# moved between reruns on lines two linters both reported. Repo-scale tiers now
+# run with the key off (`corpus/patch_unlimited_issues.py --uniq-by-line
+# false`), so this fixture — where both tools' finding sets are pinned exactly
+# — is the only place the order is checked.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - gosec
+    - nolintlint
+    - revive
+    - staticcheck
+    - unused
+  settings:
+    gosec:
+      includes:
+        - G104
+    revive:
+      rules:
+        - name: exported
+    staticcheck:
+      checks:
+        - SA4006
+        - ST1000
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: true
+
+run:
+  timeout: 5m

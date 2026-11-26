@@ -1,0 +1,145 @@
+//! SSA Builder — labelled break/continue/goto.
+//!
+//! Port of go/ssa's `func.go` (`lblock`, `labelledBlock`, `targetedBlock`).
+
+use crate::builder::{Builder, TargetBlock};
+use crate::function::LBlock;
+use crate::ids::{BlockId, FuncId};
+use guff::token::Token;
+
+impl<'a> Builder<'a> {
+    /// Returns the branch target associated with `name`, creating it if needed.
+    /// (Go: `Function.lblockOf`.)
+    pub(crate) fn lblock_of(&mut self, name: &str) -> BlockId {
+        let fid = self.func_id;
+        if let Some(lb) = self.prog.functions.get(fid).lblocks.get(name) {
+            return lb
+                .goto_
+                .expect("a yield function's own label resolves in the parent");
+        }
+        let goto_ = self.new_basic_block(format!("{name}.label"));
+        self.prog.functions.get_mut(fid).lblocks.insert(
+            name.to_string(),
+            LBlock {
+                name: name.to_string(),
+                resolved: false,
+                goto_: Some(goto_),
+                break_: None,
+                continue_: None,
+            },
+        );
+        goto_
+    }
+
+    /// Records `break` / `continue` targets on the labelled statement `name`.
+    pub(crate) fn set_label_loop_targets(
+        &mut self,
+        name: &str,
+        break_: BlockId,
+        continue_: BlockId,
+    ) {
+        if let Some(lb) = self.prog.functions.get_mut(self.func_id).lblocks.get_mut(name) {
+            lb.break_ = Some(break_);
+            lb.continue_ = Some(continue_);
+        }
+    }
+
+    /// Searches for the block associated with a labelled `break` / `continue`.
+    /// (Go: `labelledBlock`.) Returns the owning function — yield functions may
+    /// resolve to an ancestor's block.
+    pub(crate) fn labelled_block(&self, name: &str, tok: Token) -> Option<TargetBlock> {
+        if let Some(block) = self.labelled_block_in(self.func_id, name, tok) {
+            return Some(TargetBlock {
+                func: self.func_id,
+                block,
+            });
+        }
+        // Search ancestors if this is a yield function.
+        if self.func().jump_var.is_some() {
+            let mut fid = self.func_id;
+            while let Some(parent) = self.prog.functions.get(fid).parent {
+                if let Some(block) = self.labelled_block_in(parent, name, tok) {
+                    return Some(TargetBlock {
+                        func: parent,
+                        block,
+                    });
+                }
+                fid = parent;
+                if self.prog.functions.get(fid).jump_var.is_none() {
+                    break;
+                }
+            }
+        }
+        None
+    }
+
+    fn labelled_block_in(&self, fid: FuncId, name: &str, tok: Token) -> Option<BlockId> {
+        let lb = self.prog.functions.get(fid).lblocks.get(name)?;
+        match tok {
+            Token::BREAK => lb.break_,
+            Token::CONTINUE => lb.continue_,
+            Token::GOTO => lb.goto_,
+            _ => None,
+        }
+    }
+
+    /// Returns the nearest unlabelled `break` / `continue` / `fallthrough` target.
+    /// (Go: `targetedBlock`.)
+    pub(crate) fn targeted_block(&self, tok: Token) -> Option<TargetBlock> {
+        for tgts in self.targets.iter().rev() {
+            let block = match tok {
+                Token::BREAK => Some(tgts.break_),
+                Token::CONTINUE => tgts.continue_,
+                Token::FALLTHROUGH => tgts.fallthrough_,
+                _ => None,
+            };
+            if let Some(tb) = block {
+                return Some(tb);
+            }
+        }
+        // Yield functions inherit break targets from the parent function.
+        if self.func().jump_var.is_some() {
+            if let Some(parent) = self.func().parent {
+                return self.targeted_block_in(parent, tok);
+            }
+        }
+        None
+    }
+
+    fn targeted_block_in(&self, fid: FuncId, tok: Token) -> Option<TargetBlock> {
+        // During range_func the parent's break/continue targets are recorded on
+        // the yield function's label. Prefer that named lblock; only fall back
+        // to a sorted scan so FxHash map order cannot pick an arbitrary label
+        // (PERF_TASKS_V2 §0-12).
+        if let Some(name) = self.func().yield_label.as_deref() {
+            if let Some(block) = self.labelled_block_in(fid, name, tok) {
+                return Some(TargetBlock {
+                    func: fid,
+                    block,
+                });
+            }
+        }
+        let f = self.prog.functions.get(fid);
+        let mut labels: Vec<&crate::function::LBlock> = f.lblocks.values().collect();
+        labels.sort_by(|a, b| a.name.cmp(&b.name));
+        for lb in labels {
+            if tok == Token::BREAK {
+                if let Some(b) = lb.break_ {
+                    return Some(TargetBlock {
+                        func: fid,
+                        block: b,
+                    });
+                }
+            }
+            if tok == Token::CONTINUE {
+                if let Some(b) = lb.continue_ {
+                    return Some(TargetBlock {
+                        func: fid,
+                        block: b,
+                    });
+                }
+            }
+        }
+        None
+    }
+}

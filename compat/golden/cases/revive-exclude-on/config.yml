@@ -1,0 +1,32 @@
+# Golden case: `exported` with `exclude: ["**/excluded.go"]`.
+#
+# `lint/file.go` skips the rule for a matching file before running it:
+#
+#     ruleConfig := rulesConfig[currentRule.Name()]
+#     if ruleConfig.MustExclude(f.Name) { continue }
+#
+# The patterns are matched against the **absolute** path golangci-lint hands
+# revive, which is why `**/` is the usual prefix. `bool-literal-in-expr` has no
+# exclude list, so it keeps reporting in the same file — that row is what makes
+# this a per-rule filter rather than a skipped file.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      rules:
+        - name: exported
+          exclude:
+            - "**/excluded.go"
+        - name: bool-literal-in-expr
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

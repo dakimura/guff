@@ -1,0 +1,4 @@
+# emptyStringTest is style-tier; enable explicitly. assignOp is default.
+enabled-checks:
+  - emptyStringTest
+  - assignOp

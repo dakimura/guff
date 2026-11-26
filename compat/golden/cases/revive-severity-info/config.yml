@@ -1,0 +1,33 @@
+# Golden case: `revive.severity` set to something that is not `error`
+# (COMPAT-HARDENING Phase 4).
+#
+# revive's `severity()` is a two-way switch, not a passthrough: it returns
+# `error` when the rule's configured severity is exactly `error`, and `warning`
+# for everything else. So `severity: info` does not produce findings marked
+# info — it produces warnings, and this golden is byte-identical to
+# `revive-settings`.
+#
+# Passing the configured string through instead is the obvious implementation
+# and the wrong one; it is only visible in a gate that compares the severity
+# field.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      severity: info
+      rules:
+        - name: increment-decrement
+        - name: error-naming
+        - name: errorf
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

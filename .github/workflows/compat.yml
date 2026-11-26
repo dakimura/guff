@@ -1,0 +1,463 @@
+name: Compat (R21)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    # `labeled` is here so the `nightly-corpus` label (see the oss-nightly job)
+    # actually starts something. Without it, a job's `if` is evaluated against
+    # the labels the PR had when the run began, so labelling an open PR does
+    # nothing until the next push — which is how it was tried first, and the
+    # nightly job simply reported `skipped`. The other three are the defaults,
+    # which naming `types` at all would otherwise drop.
+    types: [opened, synchronize, reopened, labeled]
+  # So the heavy tiers can be asked for on a branch without opening a PR, and
+  # so a red nightly on main can be retried once its cause is fixed elsewhere.
+  workflow_dispatch:
+
+# Prefer finding regressions over saving a few CI minutes.
+# Full per-linter isolate is ~a few minutes locally; allow headroom on GHA.
+#
+# A single ref-keyed group with `cancel-in-progress: true` cost exactly what
+# this workflow exists to buy. Every push to main shared one group, so a merge
+# landing while the previous commit's run was still going killed it — and the
+# job it killed was always `oss-nightly`, because at ~90 minutes it is the only
+# one still running half an hour later. On 2026-08-16 that happened three times
+# in a row (0693812, e3bafca, 66eb66b, all four other jobs green, `oss-nightly`
+# cancelled in each), and those three commits are the ones that changed how
+# every arena slot is laid out. The tier's whole reason for running on push is
+# to date the next regression to a commit (compat/README.md); it cannot do that
+# for a commit whose run was cancelled by the next one.
+#
+# So: cancel superseded runs on a pull request, where only the tip matters, and
+# key pushes by commit so each one is its own group and none can supersede
+# another. Two main runs then overlap rather than one replacing the other, which
+# is the intended cost.
+concurrency:
+  group: compat-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Every gate here compares against a baseline recorded on somebody's machine,
+# and the ill-typed counts and goldens are a function of the *stdlib* guff type-
+# checks against. That version lives in `.go-version` — the same reason the
+# golangci-lint pin lives in compat/pins.json rather than in the steps.
+#
+# GOTOOLCHAIN=local is what keeps the two halves of a run agreeing. Under the
+# default `auto`, `go list` silently re-execs into whatever newer toolchain a
+# target's go.mod asks for, while guff keeps reading stdlib source from the
+# GOROOT it derived from the `go` on PATH (golist.rs `go_root_from_path`, which
+# deliberately does not run `go`). The run then type-checks go1.26 sources
+# against a go1.24 stdlib, and every package using a newer API — `wg.Go` on
+# helm, caddy and containerd — goes ill-typed. That is silent by construction:
+# an ill-typed package is skipped whole, so its findings become 0 rather than
+# wrong. With `local`, a target that outgrows the pin fails at `go list` and
+# says so instead.
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  # Fast signal: harness unit tests + tiny fixture smoke.
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: .go-version
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install golangci-lint
+        run: |
+          # The version lives in compat/pins.json, not here. It used to be a
+          # literal in five steps across two workflows, and a job left behind on
+          # an older binary compares against something nobody thinks is the
+          # baseline while still printing OK.
+          V="$(python3 -c 'import json;print(json.load(open("compat/pins.json"))["golangci_lint"])')"
+          curl -sSfL https://golangci-lint.run/install.sh \
+            | sh -s -- -b "$HOME/.local/bin" "v$V"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # cases/golines and cases/swaggo need the binaries: guff shells out to
+      # them, so without these two the golden gate reports a *file* error
+      # (`./bad.go: No such file or directory`) for a missing formatter and
+      # every other case still passes — a green tier with two linters silently
+      # unmeasured. The isolate job installs the same pair for the same reason;
+      # the versions live in compat/pins.json so bumping one is visibly a
+      # decision about golangci-lint's embedded copy too.
+      - name: Install golines and swag (versions golangci-lint embeds)
+        run: |
+          read -r GOLINES SWAG < <(python3 -c 'import json;p=json.load(open("compat/pins.json"));print(p["golines"],p["swag_commit"])')
+          go install "github.com/golangci/golines@$GOLINES"
+          go install "github.com/swaggo/swag/cmd/swag@$SWAG"
+
+      - name: Unit-test normalize / isolate harness
+        run: python3 -m unittest discover -s compat/tests -v
+
+      - name: Build guff
+        run: cargo build --release --locked -p guff-lint
+
+      # gofmt parity on input that is *not* already gofmt'd. Every corpus on
+      # disk is clean, so a straight gofmt diff only asks whether both tools
+      # are idempotent — which the go/doc/comment round trip is, by doing
+      # nothing at all. `--unformat` drops one space from `// X` line comments
+      # before handing the same bytes to both tools, so the run measures what
+      # the formatter reconstructs. On origin/main the day this landed it was
+      # 3,341 of 5,608 GOROOT files divergent, with every other tier green
+      # (docs/COMPAT-HARDENING.md 続き 85/87). ~20s.
+      - name: Build guff-fmt-native
+        run: cargo build --release --locked -p guff-fmt --bin guff-fmt-native
+
+      - name: gofmt parity on unformatted doc comments (GOROOT)
+        run: ./regress/fmt_diff.py --formatter gofmt --corpus goroot --unformat doc-comment-space
+
+      # The SA100x checks are ports of Go stdlib parsers, gated against ground
+      # truth generated by running the real stdlib (compat/oracles/README.md).
+      # Only these test binaries are built, and in release so they reuse the
+      # artifacts from the step above — this job has no Cargo cache, and a debug
+      # profile would recompile the whole dependency tree.
+      - name: Go-stdlib port differentials
+        run: |
+          cargo test --release --locked -p guff-staticcheck \
+            --test gostd_time --test gostd_url --test gostd_template --test gostd_regexp
+
+      - name: Compat smoke (fixture)
+        run: ./compat/smoke.sh
+
+      # Check-level goldens: exact match on path:line:col:linter:severity:text,
+      # no normalization and no allowlist. Runs guff only — the golden already
+      # holds golangci-lint's answer — so it is cheap enough for the fast job.
+      # A case still being brought to zero carries a ratchet.json: its diff is
+      # printed in full and the step fails if the count grows (compat/golden/README.md).
+      - name: Golden gate (check-level)
+        run: ./compat/golden/run.sh
+
+      # What the two tools *write*, not what they say: --fix over the same
+      # cases, diffed byte for byte. Runs guff only — golangci-lint's answer is
+      # already recorded under compat/fix/expected — plus a `go build` over each
+      # rewritten tree, because a fix that drops the import it now needs is a
+      # gate no finding key can express (compat/fix/README.md).
+      - name: Fix gate (what --fix writes)
+        run: ./compat/fix/run.sh
+
+      # What the two tools' *formatters* write. The three tiers above all go
+      # through `run`, so none of them ever invokes `golangci-lint fmt` — and
+      # `regress/fmt_diff.py` compares guff against the underlying gofmt /
+      # gofumpt / goimports binaries, which cannot see a golangci-lint settings
+      # default or exclusion at all. `formatters.settings.gofmt.simplify`
+      # defaults to *true* upstream, so that blind spot covered every user who
+      # merely enables gofmt. Runs guff only; expected/ holds upstream's answer
+      # (compat/fmt/README.md).
+      - name: Fmt gate (what the formatters write)
+        run: ./compat/fmt/run.sh
+
+      # The other direction: configs golangci-lint validates and refuses to
+      # start on. A finding-set tier cannot express "upstream exited before
+      # linting", and a tool that runs such a config lints with an enable set
+      # the user never asked for (COMPAT-HARDENING.md §4). Both tools are run;
+      # both must refuse, for the same reason.
+      - name: Reject gate (configs upstream refuses)
+        run: ./compat/reject/run.sh
+
+  # The crate test suites: ~3,000 tests that nothing else here runs.
+  #
+  # These do not compare against golangci-lint — they assert that guff fires,
+  # not that it fires the same thing (docs/COMPAT-HARDENING.md §1) — so they are
+  # not a compat gate. They are the regression net *under* one: every fix the
+  # golden and isolate tiers drive is landed as an assertion here, and until now
+  # nothing on CI executed them, so a fix could be undone by a later commit and
+  # only resurface as a golden diff, if at all.
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: .go-version
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: guff-workspace-debug
+          cache-targets: true
+
+      - name: Workspace tests
+        run: cargo test --workspace --locked
+
+      # The `#[ignore]`d tests are ignored for wanting `go` on PATH, which
+      # this job installed two steps up — so nothing but habit was keeping them
+      # unrun, and two of them had quietly stopped meaning what they say.
+      # `golist_export_file.rs` asserts a contract that both the hybrid-source
+      # default and the native list driver had moved out from under, and is now
+      # the regression test for the fallback that fixed the second one.
+      # `cache_dep_invalidation.rs` is the test docs/CI.md points at to claim a
+      # warm cache cannot hide a finding, and it had never run here.
+      #
+      # A separate step rather than `-- --include-ignored` on the one above:
+      # that flag reaches doctests too, and rustdoc's ```ignore blocks are
+      # ignored for a different reason — they are illustrative snippets that do
+      # not compile alone (`guff-plugin`'s `register!` example is one). Forcing
+      # those to run fails the job on prose. `--tests` keeps this pass to the
+      # test targets, where `#[ignore]` means what it says here.
+      #
+      # `doc_comment_differential.rs` is the heaviest of them (~30s): it asks
+      # the real `go/doc/comment` and this repo's port the same question about
+      # every doc comment in GOROOT plus 100,000 seeded mutations of them, and
+      # compares byte for byte. 53 hand-written fixtures cannot cover a
+      # 1,100-line recursive-descent port; this can.
+      - name: Workspace tests (`#[ignore]`d — these want `go` on PATH)
+        run: cargo test --workspace --locked --tests -- --ignored
+
+  # Thorough gate: every curated linter alone vs golangci-lint (114 targets).
+  # Catches parity holes that multi-linter OSS configs hide.
+  isolate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: .go-version
+          cache: true
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: guff-lint-release
+          cache-targets: true
+
+      - name: Install golangci-lint
+        run: |
+          # The version lives in compat/pins.json, not here. It used to be a
+          # literal in five steps across two workflows, and a job left behind on
+          # an older binary compares against something nobody thinks is the
+          # baseline while still printing OK.
+          V="$(python3 -c 'import json;print(json.load(open("compat/pins.json"))["golangci_lint"])')"
+          curl -sSfL https://golangci-lint.run/install.sh \
+            | sh -s -- -b "$HOME/.local/bin" "v$V"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # The isolate golines and swaggo targets need the binaries: guff shells
+      # out to them, golangci-lint links the libraries. A different version on
+      # either side turns a formatting difference into a false diff, so both
+      # versions live in compat/pins.json next to the golangci-lint pin — where
+      # bumping one is visibly a decision about all three.
+      - name: Install golines and swag (versions golangci-lint embeds)
+        run: |
+          read -r GOLINES SWAG < <(python3 -c 'import json;p=json.load(open("compat/pins.json"));print(p["golines"],p["swag_commit"])')
+          go install "github.com/golangci/golines@$GOLINES"
+          go install "github.com/swaggo/swag/cmd/swag@$SWAG"
+
+      - name: Prefetch isolate fixture modules
+        run: |
+          set -euo pipefail
+          for d in compat/isolate/fixtures/*/; do
+            if [[ -f "$d/go.mod" ]]; then
+              (cd "$d" && go mod download) || true
+            fi
+          done
+
+      - name: Build guff
+        run: cargo build --release --locked -p guff-lint
+
+      # Same confirmation rule as the OSS tiers (golangci-lint x2 identical),
+      # so this step's golangci half roughly doubled on 2026-08-13.
+      - name: Compat isolate (all linters)
+        run: ./compat/run.sh --isolate
+
+      # Do both tools feed their linters the same .go files? Build tags, tests,
+      # vendor and generated handling decide the *input*, and a disagreement
+      # there shows up as a finding diff somewhere else — or nowhere at all.
+      - name: File-set gate (isolate fixtures)
+        run: ./compat/filesets.sh --isolate
+
+      - name: Upload isolate report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: isolate-results
+          path: |
+            compat/results/RESULTS.isolate.md
+            compat/results/*/REPORT.md
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # OSS finding-set on the PR-tier corpus (own configs).
+  oss-pr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: .go-version
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: guff-lint-release
+          cache-targets: true
+
+      - name: Install golangci-lint
+        run: |
+          # The version lives in compat/pins.json, not here. It used to be a
+          # literal in five steps across two workflows, and a job left behind on
+          # an older binary compares against something nobody thinks is the
+          # baseline while still printing OK.
+          V="$(python3 -c 'import json;print(json.load(open("compat/pins.json"))["golangci_lint"])')"
+          curl -sSfL https://golangci-lint.run/install.sh \
+            | sh -s -- -b "$HOME/.local/bin" "v$V"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build guff
+        run: cargo build --release --locked -p guff-lint
+
+      - name: Cache OSS corpus clones
+        uses: actions/cache@v4
+        with:
+          path: corpus/cache
+          key: corpus-pr-${{ hashFiles('corpus/repos.json') }}
+          restore-keys: |
+            corpus-pr-
+
+      # Also gates worker panics and ill-typed package counts (compat/health.py).
+      #
+      # Since 2026-08-13 this runs golangci-lint until two runs return the same
+      # finding set (COMPAT_CONFIRMATIONS, default 2), so the golangci half of
+      # the wall clock roughly doubles. That is the price of not deciding a
+      # target on one run of a tool that is not a function of its input — see
+      # compat/golden/README.md, "Upstream is not a function". Raise the job
+      # timeout rather than lowering the confirmation count.
+      - name: Compat OSS (pr tier, own-config)
+        run: ./compat/run.sh --oss --tier pr
+
+      - name: File-set gate (pr tier)
+        run: ./compat/filesets.sh --tier pr
+
+      # Phase 5: fail when no gated target exercises a required input shape.
+      # Offline — it reads the committed ledger rather than re-running `go list`
+      # over every target, which the nightly job does instead.
+      - name: Corpus shape ledger
+        run: ./corpus/shapes.py check --offline
+
+      - name: Upload OSS report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oss-pr-results
+          path: |
+            compat/results/RESULTS.md
+            compat/results/*/REPORT.md
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # OSS finding-set on the nightly-tier corpus (consul / grafana / containerd).
+  #
+  # These three repos carry most of the corpus's real findings — 255 of consul's
+  # own are compared here — and for a while nothing ran them on a schedule
+  # anyone read. A regression could sit in main undated: `compat/results/RESULTS.md`
+  # showed consul at P=R=100% while HEAD had six extra findings, and there was no
+  # way to tell which commit had introduced them (docs/COMPAT-HARDENING.md §4,
+  # 2026-08-09). Running the tier on every push to main is what makes a
+  # regression attributable to a commit.
+  #
+  # Not run on every pull request: the tier takes ~3 minutes locally and much
+  # longer on a cold GHA corpus cache, and a regression caught on the merge
+  # commit is still dated to the day.
+  #
+  # But "run it locally before pushing" is a rule that has to be remembered, and
+  # the tier exists because the pr tier is not enough — the 2026-08-09 session
+  # found three false positives that only nightly saw (COMPAT-HARDENING §4). A
+  # PR that wants that answer *before* merging can now ask for it, by carrying
+  # the `nightly-corpus` label, without every PR paying ninety minutes for it.
+  # Label an analysis-touching PR, or run it locally:
+  #   ./compat/run.sh --oss --tier pr,nightly
+  oss-nightly:
+    if: >-
+      github.event_name != 'pull_request' ||
+      contains(github.event.pull_request.labels.*.name, 'nightly-corpus')
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: .go-version
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: guff-lint-release
+          cache-targets: true
+
+      - name: Install golangci-lint
+        run: |
+          # The version lives in compat/pins.json, not here. It used to be a
+          # literal in five steps across two workflows, and a job left behind on
+          # an older binary compares against something nobody thinks is the
+          # baseline while still printing OK.
+          V="$(python3 -c 'import json;print(json.load(open("compat/pins.json"))["golangci_lint"])')"
+          curl -sSfL https://golangci-lint.run/install.sh \
+            | sh -s -- -b "$HOME/.local/bin" "v$V"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build guff
+        run: cargo build --release --locked -p guff-lint
+
+      - name: Cache OSS corpus clones
+        uses: actions/cache@v4
+        with:
+          path: corpus/cache
+          key: corpus-nightly-${{ hashFiles('corpus/repos.json') }}
+          restore-keys: |
+            corpus-nightly-
+            corpus-pr-
+
+      # Also gates worker panics and ill-typed package counts (compat/health.py).
+      - name: Compat OSS (nightly tier, own-config)
+        run: ./compat/run.sh --oss --tier nightly
+
+      - name: File-set gate (nightly tier)
+        run: ./compat/filesets.sh --tier nightly
+
+      # The nightly job has every tier's checkout, so re-measure for real here:
+      # this is what catches a ledger that has drifted from the corpus (an
+      # upstream ref that dropped its go.work, a pattern that stopped matching).
+      - name: Corpus shape ledger (re-measured)
+        run: ./corpus/shapes.py check
+
+      - name: Upload OSS report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oss-nightly-results
+          path: |
+            compat/results/RESULTS.md
+            compat/results/*/REPORT.md
+          if-no-files-found: ignore
+          retention-days: 14

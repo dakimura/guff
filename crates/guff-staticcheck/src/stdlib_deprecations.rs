@@ -1,0 +1,331 @@
+//! Stdlib deprecation metadata from `honnef.co/go/tools/knowledge`.
+//!
+//! Port of `knowledge.StdlibDeprecations`.
+
+use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
+
+pub const DEPRECATED_NEVER_USE: &str = "never";
+pub const DEPRECATED_USE_NO_LONGER: &str = "no longer";
+
+/// When a Go API was deprecated and when an alternative became available.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Deprecation {
+    pub deprecated_since: &'static str,
+    pub alternative_available_since: &'static str,
+}
+
+static TABLE: &[(&str, Deprecation)] = &[
+    ("go/build.AllowBinary", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.7" }),
+    ("(archive/zip.FileHeader).CompressedSize", Deprecation { deprecated_since: "go1.1", alternative_available_since: "go1.1" }),
+    ("(archive/zip.FileHeader).UncompressedSize", Deprecation { deprecated_since: "go1.1", alternative_available_since: "go1.1" }),
+    ("(archive/zip.FileHeader).ModifiedTime", Deprecation { deprecated_since: "go1.10", alternative_available_since: "go1.10" }),
+    ("(archive/zip.FileHeader).ModifiedDate", Deprecation { deprecated_since: "go1.10", alternative_available_since: "go1.10" }),
+    ("(*archive/zip.FileHeader).ModTime", Deprecation { deprecated_since: "go1.10", alternative_available_since: "go1.10" }),
+    ("(*archive/zip.FileHeader).SetModTime", Deprecation { deprecated_since: "go1.10", alternative_available_since: "go1.10" }),
+    ("(go/doc.Package).Bugs", Deprecation { deprecated_since: "go1.1", alternative_available_since: "go1.1" }),
+    ("os.SEEK_SET", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.7" }),
+    ("os.SEEK_CUR", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.7" }),
+    ("os.SEEK_END", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.7" }),
+    ("(net.Dialer).Cancel", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.7" }),
+    ("runtime.CPUProfile", Deprecation { deprecated_since: "go1.9", alternative_available_since: "go1.0" }),
+    ("compress/flate.ReadError", Deprecation { deprecated_since: "go1.6", alternative_available_since: "no longer" }),
+    ("compress/flate.WriteError", Deprecation { deprecated_since: "go1.6", alternative_available_since: "no longer" }),
+    ("path/filepath.HasPrefix", Deprecation { deprecated_since: "go1.0", alternative_available_since: "never" }),
+    ("(net/http.Transport).Dial", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.7" }),
+    ("(net/http.Transport).DialTLS", Deprecation { deprecated_since: "go1.14", alternative_available_since: "go1.14" }),
+    ("(*net/http.Transport).CancelRequest", Deprecation { deprecated_since: "go1.6", alternative_available_since: "go1.5" }),
+    ("net/http.ErrWriteAfterFlush", Deprecation { deprecated_since: "go1.7", alternative_available_since: "no longer" }),
+    ("net/http.ErrHeaderTooLong", Deprecation { deprecated_since: "go1.8", alternative_available_since: "no longer" }),
+    ("net/http.ErrShortBody", Deprecation { deprecated_since: "go1.8", alternative_available_since: "no longer" }),
+    ("net/http.ErrMissingContentLength", Deprecation { deprecated_since: "go1.8", alternative_available_since: "no longer" }),
+    ("net/http/httputil.ErrPersistEOF", Deprecation { deprecated_since: "go1.0", alternative_available_since: "no longer" }),
+    ("net/http/httputil.ErrClosed", Deprecation { deprecated_since: "go1.0", alternative_available_since: "no longer" }),
+    ("net/http/httputil.ErrPipeline", Deprecation { deprecated_since: "go1.0", alternative_available_since: "no longer" }),
+    ("net/http/httputil.ServerConn", Deprecation { deprecated_since: "go1.0", alternative_available_since: "go1.0" }),
+    ("net/http/httputil.NewServerConn", Deprecation { deprecated_since: "go1.0", alternative_available_since: "go1.0" }),
+    ("net/http/httputil.ClientConn", Deprecation { deprecated_since: "go1.0", alternative_available_since: "go1.0" }),
+    ("net/http/httputil.NewClientConn", Deprecation { deprecated_since: "go1.0", alternative_available_since: "go1.0" }),
+    ("net/http/httputil.NewProxyClientConn", Deprecation { deprecated_since: "go1.0", alternative_available_since: "go1.0" }),
+    ("(net/http.Request).Cancel", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.7" }),
+    ("(text/template/parse.PipeNode).Line", Deprecation { deprecated_since: "go1.1", alternative_available_since: "no longer" }),
+    ("(text/template/parse.ActionNode).Line", Deprecation { deprecated_since: "go1.1", alternative_available_since: "no longer" }),
+    ("(text/template/parse.BranchNode).Line", Deprecation { deprecated_since: "go1.1", alternative_available_since: "no longer" }),
+    ("(text/template/parse.TemplateNode).Line", Deprecation { deprecated_since: "go1.1", alternative_available_since: "no longer" }),
+    ("database/sql/driver.ColumnConverter", Deprecation { deprecated_since: "go1.9", alternative_available_since: "go1.9" }),
+    ("database/sql/driver.Execer", Deprecation { deprecated_since: "go1.8", alternative_available_since: "go1.8" }),
+    ("database/sql/driver.Queryer", Deprecation { deprecated_since: "go1.8", alternative_available_since: "go1.8" }),
+    ("(database/sql/driver.Conn).Begin", Deprecation { deprecated_since: "go1.8", alternative_available_since: "go1.8" }),
+    ("(database/sql/driver.Stmt).Exec", Deprecation { deprecated_since: "go1.8", alternative_available_since: "go1.8" }),
+    ("(database/sql/driver.Stmt).Query", Deprecation { deprecated_since: "go1.8", alternative_available_since: "go1.8" }),
+    ("syscall.StringByteSlice", Deprecation { deprecated_since: "go1.1", alternative_available_since: "go1.1" }),
+    ("syscall.StringBytePtr", Deprecation { deprecated_since: "go1.1", alternative_available_since: "go1.1" }),
+    ("syscall.StringSlicePtr", Deprecation { deprecated_since: "go1.1", alternative_available_since: "go1.1" }),
+    ("syscall.StringToUTF16", Deprecation { deprecated_since: "go1.1", alternative_available_since: "go1.1" }),
+    ("syscall.StringToUTF16Ptr", Deprecation { deprecated_since: "go1.1", alternative_available_since: "go1.1" }),
+    ("(*regexp.Regexp).Copy", Deprecation { deprecated_since: "go1.12", alternative_available_since: "no longer" }),
+    ("(archive/tar.Header).Xattrs", Deprecation { deprecated_since: "go1.10", alternative_available_since: "go1.10" }),
+    ("archive/tar.TypeRegA", Deprecation { deprecated_since: "go1.11", alternative_available_since: "go1.1" }),
+    ("go/types.NewInterface", Deprecation { deprecated_since: "go1.11", alternative_available_since: "go1.11" }),
+    ("(*go/types.Interface).Embedded", Deprecation { deprecated_since: "go1.11", alternative_available_since: "go1.11" }),
+    ("go/importer.For", Deprecation { deprecated_since: "go1.12", alternative_available_since: "go1.12" }),
+    ("encoding/json.InvalidUTF8Error", Deprecation { deprecated_since: "go1.2", alternative_available_since: "no longer" }),
+    ("encoding/json.UnmarshalFieldError", Deprecation { deprecated_since: "go1.2", alternative_available_since: "no longer" }),
+    ("encoding/csv.ErrTrailingComma", Deprecation { deprecated_since: "go1.2", alternative_available_since: "no longer" }),
+    ("(encoding/csv.Reader).TrailingComma", Deprecation { deprecated_since: "go1.2", alternative_available_since: "no longer" }),
+    ("(net.Dialer).DualStack", Deprecation { deprecated_since: "go1.12", alternative_available_since: "go1.12" }),
+    ("net/http.ErrUnexpectedTrailer", Deprecation { deprecated_since: "go1.12", alternative_available_since: "no longer" }),
+    ("net/http.CloseNotifier", Deprecation { deprecated_since: "go1.11", alternative_available_since: "go1.7" }),
+    ("net/http.ProtocolError", Deprecation { deprecated_since: "go1.8", alternative_available_since: "no longer" }),
+    ("(crypto/x509.CertificateRequest).Attributes", Deprecation { deprecated_since: "go1.5", alternative_available_since: "go1.3" }),
+    ("(*crypto/x509.Certificate).CheckCRLSignature", Deprecation { deprecated_since: "go1.19", alternative_available_since: "go1.19" }),
+    ("crypto/x509.ParseCRL", Deprecation { deprecated_since: "go1.19", alternative_available_since: "go1.19" }),
+    ("crypto/x509.ParseDERCRL", Deprecation { deprecated_since: "go1.19", alternative_available_since: "go1.19" }),
+    ("(*crypto/x509.Certificate).CreateCRL", Deprecation { deprecated_since: "go1.19", alternative_available_since: "go1.19" }),
+    ("crypto/x509/pkix.TBSCertificateList", Deprecation { deprecated_since: "go1.19", alternative_available_since: "go1.19" }),
+    ("crypto/x509/pkix.RevokedCertificate", Deprecation { deprecated_since: "go1.19", alternative_available_since: "go1.19" }),
+    ("go/doc.ToHTML", Deprecation { deprecated_since: "go1.20", alternative_available_since: "go1.20" }),
+    ("go/doc.ToText", Deprecation { deprecated_since: "go1.20", alternative_available_since: "go1.20" }),
+    ("go/doc.Synopsis", Deprecation { deprecated_since: "go1.20", alternative_available_since: "go1.20" }),
+    ("math/rand.Seed", Deprecation { deprecated_since: "go1.20", alternative_available_since: "go1.0" }),
+    ("math/rand.Read", Deprecation { deprecated_since: "go1.20", alternative_available_since: "never" }),
+    ("crypto/x509.IsEncryptedPEMBlock", Deprecation { deprecated_since: "go1.16", alternative_available_since: "never" }),
+    ("crypto/x509.DecryptPEMBlock", Deprecation { deprecated_since: "go1.16", alternative_available_since: "never" }),
+    ("crypto/x509.EncryptPEMBlock", Deprecation { deprecated_since: "go1.16", alternative_available_since: "never" }),
+    ("crypto/dsa", Deprecation { deprecated_since: "go1.16", alternative_available_since: "never" }),
+    ("(*crypto/rc4.Cipher).Reset", Deprecation { deprecated_since: "go1.12", alternative_available_since: "never" }),
+    ("(net/http/httptest.ResponseRecorder).HeaderMap", Deprecation { deprecated_since: "go1.11", alternative_available_since: "go1.7" }),
+    ("image.ZP", Deprecation { deprecated_since: "go1.13", alternative_available_since: "go1.0" }),
+    ("image.ZR", Deprecation { deprecated_since: "go1.13", alternative_available_since: "go1.0" }),
+    ("(*debug/gosym.LineTable).LineToPC", Deprecation { deprecated_since: "go1.2", alternative_available_since: "go1.2" }),
+    ("(*debug/gosym.LineTable).PCToLine", Deprecation { deprecated_since: "go1.2", alternative_available_since: "go1.2" }),
+    ("crypto/tls.VersionSSL30", Deprecation { deprecated_since: "go1.13", alternative_available_since: "never" }),
+    ("(crypto/tls.Config).NameToCertificate", Deprecation { deprecated_since: "go1.14", alternative_available_since: "no longer" }),
+    ("(*crypto/tls.Config).BuildNameToCertificate", Deprecation { deprecated_since: "go1.14", alternative_available_since: "no longer" }),
+    ("(crypto/tls.Config).SessionTicketKey", Deprecation { deprecated_since: "go1.16", alternative_available_since: "go1.5" }),
+    ("(crypto/tls.ConnectionState).NegotiatedProtocolIsMutual", Deprecation { deprecated_since: "go1.16", alternative_available_since: "never" }),
+    ("(crypto/tls.ConnectionState).TLSUnique", Deprecation { deprecated_since: "go1.16", alternative_available_since: "never" }),
+    ("image/jpeg.Reader", Deprecation { deprecated_since: "go1.4", alternative_available_since: "never" }),
+    ("syscall.AttachLsf", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.0" }),
+    ("syscall.DetachLsf", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.0" }),
+    ("syscall.LsfSocket", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.0" }),
+    ("syscall.SetLsfPromisc", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.0" }),
+    ("syscall.LsfJump", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.0" }),
+    ("syscall.LsfStmt", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.0" }),
+    ("syscall.BpfStmt", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.0" }),
+    ("syscall.BpfJump", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.0" }),
+    ("syscall.BpfBuflen", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.0" }),
+    ("syscall.SetBpfBuflen", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.0" }),
+    ("syscall.BpfDatalink", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.0" }),
+    ("syscall.SetBpfDatalink", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.0" }),
+    ("syscall.SetBpfPromisc", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.0" }),
+    ("syscall.FlushBpf", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.0" }),
+    ("syscall.BpfInterface", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.0" }),
+    ("syscall.SetBpfInterface", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.0" }),
+    ("syscall.BpfTimeout", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.0" }),
+    ("syscall.SetBpfTimeout", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.0" }),
+    ("syscall.BpfStats", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.0" }),
+    ("syscall.SetBpfImmediate", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.0" }),
+    ("syscall.SetBpf", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.0" }),
+    ("syscall.CheckBpfVersion", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.0" }),
+    ("syscall.BpfHeadercmpl", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.0" }),
+    ("syscall.SetBpfHeadercmpl", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.0" }),
+    ("syscall.RouteRIB", Deprecation { deprecated_since: "go1.8", alternative_available_since: "go1.0" }),
+    ("syscall.RoutingMessage", Deprecation { deprecated_since: "go1.8", alternative_available_since: "go1.0" }),
+    ("syscall.RouteMessage", Deprecation { deprecated_since: "go1.8", alternative_available_since: "go1.0" }),
+    ("syscall.InterfaceMessage", Deprecation { deprecated_since: "go1.8", alternative_available_since: "go1.0" }),
+    ("syscall.InterfaceAddrMessage", Deprecation { deprecated_since: "go1.8", alternative_available_since: "go1.0" }),
+    ("syscall.ParseRoutingMessage", Deprecation { deprecated_since: "go1.8", alternative_available_since: "go1.0" }),
+    ("syscall.ParseRoutingSockaddr", Deprecation { deprecated_since: "go1.8", alternative_available_since: "go1.0" }),
+    ("syscall.InterfaceAnnounceMessage", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.0" }),
+    ("syscall.InterfaceMulticastAddrMessage", Deprecation { deprecated_since: "go1.7", alternative_available_since: "go1.0" }),
+    ("syscall.FormatMessage", Deprecation { deprecated_since: "go1.5", alternative_available_since: "go1.0" }),
+    ("syscall.PostQueuedCompletionStatus", Deprecation { deprecated_since: "go1.17", alternative_available_since: "go1.0" }),
+    ("syscall.GetQueuedCompletionStatus", Deprecation { deprecated_since: "go1.17", alternative_available_since: "go1.0" }),
+    ("syscall.CreateIoCompletionPort", Deprecation { deprecated_since: "go1.17", alternative_available_since: "go1.0" }),
+    ("io/ioutil", Deprecation { deprecated_since: "go1.19", alternative_available_since: "go1.19" }),
+    ("bytes.Title", Deprecation { deprecated_since: "go1.18", alternative_available_since: "go1.0" }),
+    ("strings.Title", Deprecation { deprecated_since: "go1.18", alternative_available_since: "go1.0" }),
+    ("(crypto/tls.Config).PreferServerCipherSuites", Deprecation { deprecated_since: "go1.18", alternative_available_since: "no longer" }),
+    ("(*crypto/x509.CertPool).Subjects", Deprecation { deprecated_since: "go1.18", alternative_available_since: "no longer" }),
+    ("go/types.NewSignature", Deprecation { deprecated_since: "go1.18", alternative_available_since: "go1.18" }),
+    ("(net.Error).Temporary", Deprecation { deprecated_since: "go1.18", alternative_available_since: "never" }),
+    ("(reflect.Value).InterfaceData", Deprecation { deprecated_since: "go1.18", alternative_available_since: "go1.18" }),
+    ("syscall.Syscall", Deprecation { deprecated_since: "go1.18", alternative_available_since: "go1.18" }),
+    ("syscall.Syscall12", Deprecation { deprecated_since: "go1.18", alternative_available_since: "go1.18" }),
+    ("syscall.Syscall15", Deprecation { deprecated_since: "go1.18", alternative_available_since: "go1.18" }),
+    ("syscall.Syscall18", Deprecation { deprecated_since: "go1.18", alternative_available_since: "go1.18" }),
+    ("syscall.Syscall6", Deprecation { deprecated_since: "go1.18", alternative_available_since: "go1.18" }),
+    ("syscall.Syscall9", Deprecation { deprecated_since: "go1.18", alternative_available_since: "go1.18" }),
+    ("reflect.SliceHeader", Deprecation { deprecated_since: "go1.21", alternative_available_since: "go1.17" }),
+    ("reflect.StringHeader", Deprecation { deprecated_since: "go1.21", alternative_available_since: "go1.20" }),
+    ("crypto/elliptic.GenerateKey", Deprecation { deprecated_since: "go1.21", alternative_available_since: "go1.21" }),
+    ("crypto/elliptic.Marshal", Deprecation { deprecated_since: "go1.21", alternative_available_since: "go1.21" }),
+    ("crypto/elliptic.Unmarshal", Deprecation { deprecated_since: "go1.21", alternative_available_since: "go1.21" }),
+    ("(*crypto/elliptic.CurveParams).Add", Deprecation { deprecated_since: "go1.21", alternative_available_since: "go1.21" }),
+    ("(*crypto/elliptic.CurveParams).Double", Deprecation { deprecated_since: "go1.21", alternative_available_since: "go1.21" }),
+    ("(*crypto/elliptic.CurveParams).IsOnCurve", Deprecation { deprecated_since: "go1.21", alternative_available_since: "go1.21" }),
+    ("(*crypto/elliptic.CurveParams).ScalarBaseMult", Deprecation { deprecated_since: "go1.21", alternative_available_since: "go1.21" }),
+    ("(*crypto/elliptic.CurveParams).ScalarMult", Deprecation { deprecated_since: "go1.21", alternative_available_since: "go1.21" }),
+    ("(crypto/elliptic.Curve).Add", Deprecation { deprecated_since: "go1.21", alternative_available_since: "go1.21" }),
+    ("(crypto/elliptic.Curve).Double", Deprecation { deprecated_since: "go1.21", alternative_available_since: "go1.21" }),
+    ("(crypto/elliptic.Curve).IsOnCurve", Deprecation { deprecated_since: "go1.21", alternative_available_since: "go1.21" }),
+    ("(crypto/elliptic.Curve).ScalarBaseMult", Deprecation { deprecated_since: "go1.21", alternative_available_since: "go1.21" }),
+    ("(crypto/elliptic.Curve).ScalarMult", Deprecation { deprecated_since: "go1.21", alternative_available_since: "go1.21" }),
+    ("crypto/rsa.GenerateMultiPrimeKey", Deprecation { deprecated_since: "go1.21", alternative_available_since: "never" }),
+    ("(crypto/rsa.PrecomputedValues).CRTValues", Deprecation { deprecated_since: "go1.21", alternative_available_since: "never" }),
+    ("(crypto/x509.RevocationList).RevokedCertificates", Deprecation { deprecated_since: "go1.21", alternative_available_since: "go1.21" }),
+    ("go/ast.NewPackage", Deprecation { deprecated_since: "go1.22", alternative_available_since: "go1.0" }),
+    ("go/ast.Importer", Deprecation { deprecated_since: "go1.22", alternative_available_since: "go1.0" }),
+    ("go/ast.Object", Deprecation { deprecated_since: "go1.22", alternative_available_since: "go1.0" }),
+    ("go/ast.Package", Deprecation { deprecated_since: "go1.22", alternative_available_since: "go1.0" }),
+    ("go/ast.Scope", Deprecation { deprecated_since: "go1.22", alternative_available_since: "go1.0" }),
+    ("html/template.ErrJSTemplate", Deprecation { deprecated_since: "go1.22", alternative_available_since: "no longer" }),
+    ("reflect.PtrTo", Deprecation { deprecated_since: "go1.22", alternative_available_since: "go1.18" }),
+    ("runtime.GOROOT", Deprecation { deprecated_since: "go1.24", alternative_available_since: "no longer" }),
+    ("crypto/cipher.NewCFBDecrypter", Deprecation { deprecated_since: "go1.24", alternative_available_since: "go1.2" }),
+    ("crypto/cipher.NewCFBEncrypter", Deprecation { deprecated_since: "go1.24", alternative_available_since: "go1.2" }),
+    ("crypto/cipher.NewOFB", Deprecation { deprecated_since: "go1.24", alternative_available_since: "go1.2" }),
+    ("go/ast.FilterFuncDuplicates", Deprecation { deprecated_since: "go1.25", alternative_available_since: "go1.0" }),
+    ("go/ast.FilterImportDuplicates", Deprecation { deprecated_since: "go1.25", alternative_available_since: "go1.0" }),
+    ("go/ast.FilterUnassociatedComments", Deprecation { deprecated_since: "go1.25", alternative_available_since: "go1.0" }),
+    ("go/ast.FilterPackage", Deprecation { deprecated_since: "go1.25", alternative_available_since: "go1.0" }),
+    ("go/ast.MergePackageFiles", Deprecation { deprecated_since: "go1.25", alternative_available_since: "go1.0" }),
+    ("go/ast.PackageExports", Deprecation { deprecated_since: "go1.25", alternative_available_since: "go1.0" }),
+    ("go/ast.MergeMode", Deprecation { deprecated_since: "go1.25", alternative_available_since: "go1.0" }),
+    ("go/parser.ParseDir", Deprecation { deprecated_since: "go1.25", alternative_available_since: "go1.11" }),
+    ("(crypto/ecdsa.PublicKey).X", Deprecation { deprecated_since: "go1.26", alternative_available_since: "go1.25" }),
+    ("(crypto/ecdsa.PublicKey).Y", Deprecation { deprecated_since: "go1.26", alternative_available_since: "go1.25" }),
+    ("(crypto/ecdsa.PrivateKey).D", Deprecation { deprecated_since: "go1.26", alternative_available_since: "go1.25" }),
+    ("crypto/rsa.DecryptPKCS1v15", Deprecation { deprecated_since: "go1.26", alternative_available_since: "never" }),
+    ("crypto/rsa.DecryptPKCS1v15SessionKey", Deprecation { deprecated_since: "go1.26", alternative_available_since: "never" }),
+    ("crypto/rsa.PKCS1v15DecryptOptions", Deprecation { deprecated_since: "go1.26", alternative_available_since: "never" }),
+    ("crypto/rsa.EncryptPKCS1v15", Deprecation { deprecated_since: "go1.26", alternative_available_since: "never" }),
+    ("(net/http/httputil.ReverseProxy).Director", Deprecation { deprecated_since: "go1.26", alternative_available_since: "go1.20" }),
+    ("(crypto/tls.Config).Rand", Deprecation { deprecated_since: "go1.27", alternative_available_since: "go1.26" }),
+];
+
+/// Lookup table keyed by fully-qualified API name (see upstream `SelectorName`).
+pub fn stdlib_deprecations() -> &'static HashMap<&'static str, Deprecation> {
+    static MAP: OnceLock<HashMap<&str, Deprecation>> = OnceLock::new();
+    MAP.get_or_init(|| TABLE.iter().copied().collect())
+}
+
+/// The stdlib import paths [`stdlib_deprecations`] has any entry for.
+///
+/// SA1019 needs two things to fire: the *version* pair, which this table
+/// carries, and the deprecation's own prose, which only lives in a doc comment.
+/// Dependencies read from export data have no doc comments, so for the stdlib
+/// the prose has to come from a GOROOT source scan — and that scan has to be
+/// bounded, because walking every stdlib package a program imports would cost
+/// more than the check is worth. This set is that bound: a stdlib package is
+/// worth opening exactly when the table says something in it is deprecated.
+///
+/// Keys take four shapes — `pkg/path.Name`, `(pkg/path.Type).Field`,
+/// `(*pkg/path.Type).Method`, and a bare `pkg/path` for a deprecated package —
+/// so the path is everything up to the first `.` that follows the last `/`.
+pub fn stdlib_deprecated_packages() -> &'static HashSet<&'static str> {
+    static SET: OnceLock<HashSet<&str>> = OnceLock::new();
+    SET.get_or_init(|| {
+        TABLE
+            .iter()
+            .filter_map(|(key, _)| table_key_package(key))
+            .collect()
+    })
+}
+
+/// Import path of a [`stdlib_deprecations`] key, or `None` for a non-stdlib one.
+fn table_key_package(key: &'static str) -> Option<&'static str> {
+    let bare = key.trim_start_matches(['(', '*']);
+    let after_slash = bare.rfind('/').map_or(0, |i| i + 1);
+    let path = match bare[after_slash..].find('.') {
+        Some(dot) => &bare[..after_slash + dot],
+        // A bare import path: the whole key is the package (`io/ioutil`).
+        None => bare,
+    };
+    // Belt and braces: a third-party key would carry a dot in its domain, and
+    // this table is stdlib-only by construction.
+    (!path.is_empty() && !path.contains('.')).then_some(path)
+}
+
+/// Package-doc `Deprecated:` text for stdlib packages that are only available
+/// via export data (no AST for `fact_deprecated`). Keys must also appear in
+/// [`stdlib_deprecations`]. Frozen from GOROOT package comments.
+pub fn stdlib_package_deprecation_msg(path: &str) -> Option<&'static str> {
+    match path {
+        "io/ioutil" => Some(
+            "As of Go 1.16, the same functionality is now provided by package [io] or package [os], and those implementations should be preferred in new code. See the specific function documentation for details.",
+        ),
+        "crypto/dsa" => Some(
+            "DSA is a legacy algorithm, and modern alternatives such as Ed25519 (implemented by package crypto/ed25519) should be used instead. Keys with 1024-bit moduli (L1024N160 parameters) are cryptographically weak, while bigger keys are not widely supported. Note that FIPS 186-5 no longer approves DSA for signature generation.",
+        ),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The four key shapes upstream writes. Getting this wrong is silent: a
+    /// mis-parsed path just drops out of the scan set and SA1019 goes quiet for
+    /// that package, which is exactly the failure the 2026-08-17 report hit.
+    #[test]
+    fn table_key_package_handles_every_key_shape() {
+        assert_eq!(table_key_package("go/build.AllowBinary"), Some("go/build"));
+        assert_eq!(table_key_package("os.SEEK_SET"), Some("os"));
+        assert_eq!(
+            table_key_package("(crypto/ecdsa.PublicKey).X"),
+            Some("crypto/ecdsa")
+        );
+        assert_eq!(
+            table_key_package("(*archive/zip.FileHeader).ModTime"),
+            Some("archive/zip")
+        );
+        // A bare import path: the package itself is deprecated.
+        assert_eq!(table_key_package("io/ioutil"), Some("io/ioutil"));
+    }
+
+    #[test]
+    fn deprecated_package_set_covers_the_reported_cases() {
+        let pkgs = stdlib_deprecated_packages();
+        for path in [
+            "crypto/ecdsa",
+            "archive/zip",
+            "net",
+            "net/http",
+            "regexp",
+            "path/filepath",
+            "os",
+            "io/ioutil",
+        ] {
+            assert!(pkgs.contains(path), "{path} missing from the scan set");
+        }
+        // The bound has to stay a bound: a set that swallowed every stdlib
+        // package would put a GOROOT source scan behind `import "fmt"`.
+        // (`strings` *is* in the set — `strings.Title` is deprecated — so it
+        // makes a poor negative.)
+        assert!(!pkgs.contains("fmt"), "fmt has no deprecated API");
+        assert!(!pkgs.contains("context"));
+        assert!(!pkgs.contains("errors"));
+        assert!(
+            pkgs.len() < 120,
+            "scan set grew to {} packages — is table_key_package still \
+             extracting paths correctly?",
+            pkgs.len()
+        );
+    }
+
+    /// Every key in the table must yield a package, and every package must be a
+    /// stdlib import path — the set is the gate that decides which GOROOT
+    /// packages get opened.
+    #[test]
+    fn every_table_key_yields_a_stdlib_package() {
+        for (key, _) in TABLE {
+            let path = table_key_package(key)
+                .unwrap_or_else(|| panic!("no package extracted from {key:?}"));
+            assert!(!path.contains('.'), "{key:?} → {path:?} is not stdlib");
+            assert!(key.contains(path), "{key:?} → {path:?} is not a substring");
+        }
+    }
+}

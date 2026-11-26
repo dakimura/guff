@@ -1,0 +1,5 @@
+# golangci-lint 2.15.0's pkg/golinters/exhaustive/testdata, one package per
+# file (they all declare the same Direction).
+plain/exhaustive.go                crates/guff-style/tests/testdata/exhaustive/golangci-v2.15.0/exhaustive.go
+generated/exhaustive_generated.go  crates/guff-style/tests/testdata/exhaustive/golangci-v2.15.0/exhaustive_generated.go
+cgo/exhaustive_cgo.go              crates/guff-style/tests/testdata/exhaustive/golangci-v2.15.0/exhaustive_cgo.go

@@ -1,0 +1,9 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - embeddedstructfieldcheck
+  settings:
+    embeddedstructfieldcheck:
+      empty-line: false
+      forbid-mutex: true

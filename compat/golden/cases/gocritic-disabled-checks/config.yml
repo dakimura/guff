@@ -1,0 +1,21 @@
+# Golden case: `gocritic.disabled-checks` (COMPAT-HARDENING Phase 4).
+#
+# The plain subtraction: the baseline minus `singleCaseSwitch`.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gocritic
+  settings:
+    gocritic:
+      disabled-checks:
+        - singleCaseSwitch
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

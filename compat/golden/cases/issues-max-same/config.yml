@@ -1,0 +1,29 @@
+# Golden case: `issues.max-same-issues` (COMPAT-HARDENING Phase 4).
+#
+# Same fixture and same linters as `issues-limits`, with one key changed. The
+# processor is `MaxSameIssues`: it counts per `issue.Text` — the whole rendered
+# message, across linters and across files — and keeps the first `limit` of
+# each. So this golden keeps errcheck's first no-name finding, its first
+# `f.Close` one, and the first of the three identical printf findings.
+#
+# A limit of 1 is deliberate: the default is 3, and at 3 the fixture's counts
+# would not separate this processor from `MaxFromLinter`.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+  settings:
+    govet:
+      enable:
+        - printf
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 1
+  uniq-by-line: false
+
+run:
+  timeout: 5m

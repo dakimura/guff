@@ -1,0 +1,24 @@
+# Golden case: `all` minus a category (COMPAT-HARDENING Phase 4).
+#
+# The other half of the glob rule: `-S*` removes the S category and leaves SA,
+# ST and QF alone. Read as a prefix — which is the obvious way to implement it
+# and the wrong one — this list would empty the linter out.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - staticcheck
+  settings:
+    staticcheck:
+      checks:
+        - "all"
+        - "-S*"
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

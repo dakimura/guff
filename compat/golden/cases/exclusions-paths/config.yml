@@ -1,0 +1,64 @@
+# Golden case: `linters.exclusions.paths` and `paths-except`
+# (COMPAT-HARDENING Phase 4).
+#
+# Same fixture and same linters as `exclusions`; the diff between the two
+# goldens is what these two lists remove.
+#
+# Both are set, because their composition is the part that is easy to get
+# wrong. `ExclusionPaths.shouldPassIssue` drops anything matching `paths`
+# *first* and only then, if `paths-except` is non-empty, keeps what matches at
+# least one of its patterns — so `paths-except` is not "the opposite of paths",
+# it is an allowlist that everything else falls out of. Here that leaves cmd
+# and presets: source is dropped by `paths`, and internal and presetdoc are
+# dropped for not being named at all.
+#
+# The patterns are unanchored substrings on purpose. golangci matches them
+# against `issue.RelativePath`, which is relative to the config file's
+# directory (`relative-path-mode` defaults to `cfg`), and in this harness the
+# config lives outside the materialized module — so an anchored pattern would
+# be testing the harness's layout rather than the setting.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - gosec
+    - govet
+    - ineffassign
+    - revive
+    - staticcheck
+  settings:
+    gosec:
+      includes:
+        - G103
+        - G104
+        - G204
+        - G301
+        - G304
+    govet:
+      enable:
+        - printf
+        - unsafeptr
+    revive:
+      rules:
+        - name: exported
+        - name: package-comments
+    staticcheck:
+      checks:
+        - ST1000
+        - SA4011
+  exclusions:
+    paths:
+      - source/
+    paths-except:
+      - cmd/
+      - presets/
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

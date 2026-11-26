@@ -1,0 +1,31 @@
+# Golden case: staticcheck's SA fixtures, every check enabled.
+#
+# SA#### is the correctness family — 96 checks, the largest block in the
+# ledger and the one with the most `never` entries.
+#
+# `checks: [all]` turns on the six ST checks golangci-lint leaves off by
+# default. The point of this tier is to reach checks no other gate executes, and
+# a fixture written for one check routinely trips another — those cross hits are
+# compared here too, which is where precision bugs surface.
+#
+# uniq-by-line must stay off: SA and S checks land on the same line constantly,
+# and collapsing them would hide whichever one guff gets wrong.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - staticcheck
+  settings:
+    staticcheck:
+      checks:
+        - all
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

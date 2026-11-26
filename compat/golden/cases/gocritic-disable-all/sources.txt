@@ -1,0 +1,14 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# COMPAT-HARDENING Phase 4. The seven `gocritic-*` selector cases share this
+# file (`gocritic-settings` is the baseline: no `settings.gocritic` block at
+# all); only their `config.yml` differs. The fixture carries one finding per tag
+# class — see its package comment — because go-critic's default set is *defined*
+# by tags, so nothing short of one finding per class can tell the six selector
+# keys apart.
+#
+# This is deliberately not cases/gocritic, whose 104-checker fixture would make
+# every one of these goldens a different slice of 163 findings.
+
+settings.go   crates/guff-style/tests/testdata/gocritic/settings.go

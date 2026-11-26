@@ -1,0 +1,28 @@
+# Golden case: `revive.enable-all-rules` (COMPAT-HARDENING Phase 4).
+#
+# cases/revive names all 99 rules explicitly and says why: revive v1.15.0 ships
+# more rules than guff implements, so `enable-all-rules` on a 291-finding
+# fixture would be a permanent golden diff of rules that are simply absent.
+#
+# On a three-function fixture it is measurable, because the rules guff does not
+# implement have nothing to report here. The finding it adds over the baseline
+# is `add-constant`, which is off by default in every other case in this repo.
+# If this golden ever grows a line, the fixture has drifted into a rule guff
+# does not have — read it as that, not as noise.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      enable-all-rules: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

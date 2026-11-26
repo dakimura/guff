@@ -1,0 +1,37 @@
+# Golden case: forbidigo's `analyze-types`.
+#
+# With it on, a pattern is matched against the *resolved* text
+# (`expandMatchText`), not the source text: `osu.Lookup` under
+# `osu "os/user"` is matched as `user.Lookup` — the imported package's name,
+# never the local alias — and `u.GroupIds()` on a `*os/user.User` as
+# `user.User.GroupIds`. guff matched the source text, so teleport's six
+# `os/user` findings in `session/host/user/user_forward.go` were missing
+# entirely: that file imports the package as `osu`.
+#
+# The pattern deliberately reads `^user\.` while the fixture never writes
+# `user.` in its source, so a port that matches the source text scores zero
+# here. The last shape is the opposite trap: a local type named `user` whose
+# source text *does* match and whose resolved text does not.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - forbidigo
+  settings:
+    forbidigo:
+      forbid:
+        - pkg: ^os/user$
+          pattern: ^user\.(Lookup|LookupId|Current|User\.GroupIds)$
+          msg: os/user lookup APIs potentially unsafe; use the wrapper instead
+        - pattern: ^fmt\.Println$
+          msg: no Println
+      analyze-types: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

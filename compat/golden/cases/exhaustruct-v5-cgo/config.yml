@@ -1,0 +1,16 @@
+# Golden case: golangci-lint's exhaustruct_v5_cgo.go (default settings), under the settings golangci-lint's own test runs it with.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - exhaustruct_v5
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

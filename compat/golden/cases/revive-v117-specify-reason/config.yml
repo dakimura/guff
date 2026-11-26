@@ -1,0 +1,22 @@
+# Golden case: revive v1.17.0's testdata/revive_disable_directives_specify_disable_reason.go (golangci-lint 2.14.0),
+# with the directives its revive_disable_directives_test.go configures.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      rules:
+        - name: exported
+      directives:
+        - name: specify-disable-reason
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

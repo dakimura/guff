@@ -1,0 +1,41 @@
+# Golden case: godoclint's `max-len` at its default length of 77.
+#
+# 77 is godoc-lint's `default.yaml` value, not a Rust zero — an unset
+# `options.max-len.length` keeps it, and reading the option as 0 would report
+# every line in the tree. The `-length` sibling sets it explicitly.
+#
+# What the fixture separates:
+#
+#  - the limit is in *runes*: 40 CJK characters are 120 bytes and pass, 78 are
+#    reported as 78;
+#  - lines are measured after `go/doc/comment` *reprints* the comment with
+#    code blocks removed, so an over-long indented line is not a finding;
+#  - `^\+kubebuilder:` is pinned by golangci-lint and discards the user's
+#    ignore patterns entirely;
+#  - a repeated over-long line consumes a *different* `ast.Comment` each time,
+#    so both lines are reported rather than the first one twice;
+#  - a `/*…*/` group is one `ast.Comment` whose position is the opening token,
+#    so its over-long lines fall back to the group — and two identical ones
+#    inside it collapse to a single issue, which is why the emitter still
+#    dedups;
+#  - a parent doc is reached through a symbol that has no doc of its own;
+#  - `include-tests` is pinned **true**.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - godoclint
+  settings:
+    godoclint:
+      default: none
+      enable:
+        - max-len
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

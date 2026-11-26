@@ -1,0 +1,17 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+composite/typeparams/lib/lib.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/composite/typeparams/lib/lib.go
+composite/typeparams/typeparams.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/composite/typeparams/typeparams.go
+unusedresult/a/a.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/unusedresult/a/a.go
+unusedresult/typeparams/typeparams.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/unusedresult/typeparams/typeparams.go
+unusedresult/typeparams/userdefs/userdefs.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/unusedresult/typeparams/userdefs/userdefs.go
+tests/a/a_test.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/tests/a/a_test.go
+tests/a/a.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/tests/a/a.go
+tests/a/ax_test.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/tests/a/ax_test.go
+tests/a/go118_test.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/tests/a/go118_test.go
+tests/b_x_test/b_test.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/tests/b_x_test/b_test.go
+tests/b/b.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/tests/b/b.go
+tests/divergent/buf_test.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/tests/divergent/buf_test.go
+tests/divergent/buf.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/tests/divergent/buf.go
+tests/typeparams/typeparams_test.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/tests/typeparams/typeparams_test.go
+tests/typeparams/typeparams.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/tests/typeparams/typeparams.go

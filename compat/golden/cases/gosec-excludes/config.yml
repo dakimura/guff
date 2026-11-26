@@ -1,0 +1,25 @@
+# Golden case: `gosec.excludes` alone (COMPAT-HARDENING Phase 4).
+#
+# The mirror: a blacklist over the *default* set, so this golden is
+# `gosec-default-rules` minus G401 and G101 — and it still contains G501,
+# because excluding the rule that flags the md5 *call* says nothing about the
+# rule that flags the md5 *import*.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gosec
+  settings:
+    gosec:
+      excludes:
+        - G401
+        - G101
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

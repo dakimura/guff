@@ -1,0 +1,30 @@
+# Golden case: `errcheck.exclude-functions` (COMPAT-HARDENING Phase 4).
+#
+# The list is appended to `DefaultExcludedSymbols` (it does not replace it), and
+# each entry is in kisielk's exclude-file format: a fully qualified name whose
+# package is the *import path*, with the receiver in parentheses for methods.
+# So `io.Copy` names a package function and
+# `(example.com/errcheckopts/blank).b` would name nothing — the receiver form is
+# for methods only.
+#
+# Two entries, one matching and one not, so the golden also records what an
+# entry that resolves to no symbol does (upstream: nothing, silently).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+  settings:
+    errcheck:
+      exclude-functions:
+        - io.Copy
+        - example.com/errcheckopts/blank.nosuchfunc
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

@@ -1,0 +1,78 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh errcheck-upstream
+# Produced by running golangci-lint on compat/golden/cases/errcheck-upstream/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+a/main.go:32:10:errcheck::Error return value is not checked
+a/main.go:35:15:errcheck::Error return value is not checked
+a/main.go:86:3:errcheck::Error return value is not checked
+a/main.go:90:3:errcheck::Error return value is not checked
+a/main.go:94:13:errcheck::Error return value is not checked
+a/main.go:98:21:errcheck::Error return value is not checked
+a/main.go:100:26:errcheck::Error return value is not checked
+a/main.go:104:20:errcheck::Error return value is not checked
+a/main.go:106:25:errcheck::Error return value is not checked
+a/main.go:111:5:errcheck::Error return value of `x.a` is not checked
+a/main.go:116:6:errcheck::Error return value of `x2.a` is not checked
+a/main.go:120:6:errcheck::Error return value of `x3.a` is not checked
+a/main.go:124:6:errcheck::Error return value of `x4.a` is not checked
+a/main.go:129:7:errcheck::Error return value of `y.t.a` is not checked
+a/main.go:133:9:errcheck::Error return value is not checked
+a/main.go:159:6:errcheck::Error return value is not checked
+a/main.go:160:9:errcheck::Error return value is not checked
+a/main.go:171:13:errcheck::Error return value of `os.ReadFile` is not checked
+a/main.go:174:19:errcheck::Error return value of `emiw.MakeNilError` is not checked
+a/main.go:177:2:errcheck::Error return value is not checked
+a/main.go:180:2:errcheck::Error return value is not checked
+a/main.go:194:2:errcheck::Error return value is not checked
+a/main.go:195:3:errcheck::Error return value is not checked
+a/main.go:196:2:errcheck::Error return value is not checked
+a/main.go:214:7:errcheck::Error return value is not checked
+blank/main.go:26:3:errcheck::Error return value is not checked
+blank/main.go:27:3:errcheck::Error return value is not checked
+blank/main.go:45:2:errcheck::Error return value is not checked
+blank/main.go:60:2:errcheck::Error return value is not checked
+main/chan.go:10:2:errcheck::Error return value is not checked
+main/chan.go:11:3:errcheck::Error return value is not checked
+main/chan.go:12:2:errcheck::Error return value is not checked
+main/chan.go:13:2:errcheck::Error return value is not checked
+main/chan.go:72:7:errcheck::Error return value is not checked
+main/iter.go:32:2:errcheck::Error return value is not checked
+main/iter.go:36:2:errcheck::Error return value is not checked
+main/iter.go:39:2:errcheck::Error return value is not checked
+main/iter.go:57:2:errcheck::Error return value is not checked
+main/iter.go:67:2:errcheck::Error return value is not checked
+main/main.go:29:10:errcheck::Error return value is not checked
+main/main.go:32:15:errcheck::Error return value is not checked
+main/main.go:80:3:errcheck::Error return value is not checked
+main/main.go:84:3:errcheck::Error return value is not checked
+main/main.go:88:13:errcheck::Error return value is not checked
+main/main.go:92:21:errcheck::Error return value is not checked
+main/main.go:94:26:errcheck::Error return value is not checked
+main/main.go:98:20:errcheck::Error return value is not checked
+main/main.go:100:25:errcheck::Error return value is not checked
+main/main.go:105:5:errcheck::Error return value of `x.a` is not checked
+main/main.go:110:7:errcheck::Error return value of `y.t.a` is not checked
+main/main.go:114:9:errcheck::Error return value is not checked
+main/main.go:140:6:errcheck::Error return value is not checked
+main/main.go:141:9:errcheck::Error return value is not checked
+main/main.go:153:13:errcheck::Error return value of `os.ReadFile` is not checked
+main/main.go:156:19:errcheck::Error return value of `emiw.MakeNilError` is not checked
+main/main3.go:15:14:errcheck::Error return value of `fmt.Fprintln` is not checked
+main/main_test.go:15:3:errcheck::Error return value is not checked
+main/main_test.go:19:3:errcheck::Error return value is not checked
+main/main_test.go:23:13:errcheck::Error return value is not checked
+main/main_test.go:27:21:errcheck::Error return value is not checked
+main/main_test.go:29:26:errcheck::Error return value is not checked
+main/main_test.go:33:20:errcheck::Error return value is not checked
+main/main_test.go:35:25:errcheck::Error return value is not checked
+main/main_test.go:40:5:errcheck::Error return value of `x.a` is not checked
+main/main_test.go:45:7:errcheck::Error return value of `y.t.a` is not checked
+main/main_test.go:49:9:errcheck::Error return value is not checked
+main/main_test.go:75:6:errcheck::Error return value is not checked
+main/main_test.go:76:9:errcheck::Error return value is not checked
+main/main_test.go:86:13:errcheck::Error return value of `os.ReadFile` is not checked
+main/main_test.go:89:19:errcheck::Error return value of `emiw.MakeNilError` is not checked

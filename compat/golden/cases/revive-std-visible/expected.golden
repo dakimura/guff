@@ -1,0 +1,15 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh revive-std-visible
+# Produced by running golangci-lint on compat/golden/cases/revive-std-visible/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+main.go:18:2:revive:warning:unhandled-error: Unhandled error in call to function fmt.Printf
+main.go:19:2:revive:warning:unhandled-error: Unhandled error in call to function errors.New
+main.go:20:2:revive:warning:unhandled-error: Unhandled error in call to function os.Remove
+main.go:22:2:revive:warning:unhandled-error: Unhandled error in call to function local
+main.go:24:2:revive:warning:unhandled-error: Unhandled error in call to function bytes.Buffer.WriteString
+main.go:35:17:revive:warning:unexported-return: exported func StdAlias returns unexported type *rv.stdBuf, which can be annoying to use
+main.go:39:17:revive:warning:unexported-return: exported func OwnAlias returns unexported type *rv.ownAlias, which can be annoying to use

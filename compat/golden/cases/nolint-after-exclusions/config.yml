@@ -1,0 +1,33 @@
+# Golden case: the order of the exclusion processors and the `//nolint` one.
+#
+# Upstream's `Runner.Run` puts `exclude` (the presets and `exclude` patterns)
+# and `exclude_rules` **ahead** of `nolint`, so a finding an exclusion removes
+# never reaches a directive and nolintlint reports the directive as unused.
+#
+# guff marked directives first, with a comment claiming that a directive
+# covering a preset-excluded finding still counts as used. Measured both ways —
+# an `exclusions.rules` entry matching `source: Rollback` (syncthing, five
+# directives) and the `std-error-handling` preset's EXC0001 over
+# `defer f.Close()` — it does not.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - nolintlint
+  exclusions:
+    presets:
+      - std-error-handling
+    rules:
+      - linters: [errcheck]
+        source: Rollback
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

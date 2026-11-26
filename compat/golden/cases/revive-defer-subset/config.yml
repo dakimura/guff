@@ -1,0 +1,33 @@
+# Golden case: `defer` with an argument list naming three sub-checks.
+#
+# This is tailscale's configuration verbatim. Upstream reads the list and runs
+# only those three; guff used to run all six, which put 55 findings on that
+# target — 42 "prefer not to defer inside loops" and 13 "prefer not to defer
+# chains of function calls" — none of which golangci-lint reports.
+#
+# The fixture is the same file `revive-defer-default` reads, so the difference
+# between the two goldens is exactly what the argument list selects.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      enable-all-rules: false
+      rules:
+        - name: defer
+          arguments: [[
+              "immediate-recover",
+              "recover",
+              "return",
+          ]]
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

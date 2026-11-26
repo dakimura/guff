@@ -1,0 +1,6 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# Only checks that are gated *below* Go 1.15 belong here — see config.yml.
+sa3000/bad/bad.go  crates/guff-staticcheck/tests/testdata/sa3000/bad.go
+sa3000/ok/ok.go    crates/guff-staticcheck/tests/testdata/sa3000/ok.go

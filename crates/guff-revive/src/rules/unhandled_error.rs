@@ -1,0 +1,195 @@
+//! `unhandled-error` — warn on unhandled errors returned by function calls.
+
+use guff::ast::{CallExpr, Expr};
+use guff::walk::{self, NodeRef};
+use guff_analysis::Pass;
+use guff_analysis::code::{self, type_with_name};
+use guff_types::arena::TypeData;
+use guff_types::TypeId;
+
+use crate::failure::Failure;
+use crate::util::{revive_can_import, type_of};
+
+pub struct Checker<'a> {
+    pass: &'a Pass<'a>,
+    failures: Vec<Failure>,
+}
+
+impl<'a> Checker<'a> {
+    pub fn try_new(pass: &'a Pass<'a>) -> Option<Self> {
+        if pass.types_info().is_none() {
+            return None;
+        }
+        Some(Self {
+            pass,
+            failures: Vec::new(),
+        })
+    }
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        let NodeRef::ExprStmt(stmt) = n else {
+            return;
+        };
+        let Expr::CallExpr(call) = &stmt.x else {
+            return;
+        };
+        if !callee_is_visible(self.pass, call) {
+            return;
+        }
+        if returns_error(self.pass, call) {
+            let name = func_name(self.pass, call);
+            self.failures.push(Failure {
+                rule: "unhandled-error",
+                pos: call.fun.pos().0 as u32,
+                message: format!("Unhandled error in call to function {name}"),
+                ..Failure::default()
+            });
+        }
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
+pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let Some(mut c) = Checker::try_new(pass) else {
+        return Vec::new();
+    };
+    for file in pass.files() {
+        walk::inspect(NodeRef::File(file), |n| {
+            if let Some(n) = n {
+                c.visit(n);
+            }
+            true
+        });
+    }
+    c.into_failures()
+}
+
+/// Whether revive can see the callee's result type.
+///
+/// Upstream reaches this rule's decision through `w.pkg.TypeOf(fCall)`, and
+/// revive type-checks its own packages with `importer.Default()`. Up to
+/// golangci-lint 2.14 that resolved no import at all on most hosts; 2.15.0
+/// sets `build.Default.GOROOT`, so the standard library resolves and every
+/// other import still fails: the result type of a call into one is invalid
+/// and the rule stays silent. Measured against 2.15.0: `fmt.Printf(…)` and
+/// `errors.New(…)` as statements are reported, `sub.E()` from another package
+/// of the same module is not, and a local `func() error` is.
+///
+/// guff has real type information for the whole program, so it has to put the
+/// boundary back by hand or it reports a superset of what the user sees from
+/// golangci-lint.
+fn callee_is_visible(pass: &Pass<'_>, call: &CallExpr) -> bool {
+    let Some(obj) = code::call_target_object(pass, &call.fun) else {
+        // Calling a func value (a variable, a field, a literal) rather than a
+        // declared function. Its signature came from wherever the value's type
+        // was declared; upstream sees it only when that is this package, which
+        // is also when guff's own resolution above returns None. Keep quiet.
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(pkg) = obj.pkg(&artifacts.objects) else {
+        return false;
+    };
+    // Compare package *identity* for this package, not the import path
+    // string: the Package metadata's path is not always the same spelling
+    // (it is empty under the unit-test harness).
+    Some(pkg) == pass.pkg().types || revive_can_import(pass, artifacts.packages.get(pkg).path())
+}
+
+fn returns_error(pass: &Pass<'_>, call: &CallExpr) -> bool {
+    let Some(typ) = type_of(pass, &Expr::CallExpr(call.clone())) else {
+        return false;
+    };
+    match result_type_errors(pass, typ) {
+        Some(flags) => flags.iter().any(|&b| b),
+        None => false,
+    }
+}
+
+fn result_type_errors(pass: &Pass<'_>, typ: TypeId) -> Option<Vec<bool>> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    match artifacts.types.get(typ) {
+        TypeData::Tuple(t) => Some(
+            (0..t.len())
+                .map(|i| {
+                    t.at(i)
+                        .typ(&artifacts.objects)
+                        .is_some_and(|rt| type_with_name(pass, rt, "error"))
+                })
+                .collect(),
+        ),
+        _ => Some(vec![type_with_name(pass, typ, "error")]),
+    }
+}
+
+/// Upstream `lintUnhandledErrors.funcName`: for a selector call whose selected
+/// object is a `*types.Func`, the object's `FullName()` with `(`, `)` and `*`
+/// removed; for anything else, the callee as `go/printer` writes it — so a
+/// plain call to a package-level function prints as the bare identifier, not
+/// as `example.com/pkg.f`.
+fn func_name(pass: &Pass<'_>, call: &CallExpr) -> String {
+    if let Expr::SelectorExpr(sel) = call.fun.as_ref() {
+        if let (Some(info), Some(artifacts)) =
+            (pass.types_info(), pass.pkg().type_artifacts.as_ref())
+        {
+            if let Some(obj) = info.uses.get(&sel.sel.id).copied() {
+                if matches!(
+                    artifacts.objects.get(obj),
+                    guff_types::arena::ObjectData::Func(_)
+                ) {
+                    return full_name(pass, obj).replace(['(', ')', '*'], "");
+                }
+            }
+        }
+    }
+    let mut buf: Vec<u8> = Vec::new();
+    match guff::printer::fprint(&mut buf, pass.fset(), guff::printer::PrintNode::Expr(&call.fun)) {
+        Ok(()) => String::from_utf8(buf).unwrap_or_default(),
+        Err(_) => String::new(),
+    }
+}
+
+/// `fn.FullName()` as revive computes it. revive type-checks the package
+/// itself, under its *name* (`config.Check(file.Name.Name, …)`), so the
+/// package's own types print as `inst.W[string]`, not with the import path
+/// golangci-lint knows them by. Imported ones keep their path.
+fn full_name(pass: &Pass<'_>, obj: guff_types::ObjectId) -> String {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return String::new();
+    };
+    let this = artifacts.type_pkg;
+    let qualify = |pkg: guff_types::arena::PackageId, packages: &guff_types::arena::PackageArena| {
+        let p = packages.get(pkg);
+        if pkg == this {
+            p.name().to_string()
+        } else {
+            p.path().to_string()
+        }
+    };
+    let name = obj.name(&artifacts.objects);
+    let recv = obj
+        .typ(&artifacts.objects)
+        .and_then(|sig| guff_types::signature::signature_recv(&artifacts.types, sig))
+        .and_then(|r| r.typ(&artifacts.objects));
+    match recv {
+        Some(recv) => {
+            let recv_str = guff_types::typestring::type_string(
+                &artifacts.types,
+                &artifacts.objects,
+                &artifacts.packages,
+                recv,
+                Some(&qualify),
+            );
+            format!("({recv_str}).{name}")
+        }
+        None => match obj.pkg(&artifacts.objects) {
+            Some(pkg) => format!("{}.{name}", qualify(pkg, &artifacts.packages)),
+            None => name.to_string(),
+        },
+    }
+}

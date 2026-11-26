@@ -1,0 +1,23 @@
+# Golden case: predeclared-modes.
+#
+# Both modes, with qualified-name: every object kind v0.3.0 reads (Defs and the Implicits of imports, type-switch clauses and fields), labels, and the multi-level shadow lookup.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - predeclared
+  settings:
+    predeclared:
+      qualified-name: true
+      mode:
+        - shadow
+        - declare
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

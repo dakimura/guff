@@ -1,0 +1,28 @@
+# Golden case: ginkgolinter on upstream's testdata with every opt-in rule on.
+# Upstream's TestFlags turns these on one directory at a time; together they
+# also cover how the rules combine (ForceExpectTo answers false and lets the
+# next rule add its issue to the same report).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - ginkgolinter
+  settings:
+    ginkgolinter:
+      forbid-focus-container: true
+      force-expect-to: true
+      validate-async-intervals: true
+      forbid-spec-pollution: true
+      force-succeed: true
+      force-assertion-description: true
+      force-tonot: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

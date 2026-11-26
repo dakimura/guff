@@ -1,0 +1,399 @@
+//! S1008 — simplify returning boolean expression.
+//!
+//! Port of `honnef.co/go/tools/simple/s1008`.
+
+use std::sync::OnceLock;
+
+use guff::ast::{BinaryExpr, BlockStmt, Comment, CommentGroup, Expr, IfStmt, ReturnStmt, Stmt};
+use guff::commentmap::{new_comment_map, CommentMap};
+use guff::parser::{parse_file, PARSE_COMMENTS};
+use guff::position::FileSet;
+use guff::node_mask;
+use guff::token::Token;
+use guff::walk::NodeRef;
+use guff_analysis::code::predeclared_bool_ident;
+use guff_analysis::passes::inspect;
+use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_constant::{int64_val, Kind};
+
+use crate::render::render_expr;
+
+/// honnef's `pattern.match` unwraps `*ast.ParenExpr` on **both** sides before
+/// comparing, so every metavariable a pattern binds is bound to the unwrapped
+/// node. For S1008 that shows up three times over: `if (b == true)` still
+/// reaches the operator switch (`cond` is the `BinaryExpr`, not the paren),
+/// `return (true)` still matches `(Builtin (Or "true" "false"))`, and the
+/// rendered message says `b == true` rather than `(b == true)`.
+///
+/// This is the exact opposite of the revive rules in the same session, where
+/// upstream uses plain type assertions and guff had to *stop* unwrapping. The
+/// policy is per-linter and has to be read off the upstream matcher each time:
+/// honnef is pattern-based and always unwraps, revive asserts and never does.
+/// (compat/fuzz.py, COMPAT-HARDENING Phase 6.)
+fn unparen(e: &Expr) -> &Expr {
+    let mut cur = e;
+    while let Expr::ParenExpr(p) = cur {
+        cur = &p.x;
+    }
+    cur
+}
+
+fn is_comparison_if_cond(cond: &Expr) -> bool {
+    let Expr::BinaryExpr(BinaryExpr { op, .. }) = cond else {
+        return true;
+    };
+    matches!(
+        *op,
+        Token::EQL | Token::LSS | Token::GTR | Token::NEQ | Token::LEQ | Token::GEQ
+    )
+}
+
+/// The file's comments, with positions in `pass.fset()`.
+///
+/// `file.comments` on the analysis AST is **empty for anything below the file
+/// header**: the shared load runs the parser without `PARSE_COMMENTS`, so a
+/// comment inside a function body is not in the tree at all. S1008 has always
+/// had the `hasComments` guard upstream requires — it just always answered
+/// "no", so every one of these was reported and upstream reports none:
+///
+/// ```go
+/// if 1 == x { return true }
+/// // any comment here
+/// return false
+/// ```
+///
+/// COMPAT-HARDENING §4 records this same root cause diagnosed separately for
+/// buildtag, directive, comments-density, comment-spacings and four others;
+/// this is the ninth, and the first one a fuzzer found rather than a human
+/// (`compat/fuzz.py`, Phase 6).
+///
+/// The reparse gets its own `FileSet`, so every position has to be mapped back
+/// before the comments can be matched against analysis-AST nodes — the comment
+/// map keys on node identity in the tree it was built over, which must be the
+/// analysis tree for `filter` to find anything.
+fn comments_with_positions(pass: &Pass<'_>, file: &guff::ast::File) -> Vec<CommentGroup> {
+    // The analysis FileSet may name a file by full path or by basename
+    // depending on how it was loaded, so compare on the basename of both.
+    let Some(fname) = pass.fset().file(file.pos()).map(|f| f.name().to_string()) else {
+        return Vec::new();
+    };
+    let base = std::path::Path::new(&fname)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(fname.as_str())
+        .to_string();
+    let Some((index, path)) = pass
+        .pkg()
+        .compiled_go_files
+        .iter()
+        .enumerate()
+        .find(|(_, p)| p.file_name().and_then(|s| s.to_str()) == Some(base.as_str()))
+    else {
+        return Vec::new();
+    };
+    // The type-checker already read this file; re-opening it makes the kernel
+    // do the work twice (PERF_TASKS_V3 V1-4).
+    let owned;
+    let src: &[u8] = match pass.pkg().source_bytes(index) {
+        Some(b) => b,
+        None => match std::fs::read(path) {
+            Ok(b) => {
+                owned = b;
+                &owned
+            }
+            Err(_) => return Vec::new(),
+        },
+    };
+    let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+        return Vec::new();
+    };
+    let rfset = FileSet::new();
+    let Ok(rfile) = parse_file(&rfset, name, src, PARSE_COMMENTS) else {
+        return Vec::new();
+    };
+    let Some(to) = pass.fset().file(file.pos()) else {
+        return Vec::new();
+    };
+    // Every comment came out of the same reparse, so it lives in the one file
+    // `rfset` holds — look it up once instead of per comment.
+    let Some(from) = rfset.file(rfile.package) else {
+        return Vec::new();
+    };
+    let mut out = Vec::with_capacity(rfile.comments.len());
+    for group in &rfile.comments {
+        let mut list = Vec::with_capacity(group.list.len());
+        for c in &group.list {
+            let offset = from.offset(c.slash);
+            if offset < 0 || offset > to.size() {
+                continue;
+            }
+            list.push(Comment {
+                slash: to.pos(offset),
+                text: c.text.clone(),
+            });
+        }
+        if !list.is_empty() {
+            out.push(CommentGroup { list });
+        }
+    }
+    out
+}
+
+fn has_comments(cm: &CommentMap<'_>, n: NodeRef<'_>) -> bool {
+    let filtered = cm.filter(n);
+    for group in filtered.comments() {
+        for cmt in &group.list {
+            if cmt.text.contains("//@ diag") {
+                continue;
+            }
+            return true;
+        }
+    }
+    false
+}
+
+fn is_zero_int(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let info = match pass.types_info() {
+        Some(i) => i,
+        None => return false,
+    };
+    let tav = match info.types.get(&expr.id()) {
+        Some(t) => t,
+        None => return false,
+    };
+    let val = match tav.val.as_ref() {
+        Some(v) if v.kind() == Kind::Int => v,
+        _ => return false,
+    };
+    int64_val(val) == (0, true)
+}
+
+fn is_len_cap_copy_call(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Expr::CallExpr(call) = expr else {
+        return false;
+    };
+    guff_analysis::code::is_call_to_any(pass, call, &["len", "cap", "copy"])
+}
+
+fn negate(pass: &Pass<'_>, expr: &Expr) -> Expr {
+    match expr {
+        Expr::BinaryExpr(b) => {
+            let mut out = b.clone();
+            out.op = match b.op {
+                Token::EQL => Token::NEQ,
+                Token::LSS => Token::GEQ,
+                Token::GTR => {
+                    if is_len_cap_copy_call(pass, &b.x) && is_zero_int(pass, &b.y) {
+                        Token::EQL
+                    } else {
+                        Token::LEQ
+                    }
+                }
+                Token::NEQ => Token::EQL,
+                Token::LEQ => Token::GTR,
+                Token::GEQ => Token::LSS,
+                _ => {
+                    return Expr::UnaryExpr(guff::ast::UnaryExpr {
+                        op_pos: Default::default(),
+                        op: Token::NOT,
+                        x: Box::new(Expr::ParenExpr(guff::ast::ParenExpr {
+                            lparen: Default::default(),
+                            x: Box::new(expr.clone()),
+                            rparen: Default::default(),
+                            id: 0,
+                        })),
+                        id: 0,
+                    });
+                }
+            };
+            Expr::BinaryExpr(out)
+        }
+        Expr::Ident(_) | Expr::CallExpr(_) | Expr::IndexExpr(_) | Expr::StarExpr(_) => {
+            Expr::UnaryExpr(guff::ast::UnaryExpr {
+                op_pos: Default::default(),
+                op: Token::NOT,
+                x: Box::new(expr.clone()),
+                id: 0,
+            })
+        }
+        Expr::UnaryExpr(u) if u.op == Token::NOT => *u.x.clone(),
+        other => Expr::UnaryExpr(guff::ast::UnaryExpr {
+            op_pos: Default::default(),
+            op: Token::NOT,
+            x: Box::new(Expr::ParenExpr(guff::ast::ParenExpr {
+                lparen: Default::default(),
+                x: Box::new(other.clone()),
+                rparen: Default::default(),
+                id: 0,
+            })),
+            id: 0,
+        }),
+    }
+}
+
+/// `cm` is `None` during the structural pre-pass, which asks only whether this
+/// file contains the shape at all — see [`run`]. Everything above the comment
+/// test is pure AST and answers identically either way.
+fn check_if_return(
+    pass: &Pass<'_>,
+    if_: &IfStmt,
+    ret2: &ReturnStmt,
+    cm: Option<&CommentMap<'_>>,
+) -> Option<String> {
+    if if_.init.is_some() || if_.else_.is_some() {
+        return None;
+    }
+    if if_.body.list.len() != 1 {
+        return None;
+    }
+    let Stmt::ReturnStmt(ret1) = &if_.body.list[0] else {
+        return None;
+    };
+    if ret1.results.len() != 1 || ret2.results.len() != 1 {
+        return None;
+    }
+    let Expr::Ident(id1) = unparen(&ret1.results[0]) else {
+        return None;
+    };
+    let Expr::Ident(id2) = unparen(&ret2.results[0]) else {
+        return None;
+    };
+    let val1 = predeclared_bool_ident(pass, id1)?;
+    let val2 = predeclared_bool_ident(pass, id2)?;
+    if val1 == val2 {
+        return None;
+    }
+    if !is_comparison_if_cond(unparen(&if_.cond)) {
+        return None;
+    }
+
+    if let Some(cm) = cm {
+        let n1 = NodeRef::IfStmt(if_);
+        let n2 = NodeRef::ReturnStmt(ret2);
+        if has_comments(cm, n1) || has_comments(cm, n2) {
+            return None;
+        }
+    }
+
+    let orig_cond = unparen(&if_.cond);
+    let cond = if val1 {
+        orig_cond.clone()
+    } else {
+        negate(pass, orig_cond)
+    };
+    let simplified = render_expr(&cond);
+    let orig = render_expr(orig_cond);
+    Some(format!(
+        "should use 'return {simplified}' instead of 'if {orig} {{ return {} }}; return {}'",
+        id1.name, id2.name
+    ))
+}
+
+fn check_block(
+    pass: &Pass<'_>,
+    block: &BlockStmt,
+    cm: Option<&CommentMap<'_>>,
+) -> Option<(u32, String)> {
+    let l = block.list.len();
+    if l < 2 {
+        return None;
+    }
+    if l >= 3 && matches!(block.list[l - 3], Stmt::IfStmt(_)) {
+        return None;
+    }
+    let Stmt::IfStmt(if_) = &block.list[l - 2] else {
+        return None;
+    };
+    let Stmt::ReturnStmt(ret2) = &block.list[l - 1] else {
+        return None;
+    };
+    check_if_return(pass, if_, ret2, cm)
+        .map(|msg| (if_.if_.0 as u32, msg))
+}
+
+fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
+    let inspect = pass
+        .result_of::<inspect::InspectResult>(inspect::analyzer())
+        .ok_or_else(|| "S1008 requires inspect analyzer".to_string())?
+        .clone();
+
+    let mut pending: Vec<(u32, String)> = Vec::new();
+    {
+        let files = pass.files();
+        for file in files {
+            // `report.FilterGenerated`: honnef's whole-file scan, not the
+            // go/ast header rule (see `code::is_generated_file_at`).
+            if guff_analysis::code::is_generated_file_at(pass, file.package.0 as u32) {
+                continue;
+            }
+            // The comment map below costs a disk read, a full `PARSE_COMMENTS`
+            // reparse and a whole-file walk — more than every other S1008 check
+            // put together, and it used to be paid for every file in the
+            // package. Almost no file contains the `if cond { return true };
+            // return false` shape, so ask the cheap question first and build
+            // nothing when the answer is no. Same shape as SA4006's
+            // `OnceCell<IdentIndex>`, spelled as two walks because a
+            // `CommentMap` borrows the reparse it was built over.
+            let mut has_candidate = false;
+            inspect.preorder_typed(node_mask!(BlockStmt), std::slice::from_ref(file), |n| {
+                if has_candidate {
+                    return;
+                }
+                let NodeRef::BlockStmt(block) = n else {
+                    return;
+                };
+                has_candidate = check_block(pass, block, None).is_some();
+            });
+            if !has_candidate {
+                continue;
+            }
+            let reparsed = comments_with_positions(pass, file);
+            let cm = new_comment_map(
+                pass.fset(),
+                guff::walk::NodeRef::File(file),
+                &reparsed,
+            );
+            inspect.preorder_typed(node_mask!(BlockStmt), std::slice::from_ref(file), |n| {
+                let NodeRef::BlockStmt(block) = n else {
+                    return;
+                };
+                if let Some(diag) = check_block(pass, block, Some(&cm)) {
+                    pending.push(diag);
+                }
+            });
+        }
+    }
+    for (pos, message) in pending {
+        pass.reportf(pos, message);
+    }
+    Ok(None)
+}
+
+fn s1008_analyzer_impl() -> Analyzer {
+    Analyzer {
+        name: "S1008",
+        doc: "simplify returning boolean expression",
+        url: "https://staticcheck.dev/docs/checks/#S1008",
+        run: run as RunFn,
+        run_despite_errors: false,
+        requires: vec![inspect::analyzer()],
+        fact_types: vec![],
+    }
+}
+
+/// S1008 analyzer singleton.
+pub fn analyzer() -> &'static Analyzer {
+    static A: OnceLock<Analyzer> = OnceLock::new();
+    A.get_or_init(s1008_analyzer_impl)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use guff_analysis::validate;
+
+    #[test]
+    fn s1008_validates() {
+        assert!(validate(&[analyzer()]).is_ok());
+    }
+}

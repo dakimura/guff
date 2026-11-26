@@ -1,0 +1,27 @@
+# Golden case: `run.tests` left at its default (COMPAT-HARDENING Phase 4).
+#
+# The default is **true**: `_test.go` files are linted unless a config says
+# otherwise, and the loader asks go/packages for the test variants of every
+# package. This case spells out no `tests` key at all, so the golden is the
+# default's behaviour rather than an assertion about the key.
+#
+# Read it against `run-tests-off`, which is the same config with one line added.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+  settings:
+    govet:
+      enable:
+        - printf
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

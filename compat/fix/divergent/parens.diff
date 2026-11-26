@@ -1,0 +1,108 @@
+# A case where guff writes one hunk more than golangci-lint does.
+#
+# Hand-written. Nothing in regen.sh creates a file here, and the `pending`
+# recorder now refuses this direction per file and per line — which is why this
+# case is here at all. The hunk entered pending/ in #124 — the same commit
+# that built divergent/ and wrote this defect down — because the refusal only
+# asked whether upstream writes *anything* in the case, upstream writes seven
+# hunks here, and guff's eighth walked past a guard aimed straight at it.
+#
+# upstream-writes: 64 line(s), sha256:61fe4ed2b48805dd
+#
+# why: the extra hunk is revive's `errorf` rule, and it is the same upstream
+# defect already written down in divergent/revive.diff — pkg/golinters/revive/
+# revive.go looks the file up with `Fset.File(token.Pos(failure.Position.Start.
+# Offset))`, a byte offset handed to a lookup that wants a FileSet-wide
+# position, and drops the fix unless the file it lands in is the failure's own.
+# What is new here is how little it takes to flip: measured with golangci-lint
+# 2.12.2 on this exact fixture, `revive` alone writes
+# `return fmt.Errorf("bad %s", name)` at line 151, and `revive` plus *any* one
+# of govet, staticcheck, or errorlint writes nothing there. The second linter
+# widens the go/packages load mode, dependency sources enter the shared FileSet
+# ahead of parens.go, and offset 4693 stops landing in a 6241-byte file that
+# used to start at base 1. The nine revive-* cases in expected/ keep their fix
+# only because each of them enables revive and nothing else.
+#
+# So this case and revive-settings.diff disagree about the same rule on the
+# same code for no reason either tool states, and guff cannot follow both. It
+# writes the fix revive itself prescribes, which is what the nine expected
+# cases already pin. The findings are identical either way (golden is 193/193),
+# the tree still compiles, and the cost of the divergence is that `guff --fix`
+# improves one line `golangci-lint --fix` skips by accident.
+#
+# Fails if guff's bytes move, and fails if upstream's own output moves — the
+# `# upstream-writes:` digest above is what makes the second one detectable now
+# that "upstream writes nothing" is no longer the test.
+--- a/parens/parens.go
++++ b/parens/parens.go
+@@ -46,14 +46,12 @@
+ 
+ // The control: reported.
+ func AssignPlain(x int) int {
+-	x = x
+ 	return x
+ }
+ 
+ // Reported, and the operand is named with the rendered source (`s.f`), not with
+ // an identifier — guff used to print `_` for anything that was not a bare name.
+ func AssignSelector(s *S) {
+-	s.f = s.f
+ }
+ 
+ // Silent: upstream requires NoEffects on both sides, and deleting this
+@@ -76,7 +74,7 @@
+ // honnef's pattern matcher unwraps ParenExpr, so both of these still match and
+ // the message renders the *unwrapped* condition.
+ func S1008ParenCond(b bool) bool {
+-	if (b == true) {
++	if b == true {
+ 		return true
+ 	}
+ 	return false
+@@ -131,9 +129,10 @@
+ 
+ // The control: reported.
+ func QF1003Plain(x int) string {
+-	if x == 1 {
++	switch x {
++	case 1:
+ 		return "one"
+-	} else if x == 2 {
++	case 2:
+ 		return "two"
+ 	}
+ 	return "other"
+@@ -148,7 +147,7 @@
+ 
+ // The control: reported.
+ func ErrorfPlain(name string) error {
+-	return errors.New(fmt.Sprintf("bad %s", name))
++	return fmt.Errorf("bad %s", name)
+ }
+ 
+ // --- revive range-val-address -----------------------------------------------
+@@ -179,13 +178,13 @@
+ // strips ParenExpr from both sides *before* any binding is made, so the switch
+ // never sees one and this is reported.
+ func SA1006Paren(s string) {
+-	fmt.Printf((s))
++	fmt.Print((s))
+ }
+ 
+ // The control: reported too. Both must fire — this pair exists to stop a fix
+ // that silences the parenthesized form from looking correct.
+ func SA1006Plain(s string) {
+-	fmt.Printf(s)
++	fmt.Print(s)
+ }
+ 
+ // --- errorlint --------------------------------------------------------------
+@@ -193,7 +192,7 @@
+ // errorlint's `isNil` is a bare `ex.(*ast.Ident)` assertion, so `(nil)` is not
+ // a nil comparison to it and the comparison is reported like any other.
+ func ErrorlintParenNil(err error) bool {
+-	return err != (nil)
++	return !errors.Is(err, (nil))
+ }
+ 
+ // The control: silent, because this one *is* a nil comparison.

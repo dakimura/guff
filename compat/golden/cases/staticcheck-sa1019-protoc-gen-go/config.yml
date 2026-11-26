@@ -1,0 +1,25 @@
+# Golden case: SA1019 lets protoc-gen-go output import
+# github.com/golang/protobuf/proto.
+#
+# Upstream's import check returns when the importing file's generator is
+# protoc-gen-go (`code.Generator(pass, spec.Path.Pos()) ==
+# generated.ProtocGenGo`). Only that generator: the mockgen file and the
+# plain file are reported. `exclusions.generated: disable` keeps golangci's own
+# generated-file filter from hiding the two generated files.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - staticcheck
+  settings:
+    staticcheck:
+      checks:
+        - SA1019
+  exclusions:
+    generated: disable
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false

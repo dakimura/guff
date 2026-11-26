@@ -1,0 +1,13 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - gosec
+  settings:
+    gosec:
+      excludes:
+        - G101
+        -
+        - G404
+      confidence: medium
+      includes:

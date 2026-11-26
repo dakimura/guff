@@ -1,0 +1,356 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh gosec
+# Produced by running golangci-lint on compat/golden/cases/gosec/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+bad/bad.go:5:2:gosec:medium:G502: Blocklisted import crypto/des: weak cryptographic primitive
+bad/bad.go:6:2:gosec:medium:G501: Blocklisted import crypto/md5: weak cryptographic primitive
+bad/bad.go:7:2:gosec:medium:G503: Blocklisted import crypto/rc4: weak cryptographic primitive
+bad/bad.go:9:2:gosec:medium:G505: Blocklisted import crypto/sha1: weak cryptographic primitive
+bad/bad.go:17:2:gosec:medium:G504: Blocklisted import net/http/cgi: Go versions < 1.6.3 are vulnerable to Httpoxy attack: (CVE-2016-5386)
+bad/bad.go:18:2:gosec:high:G108: Profiling endpoint is automatically exposed on /debug/pprof
+bad/bad.go:26:2:gosec:medium:G506: Blocklisted import golang.org/x/crypto/md4: deprecated and weak cryptographic primitive
+bad/bad.go:27:2:gosec:medium:G507: Blocklisted import golang.org/x/crypto/ripemd160: deprecated and weak cryptographic primitive
+bad/bad.go:40:6:gosec:medium:G401: Use of weak cryptographic primitive
+bad/bad.go:41:6:gosec:medium:G401: Use of weak cryptographic primitive
+bad/bad.go:42:6:gosec:high:G404: Use of weak random number generator (math/rand or math/rand/v2 instead of crypto/rand)
+bad/bad.go:43:9:gosec:medium:G405: Use of weak cryptographic primitive
+bad/bad.go:44:9:gosec:medium:G405: Use of weak cryptographic primitive
+bad/bad.go:45:6:gosec:medium:G406: Use of deprecated weak cryptographic primitive
+bad/bad.go:46:6:gosec:medium:G406: Use of deprecated weak cryptographic primitive
+bad/bad.go:48:6:gosec:low:G103: Use of unsafe calls should be audited
+bad/bad.go:51:6:gosec:medium:G106: Use of ssh InsecureIgnoreHostKey should be audited
+bad/bad.go:52:6:gosec:medium:G114: Use of net/http serve function that has no support for setting timeouts
+bad/bad.go:53:9:gosec:medium:G102: Binds to all network interfaces
+bad/bad.go:54:9:gosec:medium:G102: Binds to all network interfaces
+bad/bad.go:61:6:gosec:medium:G204: Subprocess launched with variable
+bad/bad.go:61:18:gosec:high:G702: Command injection via taint analysis
+bad/bad.go:62:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
+bad/bad.go:62:18:gosec:high:G702: Command injection via taint analysis
+bad/bad.go:64:2:gosec:high:G101: Potential hardcoded credentials
+bad/bad.go:66:2:gosec:high:G101: Potential hardcoded credentials: AWS API Key
+bad/bad.go:69:2:gosec:low:G104: Errors unhandled
+bad/bad.go:72:6:gosec:medium:G301: Expect directory permissions to be 0750 or less
+bad/bad.go:73:6:gosec:medium:G301: Expect directory permissions to be 0750 or less
+bad/bad.go:74:9:gosec:medium:G302: Expect file permissions to be 0600 or less
+bad/bad.go:75:6:gosec:medium:G302: Expect file permissions to be 0600 or less
+bad/bad.go:76:6:gosec:medium:G306: Expect WriteFile permissions to be 0600 or less
+bad/bad.go:77:9:gosec:medium:G403: RSA keys should be at least 2048 bits
+bad/bad.go:78:37:gosec:high:G402: TLS InsecureSkipVerify set to true.
+bad/bad.go:79:6:gosec:medium:G111: Potential directory traversal
+bad/bad.go:81:9:gosec:medium:G110: Potential DoS vulnerability via decompression bomb
+bad/bad.go:82:9:gosec:medium:G110: Potential DoS vulnerability via decompression bomb
+bad/bad.go:84:9:gosec:medium:G303: File creation in shared tmp directory without using ioutil.Tempfile
+bad/bad.go:85:6:gosec:medium:G303: File creation in shared tmp directory without using ioutil.Tempfile
+bad/bad.go:85:6:gosec:medium:G306: Expect WriteFile permissions to be 0600 or less
+bad/bad.go:86:6:gosec:medium:G303: File creation in shared tmp directory without using ioutil.Tempfile
+bad/bad.go:88:9:gosec:medium:G107: Potential HTTP request made with variable url
+bad/bad.go:89:8:gosec:medium:G112: Potential Slowloris Attack because ReadHeaderTimeout is not configured in the http.Server
+bad/bad.go:90:18:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+bad/bad.go:93:6:gosec:high:G109: Potential Integer overflow made by strconv.Atoi result conversion to int16/32
+bad/bad.go:93:11:gosec:high:G115: integer overflow conversion int -> int32
+bad/bad.go:96:6:gosec:medium:G203: The used method does not auto-escape HTML. This can potentially lead to 'Cross-site Scripting' vulnerabilities, in case the attacker controls the input.
+bad/bad.go:99:19:gosec:high:G122: Filesystem operation in filepath.Walk/WalkDir callback uses race-prone path; consider root-scoped APIs (e.g. os.Root) to prevent symlink TOCTOU traversal
+bad/bad.go:108:20:gosec:high:G122: Filesystem operation in filepath.Walk/WalkDir callback uses race-prone path; consider root-scoped APIs (e.g. os.Root) to prevent symlink TOCTOU traversal
+bad/bad.go:117:19:gosec:high:G122: Filesystem operation in filepath.Walk/WalkDir callback uses race-prone path; consider root-scoped APIs (e.g. os.Root) to prevent symlink TOCTOU traversal
+bad/bad.go:121:10:gosec:medium:G304: Potential file inclusion via variable
+bad/bad.go:121:21:gosec:high:G703: Path traversal via taint analysis
+bad/bad.go:131:20:gosec:medium:G202: SQL string concatenation
+bad/bad.go:137:2:gosec:low:G104: Errors unhandled
+bad/bad.go:137:10:gosec:medium:G202: SQL string concatenation
+bad/bad.go:145:22:gosec:medium:G202: SQL string concatenation
+bad/bad.go:156:14:gosec:medium:G304: Potential file inclusion via variable
+bad/bad.go:161:21:gosec:high:G703: Path traversal via taint analysis
+bad/bad.go:172:15:gosec:medium:G304: Potential file inclusion via variable
+bad/bad.go:179:21:gosec:high:G703: Path traversal via taint analysis
+directiveonly/directive_only.go:21:2:gosec:high:G101: Potential hardcoded credentials
+directiveonly/directive_only.go:38:2:gosec:high:G101: Potential hardcoded credentials
+dotio/dotimport_io.go:26:14:gosec:high:G115: integer overflow conversion int -> int32
+dotio/dotimport_io.go:33:9:gosec:high:G109: Potential Integer overflow made by strconv.Atoi result conversion to int16/32
+dotio/dotimport_io.go:33:14:gosec:high:G115: integer overflow conversion int -> int32
+dotio/dotimport_io.go:46:9:gosec:medium:G110: Potential DoS vulnerability via decompression bomb
+dotnet/dotimport_net.go:17:55:gosec:medium:G102: Binds to all network interfaces
+dotos/dotimport_os.go:31:57:gosec:medium:G304: Potential file inclusion via variable
+dotos/dotimport_os.go:33:59:gosec:medium:G304: Potential file inclusion via variable
+dotos/dotimport_os.go:35:61:gosec:medium:G304: Potential file inclusion via variable
+dotos/dotimport_os.go:37:59:gosec:medium:G304: Potential file inclusion via variable
+dotos/dotimport_os.go:43:60:gosec:medium:G304: Potential file inclusion via variable
+dotos/dotimport_os.go:47:9:gosec:medium:G303: File creation in shared tmp directory without using ioutil.Tempfile
+dotos/dotimport_os.go:47:9:gosec:medium:G304: Potential file inclusion via variable
+entropy/entropy.go:12:2:gosec:high:G101: Potential hardcoded credentials
+entropy/entropy.go:13:2:gosec:high:G101: Potential hardcoded credentials
+entropy/entropy.go:14:2:gosec:high:G101: Potential hardcoded credentials
+entropy/entropy.go:15:2:gosec:high:G101: Potential hardcoded credentials
+g102/g102.go:29:47:gosec:medium:G102: Binds to all network interfaces
+g102/g102.go:35:49:gosec:medium:G102: Binds to all network interfaces
+g102/g102.go:38:46:gosec:medium:G102: Binds to all network interfaces
+g102/g102.go:53:9:gosec:medium:G102: Binds to all network interfaces
+g102/g102.go:57:64:gosec:medium:G102: Binds to all network interfaces
+g115/g115.go:24:39:gosec:high:G115: integer overflow conversion int -> int32
+g115/g115.go:26:45:gosec:high:G115: integer overflow conversion int64 -> int32
+g115/g115.go:28:44:gosec:high:G115: integer overflow conversion int -> uint8
+g115/g115.go:30:49:gosec:high:G115: integer overflow conversion uint64 -> int
+g115/g115.go:32:50:gosec:high:G115: integer overflow conversion int -> int32
+g115/g115.go:34:49:gosec:high:G115: integer overflow conversion int -> uint8
+g115/g115.go:41:14:gosec:high:G115: integer overflow conversion int -> int32
+g115/g115.go:50:14:gosec:high:G115: integer overflow conversion int -> uint8
+g115/g115.go:144:14:gosec:high:G115: integer overflow conversion int -> uint8
+g115/g115.go:155:45:gosec:high:G115: integer overflow conversion int -> uint32
+g115/g115.go:159:43:gosec:high:G115: integer overflow conversion int -> uint8
+g115/g115.go:163:44:gosec:high:G115: integer overflow conversion int -> int32
+g115/g115.go:194:14:gosec:high:G115: integer overflow conversion int64 -> int32
+g115/g115.go:214:53:gosec:high:G115: integer overflow conversion int -> uint32
+g115/g115.go:235:15:gosec:high:G115: integer overflow conversion uint64 -> int64
+g115/g115.go:242:15:gosec:high:G115: integer overflow conversion uint64 -> int64
+g115/g115.go:272:34:gosec:high:G115: integer overflow conversion uint64 -> int64
+g115/g115.go:284:14:gosec:high:G115: integer overflow conversion uint64 -> int64
+g115c/g115_cache.go:13:40:gosec:high:G115: integer overflow conversion int32 -> byte
+g115c/g115_cache.go:17:11:gosec:high:G115: integer overflow conversion int32 -> byte
+g115c/g115_cache.go:22:38:gosec:high:G115: integer overflow conversion int32 -> byte
+g115c/g115_cache.go:25:51:gosec:high:G115: integer overflow conversion uint8 -> int8
+g115c/g115_cache.go:28:43:gosec:high:G115: integer overflow conversion uint8 -> int8
+g115c/g115_cache.go:30:53:gosec:high:G115: integer overflow conversion uint8 -> int8
+g115c/g115_cache.go:33:41:gosec:high:G115: integer overflow conversion int64 -> byte
+g115c/g115_cache.go:36:44:gosec:high:G115: integer overflow conversion int64 -> byte
+g115c/g115_cache.go:43:34:gosec:high:G115: integer overflow conversion uint16 -> int8
+g115c/g115_cache.go:46:41:gosec:high:G115: integer overflow conversion uint16 -> int8
+g115f/g115_files_a.go:7:37:gosec:high:G115: integer overflow conversion byte -> int8
+g115f/g115_files_b.go:3:39:gosec:high:G115: integer overflow conversion byte -> int8
+g115n/g115_names.go:23:11:gosec:high:G115: integer overflow conversion rune -> byte
+g115n/g115_names.go:28:44:gosec:high:G115: integer overflow conversion rune -> byte
+g115n/g115_names.go:33:11:gosec:high:G115: integer overflow conversion rune -> byte
+g115n/g115_names.go:41:11:gosec:high:G115: integer overflow conversion rune -> byte
+g115n/g115_names.go:49:11:gosec:high:G115: integer overflow conversion rune -> byte
+g115n/g115_names.go:54:42:gosec:high:G115: integer overflow conversion rune -> byte
+g115n/g115_names.go:59:11:gosec:high:G115: integer overflow conversion rune -> byte
+g115n/g115_names.go:67:12:gosec:high:G115: integer overflow conversion rune -> byte
+g115n/g115_names.go:80:43:gosec:high:G115: integer overflow conversion uint8 -> int8
+g117/g117.go:25:29:gosec:medium:G117: Marshaled struct field "Password" (JSON key "password") matches secret pattern
+g117/g117.go:28:35:gosec:medium:G117: Marshaled struct field "Password" (JSON key "password") matches secret pattern
+g117/g117.go:31:40:gosec:medium:G117: Marshaled struct field "Password" (JSON key "password") matches secret pattern
+g117/g117.go:41:36:gosec:medium:G117: Marshaled struct field "Secret" (JSON key "harmless") matches secret pattern
+g117/g117.go:96:25:gosec:medium:G117: Marshaled struct field "Password" (JSON key "password") matches secret pattern
+g117/g117.go:99:25:gosec:medium:G117: Marshaled struct field "Password" (JSON key "password") matches secret pattern
+g117/g117.go:102:23:gosec:medium:G117: Marshaled struct field "Password" (JSON key "password") matches secret pattern
+g117/g117.go:157:28:gosec:medium:G117: Marshaled struct field "Password" (XML key "Password") matches secret pattern
+g117/g117.go:160:29:gosec:medium:G117: Marshaled struct field "Password" (YAML key "Password") matches secret pattern
+g117/g117.go:164:40:gosec:medium:G117: Marshaled struct field "Password" (TOML key "Password") matches secret pattern
+g117/g117.go:173:28:gosec:medium:G117: Marshaled struct field "Password" (JSON key "Password") matches secret pattern
+g117/g117.go:180:29:gosec:medium:G117: Marshaled struct field "Password" (JSON key "pass") matches secret pattern
+g117/g117.go:187:30:gosec:medium:G117: Marshaled struct field "Password" (JSON key "Password") matches secret pattern
+g117/g117.go:190:37:gosec:medium:G117: Marshaled struct field "Password" (JSON key "password") matches secret pattern
+g118/g118.go:22:33:gosec:medium:G118: context cancellation function returned by WithCancel/WithTimeout/WithDeadline is not called
+g118/g118.go:33:28:gosec:medium:G118: context cancellation function returned by WithCancel/WithTimeout/WithDeadline is not called
+g118/g118.go:38:34:gosec:medium:G118: context cancellation function returned by WithCancel/WithTimeout/WithDeadline is not called
+g118/g118.go:61:33:gosec:medium:G118: context cancellation function returned by WithCancel/WithTimeout/WithDeadline is not called
+g118/g118.go:136:33:gosec:medium:G118: context cancellation function returned by WithCancel/WithTimeout/WithDeadline is not called
+g118/g118.go:147:2:gosec:high:G118: Goroutine uses context.Background/TODO while request-scoped context is available
+g118/g118.go:151:2:gosec:high:G118: Goroutine uses context.Background/TODO while request-scoped context is available
+g118/g118.go:176:13:gosec:high:G118: Long-running loop performs calls without a ctx.Done() cancellation guard
+g119/g119.go:30:7:gosec:high:G119: Unsafe redirect policy may propagate sensitive headers across origins
+g119/g119.go:39:6:gosec:high:G119: Unsafe redirect policy may propagate sensitive headers across origins
+g119/g119.go:47:6:gosec:high:G119: Unsafe redirect policy may propagate sensitive headers across origins
+g119/g119.go:54:6:gosec:high:G119: Unsafe redirect policy may propagate sensitive headers across origins
+g119/g119.go:59:6:gosec:high:G119: Unsafe redirect policy may propagate sensitive headers across origins
+g119/g119.go:65:16:gosec:high:G119: Sensitive headers should not be re-added in redirect policy callbacks
+g119/g119.go:66:16:gosec:high:G119: Sensitive headers should not be re-added in redirect policy callbacks
+g119/g119.go:67:16:gosec:high:G119: Sensitive headers should not be re-added in redirect policy callbacks
+g119/g119.go:68:16:gosec:high:G119: Sensitive headers should not be re-added in redirect policy callbacks
+g119/g119.go:78:7:gosec:high:G119: Sensitive headers should not be re-added in redirect policy callbacks
+g122/g122.go:21:10:gosec:medium:G304: Potential file inclusion via variable
+g122/g122.go:21:21:gosec:high:G122: Filesystem operation in filepath.Walk/WalkDir callback uses race-prone path; consider root-scoped APIs (e.g. os.Root) to prevent symlink TOCTOU traversal
+g122/g122.go:30:9:gosec:medium:G304: Potential file inclusion via variable
+g122/g122.go:30:20:gosec:high:G122: Filesystem operation in filepath.Walk/WalkDir callback uses race-prone path; consider root-scoped APIs (e.g. os.Root) to prevent symlink TOCTOU traversal
+g122/g122.go:51:9:gosec:medium:G304: Potential file inclusion via variable
+g122/g122.go:51:20:gosec:high:G122: Filesystem operation in filepath.Walk/WalkDir callback uses race-prone path; consider root-scoped APIs (e.g. os.Root) to prevent symlink TOCTOU traversal
+g122/g122.go:76:9:gosec:medium:G304: Potential file inclusion via variable
+g122/g122.go:90:9:gosec:medium:G304: Potential file inclusion via variable
+g122/g122.go:105:9:gosec:medium:G304: Potential file inclusion via variable
+g122/g122.go:125:10:gosec:medium:G304: Potential file inclusion via variable
+g122/g122.go:125:21:gosec:high:G122: Filesystem operation in filepath.Walk/WalkDir callback uses race-prone path; consider root-scoped APIs (e.g. os.Root) to prevent symlink TOCTOU traversal
+g123/g123.go:26:24:gosec:high:G123: tls.Config uses VerifyPeerCertificate while session resumption may remain enabled and VerifyConnection is not set; resumed sessions can bypass custom certificate checks
+g123/g123.go:46:4:gosec:high:G123: tls.Config uses VerifyPeerCertificate while session resumption may remain enabled and VerifyConnection is not set; resumed sessions can bypass custom certificate checks
+g123/g123.go:70:21:gosec:high:G123: tls.Config uses VerifyPeerCertificate while session resumption may remain enabled and VerifyConnection is not set; resumed sessions can bypass custom certificate checks
+g123/g123.go:71:46:gosec:high:G123: tls.Config uses VerifyPeerCertificate while session resumption may remain enabled and VerifyConnection is not set; resumed sessions can bypass custom certificate checks
+g123/g123.go:82:8:gosec:high:G123: tls.Config uses VerifyPeerCertificate while session resumption may remain enabled and VerifyConnection is not set; resumed sessions can bypass custom certificate checks
+g124e/g124_elided.go:25:58:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:27:54:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:29:75:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:31:78:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:33:55:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:37:69:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:39:71:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:42:38:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:45:52:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:47:71:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:49:64:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:51:68:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:54:56:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:57:71:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:60:41:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:64:19:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:70:37:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:74:54:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:77:65:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:79:67:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:81:56:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g124e/g124_elided.go:94:24:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+g201/g201.go:50:7:gosec:medium:G201: SQL string formatting
+g201/g201.go:62:7:gosec:medium:G201: SQL string formatting
+g201/g201.go:72:7:gosec:medium:G201: SQL string formatting
+g201/g201.go:73:2:gosec:low:G104: Errors unhandled
+g201/g201.go:81:7:gosec:medium:G201: SQL string formatting
+g201/g201.go:91:7:gosec:medium:G201: SQL string formatting
+g201/g201.go:97:7:gosec:medium:G201: SQL string formatting
+g201/g201.go:105:7:gosec:medium:G201: SQL string formatting
+g201/g201.go:112:7:gosec:medium:G201: SQL string formatting
+g201/g201.go:121:8:gosec:medium:G201: SQL string formatting
+g202/g202.go:34:7:gosec:medium:G202: SQL string concatenation
+g202/g202.go:42:7:gosec:medium:G202: SQL string concatenation
+g202/g202.go:49:7:gosec:medium:G202: SQL string concatenation
+g202/g202.go:57:7:gosec:medium:G202: SQL string concatenation
+g202/g202.go:64:7:gosec:medium:G202: SQL string concatenation
+g202/g202.go:74:2:gosec:medium:G202: SQL string concatenation
+g202/g202.go:82:2:gosec:medium:G202: SQL string concatenation
+g202b/g202_builder.go:30:30:gosec:medium:G202: SQL string concatenation
+g202b/g202_builder.go:43:30:gosec:medium:G202: SQL string concatenation
+g202b/g202_builder.go:51:30:gosec:medium:G202: SQL string concatenation
+g202b/g202_builder.go:60:30:gosec:medium:G202: SQL string concatenation
+g202b/g202_builder.go:68:30:gosec:medium:G202: SQL string concatenation
+g202b/g202_builder.go:81:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
+g202b/g202_builder.go:91:30:gosec:medium:G202: SQL string concatenation
+g304/g304.go:22:49:gosec:medium:G304: Potential file inclusion via variable
+g304/g304.go:34:58:gosec:medium:G304: Potential file inclusion via variable
+g304/g304.go:46:9:gosec:medium:G304: Potential file inclusion via variable
+g304/g304.go:57:53:gosec:medium:G304: Potential file inclusion via variable
+g304/g304.go:63:50:gosec:medium:G304: Potential file inclusion via variable
+g304/g304.go:65:52:gosec:medium:G304: Potential file inclusion via variable
+g304/g304.go:86:52:gosec:medium:G304: Potential file inclusion via variable
+g304/g304.go:89:60:gosec:medium:G304: Potential file inclusion via variable
+g304/g304.go:109:12:gosec:medium:G304: Potential file inclusion via variable
+g304/g304.go:124:9:gosec:medium:G304: Potential file inclusion via variable
+g305/g305.go:32:9:gosec:medium:G305: File traversal when extracting zip/tar archive
+g305/g305.go:36:9:gosec:medium:G305: File traversal when extracting zip/tar archive
+g305/g305.go:42:9:gosec:medium:G305: File traversal when extracting zip/tar archive
+g305/g305.go:47:9:gosec:medium:G305: File traversal when extracting zip/tar archive
+g305/g305.go:53:7:gosec:medium:G305: File traversal when extracting zip/tar archive
+g305/g305.go:54:9:gosec:medium:G305: File traversal when extracting zip/tar archive
+g402/g402.go:19:4:gosec:high:G402: TLS Bad Cipher Suite: TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA
+g402/g402.go:40:23:gosec:high:G402: TLS InsecureSkipVerify set to true.
+g402/g402.go:52:4:gosec:high:G402: TLS Bad Cipher Suite: TLS_RSA_WITH_AES_128_CBC_SHA
+g602/g602.go:10:8:gosec:low:G602: slice bounds out of range
+g602/g602.go:16:10:gosec:low:G602: slice index out of range
+g602/g602.go:22:10:gosec:low:G602: slice index out of range
+g602/g602.go:44:10:gosec:low:G602: slice index out of range
+g602v/g602_variadic.go:26:15:gosec:low:G602: slice index out of range
+g602v/g602_variadic.go:39:15:gosec:low:G602: slice index out of range
+g602v/g602_variadic.go:51:15:gosec:low:G602: slice index out of range
+g602v/g602_variadic.go:61:15:gosec:low:G602: slice index out of range
+g602v/g602_variadic.go:80:15:gosec:low:G602: slice index out of range
+g602v/g602_variadic.go:95:15:gosec:low:G602: slice index out of range
+g602v/g602_variadic.go:109:15:gosec:low:G602: slice index out of range
+g602v/g602_variadic.go:126:16:gosec:low:G602: slice index out of range
+g602v/g602_variadic.go:137:15:gosec:low:G602: slice index out of range
+g602v/g602_variadic.go:144:60:gosec:low:G602: slice index out of range
+g602v/g602_variadic.go:155:15:gosec:low:G602: slice index out of range
+g602v/g602_variadic.go:166:65:gosec:low:G602: slice index out of range
+g602v/g602_variadic.go:171:59:gosec:low:G602: slice index out of range
+g602v/g602_variadic.go:180:13:gosec:low:G602: slice index out of range
+g710v/g710_variadic.go:95:64:gosec:medium:G710: Open redirect via taint analysis
+g710v/g710_variadic.go:97:64:gosec:medium:G710: Open redirect via taint analysis
+g710v/g710_variadic.go:103:64:gosec:medium:G710: Open redirect via taint analysis
+g7xx/g7xx.go:41:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
+g7xx/g7xx.go:41:18:gosec:high:G702: Command injection via taint analysis
+g7xx/g7xx.go:46:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
+g7xx/g7xx.go:46:18:gosec:high:G702: Command injection via taint analysis
+g7xx/g7xx.go:54:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
+g7xx/g7xx.go:54:18:gosec:high:G702: Command injection via taint analysis
+g7xx/g7xx.go:59:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
+g7xx/g7xx.go:59:18:gosec:high:G702: Command injection via taint analysis
+g7xx/g7xx.go:66:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
+g7xx/g7xx.go:66:18:gosec:high:G702: Command injection via taint analysis
+g7xx/g7xx.go:73:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
+g7xx/g7xx.go:84:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
+g7xx/g7xx.go:97:6:gosec:medium:G204: Subprocess launched with variable
+g7xx/g7xx.go:106:6:gosec:medium:G204: Subprocess launched with variable
+g7xx/g7xx.go:122:9:gosec:medium:G204: Subprocess launched with variable
+g7xx/g7xx.go:122:21:gosec:high:G702: Command injection via taint analysis
+g7xx/g7xx.go:129:17:gosec:high:G703: Path traversal via taint analysis
+g7xx/g7xx.go:135:17:gosec:high:G703: Path traversal via taint analysis
+g7xx/g7xx.go:148:10:gosec:medium:G304: Potential file inclusion via variable
+g7xx/g7xx.go:148:17:gosec:high:G703: Path traversal via taint analysis
+g7xx/g7xx.go:154:16:gosec:high:G703: Path traversal via taint analysis
+g7xx/g7xx.go:166:17:gosec:high:G703: Path traversal via taint analysis
+g7xx/g7xx.go:174:14:gosec:medium:G304: Potential file inclusion via variable
+g7xx/g7xx.go:178:21:gosec:high:G703: Path traversal via taint analysis
+g7xx/g7xx.go:193:13:gosec:low:G706: Log injection via taint analysis
+g7xx/g7xx.go:209:11:gosec:low:G706: Log injection via taint analysis
+g7xx/g7xx.go:220:12:gosec:low:G706: Log injection via taint analysis
+g7xx/g7xx.go:225:13:gosec:low:G706: Log injection via taint analysis
+g7xx/g7xx.go:257:12:gosec:low:G706: Log injection via taint analysis
+g7xx/g7xx.go:270:15:gosec:medium:G710: Open redirect via taint analysis
+g7xx/g7xx.go:286:15:gosec:medium:G710: Open redirect via taint analysis
+g7xx/g7xx.go:303:2:gosec:low:G104: Errors unhandled
+g7xx/g7xx.go:303:9:gosec:medium:G705: XSS via taint analysis
+g7xx/g7xx.go:308:13:gosec:medium:G705: XSS via taint analysis
+g7xx/g7xx.go:313:12:gosec:medium:G705: XSS via taint analysis
+g7xx/g7xx.go:314:14:gosec:medium:G705: XSS via taint analysis
+g7xx/g7xx.go:320:2:gosec:low:G104: Errors unhandled
+g7xx/g7xx.go:320:16:gosec:medium:G705: XSS via taint analysis
+g7xx/g7xx.go:329:13:gosec:medium:G705: XSS via taint analysis
+g7xx/g7xx.go:334:2:gosec:low:G104: Errors unhandled
+g7xx/g7xx.go:334:9:gosec:medium:G705: XSS via taint analysis
+g7xx/g7xx.go:351:2:gosec:low:G104: Errors unhandled
+g7xx/g7xx.go:368:2:gosec:low:G104: Errors unhandled
+g7xx/g7xx.go:373:2:gosec:low:G104: Errors unhandled
+g7xx/g7xx.go:393:13:gosec:medium:G705: XSS via taint analysis
+g7xx/g7xx.go:404:9:gosec:medium:G203: The used method does not auto-escape HTML. This can potentially lead to 'Cross-site Scripting' vulnerabilities, in case the attacker controls the input.
+g7xx/g7xx.go:462:15:gosec:medium:G710: Open redirect via taint analysis
+g7xx/g7xx.go:524:26:gosec:medium:G120: Unbounded form parsing in HTTP handlers can cause memory exhaustion
+g7xx/g7xx.go:552:26:gosec:medium:G120: Unbounded form parsing in HTTP handlers can cause memory exhaustion
+g7xx/g7xx.go:564:26:gosec:medium:G120: Unbounded form parsing in HTTP handlers can cause memory exhaustion
+g7xx/g7xx.go:581:23:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:591:29:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:596:19:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:616:19:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:639:9:gosec:medium:G107: Potential HTTP request made with variable url
+g7xx/g7xx.go:639:18:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:640:9:gosec:medium:G107: Potential HTTP request made with variable url
+g7xx/g7xx.go:640:18:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:641:9:gosec:medium:G107: Potential HTTP request made with variable url
+g7xx/g7xx.go:641:22:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:646:35:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:653:14:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:654:15:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:655:15:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:661:14:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:668:17:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:669:24:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:670:23:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:679:43:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:684:17:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:685:17:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:699:17:gosec:high:G704: SSRF via taint analysis
+g7xx/g7xx.go:713:24:gosec:high:G704: SSRF via taint analysis
+nosec/nosec.go:27:7:gosec:high:G101: Potential hardcoded credentials
+nosec/nosec.go:31:5:gosec:high:G101: Potential hardcoded credentials
+nosec/nosec.go:36:7:gosec:high:G101: Potential hardcoded credentials
+nosec/nosec.go:44:5:gosec:high:G101: Potential hardcoded credentials
+nosec/nosec.go:49:2:gosec:high:G101: Potential hardcoded credentials
+nosec/nosec.go:79:10:gosec:high:G101: Potential hardcoded credentials
+nosec/nosec.go:86:10:gosec:high:G101: Potential hardcoded credentials
+nosec/nosec.go:113:10:gosec:high:G101: Potential hardcoded credentials
+nosec/nosec.go:128:9:gosec:high:G101: Potential hardcoded credentials
+ok/ok.go:170:11:gosec:medium:G304: Potential file inclusion via variable
+ok/ok.go:199:35:gosec:high:G404: Use of weak random number generator (math/rand or math/rand/v2 instead of crypto/rand)
+ok/ok.go:202:2:gosec:high:G404: Use of weak random number generator (math/rand or math/rand/v2 instead of crypto/rand)
+ok/ok.go:287:16:gosec:medium:G304: Potential file inclusion via variable
+ok/ok.go:315:15:gosec:medium:G304: Potential file inclusion via variable
+scores/scores.go:3:8:gosec:medium:G501: Blocklisted import crypto/md5: weak cryptographic primitive
+scores/scores.go:7:7:gosec:high:G101: Potential hardcoded credentials
+scores/scores.go:13:6:gosec:medium:G401: Use of weak cryptographic primitive
+settings/settings.go:3:8:gosec:medium:G501: Blocklisted import crypto/md5: weak cryptographic primitive
+settings/settings.go:6:6:gosec:medium:G401: Use of weak cryptographic primitive

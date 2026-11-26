@@ -1,0 +1,22 @@
+# Golden case: gochecksumtype-imports with contextcheck enabled beside it.
+#
+# contextcheck makes guff type-check same-module imports and wire them into the
+# action graph, so gochecksumtype runs on ops as a dependency and user gets
+# ops.Op from a sumTypeFact — upstream's path. Without it (gochecksumtype-imports)
+# guff reads ops.Op from source. Both must give golangci's answer.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gochecksumtype
+    - contextcheck
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

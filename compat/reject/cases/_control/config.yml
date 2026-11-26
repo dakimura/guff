@@ -1,0 +1,16 @@
+version: "2"
+linters:
+  default: none
+  enable: [errcheck]
+  exclusions:
+    presets: [std-error-handling]
+    rules:
+      - linters: [errcheck]
+        path: '_test\.go'
+severity:
+  default: warning
+  rules:
+    - linters: [errcheck]
+      severity: error
+output:
+  path-mode: abs

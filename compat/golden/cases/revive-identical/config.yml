@@ -1,0 +1,27 @@
+# Golden case: revive's five `identical-*` rules.
+#
+# They share one comparison — the printed text of a branch — so they belong in
+# one case: a change to the renderer moves all five at once.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      rules:
+        - name: identical-branches
+        - name: identical-ifelseif-branches
+        - name: identical-ifelseif-conditions
+        - name: identical-switch-branches
+        - name: identical-switch-conditions
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

@@ -1,0 +1,42 @@
+# Golden case: non-ASCII identifiers, comments and literals (Phase 5).
+#
+# The linters here are chosen for one property: each one does arithmetic on
+# byte offsets or slices a string, which is where a UTF-8 assumption breaks.
+# godox is the precedent — it panicked on caddy by slicing `line[..kw.len()]`
+# at a position that was not a character boundary, and truncated its message
+# by bytes where upstream truncates by runes.
+#
+# Every finding lands after multi-byte text on its own line, so a column
+# computed in characters rather than bytes cannot match the golden.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - godox
+    - govet
+    - ineffassign
+    - lll
+    - misspell
+    - nolintlint
+  settings:
+    govet:
+      enable:
+        - printf
+    lll:
+      # Deliberately small, and chosen so lines whose *rune* count is under the
+      # limit run over it in *bytes*: that difference is the whole test.
+      line-length: 60
+    godox:
+      keywords:
+        - TODO
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # Several of these lines carry more than one finding on purpose.
+  uniq-by-line: false
+
+run:
+  timeout: 5m

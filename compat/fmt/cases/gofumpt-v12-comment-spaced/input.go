@@ -1,0 +1,80 @@
+//go:build tag
+// +build tag
+
+package p
+
+//go:generate some command
+
+//go:unknowndirective
+
+//lint:disablefoo
+
+//go-sumtype:decl Foo
+
+//nolint
+
+//nolint // explanation
+
+//nolint:somelinter // explanation
+
+//NOSONAR
+
+//NOSONAR // explanation
+
+//noinspection ALL
+
+//noinspection foo,bar
+
+//#nosec
+
+//#nosec G000 G999 -- explanation
+
+//not actually: a directive
+
+//https://just.one/url
+
+//TODO: do something
+
+//export CgoFunc
+
+//extern open
+func c_open(name *byte, mode int, perm int) int
+
+//line 123
+
+//sys   Unlink(path string) (err error)
+
+//sysnb	Getpid() (pid int)
+
+//foo:bar_one
+
+//foo:bar-two
+
+//foo:bar01
+
+//foo:barOne
+
+//foo:barTwo
+
+//foo is foo.
+type foo int
+
+//	comment with a tab.
+
+//  comment with many spaces
+
+//comment group
+//123 numbers too
+
+// comment group
+//123 numbers too
+
+//{
+//this is probably code
+//}
+
+////////////
+// ascii art
+//----------
+
+//

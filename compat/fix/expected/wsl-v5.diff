@@ -1,0 +1,113 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh wsl-v5
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/wsl-v5/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.15.0
+
+--- a/bad/bad.go
++++ b/bad/bad.go
+@@ -3,12 +3,15 @@
+ func Bad() {
+ 	one := 1
+ 	two := 2
++
+ 	three := 3
+ 	if three == 3 {
+ 		_ = one
+ 		_ = two
++
+ 		return
+ 	}
++
+ 	four := 4
+ 	_ = four
+ }
+@@ -80,7 +83,6 @@
+ // blank line *is* reported. Silencing everything does not pass this fixture.
+ func ErrWithBlankLine(v string) error {
+ 	_, err := parse(v)
+-
+ 	if err != nil {
+ 		return err
+ 	}
+@@ -95,7 +97,6 @@
+ // inserted newline, and nothing in this fixture exercised them
+ // (COMPAT-HARDENING 続き 77).
+ func BlockLeadingWSV5() {
+-
+ 	x := 1
+ 	_ = x
+ }
+@@ -103,5 +104,4 @@
+ func BlockTrailingWSV5() {
+ 	x := 1
+ 	_ = x
+-
+ }
+--- a/upstream/if.go
++++ b/upstream/if.go
+@@ -4,6 +4,7 @@
+ 
+ func fn1() {
+ 	a := 1
++
+ 	b := 2 // want `missing whitespace above this line \(too many statements above if\)`
+ 	if b == 2 {
+ 		panic(1)
+@@ -15,6 +16,7 @@
+ func fn2() {
+ 	b := 2
+ 	a := 1
++
+ 	if b == 2 { // want `missing whitespace above this line \(no shared variables above if\)`
+ 		panic(1)
+ 	}
+@@ -24,7 +26,6 @@
+ 
+ func fn3() {
+ 	err := errors.New("error") // want +1 `unnecessary whitespace \(err\)`
+-
+ 	if err != nil {
+ 		panic(err)
+ 	}
+@@ -34,6 +35,7 @@
+ 	if a := 1; a != 2 {
+ 		panic(a)
+ 	}
++
+ 	if a := 2; a != 2 { // want `missing whitespace above this line \(invalid statement above if\)`
+ 		panic(a)
+ 	}
+@@ -52,14 +54,17 @@
+ 	if true {
+ 		_ = 1
+ 		_ = 2
++
+ 		return // want `missing whitespace above this line \(too many lines above return\)`
+ 	} else if false {
+ 		_ = 1
+ 		_ = 2
++
+ 		return // want `missing whitespace above this line \(too many lines above return\)`
+ 	} else {
+ 		_ = 1
+ 		_ = 2
++
+ 		return // want `missing whitespace above this line \(too many lines above return\)`
+ 	}
+ }
+@@ -79,8 +84,10 @@
+ func reportsForLabeledStatementWhenTwoStmtsAboveIf() {
+ 	for {
+ 		x := 1
++
+ 	LABEL: // want `missing whitespace above this line \(never cuddle label\)`
+ 		y := 2
++
+ 		if x > y { // want `missing whitespace above this line \(too many statements above if\)`
+ 			goto LABEL
+ 		}

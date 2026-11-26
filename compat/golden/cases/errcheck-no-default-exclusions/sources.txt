@@ -1,0 +1,23 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# COMPAT-HARDENING Phase 4. The five `errcheck-*` option cases share this file
+# (`errcheck-opts` is the baseline: every key at its default); only their
+# `config.yml` differs. Each fixture carries the shape one key turns on:
+#
+#   blank/    `_ = f()` and `r, _ := f()`      → check-blank
+#   assert/   `_ = i.(string)` and friends     → check-type-assertions
+#   exclude/  io.Copy / io.WriteString         → exclude-functions
+#   defaults/ fmt.Println / hash.Hash.Write    → disable-default-exclusions
+#   shapes/   where an assertion is reported, and where upstream stops
+#             looking (pruned subtrees, parenthesized operands)
+#
+# The Rust tests type-check each fixture file as a package of its own, so every
+# file gets its own directory here — and the `ok.go` half of the blank/assert
+# fixtures cannot join its `bad.go` (they redeclare the same helpers).
+
+blank/bad.go     crates/guff-errcheck/tests/testdata/blank/bad.go
+assert/bad.go    crates/guff-errcheck/tests/testdata/assert/bad.go
+exclude/bad.go   crates/guff-errcheck/tests/testdata/exclude/bad.go
+defaults/bad.go  crates/guff-errcheck/tests/testdata/default_exclude/bad.go
+shapes/bad.go   crates/guff-errcheck/tests/testdata/assert_shapes/bad.go

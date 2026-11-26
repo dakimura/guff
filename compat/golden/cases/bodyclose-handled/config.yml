@@ -1,0 +1,18 @@
+# Golden case: bodyclose 857993a2939c's own testdata for `//bodyclose:handled`
+# (golangci-lint 2.14.0), vendored verbatim (MIT, LICENSE next to it) except
+# the GOPATH-style import, rewritten to example.com/…: a same-package callee
+# and an imported one carry the directive, a third does not.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - bodyclose
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

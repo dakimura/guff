@@ -1,0 +1,27 @@
+# Golden case: predeclared-ignore.
+#
+# The ignore list: golangci joins it with "," and predeclared splits and trims it, so " max" still ignores max.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - predeclared
+  settings:
+    predeclared:
+      ignore:
+        - complex
+        - print
+        - " max"
+        - len
+      mode:
+        - declare
+        - shadow
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

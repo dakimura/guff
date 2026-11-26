@@ -1,0 +1,31 @@
+# Golden case: `function-length` with a zero limit.
+#
+# `parseArguments` accepts either no arguments or exactly two, and `Apply` then
+# gates each half on `> 0`:
+#
+#     if r.maxStmt > 0 { … }
+#     if r.maxLines > 0 { … }
+#
+# so `[0, 12]` turns the statement half **off** rather than reporting every
+# function. Only the line rows appear here.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      rules:
+        - name: function-length
+          arguments:
+            - 0
+            - 12
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

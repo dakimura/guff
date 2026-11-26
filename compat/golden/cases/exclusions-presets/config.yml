@@ -1,0 +1,70 @@
+# Golden case: `linters.exclusions.presets` (COMPAT-HARDENING Phase 4).
+#
+# Same fixture and same linters as `exclusions`, with all four presets on. The
+# fixture is built so that every rule in `processors.LinterExclusionPresets`
+# has a finding to remove, which makes the diff between this golden and
+# `exclusions` an enumeration of the preset set itself:
+#
+#   comments               EXC0011 staticcheck ST1000 (both shapes)
+#                          EXC0012 revive exported / undocumented
+#                          EXC0013 revive package-comments "should be of the form"
+#                          EXC0014 revive exported "should be of the form"
+#                          EXC0015 revive package-comments "should have"
+#   std-error-handling     EXC0001 errcheck on a `.Close` call
+#   common-false-positives EXC0006 gosec G103, EXC0007 gosec G204
+#   legacy                 EXC0004 govet unsafeptr, EXC0005 staticcheck SA4011,
+#                          EXC0008 gosec G104, EXC0009 gosec G301
+#
+# One rule has no target: EXC0010 (gosec G304) — guff does not implement G304
+# yet, so a fixture for it would be a permanent `missing` rather than a
+# comparison. Add the fixture with the rule.
+#
+# The v1 preset list is *not* this list. EXC0002 and EXC0003 named `golint`,
+# which v2 does not have, and EXC0011 there named `stylecheck` rather than
+# `staticcheck`. Since upstream matches the linter name verbatim, a leftover v1
+# entry can only ever over-exclude.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - gosec
+    - govet
+    - ineffassign
+    - revive
+    - staticcheck
+  settings:
+    gosec:
+      includes:
+        - G103
+        - G104
+        - G204
+        - G301
+        - G304
+    govet:
+      enable:
+        - printf
+        - unsafeptr
+    revive:
+      rules:
+        - name: exported
+        - name: package-comments
+    staticcheck:
+      checks:
+        - ST1000
+        - SA4011
+  exclusions:
+    presets:
+      - comments
+      - std-error-handling
+      - common-false-positives
+      - legacy
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

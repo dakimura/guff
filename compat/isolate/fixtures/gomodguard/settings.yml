@@ -1,0 +1,4 @@
+blocked:
+  modules:
+    - github.com/sirupsen/logrus:
+        reason: "use log/slog"

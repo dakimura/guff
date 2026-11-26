@@ -1,0 +1,1 @@
+can't load config: can't set severity rule option: no default severity defined

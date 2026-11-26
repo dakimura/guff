@@ -1,0 +1,5 @@
+# The default threshold is 20, and a maintainability index that low takes a
+# function of a few hundred lines — more fixture than this tier wants to carry
+# for one message. Raising the bar puts the ordinary function below it instead,
+# which is what the tiers here measure: the message, the column, the severity.
+under: 100

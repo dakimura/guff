@@ -1,0 +1,49 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh wsl
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/wsl/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.15.0
+
+--- a/bad.go
++++ b/bad.go
+@@ -3,12 +3,15 @@
+ func Bad() {
+ 	one := 1
+ 	two := 2
++
+ 	three := 3
+ 	if three == 3 {
+ 		_ = one
+ 		_ = two
++
+ 		return
+ 	}
++
+ 	four := 4
+ 	_ = four
+ }
+@@ -18,7 +21,6 @@
+ // report sites whose fix range is *not* their report position were never
+ // exercised (COMPAT-HARDENING 続き 77).
+ func BlockLeadingWS() {
+-
+ 	x := 1
+ 	_ = x
+ }
+@@ -26,12 +28,9 @@
+ func BlockTrailingWS() {
+ 	x := 1
+ 	_ = x
+-
+ }
+ 
+ func BlockBothWS() {
+-
+ 	x := 1
+ 	_ = x
+-
+ }

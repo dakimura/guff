@@ -1,0 +1,19 @@
+# Golden case: wrapcheck-upstream.
+#
+# v2.13.0 reports any returned value whose type implements error (not only the
+# `error` interface), but only into a result that error is assignable to.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - wrapcheck
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

@@ -1,0 +1,4 @@
+# exhaustive v0.15.0's own testdata (passes/exhaustive/testdata/test, MIT,
+# LICENSE next to it), under the flags exhaustive_test.go runs it with.
+check/swtch/directive/enforce/file.go  crates/guff-style/tests/testdata/exhaustive/upstream-v0.15.0/check/swtch/directive/enforce/file.go
+check/mapliteral/commentassoc/file.go  crates/guff-style/tests/testdata/exhaustive/upstream-v0.15.0/check/mapliteral/commentassoc/file.go

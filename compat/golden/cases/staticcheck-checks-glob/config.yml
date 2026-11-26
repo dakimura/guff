@@ -1,0 +1,26 @@
+# Golden case: a category glob (COMPAT-HARDENING Phase 4).
+#
+# `S*` is **not** a prefix match. `filterAnalyzerNames` splits each check name
+# at its first digit and compares the *category*, so `S*` matches S1002 and not
+# SA4006 or ST1017. A glob that already contains a digit (`S1*`) is a plain
+# prefix match instead — the two spellings mean different things.
+#
+# Nothing else is enabled: a selector list with no `all` starts from empty.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - staticcheck
+  settings:
+    staticcheck:
+      checks:
+        - "S*"
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

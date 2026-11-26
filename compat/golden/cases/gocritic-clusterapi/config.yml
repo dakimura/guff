@@ -1,0 +1,35 @@
+# Golden case: the three gocritic shapes cluster-api v1.14.0 turned up.
+#
+# * `dupOption` — upstream's `isOptionType` asks the type's **underlying**, so a
+#   variadic parameter over a *named* func type still qualifies. guff stopped at
+#   the `Named`, and cluster-api's `func And(filters ...Func) Func` went unseen
+#   while an unnamed `...func(int) bool` element worked.
+# * `offBy1` — upstream has four slice forms over `strings.Index` /
+#   `bytes.Index`; guff had only the `x[len(x)]` index form.
+# * `badCond` — `x == a && x == b` also needs both right-hand sides to be
+#   side-effect free, and `typep.SideEffectFree` counts a call only when it is a
+#   type conversion. `i == len(v) && i == len(o)` is therefore *not* reported;
+#   guff omitted the condition and reported it alone.
+#
+# `dupOption` is tagged experimental, so the tags have to be turned on for any
+# of this to run — cluster-api enables diagnostic, experimental and performance.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gocritic
+  settings:
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - experimental
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

@@ -1,0 +1,4 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+dep/dep.go  crates/guff-staticcheck/tests/testdata/sa1019structkey/dep/dep.go
+use.go      crates/guff-staticcheck/tests/testdata/sa1019structkey/use.go

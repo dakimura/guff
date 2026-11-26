@@ -1,0 +1,41 @@
+# Golden case: SA1019 on a **promoted** deprecated field.
+#
+# buildkit `frontend/dockerfile/dockerfile2llb/convert.go:1605` writes
+# `d.image.Config.ArgsEscaped` under a `//nolint:staticcheck`. `ArgsEscaped` is
+# declared on `ocispecs.ImageConfig` (opencontainers/image-spec) and reached
+# through the embedded field of `dockerspec.DockerOCIImageConfig`
+# (moby/docker-image-spec). guff keyed its field lookup by the *selection's
+# receiver*, asking for `DockerOCIImageConfig.ArgsEscaped`, which no scan ever
+# writes — so every promoted deprecated field was silent, and the directive
+# above one was reported unused by nolintlint instead.
+#
+# `staticcheck` **alone**, on purpose. Adding a second linter that forces a full
+# analysis of the dependency (as staticcheck-sa1019-group-doc does with
+# contextcheck) makes the `Deprecated` fact exist, and the fact path never
+# consults a receiver — which is exactly why the fixtures that had one passed
+# throughout the defect. With staticcheck alone SA1019 answers from its own scan
+# of the dependency's sources, the path that was broken.
+#
+# `use.go` carries a blank `_ "…/inner"` import that its own code does not need.
+# It is load-bearing for guff and not for upstream: `DeepOld` is declared in
+# `inner`, and guff finds a declaring package through `Package::imports`, which
+# holds *direct* edges only. Without the import the two-level form is silent —
+# a separate open defect in the package loader, measured in COMPAT-HARDENING
+# 2026-09-04 続き 159. Delete the blank import once that is fixed.
+#
+# Measured on this fixture while the promoted-field defect was live:
+# upstream 7, guff 3.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - staticcheck
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

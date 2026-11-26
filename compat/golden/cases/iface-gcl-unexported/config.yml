@@ -1,0 +1,21 @@
+# Golden case: golangci-lint v2.14.0's pkg/golinters/iface/testdata/iface_unexported.{go,yml},
+# under the settings golangci-lint's own test runs it with.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - iface
+  settings:
+    iface:
+      enable:
+        - unexported
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

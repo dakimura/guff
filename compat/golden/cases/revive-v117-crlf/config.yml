@@ -1,0 +1,25 @@
+# Golden case: package-comments on CRLF sources (revive issue 607), revive
+# v1.17.0's own testdata. The scanner strips carriage returns from comment
+# text, so `CommentGroup.End()` on a CRLF block comment lands short of its
+# real end; v1.17.0 counts lines from the comment's start instead. The files
+# keep their CRLF endings (see the .gitattributes next to them).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      severity: warning
+      rules:
+        - name: package-comments
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

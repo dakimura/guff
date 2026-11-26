@@ -1,0 +1,298 @@
+package wastedassign
+
+import "fmt"
+
+func wastedNeverUsed() {
+	a := 0
+	fmt.Print(a)
+	a = 1
+}
+
+func wastedReassigned() {
+	b := 0
+	fmt.Print(b)
+	b = 1
+	b = 2
+	fmt.Print(b)
+}
+
+// The recall side of the same fix: `break parsingLoop` leaves the outer loop,
+// after which nothing reads `line` again — so the assignment before it is
+// wasted, and upstream says so. While the labelled break resolved to the loop's
+// *head* instead of its exit, the head's `line == ""` looked like a read and
+// guff reported nothing here.
+func labelledBreakToOuter(read func() string) int {
+	n := 0
+	line := read()
+parsingLoop:
+	for {
+		if line == "" {
+			return n
+		}
+		for {
+			n++
+			switch {
+			case line == "end":
+				line = read() + "?"
+				break parsingLoop
+			}
+			line = read()
+		}
+	}
+	return n
+}
+
+// The other side of the self-edge fix: this store *is* wasted, because the top
+// of the next iteration overwrites `x` before reading it. Keeping the self-edge
+// must not silence it — the revisit finds a Store, which is `reassignedSoon`,
+// not `notWasted`.
+func wastedInsideIntegerRange(n int) {
+	x := 0
+	for i := range n {
+		x = i
+		fmt.Print(x)
+		x = 99
+	}
+}
+
+// The `if`-init store whose value the condition reads is excused because
+// NaiveForm does not Load it. Keyed on the *object* rather than on the store,
+// that excuse also covered the declaration above the loop, which has nothing
+// to do with the `if`.
+func ifInitCondRead(tree map[string]map[string]int, components []string) int {
+	dir, exists := tree, false
+	for _, item := range components {
+		var sub map[string]int
+		if sub, exists = dir[item]; !exists {
+			return 0
+		}
+		_ = sub
+	}
+	return 1
+}
+
+func trim(s string) string { return s }
+
+// An assignment whose right-hand side mentions the variable: the operands are
+// evaluated *before* the store, so that mention is not a later read.
+func selfReferencingParam(name string) string {
+	name = trim(name)
+	return "x"
+}
+
+func selfReferencingThenReassigned() string {
+	s := "q"
+	s = trim(s)
+	s = "z"
+	return s
+}
+
+// The control: here the value really is read, so the store is live.
+func selfReferenceIsARealRead() string {
+	s := "q"
+	s = trim(s)
+	return s
+}
+
+// Upstream's `srcFuncs` is every named function in the package's AST, methods
+// included. A members-only list leaves out every method in the package.
+type tree map[string]tree
+
+func (t tree) methodWastedStore() int {
+	x := 1
+	x = 2
+	return x
+}
+
+func (t *tree) pointerMethodWastedStore() int {
+	x := 1
+	x = 2
+	return x
+}
+
+// A method, an `if`-init whose condition reads the variable, and a declaration
+// above the loop that has nothing to do with it.
+func (t tree) getByComponents(components []string) (tree, error) {
+	dir, exists := t, false
+	for _, item := range components {
+		if len(item) != 0 {
+			if dir == nil {
+				return nil, nil
+			}
+			if dir, exists = dir[item]; !exists {
+				return nil, nil
+			}
+		}
+	}
+	return dir, nil
+}
+
+// Through x/tools v0.44 `compLit` wrote an array or struct literal *into the
+// address* (no `Store`, nothing to report) and stored a slice or map literal at
+// its `Lbrace`. v0.50 (golangci-lint 2.14.0) builds every literal into a
+// temporary and stores it once, at the left-hand name — so all four below are
+// reported now, including beats' `x-pack/metricbeat/module/aws/billing/
+// billing.go:209` (`event := mb.Event{}`) that 2.12.2 left alone.
+type elem struct{ N int }
+
+func mkElem() elem          { return elem{} }
+func mkSlice() []int        { return nil }
+func mkMap() map[string]int { return nil }
+func mkArray() [3]int       { return [3]int{} }
+
+// Reported since 2.14.0: a struct literal.
+func structLiteralInit(c bool) elem {
+	e := elem{}
+	if c {
+		e = mkElem()
+	} else {
+		e = mkElem()
+	}
+	return e
+}
+
+// Reported since 2.14.0: an array literal.
+func arrayLiteralInit(c bool) [3]int {
+	a := [3]int{1, 2, 3}
+	if c {
+		a = mkArray()
+	} else {
+		a = mkArray()
+	}
+	return a
+}
+
+// Reported, at the name (2.12.2: the `{`).
+func sliceLiteralInit(c bool) []int {
+	s := []int{1}
+	if c {
+		s = mkSlice()
+	} else {
+		s = mkSlice()
+	}
+	return s
+}
+
+func mapLiteralInit(c bool) map[string]int {
+	m := map[string]int{"a": 1}
+	if c {
+		m = mkMap()
+	} else {
+		m = mkMap()
+	}
+	return m
+}
+
+// `&elem{}` is a UnaryExpr around the literal, not a literal: an ordinary
+// store at the `=`.
+func pointerToLiteralInit(c bool) *elem {
+	p := &elem{}
+	if c {
+		p = nil
+	} else {
+		p = nil
+	}
+	return p
+}
+
+// Inside a func literal. `srcFuncs` adds every `AnonFuncs` entry, so upstream
+// looks in here — but guff's "captured by a func literal" guard collected every
+// `uses` entry in a literal's body, which includes the literal's *own* locals:
+// a wasted store always has a later mention of the variable, so every local of
+// every literal was suppressed and nothing in a closure was ever reported.
+// beats' four remaining rows were all of this shape.
+func run(f func()) { f() }
+
+func chanInitInLit(await chan *int) {
+	run(func() {
+		c := <-await
+		c = nil
+		c = <-await
+		fmt.Print(c)
+	})
+}
+
+func errChainInLit() {
+	run(func() {
+		p, err := two()
+		fmt.Print(p)
+		p, err = two()
+		fmt.Print(p, err)
+	})
+}
+
+func two() (int, error) { return 0, nil }
+
+// A *parameter* of the literal, compound-assigned and then thrown away — beats'
+// `libbeat/reader/debug` makeNullCheck.
+func litParamCompoundAssign() func(int64, []byte) bool {
+	return func(offset int64, buf []byte) bool {
+		if len(buf) == 0 {
+			offset += int64(len(buf))
+			return false
+		}
+		return true
+	}
+}
+
+// A local of the *outer* literal, wasted there. The inner literal's own pass
+// must not claim it (it declares nothing), and the outer literal's pass must
+// not excuse it just because the body mentions it again.
+func nestedLitLocal(n int) func() int {
+	return func() int {
+		mid := 0
+		mid = n
+		mid = n * 2
+		return mid
+	}
+}
+
+// A read that cannot be reached from the store. The AST fallback is positional,
+// and a position says nothing about reachability: beats'
+// `libbeat/reader/debug` makeNullCheck writes the store inside a block that
+// ends in `return`, and the `offset` on the line *after* that block made the
+// fallback call the store live. Nothing can get there. Three spellings, because
+// the shape has nothing to do with the closure it happens to sit in.
+func nullCheckInLit(pattern []byte) func(int64, []byte) bool {
+	return func(offset int64, buf []byte) bool {
+		if len(buf) < len(pattern) {
+			offset += int64(len(buf))
+			return false
+		}
+		fmt.Print(offset + 1)
+		return true
+	}
+}
+
+func nullCheckParam(pattern []byte, offset int64, buf []byte) bool {
+	if len(buf) < len(pattern) {
+		offset += int64(len(buf))
+		return false
+	}
+	fmt.Print(offset + 1)
+	return true
+}
+
+func nullCheckLocal(buf []byte) bool {
+	var offset int64
+	if len(buf) == 0 {
+		offset += int64(len(buf))
+		return false
+	}
+	fmt.Print(offset + 1)
+	return true
+}
+
+// The `return` is in an *outer* block: everything past that block is still
+// unreachable from the store.
+func returnInOuterBlock(xs []int, c bool) int {
+	offset := 0
+	if c {
+		if len(xs) > 0 {
+			offset += 1
+		}
+		return 0
+	}
+	fmt.Print(offset)
+	return offset
+}

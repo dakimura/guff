@@ -1,0 +1,3 @@
+package mod
+
+func Mod() {}

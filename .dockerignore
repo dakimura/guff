@@ -1,0 +1,19 @@
+# Build context for the guff image — keep it small.
+.git
+.github
+.idea
+target
+**/target
+helm
+prometheus
+benchmarks
+compat
+regress
+docs
+agent.log
+loop-agent.sh
+*.md
+!THIRD_PARTY_LICENSES.md
+!LICENSE
+.env
+.DS_Store

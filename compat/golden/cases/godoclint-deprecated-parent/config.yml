@@ -1,0 +1,35 @@
+# Golden case: godoclint's `deprecated`, alone.
+#
+# The rule is in the `basic` default set and the sibling `godoclint` case
+# covers it — but only through symbols that carry a doc of their own. Two
+# shapes were invisible:
+#
+#  - A `// deprecated:` above a `const (…)` whose specs are all undocumented.
+#    Upstream collects `sd.ParentDoc` *before* the `sd.Doc == nil` continue, so
+#    the group is reported; the old collector dropped the symbol first.
+#  - An exported method on an unexported receiver. This rule uses
+#    `ast.IsExported(sd.Name)` with no receiver adjustment, unlike `require-doc`
+#    and `start-with-name` — so godoclint answers the same declaration two
+#    different ways depending on the rule.
+#
+# The third line the case pins is a position, not a presence: a bad parent doc
+# is reported at the *parent's* line even when the spec under it has a doc.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - godoclint
+  settings:
+    godoclint:
+      default: none
+      enable:
+        - deprecated
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

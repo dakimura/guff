@@ -1,0 +1,222 @@
+use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use guff::parser::{parse_file, Mode};
+use guff::position::FileSet;
+use guff_packages::{Error, ErrorKind, Package, TypecheckArtifacts};
+use guff_runner::{run_on_packages, RunnerOptions};
+use guff_types::{Checker, Config, default_sizes};
+
+pub fn testdata(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/testdata")
+        .join(name)
+}
+
+pub fn typecheck_pkg(pkg_id: &str, main_path: &Path) -> Arc<Package> {
+    typecheck_with_other_files(pkg_id, main_path, &[], &[])
+}
+
+pub fn typecheck_with_other_files(
+    pkg_id: &str,
+    main_path: &Path,
+    other_files: &[PathBuf],
+    deps: &[(&str, &Path)],
+) -> Arc<Package> {
+    typecheck_with_config_and_other_files(
+        pkg_id,
+        main_path,
+        other_files,
+        deps,
+        Config::default(),
+    )
+}
+
+pub fn typecheck_with_deps(
+    pkg_id: &str,
+    main_path: &Path,
+    deps: &[(&str, &Path)],
+) -> Arc<Package> {
+    typecheck_with_config(pkg_id, main_path, deps, Config::default())
+}
+
+pub fn typecheck_with_config(
+    pkg_id: &str,
+    main_path: &Path,
+    deps: &[(&str, &Path)],
+    config: Config,
+) -> Arc<Package> {
+    typecheck_with_config_and_other_files(pkg_id, main_path, &[], deps, config)
+}
+
+pub fn typecheck_with_config_and_other_files(
+    pkg_id: &str,
+    main_path: &Path,
+    other_files: &[PathBuf],
+    deps: &[(&str, &Path)],
+    config: Config,
+) -> Arc<Package> {
+    let fset = FileSet::new();
+    let main_src = fs::read(main_path).expect("read main source");
+    let main_name = main_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .expect("main file name");
+    let main_file = parse_file(&fset, main_name, &main_src, Mode::NONE).expect("parse main");
+
+    let mut check = Checker::new(config);
+    for (import_path, dep_path) in deps {
+        let src = fs::read(dep_path).expect("read dep");
+        let name = dep_path.file_name().and_then(|s| s.to_str()).unwrap();
+        let file = parse_file(&fset, name, &src, Mode::NONE).expect("parse dep");
+        check.add_dependency_source(*import_path, vec![file]);
+    }
+    check.check_files(vec![main_file.clone()]);
+
+    let ill_typed = !check.errors.is_empty();
+    let errors: Vec<Error> = check
+        .errors
+        .iter()
+        .map(|e| Error {
+            pos: if e.pos == 0 {
+                String::new()
+            } else {
+                e.pos.to_string()
+            },
+            msg: e.msg.clone(),
+            kind: ErrorKind::Type,
+        })
+        .collect();
+
+    // Populate `imports` from the AST so `run_on_packages`' import gate
+    // (`analyzer_applies_to_package` → `package_imports_prefix`) can see them.
+    // The gate only inspects keys; stub values are enough. Without this, every
+    // gated analyzer (errorsas, atomic, …) is silently skipped and its
+    // "must flag" tests assert on an empty diagnostic list.
+    let mut imports = HashMap::new();
+    for imp in &main_file.imports {
+        let path = unquote_import_path(&imp.path.value);
+        if !path.is_empty() {
+            imports.insert(path, Arc::new(Package::default()));
+        }
+    }
+    for (import_path, dep_path) in deps {
+        // A real `Package` carries where its source is, and `inline` reads it:
+        // a `//go:fix inline` directive on a sibling package's declaration is
+        // discovered by opening that package's files. A `Package::default()`
+        // has an empty `dir`, which makes the scan look in the working
+        // directory and find nothing.
+        let dep_pkg = Package {
+            pkg_path: (*import_path).to_string(),
+            dir: dep_path
+                .parent()
+                .unwrap_or(dep_path)
+                .to_path_buf(),
+            compiled_go_files: vec![dep_path.to_path_buf()],
+            go_files: vec![dep_path.to_path_buf()],
+            ..Package::default()
+        };
+        // Overwrite, not `or_insert_with`: the loop above already put a
+        // bare `Package::default()` under this path from the import spec.
+        imports.insert((*import_path).to_string(), Arc::new(dep_pkg));
+    }
+
+    Arc::new(Package {
+        id: pkg_id.into(),
+        pkg_path: pkg_id.into(),
+        name: main_file.name.name.clone().into(),
+        dir: main_path.parent().unwrap_or(main_path).to_path_buf(),
+        compiled_go_files: vec![main_path.to_path_buf()],
+        go_files: vec![main_path.to_path_buf()],
+        other_files: other_files.to_vec(),
+        syntax: vec![main_file],
+        fset: Some(fset),
+        types: Some(check.pkg),
+        types_info: Some(std::sync::Arc::new(check.info.clone())),
+        type_artifacts: Some(TypecheckArtifacts {
+            type_pkg: check.pkg,
+            types: check.types,
+            objects: check.objects,
+            scopes: check.scopes,
+            packages: check.packages,
+            info: std::sync::Arc::new(check.info),
+        }),
+        ill_typed,
+        errors,
+        imports,
+        types_sizes: Some(default_sizes()),
+        ..Package::default()
+    })
+}
+
+/// Strip matching outer `"` / `` ` `` from an import path literal (AST keeps quotes).
+fn unquote_import_path(lit: &str) -> String {
+    let bytes = lit.as_bytes();
+    if bytes.len() >= 2 {
+        let (first, last) = (bytes[0], bytes[bytes.len() - 1]);
+        if (first == b'"' && last == b'"') || (first == b'`' && last == b'`') {
+            return lit[1..lit.len() - 1].to_string();
+        }
+    }
+    lit.to_string()
+}
+
+/// The diagnostics themselves, for checks whose **position** is the thing
+/// being tested. `fieldalignment` reports at the `struct` keyword, which is
+/// neither the type name nor the `{`, and the message says nothing about it.
+pub fn run_analyzer_diagnostics(
+    analyzer: &'static guff_analysis::Analyzer,
+    pkg: &Arc<Package>,
+) -> Vec<guff_analysis::Diagnostic> {
+    let result = run_on_packages(
+        &[analyzer],
+        std::slice::from_ref(pkg),
+        &RunnerOptions {
+            sequential: true,
+            ..RunnerOptions::default()
+        },
+    )
+    .expect("run analyzer");
+    for action in result.graph.all_actions() {
+        if let Some(err) = action.error() {
+            panic!("analyzer {} failed: {err}", action.string_id());
+        }
+    }
+    result.diagnostics().into_iter().map(|(_, d)| d).collect()
+}
+
+pub fn run_analyzer(
+    analyzer: &'static guff_analysis::Analyzer,
+    pkg: &Arc<Package>,
+) -> Vec<String> {
+    let result = run_on_packages(
+        &[analyzer],
+        std::slice::from_ref(pkg),
+        &RunnerOptions {
+            sequential: true,
+            ..RunnerOptions::default()
+        },
+    )
+    .expect("run analyzer");
+    for action in result.graph.all_actions() {
+        if let Some(err) = action.error() {
+            panic!("analyzer {} failed: {err}", action.string_id());
+        }
+    }
+    result
+        .diagnostics()
+        .into_iter()
+        .map(|(_, d)| d.message)
+        .collect()
+}
+
+/// Set the module Go version on a type-checked package (for version-gated checks).
+pub fn with_go_version(mut pkg: Arc<Package>, version: &str) -> Arc<Package> {
+    Arc::make_mut(&mut pkg).module = Some(guff_packages::Module {
+        go_version: version.to_string(),
+        ..guff_packages::Module::default()
+    });
+    pkg
+}

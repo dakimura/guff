@@ -1,0 +1,4937 @@
+# guff 高速化タスク 第2弾 — 実装エージェント向け詳細手順書
+
+> **このファイルを読む前に、必ず `docs/PERF_TASKS.md` を最初から最後まで読むこと。**
+> あちらは「第1弾（Task 1〜5）」の手順書兼作業記録で、**絶対ルール（§0）・計測ハーネス（§1）・
+> findings 同一性の検証（§2）・本番ゲート（§3）はすべてこちらでもそのまま有効**です。
+> このファイルは重複を避けるため、それらを再掲せず参照します。
+>
+> こちらは **2026-07-27 にコードベース全体を再調査して洗い出した「次の 33 本」** です。
+> 第1弾のタスクはすべて完了（DONE）しているので、新しく着手するならこのファイルから選びます。
+>
+> ---
+>
+> ### 📌 セッションを引き継いだ人はここから
+>
+> **native list skip dep `*_test.go` DONE（2026-07-31）:** 空 cold samply の本丸だった
+> `load_package_files` / `__open`。依存パッケージは test ファイルを使わない
+> （`cfg.tests && is_root` だけ）ので `import_dir_with(..., include_tests=false)` で
+> 開かない。加えて `good_os_arch` / `_` `.` を open 前に弾く。
+> empty-cold native list **0.58→0.47s（−0.11s）** / load **≈ −0.11s** / wall **≈ −0.12s**。
+> `GUFF_NATIVE_LIST=verify` OK。findings 同一。tsdb+full regress PASS（guff_only=0、
+> RSS 悪化なし）。※ header を 16KiB に縮めると `math/big/natdiv.go`（package が 24KiB超）
+> が落ちるので **64KiB のまま**。
+>
+> **SKIP_FUNC_BODIES byte-level brace skip DONE（2026-07-31）:** 空 cold を samply
+> で切り直し。typecheck CPU の本丸は seed の `skip_body` が**本体をフルトークン化**
+> していたこと（`Scanner::scan` self 0.59s）。`Scanner::skip_to_closing_brace` で
+> 文字走査だけにして keyword lookup / literal 割当を省略。
+> `-j 1` seed **1.89→1.68s（−0.21s）** / typecheck **2.41→2.20s** / wall **−0.21s**。
+> 並列 empty-cold の seed 中央 ≈ **−0.06s**（wall は load/format ノイズで見えにくい）。
+> samply: `Scanner::scan` 0.59→0.37s。findings byte 同一 / seed cold↔hot 同一。
+>
+> **goimports names-only resolve + SKIP_STAMP DONE（2026-07-31）:** 本ファイルの初回
+> parse を `SKIP_OBJECT_RESOLUTION | SKIP_STAMP_NODE_IDS` にし、直後に
+> `resolve_file_names_only`（`ObjDecl::Name`、AST クローン無し）で `Ident.obj` だけ埋める。
+> samply: `Goimports::format` 0.78→0.40s / `walk_func_decl` 0.45→0.34s / parse_file −0.27s。
+> seed-hot wall **≈ 1.10s**（旧 ≈ 1.25–1.3s）/ goimports-only format_checks **≈ 0.12s**。
+> findings 3635 byte 同一。両 regress PASS。
+>
+> **goimports identity fast-path DONE（2026-07-31）:** import rewrite が no-op のとき
+> `go/format.Source`（再パース+print）を飛ばして `src` を返す。samply で Source/print が
+> goimports CPU の約半分だった。goimports-only format **~0.62s → ~0.30s**。
+> seed-hot format ~1.25s。gofmt 本体の直しは gofumpt/gofmt 側に任せる（併走前提）。
+> findings 同一。両 regress PASS。
+>
+> **P0-1b DONE（2026-07-31）:** C-3c/B-10 後に format が seed-hot critical path
+> （`waited` ≈ 0.5s）。fmt 既定を 2 → `(ncpu/3).clamp(2,4)`（10-core → 3）。
+> seed-hot wall **≈ −0.4s** / empty-cold **≈ −0.1s**。findings 同一。§P0-1。
+>
+> **B-10 DONE（2026-07-31）:** formatter check を 1 パス化（read 1 回）+ native
+> gci/gofumpt の skip-object parse 共有。goimports は独自 parse。C-3c 後は
+> `format_checks waited` が cold 0.02〜0.06s / seed-hot **0.54s** で着手条件クリア。
+> wall は小幅（goimports 支配）。findings byte 同一。両 regress PASS。§B-10。
+>
+> **C-3c Phase 3 DONE（2026-07-31）:** 速度フォロー 2 本。
+> 1. **`--no-cache` でも `native_list/` を peek**（書き込みは `disable_cache` のままオフ。C-7 と同型）。
+>    恒久 `GUFF_CACHE` + `--no-cache` の load_graph **0.20s → 0.04s**。
+> 2. **`modmeta/` を package JSON×N → `module@version`（+ stdlib VERSION）単位の 1 blob**
+>    （`modmeta-v2`）。prometheus で **~1489 → 243 ファイル**。modmeta 再構築自体は
+>    グラフ組み立て残りで ~0.20s（peek が主戦場）。
+> `verify` prometheus `./...` **diff 空**。findings **28≡28**（off≡on）。§C-3c。
+>
+> **C-3c Phase 2 DONE（2026-07-30）:** native list **既定オン**。
+> ① warm ディスクキャッシュ `$GUFF_CACHE/native_list/`（warm wall **0.15s**）
+> ② 完全 `-test` + for-test 依存 ③ **header-only 走査 + 並列 BFS + `modmeta/` 恒久キャッシュ**
+> （GOMODCACHE/GOROOT）。`verify` prometheus `./...` **diff 空**。findings **28≡28**。
+>
+> **cold load_graph（A/B、Darwin arm64）— Phase 3 後:**
+> - 空 `GUFF_CACHE`（初回）: go list 0.75s → native **~0.58s**（modmeta 書き込み込み）
+> - **恒久 `GUFF_CACHE` + `--no-cache`**: go list 0.75s → native peek **0.04s**（**−0.71s**）/
+>   wall ~1.94s → **~1.80s**
+> - warm: load **0.04s** / wall **0.15s**
+>
+> `GUFF_NATIVE_LIST=off` で旧経路。**repo `vendor/` + C-3e DONE（2026-07-31）。**
+> B-9 はやらない。§C-3c / §C-3e。
+>
+> **vendor/ + C-3e DONE（2026-07-31）:** `vendor/modules.txt` をパースして `-mod=vendor`
+> 解決（go.work 時は cmd/go 同様に無視）。C-3e は `has_cgo` パッケージだけ
+> `go list -compiled=true` に委譲（C-3a 第 2 コール再利用）。cgo 無しリポは go ゼロ呼び出し。
+>
+> **C-3d DONE（2026-07-30）:** stdlib を GOROOT ソース typecheck + seed overlay 永続化。
+> **既定オン**（`GUFF_STDLIB_SOURCE=export` で旧 `.a` 経路）。`go list -export` stdlib
+> サブプロセス削除。export importer 修正で findings **28≡28**（TB Pkg + CacheImporter）。
+> go-less: `go` 不在 or `GUFF_NATIVE_LIST=force` で `./...` 完走（fake `go` 0 回）。
+> nested `go.mod` を `./...` から除外する修正入り。§C-3d。
+>
+> **C-3c Phase 1（2026-07-30）:** ネイティブ lister 骨格 + オラクル。
+> 新クレート `guff-golist`（escape / GOMODCACHE / go.mod require+replace /
+> GOROOT vendor / Go 1.26 experiment tags / **go.work** / **nested-module skip**）。
+> Phase 2 で warm キャッシュ + `-test` + 既定オンまで完了。
+>
+> **C-9 DONE（2026-07-30）:** seed が捨てる `Info` への記録を止める（Go の nil-map ゲート相当）。
+> `-j 1` seed ≈ **−0.15s** / wall ≈ **−0.17s**。findings byte 同一。§C-9。
+>
+> **C-1 Phase 2 MVP DONE（2026-07-30）:** DeclInfo/Initializer → NodeId。seed ≈ −0.07s。
+> Phase 3/4 は条件付き GO で着手しない（§C-1）。
+>
+> **完了済み: S-1 / S-2 / S-3 / P0-1（+P0-1b） / P0-2 / P0-3 / A-5 / A-10 / B-0 / B-1（a/b/c 全段） / B-3 / B-6 / B-8 / X-1 / X-2 / X-4 / X-5 /
+> A-1（guff-ssa + guff-types + keywords + guff-runner） / A-3a / B-4（A 分類完了: 32 rules） / A-8b（PGO スクリプト） /
+> buildir lazy import members（§B-2 follow-up） / A-9（計測のみ） / misspell FxHash / B-5（インターン実装） /
+> C-3a（`go list` の無駄取り） / C-3b（`go env`/`go version` 撲滅） / C-7（seed speculate） / C-8（RSS 内訳） / C-2（`--watch` MVP） /
+> C-9（seed Info skip） / **C-3d（stdlib ソース + go-less）** / **C-3c（native list 既定オン + Phase 3 peek/modmeta-v2）** /
+> **B-10（formatter read+parse 共有）**。
+> **NO-GO と判定済み: A-2**（§A-2）**、A-3b/c**（§A-3）**、A-4**（§A-4）**、A-6**（§A-6）**、A-7**（§A-7）**、A-8a**（§A-8）**、B-1d**（§B-1 末尾）**、B-2（関数単位遅延）**（§B-2）**、
+> **B-7**（§B-7。misspell↔typecheck 共有は既済。format 共有は B-10）**、**A-9**（§A-9。startup 0.01s）**、
+> **C-6**（§C-6。Ident Mutex の wall 上限 &lt; 0.1s）**。
+> 各タスク節末尾の `### DONE` / `### NO-GO` に実測値があります。
+>
+> **C-3a DONE（2026-07-30）: cold −0.30〜0.35s / `load_graph` 1.24s → 0.86s / findings byte 同一。**
+> 旧 C-3 は「工数特大・リスク最高」と書かれていましたが、**`go list` のコスト内訳を
+> 誰も測っていなかっただけ**でした。実際には 1.02s のうち **0.56s が guff の要求しない仕事**
+> （`-compiled=true` 0.39s ＋ 読まないフィールドの marshal 0.17s）で、
+> **`go list` を 1 行も置き換えずに**削れました。§C-3.0 に内訳、§C-3a に DONE 記録。
+> **残る C-3c〜C-3e（`go` 非依存化）は wall ではなく製品判断のタスクです**（§C-3 ロードマップ）。
+> **C-3b DONE（2026-07-30）:** cold の `go env`/`go version` 5 本を VERSION/stat/default path に置換。
+> subprocess は消えたが **cold wall は ±0（この機では `go env` 自体が real 0.00s）**。§C-3b。
+>
+> **A-10 DONE（2026-07-30）: cold −0.27s / `-j 1` −0.19s / findings byte 同一。**
+> A-9 が測った「起動側」の反対側＝**「最後の phase からプロセス終了まで」を誰も測っていなかった**
+> ため、**`drop(LintResult)` の 0.28s** が丸ごと隠れていました。診断を全部 stdout に出した後で
+> ~3.7 GiB の参照グラフを free していたので、one-shot だけ `std::mem::forget` に変更。§A-10。
+>
+> **⚠️ 地図は §1.3-post2（2026-07-30）に更新しました。cold wall は 2.72s です（C-9 前）。**
+> **C-9 後の `-j 1` seed は ≈ −0.15s。並列 cold はマシン負荷でブレやすいが同方向。**
+> **cold の直列 phase 合計 2.71s ＝ `real` 2.72s で、計測されていない区間はもうありません。**
+> **残る攻めどころは ① seed dep check（B-9 = 触らない。C-9 で ≈−0.15s）
+> ② `go list` 0.85s（C-3c = 製品判断）の 2 つ。**
+> **analyze は 0.37s まで落ちたので、C-4（gocritic walk 融合）の期待値は消えました。**
+> **B-10 DONE（2026-07-31）。** B-9 は原則着手しない。
+> **C-2 DONE（MVP・2026-07-30 放置）:** `guff run --watch`。再パス 0.07〜0.10s。
+> 編集は seed 再構築が残り ~1.35s。ExportSeed 保持 follow-up は当面やらない（§C-2）。
+> **`--watch` なしの one-shot は従来どおり**（warm 0.21s 実測維持）。
+> **C-7 DONE:** seed-hot `--no-cache` で typecheck −0.35s / wall −0.15〜0.25s（空 cold は効かない）。
+> **C-8 DONE:** peak RSS ~3.46 GiB。内訳は型アリーナ ~1.0 GiB + AST est ~0.4 GiB + Info ~0.2 GiB。
+> SSA incremental は無視できる（lazy import members 後）。`GUFF_DEBUG_RSS=1` で再計測可。
+> **B-5 の Slice インターンは revive `var-declaration` の TypeId`==` 依存で findings が変わるため未実装。**
+> **P0-3 は条件付き実装済みだが、prometheus（`default: standard` → `ineffassign` 有効）では
+> スキップが発火せず wall は動かない。`default: none` かつ ineffassign/maintidx 無効な設定で効く。**
+> **C-8 の前提「RSS 7.6GB」は古い。lazy import members 後は ~3.5–3.7 GiB（目標 6GB は既達）。**
+>
+> **次の小粒候補（未着手）:** goimports 初回 parse の残りは素の scan/parse。
+> sibling parse キャッシュは get_fixes が小さいうちは後回し。空 cold の残りは
+> typecheck 内の check/stamp と、syscall バウンドな header open の更なる詰め
+> （dirfd/openat 等。期待値は小）。
+> ~~native list skip dep tests~~ **DONE** / ~~SKIP_FUNC_BODIES byte skip~~ **DONE** /
+> ~~seed SHA→blake3~~ **DONE** / ~~`guff-packages` FxHash~~ **DONE** /
+> ~~`position_internal`~~ **NO-GO** / ~~B-10~~ **DONE** / ~~P0-1b~~ **DONE** /
+> ~~goimports identity fast-path~~ **DONE** / ~~goimports names-only resolve~~ **DONE**。
+>
+> **性能タスクの前に、まず [§8「次セッションへの引き継ぎ」](#8-次セッションへの引き継ぎ--性能タスク中に見つかった別問題2026-07-27)
+> を読むこと。** 性能作業中に見つけた**性能以外の問題**のうち、未修理は
+> **X-3（計測作法）** と **X-6（`guff-staticcheck` の 3 本。既存の false positive / 検出漏れ）**。
+> ~~X-1 / X-2 / X-4 / X-5 は DONE~~。とくに:
+>
+> - **X-3 は計測の前提です**: この開発機は単発で数十秒スパイクします。
+>   そして **A/B/A/B の交互測定をしないと、存在しない回帰が見えます**（実例あり）。
+> - **S-2（samply）は済んでいるので、GO/NO-GO は推測せず測れます。**
+>   `scripts/perf-profile.py` でブラウザ無しに self / inclusive / callers を出せます（§S-2 の DONE 参照）。
+>   実際にこれで A-2 を NO-GO に落とし、B-3 の真犯人を一発で特定しました。
+
+---
+
+## 0. 追加の絶対ルール（`PERF_TASKS.md` §0 の10個に加えて）
+
+第1弾の10ルールは全部そのまま生きています。以下は今回の調査で「これも明文化しないと事故る」と
+判明したものです。
+
+### ルール 11 — 「全 phase が均等に遅い」なら、それはあなたのコードのせいではない
+
+今回の調査で実際に踏みました。詳細は §1.1。**1つの phase だけが遅いのか、全部が同じ倍率で
+遅いのかを必ず見ること。** 全部が同じ倍率なら原因はマシン（他プロセスの CPU 食い・熱・電源）
+であって、コードではありません。ここを間違えると、ありもしない回帰を追いかけて何時間も溶かします。
+
+判定方法は §1.2 のスクリプトを**計測のたびに**走らせること。
+
+### ルール 12 — `HashMap` のハッシャを差し替える前に、iteration order 依存を全部潰す
+
+`std::collections::HashMap` は実行ごとにシード（`RandomState`）が変わるので、
+**イテレーション順に依存したコードは今すでに非決定的**です。今それが顕在化していないのは
+「たまたま順序が結果に影響しない」か「後段でソートしている」から。
+
+ハッシャを `FxHashMap` に替えると順序が**決定的だが今までと違う順序**になります。
+これで隠れていたバグが顕在化して findings が変わることがあります。これは
+「あなたが壊した」のではなく「元々壊れていたのが見えた」ケースですが、**どちらにせよ
+findings が変わったらコミットしてはいけません**（§0-10）。原因を特定して、
+順序依存そのものを直してから再挑戦します。
+
+差し替え前に必ずやること:
+
+```bash
+cd /Users/dakimura/projects/src/github.com/dakimura/guff
+# HashMap を直接 iterate している箇所を全部列挙して、順序依存がないか目で見る
+rg -n 'for .* in .*\.iter\(\)|for .* in &\w+_map|\.values\(\)|\.keys\(\)|\.drain\(\)' \
+  --glob '*.rs' crates | rg -i 'map|table|cache|registry|index' | head -50
+```
+
+順序依存を見つけたら **そこを直すのが先**（`BTreeMap` にするか、collect 後に sort する）。
+
+### ルール 13 — 参照実装（Go 本体 / golangci-lint / staticcheck）に既にある最適化を優先する
+
+guff は Go のツール群の移植です。「Go 側では最適化されているのに guff では素朴なまま」の箇所が
+一番安全でリターンが大きい（**設計が既に検証済みで、findings が変わらないことも実証済み**）。
+逆に guff 独自の新発明は、findings を壊すリスクが跳ね上がります。
+
+このファイルの Tier B の目玉（B-1: 本物の Inspector）はまさにこのパターンです。
+
+### ルール 14 — 「効くはず」で実装を始めない。必ず先に**上限を測る**
+
+各タスクに「**GO/NO-GO 判定**」節を用意してあります。そこに書いてある計測を先にやって、
+削減できる上限（＝その処理に費やしている総時間）を確認してから実装に入ってください。
+上限が wall 換算 0.1s 未満なら、そのタスクは **やらない**のが正解です。
+第1弾 §1.9 の末尾（「parse の残りを詰めるべきか（結論: 詰めない）」）が良いお手本です。
+
+### ルール 15 — 1タスク = 1コミット = 1 regress PASS
+
+`PERF_TASKS.md` §0-9 の再掲ですが、第2弾はタスク数が多いので改めて。
+**§4 のタスクテンプレートをコピーして、チェックが全部埋まってからコミット**してください。
+
+---
+
+## 1. 計測（第1弾 §1 の更新・補足）
+
+計測ハーネス本体（cold / warm のコマンド）は `PERF_TASKS.md` §1.2〜§1.5 をそのまま使います。
+ここでは**今回追加で分かったこと**だけ書きます。
+
+### 1.1 実例: 計測汚染がどう見えるか（2026-07-27 の実測・**対照実験つき**）
+
+**同じバイナリで、Chrome を開いたまま 3 回・Chrome を閉じて 3 回**まわした結果です。
+
+| phase | 2026-07-26 のクリーン値（`PERF_TASKS.md` §1.10） | 汚染時（Chrome 起動中） | **クリーン時（Chrome 終了後）** |
+|---|---:|---:|---:|
+| load_graph（`go list`） | 1.53s | 2.55〜2.69s | **1.25s** |
+| typecheck_roots | 1.79s | 4.56〜4.72s | **1.86〜1.90s** |
+| └ seed dep check | 1.40s | 3.49〜3.65s | **1.41〜1.43s** |
+| analyze | 1.16s | 2.56〜2.66s | **1.20〜1.23s** |
+| format_checks | 0.59s | 4.99〜5.14s | **1.70〜1.79s** |
+| issues+filter | 0.04s | 0.07s | **0.03〜0.04s** |
+| **wall** | **4.88s** | **10.55〜11.00s** | **4.71〜4.79s** |
+| **peak RSS** | **7.73GB** | **7.69〜7.76GB** | **7.60〜7.72GB** |
+| findings | 20 | 20 | **20** |
+
+汚染時の負荷はこれでした:
+
+```
+load averages: 5.13 3.90 3.31       ← 10 コア（性能4 + 効率6）機で load 5
+84.5% Google Chrome
+59.3% Google Chrome Helper
+33.2% Google Chrome Helper
+22.7% Cursor Helper
+```
+
+Chrome を閉じたあとは `load averages: 2.05 2.34 2.61` になり、**wall が 10.6s → 4.75s に戻りました。**
+コードは 1 行も変えていません。
+
+**この事例から必ず持ち帰ってほしい 3 点:**
+
+1. **RSS を見れば汚染かどうか一発で分かる。** 汚染時も wall は 2.2 倍なのに **RSS は 3 桁一致**
+   しています。RSS はやる仕事の量で決まり、CPU が空いているかどうかでは変わりません。
+   「**やっている仕事は完全に同じで、CPU だけが足りていない**」の決定的な証拠です。
+   **wall が悪化して RSS が変わっていなければ、まずマシンを疑う。**
+2. **ブラウザとエディタも `cargo build` と同罪。** `PERF_TASKS.md` §0-7 は
+   「`cargo build` が走っていないか確認しろ」としか書いていませんが、不十分でした。
+3. **「全 phase が揃って同じ倍率」がシグナル。** 1 つの phase だけ突出して悪いなら、
+   それは本物の回帰である可能性が高い。→ **まさにそれが `format_checks` でした（P0-1）。**
+   クリーン環境でも他の全 phase が §1.10 の記録値と一致するなか、
+   **format_checks だけが 0.59s → 1.75s と 3 倍**残りました。汚染では説明できません。
+
+### 1.2 計測前に必ず走らせるガード（S-1 で常設化する）
+
+S-1 タスク（§5）を実装するまでは、以下を手で打ってください。
+
+```bash
+# 1) 重いプロセスが居ないか
+ps aux | sort -nrk3 | head -8 | awk '{printf "%5s%%  %s\n", $3, $11}'
+# 2) load average が (コア数 / 4) 以下か
+uptime
+sysctl -n hw.ncpu
+# 3) 低電力モード / 熱スロットルに入っていないか
+pmset -g | grep -i lowpowermode
+pmset -g therm
+# 4) 自分以外のビルド/エージェント
+ps aux | grep -iE 'cargo|rustc|cursor-agent|go build' | grep -v grep
+```
+
+**合格ライン: load average < ncpu/4（10 コアなら 2.5 未満）、CPU 上位に自分のプロセス以外が居ない、
+lowpowermode = 0。** 満たさないなら Chrome を閉じるか、落ち着くまで待つ。
+
+**実測での較正値（この開発機、Darwin arm64 / 10 コア = 性能4 + 効率6）:**
+
+| 状態 | load avg (1min) | cold wall | 判定 |
+|---|---:|---:|---|
+| Chrome + Cursor + Activity Monitor 起動 | 5.13 | 10.6s | **FAIL**（数字は使い物にならない） |
+| Cursor のみ（Chrome 終了後） | **2.05** | **4.75s** | **PASS**（`PERF_TASKS.md` §1.10 の記録値を再現） |
+
+つまり **Chrome を閉じるだけで十分**でした。Cursor は起動したままで問題ありません。
+とはいえ 2.05 は合格ライン 2.5 にそこそこ近いので、**wall が 0.2s 単位で効くタスク
+（A-5, A-9, B-8 など warm 系）ではさらに静かな状態を作ること。**
+
+### 1.3-post2 現在の phase 内訳（**2026-07-30 / C-3a + A-10 後のクリーン実測。★ 全体像はここ。ただし `analyze` の数字は古い**）
+
+> 下の §1.3-post（2026-07-28）と §1.3（2026-07-27）は履歴として残してあります。
+> **差分を見たいとき以外は、この節の数字を使ってください。**
+>
+> **⚠ 2026-08-09 追記 — `analyze` の 0.37s は古い。** 同じマシン・同じコマンドで
+> `GUFF_DEBUG_CACHE=2` を実測すると `phase analyze (run_on_packages)` は
+> **0.85〜0.90s**（prometheus `./...`、cold、`--no-cache`。修正前は 0.88〜0.90s）。
+> この表が書かれた 2026-07-30 以降に追加された check の分だけ育っている。
+> **「analyze はもう小さい / C-4 の期待値も消滅」は現在は成り立たない** —
+> `analyze` は再び 2 番目に大きい直列 phase である。
+> 表の他の行は再実測していないので、`analyze` 以外の数字も**まず測り直すこと**。
+>
+> その実例として 2026-08-09 に errcheck の `is_error_type`
+> （呼び出しごとに object arena 全走査 + `TypeArena` 複製 + 型の `String` 描画）を
+> run 単位のメモに変えたところ、**analyze が 0.19〜0.20s → 0.15s / wall 0.57s → 0.53s**
+> （`./tsdb/...`）、**analyze 0.88〜0.90s → 0.85〜0.86s**（`./...`）。手順と A/B は
+> [`COMPAT-HARDENING.md`](COMPAT-HARDENING.md) §4 の 2026-08-09（2 本目）§6。
+
+**cold（空 `GUFF_CACHE`, `--no-cache`）— wall 2.71〜2.76s / RSS 3.75 GB / findings 20**
+
+| phase | wall | §1.3-post 比 | 何をしているか | 残っているレバー |
+|---|---:|---:|---|---|
+| startup | 0.01s | — | 設定 + レジストリ | **A-9 で NO-GO 済み** |
+| load_graph（`go list`） | **0.85s** | −0.38 | 外部プロセス待ち。CPU は遊んでいる | C-3c（**製品判断**。wall は残り 0.26s + 起動 0.078s） |
+| cache setup+partition | 0.00s | — | `--no-cache` なので実質ゼロ | 触らない |
+| typecheck_roots | **1.45s** | −0.13 | うち **seed dep check 1.08s**（1455 source deps / 35 waves / widest 161）+ merge 0.05s + target ~0.32s | **ここが最大**。ただし wave 撤廃は **B-9 = 原則着手しない** |
+| analyze | **0.37s** | **−0.38** | 全 analyzer | B-2 follow-up（lazy import members）が効いて**もう小さい**。C-4 の期待値も消滅 |
+| issues+filter | 0.03s | — | | 触らない |
+| **format_checks** | **1.65〜1.81s** | ±0 | 2 スレッド専用プール。**`waited=0.00s`** | **B-10 は依然 NO-START**（下記） |
+| **teardown** | **0.00s** | **−0.28** | A-10 で leak に変更 | 済み |
+| （プロセス終了） | 0.045s | — | rayon join / mimalloc / 静的変数 | 基準未満。`process::exit` は入れていない |
+
+**直列 phase の合計 = 0.01 + 0.85 + 1.45 + 0.37 + 0.03 = 2.71s。`real` = 2.72s で閉じています。**
+**つまり今は「計測されていない直列区間」がありません**（A-10 前は 0.33s ありました）。
+
+> **B-10（formatter の read+parse 共有）の着手条件は満たされていません。**
+> format 1.65〜1.81s に対して直列 phase が 2.71s なので、format はまだ内側に隠れており
+> `waited=0.00s` です。**余裕は約 0.9s。** cold をさらに 0.9s 詰めたら
+> format が critical path になり、そのとき初めて B-10 に価値が出ます。
+
+**cold の攻めどころは実質 2 つだけになりました:**
+**① seed dep check 1.08s（B-9 = 触らない / C-1 = 要合意）**、**② `go list` 0.85s（C-3c = 製品判断）**。
+**どちらもユーザー合意が必要な領域です。**
+
+**warm（キャッシュ hot）— wall 0.21s ×2 / RSS 0.14GB / 294 hits 0 misses**
+
+| phase | wall |
+|---|---:|
+| startup | 0.01s |
+| load_graph | 0.08s |
+| cache setup+partition | 0.01s |
+| issues+filter | 0.03s |
+| format_checks | 0.07〜0.08s |
+| teardown | 0.00s |
+
+warm は B-8 後 0.21s で動いていません。`go list` の 0.08s が最大要素で、
+これを消すのは C-3b + C-3c（製品タスク）です。
+
+### 1.3-post phase 内訳（**2026-07-28 / B-3 後のクリーン実測。履歴。最新は §1.3-post2**）
+
+> 下の §1.3 は**着手時（2026-07-27）の記録**として残してあります。
+
+**cold（空 `GUFF_CACHE`, `--no-cache`）— wall 3.96〜4.06s / RSS 7.42〜7.60GB / findings 20**
+
+| phase | wall | 2026-07-27 比 | 何をしているか | 次に攻めるタスク |
+|---|---:|---:|---|---|
+| load_graph（`go list`） | ~~1.23s~~ → **0.86s**（C-3a 後） | −0.02 | 外部プロセス待ち（`golist invoke(main)` ~~1.01s~~ → **0.62s** / `stdlib-export` 0.16s / パース 0.03s / `connect_imports` 0.01s）。**CPU は遊んでいる** | ~~C-3a 済~~。残りは C-3c（製品判断） |
+| typecheck_roots | **1.58s** | −0.29 | seed + target | A-1, B-5, B-6, P0-3 |
+| **format_checks** | **1.68s**（並列に重畳、待ち 0.00s） | −0.07 | 2 スレッド専用プール | **P0-1 は「wall に効かない」で終わっている。重畳が崩れたらここが critical path** |
+| analyze | **0.75s** | **−0.47** | 全 analyzer | **B-1**（`preorder_stack` が self 0.87s / inclusive 2.81s）, B-2, B-4 |
+| issues+filter | 0.03s | — | | 触らない |
+| print | 0.00s | — | | 触らない |
+
+**cold seed-hot（`GUFF_CACHE` 永続, `--no-cache`）— wall 3.10s / RSS 7.47GB**
+
+| phase | wall |
+|---|---:|
+| load_graph | 1.09s |
+| typecheck_roots | 0.87s |
+| analyze | 0.75s |
+| **format_checks** | **1.78s**（重畳、待ち 0.00s） |
+
+> ⚠️ **seed-hot では format_checks 1.78s が wall 3.10s の 57%。**
+> 直列 phase の合計は 1.09+0.87+0.75+0.03 = **2.74s** で、format はまだ内側に隠れています
+> （t=0 に開始して 1.78s で終わるため）。**しかし余裕は 0.96s しかありません。**
+> **cold を 1s 詰めた瞬間に format が critical path になり、そこから先は
+> 「analyze / typecheck をどれだけ速くしても wall が動かない」領域に入ります。**
+>
+> **↑ この懸念は S-3（2026-07-28 DONE）で解消済みです。** 内訳を取ったところ
+> format の 1.58s は **gci 0.40 + gofumpt 0.57 + goimports 0.61 ＝ 同じ 725 ファイルの 3 周**で、
+> critical path 化しても **CPU の最大 2/3 を落とせる未着手のレバー**が残っています。
+> **B-1 / A-1 を先に進めて問題ありません。** 詳細は §S-3 の DONE 節。
+
+**warm（キャッシュ hot）— wall 0.21s ×3 / RSS 0.14GB（B-8 / X-1 後と同一。B-3 は warm に効かない）**
+
+| phase | wall |
+|---|---:|
+| load_graph | 0.07s |
+| cache setup+partition | 0.09s（294 hit / 0 miss） |
+| issues+filter | 0.03s |
+| format_checks | 0.07s |
+
+**analyze の中身（合計 CPU、B-3 後の上位 12）:**
+
+```
+                         buildir      2.26s      66 actions   ← 1 pkg あたり 34ms。単独で最重量
+                          revive      0.72s     293 actions
+                        misspell      0.45s     293 actions
+                      whitespace      0.27s     293 actions
+                          inline      0.27s     293 actions
+                       modernize      0.26s     293 actions
+                       copylocks      0.20s     293 actions
+                       typeindex      0.20s     293 actions
+                        gocritic      0.12s      66 actions
+                          SA4023      0.11s      66 actions
+                          SA5001      0.10s     293 actions
+                      composites      0.09s     293 actions
+（testifylint は 1.12s → 0.08s になり圏外。§B-3 参照）
+```
+
+**`inspect preorder`: 12361 calls / 54,385,011 nodes / 2.14s CPU（analyze CPU の 31.6%）。**
+絶対値は B-3 前後で不変（2.13s → 2.14s）で、**比率が上がったのは分母が縮んだだけ**です。
+**B-1 の期待値（wall 0.15〜0.25s）は変わっていません。**
+
+**samply の self CPU 上位（合計 18.50s。B-3 前は 19.29s）:**
+
+| CPU | % | symbol | タスク |
+|---:|---:|---|---|
+| 1.942s | 10.5% | `_platform_memmove`（内訳: `RawVec::grow_one` / SSA アリーナ / `Ident::clone`） | A-3 と同じ「小さい確保が大量」領域 |
+| 0.874s | 4.7% | `guff::walk::preorder_stack::rec` | **B-1** |
+| 0.789s+0.474s | 6.8% | `Scanner::scan` + `Scanner::next` | **A-3** |
+| 0.579s | 3.1% | `guff_ssa::ssautil::load::build_package_for_analysis` | B-2 |
+| **0.574s+0.514s** | **5.9%** | **`BuildHasher::hash_one` + `sip::Hasher::write`（SipHash）** | **A-1** |
+| 0.461+0.309+0.308s | 5.8% | `mi_free` / `mi_malloc_aligned` / `mi_page_free_list_extend` | アロケータ。A-3 と連動 |
+| 0.328s+0.296s | 3.4% | `drop_in_place<ast::Expr>` + `Expr::clone` | B-6 |
+| 0.323s | 1.7% | `sha2::sha256::compress256` | キャッシュ鍵。仕様 |
+| 0.234s+0.245s | 2.6% | `pthread_mutex_init` + `pthread_mutex_unlock` | A-4 / C-6 |
+
+**A-1 の GO/NO-GO 材料（測ってあります）:** SipHash 合計 1.088s ＝ wall 換算 **約 0.18s** で
+基準は超えます。ただし `--callers` で割ると**呼び出し元が分散**しています:
+
+| CPU | 呼び出し元 |
+|---:|---|
+| 0.290s | `build_package_for_analysis` ← `buildir::run`（SSA 構築） |
+| 0.148s | `member_from_object` ← `build_package_for_analysis` |
+| 0.104s | `guff::token::lookup` ← `Scanner::scan`（**キーワード表。`match` にすれば HashMap 不要**） |
+| 0.089s | `Arc::drop_slow` ← `drop_in_place<ast::File>` |
+| 0.082s | `collect_objects` ← `Checker::check_files` |
+| （以下 0.06s 未満が延々と続く） |
+
+つまり **「1 箇所替えれば終わり」ではない**ので、§A-1 の指示どおり **crate ごと・1 コミットずつ**、
+かつ **guff-ssa（合計 0.44s）から**着手するのが最も効率的です。
+**その前に §0-12（iteration order 依存の洗い出し）を必ず終わらせること** — SSA の構築順が
+変わると findings が動く可能性があります。
+
+### 1.3 phase 内訳（**2026-07-27 クリーン計測 / 着手時の記録。最新は §1.3-post2**）
+
+**cold（空 `GUFF_CACHE`, `--no-cache`）— wall 4.71〜4.79s / RSS 7.60〜7.72GB / findings 20**
+
+| phase | wall | 何をしているか | 攻めるタスク |
+|---|---:|---|---|
+| load_graph（`go list`） | **1.25s** | 外部プロセス待ち。CPU は遊んでいる | B-8 / C-3（warm は B-8） |
+| typecheck_roots | **1.87s** | うち seed 1.42s（1455 依存パッケージ）/ target 0.43s | P0-2, P0-3, A-2〜A-4, B-5, B-6 |
+| analyze | **1.22s** | 全 analyzer の実行 | B-0〜B-4 |
+| format_checks | **1.75s**（並列に重畳、待ち 0.00s） | 2 スレッド専用プールで実行。**記録値 0.59s の 3 倍** | **P0-1（最優先）** |
+| issues+filter | **0.03s** | もう十分速い | 触らない |
+| print | 0.00s | | 触らない |
+
+**cold seed-hot（`GUFF_CACHE` 永続, `--no-cache`）— wall 3.68s / RSS 7.31GB**
+
+| phase | wall |
+|---|---:|
+| load_graph | 1.22s |
+| typecheck_roots | 0.88s（seed dep check **0.39s**、1455 hit / 0 miss） |
+| analyze | 1.19s |
+| format_checks | **1.90s**（重畳、待ち 0.00s） |
+
+> ⚠️ **seed-hot では format_checks（1.90s）が wall（3.68s）の半分を超えています。**
+> cold を速くすればするほど format の比率が上がり、いずれ critical path になります。
+> P0-1 を最優先にしている理由がこれです。
+
+**warm（issues+fmt キャッシュ hot）— wall 0.35〜0.36s / RSS 0.14GB**
+
+| phase | wall |
+|---|---:|
+| load_graph（`go list`） | **0.21〜0.22s**（＝ warm wall の **60%**） |
+| cache setup+partition | 0.09s（294 hit / 0 miss） |
+| typecheck_roots | 0.01s（0 pkgs） |
+| analyze | 0.00s |
+| issues+filter | 0.03s |
+| format_checks | 0.09〜0.10s（fmt_check キャッシュ hot） |
+
+warm を詰めるなら **`go list` の 0.21s（B-8）が主戦場**です。ここを潰さない限り warm は
+0.2s を割れません。**逆に P0-1 は warm には効きません**（warm の format は 0.09s）。
+
+### 1.4 analyze の中身（**2026-07-27 クリーン実測 / 着手時の記録。最新は §1.3-post**）
+
+**この表は wall ではありません**（`PERF_TASKS.md` §1.6 の注意を再読すること）。
+並列に走るので実 wall はこの 1/6 くらいです（実際 analyze の wall は 1.20s）。
+
+```
+                         buildir      2.34s      66 actions   ← 1 pkg あたり 35ms
+                     testifylint      1.15s      19 actions   ← 1 pkg あたり 61ms
+                          revive      0.78s     293 actions
+                        misspell      0.43s     293 actions
+                       modernize      0.30s     293 actions
+                          inline      0.28s     293 actions
+                      whitespace      0.25s     293 actions
+                       copylocks      0.19s     293 actions
+                       typeindex      0.19s     293 actions
+                        gocritic      0.12s      66 actions
+                          SA5001      0.09s     293 actions
+                       structtag      0.09s     293 actions
+                      composites      0.09s     293 actions
+                        errorsas      0.08s     141 actions
+                           godot      0.08s      66 actions
+                          SA1012      0.08s     116 actions
+                     unreachable      0.08s     293 actions
+                          SA4023      0.07s      66 actions
+                    unusedresult      0.07s     293 actions
+                          ST1005      0.07s     293 actions
+（上位 20 の合計 ≈ 6.7s。以下に 200 個以上の analyzer の裾野が続く）
+```
+
+読み取れること:
+
+- **buildir（SSA 構築）が単独で 35%。** 66 actions しかない＝1 パッケージあたり **35ms**。→ **B-2**
+- **testifylint が 19 actions で 1.15s ＝ 1 パッケージあたり 61ms**。単価は buildir の
+  1.7 倍で、全 analyzer 中で最悪。→ **B-3**
+- 上位 2 つで **52%**。3 位以下は「293 actions で 0.07〜0.78s」＝1 パッケージ 0.2〜2.7ms の
+  小物が延々と並ぶ。個々は安いが **数が 200 以上あるので裾野の合計が効く**。
+  この裾野の大半は「AST を丸ごと 1 周舐めて、欲しいノード種別以外を捨てる」だけに
+  費やされている。→ **B-0 / B-1**
+
+> 参考: 汚染環境（§1.1）で同じ表を取ると全部が 2.2 倍（buildir 5.19s / testifylint 2.80s）に
+> なります。**比率は変わらない**ので、汚染環境でも「どれが重いか」の判断には使えますが、
+> **GO/NO-GO の絶対値の判定には使えません。** 必ずクリーン環境で取り直すこと。
+
+---
+
+## 2. 検証プロトコル（毎タスク必須。省略したらそのタスクは失敗）
+
+### 2.1 findings 同一性
+
+`PERF_TASKS.md` §2.1 の `gen()` 関数を **`scripts/findings-gen.sh` として常設**しました
+（毎回コピペする必要はありません）:
+
+```bash
+./scripts/findings-gen.sh /tmp/before.txt          # 変更前（prometheus。第2引数で別リポジトリ）
+# … 実装してビルド …
+./scripts/findings-gen.sh /tmp/after.txt
+diff /tmp/before.txt /tmp/after.txt && echo IDENTICAL
+```
+
+**diff が空でなければロールバック。** 件数の一致で満足しないこと（§2.1 の注意書き参照）。
+
+### 2.2 決定性
+
+`PERF_TASKS.md` §2.2。**通常 3 回、ハッシャ/並列/キャッシュを触るタスクは 5 回。**
+
+### 2.3 本番ゲート
+
+```bash
+cd /Users/dakimura/projects/src/github.com/dakimura/guff
+./regress/run.sh                 # tsdb プロファイル（軽い。まずこれ。~1.7s の計測 + golangci-lint）
+./regress/run.sh --profile full  # ./... 全体（本番。重い）
+```
+
+合格条件（`regress/gate.py`）:
+
+| 項目 | しきい値 |
+|---|---|
+| wall | baseline × **1.0** + **0.15s**（第1弾の記述より厳しくなっています。実測値を信じること） |
+| peak RSS | baseline × **1.20** |
+| `guff_only` の増分 | **0** |
+| `golangci_only` の増分 | **0** |
+| `both` の減少 | **禁止** |
+
+現 baseline（`regress/baseline*.json`、**2026-07-30 C-3a + A-10 後に再ロック**）:
+
+| プロファイル | baseline wall | baseline RSS | findings |
+|---|---:|---:|---|
+| tsdb | **1.250s** | **1,132,838,912** (~1.05 GiB) | both 4 / only 0,0 |
+| full | **2.770s** | **3,729,309,696** (~3.47 GiB) | both 20 / only 0,0 |
+
+（旧 baseline は tsdb 1.360s / full 3.360s。C-3a の `go list` 削減と A-10 の teardown 省略をゲートに焼き込んだ。）
+
+**両プロファイル PASS しなければコミットしない。baseline はユーザー承認まで更新しない**（§0-6）。
+
+> ⚠️ wall のしきい値が `ratio=1.0, epsilon=0.15s` と非常に厳しいので、**§1.2 のガードを通していない
+> 汚れた環境ではゲートがほぼ確実に落ちます。** ゲートが落ちたときは、まず「マシンが汚れていないか」
+> を疑ってから、コードを疑ってください。
+
+### 2.4 `-j 1` でも遅くなっていないこと
+
+`PERF_TASKS.md` §0-3。並列パスにだけ重い処理を足していないかの確認です。
+
+```bash
+cd .../prometheus
+CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-cache -j 1 -c .golangci.yml ./... >/dev/null; rm -rf "$CACHE"
+```
+
+---
+
+## 3. タスク一覧（全 33 本）
+
+**リスク**は「findings を壊す確率」、**工数**は実装＋検証の総量です。
+**期待**は cold wall（prometheus `./...`）に対するクリーン環境での見込み削減量。
+数字に `?` が付いているものは **GO/NO-GO 計測をしないと分からない**という意味です。
+
+### Tier S — 計測基盤（**他のどのタスクより先にやる**）
+
+| ID | タスク | 効く所 | 期待 | 工数 | リスク |
+|---|---|---|---|---|---|
+| S-1 | 計測環境クリーン判定スクリプト | （全部） | — | 極小 | ゼロ |
+| S-2 | プロファイラ（samply）手順の常設 | （全部） | — | 小 | ゼロ |
+| ~~S-3~~ | ~~`GUFF_DEBUG_CACHE=2` で phase 内訳を細分化~~ **DONE**（format_checks の正体 = 3 formatter × 725 ファイルの 3 周） | （全部） | — | 小 | 低 |
+
+### Tier P0 — 今回の調査で見つかった「たぶん既に損している」もの
+
+| ID | タスク | 効く所 | 期待 | 工数 | リスク |
+|---|---|---|---|---|---|
+| ~~P0-1~~ | ~~format_checks の 2 スレッド固定を見直す~~ **DONE（2026-07-27: 既定2のまま）+ P0-1b（2026-07-31: `(ncpu/3).clamp(2,4)`。seed-hot ≈ −0.4s）** | cold | **−0.4s seed-hot** | 小 | 低 |
+| **P0-2** | **依存パースで `SKIP_OBJECT_RESOLUTION`** | cold | **0.2〜0.5s?** | 小 | 低 |
+| ~~P0-3~~ | ~~target パースの object resolution も条件スキップ~~ **DONE**（条件付き実装。prometheus は `ineffassign` 有効で発火せず。上限: parse CPU −0.45s / target wall −0.05s。§P0-3） | cold | **0（prometheus）** / 天井 −0.05〜0.2s | 中 | 中 |
+
+### Tier A — 低リスク・小〜中の確実な勝ち
+
+| ID | タスク | 効く所 | 期待 | 工数 | リスク |
+|---|---|---|---|---|---|
+| A-1 | ハッシャを FxHash に差し替え | cold/warm | 0.1〜0.4s? | 中 | **中**（§0-12） |
+| ~~A-2~~ | ~~Scanner の `src.to_vec()` 除去~~ **NO-GO**（`Scanner::init` は合計 CPU 0.024s。§A-2 参照） | — | 0 | — | — |
+| A-3 | トークンごとの `String` 割り当て削減 | cold | 0.1〜0.3s? | 中 | 低 |
+| ~~A-4~~ | ~~`File::add_line` の Mutex 除去~~ **NO-GO**（`-j1` wall 差 ±0.00s。§A-4） | — | 0 | — | — |
+| A-5 | `hex_encode` の `format!` 除去 | warm | 0.01〜0.05s? | 極小 | 極低 |
+| ~~A-6~~ | ~~`Context::lookup` の `Vec` 割り当て除去~~ **NO-GO**（lookup 14k 回 ≪ 100万。§A-6） | — | 0 | — | — |
+| ~~A-7~~ | ~~`typecheck_one_target` の `Package` 丸ごと clone 除去~~ **NO-GO**（clone 0.005s。§A-7） | — | 0 | — | — |
+| ~~A-8~~ | ~~`target-cpu=native` / PGO~~ **A-8a NO-GO**（native wall ±0）。**A-8b DONE**（PGO `-j1` −0.28s / 並列 −0.11s。スクリプト常設。baseline 未更新） | 全部 | **−0.11〜0.28s**（PGO） | 中 | 低 |
+| ~~A-9~~ | ~~起動コスト（レジストリ構築・設定パース）~~ **NO-GO**（startup **0.01s** &lt; 0.02s。タイマー常設。§A-9） | warm | 0 | — | — |
+| ~~A-10~~ | ~~終了時のティアダウンを払わない~~ **DONE**（`drop(LintResult)` が print 後に 0.28s。one-shot だけ leak。§A-10） | cold | **−0.27s（実測）** | 極小 | 低 |
+
+### Tier B — 構造的（中〜大。必ず GO/NO-GO 計測を先に）
+
+| ID | タスク | 効く所 | 期待 | 工数 | リスク |
+|---|---|---|---|---|---|
+| ~~B-0~~ | ~~preorder 総時間の計測（B-1 の GO/NO-GO）~~ **DONE** | — | 27.9% と判明 | 小 | ゼロ |
+| ~~B-1~~ | ~~本物の Inspector（フラットイベント列 + 種別マスク）~~ **完了（打ち止め）**。B-1a: wall −0.12s / preorder CPU 2.01→0.86s。**B-1b/c: 並列 wall ±0.00s・`-j 1` −0.08s・preorder CPU 0.88→0.73s**。**B-1d: 実装して計測し NO-GO（走査 −85% でも CPU +0.02s）→ revert** | cold | **実績 −0.12s**（見込み 0.15〜0.25s には届かず。理由は §B-1） | 大 | 中 |
+| ~~B-2~~ | ~~buildir/SSA の関数単位 遅延構築~~ **NO-GO**（消費者は `src_funcs` 全走査）。**follow-up DONE: lazy import members**（eager `populate_imported_package_members` 除去 → buildir 1.81→0.11s / wall −0.27s / RSS 半減） | cold | **−0.27s wall / buildir −94%** | 中 | 中 |
+| ~~B-3~~ | ~~testifylint の高速化（単価 61ms の解明）~~ **DONE**（原因は `lookup_named_type` の O(nodes × packages) 走査。`cut_vendor` が testifylint の 94%） | cold | **−0.43s 達成**（analyze 1.17→0.75s） | 中 | 中 |
+| ~~B-4~~ | ~~revive の `shared_walk` を全ルールに拡大~~ **DONE（A 32 rules）。B/C は触らない** | cold | 誤差帯（revive ~0.75s） | 中 | 中 |
+| ~~B-5~~ | ~~型の構造的インターン（hash-consing）~~ **DONE**（Pointer/Array/Map/Chan/Signature。Slice 除外。types −26% / RSS −0.23GiB。§B-5） | cold | **RSS −0.23 GiB** | 大 | **高** |
+| ~~B-6~~ | ~~型チェッカの `Expr::clone` 除去~~ **DONE**（`Operand<'a>` が `&Expr` を保持。typecheck cold −0.17s） | cold | **−0.17s** typecheck | 中 | 中 |
+| ~~B-7~~ | ~~ソースバイトの一回読みを format/misspell と共有~~ **NO-GO**（§B-7） | cold | — | 中 | 低 |
+| ~~B-8~~ | ~~warm の `go list` をパース済み形式でキャッシュ~~ **DONE**（実際の犯人は stdlib `go list -export`。パース済みグラフ化は上限 0.03s で NO-GO） | **warm** | **−0.15s 達成**（0.35→0.20s） | 中 | 中 |
+| B-9 | seed の wave バリアを部分的に撤廃 | cold | ~0.1s | 大 | **高** |
+| **~~B-10~~** | ~~formatter 間で read + parse を共有する（S-3 で発見）~~ **DONE**（check: read 1 回 + native gci/gofumpt 共有 parse。goimports は独自。wall 小幅 / warm format ~0.07→0.04s。§B-10） | cold（format critical） | **小幅**（goimports 支配） | 中 | 中 |
+
+### Tier C — 大物・実験（時間と注意力に余裕があるときだけ）
+
+| ID | タスク | 効く所 | 期待 | 工数 | リスク |
+|---|---|---|---|---|---|
+| ~~C-1~~ | ~~AST アリーナ化 + 文字列インターン~~ **DONE（Phase 2 MVP）**。DeclInfo → NodeId。seed ≈ −0.07s。Phase 3/4 NO-START。§C-1 | cold | **−0.07s** | 特大→中 | 最高→中 |
+| ~~C-2~~ | ~~常駐デーモン / watch モード~~ **DONE（MVP）**。`guff run --watch`。再パス 0.07〜0.10s / 編集 ~1.35s（one-shot 同条件 ~1.95s）。型/SSA 非保持。§C-2 | warm | **再パス −0.11s** | 大 | 中 |
+| **C-3a** | **`go list` に無駄な仕事をさせない**（`-json=fields` + `-compiled=false`）。§C-3a | cold | **−0.36s（実測）** | **小** | **低** |
+| ~~C-3b~~ | ~~`go env`/`go version` 撲滅~~ **DONE**（cold 5 本消滅・wall ±0。§C-3b） | cold | **±0** | 小 | 低 |
+| C-3c〜e | `go` 依存の段階的除去（native lister / stdlib スナップショット / cgo 委譲）。§C-3 | cold | −0.2〜0.5s | 大〜特大 | 中〜高 |
+| C-4 | gocritic 106 チェッカーの walk 融合 | cold | 0.0〜0.1s? | 大 | 中 |
+| C-5 | issue cache を analyzer 単位の粒度に | warm | ? | 大 | **高** |
+| ~~C-6~~ | ~~`Ident` から `Mutex` を外す~~ **NO-GO**（Ident Mutex 帰属 CPU ~0.3–0.5s → wall ≲0.08s。§C-6） | cold | 0 | — | — |
+| ~~C-7~~ | ~~依存 seed のプリウォーム（バックグラウンド投機実行）~~ **DONE**（seed-hot `--no-cache` typecheck −0.35s / wall −0.15〜0.25s。§C-7） | cold seed-hot | **−0.15〜0.25s** | 大 | 中 |
+| ~~C-8~~ | ~~メモリ削減で並列度を上げる~~ **DONE（内訳のみ）**。peak ~3.46 GiB。主因は型アリーナ (~1.0 GiB) + AST (~0.4) + Info (~0.2)。SSA incremental ≈0。§C-8 | cold | 内訳記録 | 小 | ゼロ |
+| ~~C-9~~ | ~~seed が捨てる `Info` 記録を止める~~ **DONE**（Go nil-map 相当。`-j 1` seed −0.15s。§C-9） | cold | **−0.15s（`-j 1`）** | 小 | 低 |
+
+**推奨着手順（着手時の計画）:** `S-1 → S-2 → S-3 → P0-1 → P0-2 → A-5 → A-2 → B-0 → （B-0 の結果次第で B-1）→ A-1 → …`
+
+**2026-07-31 時点の残り（★ 最新）:** SKIP_FUNC_BODIES byte skip + native list skip
+dep tests DONE。empty-cold wall ≈ **1.8s** 帯（load≈0.6 / typecheck≈1.0）。
+seed-hot ≈ **1.10s**。format は waited=0 でほぼ隠れている。B-5 Slice は findings ずれで見送り。
+
+**2026-07-31 時点の残り（goimports names-only 直後・履歴）:** goimports names-only resolve + identity fast-path +
+P0-1b + B-10 DONE。seed-hot ≈ **1.10s** / empty-cold ≈ **1.85–1.9s**（typecheck+load）。
+format は waited=0 でほぼ隠れている。B-5 Slice は findings ずれで見送り。
+
+**2026-07-31 時点の残り（identity fast-path 直後・履歴）:** goimports identity fast-path + P0-1b + B-10 DONE。
+seed-hot ≈ 1.25–1.3s / empty-cold ≈ 2.0s（typecheck+load）。goimports 初期 parse が残り。
+B-5 Slice は findings ずれで見送り。
+
+**2026-07-31 時点の残り（P0-1b 直後・履歴）:** **B-10 + P0-1b DONE。** seed-hot wall ≈ 1.2s 帯。
+empty-cold は typecheck+load（≈2.0s）が本丸。goimports 単体 / seed は B-9 除外で残り薄い。
+B-5 Slice は findings ずれで見送り。
+
+**2026-07-31 時点の残り（B-10 直後・履歴）:** **B-10 DONE。** C-3c 後 seed-hot では format が
+critical path（waited ~0.5s）。B-10 で gci/gofumpt を畳んだが **goimports が残る本丸**。
+B-5 Slice は findings ずれで見送り。`B-9` は原則着手しない。`C-4` は analyze 0.37s で期待値消滅。
+
+**2026-07-30 時点の残り（履歴）:** **wall だけを狙う低リスクなタスクは尽きました。**
+§1.3-post2 のとおり cold 2.72s の直列内訳は `go list` 0.85 / seed 1.08 / target 0.32 / analyze 0.37 で、
+**未計測の隙間はゼロ**です。C-9 で seed ≈ −0.15s（`-j 1`）。ここから先の壁時計は
+**C-3c（`go` 非依存化。製品タスク）** か、B-5 Slice（findings 合意）程度。
+`B-10` は `waited=0.00s` の間 NO-START、`B-9` は原則着手しない、`C-4` は analyze 0.37s で期待値消滅、
+`C-5` は先に「設定変更時の再解析コスト」の計測から。C-1 Phase 3/4 は条件付き GO で NO-START。
+
+**2026-07-29 時点の残り推奨順（履歴）:** `B-10 は waited=0 の間 NO-START` → B-9（原則着手しない） /
+**C-1（AST・ユーザー合意後）**。**C-2 / C-7 / C-8 DONE**。**C-6 NO-GO**。
+P0-3 DONE。B-5 DONE（Slice 以外）。A-4 / A-6 / A-7 / A-8a / A-9 は NO-GO。A-8b DONE。
+B-2 関数単位遅延は NO-GO、**lazy import members は DONE**（RSS 7.4→3.8 GiB）。B-7 NO-GO。B-4 A 完了。
+RSS をさらに詰めるなら **C-1（AST）** か **B-5 Slice（findings 合意後）** — 内訳は §C-8。
+Watch のコンテンツ編集をさらに詰めるなら **セッション内 ExportSeed 保持**（RSS ↔ wall トレードオフ・要合意）。
+
+> **§1.3-post の「余裕 0.96s」問題は S-3 で決着しました。そのまま進めて構いません。**
+> seed-hot では format_checks（1.78s 重畳）に対して直列 phase の余裕が 0.96s しかなく、
+> cold を約 1s 詰めると format が critical path になる——という懸念でしたが、
+> **S-3 の内訳で「format 1.58s ＝ gci 0.40 + gofumpt 0.57 + goimports 0.61、
+> すなわち同じ 725 ファイルの 3 周」**と判明しました（§S-3 の DONE）。
+> つまり format が critical path 化しても、**そこには CPU の最大 2/3 を落とせる
+> 未着手のレバーが残っています。** 先に format を潰しておく必要はありません。
+> （ただし §5 の「format の shared-read は逆に悪化」の先例があるので、着手は要 GO/NO-GO。）
+
+自信がなければ **Tier S と Tier P0 だけやって終わりにしてよい**です。それでも十分な成果です。
+
+---
+
+## 4. タスクテンプレート（コピーして使う）
+
+各タスクに着手したら、これを作業メモに貼って埋めていってください。**全部 YES になるまでコミット禁止。**
+
+```
+## タスク: <ID> <名前>
+- [ ] `docs/PERF_TASKS.md` §0 の10ルール + このファイル §0 の5ルールを読み直した
+- [ ] §1.2 のガードを走らせ、マシンがクリーンであることを確認した
+      load avg = ____ / ncpu = ____ / lowpowermode = ____
+- [ ] GO/NO-GO 計測をやり、削減上限 = ____ s と見積もった（0.1s 未満なら中止）
+- [ ] 変更前の findings を取った（/tmp/before.txt、件数 ____）
+- [ ] 実装した（触ったファイル: ____）
+- [ ] `cargo build --release` が警告増なしで通る
+- [ ] `cargo test --workspace` が通る
+- [ ] 変更後の findings を取った（/tmp/after.txt）
+- [ ] `diff /tmp/before.txt /tmp/after.txt` が **空**
+- [ ] 同条件 3 回（ハッシャ/並列/キャッシュ系は 5 回）で after.txt が毎回同一
+- [ ] 狙った phase の秒数が実際に下がった: ____ s → ____ s
+- [ ] `-j 1` でも遅くなっていない: ____ s → ____ s
+- [ ] RSS が baseline × 1.20 以内: ____ bytes
+- [ ] `./regress/run.sh` PASS
+- [ ] `./regress/run.sh --profile full` PASS
+- [ ] baseline は更新していない
+- [ ] このコミットに他タスクを混ぜていない
+- [ ] このファイル（PERF_TASKS_V2.md）の該当タスクに DONE と実測値を追記した
+```
+
+---
+
+# Tier S — 計測基盤
+
+## S-1 — 計測環境クリーン判定スクリプト
+
+### 目的
+
+§1.1 の事故（Chrome に 2 コア食われて全 phase 2.2 倍）を二度と起こさないため、
+計測前チェックを 1 コマンドにする。
+
+### 手順
+
+`scripts/perf-guard.sh` を新規作成する。仕様:
+
+1. `sysctl -n hw.ncpu` でコア数を取る（Linux なら `nproc`）。
+2. `uptime` から 1 分 load average を取る。**load > ncpu/4 なら FAIL。**
+3. `ps aux | sort -nrk3` の上位 10 件を出す。**自分（guff / cargo / rustc）以外で
+   CPU 20% 超のプロセスがあれば WARN、50% 超なら FAIL。**
+4. macOS なら `pmset -g | grep lowpowermode` が 0 でなければ FAIL、
+   `pmset -g therm` に警告があれば FAIL。
+5. `cargo` / `rustc` / `cursor-agent worker` / `go build` が走っていれば FAIL。
+6. FAIL なら exit 1 して、**何が原因かと対処法**（「Chrome を閉じる」等）を出す。
+7. `--wait` オプションで、クリーンになるまで 5 秒おきにリトライ（最大 5 分）できるようにする。
+
+そのうえで `regress/run.sh` の冒頭（`ROOT=` を決めた直後あたり）から呼び出し、
+**`PERF_GUARD=0` で無効化できる**ようにする（CI や意図的な計測で邪魔になるため）。
+
+### 検証
+
+- 汚れた状態（Chrome で YouTube を再生する等）で走らせて FAIL すること。
+- クリーンな状態で PASS すること。
+- `PERF_GUARD=0 ./regress/run.sh` が従来どおり動くこと。
+- **guff 本体のコードは1行も触らないので findings 検証は不要**（ただし `regress/run.sh` を
+  触るので、`./regress/run.sh` が最後まで走ることは確認する）。
+
+### やってはいけない
+
+- guff のバイナリ側に判定を入れる（ユーザーの実行時に load average を見に行くのは筋が悪い）。
+- FAIL でいきなり `pkill` する。**警告して止まるだけ**にする。
+
+---
+
+## S-2 — プロファイラ（samply）手順の常設
+
+### 目的
+
+今のところ「phase タイマー」しか計測手段がない。関数レベルでどこに時間が行っているかを
+見られないと、Tier A/B のタスクは当てずっぽうになる（§0-14 に反する）。
+
+### 背景
+
+このリポジトリには現在プロファイラが入っていません（`which samply cargo-flamegraph` → 両方なし）。
+`samply` は macOS / Linux 両対応で、Firefox Profiler の UI で読めるサンプリングプロファイラです。
+コード変更が要らず、release バイナリにそのまま使えます。
+
+### 手順
+
+1. インストール:
+   ```bash
+   cargo install samply
+   ```
+2. **`strip = true` を一時的に外す必要があります。** ルートの `Cargo.toml` の
+   `[profile.release]` に `strip = true` があるとシンボルが消えてプロファイルが読めません。
+   プロファイル専用プロファイルを追加するのが安全:
+   ```toml
+   # ルート Cargo.toml に追記
+   [profile.profiling]
+   inherits = "release"
+   strip = false
+   debug = 1
+   ```
+   ビルド: `cargo build --profile profiling`（成果物は `target/profiling/guff`）。
+   **`[profile.release]` 自体は絶対に変更しないこと**（`PERF_TASKS.md` のコメントにあるとおり
+   `lto`/`codegen-units`/`panic` は意図して選ばれている）。
+3. 取得:
+   ```bash
+   cd .../prometheus
+   CACHE=$(mktemp -d)
+   GUFF_CACHE="$CACHE" samply record -- \
+     ../target/profiling/guff run --no-cache -c .golangci.yml ./... >/dev/null
+   rm -rf "$CACHE"
+   ```
+4. 手順を `docs/DEVELOPMENT.md` のプロファイリング節に追記する。
+
+### 注意
+
+- **`profiling` プロファイルで測った wall を regress のゲートに使ってはいけません。**
+  `strip=false` / `debug=1` はバイナリサイズを変えるので、数字が `release` と一致しません。
+  ゲートは常に `target/release/guff`。
+- 並列実行なので、フレームグラフは worker スレッドごとに分けて見ること。
+  「合計 CPU」と「wall」を混同しない（§1.6 の再掲）。
+
+### 検証
+
+コード変更なし。`cargo build --release` が従来どおり通ること、
+`./regress/run.sh` が PASS することだけ確認。
+
+### DONE（2026-07-28）— **`[profile.profiling]` + `scripts/perf-profile.py`（ヘッドレス集計）。B-3 の真犯人を即座に特定できた。**
+
+**入れたもの:**
+
+1. ルート `Cargo.toml` に `[profile.profiling]`（`inherits = "release"` + `strip = false` /
+   `debug = 1`）。`[profile.release]` は 1 文字も変えていない。
+   ビルド `cargo build --profile profiling` → `target/profiling/guff`（2m01s / 20.7MB）。
+2. `samply 0.13.1` を `cargo install samply` で導入。
+3. **`scripts/perf-profile.py`（新規）** — samply プロファイルを**ブラウザなしで**集計する。
+   手順書どおり `samply record` は Firefox Profiler UI を開くが、**エージェント/SSH/CI では
+   UI を開けないので数字が取り出せない**。これが無いと S-2 は「取得はできるが読めない」で終わる。
+
+**`perf-profile.py` の使い方（`--unstable-presymbolicate` が必須）:**
+
+```bash
+cd .../prometheus
+CACHE=$(mktemp -d)
+GUFF_CACHE="$CACHE" samply record --save-only --unstable-presymbolicate \
+  -o /tmp/guff.json.gz -- .../target/profiling/guff run --no-cache -c .golangci.yml ./... >/dev/null
+rm -rf "$CACHE"
+
+.../scripts/perf-profile.py /tmp/guff.json.gz --top 35          # self CPU 上位
+.../scripts/perf-profile.py /tmp/guff.json.gz --inclusive 'Scanner|testifylint'
+.../scripts/perf-profile.py /tmp/guff.json.gz --callers 'memmove' --depth 3
+.../scripts/perf-profile.py /tmp/guff.json.gz --threads
+```
+
+- `--unstable-presymbolicate` を付けないと `.syms.json` サイドカーが出ず、
+  **全フレームが `0x1684` のような生アドレスになって読めない**（実際に踏んだ）。
+- プロファイル側のライブラリ ID は Breakpad 形式（`05160B71CC51…0`）、サイドカー側は
+  ダッシュ付き小文字 UUID なので、スクリプト内で変換している。ここを間違えると
+  「シンボルが 1 個も解決しない」表が出る（実際に踏んだ）。
+- 時間は各サンプルの `threadCPUDelta`（µs）で重み付けしている。**したがって出る数字は
+  「全ワーカースレッドの合計 CPU」で、wall ではない**（§1.6）。`go list` 待ちや rayon の
+  バリアで寝ているスレッドは ~0 しか計上されない。**この数字を wall として引用してはいけない。**
+
+**実測（cold prometheus `./...`、合計 CPU 19.29s、self 上位）:**
+
+| CPU | % | symbol | 関連タスク |
+|---:|---:|---|---|
+| 1.895s | 9.8% | `_platform_memmove` | （下記の内訳参照） |
+| 0.916s | 4.8% | `guff::walk::preorder_stack::rec` | **B-1** |
+| 0.785s | 4.1% | `guff::scanner::Scanner::scan` | A-3 |
+| **0.767s** | **4.0%** | **`<core::str::pattern::StrSearcher>::new`** | **B-3（真犯人）** |
+| 0.623s | 3.2% | `guff_ssa::ssautil::load::build_package_for_analysis` | B-2 |
+| 0.608s+0.496s | 5.7% | `BuildHasher::hash_one` + `sip::Hasher::write` | **A-1（SipHash が 1.1s）** |
+| 0.366s+0.320s | 3.6% | `drop_in_place<ast::Expr>` + `Expr::clone` | B-6 |
+| 0.345s | 1.8% | `sha2::sha256::compress256` | （キャッシュ鍵。仕様） |
+| 0.341s | 1.8% | `guff::position::File::position_internal` | A-4 |
+
+`memmove` の呼び出し元内訳（`--callers 'memmove|memcpy' --depth 3`）:
+
+| CPU | 呼び出し元 |
+|---:|---|
+| 0.542s | `RawVec::grow_one`（`Vec` の再確保。`with_capacity` 不足） |
+| 0.267s | `guff_ssa::arena::Arena::alloc` ← `member_from_object` |
+| 0.118s | `ast::Ident::clone` ← `Expr::clone` |
+| 0.068s | `Scanner::scan` ← `Parser::next0` |
+
+つまり **`memmove` の 9.8% は「1 箇所の巨大コピー」ではなく `Vec` 成長とアリーナ確保の裾野**。
+A-2 が狙っていた `src.to_vec()` は**この表に出てこない**（→ A-2 の NO-GO 判定に直結）。
+
+**注意（この手順の限界）:**
+- `profiling` ビルドの wall を regress ゲートに使ってはいけない（手順書どおり）。ゲートは常に
+  `target/release/guff`。
+- `lto = "fat"` なので**インライン化された小関数は呼び出し元に吸収されて表に出ない。**
+  「表に無い＝コストが無い」ではない。`Scanner::init` のように**シンボルが残っているもの**については
+  inclusive 0.024s を信用してよいが、完全に消えた関数は `--callers` で親側から追うこと。
+
+**検証:** `cargo build --release` 従来どおり通る / tsdb regress **PASS**（wall 1.500s vs baseline
+1.740s、RSS 1.27GB vs 1.32GB、both 4 / only 0,0）。guff のコードは 1 行も触っていないので
+findings 検証は不要。
+
+---
+
+## S-3 — `GUFF_DEBUG_CACHE=2` で phase 内訳を細分化
+
+### 目的
+
+現在の phase タイマーは粒度が粗すぎて、Tier A/B の GO/NO-GO 判定に使えません。
+たとえば `load_graph 1.53s` の内訳（サブプロセス待ち / JSON パース / グラフ構築）が分からない。
+
+### 手順
+
+1. 既存の `timing_enabled()` 相当（`GUFF_DEBUG_CACHE` の有無を見ている箇所）を探す:
+   ```bash
+   rg -n 'GUFF_DEBUG_CACHE' crates --glob '*.rs'
+   ```
+2. **既存の `=1` の出力は 1 行も変えない**まま、`GUFF_DEBUG_CACHE=2`（＝値が `2` 以上）のときだけ
+   追加で出る詳細レベルを足す。
+3. 追加してほしい内訳:
+   - `load_graph` の中: `go list` サブプロセスの実時間 / stdout バイト数 / JSON パース /
+     `connect_imports` / `refine`。（`crates/guff-packages/src/golist.rs` に
+     `golist invoke(main)` / `golist parse+build` が既にあるので、それを `=2` に載せ替える）
+   - `typecheck_roots target check` の中: ファイル読み / パース / 型チェックの内訳（合計 CPU で可）
+   - `analyze` の中: **`InspectResult::preorder` に費やした総 CPU**（→ B-0 で使う）
+   - `format_checks` の中: ファイル収集 / formatter ごとの内訳
+4. 出力形式は既存に合わせる（`guff:   <2段インデント><名前> <秒>s`）。
+
+### やってはいけない
+
+- 計測コードをホットループの内側に置いて、それ自体が遅くする。
+  `Instant::now()` はナノ秒オーダーだが、1000万回呼べば効く。
+  **ループの外で `Instant` を取り、スレッドローカルに累算して最後に集計**する。
+  （既存の `record_analyzer_time` / `ANALYZER_TIMING`（`crates/guff-runner/src/action.rs`）が
+  グローバル `Mutex<HashMap>` を使っているが、これは analyzer 1回につき1回なので OK。
+  preorder のような高頻度のものに同じ実装を使ってはいけない。）
+- `GUFF_DEBUG_CACHE` が未設定のときにオーバーヘッドを足す。**必ず `bool` を一度読んで使い回す。**
+
+### 検証
+
+- `GUFF_DEBUG_CACHE=1` の出力が**変更前とバイト同一**であること（`diff` で確認）。
+- `GUFF_DEBUG_CACHE` 未設定での wall が変わらないこと（3 回計測して誤差内）。
+- findings diff = 空、両 regress PASS。
+
+### DONE（2026-07-28）— **`GUFF_DEBUG_CACHE=2` を追加。最大の収穫は「format_checks は 3 formatter × 725 ファイルの 3 周」。**
+
+**入れたもの:**
+
+| ファイル | 内容 |
+|---|---|
+| `crates/guff-packages/src/debug.rs`（新規） | レベル判定（0 = off / 1 = phase 合計 / 2+ = 内訳）。`enabled()` / `detailed()` |
+| `crates/guff-lint/src/debug.rs`（新規） | 同じロジックの写し。この 2 crate に共通の下位 crate が無いため（`guff-analysis` も既に独立して同じ env を読んでいる） |
+| `golist.rs` | `load_or_invoke_go` に **cache probe / subprocess / cache store** の分解 |
+| `load.rs` | `refine total`（既存の `connect_imports` は connect だけを測っている） |
+| `typecheck.rs` | `typecheck_package_with_seed` に **read / parse / seed-clone / check_files** のグローバル `AtomicU64` 累算。`typecheck_roots` が target ループの前後で **snapshot して差分**（seed 分と混ざらない） |
+| `lib.rs`（guff-lint） | `format collect_paths` と **formatter ごと**の秒数＋検出数 |
+
+**レベルの決め方:** `GUFF_DEBUG_CACHE` の値を `u8` としてパースし、パースできなければ 1。
+`.max(1)` してあるので、従来の `var_os(..).is_some()` と同じく **`=` （空）や `=0` も「on（レベル1）」のまま**です。
+
+> **手順書の「既存の `=1` 出力を `=2` に載せ替える」は採用していません。** §S-3 の検証条件が
+> 「`=1` の出力が変更前とバイト同一」で、載せ替えるとこれが破れるためです。**`=1` は 1 行も
+> 動かさず、`=2` で行を足すだけ**にしてあります（過去の記録値がそのまま比較できる）。
+
+**オーバーヘッド:** 高頻度パス（ファイルごと）の `Instant::now()` は `detail::start(on)` が
+`on.then(Instant::now)` なので、**未設定時は時計を読みません**（`bool` 1 回の分岐だけ）。
+実測は下の A/B 参照。
+
+**実測（クリーン環境・load 1.52・cold prometheus `./...`・`GUFF_DEBUG_CACHE=2`、
+wall 3.95s / RSS 7.46GB / findings 20）:**
+
+```
+guff:     format collect_paths 0.00s (725 files, 1 roots)
+guff:     golist cache probe 0.00s (miss)
+guff:     format gci 0.40s (0 unformatted)
+guff:     format gofumpt 0.57s (0 unformatted)
+guff:     golist subprocess 1.00s (14069597 bytes), cache store 0.00s
+guff:   golist invoke(main) 1.00s (14069597 bytes)
+guff:   golist parse+build 0.03s (1792 pkgs)
+guff:   golist stdlib-export 0.16s
+guff:   refine connect_imports 0.01s (1792 pkgs)
+guff:     refine total 0.01s (1792 pkgs, 294 roots)
+guff: phase load_graph (go list) 1.21s (294 roots, 1792 total pkgs)
+guff: phase cache setup+partition 0.00s (1 hits, 293 misses)
+guff:     format goimports 0.61s (0 unformatted)
+guff:     seed dep check 1.13s (...), 1455 source deps in 35 waves (widest 161), 243 export deps
+guff:   typecheck_roots seed build 1.15s (from_source=true)
+guff:   typecheck_roots target check 0.44s (293 targets)
+guff:     target check read 0.04s / parse 0.89s / seed-clone 0.02s / check_files 1.71s (summed across workers)
+guff: phase typecheck_roots 1.60s (293 pkgs)
+guff: phase analyze (run_on_packages) 0.75s
+guff: phase issues+filter 0.03s
+guff: phase format_checks 1.58s (overlapped with analysis; 0.00s waited)
+```
+
+> `format …` の行が phase の行の間に挟まるのは、format が別スレッドで重畳しているからで、
+> **順序は毎回変わります**（`eprintln!` は行単位でロックされるので行は壊れません）。
+> むしろ「format が何秒目に終わったか」が読めるので、そのままにしてあります。
+
+#### 読み取れたこと (1) — **format_checks 1.58s の正体は「同じ 725 ファイルを 3 周」**
+
+| 内訳 | 秒（2 スレッド専用プール上） |
+|---|---:|
+| collect_paths（ツリー走査） | **0.00s**（第1弾 2026-07-25 で 1 回に共有済み） |
+| gci | 0.40s |
+| gofumpt | 0.57s |
+| goimports | 0.61s |
+
+`run_format_checks`（`crates/guff-lint/src/lib.rs`）は **`cfg.enable` の formatter ごとに
+`Runner::check_files(&files)` を呼び直します。** ファイル一覧の walk だけは共有済みですが、
+**読み込みとフォーマット本体は formatter の数だけ繰り返し**です（prometheus は
+gci + gofumpt + goimports の 3 つ）。
+
+**これが §1.3-post の「余裕 0.96s」問題への答えです。** format が critical path 化しても、
+**そこには最大で CPU の 2/3 を落とせる既知のレバーが残っている**ので、
+**B-1 / A-1 の前に format を先に潰す必要はありません。** 順番はこれまでどおりで構いません。
+
+> ⚠️ ただし §5 の禁止リストに「**format の shared-read は第1弾 §1.7 で試して逆に悪化**」が
+> あります。**あれはバイト列の共有の話**で、ここで見えているのは
+> 「read + フォーマット本体（＝パースと整形）の 3 重実行」です。別の話ですが、
+> 先例があるので**着手するなら必ず GO/NO-GO 計測から**（新タスクとして起票すること）。
+
+#### 読み取れたこと (2) — target check の内訳（合計 CPU 2.66s / wall 0.44s ＝ 実効並列度 6.0）
+
+| 内訳 | 合計 CPU | 比率 |
+|---|---:|---:|
+| `check_files`（型チェック本体） | **1.71s** | 64% |
+| `parse_file` | **0.89s** | 33% |
+| `fs::read` | 0.04s | 2% |
+| seed clone + importer | 0.02s | 1% |
+
+**P0-3（target パースの object resolution スキップ）の上限がこれで確定します。**
+parse を**丸ごと消しても** wall 換算 `0.44 × 0.33 ≈ 0.15s`、そのうち `resolve_file` は一部なので、
+**上限は 0.15s を大きく下回ります。** §0-14 の基準（0.1s）ぎりぎりか、下回る可能性が高い。
+着手するなら、まず `resolve_file` 単独の CPU を samply（S-2）で切り出すこと。
+
+ついでに **B-6（`Expr::clone` 除去）と B-5（型のインターン）の当たり所も 1.71s の中**だと
+確定しました（samply の `drop_in_place<ast::Expr>` + `Expr::clone` = 0.62s はここと seed の両方に散る）。
+
+#### 読み取れたこと (3) — load_graph 1.21s は全部説明がついた
+
+`subprocess 1.00s`（`go list` の外部プロセス待ち）＋ `stdlib-export 0.16s` ＋
+`parse+build 0.03s` ＋ `refine 0.01s`。**83% が外部プロセス待ちで、CPU は遊んでいます。**
+`cache probe` は cold で 0.00s（ミス）なので、キャッシュ判定自体のコストはゼロ。
+~~**C-3 以外にここを詰める手はありません**~~
+**（2026-07-30 訂正）** この結論は「外部プロセス待ち＝手が出せない」という前提でしたが、
+**待っている中身を測っていませんでした**。`go list` の 1.02s のうち **0.56s は
+guff が要求しなくてよい仕事**です（`-compiled=true` の 0.39s ＋ 読みもしないフィールドの
+marshal 0.17s）。**§C-3a を見てください（実測 `load_graph` 1.24s → 0.83s / findings 同一）。**
+
+**検証:**
+
+- **findings byte 一致**: 変更前バイナリの出力と `diff` が空（20 件）。`=1` / `=2` / 未設定 /
+  `-j 1` のすべてで確認。**cold 3 回とも同一**。
+- **`=1` の出力が構造的に不変**: 秒数を正規化して `diff` すると、差分は
+  (a) 上位20リストの同着順の揺れ、(b) preorder の % の小数、(c) `/usr/bin/time` の有無 のみ。
+  **行の追加・削除・文言変更はゼロ。**
+- **未設定時のオーバーヘッドなし**（§0-11 / B-0 の教訓に従い **A/B/A/B の交互 4 往復**）:
+
+  | 回 | pre | post |
+  |---:|---:|---:|
+  | 1 | 4.49s | 4.34s |
+  | 2 | 4.00s | 3.97s |
+  | 3 | 4.00s | 3.97s |
+  | 4 | 3.99s | 3.97s |
+  | **中央値** | **4.00s** | **3.97s** |
+
+  差 −0.03s（＝ノイズ）。1 回目が両方とも高いのは初回のファイルキャッシュ。
+- **`-j 1` も不変**（同じく交互）: pre 8.86 / 8.88s、post 8.86 / 8.91s。
+- `cargo test --workspace --release --no-fail-fast`: **2796 passed / 3 failed**。
+  失敗は **X-6 の 3 本ちょうど**（`sa4010` / `sa4017` / `sa5011`）で、§X-6 のとおり `main` で
+  以前から落ちているもの。**この変更で増えていません。**
+- `cargo build --release` の警告数 **183 → 183**（増減なし）。
+- **regress 両方 PASS**:
+
+  | プロファイル | baseline wall | 実測 wall | baseline RSS | 実測 RSS | findings |
+  |---|---:|---:|---:|---:|---|
+  | tsdb | 1.740s | **1.510s** | 1,319,845,888 | **1,248,411,648** | both 4 / only 0,0 |
+  | full | 4.940s | **3.840s** | 7,608,352,768 | **7,580,041,216** | both 20 / only 0,0 |
+
+  baseline 未更新。
+
+> **「狙った phase が下がったか」は N/A です** — S-3 は計測タスクで、高速化はしていません
+> （§4 テンプレートのこの項目は Tier S には当てはまりません）。
+
+---
+
+# Tier P0 — たぶん既に損しているもの
+
+## P0-1 — `format_checks` の 2 スレッド固定を見直す（**最優先**）
+
+### 目的
+
+format_checks が **2 スレッドの専用 rayon プールに固定**されており、実測で **5.0s** かかっています。
+コードのコメントは「2 workers は `go list`（~1.3s）の間に終わるのに十分」と書いていますが、
+**実測は 5.0s で、前提が成り立っていません。** その間ずっと 10 コアのうち 2 コアを
+typecheck/analyze から奪い続けています。
+
+### 現状の証拠
+
+`crates/guff-lint/src/lib.rs:640-671`:
+
+```rust
+fn run_and_write_inner(opts: &LintOptions, out: &mut dyn Write) -> Result<i32, RunError> {
+    // ...
+                // Format checks use rayon heavily; pin them to a small private
+                // pool so they don't steal workers from the global pool that
+                // typecheck/analyze need during the overlap window.
+                // 2 workers is enough to finish during `go list` (~1.3s) without
+                // starving analysis; 1 worker makes format the critical path.
+                let pool = rayon::ThreadPoolBuilder::new()
+                    .num_threads(2)
+```
+
+**実測（2026-07-27、クリーン環境で 3 回。§1.1 の対照実験済み）:**
+
+```
+cold（空 GUFF_CACHE）      : format_checks 1.70 / 1.79 / 1.78s   （wall 4.75s）
+cold seed-hot（永続 CACHE）: format_checks 1.90s                 （wall 3.68s）
+warm（キャッシュ hot）      : format_checks 0.09〜0.10s           （wall 0.36s）
+```
+
+**これは汚染では説明できません。** §1.1 のとおり、クリーン環境では他の全 phase が
+`PERF_TASKS.md` §1.10 の記録値とぴったり一致しています（load 1.53→1.25s、
+typecheck 1.79→1.87s、analyze 1.16→1.22s）。**format_checks だけが 0.59s → 1.75s と
+3 倍**残りました。
+
+内訳の説明はつきます。`PERF_TASKS.md` §1.10 が記録している 0.59s は
+**まだグローバルプール（全コア）で走っていた頃の値**なので、
+`0.59s × 有効並列度 6 ≈ 3.5 CPU 秒 ÷ 2 スレッド ≈ 1.75s`。ぴったり合います。
+**つまりバグではなく、意図した隔離の副作用です。**
+
+問題は、コメントが根拠にしている「2 workers は `go list`（~1.3s）の間に終わる」が
+**事実として成り立っていない**ことです。実際には 1.75s かかり、`go list` が終わったあとも
+0.5s ぶん typecheck/analyze と 2 コアを取り合っています。
+**そしてより深刻なのは seed-hot のケース**で、format 1.90s / wall 3.68s ＝ **wall の 52%** です。
+cold が速くなるほど比率が上がり、いずれ critical path になります。
+
+### GO/NO-GO 判定
+
+**判定済み: GO。** 上記の実測（クリーン環境・3 回・対照実験つき）がそのまま根拠です。
+再測して `format_checks` が 1.5s を大きく超えることだけ確認してから着手してください。
+
+```bash
+cd .../prometheus
+GUFFBIN=.../target/release/guff
+CACHE=$(mktemp -d)
+GUFF_CACHE="$CACHE" GUFF_DEBUG_CACHE=1 /usr/bin/time -lp \
+  "$GUFFBIN" run --no-cache -c .golangci.yml ./... >/dev/null 2>/tmp/f.txt
+grep -E 'phase |^real' /tmp/f.txt
+rm -rf "$CACHE"
+```
+
+1.0s 未満に下がっていたら（＝誰かが既に直したなら）NO-GO。
+
+### 手順
+
+1. スレッド数を**環境変数で差し替えられる**ようにする（例 `GUFF_FMT_THREADS`、
+   未設定なら現状の 2）。これは恒久 API ではなく**実験用のつまみ**なので、
+   `README` には載せず、コード内コメントに「実験用」と明記する。
+2. `GUFF_FMT_THREADS` を **1 / 2 / 3 / 4 / ncpu/2 / ncpu** で cold を各 3 回計測し、
+   **wall（＝ format 単体の秒数ではなく全体の wall）** が最小になる値を探す。
+   表にして記録すること。
+3. **重要: 見るべきは format_checks の秒数ではなく wall です。**
+   format が速くなっても typecheck/analyze が遅くなれば意味がありません。両方の秒数を記録する。
+4. 最適値が 2 でなければ、デフォルトを最適値に変える。
+   ただし**ハードコードした定数ではなく `available_parallelism()` からの相対値**にする
+   （10 コア機に最適化した数字が 4 コア機で破滅しないように）。
+   例: `max(2, ncpu / 4)`。
+5. さらに踏み込むなら: **format のワークを 1 個ずつ global pool に投げる**方式も比較する。
+   rayon の `spawn` で低優先度に流せば、専用プール自体が要らなくなる可能性があります。
+   ただしこれは work-stealing の挙動が読みにくいので、**まずは 1〜4 のスレッド数チューニングだけ**で
+   区切ってコミットしてください（§0-9: 1タスク1論点）。
+
+### 検証
+
+- findings diff = 空（format の findings は "File is not properly formatted" 行なので、
+  スレッド数で変わったら並列バグです。**変わったら即ロールバックして原因を探す**）。
+- 3 回決定性。
+- **wall が下がったこと**（format_checks 単体ではなく wall）。
+- `-j 1` でも遅くなっていないこと。**`-j 1` のときは format も 1 スレッドにすべきか**を
+  併せて検討する（`opts.sequential` のときの挙動を確認）。
+- RSS が増えていないこと（スレッドを増やすと同時に開くファイルバッファが増える）。
+- 両 regress PASS。
+
+### やってはいけない
+
+- `--fix` の逐次パスを並列化する。**`--fix` は解析が読んでいるファイルを書き換える**ので、
+  逐次であることが正しさの前提です（コードコメント参照）。
+- スレッド数を `ncpu` にして「format は速くなりました」で終わる。wall で判断すること。
+
+### ロールバック基準
+
+wall が下がらない / findings が変わる / `-j 1` が遅くなる → `git checkout -- crates/guff-lint/src/lib.rs`。
+
+### DONE（2026-07-27）— **結論: デフォルトは 2 のまま（wall には効かない）。実験用つまみだけ追加。**
+
+`GUFF_FMT_THREADS`（実験用・README 非掲載）を `fmt_thread_count()`
+（`crates/guff-lint/src/lib.rs`）に追加し、cold full `./...` を 1/2/3/4/5/10 スレッドで
+各 3 回スイープした（クリーン環境・§1.2 ガード合格・sweep スクリプトは settle 待ち込み）:
+
+| threads | wall (中央値) | format_checks | typecheck_roots | analyze |
+|---:|---:|---:|---:|---:|
+| 1 | 4.61s | 3.53s | 1.84s | 1.18s |
+| **2（既定）** | **4.50s** | 1.62s | 1.75s | 1.14s |
+| 3 | 4.54s | 1.29s | 1.75s | 1.14s |
+| 4 | 4.73s | 0.77s | 1.76s | 1.15s |
+| 5 | 4.75s | 0.68s | 1.75s | 1.15s |
+| 10 | 4.80s | 0.58s | 1.75s | 1.14s |
+
+**判明したこと: format_checks は分析ウィンドウ（load_graph 1.2s + typecheck 1.75s + analyze
+1.15s ≈ 4.1s）に完全に重畳しており、`waited=0.00s`。つまり critical path に乗っていない。**
+スレッドを増やすと format 単体は速くなる（1.62→0.58s）が、**wall はむしろ悪化**する
+（分析と CPU を取り合うだけ）。**wall の最小は 2 スレッド（4.50s）。**
+
+**seed-hot（永続 GUFF_CACHE, --no-cache）でも同じ**: 2 スレッド wall 3.46s / 3 スレッド 3.53s。
+typecheck が 0.83s に縮んでも、load_graph+analyze が残るので format（1.8s）は依然重畳しきる。
+doc が懸念した「format が wall の 52% ＝ critical path 化」は**測定上は起きていない**
+（52% は重畳ぶんであって、直列に足されているわけではない）。
+
+したがって **§0-14 / ルール14 に従い、削減上限 ≈ 0s なのでデフォルト変更は NO-GO**。
+当初検討した `(ncpu/4).max(2)` は、このスイープでは 12 コア以上の機で 3〜4 スレッドになり
+**wall を悪化させる**ため採用しない。`GUFF_FMT_THREADS` だけ残し（他ハードでの再測定用）、
+既定は定数 2。findings byte 一致（20/20）、tsdb gate PASS、`-j 1` 挙動も不変（既定を触っていない）。
+
+### DONE（2026-07-31）— **P0-1b: C-3c/B-10 後に再スイープ。既定を `(ncpu/3).clamp(2,4)` へ。**
+
+分析が短くなり seed-hot で `waited` ≈ 0.5–0.6s（format が critical path）。
+prometheus `./...`・10-core arm64・A/B 交互 3 回:
+
+| threads | seed-hot wall (med) | empty-cold wall (med) |
+|---:|---:|---:|
+| 2（旧既定） | 1.69s | 2.14s |
+| **3** | **1.24s** | **2.03s** |
+| 4 | 1.24s | 2.01s |
+| 6 | 1.23s | 2.01s |
+
+**既定変更:** `(available_parallelism()/3).clamp(2, 4)`（10-core → 3）。
+`GUFF_FMT_THREADS` は従来どおり上書き。`-j 1` / sequential では format も 1 スレッド。
+
+確認 A/B（既定 vs `GUFF_FMT_THREADS=2`）: seed-hot **≈ −0.4s** / empty-cold **≈ −0.1s**。
+findings byte 同一。両 regress PASS（full wall 2.11→2.00）。
+
+---
+
+## P0-2 — 依存パースで `SKIP_OBJECT_RESOLUTION` を使う
+
+### 目的
+
+guff の parser は、パース後に **Go の `ast.Object` 解決（`resolve_file`）** を走らせています。
+これは「識別子から宣言へのポインタを AST に埋める」処理で、Go 本体でも **deprecated**
+（`parser.SkipObjectResolution` で切れる）です。
+
+**seed 用の依存パース（1455 パッケージ / 約 12318 ファイル）では、この結果を誰も読んでいません。**
+型チェッカ（`guff-types`）は独自のスコープ解決をするので `ast.Object` を一切参照しません。
+つまり丸ごと無駄です。
+
+### 現状の証拠
+
+モードは既に存在します:
+
+`crates/guff-ast/src/parser.rs:62`:
+
+```rust
+pub const SKIP_OBJECT_RESOLUTION: Mode = Mode(1 << 6);
+```
+
+`crates/guff-ast/src/parser.rs:3150-3151`:
+
+```rust
+        if !mode.contains(SKIP_OBJECT_RESOLUTION) {
+            resolve_file(&mut file, &pos_file, None);
+```
+
+しかし依存パースは指定していません:
+
+`crates/guff-packages/src/typecheck.rs:1036`:
+
+```rust
+        if let Ok(file) = parse_file(fset, name, src, SKIP_FUNC_BODIES) {
+```
+
+そして `guff-types` / `guff-analysis` / `guff-packages` は `ident.obj` を**一度も読みません**。
+自分で確認してください:
+
+```bash
+cd /Users/dakimura/projects/src/github.com/dakimura/guff
+rg -n 'obj\.lock' crates/guff-types crates/guff-analysis crates/guff-packages
+# → 0 件であることを確認する
+```
+
+`ast::Ident.obj` を読んでいるのは以下の 3 箇所だけです（**依存パースの経路には居ません**）:
+
+```bash
+rg -n 'obj\.lock' crates --glob '*.rs' | grep -v '^crates/guff-ast/'
+# crates/guff-ineffassign/src/cfg.rs:766   ← target パッケージのみ（P0-3 の対象）
+# crates/guff-style/src/maintidx.rs:202    ← target パッケージのみ（P0-3 の対象）
+# crates/guff-fmt/src/native/goimports/fix.rs:152 ← 自前で別に parse している。無関係
+```
+
+### GO/NO-GO 判定
+
+`resolve_file` にどれだけ時間が使われているか、単発で測ってください。
+S-3 で `=2` の詳細タイマーを入れているなら、`parse_dep_sources` の中で
+`parse_file` の合計 CPU を出し、`SKIP_OBJECT_RESOLUTION` を付けた版と付けない版で比べます。
+
+手っ取り早くやるなら、`crates/guff-packages/tests/` か一時的なバイナリで、
+依存クロージャの .go を全部読んで両モードでパースし、シングルスレッドで秒数を比べる
+（`PERF_TASKS.md` §1.9 の末尾がまさにこの手法を使っています）。
+
+**合計 CPU の削減が 0.5s 未満なら NO-GO**（seed は既に wall 1.4s まで縮んでおり、
+有効並列度 6 で割ると wall 0.08s 未満にしかならないため）。
+
+### 手順
+
+1. `crates/guff-packages/src/typecheck.rs:1036` を
+   `parse_file(fset, name, src, SKIP_FUNC_BODIES | SKIP_OBJECT_RESOLUTION)` にする
+   （`Mode` の `|` 実装があることを確認。無ければ `Mode(SKIP_FUNC_BODIES.0 | SKIP_OBJECT_RESOLUTION.0)`
+   相当を使う。`rg -n 'impl.*BitOr.*Mode' crates/guff-ast/src/parser.rs` で確認）。
+2. インポートを追加する。
+3. **`parse_dep_sources` の doc コメントを更新する。** 既に `SKIP_FUNC_BODIES` について
+   「seed は exported API しか要らない」と書いてあるので、そこに object resolution の話も足す。
+   `PERF_TASKS.md` §1.9 のコメントと同じ密度で書くこと。
+
+### 検証
+
+- **findings diff = 空**（これが本丸。依存の `ast.Object` が本当に未使用なら 1 バイトも変わらない）。
+- 3 回決定性。
+- **seed キャッシュとの相互作用に注意**: seed の永続キャッシュ（`${GUFF_CACHE}/seed/`）は
+  「パース結果」ではなく「型チェック済み overlay」を保存しているので、キーは変わらないはず。
+  ただし念のため **seed キャッシュを空にした cold と、seed hot の cold で findings が同一**である
+  ことを確認すること（`PERF_TASKS.md` Task 4 の検証項目と同じ）。
+- `seed dep check` の秒数が下がったこと。
+- RSS はむしろ下がるはず（`Arc<Object>` を作らないぶん）。**増えていたらおかしい。**
+- 両 regress PASS。
+
+### やってはいけない
+
+- **`crates/guff-packages/src/typecheck.rs:417`（target パッケージのパース）を同時に変える。**
+  そちらは `ineffassign` と `maintidx` が `ident.obj` を読むので、findings が変わります。
+  分けて P0-3 でやってください（§0-9: 1タスク1論点）。
+- 「たぶん誰も使ってない」で確認せずに進める。**上の `rg` を自分の手で走らせて 0 件を確認すること。**
+
+### ロールバック基準
+
+findings が 1 件でも変わったら即ロールバック。その場合、依存パースの `ast.Object` を
+どこかが読んでいるということなので、**それを特定してからこのファイルに追記**してください
+（次のエージェントが同じ罠を踏まないように）。
+
+### DONE（2026-07-27）— **GO。cold wall −0.13s、seed dep check −0.2s、findings byte 一致。**
+
+`crates/guff-packages/src/typecheck.rs:1036`（`parse_dep_sources`）を
+`SKIP_FUNC_BODIES | SKIP_OBJECT_RESOLUTION` にした。import に `SKIP_OBJECT_RESOLUTION` を追加、
+doc コメントに「型チェッカも analyzer も dep の `Ident.obj` を読まない（唯一の読者
+ineffassign/maintidx は target 側）」旨を追記。
+
+**事前確認（doc 指定の rg を実行済み）:**
+`rg 'obj\.lock' crates/guff-types crates/guff-analysis crates/guff-packages` → **0 件**。
+guff-ast 外の `obj.lock` は 3 箇所のみ＝ goimports/fix.rs（自前 parse・無関係）、
+ineffassign/cfg.rs・maintidx/maintidx.rs（**target 専用**・P0-3 の対象）。依存パース経路には居ない。
+
+**実測（クリーン環境・§1.2 ガード合格）:**
+
+| 指標 | before | after |
+|---|---:|---:|
+| seed dep check（wave-parallel, 1455 deps） | 1.33〜1.39s | **1.16〜1.17s** |
+| cold full wall | 4.50s | **4.36〜4.37s** |
+| full regress wall | 4.94s (baseline) | **4.28s** PASS |
+| full regress peak RSS | 7.608GB (baseline) | **7.577GB**（低下・doc 予想どおり） |
+
+**検証: findings byte 一致 20/20（cold）、決定性 3/3 一致、seed-hot↔cold 一致、
+`-j 1` findings 一致（wall 9.70s、変更は仕事を減らすだけなので遅くなりようがない）、
+tsdb+full 両 regress PASS（guff_only=0 / golangci_only=0 / both 減少なし）。**
+RSS は `Arc<Object>` を作らないぶんむしろ下がった。baseline 未更新。
+
+---
+
+## P0-3 — target パースの object resolution も条件付きスキップ
+
+> **前提: P0-2 を完了・コミットしてから着手すること。**
+
+### 目的
+
+P0-2 で依存パース（1455 pkg）を潰したら、次は target パース（293 pkg、ただし**関数本体つきの
+フルパース**なので 1 ファイルあたりのコストは依存より高い）。
+
+### 難所
+
+target では `ident.obj` を読む利用者が 2 つあります:
+
+- `crates/guff-ineffassign/src/cfg.rs:766` — `id.obj.lock().unwrap().is_none()` で
+  「`false` / `nil` がシャドウされていない組み込み識別子か」を判定している
+- `crates/guff-style/src/maintidx.rs:202` — `id.obj.lock().unwrap().clone()`
+
+つまり **`ineffassign` と `maintidx` のどちらかが有効なら resolution が必要**です。
+prometheus の `.golangci.yml` で両方が有効かどうかを先に確認してください:
+
+```bash
+cd .../prometheus && cat .golangci.yml
+```
+
+### 手順
+
+1. `LintOptions` から「有効な analyzer 名の集合」を取り、
+   `ineffassign` / `maintidx` のどちらかが含まれるかを判定する述語を作る。
+   **判定は analyzer 名の集合照合だけ**（型情報もパス情報も不要・O(1)）。
+2. その述語が偽なら、target パースにも `SKIP_OBJECT_RESOLUTION` を付ける。
+3. 述語の結果を `TypecheckEnv` 相当に載せて `typecheck.rs:417` まで運ぶ。
+   **グローバル変数や環境変数で運ばないこと**（テストが並列で走ると壊れる）。
+
+### 検証（P0-2 より厳しく）
+
+- **`ineffassign` / `maintidx` を有効にした構成**と**無効にした構成**の両方で findings を取り、
+  それぞれ変更前とバイト同一であること。**片方だけ確認して終わりにしない。**
+  ```bash
+  # 無効側の確認例（一時的な設定ファイルを作る）
+  # 有効側は prometheus の .golangci.yml をそのまま使う
+  ```
+- `ineffassign` が実際に検出を出すコードで、検出が消えていないことを名指しで確認する。
+  prometheus に無ければ、小さな fixture を作って手で確認する。
+- 3 回決定性、両 regress PASS。
+
+### やってはいけない
+
+- 「prometheus の設定では ineffassign が無効だから常にスキップでいい」と決め打つ。
+  **guff は他人の設定でも動かなければいけません。** 必ず条件判定にする。
+- 述語を「型チェック後」に評価する。パース前に決まっていなければ意味がありません。
+
+### DONE（2026-07-29）— **条件付き実装。prometheus では `ineffassign` が Standard 既定で有効なため発火せず wall ±0。天井は十分。**
+
+**発見（着手前の設定確認）:** prometheus `.golangci.yml` は `linters.default` 未指定 →
+guff/golangci とも **`standard` 既定** → **`ineffassign` が有効**（明示 `enable:` リストには無い）。
+`maintidx` は無効。よって prometheus 本番経路ではスキップ条件が成り立たない。
+
+**GO/NO-GO 天井（`FORCE_SKIP` で強制発火・A/B/A/B ×3）:**
+
+| 指標 | resolve ON | skip ON |
+|---|---:|---:|
+| target parse（合計 CPU） | 0.90〜0.93s | **0.48〜0.49s（−0.45s）** |
+| target check wall | 0.32〜0.35s | **0.28〜0.29s（−0.05s）** |
+| cold wall（中央寄り） | 3.41〜3.44s | **3.19〜3.25s（〜−0.2s）** |
+
+samply（既存 profile）でも `parser_resolver::Resolver::walk_func_decl` inclusive **0.68〜0.79s**。
+
+**実装:**
+- `TypecheckEnv::skip_object_resolution`（default `false`）
+- `guff-lint`: `ineffassign` / `maintidx` が analyzer 集合に居なければ `true`
+- `typecheck_package_with_seed`: そのとき `parse_file(..., SKIP_OBJECT_RESOLUTION)`
+
+**検証:**
+- prometheus（ineffassign ON → skip 発火せず）: findings byte 一致 20/20 ×3 + `-j 1`
+- ineffassign / maintidx ユニットテスト PASS（`TypecheckEnv::default()` = resolve ON）
+- 述語ユニットテスト PASS
+- tsdb regress PASS（wall 1.38s / both 4 / only 0,0）
+- full regress PASS（wall 3.41s / RSS 3.50 GiB / both 20 / only 0,0）
+- baseline 未更新
+
+**prometheus wall への寄与は 0。** 効くのは `default: none` かつ ineffassign/maintidx を
+明示 enable していない設定。C-6（`Ident` の `Mutex` 除去）の前提として残す価値あり。
+
+---
+
+# Tier A — 低リスク・確実な勝ち
+
+## A-1 — ハッシャを FxHash に差し替え
+
+### 目的
+
+このリポジトリは **`HashMap` を全部 `std` のデフォルト（SipHash 1-3 + `RandomState`）で使っています。**
+FxHash / ahash などの高速非暗号ハッシャは入っていません:
+
+```bash
+rg -n 'rustc-hash|fxhash|ahash' Cargo.lock   # → hashbrown 以外ヒットなし
+```
+
+SipHash は DoS 耐性のために選ばれていますが、guff は**信頼できるローカルのソースコードしか
+読まない**ので、その耐性は不要です。短いキー（識別子・パッケージパス）では FxHash が 2〜5 倍速いです。
+
+### 対象（優先順）
+
+ホットな順に。**一度に全部やらないこと。** 1 crate ずつ、1 コミットずつ。
+
+0. ~~`crates/guff-ssa`（全 `HashMap`/`HashSet`）~~ **DONE**（§末尾。SipHash callers 最大塊）
+1. `crates/guff-types/src/scope.rs` の `Scope.elems: HashMap<String, ObjectId>`
+   — スコープ検索は型チェックの最内周
+2. `crates/guff-types/src/check.rs` の `import_cache` / `obj_map` / `methods` / `untyped`
+3. `crates/guff-types/src/api.rs` の `Info.types` / `defs` / `uses`（ノード id → 型。巨大）
+4. `crates/guff-ast/src/token.rs` の `keywords()`（`&'static str` キー。頻度は最高）
+5. `crates/guff-runner/src/cache.rs` / `action.rs`
+
+### 事前に必ずやること（§0-12）
+
+**イテレーション順依存の監査。** これを飛ばすと非決定性を埋め込みます。
+
+```bash
+cd /Users/dakimura/projects/src/github.com/dakimura/guff
+# 対象 crate に絞って、HashMap を直接 iterate している箇所を洗う
+rg -n 'for .* in .*(\.iter\(\)|\.values\(\)|\.keys\(\)|\.drain\(\))' crates/guff-types/src
+```
+
+見つかった各箇所について「順序が結果に影響するか」を判断し、影響するなら
+**先にそこを直す（別コミット）**。典型的には `collect()` して `sort_by_key()` するか、
+`BTreeMap` にする。`Scope.elems` は `Serialize`/`Deserialize` も付いているので、
+**シリアライズ順が変わると seed キャッシュのバイト列が変わる**点にも注意（後述）。
+
+### 手順
+
+1. ワークスペースの `Cargo.toml` に依存を足す:
+   ```toml
+   # ルート Cargo.toml の [workspace.dependencies] があればそこ、無ければ各 crate に
+   rustc-hash = "2"
+   ```
+   （`rustc-hash` v2 は `FxHashMap` / `FxHashSet` を提供します。バージョンは
+   `cargo add rustc-hash` で最新を取ること。**バージョンをでっち上げない。**）
+2. 1 crate ずつ、`use std::collections::HashMap` を `use rustc_hash::FxHashMap as HashMap` に
+   置き換える。型引数の数が違う（`HashMap<K, V>` のままでよい）ので機械的に済みます。
+3. **`Serialize`/`Deserialize` が付いている構造体のマップは要注意。**
+   `Scope.elems` は seed キャッシュに bincode でシリアライズされます。
+   マップのシリアライズ順が変わると **同じ内容でもバイト列が変わる**ので、
+   `SEED_OVERLAY_SCHEMA`（`crates/guff-types/src/check.rs`）を**インクリメントする必要があるか**を
+   検討してください。厳密には内容が同じならデコード結果も同じなので必須ではありませんが、
+   古いキャッシュとの互換性を疑うなら上げるのが安全です。判断に迷ったら**上げる**。
+
+### 検証（5 回決定性が必須）
+
+- findings diff = 空。
+- **§2.2 を 5 回**（ハッシャ変更は順序依存バグを叩き起こす筆頭）。
+- **seed キャッシュ空 cold ↔ seed hot cold で findings 同一。**
+- **`-j 1` と `-j N` の両方で findings 同一。**
+- 狙った phase（typecheck_roots）が下がったこと。
+- 両 regress PASS。
+
+### やってはいけない
+
+- 全 crate を一括置換して 1 コミットにする。**壊れたとき切り分け不能。**
+- `HashSet` を見落とす（`FxHashSet` も同様に置き換える）。
+- 監査を飛ばす。
+
+### ロールバック基準
+
+findings が 1 回でも揺れたら即ロールバック。**「5 回中 4 回同じだった」は失敗です。**
+
+### DONE（2026-07-28）— **guff-ssa を FxHash 化。buildir CPU 2.22s → 1.94s（−0.28s）。findings byte 一致。**
+
+**入れたもの:**
+
+1. `rustc-hash = "2"`（`crates/guff-ssa/Cargo.toml`）。`FxHashMap`/`FxHashSet` は
+   `std::collections::HashMap<_, _, FxBuildHasher>` の別名なので **`::new()` /
+   `::with_capacity()` は使えない**（`RandomState` 専用）。`::default()` /
+   `::with_capacity_and_hasher(n, Default::default())` に置き換える。
+2. `crates/guff-ssa/src/hash.rs` で `HashMap`/`HashSet` を crate 内エイリアス化し、
+   SSA 構築の全マップを差し替え。
+3. §0-12 の順序依存を先に潰した:
+   - `targeted_block_in`: yield_label 優先 + lblock 名ソート
+   - `all_functions` / `runtime_types` / `compute_method_set`: 名前順
+   - `buildir` / `wastedassign` の `collect_src_funcs`: メンバー名ソート
+
+**実測（prometheus `./...`、空 `GUFF_CACHE`、`--no-cache`）:**
+
+| 指標 | before | after |
+|---|---:|---:|
+| buildir CPU（66 actions） | 2.22s | **1.94s** |
+| analyze wall | 0.64s | 0.62〜0.63s |
+| cold wall | 3.98s | 3.98〜4.06s（誤差。format 重畳） |
+| peak RSS | 7.53GB | 7.34〜7.41GB |
+
+**検証:** findings 20 件 before と byte 同一、§2.2 を 5 回決定的、`-j 1` 同一、
+seed cold↔hot 同一。`cargo test -p guff-ssa --release` PASS。regress tsdb / full とも PASS。
+
+**残り:** keywords（`guff-ast` `token.rs`）/ guff-runner。推奨順どおり次は **A-3** だったが
+A-3a 済・A-3b/c NO-GO なので、残りは **A-1 keywords/runner** か **B-10**。
+
+### DONE（2026-07-29）— **guff-types を FxHash 化。findings byte 一致（5 回・`-j 1`・seed cold↔hot）。**
+
+**入れたもの:**
+
+1. `rustc-hash = "2"` + `crates/guff-types/src/hash.rs`（SSA と同パターン）。
+2. §0-12: `initorder::dependency_graph` の `obj_map.keys()` / deps を source `order()` でソート。
+   func 除去時の pred/succ 収集も sort。
+3. `SEED_OVERLAY_SCHEMA` 1 → **2**（`Scope.elems` などマップの serde 順変化に備える）。
+4. crate 内の `HashMap`/`HashSet` を一括差し替え（`::default()` /
+   `with_capacity_and_hasher`）。
+
+**実測（prometheus `./...`、seed-hot、`--no-cache`、3 回）:**
+
+| 指標 | おおよそ |
+|---|---:|
+| typecheck_roots | ~0.83s |
+| buildir CPU | ~1.81〜1.91s |
+| cold wall | ~2.96〜3.02s |
+
+**検証:** findings 20 件が変更前（B-7 後）と byte 同一、§2.2 を **5 回**決定的、
+`-j 1` 同一、seed cold↔hot 同一。`cargo test -p guff-types --release` PASS。
+
+### DONE（2026-07-29）— **keywords（`guff-ast`）を FxHash 化。findings 同一。**
+
+`token.rs` の `keywords()` OnceLock マップを `FxHashMap` に。lookup のみ（iterate なし）。
+findings byte 同一（3 回）、両 regress PASS。
+
+**残り A-1:** guff-runner（`cache.rs` / `action.rs`）。次は runner か **B-10**。
+
+### DONE（2026-07-29）— **guff-runner を FxHash 化。findings byte 一致（5 回・`-j 1`・seed cold↔hot）。**
+
+**入れたもの:**
+
+1. `rustc-hash = "2"` + `crates/guff-runner/src/hash.rs`（SSA/types と同パターン）。
+2. `action.rs` / `cache.rs` / `load_mode.rs` / `memory.rs` / `runner.rs` の
+   `HashMap`/`HashSet` を差し替え。`Pass.result_of` は analysis API 境界のため
+   **`std::collections::HashMap` のまま**（`RandomState`）。`typecheck_package` へ渡す
+   import マップも呼び出し側で `std::collections::HashMap`。
+3. §0-12: timing dump / dep-hash レジストリシリアライズは既にキーソート済み。追加修正なし。
+
+**実測（prometheus `./...`、空 `GUFF_CACHE`、`--no-cache`）:**
+
+| 指標 | おおよそ |
+|---|---:|
+| typecheck_roots（seed cold） | ~1.60s |
+| typecheck_roots（seed hot） | ~0.85s |
+| buildir CPU | ~1.85〜1.97s |
+| cold wall | ~3.92s |
+| seed-hot wall | ~2.97s |
+| format_checks waited | **0.00s**（B-10 着手条件未達） |
+
+**検証:** findings 20 件が keywords 後と byte 同一、§2.2 を **5 回**決定的、`-j 1` 同一、
+seed cold↔hot 同一。`cargo test -p guff-runner --release` PASS。両 regress PASS。
+
+**A-1 完了。** 次は B-10 以外（waited=0 の間は B-10 NO-START）。
+
+---
+
+## A-2 — Scanner の `src.to_vec()` を除去
+
+### 目的
+
+スキャナは初期化時にソース全体を**コピー**しています:
+
+`crates/guff-ast/src/scanner.rs:144`:
+
+```rust
+        self.src = src.to_vec();
+```
+
+prometheus の依存クロージャは約 **150MB / 12318 ファイル**（`PERF_TASKS.md` §1.9 の実測）。
+つまり cold 1 回につき 150MB の無駄な memcpy と、その分のアロケータ負荷・ページフォルトが
+発生しています。
+
+### GO/NO-GO 判定
+
+150MB の memcpy 自体は数十 ms（メモリ帯域律速）なので、**単体では小さい**です。
+効くのはむしろ「アロケータ経由の 12318 回の大きな確保・解放」とキャッシュ汚染のほう。
+S-3 か samply（S-2）で `Scanner::init` / `to_vec` の比率を先に見てください。
+**wall 換算 0.05s 未満なら NO-GO。**
+
+### 手順
+
+`Scanner` にライフタイムを付けて借用にするのが本筋ですが、`Scanner` が構造体フィールドとして
+`Parser` に持たれているので、ライフタイムが波及します。波及範囲を先に確認:
+
+```bash
+rg -n 'struct Scanner|Scanner \{|scanner:' crates/guff-ast/src | head -20
+```
+
+波及が大きすぎるなら、**`Arc<[u8]>` に変える**のが折衷案です。呼び出し側が
+`Arc<[u8]>` を持っていれば `Arc::clone` で済み、コピーが消えます。
+`parse_file` はソースを `&[u8]` で受け取っているので、`parse_file` 側で 1 回だけ
+`Arc<[u8]>` 化する（＝コピー 1 回は残るが、`Scanner` 内のコピーは消える）。
+
+**より良い案:** `parse_dep_sources`（`crates/guff-packages/src/typecheck.rs`）は
+ファイルを自分で読んで `&[u8]` を渡しているので、**そこで `Arc<[u8]>` を作って
+`parse_file` に渡せばコピーはゼロになります。** `parse_file` に `Arc<[u8]>` を
+受ける新 API（例 `parse_file_shared`）を足し、既存の `parse_file` はそれを呼ぶ薄い
+ラッパにするのが後方互換で安全です。
+
+### 検証
+
+- findings diff = 空、3 回決定性。
+- `cargo test --workspace`（`guff-ast` のテストが多いので必ず通す）。
+- **RSS を必ず確認。** `Arc<[u8]>` にすると、パース中はソースが生き続けます。
+  今は `to_vec` したコピーがスキャナと一緒に落ちる設計なので、**共有にするとむしろ
+  RSS が増える可能性があります。** ここが最大の落とし穴。増えたら NO-GO。
+- 両 regress PASS。
+
+### やってはいけない
+
+- ソースを `String` に変える。`from_utf8_lossy` の挙動（不正 UTF-8 の扱い）が変わって
+  findings が変わります。**`[u8]` のまま**扱うこと。
+
+### NO-GO（2026-07-28）— **`Scanner::init` は合計 CPU 0.024s。上限が基準の 1/20 未満。着手しない。**
+
+S-2 で入れた samply + `scripts/perf-profile.py` で、この節が要求している
+「`Scanner::init` / `to_vec` の比率」を実測しました（cold prometheus `./...`、
+**全ワーカースレッドの合計 CPU 19.29s** に対して）:
+
+| 指標 | 合計 CPU | 全体比 |
+|---|---:|---:|
+| `Scanner::init` の inclusive | **0.024s** | 0.12% |
+| `Scanner::init` 配下の `_platform_memmove` | **0.020s** | 0.10% |
+| `memmove` のうち直接の呼び出し元が `Scanner*` / `parse_file`（甘めの上限） | **0.096s** | 0.50% |
+| 参考: `parse_file` の inclusive | 3.876s | 20.1% |
+
+**判定: NO-GO。** 一番甘く見積もった 0.096s でも**合計 CPU** であって wall ではありません。
+パースは 6 並列で走るので wall 換算は **0.016s 程度**。§0-14 の基準（wall 換算 0.05s 未満なら
+やらない）を 3 倍下回ります。
+
+**なぜ 150MB の memcpy が効かないのか（第1弾 §1.9 の 150MB / 12318 ファイルは正しい）:**
+`_platform_memmove` 自体は確かに self CPU 1.895s（9.8%）で単独 1 位ですが、
+`--callers` で割ると内訳は **`RawVec::grow_one` 0.542s（`Vec` の再確保）/ `guff_ssa::arena::Arena::alloc`
+0.267s / `Ident::clone` 0.118s** で、**`Scanner::init` の一括コピーは表に出てきません。**
+150MB を 12318 回に割ると 1 ファイル平均 12KB で、`memmove` としては帯域律速の一瞬で終わります。
+つまり「大きなコピーが 1 万回」より「小さな `Vec` の成長が数百万回」のほうが桁で高い、
+という素直な結果です。
+
+**この判定が示す次の方向（A-2 の代わりに攻めるべき所）:**
+`Vec` 成長 0.542s は「`with_capacity` を渡していない `Vec`」の裾野です。A-3（トークンごとの
+`String`）と重なる領域なので、**A-3 を先に見るほうが期待値が高い**。
+
+**得られた副産物:** `Arc<[u8]>` 化を入れずに済んだので、この節が最大の落とし穴として挙げていた
+**RSS 増加リスクをそもそも負わずに終われました。**
+
+---
+
+## A-3 — トークンごとの `String` 割り当てを削減
+
+### 目的
+
+スキャナは**トークン 1 個につき `String` を 1 個**作ります:
+
+`crates/guff-ast/src/scanner.rs:750-752`:
+
+```rust
+    pub fn scan(&mut self) -> (Pos, Token, String) {
+```
+
+識別子・数値・文字列・ルーン・コメント、さらに挿入セミコロンの `"\n".to_string()` まで。
+`PERF_TASKS.md` §1.9 の実測では依存クロージャで **2230 万トークン**。
+そのうち大半はキーワード・区切り記号で、**リテラル文字列が要らない**トークンです。
+
+### 段階（この順に。1 段ずつコミット）
+
+**A-3a（最小・最安全）: 空文字列の割り当てを消す。**
+記号・キーワードのトークンは `lit` が使われません。`String::new()` は実はアロケートしないので
+既にゼロコストですが、`";".to_string()` / `"\n".to_string()` は**アロケートします**。
+これを `&'static str` を返す形にするか、`Cow<'static, str>` にする。
+呼び出し側（`parser.rs:233-238`）が `self.lit = lit` しているだけなので影響は局所的。
+
+**A-3b: 識別子を `Box<str>` にする。**
+`String` は 24 バイト（ptr/len/cap）、`Box<str>` は 16 バイト（ptr/len）。
+`Ident.name` は AST に大量に残るので、`Box<str>` 化はメモリ削減にも効きます。
+ただし `name: String` を前提にしたコードが多いので、影響範囲を先に測ること:
+```bash
+rg -c '\.name\b' crates --glob '*.rs' | sort -t: -k2 -nr | head
+```
+
+**A-3c（本命だが大きい）: 識別子のインターン。**
+Go のソースは同じ識別子（`err`, `ctx`, `nil`, `String`, `Context` …）が何万回も出ます。
+グローバルな `Symbol` テーブル（`u32` ハンドル）にすれば、比較が整数比較になり、
+メモリも激減します。**ただしこれは C-1 の一部**なので、単体でやるなら
+「スキャナ内の一時バッファ再利用」までに留めるのが安全です。
+
+### GO/NO-GO 判定
+
+samply（S-2）で `alloc` / `malloc` / `free` のサンプル比率を見てください。
+**アロケータが総サンプルの 10% を超えていなければ、A-3b/c は NO-GO。**
+A-3a は工数が極小なので、GO/NO-GO なしでやってよいです。
+
+### 検証
+
+- findings diff = 空、3 回決定性。
+- `cargo test --workspace`（スキャナのテストが厚いので、ここで壊れたら即分かる）。
+- **RSS が下がっていること**（下がらないなら効いていない）。
+- 両 regress PASS。
+
+### やってはいけない
+
+- `from_utf8_lossy` を `from_utf8_unchecked` に変える。**不正 UTF-8 のファイルで UB。**
+  Go の scanner は不正 UTF-8 を明示的にエラーにするので、挙動を変えると findings が変わります。
+
+### DONE（2026-07-28）— **A-3a: `scan`/`Parser.lit` を `Cow<'static, str>` 化。セミコロン `"\n"`/`";"` の割当を消した。**
+
+**入れたもの:** `Scanner::scan` の戻り値と `Parser.lit` を `Cow<'static, str>` に変更。
+挿入／明示セミコロンは `Cow::Borrowed`、識別子・リテラル・コメントだけ `Cow::Owned`。
+
+**実測:** findings 20 件 byte 同一・3 回決定的。`cargo test -p guff-ast --release` PASS。
+cold wall ~3.87s / RSS ~7.43GB（A-1 後と同程度。A-3a 単体の wall 効果は誤差帯）。
+両 regress PASS（tsdb 1.60s / full 3.88s）。
+
+### NO-GO（2026-07-28）— **A-3b/c。アロケータ合計 CPU 5.8% < 10% 基準。**
+
+§1.3-post samply: `mi_free`+`mi_malloc_aligned`+`mi_page_free_list_extend` = **5.8%**。
+節の GO/NO-GO（10% 超でなければ A-3b/c はやらない）に抵触。Ident インターン（A-3c）は C-1 側。
+
+---
+
+## A-4 — `File::add_line` の Mutex を除去
+
+### 目的
+
+スキャナは**改行 1 個ごとに Mutex を取ります**:
+
+`crates/guff-ast/src/position.rs:173-180`:
+
+```rust
+    pub fn add_line(&self, offset: i64) {
+        let mut m = self.mutable.lock().unwrap();
+        // ...
+        m.lines.push(offset);
+    }
+```
+
+呼び出し元は `Scanner::next`（`crates/guff-ast/src/scanner.rs:173-176`）。
+150MB のソースなら数百万回のロック取得です。**無競合の Mutex は約 20ns** なので
+数百万回で 0.05〜0.1s、しかも並列パース中は同一 `FileSet` 上で
+（別ファイルなら別 `File` なので実際の競合は少ないはずですが）アトミック命令が走ります。
+
+### 手順
+
+**1 ファイルのパースは 1 スレッドで完結する**ので、パース中はロック不要です。
+
+1. `Scanner` にローカルの `line_offsets: Vec<i64>` を持たせ、改行のたびにそこへ push する。
+2. パース完了時（`parse_file` の最後、`Scanner` を落とす直前）に、**1 回だけロックを取って
+   まとめて `File` に流し込む**。
+3. **ただし途中で `File` の行テーブルを読む人が居ないかを必ず確認すること。**
+   ```bash
+   rg -n 'fn line\b|fn position\b|fn offset\b|line_count|\.lines\b' crates/guff-ast/src/position.rs
+   rg -n '\.position\(|\.line\(' crates/guff-ast/src/parser.rs crates/guff-ast/src/scanner.rs
+   ```
+   **パース中にエラーを報告する経路（`error()` / `Bailout`）が行番号を引いている可能性が高い**ので、
+   そこは要注意。引いているなら、ローカル `Vec` からも引けるようにするか、
+   その経路だけ従来どおりにする。
+
+### 検証
+
+- findings diff = 空。**特にパースエラーを含むファイル**（`compat/` や
+  `regress/fmt_fixtures/` に無ければ、わざと壊した .go を一時的に作る）で
+  エラーメッセージの行番号が変わらないことを確認する。
+- 3 回決定性、`cargo test --workspace`、両 regress PASS。
+
+### やってはいけない
+
+- `Mutex` を `RwLock` に変えるだけ。**書き込みが主なので改善しません。**
+- `unsafe` でロックを外す。
+
+### NO-GO（2026-07-29）— **実装して計測したが wall に出ない。revert。**
+
+**GO/NO-GO 計測（着手前）:** `File::add_line` に `Instant` + Atomic を仕込んで cold prometheus
+`./...` を 1 回: **calls=7,932,985 / 計測 CPU 0.673s（85 ns/call）**。コール数は十分多いが、
+`Instant::now()` 自体が数十 ns なので、この 0.673s は**上限の過大評価**（真の Mutex コストは
+おそらく ~0.2s CPU 前後）。
+
+**実装したこと（2 案とも revert 済み）:**
+
+1. **`Scanner::init` で `set_lines_for_content` → `next` から `add_line` 削除。**
+   追加の全バイト走査が載る。`-j1` で **before 7.62s / after 7.72s** と**悪化**したので即捨て。
+2. **手順書どおりローカル `pending_lines: Vec<i64>` + `File::add_lines` 一括 flush。**
+   `error` / `line_for` / EOF / `parse_file` 終了時に flush。findings byte 一致・
+   `guff-ast` 170/170 PASS・決定性 3/3。
+
+**交互測定（before/after バイナリ、`-j1` ×5、load ~3.2）:**
+
+| | before 中央値 | after 中央値 |
+|---|---:|---:|
+| wall | **7.50s** | **7.50s** |
+| typecheck_roots | 3.81s | 3.80s |
+| seed dep check | 2.70s | 2.69s |
+
+並列 cold も before/after とも 3.6〜3.9s 帯で、after が系統的に速い兆候なし。
+**wall 換算の削減は誤差帯（≪ 0.1s）→ Rule 14 で NO-GO。** コードはすべて revert。
+
+**学び:** Darwin arm64 の無競合 `Mutex` は改行単位でも既に安い。追加パス（案1）は論外で、
+ローカルバッファ（案2）も flush / Vec 成長で相殺されて wall に出ない。
+次に触るなら `position_internal` の**読み**側（S-2 で self 0.34s）の方が余地があるが、
+別タスクとして切り出すこと。
+
+---
+
+## A-5 — `hex_encode` の `format!` を除去（**一番簡単。腕慣らしに最適**）
+
+### 目的
+
+キャッシュキーの 16 進エンコードが**バイトごとに `format!`** しています:
+
+```bash
+rg -n 'fn hex_encode' -A6 crates/guff-runner/src/cache.rs
+```
+
+`format!("{b:02x}")` は 1 回で `String` を確保し、フォーマット機構を通します。
+SHA-256 は 32 バイトなので 1 ハッシュにつき 32 回。
+パッケージ 1792 個 × ファイル数ぶん呼ばれます。
+
+### 手順
+
+ルックアップテーブル方式に置き換える:
+
+```rust
+const HEX: &[u8; 16] = b"0123456789abcdef";
+
+fn hex_encode(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for &b in bytes {
+        s.push(HEX[(b >> 4) as usize] as char);
+        s.push(HEX[(b & 0xf) as usize] as char);
+    }
+    s
+}
+```
+
+**出力は 1 バイトも変わらないこと**（小文字 16 進・ゼロ埋め 2 桁）を確認してください。
+`format!("{b:02x}")` は小文字ゼロ埋め 2 桁なので上と同一です。
+
+### 検証
+
+- **既存のユニットテストがあるか確認し、無ければ書く**（`assert_eq!(hex_encode(&[0x00, 0x0f, 0xff]), "000fff")`）。
+- findings diff = 空（キャッシュキーが変わるとキャッシュが全ミスするので、
+  **キーのバイト列が同一であること**が本質）。
+- **warm を 2 回まわして、2 回目がちゃんと hit すること**を `GUFF_DEBUG_CACHE=1` の
+  `hits=` で確認する。ここが変わったらエンコードが違っています。
+- 両 regress PASS。
+
+### DONE（2026-07-30）— **blake3 content hashing（A-5 follow-up）。`-j 1` seed ≈ −0.15〜0.20s。**
+
+`pkg_self_hash_from_sources` / `IssueCache::{self_hash,file_hash}` / seed
+`base_fingerprint` / `overlay_path` を blake3 化。`SEED_OVERLAY_SCHEMA` 3→4、
+`DEP_HASH_REGISTRY_SCHEMA` 1→2（既存キャッシュは一度 miss）。findings byte 同一。
+
+`-j 1` A/B（空 `GUFF_CACHE`）: seed 中央 ≈ **−0.15〜0.20s**（負荷でブレあり）。
+persist ON↔OFF ギャップは SHA 時 ~0.33s → blake3 後 ~0.15s（残りは overlay encode）。
+
+### 発展（別タスクにする）
+
+SHA-256 自体を **blake3** に置き換えると 5〜10 倍速くなります。ただし
+**キャッシュキーが全部変わる**ので既存キャッシュが全ミスします。
+やるなら「キャッシュのスキーマバージョンを上げる」とセットで、別コミットで。
+効くのは cold の `set_dep_hashes`（全パッケージの全ファイルを SHA する）なので、
+**先に S-3 でそこの秒数を測ってから**判断してください。
+
+### DONE（2026-07-27）— **findings byte 一致・cache 全 hit 維持。腕慣らしどおり安全。**
+
+`crates/guff-runner/src/cache.rs:848` の `hex_encode` を、`fmt_cache.rs` に既にある
+LUT 実装（`b"0123456789abcdef"`）に置き換え。`format!("{b:02x}")` と**バイト同一**（小文字・
+ゼロ埋め 2 桁）。ユニットテスト `hex_encode_matches_format` を追加し、空 / `0x00` / `0x0f` /
+`0xff` / 混在 / **全 256 バイト**で新旧が一致することを検証（`cargo test -p guff-runner`）。
+
+**検証:** findings byte 一致 20/20（cold）、決定性 3/3、warm 2 回目が `hits=294 misses=0`
+（キャッシュキーのバイト列が変わっていない＝エンコード同一の証拠）、両 regress PASS。
+
+> 補足: `crates/guff-fmt/src/fmt_cache.rs` の `hex_encode` は既に LUT 化済みだったので、
+> 残っていた `format!` 版は `cache.rs` の 1 箇所だけ。期待どおり cold wall への寄与は
+> 測定ノイズ以下（この関数はハッシュ確定ごとに 1 回・SHA-256 32 バイト）だが、
+> **腕慣らし＆一貫性**目的なので DONE 判定は findings 同一と cache hit 維持で足りる。
+
+---
+
+## A-6 — `Context::lookup` の `Vec` 割り当てを除去
+
+### 目的
+
+ジェネリクスのインスタンス化キャッシュが、**参照するたびに `Vec` を確保**しています:
+
+```bash
+rg -n 'fn lookup' -A4 crates/guff-types/src/context.rs
+```
+
+`self.instances.get(&(orig, targs.to_vec()))` — キーが `(TypeId, Vec<TypeId>)` なので、
+**読むだけなのに `targs` をコピー**しています。
+
+### 手順
+
+`hashbrown` の raw entry API か、キーをハッシュ可能な借用形に変えるのが定石です。
+一番簡単なのは **キーを事前にハッシュした `u64` にする**方式:
+
+1. `(orig, targs)` から決定的なハッシュ（例 FNV-1a / blake3 の先頭 8 バイト）を計算する関数を作る。
+2. `instances: HashMap<u64, TypeId>` にする。
+3. **ハッシュ衝突が起きたら型を取り違えます。** これは findings を壊すので、
+   衝突対策として `HashMap<u64, Vec<(TypeId, Vec<TypeId>, TypeId)>>`（バケット内で厳密比較）に
+   するか、64bit で衝突を許容しない設計にする。**手抜きすると静かに壊れます。**
+
+より安全な代替: `targs` が短い（普通 1〜2 個）ので **`SmallVec<[TypeId; 4]>`** にすれば
+ヒープ確保がゼロになります。`smallvec` クレートを足すだけで、ロジックは一切変わりません。
+**こちらを推奨します。**
+
+### GO/NO-GO 判定
+
+ジェネリクスを多用しないコードベースでは、そもそも `lookup` がほとんど呼ばれません。
+prometheus がどれだけジェネリクスを使っているか不明なので、
+**まず `lookup` の呼び出し回数をカウンタで数えてください。100 万回未満なら NO-GO。**
+
+### 検証
+
+- findings diff = 空、3 回決定性。**ジェネリクスを含むパッケージで検出が変わらないこと**を重点確認。
+- `cargo test --workspace`（`guff-types` のジェネリクステストが本丸）。
+- 両 regress PASS。
+
+### NO-GO（2026-07-29）— **lookup 14,268 回 ≪ 100万。コード未変更。**
+
+prometheus cold `./...` で `Context::lookup` に Atomic カウンタを仕込み計測:
+**calls=14,268 / total_targs=19,209 / avg_targs=1.35**。
+手順書の閾値「100 万回未満なら NO-GO」を 2 桁下回る。
+仮に毎回 `Vec` 確保が 100ns でも上限は ~1.4ms CPU → wall 換算は誤差以下。
+実装せず計測コードのみ revert。
+
+---
+
+## A-7 — `typecheck_one_target` の `Package` 丸ごと clone を除去
+
+### 目的
+
+`crates/guff-packages/src/typecheck.rs:285`:
+
+```rust
+    let mut pkg = (**by_id.get(id)?).clone();
+```
+
+`Package` は `Vec<PathBuf>`（compiled_go_files）、import マップ、各種メタデータを持つ
+そこそこ大きい構造体です。それを **293 パッケージぶん丸ごと deep clone** しています。
+
+### 手順
+
+1. **なぜ clone しているのかを先に読む。** おそらく「型チェック結果（syntax / types /
+   types_info）を書き込むために所有権が要る」からです。`Arc<Package>` を共有したまま
+   結果だけ別に持てないか検討する。
+2. 最小の改善は「clone せず、必要なフィールドだけ move / 参照する」。
+   `Arc::try_unwrap` が使えるなら（他に参照が無ければ）コピーゼロで所有権が取れます。
+3. **`by_id` に `Arc` が残っている限り `try_unwrap` は失敗します**ので、
+   `by_id` の構築方法から見直す必要があるかもしれません。
+
+### GO/NO-GO 判定
+
+293 回の clone です。**1 回 1ms でも 0.3s** ですが、実際は数十 µs でしょう（0.01s 程度）。
+samply で `Package::clone` が見えなければ **NO-GO**。
+このタスクは「見た目が悪いだけで実は安い」可能性が高いです。
+
+### やってはいけない
+
+- **`Package` の中に pointer identity を map のキーにしているものがないか確認せずに触る**
+  （`PERF_TASKS.md` §0-8）。
+  ```bash
+  rg -n 'as \*const .* as usize|ptr::eq' crates/guff-packages/src crates/guff-types/src
+  ```
+
+### NO-GO（2026-07-29）— **Package::clone 合計 CPU 0.005s。コード未変更。**
+
+`typecheck_one_target` の `(**by_id.get(id)?).clone()` を Instant 計測（prometheus cold）:
+**n=293 / cpu=0.005s / 18 µs/call**。
+手順書の見込みどおり「見た目が悪いだけで実は安い」。wall 換算 ≪ 0.1s → Rule 14 で NO-GO。
+（参考: `GUFF_DEBUG_CACHE=2` の `seed-clone 0.02s` は別経路の seed 組み立てで、この clone は含まない。）
+
+---
+
+## A-8 — `target-cpu=native` / PGO ビルド
+
+### 目的
+
+現在 `.cargo/config.toml` が存在せず、`RUSTFLAGS` も設定されていません
+（`ls .cargo` → 無し）。つまり **generic な arm64/x86-64 向けコードが出ています。**
+
+### 段階
+
+**A-8a: `target-cpu=native`（ローカル計測用のみ）**
+
+```toml
+# .cargo/config.toml（新規）
+# 注意: これはローカル開発機向け。配布バイナリはこれを使ってはいけない（他マシンで
+# 不正命令になる）。CI / リリースビルドでは無効化すること。
+[build]
+rustflags = ["-C", "target-cpu=native"]
+```
+
+⚠️ **これを入れると配布バイナリが壊れる可能性があります。** リリース CI が
+`cargo build --release` を素で叩いているなら、`.cargo/config.toml` はリポジトリに
+**コミットしてはいけません**（`.gitignore` に入れる）。
+`.github/workflows/` と `Dockerfile` を必ず確認してから決めること:
+
+```bash
+cat .github/workflows/*.yml | grep -n 'cargo build'
+grep -n 'cargo build' Dockerfile
+```
+
+**判断: リポジトリにコミットするなら、`[target.<host-triple>]` 節に限定するか、
+環境変数 `RUSTFLAGS` で都度渡す運用にする。** 一番安全なのは
+「`docs/DEVELOPMENT.md` に `RUSTFLAGS='-C target-cpu=native' cargo build --release` と書くだけ」です。
+
+**A-8b: PGO（Profile-Guided Optimization）**
+
+これは**確実に効く**（rustc 自身が PGO で 10〜20% 速くなっています）が、ビルド手順が複雑です。
+
+```bash
+# 1) 計装ビルド
+RUSTFLAGS="-Cprofile-generate=/tmp/pgo-data" cargo build --release
+# 2) 代表的なワークロードを走らせる（prometheus cold + warm 両方）
+cd prometheus && ../target/release/guff run --no-cache -c .golangci.yml ./... >/dev/null
+# 3) プロファイルをマージ（llvm-profdata が要る）
+xcrun llvm-profdata merge -o /tmp/pgo-data/merged.profdata /tmp/pgo-data
+# 4) 本ビルド
+RUSTFLAGS="-Cprofile-use=/tmp/pgo-data/merged.profdata" cargo build --release
+```
+
+これを `scripts/build-pgo.sh` として常設し、`docs/DEVELOPMENT.md` に書く。
+
+### 検証
+
+- **findings diff = 空**（最適化フラグで findings が変わったら、それは
+  未定義動作か浮動小数点の非決定性があるということ。**その場合は最適化を諦めるのではなく
+  バグを探すこと**）。
+- 3 回決定性。
+- wall が下がったこと。
+- **両 regress PASS。ただし baseline との比較は「同じビルド設定で取った baseline」と
+  やらないと意味がありません。** PGO ビルドの速さを baseline に焼き込むと、
+  以後の通常ビルドが全部 FAIL します。**PGO は「ローカルで速くする手段」であって
+  「baseline を更新する理由」ではありません。**（§0-6 の精神）
+
+### やってはいけない
+
+- PGO ビルドの数字で `--update-baseline` する。**絶対にやらないこと。**
+- `.cargo/config.toml` を CI 確認なしにコミットする。
+
+### NO-GO（2026-07-29）— **A-8a `target-cpu=native` は aarch64-apple-darwin で wall に出ない。**
+
+`.cargo/config.toml` はコミットしない（CI の `cargo build --release` が素で走るため）。
+運用は `RUSTFLAGS='-C target-cpu=native' cargo build --release` を
+`docs/DEVELOPMENT.md` §9.4 に Tips として記載するだけ。
+
+**交互測定（generic vs native バイナリ、seed-hot `GUFF_CACHE`、`--no-cache`、load ~2）:**
+
+並列（既定 `-j`）×3 往復:
+
+| | generic | native |
+|---|---:|---:|
+| wall | 2.90 / 2.91 / 2.93 | 3.46† / 2.96 / 2.92 |
+| analyze | 0.60〜0.61s | 0.60〜0.61s |
+| buildir CPU | 1.91〜1.96s | 1.86〜1.93s |
+
+† 1 本目の 3.46s は X-3 スパイク（format/load 以外は通常帯）。中央値は generic **2.91s** /
+native **2.96s**。
+
+`-j 1` ×5 往復（CPU 差が見えやすい条件）:
+
+| | generic 中央値 | native 中央値 | Δ |
+|---|---:|---:|---:|
+| wall | **5.34s** | **5.39s** | **+0.05s**（native が遅い） |
+
+findings 20 件は generic/native 全ランで **byte 同一**（cksum 一致・3 回以上決定的）。
+`format_checks waited=0.00s` のまま（B-10 着手条件未達）。
+
+**結論:** Apple Silicon では baseline `aarch64` と `native` の差がほぼ無い（または
+メモリ束縛で隠れる）。wall 換算 ≪ 0.1s → Rule 14 で **A-8a は NO-GO**。
+Tips としての `RUSTFLAGS` 記載は残す（x86-64 ローカルでは効く余地がある）。
+**A-8b（PGO）は別途測る**（下の DONE）。
+
+### DONE（2026-07-29）— **A-8b PGO: `scripts/build-pgo.sh` 常設。`-j1` wall −0.28s。baseline 未更新。**
+
+入れたもの:
+
+1. [`scripts/build-pgo.sh`](../scripts/build-pgo.sh) — profile-generate → prometheus cold+warm 訓練
+   → `llvm-profdata merge` → profile-use。guff の findings 非ゼロ終了を許容。
+2. `docs/DEVELOPMENT.md` §9.5 に native / PGO のローカル手順。
+3. **`.cargo/config.toml` は置かない**（CI の素 `cargo build --release` を壊さない）。
+
+**交互測定（generic vs PGO、seed-hot、`--no-cache`、findings byte 同一）:**
+
+| | generic 中央値 | PGO 中央値 | Δ |
+|---|---:|---:|---:|
+| 並列 wall（×3） | 2.85s | **2.74s** | **−0.11s** |
+| `-j 1` wall（×5） | 5.19s | **4.91s** | **−0.28s** |
+| analyze（並列） | 0.55〜0.58s | 0.53s | −0.03〜0.05s |
+| buildir CPU | 1.77〜1.82s | 1.76〜1.83s | 誤差 |
+
+バイナリサイズ: generic 18.1MB → PGO **14.2MB**。
+**`--update-baseline` はしていない**（PGO はローカル手段。ゲートは常に素の release）。
+
+---
+
+## A-9 — 起動コスト（レジストリ構築・設定パース）の計測と削減
+
+### 目的
+
+warm 実行は **wall 0.41s** しかないので、プロセス起動〜レジストリ構築のコストが
+無視できない比率になっている可能性があります。しかし**現在それを測る phase タイマーがありません**
+（最初の phase は `load_graph`）。
+
+`crates/guff-lint/src/registry.rs` は linter 名から analyzer 集合を解決しますが、
+staticcheck だけで **161 個**、style で **77 個**、govet で **30 個** の
+`Analyzer` 構造体（`requires: Vec<...>`, `fact_types: Vec<...>` を持つ）を組み立てます。
+
+### 手順
+
+1. **まず測る。** `main()` の先頭で `Instant::now()` を取り、
+   `run_linters` に入る直前までを `GUFF_DEBUG_CACHE=1` で
+   `phase startup (config+registry) X.XXs` として出す。
+2. **0.02s 未満なら NO-GO。** そのまま計測コードだけコミットして終わり（それでも価値があります）。
+3. 0.05s を超えるようなら:
+   - `OnceLock` で全 analyzer を毎回構築しているなら、**実際に有効な linter のぶんだけ**
+     構築するように遅延化する。
+   - `Vec<&'static Analyzer>` の重複除去（`registry.rs` の `partition_linters` 周辺）が
+     O(n²) になっていないか確認する。
+   - 設定 YAML のパースが重いなら、`serde_yaml` の使い方を見直す。
+
+### 検証
+
+- findings diff = 空、3 回決定性。
+- **warm の wall が下がったこと**（cold では誤差に埋もれます。`PERF_TASKS.md` §1.4 の warm 手順で測る）。
+- 両 regress PASS。
+
+### NO-GO（2026-07-29）— **startup 0.01s。タイマーだけ残す。**
+
+`cli::main` 先頭 → `run_and_print` 直前を `GUFF_DEBUG_CACHE=1` で
+`phase startup (config+registry)` として出力。
+
+**実測（prometheus `./...` warm ×3、issues cache hot）:**
+
+| 回 | startup |
+|---|---:|
+| 1 | **0.01s** |
+| 2 | **0.01s** |
+| 3 | **0.01s**（warm wall 0.21s） |
+
+閾値 0.02s 未満 → **最適化しない**。phase 行は今後も warm 内訳の地図として残す。
+
+---
+
+## misspell — 辞書を FxHash 化（A-1 延長）
+
+### DONE（2026-07-29）— **`Replacer` 辞書を `FxHashMap`。misspell CPU 誤差帯。findings 同一。**
+
+`crates/guff-misspell` の ~30k エントリ訂正辞書を `std::HashMap` → `rustc_hash::FxHashMap`
+（lookup のみ。イテレーション順依存なし）。
+
+**実測（prometheus `./...`、空 `GUFF_CACHE`、`--no-cache`）:**
+
+| 指標 | before（文書値） | after |
+|---|---:|---:|
+| misspell CPU（293 actions） | 0.43〜0.45s | **0.42s**（誤差帯） |
+
+**検証:** findings 20 件 byte 同一（3 回・`-j 1`）。`cargo test -p guff-misspell --release` PASS。
+Aho-Corasick 等は境界/case リスクのため未着手。
+
+---
+
+## A-10 — 終了時のティアダウンを払わない（**A-9 の裏側。2026-07-30 発見**）
+
+### 目的
+
+**A-9 は「プロセス開始から最初の phase まで」を測って 0.01s と結論しましたが、
+反対側の端＝「最後の phase からプロセス終了まで」は誰も測っていませんでした。**
+そこに **0.28s** ありました。
+
+`phase print` が終わった時点で診断はすべて stdout に出ています。しかし
+`LintResult`（`packages: Vec<Arc<Package>>` ＋ `RunResult`）はまだ生きていて、
+`run_and_write_inner` を抜けるときに drop されます。cold `./...` ではここに
+**~3.7 GiB のパッケージ・AST・型アリーナ**がぶら下がっているので、
+その参照グラフを辿って free するだけで **0.28s（シングルスレッド）** かかります。
+**そして直後にプロセスが終了し、カーネルがアドレス空間をまとめて回収します。**
+
+### GO/NO-GO 判定（**先にこれをやる。一時パッチで足りる**）
+
+phase タイマーは各々が**自分の所要時間**を測るので、**phase と phase の隙間は見えません。**
+プロセス開始からの**絶対時刻**を打たないと見つかりません。
+
+```bash
+# cli::main 冒頭の `startup: Instant` を OnceLock に入れ、要所で
+#   eprintln!("guff: PROBE {label} {:.3}s", start.elapsed().as_secs_f64())
+# を打つ一時パッチを当てて cold を回す。
+```
+
+**上限の判定は「phase の合計」と `/usr/bin/time` の `real` の差**です。
+差が 0.1s を超えていたら、どこかに計測されていない直列区間があります。
+
+**2026-07-30 実測（prometheus `./...`、空 `GUFF_CACHE`、`--no-cache`）:**
+
+| 絶対時刻 | 位置 |
+|---:|---|
+| 0.006s | `run_linters` 突入 |
+| 0.854s | `prepare_linter_run` 完了（`go list`） |
+| 2.697s | `run_linters_on_graph` 完了 |
+| 2.701s | `drop(prepared.graph)` 完了（Arc の参照が残るので **4ms**） |
+| 2.732s | **`phase print` 完了 — 出力は全部済んでいる** |
+| 2.732s | `drop(issues)` 完了 |
+| **3.015s** | **`drop(result)` 完了 ← ここで 0.283s** |
+| 3.015s | `run_cmd` から復帰 |
+| 3.06s | `real`（残り 0.045s がプロセス終了そのもの） |
+
+**帰属:** phase 合計 2.73s に対して `real` 3.06s。差 0.33s の内訳は
+**`drop(result)` 0.28s ＋ プロセス終了 0.045s**。
+上限 0.28s は §0-14 の 0.1s 基準を大きく超える → **GO**。
+
+### 手順
+
+1. `Teardown { Free, LeakOnProcessExit }` を `guff-lint` に追加。
+2. `run_and_write_inner` の末尾で、`Free` なら従来どおり drop、
+   `LeakOnProcessExit` なら `std::mem::forget(result)`。
+   **`phase teardown` 行を出して、どちらを選んだか記録に残すこと。**
+3. **`Teardown::LeakOnProcessExit` を渡すのは `cli.rs` の one-shot 経路だけ。**
+   既存の `run_and_write` / `run_and_print` は `Free` のまま（＝公開 API の挙動は不変）。
+
+### やってはいけない
+
+- **`run_and_write` / `run_and_print` 自体を leak させる。** ライブラリ API なので、
+  埋め込み側がループで呼ぶと無限に増えます。
+- **`--watch` を leak させる。** 常駐プロセスなのでパスごとに数 GiB 積み上がります。
+  幸い `watch.rs` は `run_linters_on_graph` を直接呼ぶので `run_and_write_inner` を通りません
+  （**この分離は維持すること**）。
+- **`std::process::exit` で済ませる。** timeout 経路（`run_and_write_with_timeout`）は
+  worker スレッドで `Vec<u8>` に集めてから main スレッドが書き出すので、
+  worker から `exit` すると**出力が消えます**。
+- **副作用のある `Drop` を leak させる。** 着手前に `rg 'impl Drop for'` で全部見ること。
+  実際に確認した結果:
+  - `IssueCache` / fmt キャッシュに `Drop` は**無い**（書き込みは解析中に完了している）。
+    そもそも `Arc<IssueCache>` は `RunnerOptions` の一時値なので `run_on_packages` 直後に落ちます。
+  - `seed_cache::OverlayWriter` の `Drop`（writer スレッドの join）は**本物の副作用**ですが、
+    `typecheck.rs` のローカルで seed ビルド中に完結し、`LintResult` からは辿れません。
+  - 残る `Drop` は `DepthGuard` / `TempGuard` / `DirGuard` / `BailoutSilence` / テスト用 `TempFile`
+    のみで、いずれも `LintResult` に到達しません。
+
+### DONE（2026-07-30）— **cold −0.27s / `-j 1` −0.19s / findings byte 同一。**
+
+**入れたもの:** `Teardown` enum ＋ `run_and_write_with_teardown`。
+`cli.rs` の one-shot（`--watch` なし）だけが `LeakOnProcessExit` を渡す。
+`phase teardown 0.00s (left to process exit)` が出るようになりました。
+
+**実測（A/B/A/B 交互、§X-3。`head` = 144e1ff、`a10` = 本変更）:**
+
+| 条件 | head | a10 | 差 |
+|---|---:|---:|---:|
+| cold wall（4 往復の各ペア） | 3.11 / 3.10 / 3.27 / 3.31s | **2.78 / 2.86 / 2.94 / 3.14s** | **−0.33 / −0.24 / −0.33 / −0.17** |
+| cold wall（中央値） | 3.19s | **2.90s** | **−0.29s** |
+| `-j 1` wall（2・3 回目） | 6.55 / 6.58s | **6.38 / 6.36s** | **−0.19s** |
+| `phase teardown` | 0.28s（drop） | **0.00s** | |
+| peak RSS | 3.74 GB | 3.76 GB | +0.7%（誤差帯。ピークは解析中で teardown より前） |
+| warm wall | 0.21s | **0.21s** | ±0.00（warm の result は 0.14GB なので元から安い） |
+
+**検証:**
+- findings **20 件 byte 同一**（`diff` 空）・**3 回とも同一**（`scripts/findings-gen.sh`）。
+- **warm 2 回目が `294 hits / 0 misses`** — leak がキャッシュ永続化を壊していない証拠。
+- `--watch` スモーク（`./tsdb/...`）: pass #1 0.95s → pass #2 0.02s。
+  `phase teardown` 行は出ない（＝ `Free` 経路のまま）。
+- `cargo test --workspace --release --no-fail-fast`: **2811 passed / 3 failed**。
+  失敗は **X-6 の 3 本ちょうど**（`sa4010` / `sa4017` / `sa5011`）で `main` から不変。
+- `guff-lint` の警告数 4 → 4（増減なし）。
+- **regress 両方 PASS**（baseline 未更新）:
+
+  | プロファイル | baseline wall | 実測 wall | baseline RSS | 実測 RSS | findings |
+  |---|---:|---:|---:|---:|---|
+  | tsdb | 1.360s | **1.390s** | 1,141,440,512 | 1,115,570,176 | both 4 / only 0,0 |
+  | full | 3.360s | **2.900s** | 4,034,396,160 | **3,745,628,160** | both 20 / only 0,0 |
+
+**次にやる人へ:** 残り 0.045s（rayon プールの join / mimalloc / 静的変数）は基準未満なので
+`std::process::exit` は**入れていません**。同じ「終端の隙間」を疑うなら、
+まず **phase 合計と `real` の差**を見ること。今は 2.73 → 2.72s（`real` 2.72s）でほぼ閉じています。
+
+---
+
+# Tier B — 構造的（GO/NO-GO 計測を必ず先に）
+
+## B-0 — preorder 総時間の計測（**B-1 の GO/NO-GO。単独で完結するタスク**）
+
+### 目的
+
+B-1（本物の Inspector）は工数「大」なので、**やる価値があるかを先に数字で確かめます。**
+このタスクは計測だけで、最適化は一切しません。**結果が NO-GO でも成功です。**
+
+### 背景（なぜ怪しいか）
+
+`InspectResult` は**空の構造体**で、`preorder()` は呼ばれるたびに AST を丸ごと歩き直します:
+
+`crates/guff-analysis/src/passes/inspect.rs:13-36`:
+
+```rust
+/// Empty on purpose: this port rewalks on each [`preorder`] call, so collecting
+/// node ids at analyzer-run time was unused overhead.
+#[derive(Clone, Default)]
+pub struct InspectResult {}
+
+impl InspectResult {
+    pub fn preorder<F>(&self, files: &[File], mut f: F)
+    where
+        F: FnMut(NodeRef<'_>),
+    {
+        let mut stack = Vec::new();
+        for file in files {
+            preorder_stack(NodeRef::File(file), &mut stack, |n, _| {
+                f(n);
+                true
+            });
+        }
+    }
+}
+```
+
+呼び出し箇所は **144 箇所**（`rg -n '\.preorder\(' crates | wc -l`）。
+そしてそのほとんどが、**最初の 1 行で欲しいノード種別以外を捨てています**:
+
+`crates/guff-govet/src/assign.rs:39-42`:
+
+```rust
+    inspect.preorder(pass.files(), |n| {
+        let NodeRef::AssignStmt(AssignStmt { tok, lhs, rhs, .. }) = n else {
+            return;
+        };
+```
+
+`crates/guff-staticcheck/src/sa4006.rs:119-122`:
+
+```rust
+    inspect.preorder(pass.files(), |node| {
+        let NodeRef::ForStmt(fs) = node else {
+            return;
+        };
+```
+
+つまり **`AssignStmt` が欲しいだけの analyzer が、全ノード（数万個）を訪問して 99% を捨てている。**
+これが analyzer の数だけ繰り返されます。
+
+**Go 本体はこれを解決済みです。** `golang.org/x/tools/go/ast/inspector.Inspector` は
+AST を**一度だけ**歩いてフラットなイベント配列（各要素にノード種別のタグ付き）を作り、
+`Preorder(types ...ast.Node)` はビットマスクで**該当種別のイベントだけを線形スキャン**します。
+さらに「この種別が部分木に存在しない」なら部分木ごとスキップできます。
+**これは §0-13 の「参照実装にある最適化」の教科書的な例です。**
+
+### 手順（計測のみ）
+
+1. `InspectResult::preorder` に**スレッドローカルの累算カウンタ**を仕込む:
+   - 呼び出し回数
+   - 訪問ノード総数
+   - 費やした総ナノ秒
+   - できれば「呼び出し元 analyzer 名」ごとの内訳（`Pass` から analyzer 名が取れるなら）
+2. **グローバル `Mutex` を使わないこと。** `thread_local!` + `Cell<u64>` で累算し、
+   スレッド終了時 or 解析終了時に集計する。ここは超高頻度パスです。
+3. `GUFF_DEBUG_CACHE=1`（または S-3 の `=2`）で以下を出す:
+   ```
+   guff: inspect preorder: 1234 calls, 45,678,901 nodes visited, 3.21s total CPU
+   ```
+4. cold の prometheus `./...` で計測し、**この表を PERF_TASKS_V2.md のこの節に追記する。**
+
+### GO/NO-GO の判定基準
+
+- 総 CPU が **analyze フェーズの総 CPU（§1.4 の上位20合計 ≈ 6.7s + 裾野）の 20% 未満** なら **NO-GO**。
+  B-1 は諦めて、この計測結果を記録して終わり。
+- 20〜40% なら **条件付き GO**（B-1 の「軽量版」＝ §B-1 の手順 1〜3 だけ）。
+- 40% 超なら **フル GO**。
+
+### 検証
+
+- 計測コードを入れた状態と外した状態で **wall が変わらないこと**（3 回計測して誤差内）。
+  変わるなら計測自体が重すぎます。
+- findings diff = 空（当たり前ですが確認する）。
+- 両 regress PASS。
+
+### やってはいけない
+
+- 計測せずに B-1 を始める（§0-14）。
+- `Instant::now()` を `preorder` のコールバック内側（＝ノードごと）に置く。**破滅します。**
+
+### DONE（2026-07-27）— **判定: 条件付き GO（27.9%）。ただし cold wall の上限は 0.32s しかない。**
+
+`InspectResult::preorder`（`crates/guff-analysis/src/passes/inspect.rs`）に
+スレッドローカル計装を入れ、`GUFF_DEBUG_CACHE` 有効時のみ集計するようにした。
+`crates/guff-runner/src/action.rs` は各アクションの前後でスレッドカウンタを差分して
+analyzer 別に按分する（1 アクションは 1 スレッドで完走するので正しい）。
+
+**実測（クリーン環境・cold prometheus `./...`・3 回）:**
+
+```
+guff: inspect preorder: 12361 calls, 54385011 nodes visited, 2.11s total CPU (27.9% of analyze CPU)
+```
+
+| 回 | preorder 総 CPU | analyze CPU 比 | calls | nodes |
+|---:|---:|---:|---:|---:|
+| 1 | 2.07s | 27.1% | 12,361 | 54,385,011 |
+| 2 | 2.14s | 27.9% | 12,361 | 54,385,011 |
+| 3 | 2.11s | 27.9% | 12,361 | 54,385,011 |
+
+calls / nodes は 3 回とも**完全一致**（決定的）。analyze の総 CPU は約 **7.7s**、analyze の
+**wall は 1.16s**（有効並列度 ≈ 6.6）。
+
+**判定は §B-0 の基準どおり 20〜40% ＝ 条件付き GO（軽量版＝設計項目 1〜3、部分木スキップ抜き）。
+ただし着手前に必ず次の 3 点を読むこと。**
+
+**(1) 上限は 0.32s、現実的には 0.15〜0.25s。** preorder が**タダになっても** analyze wall は
+`1.16s × 0.279 = 0.32s` しか縮みません。events 配列の構築コスト（293 pkg × 1 walk）と、
+マスクに合致したノードのコールバック本体は残るので、現実的な取り分は **cold wall 0.15〜0.25s**。
+doc の当初見積もり「0.3〜0.7s」は**過大**でした。工数「大」＋144 箇所のマスク漏れリスクに
+見合うかは、この数字で判断してください。
+
+**(2) analyze CPU の上位は `preorder` を使っていない。** ここが最大の発見です。
+
+| analyzer | analyze CPU | うち preorder |
+|---|---:|---:|
+| buildir | 2.17s | **0**（SSA 構築。walk しない） |
+| testifylint | 1.13s | **0**（独自 walk） |
+| revive | 0.73s | **0**（`shared_walk`） |
+| misspell | 0.43s | **0** |
+| modernize | 0.28s | **0** |
+| whitespace | 0.25s | **0** |
+| typeindex | 0.17s | **0** |
+| gocritic | 0.11s | **0** |
+| inline | 0.26s | 0.26s |
+| copylocks | 0.20s | 0.19s |
+| SA5001 / composites / SA1012 / errorsas / SA4023 / unreachable / structtag / unusedresult / ST1005 … | 各 0.06〜0.10s | ほぼ全部 |
+
+つまり **B-1 が触れるのは analyze CPU 7.7s のうち 2.1s だけ**で、上位 8 個（合計 5.3s）には
+1 秒も効きません。§1.4 の「裾野の大半は AST を丸ごと舐めているだけ → B-0/B-1」という読みは
+**半分正しく半分間違い**でした（裾野が walk 主体なのは正しいが、裾野の合計が 2.1s しかない）。
+逆に言えば、**B-1 を入れたあとに revive / misspell / modernize / whitespace を
+同じ inspector に載せ替えれば取り分は倍以上になる**（B-4 がその一部）。
+B-1 に着手するなら、この「載せ替え先」もセットで計画すること。
+
+**(3) `preorder` の再帰呼び出し（二次コスト）を計装中に発見。**
+`crates/guff-staticcheck/src/sa4023.rs:52`（`interface_from_typed_nil`）は
+**preorder のコールバックの中から候補識別子ごとにフルファイル walk を回します**。
+その結果 SA4023 だけで **8.4M ノード / 66 アクション**（1 アクション 127k ノード。
+inline の 15k の 8 倍）を訪問しています。計装では depth 0 のときだけ時間を積むことで
+二重計上を避けています（それをやる前は SA4023 の preorder 時間 0.15s が
+自分の analyzer 総時間 0.08s を上回るという矛盾が出ていました）。
+**時間としては 0.09s なので単独では追う価値がありませんが、B-1 でマスク版に移行すると
+この二次パターンは自動的に安くなります**（内側の walk が `AssignStmt` だけの線形スキャンになる）。
+
+**検証:** findings byte 一致 20/20、tsdb PASS（wall 1.700s / RSS 1.245GB）、
+full PASS（wall 4.210s / RSS 7.581GB、guff_only=0 / golangci_only=0 / both 20）。
+計装 OFF（`GUFF_DEBUG_CACHE` 未設定）のオーバーヘッドは、変更前バイナリと**交互に 5 往復**
+計測して post 中央値 4.35s / pre 中央値 4.36s ＝**差なし**（LazyLock の `bool` を 1 回読む
+分岐だけで、ノードごとのコストはゼロ）。baseline 未更新。
+
+> ⚠️ 計測手順の注意: 「変更前を 3 回 → 変更後を 3 回」の順で測ったら +0.27s の差が出ましたが、
+> **交互計測ではきれいに消えました**（マシンのドリフト）。0.1s 単位を争うときは
+> **必ず交互（A/B/A/B）で測ること。** §1.1 のルール 11 の実運用版です。
+
+---
+
+## B-1 — 本物の Inspector（フラットイベント列 + ノード種別マスク）
+
+> **前提: B-0 を完了し、GO 判定が出ていること。**
+
+### 目的
+
+`x/tools/go/ast/inspector` と同じ設計に置き換え、
+**「AST を N 回歩く」を「1 回歩いて N 回フィルタする」**に変える。
+
+### 設計（Go の inspector をそのまま移植する。独自設計をしないこと。§0-13）
+
+Go 側の実装（`golang.org/x/tools/go/ast/inspector/inspector.go`）を読んでから始めてください。
+要点だけ:
+
+1. **`events` 配列**を作る。各ノードにつき「push イベント」と「pop イベント」の 2 個。
+   各イベントは `{ node, parent_index, typ_bits, index_of_matching_pop }`。
+2. **`typ_bits`** はノード種別を表す 1 ビット（56 種類なので `u64` に収まる。
+   guff の `NodeRef` はちょうど 56 バリアント — `crates/guff-ast/src/walk.rs` のコメント参照）。
+3. `Preorder(mask)` は events を線形に走査し、`typ_bits & mask != 0` のイベントだけ callback する。
+4. **最適化の肝:** push イベントに「対応する pop の index」を持たせておくと、
+   「この部分木に mask に該当するノードが 1 つも無い」場合に **部分木ごと index をジャンプできる**。
+   Go 版はこれで劇的に速くなっています。**この最適化を省くと効果が半減します。**
+
+### 段階（1 段ずつコミット）
+
+**B-1a: イベント配列の構築だけ。** `InspectResult` に events を持たせ、
+`preorder()`（マスク無し版）を events の線形走査で実装する。
+既存の 144 箇所は**一切変更しない**（API 互換）。
+この時点で「N 回の再帰 walk」が「N 回の配列走査」になり、それだけでも
+キャッシュ効率で速くなるはずです。**ここで findings 同一・regress PASS を確認してコミット。**
+
+> ⚠️ **メモリに注意。** events 配列は 1 パッケージあたり「ノード数 × 2 × 16〜24 バイト」。
+> 大きいパッケージで数 MB になります。293 パッケージが同時に生きると RSS が跳ねます。
+> **`release_finished_deps`（`crates/guff-runner/src/action.rs`）が buildir の結果を
+> 解放しているのと同じ仕組みで、inspect の結果も最後の消費者が終わったら解放されること**を
+> 必ず確認してください。現在 `InspectResult` は空なので解放してもゼロ効果ですが、
+> events を持たせた瞬間にここが RSS の生死を分けます。**RSS が baseline × 1.20 を
+> 超えたらこのタスクは失敗です。**
+
+**B-1b: マスク付き API を足す。** `preorder_typed(mask, f)` を足し、
+`NodeRef` の各バリアントに対応するビット定数を定義する。
+既存の `preorder()` は「全ビット立てたマスク」で実装する（互換維持）。
+
+**B-1c: 呼び出し側を 1 つずつ移行する。** 144 箇所を**一度に変えない**。
+まず §1.4 の上位（`revive`, `misspell`, `modernize`, `inline`, `copylocks`, `whitespace`）から、
+**5〜10 箇所ずつ・1 コミットずつ**移行する。
+移行の型は機械的です:
+
+```rust
+// before
+inspect.preorder(pass.files(), |n| {
+    let NodeRef::AssignStmt(a) = n else { return };
+    ...
+});
+
+// after
+inspect.preorder_typed(node_mask!(AssignStmt), pass.files(), |n| {
+    let NodeRef::AssignStmt(a) = n else { unreachable!() };
+    ...
+});
+```
+
+**`else { return }` を `else { unreachable!() }` に変えるのは危険です**（マスクの指定漏れが
+パニックになる）。**`else { return }` のまま残すこと。** 遅くはなりません。
+
+**B-1d: 部分木スキップ最適化を入れる。** B-1a の events に pop index を持たせ、
+「部分木に該当ノード無し」でジャンプする。これには**部分木ごとの種別ビット和**を
+push イベントに持たせる必要があります（Go 版と同じ）。
+
+### 検証（各段ごとに全部）
+
+- findings diff = 空。**144 箇所の移行では、1 箇所ずつマスクの過不足を疑うこと。**
+  マスクが足りないと**検出が消えます**（＝最悪の回帰）。
+- **移行した analyzer が実際に検出を出しているパッケージで、検出が減っていないことを名指しで確認する。**
+  prometheus の findings は 20 件しかないので、`--profile full` の 20 件だけでは
+  マスク漏れを検出できません。**`compat/` のテストスイートも走らせること**:
+  ```bash
+  ls compat/
+  # compat のテスト実行方法を README で確認して走らせる
+  ```
+- 3 回決定性。
+- **RSS を毎段で確認**（上の警告参照）。
+- `-j 1` でも遅くなっていないこと。
+- 両 regress PASS。
+
+### やってはいけない
+
+- 144 箇所を一括で機械置換する。**マスク漏れが混入したとき、どれが原因か特定できません。**
+- `unreachable!()` / `unwrap()` をマスク前提で入れる。
+- events を `Vec<Box<dyn ...>>` のような間接参照だらけの構造にする。
+  **フラットな `Vec<Event>`（`Event` は `Copy` な小さい構造体）でなければ意味がありません。**
+- 部分木スキップ（B-1d）を「難しいから」と省いて B-1 を DONE にする。
+  省くなら**明示的に「B-1d 未実施」と本ファイルに書き残す**こと。
+
+### ロールバック基準
+
+findings が変わる / RSS が baseline × 1.20 を超える / wall が下がらない → その段を revert。
+**段ごとにコミットしているので、revert は 1 段だけで済みます。これが段階分けの理由です。**
+
+### B-1a DONE（2026-07-28）— **wall −0.12s / preorder CPU 2.01s → 0.86s。`unsafe` を 1 箇所導入。**
+
+#### Rust では手順書どおりには移植できない（設計判断）
+
+**`AnalysisResult` は `Box<dyn Any + Send + Sync>` ＝ `'static` です。**
+Go の `inspector` は `[]ast.Node` を結果に持てますが、`NodeRef<'a>` は AST を借用するので
+**フラットな event 配列をそのまま `InspectResult` に持たせられません。**
+
+ユーザー判断で **「Go 版に忠実（unsafe あり）」** を採用しました。採った形:
+
+| 要素 | 内容 |
+|---|---|
+| `Event` | `{ ptr: *const (), kind: NodeKind }`（`Copy` な 16 バイト POD） |
+| 復元 | `unsafe { NodeRef::from_erased(kind, ptr) }` |
+| **生存保証** | `Events` が **`Arc<Package>` を保持**する。これで「AST が events より長生きする」が**このファイル内で閉じた事実**になり、runner の drop 順に依存しなくなる |
+| **同一性ガード** | `(files.as_ptr(), files.len())` を保存し、**deref せず比較のみ**。不一致なら**従来の再帰 walk にフォールバック** |
+| 適用率 | 呼び出し 144 箇所のうち **134 箇所が `pass.files()`**（＝ events を作ったのと同じスライス）。残り 10 箇所（`from_ref(file)` 等）はフォールバック |
+
+**56 バリアントのリストは `node_variants!` マクロ 1 箇所に集約**しました
+（`crates/guff-ast/src/walk.rs`）。`kind_name` / `kind` / `erased_ptr` / `from_erased` を
+すべてそこから生成しています。**手書きのリストが 3 本並ぶ状態こそが「バリアントが 1 個消える」
+現実的な経路**なので、既存の `kind_name` もマクロ生成に寄せました（`stringify!` なので文字列は不変）。
+
+#### 実測（クリーン環境、A/B/A/B 交互 4 往復）
+
+| 回 | pre | B-1a |
+|---:|---:|---:|
+| 1 | 4.23s | 4.20s |
+| 2 | 3.85s | 3.68s |
+| 3 | 3.86s | 3.70s |
+| 4 | 3.86s | 3.77s |
+| **中央値** | **3.855s** | **3.735s（−0.12s）** |
+
+| 指標 | pre | B-1a |
+|---|---:|---:|
+| `phase analyze` | 0.72s | **0.61s** |
+| `inspect preorder` 合計 CPU | 2.01s | **0.86s（−57%）** |
+| preorder calls / nodes | 12361 / 54,385,011 | **完全一致** |
+| peak RSS（4 回の最大） | 7.62GB | 7.68GB（+0.8%） |
+| `-j 1` wall | 8.79 / 8.80s | **8.38 / 8.37s** |
+
+**nodes が 1 個も違わないのが要点です。** フラット配列は再帰 walk が出したのと
+**同じ列を同じ順で**再生しているので、どの analyzer も違う木を見ることはありません。
+
+**events 配列の構築コストは analyze CPU に含まれています**（`inspect::run` が 293 パッケージ分
+1 回ずつ walk する）。上の analyze −0.11s は**それを差し引いた後の値**です。
+1 パッケージあたり preorder 呼び出しは平均 42 回なので、構築 1 回は十分に償却されます。
+
+RSS 増（+0.8%）は events 配列そのもの。ノード総数 ≈ 1.3M × 16 バイト ≈ 21MB の想定と整合します。
+
+#### 検証
+
+- findings byte 一致（cold `-jN` **3 回とも同一**、`-j 1`、変更前バイナリとも一致）。
+- `cargo test --workspace --release --no-fail-fast`: **2799 passed / 3 failed**
+  （2796 + 新規 3 本。失敗は X-6 の 3 本のみで不変）。
+- 新規テスト 3 本（`crates/guff-analysis/src/passes/inspect.rs`）:
+  - `flat_events_match_the_recursive_walk` — 2 ファイルのパッケージで
+    **(kind_name, ポインタ) の列が再帰 walk と完全一致**することを確認。
+    「静かに短い列」＝ findings 消失なので、件数ではなく**列そのもの**を比較しています。
+  - `foreign_file_slice_falls_back_to_walking` — 別スライスを渡すと `events_for` が `None` を返し、
+    渡されたぶんだけを walk すること。
+  - `no_owner_means_no_events` — `pkg_arc` が無い pass では events を作らず、walk 結果が一致すること。
+- 警告数 183 → 183。
+- **regress 両方 PASS**（baseline 未更新）:
+
+  | プロファイル | baseline wall | 実測 wall | baseline RSS | 実測 RSS | findings |
+  |---|---:|---:|---:|---:|---|
+  | tsdb | 1.740s | **1.470s** | 1,319,845,888 | **1,322,123,264** | both 4 / only 0,0 |
+  | full | 4.940s | **3.800s** | 7,608,352,768 | **7,598,784,512** | both 20 / only 0,0 |
+
+### B-1b / B-1c DONE・B-1d 実装したうえで NO-GO（2026-07-28）
+
+**結論から: B-1 は「B-1a で取り切っていた」。B-1b/c/d に並列 wall の伸びしろは無い。**
+残り見込み 0.06〜0.13s に対して実測 **並列 wall ±0.00s / `-j 1` −0.08s**。
+findings は全段でバイト一致、regress 両プロファイル PASS。
+
+#### 入れたもの
+
+| 段 | 内容 |
+|---|---|
+| **B-1b** | `NodeMask`（56 種の `u64` ビットセット）+ `node_mask!(A, B)` + `preorder_typed(mask, files, f)`。`ALL` / `NodeKind::{COUNT,bit,from_name}` は **`node_variants!` から生成**（56 バリアントの手書きリストを増やさない）。`COUNT <= 64` を `const` assert で固定。`preorder` は `preorder_typed(ALL, ..)` |
+| **B-1c** | **全 138 呼び出しをマスク化**（`inspect.preorder` の残数 0）。加えて `pattern_match::matches` の `HashSet<&str>` × `kind_name()` 判定を `entry_mask(pat)` に置換 |
+| **B-1d** | 実装して計測 → **NO-GO（revert 済み）**。下記 |
+
+#### マスク漏れをどう潰したか（**この手口が本題。144 箇所を目で見る作業ではない**）
+
+マスクが足りないと**検出が静かに消える**。prometheus の findings は 20 件しかないので
+コーパス差分では捕まりません。3 重にしました:
+
+1. **`GUFF_INSPECT_MASKS=0`** — 全マスクを `ALL` に広げる環境変数
+   (`crates/guff-analysis/src/passes/inspect.rs`)。**同一バイナリを 2 回走らせるだけ**で
+   「マスクを信じた結果」と「信じない結果」を比較できる。リビルド不要。
+   全段でバイト一致を確認。1 呼び出しあたり `LazyLock<bool>` 1 分岐なので常時 on で問題なし。
+2. **`cargo test --workspace`（2803 passed / 3 failed）** — これが実効的な本命。
+   analyzer の単体テストは「その analyzer が実際に検出を出す」入力で書かれているので、
+   マスク漏れはテスト失敗として出る。失敗 3 本は X-6 の既存分で不変。
+3. **導出そのものを機械化して、機械が分からなかったものだけ人間が読む。**
+   クロージャ本体から `let NodeRef::X ..else` / `if let NodeRef::X` / `match n` のアーム
+   を抽出。**「生ノードをヘルパに丸投げしていて narrowing が無い」場所は自動適用から除外**
+   （実際に該当したのは `loopclosure` 1 件、`loop_vars` が RangeStmt/ForStmt 以外に
+   `None` を返す）。さらに **「本体が言及している種別 ⊃ 導出マスク」の差分を全件列挙**
+   して目視（2 件ヒット、どちらも *内側の* walk の種別で外側の callback とは無関係。
+   `SA9001` はここで手動で RangeStmt に絞った）。
+
+`else { return }` / `_ => {}` は**全箇所そのまま残した**（§B-1c の指示どおり）。
+
+#### 実測（cold, full `./...`、A/B/A/B 交互）
+
+| 指標 | pre（B-1a 時点） | B-1c | 差 |
+|---|---:|---:|---:|
+| **wall（-j N, 5 往復の中央値）** | 3.88s | **3.87s** | **±0.00（誤差内）** |
+| **wall（`-j 1`, 2 往復）** | 8.42s | **8.34s** | **−0.08s** |
+| `phase analyze` | 0.65s | 0.61s | −0.04 |
+| `inspect preorder` 合計 CPU | 0.88s | **0.73s** | **−0.15s（−17%）** |
+| callback に届いたノード | 54,385,011 (100%) | **3,302,363（94% を除去）** | |
+| peak RSS | 7.70GB | 7.50GB | 誤差内 |
+| findings | 20 | 20（**バイト一致**） | |
+
+**なぜ wall が動かないか。** preorder CPU −0.15s は 10 並列では wall 0.015s 相当。
+`analyze` phase は wall 0.61s しかなく、しかも `format_checks`（1.6s、重畳）の陰にいる。
+**B-1a の時点で「AST を N 回歩く」コストは既に潰れていて、残っていた 0.88s は
+"歩く" ぶんではなく callback の中身（analyzer 自身の仕事）だった** ——
+これが今回いちばん重要な発見です（下の B-1d が裏付け）。
+
+#### B-1d（部分木スキップ）— **実装して測って NO-GO。省略ではない**
+
+Go 版と同じ「部分木に該当種別が無ければ丸ごと飛ばす」を実装しました。
+Go は push/pop の 2 イベントで持ちますが、guff は preorder しか要らない
+（`Nodes`/`WithStack` 相当の API が無い）ので **push イベント 1 本に
+`subtree: NodeMask`（自分を含む部分木の種別和）と `end: u32`（部分木の終端 index）を
+畳んだ** 1 配列 = 24B/node（Go 相当なら 2×24B）。構築は `Visitor` の `leave` で
+`end` を確定して親に種別和を畳み上げる。
+
+結果:
+
+| 指標 | B-1c | B-1c + B-1d |
+|---|---:|---:|
+| 走査したイベント数 | 54,385,011 | **8,237,952（−85%）** |
+| `inspect preorder` CPU | 0.73s | **0.75s**（3/3 で悪化） |
+| `inspect`（構築）CPU | 0.09s | 0.10s |
+| analyze phase / wall / RSS | — | **全部変化なし** |
+
+**走査を 85% 減らして CPU が増えた**、が答えです。マスク判定込みの線形走査は
+1 イベント ≈ 1ns（完全に分岐予測が当たる連続読み。46M 件飛ばしても ~0.03s）で、
+`Event` が 16B → 24B になったぶんのキャッシュ密度悪化と相殺してわずかに負ける。
+**§B-1 の「この最適化を省くと効果が半減します」は Go の前提（イベント配列の走査が
+高コスト）であって、guff の B-1c 後には当てはまりません。**
+ロールバック基準（wall が下がらない → revert）どおり revert しました。
+
+再挑戦するなら: 走査コストが問題になるのは「1 パッケージのノード数が桁違いに多い」
+「マスクが極端に稀」の両方が揃ったとき。上限は **preorder CPU 0.73s のうち走査ぶん
+＝ せいぜい 0.05s CPU（wall 0.005s）** なので、**このコーパスでは二度とやる価値がありません。**
+
+#### 検証（全部やった）
+
+- findings: cold full で **pre とバイト一致**（20）。`-j 1` も一致。masks on == masks off。
+- `cargo test --workspace --release`: **2803 passed / 3 failed**（失敗は X-6 の 3 本のみ）。
+  新規テスト: マスク列 == 無マスク列のフィルタ結果（flat / fallback 両方）、`ALL` が全種別を含む、
+  `entry_kinds` の語彙が全部 `NodeKind` に解決すること。
+- `compat/smoke.sh`: guff 出力が masks on/off でバイト一致
+  （このスイート自体の 1 FAIL は errcheck のメッセージ書式差で、B-1b 以前から存在）。
+- 警告数 183 → 183。
+- **regress 両方 PASS**（baseline 未更新）:
+
+  | プロファイル | baseline wall | 実測 wall | baseline RSS | 実測 RSS | findings |
+  |---|---:|---:|---:|---:|---|
+  | tsdb | 1.740s | **1.520s** | 1,319,845,888 | **1,303,379,968** | both 4 / only 0,0 |
+  | full | 4.940s | **3.790s** | 7,608,352,768 | **7,498,366,976** | both 20 / only 0,0 |
+
+#### 次にやる人へ
+
+**B-1 は打ち止めです。** analyze phase をさらに削るなら preorder ではなく
+**callback の中身** — §1.4 の analyzer 別 CPU 表の上位（buildir 2.10s が単独で最大、
+次いで revive / misspell）を見てください。`GUFF_DEBUG_CACHE=1` の
+`preorder CPU by analyzer` 表は `scanned` / `delivered` の 2 列になったので、
+「まだマスクが緩い analyzer」があればそこで分かります。
+
+---
+
+## B-2 — buildir/SSA の関数単位 遅延構築
+
+### 目的
+
+buildir は analyzer 総 CPU の **35%**（§1.4）。66 パッケージで 2.34s ＝ 1 パッケージ 35ms。
+`PERF_TASKS.md` の「buildir 条件スキップ（Task 5 残り）」は
+「staticcheck + nilnesserr が有効だと全 pkg 必須なのでスキップ不可」と結論しています。
+**それは正しいですが、「パッケージ単位でスキップできない」だけで、
+「関数単位で遅延構築できない」とは言っていません。**
+
+### 背景（先に確認すべきこと）
+
+Go の `x/tools/go/ssa` は `Program.Build()` で全関数を建てますが、
+`BuilderMode` に `NaiveForm` などがあり、また staticcheck 本体は
+**必要な関数だけ `f.Build()` する**運用をしている箇所があります。
+guff の実装がどうなっているか先に読む:
+
+```bash
+rg -n 'fn build|src_funcs|Program|BuilderMode' crates/guff-ssa/src/lib.rs | head -30
+rg -n 'buildir' crates/guff-analysis/src/passes/buildir.rs
+```
+
+### GO/NO-GO 判定
+
+1. **buildir の 35ms/pkg の内訳を samply（S-2）で見る。** 「SSA 命令の生成」なのか
+   「型アリーナのクローン」なのかで打ち手が全く違います。
+   - 型アリーナのクローンが主なら → **A-1 / B-5 の領域**であって B-2 ではない
+   - SSA 生成が主なら → B-2 の GO
+2. **buildir の結果を実際に読む analyzer が、全関数を必要としているかを調べる。**
+   ```bash
+   rg -ln 'buildir::analyzer\(\)' crates/guff-staticcheck/src crates/guff-govet/src | wc -l
+   rg -n 'src_funcs' crates/guff-staticcheck/src | head -20
+   ```
+   ほとんどが `ir.src_funcs` を全部舐めているなら、遅延構築の効果はありません → **NO-GO**。
+
+### 手順（GO の場合）
+
+これは**高リスク・大工数**です。着手する前に、ユーザーに「B-2 に入ってよいか」を確認してください。
+
+1. `Program` の関数を「宣言だけ作って本体は未構築」の状態で持てるようにする。
+2. `Function` へのアクセス時に、未構築なら構築する（内部可変性が要る＝**並列アクセスで
+   ロックが要る＝競合で逆に遅くなる危険**）。
+3. **決定性に最大の注意。** 構築順が実行ごとに変わると、SSA の値 id が変わり、
+   それを map のキーにしている箇所（`PERF_TASKS.md` §0-8）が壊れます。
+   ```bash
+   rg -n 'as \*const .* as usize|ptr::eq|HashMap<.*ValueId' crates/guff-ssa/src crates/guff-staticcheck/src
+   ```
+
+### 検証
+
+- findings diff = 空、**5 回決定性**（遅延構築は非決定性の温床）。
+- `-j 1` と `-j N` の両方で findings 同一。
+- RSS が下がること（建てない関数のぶん）。**増えたら設計が間違っています。**
+- 両 regress PASS。
+
+### やってはいけない
+
+- GO/NO-GO を飛ばす。**このタスクは工数が大きく、NO-GO の可能性も十分あります。**
+- SSA の構築順を実行ごとに変える設計にする。
+
+### NO-GO（2026-07-28）— **消費者のほぼ全部が `src_funcs` 全走査。遅延構築しても仕事が残る。**
+
+**判定材料:**
+
+1. **`src_funcs` 全走査が 18 箇所**（nilnesserr / nilerr / callcheck / contextcheck /
+   wastedassign / zerologlint / SA* 多数）。`find_map` で 1 関数だけ取るのは 3 箇所だけ。
+   遅延構築しても、これらの analyzer が走った瞬間に全関数を建て直す。
+2. **buildir inclusive 2.21s のうち `member_from_object` が 1.14s**（import 先メンバー生成）。
+   関数本体の遅延ではここは消えない。A-1（guff-ssa FxHash）後の buildir ~1.9s でも同じ構造。
+3. 高リスク（並列時の内部可変性ロック）に見合う wall 上限が見えない。
+
+**やらない。** buildir を削るなら B-5（型アリーナ共有）や import メンバー生成の絞り込み方向。
+
+### DONE（2026-07-29）— **lazy import members。buildir CPU 1.81s → 0.11s（−94%）。findings byte 一致。RSS 半減。**
+
+B-2（関数単位遅延）は NO-GO のまま。代わりに §B-2 末尾の「import メンバー生成の絞り込み」を実装した。
+
+**変更:** `build_package_for_analysis` / `build_package_from_loaded` /
+`build_package_from_source` から `populate_imported_package_members` の呼び出しを外した。
+import 先メンバーは `build_package` 中の `ensure_package_member` が参照されたものだけ作る。
+関数自体は tests / 明示 eager 用に `pub` のまま残す。
+
+**根拠（GO 判定）:**
+
+1. samply（profiling ビルド）: `member_from_object` inclusive **1.038s** /
+   `build_package_for_analysis` inclusive **1.751s**。呼び出し元はすべて
+   `build_package_for_analysis ← buildir`。
+2. 消費者（`buildir::collect_src_funcs` / staticcheck）は**主パッケージ**の
+   `members` だけを見る。import 側を全生成しても analyzer は触らない。
+3. 交互測定（seed-hot、`--no-cache`、eager vs lazy）:
+
+| | eager 中央値 | lazy 中央値 |
+|---|---:|---:|
+| wall | 2.86s | **2.59s**（−0.27s） |
+| analyze | 0.55〜0.59s | **0.36s** |
+| buildir CPU | **1.81s** | **0.10〜0.11s** |
+
+findings 20 件は eager/lazy・5 回決定性・`-j 1`・seed cold すべて **byte 同一**。
+
+**regress（再ロック済み）:**
+
+| プロファイル | 旧 baseline | 新 baseline wall | 旧 RSS | 新 RSS | findings |
+|---|---:|---:|---:|---:|---|
+| tsdb | 1.430s | **1.360s** | 1.28GB | **1.06GB** | both 4 |
+| full | 3.680s | **3.360s** | 7.37GB | **3.76GB** | both 20 |
+
+`cargo test -p guff-ssa --release` PASS。baseline は 2026-07-29 に再ロック。
+
+---
+
+## B-3 — testifylint の高速化（単価 61ms の解明）
+
+### 目的
+
+§1.4 で **testifylint が 19 actions で 1.15s ＝ 1 パッケージ 61ms** と、
+単価が全 analyzer 中で最悪です（buildir の 35ms の 1.7 倍）。
+19 パッケージしか走っていないのにこの重さは異常です。
+
+### 手順（まず調査。最適化は後）
+
+1. testifylint の実装を読む:
+   ```bash
+   rg -ln 'testifylint' crates/*/src
+   ```
+2. **なぜ 61ms もかかるのかを特定する。** 候補:
+   - buildir の結果（`Arc<Program>`）から SSA を舐め直している
+   - 正規表現をチェックごとにコンパイルしている
+   - AST を何周もしている（→ B-1 で解決）
+   - `format!` でメッセージを毎ノード作っている
+3. samply（S-2）で testifylint のフレームを見る。**推測で書き換えない。**
+4. 原因が分かったら、**このファイルのこの節に「原因は X だった」と追記してから**修正に入る。
+
+### GO/NO-GO 判定
+
+19 actions × 61ms = 1.15s CPU。有効並列度 6 なら wall 換算 **0.19s**。
+半分にできれば wall 0.10s。**GO/NO-GO は微妙なライン**なので、
+samply で「1 箇所直せば半減する」明確な原因が見えたときだけ着手してください。
+ただし「19 パッケージしか走らない」＝ testify を使うパッケージだけ、なので
+**他のコードベースでは効果が全く違います。** prometheus に過剰適合しないよう注意。
+
+### 検証
+
+- findings diff = 空。**testifylint の検出が 1 件も消えていないこと**を名指しで確認。
+  prometheus で testifylint が何を検出しているかを先にリストアップしておく:
+  ```bash
+  cd .../prometheus
+  "$GUFFBIN" run --no-cache -c .golangci.yml --out-format json ./... 2>/dev/null \
+    | python3 -c 'import json,sys; d=json.load(sys.stdin); print("\n".join(sorted(f"{i[\"Pos\"][\"Filename\"]}:{i[\"Pos\"][\"Line\"]}" for i in (d.get("Issues") or []) if i["FromLinter"]=="testifylint")))'
+  ```
+- 3 回決定性、両 regress PASS。
+
+### 原因（2026-07-28、samply 実測。推測ではない）
+
+**原因は `lookup_named_type` の O(nodes × packages) 走査だった。** 候補として挙がっていた
+「SSA 舐め直し / 正規表現の再コンパイル / AST の複数周回 / `format!`」は**どれも違いました。**
+
+`--inclusive` で testifylint 内部を割ると:
+
+| 合計 CPU | 全体比 | symbol |
+|---:|---:|---|
+| 1.169s | 6.06% | `guff_style::testifylint::run` |
+| 1.109s | 5.75% | `guff_style::testifylint::lookup_named_type` |
+| **1.095s** | **5.68%** | **`guff_style::testifylint::cut_vendor`** |
+| 0.052s | 0.27% | `check_call` |
+| 0.007s | 0.04% | `implements_iface` |
+
+**`cut_vendor` が testifylint の 94%。** self CPU 上位でも
+`<core::str::pattern::StrSearcher>::new` が 0.767s（全体 4.0%）で 4 位に居て、
+`--callers` で見ると**全部が `cut_vendor` ← `lookup_named_type`** でした。
+
+仕組み:
+
+1. `lookup_named_type` は `type_artifacts.packages` を**全件線形走査**する（prometheus では 1455 件）。
+2. 各パッケージについて `cut_vendor(pkg.path())` を呼ぶ。中身は `path.rfind("/vendor/")` で、
+   **`&str` パターンの `rfind` は呼び出しごとに two-way searcher を構築する**。
+   針 8 バイト・干し草 40 バイトなので、**セットアップだけでほぼ全部**（それが `StrSearcher::new`）。
+3. そしてこれが `preorder_stack` のコールバック**＝ノードごと**に呼ばれる
+   （`implements_testify_suite` / `implements_testing_t` 経由）。
+
+**miss が最悪ケース**という点が重要です。testify を import していないパッケージは
+1455 件を全部走査して `None` を返し、それを候補ノードごとに繰り返します。
+
+### DONE（2026-07-28）— **testifylint 1.12s → 0.08s CPU（−93%）/ analyze wall 1.17s → 0.75s / cold wall 4.44s → 4.01s。findings byte 一致。**
+
+**実装:** `(pkg_path, name) → Option<TypeId>` の thread-local memo を追加し、
+`run` の先頭で `reset_type_scratch()` の隣で clear する（既存の `TYPE_SCRATCH` と同じ作法。
+rayon ワーカーはパッケージ間でスレッドを再利用するので、reset を忘れると
+**別の型クロージャの答えを返してしまう**）。呼び出し箇所は 6 つ・キーの種類は数個なので、
+`HashMap` ではなく `Vec` の線形探索（ハッシュより速い）。
+
+**memo が安全な理由:** `lookup_named_type` が読むのは `type_artifacts.packages` / `.scopes` だけで、
+run 中にこれを書き換える analyzer は居ません（`with_types_mut` は **types** アリーナの
+クローンを触るだけ）。よって 1 回の `run` の間、答えは不変です。
+
+**`cut_vendor` 自体は書き換えていません。** memo で呼び出し回数が 3 桁減るので、
+`rfind` を手書きバイト走査に置き換える価値がなくなりました（§0-9 の「1 コミット 1 論点」）。
+
+**計測（A/B/A/B 交互 3 往復。X-3 に従いバッチ測定は不可）:**
+
+| | PRE | POST |
+|---|---|---|
+| cold wall | 4.47 / 4.39 / 4.47 s | **4.00 / 3.96 / 4.06 s** |
+| **phase analyze** | 1.16 / 1.18 / 1.18 s | **0.76 / 0.74 / 0.76 s** |
+| phase typecheck_roots | 1.64 / 1.60 / 1.64 s | 1.60 / 1.59 / 1.65 s（不変） |
+| peak RSS | 7.52〜7.69 GB | 7.42〜7.60 GB |
+| `-j 1` wall | 9.89s | **9.02s**（逐次でも改善。並列パスだけの細工ではない） |
+
+per-analyzer テーブル（合計 CPU）:
+
+| analyzer | PRE | POST |
+|---|---:|---:|
+| **testifylint** | **1.12s / 19 actions（59ms/pkg）** | **0.08s / 19 actions（4.2ms/pkg）** |
+| buildir | 2.17s | 2.26s（誤差。未変更） |
+| revive | 0.71s | 0.72s |
+
+testifylint は **上位 20 の 2 位から圏外**に落ちました。
+`inspect preorder` の絶対値は 2.13s → 2.14s で不変（比率が 27.7% → 31.6% に上がるのは
+分母の analyze CPU が減ったから。**B-1 の期待値は変わっていない**ので注意）。
+
+**検証:**
+- findings **byte 一致**（prometheus `./...` の全 60 行の出力を pre/post で `diff` → 空）
+- 決定性 **3 回で md5 完全一致**（`493f0518…`、pre とも一致）
+- `cargo test -p guff-style` → **275 passed / 0 failed**（X-4 で直した testifylint 7 本を含む。
+  `implements_testify_suite` / `implements_testing_t` / `net/http.HandlerFunc` の 3 経路を通る）
+- tsdb regress **PASS**（wall 1.540s / RSS 1.24GB / both 4 / only 0,0）
+- full regress **PASS**（wall **3.970s** vs baseline 4.940s / RSS 7.60GB / both 20 / only 0,0）
+
+**prometheus 過剰適合について（この節の警告への回答）:**
+効果の**絶対値**は「testify を import するパッケージ数 × その AST サイズ」に比例するので
+コードベース依存です。ただし直したのは **O(nodes × packages) → O(packages) というアルゴリズム**で、
+prometheus 固有の定数ではありません。**型クロージャが大きいリポジトリほど効きます**
+（miss が最悪ケースなので、testify を薄く使うリポジトリでも効く）。
+
+---
+
+## B-4 — revive の `shared_walk` を全ルールに拡大
+
+### 目的
+
+revive は **293 actions で 0.78s**（3 位）。内部に約 100 個のルールがあり、
+そのうち約 50 個は既に `shared_walk`（1 ファイル 1 walk を共有）に統合されています:
+
+```bash
+sed -n '1,10p' crates/guff-revive/src/rules/shared_walk.rs
+rg -n 'shared_walk' crates/guff-revive/src/rules/mod.rs | head
+```
+
+**残り約 50 ルールが個別に walk しています。** これを `shared_walk` に取り込む。
+
+### 手順
+
+1. `crates/guff-revive/src/rules/mod.rs` を読み、`shared_walk` に入っているルールと
+   入っていないルールを**リストアップしてこのファイルに書く**。
+2. 入っていないルールについて、なぜ入っていないかを 1 つずつ判断する:
+   - 単に未対応 → 取り込む
+   - walk 以外の情報（型情報・CFG）が要る → 取り込めない。**理由を記録する**
+   - 走査順が特殊（後順・部分木限定） → 取り込めない or shared_walk 側の拡張が要る
+3. 取り込めるものを **5 ルールずつ・1 コミットずつ**移行する。
+
+### 注意
+
+**B-1（本物の Inspector）が入ると、この作業の前提が変わります。**
+B-1 が GO なら、**B-4 より B-1 を先にやってください。** B-1 後は
+「revive の各ルールが `preorder_typed` を使う」だけで shared_walk と同等以上になる可能性があります。
+（B-1 が NO-GO / 未着手のときだけ B-4 をやる）
+
+### 検証
+
+- findings diff = 空。**revive の検出が 1 件も消えていないこと**を、
+  ルール名ごとに確認する（`--out-format json` の `Text` にルール名が入っているはず）。
+- 3 回決定性、両 regress PASS。
+
+### 仕分け（2026-07-28）— 52 本の非 shared_walk
+
+| 分類 | 数 | 内容 |
+|---|---:|---|
+| **A** shared_walk 化可 | 31 | フィルタのみ（Checker 化） |
+| **B** 既に ifelse 共有 | 3 | early-return / indent-error-flow / superfluous-else |
+| **C** 特殊（入れない） | 18 | prune / ファイルメタ / CFG / パッケージパス |
+
+### DONE batch 1（2026-07-28）— **10 ルールを shared_walk へ。findings 同一。**
+
+取り込んだルール:
+
+1. `dot-imports` / `duplicated-imports` / `redundant-import-alias` /
+   `argument-limit` / `function-result-limit`
+2. （prometheus 有効）`context-as-argument` / `error-naming` / `error-return` /
+   `receiver-naming` / `unused-receiver`
+
+**注意:** `error-naming` は `NodeRef::File` でパッケージ宣言だけ見る。
+`GenDecl` 全訪問にすると関数内 `var` まで拾って findings が増える（実測で 1 件増えた）。
+
+**実測:** revive CPU ~0.76s → ~0.74s（誤差帯。有効ルールの walk 統合はまだ半分）。
+cold wall ~3.93s。findings 20 件 byte 同一。両 regress PASS
+（tsdb 1.570s / full 3.960s）。
+
+残り A: ~21（`exported` / `time-naming` / `get-return` / `defer` …）。C は触らない。
+
+### DONE batch 2（2026-07-28）— **5 ルールを shared_walk へ。findings 同一。**
+
+取り込んだルール:
+
+1. （prometheus 有効）`time-naming` / `unexported-return`
+2. `get-return` / `confusing-results` / `waitgroup-by-value`
+
+**注意:** `time-naming` は `error-naming` と同様に `NodeRef::File` でパッケージ宣言だけ見る。
+
+**実測:** revive CPU ~0.77s（batch 1 と同帯）。cold wall ~3.91s。findings 20 件 byte 同一（3 回決定的）。
+両 regress PASS（tsdb 1.560s / full 3.850s）。
+
+残り A: ~16（`exported` / `defer` / …）。C は触らない。prometheus 有効で未統合は
+主に `exported`（A・重い）と B/C（ifelse 三本 / blank-imports / comment-spacings）。
+
+### DONE batch 3（2026-07-28）— **5 ルールを shared_walk へ。findings 同一。**
+
+取り込んだルール:
+
+1. `import-alias-naming` / `imports-blocklist` / `package-naming`
+2. `enforce-repeated-arg-type-style` / `redundant-test-main-exit`
+
+**実測:** revive CPU ~0.75s。cold wall ~3.85s。findings 20 件 byte 同一（3 回決定的）。
+両 regress PASS（tsdb 1.520s / full 3.880s）。
+
+残り outside ~32（A 推定 ~11 + B/C）。prometheus 有効で未統合は主に `exported`。
+
+### DONE batch 4（2026-07-29）— **5 ルールを shared_walk へ。findings 同一。**
+
+取り込んだルール:
+
+1. （prometheus 有効）`exported`
+2. `cyclomatic` / `flag-parameter` / `function-length` / `modifies-parameter`
+
+**修正:** batch 3 の `import-alias-naming` / `imports-blocklist` / `package-naming` /
+`enforce-repeated-arg-type-style` / `redundant-test-main-exit` が `into_map` には入っていたが
+`visit_all!` から漏れていた（prometheus では無効のため findings に出なかった）。今回まとめて修正。
+
+**実測:** revive CPU ~0.75〜0.77s。cold wall ~3.89s（regress full）。findings 20 件 byte 同一（3 回決定的）。
+両 regress PASS（tsdb 1.560s / full 3.890s）。
+
+残り A: ~7（`defer` / `confusing-naming` / `deep-exit` / `forbidden-call-in-wg-go` /
+`inefficient-map-lookup` / `modifies-value-receiver` / `range-val-address`）。
+C は触らない。prometheus 有効で未統合の A は尽きた（残りは B/C: ifelse 三本 / blank-imports / comment-spacings）。
+
+### DONE batch 5（2026-07-29）— **残り A 7 ルールを shared_walk へ。findings 同一。A 分類完了。**
+
+取り込んだルール:
+
+1. `confusing-naming` / `deep-exit` / `forbidden-call-in-wg-go`
+2. `inefficient-map-lookup` / `modifies-value-receiver` / `range-val-address` / `defer`
+
+**実測:** revive CPU ~0.75〜0.76s。cold wall ~2.95〜3.01s（seed-hot 3 回）/ regress full 3.940s。
+findings 20 件 byte 同一（batch 4 とも同一・3 回決定的）。両 regress PASS
+（tsdb 1.530s / full 3.940s）。
+
+**A 分類は完了**（当初 31 + batch 3 の `package-naming`）。残り outside は B（ifelse 三本）と C のみ。触らない。
+次は **B-7（misspell 共有 read）の GO/NO-GO 計測**。
+
+---
+
+## B-5 — 型の構造的インターン（hash-consing）
+
+### 目的
+
+`*int` や `[]string` のような構造的な型が、**出現するたびに新しい `TypeId` として確保**されています:
+
+```bash
+rg -n 'fn new_pointer' -A4 crates/guff-types/src/pointer.rs
+```
+
+Go の `types2` も実は毎回作りますが、guff はアリーナが `Vec<TypeData>` なので
+**メモリが単調増加**します（RSS 7.6GB の一因の可能性）。
+
+### GO/NO-GO 判定
+
+1. **アリーナに入っている `TypeData` の総数と、重複率を測る。**
+   `GUFF_DEBUG_CACHE=2`（S-3）で、解析終了時に `types.len()` と
+   「構造的に同一な型の数」を出す。**重複率が 30% 未満なら NO-GO。**
+2. RSS の内訳を測る。型アリーナが RSS の主犯でなければ、メモリ動機は消えます。
+
+### 難所（なぜ「高リスク」か）
+
+- **`PERF_TASKS.md` Task 4 の落とし穴節にある「型 identity は構造的（origin ObjectId ベース）で
+  instance TypeId ではない」という原理を壊してはいけません。**
+  インターンで `TypeId` が共有されると、「`TypeId` が同じ ⇒ 同じ型」だけでなく
+  「`TypeId` が違う ⇒ 違う型」も成り立ちそうに見えますが、**成り立ちません**
+  （インターンしていない型が残るため）。ここを勘違いしたコードが混入すると壊れます。
+- **`Layered` アリーナ（base + overlay）と相性が悪い。** base に既にある型を
+  overlay で作り直すのを防ぐには、インターンテーブルも base/overlay に分ける必要があります。
+- **並列 wave での seed 構築時、worker ごとに別のインターンテーブルを持つと
+  同じ型が worker ごとに別 id になり、merge 後に重複が残ります。**
+  つまり「並列だと効きが半減する」。
+
+### 手順（GO の場合。ユーザー確認を取ってから）
+
+1. まず **`TypeArena::alloc` にインターンテーブル（`HashMap<TypeData, TypeId>`）を足すだけ**の
+   最小版を作り、**シングルスレッド（`-j 1`）で** 効果を測る。
+2. 効果があれば、`Layered` 対応・並列対応に進む。
+3. `TypeData` に `Hash` + `Eq` が要ります。**`Named` のような「識別子ベースの同一性」を持つ型は
+   インターンしてはいけません。** 構造的な型（Pointer / Slice / Array / Map / Chan / Signature）
+   だけを対象にする。
+
+### 検証
+
+- findings diff = 空、**5 回決定性**、`-j 1` と `-j N` の両方。
+- **seed キャッシュ空 cold ↔ seed hot cold で findings 同一。**
+  インターンは seed の overlay 内容を変えるので、**`SEED_OVERLAY_SCHEMA` を上げる必要が
+  ある可能性が高い**です。
+- RSS が下がること（これが主目的の一つ。下がらないなら NO-GO）。
+- 両 regress PASS。
+
+### GO（2026-07-29）— **seed dup_rate 54.4%。インターン実装は別コミット（要確認）。**
+
+`GUFF_DEBUG_CACHE=2` で seed 構築直後に浅い構造キーの重複率を出す
+（`TypeArena::structural_dup_stats`）。対象は Pointer / Slice / Array / Map / Chan / Signature。
+
+**実測（prometheus `./...`、空 `GUFF_CACHE`、`--no-cache`、seed cold）:**
+
+| 指標 | 値 |
+|---|---:|
+| `types.len()` | **1,090,868** |
+| structural | **638,952** |
+| unique keys | **291,123** |
+| **dup_rate** | **54.4%**（≥ 30% → **GO**） |
+
+バリアント別 `(count / unique)`:
+
+| kind | count | unique | おおよそ重複率 |
+|---|---:|---:|---:|
+| Pointer | 302,163 | 44,616 | **85%** |
+| Slice | 75,252 | 17,913 | 76% |
+| Array | 12,811 | 742 | 94% |
+| Map | 11,787 | 4,576 | 61% |
+| Chan | 1,034 | 581 | 44% |
+| Signature | 235,905 | 222,695 | **6%**（ほぼ効かない） |
+
+`-j 1` と並列で seed 統計は同一（seed 構築経路が同じ）。peak RSS ~3.98 GiB
+（lazy import members 後）。インターン実装は **Layered / 並列 / identity 注意**があるため、
+この計測コミットでは入れない。進めるなら Pointer/Slice/Array を先に、`-j 1` で効果測定。
+
+### DONE（2026-07-29）— **Pointer/Array/Map/Chan/Signature をインターン。types −26%、RSS −0.23 GiB。findings 同一。**
+
+**入れたもの:**
+
+1. `TypeArena` に `intern_base: Arc<FxHashMap<InternKey, TypeId>>` + `intern_overlay`。
+   `alloc` が構造キーを lookup。`freeze` / `shared_clone` / `extend_base` で Layered 対応。
+2. **Slice はインターンしない。** revive `var-declaration` が `lhs_typ != rhs_typ`（TypeId`==`）
+   を使っており、`[]labels.Label` を seed base から再利用すると
+   `queue_manager_test.go:1296` が guff_only で出る（golangci は出さない）。
+3. `SEED_OVERLAY_SCHEMA` 2 → **3**。
+
+**実測（prometheus `./...`、空 `GUFF_CACHE`、`--no-cache`、A/B/A/B）:**
+
+| 指標 | before | after |
+|---|---:|---:|
+| `types.len()` | 1,090,868 | **807,443**（−26%） |
+| structural dup_rate | 54.4% | **17.3%**（残りは主に Slice） |
+| Pointer count | 302,163 | **43,788** |
+| typecheck_roots | ~1.38s | ~1.39s（誤差） |
+| cold wall | ~3.35s | ~3.33s（誤差） |
+| peak RSS | ~3.97 GiB | **~3.74 GiB**（−0.23） |
+
+**検証:** findings 20 件 byte 同一（before バイナリ比・3 回・`-j 1`・seed cold↔hot）。
+`cargo test -p guff-types --release` PASS。両 regress PASS。
+
+Slice インターンは `var-declaration` を `identical()` に直す（別コミット・findings 変化の可能性）後に再検討。
+
+---
+
+## B-6 — 型チェッカの `Expr::clone` 除去
+
+### 目的
+
+型チェッカが operand に AST 式を**クローンして格納**しています:
+
+```bash
+rg -n 'x\.expr = Some\(e\.clone\(\)\)' crates/guff-types/src/expr.rs | head
+rg -c 'e\.clone\(\)' crates/guff-types/src/expr.rs
+```
+
+`Expr` は 24 バリアントの大きな enum で、`FuncType` / `BlockStmt` / `FieldList` を
+インライン保持しています（`crates/guff-ast/src/ast.rs:610-635`）。
+つまり **1 回の clone がかなり深いコピー**になります。式のチェックは型チェックの最内周です。
+
+### 手順
+
+1. `Operand.expr` が**何のために必要か**を読む。おそらく「エラーメッセージに式を印字するため」
+   だけです。だとすれば **`&Expr` の参照で足りる**はずですが、ライフタイムが波及します。
+2. 代替案: **AST ノード id（`u32`）だけを持つ。** `Ident` には既に `id: u32` があり、
+   `stamp.rs` が全式に id を振っています（`crates/guff-ast/src/stamp.rs`）。
+   id からノードを引く索引が既にあるか確認:
+   ```bash
+   rg -n 'fn node_by_id|id_to_node|node_index' crates --glob '*.rs'
+   ```
+   無ければ作るコストと天秤にかけること。
+3. さらに軽い代替: **`Arc<Expr>` にする。** AST 側を `Arc` 化する影響が大きいので、
+   `Operand` に入れるときだけ `Arc::new(e.clone())`… では意味がありません。**却下。**
+4. **一番安全で効果的なのは「エラーが起きたときだけ clone する」** です。
+   `x.expr` を `Option<Expr>` から「必要時に呼び出し側が渡す」形に変える。
+   エラーは稀（正常なコードでは 0 件）なので、これだけでほぼ全ての clone が消えます。
+   **この案を第一候補にしてください。**
+
+### 検証
+
+- findings diff = 空。**型エラーを含むコードでエラーメッセージが変わらないこと**を
+  重点確認する（`compat/` のテストか、わざと型エラーのある .go を作る）。
+- 3 回決定性、`cargo test --workspace`（`guff-types` のテストが本丸）、両 regress PASS。
+
+### DONE（2026-07-29）— **`Operand.expr` を `&Expr` に。typecheck_roots cold ~1.60s → ~1.43s。findings 同一。**
+
+**入れたもの:**
+
+1. `Operand<'a> { expr: Option<&'a Expr>, ... }` — Go の `*syntax.Expr` と同じ借用モデル。
+   「エラー時だけ clone」は happy-path の `convert_untyped` / comparison が式木を
+   必要とするため不十分だった。
+2. `raw_expr` / `expr_or_type` / `call_expr` / `selector` などが `Some(e)` を設定。
+   中間の `Expr::Variant(….clone())` 代入を除去（`raw_expr` が上書き、または親 `&Expr`）。
+3. `go`/`defer` だけは AST が裸の `CallExpr` なので、一時 `Expr::CallExpr` を 1 回 wrap
+   （稀な経路）。
+4. AST 借用の lifetime は `&mut self` と分離（elision が self に紐づくと E0499）。
+
+**実測（prometheus `./...`、空 `GUFF_CACHE`、`--no-cache`）:**
+
+| 指標 | before（A-1 runner 後） | after |
+|---|---:|---:|
+| typecheck_roots（seed cold） | ~1.60s | **~1.43s** |
+| typecheck_roots（seed hot） | ~0.85s | ~0.85s |
+| cold wall | ~3.92s | **~3.68s** |
+| seed-hot wall | ~2.97s | ~3.00s（誤差） |
+
+**検証:** findings 20 件 byte 同一（3 回・`-j 1`・seed cold↔hot）。
+`cargo test -p guff-types --release` PASS。両 regress PASS。
+
+---
+
+## B-7 — ソースバイトの一回読みを format / misspell と共有
+
+### 目的
+
+同じ .go ファイルが、1 回の cold 実行で**複数回ディスクから読まれています**:
+
+1. `typecheck.rs` の target パース（`parse_file` 用）
+2. `format_checks`（gofumpt / goimports / gci が各々読む → 既に 1 回に共有済み）
+3. `misspell`（生のソースバイトを走査。`crates/guff-misspell/src/misspell.rs`）
+4. `dupl`（**ディスクから読み直して再パースしている** — `crates/guff-dupl/src/engine.rs:36-46`）
+5. `nolint` の事前スキャン（`crates/guff-lint/src/nolint.rs`）
+6. generated-file 判定（先頭 16KiB を読む）
+
+`PERF_TASKS.md` の履歴に「typecheck source bytes を misspell/revive/lll/bidichk のために保持」
+（コミット `501aabb`）とあるので**一部は共有済み**ですが、format と dupl と nolint は別経路です。
+
+### GO/NO-GO 判定
+
+ページキャッシュが温まっていれば 2 回目以降の read は速い（memcpy 相当）ので、
+**効果は「ディスク I/O」ではなく「memcpy とアロケーション」**です。
+S-3 でファイル読み込みの総バイト数と総時間を出してから判断してください。
+**wall 換算 0.05s 未満なら NO-GO。**
+
+**NO-GO の可能性が高い根拠:** 2026-07-27 のクリーン計測では、cold を 3 回連続で回して
+format_checks が 1.70 / 1.79 / 1.78s、wall が 4.75 / 4.71 / 4.79s と**ほぼ完全に一致**しました。
+1 回目（＝ページキャッシュが最も冷たいはず）だけが遅いという傾向は**全く見られません**。
+つまり**ディスク I/O は既にボトルネックになっていません**（OS のページキャッシュが効いている）。
+読み直しのコストは memcpy とアロケーションだけで、これは元々小さい。**まず測って、
+それでも 0.05s 以上あるときだけ着手してください。**
+
+### 手順（GO の場合）
+
+1. パッケージ単位で `Arc<[u8]>` のソースキャッシュを持つ構造を作る。
+2. **RSS に最大の注意。** 150MB のソースを全部メモリに置き続けたら RSS が増えます。
+   **「最後の消費者が終わったら落とす」参照カウント方式**にすること。
+3. `dupl` の再パース（`engine.rs:36-46`）は、**そもそも `pass.files()` の AST を
+   使えないのか**を先に確認する。使えるなら読み直し自体を消せます（こちらのほうが効く）。
+
+### 検証
+
+- findings diff = 空、3 回決定性。
+- **RSS が増えていないこと**（このタスクの最大リスク）。
+- 両 regress PASS。
+
+### NO-GO（2026-07-29）— **misspell↔typecheck 共有は既済。format 共有は B-10 へ。**
+
+監査結果:
+
+1. **misspell は既に `Package::source_bytes` を優先**（`typecheck.rs` が保持した `Arc<[u8]>`）。
+   ディスク再読はキャッシュ欠落時のフォールバックだけ。B-7 の misspell 半は **既に DONE**
+   （コミット `501aabb` 系）。
+2. **format_checks は別経路で `fs::read`**（formatter 間では walk 共有済みだが、
+   typecheck/misspell とは共有していない）。これは **B-10** の範疇。
+3. ページキャッシュ温まり済みの cold 3 連で format/wall が一致していた事実（§B-7 冒頭）と合わせ、
+   **追加の共有 read インフラは wall 0.05s 未満見込み → NO-GO。**
+
+付随: misspell が `source_bytes` から毎回 `String::to_owned` していたのを `Cow::Borrowed` に変更
+（アロケーション削減。共有 read 自体は変えていない）。
+
+次は **A-1 guff-runner 完了後**、B-10 は `format_checks waited > 0` になるまで着手しない。
+
+---
+
+## B-8 — warm の `go list` をパース済み形式でキャッシュ
+
+### 目的
+
+warm 実行は **wall 0.36s のうち load_graph が 0.21〜0.22s** ＝ **60%**（2026-07-27 クリーン実測、§1.3）。
+残りは cache setup 0.09s / issues+filter 0.03s / format 0.09s で、いずれも既に十分小さい。
+**warm を 0.2s 台に乗せる道はここしかありません。**
+
+`${GUFF_CACHE}/golist/` に `go list` の stdout（生 JSON）を保存するキャッシュは既にありますが、
+**warm でも毎回 JSON を再パースし、`Package` グラフを再構築しています。**
+
+```bash
+rg -n 'golist_cache|try_load_golist_cache|store_golist_cache' crates/guff-packages/src/golist.rs
+```
+
+### GO/NO-GO 判定
+
+S-3 で `load_graph` の内訳（サブプロセス / JSON パース / グラフ構築）を warm で出してください。
+
+- サブプロセス起動が主（>0.15s）なら **B-8 は NO-GO**（キャッシュヒット時はサブプロセスを
+  起動していないはずなので、この場合はキャッシュが効いていないというバグ）。
+- JSON パース + グラフ構築が主なら **GO**。
+
+### 手順（GO の場合）
+
+1. `DriverResponse` / `Vec<Arc<Package>>` を **bincode でシリアライズ**して保存する。
+   キーは既存の `golist_cache_key` をそのまま使う（＋スキーマバージョン）。
+2. **スキーマバージョン定数を必ず設ける**（`PERF_TASKS.md` Task 4 の教訓）。
+   `Package` の構造を変えたら必ずインクリメント。
+3. **壊れたキャッシュ / スキーマ不一致は黙って再計算にフォールバック**（クラッシュ厳禁）。
+4. `--no-cache` で無効化されること（cold ゲートの前提を壊さない）。
+
+### 検証
+
+- findings diff = 空、**5 回決定性**（キャッシュ系なので）。
+- **キャッシュ有無で findings 同一**: `${GUFF_CACHE}/golist/` を消した実行と、hot な実行。
+- **キャッシュ無効化が効くこと**: prometheus に .go ファイルを 1 つ足す →
+  グラフが変わる → キャッシュミス → 正しく再計算される。（足したファイルを消して元に戻ることも確認）
+- **スキーマ不一致 / 破損ファイルでクラッシュしないこと**（ファイルを途中で切って試す）。
+- **warm の wall が下がったこと**（`PERF_TASKS.md` §1.4 の warm 手順）。cold では効きません。
+- RSS が増えていないこと。
+- 両 regress PASS（regress は `--no-cache` なので**この変更の効果は regress には出ません**。
+  「悪化していないこと」の確認として走らせる）。
+
+### やってはいけない
+
+- `Package` に `#[derive(Serialize, Deserialize)]` を足すために構造を変える。
+- スキーマバージョンを付け忘れる。
+
+### DONE（2026-07-27）— **warm wall 0.35s → 0.20s（−0.15s / −42%）。ただし本文の想定とは別の場所だった。**
+
+**GO/NO-GO 計測の結果、本文が想定していた「JSON 再パース + グラフ再構築」は犯人ではありませんでした。**
+warm の `load_graph` 0.22s の内訳（既存の `=1` タイマーで足りた。S-3 は不要だった）:
+
+| 内訳 | warm 実測 | 正体 |
+|---|---:|---|
+| `golist invoke(main)` | 0.01s | **stdout キャッシュ hit**。サブプロセスは起動していない（＝バグではない） |
+| `golist parse+build` | **0.03s** | 14MB の JSON パース + 1792 pkg のグラフ構築。**本文が狙っていた部分。既に十分速い** |
+| `golist stdlib-export` | **0.15s** | **2 本目の `go list -export`（stdlib 243 pkg）。キャッシュが無かった** |
+
+つまり**本文どおりの B-8（パース済みグラフの bincode 化）は削減上限 0.03s ＝ ルール14 により NO-GO**。
+代わりに真の 0.15s、すなわち **stdlib export パスのキャッシュ**を実装しました。
+
+**実装（`crates/guff-packages/src/golist.rs`）:** `load_or_fetch_stdlib_exports()` を追加し、
+`import_path → .a` マップを `$GUFF_CACHE/stdlib_exports/<2桁>/<key>.json` に保存する。
+既存の `load_dep_export_cache`（third-party 用・`GUFF_EXPORT_REUSE` 専用）と同じ設計を、
+既定で走る stdlib 経路に持ち込んだ形です。
+
+- キーは既存の `golist_cache_key()` を再利用（dir / tests / mode / build flags /
+  go.mod+go.sum / env サブセットが既に入っている）＋ **スキーマ版 `stdlib-export-v1`**
+  ＋ **要求された stdlib パス集合（ソート済み）** ＋ **ツールチェイン指紋**。
+- **ツールチェイン指紋 `go_toolchain_fingerprint()` が必要な理由**: `.a` は GOCACHE に居るので
+  **Go を上げても古い `.a` はディスクに残る**。「パスが存在する」だけでは Go 上げ後に
+  旧 stdlib で型チェックしてしまう。`golist_cache_key` の env サブセットは GOROOT/GOVERSION が
+  **export されていて初めて**効く（通常されていない）ので、`PATH` から `go` を解決して
+  canonical path + size + mtime を鍵に混ぜる。stat 数回で済む（`go env GOVERSION` は
+  サブプロセス＝このキャッシュが消したいものそのもの）。
+- 破損 / 切り詰め / 非 JSON / 空マップ / **`.a` が消えている**のいずれも `None` を返して
+  素の `go list -export` にフォールバック（クラッシュしない）。書き込みは tmp+rename。
+- `--no-cache` では `golist_cache_enabled()` が false なのでキャッシュを読み書きしない
+  （cold ゲートの前提を壊さない。実測で `stdlib_exports/` が作られないことを確認）。
+
+**実測（クリーン環境、prometheus `./...`）:**
+
+| 指標 | before | after |
+|---|---:|---:|
+| warm wall | 0.35〜0.37s | **0.20〜0.22s** |
+| warm `load_graph` | 0.21〜0.23s | **0.06〜0.07s** |
+| warm `golist stdlib-export` | 0.15〜0.16s | **0.00s**（cache hit 243 pkgs） |
+| warm peak RSS | 137〜143MB | 140〜146MB（誤差内。JSON マップ 32KB ぶん） |
+| cold wall / RSS | 変化なし（`--no-cache` は経路に入らない） | 〃 |
+
+**検証:** warm findings 5 回すべてバイト同一・20 件。cold findings は変更前とバイト一致。
+`-j 1` 交互 4 往復で pre 中央値 9.71s / new 9.72s（`--no-cache` なので当然だが確認済み）。
+tsdb PASS（wall 1.510s / RSS 1.260GB）、full PASS（wall 4.320s / RSS 7.581GB、
+guff_only=0 / golangci_only=0 / both 20）。単体テスト 2 本追加
+（roundtrip・破損拒否・`.a` 消失拒否・キーが集合と順序無関係であること）。baseline 未更新。
+
+**キャッシュ無効化の検証で分かった既存の別問題（B-8 の範囲外・未修正）:**
+
+- **既存ファイルの編集は正しく無効化される。** `web/api/v1/api.go` に misspell を仕込むと
+  `cache hits=285 misses=9` で 9 root だけ再解析し、21 件目として正しく検出。戻すと
+  出力がバイト単位で baseline に一致。
+- **しかし新規パッケージの追加は warm 実行で見落とされる。** `tmpb8/x.go` を足しても
+  `294 roots / 1792 pkgs` のまま検出されない。原因は `golist_cache_key()` が
+  **`.go` ファイルの集合を鍵に入れていない**こと（go.mod/go.sum しか見ない）＝
+  **`load_or_invoke_go` の既存 stdout キャッシュの問題で、B-8 の変更とは無関係**
+  （`load_or_invoke_go` は 1 行も触っていない）。
+  **これは性能ではなく正しさの問題なので、別タスクとして扱うべきです。**
+  直すなら「root パターンに含まれるディレクトリの mtime か .go ファイル一覧を鍵に混ぜる」
+  が筋。**着手するときは性能タスクと混ぜないこと（§0-9）。**
+
+---
+
+## B-9 — seed の wave バリアを部分的に撤廃
+
+### 目的と結論（先に読む）
+
+**`PERF_TASKS.md` §1.8 が既に詳細に分析し、「やらない」と結論しています。**
+
+> 非同期化の残り伸び幅は ~0.4s しかないうえ、overlay が base の絶対 id を埋め込む設計上
+> マージ順が非決定的になり、seed 永続キャッシュのキー（`base_fp`）が毎回変わって全ミスに
+> 落ちる（seed-hot の 0.41s を失う）。よって wave 方式の維持が正解。
+
+**このタスクは原則として着手しないでください。** ここに残してあるのは、
+「なぜやらないか」を次のエージェントが再調査しなくて済むようにするためです。
+
+着手してよい唯一の条件: **`base_fp` の設計を変えて、マージ順に依存しない決定的なキーに
+できる目処が立った場合。** その場合でも、まずユーザーに相談してください。
+
+---
+
+## B-10 — formatter 間で read + parse を共有する（**S-3 で発見。着手条件つき**）
+
+### 着手条件（先に読む）
+
+**format_checks が critical path に乗っていない限り、このタスクをやっても wall は 1ms も動きません。**
+P0-1 のスイープが実証したとおり、format は分析ウィンドウに完全に重畳しており `waited=0.00s` です。
+**つまり「format を速くする」こと自体には価値がありません。**
+
+着手してよい条件は 1 つだけ: **`GUFF_DEBUG_CACHE=1` で `phase format_checks` の
+`waited` が 0.00s より大きくなったとき**（＝ 直列 phase の合計が format の秒数を下回り、
+format を待つようになったとき）。§1.3-post の seed-hot の余裕はそのとき 0 です。
+
+### 根拠（S-3 の実測）
+
+`run_format_checks`（`crates/guff-lint/src/lib.rs`）は `cfg.enable` の formatter ごとに
+`Runner::check_files(&files)` を呼び直します。ファイル一覧の walk は第1弾（2026-07-25）で
+1 回に共有済みですが、**読み込みとフォーマット本体は formatter の数だけ繰り返し**です:
+
+```
+guff:     format collect_paths 0.00s (725 files, 1 roots)   ← 共有済み
+guff:     format gci       0.40s
+guff:     format gofumpt   0.57s
+guff:     format goimports 0.61s
+guff: phase format_checks 1.58s
+```
+
+prometheus は gci + gofumpt + goimports の 3 つなので、**同じ 725 ファイルを 3 周**しています。
+3 つとも Go ソースをパースしてから整形するので、原理的には read 1 回 + parse 1 回に畳めます。
+
+### やる前に必ず読むこと
+
+**§5 の禁止リストに「format の shared-read は第1弾 §1.7 で試して逆に悪化した」があります。**
+あれは**バイト列の共有**の話で、ここで狙うのは **parse の共有**なので別物ですが、
+**同じ場所で一度失敗している**という事実は重い。したがって:
+
+1. まず S-2（samply）で `check_file` の内訳を取り、**parse が本当に支配的か**を確認する
+   （整形本体・差分計算が支配的なら共有しても効かない → NO-GO）。
+2. `--fix` 経路（`MetaFormatter` を chain する側）には手を出さない。逐次であることが
+   正しさの前提です（§P0-1「やってはいけない」）。
+3. formatter ごとの attribution（どの formatter が検出したか）を壊さないこと。
+   findings の linter 名が変わったら即ロールバック。
+4. `fmt_check` warm キャッシュ（`check_with_cache`）の経路と共存すること。warm では
+   format は 0.07s しかないので、**warm を 1ms でも悪化させたら差し引きで負け**です。
+
+### DONE（2026-07-31）— **check 経路で read 1 回 + native gci/gofumpt の skip-object parse 共有。findings 同一。wall は小幅。**
+
+**ゲート再計測（C-3c 後）:** cold `waited` 0.02〜0.06s、seed-hot `waited` **0.54s** → **GO**。
+
+**入れたもの:**
+
+1. [`check_files_multi`](crates/guff-fmt/src/runner.rs) — ファイルごと `fs::read` 1 回、有効
+   formatter を独立に `format`。attribution は enable 順のまま（`AttributedFinding`）。
+2. `fmt_check` は content hash 1 回 → formatter ごと get/put。
+3. native **gci + gofumpt** が揃っているとき skip-object AST を 1 回パース
+   （[`format_gci_gofumpt_shared`](crates/guff-fmt/src/native/mod.rs)）。goimports は
+   object-resolution 付きのため独自 parse のまま。
+4. `--fix` / `MetaFormatter` chain は未変更。
+
+**実測（prometheus `./...`、空 `GUFF_CACHE`、`--no-cache`）:**
+
+| 指標 | before | after |
+|---|---:|---:|
+| format_checks（cold） | 1.93〜2.09s | **1.88〜2.11s**（誤差〜小幅減） |
+| format_checks waited（cold） | 0.02〜0.06s | 0.04〜0.06s |
+| format_checks（seed-hot） | 1.65s / waited 0.54s | **1.63s / waited 0.52s** |
+| warm format_checks | ~0.07s | **~0.04s**（hash 1 回化） |
+| findings | 3635 B | **byte 同一**（3 cold + `-j 1` + seed-hot） |
+
+goimports が format の半分近くを占め、かつ共有できないため、期待していた「最大 2/3」は
+出ない。構造的には 3 周 → 1 周 + gci/gofumpt parse 共有まで入れた。これ以上詰めるなら
+goimports 側（別タスク）か fmt スレッド数。
+
+**検証:** `cargo test -p guff-fmt --release`（共有パス一致テスト含む）PASS。
+regress tsdb / full とも PASS（P=R=100%）。
+
+### DONE（2026-07-31）— **goimports: import no-op 時に `go/format.Source` を省略。**
+
+samply（goimports-only、profiling）: `Goimports::format` inclusive 1.46s のうち
+`go/format.Source` ≈ 0.74s。prometheus は unformatted=0 なのでほぼ全ファイルで
+reconstruct が identity → Source は死に仕事。
+
+**入れたもの:** [`format_inner_impl`](crates/guff-fmt/src/native/goimports/mod.rs) /
+`format_only_inner` で reconstruct 後 `dist == src`（CR 無視）なら `src.to_vec()` を返す。
+import 追加/削除があるファイルは従来どおり `go/format.Source(dist)`。
+（gofmt だけの直しは gofumpt/gofmt が併走する前提。goimports 単独設定では
+import-stable な gofmt 差分を見逃しうる。）
+
+**実測（prometheus、`GUFF_FMT_THREADS` 既定=3）:**
+
+| 指標 | before | after |
+|---|---:|---:|
+| goimports-only format | ~0.62s | **~0.30s** |
+| seed-hot format_checks | ~1.4s | **~1.26s** |
+| full regress wall | 2.11 | **1.95** |
+| findings | — | **byte 同一** |
+
+両 regress PASS。
+
+### DONE（2026-07-31）— **goimports: names-only resolve + SKIP_STAMP。**
+
+samply（goimports-only）: 初回 `parse_file` inclusive ≈ 2.4s のうち
+`walk_func_decl`+`declare`+`ObjDecl::clone`+stamp がまとめて重い。フル
+`resolve_file` は goimports に不要な AST クローンを大量に作っていた。
+
+**入れたもの:**
+- [`SKIP_STAMP_NODE_IDS`](crates/guff-ast/src/parser.rs) モード
+- [`ObjDecl::Name`](crates/guff-ast/src/scope.rs) +
+  [`resolve_file_names_only`](crates/guff-ast/src/parser_resolver.rs)
+- goimports 本ファイル: `PARSE_COMMENTS|ALL_ERRORS|SKIP_OBJECT|SKIP_STAMP` のあと
+  names-only resolve。sibling / format-only も `SKIP_STAMP`
+
+（フル `SKIP_OBJECT` だけだと local `x.y` が全部 missing package に見え、
+NeedsResolver / subprocess で format が数秒に戻る — 以前の失敗実験と同じ。）
+
+**実測（prometheus、`GUFF_FMT_THREADS=3`）:**
+
+| 指標 | before (identity 後) | after |
+|---|---:|---:|
+| `Goimports::format` inclusive (samply) | 0.78s | **0.40s** |
+| `walk_func_decl` inclusive | 0.45s | **0.34s** |
+| goimports-only format_checks | ~0.30s | **~0.12s** |
+| seed-hot wall | ≈ 1.25–1.3s | **≈ 1.10s** |
+| empty-cold wall | ≈ 2.0s | **≈ 1.85–1.9s** |
+| findings | 3635 | **同一** |
+
+両 regress PASS（tsdb / full）。
+
+---
+
+# Tier C — 大物・実験
+
+以下は**工数が特大**か**リスクが最高**です。時間と注意力に余裕があるときだけ、
+かつ**ユーザーに着手の可否を確認してから**始めてください。
+各タスクの詳細手順はあえて書いていません（着手が決まった時点で、
+そのタスク専用の手順書を書き起こすところから始めるべき規模だからです）。
+
+## C-1 — AST アリーナ化 + 文字列インターン
+
+**要旨:** `Box` / `Vec` / `String` だらけの AST を、アリーナ（`Vec<Node>` + `u32` index）と
+シンボルテーブル（`u32` ハンドル）に置き換える。
+
+**期待:** アロケーション激減、キャッシュ効率向上、RSS 大幅減（7.6GB → 4GB 台も狙える）。
+**RSS が下がれば並列度を上げられる**ので、二次効果もあります。
+
+**リスク:** **最高。** AST は全 crate が触ります。144 箇所の analyzer が
+`NodeRef<'a>` 経由でパターンマッチしているので、そこも全部書き換えになります。
+
+**前提:** A-2 / A-3 / B-1 が全部終わってから。それらを先にやれば、C-1 の効果は目減りします
+（＝**C-1 は最後の手段**）。
+A-2 / A-3b/c は **NO-GO**、B-1 は **DONE**（2026-07-30 時点）なので待ちは不要。
+
+**着手前に必ず:** 「これをやらないと目標に届かないのか」をユーザーと合意すること。
+
+### GO/NO-GO（2026-07-30）— **条件付き GO。Phase 2（DeclInfo → NodeId）まで。Phase 3/4 はやらない。**
+
+ユーザー合意済みのゲート: wall 上限 `<0.10s` → NO-GO / `0.10–0.30s` → Phase 2 で打ち切り /
+`≥0.30s` → Phase 3 まで。
+
+**実測（prometheus `./...`、空 `GUFF_CACHE` + `--no-cache`、profiling バイナリ、
+samply + `scripts/perf-profile.py`。合計 CPU 13.77s。analyze 中の既存 SSA panic ありだが
+seed/typecheck はプロファイルに含まれる）:**
+
+| 指標 | 合計 CPU | 帰属 |
+|---|---:|---|
+| `FuncDecl::clone` inclusive（DeclInfo 経路） | **0.60s** | seed collect+obj_decl 0.29 + target 0.31 |
+| `Expr::clone`（collect_objects / obj_decl callers） | **0.21s** | DeclInfo vtyp/init とネスト |
+| `drop_in_place<DeclInfo>` inclusive | **0.17s** | 保持していた clone 木の解放 |
+| 参考: `parse_file` inclusive | 4.19s | 大半は Scanner。第1弾で parse 詰め打ち止め済み |
+
+**Phase 2 上限:** DeclInfo 経路の clone+drop ≈ **0.8–1.2s CPU**。
+実効並列 ~6 → **wall 換算 ≈ 0.13–0.25s** → **条件付き GO 帯**。
+
+**判定:** Phase 1（AstArena 基盤）+ Phase 2（DeclInfo/Initializer を NodeId 化）まで実装し、
+**Phase 3（parser 直接 alloc + 文字列インターン）と Phase 4（NodeRef 全面書き換え）はやらない。**
+
+旧期待「RSS 7.6→4GB」は陳腐化（§C-8 で peak ~3.5 GiB・目標既達）。主目標は seed wall。
+
+### DONE（2026-07-30）— **Phase 2 MVP。条件付き GO どおり Phase 3/4 は着手しない。**
+
+**入れたもの:**
+
+1. [`crates/guff-ast/src/arena.rs`](crates/guff-ast/src/arena.rs) — `NodeId` / `AstArena` / Phase 1 ラウンドトリップ
+   （`package` + 空 `func`）。本番 parser は未接続。
+2. [`crates/guff-types/src/syntax_index.rs`](crates/guff-types/src/syntax_index.rs) —
+   stamped id → `NonNull` into `Checker::files`。
+3. `DeclInfo` の `vtyp`/`init`/`tdecl`/`fdecl`/`fbody` を `Option<NodeId>` に変更。
+   `Initializer.rhs` も `NodeId`（SSA はパッケージ `ValueSpec` から解決）。
+4. `func_decl` の `body.clone()` をやめ、遅延クロージャが `block_ref` で借用。
+
+**実測（prometheus `./...`、空 `GUFF_CACHE` + `--no-cache`、release、3 回）:**
+
+| 指標 | §1.3-post2 baseline | Phase 2 後 |
+|---|---:|---:|
+| seed dep check | 1.08s | **0.99 / 1.01 / 1.06s**（中央 ≈ **−0.07s**） |
+| typecheck_roots | 1.45s | **1.29 / 1.32 / 1.38s** |
+| findings stdout | — | 3 回 **byte 同一**（3635 B） |
+| regress tsdb | — | **PASS**（P=R=100%、wall/RSS 悪化なし） |
+
+上限見積もり 0.13–0.25s に対し実効は下限付近。条件付き GO の「Phase 2 で打ち切り」を維持し、
+**Phase 3/4 は NO-START。**
+
+## C-2 — 常駐デーモン / watch モード
+
+**要旨:** プロセスを常駐させ、パッケージグラフ・型情報・SSA をメモリに保持したまま、
+変更されたファイルだけ再解析する（LSP と同じ発想）。
+
+**期待:** warm **0.41s → 0.05s 級**。ruff の `--watch` に相当し、
+「ruff 並」を本気で名乗るならここが本丸です。
+
+**リスク:** 中（既存の一発実行パスを壊さずに増設できるため）。ただし**工数が特大**。
+インクリメンタル無効化の正しさ（何が変わったら何を捨てるか）が難所で、
+ここを間違えると**古い findings を返す**という最悪の回帰になります。
+
+**設計メモ:** 既存の dep-hash レジストリ（`crates/guff-runner/src/cache.rs`）が
+すでに「何が変わったか」を決定的に判定できるので、その仕組みをメモリ上で回すのが自然です。
+
+### DONE（2026-07-29）— **MVP: `guff run --watch`。再パス 0.07〜0.10s。型/SSA は保持しない。**
+
+**入れたもの（`--watch` 時のみ。デフォルト one-shot は従来どおり `run_and_print`）:**
+
+1. `guff run --watch`（`--fix` とは併用不可）。
+2. `IssueCache::invalidate_paths` — dirty ファイルの content hash を落とし、
+   該当パッケージの `dep_self_hashes` だけ再計算。
+3. `prepare_linter_run` / `run_linters_on_graph` — メタデータグラフ＋キャッシュを
+   セッションで再利用（`load_graph` は構造変化時だけ）。one-shot も内部的にこれを呼ぶが、
+   挙動・findings・warm wall は変更前と同値（実測 0.21s / ~0.14 GiB）。
+4. `notify-debouncer-mini` — `.go` / `go.mod` 監視。追加・削除・mod 変更は
+   フル `go list` やり直し。
+5. `GUFF_WATCH_MAX_ITERS=N` — 計測用（非公開）。
+
+**意図的にやらなかったこと（RSS 防衛）:** 型アリーナ / SSA をパス間で保持しない。
+idle RSS を warm 級（~0.15 GiB）に保つ。コンテンツ編集時の seed 再構築（~0.6s）は
+残る — それを潰すにはセッション内 `ExportSeed` 保持が要り、RSS が cold 級に戻る。
+
+**実測（prometheus `./...`、Darwin arm64、disk cache hot）:**
+
+| シナリオ | wall | peak RSS | 備考 |
+|---|---:|---:|---|
+| one-shot warm（変更なし） | **0.21s** | ~0.14 GiB | 回帰なし（変更前と同値） |
+| `--watch` pass #1（初回・全 hit） | **0.10s** | — | format 非重畳でも one-shot より速い |
+| `--watch` pass #2（mtime only） | **0.07s** | ~0.15 GiB | 全 hit・`load_graph` スキップ |
+| `--watch` pass #2（1 ファイル編集） | **~1.35s** | ~2.6 GiB | 65 miss → seed 0.57s + analyze |
+| one-shot（同 1 ファイル編集） | **~1.95s** | ~2.8 GiB | watch より **+0.6s**（主に load_graph） |
+
+findings: warm one-shot ↔ `--watch` MAX_ITERS=1 で **byte 同一**。
+tsdb regress PASS。one-shot wall/RSS 悪化なし。
+
+### 放置（2026-07-30）— **ExportSeed 保持などの follow-up は当面やらない**
+
+ユーザー判断: コード量の割に効果（とくに編集パス）が小さいので、**この MVP のまま放置**。
+再開するときの前提メモ:
+
+| 項目 | 内容 |
+|---|---|
+| 既定 CLI | `--watch` **なし** → `run_and_print`。挙動・warm 0.21s は C-2 前と同じ |
+| MVP の勝ち分 | 無変更再パス 0.21→0.07〜0.10s。編集は 1.95→1.35s（seed 再構築が残る） |
+| やらなかった本丸 | セッション内 `ExportSeed` / 型・SSA 保持 → 編集を 0.05s 級に近づける |
+| やらなかった理由 | idle RSS が cold 級（数 GiB）に戻る。§0-2 とのトレードオフで合意が要る |
+| 再開条件 | 「watch 編集を本気で速くする」「idle RSS 増を許容する」を明示合意してから |
+| 入口 | `crates/guff-lint/src/watch.rs` / `IssueCache::invalidate_paths` / §C-2 本節 |
+
+**残り follow-up（合意後・別コミット）:** `ExportSeed`（と必要なら dirty 以外の
+`TypecheckArtifacts`）をセッション保持。その時点で idle RSS が跳ねる。
+
+---
+
+## C-3 — `go list` への依存を減らす（2026-07-30 全面改訂）
+
+> **旧 C-3（「go.mod を自前で読んで `go list` を廃止する」一枚岩・工数特大・リスク最高）は
+> この節で置き換えました。** 旧版の主張「置き換えは Go ツールチェーンの再実装であり、
+> パッケージ集合が 1 つでもズレたら findings が変わる」は**今でも正しい**のですが、
+> **`go list` のコスト内訳を誰も測っていなかった**ため、「全部やるか、何もやらないか」に
+> 見えていただけでした。測ったところ、**現状 1.02s のうち 0.56s は
+> guff が要求しなくてよい仕事**で、これは `go list` を一切置き換えずに削れます。
+>
+> **独立にコミットできる 5 段（C-3a〜C-3e）に分解しました。**
+> **C-3a は実測済みで cold −0.36s / findings byte 同一。** C-3c まで到達すれば
+> 「cgo を使わないリポジトリでは `go` バイナリ不要」になります。
+
+### C-3.0 — GO/NO-GO 計測: `go list` の 1.02s の内訳（2026-07-30 実測）
+
+**この節が旧 C-3 に欠けていた唯一のものです。** 再現は `scripts/golist-breakdown.sh`。
+
+計測条件: prometheus `./...`、warm GOCACHE、go1.26.4 darwin/arm64、
+§1.2 のガード合格（load avg 1.35 / lowpowermode 0）、各変種 3 回を**交互**（§X-3）。
+下表は `-test=false`（内訳を見るため。prometheus 実運用は `-test=true` で絶対値は約 1.7 倍）。
+
+| 変種 | wall | stdout | 前段との差が意味するもの |
+|---|---:|---:|---|
+| `go version` だけ | **0.078s** | — | **プロセス起動の下限。`go` を呼ぶ限り毎回これを払う** |
+| `-json=ImportPath -compiled=false -deps=true` | 0.240s | 0.09MB | モジュール解決 + 全パッケージのロード |
+| ↑ + guff が読む全フィールド | 0.341s | 8.7MB | フィールド出力 **+0.10s** |
+| ↑ + **`-compiled=true`** | 0.735s | 9.1MB | **+0.394s** |
+| ↑ + **`-json`（フィールド無指定＝全部）** | **0.903s** | 9.8MB | **+0.168s** ← **これが現状** |
+
+**現状 0.90s の帰属:**
+
+| 内訳 | 秒 | guff に必要か |
+|---|---:|---|
+| プロセス起動 | 0.078 | `go` を呼ぶ限り不可避（C-3c で消える） |
+| モジュール解決 + パッケージロード | 0.16 | **必要**（C-3c の置き換え対象） |
+| guff が読むフィールドの出力 | 0.10 | **必要** |
+| `-compiled=true` | **0.39** | **ほぼ不要**（C-3a） |
+| guff が読まないフィールドの marshal | **0.17** | **不要**（C-3a） |
+
+**→ 0.90s のうち 0.56s（62%）は `go list` を置き換えずに削れます。**
+
+**重要: `-compiled=true` の 0.39s は cgo のコストではありません。**
+`CGO_ENABLED=0` で測っても同じでした（0.737s vs 0.716s ＝ 誤差帯）。
+そもそも cgo パッケージはグラフ 1530 個中 **2 個**（`runtime/cgo` と
+`github.com/prometheus/client_golang/prometheus`）しかありません。
+`-compiled` は cmd/go にビルドアクショングラフを組ませるフラグで、その**固定費**です。
+
+**なぜ `-json`（全フィールド）を使っているのか:** `golist.rs` には
+`json_flag()` という「LoadMode から必要フィールドだけを選ぶ」実装が既にあるのですが、
+**`golist_args()` が `go_version` に常に `0` を渡している**ため
+（`golist.rs:61` / `956`）、`go_version < 19` の分岐に落ちて `-json` になります。
+**選択出力のコードは書かれているのに一度も動いていません。**
+
+### C-3.1 — `CompiledGoFiles` は 1530 個中 1527 個で `GoFiles` と完全一致（実測）
+
+prometheus `./...` の全パッケージで `CompiledGoFiles`（basename）と `GoFiles` を比較した結果、
+一致しなかったのは **3 個だけ**:
+
+| パッケージ | 差の理由 | guff への影響 |
+|---|---|---|
+| `unsafe` | Compiled が空 | **既に特別扱い済み**（`golist.rs:1116-1117` が clear する） |
+| `runtime/cgo` | `CgoFiles` あり | stdlib なので **export data から復元され、Compiled は読まれない** |
+| `client_golang/prometheus` | `CgoFiles` あり | **ここだけ本当に Compiled が要る** |
+
+**規則は厳密です:** `CompiledGoFiles != GoFiles` ⟺ そのパッケージが
+`CgoFiles` / `SwigFiles` / `SwigCXXFiles` を持つ（`unsafe` を除く）。
+そして **`CgoFiles`・`SwigFiles` は `-compiled=false` の出力にも入っている**ので、
+第 1 コールの結果だけで「誰に Compiled が要るか」が確定します。
+
+さらに **hybrid モード（既定）では stdlib の `CompiledGoFiles` は一度も読まれません**。
+`typecheck.rs:785-790` が `export_paths` を優先し、stdlib は export data から復元して
+source typecheck しないためです。つまり Compiled の第 2 コールが要るのは
+**「`CgoFiles`/`SwigFiles` を持つ非 stdlib パッケージ」だけ**で、prometheus では **1 個**です。
+
+そして `json_package_to_package` には既に
+「`compiled_go_files` が空なら `go_files` で埋める」フォールバックがあります
+（`golist.rs:1118-1120`）。**非 cgo パッケージは今のコードのまま正しくなります。**
+
+---
+
+### C-3a — `go list` に無駄な仕事をさせない（**最優先。`go list` は置き換えない**）
+
+**要旨:** 3 つだけ変える。
+
+1. **`-json=<フィールド列>` を実際に使う。** `golist_args` に本物の Go マイナーバージョンを
+   渡す。**`go env GOVERSION` を呼んではいけません**（0.074s のサブプロセス。C-3b で消す対象）。
+   **`$GOROOT/VERSION` の 1 行目**を読むこと（実測 **0.011ms**、7000 倍速い）。
+   `GOROOT` は `cfg.resolved_env()` → なければ `go` の実体パスから導出。
+   取れなければ従来どおり `-json`（フォールバック）。
+2. **`-compiled=false` にする。** 非 cgo パッケージは既存フォールバックで
+   `compiled_go_files = go_files` になる。
+3. **cgo/swig を持つ非 stdlib パッケージにだけ、第 2 の
+   `go list -json=ImportPath,CompiledGoFiles -compiled=true <paths>` を投げる。**
+   **既存の stdlib-export コールと並列に**走らせること（両者は独立）。
+   実測 0.16s だが、その 0.078s はプロセス起動なので stdlib-export の 0.15s に隠れる。
+   **cgo パッケージが 0 個のリポジトリではこのコール自体が消えます。**
+
+**⚠️ C-3a で唯一の落とし穴（必ず読むこと）:**
+`json_flag()` が返すフィールド集合は **LoadMode から導出**されますが、
+`json_package_to_package()` は **LoadMode に関係なく**
+`ForTest` / `Target` / `EmbedFiles` / `EmbedPatterns` / `Ignored*` / `C*Files` などを読みます。
+`-json`（全部）だとこの不整合が見えませんが、**選択出力にした瞬間に静かに空になります。**
+`other_files` / `ignored_files` は `guff-analysis/src/pass.rs:68,74,132,136` が実際に読みます。
+
+→ **対策:** `json_flag` を「LoadMode 由来の集合 **∪** `JsonPackage` が deserialize する全フィールド」に
+すること。**`JsonPackage` のフィールドを増やしたら `json_flag` も増やす**というテストを足すこと
+（コンパイル時に落ちないので、テストがないと必ず腐ります）。
+
+**実装場所:** `crates/guff-packages/src/golist.rs` の
+`golist_args` / `json_flag` / `go_list_driver`。**約 80〜120 行。**
+
+#### GO 判定（2026-07-30・**実装前に shim で実測済み**）
+
+`go` を装う shim で `-json` → `-json=<全 deserialize フィールド>`、`-compiled=true` → `-compiled=false`
+に書き換え、**guff 本体は無改造**のまま prometheus `./...` を cold（空 `GUFF_CACHE` + `--no-cache`）で A/B 交互 3 回:
+
+| run | A（現状） | B（C-3a 相当） | findings |
+|---|---:|---:|---|
+| 1 | 3.553s | **3.216s** | 60 / 60 **byte 同一** |
+| 2 | 3.480s | **3.116s** | 60 / 60 **byte 同一** |
+| 3 | 3.477s | **3.122s** | 60 / 60 **byte 同一** |
+
+phase 内訳（`GUFF_DEBUG_CACHE=2`）:
+
+| phase | A | B |
+|---|---:|---:|
+| `golist subprocess` | 1.02s (14.07MB) | **0.62s** (13.40MB) |
+| `golist stdlib-export` | 0.16s | 0.15s |
+| **`load_graph`** | **1.24s** | **0.83s** |
+| 総パッケージ数 | 1792 | **1792**（同一） |
+
+**cold wall −0.36s / `load_graph` −0.41s / findings byte 同一。**
+§0-14 の基準（0.1s）を大きく超えます。**GO。**
+
+**注意:** この shim 実験は cgo の第 2 コール**なし**（＝ `client_golang/prometheus` の
+Compiled が `GoFiles + CgoFiles` に落ちた状態）でも prometheus では findings が変わりませんでした。
+これは当該パッケージが root ではなく依存で、依存の診断は報告されないためです。
+**「だから cgo 対応は要らない」と読まないこと** — 型が壊れれば他リポジトリで findings が動きます。
+第 2 コールは正しさのために必須です。
+
+### DONE（2026-07-30）— **cold −0.30〜0.35s / `load_graph` 1.24s → 0.86s。findings byte 同一。warm 回帰なし。**
+
+**入れたもの（`crates/guff-packages/src/golist.rs` のみ、+約 330 行）:**
+
+1. **`go_minor_version()`** — `$GOROOT/VERSION` の 1 行目から Go マイナー版を得る。
+   `cfg.resolved_env()` の `GOROOT` → 無ければ PATH 上の `go` を canonicalize して
+   `<bin の親>` と `<bin の親>/libexec` を試す（`VERSION` と `src/` の両方があるものだけ採用）。
+   PATH 由来は `OnceLock` で 1 回だけ。取れなければ `0` を返して従来の `-json` に落ちる。
+   **サブプロセスは 1 本も増えていません。**
+2. `golist_args` が本物の版を渡すようになり、**`-json=<フィールド>` が初めて有効化**。
+3. **`DESERIALIZED_FIELDS`** — `JsonPackage` が decode する全 29 フィールドを `json_flag` が
+   無条件に要求する。LoadMode 由来の追加分はその上に載る。
+4. **`defers_compiled(cfg)`（= `cfg.dep_source`）** — hybrid のとき主コールを `-compiled=false` に。
+   export 経路（`GUFF_DEP_SOURCE=0`）は `-export=true` でどのみち builder が動くので**据え置き**。
+5. **cgo/SWIG 限定の第 2 コール** `go list -e -json=ImportPath,Dir,CompiledGoFiles -compiled=true`。
+   対象は `needs_compiled_query()`（`CgoFiles`/`SwigFiles`/`SwigCXXFiles` を持ち、
+   エラー無し、id に空白を含まない＝テストバリアント除外）。
+   **stdlib-export コールと `std::thread::scope` で並列。** 失敗しても `GoFiles`
+   フォールバックのまま続行（run は落とさない）。
+6. **`compiled_files` ディスクキャッシュ**（B-8 と同設計）。`peek_compiled_files_cache` を
+   `peek_cached_graph`（C-7 投機）にも通した。
+
+**実測（prometheus `./...`、変更前バイナリと A/B 交互、§1.2 ガード合格）:**
+
+| | 変更前 | 変更後 | 差 |
+|---|---:|---:|---:|
+| cold wall（3 ペア） | 3.830 / 3.896 / 3.912s | **3.578 / 3.545 / 3.528s** | **−0.30〜0.35s** |
+| warm wall（4 ペア） | 0.311 / 0.299 / 0.303 / 0.303s | **0.293 / 0.290 / 0.297 / 0.297s** | −0.01s（**回帰なし**） |
+
+**phase（cold, `GUFF_DEBUG_CACHE=2`）:**
+
+| | 変更前 | 変更後 |
+|---|---:|---:|
+| `golist subprocess` | 1.02s (14.07MB) | **0.62s** (13.40MB) |
+| `golist compiled-files` | — | 2 attached / 2 cgo pkgs（**stdlib-export の陰に隠れる**） |
+| `golist stdlib-export` | 0.16s | 0.18s |
+| **`load_graph`** | **1.24s** | **0.86s** |
+| 総パッケージ数 | 1792 | 1792（同一） |
+
+warm では `compiled-files cache hit (2 pkgs)` → `stdlib-export 0.00s` → `load_graph` **0.08s**
+（変更前 0.07s。サブプロセスは 1 本も出ない）。
+
+**findings（全部 byte 同一。件数一致ではなく `diff` が空）:**
+
+| ケース | 結果 |
+|---|---|
+| prometheus `./...` cold ×3（変更前バイナリと） | **byte 同一**、3 回とも決定的 |
+| prometheus `./...` warm ×4 | **byte 同一** |
+| `-j 1` | **byte 同一**（wall 9.0s ≫ `-jN` 3.15s。逆転なし） |
+| `--tests=false` / `GUFF_DEP_SOURCE=0` | **byte 同一** |
+| **helm**（cgo 3: `runtime/cgo` / `plugin` / client_golang） | **byte 同一**（3 findings） |
+
+**その他:** peak RSS 3.70 GiB（baseline 帯 3.46〜3.7 GiB 内）。
+`cargo test -p guff-packages --lib` **46 passed**（新規 6 本）。
+`cargo test --workspace --release --no-fail-fast` **2811 passed / 3 failed** で、
+失敗は **X-6 の 3 本ちょうど**（`sa4010`/`sa4017`/`sa5011`。`main` で以前から落ちているもの。
+`325 passed; 3 failed` のシグネチャが §X-6 の記録と一致）。`guff-packages` の警告数 **45 → 45**。
+**regress 両方 PASS**（baseline 未更新）:
+
+| プロファイル | baseline wall | 実測 wall | baseline RSS | 実測 RSS | findings |
+|---|---:|---:|---:|---:|---|
+| tsdb | 1.360s | **1.330s** | 1,141,440,512 | 1,139,326,976 | both 4 / only 0,0 |
+| full | 3.360s | **3.270s** | 4,034,396,160 | **3,741,138,944** | both 20 / only 0,0 |
+
+#### 踏んだ罠（次の人へ。C-3c でも同じ形が出ます）
+
+**`go list -compiled` の `CompiledGoFiles` は 2 種類のパスが混ざっています。**
+パッケージ自身のソースは **`Dir` からの相対ファイル名**、cgo 生成物は **GOCACHE の絶対パス**。
+最初これを**そのまま**キャッシュに保存したため、`load_compiled_files_cache` の存在チェック
+（相対名を CWD 基準で `exists()`）が必ず false になり、**キャッシュが毎回ミス**していました。
+症状は「findings は正しいのに warm が 0.285s → 0.40s に悪化」。
+→ `-json=…,Dir,…` も要求して**保存前に絶対化**。
+`compiled_files_cache_roundtrips_and_rejects_unresolvable_paths` が相対パスを拒否することで回帰を防ぎます。
+
+**もう 1 つ:** `cargo test --workspace` は fail-fast なので guff-staticcheck で止まります
+（§X-6 の 3 本）。全体像には `--no-fail-fast` を使うこと。
+
+**⚠️ 未確認:** 検証はすべて **Go 1.26.4 / darwin arm64 / モジュールモード**。
+`-json=<fields>` は Go 1.19+ 限定で、それ未満は `go_minor_version()` が 0 を返して
+従来経路に落ちる設計ですが、**古いツールチェーンでの実走は未確認**です。
+vendor ディレクトリ有りのリポジトリも未確認（`go list` に任せているので影響は無いはず）。
+
+---
+
+### C-3b — `go env` / `go version` サブプロセスの撲滅
+
+**要旨:** **完全 warm 実行でも `go` サブプロセスが 6 本走っています**（2026-07-30 実測。
+`go` を装う shim で全呼び出しを記録）:
+
+| 呼び出し | 回数 | 呼び出し元 |
+|---|---:|---|
+| `go env GOVERSION` | **4** | `guff-runner/cache.rs:270`（issue cache salt）/ `guff-packages/typecheck.rs:123` |
+| `go version` | 1 | `golist.rs:1578`（`go_available`） |
+| `go env GOCACHE` | 1 | `guff-runner/cache.rs:155` |
+
+**1 本あたり 0.074s。** 置き換え先はすべてファイル 1 個の読み取りで済みます:
+
+| 現状 | 置き換え | 実測 |
+|---|---|---:|
+| `go env GOVERSION` | `$GOROOT/VERSION` の 1 行目（`go1.26.4`） | **0.011ms** |
+| `go env GOCACHE` | `default_gocache_path()` が既にある（`golist.rs:1368`） | 0 |
+| `go version`（存在確認） | PATH 上の `go` を `stat`（`go_toolchain_fingerprint()` が既にやっている） | 0 |
+
+`GOROOT` 自体は `go env GOROOT` なしで取れます（`cfg.resolved_env()` の `GOROOT` →
+なければ PATH 上の `go` を canonicalize して `../libexec` or `../..`）。
+**取れなければ従来のサブプロセスにフォールバック**すること。
+
+#### GO/NO-GO（2026-07-30 実測・**単独では基準未満**）
+
+bash shim で `go env`/`go version` を即答にして warm A/B（初回は shim の page-in で汚染、2・3 回目を採用）:
+
+| | A（実 `go`） | B（shim） |
+|---|---:|---:|
+| warm wall | 0.285 / 0.286s | 0.270 / 0.268s |
+
+**−0.017s。** ただし **shim 自体が bash で 1 本 5〜10ms 払っている**ので、
+真の上限はこれより大きい（6 本 × 0.074s ＝ 0.44s ぶんのスレッド待ちが、
+並列に重なって wall にはこれだけしか出ていない）。
+
+**単独では §0-14 の 0.1s に届きません。**
+それでも**やる価値がある理由は 2 つ**:
+
+1. **C-3c/C-3d の前提**。ここが残っていると「`go` なしで動く」に到達できません。
+2. **実装が数十行で、リスクがほぼゼロ**（フォールバック付きの読み取り置換）。
+
+**→ C-3c に進むと決めたときにセットで入れる。単独で wall を狙って着手しない。**
+
+#### DONE（2026-07-30）— **cold の `go env`/`go version` を 5 本 → 0。wall は誤差帯。findings byte 同一。**
+
+低リスク枠が尽きたあとの次手として実装。cold `--no-cache` では warm より多く
+（`env GOVERSION` ×3 + `version` ×1 + `env GOCACHE` ×1 = **5 本**）が直列寄りに見えたが、
+この開発機では `go` がページイン済みだと `go env` 自体が **real 0.00s** で、
+A/B 交互の cold wall は **±0（誤差帯）**。§0-14 の wall 基準には届かないまま。
+
+**入れたもの:**
+
+1. `guff_packages::detect_go_version_string()` — `$GOVERSION` → `$GOROOT/VERSION` →
+   `go env GOVERSION`（フォールバック）。`OnceLock` でプロセス内は 1 回。
+2. `TypecheckEnv::from_env` と `guff_runner::detect_go_version` がそれを使う。
+3. `go_available()` は PATH 上の `go` を `stat`（`go version` を起動しない）。
+4. `default_go_cache_dir` は platform default（`~/Library/Caches/go-build` 等）を
+   `go env GOCACHE` より先に試す。
+
+**検証:**
+- cold の `go` 呼び出し: **9 → 4**（残るのは `go list` 系のみ。env/version は 0）。
+- findings **20 件 byte 同一**・3 回決定的。
+- 両 regress PASS（baseline 未更新）: tsdb 1.280s / full 2.850s。
+
+**次にやる人へ:** wall を取りに行くなら **C-3c（要合意）**。C-3b 単体の cold wall は期待しないこと。
+
+---
+
+### C-3c — ネイティブ lister（`go list` の置き換え本体）
+
+**ここが旧 C-3 の本体ですが、C-3.0 の内訳が出た今は「残り 0.26s ＋ プロセス起動 0.078s」の話です。**
+**wall だけが目的なら ROI は C-3a の 1/2 以下。** それでも狙う理由は
+**`go` への依存を切ること**（単一バイナリ配布 / Go 無し CI・Docker イメージ / バージョン差の排除）です。
+**性能タスクではなく製品タスクとして扱ってください。**
+
+#### なぜ「Go ツールチェーンの再実装」にならずに済むのか（2026-07-30 の新事実）
+
+**(1) MVS（最小バージョン選択）が要らない。**
+Go 1.17 以降のモジュールグラフ枝刈りにより、**メインモジュールの `go.mod` の
+`require` 群だけで、インポート解決に必要なモジュールが全部揃います。**
+prometheus で実測: パッケージグラフに現れるモジュール **242 個が、
+`go.mod` の require 251 行に全部含まれていました**（例外はメインモジュール自身のみ）。
+**`go.mod` を 1 個読むだけでモジュール解決が閉じます。** 推移的なモジュールグラフを辿る必要はありません。
+
+**(2) 走査対象の 92% が不変（immutable）で、恒久キャッシュできる。**
+prometheus `./...` の 1530 パッケージディレクトリの内訳と、
+Rust で readdir + 各 `.go` の先頭 4KB を読む実測コスト（8 スレッド）:
+
+| 区分 | dirs | files | 走査実測 | 可変性 |
+|---|---:|---:|---:|---|
+| GOMODCACHE | 1176 | 15018 | 0.15s | **不変**（content-addressed・read-only） |
+| GOROOT | 241 | 3445 | （残り） | **不変**（ツールチェーン単位） |
+| **メインモジュール** | **113** | **709** | **0.005s** | 可変 |
+| 合計 | 1530 | 19172 | **0.20s** | |
+
+**毎回走査しなければならないのは 113 ディレクトリ / 709 ファイル ＝ 5ms だけ**です。
+残りは `module@version` をキーに `GUFF_CACHE` へ**恒久的に**（無効化不要で）置けます。
+`go list` は GOCACHE を持っていてなお 0.24s 払っているので、
+**ネイティブ lister は原理的に `go list` より速くなれます。**
+
+⚠️ ただし **初回（キャッシュ無し）は 0.20s** で、`go list` の実質 0.26s とほぼ差がありません。
+**「速いのはキャッシュが効いてから」**であり、そこを取り違えないこと。
+なお走査は **CPU ではなく syscall バウンド**です（1 スレッド 0.25s → 8 スレッド 0.20s。
+スレッドを増やしても伸びません）。
+
+**(3) 土台は既にある。** `crates/guff-build/`（1383 行）は `go/build` の移植で、
+build constraints（`//go:build` / `+build` / `_GOOS_GOARCH` サフィックス）の判定
+（`match_file.rs`）とディレクトリのインポート（`import_dir.rs`）を持っています。
+`crates/guff-packages/src/offline.rs`（428 行）は `go` 不在時のフォールバック driver として
+既にこれでパッケージを組み立てています。**足りないのは「外部モジュールの解決」だけ**で、
+`offline.rs:7-8,167-168` に `DEFERRED` として明記されています。
+`go.mod` パーサも `crates/guff-import/src/gomod.rs` に
+（require / replace / exclude / retract / toolchain 対応の）実装済みのものがあります。
+
+#### 設計（必ずこの順で）
+
+**新クレート `guff-golist`**（`guff-packages` を太らせない）。`Driver` trait を実装し、
+`AutoDriver` の前段に入れる。**判定は「使えるなら使う、少しでも怪しければ `go list`」。**
+
+**サポート外なら即フォールバック（bail）する条件を、最初から明示的に持つこと:**
+
+| 条件 | 初版 |
+|---|---|
+| `go.mod` の `go` ディレクティブ < 1.17 | **bail**（枝刈り前提が崩れる） |
+| `go.work` が存在 | **対応済み**（use + workspace replace + 粗 MVS） |
+| `vendor/` が存在 | **対応済み**（`vendor/modules.txt`。go.work 時は無視。modules.txt 無しは bail） |
+| `GOFLAGS` / `build_flags` に `-tags` 以外 | **bail** |
+| require されたモジュールが GOMODCACHE に未展開 | **bail**（ダウンロードは絶対にしない。vendor 時は vendor から解決） |
+| `CgoFiles` を持つパッケージがある | **cgo だけ `go list` に委譲**（C-3e DONE） |
+| `-test=true` | **対応済み**（`P [P.test]` / `P_test [P.test]` / `P.test` + for-test 依存） |
+| パターンが `./…` / `.` / 絶対パス / 自モジュール以外 | **bail** |
+
+**等価性オラクル（これが工数の半分。先に作ること）:**
+`GUFF_NATIVE_LIST=verify` で**両方**走らせ、`DriverResponse` を正規化して diff し、
+不一致を stderr に出す（かつ `go list` の結果を採用する）。
+`regress/` のコーパス（prometheus / helm / `compat/`）で
+**diff 空**を確認してから既定オンにします。**findings ではなくパッケージグラフを直接比較すること** —
+findings は差を吸収してしまうので、オラクルとしては鈍すぎます。
+
+**段取り:** ①オラクル → ②`go.mod` 解決 + GOMODCACHE 探索 → ③ディレクトリ走査
+（`guff-build` 再利用）→ ④`module@version` 恒久キャッシュ → ⑤ vendor → ⑥ `go.work` → ⑦ `-test`。
+**各段でオラクル diff 空を確認。1 段 = 1 コミット。**
+
+---
+
+### C-3d — stdlib の型情報を `go list -export` なしで得る
+
+**C-3c を入れても `go` は消えません。** hybrid モードは stdlib の型を
+**GOCACHE の `.a`（export data）**から取っており、その `.a` のパスを
+`go list -export` に聞いているからです（warm 0.15s / cold は stdlib のビルドを伴う）。
+
+**案:** **GOROOT のソースから stdlib を一度 typecheck し、guff 自身の形式で
+`GUFF_CACHE` に永続化する**（キーは `$GOROOT/VERSION` + GOOS/GOARCH）。
+
+- guff は既に stdlib をソースから型付けできます（offline driver がそれをやっています）。
+- 永続化の器も既にあります（`seed_cache.rs` の overlay 永続化 / `ExportSeed`）。
+- **Go バージョンごとに一度だけ**払えば、以後は `.a` デコードより速い可能性が高い
+  （現状 `stdlib-export` 0.15s ＋ Phase A のデコードが消える）。
+
+#### DONE（2026-07-30）— **stdlib-export 削除・既定ソース。findings 28≡28。go-less 到達。**
+
+**ブロッカー修正（export 経路側）:**
+1. `guff-exportdata/ureader.rs` `prepare_named_underlying` — named iface メソッド clone 時に
+   **`Pkg` を保持**（Go ureader と同じ）。これで `testing.TB.private()` の Implements が通る。
+2. `guff-exportdata/importer.rs` — decode 中の `NoopImporter` を **`CacheImporter`** に置換。
+   既デコード deps（`embed`→`io/fs`）を stub 化せず共有し、`embed.FS` → `fs.FS` が通る。
+3. 回帰: `guff-types/tests/export_sealed_iface.rs`（sealed iface / `testing.TB` / `embed.FS`）。
+
+**製品挙動:**
+- hybrid `dep_source` 既定で stdlib `.a` を付けない（`stdlib_export_requested()` = false）。
+- 永続化は既存 seed overlay（`GUFF_CACHE/seed/`）。専用 VERSION キー blob は不要だった。
+- `GUFF_STDLIB_SOURCE=export|0|off` で旧 `go list -export` 経路に戻せる。
+
+**C-3c 追補（go-less 用）:**
+- `./...` walk が nested `go.mod`（prometheus `compliance/`）をスキップ（`go list` と同じ）。
+- `guff-build` `discover_goroot` が PATH / Homebrew Cellar から GOROOT を探す（`go env` なし）。
+- `GUFF_NATIVE_LIST` 既定は **on**（Phase 2: warm `native_list/` キャッシュ +
+  完全 `-test` + for-test 依存バリアント）。`GUFF_NATIVE_LIST=off` で旧経路。
+  明示 `force` で go-less / `verify` でオラクル。
+
+| 計測（prometheus `./...`） | export (A) | source 既定 (B) |
+|---|---:|---:|
+| findings | **28** | **28**（diff 空・決定的） |
+| warm | 0.18s | **0.18s** |
+| seed-hot `--no-cache` | ~2.10s（毎回 export 0.18s※） | **~2.05s** |
+| cold 空キャッシュ | ~2.45s | ~2.49s（seed +0.1s ≈ export −0.1s） |
+| go-less `force` + fake `go` | — | **完走 / GO_INVOKED=0**（findings 28） |
+
+※ `--no-cache` は golist/stdlib_exports 書き込みも止めるので A は毎回 export を払う。
+
+**残:** なし（C-3 製品タスク完了）。B-9 はやらない。
+
+---
+
+### C-3e — cgo **DONE（2026-07-31）**
+
+**`go` を完全に不要にできない唯一の本質的な理由。** `import "C"` の解決には
+cgo（＝ C コンパイラ）が要ります。**再実装しないこと。**
+
+**方針（実装済み）:** `CgoFiles` を持つパッケージが存在するときだけ、
+**そのパッケージに限定して** `go list -compiled=true` に委譲する（C-3a の第 2 コールを
+`attach_hybrid_exports` → `attach_compiled_files_for_paths` 経由で再利用）。
+**cgo を使わないリポジトリでは `go` が 1 回も呼ばれない。**
+失敗時は GoFiles フォールバック（C-3a と同ポリシー）。
+
+**あわせて repo `vendor/` DONE:** `vendor/modules.txt` パーサ + `resolve_import` で
+`vendor/<import>` を優先（GOMODCACHE スキップ）。`go.work` 時は vendor 無視。
+`vendor/` のみで `modules.txt` 無しは従来どおり bail。
+
+---
+
+### C-3 ロードマップまとめ
+
+| 段 | 内容 | 工数 | cold への効果 | `go` 依存 | リスク |
+|---|---|---|---:|---|---|
+| ~~**C-3a**~~ | ~~`-json=fields` + `-compiled=false` + cgo 限定第 2 コール~~ **DONE** | 小（実績 +330 行） | **−0.30〜0.35s（実測）** | 変わらず | 低 |
+| ~~C-3b~~ | ~~`go env`/`go version` の撲滅~~ **DONE**（cold で 5 本消滅。wall ±0） | 小 | **±0（誤差帯）** | −3 種 | 低 |
+| C-3c | ネイティブ lister（+ warm キャッシュ + `-test` + peek + modmeta-v2） | **DONE** | `--no-cache` peek **0.04s** / go 主コール消滅 | 主コールが消える（bail/cgo 除く） | 低（検証済み） |
+| ~~C-3d~~ | ~~stdlib 型スナップショット~~ **DONE**（既定ソース・export 修正で findings 同一） | 中〜大 | seed-hot `--no-cache` で export 0.18s 消滅 | export コール消滅 + go-less | 低（修正後） |
+| ~~C-3e~~ | ~~cgo は `go list` に委譲~~ **DONE**（+ repo `vendor/modules.txt`） | 小 | — | cgo 無しリポジトリで **ゼロ** | 低 |
+
+**C-3a〜C-3e すべて DONE**（C-3c Phase 2+3 含む）。**wall だけが目的なら C-3 の安い削りはもう終わっています。**
+
+### C-3c Phase 3 DONE メモ（2026-07-31）
+
+**入れたもの:**
+1. `native_cache::try_load` が `--no-cache`（`disable_cache`）でも **peek**（C-7 golist と同型）。
+   書き込みは従来どおり `cache_enabled` でオフ。`native_list/` 無ければ key walk 前に return。
+2. `modmeta-v2` — package 単位 JSON×N → **`module@version`（+ stdlib VERSION）単位の 1 blob**。
+   `ModMetaSession` が list 走査中に blob を 1 回だけ読み、dirty を終了時に flush。
+
+**実測（prometheus `./...`、Darwin arm64、A/B/A/B）:**
+
+| 条件 | go list load | native load | wall (off→native) |
+|---|---:|---:|---:|
+| 恒久 GUFF_CACHE + `--no-cache` | 0.75s | **0.04s**（peek） | 1.94 → **1.80s** |
+| warm（issue cache hot） | 0.06s | **0.04s** | 0.17 → **0.15s** |
+| native_list 無し（modmeta 再構築） | — | **~0.20s** | — |
+
+modmeta ファイル数 **~1489 → 243**。modmeta 再構築が ~0.20s に留まるのは
+blob 読込より **グラフ組み立て**が支配的なため。フルグラフは `native_list/` peek が担う。
+
+verify（peek / modmeta 両経路）diff 空 / findings **28≡28**（off≡on）。
+
+### C-3c Phase 2 DONE メモ（2026-07-30）
+
+**入れたもの:**
+1. 完全 `-test` IDs + for-test 依存 `Q [P.test]`
+2. `$GUFF_CACHE/native_list/` warm グラフキャッシュ
+3. **走査高速化:** `.go` ヘッダ 64KiB のみ / import 再読込廃止 / `./...` 二重 `import_dir` 廃止 /
+   `canonicalize` 回避 / 並列 BFS
+4. **`$GUFF_CACHE/modmeta/`** — `module@version`（+ stdlib VERSION）恒久メタデータ
+5. `GUFF_NATIVE_LIST` **既定 on**
+
+**実測（prometheus `./...`、Darwin arm64、A/B 交互）:**
+
+| 条件 | go list load | native load | wall (off→native) |
+|---|---:|---:|---:|
+| 空 GUFF_CACHE（初回） | 0.75s | **0.70s** | 2.35 → 2.32s |
+| 恒久 GUFF_CACHE + `--no-cache` | 0.76s | **0.23s** | 2.0 → **1.85s** |
+| warm（issue cache hot） | 0.06s | **0.04s** | 0.17 → **0.15s** |
+
+verify diff 空 / findings 28≡28。空 GUFF_CACHE が go list に大きく勝てないのは
+**go 側 GOCACHE が常に warm**なため（設計書どおり「初回 ≈ go list、勝つのはキャッシュ後」）。
+
+**残タスク:** なし（repo `vendor/` + C-3e は 2026-07-31 に DONE）。
+
+### C-3c Phase 1 DONE メモ（2026-07-30）
+
+**入れたもの:**
+1. `crates/guff-golist` — `list_packages` / `Bail` / module path escape / GOMODCACHE
+2. `guff-packages::native` — `GUFF_NATIVE_LIST={off,on,verify,force}` + graph diff オラクル
+3. `guff-build` — `replace`/`exclude`/`retract` パース、Go 1.26 experiment tool tags
+4. AutoDriver: mode に従い native ↔ `go list` ↔ offline
+
+**オラクル実測（`tests: false`）:** hybrid 61 / helm `pkg/chart` 629 /
+prometheus `model` 424（**go.work**）いずれも OK。
+
+**go.work 対応（同日追記）:** `use` モジュールをすべて main として解決、workspace
+`replace` 優先、同一 path の require は粗 MVS（最高バージョン）。`exclude`/`retract` は
+listing では無視。cgo は GoFiles マージ + `runtime/cgo` を Deps に合成（CompiledGoFiles
+生成物は C-3e）。
+
+**使い方:**
+```bash
+GUFF_NATIVE_LIST=verify guff run --no-cache ./...   # 両方走らせて diff、結果は go list
+GUFF_NATIVE_LIST=off     guff run --no-cache ./...   # 旧 go list 優先
+GUFF_NATIVE_LIST=force   guff run --no-cache ./...   # native のみ（go 無し CI 向け）
+# 既定（unset）= on: native 優先、bail 時 go list
+```
+
+**Phase 1 時点の残（Phase 2 で解消）:** `module@version` 恒久キャッシュ相当の warm キャッシュ、
+go list 同等の test バリアント、既定オン。
+
+---
+
+## C-4 — gocritic 106 チェッカーの walk 融合
+
+**要旨:** `crates/guff-style/src/gocritic.rs`（約 8000 行）は 1 analyzer の中で 106 個の
+チェッカーを回し、それぞれが内部で `walk::inspect` を呼んでいます。
+
+**期待:** §1.4 では gocritic は 0.12s / 66 actions と**そこまで重くありません**。
+→ **優先度は低い。B-1 が入れば自動的に改善する可能性もあります。**
+
+## C-5 — issue cache を analyzer 単位の粒度に
+
+**要旨:** 現在のキャッシュはパッケージ単位。1 つの analyzer の設定が変わると
+そのパッケージ全体が再解析されます。
+
+**リスク:** 高（キャッシュキーの設計変更は `PERF_TASKS.md` Task 2/4 の落とし穴の宝庫）。
+**効果が測れていないので、まず「設定変更時の再解析コスト」を測ることから。**
+
+## C-6 — `Ident` から `Mutex` を外す
+
+**要旨:** `ast::Ident` は **識別子 1 個ごとに `Mutex<Option<Arc<Object>>>`** を持っています:
+
+`crates/guff-ast/src/ast.rs:304-316`（`id` の doc コメントは省略）:
+
+```rust
+pub struct Ident {
+    pub name_pos: Pos,
+    pub name: String,
+    pub obj: std::sync::Mutex<Option<std::sync::Arc<crate::scope::Object>>>,
+    pub id: u32,
+}
+```
+
+`Mutex` は 8〜16 バイト、`Ident::clone` は**ロックを取ってから**クローンします
+（`crates/guff-ast/src/ast.rs:317-325`）。識別子は AST 中で最も数が多いノードです。
+
+**P0-2 / P0-3 が完了して object resolution が実質使われなくなったら、
+`Mutex` を `OnceLock` か素の `Option` に落とせる可能性があります。**
+（`Mutex` が必要なのは「パース後に後から書き込む」ためなので、
+`&mut File` で resolve するように変えれば素の `Option` で済む）
+
+**前提:** P0-2 / P0-3 を先に完了させること。
+**期待:** RSS 削減 + clone コスト削減。**A-3b（`Box<str>` 化）と同時にやると効率的**ですが、
+§0-9 に従い別コミットにすること。
+
+### NO-GO（2026-07-29）— **Ident Mutex の wall 上限 ≲ 0.08s。§0-14 で中止。コード未変更。**
+
+P0-2 / P0-3 完了後に samply（profiling ビルド、prometheus `./...`、空 `GUFF_CACHE`、
+`--no-cache`。合計 CPU 13.93s）で測った。
+
+| 指標 | CPU | 備考 |
+|---|---:|---|
+| `pthread_mutex_{init,lock,unlock,destroy}` self 合計 | ~0.66s | Ident **以外**（`File` / `Scope` / runner）も含む |
+| `drop_in_place` of Ident's `Mutex<Option<Arc<Object>>>` | 0.093s | 明確に Ident |
+| `Ident::clone` self | 0.082s | Mutex + `String`/`Arc` clone 混在 |
+| `Ident::clone` inclusive | 0.725s | 大半はネストした `Expr::clone` 側。Mutex 除去では消えない |
+| `pthread_mutex_init` ← `Ident::clone`（callers 上位） | ~0.08s | 帰属できる init の上限付近 |
+| サイズ | Mutex 24B → OnceLock 16B → Option 8B | RSS は Ident 数 × 8〜16B。現状 peak ~3.7 GiB では二の次 |
+
+**上限見積もり:** Ident に帰属できる Mutex CPU を甘く見て 0.3〜0.5s。有効並列 ~6 なら
+wall 換算 **0.05〜0.08s**。§0-14 の 0.1s を下回る。A-4（`File` Mutex）と同じく
+「Mutex は自己 CPU に出るが wall に出ない」パターン。
+
+**補足:** `short_var_decl` は obj を一度書いてから `alt` で上書きするため、素の `OnceLock` には
+そのまま載らない（最終値を先に決めて 1 回 set する書き換えは可能だが、上の上限では元が取れない）。
+
+**やらない。** RSS をさらに詰めるなら C-1 / B-5 Slice（findings 合意後）側。
+
+## C-7 — 依存 seed のプリウォーム（投機実行）
+
+**要旨:** `go list` がサブプロセスで 1.3s 走っている間、コアは遊んでいます
+（`PERF_TASKS.md` §1.10 が format_checks をここに重ねたのはこの理由）。
+format 以外にも、**前回実行時のパッケージリストを覚えておいて、seed の構築を投機的に始める**
+ことができます。
+
+**リスク:** 中。投機が外れたときに無駄な CPU と RSS を使います。
+また `PERF_TASKS.md` §0-2（RSS を増やすな）に抵触しやすい。
+
+**前提:** P0-1 の結果次第。もし P0-1 で「format はもっとスレッドを使うべき」と分かったら、
+`go list` の間のコアは既に埋まっているので **C-7 は NO-GO** です。
+
+**2026-07-29 追記（着手判断用）:** P0-1 は「デフォルト format=2 のまま」で終わった。
+format は `go list`+typecheck+analyze と重畳するが **専用 2 スレッドだけ**なので、
+10 コア機では `go list` 中に **~8 コアが空く**。C-7 の前提はクリア。
+空 cold（前回リスト無し）では効かず、**リストを別キャッシュに残す設計**が本体。
+天井は `min(go list ≈1.3s, seed build ≈1.0s)`。着手前に「リスト命中率」と
+投機ミス時の RSS を測ること。
+
+### DONE（2026-07-29）— **seed-hot `--no-cache` で typecheck −0.35s / wall −0.15〜0.25s。findings 同一。**
+
+**GO 判定（着手前）:** seed-hot + `--no-cache` で `seed dep check` **0.38〜0.39s**、
+`load_graph` **1.10〜1.13s**。天井 ≥ 0.15s → GO。空 `GUFF_CACHE` は peek 不能で効かない
+（regress cold はそのまま）。
+
+**入れたもの:**
+
+1. `crates/guff-packages/src/speculate.rs` — fingerprint + バックグラウンド seed。
+2. `golist::peek_cached_graph` — `--no-cache` でも**読みだけ** golist/stdlib-export キャッシュを使う
+   （書き込みは従来どおり `disable_cache` でオフ）。`golist/` が無ければ `.go` walk せず return。
+3. `run_linters`: `!use_cache && dep_source` のとき speculate 開始 → `load_graph` →
+   fingerprint 一致なら `typecheck_roots_with_prebuilt_seed`。
+4. `GUFF_SEED_SPECULATE=0` で無効化（計測用）。
+
+**実測（prometheus `./...`、seed-hot、`--no-cache`、A/B 交互）:**
+
+| 指標 | A（speculate off） | B（on / HIT） |
+|---|---:|---:|
+| typecheck_roots | 0.83〜0.89s | **0.49〜0.54s**（seed prebuilt 0.00s） |
+| wall | 2.75〜3.01s | **2.74〜2.84s**（中央付近 −0.15〜0.25s） |
+| peak RSS | ~3.56 GiB | ~3.55 GiB（≤ 1.20×） |
+| `-j 1` wall | 4.84s | **4.33s**（−0.51s） |
+
+空 cold: `seed speculate skip`、A/B wall 差は誤差帯（3.47/3.45 等）。warm（issue cache on）は
+speculate しない。findings 20 件 byte 同一（warm 比・HIT 3 回・5 回決定性・`-j 1`）。
+
+**検証:** `cargo test -p guff-packages --release --lib` PASS / `cargo test -p guff-lint --release --lib` PASS /
+tsdb regress PASS。full regress は計測時 load avg ~3 で wall ノイズ（3.7s）；空 cold 経路は
+speculate 無しなので C-7 非関与。静かなら baseline 帯に戻る想定。
+
+## C-8 — メモリ削減で並列度を上げる
+
+**要旨（着手時）:** cold の peak RSS が **7.6GB**。これが並列度の上限を決めている可能性
+（regress の full プロファイルが 18GiB でキルする設定なのはそのため）。
+
+**2026-07-29 時点の実態:** lazy import members（§B-2 follow-up）で full RSS が
+**7.37 → 3.76 GiB**、B-5 でさらに **~3.74 GiB**。§7 の目標 6.0GB は**既達**。
+「半減して並列度を上げる」動機は薄れた。残る作業は**内訳の記録**（今後 C-1 等の
+優先度判断用）だけ。
+
+**先にやること:** **RSS の内訳を測る。** 候補は「型アリーナ」「AST」「SSA (buildir)」「ソースバイト」。
+`heaptrack`（Linux）や Instruments の Allocations（macOS）で内訳を取り、
+**このファイルに表として記録する**ところまでを 1 タスクにしてください。
+
+### DONE（2026-07-29）— **内訳記録。peak ~3.46 GiB。主因は型アリーナ + AST。SSA は無視可。**
+
+**入れたもの（計測用。既定オフ）:**
+
+1. `GUFF_DEBUG_RSS=1` — typecheck / analyze 直後にカテゴリ別の retained 概算を stderr へ。
+2. `guff_types::RetainedBytes` — `Layered` の Arc base をポインタ identity で dedup。
+3. `guff_packages::report_packages` — 型アリーナ / Info / source / AST ノード概算。
+4. `buildir` — SSA **incremental**（overlay + 粗く SSA funcs）の peak サンプル。
+   共有 seed base は post-typecheck 側で既に計上済みなので除外。
+
+Instruments / heaptrack の代わりに**カテゴリ帰属**にした（C-8 が欲しい切断面そのもの）。
+ピーク RSS は従来どおり `/usr/bin/time -lp`。
+
+**実測（prometheus `./...`、空 `GUFF_CACHE`、`--no-cache`、Darwin arm64。
+load avg はやや高めだったが RSS は安定）:**
+
+| 指標 | 値 | 備考 |
+|---|---:|---|
+| peak RSS（`time -lp`） | **3.46 GiB**（3,717,283,840 B） | B-5 後の ~3.7 GiB 帯と一致 |
+| attributed sum（下界） | **1.62 GiB**（1662 MiB） | スロット + 概算。未計上あり（下記） |
+| findings | 20 | 計測のみ。byte 同一性は非対象 |
+
+**カテゴリ内訳（post typecheck = post analyze。analyze はパッケージを trim しない）:**
+
+| カテゴリ | MiB | peak RSS 比 | 次に効くタスク |
+|---|---:|---:|---|
+| **型アリーナ slots（types）** | **800** | 23% | B-5 Slice（合意後）/ C-1 周辺 |
+| 型アリーナ objects | 148 | 4% | （上に従属） |
+| 型アリーナ scopes | 49 | 1% | target から scopes を落とせるなら小勝ち |
+| 型アリーナ packages + names + intern | 36 | 1% | — |
+| **型まわり合計** | **1032** | **29%** | |
+| **Info maps** | **191** | 5% | マップ粒度・寿命（高リスク） |
+| **AST envelope 概算**（2.26M nodes × ~192B） | **414** | 12% | **C-1** |
+| AST 文字列 | 8 | — | A-3 系の延長 |
+| **ソースバイト**（1101 files, Arc dedup） | **16** | 0.5% | 触る価値なし |
+| **SSA incremental peak**（66 buildir） | **≲1** | ~0% | **これ以上の SSA RSS 攻めは NO-GO** |
+
+**読み方:**
+
+- attributed（1.62 GiB）≪ peak（3.46 GiB）の差 ~1.8 GiB は、主に
+  (1) `TypeData` 内の `Vec` ヒープ（Interface methods 等。`size_of` スロットに含まれない）、
+  (2) HashMap バケットの甘め見積もり、(3) mimalloc フリーリスト / 一時バッファ /
+  rayon スタック、(4) seed 構築中の一時アリーナ。
+  **順序付けには十分な分解能**（型 ≫ AST ≫ Info ≫ source ≫ SSA）。
+- lazy import members 後、**SSA は peak RSS の主因ではない**。C-8 着手時の
+  「buildir がアリーナ丸ごと clone で RSS を支配」仮説は既に解消済み。
+- 並列度をさらに上げる動機は薄い（目標 6 GiB 既達）。RSS を詰めるなら
+  **C-1（AST）** か **B-5 Slice（findings 合意）**。壁時計を詰めるなら C-2 / B-10 条件待ち。
+
+**再計測:**
+
+```bash
+GUFF_CACHE=$(mktemp -d) GUFF_DEBUG_RSS=1 GUFF_DEBUG_CACHE=1 \
+  /usr/bin/time -lp target/release/guff run --no-cache -c .golangci.yml ./...
+```
+
+---
+
+## C-9 — seed が捨てる `Info` 記録を止める（**A-10 型の死に仕事。2026-07-30 発見**）
+
+### 目的
+
+seed worker は `Checker::into_worker_overlays` で**アリーナ overlay だけ**残し、
+`Info`（`types`/`defs`/`uses`/…）は丸ごと drop する。それなのに typecheck 中は
+Go の nil-map ゲート無しで全部の `record_*` が HashMap に書き込んでいた。
+Go 本体は `if m := check.Types; m != nil` でスキップする。
+
+### 入れたもの
+
+1. `Checker::record_info`（default `true`）+ `set_record_info(false)`。
+   seed の `check_sources` だけ false（`ignore_func_bodies` と併用）。
+2. 全 `record_*` / `record_untyped` / `file_versions` / `record_scope` /
+   `record_implicit` をゲート。`record_comma_ok_types` は Info 用の throwaway
+   `Var`/`Tuple` アリーナ割当もスキップ（overlay TypeId ノイズ削減）。
+3. `!record_info` のとき `init_order` をスキップ（`Info.init_order` 専用。
+   seed の soft cycle error は元々 discard）。
+4. `unused_imports` を `ignore_func_bodies` 時に early-return（**Go と同じ**。
+   コメントは「Go はスキップするが guff は常に走る」と誤っていた）。
+5. ついでに C-1 後の抜け: `syntax_index` を FxHash 化、method collect の
+   無駄な `recv` `Expr::clone` を借用に変更。
+
+### DONE（2026-07-30）— **`-j 1` seed −0.15s / wall −0.17s。findings byte 同一。**
+
+**実測（prometheus `./...`、空 `GUFF_CACHE`、`--no-cache`、release、A/B 交互）:**
+
+| 指標 | before（中央） | after（中央） | Δ |
+|---|---:|---:|---:|
+| `-j 1` seed dep check | 2.265s | 2.11s | **−0.15s** |
+| `-j 1` typecheck_roots | 3.105s | 2.95s | **−0.15s** |
+| `-j 1` wall (`real`) | 5.51s | 5.34s | **−0.17s** |
+| findings stdout | 3635 B | 3635 B | byte 同一（並列・`-j 1`） |
+| `cargo test -p guff-types --release --tests` | — | PASS | |
+
+並列 cold は load 汚染でブレが大きいが、落ち着いたペアでは seed ≈ −0.08〜0.17s。
+決定性: after 同士の findings も byte 同一。
+
+**判定:** A-10 と同じ「捨てる直前の仕事」パターン。GO。baseline 更新はユーザー承認待ち。
+
+---
+
+## 5. やらないと決めたこと（禁止リスト）
+
+`PERF_TASKS.md` §0 の禁止事項に加えて、今回の調査で「やっても無駄／有害」と判定したもの:
+
+| やらないこと | 理由 |
+|---|---|
+| `mimalloc` の導入 | **既に入っています**（`crates/guff-lint/src/main.rs:8-9`）。約 19% 速い、と記録あり |
+| `lto` / `codegen-units` / `panic` の変更 | ルート `Cargo.toml` のコメントに理由が明記済み。`panic = "abort"` は linter の fault isolation を壊す |
+| `issues+filter` の最適化 | 既に 0.04〜0.07s。**第1弾 Task 3 で調査済み** |
+| `print` の最適化 | 0.00s |
+| seed の parse をさらに詰める | **第1弾 §1.9 末尾で「打ち止め」と結論済み**（残り CPU 0.4s、wall 換算 0.1s 未満） |
+| seed の wave バリア撤廃 | B-9 参照。第1弾 §1.8 で分析済み、決定性とキャッシュを失う |
+| `GUFF_DEP_SOURCE=0`（export-data 経路） | 第1弾 §0-5。cold 22.9s + 検出数が変わる。袋小路 |
+| buildir のパッケージ単位スキップ | 第1弾「buildir 条件スキップ判定」。staticcheck + nilnesserr 有効下では不可 |
+| format の shared-read | 第1弾 §1.7。試して**逆に悪化**した |
+| **A-2**（`Scanner` の `src.to_vec()` 除去） | **samply 実測で `Scanner::init` の inclusive が合計 CPU 0.024s（0.12%）**。甘い上限でも 0.096s＝wall 換算 0.016s で §0-14 の基準を大きく下回る。§A-2 の NO-GO 節に内訳あり |
+| **C-6**（`Ident` の `Mutex` 除去） | Ident 帰属 Mutex CPU ~0.3–0.5s → wall ≲0.08s。§0-14。§C-6 |
+
+**新しく「やらない」と判定したものは、必ずこの表に理由つきで追記してください。**
+それが次のエージェントの時間を守ります。
+
+---
+
+## 6. コミット前チェックリスト
+
+§4 のタスクテンプレートを使ってください。要点だけ再掲:
+
+- [ ] `PERF_TASKS.md` §0（10ルール）+ 本ファイル §0（5ルール）に違反していない
+- [ ] §1.2 のガードでマシンがクリーンなことを確認して計測した
+- [ ] GO/NO-GO 計測をやった（削減上限 0.1s 未満なら着手しない）
+- [ ] findings diff = 空（**件数一致ではなく diff が空**）
+- [ ] 3 回（ハッシャ／並列／キャッシュ系は 5 回）で findings が毎回同一
+- [ ] `-j 1` と `-j N` の両方で wall を測り、並列が逐次より遅くなっていない
+- [ ] RSS が baseline × 1.20 以内
+- [ ] 狙った phase が実際に下がった（下がっていないなら入れる意味がない）
+- [ ] `cargo test --workspace` が通る
+- [ ] `./regress/run.sh` PASS
+- [ ] `./regress/run.sh --profile full` PASS
+- [ ] baseline は更新していない（ユーザー承認後のみ）
+- [ ] 1 コミット = 1 タスク
+- [ ] **本ファイルの該当タスクに DONE と実測値（before → after）を追記した**
+
+---
+
+## 7. ゴールの再設定
+
+`PERF_TASKS.md` §6 は「**warm ≤ 0.4s / cold ≤ 4〜5s**」を現実解としていて、
+2026-07-26 時点で **warm 0.39s / cold 4.88s** と、既に達成しています。
+
+第2弾の目標は次のとおりに設定します:
+
+| シナリオ | 着手時（2026-07-27） | **現在（B-3 後 / 2026-07-28）** | 第2弾の目標 | 主な手段 |
+|---|---:|---:|---:|---|
+| cold（空キャッシュ） | 4.75s | **3.79s**（full regress 実測。B-1c 後） | **3.5s** | ~~P0-1~~, ~~P0-2~~, ~~B-3~~, ~~B-1（全段）~~, A-1 |
+| cold（seed hot） | 3.68s | **3.10s** | **2.8s** | 同上（残り 0.30s） |
+| warm（キャッシュ hot） | 0.36s | **0.20〜0.22s ✅ 達成** | **0.20s** | ~~B-8~~, ~~A-9~~ |
+| warm（デーモン） | — | — | **0.05s** | C-2 |
+| peak RSS（cold full） | 7.57GB | 7.58GB | **6.0GB** | C-8 の調査結果次第 |
+
+**warm は目標達成しました**（B-8 = stdlib `go list -export` のキャッシュ）。
+これ以上 warm を詰めるなら残りは C-2（デーモン）だけです。内訳は
+`load_graph 0.07s / cache setup 0.09s / issues+filter 0.03s / format 0.09s` で、
+**どれも単独では 0.1s を切っており、§0-14 の基準では着手対象になりません。**
+
+**cold の下限は `go list` の 1.3s + 型チェックの実コストで決まる**ので、
+C-3 に手を出さない限り 3s を大きく割ることはできません。
+**（2026-07-30 追記）** その「`go list` の 1.3s」は**固定費ではありませんでした**。
+**§C-3a（工数小・低リスク）だけで `load_graph` 1.24s → 0.83s / cold wall 3.48s → 3.12s が
+実測できています**（findings byte 同一）。**目標 3.5s は C-3a 単独で達成見込みです。**
+**「真の 0.1s」は cold では不可能**という第1弾の結論は変わりません。
+そこを狙うなら C-2（デーモン）です。
+
+**そして最後に、第1弾から変わらない最重要の原則:**
+**速さより findings 同一が常に優先。findings を守れないなら、その高速化は入れない。**
+
+---
+
+## 8. 次セッションへの引き継ぎ — 性能タスク中に見つかった**別問題**（2026-07-27）
+
+> **これらは性能タスクではありません。** B-0 / B-8 の検証中に踏んだもので、
+> §0-9（1コミット1論点）に従い**あえて直さずに残してあります**（X-1 / X-2 は後続セッションで修理済み）。
+> 性能タスクと混ぜて直さないこと。残っているのは **X-3（計測作法）** のみ。
+
+### X-1 — `go list` stdout キャッシュが `.go` ファイル集合を鍵に入れていない（**正しさのバグ**）
+
+**症状:** warm 実行で**新規パッケージの追加が見落とされる。** 実測（prometheus）:
+
+```bash
+cd .../prometheus
+G=.../target/release/guff; C=$(mktemp -d)
+GUFF_CACHE="$C" "$G" run -c .golangci.yml ./... >/dev/null      # キャッシュを温める
+mkdir -p tmpb8
+printf 'package tmpb8\n\n// Foo does noting usefull.\nfunc Foo() {}\n' > tmpb8/x.go
+GUFF_CACHE="$C" GUFF_DEBUG_CACHE=1 "$G" run -c .golangci.yml ./... 2>&1 | grep 'total pkgs'
+#  → guff: phase load_graph (go list) 0.06s (294 roots, 1792 total pkgs)
+#    ＝ tmpb8 が居ないときと同じ数。misspell の "noting"/"usefull" も検出されない
+rm -rf tmpb8 "$C"     # 後片付けを忘れないこと（prometheus は git チェックアウト）
+```
+
+**原因（特定済み）:** `golist_cache_key()`（`crates/guff-packages/src/golist.rs:441`）が鍵に入れているのは
+dir / tests / mode / build flags / **go.mod + go.sum の内容** / env サブセットだけで、
+**対象ディレクトリの `.go` ファイル一覧を見ていません。** よって
+`load_or_invoke_go()` が古い stdout を返し、新パッケージがグラフに現れません。
+
+**境界（実測で確認済み）:**
+
+| 操作 | warm での挙動 |
+|---|---|
+| 既存ファイルの**編集** | **正しく無効化される。** `cache hits=285 misses=9` で 9 root を再解析し、仕込んだ misspell を検出。戻すと出力がバイト単位で一致（issue キャッシュはファイル内容で keying しているため） |
+| 新規パッケージの**追加** | **見落とす**（上記） |
+| パッケージの**削除** | 未検証。同じ原因なので**同様に古いままになる可能性が高い**。着手時に必ず確認すること |
+
+**B-8 とは無関係です。** B-8（`b8a4fec`）は stdlib export の 2 本目の `go list` だけを触っており、
+`load_or_invoke_go` は 1 行も変更していません。B-8 前のバイナリでも同じ症状が出ます。
+
+**直し方の方針:**
+
+- 鍵に「root パターンが展開されるディレクトリの `.go` ファイル一覧」を混ぜる。
+  **ファイル内容ではなく名前の一覧で十分**（内容の変更は issue キャッシュ側が既に見ている）。
+  ディレクトリの mtime だけに頼るのは危険（同一秒内の変更を取りこぼす FS がある）。
+- **コストに注意**: いま warm の `load_graph` は 0.07s まで落ちています。
+  ディレクトリを再帰的に walk すると数十 ms を足しかねません。
+  **§0-14 に従って、まず「walk にどれだけかかるか」を測ってから実装**すること。
+  ここは「正しさのために性能を払う」場面なので、**payment が発生してよい唯一の例外**ですが、
+  払う額は把握しておくべきです。
+- `--no-cache` は影響しません（キャッシュを読まない）。
+
+**検証で必ずやること:** 上の再現手順が直ること、**パッケージ削除**も直ること、
+既存ファイル編集の挙動が壊れていないこと、warm wall の悪化幅を記録すること、両 regress PASS。
+
+### DONE（2026-07-27）— **パッケージ追加/削除を正しく無効化。warm wall 悪化なし（0.21s）。**
+
+`golist_cache_key`（`crates/guff-packages/src/golist.rs`）に、root パターン配下の
+`.go` **ファイル名一覧**（内容は見ない）を混ぜた。スキーマ版は `golist-v1` → `golist-v2`。
+
+**GO/NO-GO 計測（着手前）:** prometheus `./...` で `.go` walk + sort + SHA は
+**~4–6 ms / 725 files**（Python 実測）。warm `load_graph` 0.07s に対して十分安い。
+
+**実装の要点:**
+- `include_go_files: bool` を `golist_cache_key` に追加。main stdout キャッシュだけ
+  `true`。stdlib export / dep-export は `false`（ローカル pkg 増減でキーを壊さない）。
+- `./...` / `.` / 絶対パス、および現行モジュールパス（`go.mod` の `module` 行）を walk。
+  `vendor` / `testdata` / `.`・`_` 始まりは `go list ./...` と同じくスキップ。
+- ユニットテスト: 内容編集でキー不変・追加で変化・削除で復元・skip 規則・
+  `include_go_files=false` がファイル集合を無視すること。
+
+**検証（prometheus）:**
+| 操作 | 結果 |
+|---|---|
+| 新規 `tmpx1/x.go`（misspell 仕込み） | **295 roots / 1793 pkgs**、`usefull` を検出（以前は 294/1792 のまま見落とし） |
+| `tmpx1` 削除 | **294/1792 に戻り**、stale findings なし（旧キーのキャッシュへ hit） |
+| 既存 `web/api/v1/api.go` 編集 | `hits=285 misses=9`、misspell 検出（従来どおり） |
+| warm wall ×3 | **0.21s / 0.21s / 0.21s**、`load_graph` 0.07s（B-8 後の 0.20〜0.22s と一致。悪化なし） |
+| tsdb regress | PASS（wall 1.61s / RSS 1.17 GiB / both 4） |
+| full regress | PASS（wall 4.70s / RSS 7.44 GiB / both 20 / only 0,0） |
+
+### X-2 — `guff-govet` の `checks_test` が 11 本落ちている（**テストハーネスの穴**）
+
+**症状:** `cargo test --workspace` で以下の 11 本が失敗します。
+**`main` で以前から落ちています**（B-0 / B-8 の変更を stash して確認済み。私の変更が原因ではありません）。
+
+```
+atomic_flags_direct_assignment            errorsas_flags_non_pointer_target
+cgocall_flags_chan_argument               httpresponse_flags_defer_before_error_check
+defers_flags_undelayed_since              lostcancel_flags_discarded_cancel
+errorsas_flags_non_pointer_concrete_error sigchanyzer_flags_unbuffered_notify
+slog_flags_missing_value                  timeformat_flags_bad_layout
+unmarshal_flags_non_pointer
+```
+
+**原因（特定済み。推測ではありません）:** 落ちている 11 本は
+**「import ゲートを持つ analyzer」と完全に一致**します。
+
+1. `support::run_analyzer()`（`crates/guff-govet/tests/support.rs`）は analyzer を直接呼ばず
+   **`run_on_packages()` 経由で走らせます**＝ランナーの import ゲートを通る。
+2. ゲートは `analyzer_applies_to_package()` → `package_imports_prefix()`
+   （`crates/guff-runner/src/action.rs:650, 738`）で **`package.imports` を見ます**。
+3. ところがハーネスが組み立てる `Package` は **`imports: HashMap::new()`**
+   （`support.rs` の `typecheck_with_config_and_other_files`）。
+
+→ 「`errors` を import していない」と判定され、`errorsas` はそもそも**スケジュールされず**、
+診断ゼロ → `assert!(!messages.is_empty())` が空配列で落ちる、というのが全 11 本の正体です。
+
+**本番は壊れていません。** 本番の `Package.imports` は `go list` 由来で埋まっており、
+full regress が `both=20 / guff_only=0 / golangci_only=0`（golangci-lint と完全一致）を
+維持しています。**壊れているのはテストの側だけ**です。
+
+**ただし放置してはいけない理由:** この 11 本は import ゲートの**唯一のユニットテスト**です。
+いま「ゲートが誤って落とす」回帰を検出できる仕組みが**ゼロ**なので、
+将来ゲート条件を触ったときに検出漏れを静かに入れられます。
+
+**直し方の方針（どちらか）:**
+
+- **推奨:** ハーネスがパース済み `main_file` の import 宣言から `imports` を埋める。
+  `Package::default()` を値に入れるだけでよく（ゲートは**キーしか見ない**）、
+  `package_imports_prefix_matches_module_and_subpath`（`action.rs:1032`）が既に同じ形を使っています。
+  これで 11 本が通り、**かつゲートを実際に通過するので、ゲートのテストとしても機能します。**
+- 代替: ハーネスがゲートを迂回する。**非推奨** — ゲートが未テストのまま残ります。
+
+**検証:** 11 本が通ること、他の 55 本が落ちないこと、
+**わざとゲートを壊して（例: `"errorsas"` の分岐を `false` にして）該当テストが落ちることを確認**する
+（＝テストが本当にゲートを見張っていることの確認）。findings / 性能への影響はないので regress は不要。
+
+### DONE（2026-07-27）— **`checks_test` 66/66 PASS。ゲート破壊プローブも確認。**
+
+`crates/guff-govet/tests/support.rs` の `typecheck_with_config_and_other_files` で、
+パース済み `main_file.imports` から `Package.imports` を埋めるようにした（値は
+`Package::default()` の stub。ゲートはキーしか見ない）。`deps` 引数の import path も
+念のため同マップに入れる。AST の path literal は引用符つきなので、型チェッカと同じ
+`"` / `` ` `` の outer-strip をローカル `unquote_import_path` で行う。
+
+**検証:**
+- `cargo test -p guff-govet --test checks_test` → **66 passed / 0 failed**
+  （落ちていた 11 本＋残りの 55 本すべて）
+- ゲート破壊プローブ: `analyzer_applies_to_package` の `"errorsas"` 分岐を一時的に
+  `false` にしたうえで `errorsas_flags_non_pointer_target` を再実行 → **FAILED**
+  （空 `[]`）。戻すと再び PASS。よってこのテストはゲート通過を実際に見張っている。
+- 本番コード（`action.rs` 等）は未変更。findings / 性能への影響なし。regress 不要。
+
+### X-3 — 計測作法: この開発機は**単発で数十秒スパイクする**
+
+B-0 / B-8 の計測中、`cold -j 1` が 9.7s で安定している最中に **1 回だけ 24.18s**、
+別の機会に cold が 4.3s 安定中に **1 回だけ 87.14s** を記録しました。
+コードは同一、直前直後の交互測定は正常値です。**外れ値は捨ててよい**（が、必ず記録する）。
+
+**そして §1.1 のルール 11 の実務版として、次を守ってください:**
+
+> **A を 3 回 → B を 3 回」の順で測ってはいけない。必ず A/B/A/B と交互に測る。**
+
+B-0 でこれを踏みました。逐次バッチだと **+0.27s の「回帰」**が見えましたが、
+交互測定に切り替えると **post 4.35s / pre 4.36s ＝ 差なし**にきれいに消えました。
+0.1s 単位を争うタスク（Tier A のほぼ全部）では、バッチ測定は**存在しない回帰を捏造します。**
+
+### X-4 — `guff-style` の `checks_test` が 19 本落ちている（**X-2 と同一原因**）
+
+**発見の経緯:** B-3（testifylint）の findings 安全網を用意しようとして踏みました。
+**prometheus では testifylint の検出が 0 件**なので（実測: modernize 16 / govet 4 の計 20 件のみ）、
+testifylint を触るタスクの findings 検証は **`cargo test -p guff-style` が唯一の安全網**です。
+そこが落ちていると、B-3 は「検証できないので着手できない」になります。
+
+**症状:** `cargo test -p guff-style` で **19 本 failed / 256 passed**。うち 7 本が testifylint。
+
+```
+clickhouselint_flags_missing_err_and_batch_close   sloglint_flags_mixed_args_by_default
+exptostd_flags_exp_constraints                     sloglint_settings_static_msg_forbidden_keys_and_attr_only
+exptostd_flags_exp_maps                            testifylint_disable_all_then_enable_subset
+exptostd_flags_exp_slices_import_only_when_...     testifylint_flags_blank_imports
+ginkgolinter_flags_common_assertion_mistakes       testifylint_flags_common_anti_patterns
+ginkgolinter_respects_settings                     testifylint_flags_mock_expect
+loggercheck_custom_rules_from_settings             testifylint_go_require_ignore_http_handlers
+loggercheck_flags_odd_kv_pairs                     testifylint_require_error_fn_pattern
+loggercheck_require_string_key_and_noprintflike    testifylint_suite_thelper_when_enabled
+zerologlint_flags_undispatched_events
+```
+
+**原因: X-2 と 1 文字違いで同じ。** `crates/guff-style/tests/support.rs:114` が
+`imports: HashMap::new()` のままで、`run_on_packages` の import ゲート
+（`analyzer_applies_to_package` → `package_imports_prefix`）が空マップを見て
+**analyzer をそもそもスケジュールしません。** 落ちている 19 本は
+「import ゲートを持つ analyzer」と完全に一致します。X-2 は `guff-govet` 側だけを直しました。
+
+**本番は壊れていません**（X-2 と同じ理由。`Package.imports` は `go list` 由来で埋まる）。
+
+### DONE（2026-07-28）— **19 本 → 0 本。275/275 PASS。ゲート破壊プローブ確認済み。**
+
+`crates/guff-style/tests/support.rs` の `typecheck_with_deps` で、パース済み
+`main_file.imports` と `deps` の import path から `Package.imports` を埋める
+（値は `Package::default()` の stub。ゲートはキーしか見ない）。X-2 の実装をそのまま移植し、
+`unquote_import_path` も同じものをローカルに置いた。
+
+**そのうえで露出した 1 件は「テストの期待値が間違っていた」ものだった:**
+`testifylint_flags_common_anti_patterns` は `messages.contains("zero")` を
+**あるはず**として assert していましたが、`zero` チェッカは
+`IMPLEMENTED`（`crates/guff-style/src/testifylint.rs`）から**意図的に外されています** —
+golangci-lint 2.12 が vendor する testifylint は v1.6.4 で `zero` を持たないため、
+有効化すると `guff_only` 差分が出ます。19 本が「最初の assert で落ちていた」ので、
+この誤りは**ずっと隠れていました**。
+
+→ assert を**否定形に反転**しました（`!messages.any(|m| m.starts_with("zero:"))`）。
+`bad.go:50` に `assert.True(t, ts.IsZero())`（`check_zero` が拾う形）があるので
+**空振りの assert ではなく**、`zero` を誤って既定 ON にしたらここで落ちます。
+つまり golangci 互換の判断を守る回帰ガードになりました。
+
+**検証:**
+- `cargo test -p guff-style` → **275 passed / 0 failed**（before: 256/19）
+- ゲート破壊プローブ: `action.rs:652` の `"testifylint" => package_imports_prefix(...)` を
+  一時的に `=> false` にして再実行 → **testifylint の 7 本がちょうど落ちる**（他は無傷）。
+  戻すと 275/275。よってこのテスト群は実際にゲート通過を見張っている。
+- 本番コードは未変更（`crates/guff-style/tests/` のみ）。findings / 性能への影響なし。
+
+**残っている同種の穴（未修理。ただし現時点で症状は出ていない）:**
+
+```bash
+rg -n 'imports: HashMap::new\(\)' crates/*/tests/
+```
+
+2026-07-28 時点で **10 クレートがまだ空マップのまま**です:
+guff-comment / guff-dupl / guff-errcheck / guff-gostaticanalysis / guff-import /
+guff-ineffassign / guff-misspell / guff-plugin-example / guff-revive / guff-unused。
+
+**それでもこの 10 個は今テストが通っています。** `analyzer_applies_to_package`
+（`crates/guff-runner/src/action.rs:652` 付近）の import ゲートは **analyzer 名の
+ホワイトリスト**なので、ゲートに載っていない analyzer は空マップでも素通りします。
+つまり「空マップ ＝ 壊れている」ではなく、**「空マップ ＋ ゲート対象 ＝ 壊れている」**です。
+
+**したがって危険なのは将来です:** これら 10 クレートのどれかの analyzer を後から
+ゲートに追加した瞬間、そのクレートの must-flag テストが**静かに空配列を assert する側に
+回ります**（＝ X-2 / X-4 と同じ事故）。ゲートに analyzer を足すときは、
+**その analyzer のクレートの `tests/support.rs` が `imports` を埋めているか**を必ず先に見ること。
+
+### X-5 — `parse_v2_modernize_settings` が落ちている（**古い期待値。X-4 と同じ「数を assert した」事故**）
+
+**発見の経緯:** X-4 のあと `cargo test --workspace` を通したら、guff-style とは無関係に
+これ 1 本だけ残りました。**`main` で以前から落ちています**（変更を stash して確認済み）。
+
+**症状:** `crates/guff-lint/tests/settings_test.rs:979` で `left: 9 / right: 3`。
+
+**原因:** `to_guff_modernize()`（`crates/guff-lint/src/settings.rs`）は、
+ユーザーの `disable:` に **`SUITE_EXTRA_OFF` の 6 個を追記**します
+（`errorsastype` / `slicesdelete` / `bloop` / `importcomment` / `reflecttypeassert` / `stringscut`
+＝ guff は実装しているが golangci-lint が vendor する x/tools Suite v0.44 では有効化されない
+チェッカ。golangci と finding set を合わせるための意図的な既定 OFF）。
+よって fixture が 3 個 disable すると **3 + 6 = 9** になります。
+テストの `assert_eq!(opts.disable.len(), 3)` は `SUITE_EXTRA_OFF` 導入前の期待値でした。
+
+### DONE（2026-07-28）— **不変条件を assert する形に直した（`len()` の直値をやめた）。**
+
+`len() == 9` に書き換えるのは**同じ事故を繰り返す**（Suite の内容が変わるたびに落ちる）ので、
+代わりに次を assert:
+
+1. **ユーザーの 3 個が先頭に、順序どおり残る**（`take(3)` で比較）
+2. **suite-extra が追記されている**（`stringscut` の存在）
+3. **重複が入っていない**（sort+dedup して長さ不変）
+
+これで「ユーザー指定を落とす」「追記を忘れる」「二重に足す」の 3 方向を守れます。
+
+**検証:** `cargo test -p guff-lint --test settings_test` → **61 passed / 0 failed**。テストのみの変更。
+
+> ⚠️ **訂正（同日）:** この DONE を書いた時点では「これで `cargo test --workspace` が全 crate green」と
+> 判断しましたが、**間違いでした。** `cargo test` は**最初に失敗したテストバイナリで打ち切る**ため、
+> guff-lint より後に走る `guff-staticcheck` に到達していなかっただけです。
+> 直した結果その先に進めるようになり、**新たに 3 本の既存失敗が露出しました（→ X-6）。**
+> **教訓: `cargo test --workspace` の「失敗 1 本」を信用してはいけない。
+> 全体像を見るには `cargo test --workspace --no-fail-fast` を使うこと。**
+
+### X-6 — `guff-staticcheck` の `checks_test` が 3 本落ちている（**未修理。X-4 / X-5 とは別原因**）
+
+**発見の経緯:** X-5 を直したことで `cargo test --workspace` が guff-staticcheck まで到達し、
+**それまで fail-fast に隠れていた** 3 本が見えるようになりました。
+
+```
+sa4010_allows_ok_cases            ← ok fixture に対して誤検出（false positive）
+sa4017_allows_ok_cases            ← 同上
+sa5011_flags_possible_nil_deref   ← 検出できていない（空配列）
+```
+
+**`main` で以前から落ちています**（B-3 の変更を stash して確認済み。325 passed / 3 failed で同一）。
+**X-2 / X-4 の import ゲート問題ではありません** —
+`crates/guff-staticcheck/tests/support.rs:102` は既に `imports` を埋めています。
+
+**性能タスクとは無関係な linter の挙動の問題**なので、§0-9 に従って**あえて直していません。**
+いずれも SSA / CFG ベースのチェックなので、修理はリスクが高く、独立したタスクにするべきです。
+
+**本番の影響は限定的**と考えられます: full regress は `guff_only=0 / golangci_only=0`
+（golangci-lint と完全一致）を維持しているので、**prometheus の実コードでは差が出ていません。**
+つまり fixture レベルの取りこぼし／誤検出です。ただし SA5011 は
+「nil deref を見逃す」方向なので、**別リポジトリでは検出漏れになりえます。**
+
+**着手するときの注意:** `cargo test --workspace --no-fail-fast` で全体を見ること
+（`--no-fail-fast` 無しだと、この 3 本の手前で別の失敗が出た瞬間また見えなくなります）。

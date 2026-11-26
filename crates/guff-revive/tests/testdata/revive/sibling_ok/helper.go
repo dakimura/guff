@@ -1,0 +1,3 @@
+package siblingok
+
+func helper() {}

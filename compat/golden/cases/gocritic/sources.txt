@@ -1,0 +1,19 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# The golden tier does NOT keep its own copy of these files: it points at the
+# fixture the Rust unit tests already use, so the two can never drift. Editing
+# the fixture changes the golden diff, which is exactly the intended signal.
+bad.go     crates/guff-style/tests/testdata/gocritic/bad.go
+ok.go      crates/guff-style/tests/testdata/gocritic/ok.go
+extras.go  crates/guff-style/tests/testdata/gocritic/extras.go
+ptrtoref.go  crates/guff-style/tests/testdata/gocritic/ptrtoref.go
+deprecated.go  crates/guff-style/tests/testdata/gocritic/deprecated.go
+testfuncs.go  crates/guff-style/tests/testdata/gocritic/testfuncs.go
+duparg.go  crates/guff-style/tests/testdata/gocritic/duparg.go
+# exitAfterDefer over every construct that can hold a call — the walk is
+# generic upstream, and guff used to enumerate statement kinds by hand.
+exitafterdefer.go  crates/guff-style/tests/testdata/gocritic/exitafterdefer.go
+# dupSubExpr's two guards (resultIsFloat / SideEffectFree) and the composite,
+# slice and unary shapes its AST comparison had no arm for.
+dupsubexpr.go  crates/guff-style/tests/testdata/gocritic/dupsubexpr.go

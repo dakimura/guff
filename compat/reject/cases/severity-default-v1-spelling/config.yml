@@ -1,0 +1,10 @@
+version: "2"
+linters:
+  default: none
+  enable: [errcheck]
+severity:
+  # v1's key. In a v2 file it sets nothing, so the rules below have no default.
+  default-severity: warning
+  rules:
+    - linters: [errcheck]
+      severity: error

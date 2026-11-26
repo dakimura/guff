@@ -1,0 +1,12 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh exhaustruct
+# Produced by running golangci-lint on compat/golden/cases/exhaustruct/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+bad.go:15:9:exhaustruct::p.T is missing field B
+bad.go:20:9:exhaustruct::p.T is missing fields B, C
+bad.go:31:9:exhaustruct::p.Outer is missing field N
+bad.go:35:10:exhaustruct::p.T is missing field C

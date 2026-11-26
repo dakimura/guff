@@ -1,0 +1,24 @@
+# Golden case: `gocritic.enabled-checks` (COMPAT-HARDENING Phase 4).
+#
+# Adding by name, from two different tag classes: `paramTypeCombine` is style +
+# opinionated and `emptyFallthrough` is style + experimental. Neither is on by
+# default, and naming a checker needs no tag to be named alongside it.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gocritic
+  settings:
+    gocritic:
+      enabled-checks:
+        - paramTypeCombine
+        - emptyFallthrough
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

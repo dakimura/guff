@@ -1,0 +1,10 @@
+# Known finding-set diffs for per-linter isolate runs.
+# Format: <target> <guff-only|golangci-only> <normalized-key>
+# target = isolate-<linter>
+#
+# Prefer fixing guff over growing this list.
+#
+# The former SA5011 guff-only and QF1008 golangci-only entries are fixed:
+# SA5011 now reconstructs the sigma/phi renaming that hides a deref reached only
+# after an `if p != nil` block, and QF1008 passes the current package to
+# `lookup_field_or_method` so unexported embedded fields resolve.

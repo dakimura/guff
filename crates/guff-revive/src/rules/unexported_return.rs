@@ -1,0 +1,202 @@
+//! `unexported-return` — exported functions should not return unexported types.
+
+use guff::ast::FuncDecl;
+use guff::walk::{self, NodeRef};
+use guff_analysis::Pass;
+use guff_types::arena::TypeData;
+use guff_types::ObjectId;
+
+use crate::failure::Failure;
+use crate::util::{file_is_test, is_importable_package, receiver_type_key, revive_can_import, type_string};
+
+pub struct Checker<'a> {
+    pass: &'a Pass<'a>,
+    failures: Vec<Failure>,
+    /// `!file.IsImportable()` for the current file: a test file. (A `main`
+    /// package or an external test package never gets a checker at all.)
+    skip_file: bool,
+}
+
+impl<'a> Checker<'a> {
+    pub fn try_new(pass: &'a Pass<'a>) -> Option<Self> {
+        if !is_importable_package(&pass.pkg().name) {
+            return None;
+        }
+        Some(Self {
+            pass,
+            failures: Vec::new(),
+            skip_file: false,
+        })
+    }
+
+    pub fn on_file(&mut self, file_is_test: bool) {
+        self.skip_file = file_is_test;
+    }
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        if self.skip_file {
+            return;
+        }
+        let NodeRef::FuncDecl(f) = n else {
+            return;
+        };
+        check_func(self.pass, f, &mut self.failures);
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
+pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let Some(mut c) = Checker::try_new(pass) else {
+        return Vec::new();
+    };
+    for file in pass.files() {
+        c.on_file(file_is_test(pass, file));
+        walk::inspect(NodeRef::File(file), |n| {
+            if let Some(n) = n {
+                c.visit(n);
+            }
+            true
+        });
+    }
+    c.into_failures()
+}
+
+fn check_func(pass: &Pass<'_>, f: &FuncDecl, failures: &mut Vec<Failure>) {
+    let Some(results) = &f.ty.results else {
+        return;
+    };
+    if !f.name.is_exported() {
+        return;
+    }
+    let thing = if f.recv.is_some() {
+        if let Some(recv) = f.recv.as_ref().and_then(|r| r.list.first()) {
+            if let Some(ty) = &recv.ty {
+                let key = receiver_type_key(ty);
+                if !guff::ast::ast_is_exported(&key) {
+                    return;
+                }
+            }
+        }
+        "method"
+    } else {
+        "func"
+    };
+    for ret in &results.list {
+        let Some(ty_expr) = &ret.ty else {
+            continue;
+        };
+        // Must use type info — a lowercase Ident may be a predeclared builtin
+        // (`string`, `error`, `int`, …) which is not an "unexported" package type.
+        let Some(typ) = crate::util::type_of(pass, ty_expr) else {
+            continue;
+        };
+        if exported_type(pass, typ) {
+            continue;
+        }
+        failures.push(Failure {
+            rule: "unexported-return",
+            pos: ty_expr.pos().0 as u32,
+            message: format!(
+                "exported {thing} {} returns unexported type {}, which can be annoying to use",
+                f.name.name,
+                type_string(pass, typ)
+            ),
+            ..Failure::default()
+        });
+        break;
+    }
+}
+
+/// Does this alias resolve, through any chain of aliases, to a type declared in
+/// a package revive's own type check cannot import (anything but this package
+/// and the standard library; see [`revive_can_import`])?
+fn alias_target_is_imported(pass: &Pass<'_>, typ: guff_types::TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let (types, objects) = (&artifacts.types, &artifacts.objects);
+    let here = artifacts.type_pkg;
+    let mut cur = typ;
+    for _ in 0..16 {
+        let TypeData::Alias(a) = types.get(cur) else {
+            break;
+        };
+        let Some(rhs) = a.rhs() else {
+            return false;
+        };
+        match types.get(rhs) {
+            TypeData::Alias(_) => cur = rhs,
+            TypeData::Named(n) => {
+                return n.obj().pkg(objects).is_some_and(|p| {
+                    p != here && !revive_can_import(pass, artifacts.packages.get(p).path())
+                });
+            }
+            _ => return false,
+        }
+    }
+    false
+}
+
+fn exported_type(pass: &Pass<'_>, typ: guff_types::TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return true;
+    };
+    let types = &artifacts.types;
+    let objects = &artifacts.objects;
+    match types.get(typ) {
+        TypeData::Named(n) => return named_exported(objects, n.obj()),
+        TypeData::Alias(a) => {
+            let obj = a.obj();
+            if obj.pkg(objects).is_none() {
+                return true;
+            }
+            // An alias whose target lives in **another package** outside the
+            // standard library is invisible to upstream. revive type-checks
+            // the files itself with `importer.Default()`, which (since
+            // golangci-lint 2.15.0) resolves only the standard library, so
+            // `Pkg.TypeOf` hands `exportedType` a nil type and nil is
+            // "exported". datadog-agent's dogstatsd reader returns
+            // `[]*resource` where `type resource = metrics.Resource`.
+            //
+            // Only the alias *target* counts: an unexported struct that merely
+            // holds an imported field still type-checks locally and is still
+            // reported.
+            if alias_target_is_imported(pass, typ) {
+                return true;
+            }
+            // revive v1.17.0 `exportedTypeName`: no exception for an
+            // unexported alias of an interface any more.
+            return obj.exported(objects);
+        }
+        TypeData::Pointer(p) => return exported_type(pass, p.elem()),
+        TypeData::Slice(s) => return exported_type(pass, s.elem()),
+        TypeData::Array(a) => return exported_type(pass, a.elem()),
+        TypeData::Map(m) => {
+            return exported_type(pass, m.key()) && exported_type(pass, m.elem());
+        }
+        TypeData::Chan(c) => return exported_type(pass, c.elem()),
+        _ => {}
+    }
+    let u = typ.underlying(types);
+    match types.get(u) {
+        TypeData::Basic(_) => true,
+        TypeData::Named(n) => named_exported(objects, n.obj()),
+        TypeData::Pointer(p) => exported_type(pass, p.elem()),
+        TypeData::Slice(s) => exported_type(pass, s.elem()),
+        TypeData::Array(a) => exported_type(pass, a.elem()),
+        TypeData::Map(m) => exported_type(pass, m.key()) && exported_type(pass, m.elem()),
+        TypeData::Chan(c) => exported_type(pass, c.elem()),
+        _ => true,
+    }
+}
+
+fn named_exported(objects: &guff_types::ObjectArena, obj: ObjectId) -> bool {
+    if obj.pkg(objects).is_none() {
+        return true;
+    }
+    // revive v1.17.0 dropped the exception for unexported interface types.
+    obj.exported(objects)
+}

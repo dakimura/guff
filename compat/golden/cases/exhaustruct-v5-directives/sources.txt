@@ -1,0 +1,8 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces)
+external/external.go  crates/guff-style/tests/testdata/exhaustruct/upstream-v5.2.0/external/external.go
+types/directives/directives.go  crates/guff-style/tests/testdata/exhaustruct/upstream-v5.2.0/types/directives/directives.go
+types/directives/errors.go  crates/guff-style/tests/testdata/exhaustruct/upstream-v5.2.0/types/directives/errors.go
+types/directives/nested.go  crates/guff-style/tests/testdata/exhaustruct/upstream-v5.2.0/types/directives/nested.go
+types/directives/package-clause.go  crates/guff-style/tests/testdata/exhaustruct/upstream-v5.2.0/types/directives/package-clause.go
+types/directives/priority.go  crates/guff-style/tests/testdata/exhaustruct/upstream-v5.2.0/types/directives/priority.go

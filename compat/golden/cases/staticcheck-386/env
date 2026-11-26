@@ -1,0 +1,6 @@
+# SA1027 returns early unless the target's word size is 4, so on any 64-bit
+# host it cannot fire — for either tool. Cross-compiling the case is the only
+# way to compare it at all. GOOS must move too: darwin/386 is not a valid pair
+# and golangci-lint reports "no go files to analyze" for it.
+GOOS=linux
+GOARCH=386

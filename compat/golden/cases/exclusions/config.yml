@@ -1,0 +1,56 @@
+# Golden case: the baseline for the `linters.exclusions.*` cases
+# (COMPAT-HARDENING Phase 4).
+#
+# This config has no `exclusions` key at all. Every other exclusions case runs
+# the same linters over the same fixture and adds exactly one axis
+# (`rules`, `paths`, `presets`), so the diff between this golden and that one
+# is the setting's whole effect, written in golangci-lint's own output.
+#
+# The linters are chosen for what they let a rule discriminate: errcheck gives
+# several findings whose *text* differs, govet gives findings whose analyzer
+# name (`printf`) is not the linter name, and revive / staticcheck / gosec are
+# the linters the four exclusion presets name. Their checks are pinned to the
+# handful the presets reach so the case cannot drift when an unrelated check
+# changes.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - gosec
+    - govet
+    - ineffassign
+    - revive
+    - staticcheck
+  settings:
+    gosec:
+      includes:
+        - G103
+        - G104
+        - G204
+        - G301
+        - G304
+    govet:
+      enable:
+        - printf
+        - unsafeptr
+    revive:
+      rules:
+        - name: exported
+        - name: package-comments
+    staticcheck:
+      checks:
+        - ST1000
+        - SA4011
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # Several findings deliberately share a line (a govet/printf finding and the
+  # errcheck one on the same `fmt.Printf` call), and telling a `linters:` rule
+  # from a `text:` rule depends on both surviving.
+  uniq-by-line: false
+
+run:
+  timeout: 5m

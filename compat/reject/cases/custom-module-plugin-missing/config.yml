@@ -1,0 +1,25 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - errcheck
+  settings:
+    # A module plugin the running binary was not built with. golangci-lint
+    # builds every plugin declared here — enabled or not, which is why this
+    # case does not name `requiredfield` under `enable` — and a plugin it
+    # cannot find ends the process before any package is loaded.
+    #
+    # Found on pulumi's config (corpus candidate, 2026-08-29): it declares two
+    # such plugins, golangci-lint refuses to start, and guff listed both as
+    # enabled linters and linted on with everything else. That is the same
+    # shape as `unknown-linter` — a run that exits clean while the config asked
+    # for a linter nobody has — but it survived that fix, because a name under
+    # `settings.custom` is a *declared* linter rather than an unknown one.
+    #
+    # One plugin, not two: upstream ranges over a Go map, so with two missing
+    # plugins the name in the message is whichever came out first (pulumi's two
+    # alternate across runs).
+    custom:
+      requiredfield:
+        type: module
+        description: Checks that required fields are set in struct literals

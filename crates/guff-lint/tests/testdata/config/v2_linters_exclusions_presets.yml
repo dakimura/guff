@@ -1,0 +1,12 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - errcheck
+  exclusions:
+    presets:
+      - std-error-handling
+      - comments
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

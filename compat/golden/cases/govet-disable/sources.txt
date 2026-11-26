@@ -1,0 +1,15 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# COMPAT-HARDENING Phase 4. The five `govet-*` selector cases share this file
+# (`govet-settings` is the baseline: no `settings.govet` block at all); only
+# their `config.yml` differs. The fixture trips exactly three analyzers — all
+# implemented by guff, all on golangci-lint's default list — so each golden is
+# a subtraction from the baseline and nothing else moves.
+#
+# This is deliberately *not* cases/govet, which names all thirty analyzers
+# explicitly so that its golden is about the analyzers. Naming them is exactly
+# what makes the defaults unmeasurable, and `enable-all` on that fixture would
+# drag in the sixteen analyzers guff does not implement.
+
+settings/bad.go   crates/guff-govet/tests/testdata/settings/bad.go

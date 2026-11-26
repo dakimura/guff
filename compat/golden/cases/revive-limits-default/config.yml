@@ -1,0 +1,30 @@
+# Golden case: the six numeric-limit revive rules at their defaults.
+#
+# argument-limit 8 / cyclomatic 10 / function-length 50,75 /
+# function-result-limit 3 / line-length-limit 80 / max-control-nesting 5.
+#
+# The pair with `revive-limits-configured` is what pins that the arguments are
+# read at all: guff had every default baked in as a `const`.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      rules:
+        - name: argument-limit
+        - name: cyclomatic
+        - name: function-length
+        - name: function-result-limit
+        - name: line-length-limit
+        - name: max-control-nesting
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

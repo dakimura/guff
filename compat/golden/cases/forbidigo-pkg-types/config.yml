@@ -1,0 +1,37 @@
+# Golden case: forbidigo's `pkg:` with `analyze-types`, same fixture.
+#
+# With type analysis the path is resolved — except for a builtin, which has no
+# package, so `println` is tested against "": `pkg: ^$` fires on it and
+# `pkg: .+` never does. guff skipped a `pkg` pattern outright when no path was
+# resolved, and so missed the `^$` one.
+#
+# Fires here: everything but `print` (`pkg: .+`).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - forbidigo
+  settings:
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: ^fmt\.Println$
+          pkg: ^fmt$
+        - pattern: ^strings\.ToUpper$
+          pkg: .*
+        - pattern: ^println$
+          pkg: ^$
+        - pattern: ^print$
+          pkg: .+
+        - pattern: ^user\.Current$
+          pkg: ^os/user$
+        - pattern: ^user\.Lookup$
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
