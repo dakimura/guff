@@ -1,0 +1,45 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh modernize-upstream-v052
+# Produced by running golangci-lint on compat/golden/cases/modernize-upstream-v052/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+slicesbackward/slicesbackward.go:16:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:25:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:34:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:45:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:54:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:62:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:69:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:76:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:127:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:262:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:269:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:284:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:291:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:305:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:315:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:316:7:modernize::rangeint: for loop can be modernized using range over int
+slicesbackward/slicesbackward.go:327:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:341:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:352:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:367:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:396:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+stditerators/stditerators.go:9:2:modernize::stditerators: Len/At loop can simplified using Tuple.Variables iteration
+stditerators/stditerators.go:15:2:modernize::stditerators: NumChildren/Child loop can simplified using Scope.Children iteration
+stditerators/stditerators.go:21:3:modernize::stditerators: NumChildren/Child loop can simplified using Scope.Children iteration
+stditerators/stditerators.go:24:3:modernize::stditerators: NumChildren/Child loop can simplified using Scope.Children iteration
+stditerators/stditerators.go:35:3:modernize::stditerators: NumChildren/Child loop can simplified using Scope.Children iteration
+stditerators/stditerators.go:41:3:modernize::stditerators: NumChildren/Child loop can simplified using Scope.Children iteration
+stditerators/stditerators.go:49:2:modernize::stditerators: Len/Term loop can simplified using Union.Terms iteration
+stditerators/stditerators.go:68:2:modernize::stditerators: Len/At loop can simplified using Tuple.Variables iteration
+stditerators/stditerators.go:81:3:modernize::stditerators: Len/At loop can simplified using Tuple.Variables iteration
+stditerators/stditerators.go:89:3:modernize::stditerators: Len/At loop can simplified using Tuple.Variables iteration
+stditerators/stditerators.go:96:2:modernize::stditerators: NumField/Field loop can simplified using Type.Fields iteration
+stditerators/stditerators.go:99:2:modernize::stditerators: NumMethod/Method loop can simplified using Type.Methods iteration
+stditerators/stditerators.go:102:2:modernize::stditerators: NumIn/In loop can simplified using Type.Ins iteration
+stditerators/stditerators.go:105:2:modernize::stditerators: NumOut/Out loop can simplified using Type.Outs iteration
+stditerators/stditerators.go:116:2:modernize::stditerators: NumField/Field loop can simplified using Value.Fields iteration
+stditerators/stditerators.go:123:2:modernize::stditerators: NumMethod/Method loop can simplified using Value.Methods iteration
