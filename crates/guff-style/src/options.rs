@@ -1350,6 +1350,10 @@ pub struct ParalleltestOptions {
     pub ignore_missing_subtests: bool,
     /// Report `defer` used together with `t.Parallel` (prefer `t.Cleanup`).
     pub check_cleanup: bool,
+    /// Upstream `-ignoreloopVar`: skip the "does not reinitialise the
+    /// variable" check. golangci-lint sets it from `run.go` ≥ 1.22, never
+    /// from a config key.
+    pub ignore_loop_var: bool,
 }
 
 /// `linters.settings.tagliatelle` / `linters-settings.tagliatelle`.

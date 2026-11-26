@@ -1,0 +1,22 @@
+# Golden case: paralleltest-upstream-cleanup.
+#
+# paralleltest v1.0.16 testdata/src/cleanup, run as upstream's paralleltest_test.go
+# runs it (TestCheckCleanupOption: check-cleanup).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - paralleltest
+  settings:
+    paralleltest:
+      check-cleanup: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

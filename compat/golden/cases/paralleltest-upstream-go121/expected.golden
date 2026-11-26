@@ -1,0 +1,34 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh paralleltest-upstream-go121
+# Produced by running golangci-lint on compat/golden/cases/paralleltest-upstream-go121/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+t/chdir_test.go:17:1:paralleltest::Function TestFunctionWithChdirLookalike missing the call to method parallel\n
+t/chdir_test.go:30:2:paralleltest::Function TestFunctionChdirChildrenCanBeParallel missing the call to method parallel in the test run\n
+t/chdir_test.go:33:2:paralleltest::Function TestFunctionChdirChildrenCanBeParallel missing the call to method parallel in the test run\n
+t/chdir_test.go:42:2:paralleltest::Function TestFunctionRunWithChdirSibling missing the call to method parallel in the test run\n
+t/t_test.go:46:1:paralleltest::Function TestFunctionMissingCallToParallel missing the call to method parallel\n
+t/t_test.go:60:2:paralleltest::Range statement for test TestFunctionRangeMissingCallToParallel missing the call to method parallel in test Run\n
+t/t_test.go:67:1:paralleltest::Function TestFunctionMissingCallToParallelAndRangeNotUsingRangeValueInTDotRun missing the call to method parallel\n
+t/t_test.go:72:2:paralleltest::Range statement for test TestFunctionMissingCallToParallelAndRangeNotUsingRangeValueInTDotRun missing the call to method parallel in test Run\n
+t/t_test.go:84:2:paralleltest::Range statement for test TestFunctionRangeNotUsingRangeValueInTDotRun does not reinitialise the variable tc\n
+t/t_test.go:97:2:paralleltest::Range statement for test TestFunctionRangeNotReInitialisingVariable does not reinitialise the variable tc\n
+t/t_test.go:108:2:paralleltest::Function TestFunctionTwoTestRunMissingCallToParallel missing the call to method parallel in the test run\n
+t/t_test.go:111:2:paralleltest::Function TestFunctionTwoTestRunMissingCallToParallel missing the call to method parallel in the test run\n
+t/t_test.go:118:2:paralleltest::Function TestFunctionFirstOneTestRunMissingCallToParallel missing the call to method parallel in the test run\n
+t/t_test.go:133:2:paralleltest::Function TestFunctionSecondOneTestRunMissingCallToParallel missing the call to method parallel in the test run\n
+t/t_test.go:153:1:paralleltest::Function TestFunctionWithParallelLookalike missing the call to method parallel\n
+t/t_test.go:170:1:paralleltest::Function TestFunctionWithSetenvLookalike missing the call to method parallel\n
+t/t_test.go:187:2:paralleltest::Function TestFunctionSetenvChildrenCanBeParallel missing the call to method parallel in the test run\n
+t/t_test.go:190:2:paralleltest::Function TestFunctionSetenvChildrenCanBeParallel missing the call to method parallel in the test run\n
+t/t_test.go:202:2:paralleltest::Function TestFunctionRunWithSetenvSibling missing the call to method parallel in the test run\n
+t/t_test.go:276:2:paralleltest::Function TestFunctionCallToParallelWhereTestContextIsAFunction missing the call to method parallel in the test run\n
+t/t_test.go:294:3:paralleltest::Function TestNestedTestRunsWithHelpers missing the call to method parallel in the test run\n
+t/t_test.go:295:3:paralleltest::Function TestNestedTestRunsWithHelpers missing the call to method parallel in the test run\n
+t/t_test.go:320:4:paralleltest::Function TestRangeHelperWithDifferentParamNames missing the call to method parallel in the test run\n
+t/t_test.go:321:4:paralleltest::Function TestRangeHelperWithDifferentParamNames missing the call to method parallel in the test run\n
+t/t_test.go:350:2:paralleltest::Function TestBuilderFunctionMissingParallel missing the call to method parallel in the test run\n
+t/t_test.go:351:2:paralleltest::Function TestBuilderFunctionMissingParallel missing the call to method parallel in the test run\n

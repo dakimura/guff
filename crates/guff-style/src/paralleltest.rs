@@ -10,13 +10,16 @@
 //! - `ignore-missing-subtests` (default false)
 //! - `check-cleanup` (default false)
 //!
-//! DEFERRED: loop-variable reinit detection (`ignoreloopVar`; golangci enables
-//! ignore for Go ≥ 1.22), builder-function returns used as `t.Run` callbacks.
+//! Not a config key: `ignoreloopVar`, which golangci-lint turns on when
+//! `run.go` (or the detected module version) is at least 1.22 — below that the
+//! "does not reinitialise the variable" check runs.
 
 use std::sync::OnceLock;
 
 use guff::ast::{CallExpr, Decl, Expr, FuncDecl, Stmt};
 use guff::walk::{self, expr_ref, NodeRef};
+use guff_types::arena::ObjectId;
+use guff_analysis::code;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
@@ -46,6 +49,9 @@ struct TestFunctionAnalysis {
     number_of_test_run: usize,
     position_of_test_run_node: Vec<u32>,
     range_pos: Option<u32>,
+    /// `loopVariableUsedInRun`: the first `t.Run` callback (of any range
+    /// statement in the function) that mentions a loop variable of its range.
+    loop_variable_used_in_run: Option<String>,
     defer_positions: Vec<u32>,
 }
 
@@ -152,6 +158,111 @@ fn target_method_in_method_run(call: &CallExpr, test_var: &str, target: &str) ->
     called
 }
 
+/// `parallelBlockingMethodIsCalledInTestFunction` (v1.0.16): a call to
+/// `<testVar>.Setenv` or `<testVar>.Chdir` — the `testing` methods that panic
+/// after `t.Parallel`. Matched by receiver **name**, like upstream, so a
+/// `Chdir` on some other value of that name counts too.
+fn parallel_blocking_in_node(n: NodeRef<'_>, test_var: &str) -> bool {
+    node_call_has_method(n, test_var, "Setenv") || node_call_has_method(n, test_var, "Chdir")
+}
+
+/// `parallelBlockingMethodIsCalledInMethodRun` (v1.0.16).
+fn parallel_blocking_in_method_run(call: &CallExpr, test_var: &str) -> bool {
+    target_method_in_method_run(call, test_var, "Setenv")
+        || target_method_in_method_run(call, test_var, "Chdir")
+}
+
+/// `checkBuilderFunctionForParallel`: `t.Run("name", builder())` counts as
+/// parallel when the **first** top-level func declaration named like the
+/// callee (`builder` or `x.builder` — the name only, so a method of the same
+/// name can be the one picked) has a `return func(<p> …) { … p.Parallel() … }`
+/// anywhere in it, nested func literals included. A returned literal with no
+/// named first parameter is skipped; an unknown builder is not parallel.
+fn check_builder_function_for_parallel(pass: &Pass<'_>, builder_call: &CallExpr) -> bool {
+    let builder_func_name = match builder_call.fun.as_ref() {
+        Expr::Ident(id) => id.name.as_str(),
+        Expr::SelectorExpr(sel) => sel.sel.name.as_str(),
+        _ => return false,
+    };
+    if builder_func_name.is_empty() {
+        return false;
+    }
+    for file in pass.files() {
+        for decl in &file.decls {
+            let Decl::FuncDecl(fd) = decl else {
+                continue;
+            };
+            if fd.name.name != builder_func_name {
+                continue;
+            }
+            let mut has_parallel = false;
+            // Stopping the whole walk once found is fine: the answer is a
+            // single boolean.
+            walk::preorder(NodeRef::FuncDecl(fd), |n| {
+                let NodeRef::ReturnStmt(ret) = n else {
+                    return true;
+                };
+                for result in &ret.results {
+                    let Expr::FuncLit(func_lit) = result else {
+                        continue;
+                    };
+                    let param_name = func_lit
+                        .ty
+                        .params
+                        .as_ref()
+                        .and_then(|params| params.list.first())
+                        .and_then(|first| first.names.first())
+                        .map(|n| n.name.as_str())
+                        .unwrap_or("");
+                    if param_name.is_empty() {
+                        continue;
+                    }
+                    walk::preorder(NodeRef::FuncLit(func_lit), |p| {
+                        if node_call_has_method(p, param_name, "Parallel") {
+                            has_parallel = true;
+                        }
+                        !has_parallel
+                    });
+                    if has_parallel {
+                        return false;
+                    }
+                }
+                true
+            });
+            return has_parallel;
+        }
+    }
+    false
+}
+
+/// `loopVarReferencedInRun`: the name of the **last** identifier in the
+/// callback argument (`call.Args[1]`, only for a two-argument call) whose
+/// object is one of `vars` — `ast.Inspect` does not stop at the first.
+///
+/// Without type information there is no `ObjectOf` to compare, and every
+/// identifier would equal a missing loop variable; upstream does not run on
+/// such a package at all, so neither does this.
+fn loop_var_referenced_in_run(
+    pass: &Pass<'_>,
+    call: &CallExpr,
+    vars: &[Option<ObjectId>],
+) -> Option<String> {
+    if call.args.len() != 2 || pass.types_info().is_none() {
+        return None;
+    }
+    let mut found = None;
+    walk::preorder(expr_ref(&call.args[1]), |n| {
+        if let NodeRef::Ident(ident) = n {
+            let obj = code::object_of(pass, ident);
+            if vars.iter().any(|v| *v == obj) {
+                found = Some(ident.name.clone());
+            }
+        }
+        true
+    });
+    found
+}
+
 fn analyze_test_run(pass: &Pass<'_>, call: &CallExpr, test_var: &str) -> TestRunAnalysis {
     let mut analysis = TestRunAnalysis::default();
     if !call_has_method(call, test_var, "Run") {
@@ -172,7 +283,7 @@ fn analyze_test_run(pass: &Pass<'_>, call: &CallExpr, test_var: &str) -> TestRun
                         }
                         if !analysis.cant_parallel {
                             analysis.cant_parallel =
-                                node_call_has_method(p, &inner_test_var, "Setenv");
+                                parallel_blocking_in_node(p, &inner_test_var);
                         }
                         true
                     });
@@ -204,9 +315,9 @@ fn analyze_test_run(pass: &Pass<'_>, call: &CallExpr, test_var: &str) -> TestRun
                     analysis.has_parallel = false;
                 }
             }
-            Expr::CallExpr(_) => {
-                // DEFERRED: builder functions that return a test func.
-                analysis.has_parallel = false;
+            Expr::CallExpr(builder_call) => {
+                // `t.Run("name", builder())`.
+                analysis.has_parallel = check_builder_function_for_parallel(pass, builder_call);
             }
             _ => {
                 analysis.has_parallel = false;
@@ -254,7 +365,7 @@ fn analyze_test_function(
                     }
                     if !analysis.func_cant_parallel_method {
                         analysis.func_cant_parallel_method =
-                            node_call_has_method(n, &test_var, "Setenv");
+                            parallel_blocking_in_node(n, &test_var);
                     }
                     if let NodeRef::CallExpr(call) = n {
                         if call_has_method(call, &test_var, "Run") {
@@ -270,6 +381,16 @@ fn analyze_test_function(
             }
             Stmt::RangeStmt(range) => {
                 analysis.range_pos = Some(range.for_.0 as u32);
+                // `pass.TypesInfo.ObjectOf` of the key and value when they
+                // are identifiers. Upstream compares the objects with `==`,
+                // nil included, so an `Option` compared whole is the port.
+                let loop_vars: Vec<Option<ObjectId>> = [&range.key, &range.value]
+                    .into_iter()
+                    .filter_map(|e| match e {
+                        Some(Expr::Ident(id)) => Some(code::object_of(pass, id)),
+                        _ => None,
+                    })
+                    .collect();
                 walk::preorder(NodeRef::RangeStmt(range), |n| {
                     let NodeRef::ExprStmt(r) = n else {
                         return true;
@@ -289,7 +410,11 @@ fn analyze_test_function(
                     }
                     if !analysis.range_statement_cant_parallel_method {
                         analysis.range_statement_cant_parallel_method =
-                            target_method_in_method_run(call, &inner_test_var, "Setenv");
+                            parallel_blocking_in_method_run(call, &inner_test_var);
+                    }
+                    if !opts.ignore_loop_var && analysis.loop_variable_used_in_run.is_none() {
+                        analysis.loop_variable_used_in_run =
+                            loop_var_referenced_in_run(pass, call, &loop_vars);
                     }
 
                     if call.args.len() > 1 {
@@ -343,19 +468,32 @@ fn analyze_test_function(
 
     if analysis.range_statement_over_test_cases_exists {
         if let Some(range_pos) = analysis.range_pos {
+            // Upstream's `else` hangs off the outer test only: a range
+            // whose subtests are neither parallel nor blocked reports the
+            // missing call (unless ignored) and never the loop variable.
             if !analysis.range_statement_has_parallel_method
                 && !analysis.range_statement_cant_parallel_method
-                && !opts.ignore_missing
-                && !opts.ignore_missing_subtests
+            {
+                if !opts.ignore_missing && !opts.ignore_missing_subtests {
+                    reports.push(PendingReport {
+                        pos: range_pos,
+                        message: format!(
+                            "Range statement for test {func_name} missing the call to method parallel in test Run\n"
+                        ),
+                    });
+                }
+            } else if let Some(name) = analysis
+                .loop_variable_used_in_run
+                .as_ref()
+                .filter(|_| !opts.ignore_loop_var)
             {
                 reports.push(PendingReport {
                     pos: range_pos,
                     message: format!(
-                        "Range statement for test {func_name} missing the call to method parallel in test Run\n"
+                        "Range statement for test {func_name} does not reinitialise the variable {name}\n"
                     ),
                 });
             }
-            // DEFERRED: loop variable reinit (`ignoreloopVar`).
         }
     }
 

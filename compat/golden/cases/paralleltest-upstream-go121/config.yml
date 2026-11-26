@@ -1,0 +1,24 @@
+# Golden case: paralleltest-upstream-go121.
+#
+# paralleltest v1.0.16 testdata/src/t, run as upstream's paralleltest_test.go
+# runs it (TestMissing: default options; chdir_test.go is the v1.0.16 t.Chdir rule).
+#
+# The same package in a `go 1.21` module. golangci-lint sets paralleltest's
+# `ignoreloopVar` from run.go >= 1.22, so only below that does the
+# "does not reinitialise the variable" check run — upstream's own test runs it
+# with the flag off.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - paralleltest
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

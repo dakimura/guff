@@ -1,0 +1,22 @@
+# Golden case: paralleltest-upstream-ignoremissing.
+#
+# paralleltest v1.0.16 testdata/src/i, run as upstream's paralleltest_test.go
+# runs it (TestIgnoreMissingOption: ignore-missing).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - paralleltest
+  settings:
+    paralleltest:
+      ignore-missing: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true
