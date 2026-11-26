@@ -470,7 +470,23 @@ jobs:
       # `if: failure()` and `if: always()` alike — came out `skipped`, so the
       # diagnostics step below never ran and the file was never read. A line
       # per minute here survives whatever stops the runner.
+      #
+      # What those lines showed (bcf36f7, 2026-11-26): consul passed; guff on
+      # grafana peaked at 6 GB and finished; then golangci-lint on grafana held
+      # 6.5 GB resident plus 19 GB of the runner's 20 GB swap, paging ~30 MB/s
+      # each way, until the step died an hour into grafana with exit 143.
+      # Go's default GOGC=100 lets a heap grow to twice its live size before
+      # collecting; GOMEMLIMIT adds a soft ceiling on top, so the runtime also
+      # collects whenever the heap nears it. It is per process, and soft: if
+      # grafana's live heap is itself above 5 GiB the heap still grows past it
+      # and GC just runs more often (Go caps GC at ~50% CPU). Whether 5 GiB is
+      # enough is what the [mem] lines will show next. It changes when the GC
+      # runs, never what golangci-lint reports (a timeout still fails the
+      # target: run.sh returns 1 on golangci's exit 4), so the gate is the same
+      # gate. guff is Rust and ignores it.
       - name: Compat OSS (nightly tier, own-config)
+        env:
+          GOMEMLIMIT: 5GiB
         run: |
           (
             # A diagnostic must not stop itself: `head` closing the pipe on ps
