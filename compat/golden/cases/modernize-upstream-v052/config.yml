@@ -1,0 +1,25 @@
+# Golden case: x/tools v0.52.0's own modernize testdata (golangci-lint 2.15.0)
+# for the two analyzers whose v0.52 change is a new "do not report" guard
+# (PHASE9-LEDGER xtools-modernize #1 and #2):
+#   slicesbackward — the `name := s[i]` value variable only from the body's
+#     first statement; no report when s has effects and the body re-reads
+#     s[i]; no report when the body reads neither i nor s[i].
+#   stditerators   — no report when the body never calls x.At(i).
+# The files are upstream's, verbatim (BSD-3, LICENSE next to them). The fix
+# tier replays this case with --fix, so the `.go.golden` rewrites (notably
+# declInBlock, which keeps `v := item`) are gated too.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - modernize
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

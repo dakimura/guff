@@ -1,0 +1,4 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+slicesbackward/slicesbackward.go  crates/guff-style/tests/testdata/modernize/upstream-v0.52.0/slicesbackward/slicesbackward.go
+stditerators/stditerators.go  crates/guff-style/tests/testdata/modernize/upstream-v0.52.0/stditerators/stditerators.go

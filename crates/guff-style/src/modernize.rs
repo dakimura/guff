@@ -41,7 +41,7 @@
 //! - `stditerators` — `for i := 0; i < x.Len(); i++ { use(x.At(i)) }` →
 //!   `for elem := range x.All()` for well-known `go/types`/`reflect` types
 //!   (Go 1.24+/1.26+; both C-style and `for i := range x.Len()` forms;
-//!   elem-name collision → candidate skipped, DEFERRED fresh-name)
+//!   `chooseName` / `freshName` for the element variable)
 //! - `atomictypes` — `var x int32` + `atomic.AddInt32(&x, …)` → `atomic.Int32`
 //!   (Go 1.19+; And/Or need Go 1.23+; Pointer variants / IgnoredFiles gating
 //!   DEFERRED)
@@ -49,8 +49,7 @@
 //! DEFERRED (recognized in `disable` / documented): embedlit,
 //! appendclipped (unsafe-by-default upstream),
 //! atomictypes Pointer variants / IgnoredFiles,
-//! stditerators fresh-name generation on elem collisions / Seq2 dual-component
-//! patterns, unsafefuncs Slice/String helpers, importcomment Module==nil
+//! stditerators Seq2 dual-component patterns, unsafefuncs Slice/String helpers, importcomment Module==nil
 //! (GOPATH) skip, mapsloop Insert/Collect (iter.Seq2) / Clone (nil-preserving),
 //! slicescontains nested free break/continue analysis full parity,
 //! waitgroupgo trailing-Done,
@@ -4033,7 +4032,16 @@ fn check_slicesbackward(
                                 .rhs
                                 .iter()
                                 .any(|r| walk::expr_ref(r).erased_ptr() == parent.unwrap().erased_ptr());
-                            if in_rhs && a.lhs.len() == 1 && a.tok == Some(Token::DEFINE) {
+                            // x/tools v0.52: the declaration must be the
+                            // body's first statement. Anywhere else (inner
+                            // loop, func lit, if, after a label) it may run
+                            // zero or several times per iteration, while the
+                            // range variable is assigned exactly once.
+                            let is_first_stmt = matches!(
+                                for_stmt.body.list.first(),
+                                Some(Stmt::AssignStmt(first)) if std::ptr::eq(first, a)
+                            );
+                            if in_rhs && a.lhs.len() == 1 && a.tok == Some(Token::DEFINE) && is_first_stmt {
                                 first_assign = Some(a);
                                 return true;
                             }
@@ -4048,6 +4056,17 @@ fn check_slicesbackward(
         true
     });
     if bail {
+        return;
+    }
+    // x/tools v0.52: the fix evaluates s once, in the range header; if the
+    // body evaluates it again in s[i] and it has effects, that changes the
+    // program.
+    if slice_idxs > 0 && expr_has_effects(pass, slice_expr) {
+        return;
+    }
+    // x/tools v0.52: the body reads neither i nor s[i], so the direction is
+    // not observable and there is nothing for slices.Backward to express.
+    if other_uses == 0 && slice_idxs == 0 {
         return;
     }
 
@@ -6189,9 +6208,12 @@ fn check_stringscut(pass: &Pass<'_>, pending: &mut Vec<Diagnostic>) {
             let (sp, se) = (substr.pos().0 as u32, substr.end().0 as u32);
             if pkg_name == "strings" {
                 match code::expr_to_int(pass, substr) {
+                    // x/tools v0.52: a byte variable becomes
+                    // `string([]byte{b})`, not `string(b)`, which would
+                    // UTF-8 encode a byte >= 0x80 as two bytes.
                     None => {
-                        edits.push(TextEdit { pos: sp, end: sp, new_text: "string(".into() });
-                        edits.push(TextEdit { pos: se, end: se, new_text: ")".into() });
+                        edits.push(TextEdit { pos: sp, end: sp, new_text: "string([]byte{".into() });
+                        edits.push(TextEdit { pos: se, end: se, new_text: "})".into() });
                     }
                     Some(v) => edits.push(TextEdit {
                         pos: sp,
@@ -8103,18 +8125,12 @@ fn stditerators_row_for(
         .find(|r| r.pkgpath == path && r.typename == name && r.lenmethod == method_name)
 }
 
-fn obj_name_is(pass: &Pass<'_>, obj: ObjectId, name: &str) -> bool {
-    pass.pkg()
-        .type_artifacts
-        .as_ref()
-        .is_some_and(|a| obj.name(&a.objects) == name)
-}
-
 /// Verifies that every use of `loop_var` inside `body` is the sole argument of
 /// an `recv.At(loop_var)` call, and returns the edits replacing each such call
-/// with `elem`. Returns `None` when a use escapes that pattern, or when `elem`
-/// would collide with an existing name referenced in the body (upstream renames;
-/// we conservatively decline — DEFERRED).
+/// with `elem`. Returns `None` when a use escapes that pattern, when the body
+/// has no such call at all, or when, at some call, `elem` resolves to an
+/// object declared after the index variable other than `elem_var` (upstream:
+/// `lookup(info, curAtCall, elem)`; "shadowing of fresh name at use").
 fn stditerators_at_edits(
     pass: &Pass<'_>,
     body: &BlockStmt,
@@ -8122,11 +8138,15 @@ fn stditerators_at_edits(
     loop_var: ObjectId,
     atmethod: &str,
     elem: &str,
+    elem_var: Option<ObjectId>,
 ) -> Option<Vec<TextEdit>> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let pkg_scope = artifacts.packages.get(artifacts.type_pkg).scope();
+    let index_pos = loop_var.pos(&artifacts.objects);
     let mut at_edits: Vec<TextEdit> = Vec::new();
     let mut allowed: HashSet<u32> = HashSet::new();
     let mut uses: Vec<u32> = Vec::new();
-    let mut collision = false;
+    let mut shadowed = false;
 
     walk::inspect(NodeRef::BlockStmt(body), |n| {
         let Some(n) = n else {
@@ -8140,6 +8160,20 @@ fn stditerators_at_edits(
                         if let Expr::Ident(arg) = &call.args[0] {
                             if ident_obj(pass, arg) == Some(loop_var) {
                                 allowed.insert(arg.id);
+                                let call_pos = call.fun.pos().0 as u32;
+                                let at = guff_types::scope::innermost(&artifacts.scopes, pkg_scope, call_pos)
+                                    .unwrap_or(pkg_scope);
+                                if let Some((_, obj)) = guff_types::scope::lookup_parent(
+                                    &artifacts.scopes,
+                                    &artifacts.objects,
+                                    at,
+                                    elem,
+                                    call_pos,
+                                ) {
+                                    if Some(obj) != elem_var && obj.pos(&artifacts.objects) > index_pos {
+                                        shadowed = true;
+                                    }
+                                }
                                 at_edits.push(TextEdit {
                                     pos: call.fun.pos().0 as u32,
                                     end: call.rparen.0 as u32 + 1,
@@ -8151,12 +8185,8 @@ fn stditerators_at_edits(
                 }
             }
             NodeRef::Ident(id) => {
-                if let Some(obj) = ident_obj(pass, id) {
-                    if obj == loop_var {
-                        uses.push(id.id);
-                    } else if obj_name_is(pass, obj, elem) {
-                        collision = true;
-                    }
+                if ident_obj(pass, id) == Some(loop_var) {
+                    uses.push(id.id);
                 }
             }
             _ => {}
@@ -8164,13 +8194,74 @@ fn stditerators_at_edits(
         true
     });
 
-    if collision {
+    if shadowed {
         return None;
     }
     if uses.iter().any(|u| !allowed.contains(u)) {
         return None;
     }
+    // x/tools v0.52: no x.At(i) in the body means the new loop variable
+    // would be unused and the fix would not compile; upstream does not
+    // report the loop at all (both the for and the range pattern).
+    if at_edits.is_empty() {
+        return None;
+    }
     Some(at_edits)
+}
+
+/// stditerators' `chooseName(curBody, x, i)`: if the body's first statement
+/// is `e := x.At(i)`, or an `if e := x.At(i); …` whose init is, prefer `e` and
+/// return its var too (the fix then leaves a redundant `e := e`, as upstream
+/// does). Otherwise `freshName(info, index, info.Scopes[loop], loop.Pos(),
+/// curBody, curBody, NoPos, row.elemname)`.
+fn stditerators_choose_name(
+    pass: &Pass<'_>,
+    body: &BlockStmt,
+    recv: &Expr,
+    loop_var: ObjectId,
+    atmethod: &str,
+    elemname: &str,
+    loop_pos: u32,
+    loop_scope_pos: u32,
+) -> (String, Option<ObjectId>) {
+    let is_var_assign = |stmt: &Stmt| -> Option<(String, ObjectId)> {
+        let Stmt::AssignStmt(a) = stmt else { return None };
+        if a.tok != Some(Token::DEFINE) || a.lhs.len() != 1 || a.rhs.len() != 1 {
+            return None;
+        }
+        let Expr::Ident(lhs) = &a.lhs[0] else { return None };
+        let Expr::CallExpr(call) = &a.rhs[0] else { return None };
+        let Expr::SelectorExpr(sel) = unparen_expr(&call.fun) else { return None };
+        if sel.sel.name != atmethod || call.args.len() != 1 || !exprs_equal(&sel.x, recv) {
+            return None;
+        }
+        let Expr::Ident(arg) = &call.args[0] else { return None };
+        if pass.types_info()?.uses.get(&arg.id) != Some(&loop_var) {
+            return None;
+        }
+        let v = pass.types_info()?.defs.get(&lhs.id).copied().flatten()?;
+        Some((lhs.name.clone(), v))
+    };
+    if let Some(first) = body.list.first() {
+        if let Some((name, v)) = is_var_assign(first) {
+            return (name, Some(v));
+        }
+        if let Stmt::IfStmt(ifs) = first {
+            if let Some((name, v)) = ifs.init.as_deref().and_then(is_var_assign) {
+                return (name, Some(v));
+            }
+        }
+    }
+    let lbrace = body.lbrace.0 as u32;
+    let name = modernize_fresh_name(
+        pass,
+        lbrace,
+        (lbrace, body.rbrace.0 as u32 + 1),
+        loop_scope_pos,
+        loop_pos,
+        elemname,
+    );
+    (name, None)
 }
 
 fn stditerators_message(row: &StdIterRow) -> String {
@@ -8241,9 +8332,19 @@ fn check_stditerators_for(pass: &Pass<'_>, for_stmt: &ForStmt, pending: &mut Vec
     let Some(loop_var) = ident_obj(pass, cmp_x) else {
         return;
     };
-    let elem = row.elemname;
+    let (elem, elem_var) = stditerators_choose_name(
+        pass,
+        &for_stmt.body,
+        recv,
+        loop_var,
+        row.atmethod,
+        row.elemname,
+        pos,
+        init.lhs[0].pos().0 as u32,
+    );
+    let elem = elem.as_str();
     let Some(mut at_edits) =
-        stditerators_at_edits(pass, &for_stmt.body, recv, loop_var, row.atmethod, elem)
+        stditerators_at_edits(pass, &for_stmt.body, recv, loop_var, row.atmethod, elem, elem_var)
     else {
         return;
     };
@@ -8327,9 +8428,19 @@ fn check_stditerators_range(
     let Some(loop_var) = ident_obj(pass, key_id) else {
         return;
     };
-    let elem = row.elemname;
+    let (elem, elem_var) = stditerators_choose_name(
+        pass,
+        &range_stmt.body,
+        recv,
+        loop_var,
+        row.atmethod,
+        row.elemname,
+        range_stmt.for_.0 as u32,
+        key.pos().0 as u32,
+    );
+    let elem = elem.as_str();
     let Some(mut at_edits) =
-        stditerators_at_edits(pass, &range_stmt.body, recv, loop_var, row.atmethod, elem)
+        stditerators_at_edits(pass, &range_stmt.body, recv, loop_var, row.atmethod, elem, elem_var)
     else {
         return;
     };
