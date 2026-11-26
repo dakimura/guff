@@ -2,3 +2,7 @@
 # Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
 slicesbackward/slicesbackward.go  crates/guff-style/tests/testdata/modernize/upstream-v0.52.0/slicesbackward/slicesbackward.go
 stditerators/stditerators.go  crates/guff-style/tests/testdata/modernize/upstream-v0.52.0/stditerators/stditerators.go
+stringscut/stringscut.go  crates/guff-style/tests/testdata/modernize/upstream-v0.52.0/stringscut/stringscut.go
+newexpr/newexpr.go  crates/guff-style/tests/testdata/modernize/upstream-v0.52.0/newexpr/newexpr.go
+newexpr/newexpr_go125.go  crates/guff-style/tests/testdata/modernize/upstream-v0.52.0/newexpr/newexpr_go125.go
+newexprdirective/newexpr_directive.go  crates/guff-style/tests/testdata/modernize/newexpr_directive.go
