@@ -1,0 +1,54 @@
+name: Runner memory (swap + watch)
+description: >-
+  Give the runner a large swap file and start a background memory log, so a
+  job that outgrows RAM slows down instead of being killed, and says so.
+
+# Why this exists: dakimura/guff became a private repository on 2026-11-26
+# (the history reset). A private repository's `ubuntu-latest` runner is the
+# small one (2 vCPU, ~7 GB RAM; public repositories get 4 vCPU / 16 GB), and the
+# nightly corpus was sized on the big one. Once free-disk let golangci-lint get
+# past typecheck, `oss-nightly` ran grafana for 34 minutes and was then stopped
+# from outside with exit 143 (SIGTERM) — no timeout or cancellation fired, the
+# step and the job budget both had room left. Memory pressure is the cause
+# that fits; this file does not relax any gate, it only adds room and evidence:
+#
+#   * a swap file on the root filesystem (free-disk leaves ~45 GB there);
+#   * `$RUNNER_TEMP/memwatch.log`: `free -m` and the top RSS processes every
+#     30 s, printed by the job's `if: failure()` diagnostics step together with
+#     the kernel / systemd-oomd kill records.
+#
+# Requires free-disk to have run first (the swap file needs the room).
+
+inputs:
+  swap-gb:
+    description: Size of the extra swap file in GiB.
+    default: "16"
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        SWAP_GB: ${{ inputs.swap-gb }}
+      run: |
+        echo "::group::memory before"
+        nproc
+        free -h
+        swapon --show || true
+        echo "::endgroup::"
+        sudo fallocate -l "${SWAP_GB}G" /guff-swapfile
+        sudo chmod 600 /guff-swapfile
+        sudo mkswap /guff-swapfile >/dev/null
+        sudo swapon /guff-swapfile
+        echo "::group::memory after"
+        free -h
+        swapon --show || true
+        echo "::endgroup::"
+        # Background processes outlive the step and are reaped at job end.
+        nohup bash -c '
+          while :; do
+            echo "--- $(date -u +%H:%M:%S)"
+            free -m | sed -n "2,3p"
+            ps -eo rss=,args= --sort=-rss | head -n 4 | cut -c1-160
+            sleep 30
+          done' >"$RUNNER_TEMP/memwatch.log" 2>&1 &

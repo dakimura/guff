@@ -38313,3 +38313,17 @@ go1.27.1 を交互に 3 回ずつ測って差なし。
 
 fmt は `gofumpt-v12-diagnose` 1 件だけ期待値を撮り直した（stdin で go.mod が無いと両ツールとも
 `-lang` を PATH の `go` から取る。go1.27.x で両者 `-lang=go1.27` で一致）。
+
+#### 同 PR の nightly 赤（2 件、どちらも Go 1.27 とは無関係）
+
+1. **consul の stale allowlist 3 行**: `agent/agent.go:3191` / `agent/checks/check.go:1131` /
+   `agent/consul/state/config_entry.go:526` の staticcheck「this comparison is always/never true」
+   （golangci-only）は、Go 1.26.5 の main の nightly でも既に diff ではなかった（staticcheck
+   guff 239 / golangci 238 / both 237、残る diff は allowlist の他の 3 行だけ）。stale は
+   normalize.py が失敗にするので行を削除した（ゲートは締まる側）。
+2. **grafana の exit 143**: リポジトリは 2026-11-26 の履歴作り直しで **private** になり、
+   `ubuntu-latest` が private 用の小さい runner（2 vCPU / 約 7 GB）になった。free-disk で
+   typecheck を越えた grafana が 34 分走ったところで外から SIGTERM（timeout も cancel も
+   発火していない）。`.github/actions/runner-memory`（swap 16 GB ＋ 30 秒ごとの `free`/RSS 上位の記録）
+   を oss-nightly に入れ、失敗時に memwatch・dmesg・systemd-oomd を出すステップを足した。
+   これで直らなければ、次はそのログで「誰が何 GB 使ったか」から始める。

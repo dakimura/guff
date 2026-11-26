@@ -421,6 +421,11 @@ jobs:
       - name: Free runner disk
         uses: ./.github/actions/free-disk
 
+      # grafana outgrew the private-repo runner's RAM (exit 143, 2026-11-26);
+      # see .github/actions/runner-memory/action.yml.
+      - name: Swap and memory watch
+        uses: ./.github/actions/runner-memory
+
       - name: Install Go
         uses: actions/setup-go@v5
         with:
@@ -470,6 +475,16 @@ jobs:
       # upstream ref that dropped its go.work, a pattern that stopped matching).
       - name: Corpus shape ledger (re-measured)
         run: ./corpus/shapes.py check
+
+      - name: Memory diagnostics
+        if: failure()
+        run: |
+          echo "::group::memwatch (last 30 min)"
+          tail -n 420 "$RUNNER_TEMP/memwatch.log" || true
+          echo "::endgroup::"
+          free -h || true
+          sudo dmesg -T | grep -iE 'out of memory|oom|killed process' | tail -n 20 || true
+          sudo journalctl -u systemd-oomd --no-pager | tail -n 20 || true
 
       - name: Upload OSS report
         if: always()
