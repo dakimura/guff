@@ -52,7 +52,7 @@
 | isolate-containedctx | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-iotamixing | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-asasalint | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
-| isolate-exhaustive | 40 | 40 | 40 | 100.0% | 100.0% | 0 |
+| isolate-exhaustive | 37 | 37 | 37 | 100.0% | 100.0% | 0 |
 | isolate-exhaustruct | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | isolate-exhaustruct_v5 | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | isolate-funcorder | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
@@ -70,7 +70,7 @@
 | isolate-musttag | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-reassign | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-tagliatelle | 31 | 31 | 31 | 100.0% | 100.0% | 0 |
-| isolate-canonicalheader | 15 | 15 | 15 | 100.0% | 100.0% | 0 |
+| isolate-canonicalheader | 10 | 10 | 10 | 100.0% | 100.0% | 0 |
 | isolate-ireturn | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-iface | 5 | 5 | 5 | 100.0% | 100.0% | 0 |
 | isolate-varnamelen | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
@@ -426,7 +426,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| exhaustive | 40 | 40 | 40 | 100.0% | 100.0% |
+| exhaustive | 37 | 37 | 37 | 100.0% | 100.0% |
 
 ## isolate-exhaustruct
 
@@ -534,7 +534,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| canonicalheader | 15 | 15 | 15 | 100.0% | 100.0% |
+| canonicalheader | 10 | 10 | 10 | 100.0% | 100.0% |
 
 ## isolate-ireturn
 
