@@ -144,6 +144,10 @@ pub fn list_packages(cfg: &ListConfig, patterns: &[String]) -> Result<ListRespon
     let mut ctxt = Context::default();
     if let Some(root) = &cfg.goroot {
         ctxt.goroot = root.to_string_lossy().into_owned();
+        // Release tags belong to the toolchain at that GOROOT.
+        if let Some(n) = guff_build::goroot_release(&ctxt.goroot) {
+            ctxt.release_tags = guff_build::release_tags_for_version(n);
+        }
     }
     for tag in &cfg.build_tags {
         if !ctxt.build_tags.iter().any(|t| t == tag) {

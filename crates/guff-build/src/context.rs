@@ -83,7 +83,6 @@ pub fn default_context() -> Context {
     Context {
         goarch: goarch.clone(),
         goos: goos.clone(),
-        goroot,
         gopath,
         dir: String::new(),
         cgo_enabled: default_cgo_enabled(&goos, &goarch),
@@ -91,9 +90,30 @@ pub fn default_context() -> Context {
         compiler: "gc".to_string(),
         build_tags: Vec::new(),
         tool_tags: default_tool_tags(&goarch),
-        release_tags: release_tags_for_version(VERSION),
+        release_tags: release_tags_for_version(goroot_release(&goroot).unwrap_or(VERSION)),
+        goroot,
         install_suffix: String::new(),
     }
+}
+
+/// The Go 1.N release of the toolchain installed at `goroot`, from the first
+/// line of its `VERSION` file (`go1.27.1` → 27).
+///
+/// Upstream fills `ReleaseTags` from `internal/goversion.Version`, which is
+/// compiled into the `go` command — so `go list` (what golangci-lint loads
+/// through) answers for the toolchain on PATH, not for any fixed release.
+/// guff stands in for that `go` command, so it reads the same toolchain's
+/// version. A fixed list hid every `//go:build go1.27` file on a go1.27 host
+/// and would admit them on a go1.26 one. `None` (no file, a `devel` build)
+/// falls back to [`VERSION`].
+pub fn goroot_release(goroot: &str) -> Option<u32> {
+    if goroot.is_empty() {
+        return None;
+    }
+    let text = std::fs::read_to_string(Path::new(goroot).join("VERSION")).ok()?;
+    let rest = text.lines().next()?.trim().strip_prefix("go1.")?;
+    let minor: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    minor.parse().ok().filter(|&n| n >= 1)
 }
 
 /// Builds the list of Go release tags `go1.1` … `go1.N` for Go 1.N.

@@ -42,6 +42,16 @@ concurrency:
 # checks against. That version lives in `.go-version` — the same reason the
 # golangci-lint pin lives in compat/pins.json rather than in the steps.
 #
+# The Go patch is capped by that pin, not by go.dev: `.go-version` is the newest
+# patch whose export data the pinned golangci-lint can read. 2.15.0 is built with
+# go1.27.0, whose go/importer reads pkgbits up to V4, and from go1.27.2 on
+# cmd/compile writes V5. revive type-checks its own files through
+# importer.Default() (`go list -export`), so on go1.27.2+ that check fails and
+# every type-dependent revive rule returns nothing — upstream only, which
+# showed up as five `//nolint:revive is unused` lines on helm. guff does not
+# copy that importer blindness (COMPAT-HARDENING §6), so the pin stays at
+# go1.27.1 until golangci-lint ships a binary built with go1.27.2 or newer.
+#
 # GOTOOLCHAIN=local is what keeps the two halves of a run agreeing. Under the
 # default `auto`, `go list` silently re-execs into whatever newer toolchain a
 # target's go.mod asks for, while guff keeps reading stdlib source from the

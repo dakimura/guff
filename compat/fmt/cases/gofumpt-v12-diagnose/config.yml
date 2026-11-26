@@ -1,6 +1,8 @@
 # gofumpt v0.12.0's testscript `diagnose.txtar`, input `foo.go`, verbatim
 # (golangci-lint 2.14.0 bundles gofumpt v0.12.0). The script's own
 # `foo.go.golden` is gofumpt's answer; expected/ holds golangci-lint fmt's.
+# With no go.mod on stdin, both tools take `-lang` from the `go` on PATH, so
+# the expectation follows `.go-version` (recorded with go1.27.1).
 version: "2"
 formatters:
   enable:

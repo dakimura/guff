@@ -261,6 +261,9 @@ printf/induction/shapes/shapes.go:33:53:govet::printf: (example.com/printf/induc
 printf/induction/shapes/shapes.go:68:22:govet::printf: (example.com/printf/induction/shapes.IPrintln).Println call has possible Printf formatting directive %d
 printf/induction/shapes/shapes.go:78:32:govet::printf: (example.com/printf/induction/shapes.IErr).Errorf format %w has arg 8 of wrong type int
 printf/induction/shapes/shapes.go:87:34:govet::printf: (example.com/printf/induction/shapes.ICmpPtr).Logf format %s has arg 9 of wrong type int
+printf/issue62595/a_go127.go:12:19:govet::printf: fmt.Sprintf format %d has arg &i of wrong type *int (use %p for a pointer)
+printf/issue62595/a_go127.go:13:19:govet::printf: fmt.Sprintf format %d has arg make(chan int) of wrong type chan int
+printf/issue62595/a_go127.go:15:19:govet::printf: fmt.Sprintf format %d has arg u of wrong type unsafe.Pointer (use %p for a pointer)
 printf/issue68744/issue68744.go:12:9:govet::printf: example.com/printf/issue68744.wrapf format %s has arg 123 of wrong type int
 printf/issue70572/issue70572.go:23:16:govet::printf: (example.com/printf/issue70572.A).Printf call has arguments but no formatting directives
 printf/issue70572/issue70572.go:24:16:govet::printf: (example.com/printf/issue70572.B[T]).Printf call has arguments but no formatting directives

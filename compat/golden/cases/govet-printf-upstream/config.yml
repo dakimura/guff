@@ -8,8 +8,10 @@
 # "example.com/printf/b". induction/ relates an interface to a wrapper
 # through each place refactor/satisfy records a constraint.
 #
-# issue62595's a_go127.go is excluded by its build tag on a go1.26
-# toolchain (PR 15).
+# issue62595's a_go127.go is in the build only on a go1.27 toolchain
+# (`.go-version`); its //go:build go1.27 line raises the file to go1.27, so
+# its three %d-of-a-pointer findings are in expected.golden. w/ stays silent
+# here because the module is go 1.26 — govet-printf-go127 covers it.
 version: "2"
 
 linters:

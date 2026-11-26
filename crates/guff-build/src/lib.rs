@@ -16,7 +16,7 @@ mod match_file;
 mod module;
 mod package;
 
-pub use context::{default_context, release_tags_for_version, Context, DEFAULT};
+pub use context::{default_context, goroot_release, release_tags_for_version, Context, DEFAULT};
 pub use import_path::is_local_import;
 pub use match_file::MatchError;
 pub use module::{

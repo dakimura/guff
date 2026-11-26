@@ -1,0 +1,29 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh govet-printf-go127
+# Produced by running golangci-lint on compat/golden/cases/govet-printf-go127/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+printf/issue62595/a_go127.go:12:19:govet::printf: fmt.Sprintf format %d has arg &i of wrong type *int (use %p for a pointer)
+printf/issue62595/a_go127.go:13:19:govet::printf: fmt.Sprintf format %d has arg make(chan int) of wrong type chan int
+printf/issue62595/a_go127.go:15:19:govet::printf: fmt.Sprintf format %d has arg u of wrong type unsafe.Pointer (use %p for a pointer)
+printf/shapes/shapes.go:25:18:govet::printf: %w wants operand of error type CustomError, not pointer type PE (defeats errors.Is)
+printf/shapes/shapes.go:26:18:govet::printf: %w wants operand of error type error, not pointer type *error (defeats errors.Is)
+printf/shapes/shapes.go:27:18:govet::printf: %w wants operand of error type syscall.Errno, not pointer type *syscall.Errno (defeats errors.Is)
+printf/shapes/shapes.go:31:18:govet::printf: %w wants operand of error type syscall.Errno, not pointer type *syscall.Errno (defeats errors.Is)
+printf/shapes/shapes.go:32:18:govet::printf: %w wants operand of error type error, not pointer type *error (defeats errors.Is)
+printf/shapes/shapes.go:37:21:govet::printf: %w wants operand of error type T, not pointer type *T (defeats errors.Is)
+printf/shapes/shapes.go:43:19:govet::printf: fmt.Sprintf format %d has arg &i of wrong type *int (use %p for a pointer)
+printf/shapes/shapes.go:44:19:govet::printf: fmt.Sprintf format %d has arg m of wrong type map[string]int
+printf/shapes/shapes.go:51:19:govet::printf: fmt.Sprintf format %5d has arg &i of wrong type *int (use %p for a pointer)
+printf/shapes/shapes.go:52:25:govet::printf: fmt.Sprintf format %[1]d has arg &i of wrong type *int (use %p for a pointer)
+printf/shapes/shapes.go:53:19:govet::printf: fmt.Sprintf format %d has arg unsafe.Pointer(&i) of wrong type unsafe.Pointer (use %p for a pointer)
+printf/w/w.go:23:2:govet::unusedresult: result of fmt.Errorf call not used
+printf/w/w.go:23:14:govet::printf: %w wants operand of error type CustomError, not pointer type *CustomError (defeats errors.Is)
+printf/w/w.go:24:2:govet::unusedresult: result of fmt.Errorf call not used
+printf/w/w.go:26:2:govet::unusedresult: result of fmt.Errorf call not used
+printf/w/w.go:26:14:govet::printf: %w wants operand of error type CustomError, not pointer type *CustomError (defeats errors.Is)
+printf/w/w.go:29:2:govet::unusedresult: result of fmt.Errorf call not used
+printf/w/w.go:31:14:govet::printf: log.Printf does not support error-wrapping directive %w

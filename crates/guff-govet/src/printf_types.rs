@@ -14,7 +14,7 @@ use std::collections::HashSet;
 use guff::ast::{Decl, Expr, UnaryExpr};
 use guff::token::Token;
 use guff_analysis::Pass;
-use guff_types::api_predicates::api_convertible_to;
+use guff_types::api_predicates::{api_convertible_to, api_implements};
 use guff_types::alias::unalias_readonly;
 use guff_types::arena::{ObjectData, ObjectId, TypeArena, TypeData};
 use guff_types::basic::BasicKind;
@@ -333,6 +333,37 @@ pub(crate) fn type_string(pass: &Pass<'_>, typ: TypeId) -> String {
         return "?".into();
     };
     guff_types::typestring::type_string(&art.types, &art.objects, &art.packages, typ, None)
+}
+
+/// `%w`'s go1.27 check (golang/go#61342): when the underlying type of `typ`
+/// is `*E` and `E` implements `error`, the two type strings upstream reports —
+/// `E` and `typ` — qualified by package name unless the package is the one
+/// under analysis.
+pub(crate) fn pointer_to_error(
+    pass: &Pass<'_>,
+    scratch: &mut Scratch,
+    typ: TypeId,
+) -> Option<(String, String)> {
+    let art = pass.pkg().type_artifacts.as_ref()?;
+    let err = universe_error(pass)?;
+    let types = scratch.types(pass)?;
+    let TypeData::Pointer(p) = types.get(typ.underlying(types)) else {
+        return None;
+    };
+    let elem = p.elem();
+    if !api_implements(types, &art.objects, &art.packages, elem, err) {
+        return None;
+    }
+    let here = art.type_pkg;
+    let qual = move |pid: guff_types::PackageId, pkgs: &guff_types::PackageArena| {
+        if pid == here {
+            String::new()
+        } else {
+            pkgs.get(pid).name().to_string()
+        }
+    };
+    let ts = |t| guff_types::typestring::type_string(&art.types, &art.objects, &art.packages, t, Some(&qual));
+    Some((ts(elem), ts(typ)))
 }
 
 /// The predeclared `error` type.
