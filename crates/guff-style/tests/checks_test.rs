@@ -3050,8 +3050,32 @@ fn paralleltest_allows_valid_parallel_usage() {
         "example.com/paralleltest/ok",
         "ok_test.go",
     );
-    let messages = support::run_analyzer(paralleltest(), &pkg);
+    // golangci-lint always passes settings, with `ignoreloopVar` on from
+    // run.go 1.22 — the version this fixture's per-iteration `tt` relies on.
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "paralleltest",
+        guff_style::ParalleltestOptions {
+            ignore_loop_var: true,
+            ..Default::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        paralleltest(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
     assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+
+    // The bare analyzer (upstream's flag default) still checks the capture.
+    let messages = support::run_analyzer(paralleltest(), &pkg);
+    assert_eq!(
+        messages,
+        vec!["Range statement for test TestRangeWithParallel does not reinitialise the variable tt\n".to_string()]
+    );
 }
 
 #[test]
