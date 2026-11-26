@@ -1047,11 +1047,9 @@ fn ok_printf_arg(
     }
     let arg = &call.args[op.verb_arg];
     // `%w` of `*E` where `E` implements error defeats errors.Is (#61342).
-    // Upstream's `versions.AtLeast` is false for an unknown version.
-    if verb == 'w'
-        && !file_version.is_empty()
-        && code::version_compare(file_version, "go1.27") >= 0
-    {
+    // Unlike the %d and %q gates this one does not fail open: upstream's
+    // `versions.AtLeast` treats an unknown ("") version as the future.
+    if verb == 'w' && (file_version.is_empty() || code::version_compare(file_version, "go1.27") >= 0) {
         if let Some((elem, ptr)) =
             expr_type(pass, arg).and_then(|t| printf_types::pointer_to_error(pass, scratch, t))
         {

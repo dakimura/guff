@@ -38296,6 +38296,8 @@ golden を go1.27.1 で**全 case 上流から撮り直して**キー集合で�
    `ReleaseTags` は `go` コマンドに焼き込まれた版なので、guff が代わりを務める「PATH 上の go」の
    `GOROOT/VERSION` から作るようにした（読めなければ定数）。go1.26.5 / go1.27.1 の両 host で
    上流と同じファイル集合になることを確認。
+   残るずれ（いずれも変更前より悪くはない）: devel ビルドは `VERSION` が無く定数に落ちる／`GOROOT` 環境変数が
+   PATH の `go` と別の toolchain を指す／`GOTOOLCHAIN=auto` で別 toolchain に re-exec される（CI は `local`）。
 
 そのうえで Phase 9 passes #8（Phase 8 #5「PR 15」）の printf go1.27 規則を移植した：
 `%d` は go1.27 以上のファイルでポインタを受け付けない（#62595）、`%w` は `*E`（E が error を実装）を
@@ -38303,7 +38305,7 @@ golden を go1.27.1 で**全 case 上流から撮り直して**キー集合で�
 型は現在パッケージ以外をパッケージ名で修飾）。新 golden `govet-printf-go127`（go 1.27 module）に
 上流の `w/w.go`・`issue62595/` と自前の形（名前付きポインタ型・`*error`・他パッケージ・`*T`
 の型パラメータ・Error が pointer 側だけの型・明示 index・`//go:build go1.26` で版を下げたファイル・
-`%d` に map / slice / `*struct` / uintptr / `%x` / `%o`）を入れて **21 件完全一致**。
+`%d` に map / slice / `*struct` / uintptr / `%x` / `%o`）を入れて **21 件完全一致**（printf 17・unusedresult 4）。`%w` の版 gate は `%d` と違い fail open しない（`versions.AtLeast("", …)` は true）ので、版不明でも検査する。
 
 fmt は `gofumpt-v12-diagnose` 1 件だけ期待値を撮り直した（stdin で go.mod が無いと両ツールとも
 `-lang` を PATH の `go` から取る。go1.27.x で両者 `-lang=go1.27` で一致）。

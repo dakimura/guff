@@ -28,8 +28,8 @@ func Wrap(pe PE, ep *error, errno syscall.Errno) {
 	_ = fmt.Errorf("%w", &fs.PathError{})    // *fs.PathError: the value has no Error method
 	_ = fmt.Errorf("%w", &PtrOnly{})         // same, local
 	_ = fmt.Errorf("%w", errno)              // not a pointer
-	_ = fmt.Errorf("%[1]w %[1]w", &errno)    // explicit index, reported once per verb
-	_ = fmt.Errorf("%w and %w", ep, pe)      // both operands
+	_ = fmt.Errorf("%[1]w %[1]w", &errno)    // explicit index: the first failure ends the call
+	_ = fmt.Errorf("%w and %w", ep, pe)      // likewise: only the first operand is reported
 	_ = fmt.Errorf("%v", ep)                 // other verbs are untouched
 }
 
