@@ -1,0 +1,2 @@
+# guff's own paralleltest shapes beyond the upstream testdata.
+shapes/shapes_test.go  crates/guff-style/tests/testdata/paralleltest/shapes/shapes_test.go

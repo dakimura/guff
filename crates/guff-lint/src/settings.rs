@@ -1740,6 +1740,10 @@ pub struct ParalleltestSettings {
     pub ignore_missing_subtests: bool,
     #[serde(default, rename = "check-cleanup")]
     pub check_cleanup: bool,
+    /// `run.go`, pushed here by [`LinterSettings::apply_go_version`]
+    /// (`ParallelTestSettings.Go`, `mapstructure:"-"`).
+    #[serde(skip)]
+    pub go: Option<String>,
 }
 
 impl ParalleltestSettings {
@@ -1748,6 +1752,9 @@ impl ParalleltestSettings {
             ignore_missing: self.ignore_missing,
             ignore_missing_subtests: self.ignore_missing_subtests,
             check_cleanup: self.check_cleanup,
+            // `paralleltest.go`: `if config.IsGoGreaterThanOrEqual(settings.Go,
+            // "1.22") { cfg["ignoreloopVar"] = true }`.
+            ignore_loop_var: self.go.as_deref().is_some_and(|go| go_at_least(go, 1, 22)),
         }
     }
 }
@@ -3132,6 +3139,7 @@ impl LinterSettings {
         self.govet.go = go.map(str::to_string);
         self.revive.go = go.map(str::to_string);
         self.gocritic.go = go.map(str::to_string);
+        self.paralleltest.go = go.map(str::to_string);
     }
 }
 
@@ -5069,6 +5077,10 @@ custom:
         assert_eq!(settings.govet.go.as_deref(), Some("1.23"));
         assert_eq!(settings.revive.go.as_deref(), Some("1.23"));
         assert_eq!(settings.gocritic.go.as_deref(), Some("1.23"));
+        assert_eq!(settings.paralleltest.go.as_deref(), Some("1.23"));
+        assert!(settings.paralleltest.to_guff_paralleltest().ignore_loop_var);
+        settings.apply_go_version(Some("1.21"));
+        assert!(!settings.paralleltest.to_guff_paralleltest().ignore_loop_var);
         settings.apply_go_version(Some(""));
         assert_eq!(settings.govet.go, None);
     }

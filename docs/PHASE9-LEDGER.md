@@ -696,7 +696,7 @@ golangci 側の wrapper（`pkg/golinters/<name>/`、`pkg/goformatters/golines/`�
 
 | # | upstream_path | kind | 要約 | guff の場所 | status | effort | upstream testdata |
 |---|---------------|------|------|-------------|--------|--------|-------------------|
-| P1 | pkg/paralleltest/paralleltest.go `parallelBlockingMethodIs…` | behavior | `t.Chdir` も `t.Setenv` と同じく並列不可（関数本体・t.Run 本体・range の t.Run の 3 箇所）。受信者名で照合するので別型の `Chdir` は効かない | guff-style/src/paralleltest.rs:175, 257, 292 | needs-port | S | testdata/src/t/chdir_test.go（go1.24。実測 guff-only 8 件） |
+| P1 | pkg/paralleltest/paralleltest.go `parallelBlockingMethodIs…` | behavior | `t.Chdir` も `t.Setenv` と同じく並列不可（関数本体・t.Run 本体・range の t.Run の 3 箇所）。受信者名で照合するので別型の `Chdir` は効かない | guff-style/src/paralleltest.rs:175, 257, 292 | **done (autopilot)**（`parallel_blocking_in_*`。同じ PR で guff 側の既存 DEFERRED 2 つも移植：`checkBuilderFunctionForParallel`（`t.Run("x", builder())`、t_test.go で guff-only 2 件）と loop 変数の再初期化チェック（golangci は `run.go` ≥ 1.22 で `ignoreloopVar`。go 1.21 module で guff は 0 件、上流 4 件）。golden: v1.0.16 の testdata/src 4 package 全部＋t の go1.21 版＋自作 shapes ×2（go1.21 / 1.26）、計 7 case 完全一致） | S | testdata/src/t/chdir_test.go（go1.24。実測 guff-only 8 件） |
 
 ###### rowserrcheck（golangci fork c5f79b8 → e0740d5）
 

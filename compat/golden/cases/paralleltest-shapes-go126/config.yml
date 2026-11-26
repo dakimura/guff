@@ -1,0 +1,19 @@
+# Golden case: paralleltest-shapes-go126.
+#
+# Hand-written shapes (see the file's doc) in a go 1.26 module: below 1.22 the
+# loop-variable check runs, from 1.22 golangci-lint turns it off.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - paralleltest
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

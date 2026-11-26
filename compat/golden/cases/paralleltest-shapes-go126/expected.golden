@@ -1,0 +1,13 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh paralleltest-shapes-go126
+# Produced by running golangci-lint on compat/golden/cases/paralleltest-shapes-go126/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+shapes/shapes_test.go:94:2:paralleltest::Range statement for test TestMissingAndCaptured missing the call to method parallel in test Run\n
+shapes/shapes_test.go:124:2:paralleltest::Function TestBuilders missing the call to method parallel in the test run\n
+shapes/shapes_test.go:125:2:paralleltest::Function TestBuilders missing the call to method parallel in the test run\n
+shapes/shapes_test.go:127:2:paralleltest::Function TestBuilders missing the call to method parallel in the test run\n
+shapes/shapes_test.go:135:1:paralleltest::Function TestChdirByName missing the call to method parallel\n

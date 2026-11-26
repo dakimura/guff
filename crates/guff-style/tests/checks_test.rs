@@ -3085,6 +3085,7 @@ fn paralleltest_respects_settings() {
             ignore_missing: true,
             ignore_missing_subtests: false,
             check_cleanup: true,
+            ignore_loop_var: false,
         },
     );
     let messages = support::run_analyzer_with_settings(
