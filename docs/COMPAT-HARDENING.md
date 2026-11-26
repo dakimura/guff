@@ -38307,5 +38307,9 @@ golden を go1.27.1 で**全 case 上流から撮り直して**キー集合で�
 の型パラメータ・Error が pointer 側だけの型・明示 index・`//go:build go1.26` で版を下げたファイル・
 `%d` に map / slice / `*struct` / uintptr / `%x` / `%o`）を入れて **21 件完全一致**（printf 17・unusedresult 4）。`%w` の版 gate は `%d` と違い fail open しない（`versions.AtLeast("", …)` は true）ので、版不明でも検査する。
 
+ゲート（go1.27.1 を PATH に、`GOTOOLCHAIN=local`）: hygiene〜regress の全 14 段が緑。regress の tsdb は
+両者 4 → 7 件（P/R 100%）に増える（Go 1.27 の stdlib 由来、両ツール一致）。wall は同じバイナリで go1.26.5 /
+go1.27.1 を交互に 3 回ずつ測って差なし。
+
 fmt は `gofumpt-v12-diagnose` 1 件だけ期待値を撮り直した（stdin で go.mod が無いと両ツールとも
 `-lang` を PATH の `go` から取る。go1.27.x で両者 `-lang=go1.27` で一致）。
