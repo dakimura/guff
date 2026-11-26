@@ -187,6 +187,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The runner's root filesystem ran out mid-job here (2026-11-26); see
+      # .github/actions/free-disk/action.yml.
+      - name: Free runner disk
+        uses: ./.github/actions/free-disk
+
       - name: Install Go
         uses: actions/setup-go@v5
         with:
@@ -410,6 +415,11 @@ jobs:
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
+
+      # The runner's root filesystem ran out mid-job here (2026-11-26); see
+      # .github/actions/free-disk/action.yml.
+      - name: Free runner disk
+        uses: ./.github/actions/free-disk
 
       - name: Install Go
         uses: actions/setup-go@v5
