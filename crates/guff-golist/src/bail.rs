@@ -59,6 +59,10 @@ pub enum BailReason {
     /// `Error` (`import cycle not allowed`, with an `ImportStack` whose shape
     /// depends on `cmd/go`'s load order), so it is left to `go list`.
     ImportCycle,
+    /// A `package main` for a target that must link externally (android,
+    /// ios/arm64, …) while cgo is off. `go list -e` makes `LinkerDeps`'
+    /// error the package's `Error` and lists no Deps for it.
+    ExternalLinkWithoutCgo,
     /// Filesystem / parse error while listing.
     Io,
 }

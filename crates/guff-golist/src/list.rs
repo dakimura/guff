@@ -158,6 +158,7 @@ pub fn list_packages(cfg: &ListConfig, patterns: &[String]) -> Result<ListRespon
     }
     let goroot = PathBuf::from(&ctxt.goroot);
     let goroot_ver = modmeta::goroot_version(&goroot);
+    let linker_deps = linker_deps(&ctxt.goos, &ctxt.goarch, ctxt.cgo_enabled);
     let modmeta_session = ModMetaSession::new();
 
     let root_dirs = expand_patterns(
@@ -306,6 +307,7 @@ pub fn list_packages(cfg: &ListConfig, patterns: &[String]) -> Result<ListRespon
                 module,
                 is_root,
                 build_pkg,
+                &linker_deps,
             )?;
         }
         if bfs_debug {
@@ -397,6 +399,58 @@ pub fn list_packages(cfg: &ListConfig, patterns: &[String]) -> Result<ListRespon
     Ok(response)
 }
 
+/// `LinkerDeps` in cmd/go's load/pkg.go: the packages the linker adds to
+/// every command it links, for the GOOS/GOARCH the listing is for. `Err`
+/// carries `externalLinkingReason`'s answer when the target must link
+/// externally but cgo is off — cmd/go makes that the package's `Error`.
+///
+/// Only the reasons a plain `go list` can hit are modelled. `-race`, `-msan`,
+/// `-asan`, `-cover`, `-buildmode`, `-linkshared` and `-ldflags` are build
+/// flags, which the native lister refuses up front (`UnsupportedBuildFlags`);
+/// the same flags arriving through `GOFLAGS` are not seen by it at all.
+fn linker_deps(goos: &str, goarch: &str, cgo_enabled: bool) -> Result<Vec<&'static str>, String> {
+    let mut deps = vec!["runtime"];
+    // `platform.MustLinkExternal(goos, goarch, false)`.
+    let must_link_external =
+        (goos == "android" && goarch != "arm64") || (goos == "ios" && goarch == "arm64");
+    // A default-PIE target without internal PIE linking
+    // (`platform.DefaultPIE` && !`platform.InternalLinkPIESupported`).
+    let default_pie = matches!(goos, "android" | "ios" | "windows" | "darwin");
+    let internal_pie = matches!(
+        format!("{goos}/{goarch}").as_str(),
+        "android/arm64"
+            | "darwin/amd64"
+            | "darwin/arm64"
+            | "linux/amd64"
+            | "linux/arm64"
+            | "linux/loong64"
+            | "linux/ppc64"
+            | "linux/ppc64le"
+            | "linux/s390x"
+            | "windows/386"
+            | "windows/amd64"
+            | "windows/arm64"
+    );
+    let reason = if must_link_external {
+        Some(format!("{goos}/{goarch}"))
+    } else if default_pie && !internal_pie {
+        Some("default PIE binary".to_string())
+    } else {
+        None
+    };
+    if let Some(what) = reason {
+        if !cgo_enabled {
+            return Err(what);
+        }
+        deps.push("runtime/cgo");
+    }
+    // Soft float on ARM.
+    if goarch == "arm" {
+        deps.push("math");
+    }
+    Ok(deps)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn process_listed_package(
     cfg: &ListConfig,
@@ -414,6 +468,7 @@ fn process_listed_package(
     module: ResolvedModule,
     is_root: bool,
     build_pkg: guff_build::Package,
+    linker_deps: &Result<Vec<&'static str>, String>,
 ) -> Result<(), Bail> {
         let go_files = abs_join(&build_pkg.dir, &build_pkg.go_files);
         // Match go list's Package.GoFiles which merges CgoFiles into GoFiles.
@@ -467,8 +522,12 @@ fn process_listed_package(
         // Without `syscall` a cgo package that does not reach it some other
         // way was ill-typed (`undefined: syscall`) and every typed linter
         // skipped it.
+        //
+        // Every implicit import below reaches Deps only, and `P [P.test]`
+        // inherits them: cmd/go builds `ptest.Internal.Imports` as the test
+        // imports followed by `p.Internal.Imports`, which already holds them.
+        let mut implicit: Vec<&str> = Vec::new();
         if has_cgo {
-            let mut implicit: Vec<&str> = Vec::new();
             if !(module.standard && pkg_path == "runtime/cgo") {
                 implicit.push("runtime/cgo");
             }
@@ -480,22 +539,45 @@ fn process_listed_package(
             {
                 implicit.push("syscall");
             }
-            for dep in implicit {
-                if direct_ids.iter().any(|d| d == dep) {
-                    continue;
-                }
-                if let Ok((dep_dir, dep_mod)) =
-                    resolve_import(dep, &workspace, &cache, &goroot, false, vendor)
-                {
-                    let dep_id = dep_mod.pkg_id.clone();
-                    // Deps only — do not add to import_list / Imports map.
-                    direct_ids.push(dep_id.clone());
-                    if (is_root || cfg.need_deps) && seen.insert(dep_id.clone()) {
-                        queue.push_back((dep_id, dep_dir, dep_mod, false));
-                    }
+        }
+        // The linker's implicit dependencies of a command (`p.Name == "main"`
+        // in `load.PackagesAndErrors`, `addImport(dep, false)` for each of
+        // `LinkerDeps`): `runtime` always, plus `runtime/cgo` / `math` when
+        // the target needs them. A `package main` that imports nothing — or
+        // nothing that reaches `runtime` — had a Deps list missing the whole
+        // runtime closure. The `P [P.test]` copy keeps them (`ForceLibrary`
+        // only stops cmd/go from adding them again), so they ride along with
+        // `implicit_ids` below; the external test package is not `main`.
+        if build_pkg.name == "main" {
+            match linker_deps {
+                Ok(deps) => implicit.extend(deps.iter().copied()),
+                // `go list -e` sets this as the package's Error and lists no
+                // Deps for it; the message is cmd/go's to render.
+                Err(what) => {
+                    return Err(Bail::new(
+                        BailReason::ExternalLinkWithoutCgo,
+                        format!("{pkg_path}: {what} requires external (cgo) linking, but cgo is not enabled"),
+                    ))
                 }
             }
         }
+        let mut implicit_ids: Vec<String> = Vec::new();
+        for dep in implicit {
+            if let Ok((dep_dir, dep_mod)) =
+                resolve_import(dep, &workspace, &cache, &goroot, false, vendor)
+            {
+                let dep_id = dep_mod.pkg_id.clone();
+                if implicit_ids.contains(&dep_id) {
+                    continue;
+                }
+                // Deps only — do not add to import_list / Imports map.
+                implicit_ids.push(dep_id.clone());
+                if (is_root || cfg.need_deps) && seen.insert(dep_id.clone()) {
+                    queue.push_back((dep_id, dep_dir, dep_mod, false));
+                }
+            }
+        }
+        direct_ids.extend(implicit_ids.iter().cloned());
         direct_ids.sort();
         direct_ids.dedup();
         direct_imports.insert(pkg_path.clone(), direct_ids);
@@ -547,8 +629,15 @@ fn process_listed_package(
                 let test_bin = format!("{pkg_path}.test");
                 let internal_id = format!("{pkg_path} [{test_bin}]");
                 let mut variant_ids_for_testmain: Vec<String> = Vec::new();
+                // cmd/go builds `P [P.test]` when there are internal test
+                // files *or the package is a command* (`len(p.TestGoFiles) >
+                // 0 || p.Name == "main"` in `TestPackagesFor`): a `package
+                // main` with only `package main_test` files — or a directory
+                // of those alone — still gets one, and testmain links it in
+                // place of plain `P`.
+                let has_ptest = has_internal || build_pkg.name == "main";
 
-                if has_internal {
+                if has_ptest {
                     let mut internal_files = go_files_with_cgo.clone();
                     internal_files.extend(abs_join(&build_pkg.dir, &build_pkg.test_go_files));
                     let mut internal_imps = build_pkg.imports.clone();
@@ -577,6 +666,10 @@ fn process_listed_package(
                     );
                     let mut ptest_files = prod_files.clone();
                     ptest_files.extend(test_files);
+                    let mut directs = directs;
+                    directs.extend(implicit_ids.iter().cloned());
+                    directs.sort();
+                    directs.dedup();
                     direct_imports.insert(internal_id.clone(), directs);
                     packages.insert(
                         internal_id.clone(),
@@ -621,7 +714,11 @@ fn process_listed_package(
                         },
                     );
                     response.roots.push(internal_id.clone());
-                    variant_ids_for_testmain.push(internal_id.clone());
+                    // testmain imports `ptest` only when it has files
+                    // (`len(ptest.GoFiles)+len(ptest.CgoFiles) > 0`).
+                    if has_internal || !go_files_with_cgo.is_empty() {
+                        variant_ids_for_testmain.push(internal_id.clone());
+                    }
                 }
 
                 if has_external {
@@ -629,7 +726,7 @@ fn process_listed_package(
                     let xtest_files = abs_join(&build_pkg.dir, &build_pkg.xtest_go_files);
                     // Import of P resolves to the internal test variant when
                     // present (same as cmd/go); otherwise the plain package.
-                    let p_target = if has_internal {
+                    let p_target = if has_ptest {
                         internal_id.clone()
                     } else {
                         pkg_path.clone()
@@ -706,9 +803,33 @@ fn process_listed_package(
                     // but only when it has files (`len(ptest.GoFiles) +
                     // len(ptest.CgoFiles) > 0` in cmd/go's TestPackagesFor).
                     // A directory of `package P_test` files alone links no `P`.
-                    if !has_internal && !go_files_with_cgo.is_empty() {
+                    if !has_ptest && !go_files_with_cgo.is_empty() {
                         tm_imports.push((pkg_path.clone(), pkg_path.clone()));
                         tm_direct.push(pkg_path.clone());
+                    }
+                    // `TestMainDeps` plus the linker's implicit deps of the
+                    // test binary (`LinkerDeps(ld, p)` in load/test.go, for
+                    // every package under test, `main` or not). They join
+                    // pmain's Deps, never its Imports.
+                    let tm_linker: &[&str] = match linker_deps {
+                        Ok(deps) => deps,
+                        Err(what) => {
+                            return Err(Bail::new(
+                                BailReason::ExternalLinkWithoutCgo,
+                                format!("{test_bin}: {what} requires external (cgo) linking, but cgo is not enabled"),
+                            ))
+                        }
+                    };
+                    for dep in tm_linker {
+                        if let Ok((dep_dir, dep_mod)) =
+                            resolve_import(dep, &workspace, &cache, &goroot, false, vendor)
+                        {
+                            let dep_id = dep_mod.pkg_id.clone();
+                            tm_direct.push(dep_id.clone());
+                            if cfg.need_deps && seen.insert(dep_id.clone()) {
+                                queue.push_back((dep_id, dep_dir, dep_mod, false));
+                            }
+                        }
                     }
                     for std in ["testing", "os", "reflect", "testing/internal/testdeps"] {
                         if let Ok((dep_dir, dep_mod)) =
@@ -857,8 +978,10 @@ fn emit_fortest_dep_variants(
                 new_pkg.dep_only = true;
                 // Remap imports onto variants we already know; a second pass
                 // below finishes remapping once the fixed point settles.
+                let implicit = implicit_directs(direct_imports.get(&q), &qpkg.imports);
                 remap_imports_with_var_map(&mut new_pkg.imports, &var_map);
-                let directs: Vec<String> = new_pkg.imports.iter().map(|(_, id)| id.clone()).collect();
+                let mut directs: Vec<String> = new_pkg.imports.iter().map(|(_, id)| id.clone()).collect();
+                directs.extend(implicit);
                 direct_imports.insert(q_var.clone(), directs);
                 packages.insert(q_var.clone(), new_pkg);
                 var_map.insert(q, q_var);
@@ -877,11 +1000,30 @@ fn emit_fortest_dep_variants(
             let Some(pkg) = packages.get_mut(&id) else {
                 continue;
             };
+            let implicit = implicit_directs(direct_imports.get(&id), &pkg.imports);
             remap_imports_with_var_map(&mut pkg.imports, &var_map);
-            let directs: Vec<String> = pkg.imports.iter().map(|(_, tid)| tid.clone()).collect();
+            let mut directs: Vec<String> = pkg.imports.iter().map(|(_, tid)| tid.clone()).collect();
+            directs.extend(implicit);
             direct_imports.insert(id, directs);
         }
     }
+}
+
+/// The direct deps of a package that no import names: cgo's `runtime/cgo` /
+/// `syscall` and the linker's deps of a command. They are Deps-only, so a
+/// rebuild of the direct list from `imports` has to carry them over — the
+/// `[P.test]` remap used to drop them, and `P [P.test]` of a cgo package or
+/// of a `package main` lost `syscall` / the `runtime` closure. They are
+/// standard-library packages, so the remap itself never applies to them.
+fn implicit_directs(directs: Option<&Vec<String>>, imports: &[(String, String)]) -> Vec<String> {
+    let Some(directs) = directs else {
+        return Vec::new();
+    };
+    directs
+        .iter()
+        .filter(|d| !imports.iter().any(|(_, id)| id == *d))
+        .cloned()
+        .collect()
 }
 
 fn plain_package_id(id: &str) -> String {
@@ -1347,4 +1489,36 @@ fn relative_to(path: &Path, base: &Path) -> Option<String> {
         return Some(".".to_string());
     }
     Some(parts.join("/"))
+}
+
+#[cfg(test)]
+mod linker_deps_tests {
+    use super::linker_deps;
+
+    /// Each row measured with `go list -e -deps -json ./m` on go1.27.1 for a
+    /// `package main` that imports nothing (GOOS/GOARCH/CGO_ENABLED in env).
+    #[test]
+    fn follows_cmd_go_per_target() {
+        assert_eq!(linker_deps("darwin", "arm64", true), Ok(vec!["runtime"]));
+        assert_eq!(linker_deps("darwin", "arm64", false), Ok(vec!["runtime"]));
+        assert_eq!(linker_deps("linux", "amd64", false), Ok(vec!["runtime"]));
+        assert_eq!(linker_deps("windows", "amd64", false), Ok(vec!["runtime"]));
+        assert_eq!(linker_deps("linux", "arm", false), Ok(vec!["runtime", "math"]));
+        assert_eq!(
+            linker_deps("android", "amd64", true),
+            Ok(vec!["runtime", "runtime/cgo"])
+        );
+        assert_eq!(
+            linker_deps("ios", "arm64", true),
+            Ok(vec!["runtime", "runtime/cgo"])
+        );
+        // `go list -e` reports "android/amd64 requires external (cgo)
+        // linking, but cgo is not enabled" as the package's Error.
+        assert_eq!(
+            linker_deps("android", "amd64", false),
+            Err("android/amd64".to_string())
+        );
+        // android/arm64 links internally (PIE supported internally).
+        assert_eq!(linker_deps("android", "arm64", false), Ok(vec!["runtime"]));
+    }
 }
