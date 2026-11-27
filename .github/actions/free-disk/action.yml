@@ -1,0 +1,40 @@
+name: Free runner disk
+description: >-
+  Delete the preinstalled SDKs this repository never uses, so the job's own
+  build and corpus output fit on the runner's root filesystem.
+
+# Why this exists: on 2026-11-26 the hosted ubuntu runner ran out of space in
+# two different jobs. `oss-nightly` failed twice in a row with
+# `mkdir /tmp/go-build…: no space left on device` from golangci-lint's
+# typecheck on grafana and containerd (which then also read as "golangci-lint
+# never agreed with itself"), and `unit` died inside the debug
+# `cargo test --workspace` build when the runner could not write its own log.
+# Neither was a guff defect, and no gate is relaxed here: this only removes
+# toolchains (.NET, Android, GHC, CodeQL, Swift, PowerShell, preloaded Docker
+# images) that no step in these jobs calls.
+#
+# The `df` lines before and after are the diagnostic for next time: if a job
+# still runs out, its log says how much room it started with.
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        echo "::group::disk before"
+        df -h /
+        echo "::endgroup::"
+        sudo rm -rf \
+          /usr/share/dotnet \
+          /usr/local/lib/android \
+          /opt/ghc \
+          /usr/local/.ghcup \
+          /opt/hostedtoolcache/CodeQL \
+          /usr/share/swift \
+          /usr/local/share/powershell \
+          /usr/local/share/chromium \
+          /usr/local/share/boost || true
+        sudo docker image prune --all --force >/dev/null 2>&1 || true
+        echo "::group::disk after"
+        df -h /
+        echo "::endgroup::"
