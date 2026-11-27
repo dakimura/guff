@@ -6175,6 +6175,14 @@ fn check_stringscut(pass: &Pass<'_>, pending: &mut Vec<Diagnostic>) {
         }
 
         let mut edits: Vec<TextEdit> = Vec::new();
+        // x/tools v0.52: delete the type of `var i int = strings.Index(...)`,
+        // as the new variables are not ints. Only the type, not any comment
+        // before it; the formatter removes the extra space.
+        if let Some(NodeRef::ValueSpec(vs)) = c.stack.last() {
+            if let Some(ty) = &vs.ty {
+                edits.push(TextEdit { pos: ty.pos().0 as u32, end: ty.end().0 as u32, new_text: String::new() });
+            }
+        }
         let mut replace = |spans: &[(u32, u32)], text: &str| {
             for &(pos, end) in spans {
                 edits.push(TextEdit { pos, end, new_text: text.to_string() });
@@ -6298,23 +6306,31 @@ fn type_name_of(pass: &Pass<'_>, typ: TypeId) -> Option<String> {
     ))
 }
 
-fn has_go_fix_inline(doc: &Option<CommentGroup>) -> bool {
-    let Some(doc) = doc else {
+/// Whether the doc comment of the func declaration whose `func` keyword is
+/// at `func_pos` already holds a `//go:fix inline` directive: x/tools v0.52
+/// `astutil.Directives(decl.Doc)` with `Tool == "go" && Name == "fix" &&
+/// Args == "inline"`. Exact on the arguments, so `//go:fix inline // why`
+/// is a different directive and the fix still adds the line; `/* */`
+/// comments are never directives.
+///
+/// A file that cannot be reparsed answers `false` (add the line), which is
+/// what the fix did before the doc comment could be seen at all.
+fn has_go_fix_inline(reparsed: Option<&guff_analysis::comments::Reparsed>, func_pos: Pos) -> bool {
+    let Some(r) = reparsed else {
         return false;
     };
-    for c in &doc.list {
-        let text = c.text.trim();
-        // Match `//go:fix inline` (and block-comment equivalents).
-        let stripped = text
-            .trim_start_matches("//")
-            .trim_start_matches("/*")
-            .trim_end_matches("*/")
-            .trim();
-        if stripped.starts_with("go:fix") && stripped.contains("inline") {
-            return true;
-        }
-    }
-    false
+    let Some(doc) = r.file.decls.iter().find_map(|d| match d {
+        Decl::FuncDecl(rfd) if r.rebase(rfd.ty.func) == func_pos => Some(rfd.doc.as_ref()),
+        _ => None,
+    }) else {
+        return false;
+    };
+    doc.is_some_and(|g| {
+        g.list.iter().any(|c| {
+            guff::parse_directive(c.slash, &c.text)
+                .is_some_and(|d| d.tool == "go" && d.name == "fix" && d.args == "inline")
+        })
+    })
 }
 
 fn newlike_unary<'a>(body: &'a BlockStmt) -> Option<&'a UnaryExpr> {
@@ -6575,6 +6591,10 @@ fn collect_newexpr_decls(pass: &Pass<'_>) -> Vec<NewExprDeclCand> {
         return out;
     };
     for file in pass.files() {
+        // The analysis AST carries no comments, so `fd.doc` is always `None`:
+        // reparse the file (once, and only if it has a candidate) to read the
+        // doc comment go/parser would attach.
+        let mut reparsed: Option<Option<guff_analysis::comments::Reparsed>> = None;
         for decl in &file.decls {
             let Decl::FuncDecl(fd) = decl else {
                 continue;
@@ -6636,7 +6656,12 @@ fn collect_newexpr_decls(pass: &Pass<'_>) -> Vec<NewExprDeclCand> {
                 decl_pos: fd.ty.func.0 as u32,
                 amp_pos: unary.op_pos.0 as u32,
                 x_end: unary.x.end().0 as u32,
-                need_inline_comment: !has_go_fix_inline(&fd.doc),
+                need_inline_comment: !has_go_fix_inline(
+                    reparsed
+                        .get_or_insert_with(|| guff_analysis::comments::reparse_with_comments(pass, file))
+                        .as_ref(),
+                    fd.ty.func,
+                ),
                 go126: go_at_least(pass, pos, "go1.26"),
             });
         }
