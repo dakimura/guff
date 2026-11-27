@@ -37,7 +37,12 @@ pub enum ValidResult {
     /// A cycle was detected. `path` is the list of `Named` ObjectId entries
     /// from the start of the cycle to its end, in the order Go would pass
     /// to `check.cycleError`. Use for error reporting.
-    Cycle { path: Vec<ObjectId> },
+    ///
+    /// `types` is the same cycle as the `Named` types themselves (Go's
+    /// `path[start:]` before `makeObjList`). Go gives every instance its own
+    /// `TypeName`, so `cycleError` can print `T[int]`; guff's instances share
+    /// the origin's object, so the instance is only visible here.
+    Cycle { path: Vec<ObjectId>, types: Vec<TypeId> },
 }
 
 impl ValidResult {
@@ -81,12 +86,13 @@ pub fn valid_type(
         Step::Ok => ValidResult::Valid,
         Step::Cycle(cycle) => ValidResult::Cycle {
             path: cycle
-                .into_iter()
-                .map(|t| match arena.get(t) {
+                .iter()
+                .map(|&t| match arena.get(t) {
                     TypeData::Named(n) => n.obj(),
                     _ => unreachable!("nest holds only Named types"),
                 })
                 .collect(),
+            types: cycle,
         },
     }
 }

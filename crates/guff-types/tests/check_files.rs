@@ -424,6 +424,66 @@ fn mutual_recursive_types_are_invalid() {
     );
 }
 
+/// go1.27 `cycleError` names an instance with its type arguments
+/// (`T[P]`, `U[int]`), and `typeDecl` queues `validType` before checking the
+/// RHS, so a mutual cycle is reported on the type declared first. Expected
+/// values are go1.27.1 `go/types` on the same source (first line of each
+/// error; guff drops the `\tX refers to Y` continuation lines). The two
+/// instance cycles (`T[P]`, `U[int]`, `B[P]`, `E[string]`) are reported by
+/// go1.27.1 at the instantiation site (4:2, 8:4, 11:25, 17:18); guff's
+/// instances share the origin's object, so they land on the declaration.
+#[test]
+fn recursive_type_cycle_names_instances_like_go127() {
+    let src = "package p\n\
+\n\
+type T[P any] struct {\n\
+\tT[P]\n\
+}\n\
+\n\
+type U[P any] struct {\n\
+\tf U[int]\n\
+}\n\
+\n\
+type A[P any] struct{ b B[P] }\n\
+type B[P any] struct{ a A[P] }\n\
+\n\
+type C struct{ d D[int] }\n\
+type D[P any] struct{ c C }\n\
+\n\
+type E[P any] [2]E[string]\n\
+\n\
+type S struct{ s S }\n\
+type X struct{ y Y }\n\
+type Y struct{ x X }\n";
+    let fset = FileSet::new();
+    let file = parse_file(&fset, "a.go", src.as_bytes(), Mode::NONE).expect("parse");
+    let mut check = Checker::new(Config::default());
+    check.check_files(vec![file]);
+    let got: Vec<String> = check
+        .errors
+        .iter()
+        .filter(|e| e.code == guff_types_errors::Code::InvalidDeclCycle)
+        .map(|e| {
+            let p = fset.position(guff::position::Pos(e.pos as i64));
+            format!("{}:{}: {}", p.line, p.column, e.msg)
+        })
+        .collect();
+    assert_eq!(
+        got,
+        [
+            "3:6: invalid recursive type: T[P] refers to itself",
+            "7:6: invalid recursive type: U[int] refers to itself",
+            "12:6: invalid recursive type B[P]",
+            "14:6: invalid recursive type C",
+            "17:6: invalid recursive type: E[string] refers to itself",
+            "19:6: invalid recursive type: S refers to itself",
+            "20:6: invalid recursive type X",
+        ],
+        "all errors: {:?}",
+        check.errors
+    );
+}
+
 // ---------------------------------------------------------------------------
 // chunk 39 — label checking (labels.go)
 
