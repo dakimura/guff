@@ -1,0 +1,15 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh paralleltest-upstream-cleanup
+# Produced by running golangci-lint on compat/golden/cases/paralleltest-upstream-cleanup/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+cleanup/cleanup_test.go:15:2:paralleltest::Function TestWithParallelAndDefer uses defer with t.Parallel, use t.Cleanup instead to ensure cleanup runs after parallel subtests complete
+cleanup/cleanup_test.go:16:2:paralleltest::Function TestWithParallelAndDefer uses defer with t.Parallel, use t.Cleanup instead to ensure cleanup runs after parallel subtests complete
+cleanup/cleanup_test.go:42:1:paralleltest::Function TestWithoutParallelButWithDefer missing the call to method parallel\n
+cleanup/cleanup_test.go:70:2:paralleltest::Function TestWithMultipleDefersAndParallel uses defer with t.Parallel, use t.Cleanup instead to ensure cleanup runs after parallel subtests complete
+cleanup/cleanup_test.go:71:2:paralleltest::Function TestWithMultipleDefersAndParallel uses defer with t.Parallel, use t.Cleanup instead to ensure cleanup runs after parallel subtests complete
+cleanup/cleanup_test.go:72:2:paralleltest::Function TestWithMultipleDefersAndParallel uses defer with t.Parallel, use t.Cleanup instead to ensure cleanup runs after parallel subtests complete
+cleanup/cleanup_test.go:82:2:paralleltest::Function TestDemonstratingProblem uses defer with t.Parallel, use t.Cleanup instead to ensure cleanup runs after parallel subtests complete

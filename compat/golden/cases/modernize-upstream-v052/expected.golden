@@ -1,0 +1,112 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh modernize-upstream-v052
+# Produced by running golangci-lint on compat/golden/cases/modernize-upstream-v052/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+newexpr/newexpr.go:6:6:modernize::newexpr: intVar can be an inlinable wrapper around new(expr)
+newexpr/newexpr.go:8:6:modernize::newexpr: int64Var can be an inlinable wrapper around new(expr)
+newexpr/newexpr.go:10:6:modernize::newexpr: stringVar can be an inlinable wrapper around new(expr)
+newexpr/newexpr.go:12:6:modernize::newexpr: varOf can be an inlinable wrapper around new(expr)
+newexpr/newexpr.go:15:6:modernize::newexpr: alreadyAnnotated can be an inlinable wrapper around new(expr)
+newexpr/newexpr.go:24:6:modernize::newexpr: call of intVar(x) can be simplified to new(x)
+newexpr/newexpr.go:26:6:modernize::newexpr: call of stringVar(x) can be simplified to new(x)
+newexpr/newexpr.go:27:6:modernize::newexpr: call of varOf(x) can be simplified to new(x)
+newexpr/newexpr.go:28:6:modernize::newexpr: call of varOf(x) can be simplified to new(x)
+newexpr/newexpr.go:29:6:modernize::newexpr: call of varOf(x) can be simplified to new(x)
+newexpr/newexpr.go:30:6:modernize::newexpr: call of varOf(x) can be simplified to new(x)
+newexpr/newexpr.go:32:6:modernize::newexpr: call of varOf(x) can be simplified to new(x)
+newexpr/newexpr.go:33:3:modernize::newexpr: call of varOf(x) can be simplified to new(x)
+newexpr/newexpr.go:34:6:modernize::newexpr: call of alreadyAnnotated(x) can be simplified to new(x)
+newexprdirective/newexpr_directive.go:9:6:modernize::newexpr: annotated can be an inlinable wrapper around new(expr)
+newexprdirective/newexpr_directive.go:14:6:modernize::newexpr: annotatedAfterDoc can be an inlinable wrapper around new(expr)
+newexprdirective/newexpr_directive.go:17:6:modernize::newexpr: extraSpaces can be an inlinable wrapper around new(expr)
+newexprdirective/newexpr_directive.go:20:6:modernize::newexpr: trailingComment can be an inlinable wrapper around new(expr)
+newexprdirective/newexpr_directive.go:23:6:modernize::newexpr: extraArg can be an inlinable wrapper around new(expr)
+newexprdirective/newexpr_directive.go:26:6:modernize::newexpr: blockComment can be an inlinable wrapper around new(expr)
+newexprdirective/newexpr_directive.go:29:6:modernize::newexpr: spaceAfterSlashes can be an inlinable wrapper around new(expr)
+newexprdirective/newexpr_directive.go:33:6:modernize::newexpr: blankLineBetween can be an inlinable wrapper around new(expr)
+newexprdirective/newexpr_directive.go:36:6:modernize::newexpr: otherName can be an inlinable wrapper around new(expr)
+newexprdirective/newexpr_directive.go:39:6:modernize::newexpr: otherDirective can be an inlinable wrapper around new(expr)
+newexprdirective/newexpr_directive.go:41:6:modernize::newexpr: bare can be an inlinable wrapper around new(expr)
+newexprdirective/newexpr_directive.go:46:10:modernize::newexpr: method can be an inlinable wrapper around new(expr)
+newexprdirective/newexpr_directive.go:48:10:modernize::newexpr: methodBare can be an inlinable wrapper around new(expr)
+slicesbackward/slicesbackward.go:16:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:25:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:34:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:45:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:54:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:62:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:69:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:76:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:127:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:262:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:269:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:284:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:291:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:305:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:315:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:316:7:modernize::rangeint: for loop can be modernized using range over int
+slicesbackward/slicesbackward.go:327:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:341:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:352:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:367:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicesbackward/slicesbackward.go:396:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+stditerators/stditerators.go:9:2:modernize::stditerators: Len/At loop can simplified using Tuple.Variables iteration
+stditerators/stditerators.go:15:2:modernize::stditerators: NumChildren/Child loop can simplified using Scope.Children iteration
+stditerators/stditerators.go:21:3:modernize::stditerators: NumChildren/Child loop can simplified using Scope.Children iteration
+stditerators/stditerators.go:24:3:modernize::stditerators: NumChildren/Child loop can simplified using Scope.Children iteration
+stditerators/stditerators.go:35:3:modernize::stditerators: NumChildren/Child loop can simplified using Scope.Children iteration
+stditerators/stditerators.go:41:3:modernize::stditerators: NumChildren/Child loop can simplified using Scope.Children iteration
+stditerators/stditerators.go:49:2:modernize::stditerators: Len/Term loop can simplified using Union.Terms iteration
+stditerators/stditerators.go:68:2:modernize::stditerators: Len/At loop can simplified using Tuple.Variables iteration
+stditerators/stditerators.go:81:3:modernize::stditerators: Len/At loop can simplified using Tuple.Variables iteration
+stditerators/stditerators.go:89:3:modernize::stditerators: Len/At loop can simplified using Tuple.Variables iteration
+stditerators/stditerators.go:96:2:modernize::stditerators: NumField/Field loop can simplified using Type.Fields iteration
+stditerators/stditerators.go:99:2:modernize::stditerators: NumMethod/Method loop can simplified using Type.Methods iteration
+stditerators/stditerators.go:102:2:modernize::stditerators: NumIn/In loop can simplified using Type.Ins iteration
+stditerators/stditerators.go:105:2:modernize::stditerators: NumOut/Out loop can simplified using Type.Outs iteration
+stditerators/stditerators.go:116:2:modernize::stditerators: NumField/Field loop can simplified using Value.Fields iteration
+stditerators/stditerators.go:123:2:modernize::stditerators: NumMethod/Method loop can simplified using Value.Methods iteration
+stringscut/stringscut.go:19:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+stringscut/stringscut.go:92:7:modernize::stringscut: strings.Index can be simplified using strings.Contains
+stringscut/stringscut.go:97:7:modernize::stringscut: strings.Index can be simplified using strings.Contains
+stringscut/stringscut.go:110:7:modernize::stringscut: strings.IndexByte can be simplified using strings.Contains
+stringscut/stringscut.go:115:7:modernize::stringscut: bytes.IndexByte can be simplified using bytes.Contains
+stringscut/stringscut.go:121:7:modernize::stringscut: strings.LastIndex can be simplified using strings.Contains
+stringscut/stringscut.go:126:7:modernize::stringscut: strings.LastIndexByte can be simplified using strings.Contains
+stringscut/stringscut.go:131:7:modernize::stringscut: bytes.LastIndex can be simplified using bytes.Contains
+stringscut/stringscut.go:136:7:modernize::stringscut: bytes.LastIndexByte can be simplified using bytes.Contains
+stringscut/stringscut.go:148:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+stringscut/stringscut.go:162:7:modernize::stringscut: strings.IndexByte can be simplified using strings.Cut
+stringscut/stringscut.go:170:7:modernize::stringscut: strings.IndexByte can be simplified using strings.Cut
+stringscut/stringscut.go:179:7:modernize::stringscut: strings.IndexByte can be simplified using strings.Cut
+stringscut/stringscut.go:187:7:modernize::stringscut: strings.IndexByte can be simplified using strings.Contains
+stringscut/stringscut.go:193:7:modernize::stringscut: strings.IndexByte can be simplified using strings.Cut
+stringscut/stringscut.go:201:7:modernize::stringscut: strings.IndexByte can be simplified using strings.Cut
+stringscut/stringscut.go:209:7:modernize::stringscut: strings.IndexByte can be simplified using strings.Contains
+stringscut/stringscut.go:214:7:modernize::stringscut: bytes.IndexByte can be simplified using bytes.Cut
+stringscut/stringscut.go:222:7:modernize::stringscut: bytes.Index can be simplified using bytes.Cut
+stringscut/stringscut.go:240:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+stringscut/stringscut.go:249:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+stringscut/stringscut.go:258:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+stringscut/stringscut.go:270:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+stringscut/stringscut.go:327:16:modernize::stringscut: strings.Index can be simplified using strings.Contains
+stringscut/stringscut.go:332:30:modernize::stringscut: strings.Index can be simplified using strings.Contains
+stringscut/stringscut.go:337:16:modernize::stringscut: strings.Index can be simplified using strings.Cut
+stringscut/stringscut.go:345:16:modernize::stringscut: strings.Index can be simplified using strings.Cut
+stringscut/stringscut.go:353:16:modernize::stringscut: strings.IndexByte can be simplified using strings.Contains
+stringscut/stringscut.go:358:16:modernize::stringscut: bytes.Index can be simplified using bytes.Cut
+stringscut/stringscut.go:366:16:modernize::stringscut: bytes.IndexByte can be simplified using bytes.Cut
+stringscut/stringscut.go:497:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+stringscut/stringscut.go:515:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+stringscut/stringscut.go:519:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+stringscut/stringscut.go:530:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+stringscut/stringscut.go:541:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+stringscut/stringscut.go:590:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+stringscut/stringscut.go:599:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+stringscut/stringscut.go:608:7:modernize::stringscut: strings.Index can be simplified using strings.Cut
+stringscut/stringscut.go:620:7:modernize::stringscut: strings.SplitN call can be simplified using strings.Cut
+stringscut/stringscut.go:626:7:modernize::stringscut: strings.Split call can be simplified using strings.Cut

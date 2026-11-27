@@ -1740,6 +1740,10 @@ pub struct ParalleltestSettings {
     pub ignore_missing_subtests: bool,
     #[serde(default, rename = "check-cleanup")]
     pub check_cleanup: bool,
+    /// `run.go`, pushed here by [`LinterSettings::apply_go_version`]
+    /// (`ParallelTestSettings.Go`, `mapstructure:"-"`).
+    #[serde(skip)]
+    pub go: Option<String>,
 }
 
 impl ParalleltestSettings {
@@ -1748,6 +1752,9 @@ impl ParalleltestSettings {
             ignore_missing: self.ignore_missing,
             ignore_missing_subtests: self.ignore_missing_subtests,
             check_cleanup: self.check_cleanup,
+            // `paralleltest.go`: `if config.IsGoGreaterThanOrEqual(settings.Go,
+            // "1.22") { cfg["ignoreloopVar"] = true }`.
+            ignore_loop_var: self.go.as_deref().is_some_and(|go| go_at_least(go, 1, 22)),
         }
     }
 }
@@ -3132,16 +3139,55 @@ impl LinterSettings {
         self.govet.go = go.map(str::to_string);
         self.revive.go = go.map(str::to_string);
         self.gocritic.go = go.map(str::to_string);
+        self.paralleltest.go = go.map(str::to_string);
     }
 }
 
-/// `version` is at least `major.minor` (`1.22`, `go1.22`, `1.22.3` all parse).
+/// golangci-lint's `config.IsGoGreaterThanOrEqual(version, "major.minor")`:
+/// `hashicorp/go-version` on `version` with a leading `go` trimmed.
+///
+/// That parser takes an optional `v`, dot-separated numbers, and an optional
+/// pre-release (`-rc1`, or `rc1` straight after the numbers) and `+build`
+/// suffix. A pre-release sorts **below** its release, so `1.22rc1` is not at
+/// least 1.22 while `1.23rc1` is. Anything it rejects compares as false.
 fn go_at_least(version: &str, major: u32, minor: u32) -> bool {
-    let stripped = version.trim().strip_prefix("go").unwrap_or(version.trim());
-    let mut parts = stripped.split('.');
-    let maj: u32 = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
-    let min: u32 = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
-    maj > major || (maj == major && min >= minor)
+    let v = version.trim();
+    let v = v.strip_prefix("go").unwrap_or(v);
+    let v = v.strip_prefix('v').unwrap_or(v);
+    let (core, meta) = match v.split_once('+') {
+        Some((core, meta)) => (core, Some(meta)),
+        None => (v, None),
+    };
+    let ident_ok = |s: &str| {
+        !s.is_empty()
+            && s.split('.').all(|part| {
+                !part.is_empty()
+                    && part.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '~')
+            })
+    };
+    if meta.is_some_and(|m| !ident_ok(m)) {
+        return false;
+    }
+    let num_end = core
+        .char_indices()
+        .find(|&(_, c)| !(c.is_ascii_digit() || c == '.'))
+        .map_or(core.len(), |(i, _)| i);
+    let (nums, pre) = core.split_at(num_end);
+    let mut segments: Vec<u64> = Vec::new();
+    for part in nums.split('.') {
+        match part.parse() {
+            Ok(n) => segments.push(n),
+            Err(_) => return false,
+        }
+    }
+    let pre = pre.strip_prefix('-').unwrap_or(pre);
+    if !pre.is_empty() && !ident_ok(pre) {
+        return false;
+    }
+    let at = |i: usize| segments.get(i).copied().unwrap_or(0);
+    let have = (at(0), at(1), at(2));
+    let want = (u64::from(major), u64::from(minor), 0);
+    have > want || (have == want && pre.is_empty())
 }
 
 fn filter_govet(
@@ -5063,12 +5109,38 @@ custom:
     }
 
     #[test]
+    fn go_at_least_follows_hashicorp_go_version() {
+        for (v, want) in [
+            ("1.22", true),
+            ("go1.22", true),
+            ("1.22.3", true),
+            ("1.23rc1", true),
+            ("1.22rc1", false),
+            ("1.22-rc.1", false),
+            ("1.22.0+meta", true),
+            ("v1.23", true),
+            ("1.21.13", false),
+            ("2", true),
+            ("1", false),
+            ("", false),
+            ("abc", false),
+            ("1..22", false),
+        ] {
+            assert_eq!(go_at_least(v, 1, 22), want, "{v}");
+        }
+    }
+
+    #[test]
     fn apply_go_version_reaches_every_linter_the_loader_writes() {
         let mut settings = LinterSettings::default();
         settings.apply_go_version(Some("  1.23  "));
         assert_eq!(settings.govet.go.as_deref(), Some("1.23"));
         assert_eq!(settings.revive.go.as_deref(), Some("1.23"));
         assert_eq!(settings.gocritic.go.as_deref(), Some("1.23"));
+        assert_eq!(settings.paralleltest.go.as_deref(), Some("1.23"));
+        assert!(settings.paralleltest.to_guff_paralleltest().ignore_loop_var);
+        settings.apply_go_version(Some("1.21"));
+        assert!(!settings.paralleltest.to_guff_paralleltest().ignore_loop_var);
         settings.apply_go_version(Some(""));
         assert_eq!(settings.govet.go, None);
     }

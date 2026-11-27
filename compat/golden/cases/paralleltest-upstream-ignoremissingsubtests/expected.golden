@@ -1,0 +1,11 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh paralleltest-upstream-ignoremissingsubtests
+# Produced by running golangci-lint on compat/golden/cases/paralleltest-upstream-ignoremissingsubtests/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+ignoremissingsubtests/ignoremissingsubtests_test.go:46:1:paralleltest::Function TestFunctionMissingCallToParallel missing the call to method parallel\n
+ignoremissingsubtests/ignoremissingsubtests_test.go:66:1:paralleltest::Function TestFunctionMissingCallToParallelAndRangeNotUsingRangeValueInTDotRun missing the call to method parallel\n
+ignoremissingsubtests/ignoremissingsubtests_test.go:155:1:paralleltest::Function TestFunctionWithParallelLookalike missing the call to method parallel\n
