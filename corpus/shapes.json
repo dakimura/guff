@@ -217,6 +217,35 @@
         "oldgo": 0
       }
     },
+    "go-client": {
+      "tier": "pr",
+      "packages": "./...",
+      "ref": "v1.19.0",
+      "go": "1.25",
+      "packages_analyzed": 4,
+      "files_analyzed": 37,
+      "modules": [
+        "github.com/qdrant/go-client"
+      ],
+      "shapes": {
+        "generics": 1,
+        "genericrecv": 0,
+        "genericunion": 0,
+        "genericalias": 0,
+        "cgo": 0,
+        "buildtags": 0,
+        "gowork": 0,
+        "multimodule": 0,
+        "vendormode": 0,
+        "embed": 0,
+        "testonly": 1,
+        "asm": 0,
+        "nonascii": 0,
+        "generated": 12,
+        "biggen": 2,
+        "oldgo": 0
+      }
+    },
     "grafana": {
       "tier": "nightly",
       "packages": "./pkg/... ./apps/advisor/...",
