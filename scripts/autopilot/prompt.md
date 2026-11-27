@@ -6,8 +6,16 @@
 ファイル（journal・memory・docs）にしか残りません。
 
 ドライバ（`scripts/autopilot/run.sh`）が、あなたの開始前に作業ツリーを `origin/main` の
-detached HEAD に揃え、終了後に PR の CI を待って **全部緑なら自分でマージ**します。
-あなたは `gh pr merge` を打ちません（guard が拒否します）。
+detached HEAD に揃え、終了後に PR をマージするかを機械的に決めます。マージ条件は 3 つ:
+
+1. PR の CI が全部緑
+2. **独立レビュアー**（別コンテキストの読み取り専用セッション）がその head を approve
+3. コード（`crates/` `Cargo.*` `compat/` `regress/` `corpus/`）に触る PR は、**push した head の
+   ツリーそのもの**で `{{GATE}}` のフル実行の記録があり、全段 PASS（main でも赤い段＝known-red は可）
+
+あなたは `gh pr merge` を打ちません（guard が拒否します）。ゲートの記録も gate.sh 以外では作れません。
+
+**このイテレーションの締め切り: {{DEADLINE}}**（`date` で確認できる。超えるとドライバが打ち切る）。
 
 下の「signals」はドライバがトークンを使わずに集めた現在の状態です。
 
@@ -21,6 +29,9 @@ detached HEAD に揃え、終了後に PR の CI を待って **全部緑なら�
    ならびに `scripts/compat-session-prompt.md`（close/hunt の進め方。最小再現→上流で複数形を測る→
    全形を fixture に→件数で assert→golden はキー集合で差分）。
 4. `{{STATE_DIR}}/journal.md` の末尾（過去イテレーションが何をして何に詰まったか）。
+   `HUMAN-DECISION` の見出しは人間の判断で、未処理なら最優先で従う。
+5. signals 末尾の **scout brief** があれば読む。前の PR の CI 待ちの間に別セッションが下調べした
+   次タスクの案。P0 が無く妥当なら採用してよい（採用しなくてもよい。鵜呑みにせず上流は自分で確かめる）。
 
 ## 1. タスクの選び方（上から順に、該当するものを 1 つ）
 
@@ -28,6 +39,9 @@ detached HEAD に揃え、終了後に PR の CI を待って **全部緑なら�
 - signals に `open PRs` があり、それが `autopilot/` ブランチなら、それはドライバがマージ
   できなかった前イテレーションの PR です。`gh pr checks <n> -R {{REPO}}` と失敗ログを読み、
   **そのブランチを checkout して追加コミットで直し push** する（force-push 禁止）。
+  理由は PR のコメント（`gh pr view <n> -R {{REPO}} --comments`）にある: `autopilot review`
+  （レビュアーの要修正。本物か自分で確かめてから直す。誤りなら根拠を PR にコメントして push し直す
+  ＝新しい head は再レビューされる）、`autopilot driver`（ゲート記録が無い／失敗）、または CI の赤。
   直せない根拠が揃ったら PR を draft にし、理由をコメントと journal に残して次へ。
 - main の CI が赤なら、原因を `--log-failed` で読んで直す。落ちた理由が分からないまま
   再実行しない。golangci-lint 側の非決定性（memory: golangci-is-nondeterministic）、
@@ -64,15 +78,22 @@ detached HEAD に揃え、終了後に PR の CI を待って **全部緑なら�
    直す場合はそのブランチを `git switch` する。
 2. 直す前に再現する。scratchpad（`mktemp -d`）で最小再現→上流で複数形を測る→全形を fixture に。
 3. 実装。規約は DEVELOPMENT §4。`// DEFERRED:` を黙って増やさない。
-4. **ゲート**: `{{GATE}}`（速度・リファクタなら `--perf`）。CI と同じ手順を
-   順に回し、最初の失敗で止まる。直したら `--from <step>` で再開してよいが、
-   コードを変えたら最後にもう一度頭から通す。長いので Bash の timeout は最大（600000）にし、
-   足りなければ `run_in_background` で走らせて完了通知を待つ（ポーリングループを作らない）。
-   **ゲート実行中にビルドしない・`compat/run.sh` を 2 本同時に走らせない。**
-5. **独立レビュー**: ゲートが通ったら、Agent ツールで reviewer を 1 体起動し、
+4. **ゲート**（時間の大半はここ。回数を減らす）:
+   - 開発中は `{{GATE}} --quick`（release build・golden・fix・変更したクレートの cargo test、数分）。
+   - 仕上げに **フル 1 回**: `{{GATE}} --keep-going`（速度・リファクタなら `--perf` も）。全段を最後まで
+     回すので、失敗が複数あっても 1 回で全部分かる。所要 40〜60 分。Bash の timeout は 600000 で足りない
+     ので `run_in_background` で走らせて完了通知を待つ（ポーリングループを作らない）。
+   - フル実行は**開始時の作業ツリー**のツリーハッシュで記録される。そのツリーをそのまま
+     `git add -A` でコミットして push する（後からコードを変えたら、もう一度フル）。gate が書き換える
+     `RESULTS*.md` は gate 自身が戻すので触らない。
+   - signals の **known-red on main** にある段が落ちるのはあなたの変更のせいではない。追わない
+     （それ自体を直すのがタスクなら別）。PR 本文に「known-red」と書く。
+   - **ゲート実行中にビルドしない・`compat/run.sh` を 2 本同時に走らせない。**
+5. **セルフレビュー**（任意だが推奨）: フルゲートの前に、Agent ツールで reviewer を 1 体起動し、
    `git diff origin/main...HEAD` と関係する上流ソースのパスだけを渡して（あなたの結論は渡さずに）
-   正しさのレビューを頼む。brief には「rm 禁止・ファイルを書き換えない」を書く。
-   指摘は自分で検証し、本物なら直してゲートを再実行。
+   正しさのレビューを頼む。brief には「rm 禁止・ファイルを書き換えない」を書く。PR を出した後にも
+   ドライバの独立レビュアーが見るが、そこで止まると 1 イテレーション分遅れるので、先に潰しておく。
+   調査（上流の差分読み・呼び出し元の洗い出し）も Explore 系の subagent に並列で任せてよい。
 6. コミット（英語。末尾に `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`）、
    `git push -u origin autopilot/<slug>`、`gh pr create -R {{REPO}}`（英語。何を・なぜ・どう測ったか。
    本文末尾に `🤖 Generated with [Claude Code](https://claude.com/claude-code)`）。

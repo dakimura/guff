@@ -95,7 +95,7 @@ release_pr() {  # $1 = branch, $2 = title, $3 = body
   pr="$(gh pr create -R "$REPO" --base main --head "$1" --title "$2" --body "$3" | sed -nE 's#.*/pull/([0-9]+).*#\1#p')"
   [[ -n "$pr" ]] || return 1
   log "release: opened PR #$pr ($2)"
-  wait_and_merge "$pr"
+  wait_and_merge "$pr" mech
 }
 
 cut_release() {
