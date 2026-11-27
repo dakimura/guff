@@ -512,14 +512,36 @@ pub fn deref_struct_ptr(arena: &TypeArena, t: TypeId) -> TypeId {
 /// Reports whether `T` is a pointer to an interface (or a pointer to a
 /// type parameter, which the language also rejects).
 ///
-/// Equivalent to `isInterfacePtr`.
+/// Equivalent to `isInterfacePtr`. Upstream's `IsInterface(p.base)` is true
+/// for every type parameter (its underlying is always its constraint
+/// interface); guff builds that interface lazily, so a type parameter whose
+/// constraint is a bare type (`P []byte`) is not an interface to
+/// `is_interface` here — ask `is_type_param` too.
 pub fn is_interface_ptr(arena: &TypeArena, t: TypeId) -> bool {
     let u = t.underlying(arena);
     let base = match arena.get(u) {
         TypeData::Pointer(p) => p.elem(),
         _ => return false,
     };
-    is_interface(arena, base)
+    is_interface(arena, base) || crate::predicates::is_type_param(arena, base)
+}
+
+/// The text of the cause for a pointer to an interface or to a type
+/// parameter, `t` written with `type_str` (go1.27, go.dev/issue/79883).
+/// `t` must satisfy [`is_interface_ptr`].
+///
+/// Equivalent to `Checker.interfacePtrError` (lookup.go).
+pub fn interface_ptr_error(arena: &TypeArena, t: TypeId, type_str: &str) -> String {
+    debug_assert!(is_interface_ptr(arena, t));
+    let base = match arena.get(t.underlying(arena)) {
+        TypeData::Pointer(p) => Some(p.elem()),
+        _ => None,
+    };
+    if base.is_some_and(|b| crate::predicates::is_type_param(arena, b)) {
+        format!("type {type_str} is pointer to type parameter, not type parameter")
+    } else {
+        format!("type {type_str} is pointer to interface, not interface")
+    }
 }
 
 /// Reports whether `T` is a struct (or pointer to a struct) containing —

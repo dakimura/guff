@@ -2635,3 +2635,87 @@ fn nullary_generic_call_without_type_arguments_still_fails_to_infer() {
         .count();
     assert_eq!(infer, 2, "{:?}", check.errors);
 }
+
+/// `interfacePtrError` (go1.27, go.dev/issue/79883): a pointer to an interface
+/// or to a type parameter is named in the cause with its type, and a pointer
+/// to a type parameter says so instead of "pointer to interface". Upstream
+/// reaches the helper from three callers — the selector's
+/// `MissingFieldOrMethod`, `missingMethod` (V is the pointer) and `implements`
+/// (T is the pointer). The type-parameter base may be a bare-type constraint
+/// (`P []byte`, issue79883), whose interface guff builds lazily.
+/// Messages measured with go1.27.1 `go vet` (go/types).
+///
+/// Not covered here: guff's assignment and conversion errors do not carry a
+/// cause at all yet (`cannot use T value as I value in ...`), so issue79883's
+/// own conversion shape is asserted through `implements` below instead.
+#[test]
+fn interface_ptr_error_names_the_type_and_type_parameters() {
+    let cases: &[(&str, &str)] = &[
+        // Selector.
+        ("type I interface{ M() }\nfunc f(x *I) { x.M() }", "x.M undefined (type *I is pointer to interface, not interface)"),
+        ("type I interface{ M() }\ntype PI *I\nfunc g(x PI) { x.M() }", "x.M undefined (type PI is pointer to interface, not interface)"),
+        ("func f[P any](x *P) { _ = x.M }", "x.M undefined (type *P is pointer to type parameter, not type parameter)"),
+        ("func f[P []byte](x *P) { _ = x.M }", "x.M undefined (type *P is pointer to type parameter, not type parameter)"),
+        // Instantiation → missingMethod with V the pointer.
+        ("type I interface{ M() }\nfunc g[Q I]() {}\nfunc f() { g[*I]() }", "*I does not satisfy I (type *I is pointer to interface, not interface)"),
+        ("type I interface{ M() }\ntype PI *I\nfunc g[Q I]() {}\nfunc f() { g[PI]() }", "PI does not satisfy I (type PI is pointer to interface, not interface)"),
+        ("type I interface{ M() }\nfunc g[Q I]() {}\nfunc f[P I]() { g[*P]() }", "*P does not satisfy I (type *P is pointer to type parameter, not type parameter)"),
+        // Unchanged: a plain missing method.
+        ("type I interface{ M() }\ntype T struct{}\nfunc g[Q I]() {}\nfunc f() { g[T]() }", "T does not satisfy I (missing method M)"),
+        ("type T struct{}\nfunc f(x *T) { x.M() }", "x.M undefined (type *T has no field or method M)"),
+    ];
+    let mut bad = Vec::new();
+    for (body, want) in cases {
+        let src = format!("package p\n{body}\n");
+        let check = check_src(&src);
+        let msgs: Vec<String> = check.errors.iter().map(|e| e.msg.clone()).collect();
+        if msgs != vec![want.to_string()] {
+            bad.push(format!("{body}\n  got:  {msgs:?}\n  want: {want}"));
+        }
+    }
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+
+    // `implements` itself, for the causes assignment/conversion would show
+    // (go1.27.1: `T does not implement *I (type *I is pointer to interface,
+    // not interface)` and `string does not implement *P (type *P is pointer
+    // to type parameter, not type parameter)`).
+    let mut check = check_src(
+        "package p\n\
+         type I interface{ M() }\n\
+         type T struct{}\n\
+         func (T) M() {}\n\
+         type PI *I\n\
+         type N int\n\
+         type Box[P []byte] struct{ p *P }\n",
+    );
+    assert!(check.errors.is_empty(), "{:?}", check.errors);
+    let pkg_scope = check.packages.get(check.pkg).scope();
+    let ty = |check: &Checker, n: &str| {
+        scope_lookup(&check.scopes, pkg_scope, n)
+            .expect(n)
+            .typ(&check.objects)
+            .expect(n)
+    };
+    let (i, t, pi, n) = (ty(&check, "I"), ty(&check, "T"), ty(&check, "PI"), ty(&check, "N"));
+    assert_eq!(
+        check.implements(t, pi, false).unwrap_err(),
+        "T does not implement PI (type PI is pointer to interface, not interface)"
+    );
+    assert_eq!(
+        check.implements(pi, i, false).unwrap_err(),
+        "PI does not implement I (type PI is pointer to interface, not interface)"
+    );
+    // A non-pointer, non-interface target is unchanged.
+    assert_eq!(check.implements(t, n, false).unwrap_err(), "T does not implement N (N is not an interface)");
+    // `*P` with P's bare-type constraint `[]byte`: the field type of Box.
+    let box_t = ty(&check, "Box");
+    let ptr_p = match check.types.get(box_t.underlying(&check.types)) {
+        guff_types::arena::TypeData::Struct(st) => st.field(0).typ(&check.objects).unwrap(),
+        other => panic!("Box underlying: {other:?}"),
+    };
+    let string_t = check.typ[guff_types::BasicKind::String as usize];
+    assert_eq!(
+        check.implements(string_t, ptr_p, false).unwrap_err(),
+        "string does not implement *P (type *P is pointer to type parameter, not type parameter)"
+    );
+}
