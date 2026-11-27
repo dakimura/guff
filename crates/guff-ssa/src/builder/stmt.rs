@@ -1063,7 +1063,14 @@ impl<'a> Builder<'a> {
         if s.body.list.len() == 1 {
             if let Stmt::CommClause(clause) = &s.body.list[0] {
                 if let Some(comm) = &clause.comm {
-                    self.stmt(comm);
+                    // x/tools v0.52: a receive assignment evaluates the
+                    // receive before its LHS (`assignSelectRecvStmt`).
+                    match comm.as_ref() {
+                        Stmt::AssignStmt(recv_assign) => {
+                            self.assign_select_recv_stmt(recv_assign);
+                        }
+                        _ => self.stmt(comm),
+                    }
                     let done = self.new_basic_block("select.done".to_string());
                     if let Some(name) = label {
                         self.set_label_break(name, done);
@@ -1363,24 +1370,7 @@ impl<'a> Builder<'a> {
 
         // Phase 1: compute an lvalue for each LHS (left-to-right), creating a
         // local cell first for each variable a `:=` newly defines.
-        let mut lvals: Vec<Box<dyn crate::lvalue::LValue>> = Vec::with_capacity(s.lhs.len());
-        for lhs in &s.lhs {
-            if is_blank_ident(lhs) {
-                lvals.push(Box::new(crate::lvalue::Blank));
-                continue;
-            }
-            if is_def {
-                if let Expr::Ident(id) = lhs {
-                    if let Some(Some(obj)) = self.prog.info.defs.get(&id.id).copied() {
-                        if matches!(self.prog.object_arena.get(obj), guff_types::ObjectData::Var(_)) {
-                            let block = self.block.expect("no current block");
-                            crate::emit::emit_local_var(self.prog, self.func_id, block, obj);
-                        }
-                    }
-                }
-            }
-            lvals.push(self.address(lhs, false)); // non-escaping
-        }
+        let lvals = self.assign_lhs(&s.lhs, is_def);
 
         if s.lhs.len() == s.rhs.len() {
             // Simple / parallel assignment or short var decl. The RHSs may refer
@@ -1400,6 +1390,57 @@ impl<'a> Builder<'a> {
                 let elem = crate::emit::emit_extract(self.prog, self.func_id, block, tuple, i);
                 lval.store(self, elem);
             }
+        }
+    }
+
+    /// assign_lhs computes an lvalue for each of `lhss` (left-to-right). When
+    /// `is_def` (a `:=`), it first creates a fresh local cell for each variable
+    /// the statement newly defines. Blank identifiers yield a `Blank` lvalue.
+    /// (Go: `builder.assignLHS`, x/tools v0.52.)
+    fn assign_lhs(&mut self, lhss: &[Expr], is_def: bool) -> Vec<Box<dyn crate::lvalue::LValue>> {
+        let mut lvals: Vec<Box<dyn crate::lvalue::LValue>> = Vec::with_capacity(lhss.len());
+        for lhs in lhss {
+            if is_blank_ident(lhs) {
+                lvals.push(Box::new(crate::lvalue::Blank));
+                continue;
+            }
+            if is_def {
+                if let Expr::Ident(id) = lhs {
+                    if let Some(Some(obj)) = self.prog.info.defs.get(&id.id).copied() {
+                        if matches!(self.prog.object_arena.get(obj), guff_types::ObjectData::Var(_)) {
+                            let block = self.block.expect("no current block");
+                            crate::emit::emit_local_var(self.prog, self.func_id, block, obj);
+                        }
+                    }
+                }
+            }
+            lvals.push(self.address(lhs, false)); // non-escaping
+        }
+        lvals
+    }
+
+    /// assign_select_recv_stmt emits the receive assignment of a single-case
+    /// select (`select { case a[f()] = <-ch: }`). Unlike an ordinary
+    /// assignment, its single RHS is evaluated and the receive performed
+    /// *before* the LHS is evaluated (and before any `:=` cell is created).
+    /// (Go: `builder.assignSelectRecvStmt`, x/tools v0.52; honnef go/ir v0.8.2
+    /// has the same order.)
+    fn assign_select_recv_stmt(&mut self, s: &AssignStmt) {
+        let mut values: Vec<Value> = Vec::with_capacity(s.lhs.len());
+        if s.lhs.len() == 1 {
+            values.push(self.expr(&s.rhs[0]));
+        } else {
+            let tuple = self.expr_n(&s.rhs[0]);
+            self.emit_debug_ref(&s.rhs[0], tuple, false);
+            let block = self.block.expect("no current block");
+            for i in 0..s.lhs.len() {
+                values.push(crate::emit::emit_extract(self.prog, self.func_id, block, tuple, i));
+            }
+        }
+        let is_def = s.tok == Some(guff::token::Token::DEFINE);
+        let lvals = self.assign_lhs(&s.lhs, is_def);
+        for (lval, v) in lvals.into_iter().zip(values) {
+            lval.store(self, v);
         }
     }
 
