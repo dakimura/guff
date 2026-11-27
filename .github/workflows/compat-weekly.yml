@@ -69,9 +69,9 @@ jobs:
       - name: Install golangci-lint
         run: |
           # The version lives in compat/pins.json, not here — see compat.yml.
-          V="$(python3 -c 'import json;print(json.load(open("compat/pins.json"))["golangci_lint"])')"
-          curl -sSfL https://golangci-lint.run/install.sh \
-            | sh -s -- -b "$HOME/.local/bin" "v$V"
+          # Not upstream install.sh: it resolves the tag via an HTML page that
+          # 504s on its own (see the script).
+          ./scripts/ci/install-golangci-lint.sh "$HOME/.local/bin"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Build guff
