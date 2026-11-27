@@ -41,16 +41,35 @@ for r in pend:
 ' "$main_sha" "$REPO"
 
 # --- open PRs -----------------------------------------------------------------
-prs="$(gh pr list -R "$REPO" --state open --json number,title,headRefName,isDraft 2>/dev/null || echo '[]')"
+prs="$(gh pr list -R "$REPO" --state open --json number,title,headRefName,isDraft,headRefOid 2>/dev/null || echo '[]')"
 echo "$prs" | python3 -c '
-import json, sys
-prs = json.load(sys.stdin)
+import json, os, sys
+prs, state = json.load(sys.stdin), sys.argv[1]
 print(f"- open PRs: {len(prs)}")
 for p in prs:
     d = " (draft)" if p["isDraft"] else ""
-    n, h, t = p["number"], p["headRefName"], p["title"]
+    n, h, t, sha = p["number"], p["headRefName"], p["title"], p["headRefOid"]
     print(f"  - #{n} `{h}` {t}{d}")
-'
+    v = os.path.join(state, "reviews", sha + ".verdict")
+    if os.path.exists(v):
+        verdict = open(v).read().strip()
+        extra = " — **reviewer requested changes; read the `autopilot review` comment on the PR**" if verdict == "changes" else ""
+        print(f"    - reviewer on {sha[:10]}: {verdict}{extra}")
+' "$STATE"
+
+# --- main health (local-only gate steps on origin/main, run by the driver) -------
+if [[ -f "$STATE/main-health.tsv" ]]; then
+  hsha="$(sed -n 's/^#sha	//p' "$STATE/main-health.tsv")"
+  hres="$(grep -v '^#' "$STATE/main-health.tsv" | awk -F'	' '{printf "%s=%s ", $1, $2}')"
+  if [[ "$hsha" == "$main_sha" ]]; then
+    echo "- main health (local-only steps on origin/main): $hres"
+  else
+    echo "- main health (from ${hsha:0:10}, older than origin/main): $hres"
+  fi
+  if grep -q $'\tFAIL' "$STATE/main-health.tsv"; then
+    echo "  - **known-red on main**: $(grep $'\tFAIL' "$STATE/main-health.tsv" | cut -f1 | tr '\n' ' ')— a gate failure in these steps is not yours unless your task is to fix it. The driver accepts them as known-red."
+  fi
+fi
 
 # --- upstream versions ----------------------------------------------------------
 pin="$(python3 -c 'import json;print(json.load(open("compat/pins.json"))["golangci_lint"])')"
@@ -82,6 +101,14 @@ for l in $(ls docs/PHASE*-LEDGER.md 2>/dev/null | sort -V | tail -1); do
   n="$(grep -c 'needs-port' "$l" 2>/dev/null)"
   echo "- newest ledger: \`$l\` (lines mentioning needs-port: $n)"
 done
+
+# --- scout brief (prepared during the previous PR's CI wait) --------------------
+if [[ -f "$STATE/next-task.md" ]]; then
+  echo
+  echo "### scout brief (下調べ。採用するかは自分で判断)"
+  echo
+  cat "$STATE/next-task.md"
+fi
 
 # --- previous iterations ------------------------------------------------------
 if [[ -f "$STATE/journal.md" ]]; then
