@@ -1,0 +1,22 @@
+# Golden case: `linters.default: fast`.
+#
+# Upstream's `fast` is every linter built without `WithLoadForGoAnalysis()` —
+# 46 syntax-only linters in 2.15.0 — and contains none of govet, errcheck or
+# unused. guff used to resolve it to `[govet, errcheck, ineffassign, unused]`,
+# so a `default: fast` config ran four linters, three of them the wrong ones.
+# The fixture fires several fast linters (godot, misspell, whitespace, mnd,
+# dogsled, gochecknoinits, ineffassign, nakedret, copyloopvar, ...) and holds
+# shapes only govet / errcheck / unused / staticcheck would report, which must
+# stay silent.
+version: "2"
+
+linters:
+  default: fast
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

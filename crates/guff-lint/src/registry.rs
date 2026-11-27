@@ -16,8 +16,63 @@ pub const STANDARD_LINTER_NAMES: &[&str] = &[
     "unused",
 ];
 
-/// Names in the golangci-lint v2 `fast` preset (standard minus slow linters).
-pub const FAST_LINTER_NAMES: &[&str] = &["govet", "errcheck", "ineffassign", "unused"];
+/// Names in the golangci-lint v2 `fast` preset.
+///
+/// Upstream's `fast` is not "standard minus slow linters": it is every linter
+/// built without `WithLoadForGoAnalysis()` (`lintersdb/builder_linter.go`),
+/// i.e. syntax-only ones — so `govet`, `errcheck` and `unused` are *not* in it
+/// and `ineffassign` is the only overlap with `standard`. Transcribed from the
+/// Enabled list of `golangci-lint linters` under `linters.default: fast`
+/// (v2.15.0, 46 names; `predeclared` left the set in 2.15). Includes the
+/// deprecated `gomodguard` and `wsl`, which therefore run with a warning.
+pub const FAST_LINTER_NAMES: &[&str] = &[
+    "asciicheck",
+    "bidichk",
+    "copyloopvar",
+    "cyclop",
+    "decorder",
+    "depguard",
+    "dogsled",
+    "dupl",
+    "dupword",
+    "embeddedstructfieldcheck",
+    "funcorder",
+    "funlen",
+    "gocheckcompilerdirectives",
+    "gochecknoinits",
+    "gocognit",
+    "gocyclo",
+    "godoclint",
+    "godot",
+    "godox",
+    "goheader",
+    "gomoddirectives",
+    "gomodguard",
+    "gomodguard_v2",
+    "goprintffuncname",
+    "grouper",
+    "inamedparam",
+    "ineffassign",
+    "interfacebloat",
+    "iotamixing",
+    "lll",
+    "maintidx",
+    "misspell",
+    "mnd",
+    "nakedret",
+    "nestif",
+    "nlreturn",
+    "nolintlint",
+    "nosprintfhostport",
+    "promlinter",
+    "tagalign",
+    "testableexamples",
+    "testpackage",
+    "unqueryvet",
+    "usestdlibvars",
+    "whitespace",
+    "wsl",
+];
 
 /// Returns analyzers registered under `name`, if any.
 pub fn analyzers_for_linter(name: &str) -> Option<Vec<&'static Analyzer>> {

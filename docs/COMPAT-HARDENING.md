@@ -38464,3 +38464,13 @@ bare-type 制約 `P []byte` の interface を遅延生成するので偽にな�
 guff の fixer も同じ規則（`fix.rs`）なので、wide の形は 1 ファイルに 1 つずつ置いた（混ぜると narrow 側の fix まで消えて測れない）。
 既存の `govet` case の `--fix` も上流と一致し（差は `string(65)` の `fmt.Sprint(rune(65))` → `fmt.Sprintf("%d", rune(65))` の 1 行だけだった）、
 `compat/fix/pending/govet.diff` を削除した（pending は 3 case に）。
+
+### 2026-11-28 — `linters.default: fast` を上流の集合に（Phase 9 台帳 core #11）
+
+guff の `FAST_LINTER_NAMES` は `[govet, errcheck, ineffassign, unused]`（「standard から遅いものを抜いた」という誤解）だったが、
+上流の `fast` は `WithLoadForGoAnalysis()` を付けない linter 全部で、govet・errcheck・unused は入らない。2.15.0 の
+`golangci-lint linters`（`default: fast`）の Enabled 欄は台帳の 44 ではなく 46 個（deprecated の gomodguard・wsl を含み、
+両者は警告付きで走る。guff の警告経路も同じ 2 行を出す）。46 個は全部 guff に実装があるので集合を転記するだけで済んだ。
+golden＋fix `config-default-fast`（godot・misspell・whitespace・mnd・dogsled・gochecknoinits・ineffassign・nlreturn・wsl が出る形と、
+govet printf・errcheck・unused・staticcheck だけが出す形）で 20 キー、`--fix` もバイト一致。旧集合では 2 キーしか出なかった。
+単体テストで 46 個・`enable`/`disable` の重ね合わせ（上流で 45 個を実測）も固定。
