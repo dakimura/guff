@@ -1,0 +1,48 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh govet-stringintconv-v052
+# Produced by running golangci-lint on compat/golden/cases/govet-stringintconv-v052/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+a/a.go:34:6:govet::stringintconv: conversion from int to string yields a string of one rune, not a string of digits
+a/a.go:37:6:govet::stringintconv: conversion from untyped int to string yields a string of one rune, not a string of digits
+a/a.go:38:6:govet::stringintconv: conversion from C (int) to A (string) yields a string of one rune, not a string of digits
+a/a.go:39:6:govet::stringintconv: conversion from D (uintptr) to B (string) yields a string of one rune, not a string of digits
+a/a.go:40:6:govet::stringintconv: conversion from int to string yields a string of one rune, not a string of digits
+a/a.go:41:6:govet::stringintconv: conversion from int to string yields a string of one rune, not a string of digits
+fix/fix.go:9:10:govet::stringintconv: conversion from uint64 to string yields a string of one rune, not a string of digits
+fix/fixdot.go:11:10:govet::stringintconv: conversion from uint64 to string yields a string of one rune, not a string of digits
+fix/fixnamed.go:11:9:govet::stringintconv: conversion from int16 to mystring (string) yields a string of one rune, not a string of digits
+fix/fixtarget.go:12:9:govet::stringintconv: conversion from int16 to str (string) yields a string of one rune, not a string of digits
+fix/fixtarget.go:17:9:govet::stringintconv: conversion from int16 to string (in S) yields a string of one rune, not a string of digits
+fix/fixwide.go:14:10:govet::stringintconv: conversion from int to string yields a string of one rune, not a string of digits
+fix/fixwide.go:15:10:govet::stringintconv: conversion from int64 to string yields a string of one rune, not a string of digits
+fix/fixwide.go:16:10:govet::stringintconv: conversion from uint to string yields a string of one rune, not a string of digits
+fix/fixwide.go:17:10:govet::stringintconv: conversion from uintptr to string yields a string of one rune, not a string of digits
+fix/fixwide.go:18:10:govet::stringintconv: conversion from uint32 to string yields a string of one rune, not a string of digits
+fix/fixwide.go:19:10:govet::stringintconv: conversion from int8 to string yields a string of one rune, not a string of digits
+fix/fixwide.go:20:10:govet::stringintconv: conversion from int64 to string yields a string of one rune, not a string of digits
+fix/fixwide.go:21:10:govet::stringintconv: conversion from int64 to string yields a string of one rune, not a string of digits
+fix/fixwide.go:30:10:govet::stringintconv: conversion from myint (int64) to string yields a string of one rune, not a string of digits
+fix/fixwide.go:33:10:govet::stringintconv: conversion from untyped int to string yields a string of one rune, not a string of digits
+shapes/alias.go:10:10:govet::stringintconv: conversion from rn (int64) to text (string) yields a string of one rune, not a string of digits
+shapes/narrow.go:22:10:govet::stringintconv: conversion from small (uint16) to string yields a string of one rune, not a string of digits
+shapes/narrow.go:23:10:govet::stringintconv: conversion from G (int) to string yields a string of one rune, not a string of digits
+shapes/narrow.go:25:10:govet::stringintconv: conversion from uint16 to string yields a string of one rune, not a string of digits
+shapes/narrow.go:26:10:govet::stringintconv: conversion from Num (int16) to Str (string) yields a string of one rune, not a string of digits
+shapes/narrow.go:29:10:govet::stringintconv: conversion from untyped int to string yields a string of one rune, not a string of digits
+shapes/narrow.go:30:10:govet::stringintconv: conversion from untyped int to string yields a string of one rune, not a string of digits
+shapes/narrow.go:31:10:govet::stringintconv: conversion from untyped int to string yields a string of one rune, not a string of digits
+shapes/narrow.go:32:10:govet::stringintconv: conversion from int64 to string yields a string of one rune, not a string of digits
+shapes/ptronly.go:10:10:govet::stringintconv: conversion from ptrOnly (int64) to string yields a string of one rune, not a string of digits
+shapes/wideconst.go:6:10:govet::stringintconv: conversion from int64 to string yields a string of one rune, not a string of digits
+typeparams/typeparams.go:30:6:govet::stringintconv: conversion from int to string (in MaybeString) yields a string of one rune, not a string of digits
+typeparams/typeparams.go:33:6:govet::stringintconv: conversion from Int (int) to string (in MaybeString) yields a string of one rune, not a string of digits
+typeparams/typeparams.go:34:6:govet::stringintconv: conversion from uintptr to string (in MaybeString) yields a string of one rune, not a string of digits
+typeparams/typeparams.go:37:6:govet::stringintconv: conversion from int to string (in MaybeString) yields a string of one rune, not a string of digits
+typeparams/typeparams.go:39:6:govet::stringintconv: conversion from int to string (in AllString) yields a string of one rune, not a string of digits
+typeparams/typeparams.go:48:6:govet::stringintconv: conversion from int to String (string, in NamedString) yields a string of one rune, not a string of digits
+typeparams/typeparams.go:49:6:govet::stringintconv: conversion from int (in MaybeString) to string yields a string of one rune, not a string of digits
+typeparams/typeparams.go:52:6:govet::stringintconv: conversion from int (in MaybeString) to string (in MaybeString) yields a string of one rune, not a string of digits
