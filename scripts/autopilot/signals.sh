@@ -65,7 +65,11 @@ gos="$(curl -fsS 'https://go.dev/dl/?mode=json' 2>/dev/null | python3 -c 'import
 echo "- Go: CI uses go$gover_ci (.go-version); go.dev stable = ${gos:-unknown}"
 if [[ -n "$gos" ]]; then
   newest="$(echo "$gos" | tr ' ' '\n' | head -1)"
-  [[ "$newest" != "go$gover_ci" ]] && echo "  - **CI Go is behind the newest stable ($newest)**"
+  if [[ "$newest" != "go$gover_ci" ]]; then
+    echo "  - CI Go is behind the newest stable ($newest) — but .go-version is capped by the export"
+    echo "    data the pinned golangci-lint can read (comment in .github/workflows/compat.yml). Raise it"
+    echo "    only with a golangci-lint built with a Go whose importer reads the new toolchain's output."
+  fi
 fi
 golangci_go="$("$ROOT/compat/.tools/golangci-lint-$pin/golangci-lint" version 2>/dev/null | sed -nE 's/.*built with (go[0-9.]+).*/\1/p')"
 [[ -n "$golangci_go" ]] && echo "  - pinned golangci-lint binary is built with $golangci_go"

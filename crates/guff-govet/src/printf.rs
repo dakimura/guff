@@ -7,8 +7,9 @@
 //! format string with its fix — and `checkPrint` for unformatted ones.
 //! Which functions are print-like is [`crate::printf_wrappers`].
 //!
-//! Not ported: the go1.27 rules (`%d` of a pointer, `%w` of a pointer to an
-//! error type; PR 15), and wrappers declared in other packages (facts).
+//! The go1.27 rules — `%d` of a pointer and `%w` of a pointer to an error
+//! type — are gated on the file's Go version, as upstream's are.
+//! Not ported: wrappers declared in other packages (facts).
 
 use std::sync::OnceLock;
 
@@ -53,7 +54,7 @@ const PRINT_VERBS: &[PrintVerb] = &[
     PrintVerb { verb: '%', flags: NO_FLAG, typ: 0 },
     PrintVerb { verb: 'b', flags: SHARP_NUM_FLAG, typ: ARG_INT | ARG_FLOAT | ARG_COMPLEX | ARG_POINTER },
     PrintVerb { verb: 'c', flags: "-", typ: ARG_RUNE | ARG_INT },
-    // When analyzing go1.27+ code argPointer is disallowed (PR 15).
+    // When analyzing go1.27+ code argPointer is disallowed (see `ok_printf_arg`).
     PrintVerb { verb: 'd', flags: NUM_FLAG, typ: ARG_INT | ARG_POINTER },
     PrintVerb { verb: 'e', flags: SHARP_NUM_FLAG, typ: ARG_FLOAT | ARG_COMPLEX },
     PrintVerb { verb: 'E', flags: SHARP_NUM_FLAG, typ: ARG_FLOAT | ARG_COMPLEX },
@@ -964,6 +965,14 @@ fn ok_printf_arg(
         typ = ARG_RUNE | ARG_BYTE | ARG_STRING;
     }
 
+    // When analyzing go1.27 code, %d does not work on pointers (#62595).
+    if verb == 'd'
+        && !file_version.is_empty() // fail open
+        && code::version_compare(file_version, "go1.27") >= 0
+    {
+        typ = ARG_INT;
+    }
+
     // Could verb's arg implement fmt.Formatter? Skip check for the %w verb,
     // which requires an error.
     let mut formatter = false;
@@ -1037,7 +1046,20 @@ fn ok_printf_arg(
         return false;
     }
     let arg = &call.args[op.verb_arg];
-    // The go1.27 `%w`-of-a-pointer check is PR 15.
+    // `%w` of `*E` where `E` implements error defeats errors.Is (#61342).
+    // Unlike the %d and %q gates this one does not fail open: upstream's
+    // `versions.AtLeast` treats an unknown ("") version as the future.
+    if verb == 'w' && (file_version.is_empty() || code::version_compare(file_version, "go1.27") >= 0) {
+        if let Some((elem, ptr)) =
+            expr_type(pass, arg).and_then(|t| printf_types::pointer_to_error(pass, scratch, t))
+        {
+            out.push((
+                op.pos,
+                format!("%w wants operand of error type {elem}, not pointer type {ptr} (defeats errors.Is)"),
+            ));
+            return false;
+        }
+    }
     if printf_types::is_function_value(pass, arg) && verb != 'p' && verb != 'T' {
         out.push((
             op.pos,

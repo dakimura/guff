@@ -1,0 +1,11 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# x/tools' printf testdata that upstream only runs on a go1.27 go command
+# (TestW, and issue62595's a_go127.go), in a go 1.27 module, plus guff's
+# own shapes.
+printf/w/w.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/printf/w/w.go
+printf/issue62595/a_go126.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/printf/issue62595/a_go126.go
+printf/issue62595/a_go127.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.50/printf/issue62595/a_go127.go
+printf/shapes/shapes.go  crates/guff-govet/tests/testdata/printf_go127/shapes/shapes.go
+printf/old/old.go  crates/guff-govet/tests/testdata/printf_go127/old/old.go

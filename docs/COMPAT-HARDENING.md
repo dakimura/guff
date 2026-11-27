@@ -38258,3 +38258,73 @@ reject case `run-relative-path-mode-unknown`（`output.path-mode: rel` も同居
 golangci-lint にだけ `--path-mode abs` を渡し、設定は作業ツリーの外（ケースディレクトリや
 `compat/results/`）に置いていた。guff の表示が作業ディレクトリ基準だった間は偶然一致していただけで、
 修正後は 262 golden が全部ずれた。guff にも `--path-mode abs` を渡して対称にした。
+
+### 2026-11-26 — CI の Go を 1.27 に（パッチは pin が読める **1.27.1**）、`//go:build go1.27` を落としていた件と printf go1.27
+
+`.go-version` を go1.26.5 → **go1.27.1**。go.dev の最新は go1.27.4 だが、go1.27.4 で回すと
+OSS pr tier の helm が 5 件 `nolintlint: directive //nolint:revive is unused for linter "revive"`
+を上流だけが出して落ちる。
+
+原因は toolchain の組み合わせ: golangci-lint 2.15.0 は **go1.27.0 でビルド**されており、その
+go/importer が読める pkgbits は V4 まで。cmd/compile は **go1.27.2 から V5 を書く**
+（`noder/unified.go` の `uirVersion`、1.27.0/1.27.1 は V4）。revive は型を要る規則のために
+自分のファイルを `importer.Default()`（`go list -export`）で型検査し、失敗すると規則ごと nil を返す
+（§6 の「revive の importer 盲目」と同じ機構）。helm の `var X func(...) = f //nolint:revive`
+（var-declaration）と `func NewLookupFunction(...) lookupFunc //nolint:revive`（unexported-return）が
+黙り、nolint が unused になる。
+
+| go | 上流の nolintlint（helm pkg/engine） |
+|---|---|
+| 1.27.0 / 1.27.1 | 0 |
+| 1.27.2 / 1.27.3 / 1.27.4 | 1 |
+
+guff はこの盲目に追従しない（§6）ので、pin を V4 を書く最新パッチに置いた。理由は
+`.github/workflows/compat.yml` の `.go-version` コメントにある。**go1.27.2 以上に上げてよいのは、
+pin した golangci-lint が go1.27.2 以上でビルドされたときだけ**。
+
+golden を go1.27.1 で**全 case 上流から撮り直して**キー集合で差分したら、動いたのは 2 case:
+
+1. **`govet`**: fixture `directive/bad.go` の `//go:debug asynctimerchan=1`。go1.27 で
+   `asynctimerchan` は Removed になり、`go list` が `invalid //go:debug: removed GODEBUG` の
+   load error を出す → 上流は typecheck 1 件だけを残して 204 件が全部消えた。fixture を 1.27 でも
+   有効な `panicnil=1` に替えた（204 件のまま一致）。**guff はこの load error を出さない**——
+   台帳に needs-port として記録。
+2. **`govet-printf-upstream`**: `issue62595/a_go127.go`（`//go:build go1.27`）の `%d` ポインタ 3 件。
+   **guff は 0 件**で、golden 自体は古い期待値のまま緑だった。原因は printf ではなく
+   **guff-build のリリースタグが定数 `go1.1`〜`go1.26`**（`guff_goversion::VERSION`）だったこと：
+   go1.27 の host では `//go:build go1.27` のファイルを**全 linter から黙って落とす**。上流の
+   `ReleaseTags` は `go` コマンドに焼き込まれた版なので、guff が代わりを務める「PATH 上の go」の
+   `GOROOT/VERSION` から作るようにした（読めなければ定数）。go1.26.5 / go1.27.1 の両 host で
+   上流と同じファイル集合になることを確認。
+   残るずれ（いずれも変更前より悪くはない）: devel ビルドは `VERSION` が無く定数に落ちる／`GOROOT` 環境変数が
+   PATH の `go` と別の toolchain を指す／`GOTOOLCHAIN=auto` で別 toolchain に re-exec される（CI は `local`）。
+
+そのうえで Phase 9 passes #8（Phase 8 #5「PR 15」）の printf go1.27 規則を移植した：
+`%d` は go1.27 以上のファイルでポインタを受け付けない（#62595）、`%w` は `*E`（E が error を実装）を
+`%w wants operand of error type E, not pointer type *E (defeats errors.Is)` で拒む（#61342。
+型は現在パッケージ以外をパッケージ名で修飾）。新 golden `govet-printf-go127`（go 1.27 module）に
+上流の `w/w.go`・`issue62595/` と自前の形（名前付きポインタ型・`*error`・他パッケージ・`*T`
+の型パラメータ・Error が pointer 側だけの型・明示 index・`//go:build go1.26` で版を下げたファイル・
+`%d` に map / slice / `*struct` / uintptr / `%x` / `%o`）を入れて **21 件完全一致**（printf 17・unusedresult 4）。`%w` の版 gate は `%d` と違い fail open しない（`versions.AtLeast("", …)` は true）ので、版不明でも検査する。
+
+ゲート（go1.27.1 を PATH に、`GOTOOLCHAIN=local`）: hygiene〜regress の全 14 段が緑。regress の tsdb は
+両者 4 → 7 件（P/R 100%）に増える（Go 1.27 の stdlib 由来、両ツール一致）。wall は同じバイナリで go1.26.5 /
+go1.27.1 を交互に 3 回ずつ測って差なし。
+
+fmt は `gofumpt-v12-diagnose` 1 件だけ期待値を撮り直した（stdin で go.mod が無いと両ツールとも
+`-lang` を PATH の `go` から取る。go1.27.x で両者 `-lang=go1.27` で一致）。
+
+#### 同 PR の nightly 赤（2 件、どちらも Go 1.27 とは無関係）
+
+1. **consul の stale allowlist 3 行**: `agent/agent.go:3191` / `agent/checks/check.go:1131` /
+   `agent/consul/state/config_entry.go:526` の staticcheck「this comparison is always/never true」
+   （golangci-only）は、Go 1.26.5 の main の nightly でも既に diff ではなかった（staticcheck
+   guff 239 / golangci 238 / both 237、残る diff は allowlist の他の 3 行だけ）。stale は
+   normalize.py が失敗にするので行を削除した（ゲートは締まる側）。
+2. **grafana の exit 143**: リポジトリは 2026-11-26 の履歴作り直しで **private** になり、
+   `ubuntu-latest` が private 用の小さい runner（2 vCPU / 約 7 GB）になった。free-disk で
+   typecheck を越えた grafana が 34 分走ったところで外から SIGTERM（timeout も cancel も
+   発火していない）。メモリ枯渇が最有力だが未確証（OOM killer も systemd-oomd も SIGKILL を送る）。
+   `.github/actions/runner-memory`（swap 16 GB（/mnt が別ディスクならそこ）＋ 30 秒ごとの `free`/RSS 上位の記録）
+   を oss-nightly に入れ、失敗時に memwatch・dmesg・systemd-oomd を出すステップを足した。
+   これで直らなければ、次はそのログで「誰が何 GB 使ったか」から始める。

@@ -1,6 +1,6 @@
 //! Tests for [`guff_build::Context`].
 
-use guff_build::{default_context, release_tags_for_version, Context, DEFAULT};
+use guff_build::{default_context, goroot_release, release_tags_for_version, Context, DEFAULT};
 use guff_goversion::VERSION;
 
 #[test]
@@ -40,7 +40,9 @@ fn release_tags_through_current_version() {
 #[test]
 fn default_context_has_release_tags() {
     let ctx = default_context();
-    let want = format!("go1.{VERSION}");
+    // The toolchain's own release when its GOROOT says, as `go list` would.
+    let n = goroot_release(&ctx.goroot).unwrap_or(VERSION);
+    let want = format!("go1.{n}");
     assert_eq!(ctx.release_tags.last().map(String::as_str), Some(want.as_str()));
     assert!(ctx.build_tags.is_empty(), "Default context has no custom build tags");
 }
@@ -56,4 +58,24 @@ fn build_tags_can_be_mutated() {
     let mut ctx = Context::default();
     ctx.build_tags.push("custom".to_string());
     assert!(ctx.build_tags.contains(&"custom".to_string()));
+}
+
+#[test]
+fn goroot_release_reads_the_version_file() {
+    let base = std::env::temp_dir().join(format!("guff-goroot-release-{}", std::process::id()));
+    let cases: &[(&str, &str, Option<u32>)] = &[
+        ("rel", "go1.27.1\ntime 2026-08-28T16:20:06Z\n", Some(27)),
+        ("minor", "go1.26\n", Some(26)),
+        ("rc", "go1.28rc1\n", Some(28)),
+        ("devel", "devel go1.28-abcdef Tue\n", None),
+        ("garbage", "\n", None),
+    ];
+    for (name, text, want) in cases {
+        let dir = base.join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("VERSION"), text).unwrap();
+        assert_eq!(goroot_release(dir.to_str().unwrap()), *want, "{name}");
+    }
+    assert_eq!(goroot_release(base.join("missing").to_str().unwrap()), None);
+    assert_eq!(goroot_release(""), None);
 }

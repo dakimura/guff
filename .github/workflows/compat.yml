@@ -42,6 +42,16 @@ concurrency:
 # checks against. That version lives in `.go-version` — the same reason the
 # golangci-lint pin lives in compat/pins.json rather than in the steps.
 #
+# The Go patch is capped by that pin, not by go.dev: `.go-version` is the newest
+# patch whose export data the pinned golangci-lint can read. 2.15.0 is built with
+# go1.27.0, whose go/importer reads pkgbits up to V4, and from go1.27.2 on
+# cmd/compile writes V5. revive type-checks its own files through
+# importer.Default() (`go list -export`), so on go1.27.2+ that check fails and
+# every type-dependent revive rule returns nothing — upstream only, which
+# showed up as five `//nolint:revive is unused` lines on helm. guff does not
+# copy that importer blindness (COMPAT-HARDENING §6), so the pin stays at
+# go1.27.1 until golangci-lint ships a binary built with go1.27.2 or newer.
+#
 # GOTOOLCHAIN=local is what keeps the two halves of a run agreeing. Under the
 # default `auto`, `go list` silently re-execs into whatever newer toolchain a
 # target's go.mod asks for, while guff keeps reading stdlib source from the
@@ -411,6 +421,11 @@ jobs:
       - name: Free runner disk
         uses: ./.github/actions/free-disk
 
+      # grafana outgrew the private-repo runner's RAM (exit 143, 2026-11-26);
+      # see .github/actions/runner-memory/action.yml.
+      - name: Swap and memory watch
+        uses: ./.github/actions/runner-memory
+
       - name: Install Go
         uses: actions/setup-go@v5
         with:
@@ -449,8 +464,50 @@ jobs:
             corpus-pr-
 
       # Also gates worker panics and ill-typed package counts (compat/health.py).
+      # The memory line is printed into this step's own log, not only into
+      # memwatch.log: on 2026-11-26 (193ef5a) grafana was stopped with exit 143
+      # after 78 minutes even with 16 GB of swap, and every later step —
+      # `if: failure()` and `if: always()` alike — came out `skipped`, so the
+      # diagnostics step below never ran and the file was never read. A line
+      # per minute here survives whatever stops the runner.
+      #
+      # What those lines showed (bcf36f7, 2026-11-26): consul passed; guff on
+      # grafana peaked at 6 GB and finished; then golangci-lint on grafana held
+      # 6.5 GB resident plus 19 GB of the runner's 20 GB swap, paging ~30 MB/s
+      # each way, until the step died an hour into grafana with exit 143.
+      # Go's default GOGC=100 lets a heap grow to twice its live size before
+      # collecting; GOMEMLIMIT adds a soft ceiling on top, so the runtime also
+      # collects whenever the heap nears it. It is per process, and soft: if
+      # grafana's live heap is itself above 5 GiB the heap still grows past it
+      # and GC just runs more often (Go caps GC at ~50% CPU). Whether 5 GiB is
+      # enough is what the [mem] lines will show next. It changes when the GC
+      # runs, never what golangci-lint reports (a timeout still fails the
+      # target: run.sh returns 1 on golangci's exit 4), so the gate is the same
+      # gate. guff is Rust and ignores it.
       - name: Compat OSS (nightly tier, own-config)
-        run: ./compat/run.sh --oss --tier nightly
+        env:
+          GOMEMLIMIT: 5GiB
+        run: |
+          (
+            # A diagnostic must not stop itself: `head` closing the pipe on ps
+            # is a SIGPIPE, which -e/pipefail would turn into a silent exit.
+            set +e +o pipefail
+            seen=""
+            while :; do
+              m="$(free -m | awk 'NR==2{printf "used=%sM avail=%sM ", $3, $7} NR==3{printf "swap=%sM", $3}')"
+              io="$(vmstat 1 2 | tail -n 1 | awk '{printf "si=%s so=%s", $7, $8}')"
+              top="$(ps -eo rss=,comm= --sort=-rss | head -n 3 | awk '{printf "%s=%dM ", $2, $1/1024}')"
+              echo "[mem $(date -u +%H:%M:%S)] $m $io top: $top"
+              k="$(sudo dmesg -T 2>/dev/null | grep -iE 'out of memory|killed process|oom-kill' | tail -n 3 || true)"
+              if [[ -n "$k" && "$k" != "$seen" ]]; then echo "[mem kernel] $k"; seen="$k"; fi
+              sleep 60
+            done
+          ) &
+          # A background child holding this step's stdout can keep the step
+          # open after run.sh returns; stop the loop (and its sleep) on exit.
+          mon=$!
+          trap 'pkill -P "$mon" 2>/dev/null || true; kill "$mon" 2>/dev/null || true' EXIT
+          ./compat/run.sh --oss --tier nightly
 
       - name: File-set gate (nightly tier)
         run: ./compat/filesets.sh --tier nightly
@@ -460,6 +517,16 @@ jobs:
       # upstream ref that dropped its go.work, a pattern that stopped matching).
       - name: Corpus shape ledger (re-measured)
         run: ./corpus/shapes.py check
+
+      - name: Memory diagnostics
+        if: failure()
+        run: |
+          echo "::group::memwatch (last 30 min)"
+          tail -n 420 "$RUNNER_TEMP/memwatch.log" || true
+          echo "::endgroup::"
+          free -h || true
+          sudo dmesg -T | grep -iE 'out of memory|oom|killed process' | tail -n 20 || true
+          sudo journalctl -u systemd-oomd --no-pager | tail -n 20 || true
 
       - name: Upload OSS report
         if: always()

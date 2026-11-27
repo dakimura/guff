@@ -1,0 +1,25 @@
+# Golden case: the go1.27 printf rules — `%d` no longer takes a pointer
+# (golang/go#62595) and `%w` rejects `*E` when E implements error
+# (golang/go#61342). Both are gated on the file's Go version, so the module
+# is go 1.27 and old/ lowers itself with //go:build go1.26. w/ and
+# issue62595/ are x/tools v0.50's testdata (identical in v0.52), which
+# upstream runs only on a go1.27 go command; shapes/ is guff's own. Needs a
+# go1.27 toolchain (`.go-version`).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+  settings:
+    govet:
+      enable:
+        - printf
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

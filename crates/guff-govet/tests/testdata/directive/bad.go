@@ -1,4 +1,4 @@
-//go:debug asynctimerchan=1
+//go:debug panicnil=1
 
 package p
 

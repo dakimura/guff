@@ -25,6 +25,9 @@ Phase 8（`docs/PHASE8-LEDGER.md`）と同じ作り方: 出力ではなく**上�
 | `math/rand/v2`（stdlib 自身が generic method を持つ）を import するだけ | 上と同じ混成環境での測定だったので**無効**（guff は 1.26.5 の `math/rand/v2` を読んでいた）。本物の go1.27 環境では、対応前の parser は `rand.go:213` の `func (r *Rand) N[Int intType]` を捨てる。対応後のバイナリでは正しく出る |
 | `compat/drift.py --candidate 2.15.0`（golden 366 case） | 上流の出力が動いたのは 10 case: canonicalheader ×2、exhaustive ×4、iface-edges、loggercheck、predeclared、revive。inventory は predeclared が `fast` から外れた 1 件 |
 
+**CI の Go（2026-11-26）**: go1.27 で削除された GODEBUG（`asynctimerchan` など）を `//go:debug` に書くと `go list` が load error にし、上流は typecheck として全件落とす。guff は出さない（**needs-port**、govet golden の fixture は `panicnil=1` に替えて回避）。
+**CI の Go（2026-11-26）**: `.go-version` は **go1.27.1**。go1.27.2 以上は pkgbits V5 を書き、go1.27.0 でビルドされた golangci-lint 2.15.0 の importer が読めず revive の型依存規則が上流だけ黙る（COMPAT-HARDENING §4 2026-11-26）。
+
 **測るときの注意**: Go 1.27 で測るときは `PATH=<go1.27 の bin>:$PATH GOTOOLCHAIN=local` にする。`GOTOOLCHAIN=go1.27.3` だけでは guff が古い stdlib を読む。
 
 ### 1.2 グループ別の行数
@@ -311,7 +314,7 @@ needs-port 14 のうち 3 行（modernize #7 embedlit、passes #9 printf go1.27�
 | 5 | passes/nilness hasCgoUnsafeArgs（同じ Directives の変更） | behavior | `//go:cgo_unsafe_args\t…` が一致するようになった | guff-govet/src/nilness.rs:192-197（`rest.is_empty() \|\| starts_with([' ', '\t'])`） | already-matches | S | — |
 | 6 | passes/inline/inline.go、internal/refactor/inline/*（inline.go +371/-218、void-tail.txtar ほか） | behavior | inliner の改修：void な末尾呼び出し、binding decl を `x := h(1)` に平らにする、版チェックをアクセス可能性チェックの後に回す、#80834 の guard。analyzer 側は `Call: cur` に変えただけ | inline.rs:749-800（関数 inliner は無い。ioutil の 6 関数は「本体が転送 1 行」という形だけで判定していて、fix の edits は空） | not-applicable（Phase 8 substrate #12 と同じ扱い。ioutil の転送本体は void でも binding でもないので、変わった経路を通らない。関数 inliner が無いという既存の大きな未移植はそのまま） | L | inline/testdata/src/binding_true/a.go.golden、refactor/inline/testdata/void-tail.txtar |
 | 7 | passes/{httpmux,httpresponse,slog,unmarshal}、passes/inline withinTestOf | other | `typesinternal.ReceiverNamed(recv)` → `RecvBase(fn)` / `IsPointerToNamed`。中身は同じ（Unalias → ポインタを剥がす → `*Named`） | guff-govet/src/{httpresponse,slog,unmarshal}.rs（httpmux は guff に無い。既定で無効の analyzer で、v0.52 とは関係ない既存の欠け） | not-applicable（recv.go と isnamed.go の v0.52 版で同じ意味だと確認した） | — | — |
-| 8 | printf.go okPrintfArg go1.27（`%w` に `*E`、`%d` にポインタ） | behavior | （Phase 8 #5 の持ち越し）v0.52 で printf.go は 0 行。test を `TestW`（go1.27 の go コマンドが要る）に分けただけ | guff-govet/src/printf.rs:10, 56, 1040（「PR 15」として未移植と明記） | needs-port（持ち越し） | M | printf/testdata/src/w/w.go、issue62595/a_go127.go |
+| 8 | printf.go okPrintfArg go1.27（`%w` に `*E`、`%d` にポインタ） | behavior | （Phase 8 #5 の持ち越し）v0.52 で printf.go は 0 行。test を `TestW`（go1.27 の go コマンドが要る）に分けただけ | guff-govet/src/printf.rs `ok_printf_arg`（`%d` / `%w` の版 gate）、printf_types.rs `pointer_to_error` | **done（CI を go1.27.1 にした PR）**: `%d` の argPointer 除外と `%w` の `*E` 検査をファイル版で gate。golden `govet-printf-go127`（go 1.27 module、21 件一致）。前提として guff-build のリリースタグを PATH の toolchain の `GOROOT/VERSION` から作るよう直した（定数 go1.26 だったので go1.27 host で `//go:build go1.27` のファイルを全 linter で黙って落としていた） | M | printf/testdata/src/w/w.go、issue62595/a_go127.go |
 
 ###### xtools-substrate
 
