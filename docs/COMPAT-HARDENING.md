@@ -38440,3 +38440,13 @@ x/tools v0.52 は gofix 指示を `go/ast.ParseDirective` で読み、name を�
 そうしたファイルは parser に届かなかった（2.15.0 は 5 件、guff は 0 件）。前段フィルタを `go:fix` の有無だけにした（判定は従来どおり
 `has_fix_inline`）。golden `govet-inline-tab-directive`（local／dependency の const・alias、dependency の generic func、
 区切りの無い `//go:fixinline` は両方とも黙る）で 5 キーが一致。
+
+### 2026-11-28 — types：`interfacePtrError`（Phase 9 台帳 types #25）
+
+go1.27 は interface／型パラメータへのポインタの cause に型名を入れ、型パラメータなら `type *P is pointer to type parameter, not type
+parameter` と書く（go.dev/issue/79883）。guff は selector で固定文言 `type is pointer to interface, not interface`（型名なし）、
+`missingMethod` と `implements` には分岐自体が無く `(missing method M)`／`*I is not an interface` だった。`lookup::interface_ptr_error`
+を足して 3 か所で使う。`is_interface_ptr` は base が型パラメータなら真にした（上流の `IsInterface(tparam)` は常に真。guff は
+bare-type 制約 `P []byte` の interface を遅延生成するので偽になっていた）。go1.27.1 の `go vet` で 13 形を測り、到達できる 9 形を
+`check_files.rs` に、T 側と issue79883 の `string`→`*P` を `implements` 直呼びで固定。golden は作れない：guff は型エラーを出力しない
+（2.15.0 は 5 件を 1 キーにまとめて出す）。代入・変換のエラーに cause が無いのは別の既存の穴。

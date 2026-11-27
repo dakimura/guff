@@ -36,7 +36,8 @@ use crate::arena::{ObjectArena, ObjectData, ObjectId, PackageArena, TypeArena, T
 use crate::check::Checker;
 use crate::interface::interface_typeset;
 use crate::lookup::{
-    as_named, deref, has_invalid_embedded_fields, lookup_field_or_method,
+    as_named, deref, has_invalid_embedded_fields, interface_ptr_error, is_interface_ptr,
+    lookup_field_or_method,
     lookup_field_or_method_fold, LookupResult,
 };
 use crate::named::{named_method, named_num_methods};
@@ -221,6 +222,13 @@ pub fn missing_method(
             .unwrap_or_default()
     };
     let cause = match state {
+        // isInterfacePtr(T) cannot hold here (T's underlying is an
+        // interface), but keep upstream's order.
+        State::NotFound if is_interface_ptr(types, v) || is_interface_ptr(types, t) => {
+            let p = if is_interface_ptr(types, v) { v } else { t };
+            let ps = type_string(types, oarena, parena, p, None);
+            format!("({})", interface_ptr_error(types, p, &ps))
+        }
         State::NotFound => format!("(missing method {})", m_name),
         State::WrongName => format!(
             "(missing method {})\n\t\thave {}\n\t\twant {}",
@@ -298,7 +306,11 @@ pub fn implements(
 
     // T's underlying must be an interface.
     if !matches!(types.get(tu), TypeData::Interface(_)) {
-        let detail = format!("{} is not an interface", ts(types, t));
+        let detail = if is_interface_ptr(types, tu) {
+            interface_ptr_error(types, t, &ts(types, t))
+        } else {
+            format!("{} is not an interface", ts(types, t))
+        };
         return Err(format!(
             "{} does not {} {} ({})",
             ts(types, v),
