@@ -546,7 +546,9 @@ loop() {
     case "$RESULT_KIND" in
       pr-open)
         fails=0; idle=0
-        pr="$(echo "$RESULT_LINE" | sed -nE 's/.*#([0-9]+).*/\1/p' | head -1)"
+        # The first `#N` after "pr-open" is the PR; later ones may be ledger
+        # rows ("ledger #21/#22") — a greedy `.*#` once picked those instead.
+        pr="$(echo "$RESULT_LINE" | sed -nE 's/.*pr-open[^#]*#([0-9]+).*/\1/p' | head -1)"
         if [[ -n "$pr" ]]; then
           wait_and_merge "$pr"; rc=$?
           [[ $rc == 2 ]] && break
