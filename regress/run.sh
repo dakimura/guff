@@ -142,8 +142,12 @@ command -v python3 >/dev/null 2>&1 || die "python3 not found"
 # Refuse to measure on a contended machine (docs/PERF_TASKS_V2.md §S-1). The
 # gate's wall tolerance is ratio=1.0+0.15s, so a couple of stolen cores fail it
 # for reasons that have nothing to do with the code. Skip with PERF_GUARD=0.
+# --wait: poll (5s, max 5 min) until the machine is clean instead of failing at
+# once. In the pre-PR gate this step runs right after oss-pr, whose own residue
+# keeps the 1-minute load at 5–8 for ~1–2 min; failing immediately rejected
+# every full gate run on a quiet machine. The threshold itself is unchanged.
 if [[ "${PERF_GUARD:-1}" != "0" && -x "$ROOT/scripts/perf-guard.sh" ]]; then
-  "$ROOT/scripts/perf-guard.sh" || die "machine is contended (set PERF_GUARD=0 to override)"
+  "$ROOT/scripts/perf-guard.sh" --wait || die "machine is contended (set PERF_GUARD=0 to override)"
 fi
 
 GUFF="$(resolve_guff)"
