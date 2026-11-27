@@ -38407,3 +38407,27 @@ go1.27 の `internal/buildcfg` は baseline に `JSONv2` と `SizeSpecializedMal
 go1.27.1 で scratch module（`GOEXPERIMENT=nojsonv2` 付きも）・echo（258 pkgs）・argo-cd（2703 pkgs）が verify OK、go1.26.5 の scratch module も OK。
 残りの別件 2 つ: test 専用パッケージ（caddy の `caddytest/integration`）が native の roots から落ちる件と、
 symlink 越しの cwd で native が `$PWD` ではなく物理パスで embed パスを作る件（go list は `$PWD` を使う）。
+
+### 2026-11-28 — native lister: modmeta キーに file 選択の文脈を入れる／test 専用ディレクトリ／xtest の暗黙 import
+
+前項（#20）の後も、**既存のキャッシュがあるマシンでは** go1.27.1 の verify が `encoding/json` で 18 件ずれたままだった。
+GOROOT の modmeta blob のキーが GOOS/GOARCH/user tags と `GOROOT/VERSION` だけで、`goexperiment.*`（tool tags）を含まないため、
+#20 より前に書かれた blob が v1 の file 集合を返し続けていた（`GUFF_CACHE` を新しくすると消える）。キーに tool tags・cgo・compiler を足し、
+`modmeta-v4` に上げて古い blob を捨てる（`GOEXPERIMENT`／`CGO_ENABLED` を変えたときも同じ形で外れていた）。
+caddy の x/net/http2 の `compiled_go_files 26 vs 19` もこれだった。module（GOMODCACHE）の blob にも `GOROOT/VERSION` を入れる
+（release tags が変わるので、`//go:build go1.28` のファイルは toolchain を上げると加わる）。
+その手前の 2 つのキャッシュも同じ穴だった: native list のグラフキャッシュ（`native-list-v3`）と go list の結果キャッシュ（golist／stdlib export／
+compiled-files）のキーは env の部分集合だけで、`GOROOT` を明示しない限り toolchain を見ず、`GOEXPERIMENT` も無かった。
+PATH の go を go1.26→go1.27 に替えても、`GOEXPERIMENT=nojsonv2` にしても前のグラフを返す（verify では **go list 側**のキャッシュが
+v2 の依存を返して 14 件ずれた）。両方に `hash_toolchain`（GOROOT・VERSION・tool/release tags・cgo）と `GOEXPERIMENT` を足した。
+1 つの `GUFF_CACHE` を共有して go1.26→1.27→nojsonv2→1.26→1.27 と切り替えて verify が全部 OK。
+
+あわせて `go list` と形を突き合わせた 2 件（go1.27.1 で t1〜t7・x1・x2 の 9 形を実測、単体テストにそのまま固定）:
+- `tests: false` で、非 test の Go ファイルが無く `*_test.go` だけ（build tag を満たすもの）があるディレクトリを、go list は
+  GoFiles 空・エラー無しで root に出す。native は test を開かずに走査して NoGo と判断し落としていた（caddy `caddytest/integration`）。
+  その場合だけ test 込みで再走査して存在だけを使う。全ファイルが tag で落ちるもの・test だけが tag で落ちるものは従来どおり出さない。
+- `P_test [P.test]` は自分のソースが import するものだけを持つ。native は「go list もそうする」というコメント付きで `P` を必ず足していた
+  （Initial commit からの記述で、実測では誤り）。xtest だけの testmain は `P` にファイルがあるときだけ plain `P` を import する。
+
+verify OK（go1.27.1）: scratch 9 形（tests true/false）・caddy（945）・prometheus・echo・argo-cd・gin・viper・minio。
+残り: traefik は root の `package main`（import 0 個）で go list の Deps に linker の暗黙依存（runtime 一式）が入り、native に無い。

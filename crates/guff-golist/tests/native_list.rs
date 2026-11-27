@@ -609,3 +609,138 @@ fn bails_on_an_import_cycle() {
 
     let _ = fs::remove_dir_all(&tmp);
 }
+
+/// Directories whose only buildable files are `*_test.go`, next to the shapes
+/// that must stay out. Every expectation is what `go list [-test] ./...`
+/// (go1.27.1) printed for this exact tree:
+///
+/// - with or without `-test`, `t1`..`t4` are listed — no GoFiles, no error
+///   (go/build's NoGoError counts test files too). The native lister scanned
+///   roots without opening tests when `tests: false`, called them empty, and
+///   dropped them (caddy `caddytest/integration`).
+/// - `t5` (everything tagged out), `t6` (only a tagged-out test) and `t7`
+///   (no `.go` file) are never listed.
+/// - `P_test [P.test]` imports only what its sources name: no implicit `P`.
+/// - the testmain of an xtest-only package imports plain `P` only when `P`
+///   has files (`x1.test` does, `t2.test` does not).
+#[test]
+fn test_only_directories_are_listed_like_go_list() {
+    let tmp = std::env::temp_dir().join(format!(
+        "guff-golist-testonly-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = fs::remove_dir_all(&tmp);
+    fs::create_dir_all(&tmp).unwrap();
+
+    let internal = |p: &str| {
+        format!("package {p}\n\nimport \"testing\"\n\nfunc TestX(t *testing.T) {{}}\n")
+    };
+    let external = |p: &str| {
+        format!("package {p}_test\n\nimport \"testing\"\n\nfunc TestY(t *testing.T) {{}}\n")
+    };
+    write(&tmp.join("go.mod"), "module example.com/m\n\ngo 1.22\n");
+    write(&tmp.join("t1/x_test.go"), &internal("t1"));
+    write(&tmp.join("t2/y_test.go"), &external("t2"));
+    write(&tmp.join("t3/x_test.go"), &internal("t3"));
+    write(&tmp.join("t3/y_test.go"), &external("t3"));
+    write(&tmp.join("t4/a.go"), "//go:build never\n\npackage t4\n");
+    write(&tmp.join("t4/x_test.go"), &internal("t4"));
+    write(&tmp.join("t5/a.go"), "//go:build never\n\npackage t5\n");
+    write(
+        &tmp.join("t5/x_test.go"),
+        &format!("//go:build never\n\n{}", internal("t5")),
+    );
+    write(
+        &tmp.join("t6/x_test.go"),
+        &format!("//go:build never\n\n{}", internal("t6")),
+    );
+    write(&tmp.join("t7/README"), "not go\n");
+    write(&tmp.join("x1/a.go"), "package x1\n\nfunc A() {}\n");
+    write(&tmp.join("x1/y_test.go"), &external("x1"));
+    write(&tmp.join("x2/a.go"), "package x2\n\nfunc A() {}\n");
+    write(
+        &tmp.join("x2/y_test.go"),
+        "package x2_test\n\nimport (\n\t\"testing\"\n\t\"example.com/m/x2\"\n)\n\nfunc TestY(t *testing.T) { x2.A() }\n",
+    );
+
+    let sorted = |mut v: Vec<String>| {
+        v.sort();
+        v
+    };
+    let m = |s: &str| format!("example.com/m/{s}");
+
+    // `tests: false` — `go list ./...`.
+    let cfg = ListConfig {
+        dir: tmp.clone(),
+        tests: false,
+        need_deps: true,
+        gomodcache: Some(tmp.join("empty-cache")),
+        ..ListConfig::default()
+    };
+    let resp = list_packages(&cfg, &["./...".to_string()]).expect("list");
+    assert_eq!(
+        sorted(resp.roots.clone()),
+        ["t1", "t2", "t3", "t4", "x1", "x2"].map(m).to_vec()
+    );
+    let t1 = resp.packages.iter().find(|p| p.id == m("t1")).unwrap();
+    assert!(t1.go_files.is_empty() && t1.imports.is_empty() && t1.errors.is_empty());
+    assert!(
+        !resp.packages.iter().any(|p| p.id.contains(".test")),
+        "no test variants without tests"
+    );
+
+    // `tests: true` — `go list -test ./...`.
+    let cfg = ListConfig {
+        tests: true,
+        ..cfg
+    };
+    let resp = list_packages(&cfg, &["./...".to_string()]).expect("list -test");
+    let mut want: Vec<String> = ["t1", "t2", "t3", "t4", "x1", "x2"].map(m).to_vec();
+    for p in ["t1", "t2", "t3", "t4", "x1", "x2"] {
+        want.push(m(&format!("{p}.test")));
+    }
+    for p in ["t1", "t3", "t4"] {
+        want.push(format!("{} [{}.test]", m(p), m(p)));
+    }
+    for p in ["t2", "t3", "x1", "x2"] {
+        want.push(format!("{}_test [{}.test]", m(p), m(p)));
+    }
+    assert_eq!(sorted(resp.roots.clone()), sorted(want));
+
+    let imports_of = |id: &str| -> Vec<String> {
+        let pkg = resp
+            .packages
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap_or_else(|| panic!("{id} listed"));
+        sorted(pkg.imports.iter().map(|(src, _)| src.clone()).collect())
+    };
+    let t4v = format!("{} [{}.test]", m("t4"), m("t4"));
+    let t4_files = &resp.packages.iter().find(|p| p.id == t4v).unwrap().go_files;
+    assert_eq!(t4_files.len(), 1, "t4 [t4.test] is the test file alone");
+    for p in ["t2", "t3", "x1"] {
+        assert_eq!(
+            imports_of(&format!("{}_test [{}.test]", m(p), m(p))),
+            vec!["testing".to_string()],
+            "{p}_test imports only what it names"
+        );
+    }
+    assert_eq!(
+        imports_of(&format!("{}_test [{}.test]", m("x2"), m("x2"))),
+        vec![m("x2"), "testing".to_string()]
+    );
+    assert!(
+        imports_of(&m("x1.test")).contains(&m("x1")),
+        "xtest-only testmain links plain P when P has files"
+    );
+    assert!(
+        !imports_of(&m("t2.test")).contains(&m("t2")),
+        "and not when P has none"
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}

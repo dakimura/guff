@@ -144,9 +144,11 @@ pub fn list_packages(cfg: &ListConfig, patterns: &[String]) -> Result<ListRespon
     let mut ctxt = Context::default();
     if let Some(root) = &cfg.goroot {
         ctxt.goroot = root.to_string_lossy().into_owned();
-        // Release tags belong to the toolchain at that GOROOT.
+        // Release tags — and the goexperiment baseline, which moves with
+        // the release — belong to the toolchain at that GOROOT.
         if let Some(n) = guff_build::goroot_release(&ctxt.goroot) {
             ctxt.release_tags = guff_build::release_tags_for_version(n);
+            ctxt.tool_tags = guff_build::default_tool_tags(&ctxt.goarch, &ctxt.goos, n);
         }
     }
     for tag in &cfg.build_tags {
@@ -211,12 +213,39 @@ pub fn list_packages(cfg: &ListConfig, patterns: &[String]) -> Result<ListRespon
                     goos: &ctxt.goos,
                     goarch: &ctxt.goarch,
                     build_tags: &ctxt.build_tags,
+                    tool_tags: &ctxt.tool_tags,
+                    cgo_enabled: ctxt.cgo_enabled,
+                    compiler: &ctxt.compiler,
                     standard: module.standard,
                     goroot_version: &goroot_ver,
                 };
                 // Test files are only attached to `P [P.test]` for pattern roots.
                 let include_tests = cfg.tests && *is_root;
-                let result = modmeta_session.import_dir(&ctxt, dir, &key, include_tests);
+                let mut result = modmeta_session.import_dir(&ctxt, dir, &key, include_tests);
+                // `go list` without `-test` still lists a matched directory
+                // whose only buildable files are `*_test.go` — as a package
+                // with no GoFiles and no error (go/build's NoGoError counts
+                // test files too). The scan above skipped tests unopened, so
+                // it called such a directory empty and the root vanished
+                // (caddy's `caddytest/integration` under `tests: false`).
+                // Rescan with tests only for that case: the test files must
+                // still pass the build constraints, and nothing but the
+                // package's existence is used — `cfg.tests` is off, so no
+                // test variant is built from them.
+                if *is_root
+                    && !include_tests
+                    && matches!(result, Err(guff_build::BuildError::NoGo(_)))
+                {
+                    if let Ok(mut p) = ctxt.import_dir_with(dir, true) {
+                        p.test_go_files.clear();
+                        p.xtest_go_files.clear();
+                        p.test_imports.clear();
+                        p.xtest_imports.clear();
+                        p.test_embed_patterns.clear();
+                        p.xtest_embed_patterns.clear();
+                        result = Ok(p);
+                    }
+                }
                 (pkg_path.clone(), dir.clone(), module.clone(), *is_root, result)
             })
             .collect();
@@ -619,12 +648,11 @@ fn process_listed_package(
                         &mut queue,
                         Some(&rewrite),
                     )?;
-                    // Ensure the package under test is imported even if the
-                    // xtest sources don't mention it (rare, but go list does).
-                    if !pairs.iter().any(|(src, _)| src == &pkg_path) {
-                        pairs.push((pkg_path.clone(), p_target.clone()));
-                        directs.push(p_target.clone());
-                    }
+                    // No implicit import of the package under test: `go list
+                    // -test` gives `P_test [P.test]` exactly the imports its
+                    // sources name. Adding `P` when they did not made
+                    // `GUFF_NATIVE_LIST=verify` differ on every such package
+                    // (and on every test-only one, whose `P` has no files).
                     pairs.sort_by(|a, b| a.0.cmp(&b.0));
                     pairs.dedup_by(|a, b| a.0 == b.0);
                     directs.sort();
@@ -674,8 +702,11 @@ fn process_listed_package(
                         tm_imports.push((vid.clone(), vid.clone()));
                         tm_direct.push(vid.clone());
                     }
-                    if !has_internal {
-                        // xtest-only: go list also imports the plain package.
+                    // xtest-only: testmain also imports the plain package —
+                    // but only when it has files (`len(ptest.GoFiles) +
+                    // len(ptest.CgoFiles) > 0` in cmd/go's TestPackagesFor).
+                    // A directory of `package P_test` files alone links no `P`.
+                    if !has_internal && !go_files_with_cgo.is_empty() {
                         tm_imports.push((pkg_path.clone(), pkg_path.clone()));
                         tm_direct.push(pkg_path.clone());
                     }

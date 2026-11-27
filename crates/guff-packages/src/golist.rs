@@ -1076,7 +1076,14 @@ fn golist_cache_key(
         if let Some((k, v)) = entry.split_once('=') {
             if matches!(
                 k,
-                "GOOS" | "GOARCH" | "CGO_ENABLED" | "GOTOOLCHAIN" | "GOROOT" | "GOFLAGS" | "GOVERSION"
+                "GOOS"
+                    | "GOARCH"
+                    | "CGO_ENABLED"
+                    | "GOTOOLCHAIN"
+                    | "GOROOT"
+                    | "GOFLAGS"
+                    | "GOVERSION"
+                    | "GOEXPERIMENT"
             ) {
                 interesting.push((k.to_string(), v.to_string()));
             }
@@ -1086,8 +1093,28 @@ fn golist_cache_key(
     for (k, v) in interesting {
         h.update(format!("env {k}={v}\n").as_bytes());
     }
+    hash_toolchain(&mut h);
 
     hex_encode(&h.finalize())
+}
+
+/// Fold the toolchain `go` resolves to into a cache key: its GOROOT, the
+/// `GOROOT/VERSION` line, and the tags that pick files (`goexperiment.*`
+/// follow both the release's baseline and `GOEXPERIMENT`; release tags follow
+/// the release). The env subsets in the keys only see `GOROOT` when it is set
+/// explicitly, so swapping the `go` on PATH — go1.26 for go1.27 — kept
+/// answering with the old toolchain's graph: `encoding/json` from its v1 files
+/// (`GUFF_NATIVE_LIST=verify`: 18 differences until the cache was replaced).
+pub(crate) fn hash_toolchain(h: &mut impl sha2::Digest) {
+    let ctxt = &*guff_build::DEFAULT;
+    let version = std::fs::read_to_string(Path::new(&ctxt.goroot).join("VERSION"))
+        .map(|s| s.lines().next().unwrap_or_default().trim().to_string())
+        .unwrap_or_default();
+    h.update(format!("goroot={}\nversion={version}\n", ctxt.goroot).as_bytes());
+    h.update(format!("cgo={}\n", ctxt.cgo_enabled).as_bytes());
+    for t in ctxt.tool_tags.iter().chain(&ctxt.release_tags) {
+        h.update(format!("tag={t}\n").as_bytes());
+    }
 }
 
 /// Fold the sorted set of relative `.go` paths under `patterns` into `h`.

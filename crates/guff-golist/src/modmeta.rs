@@ -21,7 +21,16 @@ use guff_build::{Context, EmbedPattern, Package as BuildPackage};
 // v3 adds the `//go:embed` pattern lists. A blob written by v2 has no
 // patterns at all, and a package whose patterns are missing resolves to no
 // files and no error — which is exactly the silence this cache was hiding.
-const MODMETA_VERSION: &str = "modmeta-v3";
+//
+// v4 keys blobs on the whole file-selection context (`ToolTags`, cgo,
+// compiler), not just GOOS/GOARCH/user tags. A v3 GOROOT blob written before
+// the goexperiment baseline followed the toolchain release kept answering
+// `encoding/json` with its v1 files under go1.27 (whose baseline turns
+// `goexperiment.jsonv2` on): `GUFF_NATIVE_LIST=verify` showed 18 differences
+// on a two-file module until the cache directory was replaced. Bumping the
+// version retires those blobs; the wider key stops the next baseline change
+// (or a user's `GOEXPERIMENT` / `CGO_ENABLED`) from doing the same.
+const MODMETA_VERSION: &str = "modmeta-v4";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CachedPkgMeta {
@@ -129,8 +138,14 @@ pub struct ModMetaKey<'a> {
     pub goos: &'a str,
     pub goarch: &'a str,
     pub build_tags: &'a [String],
-    /// `true` for GOROOT packages (version key = toolchain identity).
+    /// `goexperiment.*` tags: which files a GOROOT package is built from
+    /// changes with the toolchain's baseline and with `GOEXPERIMENT`.
+    pub tool_tags: &'a [String],
+    pub cgo_enabled: bool,
+    pub compiler: &'a str,
+    /// `true` for GOROOT packages (the blob is per toolchain, not per module).
     pub standard: bool,
+    /// `GOROOT/VERSION`, in every key: it decides the release tags.
     pub goroot_version: &'a str,
 }
 
@@ -327,12 +342,18 @@ fn module_key_hash(key: &ModMetaKey<'_>) -> String {
     h.update(b"\n");
     if key.standard {
         h.update(b"stdlib\n");
-        h.update(key.goroot_version.as_bytes());
     } else {
         h.update(key.module_path.as_bytes());
         h.update(b"@");
         h.update(key.module_version.as_bytes());
+        h.update(b"\n");
     }
+    // The toolchain identity for module blobs too: release tags (`go1.N`)
+    // follow it, so a `//go:build go1.28` file in a GOMODCACHE module joins
+    // the package when the toolchain moves to go1.28 — a key without it kept
+    // serving the go1.27 file set whenever the goexperiment baseline happened
+    // not to change between the two releases.
+    h.update(key.goroot_version.as_bytes());
     h.update(b"\n");
     h.update(key.goos.as_bytes());
     h.update(b"/");
@@ -344,6 +365,17 @@ fn module_key_hash(key: &ModMetaKey<'_>) -> String {
         h.update(t.as_bytes());
         h.update(b",");
     }
+    h.update(b"\ntool:");
+    let mut tool = key.tool_tags.to_vec();
+    tool.sort();
+    for t in tool {
+        h.update(t.as_bytes());
+        h.update(b",");
+    }
+    h.update(b"\ncgo:");
+    h.update(if key.cgo_enabled { b"1" } else { b"0" });
+    h.update(b"\ncompiler:");
+    h.update(key.compiler.as_bytes());
     hex_encode(&h.finalize())
 }
 
@@ -376,4 +408,55 @@ pub fn goroot_version(goroot: &Path) -> String {
     std::fs::read_to_string(path)
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|_| "unknown".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key<'a>(tool: &'a [String], cgo: bool, compiler: &'a str) -> ModMetaKey<'a> {
+        ModMetaKey {
+            module_path: "std",
+            module_version: "",
+            pkg_path: "encoding/json",
+            goos: "linux",
+            goarch: "amd64",
+            build_tags: &[],
+            tool_tags: tool,
+            cgo_enabled: cgo,
+            compiler,
+            standard: true,
+            goroot_version: "go1.27.1",
+        }
+    }
+
+    /// Every input that changes which files `go/build` picks must change the
+    /// blob: a GOROOT blob keyed only on GOOS/GOARCH/user tags served the
+    /// go1.26 `encoding/json` file set after the go1.27 baseline turned
+    /// `goexperiment.jsonv2` on.
+    #[test]
+    fn key_covers_the_file_selection_context() {
+        let v1 = vec!["goexperiment.greenteagc".to_string()];
+        let v2 = vec![
+            "goexperiment.greenteagc".to_string(),
+            "goexperiment.jsonv2".to_string(),
+        ];
+        let base = module_key_hash(&key(&v1, true, "gc"));
+        let mut other_release = key(&v1, true, "gc");
+        other_release.standard = false;
+        other_release.module_path = "example.com/lib";
+        other_release.module_version = "v1.0.0";
+        let lib_127 = module_key_hash(&other_release);
+        other_release.goroot_version = "go1.28.0";
+        assert_ne!(lib_127, module_key_hash(&other_release), "module blob per toolchain");
+        assert_ne!(base, module_key_hash(&key(&v2, true, "gc")), "tool tags");
+        assert_ne!(base, module_key_hash(&key(&v1, false, "gc")), "cgo");
+        assert_ne!(base, module_key_hash(&key(&v1, true, "gccgo")), "compiler");
+        // Tag order is not identity.
+        let v2_rev: Vec<String> = v2.iter().rev().cloned().collect();
+        assert_eq!(
+            module_key_hash(&key(&v2, true, "gc")),
+            module_key_hash(&key(&v2_rev, true, "gc"))
+        );
+    }
 }

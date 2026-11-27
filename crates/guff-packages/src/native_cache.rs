@@ -63,7 +63,11 @@ fn cache_path(key: &str) -> Option<PathBuf> {
     )
 }
 
-const NATIVE_LIST_CACHE_VERSION: &str = "native-list-v2";
+// v3: the key covers the toolchain and its file-selection tags (below), and
+// retires graphs listed before test-only roots / the xtest import edge matched
+// `go list`. A v2 graph listed under go1.26 answered go1.27 with the v1
+// `encoding/json` files, since nothing in its key named the toolchain.
+const NATIVE_LIST_CACHE_VERSION: &str = "native-list-v3";
 
 #[derive(Debug, Serialize, Deserialize)]
 struct CachedGraph {
@@ -230,7 +234,13 @@ fn cache_key(cfg: &Config, patterns: &[String]) -> String {
         if let Some((k, v)) = entry.split_once('=') {
             if matches!(
                 k,
-                "GOOS" | "GOARCH" | "CGO_ENABLED" | "GOTOOLCHAIN" | "GOROOT" | "GOFLAGS"
+                "GOOS"
+                    | "GOARCH"
+                    | "CGO_ENABLED"
+                    | "GOTOOLCHAIN"
+                    | "GOROOT"
+                    | "GOFLAGS"
+                    | "GOEXPERIMENT"
             ) {
                 interesting.push((k.to_string(), v.to_string()));
             }
@@ -240,6 +250,9 @@ fn cache_key(cfg: &Config, patterns: &[String]) -> String {
     for (k, v) in interesting {
         h.update(format!("env {k}={v}\n").as_bytes());
     }
+
+    // The toolchain the native lister builds file sets for.
+    crate::golist::hash_toolchain(&mut h);
 
     hex_encode(&h.finalize())
 }
