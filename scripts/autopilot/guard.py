@@ -14,6 +14,8 @@ RULES = [
      "force-push は禁止。CI の緑が古い run のものになる。追加コミットで直す。"),
     (r"\bgit\s+push\b[^\n;&|]*[\s:](main|master)(\s|$|[;&|])",
      "main への直接 push は禁止。autopilot/<slug> ブランチから PR を出す。"),
+    (r"\bgit\s+tag\b|\bgit\s+push\b[^\n;&|]*(--tags|refs/tags/|\sv[0-9])|\bgh\s+release\s+(create|delete|edit|upload)\b",
+     "タグと release はドライバ（release.sh）の仕事。ワーカーは作らない。"),
     (r"\bgh\s+pr\s+merge\b",
      "マージはドライバ（scripts/autopilot/run.sh）の仕事。PR を出したら AUTOPILOT_RESULT を出して終わる。"),
     (r"\bgh\s+(api\s+\S*rulesets|repo\s+(edit|delete))\b",

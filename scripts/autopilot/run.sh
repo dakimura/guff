@@ -6,6 +6,8 @@
 #   scripts/autopilot/run.sh status    # what it is doing, last results
 #   scripts/autopilot/run.sh once      # one iteration in the foreground (debugging)
 #   scripts/autopilot/run.sh prompt    # print the prompt the next worker would get
+#   scripts/autopilot/run.sh release   # cut a release at the loop's next step (see release.sh)
+#   scripts/autopilot/run.sh release-check  # is one due, and which version
 #
 # One iteration = one fresh `claude -p` session working in a dedicated git worktree
 # on exactly one task, ending with a pull request (see prompt.md). The *driver*
@@ -53,6 +55,9 @@ log()  { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 note() { echo "- $(date '+%m-%d %H:%M') $*" >> "$STATE/driver-notes.md"; log "NOTE: $*"; }
 status() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*" > "$STATE/status.txt"; }
 stopping() { [[ -f "$STATE/STOP" ]]; }
+
+# shellcheck source=release.sh
+source "$SELF_DIR/release.sh"
 
 # Sleep in small steps so `stop` is honoured promptly.
 nap() {
@@ -286,6 +291,8 @@ loop() {
   drain_open_prs
   while (( i < MAX_ITERS )); do
     stopping && break
+    maybe_release   # release.sh: weekly-ish, only from a green main
+    stopping && break
     i=$((i + 1))
     label="iter-$(date +%Y%m%d-%H%M)"
     logf="$STATE/logs/$label.jsonl"
@@ -327,7 +334,8 @@ loop() {
 case "${1:-}" in
   start)
     mkdir -p "$RUN_DIR"
-    cp "$SELF_DIR"/run.sh "$SELF_DIR"/gate.sh "$SELF_DIR"/signals.sh "$SELF_DIR"/guard.py "$SELF_DIR"/prompt.md "$RUN_DIR"/
+    cp "$SELF_DIR"/run.sh "$SELF_DIR"/gate.sh "$SELF_DIR"/signals.sh "$SELF_DIR"/guard.py "$SELF_DIR"/prompt.md \
+       "$SELF_DIR"/release.sh "$SELF_DIR"/update_formula.py "$RUN_DIR"/
     echo "$MAIN" > "$STATE/main-checkout"
     nohup caffeinate -ims bash "$RUN_DIR/run.sh" loop >> "$STATE/driver.log" 2>&1 &
     echo "started (pid $!). log: $STATE/driver.log  status: $0 status  stop: $0 stop" ;;
@@ -340,6 +348,13 @@ case "${1:-}" in
     echo "driver : $(kill -0 "$(cat "$STATE/lock.d/pid" 2>/dev/null)" 2>/dev/null && echo running || echo not running)"
     echo; echo "recent iterations:"; tail -n 8 "$STATE/iterations.tsv" 2>/dev/null
     echo; echo "driver notes:"; tail -n 8 "$STATE/driver-notes.md" 2>/dev/null ;;
+  release)  # ask the running loop to cut a release at its next step, regardless of cadence
+    touch "$STATE/RELEASE-NOW"
+    echo "release requested; the loop cuts it before its next iteration (still needs a mergeable bump PR)" ;;
+  release-check)  # would a release be due now, and which version?
+    ensure_worktree >/dev/null && git -C "$WT" fetch -q --tags origin
+    echo "last tag : $(last_tag)"; echo "next     : v$(next_version)"
+    if release_due; then echo "due      : yes"; else echo "due      : no"; fi ;;
   prompt)  # preview what the next worker would be told
     RUN_DIR="$SELF_DIR"; ensure_worktree && render_prompt preview ;;
   loop) loop ;;
