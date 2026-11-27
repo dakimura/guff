@@ -424,6 +424,11 @@ impl Checker {
                 if res0_t != self.basic(BasicKind::Bool) {
                     return (None, None, false);
                 }
+                // go1.27: "yield func of type %s cannot be variadic"
+                // (go.dev/issue/78483). Checked after the result, as upstream.
+                if crate::signature::signature_variadic(&self.types, cb) {
+                    return (None, None, false);
+                }
                 let param_typ = |i: usize| {
                     crate::tuple::tuple_at(&self.types, cb_params.unwrap(), i)
                         .typ(&self.objects)

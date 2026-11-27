@@ -1278,6 +1278,19 @@ impl Checker {
     /// `copy([]byte, string)` special case — called `internal/logtemplate`
     /// ill-typed and analysed the whole package not at all.
     fn builtin_copy<'a>(&mut self, x: &mut Operand<'a>, args: &[Operand<'a>]) -> bool {
+        // "In either case, the first argument must be a slice; in particular
+        // it cannot be the predeclared nil value. Note that nil is not
+        // excluded by the assignability requirement alone for the special
+        // case (go.dev/issue/79687)." — go1.27 asks `sliceElem(x)` before it
+        // looks at the special case, so `copy(nil, "s")` is an error too.
+        let dst_e = match self.copy_slice_elem(x) {
+            Ok(e) => e,
+            Err(msg) => {
+                self.error(x.pos() as u32, Code::InvalidCopy, format!("invalid copy: {msg}"));
+                return false;
+            }
+        };
+
         let y = &args[1];
         let src_typ = y.typ.unwrap_or_else(|| self.invalid_type());
 
@@ -1322,13 +1335,6 @@ impl Checker {
         }
 
         if !special {
-            let dst_e = match self.copy_slice_elem(x) {
-                Ok(e) => e,
-                Err(msg) => {
-                    self.error(x.pos() as u32, Code::InvalidCopy, format!("invalid copy: {msg}"));
-                    return false;
-                }
-            };
             let src_e = match self.copy_slice_elem(y) {
                 Ok(e) => e,
                 Err(msg) => {
@@ -1388,7 +1394,7 @@ impl Checker {
         for uu in unders {
             let is_slice = uu.is_some_and(|u| matches!(self.types.get(u), TypeData::Slice(_)));
             if !is_slice {
-                if x.mode == OperandMode::Value && x.typ.is_none() {
+                if x.is_nil() {
                     return Err("argument must be a slice; have untyped nil".to_string());
                 }
                 let xs = self.operand_str(x);
