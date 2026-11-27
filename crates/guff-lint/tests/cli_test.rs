@@ -435,6 +435,101 @@ formatters:
     );
 }
 
+/// golangci-lint 2.15.0 `goformatters/gofumpt.New` warns about the deprecated
+/// `extra-rules` each time it builds the formatter. Measured on 2.15.0:
+/// `run` builds it twice (`lintersdb` for the gofumpt linter, then
+/// `NewMetaFormatter` in the runner), `fmt` once, and nothing builds it with
+/// the user's settings unless gofumpt is in `formatters.enable` (or `fmt -E`).
+/// The linter-builder warnings precede the deprecated-linter message and an
+/// `unknown linters` error; the meta-formatter one follows the former.
+#[test]
+fn cli_gofumpt_extra_rules_deprecation_warning() {
+    const WARN: &str = "level=warning msg=\"[formatter] gofumpt: `extra-rules` is deprecated, \
+please use `extra.group-params` and `extra.clothe-returns` instead.\"";
+    const EXHAUSTIVE: &str = "level=warning msg=\"[linter] exhaustive: the option \
+'explicit-exhaustive-switch' has been replaced by 'explicit-exhaustive'.\"";
+    let tmp = tempfile::TempDir::new().unwrap();
+    let cache_dir = tmp.path().join("guff-cache");
+    let module = tmp.path().join("m");
+    std::fs::create_dir_all(&module).unwrap();
+    std::fs::write(module.join("go.mod"), "module example.com/m\n\ngo 1.22\n").unwrap();
+    let src = "package m\n\nfunc F(a int, b int) int { return a + b }\n";
+    std::fs::write(module.join("a.go"), src).unwrap();
+    let cfg = module.join(".golangci.yml");
+    let gofumpt = |enable: bool, settings: &str| {
+        format!(
+            "version: \"2\"\nformatters:\n{}  settings:\n    gofumpt:\n{settings}",
+            if enable { "  enable: [gofumpt]\n" } else { "" }
+        )
+    };
+    let stderr_of = |args: &[&str]| {
+        let out = Command::new(bin())
+            .args(args)
+            .current_dir(&module)
+            .env("GUFF_CACHE", &cache_dir)
+            .output()
+            .expect("spawn guff");
+        std::fs::write(module.join("a.go"), src).unwrap();
+        String::from_utf8_lossy(&out.stderr).into_owned()
+    };
+    let count = |stderr: &str| stderr.lines().filter(|l| *l == WARN).count();
+
+    let cases: &[(&str, String, &[&str], usize)] = &[
+        ("run, enabled", gofumpt(true, "      extra-rules: true\n"), &["run", "./..."], 2),
+        ("fmt, enabled", gofumpt(true, "      extra-rules: true\n"), &["fmt", "-d"], 1),
+        ("fmt -E gofmt replaces enable", gofumpt(true, "      extra-rules: true\n"), &["fmt", "-d", "-E", "gofmt"], 0),
+        ("run, not enabled", gofumpt(false, "      extra-rules: true\n"), &["run", "./..."], 0),
+        ("fmt, not enabled", gofumpt(false, "      extra-rules: true\n"), &["fmt", "-d"], 0),
+        ("fmt -E gofumpt", gofumpt(false, "      extra-rules: true\n"), &["fmt", "-d", "-E", "gofumpt"], 1),
+        ("run, false", gofumpt(true, "      extra-rules: false\n"), &["run", "./..."], 0),
+        (
+            "run, new keys only",
+            gofumpt(true, "      extra:\n        group-params: true\n        clothe-returns: true\n"),
+            &["run", "./..."],
+            0,
+        ),
+    ];
+    for (name, yaml, args, want) in cases {
+        std::fs::write(&cfg, yaml).unwrap();
+        let stderr = stderr_of(args);
+        assert_eq!(count(&stderr), *want, "{name}\nstderr:\n{stderr}");
+    }
+
+    // An unknown linter stops the run after the linter builder: one warning.
+    std::fs::write(
+        &cfg,
+        "version: \"2\"\nlinters:\n  enable: [nosuchlinter]\n".to_string()
+            + &gofumpt(true, "      extra-rules: true\n")["version: \"2\"\n".len()..],
+    )
+    .unwrap();
+    let stderr = stderr_of(&["run", "./..."]);
+    assert_eq!(count(&stderr), 1, "unknown linter\nstderr:\n{stderr}");
+    assert!(stderr.contains("unknown linters: 'nosuchlinter'"), "{stderr}");
+
+    // Order: exhaustive (built before gofumpt), gofumpt, the deprecated
+    // linter, gofumpt again.
+    std::fs::write(
+        &cfg,
+        "version: \"2\"\nlinters:\n  enable: [wsl, exhaustive]\n  settings:\n    exhaustive:\n      \
+         explicit-exhaustive-switch: true\n"
+            .to_string()
+            + &gofumpt(true, "      extra-rules: true\n")["version: \"2\"\n".len()..],
+    )
+    .unwrap();
+    let stderr = stderr_of(&["run", "./..."]);
+    let pos = |needle: &str, from: usize| {
+        stderr[from..]
+            .find(needle)
+            .map(|i| i + from)
+            .unwrap_or_else(|| panic!("{needle:?} missing after byte {from}:\n{stderr}"))
+    };
+    let e = pos(EXHAUSTIVE, 0);
+    let g1 = pos(WARN, e);
+    let d = pos("The linter 'wsl' is deprecated", g1);
+    let _g2 = pos(WARN, d);
+    assert_eq!(count(&stderr), 2, "order case\nstderr:\n{stderr}");
+}
+
 #[test]
 fn cli_fmt_goimports_local_prefixes_from_config() {
     if Command::new("goimports")

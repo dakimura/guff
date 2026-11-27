@@ -38485,3 +38485,12 @@ guff の `FAST_LINTER_NAMES` は `[govet, errcheck, ineffassign, unused]`（「s
 golden＋fix `config-default-fast`（godot・misspell・whitespace・mnd・dogsled・gochecknoinits・ineffassign・nlreturn・wsl が出る形と、
 govet printf・errcheck・unused・staticcheck だけが出す形）で 20 キー、`--fix` もバイト一致。旧集合では 2 キーしか出なかった。
 単体テストで 46 個・`enable`/`disable` の重ね合わせ（上流で 45 個を実測）も固定。
+
+### 2026-11-28 — gofumpt `extra-rules` の deprecated 警告（Phase 9 台帳 core #5）
+
+上流 2.15.0 の `goformatters/gofumpt.New` は `extra-rules: true` で `[formatter] gofumpt: ...is deprecated...` を出すが、guff は値を読むだけで何も出していなかった。
+警告は**formatter を作るたび**に出るので回数は経路で決まる：`run` は lintersdb の gofumpt linter と runner の MetaFormatter で 2 回、`fmt` は 1 回、
+`formatters.enable`（`fmt -E` は置き換え）に gofumpt が無ければ設定が linter 側に copy されず 0 回、unknown linter で止まる `run` は 1 回。
+順序は exhaustive の警告 → gofumpt → deprecated linter → gofumpt。guff の exhaustive 警告は run の後半（settings bag 生成時）に出ていたので、
+bag の生成を run の先頭へ移した（上流の linter builder は名前の検証より先に全 linter を作るので、unknown linter のときも exhaustive の警告が先に出る）。
+`linters` / `formatters` サブコマンドの警告は未移植。cli_test に 10 形を固定。台帳 core #15（iface の exported fix）は既に入っていたので done に直した。
