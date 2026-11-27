@@ -38431,3 +38431,12 @@ v2 の依存を返して 14 件ずれた）。両方に `hash_toolchain`（GOROO
 
 verify OK（go1.27.1）: scratch 9 形（tests true/false）・caddy（945）・prometheus・echo・argo-cd・gin・viper・minio。
 残り: traefik は root の `package main`（import 0 個）で go list の Deps に linker の暗黙依存（runtime 一式）が入り、native に無い。
+
+### 2026-11-28 — inline：`//go:fix` の後の空白は 1 個のスペースに限らない（Phase 9 台帳 xtools-passes #4）
+
+x/tools v0.52 は gofix 指示を `go/ast.ParseDirective` で読み、name を任意の `unicode.IsSpace` の並びで切る。`//go:fix\tinline`・
+`//go:fix  inline`・`//go:fix \t inline` はどれも inline 指示になる。guff の `parse_directive` も同じ切り方だったが、`inline.rs` の
+6 か所のソース再読み込みが、PARSE_COMMENTS で再パースする前にバイト列 `go:fix inline` の有無でファイルを捨てていたので、
+そうしたファイルは parser に届かなかった（2.15.0 は 5 件、guff は 0 件）。前段フィルタを `go:fix` の有無だけにした（判定は従来どおり
+`has_fix_inline`）。golden `govet-inline-tab-directive`（local／dependency の const・alias、dependency の generic func、
+区切りの無い `//go:fixinline` は両方とも黙る）で 5 キーが一致。

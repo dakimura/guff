@@ -1,0 +1,13 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh govet-inline-tab-directive
+# Produced by running golangci-lint on compat/golden/cases/govet-inline-tab-directive/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+bad.go:15:23:govet::inline: Type alias Alias should be inlined
+bad.go:15:30:govet::inline: Type alias dep.A should be inlined
+bad.go:16:9:govet::inline: Constant Legacy should be inlined
+bad.go:16:17:govet::inline: Constant dep.Old should be inlined
+bad.go:16:37:govet::inline: cannot inline: type parameter inference is not yet supported

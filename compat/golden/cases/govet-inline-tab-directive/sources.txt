@@ -1,0 +1,4 @@
+# The unit fixture, so the two tiers cannot drift. The declaring package is a
+# separate package from the caller: the dependency arm re-reads its source.
+bad.go      crates/guff-govet/tests/testdata/inline_tab_directive/bad.go
+dep/dep.go  crates/guff-govet/tests/testdata/inline_tab_directive/dep/dep.go
