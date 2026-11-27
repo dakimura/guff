@@ -364,6 +364,12 @@ struct Imp {
     /// same run (mirrors `astutil.AddNamedImport` reusing the previous pos).
     pos_line: i64,
     end_line: i64,
+    /// Offsets of the spec's head (its name, else its path) and of its path,
+    /// for splicing a new name into `src_range`; `None` for synthetic adds.
+    head_off: Option<(usize, usize)>,
+    /// `name` was changed by a SetImportName fix and must replace the source
+    /// spelling between `head_off.0` and `head_off.1`.
+    renamed: bool,
 }
 
 /// Apply the computed fixes to `imps` (source order) and return the arranged
@@ -380,12 +386,19 @@ fn arrange(mut imps: Vec<Imp>, fixes: &[ImportFix]) -> Vec<Imp> {
                 });
             }
             ImportFixType::SetImportName => {
-                // Not produced without loadRealPackageNames, but handle safely.
+                // Produced by `ensure_embed_import` (an unused `"embed"` kept
+                // as `_`). Upstream's `apply` only swaps `spec.Name`, so the
+                // spec's doc and trailing comment survive: keep `src_range`
+                // and splice the new name in at emit time (`imp_bytes`).
                 for imp in imps.iter_mut() {
                     if imp.path == fix.stmt.import_path {
                         imp.name = fix.stmt.name.clone();
-                        imp.src_range = None;
-                        imp.end_off = None;
+                        if imp.head_off.is_some() {
+                            imp.renamed = true;
+                        } else {
+                            imp.src_range = None;
+                            imp.end_off = None;
+                        }
                     }
                 }
             }
@@ -441,6 +454,8 @@ fn place_import(v: &mut Vec<Imp>, name: String, path: String) {
             end_off: None,
             pos_line,
             end_line,
+            head_off: None,
+            renamed: false,
         },
     );
 }
@@ -615,6 +630,8 @@ fn collect_imps(
     }
 
     let mut imps = Vec::new();
+    // Per spec: how far orphan comments may be absorbed — the decl's `)`.
+    let mut decl_ends = Vec::new();
     for (di, decl) in file.decls.iter().enumerate() {
         let Decl::GenDecl(gen) = decl else {
             break;
@@ -630,6 +647,22 @@ fn collect_imps(
                 continue;
             }
             let (start, end, name) = import_range(&f, imp, src.len());
+            // A parenthesized block owns everything up to its `)`. The *last*
+            // unparenthesized `import "x"` owns nothing past its own line: the
+            // next `//` line after it belongs to whatever follows (a
+            // `//go:embed`, a declaration's doc) and stays in the tail, so
+            // absorbing it duplicated that comment into the rewritten import
+            // block. An unparenthesized decl followed by another import decl
+            // keeps absorbing up to the next spec — that gap is not copied by
+            // anything else, and goimports keeps the comment.
+            decl_ends.push((
+                di,
+                if gen.lparen != NO_POS {
+                    pos_start(&f, gen.rparen)
+                } else {
+                    end
+                },
+            ));
             // Run detection uses the path line (matches both sortImports' Pos/End
             // and astutil.Imports' ValuePos gaps). Specs merged from a later decl
             // adopt the first decl's line so they never open a spurious run.
@@ -645,10 +678,23 @@ fn collect_imps(
                 end_off: Some(f.offset(imp.path.end()) as usize),
                 pos_line,
                 end_line,
+                head_off: Some((
+                    imp.name.as_ref().map_or_else(
+                        || pos_start(&f, imp.path.value_pos),
+                        |n| pos_start(&f, n.pos()),
+                    ),
+                    pos_start(&f, imp.path.value_pos),
+                )),
+                renamed: false,
             });
         }
     }
-    absorb_orphan_line_comments(src, &mut imps);
+    let last_decl = decl_ends.last().map(|&(di, _)| di);
+    let decl_ends: Vec<usize> = decl_ends
+        .into_iter()
+        .map(|(di, end)| if Some(di) == last_decl { end } else { usize::MAX })
+        .collect();
+    absorb_orphan_line_comments(src, &mut imps, &decl_ends);
     Ok(imps)
 }
 
@@ -658,7 +704,7 @@ fn collect_imps(
 /// go/parser leaves these on `File.comments` rather than `ImportSpec.comment`
 /// when they are not same-line. System goimports keeps them; without this,
 /// reconstruct drops grafana-style `#nosec` notes inside the import block.
-fn absorb_orphan_line_comments(src: &[u8], imps: &mut [Imp]) {
+fn absorb_orphan_line_comments(src: &[u8], imps: &mut [Imp], decl_ends: &[usize]) {
     for i in 0..imps.len() {
         let Some((start, mut end)) = imps[i].src_range else {
             continue;
@@ -666,7 +712,8 @@ fn absorb_orphan_line_comments(src: &[u8], imps: &mut [Imp]) {
         let limit = imps
             .get(i + 1)
             .and_then(|n| n.src_range.map(|(s, _)| s))
-            .unwrap_or(src.len());
+            .unwrap_or(src.len())
+            .min(decl_ends.get(i).copied().unwrap_or(src.len()));
         end = extend_through_line_comments(src, end, limit);
         imps[i].src_range = Some((start, end));
     }
@@ -967,6 +1014,17 @@ fn imp_bytes(src: &[u8], imp: &Imp) -> Vec<u8> {
         let mut slice = &src[start..end];
         while matches!(slice.last(), Some(b'\n' | b'\r' | b'\t' | b' ')) {
             slice = &slice[..slice.len() - 1];
+        }
+        if let (true, Some((head, path))) = (imp.renamed, imp.head_off) {
+            if start <= head && head <= path && path <= start + slice.len() {
+                let mut out = slice[..head - start].to_vec();
+                if !imp.name.is_empty() {
+                    out.extend_from_slice(imp.name.as_bytes());
+                    out.push(b' ');
+                }
+                out.extend_from_slice(&slice[path - start..]);
+                return out;
+            }
         }
         return slice.to_vec();
     }
@@ -1338,5 +1396,67 @@ func f(ctx context.Context, t *testing.T) error {
         let got = String::from_utf8(out).unwrap();
         let want = String::from_utf8(src.to_vec()).unwrap();
         assert_eq!(got, want, "native goimports must leave #nosec-in-import layout alone\ngot:\n{got}");
+    }
+
+    // Expected outputs below are golangci-lint 2.15.0 `--fix` (x/tools v0.52
+    // `ensureEmbedImport`); the golden case `goimports-embed` measures them.
+    fn fmt_str(src: &str) -> String {
+        String::from_utf8(format(src.as_bytes(), &opts("", "p.go")).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn embed_directive_adds_blank_embed_import() {
+        let out = fmt_str("package p\n\n//go:embed data.txt\nvar s string\n");
+        assert_eq!(out, "package p\n\nimport _ \"embed\"\n\n//go:embed data.txt\nvar s string\n");
+        // A tab separates the patterns too.
+        let out = fmt_str("package p\n\n//go:embed\tdata.txt\nvar s string\n");
+        assert!(out.contains("import _ \"embed\"\n"), "{out}");
+    }
+
+    #[test]
+    fn embed_lookalikes_add_nothing() {
+        for src in [
+            "package p\n\n//go:embedded data.txt\nvar s string\n",
+            "package p\n\n//go:embed\nvar s string\n",
+            "package p\n\n/*go:embed data.txt*/\nvar s string\n",
+            "package p\n\nimport _ \"embed\"\n\n//go:embed data.txt\nvar s string\n",
+        ] {
+            assert_eq!(fmt_str(src), src);
+        }
+    }
+
+    #[test]
+    fn embed_joins_existing_single_import() {
+        let out = fmt_str(
+            "package p\n\nimport \"fmt\"\n\n//go:embed data.txt\nvar s string\n\nfunc F() { fmt.Println(s) }\n",
+        );
+        assert_eq!(
+            out,
+            "package p\n\nimport (\n\t_ \"embed\"\n\t\"fmt\"\n)\n\n//go:embed data.txt\nvar s string\n\nfunc F() { fmt.Println(s) }\n"
+        );
+    }
+
+    #[test]
+    fn unused_embed_import_becomes_blank_keeping_comments() {
+        let out = fmt_str("package p\n\nimport \"embed\"\n\n//go:embed data.txt\nvar s string\n");
+        assert_eq!(out, "package p\n\nimport _ \"embed\"\n\n//go:embed data.txt\nvar s string\n");
+        let out = fmt_str("package p\n\nimport e \"embed\"\n\n//go:embed data.txt\nvar s string\n");
+        assert_eq!(out, "package p\n\nimport _ \"embed\"\n\n//go:embed data.txt\nvar s string\n");
+        let out = fmt_str(
+            "package p\n\nimport (\n\t// doc\n\t\"embed\" // why\n\t\"os\"\n)\n\n//go:embed data.txt\nvar s string\n\nvar _ = os.Args\n",
+        );
+        assert!(out.contains("\t// doc\n\t_ \"embed\" // why\n\t\"os\"\n"), "{out}");
+        // No directive: still deleted as unused.
+        let out = fmt_str("package p\n\nimport \"embed\"\n\n//go:embedded x\nvar s string\n");
+        assert_eq!(out, "package p\n\n//go:embedded x\nvar s string\n");
+    }
+
+    #[test]
+    fn comment_after_unparenthesized_import_is_not_absorbed() {
+        let out = fmt_str("package p\n\nimport \"fmt\"\n\n// F does things.\nfunc F() { fmt.Println(os.Args) }\n");
+        assert_eq!(
+            out,
+            "package p\n\nimport (\n\t\"fmt\"\n\t\"os\"\n)\n\n// F does things.\nfunc F() { fmt.Println(os.Args) }\n"
+        );
     }
 }

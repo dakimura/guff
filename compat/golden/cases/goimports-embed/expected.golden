@@ -1,0 +1,22 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh goimports-embed
+# Produced by running golangci-lint on compat/golden/cases/goimports-embed/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+doc/doc.go:3:1:goimports::File is not properly formatted
+docafter/docafter.go:3:1:goimports::File is not properly formatted
+fsvar/fsvar.go:2:1:goimports::File is not properly formatted
+grouped/grouped.go:3:1:goimports::File is not properly formatted
+infunc/infunc.go:2:1:goimports::File is not properly formatted
+nodirective/nodirective.go:3:1:goimports::File is not properly formatted
+noimp/noimp.go:2:1:goimports::File is not properly formatted
+renamed/renamed.go:3:1:goimports::File is not properly formatted
+tab/tab.go:2:1:goimports::File is not properly formatted
+unused/unused.go:3:1:goimports::File is not properly formatted
+unusedcomment/unusedcomment.go:4:1:goimports::File is not properly formatted
+unuseddoc/unuseddoc.go:5:1:goimports::File is not properly formatted
+usedandfmtadd/usedandfmtadd.go:2:1:goimports::File is not properly formatted
+withfmt/withfmt.go:3:1:goimports::File is not properly formatted

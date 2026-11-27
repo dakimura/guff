@@ -97,24 +97,82 @@ pub(crate) fn get_fixes(
         known_packages: HashMap::new(),
     };
     if let Some(fixes) = p.load()? {
-        return Ok(FixesResult::Fixes(fixes));
+        return Ok(FixesResult::Fixes(ensure_embed_import(file, fixes)));
     }
 
     // Pass 2: siblings.
     p.other_files = parse_other_files(fset, &src_dir, filename)?;
     if let Some(fixes) = p.load()? {
-        return Ok(FixesResult::Fixes(fixes));
+        return Ok(FixesResult::Fixes(ensure_embed_import(file, fixes)));
     }
 
     // Stdlib + sibling-derived candidates.
     p.assume_sibling_imports_valid();
     add_stdlib_candidates(&mut p);
     if let Some(fixes) = p.fix() {
-        return Ok(FixesResult::Fixes(fixes));
+        return Ok(FixesResult::Fixes(ensure_embed_import(file, fixes)));
     }
 
     // No module resolver: give up for unresolved third-party refs.
     Ok(FixesResult::NeedsResolver)
+}
+
+/// Port of x/tools v0.52 `ensureEmbedImport` (internal/imports/fix.go): a file
+/// with a `//go:embed` directive must import `"embed"` once the fixes are
+/// applied, even when the embedded variable is a `string` / `[]byte` and the
+/// package is never referenced by name. Any import of `"embed"` (renamed or
+/// blank) satisfies it; one about to be deleted as unused is turned into a
+/// blank import instead, and failing that `import _ "embed"` is added.
+///
+/// Upstream runs it in `getFixesWithSource`, i.e. on every successful return
+/// of the fix computation — hence on all three exits of [`get_fixes`].
+fn ensure_embed_import(f: &File, mut fixes: Vec<ImportFix>) -> Vec<ImportFix> {
+    if !has_embed_directive(f) {
+        return fixes;
+    }
+    let mut imported = f.imports.iter().any(|imp| imp.path.value == "\"embed\"");
+    let mut delete_fix = None;
+    for (i, fix) in fixes.iter().enumerate() {
+        if fix.stmt.import_path != "embed" {
+            continue;
+        }
+        match fix.fix_type {
+            ImportFixType::AddImport => imported = true,
+            ImportFixType::DeleteImport => {
+                imported = false;
+                delete_fix = Some(i);
+            }
+            ImportFixType::SetImportName => {}
+        }
+    }
+    if imported {
+        return fixes;
+    }
+    let mut blank_embed = ImportFix {
+        stmt: ImportInfo {
+            name: "_".to_string(),
+            import_path: "embed".to_string(),
+        },
+        ident_name: "_".to_string(),
+        fix_type: ImportFixType::AddImport,
+    };
+    if let Some(i) = delete_fix {
+        blank_embed.fix_type = ImportFixType::SetImportName;
+        fixes[i] = blank_embed;
+        return fixes;
+    }
+    fixes.push(blank_embed);
+    fixes
+}
+
+/// `hasEmbedDirective`: `//go:embed` followed by a space or tab (what
+/// distinguishes it from `//go:embedded`), anywhere in the file's comments.
+fn has_embed_directive(f: &File) -> bool {
+    f.comments.iter().flat_map(|cg| cg.list.iter()).any(|c| {
+        c.text
+            .strip_prefix("//go:embed")
+            .is_some_and(|rest| matches!(rest.as_bytes().first(), Some(b' ' | b'\t')))
+    })
 }
 
 pub(crate) fn collect_imports(f: &File) -> Vec<ImportInfo> {

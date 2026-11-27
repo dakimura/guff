@@ -1,0 +1,155 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh goimports-embed
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/goimports-embed/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.15.0
+
+--- a/doc/doc.go
++++ b/doc/doc.go
+@@ -1,5 +1,7 @@
+ // Package doc has a doc comment.
+ package doc
+ 
++import _ "embed"
++
+ //go:embed data.txt
+ var b []byte
+--- a/docafter/docafter.go
++++ b/docafter/docafter.go
+@@ -1,6 +1,9 @@
+ package docafter
+ 
+-import "fmt"
++import (
++	"fmt"
++	"os"
++)
+ 
+ // F does things.
+ func F() { fmt.Println(os.Args) }
+--- a/fsvar/fsvar.go
++++ b/fsvar/fsvar.go
+@@ -1,4 +1,6 @@
+ package fsvar
++
++import "embed"
+ 
+ //go:embed data.txt
+ var f embed.FS
+--- a/grouped/grouped.go
++++ b/grouped/grouped.go
+@@ -1,6 +1,7 @@
+ package grouped
+ 
+ import (
++	_ "embed"
+ 	"fmt"
+ 	"os"
+ 
+--- a/infunc/infunc.go
++++ b/infunc/infunc.go
+@@ -1,4 +1,6 @@
+ package infunc
++
++import _ "embed"
+ 
+ func F() {
+ 	//go:embed data.txt
+--- a/nodirective/nodirective.go
++++ b/nodirective/nodirective.go
+@@ -1,6 +1,4 @@
+ package nodirective
+-
+-import "embed"
+ 
+ //go:embedded is not a directive
+ var s string
+--- a/noimp/noimp.go
++++ b/noimp/noimp.go
+@@ -1,4 +1,6 @@
+ package noimp
++
++import _ "embed"
+ 
+ //go:embed data.txt
+ var s string
+--- a/renamed/renamed.go
++++ b/renamed/renamed.go
+@@ -1,6 +1,6 @@
+ package renamed
+ 
+-import e "embed"
++import _ "embed"
+ 
+ //go:embed data.txt
+ var s string
+--- a/tab/tab.go
++++ b/tab/tab.go
+@@ -1,4 +1,6 @@
+ package tab
++
++import _ "embed"
+ 
+ //go:embed	data.txt
+ var s string
+--- a/unused/unused.go
++++ b/unused/unused.go
+@@ -1,6 +1,6 @@
+ package unused
+ 
+-import "embed"
++import _ "embed"
+ 
+ //go:embed data.txt
+ var s string
+--- a/unusedcomment/unusedcomment.go
++++ b/unusedcomment/unusedcomment.go
+@@ -1,7 +1,7 @@
+ package unusedcomment
+ 
+ import (
+-	"embed" // for go:embed
++	_ "embed" // for go:embed
+ 	"fmt"
+ )
+ 
+--- a/unuseddoc/unuseddoc.go
++++ b/unuseddoc/unuseddoc.go
+@@ -2,7 +2,7 @@
+ 
+ import (
+ 	// The directive below needs it.
+-	"embed"
++	_ "embed"
+ 	"os"
+ )
+ 
+--- a/usedandfmtadd/usedandfmtadd.go
++++ b/usedandfmtadd/usedandfmtadd.go
+@@ -1,4 +1,9 @@
+ package usedandfmtadd
++
++import (
++	_ "embed"
++	"fmt"
++)
+ 
+ //go:embed data.txt
+ var s string
+--- a/withfmt/withfmt.go
++++ b/withfmt/withfmt.go
+@@ -1,6 +1,9 @@
+ package withfmt
+ 
+-import "fmt"
++import (
++	_ "embed"
++	"fmt"
++)
+ 
+ //go:embed data.txt
+ var s string
