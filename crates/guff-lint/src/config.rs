@@ -586,6 +586,29 @@ pub fn parse_gofmt_settings(settings: &serde_yaml::Value) -> guff_fmt::GofmtOpti
     opts
 }
 
+/// The deprecation warning golangci-lint 2.15.0's `goformatters/gofumpt.New`
+/// logs (through `internal.FormatterLogger`, hence `[formatter]`) each time it
+/// constructs the formatter with `extra-rules: true`. The value still takes
+/// effect; only the message is new. Callers decide how many times upstream
+/// constructs it (`run`: twice, `fmt`: once).
+pub fn gofumpt_deprecation_warnings(opts: &guff_fmt::GofumptOptions) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    if opts.extra_rules {
+        out.push(
+            "level=warning msg=\"[formatter] gofumpt: `extra-rules` is deprecated, \
+             please use `extra.group-params` and `extra.clothe-returns` instead.\"",
+        );
+    }
+    out
+}
+
+/// Print [`gofumpt_deprecation_warnings`] to stderr.
+pub fn warn_gofumpt_deprecations(opts: &guff_fmt::GofumptOptions) {
+    for line in gofumpt_deprecation_warnings(opts) {
+        eprintln!("{line}");
+    }
+}
+
 /// Parse gofumpt settings from `formatters.settings` YAML mapping.
 pub fn parse_gofumpt_settings(settings: &serde_yaml::Value) -> guff_fmt::GofumptOptions {
     let mut opts = guff_fmt::GofumptOptions::default();
