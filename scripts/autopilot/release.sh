@@ -151,9 +151,14 @@ After merge the driver tags \`v$ver\` on the merge commit and updates the Homebr
     (( $(date +%s) - t0 > 7200 )) && { note "release: release.yml for v$ver not done in 2h"; return 1; }
     nap 60 || return 1
   done
-  if [[ "$concl" != success ]]; then
-    note "release: release.yml for v$ver ended '$concl' (run $1); formula not updated"; return 1
+  # Judge by the job that publishes the assets: Docker (GHCR) can fail on its own
+  # (e.g. package permissions) without affecting the tarballs the formula needs.
+  local rel_job
+  rel_job="$(gh run view "$1" -R "$REPO" --json jobs --jq '.jobs[] | select(.name == "GitHub Release") | .conclusion')"
+  if [[ "$rel_job" != success ]]; then
+    note "release: release.yml for v$ver ended '$concl', GitHub Release job '${rel_job:-missing}' (run $1); formula not updated"; return 1
   fi
+  [[ "$concl" != success ]] && note "release: v$ver assets published, but release.yml ended '$concl' (run $1) — check the Docker jobs"
 
   # 4. formula / INSTALL.md PR.
   tmp="$(mktemp -d "$STATE/release-v$ver.XXXXXX")"
