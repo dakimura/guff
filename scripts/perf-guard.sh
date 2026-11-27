@@ -114,10 +114,17 @@ check_once() {
   # --- (5) active build / agent processes ------------------------------------
   # A running cargo/rustc/go build steals every core; that is a hard FAIL.
   local builds
-  builds="$(ps aux | grep -iE 'cargo (build|test|run)|[r]ustc|go build|go test' | grep -v grep || true)"
+  # Match on the *executable*, not anywhere in the command line: an agent
+  # session (`claude -p <prompt>`) carries its whole prompt in argv, and a
+  # prompt that mentions "cargo test" made every regress run in that session
+  # wait 5 minutes and fail on its own process.
+  builds="$(ps -axo args= | awk '{
+      n = $1; sub(/.*\//, "", n)
+      if (n == "rustc" || ((n == "cargo" || n == "go") && ($2 == "build" || $2 == "test" || $2 == "run"))) print
+    }' || true)"
   if [[ -n "$builds" ]]; then
     echo "  FAIL  a build is running (cargo/rustc/go). It will contend for all cores:"
-    echo "$builds" | awk '{ print "        ", $11, $12, $13 }' | head -3
+    echo "$builds" | awk '{ print "        ", $1, $2, $3 }' | head -3
     echo "        → wait for it to finish (docs §0-7)."
     fail=1
   fi
