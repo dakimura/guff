@@ -107,9 +107,9 @@ Release assets: <https://github.com/dakimura/guff/releases>
 ```bash
 # example: darwin arm64
 curl -fsSL -o guff.tgz \
-  https://github.com/dakimura/guff/releases/download/v0.4.1/guff_0.4.1_darwin_arm64.tar.gz
+  https://github.com/dakimura/guff/releases/download/v0.9.0/guff_0.9.0_darwin_arm64.tar.gz
 curl -fsSL -o guff.tgz.sha256 \
-  https://github.com/dakimura/guff/releases/download/v0.4.1/guff_0.4.1_darwin_arm64.tar.gz.sha256
+  https://github.com/dakimura/guff/releases/download/v0.9.0/guff_0.9.0_darwin_arm64.tar.gz.sha256
 shasum -a 256 -c guff.tgz.sha256
 tar -xzf guff.tgz
 install -m 755 guff ~/.local/bin/guff

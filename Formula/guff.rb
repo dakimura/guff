@@ -7,28 +7,28 @@
 class Guff < Formula
   desc "Blazing-fast golangci-lint compatible Go linter"
   homepage "https://github.com/dakimura/guff"
-  version "0.4.1"
+  version "0.9.0"
   license "GPL-3.0-only"
 
   on_macos do
     on_arm do
-      url "https://github.com/dakimura/guff/releases/download/v0.4.1/guff_0.4.1_darwin_arm64.tar.gz"
-      sha256 "8404c50fc829e24f676bd6a0471d73db754109aa1e78598723105ce9bc6650fd"
+      url "https://github.com/dakimura/guff/releases/download/v0.9.0/guff_0.9.0_darwin_arm64.tar.gz"
+      sha256 "7cf7d428e5d6f5ac2bb8cd50ac993be8fc2f39d63bf5d42681f83c43e52bb9e3"
     end
     on_intel do
-      url "https://github.com/dakimura/guff/releases/download/v0.4.1/guff_0.4.1_darwin_amd64.tar.gz"
-      sha256 "12117e3190e9cbe8798156393df98b377a187ee666ae579fc2be5c6c4278ec62"
+      url "https://github.com/dakimura/guff/releases/download/v0.9.0/guff_0.9.0_darwin_amd64.tar.gz"
+      sha256 "d143d71bb041918ab9cf1351d9b64bd8168d5ff82b4047e28cef2463b5f623f5"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/dakimura/guff/releases/download/v0.4.1/guff_0.4.1_linux_arm64.tar.gz"
-      sha256 "3b45c0052fb24f3f38aebf1a82c9bb0bdcc414024ce6f397bc6cdad34460fd21"
+      url "https://github.com/dakimura/guff/releases/download/v0.9.0/guff_0.9.0_linux_arm64.tar.gz"
+      sha256 "fee1dc0fdfdf3ac85b6de8a0d8d9d669072d23abb3acc052b9776a6773dc4f2b"
     end
     on_intel do
-      url "https://github.com/dakimura/guff/releases/download/v0.4.1/guff_0.4.1_linux_amd64.tar.gz"
-      sha256 "736da819d528bccfb1e44a08e9e500d243596c54766fb479b0cf2405a7d60c60"
+      url "https://github.com/dakimura/guff/releases/download/v0.9.0/guff_0.9.0_linux_amd64.tar.gz"
+      sha256 "0b9af059131ba3a76dd1d446490485ea64afceeed45b89881c1a4ee9e2fe83ff"
     end
   end
 
