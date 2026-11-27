@@ -87,6 +87,8 @@ detached HEAD に揃え、終了後に PR の CI を待って **全部緑なら�
   allowlist/baseline を触る必要が本当にあるなら、PR 本文に根拠を書き、journal に `NEEDS-HUMAN` と残す。
 - 手元で OSS nightly tier（consul/grafana/containerd）を回さない（メモリ不足で落ちる。CI が main で回す）。
 - `cargo fmt` 禁止、force-push 禁止、`rm -r` 禁止、`git reset --hard` 禁止（guard が止める）。
+- タグ・release・`Cargo.toml` の version 変更はしない。ドライバが定期的に（既定 7 日、main が緑のとき）
+  bump PR → タグ → release.yml → Formula 更新まで行う（`scripts/autopilot/release.sh`）。
 - `scripts/autopilot/` 自体はタスクがそれでない限り触らない。触る場合もゲートを弱めない。
 - 秘密情報・勤務先由来の文字列を fixture や docs に書かない（memory: guff-history-reset）。
 - 1 イテレーションの目安は 4 時間。それを超えそうなら、到達点で切って PR にする
