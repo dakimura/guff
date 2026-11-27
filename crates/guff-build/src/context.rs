@@ -294,7 +294,7 @@ fn cgo_supported(goos: &str, goarch: &str) -> bool {
 /// follow the `buildcfg` defaults of the toolchain's release (`release` =
 /// N in Go 1.N, as for the release tags); `GOEXPERIMENT` overrides apply on
 /// top.
-fn default_tool_tags(goarch: &str, goos: &str, release: u32) -> Vec<String> {
+pub fn default_tool_tags(goarch: &str, goos: &str, release: u32) -> Vec<String> {
     let mut tags = Vec::new();
     match goarch {
         "amd64" => tags.push("amd64.v1".to_string()),
