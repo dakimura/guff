@@ -1594,7 +1594,7 @@ fn json_package_to_package(p: &JsonPackage, cfg: &Config) -> Result<Package, GoL
     if let Some(err) = &p.error {
         pkg.errors.push(Error {
             pos: err.pos.clone(),
-            msg: err.err.clone(),
+            msg: list_error_message(err),
             kind: ErrorKind::List,
         });
     }
@@ -1603,6 +1603,27 @@ fn json_package_to_package(p: &JsonPackage, cfg: &Config) -> Result<Package, GoL
 
     let _ = cfg;
     Ok(pkg)
+}
+
+/// The `Msg` x/tools gives a `go list` package error (`golist.go`, x/tools
+/// v0.52): the text trimmed (golang.org/issue/32363), and for an import cycle
+/// the import stack appended, with each entry's ` (test)` suffix removed
+/// (golang/go#38826). v0.50 appended the stack only to the non-test form, so
+/// `import cycle not allowed in test` went out bare under golangci-lint 2.12.
+fn list_error_message(err: &JsonPackageError) -> String {
+    let msg = err.err.trim();
+    if (msg == "import cycle not allowed" || msg == "import cycle not allowed in test")
+        && !err.import_stack.is_empty()
+    {
+        let stack: Vec<&str> = err
+            .import_stack
+            .iter()
+            .map(|s| s.strip_suffix(" (test)").unwrap_or(s))
+            .collect();
+        // `fmt.Sprintf("%v", []string)` — elements joined by one space.
+        return format!("{msg}: import stack: [{}]", stack.join(" "));
+    }
+    msg.to_string()
 }
 
 fn json_module_to_module(m: &JsonModule) -> Module {
@@ -2210,6 +2231,41 @@ mod tests {
         assert_eq!(
             normalize_pattern("foo"),
             format!(".{}foo", std::path::MAIN_SEPARATOR)
+        );
+    }
+
+    #[test]
+    fn list_error_message_appends_the_import_stack_like_x_tools_v052() {
+        let mk = |err: &str, stack: &[&str]| JsonPackageError {
+            import_stack: stack.iter().map(|s| s.to_string()).collect(),
+            pos: String::new(),
+            err: err.into(),
+        };
+        // `go list` output for a <-> b, a self-import, and `b_test` importing
+        // `a` which imports `b` (stack entries as cmd/go prints them).
+        assert_eq!(
+            list_error_message(&mk("import cycle not allowed", &["ex/a", "ex/b", "ex/a"])),
+            "import cycle not allowed: import stack: [ex/a ex/b ex/a]"
+        );
+        assert_eq!(
+            list_error_message(&mk("import cycle not allowed", &["ex/a", "ex/a"])),
+            "import cycle not allowed: import stack: [ex/a ex/a]"
+        );
+        assert_eq!(
+            list_error_message(&mk(
+                "import cycle not allowed in test",
+                &["ex/b (test)", "ex/a", "ex/b (test)"]
+            )),
+            "import cycle not allowed in test: import stack: [ex/b ex/a ex/b]"
+        );
+        // No stack: left alone. Other errors are only trimmed.
+        assert_eq!(
+            list_error_message(&mk("import cycle not allowed", &[])),
+            "import cycle not allowed"
+        );
+        assert_eq!(
+            list_error_message(&mk(" pattern x: no matching files found\n", &["ex/a"])),
+            "pattern x: no matching files found"
         );
     }
 

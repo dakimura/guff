@@ -514,3 +514,98 @@ fn wildcard_skips_underscore_dot_and_testdata_dirs() {
 
     let _ = fs::remove_dir_all(&tmp);
 }
+
+/// An import cycle is left to `go list`: which package carries the error and
+/// the `ImportStack` it prints follow `cmd/go`'s load order. The test-only
+/// form (`b`'s in-package test imports `a`, which imports `b`) is a cycle only
+/// among the `[b.test]` variants, so it bails only with tests on.
+#[test]
+fn bails_on_an_import_cycle() {
+    let tmp = std::env::temp_dir().join(format!(
+        "guff-golist-cycle-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = fs::remove_dir_all(&tmp);
+    let module = |name: &str, files: &[(&str, &str)]| {
+        let dir = tmp.join(name);
+        write(&dir.join("go.mod"), "module ex\n\ngo 1.22\n");
+        for (path, body) in files {
+            write(&dir.join(path), body);
+        }
+        dir
+    };
+    let list = |dir: &PathBuf, tests: bool| {
+        let cfg = ListConfig {
+            dir: dir.clone(),
+            tests,
+            ..ListConfig::default()
+        };
+        list_packages(&cfg, &["./...".to_string()])
+    };
+
+    let pair = module(
+        "pair",
+        &[
+            ("a/a.go", "package a\n\nimport _ \"ex/b\"\n"),
+            ("b/b.go", "package b\n\nimport _ \"ex/a\"\n"),
+        ],
+    );
+    let selfimp = module("self", &[("a/a.go", "package a\n\nimport _ \"ex/a\"\n")]);
+    let three = module(
+        "three",
+        &[
+            ("a/a.go", "package a\n\nimport _ \"ex/b\"\n"),
+            ("b/b.go", "package b\n\nimport _ \"ex/c\"\n"),
+            ("c/c.go", "package c\n\nimport _ \"ex/a\"\n"),
+        ],
+    );
+    for dir in [&pair, &selfimp, &three] {
+        for tests in [false, true] {
+            let err = list(dir, tests).unwrap_err();
+            assert_eq!(err.reason, BailReason::ImportCycle, "{dir:?} tests={tests}");
+        }
+    }
+
+    let in_test = module(
+        "intest",
+        &[
+            ("a/a.go", "package a\n\nimport _ \"ex/b\"\n"),
+            ("b/b.go", "package b\n"),
+            (
+                "b/b_test.go",
+                "package b\n\nimport (\n\t\"testing\"\n\n\t_ \"ex/a\"\n)\n\nfunc TestB(t *testing.T) {}\n",
+            ),
+        ],
+    );
+    assert!(list(&in_test, false).is_ok(), "no cycle without the test variant");
+    assert_eq!(
+        list(&in_test, true).unwrap_err().reason,
+        BailReason::ImportCycle
+    );
+
+    // An external test package importing its own package, and a test variant
+    // of a package another root imports, are not cycles.
+    let xtest = module(
+        "xtest",
+        &[
+            ("a/a.go", "package a\n\nimport _ \"ex/b\"\n"),
+            ("b/b.go", "package b\n"),
+            (
+                "b/b_test.go",
+                "package b\n\nimport \"testing\"\n\nfunc TestB(t *testing.T) {}\n",
+            ),
+            (
+                "b/x_test.go",
+                "package b_test\n\nimport (\n\t\"testing\"\n\n\t_ \"ex/a\"\n\t_ \"ex/b\"\n)\n\nfunc TestX(t *testing.T) {}\n",
+            ),
+        ],
+    );
+    assert!(list(&xtest, true).is_ok());
+    assert!(list(&xtest, false).is_ok());
+
+    let _ = fs::remove_dir_all(&tmp);
+}

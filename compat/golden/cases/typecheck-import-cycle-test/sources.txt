@@ -1,0 +1,6 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+a/a.go  crates/guff-lint/tests/testdata/importcycle/test/a/a.go
+b/b.go  crates/guff-lint/tests/testdata/importcycle/test/b/b.go
+b/b_test.go  crates/guff-lint/tests/testdata/importcycle/test/b/b_test.go
+other/bad.go  compat/isolate/fixtures/errorlint/bad.go

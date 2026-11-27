@@ -55,6 +55,10 @@ pub enum BailReason {
     /// graph off disk and never builds anything, so only `go list -export` can
     /// answer; nothing here can synthesize a `.a` path.
     ExportData,
+    /// The import graph has a cycle. `go list` reports it as the package's
+    /// `Error` (`import cycle not allowed`, with an `ImportStack` whose shape
+    /// depends on `cmd/go`'s load order), so it is left to `go list`.
+    ImportCycle,
     /// Filesystem / parse error while listing.
     Io,
 }

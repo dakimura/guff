@@ -926,7 +926,12 @@ fn build_source_seed_inner(
     // — see docs/PERF_TASKS.md §1.8 for why that is not worth its cost.
     let test_only = crate::dedup::import_path_test_only_edges(by_id);
     let (order, back_edges, declined) = dep_load_order(&needed, dep_graph, &test_only, &loadable);
-    report_seed_cycles(&back_edges);
+    // A real import cycle is the one case where a back-edge is the code's
+    // fault, not guff's: `go list` has already said so (and it reaches the
+    // report as a `typecheck` issue), so the "guff bug" banner would be wrong.
+    if !has_import_cycle_error(by_id) {
+        report_seed_cycles(&back_edges);
+    }
     if !declined.is_empty() && crate::debug::enabled() {
         eprintln!(
             "guff:     seed declined {} test-only edge(s) that would close a cycle",
@@ -1311,6 +1316,18 @@ fn build_source_seed_inner(
         }
     }
     Some(Arc::new(seed))
+}
+
+/// Whether `go list` reported an import cycle on any package of the run
+/// (`import cycle not allowed`, or its `in test` form) — the code being linted
+/// does not build, so the seed graph cannot be acyclic either.
+fn has_import_cycle_error(by_id: &HashMap<String, Arc<Package>>) -> bool {
+    by_id.values().any(|p| {
+        p.errors.iter().any(|e| {
+            e.kind == crate::package::ErrorKind::List
+                && e.msg.starts_with("import cycle not allowed")
+        })
+    })
 }
 
 /// Print the back-edges [`dep_load_order`] had to drop, once per seed build.

@@ -78,6 +78,12 @@
 //! code: the emitter and the override are right, and what is missing is one
 //! named thing, embed-pattern resolution in the native lister.
 //!
+//! The exception is an **import cycle**: the native lister cannot phrase it
+//! (which package carries the error, and its import stack, follow `cmd/go`'s
+//! load order), so it bails with `BailReason::ImportCycle` and the load goes
+//! through `go list`, whose error reaches this module with an empty position —
+//! see [`anchor_to_first_file`].
+//!
 //! One detail for whoever writes it: `go list -e -json=<fields>` only *computes*
 //! the error when **`EmbedFiles`** is among the requested fields.
 //! `EmbedPatterns` alone is not enough — measured with four field lists — and
@@ -109,18 +115,18 @@ use crate::exclude::Issue;
 /// result is joined onto `base` to match every other issue, which is absolute
 /// at this point in the pipeline.
 fn parse_position(pos: &str, base: &Path) -> Option<(String, i64, i64)> {
-    let mut parts = pos.split(':');
-    let file = parts.next()?;
-    if file.is_empty() {
-        return None;
+    let parts: Vec<&str> = pos.split(':').collect();
+    if parts.len() == 1 {
+        return None; // "no colons"
     }
-    let line: i64 = parts.next()?.parse().ok()?;
-    // Upstream reads a column only when there are exactly three fields; a
-    // fourth means this is not a position it understands.
-    let column = match (parts.next(), parts.next()) {
-        (Some(c), None) => c.parse().ok()?,
-        (None, None) => 0,
-        _ => return None,
+    let file = parts[0];
+    let line: i64 = parts[1].parse().ok()?;
+    // Upstream reads a column only when there are exactly three fields; with
+    // four or more it keeps the line and leaves the column at 0.
+    let column = if parts.len() == 3 {
+        parts[2].parse().ok()?
+    } else {
+        0
     };
     let path = Path::new(file);
     let filename = if path.is_absolute() {
@@ -129,6 +135,25 @@ fn parse_position(pos: &str, base: &Path) -> Option<(String, i64, i64)> {
         base.join(path).to_string_lossy().into_owned()
     };
     Some((filename, line, column))
+}
+
+/// The tail of `extractErrors`: when the package has Go files, an error whose
+/// position does not parse is moved to line 1 of the first one and the old
+/// position is kept as a prefix of the message —
+/// `Msg = fmt.Sprintf("%s: %s", Pos, Msg)`, `Pos = GoFiles[0] + ":1"`.
+///
+/// An import cycle is the case that needs it: `go list` gives it an empty
+/// `Pos`, so golangci-lint prints `a/a.go:1: : import cycle not allowed: …`,
+/// leading `: ` included. Without a Go file the error stays unparseable and is
+/// dropped below, as upstream logs and drops it.
+fn anchor_to_first_file(pos: &str, msg: &str, pkg: &Package, base: &Path) -> (String, String) {
+    match pkg.go_files.first() {
+        Some(first) if parse_position(pos, base).is_none() => (
+            format!("{}:1", first.to_string_lossy()),
+            format!("{pos}: {msg}"),
+        ),
+        _ => (pos.to_string(), msg.to_string()),
+    }
 }
 
 /// One issue per package that failed to load, deduplicated on
@@ -141,18 +166,19 @@ pub fn issues_from_package_errors(packages: &[Arc<Package>], base: &Path) -> Vec
             if err.kind != ErrorKind::List {
                 continue;
             }
-            let Some((filename, line, column)) = parse_position(&err.pos, base) else {
+            let (pos, msg) = anchor_to_first_file(&err.pos, &err.msg, pkg, base);
+            let Some((filename, line, column)) = parse_position(&pos, base) else {
                 // Upstream logs an unparseable position and drops the issue.
                 continue;
             };
-            let key = (filename.clone(), line, column, err.msg.clone());
+            let key = (filename.clone(), line, column, msg.clone());
             if !seen.insert(key) {
                 continue;
             }
             out.push(Issue {
                 from_linter: "typecheck".into(),
                 analyzer: "typecheck".into(),
-                text: err.msg.clone(),
+                text: msg,
                 severity: String::new(),
                 filename,
                 line,
@@ -209,10 +235,54 @@ mod tests {
             parse_position("/abs/x.go:1:2", base),
             Some(("/abs/x.go".into(), 1, 2))
         );
-        // "no colons", an unparseable line, and a fourth field are all dropped.
+        // "no colons", an unparseable line or column are dropped.
         assert_eq!(parse_position("ui/web.go", base), None);
+        assert_eq!(parse_position("", base), None);
         assert_eq!(parse_position("ui/web.go:x", base), None);
-        assert_eq!(parse_position("ui/web.go:1:2:3", base), None);
+        assert_eq!(parse_position("ui/web.go:1:x", base), None);
+        // A fourth field is not an error upstream: the column is just not read.
+        assert_eq!(
+            parse_position("ui/web.go:1:2:3", base),
+            Some(("/m/ui/web.go".into(), 1, 0))
+        );
+    }
+
+    #[test]
+    fn an_unparseable_position_moves_to_line_one_of_the_first_go_file() {
+        let pkg = |go_files: Vec<&str>, pos: &str| {
+            Arc::new(Package {
+                id: "ex/a".into(),
+                go_files: go_files.into_iter().map(Into::into).collect(),
+                errors: vec![guff_packages::Error {
+                    pos: pos.into(),
+                    msg: "import cycle not allowed: import stack: [ex/a ex/b ex/a]".into(),
+                    kind: ErrorKind::List,
+                }],
+                ..Package::default()
+            })
+        };
+        let base = Path::new("/m");
+        // `go list` gives an import cycle an empty `Pos`: upstream prints
+        // `a/a.go:1: : import cycle not allowed: …`.
+        let issues = issues_from_package_errors(&[pkg(vec!["/m/a/a.go", "/m/a/b.go"], "")], base);
+        assert_eq!(issues.len(), 1);
+        assert_eq!(
+            (issues[0].filename.as_str(), issues[0].line, issues[0].column),
+            ("/m/a/a.go", 1, 0)
+        );
+        assert_eq!(
+            issues[0].text,
+            ": import cycle not allowed: import stack: [ex/a ex/b ex/a]"
+        );
+        // Without a Go file there is nowhere to anchor it: dropped.
+        assert!(issues_from_package_errors(&[pkg(vec![], "")], base).is_empty());
+        // A position that parses is left alone.
+        let issues = issues_from_package_errors(&[pkg(vec!["/m/a/a.go"], "a/x.go:3:4")], base);
+        assert_eq!(
+            (issues[0].filename.as_str(), issues[0].line, issues[0].column),
+            ("/m/a/x.go", 3, 4)
+        );
+        assert!(!issues[0].text.starts_with(':'));
     }
 
     #[test]

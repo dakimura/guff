@@ -1,0 +1,9 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh typecheck-import-cycle-self
+# Produced by running golangci-lint on compat/golden/cases/typecheck-import-cycle-self/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+a/a.go:1:0:typecheck::: import cycle not allowed: import stack: [example.com/cycle/a example.com/cycle/a]
