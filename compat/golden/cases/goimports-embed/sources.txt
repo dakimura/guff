@@ -1,0 +1,41 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces)
+#
+# One package per fixture: each needs its own data.txt so `//go:embed` resolves
+# and neither tool reports a typecheck error instead of the formatter finding.
+already/already.go  crates/guff-fmt/testdata/goimports/embed/already.go
+already/data.txt  crates/guff-fmt/testdata/goimports/embed/data.txt
+bare/bare.go  crates/guff-fmt/testdata/goimports/embed/bare.go
+bare/data.txt  crates/guff-fmt/testdata/goimports/embed/data.txt
+blockc/blockc.go  crates/guff-fmt/testdata/goimports/embed/blockc.go
+blockc/data.txt  crates/guff-fmt/testdata/goimports/embed/data.txt
+doc/doc.go  crates/guff-fmt/testdata/goimports/embed/doc.go
+doc/data.txt  crates/guff-fmt/testdata/goimports/embed/data.txt
+docafter/docafter.go  crates/guff-fmt/testdata/goimports/embed/docafter.go
+docafter/data.txt  crates/guff-fmt/testdata/goimports/embed/data.txt
+embedded/embedded.go  crates/guff-fmt/testdata/goimports/embed/embedded.go
+embedded/data.txt  crates/guff-fmt/testdata/goimports/embed/data.txt
+fsvar/fsvar.go  crates/guff-fmt/testdata/goimports/embed/fsvar.go
+fsvar/data.txt  crates/guff-fmt/testdata/goimports/embed/data.txt
+grouped/grouped.go  crates/guff-fmt/testdata/goimports/embed/grouped.go
+grouped/data.txt  crates/guff-fmt/testdata/goimports/embed/data.txt
+infunc/infunc.go  crates/guff-fmt/testdata/goimports/embed/infunc.go
+infunc/data.txt  crates/guff-fmt/testdata/goimports/embed/data.txt
+nodirective/nodirective.go  crates/guff-fmt/testdata/goimports/embed/nodirective.go
+nodirective/data.txt  crates/guff-fmt/testdata/goimports/embed/data.txt
+noimp/noimp.go  crates/guff-fmt/testdata/goimports/embed/noimp.go
+noimp/data.txt  crates/guff-fmt/testdata/goimports/embed/data.txt
+renamed/renamed.go  crates/guff-fmt/testdata/goimports/embed/renamed.go
+renamed/data.txt  crates/guff-fmt/testdata/goimports/embed/data.txt
+tab/tab.go  crates/guff-fmt/testdata/goimports/embed/tab.go
+tab/data.txt  crates/guff-fmt/testdata/goimports/embed/data.txt
+unused/unused.go  crates/guff-fmt/testdata/goimports/embed/unused.go
+unused/data.txt  crates/guff-fmt/testdata/goimports/embed/data.txt
+unusedcomment/unusedcomment.go  crates/guff-fmt/testdata/goimports/embed/unusedcomment.go
+unusedcomment/data.txt  crates/guff-fmt/testdata/goimports/embed/data.txt
+unuseddoc/unuseddoc.go  crates/guff-fmt/testdata/goimports/embed/unuseddoc.go
+unuseddoc/data.txt  crates/guff-fmt/testdata/goimports/embed/data.txt
+usedandfmtadd/usedandfmtadd.go  crates/guff-fmt/testdata/goimports/embed/usedandfmtadd.go
+usedandfmtadd/data.txt  crates/guff-fmt/testdata/goimports/embed/data.txt
+withfmt/withfmt.go  crates/guff-fmt/testdata/goimports/embed/withfmt.go
+withfmt/data.txt  crates/guff-fmt/testdata/goimports/embed/data.txt

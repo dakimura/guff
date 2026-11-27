@@ -1,0 +1,31 @@
+# Golden case: goimports and `//go:embed` (x/tools v0.52 `ensureEmbedImport`).
+#
+# A file with a `//go:embed` directive must import "embed" even when the
+# embedded variable is a string / []byte and the package is never named. v0.52
+# adds `import _ "embed"`, and turns an "embed" import about to be deleted as
+# unused (plain or renamed) into a blank one, keeping its doc and trailing
+# comment. Negative shapes: `//go:embedded`, a bare `//go:embed`, a `/*...*/`
+# block, an existing `_ "embed"`, and an unused "embed" with no directive (still
+# deleted).
+#
+# `docafter` is not about embed: an unparenthesized `import "x"`
+# followed by a blank line and a `//` comment used to have that comment copied
+# into the rewritten import block. The embed fix rewrites such files far more
+# often, so the shape is pinned here too. The fix tier checks the bytes.
+version: "2"
+
+linters:
+  default: none
+
+formatters:
+  enable:
+    - goimports
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true
