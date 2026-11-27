@@ -38393,3 +38393,17 @@ guff は import cycle を finding にしていなかった（native lister は�
 の 5 形が完全一致（golden 3 case）。3 パッケージの環は上流が `could not import ex/c (… returned nil but no error)` を別ファイルに出すので
 一致しない（台帳に DEFERRED と理由）。corpus の小 6 target で native lister が誤って bail しないことも確認した。
 
+
+### 2026-11-28 — `goexperiment.*` の baseline を toolchain の release に合わせる（go1.27 で jsonv2 が既定 on）
+
+go1.27 の `internal/buildcfg` は baseline に `JSONv2` と `SizeSpecializedMalloc` を足した。それで go1.27.1 の `go list` は
+`encoding/json` を `v2_*.go`（`encoding/json/v2`・`jsontext`・`internal/json*` を import）から、`internal/goexperiment` を
+`exp_jsonv2_on.go` から組む。guff の native lister は baseline を Go 1.26 に固定していたので v1 側のファイルを読み、
+`GUFF_NATIVE_LIST=verify` では `encoding/json` を import する module だけで 16 件の差が出た（既定の native 経路では
+依存グラフと `encoding/json` の型が go list と違っていた）。baseline は release tags と同じく
+`GOROOT/VERSION` の release から作る（1.24〜1.27 は各 toolchain の `exp.go` をそのまま写した）。受け付ける名前も release ごとの
+`Flags`（1.27 は `mapsplitgroup` が増え `goroutineleakprofile` が消えた）にし、`ParseGOEXPERIMENT` との既存の食い違い
+（途中の `none`、`noregabi` が always-on の arch で戻ること、regabi 非対応 arch、tool tags の goos がホストだった）も直した。
+go1.27.1 で scratch module（`GOEXPERIMENT=nojsonv2` 付きも）・echo（258 pkgs）・argo-cd（2703 pkgs）が verify OK、go1.26.5 の scratch module も OK。
+残りの別件 2 つ: test 専用パッケージ（caddy の `caddytest/integration`）が native の roots から落ちる件と、
+symlink 越しの cwd で native が `$PWD` ではなく物理パスで embed パスを作る件（go list は `$PWD` を使う）。
