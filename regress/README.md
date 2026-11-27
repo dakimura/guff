@@ -17,7 +17,7 @@ prometheus config — the gate still fails if `guff_only` grows or `both` shrink
 
 | Source | Notes |
 |--------|--------|
-| **finding-set / display** | Full `./...` matches golangci-lint 2.12 on path+Text (`both=20`, `guff_only=0`, `golangci_only=0`): modernize 16 + govet `inline` 4. Default `output.path-mode: rel`. |
+| **finding-set / display** | Full `./...` matches the pinned golangci-lint 2.15.0 on path+Text (`both=58`, `guff_only=0`, `golangci_only=0`): gofumpt 40, modernize 11, govet `inline` 4, errcheck 1, revive 1, SA1019 1. Default `output.path-mode: rel`. |
 | **gofumpt** | `guff run` format checks set `match_golangci` (omit gofumpt ≥v0.10 rules) so diagnostics match golangci-lint’s embedded `mvdan.cc/gofumpt@v0.9.2`. Native `guff fmt` still applies latest v0.10 rules. Override with `GUFF_GOFUMPT_MATCH_GOLANGCI=0` or pin a binary via `GUFF_GOFUMPT_BIN`. |
 | **staticcheck SA5011** | `:0` / empty-path diagnostics are suppressed; remaining SSA position gaps DEFERRED. |
 
@@ -44,7 +44,7 @@ Shared knobs (override profile defaults):
 | `REGRESS_PACKAGES` | profile default | Override package set without changing profile files |
 
 Cold `GOCACHE` + high concurrency historically peaked **>40GB**. With a warm
-system cache and hybrid default, `full` currently gates at **~2.33s / ~2.73 GiB**
+system cache and hybrid default, `full` currently gates at **~2.52s / ~1.86 GiB**
 peak (`baseline.full.json`). Further memory reduction is still desirable on 24GB
 laptops; the profile exists so we can gate regressions while chasing it.
 `REGRESS_ISOLATE_GOCACHE=1` is available but **not** recommended under 64GB RAM.
@@ -56,6 +56,7 @@ laptops; the profile exists so we can gate regressions while chasing it.
 | — | 1.890s | 2,501,869,568 | **Invalid.** Measured while 57 of prometheus's 118 packages were ill-typed and therefore skipped by every analyzer without `run_despite_errors`. |
 | 2026-08 | 2.330s | 2,932,523,008 | First baseline measured with the whole corpus actually analyzed. |
 | 2026-08-11 | 2.360s | 3,114,582,016 | **Same failure mode as the 1.890s row, one layer down.** `7edba5f` fixed eight type-checker false positives, taking prometheus from 14 ill-typed packages to 8; the 2.330s was measured while `promql/parser`, `scrape`, `tsdb/chunks`, `tsdb/encoding`, `util/zeropool` and `web/api/v1` were still being skipped whole. |
+| 2026-11-27 | 2.520s | 1,991,802,880 | **Re-record, not a regression.** `94e8467` (the first commit of the rewritten history, which carries the 2.37s baseline) measures 2.51–2.64s on this host today, interleaved with `94fe0bc` at 2.50–2.56s (4 rounds each under go1.26.5 and again under go1.27.1, load < 2.0). The compat block went 20 → 58 because the old one was recorded against golangci-lint 2.12.2 from `PATH` while the pin is 2.15.0: the 20 were modernize 16 + govet `inline` 4; the 58 against 2.15.0 are gofumpt 40, modernize 11 (slicesbackward 10, stringscut 1), govet `inline` 4, errcheck 1, revive 1, SA1019 1 — guff 58/58, P=R=1.0. `run.sh` now prefers the pinned binary. tsdb was re-recorded the same day: 0.90s → 0.96s (both binaries 0.95–0.99s under go1.27.1, 0.93–0.96s under go1.26.5), peak RSS 728 → 756 MB, 4 → 7 findings (+3 gofumpt from the 2.15.0 pin). |
 
 The old number was not a faster guff. `dep_graph` was keyed by package id, so
 after `filter_duplicate_packages` renamed a package to `P [P.test]` its
@@ -148,7 +149,9 @@ overhead to optimize away.
 ## Prerequisites
 
 - `cargo build --release -p guff-lint`
-- `golangci-lint` on `PATH`
+- `golangci-lint`: `GOLANGCI_LINT_BIN` if set, else the pinned one in
+  `compat/.tools/golangci-lint-<pin>/` (`compat/pins.json`), else `PATH`. The compat block of a
+  baseline is only comparable against the version that recorded it.
 - `go`, `python3`, `/usr/bin/time`
 - A prometheus checkout via either:
   - repo-root `prometheus/` symlink, or

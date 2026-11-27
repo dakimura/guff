@@ -20,7 +20,7 @@
 #   ./regress/run.sh --skip-golangci         # guff metrics only
 #
 # Env:
-#   GUFF_BIN / GOLANGCI_LINT_BIN / PROMETHEUS_DIR
+#   GUFF_BIN / GOLANGCI_LINT_BIN (default: pinned compat/.tools binary, else PATH) / PROMETHEUS_DIR
 #   REGRESS_PACKAGES / REGRESS_JOBS / REGRESS_RAYON_THREADS
 #   REGRESS_ISOLATE_GOCACHE / REGRESS_RSS_LIMIT_BYTES / REGRESS_TIMEOUT
 #   REGRESS_PROFILE  (tsdb|full; overridden by --profile)
@@ -104,8 +104,17 @@ resolve_guff() {
 }
 
 resolve_golangci() {
+  # Prefer the pinned golangci-lint (compat/pins.json, fetched into compat/.tools)
+  # over whatever is on PATH: the baselines' compat block is only meaningful
+  # against the version that recorded it. A PATH 2.12.2 against a 2.15.0
+  # baseline reported guff_only=3 (gofumpt) for findings guff gets right.
+  local pin pinned
+  pin="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["golangci_lint"])' "$ROOT/compat/pins.json" 2>/dev/null || true)"
+  pinned="$ROOT/compat/.tools/golangci-lint-$pin/golangci-lint"
   if [[ -n "${GOLANGCI_LINT_BIN:-}" ]]; then
     echo "$GOLANGCI_LINT_BIN"
+  elif [[ -n "$pin" && -x "$pinned" ]]; then
+    echo "$pinned"
   elif command -v golangci-lint >/dev/null 2>&1; then
     command -v golangci-lint
   else
@@ -144,7 +153,7 @@ CONFIG="$PROM/.golangci.yml"
 [[ -f "$CONFIG" ]] || die "missing config: $CONFIG"
 
 if [[ "$SKIP_GOLANGCI" -eq 0 && -z "$GOLANGCI" ]]; then
-  die "golangci-lint not on PATH (required; set GOLANGCI_LINT_BIN or pass --skip-golangci)"
+  die "golangci-lint not found (pinned compat/.tools binary or PATH; set GOLANGCI_LINT_BIN or pass --skip-golangci)"
 fi
 if [[ "$UPDATE_BASELINE" -eq 1 && "$SKIP_GOLANGCI" -eq 1 ]]; then
   die "--update-baseline requires golangci-lint (omit --skip-golangci)"
