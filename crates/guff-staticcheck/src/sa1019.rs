@@ -958,6 +958,17 @@ fn selector_diagnostic(
     let depr = if let Some(d) = deprs.objects.get(&obj) {
         d
     } else {
+        // Upstream looks the deprecation up by *object* (`deprs.Objects[obj]`)
+        // and takes `Origin()` only for a `*types.Func`. Instantiating a
+        // generic struct clones exactly the fields whose type mentions a type
+        // parameter, so `dep.S2[int]{GenField: 1}` and `x.GenField` (`GenField
+        // T`) resolve to a clone no fact names and stay silent, while a
+        // `string` field keeps its declared object and is reported
+        // (staticcheck issue 1215, `CheckDeprecated_generics.go`). The scan
+        // below matches by name, so it has to refuse the clone itself.
+        if is_field && guff_types::object::var::var_origin(&artifacts.objects, obj) != obj {
+            return None;
+        }
         // Lazy PARSE_COMMENTS reparse of dep sources. Do not scan every
         // same-module or third-party call site (prometheus cold wall). Allow:
         // - package already known-deprecated via facts,

@@ -9,3 +9,11 @@
 use.go:11:47:staticcheck::SA1019: (example.com/sa1019structkey/dep.Result).Requeue is deprecated: Use `RequeueAfter` instead. 
 use.go:13:43:staticcheck::SA1019: (example.com/sa1019structkey/dep.Result).Requeue is deprecated: Use `RequeueAfter` instead. 
 use.go:15:47:staticcheck::SA1019: (example.com/sa1019structkey/dep.Result).Requeue is deprecated: Use `RequeueAfter` instead. 
+use.go:21:54:staticcheck::SA1019: (example.com/sa1019structkey/dep.S2[int]).Field2 is deprecated: Use Live2 instead. 
+use.go:23:70:staticcheck::SA1019: (example.com/sa1019structkey/dep.S3[int, bool]).F is deprecated: Use G instead. 
+use.go:29:84:staticcheck::SA1019: (example.com/sa1019structkey/dep.S3[string, int]).F is deprecated: Use G instead. 
+use.go:31:60:staticcheck::SA1019: (example.com/sa1019structkey/dep.S2[int]).Field2 is deprecated: Use Live2 instead. 
+use.go:33:42:staticcheck::SA1019: (example.com/sa1019structkey.S2Int).Field2 is deprecated: Use Live2 instead. 
+use.go:46:21:staticcheck::SA1019: (example.com/sa1019structkey/dep.S2[int]).Slice is deprecated: Composite types without a type parameter are not cloned. 
+use.go:46:33:staticcheck::SA1019: (example.com/sa1019structkey/dep.S2[int]).Hook is deprecated: Neither is a function type. 
+use.go:49:64:staticcheck::SA1019: (example.com/sa1019structkey/dep.S2[bool]).Slice is deprecated: Composite types without a type parameter are not cloned. 

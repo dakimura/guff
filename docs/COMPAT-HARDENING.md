@@ -38328,3 +38328,27 @@ fmt は `gofumpt-v12-diagnose` 1 件だけ期待値を撮り直した（stdin �
    `.github/actions/runner-memory`（swap 16 GB（/mnt が別ディスクならそこ）＋ 30 秒ごとの `free`/RSS 上位の記録）
    を oss-nightly に入れ、失敗時に memwatch・dmesg・systemd-oomd を出すステップを足した。
    これで直らなければ、次はそのログで「誰が何 GB 使ったか」から始める。
+
+### 2026-11-27 — SA1019：ジェネリック型の struct literal key（staticcheck v0.8.2 `SelectorName`）と issue 1215
+
+Phase 9 台帳 staticcheck #1（P9-10）。`dep.S2[int]{Field2: …}` の key を SA1019 が合成した selector は
+`X` が `*ast.IndexExpr` / `*ast.IndexListExpr` で、v0.8.2 は `(%s).%s` に `info.TypeOf(x)` を入れる
+（v0.8.1 は panic）。guff は `(?).Field2` を出していた。`knowledge_selector_name` に枝を足した。
+
+測っている途中で**既存差**がもう 1 つ出た。上流は deprecation を **object** で引く
+（`deprs.Objects[obj]`。`Origin()` を取るのは `*types.Func` だけ）。instantiate は型パラメータを含む
+型のフィールドだけを clone するので、`GenField T` は key でも `x.GenField` でも黙り、`Field2 string`
+は報告される（上流 testdata の「should be flagged, but see issue 1215」）。guff は依存先の
+deprecation を名前で引いていたので `GenField` を 2 件出し過ぎていた。名前照合の前で clone された
+field Var（`var_origin(obj) != obj`）を拒む。最初の fixture は `T` 型のフィールドだけで書いたため
+上流が 0 件を返し、ここで気付いた。
+
+golden `staticcheck-sa1019-struct-key` に IndexExpr・IndexListExpr・型パラメータ型フィールド（key／selector）・
+非 deprecated フィールド・複数 key・alias（`type S2Int = dep.S2[int]` → `(…sa1019structkey.S2Int).Field2`）・
+同一パッケージのジェネリック型・型パラメータを含まない合成型（`[]string`・`func(int) error`、clone されないので報告）と `[]T`（clone、黙る）を足し、2.15.0 実測で 3 → 11 件、完全一致。fix は上流が何も直さない（baseline 無し）。
+
+同 PR で `scripts/perf-guard.sh` の「build 実行中」判定を直した。`ps aux` の行全体を
+`cargo (build|test|run)|go test|…` で grep していたため、プロンプトを argv に持つエージェント
+（`claude -p <prompt>`）のプロンプトに「cargo test」とあるだけで自分自身にマッチし、そのセッションの
+regress は `--wait` の 5 分を使い切って必ず FAIL していた。実行ファイル名（argv[0] の basename）が
+`rustc`、または `cargo`/`go` で第 1 引数が build/test/run のときだけ数える。閾値は変えていない。

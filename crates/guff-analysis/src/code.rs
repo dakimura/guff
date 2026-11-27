@@ -1128,8 +1128,22 @@ pub fn knowledge_selector_name(pass: &Pass<'_>, sel: &SelectorExpr) -> String {
         Expr::SelectorExpr(x) => {
             return format!("({}).{}", knowledge_selector_name(pass, x), sel.sel.name);
         }
-        // Upstream panics ("unsupported selector") — an instantiated generic
-        // type as the literal's type, `pkg.G[int]{F: …}`.
+        // staticcheck v0.8.2: an instantiated generic type as a struct
+        // literal's type, `pkg.S2[int]{F: …}` / `pkg.S3[int, bool]{F: …}`
+        // (v0.8.1 panicked with "unsupported selector"):
+        // `fmt.Sprintf("(%s).%s", info.TypeOf(x), expr.Sel.Name)`.
+        Expr::IndexExpr(_) | Expr::IndexListExpr(_) => {
+            if let Some(tv) = info.types.get(&sel.x.id()) {
+                let ts = guff_types::typestring::type_string(
+                    &artifacts.types,
+                    &artifacts.objects,
+                    &artifacts.packages,
+                    tv.typ,
+                    None,
+                );
+                return format!("({ts}).{}", sel.sel.name);
+            }
+        }
         _ => {}
     }
     selector_name_for(pass, sel)
