@@ -323,11 +323,28 @@ pub fn list_packages(cfg: &ListConfig, patterns: &[String]) -> Result<ListRespon
     // prometheus `./...` — the largest single-threaded stretch left in it.
     let deps_start = bfs_debug.then(std::time::Instant::now);
     let ids: Vec<String> = packages.keys().cloned().collect();
-    let computed: Vec<Vec<String>> = ids
+    let computed: Vec<(Vec<String>, bool)> = ids
         .par_iter()
         .map(|id| transitive_deps(id, &direct_imports))
         .collect();
-    for (id, deps) in ids.into_iter().zip(computed) {
+    // An import cycle is an error only `cmd/go` can phrase: which package
+    // carries it and the `ImportStack` it prints depend on the order its
+    // loader walked the graph (`reusePackage` in load/pkg.go, and
+    // `recompileForTest`'s BFS for the `in test` form). Rather than replay that
+    // walk, hand the whole request to `go list`, whose `Error` is then rendered
+    // by golist.rs exactly as x/tools does. A cycle never builds, so this costs
+    // nothing on code that does.
+    if let Some(id) = ids
+        .iter()
+        .zip(&computed)
+        .find_map(|(id, (_, cyclic))| cyclic.then_some(id))
+    {
+        return Err(Bail::new(
+            BailReason::ImportCycle,
+            format!("{id} reaches itself through its imports"),
+        ));
+    }
+    for (id, (deps, _)) in ids.into_iter().zip(computed) {
         if let Some(pkg) = packages.get_mut(&id) {
             pkg.deps = deps;
         }
@@ -1196,12 +1213,19 @@ fn abs_dir(dir: &Path) -> Result<PathBuf, Bail> {
         .map_err(|e: std::io::Error| Bail::new(BailReason::Io, e.to_string()))
 }
 
-fn transitive_deps(id: &str, direct: &FxHashMap<String, Vec<String>>) -> Vec<String> {
+/// The transitive imports of `id`, sorted, and whether `id` is among them
+/// (an import cycle through `id`, a self-import included).
+fn transitive_deps(id: &str, direct: &FxHashMap<String, Vec<String>>) -> (Vec<String>, bool) {
     let mut out = Vec::new();
     let mut seen = FxHashSet::default();
+    let mut cyclic = false;
     let mut stack: Vec<String> = direct.get(id).cloned().unwrap_or_default();
     while let Some(dep) = stack.pop() {
-        if dep == id || dep == "C" {
+        if dep == id {
+            cyclic = true;
+            continue;
+        }
+        if dep == "C" {
             continue;
         }
         if !seen.insert(dep.clone()) {
@@ -1213,7 +1237,7 @@ fn transitive_deps(id: &str, direct: &FxHashMap<String, Vec<String>>) -> Vec<Str
         }
     }
     out.sort();
-    out
+    (out, cyclic)
 }
 
 /// `resolveEmbed` plus the position `cmd/go` attaches to its error.

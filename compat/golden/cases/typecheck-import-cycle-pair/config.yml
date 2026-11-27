@@ -1,0 +1,32 @@
+# Golden case: an import cycle (a imports b imports a), reported by the `typecheck` pseudo
+# linter. Fixtures and the measured shapes: crates/guff-lint/tests/testdata/importcycle/.
+#
+# `go list` puts the cycle on one package as its `Error`, with an empty `Pos`
+# and an `ImportStack`. x/tools (golist.go) appends the stack to the message —
+# since v0.52 also for `import cycle not allowed in test`, with each entry's
+# ` (test)` removed — and golangci-lint's `extractErrors` moves the empty
+# position to line 1 of the package's first Go file, keeping it as a `: `
+# prefix of the message.
+#
+# other/ is errorlint's fixture: its eight findings must be dropped, because a
+# typecheck issue overrides every other finding in the run (InvalidIssue).
+# b imports the broken a and is ill-typed too, but the answer is stable (16 of
+# 16 runs, 4 of them --concurrency=1): go/packages cuts the a -> b edge, so a is
+# the leaf, is analyzed first, and its failure cancels the rest of the run.
+# One broken package per case: with several, upstream's answer depends on
+# which ill-typed package wins the run-wide cancel (see typecheck-embed).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errorlint
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

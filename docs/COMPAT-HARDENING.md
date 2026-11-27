@@ -38380,3 +38380,16 @@ ssadump v0.52 の `-build=F` を手元で建て、単一 case の 10 形と 2 ca
 
 上流の答えは go1.27.1 の `go build -gcflags=-e` で取った（copy 7 形、range 7 形。名前付き yield 型と
 `I ~func(func(...int) bool)` の型パラメータ iterator も拒否される）。旧実装で両テストが落ちることも確認した。
+
+### 2026-11-28 — import cycle を `typecheck` として出す（Phase 9 台帳 xtools #8、P9-12）
+
+guff は import cycle を finding にしていなかった（native lister は循環をそのまま通し、seed が「guff bug」の警告を出すだけ）。
+2.15.0 は `a/a.go:1: : import cycle not allowed: import stack: [ex/a ex/b ex/a] (typecheck)` を出し、他の finding は全部消える。
+直したのは 3 か所：native lister が循環を見つけたら `go list` に bail（エラーがどの package に載るかは cmd/go の load 順で決まる。
+`go list` は `Pos` が空の `Error` と `ImportStack` を返す）、golist.rs で x/tools v0.52 の文言（stack の連結、v0.52 で `in test` にも付き
+` (test)` を削る）、typecheck.rs で golangci の `extractErrors` の「読めない位置は `GoFiles[0]:1` に移し、元の位置を `: ` 付きで本文に」。
+
+2.15.0 で 2 パッケージの環・自己 import・`b_test` が a を import する `in test` 形・`./b/...` だけ・他パッケージの errcheck と同居、
+の 5 形が完全一致（golden 3 case）。3 パッケージの環は上流が `could not import ex/c (… returned nil but no error)` を別ファイルに出すので
+一致しない（台帳に DEFERRED と理由）。corpus の小 6 target で native lister が誤って bail しないことも確認した。
+
