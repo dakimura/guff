@@ -64,6 +64,10 @@ detached HEAD に揃え、終了後に PR をマージするかを機械的に�
 （memory: golden-tier-is-the-only-column-gate）、上流 testdata 全体での測定
 （memory: corpus-silent-linters-need-upstream-testdata）、`compat/hunt.sh`。
 
+**signals に `focus: perf` があるとき**は、P0 が無い限り P1〜P3 を飛ばして P4 を選ぶ。guff の目標は
+「golangci-lint 互換」と並んで「超高速」で、互換の台帳は尽きないので順番どおりだと P4 は永遠に来ない。
+速度の回は wall／CPU／peak RSS のどれかを**測って**縮める（推測で最適化しない）。
+
 **P4 — 速度・リファクタ。** 最新の `docs/PERF_TASKS_V*.md` の未完了項目、またはプロファイル
 （DEVELOPMENT §9.4）で見つけたもの。**挙動を変えないこと**を `{{GATE}} --perf` と
 `scripts/perf-guard.sh` / `scripts/perf-ab.sh` で示す。RSS は交互に繰り返して測る
