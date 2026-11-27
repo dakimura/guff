@@ -320,6 +320,20 @@ fn run_cmd(args: RunArgs, startup: Instant) -> Result<i32, RunError> {
     let linter_names = selection.resolve_names();
     let settings = &loaded.linter_settings;
 
+    // `lintersdb.NewLinterBuilder().Build` constructs *every* linter before
+    // any name is validated, so the settings warnings those constructors log
+    // (exhaustive's deprecated keys, gofumpt's `extra-rules`) come first —
+    // also ahead of an `unknown linters` error. The gofumpt linter sees
+    // `formatters.settings.gofumpt` only when gofumpt is in
+    // `formatters.enable` (`handleFormatterOverrides`); otherwise its settings
+    // are the zero value and it stays quiet.
+    let mut bag = (*settings.to_bag()).clone();
+    let gofumpt_enabled = loaded.formatters.enable.iter().any(|n| n == "gofumpt");
+    let gofumpt_settings = gofumpt_enabled.then(|| loaded.formatters.gofumpt_options());
+    if let Some(g) = &gofumpt_settings {
+        crate::config::warn_gofumpt_deprecations(g);
+    }
+
     // nolintlint enables no analyzer of its own: it reports on the `//nolint`
     // comments, which the issue filter is already parsing.
     // `settings.nolintlint.allow-unused` rides along inside the style.
@@ -424,6 +438,15 @@ fn run_cmd(args: RunArgs, startup: Instant) -> Result<i32, RunError> {
     // `--fix` and `issues.fix` are the same switch; upstream ORs them.
     let fix = args.fix || loaded.issues_fix;
 
+    // `lint.NewRunner` → `goformatters.NewMetaFormatter` builds the gofumpt
+    // formatter a second time for the fix/format processor, so a `run` with
+    // gofumpt enabled logs the `extra-rules` warning twice (measured on
+    // 2.15.0). Upstream builds the runner after loading packages, so a load
+    // failure there leaves one warning; guff prints both up front.
+    if let Some(g) = &gofumpt_settings {
+        crate::config::warn_gofumpt_deprecations(g);
+    }
+
     let formatters = build_formatter_run_config(
         &loaded.formatters,
         loaded.go_version.as_deref(),
@@ -454,7 +477,6 @@ fn run_cmd(args: RunArgs, startup: Instant) -> Result<i32, RunError> {
         );
     }
 
-    let mut bag = (*settings.to_bag()).clone();
     // contextcheck needs (1) same-module fact typecheck, (2) methods in SrcFuncs,
     // (3) SSA on ill-typed packages. Each costs peak RSS on large corpora, so
     // enable only when that analyzer is in the run.
@@ -925,6 +947,11 @@ fn fmt_cmd(args: FmtArgs) -> Result<i32, RunError> {
     let enable = validate_formatters(&enable)?;
 
     let mut gofumpt = formatters.gofumpt_options();
+    // `NewMetaFormatter` constructs gofumpt only when it is enabled (`-E`
+    // replaces `formatters.enable`), so `fmt` logs the warning once.
+    if enable.iter().any(|n| n == "gofumpt") {
+        crate::config::warn_gofumpt_deprecations(&gofumpt);
+    }
     if gofumpt.lang.is_none() {
         // `run.go` as `handleGoVersion` fills it in (see `detect_run_go`).
         gofumpt.lang = Some(

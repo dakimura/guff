@@ -1,0 +1,64 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh config-default-fast
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/config-default-fast/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.15.0
+
+--- a/fast/fast.go
++++ b/fast/fast.go
+@@ -8,15 +8,17 @@
+ 	"os"
+ )
+ 
+-// Foo does things
++// Foo does things.
+ func Foo(a int) int {
+ 	x := 1
+ 	x = 2
++
+ 	if a > 0 {
++		fmt.Println("receive")
++	}
+ 
+-		fmt.Println("recieve")
+-	}
+ 	_, _, _ = a, a, a
++
+ 	return a * 42
+ }
+ 
+@@ -27,24 +29,29 @@
+ func notFast() {
+ 	fmt.Printf("%d\n", "s")
+ 	os.Remove("x")
++
+ 	if errors.New("e") == nil {
+ 		return
+ 	}
++
+ 	_ = http.MethodGet
+ 	_ = "GET"
+ }
+ 
+ func unusedHelper() {}
+ 
+-// Bar returns early
++// Bar returns early.
+ func Bar(n int) (r int) {
+ 	if n > 1 {
+ 		r = n
++
+ 		return
+ 	}
++
+ 	for i := 0; i < n; i++ {
+ 		v := i
+ 		go func() { _ = v }()
+ 	}
++
+ 	return
+ }

@@ -1,0 +1,28 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh config-default-fast
+# Produced by running golangci-lint on compat/golden/cases/config-default-fast/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+fast/fast.go:11:1:godot::Comment should end in a period
+fast/fast.go:13:2:ineffassign::ineffectual assignment to x
+fast/fast.go:14:2:ineffassign::ineffectual assignment to x
+fast/fast.go:15:2:wsl::only one cuddle assignment allowed before if statement
+fast/fast.go:15:12:whitespace::unnecessary leading newline
+fast/fast.go:15:12:wsl::block should not start with a whitespace
+fast/fast.go:17:16:misspell::`recieve` is a misspelling of `receive`
+fast/fast.go:19:2:dogsled::declaration has 3 blank identifiers
+fast/fast.go:19:2:wsl::assignments should only be cuddled with other assignments
+fast/fast.go:20:2:nlreturn::return with no blank line before
+fast/fast.go:20:2:wsl::return statements should not be cuddled if block has more than two lines
+fast/fast.go:20:13:mnd::Magic number: 42, in <return> detected
+fast/fast.go:23:1:gochecknoinits::don't use `init` function
+fast/fast.go:30:2:wsl::if statements should only be cuddled with assignments
+fast/fast.go:33:2:wsl::assignments should only be cuddled with other assignments
+fast/fast.go:39:1:godot::Comment should end in a period
+fast/fast.go:43:3:nlreturn::return with no blank line before
+fast/fast.go:45:2:wsl::for statements should only be cuddled with assignments used in the iteration
+fast/fast.go:49:2:nlreturn::return with no blank line before
+fast/fast.go:49:2:wsl::return statements should not be cuddled if block has more than two lines

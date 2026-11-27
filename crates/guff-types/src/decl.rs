@@ -600,6 +600,21 @@ impl Checker {
         // refer to T recursively.
         let named = new_named(&mut self.types, &mut self.objects, obj, None, Vec::new());
 
+        // Detect invalid recursive types (e.g. `type T struct { x T }`), which
+        // have no finite layout. Go queues this at the top of `typeDecl`,
+        // before the RHS is checked, so for `type X struct{ y Y }; type Y
+        // struct{ x X }` X's check runs before Y's (Y's declaration finishes
+        // first, inside X's RHS) and the cycle is reported on X.
+        // `valid_type` invalidates the type and returns the offending cycle.
+        self.later(move |c| {
+            let invalid = c.invalid_type();
+            if let crate::validtype::ValidResult::Cycle { path, types } =
+                crate::validtype::valid_type(&mut c.types, &c.objects, &c.packages, named, invalid)
+            {
+                c.valid_type_cycle_error(&path, &types);
+            }
+        });
+
         // Collect type parameters (chunk 35a-decl). Their scope starts at the
         // beginning of the type-parameter list and extends over the RHS, so we
         // open a fresh scope and keep it current while checking the RHS.
@@ -682,23 +697,47 @@ impl Checker {
             self.close_scope();
         }
 
-        // Detect invalid recursive types (e.g. `type T struct { x T }`), which
-        // have no finite layout. Deferred so the type is fully set up first.
-        // `valid_type` invalidates the type and returns the offending cycle.
-        self.later(move |c| {
-            let invalid = c.invalid_type();
-            if let crate::validtype::ValidResult::Cycle { path } =
-                crate::validtype::valid_type(&mut c.types, &c.objects, &c.packages, named, invalid)
-            {
-                let name = obj.name(&c.objects).to_string();
-                let msg = if path.len() <= 1 {
-                    format!("invalid recursive type: {} refers to itself", name)
-                } else {
-                    format!("invalid recursive type {}", name)
-                };
-                c.error(obj.pos(&c.objects), Code::InvalidDeclCycle, msg);
+    }
+
+    /// `Checker.cycleError(makeObjList(path[start:]), 0)` from `validType`:
+    /// the cycle is reported at its first element, named the way go1.27's
+    /// `name` does — an instance with its type arguments (`T[int]`,
+    /// go1.27 `decl.go`), anything else as the package-qualified object name.
+    ///
+    /// Go reports a multi-element cycle as one error plus a `\t%s refers to
+    /// %s` continuation per edge; guff keeps the first line only (as for
+    /// `cycles.rs` and `initorder.rs`). The position is `cycle[0]`'s object:
+    /// for an instance Go has a `TypeName` at the instantiation site, guff's
+    /// instance shares the origin's, so the declaration is reported instead.
+    pub(crate) fn valid_type_cycle_error(&mut self, path: &[ObjectId], types: &[TypeId]) {
+        let (Some(&obj), Some(&typ)) = (path.first(), types.first()) else {
+            return;
+        };
+        let name = self.cycle_name(obj, typ);
+        let msg = if path.len() == 1 {
+            format!("invalid recursive type: {} refers to itself", name)
+        } else {
+            format!("invalid recursive type {}", name)
+        };
+        self.error(obj.pos(&self.objects), Code::InvalidDeclCycle, msg);
+    }
+
+    /// The `name` closure of `Checker.cycleError` for a `Named` type `typ`
+    /// declared by `obj`.
+    fn cycle_name(&self, obj: ObjectId, typ: TypeId) -> String {
+        if matches!(self.types.get(typ), TypeData::Named(n) if n.is_instance()) {
+            return self.type_str(typ);
+        }
+        let mut s = String::new();
+        if let Some(pkg) = obj.pkg(&self.objects) {
+            let q = self.qualifier(pkg);
+            if !q.is_empty() {
+                s.push_str(&q);
+                s.push('.');
             }
-        });
+        }
+        s.push_str(obj.name(&self.objects));
+        s
     }
 
     /// Whether `t` is a `type T U` still waiting for `U`'s underlying.

@@ -38454,3 +38454,66 @@ native は内部 test ファイルがあるときしか作っていなかった�
 go1.27.1 で m0（main・import 0）、m1（＋ import 0 の内部 test）、m2（＋ import 0 の `main_test`）、m3（errors を import）、
 lib（main でない）、c1（cgo ＋内部 test）、xo（`main_test` だけ）を go list で実測し、`tests`×`need_deps` の 4 通りで単体テストに固定。
 GOOS/GOARCH ごとの `LinkerDeps` も 9 通り実測して単体テスト。verify OK: traefik（2848 pkgs）・caddy・minio。
+
+### 2026-11-28 — inline：`//go:fix` の後の空白は 1 個のスペースに限らない（Phase 9 台帳 xtools-passes #4）
+
+x/tools v0.52 は gofix 指示を `go/ast.ParseDirective` で読み、name を任意の `unicode.IsSpace` の並びで切る。`//go:fix\tinline`・
+`//go:fix  inline`・`//go:fix \t inline` はどれも inline 指示になる。guff の `parse_directive` も同じ切り方だったが、`inline.rs` の
+6 か所のソース再読み込みが、PARSE_COMMENTS で再パースする前にバイト列 `go:fix inline` の有無でファイルを捨てていたので、
+そうしたファイルは parser に届かなかった（2.15.0 は 5 件、guff は 0 件）。前段フィルタを `go:fix` の有無だけにした（判定は従来どおり
+`has_fix_inline`）。golden `govet-inline-tab-directive`（local／dependency の const・alias、dependency の generic func、
+区切りの無い `//go:fixinline` は両方とも黙る）で 5 キーが一致。
+
+### 2026-11-28 — types：`cycleError` の名前に型引数（Phase 9 台帳 types #19）
+
+go1.27 の `cycleError` はインスタンスを `TypeString` で書く（`invalid recursive type: T[P] refers to itself`、`B[P]`、`E[string]`）。
+guff は `validType` の cycle を宣言した object の名前で、しかも**検査を始めた型**の位置に出していた。上流は `typeDecl` の先頭で
+`validType` を `later` に積むので相互再帰は先に宣言した型で報告されるが、guff は末尾で積んでいたので後の型（`Y`、`D`、`B`）で
+報告していた。`ValidResult::Cycle` に TypeId 列を足し（guff のインスタンスは origin の object を共有する）、`cycle[0]` で報告、
+`later` を先頭へ。上流 testdata の `invalid recursive type` を含む 32 ファイルを go1.27.1 の `go/types` と 1 行目で突き合わせて
+一致 30→38 行・失った行 0、7 形を `check_files.rs` に固定。測定中に見つけた既存の穴：issue48951 / issue52915 / issue56665 で
+guff-types が stack overflow、check/decls4.go は停止しない（main でも同じ。台帳 types #19 の「残り」に記録）。golden は作れない
+（guff は型エラーを出力しない）。
+
+### 2026-11-28 — types：`interfacePtrError`（Phase 9 台帳 types #25）
+
+go1.27 は interface／型パラメータへのポインタの cause に型名を入れ、型パラメータなら `type *P is pointer to type parameter, not type
+parameter` と書く（go.dev/issue/79883）。guff は selector で固定文言 `type is pointer to interface, not interface`（型名なし）、
+`missingMethod` と `implements` には分岐自体が無く `(missing method M)`／`*I is not an interface` だった。`lookup::interface_ptr_error`
+を足して 3 か所で使う。`is_interface_ptr` は base が型パラメータなら真にした（上流の `IsInterface(tparam)` は常に真。guff は
+bare-type 制約 `P []byte` の interface を遅延生成するので偽になっていた）。go1.27.1 の `go vet` で 13 形を測り、到達できる 9 形を
+`check_files.rs` に、T 側と issue79883 の `string`→`*P` を `implements` 直呼びで固定。golden は作れない：guff は型エラーを出力しない
+（2.15.0 は 5 件を 1 キーにまとめて出す）。代入・変換のエラーに cause が無いのは別の既存の穴。
+
+### 2026-11-28 — stringintconv：`intconv.Check`（x/tools v0.52）を丸ごと移植（Phase 9 台帳 xtools-passes #1）
+
+台帳は「診断は同じで fix だけ違う」としていたが、上流 testdata（a / fix / typeparams）を 2.15.0 と比べると診断も違っていた。guff は
+`describe` を持たず（`C (int) to A (string)` が `C to A`、alias や型パラメータの名前は `type`）、型パラメータの変換は 1 件も出さず
+（`structuralTypes` が無く、`underlying` が interface になって整数と判定されない）、`(string)(x)` を余分に見ていた（上流は Ident／Selector だけ）。
+2.15.0 の 29 件に対し guff は 20 件・うち 6 件は文言違い。v0.52 の `Check` を、fix（`rune(x)` は exact なときだけ、else `%c`、どちらも
+出せなければ fix 無し、`%d` は sprintfOK のときだけ、`string` が target なら呼び出し全体を置き換え）ごと移植した。golden＋fix
+`govet-stringintconv-v052`（上流 testdata と追加 11 形：pointer receiver だけの型、値 Format を持つ 16 bit 型、generic named、
+別パッケージの selector target、`(string)(x)`、int32 の内外の untyped／typed 定数、alias source と named target）で 40 キー、
+`--fix` もバイト一致。wide 型の `%c` と `%d` は同じ範囲を書くので golangci は govet の self-conflict としてファイルごと捨てる。
+guff の fixer も同じ規則（`fix.rs`）なので、wide の形は 1 ファイルに 1 つずつ置いた（混ぜると narrow 側の fix まで消えて測れない）。
+既存の `govet` case の `--fix` も上流と一致し（差は `string(65)` の `fmt.Sprint(rune(65))` → `fmt.Sprintf("%d", rune(65))` の 1 行だけだった）、
+`compat/fix/pending/govet.diff` を削除した（pending は 3 case に）。
+
+### 2026-11-28 — `linters.default: fast` を上流の集合に（Phase 9 台帳 core #11）
+
+guff の `FAST_LINTER_NAMES` は `[govet, errcheck, ineffassign, unused]`（「standard から遅いものを抜いた」という誤解）だったが、
+上流の `fast` は `WithLoadForGoAnalysis()` を付けない linter 全部で、govet・errcheck・unused は入らない。2.15.0 の
+`golangci-lint linters`（`default: fast`）の Enabled 欄は台帳の 44 ではなく 46 個（deprecated の gomodguard・wsl を含み、
+両者は警告付きで走る。guff の警告経路も同じ 2 行を出す）。46 個は全部 guff に実装があるので集合を転記するだけで済んだ。
+golden＋fix `config-default-fast`（godot・misspell・whitespace・mnd・dogsled・gochecknoinits・ineffassign・nlreturn・wsl が出る形と、
+govet printf・errcheck・unused・staticcheck だけが出す形）で 20 キー、`--fix` もバイト一致。旧集合では 2 キーしか出なかった。
+単体テストで 46 個・`enable`/`disable` の重ね合わせ（上流で 45 個を実測）も固定。
+
+### 2026-11-28 — gofumpt `extra-rules` の deprecated 警告（Phase 9 台帳 core #5）
+
+上流 2.15.0 の `goformatters/gofumpt.New` は `extra-rules: true` で `[formatter] gofumpt: ...is deprecated...` を出すが、guff は値を読むだけで何も出していなかった。
+警告は**formatter を作るたび**に出るので回数は経路で決まる：`run` は lintersdb の gofumpt linter と runner の MetaFormatter で 2 回、`fmt` は 1 回、
+`formatters.enable`（`fmt -E` は置き換え）に gofumpt が無ければ設定が linter 側に copy されず 0 回、unknown linter で止まる `run` は 1 回。
+順序は exhaustive の警告 → gofumpt → deprecated linter → gofumpt。guff の exhaustive 警告は run の後半（settings bag 生成時）に出ていたので、
+bag の生成を run の先頭へ移した（上流の linter builder は名前の検証より先に全 linter を作るので、unknown linter のときも exhaustive の警告が先に出る）。
+`linters` / `formatters` サブコマンドの警告は未移植。cli_test に 10 形を固定。台帳 core #15（iface の exported fix）は既に入っていたので done に直した。

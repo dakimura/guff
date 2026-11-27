@@ -586,6 +586,29 @@ pub fn parse_gofmt_settings(settings: &serde_yaml::Value) -> guff_fmt::GofmtOpti
     opts
 }
 
+/// The deprecation warning golangci-lint 2.15.0's `goformatters/gofumpt.New`
+/// logs (through `internal.FormatterLogger`, hence `[formatter]`) each time it
+/// constructs the formatter with `extra-rules: true`. The value still takes
+/// effect; only the message is new. Callers decide how many times upstream
+/// constructs it (`run`: twice, `fmt`: once).
+pub fn gofumpt_deprecation_warnings(opts: &guff_fmt::GofumptOptions) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    if opts.extra_rules {
+        out.push(
+            "level=warning msg=\"[formatter] gofumpt: `extra-rules` is deprecated, \
+             please use `extra.group-params` and `extra.clothe-returns` instead.\"",
+        );
+    }
+    out
+}
+
+/// Print [`gofumpt_deprecation_warnings`] to stderr.
+pub fn warn_gofumpt_deprecations(opts: &guff_fmt::GofumptOptions) {
+    for line in gofumpt_deprecation_warnings(opts) {
+        eprintln!("{line}");
+    }
+}
+
 /// Parse gofumpt settings from `formatters.settings` YAML mapping.
 pub fn parse_gofumpt_settings(settings: &serde_yaml::Value) -> guff_fmt::GofumptOptions {
     let mut opts = guff_fmt::GofumptOptions::default();
@@ -2113,7 +2136,45 @@ linters:
         };
         let names = sel.resolve_names();
         assert!(!names.contains(&"staticcheck".to_string()));
-        assert!(names.contains(&"govet".to_string()));
+    }
+
+    /// `linters.default: fast` is upstream's syntax-only set, not a subset of
+    /// `standard`: measured with golangci-lint 2.15.0 `linters`, it has 46
+    /// linters, none of govet / errcheck / unused, and ineffassign is the only
+    /// overlap with `standard`.
+    #[test]
+    fn fast_preset_is_the_syntax_only_set() {
+        let sel = LinterSelection {
+            default: LinterDefault::Fast,
+            ..Default::default()
+        };
+        let names = sel.resolve_names();
+        assert_eq!(names.len(), 46);
+        for off in ["govet", "errcheck", "unused", "staticcheck", "predeclared"] {
+            assert!(!names.iter().any(|n| n == off), "{off} is not in fast");
+        }
+        for on in ["ineffassign", "godot", "misspell", "whitespace", "nolintlint", "wsl", "gomodguard", "gomodguard_v2"] {
+            assert!(names.iter().any(|n| n == on), "{on} is in fast");
+        }
+        let known = known_linter_names();
+        for n in &names {
+            assert!(known.contains(&n.as_str()), "{n} is a known linter");
+        }
+    }
+
+    /// Measured with golangci-lint 2.15.0: `default: fast` + `enable: [govet]`
+    /// + `disable: [ineffassign, wsl]` gives the 46 minus the two, plus govet.
+    #[test]
+    fn fast_preset_with_enable_and_disable() {
+        let sel = LinterSelection {
+            default: LinterDefault::Fast,
+            enable: vec!["govet".into()],
+            disable: vec!["ineffassign".into(), "wsl".into()],
+        };
+        let names = sel.resolve_names();
+        assert_eq!(names.len(), 45);
+        assert!(names.iter().any(|n| n == "govet"));
+        assert!(!names.iter().any(|n| n == "ineffassign" || n == "wsl"));
     }
 
     #[test]

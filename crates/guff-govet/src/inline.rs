@@ -112,6 +112,20 @@ fn is_known_generic_gofix_inline(pkg_path: &str, name: &str) -> bool {
     }
 }
 
+/// Cheap byte screen before a `PARSE_COMMENTS` reparse: could `src` carry a
+/// `//go:fix inline` directive at all?
+///
+/// Only a screen — [`has_fix_inline`] decides. It must therefore never say
+/// *no* to a file `has_fix_inline` would accept. x/tools v0.52 parses the
+/// directive with `go/ast.ParseDirective`, which ends the name at any
+/// `unicode.IsSpace` rune and skips any run of them before the args, so
+/// `//go:fix\tinline` and `//go:fix  inline` are directives too. The old screen
+/// looked for the literal `go:fix inline` and dropped those files before the
+/// parser ever saw them. `go:fix` alone is just as rare in real code.
+fn may_carry_fix_inline(src: &[u8]) -> bool {
+    memchr::memmem::find(src, b"go:fix").is_some()
+}
+
 fn has_fix_inline(doc: &Option<CommentGroup>) -> bool {
     let Some(doc) = doc else {
         return false;
@@ -229,7 +243,7 @@ fn collect_inlinable_consts(pass: &Pass<'_>) -> HashMap<ObjectId, String> {
         };
         // Cheap filter: almost no files carry `//go:fix inline`; avoid a full
         // PARSE_COMMENTS reparse on the common path.
-        if memchr::memmem::find(src, b"go:fix inline").is_none() {
+        if !may_carry_fix_inline(src) {
             continue;
         }
         let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
@@ -279,7 +293,7 @@ fn package_has_go_fix_inline(pass: &Pass<'_>) -> bool {
                 Err(_) => continue,
             },
         };
-        if memchr::memmem::find(src, b"go:fix inline").is_some() {
+        if may_carry_fix_inline(src) {
             return true;
         }
     }
@@ -422,7 +436,7 @@ fn dir_gofix_inline_funcs(dir: &std::path::Path) -> std::sync::Arc<HashSet<Strin
             // Same cheap screen as everywhere else: almost no file carries the
             // directive, and a PARSE_COMMENTS reparse is not worth paying for
             // the ones that do not.
-            if memchr::memmem::find(&src, b"go:fix inline").is_none() {
+            if !may_carry_fix_inline(&src) {
                 continue;
             }
             let fset = FileSet::new();
@@ -651,7 +665,7 @@ fn dir_declares_gofix_inline(dir: &std::path::Path, name: &str) -> bool {
         // Same cheap filter as the local scan: almost no file carries the
         // directive, and a full PARSE_COMMENTS reparse is not worth paying for
         // the ones that do not.
-        if memchr::memmem::find(&src, b"go:fix inline").is_none() {
+        if !may_carry_fix_inline(&src) {
             continue;
         }
         let fset = FileSet::new();
@@ -876,7 +890,7 @@ fn dependency_inline_decls(
         let Ok(src) = fs::read(&file) else {
             continue;
         };
-        if memchr::memmem::find(&src, b"go:fix inline").is_none() {
+        if !may_carry_fix_inline(&src) {
             continue;
         }
         let fset = FileSet::new();
@@ -950,7 +964,7 @@ fn collect_inlinable_aliases(pass: &Pass<'_>) -> HashSet<ObjectId> {
                 Err(_) => continue,
             },
         };
-        if memchr::memmem::find(src, b"go:fix inline").is_none() {
+        if !may_carry_fix_inline(src) {
             continue;
         }
         let Some(name) = path.file_name().and_then(|s| s.to_str()) else {

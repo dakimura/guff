@@ -159,7 +159,19 @@ print(s)
 EOF
 }
 
-current_signals() { (cd "$WT" && AUTOPILOT_STATE="$STATE" "$RUN_DIR/signals.sh" 2>&1); }
+# P4 (speed) is last in the task order, so with a ledger full of needs-port rows it
+# never comes up (0 of the first 32 iterations). Every PERF_EVERY-th iteration is
+# a speed turn unless one of the previous PERF_EVERY-1 already was.
+PERF_EVERY="${AUTOPILOT_PERF_EVERY:-4}"
+next_focus() {
+  (( PERF_EVERY > 0 )) || return
+  local recent
+  recent="$(grep -oE '^### iter-[0-9-]+ P[0-4]' "$STATE/journal.md" 2>/dev/null | awk '{print $3}' | tail -n $(( PERF_EVERY - 1 )))"
+  (( $(printf '%s\n' "$recent" | grep -c '^P') >= PERF_EVERY - 1 )) || return
+  grep -q '^P4$' <<<"$recent" || echo perf
+}
+
+current_signals() { (cd "$WT" && AUTOPILOT_STATE="$STATE" AUTOPILOT_FOCUS="$(next_focus)" "$RUN_DIR/signals.sh" 2>&1); }
 
 render_prompt() {  # $1 = iteration label
   render "$RUN_DIR/prompt.md" \
@@ -313,6 +325,29 @@ start_scout() {  # $1 = pr being waited on
 }
 
 # The worker must not start while the scout still reads the worktree.
+# The driver runs from a copy in $RUN_DIR, so merged changes to scripts/autopilot
+# never reached it: #18 (PR-number parse) sat unused for 8h while the old parse
+# left #22 and #28 unmerged. After each worktree reset, adopt origin/main's copy
+# and re-exec (same pid, so the lock stays ours; drain_open_prs then runs again).
+RUN_FILES=(run.sh gate.sh signals.sh guard.py prompt.md review-prompt.md scout-prompt.md
+           release.sh update_formula.py)
+self_update() {
+  local f changed=()
+  for f in "${RUN_FILES[@]}"; do
+    [[ -f "$WT/scripts/autopilot/$f" ]] || continue
+    cmp -s "$WT/scripts/autopilot/$f" "$RUN_DIR/$f" || changed+=("$f")
+  done
+  (( ${#changed[@]} )) || return 0
+  bash -n "$WT/scripts/autopilot/run.sh" || { note "self-update skipped: run.sh on main fails bash -n"; return 0; }
+  wait_scout
+  for f in "${RUN_FILES[@]}"; do
+    [[ -f "$WT/scripts/autopilot/$f" ]] && cp "$WT/scripts/autopilot/$f" "$RUN_DIR/$f"
+  done
+  note "self-update from origin/main $(git -C "$WT" rev-parse --short origin/main): ${changed[*]}; re-exec"
+  trap - EXIT
+  exec bash "$RUN_DIR/run.sh" loop
+}
+
 wait_scout() {
   [[ -z "$SCOUT_BG" ]] && return
   local t0; t0=$(date +%s)
@@ -509,7 +544,7 @@ drain_open_prs() {
 needs_human_count() { local n; n="$(grep -c 'NEEDS-HUMAN' "$STATE/journal.md" 2>/dev/null)"; echo "${n:-0}"; }
 
 loop() {
-  if ! mkdir "$STATE/lock.d" 2>/dev/null; then
+  if ! mkdir "$STATE/lock.d" 2>/dev/null && [[ "$(cat "$STATE/lock.d/pid" 2>/dev/null)" != "$$" ]]; then
     if kill -0 "$(cat "$STATE/lock.d/pid" 2>/dev/null)" 2>/dev/null; then
       log "another driver is running (pid $(cat "$STATE/lock.d/pid"))"; exit 1
     fi
@@ -533,6 +568,7 @@ loop() {
     label="iter-$(date +%Y%m%d-%H%M)"
     logf="$STATE/logs/$label.jsonl"
     reset_worktree || { note "worktree reset failed"; nap 600 || break; continue; }
+    self_update
     target_hygiene
     status "$label running (worker log $logf)"
     log "$label start"
@@ -586,9 +622,7 @@ loop() {
 case "${1:-}" in
   start)
     mkdir -p "$RUN_DIR"
-    cp "$SELF_DIR"/run.sh "$SELF_DIR"/gate.sh "$SELF_DIR"/signals.sh "$SELF_DIR"/guard.py \
-       "$SELF_DIR"/prompt.md "$SELF_DIR"/review-prompt.md "$SELF_DIR"/scout-prompt.md \
-       "$SELF_DIR"/release.sh "$SELF_DIR"/update_formula.py "$RUN_DIR"/
+    for f in "${RUN_FILES[@]}"; do cp "$SELF_DIR/$f" "$RUN_DIR/"; done
     echo "$MAIN" > "$STATE/main-checkout"
     nohup caffeinate -ims bash "$RUN_DIR/run.sh" loop >> "$STATE/driver.log" 2>&1 &
     echo "started (pid $!). log: $STATE/driver.log  status: $0 status  stop: $0 stop" ;;

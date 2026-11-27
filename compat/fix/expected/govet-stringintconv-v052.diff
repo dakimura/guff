@@ -1,0 +1,109 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh govet-stringintconv-v052
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/govet-stringintconv-v052/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.15.0
+
+--- a/fix/fixnamed.go
++++ b/fix/fixnamed.go
+@@ -5,8 +5,10 @@
+ 
+ package fix
+ 
++import "fmt"
++
+ type mystring string
+ 
+ func _(x int16) mystring {
+-	return mystring(x) // want `conversion from int16 to mystring \(string\)...`
++	return mystring(rune(fmt.Sprintf("%d", x)) // want `conversion from int16 to mystring \(string\)...`
+ }
+--- a/fix/fixtarget.go
++++ b/fix/fixtarget.go
+@@ -5,14 +5,16 @@
+ 
+ package fix
+ 
++import "fmt"
++
+ type str = string
+ 
+ // The conversion is dropped when T is string, even via an alias...
+ func _(x int16) str {
+-	return str(x) // want `conversion from int16 to str \(string\) yields...`
++	return fmt.Sprintf("%d", rune(x)) // want `conversion from int16 to str \(string\) yields...`
+ }
+ 
+ // ...but not when T is a type parameter whose only term is string.
+ func _[S ~string](x int16) S {
+-	return S(x) // want `conversion from int16 to string \(in S\) yields...`
++	return S(rune(fmt.Sprintf("%d", x)) // want `conversion from int16 to string \(in S\) yields...`
+ }
+--- a/shapes/alias.go
++++ b/shapes/alias.go
+@@ -1,11 +1,13 @@
+ //go:build go1.21
+ 
+ package extra
++
++import "fmt"
+ 
+ type text string
+ 
+ type rn = int64
+ 
+ func _(r rn) {
+-	println(text(r)) // alias source, named target: %c + %d conflict
++	println(text(fmt.Sprintf("%c", fmt.Sprintf("%d", r))) // alias source, named target: %c + %d conflict
+ }
+--- a/shapes/narrow.go
++++ b/shapes/narrow.go
+@@ -19,15 +19,15 @@
+ func (G[T]) String() string { return "" }
+ 
+ func _(s small, g G[int], u8 uint8, u16 uint16, n dep.Num, c int32) {
+-	println(string(s))         // value method: rune(s) only
++	println(string(rune(s)))         // value method: rune(s) only
+ 	println(string(g))         // generic named, value method, int: no fix
+ 	println(string(u8))        // byte: silent
+-	println(string(u16))       // rune(u16) + %d
+-	println(dep.Str(n))        // selector target, named source from another package
++	println(f.Sprintf("%d", rune(u16)))       // rune(u16) + %d
++	println(dep.Str(rune(f.Sprintf("%d", n)))        // selector target, named source from another package
+ 	println((string)(u16))     // parenthesized: upstream does not look
+ 	println(string(c))         // rune: silent
+-	println(string(65))        // untyped const fits
+-	println(string(-1))        // negative untyped const fits int32
++	println(f.Sprintf("%d", rune(65)))        // untyped const fits
++	println(f.Sprintf("%d", rune(-1)))        // negative untyped const fits int32
+ 	println(string(1 << 31))   // untyped const past int32: no fix
+-	println(string(int64(70))) // typed const that fits
++	println(f.Sprintf("%d", rune(int64(70)))) // typed const that fits
+ }
+--- a/typeparams/typeparams.go
++++ b/typeparams/typeparams.go
+@@ -8,6 +8,8 @@
+ //go:build go1.21
+ 
+ package typeparams
++
++import "fmt"
+ 
+ type (
+ 	Int     int
+@@ -34,9 +36,9 @@
+ 	_ = MaybeString(U) // want `conversion from uintptr to string .in MaybeString. yields a string of one rune, not a string of digits`
+ 	// Type parameters are never constant types, so arguments are always
+ 	// converted to their default type (int versus untyped int, in this case)
+-	_ = MaybeString(p) // want `conversion from int to string .in MaybeString. yields a string of one rune, not a string of digits`
++	_ = MaybeString(rune(p)) // want `conversion from int to string .in MaybeString. yields a string of one rune, not a string of digits`
+ 	// ...even if the type parameter is only strings.
+-	_ = AllString(p) // want `conversion from int to string .in AllString. yields a string of one rune, not a string of digits`
++	_ = AllString(rune(fmt.Sprintf("%d", p)) // want `conversion from int to string .in AllString. yields a string of one rune, not a string of digits`
+ 
+ 	_ = NotString(i)
+ 	_ = NotString(r)

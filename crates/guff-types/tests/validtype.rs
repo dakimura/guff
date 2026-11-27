@@ -72,7 +72,7 @@ fn struct_directly_containing_self_is_invalid() {
         invalid,
     );
     match &result {
-        ValidResult::Cycle { path } => {
+        ValidResult::Cycle { path, .. } => {
             assert_eq!(path.len(), 1);
             assert_eq!(path[0], tn);
         }
@@ -136,7 +136,7 @@ fn mutual_recursion_through_struct_fields_is_invalid() {
         invalid,
     );
     match result {
-        ValidResult::Cycle { path } => {
+        ValidResult::Cycle { path, .. } => {
             // Path should contain both A and B; the cycle starts at A.
             assert!(path.contains(&tn_a));
             assert!(path.contains(&tn_b));

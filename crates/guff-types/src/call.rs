@@ -25,7 +25,7 @@ use crate::arena::{ObjectData, TypeData, TypeId};
 use crate::check::Checker;
 use crate::infer::{infer, rename_tparams, InferResult};
 use crate::instantiate::instantiate;
-use crate::lookup::{is_interface_ptr, lookup_field_or_method, LookupResult};
+use crate::lookup::{interface_ptr_error, is_interface_ptr, lookup_field_or_method, LookupResult};
 use crate::object::builtin::{ExprKind, PREDECLARED_FUNCS};
 use crate::object::var::new_param;
 use crate::operand::{Operand, OperandMode};
@@ -1284,7 +1284,8 @@ impl Checker {
                     return;
                 }
                 let why = if is_interface_ptr(&self.types, xtyp) {
-                    "type is pointer to interface, not interface".to_string()
+                    let ts = self.type_str(xtyp);
+                    interface_ptr_error(&self.types, xtyp, &ts)
                 } else {
                     format!(
                         "type {} has no field or method {}",

@@ -11,7 +11,7 @@
 
 - 下の signals（ドライバが集めた現在の状態）。
 - `{{STATE_DIR}}/journal.md` の末尾 40 行（直近の作業・次の人への一言・HUMAN-DECISION）。
-- タスクの優先順位は `{{RUN_DIR}}/prompt.md` §1（P0 赤 > P1 上流追従 > P2 台帳 > P3 互換の穴 > P4 速度）。
+- タスクの優先順位は `{{RUN_DIR}}/prompt.md` §1（P0 赤 > P1 上流追従 > P2 台帳 > P3 互換の穴 > P4 速度）。signals に `focus: perf` があれば P0 以外は P4 を下調べする（`docs/PERF_TASKS_V*.md` の最新版の未着手項目）。
   **いま CI 待ちの PR（#{{PR}}）と同じ箇所は選ばない**（衝突する）。open PR に触る P0 も選ばない
   （それはワーカーが PR の結果を見てやる）。
 - コード: `{{WT}}`（`git -C {{WT}} show origin/main:<path>` で main の内容を読む）。

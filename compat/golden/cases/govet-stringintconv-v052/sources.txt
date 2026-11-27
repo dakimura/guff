@@ -1,0 +1,18 @@
+# x/tools v0.52 stringintconv testdata (upstream copy) and the extra shapes
+# measured against golangci-lint 2.15.0 (stringintconv_shapes).
+# Format: <dest-name>  <repo-relative-source-path>
+a/a.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.52/stringintconv/a/a.go
+a/stub.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.52/stringintconv/a/stub.go
+fix/fix.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.52/stringintconv/fix/fix.go
+fix/fixdot.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.52/stringintconv/fix/fixdot.go
+fix/fixnamed.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.52/stringintconv/fix/fixnamed.go
+fix/fixtarget.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.52/stringintconv/fix/fixtarget.go
+fix/fixwide.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.52/stringintconv/fix/fixwide.go
+fix/stub.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.52/stringintconv/fix/stub.go
+typeparams/stub.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.52/stringintconv/typeparams/stub.go
+typeparams/typeparams.go  crates/guff-govet/tests/testdata/upstream-x-tools-v0.52/stringintconv/typeparams/typeparams.go
+shapes/alias.go  crates/guff-govet/tests/testdata/stringintconv_shapes/alias.go
+shapes/dep/dep.go  crates/guff-govet/tests/testdata/stringintconv_shapes/dep/dep.go
+shapes/narrow.go  crates/guff-govet/tests/testdata/stringintconv_shapes/narrow.go
+shapes/ptronly.go  crates/guff-govet/tests/testdata/stringintconv_shapes/ptronly.go
+shapes/wideconst.go  crates/guff-govet/tests/testdata/stringintconv_shapes/wideconst.go
