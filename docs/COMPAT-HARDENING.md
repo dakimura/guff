@@ -38450,3 +38450,17 @@ parameter` と書く（go.dev/issue/79883）。guff は selector で固定文言
 bare-type 制約 `P []byte` の interface を遅延生成するので偽になっていた）。go1.27.1 の `go vet` で 13 形を測り、到達できる 9 形を
 `check_files.rs` に、T 側と issue79883 の `string`→`*P` を `implements` 直呼びで固定。golden は作れない：guff は型エラーを出力しない
 （2.15.0 は 5 件を 1 キーにまとめて出す）。代入・変換のエラーに cause が無いのは別の既存の穴。
+
+### 2026-11-28 — stringintconv：`intconv.Check`（x/tools v0.52）を丸ごと移植（Phase 9 台帳 xtools-passes #1）
+
+台帳は「診断は同じで fix だけ違う」としていたが、上流 testdata（a / fix / typeparams）を 2.15.0 と比べると診断も違っていた。guff は
+`describe` を持たず（`C (int) to A (string)` が `C to A`、alias や型パラメータの名前は `type`）、型パラメータの変換は 1 件も出さず
+（`structuralTypes` が無く、`underlying` が interface になって整数と判定されない）、`(string)(x)` を余分に見ていた（上流は Ident／Selector だけ）。
+2.15.0 の 29 件に対し guff は 20 件・うち 6 件は文言違い。v0.52 の `Check` を、fix（`rune(x)` は exact なときだけ、else `%c`、どちらも
+出せなければ fix 無し、`%d` は sprintfOK のときだけ、`string` が target なら呼び出し全体を置き換え）ごと移植した。golden＋fix
+`govet-stringintconv-v052`（上流 testdata と追加 11 形：pointer receiver だけの型、値 Format を持つ 16 bit 型、generic named、
+別パッケージの selector target、`(string)(x)`、int32 の内外の untyped／typed 定数、alias source と named target）で 40 キー、
+`--fix` もバイト一致。wide 型の `%c` と `%d` は同じ範囲を書くので golangci は govet の self-conflict としてファイルごと捨てる。
+guff の fixer も同じ規則（`fix.rs`）なので、wide の形は 1 ファイルに 1 つずつ置いた（混ぜると narrow 側の fix まで消えて測れない）。
+既存の `govet` case の `--fix` も上流と一致し（差は `string(65)` の `fmt.Sprint(rune(65))` → `fmt.Sprintf("%d", rune(65))` の 1 行だけだった）、
+`compat/fix/pending/govet.diff` を削除した（pending は 3 case に）。

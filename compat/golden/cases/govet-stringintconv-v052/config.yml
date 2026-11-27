@@ -1,0 +1,35 @@
+# Golden + fix case: govet `stringintconv` as x/tools v0.52 rewrote it
+# (internal/analysis/intconv.Check, PHASE9-LEDGER xtools-passes #1).
+#
+# a/, fix/, typeparams/ are upstream's testdata verbatim: the `describe`
+# wording (`C (int) to A (string)`, `string (in MaybeString)`), type-parameter
+# conversions, and the fix files. shapes/ adds what upstream's testdata does
+# not reach: pointer-receiver-only methods (empty value method set), a value
+# Format method on a narrow type (rune fix only), a generic named type, a
+# selector target from another package, `(string)(x)` (not looked at), untyped
+# and typed constants on both sides of the int32 range, and an alias source
+# with a named target.
+#
+# For `--fix`, golangci takes the edits of every SuggestedFix. A wide type's
+# `%c` and `%d` fixes write the same range, which golangci treats as a govet
+# self-conflict and drops every govet edit in that file — so each wide shape
+# sits in a file of its own, and the narrow shapes share one.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+  settings:
+    govet:
+      enable:
+        - stringintconv
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

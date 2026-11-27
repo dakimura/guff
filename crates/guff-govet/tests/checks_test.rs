@@ -405,6 +405,88 @@ fn stringintconv_flags_int_to_string() {
     assert!(messages[0].contains("one rune"));
 }
 
+/// x/tools v0.52 `intconv.Check` reports through type parameters and names
+/// each side with `describe`: a type parameter's term `string (in
+/// MaybeString)`, a named term `String (string, in NamedString)`, a constant
+/// converted to a type parameter at its default type. Counted per message —
+/// the five `NotString` conversions and the byte/rune arguments stay silent.
+#[test]
+fn stringintconv_reports_through_type_parameters() {
+    let dir = support::testdata("upstream-x-tools-v0.52/stringintconv/typeparams");
+    let pkg = support::typecheck_pkg("example.com/govet/stringintconv/typeparams", &dir.join("typeparams.go"));
+    let mut messages = support::run_analyzer(stringintconv_analyzer(), &pkg);
+    messages.sort();
+    let tail = "yields a string of one rune, not a string of digits";
+    let mut want: Vec<String> = [
+        "conversion from int to string (in MaybeString)",
+        "conversion from Int (int) to string (in MaybeString)",
+        "conversion from uintptr to string (in MaybeString)",
+        "conversion from int to string (in MaybeString)",
+        "conversion from int to string (in AllString)",
+        "conversion from int to String (string, in NamedString)",
+        "conversion from int (in MaybeString) to string",
+        "conversion from int (in MaybeString) to string (in MaybeString)",
+    ]
+    .iter()
+    .map(|m| format!("{m} {tail}"))
+    .collect();
+    want.sort();
+    assert_eq!(messages, want);
+}
+
+/// The v0.52 fixes, per shape: `rune(x)` only when it is exact (a constant
+/// that fits int32, or a type at most 32 bits wide), else `%c` — and nothing
+/// at all for a type parameter, an untyped constant, or a type with a value
+/// method. `%d` needs a method-free, non-generic pair. Measured against
+/// golangci-lint 2.15.0 (golden case govet-stringintconv-v052).
+#[test]
+fn stringintconv_fixes_follow_intconv_v052() {
+    let dir = support::testdata("stringintconv_shapes");
+    let dep = dir.join("dep/dep.go");
+    let fmt_stub = support::testdata("printf/stub/fmt/print.go");
+    let deps = [
+        ("example.com/govet/stringintconv/shapes/dep", dep.as_path()),
+        ("fmt", fmt_stub.as_path()),
+    ];
+    let mut got = Vec::new();
+    for file in ["narrow.go", "ptronly.go", "alias.go", "wideconst.go"] {
+        let pkg = support::typecheck_with_deps(
+            "example.com/govet/stringintconv/shapes",
+            &dir.join(file),
+            &deps,
+        );
+        let mut diags = support::run_analyzer_diagnostics(stringintconv_analyzer(), &pkg);
+        diags.sort_by_key(|d| d.pos);
+        for d in diags {
+            let source = d.message.split(" to ").next().unwrap().to_string();
+            let fixes: Vec<String> =
+                d.suggested_fixes.iter().map(|f| f.message.clone()).collect();
+            got.push((file, source, fixes.join(" | ")));
+        }
+    }
+    let rune = "Convert a single rune to a string";
+    let c = "Convert single rune to string (preserves behavior)";
+    let d = "Format number as decimal (changes behavior)";
+    let want = [
+        ("narrow.go", "conversion from small (uint16)", rune.to_string()),
+        ("narrow.go", "conversion from G (int)", String::new()),
+        ("narrow.go", "conversion from uint16", format!("{rune} | {d}")),
+        ("narrow.go", "conversion from Num (int16)", format!("{rune} | {d}")),
+        ("narrow.go", "conversion from untyped int", format!("{rune} | {d}")),
+        ("narrow.go", "conversion from untyped int", format!("{rune} | {d}")),
+        ("narrow.go", "conversion from untyped int", String::new()),
+        ("narrow.go", "conversion from int64", format!("{rune} | {d}")),
+        ("ptronly.go", "conversion from ptrOnly (int64)", format!("{c} | {d}")),
+        ("alias.go", "conversion from rn (int64)", format!("{c} | {d}")),
+        ("wideconst.go", "conversion from int64", format!("{c} | {d}")),
+    ];
+    let want: Vec<_> = want
+        .into_iter()
+        .map(|(f, s, x)| (f, s.to_string(), x))
+        .collect();
+    assert_eq!(got, want);
+}
+
 #[test]
 fn stringintconv_allows_rune_conversion() {
     let dir = support::testdata("stringintconv");
