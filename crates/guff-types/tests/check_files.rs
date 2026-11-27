@@ -1816,6 +1816,16 @@ fn copy_over_type_parameters_matches_the_toolchain() {
             Some("invalid copy: arguments d and s have different element types int and uint8"),
         ),
         ("func f(d int, s []int) { copy(d, s) }", Some("invalid copy: argument must be a slice; have d")),
+        // go1.27 (go.dev/issue/79687): the destination must be a slice even
+        // when the special case would accept it — untyped nil is assignable
+        // to []byte. Messages and acceptance measured with go1.27.1.
+        ("func f() { copy(nil, []byte{}) }", Some("invalid copy: argument must be a slice; have untyped nil")),
+        ("func f() { copy(nil, \"s\") }", Some("invalid copy: argument must be a slice; have untyped nil")),
+        ("func f(raw []byte) { copy(nil, raw) }", Some("invalid copy: argument must be a slice; have untyped nil")),
+        ("func f(d string) { copy(d, \"s\") }", Some("invalid copy: argument must be a slice; have d")),
+        ("func f() { copy([]byte(nil), \"s\") }", None),
+        ("type BS []byte\nfunc f(d BS) { copy(d, \"s\") }", None),
+        ("func f[D Bytes](d D, s string) int { return copy(d, s) }", None),
     ];
 
     for (body, want) in cases {

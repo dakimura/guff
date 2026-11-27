@@ -38364,3 +38364,19 @@ ExprStmt は従来どおり）。
 ssadump v0.52 の `-build=F` を手元で建て、単一 case の 10 形と 2 case の 1 形で関数単位の出力を突き合わせて
 完全一致を確認した（2 case の `panic` の描画差は既存のもので無関係）。単体テストは `switch_select_test.rs` に
 期待値ごと入れ、旧実装で落ちることも確認した。lint の出力で観測できる差は探していない（台帳に「未測定」と書いた）。
+
+### 2026-11-27 — go/types 1.27：`copy(nil, …)` と可変長 yield を拒否する（Phase 9 台帳 go-types #21・#22）
+
+どちらも guff が通し go1.27 がエラーにする (b) 型の差。guff は型エラーを finding にしないので、効き目は
+「上流が `typecheck` しか出さないパッケージで guff が他の linter を走らせない」こと。golden は作れない
+（上流の期待値は `typecheck` 行だけで、guff はそれを出さない）ので単体テストで固定した。
+
+- #21：go1.27 の `copy` は dst の `sliceElem` を特別形（`[]byte ← string`）の判定より**前に**呼ぶ。
+  untyped nil は `[]byte` に代入可能なので、1.26 の順だと `copy(nil, "s")` が特別形で通っていた。guff も
+  同じ順にした。ついでに untyped nil の判定（`mode == Value && typ == None`、実際には成立しない）を
+  `is_nil()` にしたので文言も `have untyped nil` になる。
+- #22：range-over-func の yield が可変長なら拒否（結果が bool かの検査の後、上流と同じ位置）。
+  cause の文言（`yield func of type … cannot be variadic`）は guff の range 診断に cause が無いので未移植。
+
+上流の答えは go1.27.1 の `go build -gcflags=-e` で取った（copy 7 形、range 7 形。名前付き yield 型と
+`I ~func(func(...int) bool)` の型パラメータ iterator も拒否される）。旧実装で両テストが落ちることも確認した。

@@ -100,3 +100,36 @@ fn yield_must_return_plain_bool() {
         check.errors
     );
 }
+
+/// go1.27 rejects a variadic yield (go.dev/issue/78483): `go build` with
+/// go1.27.1 reports "yield func of type func(...int) bool cannot be variadic"
+/// for every shape below marked `true`, and accepts the others. Before this,
+/// guff accepted them and analysed a package go/types calls ill-typed.
+#[test]
+fn variadic_yield_is_rejected() {
+    let cases: &[(&str, bool)] = &[
+        ("func f(func(...int) bool) {}\nfunc use() { for range f {} }", true),
+        ("func f(func(int, ...string) bool) {}\nfunc use() { for range f {} }", true),
+        // Through a named yield type.
+        ("type Y func(...int) bool\nfunc f(Y) {}\nfunc use() { for range f {} }", true),
+        // Through a type parameter whose core type is the iterator.
+        ("func use[I ~func(func(...int) bool)](it I) { for range it {} }", true),
+        // Non-variadic controls.
+        ("func f(func(int, string) bool) {}\nfunc use() { for range f {} }", false),
+        (
+            "type It func(yield func(int, string) bool)\nfunc use(it It) { for range it {} }",
+            false,
+        ),
+        ("func use[I ~func(func(int) bool)](it I) { for range it {} }", false),
+    ];
+    for (body, rejected) in cases {
+        let check = check_src(&format!("package p\n{body}\n"));
+        let msgs: Vec<&str> = check.errors.iter().map(|e| e.msg.as_str()).collect();
+        if *rejected {
+            assert_eq!(msgs.len(), 1, "{body}\n{msgs:?}");
+            assert!(msgs[0].contains("cannot range over"), "{body}\n{msgs:?}");
+        } else {
+            assert!(msgs.is_empty(), "{body}\nunexpected: {msgs:?}");
+        }
+    }
+}
