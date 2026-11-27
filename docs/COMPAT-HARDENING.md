@@ -38352,3 +38352,15 @@ golden `staticcheck-sa1019-struct-key` に IndexExpr・IndexListExpr・型パラ
 （`claude -p <prompt>`）のプロンプトに「cargo test」とあるだけで自分自身にマッチし、そのセッションの
 regress は `--wait` の 5 分を使い切って必ず FAIL していた。実行ファイル名（argv[0] の basename）が
 `rustc`、または `cargo`/`go` で第 1 引数が build/test/run のときだけ数える。閾値は変えていない。
+
+### 2026-11-27 — 単一 case の select で受信を左辺より先に評価する（x/tools v0.52 / go/ir v0.8.2 `assignSelectRecvStmt`）
+
+Phase 9 台帳 xtools-substrate #2 と staticcheck #6（P9-11）。`select { case a[f()] = <-ch: }` のように case が
+1 つの select は、v0.52 では RHS を評価して受信してから LHS を評価する（v0.50 は通常の代入と同じく LHS が先）。
+guff は単一 case の枝で `self.stmt(comm)` を呼んでいたので、`f()` → `<-ch` の順だった。`assign_stmt` の
+Phase 1 を `assign_lhs` に切り出し、受信代入だけ新しい `assign_select_recv_stmt` に回した（send と
+ExprStmt は従来どおり）。
+
+ssadump v0.52 の `-build=F` を手元で建て、単一 case の 10 形と 2 case の 1 形で関数単位の出力を突き合わせて
+完全一致を確認した（2 case の `panic` の描画差は既存のもので無関係）。単体テストは `switch_select_test.rs` に
+期待値ごと入れ、旧実装で落ちることも確認した。lint の出力で観測できる差は探していない（台帳に「未測定」と書いた）。
