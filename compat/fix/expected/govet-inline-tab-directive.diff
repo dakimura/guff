@@ -1,0 +1,21 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh govet-inline-tab-directive
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/govet-inline-tab-directive/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.15.0
+
+--- a/bad.go
++++ b/bad.go
+@@ -12,6 +12,6 @@
+ //go:fix 	 inline
+ type Alias = Real
+ 
+-func use() (int, int, Alias, dep.A, *int, int) {
+-	return Legacy, dep.Old, 0, 0, dep.G(1), dep.Glued
++func use() (int, int, Real, dep.T, *int, int) {
++	return Preferred, dep.New, 0, 0, dep.G(1), dep.Glued
+ }

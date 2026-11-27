@@ -504,6 +504,39 @@ fn inline_reads_a_sibling_packages_gofix_directive() {
     );
 }
 
+/// `//go:fix` and `inline` separated by a tab, two spaces, or a mixed run.
+///
+/// x/tools v0.52 reads the directive with `go/ast.ParseDirective`, which splits
+/// on any `unicode.IsSpace` run, so all of these are directives. guff's parser
+/// agreed, but each source re-read was screened by the literal `go:fix inline`
+/// first and the file never reached it: 0 findings where upstream has 5.
+/// Counted per message: the local and the dependency arm of both the const and
+/// the alias, the dependency generic func, and `//go:fixinline` (no separator,
+/// not a directive) staying silent — six would mean the screen became the test.
+#[test]
+fn inline_accepts_any_whitespace_after_go_fix() {
+    let dir = support::testdata("inline_tab_directive");
+    let dep = dir.join("dep/dep.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/govet/inlinetab",
+        &dir.join("bad.go"),
+        &[("example.com/govet/inlinetab/dep", &dep)],
+    );
+    let mut messages = support::run_analyzer(inline_analyzer(), &pkg);
+    messages.sort();
+    assert_eq!(
+        messages,
+        vec![
+            "Constant Legacy should be inlined",
+            "Constant dep.Old should be inlined",
+            "Type alias Alias should be inlined",
+            "Type alias dep.A should be inlined",
+            "cannot inline: type parameter inference is not yet supported",
+        ],
+        "{messages:?}"
+    );
+}
+
 /// …and when there is no vendor directory, `go list` is asked instead.
 ///
 /// The vendor-only gate above left a hole that `adopt go-ethereum` walked into:

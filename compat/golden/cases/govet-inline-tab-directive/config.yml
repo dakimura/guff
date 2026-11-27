@@ -1,0 +1,30 @@
+# Golden case: govet `inline` with a `//go:fix` directive whose name and args
+# are separated by whitespace other than a single space.
+#
+# x/tools v0.52 parses the directive with go/ast.ParseDirective, which splits
+# on any unicode.IsSpace run: `//go:fix\tinline`, `//go:fix  inline` and
+# `//go:fix \t inline` are all directives. guff's parser agreed, but every
+# source re-read was screened by the literal bytes `go:fix inline` first, so
+# those files never reached it (PHASE9-LEDGER x/tools v0.52 #4). Covers the
+# local const and alias arms, the dependency const and alias arms, the
+# dependency generic-func arm, and `//go:fixinline` (no separator — not a
+# directive) which must stay silent.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+  settings:
+    govet:
+      enable:
+        - inline
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true
