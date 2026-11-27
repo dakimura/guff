@@ -14,6 +14,9 @@ main_sha="$(git rev-parse origin/main)"
 echo "## signals ($(date -u +%Y-%m-%dT%H:%MZ))"
 echo
 echo "- repo: \`$REPO\`, origin/main = \`${main_sha:0:10}\` — $(git log -1 --format=%s origin/main)"
+if [[ "${AUTOPILOT_FOCUS:-}" == perf ]]; then
+  echo "- **focus: perf** — 直近の回に P4 がない。P0 が無ければ今回は P4（速度）を選ぶ"
+fi
 
 # --- CI on origin/main's head -------------------------------------------------
 runs="$(gh run list -R "$REPO" --branch main --limit 30 \
