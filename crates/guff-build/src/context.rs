@@ -79,6 +79,7 @@ pub fn default_context() -> Context {
     let goos = env_or("GOOS", host_goos());
     let goroot = discover_goroot();
     let gopath = env_or("GOPATH", &default_gopath(&goroot));
+    let release = goroot_release(&goroot).unwrap_or(VERSION);
 
     Context {
         goarch: goarch.clone(),
@@ -89,8 +90,8 @@ pub fn default_context() -> Context {
         use_all_files: false,
         compiler: "gc".to_string(),
         build_tags: Vec::new(),
-        tool_tags: default_tool_tags(&goarch),
-        release_tags: release_tags_for_version(goroot_release(&goroot).unwrap_or(VERSION)),
+        tool_tags: default_tool_tags(&goarch, &goos, release),
+        release_tags: release_tags_for_version(release),
         goroot,
         install_suffix: String::new(),
     }
@@ -289,9 +290,11 @@ fn cgo_supported(goos: &str, goarch: &str) -> bool {
 /// Toolchain tags for the target architecture and enabled GOEXPERIMENTs.
 ///
 /// Mirrors `internal/buildcfg.toolTags` closely enough for stdlib `go:build`
-/// lines (regabi / greenteagc / arch versions). Baseline experiments follow
-/// Go 1.26's `buildcfg` defaults; `GOEXPERIMENT` overrides apply on top.
-fn default_tool_tags(goarch: &str) -> Vec<String> {
+/// lines (regabi / greenteagc / jsonv2 / arch versions). Baseline experiments
+/// follow the `buildcfg` defaults of the toolchain's release (`release` =
+/// N in Go 1.N, as for the release tags); `GOEXPERIMENT` overrides apply on
+/// top.
+fn default_tool_tags(goarch: &str, goos: &str, release: u32) -> Vec<String> {
     let mut tags = Vec::new();
     match goarch {
         "amd64" => tags.push("amd64.v1".to_string()),
@@ -299,93 +302,165 @@ fn default_tool_tags(goarch: &str) -> Vec<String> {
         "arm64" => tags.push("arm64.v8.0".to_string()),
         _ => {}
     }
-    for exp in enabled_goexperiments() {
+    for exp in enabled_goexperiments(goarch, goos, release) {
         tags.push(format!("goexperiment.{exp}"));
     }
     tags
 }
 
 /// Experiment names enabled for file matching (`goexperiment.x` tags).
-fn enabled_goexperiments() -> Vec<&'static str> {
-    parse_goexperiments(&env::var("GOEXPERIMENT").unwrap_or_default(), host_goos())
+fn enabled_goexperiments(goarch: &str, goos: &str, release: u32) -> Vec<&'static str> {
+    parse_goexperiments(
+        &env::var("GOEXPERIMENT").unwrap_or_default(),
+        goarch,
+        goos,
+        release,
+    )
 }
 
-/// The experiments on for `goos` given a `GOEXPERIMENT` value — the baseline,
-/// then the comma-separated overrides (`name`, `noname`, `none`).
-fn parse_goexperiments(goexp: &str, goos: &str) -> Vec<&'static str> {
-    // Baseline for Go ≥ 1.26 (see GOROOT/src/internal/buildcfg/exp.go).
-    // Older toolchains ignore unknown experiment tags in match_file.
-    let mut on = vec![
+/// The fields of `internal/goexperiment.Flags`, lower-cased, in Go
+/// 1.`release` — the names `GOEXPERIMENT` accepts. Flags come and go with
+/// releases (1.25 dropped spinbitmutex/coverageredesign, 1.26 dropped
+/// synctest/rangefunc/swissmap/…, 1.27 dropped goroutineleakprofile and added
+/// mapsplitgroup). Read off each toolchain's `flags.go`.
+fn known_goexperiments(release: u32) -> Vec<&'static str> {
+    let mut known = vec![
+        "fieldtrack",
+        "preemptibleloops",
+        "staticlockranking",
+        "boringcrypto",
         "regabiwrappers",
         "regabiargs",
-        "randomizedheapbase64",
-        "greenteagc",
+        "heapminimum512kib",
+        "arenas",
+        "cgocheck2",
+        "loopvar",
+        "newinliner",
     ];
-    // Dwarf5 is on except darwin/ios/aix — we approximate with host OS.
-    if !matches!(goos, "darwin" | "ios" | "aix") {
+    if release <= 25 {
+        known.extend([
+            "cacheprog",
+            "rangefunc",
+            "aliastypeparams",
+            "swissmap",
+            "synchashtriemap",
+            "synctest",
+        ]);
+    }
+    if release <= 24 {
+        known.extend(["coverageredesign", "spinbitmutex"]);
+    }
+    if release >= 25 {
+        known.extend(["dwarf5", "jsonv2", "greenteagc"]);
+    }
+    if release >= 26 {
+        known.extend([
+            "randomizedheapbase64",
+            "runtimefreegc",
+            "sizespecializedmalloc",
+            "simd",
+            "runtimesecret",
+        ]);
+    }
+    if release == 26 {
+        known.push("goroutineleakprofile");
+    }
+    if release >= 27 {
+        known.push("mapsplitgroup");
+    }
+    known
+}
+
+/// The experiments on for `goarch`/`goos` under Go 1.`release` given a
+/// `GOEXPERIMENT` value — `ParseGOEXPERIMENT` of that release's
+/// `internal/buildcfg/exp.go`: the baseline, then the comma-separated
+/// overrides (`name`, `noname`, `none` anywhere clears everything so far, the
+/// `regabi` alias), then regabi forced on where it is always on and off where
+/// it is unsupported. An unknown name makes upstream fail outright; it is
+/// ignored here.
+fn parse_goexperiments(goexp: &str, goarch: &str, goos: &str, release: u32) -> Vec<&'static str> {
+    // `regabiSupported` / `regabiAlwaysOn`. s390x moved from supported-only
+    // to always-on in 1.27.
+    let regabi_always_on = matches!(
+        goarch,
+        "amd64" | "arm64" | "loong64" | "ppc64le" | "ppc64" | "riscv64"
+    ) || (goarch == "s390x" && release >= 27);
+    let regabi_supported = regabi_always_on || goarch == "s390x";
+
+    // The `baseline`, which moves with every release: Go 1.27 turned on
+    // JSONv2 and SizeSpecializedMalloc, so a go1.27 `go list` builds
+    // `encoding/json` from its `v2_*.go` files (importing `encoding/json/v2`,
+    // `jsontext`, …) and `internal/goexperiment` from `exp_jsonv2_on.go`. A
+    // baseline pinned at 1.26 loaded the v1 files instead —
+    // `GUFF_NATIVE_LIST=verify` showed 16 differences on any package
+    // importing `encoding/json` under go1.27.1.
+    let mut on: Vec<&'static str> = Vec::new();
+    if regabi_supported {
+        on.extend(["regabiwrappers", "regabiargs"]);
+    }
+    // `dwarf5Supported` (a flag since 1.25).
+    if release >= 25 && !matches!(goos, "darwin" | "ios" | "aix") {
         on.push("dwarf5");
     }
+    // Go 1.24 / 1.25 only: these left `Flags` when they became permanent.
+    // spinbitmutex is `haveXchg8`, true on every 64-bit arch.
+    if release <= 24 {
+        on.push("coverageredesign");
+        if matches!(
+            goarch,
+            "amd64" | "arm64" | "loong64" | "ppc64le" | "ppc64" | "riscv64" | "s390x"
+        ) {
+            on.push("spinbitmutex");
+        }
+    }
+    if release <= 25 {
+        on.extend(["aliastypeparams", "swissmap", "synchashtriemap"]);
+    }
+    if release >= 26 {
+        on.extend(["randomizedheapbase64", "greenteagc"]);
+    }
+    if release >= 27 {
+        on.extend(["jsonv2", "sizespecializedmalloc"]);
+    }
 
-    if goexp.is_empty() {
-        return on;
-    }
-    if goexp == "none" {
-        return Vec::new();
-    }
+    let known = known_goexperiments(release);
     for part in goexp.split(',') {
         let part = part.trim();
         if part.is_empty() {
             continue;
         }
-        if let Some(name) = part.strip_prefix("no") {
-            if name == "regabi" {
-                on.retain(|e| *e != "regabiwrappers" && *e != "regabiargs");
-            } else {
-                on.retain(|e| *e != name);
-            }
+        if part == "none" {
+            on.clear();
             continue;
         }
-        if part == "regabi" {
-            for e in ["regabiwrappers", "regabiargs"] {
-                if !on.contains(&e) {
-                    on.push(e);
-                }
-            }
-            continue;
-        }
-        // Only accept names the toolchain knows: the fields of
-        // `internal/goexperiment.Flags`, lower-cased (Go 1.26). The list used
-        // to stop at ten, so `GOEXPERIMENT=jsonv2` was dropped on the floor
-        // and `encoding/json/v2` / `encoding/json/jsontext` — whose files are
-        // all `//go:build goexperiment.jsonv2` — loaded empty: trivy lints
-        // with that experiment, and nine of its packages went ill-typed on
-        // `undefined: jsontext`.
-        let known = [
-            "fieldtrack",
-            "preemptibleloops",
-            "staticlockranking",
-            "boringcrypto",
-            "regabiwrappers",
-            "regabiargs",
-            "heapminimum512kib",
-            "arenas",
-            "cgocheck2",
-            "loopvar",
-            "newinliner",
-            "dwarf5",
-            "jsonv2",
-            "greenteagc",
-            "randomizedheapbase64",
-            "runtimefreegc",
-            "sizespecializedmalloc",
-            "goroutineleakprofile",
-            "simd",
-            "runtimesecret",
-        ];
-        if let Some(k) = known.iter().copied().find(|k| *k == part) {
-            if !on.contains(&k) {
+        let (name, enable) = match part.strip_prefix("no") {
+            Some(name) => (name, false),
+            None => (part, true),
+        };
+        let names: &[&str] = if name == "regabi" {
+            &["regabiwrappers", "regabiargs"]
+        } else {
+            &[name]
+        };
+        // `GOEXPERIMENT=jsonv2` used to be dropped on the floor here (the
+        // list stopped at ten names), and `encoding/json/v2` / `jsontext` —
+        // whose files are all `//go:build goexperiment.jsonv2` on 1.26 —
+        // loaded empty: trivy lints with that experiment.
+        for n in names {
+            let Some(k) = known.iter().copied().find(|k| k == n) else {
+                continue;
+            };
+            on.retain(|e| *e != k);
+            if enable {
                 on.push(k);
             }
+        }
+    }
+
+    for k in ["regabiwrappers", "regabiargs"] {
+        on.retain(|e| *e != k);
+        if regabi_always_on {
+            on.push(k);
         }
     }
     on
@@ -393,11 +468,25 @@ fn parse_goexperiments(goexp: &str, goos: &str) -> Vec<&'static str> {
 
 #[cfg(test)]
 mod goexperiment_tests {
-    use super::parse_goexperiments;
+    use super::{default_tool_tags, parse_goexperiments};
+
+    /// The release reaches the tool tags `match_file` reads: a go1.27 GOROOT
+    /// selects `encoding/json`'s `//go:build goexperiment.jsonv2` files.
+    #[test]
+    fn tool_tags_carry_the_release_baseline() {
+        if std::env::var_os("GOEXPERIMENT").is_some() {
+            return;
+        }
+        let t27 = default_tool_tags("arm64", "darwin", 27);
+        assert!(t27.iter().any(|t| t == "goexperiment.jsonv2"), "{t27:?}");
+        assert!(t27.iter().any(|t| t == "arm64.v8.0"), "{t27:?}");
+        let t26 = default_tool_tags("arm64", "darwin", 26);
+        assert!(!t26.iter().any(|t| t == "goexperiment.jsonv2"), "{t26:?}");
+    }
 
     #[test]
     fn jsonv2_is_a_known_experiment() {
-        let on = parse_goexperiments("jsonv2", "darwin");
+        let on = parse_goexperiments("jsonv2", "arm64", "darwin", 26);
         assert!(on.contains(&"jsonv2"), "{on:?}");
         // The baseline stays on underneath an addition.
         assert!(on.contains(&"greenteagc"), "{on:?}");
@@ -405,12 +494,88 @@ mod goexperiment_tests {
 
     #[test]
     fn overrides_add_remove_and_reset() {
-        let on = parse_goexperiments("jsonv2,nogreenteagc,arenas", "linux");
+        let on = parse_goexperiments("jsonv2,nogreenteagc,arenas", "arm64", "linux", 26);
         assert!(on.contains(&"jsonv2") && on.contains(&"arenas"), "{on:?}");
         assert!(!on.contains(&"greenteagc"), "{on:?}");
         assert!(on.contains(&"dwarf5"), "dwarf5 is on for linux: {on:?}");
-        assert!(parse_goexperiments("none", "linux").is_empty());
+        // `none` clears the baseline, but regabi is forced back on where it
+        // is always on (`regabiAlwaysOn`).
+        assert_eq!(
+            parse_goexperiments("none", "arm64", "linux", 27),
+            ["regabiwrappers", "regabiargs"]
+        );
+        assert!(parse_goexperiments("none", "386", "linux", 27).is_empty());
         // An unknown name is ignored, as buildcfg rejects it.
-        assert!(!parse_goexperiments("nosuchexperiment", "linux").contains(&"nosuchexperiment"));
+        assert!(!parse_goexperiments("nosuchexperiment", "arm64", "linux", 27).contains(&"nosuchexperiment"));
+    }
+
+    /// The baseline follows the toolchain's `buildcfg`: go1.27.1 turns on
+    /// jsonv2 and sizespecializedmalloc, go1.26 does not (both read from
+    /// GOROOT/src/internal/buildcfg/exp.go of those toolchains).
+    #[test]
+    fn baseline_follows_the_release() {
+        let mut g126 = parse_goexperiments("", "arm64", "linux", 26);
+        g126.sort_unstable();
+        assert_eq!(
+            g126,
+            ["dwarf5", "greenteagc", "randomizedheapbase64", "regabiargs", "regabiwrappers"]
+        );
+        let mut g127 = parse_goexperiments("", "arm64", "darwin", 27);
+        g127.sort_unstable();
+        assert_eq!(
+            g127,
+            [
+                "greenteagc",
+                "jsonv2",
+                "randomizedheapbase64",
+                "regabiargs",
+                "regabiwrappers",
+                "sizespecializedmalloc"
+            ]
+        );
+        // An override can still turn a baseline experiment off.
+        assert!(!parse_goexperiments("nojsonv2", "arm64", "linux", 27).contains(&"jsonv2"));
+        let g125 = parse_goexperiments("", "arm64", "linux", 25);
+        assert!(g125.contains(&"swissmap") && !g125.contains(&"greenteagc"), "{g125:?}");
+    }
+
+    /// `ParseGOEXPERIMENT`'s edge cases: `none` mid-list, the regabi alias
+    /// and its arch overrides, and names that exist only in some releases.
+    #[test]
+    fn parse_follows_upstream_edge_cases() {
+        // `none` anywhere resets what came before it.
+        let on = parse_goexperiments("arenas,none,jsonv2", "386", "linux", 27);
+        assert_eq!(on, ["jsonv2"]);
+        // `noregabi` is undone on an always-on arch, and regabi is never on
+        // where it is unsupported.
+        let on = parse_goexperiments("noregabi", "amd64", "linux", 27);
+        assert!(on.contains(&"regabiargs") && on.contains(&"regabiwrappers"), "{on:?}");
+        let on = parse_goexperiments("regabi", "386", "linux", 27);
+        assert!(!on.contains(&"regabiargs"), "{on:?}");
+        // s390x: supported-only before 1.27, always on from 1.27.
+        assert!(!parse_goexperiments("noregabi", "s390x", "linux", 26).contains(&"regabiargs"));
+        assert!(parse_goexperiments("noregabi", "s390x", "linux", 27).contains(&"regabiargs"));
+        // synctest is a 1.24/1.25 flag; goroutineleakprofile is 1.26 only.
+        assert!(parse_goexperiments("synctest", "arm64", "linux", 24).contains(&"synctest"));
+        assert!(!parse_goexperiments("synctest", "arm64", "linux", 26).contains(&"synctest"));
+        let leak = "goroutineleakprofile";
+        assert!(parse_goexperiments(leak, "arm64", "linux", 26).contains(&leak));
+        assert!(!parse_goexperiments(leak, "arm64", "linux", 27).contains(&leak));
+        assert!(parse_goexperiments("mapsplitgroup", "arm64", "linux", 27).contains(&"mapsplitgroup"));
+        // Go 1.24 baseline: no dwarf5 flag yet, spinbitmutex on 64-bit.
+        let mut g124 = parse_goexperiments("", "amd64", "linux", 24);
+        g124.sort_unstable();
+        assert_eq!(
+            g124,
+            [
+                "aliastypeparams",
+                "coverageredesign",
+                "regabiargs",
+                "regabiwrappers",
+                "spinbitmutex",
+                "swissmap",
+                "synchashtriemap"
+            ]
+        );
     }
 }
