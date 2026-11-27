@@ -38441,6 +38441,17 @@ x/tools v0.52 は gofix 指示を `go/ast.ParseDirective` で読み、name を�
 `has_fix_inline`）。golden `govet-inline-tab-directive`（local／dependency の const・alias、dependency の generic func、
 区切りの無い `//go:fixinline` は両方とも黙る）で 5 キーが一致。
 
+### 2026-11-28 — types：`cycleError` の名前に型引数（Phase 9 台帳 types #19）
+
+go1.27 の `cycleError` はインスタンスを `TypeString` で書く（`invalid recursive type: T[P] refers to itself`、`B[P]`、`E[string]`）。
+guff は `validType` の cycle を宣言した object の名前で、しかも**検査を始めた型**の位置に出していた。上流は `typeDecl` の先頭で
+`validType` を `later` に積むので相互再帰は先に宣言した型で報告されるが、guff は末尾で積んでいたので後の型（`Y`、`D`、`B`）で
+報告していた。`ValidResult::Cycle` に TypeId 列を足し（guff のインスタンスは origin の object を共有する）、`cycle[0]` で報告、
+`later` を先頭へ。上流 testdata の `invalid recursive type` を含む 32 ファイルを go1.27.1 の `go/types` と 1 行目で突き合わせて
+一致 30→38 行・失った行 0、7 形を `check_files.rs` に固定。測定中に見つけた既存の穴：issue48951 / issue52915 / issue56665 で
+guff-types が stack overflow、check/decls4.go は停止しない（main でも同じ。台帳 types #19 の「残り」に記録）。golden は作れない
+（guff は型エラーを出力しない）。
+
 ### 2026-11-28 — types：`interfacePtrError`（Phase 9 台帳 types #25）
 
 go1.27 は interface／型パラメータへのポインタの cause に型名を入れ、型パラメータなら `type *P is pointer to type parameter, not type
