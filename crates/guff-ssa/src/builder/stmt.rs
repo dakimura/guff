@@ -1602,7 +1602,7 @@ impl<'a> Builder<'a> {
                 addr: crate::value::Value::Instr(faddr),
                 typ: ftype,
                 pos,
-                expr: None,
+                expr: Some(crate::lvalue::DebugExpr::of(value_expr)),
             });
             self.assign(loc, value_expr, is_zero, Some(sb));
         }
@@ -1713,7 +1713,12 @@ impl<'a> Builder<'a> {
             let iaddr = crate::emit::emit_index_addr(
                 self.prog, self.func_id, block, array, index, ptr_elem, pos,
             );
-            let loc = Box::new(crate::lvalue::Address { addr: iaddr, typ: elem, pos, expr: None });
+            let loc = Box::new(crate::lvalue::Address {
+                addr: iaddr,
+                typ: elem,
+                pos,
+                expr: Some(crate::lvalue::DebugExpr::of(value_expr)),
+            });
             if is_slice {
                 self.assign(loc, value_expr, true, None);
             } else {
@@ -1737,7 +1742,12 @@ impl<'a> Builder<'a> {
                 }),
                 cl.lbrace,
             );
-            let loc = Box::new(crate::lvalue::Address { addr, typ, pos: cl.lbrace, expr: None });
+            let loc = Box::new(crate::lvalue::Address {
+                addr,
+                typ,
+                pos: cl.lbrace,
+                expr: Some(crate::lvalue::DebugExpr::of_composite_lit(cl)),
+            });
             sb.store(loc, crate::value::Value::Instr(sid));
         }
     }
@@ -1794,7 +1804,12 @@ impl<'a> Builder<'a> {
             self.assign(loc, &kv.value, true, None);
         }
 
-        let loc = Box::new(crate::lvalue::Address { addr, typ, pos: cl.lbrace, expr: None });
+        let loc = Box::new(crate::lvalue::Address {
+            addr,
+            typ,
+            pos: cl.lbrace,
+            expr: Some(crate::lvalue::DebugExpr::of_composite_lit(cl)),
+        });
         sb.store(loc, m);
     }
 

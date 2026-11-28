@@ -650,9 +650,9 @@ impl<'a> Builder<'a> {
 
     /// emit_store emits a store instruction (`*addr = val`) to the current
     /// block at source position `pos`.
-    pub fn emit_store(&mut self, addr: Value, val: Value, pos: Pos) {
+    pub fn emit_store(&mut self, addr: Value, val: Value, pos: Pos) -> Value {
         let block = self.block.expect("no current block");
-        crate::emit::emit_store(self.prog, self.func_id, block, addr, val, pos);
+        crate::emit::emit_store(self.prog, self.func_id, block, addr, val, pos)
     }
 
     /// new_basic_block creates a new basic block and adds it to the function.
@@ -766,7 +766,7 @@ impl<'a> Builder<'a> {
                 is_addr,
                 object,
                 expr_id: e.id,
-                expr_descr: e.descr.to_string(),
+                expr_descr: e.descr,
             }),
             e.pos,
         );

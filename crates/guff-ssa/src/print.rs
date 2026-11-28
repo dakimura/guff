@@ -411,7 +411,7 @@ fn instr_body(id: InstrId, block: BlockId, f: &Function, prog: &Program) -> Stri
             // expression is an identifier, else the AST node name.
             let descr = match d.object {
                 Some(obj) => object_descr(prog, obj),
-                None => d.expr_descr.clone(),
+                None => d.expr_descr.to_string(),
             };
             let (line, col) = match &prog.fset {
                 Some(fset) => {

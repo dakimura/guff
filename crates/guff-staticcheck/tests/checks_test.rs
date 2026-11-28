@@ -2924,6 +2924,23 @@ fn sa4006_reports_inside_methods() {
     );
 }
 
+/// Composite literals, one shape per branch of the SSA builder's compLit.
+/// Counts match golangci-lint 2.15.0 on the same file (see its header).
+#[test]
+fn sa4006_composite_literal_shapes() {
+    let pkg = typecheck_rule("sa4006", "complit.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa4006::analyzer(), &pkg);
+    let mut want: Vec<String> = ["x", "s", "v", "a", "s", "ts", "v", "n"]
+        .iter()
+        .map(|n| format!("this value of {n} is never used"))
+        .collect();
+    let mut got = messages.clone();
+    want.sort();
+    got.sort();
+    assert_eq!(got, want, "{messages:?}");
+}
+
 #[test]
 fn sa4006_allows_ok_cases() {
     let pkg = typecheck_rule("sa4006", "ok.go");

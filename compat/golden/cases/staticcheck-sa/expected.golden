@@ -277,6 +277,15 @@ sa4006/bad/bad.go:29:2:staticcheck::SA4006: this value of s is never used
 sa4006/branches/branches.go:32:2:staticcheck::SA4006: this value of config is never used
 sa4006/branches/branches.go:46:2:staticcheck::SA4006: this value of config is never used
 sa4006/branches/branches.go:58:2:staticcheck::SA4006: this value of config is never used
+sa4006/complit/complit.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+sa4006/complit/complit.go:25:2:staticcheck::SA4006: this value of x is never used
+sa4006/complit/complit.go:29:2:staticcheck::SA4006: this value of s is never used
+sa4006/complit/complit.go:41:2:staticcheck::SA4006: this value of v is never used
+sa4006/complit/complit.go:47:2:staticcheck::SA4006: this value of a is never used
+sa4006/complit/complit.go:55:2:staticcheck::SA4006: this value of s is never used
+sa4006/complit/complit.go:65:2:staticcheck::SA4006: this value of ts is never used
+sa4006/complit/complit.go:84:2:staticcheck::SA4006: this value of v is never used
+sa4006/complit/complit.go:90:2:staticcheck::SA4006: this value of n is never used
 sa4006/generic_conv/generic_conv.go:58:2:staticcheck::SA4006: this value of p is never used
 sa4006/loops/loops.go:32:3:staticcheck::SA4006: this value of moreDiags is never used
 sa4006/loops/loops.go:43:2:staticcheck::SA4006: this value of moreDiags is never used

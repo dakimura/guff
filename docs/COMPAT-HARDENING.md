@@ -38517,3 +38517,12 @@ govet printf・errcheck・unused・staticcheck だけが出す形）で 20 キ�
 順序は exhaustive の警告 → gofumpt → deprecated linter → gofumpt。guff の exhaustive 警告は run の後半（settings bag 生成時）に出ていたので、
 bag の生成を run の先頭へ移した（上流の linter builder は名前の検証より先に全 linter を作るので、unknown linter のときも exhaustive の警告が先に出る）。
 `linters` / `formatters` サブコマンドの警告は未移植。cli_test に 10 形を固定。台帳 core #15（iface の exported fix）は既に入っていたので done に直した。
+
+### 2026-11-28 — SSA：合成リテラルの要素スロットに DebugRef の `expr`（Phase 9 台帳 §1.3）
+
+x/tools v0.50 の `compLit` は struct のフィールド・array/slice の要素の Store に値の式を、slice/map リテラルの最後の Store にリテラル自身を
+`address.expr` として渡し、store のたびに DebugRef を出す（memclear だけ nil）。guff は 6 か所すべて `expr: None` だった。あわせて
+`Address`/`LazyAddress`/`LazyIndexAddr` の store が DebugRef に**変換前の値**を渡していた（go は `store.Val`。`any` の位置なら MakeInterface）。
+`emit_store` が変換後の値を返すようにし、4 か所に `expr` を足した。ssadump v0.50 `-build=DF` と 30 形の DebugRef 列（descr@位置）が一致。
+SA4006 の件数は main・新コード・2.15.0 で同じ（golden `staticcheck-sa` に `sa4006/complit` 8 件）。測っている途中で既存差を 1 つ見つけた：
+既存の変数への部分 array リテラル `ar = [3]int{g()}` を guff だけが SA4006 で出す（honnef go/ir の `assign` は in-place で初期化して Alloc を指す。台帳 §1.3 に needs-port で記録）。
