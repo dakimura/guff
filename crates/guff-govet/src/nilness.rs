@@ -153,9 +153,8 @@ fn has_cgo_unsafe_args(prog: &Program, mut fid: FuncId, marked: &HashSet<u32>) -
     loop {
         let f = prog.functions.get(fid);
         if f
-            .syntax_decl
-            .as_ref()
-            .is_some_and(|d| marked.contains(&(d.ty.pos().0 as u32)))
+            .syntax_pos
+            .is_some_and(|p| marked.contains(&(p.0 as u32)))
         {
             return true;
         }

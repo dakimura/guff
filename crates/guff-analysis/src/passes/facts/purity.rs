@@ -223,7 +223,7 @@ fn full_name(prog: &Program, obj: ObjectId) -> String {
 /// appear in an instruction list. A function with no source (`fn.Source() ==
 /// nil`) is never a stub: what it does cannot be seen.
 fn is_stub(func: &Function) -> bool {
-    if func.syntax_decl.is_none() {
+    if func.syntax_pos.is_none() {
         return false;
     }
     for (_, block) in func.live_blocks() {

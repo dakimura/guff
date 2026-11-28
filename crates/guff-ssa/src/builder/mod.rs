@@ -52,9 +52,18 @@ pub fn build_function(prog: &mut Program, fid: FuncId, fd: &FuncDecl) {
     {
         let f = prog.functions.get_mut(fid);
         f.from_syntax = fd.body.is_some();
-        f.syntax_decl = Some(fd.clone());
+        f.syntax_pos = Some(fd.ty.pos());
     }
     record_generic_params(prog, fid);
+    {
+        // Only a generic origin's syntax is read again (by its instances'
+        // `build_from_syntax`); copying every declaration's body here cost
+        // ~0.5% of CPU on large repos.
+        let f = prog.functions.get_mut(fid);
+        if !f.type_params.is_empty() || !f.recv_type_params.is_empty() {
+            f.syntax_decl = Some(std::sync::Arc::new(fd.clone()));
+        }
+    }
 
     build_syntactic_body(prog, fid, Some((fd.recv.as_ref(), &fd.ty)), fd.body.as_ref());
 }
