@@ -616,7 +616,8 @@ pub struct ChanType {
 /// §📌) took `Expr` from **192 bytes to 80**, and `Stmt` — which was never
 /// touched — from **656 to 320**, because `SendStmt`, `RangeStmt` and the rest
 /// embed `Expr`s and inherited the shrink. On prometheus `./...` that is
-/// −12% wall, −18% CPU and −23% peak RSS.
+/// −12% wall, −18% CPU and −23% peak RSS. (`Stmt` has its own guard since —
+/// see [`STMT_STAYS_SMALL`].)
 ///
 /// So: **check `size_of::<Expr>()` before adding a variant or widening one.**
 /// A new inline field big enough to become the maximum silently re-inflates
@@ -979,7 +980,8 @@ pub struct RangeStmt {
 #[allow(clippy::large_enum_variant)] // boxing every variant would trade size for many extra allocations
 pub enum Stmt {
     BadStmt(BadStmt),
-    DeclStmt(DeclStmt),
+    /// Boxed to keep [`Stmt`] small — see [`STMT_STAYS_SMALL`].
+    DeclStmt(Box<DeclStmt>),
     EmptyStmt(EmptyStmt),
     LabeledStmt(LabeledStmt),
     ExprStmt(ExprStmt),
@@ -998,8 +1000,25 @@ pub enum Stmt {
     CommClause(CommClause),
     SelectStmt(SelectStmt),
     ForStmt(ForStmt),
-    RangeStmt(RangeStmt),
+    /// Boxed to keep [`Stmt`] small — see [`STMT_STAYS_SMALL`].
+    RangeStmt(Box<RangeStmt>),
 }
+
+/// Guards the size [`Stmt`] was tuned to (PERF_TASKS_V9 §V9-2).
+///
+/// After `Expr` shrank, two variants alone set `Stmt` at 320 bytes:
+/// `RangeStmt` (320 B — two `Option<Expr>`, an `Expr` and a `BlockStmt`) and
+/// `DeclStmt` (312 B, because `Decl` carries an inline `FuncDecl` that a
+/// statement can never hold). Both are boxed; the next largest is `SendStmt`
+/// (168 B), then `IfStmt` / `ForStmt` (160 B). Those are common enough that
+/// boxing them would trade the size for an allocation per statement — measure
+/// before going further. Same rules as [`EXPR_STAYS_SMALL`]: a ceiling, and the
+/// fix for a trip is to box the offending variant, not to raise the number.
+const STMT_STAYS_SMALL: () = assert!(
+    std::mem::size_of::<Stmt>() <= 176,
+    "Stmt grew past 176 bytes; every statement pays for it (docs/PERF_TASKS_V9.md §V9-2)",
+);
+const _: () = STMT_STAYS_SMALL;
 
 impl Stmt {
     pub fn pos(&self) -> Pos {
@@ -1515,3 +1534,4 @@ mod tests {
         }
     }
 }
+
