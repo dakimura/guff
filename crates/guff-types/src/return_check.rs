@@ -46,8 +46,8 @@ pub fn is_terminating(s: &Stmt, label: &str) -> bool {
 
         Stmt::IfStmt(s) => {
             if let Some(else_) = &s.else_ {
-                let then_block = Stmt::BlockStmt(s.body.clone());
-                is_terminating(&then_block, "") && is_terminating(else_, "")
+                // `is_terminating(&Stmt::BlockStmt(body))` without cloning the body.
+                is_terminating_list(&s.body.list, "") && is_terminating(else_, "")
             } else {
                 false
             }
@@ -134,8 +134,8 @@ pub fn has_break(s: &Stmt, label: &str, implicit: bool) -> bool {
         Stmt::BlockStmt(b) => has_break_list(&b.list, label, implicit),
 
         Stmt::IfStmt(s) => {
-            let then_block = Stmt::BlockStmt(s.body.clone());
-            has_break(&then_block, label, implicit)
+            // `has_break(&Stmt::BlockStmt(body))` without cloning the body.
+            has_break_list(&s.body.list, label, implicit)
                 || s.else_
                     .as_ref()
                     .is_some_and(|e| has_break(e, label, implicit))

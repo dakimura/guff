@@ -197,11 +197,14 @@ impl<'a> Resolver<'a> {
             data
         };
         for ident in idents {
-            // Build a fresh object referencing this declaration.
-            let mut obj = (*Object::new(kind, &ident.name)).clone();
-            obj.decl = decl.clone();
-            obj.data = data.clone();
-            let arc = Arc::new(obj);
+            // Build a fresh object referencing this declaration. `decl` is
+            // shared: cloning it is a reference-count bump, not a deep copy.
+            let arc = Arc::new(Object {
+                kind,
+                name: ident.name.clone(),
+                decl: decl.clone(),
+                data: data.clone(),
+            });
 
             // Receiver type-parameter identifiers are added to scope
             // but NOT recorded on the ident itself (see go.dev/issue/50956).
@@ -236,15 +239,19 @@ impl<'a> Resolver<'a> {
             None => return,
         };
         let mut new_count = 0usize;
+        // One shared clone of the statement for all of its names (see ObjDecl).
+        let mut shared: Option<ObjDecl> = None;
         for x in &assign.lhs {
             if let Expr::Ident(ident) = x {
-                let mut obj = (*Object::new(ObjKind::Var, &ident.name)).clone();
-                obj.decl = if self.names_only {
-                    ObjDecl::Name
-                } else {
-                    ObjDecl::AssignStmt(Box::new(assign.clone()))
-                };
-                let arc = Arc::new(obj);
+                let decl = shared
+                    .get_or_insert_with(|| self.pack_decl(|| ObjDecl::AssignStmt(Arc::new(assign.clone()))))
+                    .clone();
+                let arc = Arc::new(Object {
+                    kind: ObjKind::Var,
+                    name: ident.name.clone(),
+                    decl,
+                    data: ObjData::None,
+                });
                 *ident.obj.lock().unwrap() = Some(Arc::clone(&arc));
                 if ident.name != "_" {
                     if let Some(alt) = scope.insert(Arc::clone(&arc)) {
@@ -420,7 +427,7 @@ impl<'a> Resolver<'a> {
     fn walk_labeled(&mut self, l: &'a LabeledStmt) {
         if let Some(scope) = self.label_scope.clone() {
             self.declare(
-                self.pack_decl(|| ObjDecl::LabeledStmt(Box::new(l.clone()))),
+                self.pack_decl(|| ObjDecl::LabeledStmt(Arc::new(l.clone()))),
                 ObjData::None,
                 &scope,
                 ObjKind::Lbl,
@@ -614,14 +621,19 @@ impl<'a> Resolver<'a> {
             None => return,
         };
         let mut new_count = 0usize;
+        // One shared clone of the statement for all of its names (see ObjDecl).
+        let shared = if idents.is_empty() {
+            ObjDecl::None
+        } else {
+            self.pack_decl(|| ObjDecl::AssignStmt(Arc::new(decl.clone())))
+        };
         for ident in idents {
-            let mut obj = (*Object::new(ObjKind::Var, &ident.name)).clone();
-            obj.decl = if self.names_only {
-                ObjDecl::Name
-            } else {
-                ObjDecl::AssignStmt(Box::new(decl.clone()))
-            };
-            let arc = Arc::new(obj);
+            let arc = Arc::new(Object {
+                kind: ObjKind::Var,
+                name: ident.name.clone(),
+                decl: shared.clone(),
+                data: ObjData::None,
+            });
             *ident.obj.lock().unwrap() = Some(Arc::clone(&arc));
             if ident.name != "_" {
                 if let Some(alt) = scope.insert(Arc::clone(&arc)) {
@@ -665,7 +677,7 @@ impl<'a> Resolver<'a> {
                         }
                         let names: Vec<&'a Ident> = vs.names.iter().collect();
                         self.declare(
-                            self.pack_decl(|| ObjDecl::ValueSpec(Box::new(vs.clone()))),
+                            self.pack_decl(|| ObjDecl::ValueSpec(Arc::new(vs.clone()))),
                             ObjData::Int(i as i64),
                             &scope,
                             kind,
@@ -682,7 +694,7 @@ impl<'a> Resolver<'a> {
                 for spec in &g.specs {
                     if let Spec::TypeSpec(ts) = spec {
                         self.declare(
-                            self.pack_decl(|| ObjDecl::TypeSpec(Box::new(ts.clone()))),
+                            self.pack_decl(|| ObjDecl::TypeSpec(Arc::new(ts.clone()))),
                             ObjData::None,
                             &scope,
                             ObjKind::Typ,
@@ -723,7 +735,7 @@ impl<'a> Resolver<'a> {
         if f.recv.is_none() && f.name.name != "init" {
             let scope = Arc::clone(&self.pkg_scope);
             self.declare(
-                self.pack_decl(|| ObjDecl::FuncDecl(Box::new(f.clone()))),
+                self.pack_decl(|| ObjDecl::FuncDecl(Arc::new(f.clone()))),
                 ObjData::None,
                 &scope,
                 ObjKind::Fun,
@@ -762,7 +774,7 @@ impl<'a> Resolver<'a> {
             for f in &fl.list {
                 let names: Vec<&'a Ident> = f.names.iter().collect();
                 self.declare(
-                    self.pack_decl(|| ObjDecl::Field(Box::new(f.clone()))),
+                    self.pack_decl(|| ObjDecl::Field(Arc::new(f.clone()))),
                     ObjData::None,
                     &scope,
                     kind,

@@ -151,7 +151,7 @@ pub fn new_package(
                 }
             } else if local_name != "_" {
                 let mut new_obj = (*Object::new(ObjKind::Pkg, &local_name)).clone();
-                new_obj.decl = ObjDecl::ImportSpec(Box::new(spec.clone()));
+                new_obj.decl = ObjDecl::ImportSpec(Arc::new(spec.clone()));
                 new_obj.data = pkg.data.clone();
                 p.declare(&file_scope, Some(&pkg_scope), Arc::new(new_obj));
             }

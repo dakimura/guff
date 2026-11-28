@@ -76,8 +76,14 @@ impl fmt::Display for ObjKind {
 // ====================================================================
 
 /// The kinds of declarations an [`Object`] can point at. Each variant
-/// owns a clone of the original AST node so that walking back via
+/// holds a clone of the original AST node so that walking back via
 /// `obj.pos()` is self-contained.
+///
+/// The clone is shared (`Arc`), not owned per object: Go's `Object.Decl` is a
+/// pointer, so every name a declaration introduces (`var a, b, c = …`,
+/// `x, err := …`, the params of one field) points at the same node. With a
+/// `Box` the resolver deep-copied the node once per name — and once more to
+/// hand it over, which for a `FuncDecl` meant cloning the whole body twice.
 #[derive(Debug, Clone, Default)]
 pub enum ObjDecl {
     /// No declaration recorded.
@@ -87,13 +93,13 @@ pub enum ObjDecl {
     /// AST node was not cloned. Used by
     /// [`crate::parser_resolver::resolve_file_names_only`] (goimports).
     Name,
-    Field(Box<Field>),
-    ImportSpec(Box<ImportSpec>),
-    ValueSpec(Box<ValueSpec>),
-    TypeSpec(Box<TypeSpec>),
-    FuncDecl(Box<FuncDecl>),
-    LabeledStmt(Box<LabeledStmt>),
-    AssignStmt(Box<AssignStmt>),
+    Field(Arc<Field>),
+    ImportSpec(Arc<ImportSpec>),
+    ValueSpec(Arc<ValueSpec>),
+    TypeSpec(Arc<TypeSpec>),
+    FuncDecl(Arc<FuncDecl>),
+    LabeledStmt(Arc<LabeledStmt>),
+    AssignStmt(Arc<AssignStmt>),
     /// Predeclared scope (universe). [`Object::pos`] yields [`NO_POS`].
     Scope(Arc<Scope>),
 }
@@ -376,7 +382,7 @@ mod tests {
             id: 0,
         };
         let mut obj = (*Object::new(ObjKind::Var, "x")).clone();
-        obj.decl = ObjDecl::Field(Box::new(field));
+        obj.decl = ObjDecl::Field(Arc::new(field));
         assert_eq!(obj.pos(), Pos(42));
     }
 
@@ -397,7 +403,7 @@ mod tests {
             id: 0,
         };
         let mut obj = (*Object::new(ObjKind::Pkg, "x")).clone();
-        obj.decl = ObjDecl::ImportSpec(Box::new(spec));
+        obj.decl = ObjDecl::ImportSpec(Arc::new(spec));
         assert_eq!(obj.pos(), Pos(7));
     }
 
