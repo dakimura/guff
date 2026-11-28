@@ -2547,7 +2547,7 @@ impl Parser {
                 Expr::UnaryExpr(u) => *u.x,
                 other => other,
             };
-            return Stmt::RangeStmt(RangeStmt {
+            return Stmt::RangeStmt(Box::new(RangeStmt {
                 for_: pos,
                 key,
                 value,
@@ -2557,7 +2557,7 @@ impl Parser {
                 x: range_x,
                 body,
                 id: 0,
-            });
+            }));
         }
         let cond = self.make_expr(s2, "boolean or range expression");
         Stmt::ForStmt(ForStmt {
@@ -2572,9 +2572,9 @@ impl Parser {
 
     fn parse_stmt(&mut self) -> Stmt {
         self.with_nest(|p| match p.tok {
-            Token::CONST | Token::TYPE | Token::VAR => Stmt::DeclStmt(DeclStmt {
+            Token::CONST | Token::TYPE | Token::VAR => Stmt::DeclStmt(Box::new(DeclStmt {
                 decl: p.parse_decl(is_stmt_start),
-            }),
+            })),
             Token::IDENT
             | Token::INT
             | Token::FLOAT

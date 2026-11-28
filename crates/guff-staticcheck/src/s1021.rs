@@ -4,7 +4,7 @@
 
 use std::sync::OnceLock;
 
-use guff::ast::{AssignStmt, BlockStmt, DeclStmt, Expr, GenDecl, Stmt, ValueSpec};
+use guff::ast::{AssignStmt, BlockStmt, Expr, GenDecl, Stmt, ValueSpec};
 use guff::node_mask;
 use guff::token::Token;
 use guff::walk::{inspect as walk_inspect, NodeRef};
@@ -56,10 +56,10 @@ fn check_block(pass: &Pass<'_>, block: &BlockStmt) -> Vec<(u32, String, Option<T
         return out;
     }
     for i in 0..block.list.len() - 1 {
-        let Stmt::DeclStmt(DeclStmt { decl, .. }) = &block.list[i] else {
+        let Stmt::DeclStmt(ds) = &block.list[i] else {
             continue;
         };
-        let guff::ast::Decl::GenDecl(GenDecl { tok_pos, tok, specs, .. }) = decl else {
+        let guff::ast::Decl::GenDecl(GenDecl { tok_pos, tok, specs, .. }) = &ds.decl else {
             continue;
         };
         if *tok != Some(Token::VAR) || specs.len() != 1 {

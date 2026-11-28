@@ -74,6 +74,7 @@
 > | `Expr` | 192 B | 80 B | 12 | wall −12% / CPU −18% / RSS −23% |
 > | `TypeData` | 112 B | 72 B | 2 | RSS −150 MiB（wall/CPU 中立） |
 > | `ObjectData` | 104 B | 64 B | 1 | RSS −38 MiB（wall/CPU 中立） |
+> | `Stmt`（V9-2） | 320 B | 168 B | 3 | RSS −66 MiB（wall/CPU 中立） |
 >
 > どれも「一番太いヴァリアント 1〜2 個が、全ヴァリアントの値段を決めていた」で、
 > 直し方も同じ（`Box` に入れる）、壊れる箇所も 1〜12 個と小さい。
@@ -350,21 +351,39 @@ findings は 174 行でバイト一致。
 > **「仕事を減らす」変更の GO/NO-GO にはこれを先に見てください。**
 > 並列度・ロックの変更は instructions に出ないので、そちらは従来どおり wall で。
 
-### V9-2 — `Stmt` を 320 バイトからさらに縮める（**未着手 / 小〜中**）
+### V9-2 — `Stmt` を 320 バイトからさらに縮める（**完了 / 2026-11-28。320 → 168 B、RSS −66 MiB**）
 
-いまの `Stmt` の値段を決めているのは `RangeStmt`（320B: `Option<Expr>` 2 本 +
-`Expr` + `BlockStmt`）です。`Stmt::Range` を `Box` に入れると次点
-（`SendStmt` / `DeclStmt` / `IfStmt` 系）まで落ちます。V8 の boxing と
-**まったく同じ手順**が使えます:
+**見立ては半分外れていました。** 「`RangeStmt` を `Box` に入れれば次点まで落ちる」と
+書いていましたが、ヴァリアント別に測ると次点は `SendStmt` ではなく **`DeclStmt`（312 B）**でした。
+`Decl` が `FuncDecl`（`FuncType` をインラインで持つ）を抱えているからで、
+**文の位置の `DeclStmt` は `GenDecl` しか持てない**のにその値段を払っていました。
+`RangeStmt` だけ箱に入れても 320 → 312 B にしかなりません。
 
-```bash
-# 1. ast.rs のヴァリアントを Box<...> にする
-# 2. cargo check --workspace --message-format short で壊れた箇所を数える
-# 3. size_of を測り直して、割に合うか判断する
-```
+| ヴァリアント | size | | ヴァリアント | size |
+|---|---:|---|---|---:|
+| **`RangeStmt`** | **320** | | `IncDecStmt` | 96 |
+| **`DeclStmt`** | **312** | | `LabeledStmt` / `ExprStmt` / `BranchStmt` / `TypeSwitchStmt` | 80 |
+| `SendStmt` | 168 | | `GoStmt` / `DeferStmt` / `CaseClause` | 72 |
+| `IfStmt` / `ForStmt` | 160 | | `AssignStmt` | 64 |
+| `SwitchStmt` | 152 | | ほか | ≤ 56 |
 
-**注意**: `Expr` と違い `Stmt` の連鎖効果はもう小さいはずです。**先に size を測って、
-`Stmt` を 320 → いくつにできるかを見てから**着手してください。
+2 つを `Box` に入れて **`Stmt` 320 → 168 B**（`ast.rs` に `STMT_STAYS_SMALL` ≤ 176 を追加）。
+**壊れた箇所は 3 つ**（parser の構築 2、`s1021` の分解束縛 1）。
+
+実測（prometheus `./...` cold、`--no-cache` + 毎回新しい `GUFF_CACHE`、交互 A/B 6 ラウンド・順序を毎回反転、
+load 2.5〜3 の状態で）:
+
+| | A（main） | B | |
+|---|---:|---:|---|
+| peak RSS（平均） | 1890 MiB | **1824 MiB** | **−66 MiB（−3.5%）**、6 ペアすべて同符号 |
+| instructions retired（初回除く平均） | 138.47 G | 138.18 G | −0.2% |
+| wall / user+sys | | | 中立（ラウンドごとの機械のドリフトの方が大きい） |
+
+issue 集合は 12 回とも同一（`Pos.Offset` はファイルセット内の位置で実行ごとに変わるので除いて比較）。
+
+**この先は割に合いません。** 次点の `SendStmt`（168）を箱に入れても 160、その下の
+`IfStmt` / `ForStmt` は数が多く、1 文ごとの確保に見合わない。`Stmt` はここで打ち止めとします。
+`Decl`（312 B）自体はファイル直下の `Vec<Decl>` にしか並ばないので触っていません。
 
 ### V9-3 — 型アリーナの slot（**半分着手済み。`TypeData` は 112 → 72 に縮めました**）
 
