@@ -157,7 +157,8 @@ pub fn emit_local_var(prog: &mut Program, fid: FuncId, block: BlockId, obj: Obje
 /// converting `val` to the pointee type of `addr` first — that conversion is
 /// where a concrete value assigned to an interface-typed variable becomes a
 /// [`MakeInterface`], and so where the stored value picks up a referrer.
-/// (Go: `emitStore`, whose `Val` is `emitConv(f, val, MustDeref(addr.Type()))`.)
+/// Returns the stored (converted) value, `store.Val` in go. (Go: `emitStore`,
+/// whose `Val` is `emitConv(f, val, MustDeref(addr.Type()))`.)
 pub fn emit_store(
     prog: &mut Program,
     fid: FuncId,
@@ -165,7 +166,7 @@ pub fn emit_store(
     addr: Value,
     val: Value,
     pos: Pos,
-) {
+) -> Value {
     let addr_ty = value_type_of(prog, prog.functions.get(fid), addr);
     let val = match prog.type_arena.get(addr_ty.underlying(&prog.type_arena)) {
         TypeData::Pointer(_) => {
@@ -182,6 +183,7 @@ pub fn emit_store(
         InstrData::Store(Store { addr, val }),
         pos,
     );
+    val
 }
 
 /// emit_extract emits an instruction to extract the `index`th component of the

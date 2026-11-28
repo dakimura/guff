@@ -320,7 +320,7 @@ pub struct DebugRef {
     /// the reflect-style AST node name (e.g. `*ast.CallExpr`) for
     /// non-ident expressions. Only consulted when `object` is `None`.
     /// (Go: `reflect.TypeOf(s.Expr)`)
-    pub expr_descr: String,
+    pub expr_descr: &'static str,
 }
 #[derive(Debug)]
 pub struct Defer {

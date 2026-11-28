@@ -123,6 +123,9 @@ sa4006/terminated/terminated.go              crates/guff-staticcheck/tests/testd
 # invalid operand — the value it produces has referrers.
 sa4006/generic_conv/generic_conv.go          crates/guff-staticcheck/tests/testdata/sa4006/generic_conv.go
 sa4006/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa4006/ok.go
+# One shape per branch of compLit: element slots and the slice/map store
+# record an expression for DebugRef, which moves first-occurrence lookups.
+sa4006/complit/complit.go                    crates/guff-staticcheck/tests/testdata/sa4006/complit.go
 sa4008/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa4008/bad.go
 sa4008/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa4008/ok.go
 sa4009/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa4009/bad.go

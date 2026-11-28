@@ -118,17 +118,18 @@ pub struct Address {
     /// position of stores through it. (Go: `address.pos`)
     pub pos: Pos,
     /// Source syntax of the value (not address), for DebugRef in debug mode.
-    /// `None` for synthetic locations (e.g. composite-literal element slots).
+    /// `None` for synthetic locations (e.g. the memclear of a partial composite
+    /// literal).
     /// (Go: `address.expr`)
     pub expr: Option<DebugExpr>,
 }
 
 impl LValue for Address {
     fn store(&self, b: &mut Builder, v: Value) {
-        b.emit_store(self.addr, v, self.pos);
+        // store.Val: `v` converted for assignability.
+        let stored = b.emit_store(self.addr, v, self.pos);
         if let Some(expr) = &self.expr {
-            // store.Val is `v` (caller coerces for assignability).
-            b.emit_debug_ref_at(*expr, v, false);
+            b.emit_debug_ref_at(*expr, stored, false);
         }
     }
 
@@ -187,9 +188,10 @@ impl LazyAddress {
 impl LValue for LazyAddress {
     fn store(&self, b: &mut Builder, v: Value) {
         let addr = self.emit_addr(b);
-        b.emit_store(addr, v, self.pos);
+        // store.Val: `v` converted for assignability.
+        let stored = b.emit_store(addr, v, self.pos);
         if let Some(expr) = &self.expr {
-            b.emit_debug_ref_at(*expr, v, false);
+            b.emit_debug_ref_at(*expr, stored, false);
         }
     }
 
@@ -301,9 +303,10 @@ impl LazyIndexAddr {
 impl LValue for LazyIndexAddr {
     fn store(&self, b: &mut Builder, v: Value) {
         let addr = self.emit_addr(b);
-        b.emit_store(addr, v, self.pos);
+        // store.Val: `v` converted for assignability.
+        let stored = b.emit_store(addr, v, self.pos);
         if let Some(expr) = &self.expr {
-            b.emit_debug_ref_at(*expr, v, false);
+            b.emit_debug_ref_at(*expr, stored, false);
         }
     }
 

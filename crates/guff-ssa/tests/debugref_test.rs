@@ -179,9 +179,6 @@ fn disasm_debug(src: &str) -> String {
 /// This pins guff's *current* output (written on main before lvalues stopped
 /// cloning their syntax, and unchanged by it), in guff's printer format. Known
 /// differences from go/ssa, all pre-existing:
-/// - go/ssa also emits `*ast.BasicLit @ 13:13` for the `f: 7` element slot of
-///   `&S{f: 7}` (`compLit` builds `&address{…, expr: e}`); guff's composite-
-///   literal element stores (`builder/stmt.rs`) pass `expr: None`.
 /// - go/types prints a field object as `field f int`, and constants as `1:int`.
 #[test]
 fn test_debugrefs_for_every_lvalue_shape() {
@@ -224,6 +221,7 @@ func f(p *int, sl []int) {
         "*ast.IndexExpr @ 11:2 is 5",       // a[1] = 5
         "var sl []int @ 12:2 is t6",
         "*ast.IndexExpr @ 12:2 is 6",       // sl[0] = 6
+        "*ast.BasicLit @ 13:13 is 7",       // the `f: 7` element slot
         "address of *ast.CompositeLit @ 13:8 is t9", // &S{f: 7}
         "*ast.UnaryExpr @ 13:7 is t9",
         "var q *S @ 13:2 is t9",
@@ -234,4 +232,107 @@ func f(p *int, sl []int) {
     ];
     // `_ = …` and `_, _ = …` record nothing for the blank identifiers.
     assert_eq!(refs, want, "DebugRefs; full disassembly:\n{asm}");
+}
+
+/// Composite-literal element slots and the final slice/map store carry their
+/// source expression (go/ssa `compLit`: `&address{…, expr: e}` for a struct
+/// field, an array/slice element, and the `Slice`/`MakeMap` stored into the
+/// literal's location; the memclear of a partial literal would have none, but
+/// v0.50 only reaches compLit with `isZero`), and every
+/// store-DebugRef names the *converted* value (`store.Val`).
+///
+/// `want` is `ssadump -build=DF` of golang.org/x/tools v0.50.0 on this source
+/// with the values dropped (go/ssa prints after lifting; the one difference
+/// is the declarations `var a`/`var s`/`var ar`/`var w`, which lifting turns
+/// from `address of` into the zero value).
+#[test]
+fn test_debugrefs_for_composite_literal_slots() {
+    const SRC: &str = "package p
+
+type S struct{ f int; g any }
+type E struct{ S }
+
+func f(p *int, sl []int, y int, z error) {
+	var a [2]int
+	var s S
+	x := 0
+	_ = x
+	s = S{f: y, g: y}
+	_ = s
+	s = S{y, 7}
+	a = [2]int{y, 1: y}
+	_ = a
+	b := [...]any{3: y}
+	_ = b
+	c := []any{y, z}
+	_ = c
+	m := map[int]any{1: y}
+	_ = m
+	q := &S{f: 7}
+	_ = q
+	t := []S{{f: y}}
+	_ = t
+	var ar [3]int
+	ar = [3]int{y}
+	_ = ar
+	var w any
+	w = y
+	_ = w
+	n := []*S{{f: y}}
+	_ = n
+}";
+    let asm = disasm_debug(SRC);
+    let refs: Vec<(&str, &str)> = asm
+        .lines()
+        .filter_map(|l| l.split_once("; ").map(|(_, r)| r))
+        .filter_map(|r| r.split_once(" is "))
+        .filter(|(d, _)| d.contains(" @ "))
+        .collect();
+    let descrs: Vec<String> = refs
+        .iter()
+        .map(|(d, _)| d.strip_prefix("address of ").filter(|d| d.starts_with("var ")).unwrap_or(d).to_string())
+        .collect();
+    let want = [
+        "var a [2]int @ 7:6", "var s S @ 8:6", "var x int @ 9:2", "var x int @ 10:6",
+        // s = S{f: y, g: y}: each value read, then each slot store
+        "var y int @ 11:11", "var y int @ 11:17", "var y int @ 11:11", "var y int @ 11:17",
+        "*ast.CompositeLit @ 11:6", "var s S @ 11:2", "var s S @ 12:6",
+        // s = S{y, 7}: the constant has no read ref, only the slot's
+        "var y int @ 13:8", "var y int @ 13:8", "*ast.BasicLit @ 13:11",
+        "*ast.CompositeLit @ 13:6", "var s S @ 13:2",
+        "var y int @ 14:13", "var y int @ 14:19", "var y int @ 14:13", "var y int @ 14:19",
+        "*ast.CompositeLit @ 14:6", "var a [2]int @ 14:2", "var a [2]int @ 15:6",
+        "var y int @ 16:19", "var y int @ 16:19", "*ast.CompositeLit @ 16:7",
+        "var b [4]any @ 16:2", "var b [4]any @ 17:6",
+        // []any{y, z}: slot stores, then the Slice store and the read
+        "var y int @ 18:13", "var y int @ 18:13", "var z error @ 18:16", "var z error @ 18:16",
+        "*ast.CompositeLit @ 18:7", "*ast.CompositeLit @ 18:7",
+        "var c []any @ 18:2", "var c []any @ 19:6",
+        // map: an element slot records nothing; the MakeMap store does
+        "var y int @ 20:22", "*ast.CompositeLit @ 20:7", "*ast.CompositeLit @ 20:7",
+        "var m map[int]any @ 20:2", "var m map[int]any @ 21:6",
+        "*ast.BasicLit @ 22:13", "address of *ast.CompositeLit @ 22:8", "*ast.UnaryExpr @ 22:7",
+        "var q *S @ 22:2", "var q *S @ 23:6",
+        "var y int @ 24:15", "var y int @ 24:15", "*ast.CompositeLit @ 24:11",
+        "*ast.CompositeLit @ 24:11", "*ast.CompositeLit @ 24:7", "*ast.CompositeLit @ 24:7",
+        "var t []S @ 24:2", "var t []S @ 25:6",
+        // [3]int{y}: a partial literal (its memclear is unreachable in v0.50:
+        // compLit is only called on a fresh, zeroed Alloc)
+        "var ar [3]int @ 26:6", "var y int @ 27:14", "var y int @ 27:14",
+        "*ast.CompositeLit @ 27:7", "var ar [3]int @ 27:2", "var ar [3]int @ 28:6",
+        "var w any @ 29:6", "var y int @ 30:6", "var w any @ 30:2", "var w any @ 31:6",
+        "var y int @ 32:16", "var y int @ 32:16", "address of *ast.CompositeLit @ 32:12",
+        "*ast.CompositeLit @ 32:12", "*ast.CompositeLit @ 32:7", "*ast.CompositeLit @ 32:7",
+        "var n []*S @ 32:2", "var n []*S @ 33:6",
+    ];
+    assert_eq!(descrs, want, "DebugRefs; full disassembly:\n{asm}");
+
+    // A store into an `any` slot names the MakeInterface, not the int read
+    // (ssadump: `var y int @ 11:17 is t3` after `… is y`).
+    let value_of = |d: &str, nth: usize| {
+        refs.iter().filter(|(x, _)| *x == d).nth(nth).map(|(_, v)| *v).unwrap()
+    };
+    assert_ne!(value_of("var y int @ 11:17", 0), value_of("var y int @ 11:17", 1), "{asm}");
+    assert_eq!(value_of("var y int @ 11:11", 0), value_of("var y int @ 11:11", 1), "{asm}");
+    assert_ne!(value_of("var w any @ 30:2", 0), value_of("var y int @ 30:6", 0), "{asm}");
 }

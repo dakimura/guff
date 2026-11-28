@@ -52,6 +52,7 @@ Phase 8（`docs/PHASE8-LEDGER.md`）と同じ作り方: 出力ではなく**上�
 - `guff custom` の版文字列・cache salt にプラグインの版が入らない（core #1）。
 - export data 経路（`GUFF_DEP_SOURCE=0`）はもとから壊れている（go-syntax #26）。あわせて、その経路で `math/rand/v2` のように path の末尾と package 名が違う package を `v2` と名付けていた（P9-2 で修正）。
 - guff は parse error / 型エラーを `typecheck` finding にしない（COMPAT-HARDENING 続き 150–151 の既知の判断）。go/types 台帳の文言行（#13/#15/#16/#19/#25）はこれが入るまで出力に効かない。
+- 合成リテラルの要素スロット（struct のフィールド・array/slice の要素）と slice/map リテラルの最後の Store が DebugRef 用の `expr` を持っていなかった（x/tools v0.50 の `compLit` は `&address{…, expr: e}`）。あわせて store の DebugRef が変換前の値を指していた（go は `store.Val`＝interface への MakeInterface などの後）。**done（autopilot、2026-11-28）**：ssadump v0.50 `-build=DF` と 1 関数 30 形の DebugRef 列（descr@位置）が一致（`debugref_test.rs` `test_debugrefs_for_composite_literal_slots`）。SA4006 の件数は main・新コード・2.15.0 の 3 者で同じ（golden `staticcheck-sa` に `sa4006/complit` 8 件）。**見つけた既存差（needs-port）**：既存の変数への部分 array リテラル `ar = [3]int{g()}`（後で上書き）を guff は SA4006 で出し、2.15.0 は出さない。staticcheck の IR（honnef go/ir）の `assign` は addressable な位置の合成リテラルを in-place で初期化し、`emitDebugRef(e, addr, true)` で Alloc を指すので「使われている」になる。guff は go/ssa v0.50 の形（一時 Alloc → Load → Store）。struct と全要素の array は CompositeValue の経路で結果が同じになり差が出ない。
 
 ---
 
