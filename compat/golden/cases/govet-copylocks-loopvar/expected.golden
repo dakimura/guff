@@ -1,0 +1,18 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh govet-copylocks-loopvar
+# Produced by running golangci-lint on compat/golden/cases/govet-copylocks-loopvar/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+loopvar/loopvar.go:17:17:govet::copylocks: shapes passes lock by value: sync.Mutex
+loopvar/loopvar.go:17:34:govet::copylocks: shapes passes lock by value: example.com/copylocksloopvar/loopvar.guarded contains sync.Mutex
+loopvar/loopvar.go:19:9:govet::copylocks: for loop iteration copies lock value to mu: sync.Mutex
+loopvar/loopvar.go:27:6:govet::copylocks: for loop iteration copies lock value to mu: sync.Mutex
+loopvar/loopvar.go:32:9:govet::copylocks: for loop iteration copies lock value to g: example.com/copylocksloopvar/loopvar.guarded contains sync.Mutex
+loopvar/loopvar.go:37:6:govet::copylocks: for loop iteration copies lock value to n: example.com/copylocksloopvar/loopvar.nested contains example.com/copylocksloopvar/loopvar.guarded contains sync.Mutex
+loopvar/loopvar.go:42:12:govet::copylocks: assignment copies lock value to mu: sync.Mutex
+loopvar/loopvar.go:47:15:govet::copylocks: assignment copies lock value to g: example.com/copylocksloopvar/loopvar.guarded contains sync.Mutex
+loopvar/loopvar.go:58:9:govet::copylocks: range var m copies lock: sync.Mutex
+loopvar/loopvar.go:62:6:govet::copylocks: for loop iteration copies lock value to mu: sync.Mutex

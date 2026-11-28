@@ -1,0 +1,22 @@
+# Golden case: govet copylocks, `for` init-statement loop variables that hold
+# a lock ("for loop iteration copies lock value", go1.22+). old.go is tagged
+# `//go:build go1.21` to cover the per-file version gate.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+  settings:
+    govet:
+      disable-all: true
+      enable:
+        - copylocks
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
