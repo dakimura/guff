@@ -541,6 +541,77 @@ drain_open_prs() {
   done
 }
 
+# ---------------------------------------------------------------- spin guards
+# 2026-11-28: `blocked` had no wait, so a worker that kept answering "blocked
+# (machine memory)" was restarted every 30s for 5h: ~385 iterations, ~$170, and
+# the 5-hour usage limit. Every guard below costs no tokens and holds regardless
+# of the result kind, so a new failure shape cannot spin either.
+BLOCKED_MAX="${AUTOPILOT_BLOCKED_MAX:-3}"      # consecutive `blocked` → driver exits
+SPIN_SECS="${AUTOPILOT_SPIN_SECS:-300}"        # a worker shorter than this is "short"
+SPIN_MAX="${AUTOPILOT_SPIN_MAX:-4}"            # this many short ones without a merge → exit
+DAILY_USD="${AUTOPILOT_DAILY_USD:-150}"        # all sessions (worker+review+scout) per day
+MAX_WIRED_PCT="${AUTOPILOT_MAX_WIRED_PCT:-50}" # kernel-wired share of RAM that breaks gates
+
+spent_today() {
+  awk -F'\t' -v d="$(date +%F)" 'index($1, d) == 1 { c = $4; gsub(/\$/, "", c); t += c }
+    END { printf "%d", t }' "$STATE/iterations.tsv" 2>/dev/null || echo 0
+}
+
+# Wired memory is the kernel's and only a reboot returns it (92 days up: 17.3 of
+# 24 GiB). With it, regress and the gates fail on main too, and the worker can
+# only say "blocked" — so check it here, before spending tokens.
+wired_pct() {
+  local page total wired
+  page="$(sysctl -n hw.pagesize 2>/dev/null)"; total="$(sysctl -n hw.memsize 2>/dev/null)"
+  wired="$(vm_stat 2>/dev/null | awk '/Pages wired down/ { gsub(/\./, "", $4); print $4 }')"
+  [[ -n "$page" && -n "$total" && -n "$wired" ]] || { echo 0; return; }
+  echo $(( wired * page * 100 / total ))
+}
+
+human_decisions() { local n; n="$(grep -c '^### HUMAN-DECISION' "$STATE/journal.md" 2>/dev/null)"; echo "${n:-0}"; }
+
+# Sleep up to $1 seconds, waking early on STOP (→ 1) or a new HUMAN-DECISION (→ 0).
+nap_for_human() {
+  local end=$(( $(date +%s) + $1 )) h0; h0="$(human_decisions)"
+  while (( $(date +%s) < end )); do
+    stopping && return 1
+    (( $(human_decisions) > h0 )) && { log "new HUMAN-DECISION; resuming"; return 0; }
+    sleep 30
+  done
+  return 0
+}
+
+# Pre-flight before each worker. Returns 1 when the loop should go round again
+# (after waiting), 2 when it should stop.
+preflight() {
+  local spent w until
+  spent="$(spent_today)"
+  if (( spent >= DAILY_USD )); then
+    until=$(( $(date -j -v+1d -v0H -v5M -v0S +%s) ))
+    if [[ "$(cat "$STATE/budget-noted" 2>/dev/null)" != "$(date +%F)" ]]; then
+      date +%F > "$STATE/budget-noted"
+      note "daily budget reached (\$$spent >= \$$DAILY_USD); pausing until $(date -r "$until" '+%m-%d %H:%M')"
+      notify "daily budget \$$DAILY_USD reached; paused until tomorrow"
+    fi
+    status "paused: daily budget \$$spent/\$$DAILY_USD — until $(date -r "$until" '+%F %T')"
+    nap $(( until - $(date +%s) )) || return 2
+    return 1
+  fi
+  w="$(wired_pct)"
+  if (( w > MAX_WIRED_PCT )); then
+    if [[ ! -f "$STATE/wired-noted" ]]; then
+      touch "$STATE/wired-noted"
+      note "kernel wired memory ${w}% > ${MAX_WIRED_PCT}% — gates cannot pass; reboot the machine. Waiting (no tokens spent)"
+      notify "wired memory ${w}%: reboot the Mac; autopilot is waiting"
+    fi
+    status "paused: wired memory ${w}% > ${MAX_WIRED_PCT}% (reboot needed) — rechecking every 30 min"
+    nap 1800 || return 2
+    return 1
+  fi
+  rm -f "$STATE/wired-noted"
+  return 0
+}
+
 needs_human_count() { local n; n="$(grep -c 'NEEDS-HUMAN' "$STATE/journal.md" 2>/dev/null)"; echo "${n:-0}"; }
 
 loop() {
@@ -556,7 +627,7 @@ loop() {
   ensure_worktree || { log "worktree setup failed"; exit 1; }
   log "driver up: repo=$REPO worktree=$WT state=$STATE"
 
-  local i=0 fails=0 idle=0 label logf pr nh0 rc
+  local i=0 fails=0 idle=0 blocked=0 short=0 secs label logf pr nh0 rc
   drain_open_prs
   [[ -f "$STATE/main-health.tsv" ]] || main_health
   while (( i < MAX_ITERS )); do
@@ -564,6 +635,9 @@ loop() {
     maybe_release   # release.sh: weekly-ish, only from a green main
     stopping && break
     wait_scout
+    preflight; rc=$?
+    (( rc == 2 )) && break
+    (( rc == 1 )) && continue
     i=$((i + 1))
     label="iter-$(date +%Y%m%d-%H%M)"
     logf="$STATE/logs/$label.jsonl"
@@ -579,6 +653,19 @@ loop() {
     [[ -f "$STATE/next-task.md" ]] && mv -f "$STATE/next-task.md" "$STATE/scout/used-$label.md"
     (( $(needs_human_count) > nh0 )) && notify "NEEDS-HUMAN in journal ($label)"
 
+    secs="$(cat "${logf%.jsonl}.secs" 2>/dev/null)"
+    if [[ "$RESULT_KIND" != limit ]] && (( ${secs:-0} < SPIN_SECS )); then
+      short=$((short + 1))
+    else
+      short=0
+    fi
+    if (( short >= SPIN_MAX )); then
+      note "$short consecutive workers under ${SPIN_SECS}s with no merge (last: $RESULT_LINE); driver exiting"
+      notify "autopilot stopped: $short short iterations in a row — see $STATE/driver-notes.md"
+      break
+    fi
+    [[ "$RESULT_KIND" == blocked ]] || blocked=0
+
     case "$RESULT_KIND" in
       pr-open)
         fails=0; idle=0
@@ -588,16 +675,25 @@ loop() {
         if [[ -n "$pr" ]]; then
           wait_and_merge "$pr"; rc=$?
           [[ $rc == 2 ]] && break
-          [[ $rc == 0 ]] && main_health
+          [[ $rc == 0 ]] && { short=0; main_health; }
         else note "$label said pr-open without a number: $RESULT_LINE"; fi ;;
       no-task)
         fails=0; idle=$((idle + 1))
         status "idle (no task) — next check in $(( idle * 2 ))h"
         nap $(( idle > 6 ? 43200 : idle * 7200 )) || break ;;
       blocked)
-        fails=0
-        note "$label blocked: $RESULT_LINE"
-        notify "blocked: $RESULT_LINE" ;;
+        # Blocked means a human must act; asking again changes nothing. Back off
+        # (1h, 2h, …), wake early on a new HUMAN-DECISION, and give up after
+        # BLOCKED_MAX in a row so the driver never spins on it.
+        fails=0; blocked=$((blocked + 1))
+        note "$label blocked ($blocked/$BLOCKED_MAX): $RESULT_LINE"
+        notify "blocked: $RESULT_LINE"
+        if (( blocked >= BLOCKED_MAX )); then
+          note "blocked $blocked times in a row; driver exiting — write a HUMAN-DECISION in the journal, then run.sh start"
+          break
+        fi
+        status "blocked ($blocked/$BLOCKED_MAX) — waiting for a HUMAN-DECISION, at most $(( 1 << (blocked - 1) ))h"
+        nap_for_human $(( 3600 << (blocked - 1) )) || break ;;
       limit)
         local now; now=$(date +%s)
         local wait=$(( LIMIT_UNTIL > now ? LIMIT_UNTIL - now + 120 : 1800 ))
