@@ -38556,3 +38556,8 @@ go/ssa v0.52 と honnef go/ir v0.8.2 の `emitFieldSelection` は、最後に `e
 測定中に range の既存差を見つけた。`rangeStmt` は k・v を先に得てから、`createVars`、両方の lvalue、両方の store の順に出す。guff は key と value をそれぞれ lvalue→store で順に出していた。
 これを `range_assign` にまとめ（range-over-func の yield 本体も同じ順に）、12 形の命令列（うち 11 形は DebugRef 列も）を ssadump v0.52 と一致させた（`range_assign_v052_test.rs`）。
 未着手として記録した既存差が 1 つある。lift が、Alloc を指す `IsAddr` の DebugRef を値に置き換えない（台帳 §1.3）。
+
+### 2026-11-29 — SSA：lift が address の DebugRef を値に置き換える（Phase 9 台帳 §1.3）
+
+go/ssa v0.52 と honnef go/ir v0.8.2 の lift は、`rename` で lift した Alloc を指す `IsAddr` の DebugRef を、その時点のセルの値（ゼロ定数・store した値・φ）に置き換える。guff はこれをしておらず、`var i, x int` が消えた Alloc を指していた。`lift.rs` に移植し、ssadump v0.52 と 12 関数の DebugRef 列・命令列が一致した（`lift_debugref_v052_test.rs`）。
+測定中に既存差を 1 つ記録した：guff は `lift` の後に `optimize_blocks` をもう一度かけるが、上流はかけない（台帳 §1.3、needs-port）。
