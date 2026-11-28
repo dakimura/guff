@@ -744,3 +744,175 @@ fn test_only_directories_are_listed_like_go_list() {
 
     let _ = fs::remove_dir_all(&tmp);
 }
+
+/// The linker's implicit deps of a command (`LinkerDeps` in cmd/go's
+/// load/pkg.go). Measured against `go list -deps -test -json` (go1.27.1,
+/// darwin/arm64): a `package main` that imports nothing still has the whole
+/// `runtime` closure in Deps, never in Imports; `P [P.test]` inherits it;
+/// the external test package and a non-main package do not get it; and a cgo
+/// package's `P [P.test]` inherits `runtime/cgo` and `syscall` the same way.
+#[test]
+fn main_packages_list_the_linkers_implicit_deps() {
+    let tmp = std::env::temp_dir().join(format!(
+        "guff-golist-linkerdeps-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = fs::remove_dir_all(&tmp);
+    fs::create_dir_all(&tmp).unwrap();
+
+    write(&tmp.join("go.mod"), "module example.com/m\n\ngo 1.22\n");
+    // main, no imports.
+    write(&tmp.join("m0/main.go"), "package main\n\nfunc main() {}\n");
+    // main + an internal test file that imports nothing either.
+    write(&tmp.join("m1/main.go"), "package main\n\nfunc main() {}\n");
+    write(&tmp.join("m1/h_test.go"), "package main\n\nfunc helper() {}\n");
+    // main + an external test package that imports nothing.
+    write(&tmp.join("m2/main.go"), "package main\n\nfunc main() {}\n");
+    write(&tmp.join("m2/x_test.go"), "package main_test\n\nfunc helper() {}\n");
+    // Only `package main_test` files: go/build names the package `main`.
+    write(
+        &tmp.join("xo/x_test.go"),
+        "package main_test\n\nimport \"testing\"\n\nfunc TestY(t *testing.T) {}\n",
+    );
+    // main that already reaches runtime: nothing doubles up.
+    write(
+        &tmp.join("m3/main.go"),
+        "package main\n\nimport \"errors\"\n\nvar _ = errors.New\n\nfunc main() {}\n",
+    );
+    // Not a command.
+    write(&tmp.join("lib/a.go"), "package lib\n\nfunc F() {}\n");
+    write(&tmp.join("lib/h_test.go"), "package lib\n\nfunc helper() {}\n");
+
+    let cgo = guff_build::Context::default().cgo_enabled;
+    if cgo {
+        write(
+            &tmp.join("c1/a.go"),
+            "package c1\n\n// int x;\nimport \"C\"\n\nfunc F() {}\n",
+        );
+        write(&tmp.join("c1/h_test.go"), "package c1\n\nfunc helper() {}\n");
+    }
+
+    let m = |s: &str| format!("example.com/m/{s}");
+    let ptest = |s: &str| format!("{} [{}.test]", m(s), m(s));
+    let xtest = |s: &str| format!("{}_test [{}.test]", m(s), m(s));
+
+    for (tests, need_deps) in [(true, true), (true, false), (false, true), (false, false)] {
+        let cfg = ListConfig {
+            dir: tmp.clone(),
+            tests,
+            need_deps,
+            gomodcache: Some(tmp.join("empty-cache")),
+            ..ListConfig::default()
+        };
+        let resp = list_packages(&cfg, &["./...".to_string()])
+            .unwrap_or_else(|e| panic!("list tests={tests} need_deps={need_deps}: {e}"));
+        let pkg = |id: &str| {
+            resp.packages
+                .iter()
+                .find(|p| p.id == id)
+                .unwrap_or_else(|| panic!("{id} listed (tests={tests})"))
+        };
+        let ctx = format!("tests={tests} need_deps={need_deps}");
+
+        for id in [m("m0"), m("m1"), m("m2"), m("m3")] {
+            let p = pkg(&id);
+            assert!(p.deps.iter().any(|d| d == "runtime"), "{id} Deps has runtime ({ctx})");
+            assert!(
+                !p.imports.iter().any(|(src, _)| src == "runtime"),
+                "{id} Imports does not ({ctx})"
+            );
+            let mut sorted = p.deps.clone();
+            sorted.dedup();
+            assert_eq!(sorted.len(), p.deps.len(), "{id} Deps has no duplicates ({ctx})");
+            if need_deps {
+                // The runtime closure is listed too, not just named.
+                assert!(
+                    p.deps.iter().any(|d| d == "internal/abi") && pkg("runtime").standard,
+                    "{id} Deps is runtime's closure ({ctx})"
+                );
+            }
+        }
+        // `go list` gives m0's Deps exactly runtime's closure plus runtime.
+        let rt = pkg("runtime");
+        let mut want: Vec<String> = rt.deps.clone();
+        want.push("runtime".into());
+        want.sort();
+        assert_eq!(pkg(&m("m0")).deps, want, "m0 Deps ({ctx})");
+
+        let lib = pkg(&m("lib"));
+        assert!(lib.deps.is_empty(), "a non-main package gets nothing ({ctx})");
+
+        if tests {
+            assert_eq!(pkg(&ptest("m1")).deps, want, "m1 [m1.test] inherits ({ctx})");
+            assert!(pkg(&ptest("m1")).imports.is_empty(), "and lists no Imports ({ctx})");
+            assert!(pkg(&xtest("m2")).deps.is_empty(), "main_test is not a command ({ctx})");
+            // A command gets `P [P.test]` without internal test files, and
+            // testmain links it instead of plain P — when it has files.
+            assert_eq!(pkg(&ptest("m2")).deps, want, "m2 [m2.test] exists ({ctx})");
+            assert_eq!(pkg(&ptest("m2")).go_files.len(), 1, "with main.go alone ({ctx})");
+            let tm_imports = |s: &str| -> Vec<String> {
+                let mut v: Vec<String> = pkg(&format!("{}.test", m(s)))
+                    .imports
+                    .iter()
+                    .map(|(src, _)| src.clone())
+                    .collect();
+                v.sort();
+                v
+            };
+            assert_eq!(
+                tm_imports("m2"),
+                vec![
+                    ptest("m2"),
+                    xtest("m2"),
+                    "os".to_string(),
+                    "reflect".to_string(),
+                    "testing".to_string(),
+                    "testing/internal/testdeps".to_string(),
+                ],
+                "m2.test ({ctx})"
+            );
+            assert_eq!(pkg(&ptest("xo")).deps, want, "xo [xo.test] exists ({ctx})");
+            assert!(pkg(&ptest("xo")).go_files.is_empty(), "with no files ({ctx})");
+            assert_eq!(pkg(&m("xo")).deps, want, "xo is a command too ({ctx})");
+            assert_eq!(
+                tm_imports("xo"),
+                vec![
+                    xtest("xo"),
+                    "os".to_string(),
+                    "reflect".to_string(),
+                    "testing".to_string(),
+                    "testing/internal/testdeps".to_string(),
+                ],
+                "xo.test does not link an empty xo [xo.test] ({ctx})"
+            );
+            assert!(pkg(&ptest("lib")).deps.is_empty(), "lib [lib.test] gets nothing ({ctx})");
+            assert!(
+                pkg(&format!("{}.test", m("lib"))).deps.iter().any(|d| d == "runtime"),
+                "testmain links runtime ({ctx})"
+            );
+        } else {
+            assert!(!resp.packages.iter().any(|p| p.id.contains(".test")));
+        }
+
+        if cgo {
+            let implicit = ["runtime", "runtime/cgo", "syscall"];
+            let ids = if tests { vec![m("c1"), ptest("c1")] } else { vec![m("c1")] };
+            for id in ids {
+                let p = pkg(&id);
+                for d in implicit {
+                    assert!(p.deps.iter().any(|x| x == d), "{id} Deps has {d} ({ctx})");
+                }
+                assert!(
+                    !p.imports.iter().any(|(src, _)| implicit.contains(&src.as_str())),
+                    "{id} Imports has none of them ({ctx})"
+                );
+            }
+        }
+    }
+
+    let _ = fs::remove_dir_all(&tmp);
+}

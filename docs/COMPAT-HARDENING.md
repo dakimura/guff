@@ -38432,6 +38432,29 @@ v2 の依存を返して 14 件ずれた）。両方に `hash_toolchain`（GOROO
 verify OK（go1.27.1）: scratch 9 形（tests true/false）・caddy（945）・prometheus・echo・argo-cd・gin・viper・minio。
 残り: traefik は root の `package main`（import 0 個）で go list の Deps に linker の暗黙依存（runtime 一式）が入り、native に無い。
 
+### 2026-11-28 — native lister: main パッケージの linker 暗黙依存（`LinkerDeps`）／`[P.test]` の暗黙依存の継承
+
+traefik の root（`package main`、import 0 個）で、go list の Deps には `runtime` の閉包があるのに native には無かった。
+cmd/go は `p.Name == "main" && !ForceLibrary` のとき `LinkerDeps` を `addImport(dep, false)` で足す（Deps のみ、Imports には出ない）:
+常に `runtime`、external link が要る target（`MustLinkExternal`＝android（arm64 以外）・ios/arm64、または default PIE なのに
+internal PIE 非対応）なら `runtime/cgo`、GOARCH=arm なら `math`。cgo 無効で external link が要る場合、go list は package の
+Error にして Deps を出さないので、native は `ExternalLinkWithoutCgo` で bail する。race/msan/asan/cover・buildmode・ldflags は
+build flag で、native は既に `UnsupportedBuildFlags` で断っている（`GOFLAGS` 経由のものは見ていない、既存の穴）。
+testmain（`P.test`）にも `LinkerDeps(ld, p)` が Deps として加わる（`main` に限らない）。
+
+あわせて既存の欠け: `P [P.test]` は `ptest.Internal.Imports = test imports + p.Internal.Imports` で p の暗黙依存を継承するが、
+native の `emit_fortest_dep_variants` の最後の remap が `[P.test]` の直接依存を Imports だけから作り直しており、cgo package の
+`P [P.test]` から `runtime/cgo`／`syscall` が、main の `P [P.test]` から `runtime` が落ちていた（`Q [P.test]` の複製も同じ）。
+Imports に無い直接依存を remap の前後で持ち越す。
+もう 1 つ（独立レビューで発見）: cmd/go は `len(p.TestGoFiles) > 0 || p.Name == "main"` で `P [P.test]` を作る。`package main` に
+`main_test` の xtest しか無くても `P [P.test]` があり、testmain は plain `P` ではなくそれを import する（ファイルがあるときだけ）。
+`main_test` だけのディレクトリ（go/build は名前を `main` にする）ではファイル無しの `P [P.test]` が出て、testmain は import しない。
+native は内部 test ファイルがあるときしか作っていなかった。
+
+go1.27.1 で m0（main・import 0）、m1（＋ import 0 の内部 test）、m2（＋ import 0 の `main_test`）、m3（errors を import）、
+lib（main でない）、c1（cgo ＋内部 test）、xo（`main_test` だけ）を go list で実測し、`tests`×`need_deps` の 4 通りで単体テストに固定。
+GOOS/GOARCH ごとの `LinkerDeps` も 9 通り実測して単体テスト。verify OK: traefik（2848 pkgs）・caddy・minio。
+
 ### 2026-11-28 — inline：`//go:fix` の後の空白は 1 個のスペースに限らない（Phase 9 台帳 xtools-passes #4）
 
 x/tools v0.52 は gofix 指示を `go/ast.ParseDirective` で読み、name を任意の `unicode.IsSpace` の並びで切る。`//go:fix\tinline`・
