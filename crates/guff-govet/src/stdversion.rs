@@ -43,7 +43,7 @@ fn before(x: &str, y: &str) -> bool {
 
 /// `pass.Pkg.GoVersion()`: the module's `go` line as go/packages hands it to
 /// the type checker (`go1.22.0` stays `go1.22.0`), or "" when unknown.
-fn package_go_version(pass: &Pass<'_>) -> String {
+pub(crate) fn package_go_version(pass: &Pass<'_>) -> String {
     let from_module = pass.pkg().module.as_ref().map(|m| m.go_version.trim()).filter(|v| !v.is_empty());
     if let Some(v) = from_module {
         return if v.starts_with("go") { v.to_string() } else { format!("go{v}") };

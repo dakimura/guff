@@ -1,0 +1,6 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+a/a.go                crates/guff-govet/tests/testdata/httpmux/a.go
+wrap/wrap.go          crates/guff-govet/tests/testdata/httpmux/wrap/wrap.go
+noimport/noimport.go  crates/guff-govet/tests/testdata/httpmux/noimport/noimport.go
+rvc/a.go              crates/guff-govet/tests/testdata/reflectvaluecompare/a.go

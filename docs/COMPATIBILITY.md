@@ -77,7 +77,7 @@
 | goprintffuncname | ✅ | |
 | gosec | 🟡 | 主要ルール対応（G115 = 整数オーバーフロー変換はレンジ解析ごと、G101 = zxcvbn のエントロピー推定ごと移植済み）。G113 / G116–G121 / G123 / G201 / G304–G305 / G307 / G601 と G7xx の完全な taint エンジンは DEFERRED |
 | gosmopolitan | ✅ | |
-| govet | 🟡 | 上流 46 pass のうち **34 を実装**。printf は引数個数・型照合まで `go vet` 一致。32 pass は `compat/golden/cases/govet` で位置・文言まで完全一致（cgocall / framepointer は環境依存で golden に載せられない）。未実装 12: asmdecl（golangci-lint は `.s` の診断を 1 件も出さないので観測できない） / stdversion（stdlib 全シンボルの導入バージョン表が要る） / atomicalign / deepequalerrors / fieldalignment / findcall / httpmux / nilness / reflectvaluecompare / shadow / sortslice / unusedwrite（この 10 は `enable-all` 専用） |
+| govet | 🟡 | 上流 46 pass のうち **39 を実装**。printf は引数個数・型照合まで `go vet` 一致。32 pass は `compat/golden/cases/govet` で位置・文言まで完全一致（cgocall / framepointer は環境依存で golden に載せられない）。既定で無効の fieldalignment / httpmux / nilness / reflectvaluecompare は個別の golden case で突合済み。未実装 7: asmdecl（golangci-lint は `.s` の診断を 1 件も出さないので観測できない） / atomicalign / deepequalerrors / findcall / shadow / sortslice / unusedwrite（この 6 は `enable-all` 専用） |
 | grouper | ✅ | |
 | iface | ✅ | |
 | importas | ✅ | |

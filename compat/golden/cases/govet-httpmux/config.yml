@@ -1,0 +1,30 @@
+# Golden case: govet httpmux and reflectvaluecompare, two of the ten analyzers
+# outside golangci-lint's default set (they only run under `enable-all` or an
+# explicit `enable`, so no other case ever exercises them).
+#
+# httpmux is gated on the *package* Go version being at most 1.21, so this
+# module says `go 1.21`; `govet-httpmux-go1211` runs the same sources under
+# `go 1.21.1`, which semver already ranks after v1.21 — httpmux goes silent
+# there while reflectvaluecompare (no version gate) still reports.
+# noimport/ reaches *http.ServeMux only through wrap/, so the direct-import
+# gate skips it.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+  settings:
+    govet:
+      disable-all: true
+      enable:
+        - httpmux
+        - reflectvaluecompare
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

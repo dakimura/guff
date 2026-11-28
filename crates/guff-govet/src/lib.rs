@@ -16,6 +16,7 @@ mod expreq;
 mod framepointer;
 mod govet_util;
 mod hostport;
+mod httpmux;
 mod httpresponse;
 mod ifaceassert;
 mod inline;
@@ -25,6 +26,7 @@ mod lostcancel;
 mod nilfunc;
 mod nilness;
 mod printf;
+mod reflectvaluecompare;
 mod printf_types;
 mod printf_wrappers;
 mod shift;
@@ -56,6 +58,7 @@ pub use directive::analyzer as directive_analyzer;
 pub use errorsas::analyzer as errorsas_analyzer;
 pub use framepointer::analyzer as framepointer_analyzer;
 pub use hostport::analyzer as hostport_analyzer;
+pub use httpmux::analyzer as httpmux_analyzer;
 pub use httpresponse::analyzer as httpresponse_analyzer;
 pub use ifaceassert::analyzer as ifaceassert_analyzer;
 pub use inline::analyzer as inline_analyzer;
@@ -65,6 +68,7 @@ pub use fieldalignment::analyzer as fieldalignment_analyzer;
 pub use nilfunc::analyzer as nilfunc_analyzer;
 pub use nilness::analyzer as nilness_analyzer;
 pub use printf::analyzer as printf_analyzer;
+pub use reflectvaluecompare::analyzer as reflectvaluecompare_analyzer;
 pub use shift::analyzer as shift_analyzer;
 pub use sigchanyzer::analyzer as sigchanyzer_analyzer;
 pub use slog::analyzer as slog_analyzer;
@@ -99,6 +103,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         errorsas::analyzer(),
         framepointer::analyzer(),
         hostport::analyzer(),
+        httpmux::analyzer(),
         httpresponse::analyzer(),
         ifaceassert::analyzer(),
         inline::analyzer(),
@@ -108,6 +113,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         nilfunc::analyzer(),
         nilness::analyzer(),
         printf::analyzer(),
+        reflectvaluecompare::analyzer(),
         shift::analyzer(),
         sigchanyzer::analyzer(),
         slog::analyzer(),
