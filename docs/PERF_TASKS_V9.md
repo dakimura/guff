@@ -289,7 +289,7 @@ wall            1.36s
 
 ## 2. 次にやると効くこと（優先順）
 
-### V9-1 — `Ident` の `name: String` をインライン化する（**未着手 / 最有望**）
+### V9-1 — `Ident` の `name: String` をインライン化する（**測って NO-GO / 2026-11-28。§3.5**）
 
 `Expr` を 80 バイトにした今、いちばん多いノードは `Ident`（**64 バイト**）です:
 
@@ -311,6 +311,44 @@ pub struct Ident {
 `GUFF_DEBUG_CACHE=2` に出し、`mi_malloc` の呼び出し数と突き合わせる。
 `Deref<Target = str>` を持つ型にすれば `.name == "foo"` も `format!` も通るので、
 壊れるのは `ident.name = ...` の代入だけのはずです（V8 の boxing と同じ形の調査から）。
+
+> **2026-11-28 追記 — 作って測ったら効きませんでした（§3.5）。** 代わりにプロファイルで
+> 見つかった **AST の deep clone（CPU の 4.8%）** を §V9-6 にまとめ、一部を直しています。
+
+### V9-6 — 熱い経路で AST を deep clone しない（**一部完了 / 2026-11-28**）
+
+V9-1 の確認のために `samply` で seed warm を取り直したところ、`mi_malloc` / `mi_free` 系の
+6.8% は**どこか 1 箇所に集まっていません**（呼び出し元の最大が printer の 0.47%）。
+代わりに、`Expr` / `Stmt` / `FuncDecl` などの `Clone::clone` を**包含時間**で数えると
+**CPU の 4.8%** ありました。呼び出し元の上位:
+
+| 呼び出し元 | 包含 CPU | 何を clone していたか | 状態 |
+|---|---:|---|---|
+| `parser_resolver::{declare, walk_func_decl, short_var_decl, …}` | 約 1.5% | `ObjDecl` に入れる宣言ノード。`declare` が**識別子ごとに `decl.clone()` して元を捨てる**ので、`FuncDecl` は本体ごと 2 回、`var a, b, c` は 4 回、`x, err :=` は文が 2 回 | **完了**: `ObjDecl` を `Box` → `Arc`。1 宣言 1 clone |
+| `guff_ssa::builder::build_syntactic_body` / `if` / `for` | 約 0.5% | `self.stmt(&Stmt::BlockStmt(s.body.clone()))`。入れ子の本体を**深さの回数だけ**コピー | **完了**: `Builder::block_stmt(&BlockStmt)` |
+| `guff_types::return_check::{is_terminating, has_break}` の `if` | 小 | 同じ `Stmt::BlockStmt(s.body.clone())` の形 | **完了** |
+| `ssautil::load::build_package_for_analysis` | 0.51% | `builder/mod.rs` の `f.syntax_decl = Some(fd.clone())`（全関数の `FuncDecl` を本体ごと） | 未着手。`syntax_decl` の読み手を洗ってから |
+| `guff_ssa::builder::Builder::address` | 約 0.55% | `emit_call` / `assign` から来る `Expr` の clone | 未着手 |
+| `gofumpt::fumpter::apply_file` | 0.39% | `FuncDecl` の clone | 未着手 |
+| `facts::deprecated::run` | 約 0.5% | `Decl` の clone と `File` の drop（stack が LTO で潰れて出どころ未特定） | 未着手 |
+| `govet::loopclosure::walk_stmt` | — | `Stmt::BlockStmt(s.body.clone())` の同じ形（プロファイル上位には出ていない） | 未着手 |
+
+**完了分の効果**（prometheus `./...`、main `3e44c88` 比、`/usr/bin/time -l` の
+**instructions retired**、交互 3 ラウンド。ばらつきは ±0.1G）:
+
+| | before | after | |
+|---|---:|---:|---|
+| seed warm | 105.6 G | **103.4 G** | **−2.1%** |
+| cold | 142.2 G | **139.9 G** | **−1.6%** |
+
+wall / CPU / peak RSS は交互 6 ラウンドで向きは揃っていますが（seed warm CPU −3.9%、
+cold CPU −1.7%）、計測時の load average が 3.5 前後あり、この差は揺れの幅に入ります。
+findings は 174 行でバイト一致。
+
+> **測り方のメモ**: macOS の `/usr/bin/time -l` は `instructions retired` を出します。
+> 負荷のある機械でも 3 ラウンドで ±0.1%（wall は ±10%）に収まるので、
+> **「仕事を減らす」変更の GO/NO-GO にはこれを先に見てください。**
+> 並列度・ロックの変更は instructions に出ないので、そちらは従来どおり wall で。
 
 ### V9-2 — `Stmt` を 320 バイトからさらに縮める（**未着手 / 小〜中**）
 
@@ -462,14 +500,35 @@ analyze から CPU を奪うだけです。
 
 §0.2。1.6M ノードの wide scan は 0.05s しかかかりません。
 
+### 3.5 V9-1（`Ident.name` のインライン文字列化）を入れない — 2026-11-28
+
+自前の 24 バイト型（22 バイト以下をインライン、それ以上は `Box<str>`）を作り、
+ワークスペース全体を通しました（壊れた箇所は 129 ファイル／約 250 行。
+`HashMap<String, _>::get(&ident.name)` と `Vec<String>` への `collect` が大半で、
+§📌 の「壊れるのは代入だけ」という見積りは外れました）。findings はバイト一致。
+
+効果（prometheus `./...`、交互 6 ラウンドの中央値）:
+
+| | 差 |
+|---|---:|
+| seed warm wall / CPU / RSS | ±0.0% / −0.4% / +0.2% |
+| cold wall / CPU / RSS | ±0.0% / −0.7% / +0.8% |
+
+**揺れの幅の中です。** 前提が違っていました: プロファイルの malloc 6.7% は `Ident` 由来ではなく、
+呼び出し元が数百に散っていて、`Ident::clone` は 0.05% しかありません。
+1.6M ノード中の `Ident` 数十万個 × 確保 1 回 ≈ 数十 ms で、合計 CPU 8〜16s の中では見えません。
+129 ファイルの変更に見合わないので revert しました。
+
 ---
 
 ## 4. 次のセッションへの引き継ぎ
 
 1. **`cargo build --release` を走らせ、`ls -l target/release/guff` の mtime を目視する**
    （第8弾 §📌 の事故。ルール11 相当として扱ってください）。
-2. **`V9-1`（`Ident` の文字列）から始める。** この回の 2 つの当たりとまったく同じ形
-   （百万単位で並ぶ型の 1 個あたりの値段）で、いちばん有望な残りです。
+2. ~~`V9-1`（`Ident` の文字列）から始める。~~ **2026-11-28 に測って NO-GO（§3.5）。**
+   代わりに **§V9-6 の表の「未着手」行**（`syntax_decl` の `FuncDecl` clone 0.51%、
+   `Builder::address` の `Expr` clone 約 0.55% など）から。どれも「clone をやめて借用する」
+   だけで、findings が変わらないことは prometheus の出力のバイト比較で確かめられます。
 3. RSS を続けるなら `V9-3` の残り＝ **`ObjectData`（104 B × 約 2.3M）のヴァリアント別サイズ**。
    これも同じ手順で 30 分で判断がつくはずです。
 4. `V9-4` はユーザー承認が要る意味論の変更を含みます。勝手に入れないでください。

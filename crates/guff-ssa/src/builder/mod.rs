@@ -10,7 +10,7 @@ use crate::value::Value;
 use crate::block::BasicBlock;
 use crate::lvalue::{LValue, Address};
 use guff_types::{signature_type_params, BasicKind, ObjectId, TypeId};
-use guff::ast::{Decl, Expr, File, FuncDecl, Ident, Spec, Stmt};
+use guff::ast::{Decl, Expr, File, FuncDecl, Ident, Spec};
 use guff::{Pos, NO_POS};
 
 pub mod expr;
@@ -111,7 +111,7 @@ pub(crate) fn build_syntactic_body(
             crate::create::create_params(prog, fid);
             return;
         }
-        Some(b) => b.clone(),
+        Some(b) => b,
     };
 
     // go/ssa order: startBody (create the entry block) → createSyntacticParams
@@ -130,7 +130,7 @@ pub(crate) fn build_syntactic_body(
 
     let mut builder = Builder::new(prog, fid);
     builder.set_block(Some(entry));
-    builder.stmt(&Stmt::BlockStmt(body));
+    builder.block_stmt(body, None);
     // Control fell off the end of the function body. (go/ssa buildFromSyntax)
     if let Some(block) = builder.block {
         let func = builder.func();

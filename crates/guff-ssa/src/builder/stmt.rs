@@ -25,6 +25,16 @@ impl<'a> Builder<'a> {
         self.stmt_with_label(s, None);
     }
 
+    /// `stmt(&Stmt::BlockStmt(b))` for a block borrowed from a parent node.
+    /// Wrapping it in a `Stmt` meant cloning it, and since an `if`/`for` body
+    /// holds the nested ones, every statement was deep-copied once per
+    /// enclosing block.
+    pub(crate) fn block_stmt(&mut self, b: &guff::ast::BlockStmt, label: Option<&str>) {
+        for inner in &b.list {
+            self.stmt_with_label(inner, label);
+        }
+    }
+
     /// Like [`stmt`](Self::stmt) but threads the optional label of an enclosing
     /// [`LabeledStmt`] to breakable statements (`for`, `range`, …).
     pub(crate) fn stmt_with_label(&mut self, s: &Stmt, label: Option<&str>) {
@@ -42,11 +52,7 @@ impl<'a> Builder<'a> {
             Stmt::RangeStmt(r) => self.range_stmt(r, label),
             Stmt::BranchStmt(b) => self.branch_stmt(b),
             Stmt::LabeledStmt(l) => self.labeled_stmt(l, label),
-            Stmt::BlockStmt(b) => {
-                for inner in &b.list {
-                    self.stmt_with_label(inner, label);
-                }
-            }
+            Stmt::BlockStmt(b) => self.block_stmt(b, label),
             Stmt::EmptyStmt(_) => {}
             Stmt::SendStmt(s) => self.send_stmt(s),
             Stmt::IncDecStmt(s) => self.inc_dec_stmt(s),
@@ -790,7 +796,7 @@ impl<'a> Builder<'a> {
         self.cond(&s.cond, t, e);
 
         self.set_block(Some(t));
-        self.stmt(&Stmt::BlockStmt(s.body.clone()));
+        self.block_stmt(&s.body, None);
         if self.block.is_some() {
             self.emit_jump(done);
         }
@@ -1326,7 +1332,7 @@ impl<'a> Builder<'a> {
             self.set_label_loop_targets(name, done, cont);
         }
         self.push_targets(done, cont);
-        self.stmt(&Stmt::BlockStmt(s.body.clone()));
+        self.block_stmt(&s.body, None);
         self.pop_targets();
         if self.block.is_some() {
             self.emit_jump(cont);
