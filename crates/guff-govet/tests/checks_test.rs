@@ -1564,6 +1564,135 @@ fn loopclosure_flags_captured_loop_var() {
     assert!(messages.iter().any(|m| m.contains("loop variable")));
 }
 
+/// Upstream's `reportCaptured` is `ast.Inspect` over the whole statement, so a
+/// loop variable is found wherever it is used inside the literal. guff used to
+/// walk a hand-picked subset (statement bodies and a few expression kinds) and
+/// missed 11 of these 24: conditions, switch tags, `var` declarations, composite
+/// literals, a labeled statement, `i++`, a send and an `if` init.
+#[test]
+fn loopclosure_walks_every_nested_statement_kind() {
+    let dir = support::testdata("loopclosure");
+    let pkg = support::with_go_version(
+        support::typecheck_pkg("example.com/govet/loopclosure/nested", &dir.join("nested.go")),
+        "1.21",
+    );
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64, String)> =
+        support::run_analyzer_diagnostics(loopclosure_analyzer(), &pkg)
+            .into_iter()
+            .map(|d| {
+                let p = fset.position(guff::position::Pos(d.pos as i64));
+                (p.line, p.column, d.message)
+            })
+            .collect();
+    got.sort();
+
+    // `go vet -loopclosure` (x/tools v0.52) on the same file, in a go1.21
+    // module: 24 findings.
+    let row = |line: i64, col: i64, var: &str| {
+        (line, col, format!("loop variable {var} captured by func literal"))
+    };
+    assert_eq!(
+        got,
+        vec![
+            row(8, 7, "v"),   // if condition
+            row(9, 9, "i"),
+            row(10, 14, "v"), // else-if condition
+            row(11, 10, "v"),
+            row(13, 11, "i"),
+            row(15, 20, "v"), // for condition
+            row(16, 13, "i"),
+            row(19, 12, "i"),
+            row(21, 11, "v"), // switch tag
+            row(23, 9, "i"),
+            row(25, 16, "v"), // var declaration
+            row(28, 9, "v"),
+            row(32, 9, "i"),
+            row(35, 10, "v"),
+            row(37, 11, "i"), // go call argument
+            row(38, 14, "v"), // defer call argument
+            row(39, 40, "i"), // nested literal
+            row(44, 9, "v"),
+            row(46, 24, "i"), // composite literal
+            row(55, 8, "i"),  // labeled statement
+            row(56, 4, "i"),  // i++
+            row(57, 10, "v"), // send
+            row(58, 12, "v"), // if init
+            row(60, 12, "i"), // var declaration
+        ]
+    );
+}
+
+/// Which statement is "last" (recursively through if / else-if / else, loops,
+/// switches and select), the bare-node assertions upstream makes on the literal
+/// and the range key, an assignment `post`, and `t.Run` subtests after
+/// `t.Parallel()` — `go vet -loopclosure` (x/tools v0.52) gives exactly these.
+#[test]
+fn loopclosure_last_statements_and_parallel_subtests() {
+    let dir = support::testdata("loopclosure");
+    let pkg = support::with_go_version(
+        support::typecheck_with_deps(
+            "example.com/govet/loopclosure/last",
+            &dir.join("last.go"),
+            &[("testing", &dir.join("stub/testing/testing.go"))],
+        ),
+        "1.21",
+    );
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64, String)> =
+        support::run_analyzer_diagnostics(loopclosure_analyzer(), &pkg)
+            .into_iter()
+            .map(|d| {
+                let p = fset.position(guff::position::Pos(d.pos as i64));
+                (p.line, p.column, d.message)
+            })
+            .collect();
+    got.sort();
+    let row = |line: i64, col: i64, var: &str| {
+        (line, col, format!("loop variable {var} captured by func literal"))
+    };
+    assert_eq!(
+        got,
+        vec![
+            row(12, 20, "i"), // if
+            row(14, 20, "i"), // else if
+            row(16, 23, "i"), // second else if (was skipped)
+            row(18, 20, "i"), // else
+            row(23, 20, "i"), // nested range under for
+            row(29, 20, "i"),
+            row(32, 20, "v"),
+            row(38, 23, "i"), // type switch
+            row(44, 20, "i"), // select
+            row(64, 19, "p"), // assignment post
+            row(73, 8, "v"),  // after t.Parallel()
+            row(84, 8, "i"),
+        ]
+    );
+}
+
+/// A `//go:build go1.22` file in a go1.21 module is not checked, an untagged
+/// one is. This harness type-checks one file per package, so it cannot show
+/// the gate is per *file* (`FileUsesGoVersion` reads `TypesInfo.FileVersions`)
+/// rather than per package — the old any-file-below-1.22 gate passes this test
+/// too. The golden case `govet-loopclosure` pins that half: `last/` holds
+/// `last.go` and `later.go` in one package and only `last.go` is reported.
+/// (golangci-lint also drops the whole analyzer when `run.go` is 1.22 or later;
+/// that lives in guff-lint's settings.)
+#[test]
+fn loopclosure_gates_on_the_file_version() {
+    let dir = support::testdata("loopclosure");
+    let later = support::with_go_version(
+        support::typecheck_pkg("example.com/govet/loopclosure/last", &dir.join("later.go")),
+        "1.21",
+    );
+    assert!(support::run_analyzer(loopclosure_analyzer(), &later).is_empty());
+    let bad = support::with_go_version(
+        support::typecheck_pkg("example.com/govet/loopclosure", &dir.join("bad.go")),
+        "1.21",
+    );
+    assert_eq!(support::run_analyzer(loopclosure_analyzer(), &bad).len(), 1);
+}
+
 #[test]
 fn loopclosure_allows_shadowed_loop_var() {
     let dir = support::testdata("loopclosure");

@@ -1,0 +1,30 @@
+# Golden case: govet loopclosure. Its own case because golangci-lint drops the
+# analyzer outright when the Go version (here: the go.mod line) is 1.22 or
+# later, so the `govet` case (go 1.24) never runs it.
+#
+# nested/ uses a loop variable in every statement and expression position
+# inside the reported func literals (upstream walks the whole literal with
+# ast.Inspect). last/ covers which statement counts as "last" (recursively
+# through if / else-if / else, loops, switches, select), the bare-node
+# assertions on the literal and the range key, an assignment post statement,
+# `t.Run` subtests after `t.Parallel()`, and — with later.go, tagged
+# `//go:build go1.22` in this go 1.21 module — the per-file version gate.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+  settings:
+    govet:
+      disable-all: true
+      enable:
+        - loopclosure
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

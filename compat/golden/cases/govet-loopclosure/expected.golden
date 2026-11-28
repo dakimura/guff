@@ -1,0 +1,44 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh govet-loopclosure
+# Produced by running golangci-lint on compat/golden/cases/govet-loopclosure/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+last/last.go:12:20:govet::loopclosure: loop variable i captured by func literal
+last/last.go:14:20:govet::loopclosure: loop variable i captured by func literal
+last/last.go:16:23:govet::loopclosure: loop variable i captured by func literal
+last/last.go:18:20:govet::loopclosure: loop variable i captured by func literal
+last/last.go:23:20:govet::loopclosure: loop variable i captured by func literal
+last/last.go:29:20:govet::loopclosure: loop variable i captured by func literal
+last/last.go:32:20:govet::loopclosure: loop variable v captured by func literal
+last/last.go:38:23:govet::loopclosure: loop variable i captured by func literal
+last/last.go:44:20:govet::loopclosure: loop variable i captured by func literal
+last/last.go:64:19:govet::loopclosure: loop variable p captured by func literal
+last/last.go:73:8:govet::loopclosure: loop variable v captured by func literal
+last/last.go:84:8:govet::loopclosure: loop variable i captured by func literal
+nested/nested.go:8:7:govet::loopclosure: loop variable v captured by func literal
+nested/nested.go:9:9:govet::loopclosure: loop variable i captured by func literal
+nested/nested.go:10:14:govet::loopclosure: loop variable v captured by func literal
+nested/nested.go:11:10:govet::loopclosure: loop variable v captured by func literal
+nested/nested.go:13:11:govet::loopclosure: loop variable i captured by func literal
+nested/nested.go:15:20:govet::loopclosure: loop variable v captured by func literal
+nested/nested.go:16:13:govet::loopclosure: loop variable i captured by func literal
+nested/nested.go:19:12:govet::loopclosure: loop variable i captured by func literal
+nested/nested.go:21:11:govet::loopclosure: loop variable v captured by func literal
+nested/nested.go:23:9:govet::loopclosure: loop variable i captured by func literal
+nested/nested.go:25:16:govet::loopclosure: loop variable v captured by func literal
+nested/nested.go:28:9:govet::loopclosure: loop variable v captured by func literal
+nested/nested.go:32:9:govet::loopclosure: loop variable i captured by func literal
+nested/nested.go:35:10:govet::loopclosure: loop variable v captured by func literal
+nested/nested.go:37:11:govet::loopclosure: loop variable i captured by func literal
+nested/nested.go:38:14:govet::loopclosure: loop variable v captured by func literal
+nested/nested.go:39:40:govet::loopclosure: loop variable i captured by func literal
+nested/nested.go:44:9:govet::loopclosure: loop variable v captured by func literal
+nested/nested.go:46:24:govet::loopclosure: loop variable i captured by func literal
+nested/nested.go:55:8:govet::loopclosure: loop variable i captured by func literal
+nested/nested.go:56:4:govet::loopclosure: loop variable i captured by func literal
+nested/nested.go:57:10:govet::loopclosure: loop variable v captured by func literal
+nested/nested.go:58:12:govet::loopclosure: loop variable v captured by func literal
+nested/nested.go:60:12:govet::loopclosure: loop variable i captured by func literal
