@@ -184,7 +184,7 @@ fn disasm_debug_mode(src: &str, mode: BuilderMode) -> String {
 /// This pins guff's *current* output (written on main before lvalues stopped
 /// cloning their syntax, and unchanged by it), in guff's printer format. Known
 /// differences from go/ssa, all pre-existing:
-/// - go/types prints a field object as `field f int`, and constants as `1:int`.
+/// - go/types prints constants as `1:int`.
 #[test]
 fn test_debugrefs_for_every_lvalue_shape() {
     const SRC: &str = "package p
@@ -221,7 +221,8 @@ func f(p *int, sl []int) {
         "var p *int @ 9:3 is t3",
         "*ast.StarExpr @ 9:2 is 3",         // *p = 3
         "address of var s S @ 10:2 is t1",
-        "var f int @ 10:4 is 4",            // s.f = 4: the field Ident
+        "address of field f int @ 10:4 is t4", // emitFieldSelection
+        "field f int @ 10:4 is 4",          // s.f = 4: the field Ident
         "address of var a [2]int @ 11:2 is t0",
         "*ast.IndexExpr @ 11:2 is 5",       // a[1] = 5
         "var sl []int @ 12:2 is t6",
