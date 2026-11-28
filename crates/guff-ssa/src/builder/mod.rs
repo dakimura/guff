@@ -711,10 +711,15 @@ impl<'a> Builder<'a> {
     /// preferring a definition (`Info.defs`) over a use (`Info.uses`).
     /// (Go: `Function.objectOf`)
     fn object_of(&self, id: &Ident) -> Option<ObjectId> {
-        if let Some(Some(obj)) = self.prog.info.defs.get(&id.id) {
+        self.object_of_id(id.id)
+    }
+
+    /// object_of keyed by the identifier's node id.
+    fn object_of_id(&self, id: u32) -> Option<ObjectId> {
+        if let Some(Some(obj)) = self.prog.info.defs.get(&id) {
             return Some(*obj);
         }
-        self.prog.info.uses.get(&id.id).copied()
+        self.prog.info.uses.get(&id).copied()
     }
 
     /// emit_debug_ref emits a DebugRef pseudo-instruction associating the
@@ -727,13 +732,22 @@ impl<'a> Builder<'a> {
         if !self.debug_info() {
             return;
         }
-        let e = unparen(e);
+        self.emit_debug_ref_at(crate::lvalue::DebugExpr::of(e), v, is_addr);
+    }
+
+    /// emit_debug_ref_at is [`emit_debug_ref`](Builder::emit_debug_ref) for an
+    /// expression already captured as a [`DebugExpr`](crate::lvalue::DebugExpr)
+    /// (lvalues hold one instead of a copy of the syntax).
+    pub fn emit_debug_ref_at(&mut self, e: crate::lvalue::DebugExpr, v: Value, is_addr: bool) {
+        if !self.debug_info() {
+            return;
+        }
         let mut object = None;
-        if let Expr::Ident(id) = e {
-            if id.name == "_" {
+        if let Some(is_blank) = e.ident {
+            if is_blank {
                 return; // blank identifier
             }
-            object = self.object_of(id);
+            object = self.object_of_id(e.id);
             if let Some(obj) = object {
                 use guff_types::ObjectData;
                 match self.prog.object_arena.get(obj) {
@@ -743,9 +757,6 @@ impl<'a> Builder<'a> {
                 }
             }
         }
-        let expr_descr = expr_reflect_name(e).to_string();
-        let expr_id = e.id();
-        let pos = e.pos();
         let block = self.block.expect("no current block");
         crate::emit::emit_with_pos(
             self.func_mut(),
@@ -754,10 +765,10 @@ impl<'a> Builder<'a> {
                 x: v,
                 is_addr,
                 object,
-                expr_id,
-                expr_descr,
+                expr_id: e.id,
+                expr_descr: e.descr.to_string(),
             }),
-            pos,
+            e.pos,
         );
     }
 
@@ -809,7 +820,7 @@ impl<'a> Builder<'a> {
                     addr: v,
                     typ,
                     pos: e.pos(),
-                    expr: Some(e.clone()),
+                    expr: Some(crate::lvalue::DebugExpr::of(e)),
                 })
             }
             Expr::ParenExpr(p) => self.address(&p.x, escaping),
@@ -825,7 +836,7 @@ impl<'a> Builder<'a> {
                     addr: ptr,
                     typ,
                     pos: star.star,
-                    expr: Some(e.clone()),
+                    expr: Some(crate::lvalue::DebugExpr::of(e)),
                 })
             }
             _ => todo!("address for {:?}", e),
@@ -871,7 +882,7 @@ impl<'a> Builder<'a> {
                 addr: self.invalid_zero(),
                 typ: guff_types::new_pointer(&mut self.prog.type_arena, typ),
                 pos: se.sel.name_pos,
-                expr: Some(Expr::Ident(se.sel.clone())),
+                expr: Some(crate::lvalue::DebugExpr::of_ident(&se.sel)),
             });
         }
         let pointee = guff_types::pointer_elem(&self.prog.type_arena, recv_ty);
@@ -882,7 +893,7 @@ impl<'a> Builder<'a> {
                 addr: self.invalid_zero(),
                 typ: guff_types::new_pointer(&mut self.prog.type_arena, typ),
                 pos: se.sel.name_pos,
-                expr: Some(Expr::Ident(se.sel.clone())),
+                expr: Some(crate::lvalue::DebugExpr::of_ident(&se.sel)),
             });
         };
         let fld_ty = fld
@@ -895,7 +906,7 @@ impl<'a> Builder<'a> {
             typ: fld_ty,
             pos: se.sel.name_pos,
             // go/ssa uses the field Ident (`e.Sel`), not the whole SelectorExpr.
-            expr: Some(Expr::Ident(se.sel.clone())),
+            expr: Some(crate::lvalue::DebugExpr::of_ident(&se.sel)),
         })
     }
 
@@ -931,7 +942,7 @@ impl<'a> Builder<'a> {
                 addr: self.invalid_zero(),
                 typ: ptr,
                 pos: ie.lbrack,
-                expr: Some(Expr::IndexExpr(ie.clone())),
+                expr: Some(crate::lvalue::DebugExpr::of_index(ie)),
             });
         };
         let pos = ie.lbrack;
@@ -957,7 +968,7 @@ impl<'a> Builder<'a> {
                     et,
                     typ: elem,
                     pos,
-                    expr: Some(Expr::IndexExpr(ie.clone())),
+                    expr: Some(crate::lvalue::DebugExpr::of_index(ie)),
                 })
             }
             IndexMode::Var => {
@@ -971,7 +982,7 @@ impl<'a> Builder<'a> {
                     et,
                     typ: elem,
                     pos,
-                    expr: Some(Expr::IndexExpr(ie.clone())),
+                    expr: Some(crate::lvalue::DebugExpr::of_index(ie)),
                 })
             }
             IndexMode::Value | IndexMode::Invalid => {
@@ -983,7 +994,7 @@ impl<'a> Builder<'a> {
                     addr: self.invalid_zero(),
                     typ: ptr,
                     pos,
-                    expr: Some(Expr::IndexExpr(ie.clone())),
+                    expr: Some(crate::lvalue::DebugExpr::of_index(ie)),
                 })
             }
         }
@@ -1021,7 +1032,7 @@ impl<'a> Builder<'a> {
             addr: v,
             typ,
             pos: cl.lbrace,
-            expr: Some(Expr::CompositeLit(cl.clone())),
+            expr: Some(crate::lvalue::DebugExpr::of_composite_lit(cl)),
         })
     }
 }

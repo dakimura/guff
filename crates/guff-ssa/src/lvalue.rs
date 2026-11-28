@@ -4,9 +4,68 @@
 
 use crate::builder::Builder;
 use crate::value::Value;
-use guff::ast::Expr;
+use guff::ast::{Expr, Ident};
 use guff::Pos;
 use guff_types::TypeId;
+
+/// The parts of a source expression that a DebugRef records, captured when an
+/// lvalue is built so the lvalue need not own a deep copy of the syntax.
+///
+/// go/ssa keeps the `ast.Expr` pointer itself (`address.expr`,
+/// `lazyAddress.expr`); [`Builder::emit_debug_ref`] only ever reads the node
+/// id, its position, its reflect name, and — for an identifier — the object it
+/// denotes and whether it is blank. Cloning the `Expr` instead copied whole
+/// subtrees (`a.b[i].c = …`, `T{…}` with every element) on every assignment,
+/// even when debug info was off.
+#[derive(Clone, Copy, Debug)]
+pub struct DebugExpr {
+    pub(crate) id: u32,
+    pub(crate) pos: Pos,
+    pub(crate) descr: &'static str,
+    /// `Some(is_blank)` when the (unparenthesized) expression is an identifier.
+    pub(crate) ident: Option<bool>,
+}
+
+impl DebugExpr {
+    /// Captures `e` after stripping parentheses, as `emitDebugRef` does.
+    pub fn of(e: &Expr) -> Self {
+        let e = crate::builder::unparen(e);
+        match e {
+            Expr::Ident(id) => Self::of_ident(id),
+            _ => Self {
+                id: e.id(),
+                pos: e.pos(),
+                descr: crate::builder::expr_reflect_name(e),
+                ident: None,
+            },
+        }
+    }
+
+    /// Same as `DebugExpr::of(&Expr::Ident(id.clone()))`, without the clone.
+    pub fn of_ident(id: &Ident) -> Self {
+        Self {
+            id: id.id,
+            pos: id.name_pos,
+            descr: "*ast.Ident",
+            ident: Some(id.name == "_"),
+        }
+    }
+
+    /// Same as `DebugExpr::of(&Expr::IndexExpr(ie.clone()))`, without the clone.
+    pub fn of_index(ie: &guff::ast::IndexExpr) -> Self {
+        Self { id: ie.id, pos: ie.x.pos(), descr: "*ast.IndexExpr", ident: None }
+    }
+
+    /// Same as `DebugExpr::of(&Expr::CompositeLit(cl.clone()))`, without the clone.
+    pub fn of_composite_lit(cl: &guff::ast::CompositeLit) -> Self {
+        Self {
+            id: cl.id,
+            pos: cl.ty.as_ref().map(|t| t.pos()).unwrap_or(cl.lbrace),
+            descr: "*ast.CompositeLit",
+            ident: None,
+        }
+    }
+}
 
 /// LValue represents an assignable location.
 /// (Go: `lvalue` interface)
@@ -61,7 +120,7 @@ pub struct Address {
     /// Source syntax of the value (not address), for DebugRef in debug mode.
     /// `None` for synthetic locations (e.g. composite-literal element slots).
     /// (Go: `address.expr`)
-    pub expr: Option<Expr>,
+    pub expr: Option<DebugExpr>,
 }
 
 impl LValue for Address {
@@ -69,7 +128,7 @@ impl LValue for Address {
         b.emit_store(self.addr, v, self.pos);
         if let Some(expr) = &self.expr {
             // store.Val is `v` (caller coerces for assignability).
-            b.emit_debug_ref(expr, v, false);
+            b.emit_debug_ref_at(*expr, v, false);
         }
     }
 
@@ -79,7 +138,7 @@ impl LValue for Address {
 
     fn address(&self, b: &mut Builder) -> Value {
         if let Some(expr) = &self.expr {
-            b.emit_debug_ref(expr, self.addr, true);
+            b.emit_debug_ref_at(*expr, self.addr, true);
         }
         self.addr
     }
@@ -111,7 +170,7 @@ pub struct LazyAddress {
     pub pos: Pos,
     /// Source syntax of the value (typically the field `Ident`), for DebugRef.
     /// (Go: `lazyAddress.expr`)
-    pub expr: Option<Expr>,
+    pub expr: Option<DebugExpr>,
 }
 
 impl LazyAddress {
@@ -130,7 +189,7 @@ impl LValue for LazyAddress {
         let addr = self.emit_addr(b);
         b.emit_store(addr, v, self.pos);
         if let Some(expr) = &self.expr {
-            b.emit_debug_ref(expr, v, false);
+            b.emit_debug_ref_at(*expr, v, false);
         }
     }
 
@@ -142,7 +201,7 @@ impl LValue for LazyAddress {
     fn address(&self, b: &mut Builder) -> Value {
         let addr = self.emit_addr(b);
         if let Some(expr) = &self.expr {
-            b.emit_debug_ref(expr, addr, true);
+            b.emit_debug_ref_at(*expr, addr, true);
         }
         addr
     }
@@ -229,7 +288,7 @@ pub struct LazyIndexAddr {
     /// source position of the `[` in `x[index]`.
     pub pos: Pos,
     /// Source syntax of the index expression, for DebugRef. (Go: `lazyAddress.expr`)
-    pub expr: Option<Expr>,
+    pub expr: Option<DebugExpr>,
 }
 
 impl LazyIndexAddr {
@@ -244,7 +303,7 @@ impl LValue for LazyIndexAddr {
         let addr = self.emit_addr(b);
         b.emit_store(addr, v, self.pos);
         if let Some(expr) = &self.expr {
-            b.emit_debug_ref(expr, v, false);
+            b.emit_debug_ref_at(*expr, v, false);
         }
     }
 
@@ -256,7 +315,7 @@ impl LValue for LazyIndexAddr {
     fn address(&self, b: &mut Builder) -> Value {
         let addr = self.emit_addr(b);
         if let Some(expr) = &self.expr {
-            b.emit_debug_ref(expr, addr, true);
+            b.emit_debug_ref_at(*expr, addr, true);
         }
         addr
     }
