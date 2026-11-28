@@ -99,7 +99,14 @@ impl<'a> Pass<'a> {
         self.fset
     }
 
-    pub fn files(&self) -> &[File] {
+    /// The package's syntax trees.
+    ///
+    /// Borrowed for the pass's lifetime `'a`, not for `&self`, so a pass can
+    /// walk the files while calling `&mut self` methods (exporting facts,
+    /// reporting) without copying them first. `facts::deprecated` used to
+    /// `to_vec()` every file of every package for exactly that reason — a deep
+    /// clone of the whole AST, about 0.5% of CPU on prometheus.
+    pub fn files(&self) -> &'a [File] {
         self.files
     }
 

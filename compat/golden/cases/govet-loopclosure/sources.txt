@@ -1,0 +1,5 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+nested/nested.go  crates/guff-govet/tests/testdata/loopclosure/nested.go
+last/last.go      crates/guff-govet/tests/testdata/loopclosure/last.go
+last/later.go     crates/guff-govet/tests/testdata/loopclosure/later.go

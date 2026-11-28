@@ -38561,3 +38561,10 @@ go/ssa v0.52 と honnef go/ir v0.8.2 の `emitFieldSelection` は、最後に `e
 
 go/ssa v0.52 と honnef go/ir v0.8.2 の lift は、`rename` で lift した Alloc を指す `IsAddr` の DebugRef を、その時点のセルの値（ゼロ定数・store した値・φ）に置き換える。guff はこれをしておらず、`var i, x int` が消えた Alloc を指していた。`lift.rs` に移植し、ssadump v0.52 と 12 関数の DebugRef 列・命令列が一致した（`lift_debugref_v052_test.rs`）。
 測定中に既存差を 1 つ記録した：guff は `lift` の後に `optimize_blocks` をもう一度かけるが、上流はかけない（台帳 §1.3、needs-port）。
+
+### 2026-11-29 — govet loopclosure：`reportCaptured` を全木走査に、`parallelSubtest` を移植
+
+PERF_TASKS_V9 §V9-6 の「`walk_stmt` の `BlockStmt` clone」を外そうとして fixture を書いたら、clone より大きい互換の穴が 4 つ出た。上流（x/tools v0.52）の `reportCaptured` は `ast.Inspect` でリテラル全体を歩くが、guff の手書き walk は文の本体と一部の式しか見ていなかった。1 つめとして、条件式・switch の tag・`var` 宣言・合成リテラル・ラベル付き文・`i++`・send・`if` の init の 11 / 24 件を取りこぼしていた。2 つめに、`t.Run` + `t.Parallel()` のサブテスト検査（`parallelSubtest`）が丸ごと無かった。3 つめに、`else if` が 2 段以上続くと、2 段目以降の本体を「最後の文」として見ていなかった。4 つめに、版の判定がパッケージ単位（どれか 1 ファイルが 1.22 未満なら全ファイル）だった。上流は `FileUsesGoVersion` でファイル単位に判定する。
+加えて、上流は `litStmts` と `addVar` で裸の型アサーションを使うので、`go (func(){…})()` と `for (k) = range` は対象外になる。guff は unparen していたので、これも上流に揃えた。
+新しい golden case `govet-loopclosure`（go 1.21 module。golangci は `run.go` が 1.22 以上なら analyzer ごと外すので、既存の `govet` case（1.24）では測れない）を追加し、golangci-lint 2.15.0 の 36 行と一致させた。`later.go`（`//go:build go1.22`）でファイル単位の判定を固定した。
+同じ PR で `facts::deprecated::run` の clone の出どころも特定した。`pass.files().to_vec()` がパッケージ全 AST を毎回コピーしていた。`Pass::files()` を `&'a [File]` を返すようにして、これを外した。prometheus cold で instructions −0.35%、peak RSS −35 MiB、findings 同一（PERF_TASKS_V9 §V9-6）。

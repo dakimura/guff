@@ -289,8 +289,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
     }
 
-    let files: Vec<_> = pass.files().to_vec();
-    for file in &files {
+    // `files()` borrows for the pass's lifetime, so no copy is needed to call
+    // `&mut pass` methods inside the walk.
+    let files = pass.files();
+    for file in files {
         walk_file(pass, file);
     }
 
