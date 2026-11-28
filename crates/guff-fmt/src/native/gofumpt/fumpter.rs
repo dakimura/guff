@@ -252,12 +252,17 @@ impl Fumpter {
                 remove_parens(self, g);
             }
         }
-        let old = std::mem::take(&mut file.decls);
+        // Each declaration is moved out exactly once (as a `start_decl` or as a
+        // merged continuation), so no declaration — notably no `FuncDecl` with
+        // its whole body — is cloned. A slot is only taken after the loop has
+        // decided to consume it; `break` paths leave it for the next round.
+        let mut old: Vec<Option<Decl>> =
+            std::mem::take(&mut file.decls).into_iter().map(Some).collect();
         let mut new_decls = Vec::with_capacity(old.len());
         let mut i = 0;
         let mut any_merged_import = false;
         while i < old.len() {
-            let mut start_decl = old[i].clone();
+            let mut start_decl = old[i].take().expect("each decl is taken once");
             let can_join = match &start_decl {
                 Decl::GenDecl(start) => {
                     !is_cgo_import(start) && !contains_any_directive(start.doc.as_ref())
@@ -280,7 +285,7 @@ impl Fumpter {
             let mut merged = false;
             i += 1;
             while i < old.len() {
-                let cont = match &old[i] {
+                let cont = match old[i].as_ref().expect("not yet taken") {
                     Decl::GenDecl(c)
                         if c.tok == start_tok && !c.lparen.is_valid() && !is_cgo_import(c) =>
                     {
@@ -303,11 +308,11 @@ impl Fumpter {
                         break;
                     }
                 }
-                let cont = match &old[i] {
-                    Decl::GenDecl(c) => c.clone(),
-                    _ => break,
+                let cont_decl = old[i].take().expect("not yet taken");
+                let cont_end = cont_decl.end();
+                let Decl::GenDecl(cont) = cont_decl else {
+                    unreachable!("checked to be a GenDecl above")
                 };
-                let cont_end = Decl::GenDecl(cont.clone()).end();
                 // `Rparen` at the last content character (`end - 1`), like a
                 // real `)`, so the group ends on its content's final line and
                 // the empty-line separator after it is idempotent.

@@ -129,3 +129,22 @@ impl Write for ByteCounter {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod join_lone_decls_tests {
+    use super::*;
+
+    /// Every branch of `join_lone_decls` in one file: adjacent `var`s, a gap
+    /// of one blank line, an unwrapped `var ( … )` group, a doc comment that
+    /// continues the run, a directive that aborts it (as a lone decl's own doc
+    /// and as the doc between two joinable decls), a run broken by a
+    /// `func` / `type` (the breaking decl must start the next round, not be
+    /// dropped), merged imports (re-sorted), and a cgo import (never joined).
+    #[test]
+    fn join_lone_decls_moves_each_decl_once() {
+        let src = include_bytes!("../../../tests/testdata/gofumpt_join_lone_decls.input.go");
+        let want = include_str!("../../../tests/testdata/gofumpt_join_lone_decls.golden.go");
+        let out = format(src, &NativeOptions::default()).expect("gofumpt");
+        assert_eq!(String::from_utf8(out).unwrap(), want);
+    }
+}
