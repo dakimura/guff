@@ -3,12 +3,13 @@
 use std::sync::OnceLock;
 
 use guff::ast::{
-    AssignStmt, CallExpr, CompositeLit, Expr, FieldList, FuncType, GenDecl, Ident, RangeStmt,
-    ReturnStmt, Spec, ValueSpec,
+    AssignStmt, CallExpr, CompositeLit, Expr, FieldList, ForStmt, FuncType, GenDecl, Ident,
+    RangeStmt, ReturnStmt, Spec, Stmt, ValueSpec,
 };
 use guff::node_mask;
 use guff::token::Token;
 use guff::walk::{NodeMask, NodeRef};
+use guff_analysis::code;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
@@ -43,10 +44,13 @@ fn lock_path_expr(
     checker.lock_path_rhs(pass, tv.typ)
 }
 
+/// Upstream `checkCopyLocksAssign`. `for_init` is true when `assign` is the
+/// `Init` of its parent `*ast.ForStmt` (upstream's `parent(stack)` test).
 fn collect_assign(
     pass: &Pass<'_>,
     checker: &mut LockChecker,
     assign: &AssignStmt,
+    for_init: bool,
 ) -> Vec<(u32, String)> {
     let mut out = Vec::new();
     for (i, rhs) in assign.rhs.iter().enumerate() {
@@ -63,7 +67,57 @@ fn collect_assign(
             format!("assignment copies lock value to {lhs}: {}", lock_path_display(&path)),
         ));
     }
+    // Upstream sets `lhs = nil` once any rhs is reported ("we prefer the
+    // assignment warning and do not report twice"), so the loop-variable
+    // check below only runs when nothing above fired.
+    if !out.is_empty() || !for_init || assign.tok != Some(Token::DEFINE) {
+        return out;
+    }
+    // After go1.22 each iteration copies the loop variables. The version is
+    // the effective file version (`versions.FileVersion`); `AtLeast("")` is
+    // true upstream, and `effective_file_go_version` never returns "" for a
+    // package with a module or a types package.
+    let v = code::effective_file_go_version(pass, assign.tok_pos.0 as u32);
+    if !v.is_empty() && code::version_compare(&v, "go1.22") < 0 {
+        return out;
+    }
+    let (Some(info), Some(artifacts)) = (pass.types_info(), pass.pkg().type_artifacts.as_ref())
+    else {
+        return out;
+    };
+    for l in &assign.lhs {
+        let Expr::Ident(id) = l else {
+            continue;
+        };
+        if id.name == "_" {
+            continue;
+        }
+        let Some(obj) = info.defs.get(&id.id).and_then(|o| *o) else {
+            continue;
+        };
+        let Some(t) = obj.typ(&artifacts.objects) else {
+            continue;
+        };
+        if let Some(path) = checker.lock_path_rhs(pass, t) {
+            out.push((
+                l.pos().0 as u32,
+                format!(
+                    "for loop iteration copies lock value to {}: {}",
+                    id.name,
+                    lock_path_display(&path)
+                ),
+            ));
+        }
+    }
     out
+}
+
+/// The `Init` assignment of a `for` statement, if it is one.
+fn for_init_assign(f: &ForStmt) -> Option<&AssignStmt> {
+    match f.init.as_deref() {
+        Some(Stmt::AssignStmt(a)) => Some(a),
+        _ => None,
+    }
 }
 
 fn collect_gendecl(
@@ -337,10 +391,22 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         FuncDecl,
         FuncLit,
         RangeStmt,
+        ForStmt,
     );
+    // `ForStmt` is visited before its `Init`, so remembering the init's
+    // address is enough to recognise it when the `AssignStmt` arrives.
+    let mut for_init: Option<*const AssignStmt> = None;
     inspect.preorder_typed(WANTED, pass.files(), |n| {
         match n {
-            NodeRef::AssignStmt(s) => pending.extend(collect_assign(pass, &mut checker, s)),
+            NodeRef::ForStmt(f) => {
+                if let Some(a) = for_init_assign(f) {
+                    for_init = Some(a as *const AssignStmt);
+                }
+            }
+            NodeRef::AssignStmt(s) => {
+                let is_init = for_init == Some(s as *const AssignStmt);
+                pending.extend(collect_assign(pass, &mut checker, s, is_init))
+            }
             NodeRef::GenDecl(g) => pending.extend(collect_gendecl(pass, &mut checker, g)),
             NodeRef::CompositeLit(c) => {
                 pending.extend(collect_composite_lit(pass, &mut checker, c))

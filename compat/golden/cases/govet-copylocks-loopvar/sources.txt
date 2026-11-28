@@ -1,0 +1,4 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+loopvar/loopvar.go  crates/guff-govet/tests/testdata/copylocks_loopvar/loopvar.go
+loopvar/old.go      crates/guff-govet/tests/testdata/copylocks_loopvar/old.go

@@ -38568,3 +38568,8 @@ PERF_TASKS_V9 §V9-6 の「`walk_stmt` の `BlockStmt` clone」を外そうと�
 加えて、上流は `litStmts` と `addVar` で裸の型アサーションを使うので、`go (func(){…})()` と `for (k) = range` は対象外になる。guff は unparen していたので、これも上流に揃えた。
 新しい golden case `govet-loopclosure`（go 1.21 module。golangci は `run.go` が 1.22 以上なら analyzer ごと外すので、既存の `govet` case（1.24）では測れない）を追加し、golangci-lint 2.15.0 の 36 行と一致させた。`later.go`（`//go:build go1.22`）でファイル単位の判定を固定した。
 同じ PR で `facts::deprecated::run` の clone の出どころも特定した。`pass.files().to_vec()` がパッケージ全 AST を毎回コピーしていた。`Pass::files()` を `&'a [File]` を返すようにして、これを外した。prometheus cold で instructions −0.35%、peak RSS −35 MiB、findings 同一（PERF_TASKS_V9 §V9-6）。
+
+### 2026-11-29 — govet copylocks：`for` の init 句のループ変数（go1.22+）を移植
+
+上流 `checkCopyLocksAssign` の末尾の枝（`for loop iteration copies lock value to %v: %v`）が guff に無かった。go1.22 以降はループ変数が反復ごとにコピーされるので、`for` の init 句の `:=` で lock を含む変数を宣言すると上流は報告する。条件は `Tok == DEFINE`・ファイル単位の版が go1.22 以上・親 `ForStmt` の `Init` がその代入・lhs が `_` 以外の Ident で `Defs` の型が lock を含むこと。rhs で「assignment copies lock value」を 1 件でも出したら lhs ごと捨てる（`lhs = nil`）ので二重には出ない。
+guff は preorder で `ForStmt` が init より先に来ることを使い、init の `AssignStmt` のアドレスを覚えて照合する。新しい golden case `govet-copylocks-loopvar`（go 1.24 module、`old.go` は `//go:build go1.21`）で 13 形を測り、golangci-lint 2.15.0 の 10 行（うち for-iteration 5 件）と一致させた。rhs がコピーする 2 形（単独／他の lock 変数と並ぶ）で抑制されること、`=`・body 内の `:=`・init の func literal 内の `:=`・pointer・range が黙ることも固定した。
