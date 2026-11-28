@@ -2941,6 +2941,40 @@ fn sa4006_composite_literal_shapes() {
     assert_eq!(got, want, "{messages:?}");
 }
 
+/// Array literals assigned to a variable: a partial one (some elements, not
+/// all) is initialized in place by staticcheck's IR and never reported; a full,
+/// empty or slice literal is. Lines match golangci-lint 2.15.0 on the same file
+/// (see its header); before guff initialized partial literals in place it
+/// also reported the nine partial shapes.
+#[test]
+fn sa4006_partial_array_literals_are_initialized_in_place() {
+    let pkg = typecheck_rule("sa4006", "complit_partial.go");
+    support::assert_well_typed(&pkg);
+    let fset = pkg.fset.clone().expect("fixture has a FileSet");
+    let mut got: Vec<(i64, i64, String)> =
+        support::run_analyzer_diagnostics(sa4006::analyzer(), &pkg)
+            .into_iter()
+            .map(|d| {
+                let p = fset.position(guff::position::Pos(d.pos as i64));
+                (p.line, p.column, d.message)
+            })
+            .collect();
+    got.sort();
+    let never = |v: &str| format!("this value of {v} is never used");
+    assert_eq!(
+        got,
+        vec![
+            (45, 2, never("ar")),  // keyed, every element
+            (53, 2, never("ar")),  // every element
+            (129, 2, never("s")),  // slice of partial arrays
+            (137, 2, never("ar")), // full outer, partial inner
+            (153, 2, never("s")),  // struct with a partial array field
+            (167, 2, never("s")),  // slice literal with a gap
+        ],
+        "{got:?}"
+    );
+}
+
 #[test]
 fn sa4006_allows_ok_cases() {
     let pkg = typecheck_rule("sa4006", "ok.go");

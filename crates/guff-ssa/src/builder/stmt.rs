@@ -1381,10 +1381,11 @@ impl<'a> Builder<'a> {
         if s.lhs.len() == s.rhs.len() {
             // Simple / parallel assignment or short var decl. The RHSs may refer
             // to the LHSs, so evaluate every RHS into a store buffer, then flush.
-            // Each newly-`:=`-defined cell holds its zero value (`is_zero`).
+            // Each newly-`:=`-defined cell holds its zero value (`is_zero`);
+            // a redeclared one does not.
             let mut sb = crate::lvalue::StoreBuf::new();
-            for (lval, r) in lvals.into_iter().zip(&s.rhs) {
-                self.assign(lval, r, is_def, Some(&mut sb));
+            for ((lval, is_zero), r) in lvals.into_iter().zip(&s.rhs) {
+                self.assign(lval, r, is_zero, Some(&mut sb));
             }
             sb.emit(self);
         } else {
@@ -1392,7 +1393,7 @@ impl<'a> Builder<'a> {
             let tuple = self.expr_n(&s.rhs[0]);
             self.emit_debug_ref(&s.rhs[0], tuple, false);
             let block = self.block.expect("no current block");
-            for (i, lval) in lvals.into_iter().enumerate() {
+            for (i, (lval, _)) in lvals.into_iter().enumerate() {
                 let elem = crate::emit::emit_extract(self.prog, self.func_id, block, tuple, i);
                 lval.store(self, elem);
             }
@@ -1403,24 +1404,34 @@ impl<'a> Builder<'a> {
     /// `is_def` (a `:=`), it first creates a fresh local cell for each variable
     /// the statement newly defines. Blank identifiers yield a `Blank` lvalue.
     /// (Go: `builder.assignLHS`, x/tools v0.52.)
-    fn assign_lhs(&mut self, lhss: &[Expr], is_def: bool) -> Vec<Box<dyn crate::lvalue::LValue>> {
-        let mut lvals: Vec<Box<dyn crate::lvalue::LValue>> = Vec::with_capacity(lhss.len());
+    ///
+    /// Alongside each lvalue it reports whether the location holds its zero
+    /// value: true only for a variable this `:=` newly defines, not for one it
+    /// redeclares. (Go, honnef go/ir v0.8.2: `assignLHS`'s `isZero`.)
+    fn assign_lhs(
+        &mut self,
+        lhss: &[Expr],
+        is_def: bool,
+    ) -> Vec<(Box<dyn crate::lvalue::LValue>, bool)> {
+        let mut lvals: Vec<(Box<dyn crate::lvalue::LValue>, bool)> = Vec::with_capacity(lhss.len());
         for lhs in lhss {
             if is_blank_ident(lhs) {
-                lvals.push(Box::new(crate::lvalue::Blank));
+                lvals.push((Box::new(crate::lvalue::Blank), false));
                 continue;
             }
+            let mut is_zero = false;
             if is_def {
                 if let Expr::Ident(id) = lhs {
                     if let Some(Some(obj)) = self.prog.info.defs.get(&id.id).copied() {
                         if matches!(self.prog.object_arena.get(obj), guff_types::ObjectData::Var(_)) {
                             let block = self.block.expect("no current block");
                             crate::emit::emit_local_var(self.prog, self.func_id, block, obj);
+                            is_zero = true;
                         }
                     }
                 }
             }
-            lvals.push(self.address(lhs, false)); // non-escaping
+            lvals.push((self.address(lhs, false), is_zero)); // non-escaping
         }
         lvals
     }
@@ -1445,7 +1456,7 @@ impl<'a> Builder<'a> {
         }
         let is_def = s.tok == Some(guff::token::Token::DEFINE);
         let lvals = self.assign_lhs(&s.lhs, is_def);
-        for (lval, v) in lvals.into_iter().zip(values) {
+        for ((lval, _), v) in lvals.into_iter().zip(values) {
             lval.store(self, v);
         }
     }
@@ -1457,18 +1468,55 @@ impl<'a> Builder<'a> {
     /// `&`-operation is implied and the literal's address is stored. When `sb`
     /// is `Some`, the store is deferred into the buffer (evaluating `e` still
     /// happens eagerly) so a group of assignments can update in the right order.
-    /// (Go: `builder.assign`. `is_zero` is accepted for parity but, as in go, is
-    /// not consulted here.)
+    /// (Go: `builder.assign`.)
+    ///
+    /// Under [`BuilderMode::IR_IN_PLACE_PARTIAL_ARRAYS`] (the `buildir` build
+    /// staticcheck reads) a *partial* array literal stored into a plain
+    /// [`Address`] is initialized in place, as honnef's IR does — see
+    /// [`Builder::partial_array_in_place`]. x/tools v0.52's go/ssa never
+    /// initializes in place; `is_zero` is only consulted on that path.
+    ///
+    /// [`BuilderMode::IR_IN_PLACE_PARTIAL_ARRAYS`]: crate::mode::BuilderMode::IR_IN_PLACE_PARTIAL_ARRAYS
+    ///
+    /// [`Address`]: crate::lvalue::Address
     pub(crate) fn assign(
         &mut self,
         loc: Box<dyn crate::lvalue::LValue>,
         e: &Expr,
-        _is_zero: bool,
+        is_zero: bool,
         sb: Option<&mut crate::lvalue::StoreBuf>,
+    ) {
+        self.assign_to(loc, e, is_zero, sb, true);
+    }
+
+    /// assign_composite_element is [`assign`](Builder::assign) for a slot of a
+    /// struct literal or of an array/slice literal that lists every element.
+    /// honnef's IR builds those as one `CompositeValue` whose slots are
+    /// `compositeElement` lvalues, never `*address`, so nothing is initialized
+    /// in place there even though guff addresses the slot (go/ssa's form).
+    /// (Go, honnef go/ir v0.8.2: the `compositeElement` callers of
+    /// `builder.assign` in `compLit`.)
+    fn assign_composite_element(
+        &mut self,
+        loc: Box<dyn crate::lvalue::LValue>,
+        e: &Expr,
+        is_zero: bool,
+        sb: Option<&mut crate::lvalue::StoreBuf>,
+    ) {
+        self.assign_to(loc, e, is_zero, sb, false);
+    }
+
+    fn assign_to(
+        &mut self,
+        loc: Box<dyn crate::lvalue::LValue>,
+        e: &Expr,
+        is_zero: bool,
+        sb: Option<&mut crate::lvalue::StoreBuf>,
+        in_place_ok: bool,
     ) {
         // Can we initialize it in place?
         let inner = crate::builder::unparen(e);
-        if let Expr::CompositeLit(_) = inner {
+        if let Expr::CompositeLit(cl) = inner {
             // A composite literal never evaluates to a pointer, so if the
             // location's type is a pointer, an `&`-operation is implied.
             if !loc.is_blank() && guff_types::is_pointer(&self.prog.type_arena, loc.typ()) {
@@ -1476,6 +1524,29 @@ impl<'a> Builder<'a> {
                 match sb {
                     Some(sb) => sb.store(loc, ptr),
                     None => loc.store(self, ptr),
+                }
+                return;
+            }
+            if in_place_ok
+                && self.prog.mode.contains(crate::mode::BuilderMode::IR_IN_PLACE_PARTIAL_ARRAYS)
+                && loc.is_address()
+                && self.partial_array_in_place(cl, loc.typ())
+            {
+                // x = [N]T{...} or x := [N]T{...} with fewer than N elements.
+                let addr = loc.address(self);
+                let lit = crate::lvalue::DebugExpr::of_composite_lit(cl);
+                match sb {
+                    Some(sb) => {
+                        self.comp_lit(addr, cl, is_zero, sb);
+                        // Not before the stores into `addr` have happened.
+                        sb.store_addr_debug_ref(lit, addr);
+                    }
+                    None => {
+                        let mut sb = crate::lvalue::StoreBuf::new();
+                        self.comp_lit(addr, cl, is_zero, &mut sb);
+                        sb.emit(self);
+                        self.emit_debug_ref_at(lit, addr, true);
+                    }
                 }
                 return;
             }
@@ -1487,6 +1558,46 @@ impl<'a> Builder<'a> {
             Some(sb) => sb.store(loc, rhs),
             None => loc.store(self, rhs),
         }
+    }
+
+    /// partial_array_in_place reports whether `assign` fills the array literal
+    /// `cl` straight into a location of type `loc_ty`: an array (not slice)
+    /// literal that lists at least one but not every element.
+    ///
+    /// honnef's IR (go/ir v0.8.2 `builder.assign`) initializes *every*
+    /// composite literal in place at an `*address` whose type is not an
+    /// interface, and its `compLit` then writes a partial array through
+    /// `IndexAddr`s of the location itself — so the location's `Alloc` is not
+    /// lifted and the literal's DebugRef (`IsAddr`) names that `Alloc`.
+    /// SA4006 reads that as "used": staticcheck never reports
+    /// `ar = [3]int{g()}`. For a struct, an empty literal, or an array that
+    /// lists every element its `compLit` builds one `CompositeValue` and
+    /// stores it once, which after lifting is the same value guff's copy
+    /// produces; guff fills those through `FieldAddr`/`IndexAddr` (go/ssa's
+    /// form), and doing that in place would keep the `Alloc` alive where
+    /// honnef's is lifted. Slices and maps store a fresh value either way.
+    ///
+    /// DEFERRED: a literal of type-parameter type (`t = T{g()}` or `ar =
+    /// T{g()}` with `T ~[3]int`), which honnef fills in place through
+    /// `CoreType(T)` — guff's `comp_lit` does not take the core type of a
+    /// type parameter, so those still copy.
+    fn partial_array_in_place(
+        &mut self,
+        cl: &guff::ast::CompositeLit,
+        loc_ty: guff_types::TypeId,
+    ) -> bool {
+        use guff_types::TypeData;
+        let lit_ty = self.type_of(cl.id);
+        let arena = &self.prog.type_arena;
+        if !matches!(arena.get(loc_ty.underlying(arena)), TypeData::Array(_)) {
+            return false;
+        }
+        let u = lit_ty.underlying(arena);
+        if !matches!(arena.get(u), TypeData::Array(_)) {
+            return false;
+        }
+        let n = cl.elts.len() as i64;
+        n > 0 && n != guff_types::array_len(arena, u)
     }
 
     /// comp_lit emits code to initialize the aggregate at address `addr` from
@@ -1604,7 +1715,7 @@ impl<'a> Builder<'a> {
                 pos,
                 expr: Some(crate::lvalue::DebugExpr::of(value_expr)),
             });
-            self.assign(loc, value_expr, is_zero, Some(sb));
+            self.assign_composite_element(loc, value_expr, is_zero, Some(sb));
         }
     }
 
@@ -1672,7 +1783,7 @@ impl<'a> Builder<'a> {
         // The array value to fill and its element type. A slice allocates a
         // fresh backing array of length `arrayLen(elts)`; an array fills `addr`
         // in place, clearing it first for a partial literal.
-        let (array, elem) = if is_slice {
+        let (array, elem, full) = if is_slice {
             let elem = guff_types::slice_elem(&self.prog.type_arena, u);
             let len = self.array_len(&cl.elts);
             let at = guff_types::new_array(&mut self.prog.type_arena, elem, len);
@@ -1680,7 +1791,7 @@ impl<'a> Builder<'a> {
             let block = self.block.expect("no current block");
             let array =
                 crate::emit::emit_new(self.prog, fid, block, at, cl.lbrace, "slicelit".to_string());
-            (array, elem)
+            (array, elem, cl.elts.len() as i64 == len)
         } else {
             let elem = guff_types::array_elem(&self.prog.type_arena, u);
             let alen = guff_types::array_len(&self.prog.type_arena, u);
@@ -1690,7 +1801,7 @@ impl<'a> Builder<'a> {
                 let loc = Box::new(crate::lvalue::Address { addr, typ, pos: cl.lbrace, expr: None });
                 sb.store(loc, zero);
             }
-            (addr, elem)
+            (addr, elem, cl.elts.len() as i64 == alen)
         };
 
         let ptr_elem = guff_types::new_pointer(&mut self.prog.type_arena, elem);
@@ -1719,10 +1830,14 @@ impl<'a> Builder<'a> {
                 pos,
                 expr: Some(crate::lvalue::DebugExpr::of(value_expr)),
             });
-            if is_slice {
-                self.assign(loc, value_expr, true, None);
+            // A literal listing every element is honnef's `CompositeValue`
+            // (its slots are `compositeElement`s); a partial one fills
+            // `*address`es of `IndexAddr`s.
+            let sb = if is_slice { None } else { Some(&mut *sb) };
+            if full {
+                self.assign_composite_element(loc, value_expr, true, sb);
             } else {
-                self.assign(loc, value_expr, true, Some(sb));
+                self.assign(loc, value_expr, true, sb);
             }
         }
 

@@ -38526,3 +38526,17 @@ x/tools v0.50 の `compLit` は struct のフィールド・array/slice の要�
 `emit_store` が変換後の値を返すようにし、4 か所に `expr` を足した。ssadump v0.50 `-build=DF` と 30 形の DebugRef 列（descr@位置）が一致。
 SA4006 の件数は main・新コード・2.15.0 で同じ（golden `staticcheck-sa` に `sa4006/complit` 8 件）。測っている途中で既存差を 1 つ見つけた：
 既存の変数への部分 array リテラル `ar = [3]int{g()}` を guff だけが SA4006 で出す（honnef go/ir の `assign` は in-place で初期化して Alloc を指す。台帳 §1.3 に needs-port で記録）。
+
+### 2026-11-28 — SSA：部分 array リテラルを in-place で初期化（Phase 9 台帳 §1.3）
+
+honnef go/ir v0.8.2 の `assign` は、interface でない `*address` に代入する合成リテラルを in-place で初期化する。部分 array（要素数が 1 以上で長さ未満）の場合、`compLit` は変数自身の
+IndexAddr に書き込み、リテラルの DebugRef（IsAddr）は変数の Alloc を指す。Alloc は lift されないので、SA4006 はこの値を「使われている」と判断する。
+x/tools v0.52 の go/ssa は in-place にしない。guff は go/ssa 流に一時 Alloc 経由でコピーしていたので、`ar = [3]int{g()}`・`x := [3]int{g()}`・keyed・named・`[3]any`・
+並列代入・外側が部分の `[2][3]int`・括弧付きの 9 形を guff だけが報告していた。
+`assign` に in-place の枝を足し、部分 array に限った。struct・全要素・空は honnef でも CompositeValue を 1 回 store するだけで、lift 後は同じ値になる。guff はそれを FieldAddr/IndexAddr で組むので、in-place にすると Alloc が残り、上流が出す SA4006（全要素の `ar = [3]int{1, 2, g()}` など）が消える。
+struct のフィールドと全要素 array の要素スロットは honnef では `compositeElement` なので in-place にしない（`assign_composite_element`）。DebugRef の順序のため、`StoreBuf` に honnef の `storeDebugRef` 相当を足した。
+この枝は新しい `BuilderMode::IR_IN_PLACE_PARTIAL_ARRAYS` の下でだけ動き、そのモードは `buildir` だけが立てる。
+wastedassign・gosec・loggercheck は自前で go/ssa（v0.52 は常にコピー）の形を組むので対象外にした。wastedassign は変数への 1 回の Store を見るので、in-place にすると `x := [3]int{g()}` の finding が消える（セルフレビューで指摘。golden `wastedassign` に `arraylit` 4 件を追加して固定）。
+あわせて `assign_lhs` が識別子ごとに `is_zero` を返すようにした（honnef の `assignLHS` と同じく、新しく定義される変数だけ true）。こうしないと、再宣言の `n, c := 0, [3]int{g()}` で memclear が抜ける。
+fixture `sa4006/complit_partial`（25 関数）が全 SA check で 2.15.0 と一致した。
+guff-ssa には、モードありの DebugRef 列テストを足した。各リテラルの address/値の別と memclear の数が、honnef v0.8.2 の `ValueForExpr` と IR に一致する。モードなしの既存テスト（ssadump v0.50 と一致）はそのまま通る。
