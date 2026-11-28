@@ -114,6 +114,17 @@ pub fn lift(prog: &mut Program, func_id: FuncId) -> bool {
                         }
                     }
                 }
+                // `rename` turned every address DebugRef of a lifted cell into
+                // a value one; what still points at the cell is a non-address
+                // ref to an Alloc that no longer exists. (Go: `instr.X = nil`
+                // and the DebugRef is deleted.)
+                InstrData::DebugRef(d) => {
+                    if let Value::Instr(addr_id) = d.x {
+                        if let InstrData::Alloc(a) = f.instrs.get(addr_id) {
+                            if a.index >= 0 { continue; }
+                        }
+                    }
+                }
                 _ => {}
             }
             new_instrs.push(instr_id);
@@ -257,6 +268,15 @@ fn rename(
                         } else { None }
                     } else { None }
                 }
+                InstrData::DebugRef(dr) => {
+                    if let Value::Instr(addr_id) = dr.x {
+                        if let InstrData::Alloc(alloc) = f.instrs.get(addr_id) {
+                            if alloc.index >= 0 && dr.is_addr {
+                                Some(RenameAction::DebugRef(alloc.index, alloc.typ))
+                            } else { None }
+                        } else { None }
+                    } else { None }
+                }
                 _ => None,
             }
         };
@@ -269,11 +289,24 @@ fn rename(
                 renaming[idx as usize] = Some(val);
             }
             Some(RenameAction::Load(idx, typ)) => {
-                let new_val = renaming[idx as usize].unwrap_or_else(|| {
-                    prog.emit_const(None, typ)
-                });
+                let new_val = renamed(prog, renaming, idx, typ);
                 let f = prog.functions.get_mut(func_id);
                 replace_all(f, Value::Instr(instr_id), new_val);
+            }
+            Some(RenameAction::DebugRef(idx, alloc_typ)) => {
+                // A source expression denoting the cell's address now denotes
+                // the value the cell holds at this point. (Go: lift.go `case
+                // *DebugRef`, honnef go/ir lift.go likewise.) A non-address
+                // DebugRef of a lifted cell — the address of an Alloc that was
+                // optimized away — is left for `lift`'s sweep to delete.
+                let typ = guff_types::pointer_elem(&prog.type_arena, alloc_typ);
+                let new_val = renamed(prog, renaming, idx, typ);
+                let f = prog.functions.get_mut(func_id);
+                if let InstrData::DebugRef(dr) = f.instrs.get_mut(instr_id) {
+                    dr.x = new_val;
+                    dr.is_addr = false;
+                }
+                f.referrers.as_mut().unwrap().entry(new_val).or_default().push(instr_id);
             }
             None => {}
         }
@@ -298,9 +331,7 @@ fn rename(
                 // The zero value for a never-stored cell has the pointee type
                 // `T`, not the Alloc's own `*T`. (Go: `zeroConst(deref(...))`.)
                 let typ = guff_types::pointer_elem(&prog.type_arena, alloc_typ);
-                let new_val = renaming[idx as usize].unwrap_or_else(|| {
-                    prog.emit_const(None, typ)
-                });
+                let new_val = renamed(prog, renaming, idx, typ);
                 let f = prog.functions.get_mut(func_id);
                 if let InstrData::Phi(phi) = f.instrs.get_mut(phi_id) {
                     phi.edges[pred_idx] = Some(new_val);
@@ -324,6 +355,21 @@ enum RenameAction {
     KillAlloc(i32),
     Store(i32, Value),
     Load(i32, guff_types::TypeId),
+    /// An `IsAddr` DebugRef of a lifted cell: its index and the Alloc's `*T`.
+    DebugRef(i32, guff_types::TypeId),
+}
+
+/// The value the cell numbered `idx` is being renamed to. A cell not yet
+/// stored to on this path reads as the zero of its pointee type `typ`, and
+/// that zero is remembered so later reads on the same path share it.
+/// (Go: `renamed`)
+fn renamed(prog: &mut Program, renaming: &mut [Option<Value>], idx: i32, typ: guff_types::TypeId) -> Value {
+    if let Some(v) = renaming[idx as usize] {
+        return v;
+    }
+    let v = prog.emit_const(None, typ);
+    renaming[idx as usize] = Some(v);
+    v
 }
 
 fn replace_all(f: &mut Function, x: Value, y: Value) {

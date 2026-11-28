@@ -166,10 +166,6 @@ fn test_range_assign_instrs_v052() {
 
 /// The DebugRef lines of `ssadump -build=DF` for the same functions, minus
 /// the references to called functions, package qualifier dropped.
-/// `localAssign` is left out: its `var i, x int` refs differ because guff's
-/// `lift` does not rename an `IsAddr` DebugRef of a lifted Alloc to the
-/// cell's value (go/ssa lift.go `case *DebugRef`; PHASE9-LEDGER
-/// xtools-substrate, needs-port) — unrelated to the range statement.
 #[test]
 fn test_range_assign_debugrefs_v052() {
     let cases: &[(&str, &[&str])] = &[
@@ -183,6 +179,7 @@ fn test_range_assign_debugrefs_v052() {
         ("define", &["; var n int @ 39:2 is 0", "; var s []int @ 40:20 is s", "; var i int @ 40:6 is t3", "; var x int @ 40:9 is t6", "; var i int @ 41:8 is t3", "; var x int @ 41:12 is t6", "; *ast.BinaryExpr @ 41:8 is t7", "; var n int @ 41:3 is t8", "; var n int @ 43:9 is t1"]),
         ("defineEscape", &["; var s []int @ 46:20 is s", "; var i int @ 46:6 is t2", "; var x int @ 46:9 is t5", "; *ast.FuncLit @ 47:10 is t8", "; var sink func() @ 47:3 is t8"]),
         ("defineMapEscape", &["; var m map[string]int @ 51:20 is m", "; var k string @ 51:6 is t3", "; var v int @ 51:9 is t4", "; *ast.FuncLit @ 52:10 is t7", "; var sink func() @ 52:3 is t7"]),
+        ("localAssign", &["; var i int @ 61:6 is 0", "; var x int @ 61:9 is 0", "; var s []int @ 62:19 is s", "; var i int @ 62:6 is t4", "; var x int @ 62:9 is t7", "; var i int @ 64:9 is t1", "; var x int @ 64:13 is t2", "; *ast.BinaryExpr @ 64:9 is t8"]),
         ("idxAssign", &["; var s []int @ 67:25 is s", "; var a []int @ 67:6 is a", "; var a []int @ 67:12 is a", "; *ast.IndexExpr @ 67:6 is t2", "; *ast.IndexExpr @ 67:12 is t5"]),
     ];
     let mut bad = Vec::new();
