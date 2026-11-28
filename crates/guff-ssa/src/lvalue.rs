@@ -79,6 +79,12 @@ pub trait LValue {
     fn is_blank(&self) -> bool {
         false
     }
+    /// Reports whether this is a plain [`Address`] — the only lvalue that
+    /// honnef's IR initializes a composite literal into in place. (Go, honnef
+    /// go/ir v0.8.2: `loc.(*address)` in `builder.assign`.)
+    fn is_address(&self) -> bool {
+        false
+    }
 }
 
 /// StoreBuf accumulates deferred stores so that a group of assignments can
@@ -88,7 +94,16 @@ pub trait LValue {
 /// being initialized. (Go: `storebuf`.)
 #[derive(Default)]
 pub struct StoreBuf {
-    stores: Vec<(Box<dyn LValue>, Value)>,
+    stores: Vec<Deferred>,
+}
+
+/// One entry of a [`StoreBuf`]: a store, or a DebugRef that must not be
+/// emitted before the stores queued ahead of it. (Go, honnef go/ir v0.8.2:
+/// `store`, whose `debugRef` field excludes the others.)
+enum Deferred {
+    Store(Box<dyn LValue>, Value),
+    /// The address DebugRef of a composite literal initialized in place.
+    AddrDebugRef(DebugExpr, Value),
 }
 
 impl StoreBuf {
@@ -98,14 +113,24 @@ impl StoreBuf {
 
     /// Appends a deferred store of `rhs` into `lhs`. (Go: `storebuf.store`.)
     pub fn store(&mut self, lhs: Box<dyn LValue>, rhs: Value) {
-        self.stores.push((lhs, rhs));
+        self.stores.push(Deferred::Store(lhs, rhs));
+    }
+
+    /// Appends a DebugRef recording that `e` lives at address `addr`, emitted
+    /// after the stores appended so far. (Go, honnef go/ir v0.8.2:
+    /// `storebuf.storeDebugRef`.)
+    pub fn store_addr_debug_ref(&mut self, e: DebugExpr, addr: Value) {
+        self.stores.push(Deferred::AddrDebugRef(e, addr));
     }
 
     /// Emits all buffered stores, in the order they were appended. (Go:
     /// `storebuf.emit`.)
     pub fn emit(self, b: &mut Builder) {
-        for (lhs, rhs) in self.stores {
-            lhs.store(b, rhs);
+        for d in self.stores {
+            match d {
+                Deferred::Store(lhs, rhs) => lhs.store(b, rhs),
+                Deferred::AddrDebugRef(e, addr) => b.emit_debug_ref_at(e, addr, true),
+            }
         }
     }
 }
@@ -146,6 +171,10 @@ impl LValue for Address {
 
     fn typ(&self) -> TypeId {
         self.typ
+    }
+
+    fn is_address(&self) -> bool {
+        true
     }
 }
 

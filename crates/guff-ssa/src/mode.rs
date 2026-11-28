@@ -28,6 +28,13 @@ impl BuilderMode {
     /// Instantiate generics functions (monomorphize) while building.
     /// (Go: `InstantiateGenerics`)
     pub const INSTANTIATE_GENERICS: Self = Self(1 << 8);
+    /// guff-only, not in go/ssa: initialize a *partial* array literal in
+    /// place when it is assigned to a plain address, as honnef's IR (go/ir
+    /// v0.8.2 `builder.assign`) does — staticcheck's view of the code. x/tools
+    /// v0.52's go/ssa always copies; builds for go/ssa-based linters
+    /// (wastedassign, gosec, …) leave this off. Set by `buildir`. Has no
+    /// letter in [`BuilderMode::set`].
+    pub const IR_IN_PLACE_PARTIAL_ARRAYS: Self = Self(1 << 9);
 
     /// Returns `true` if `self` contains all of the flags in `other`.
     pub fn contains(&self, other: Self) -> bool {

@@ -247,7 +247,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     // GLOBAL_DEBUG emits DebugRefs needed by ValueForExpr (SA4006/SA4031).
     // When those checks are off, skip the extra IR — settings default to true
     // so unset bags (unit tests) stay conservative.
-    let mode = if pass
+    let mut mode = if pass
         .settings::<bool>("buildir_global_debug")
         .copied()
         .unwrap_or(true)
@@ -256,6 +256,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     } else {
         BuilderMode::default()
     };
+    // staticcheck builds honnef's IR, which fills a partial array literal in
+    // place (SA4006 then never reports `ar = [3]int{g()}`). The go/ssa
+    // linters that also read this IR (nilness, nilerr, unparam, …) see no
+    // difference there: indexing a local array addresses it either way.
+    mode |= BuilderMode::IR_IN_PLACE_PARTIAL_ARRAYS;
     // go/ssa drops the statements after a call that cannot return, and every
     // linter downstream of `buildssa` sees the IR that way. `ctrlflow` is what
     // knows which calls those are. (Go: `buildssa`'s

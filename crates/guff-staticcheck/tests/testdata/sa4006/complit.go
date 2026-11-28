@@ -8,9 +8,9 @@ package complit
 // slice or map literal's final store records the literal itself; these are
 // the shapes whose first DebugRef for an expression could move.
 //
-// Not here: a partial array literal assigned to an existing variable
-// (`ar = [3]int{g()}` then overwritten). staticcheck's IR initializes it in
-// place and does not report it; guff does (PHASE9-LEDGER, needs-port).
+// Not here: a partial array literal assigned to a variable (`ar =
+// [3]int{g()}` then overwritten), which staticcheck's IR initializes in place
+// and never reports — those shapes are in complit_partial.go.
 
 type T struct {
 	A int

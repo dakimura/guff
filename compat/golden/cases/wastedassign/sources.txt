@@ -4,3 +4,5 @@ bad.go  compat/isolate/fixtures/wastedassign/bad.go
 # same file is a named receive variable in the same two-case `select`.
 blank/blank.go  crates/guff-style/tests/testdata/wastedassign/blank.go
 branch/branch.go  crates/guff-style/tests/testdata/wastedassign/branch.go
+# Array literals, partial and full: go/ssa copies them all.
+arraylit/arraylit.go  crates/guff-style/tests/testdata/wastedassign/arraylit.go

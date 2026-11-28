@@ -134,12 +134,17 @@ fn test_debugref_disassembly() {
 
 /// Builds `f` from `src` under GLOBAL_DEBUG and returns its disassembly.
 fn disasm_debug(src: &str) -> String {
+    disasm_debug_mode(src, BuilderMode::GLOBAL_DEBUG)
+}
+
+/// [`disasm_debug`] under an explicit builder mode.
+fn disasm_debug_mode(src: &str, mode: BuilderMode) -> String {
     let fset = FileSet::new();
     let file = parse_file(&fset, "test.go", src.as_bytes(), Mode::NONE).expect("parse failed");
     let mut check = Checker::new(Config::default());
     check.check_files(vec![file.clone()]);
     let mut prog = Program::new(
-        BuilderMode::GLOBAL_DEBUG,
+        mode,
         check.info,
         check.types,
         check.objects,
@@ -335,4 +340,77 @@ func f(p *int, sl []int, y int, z error) {
     assert_ne!(value_of("var y int @ 11:17", 0), value_of("var y int @ 11:17", 1), "{asm}");
     assert_eq!(value_of("var y int @ 11:11", 0), value_of("var y int @ 11:11", 1), "{asm}");
     assert_ne!(value_of("var w any @ 30:2", 0), value_of("var y int @ 30:6", 0), "{asm}");
+}
+
+/// Under `IR_IN_PLACE_PARTIAL_ARRAYS` (buildir, what staticcheck reads) a
+/// partial array literal assigned to a variable fills that variable in place,
+/// as honnef's IR (go/ir v0.8.2 `builder.assign`) does: the cell's address
+/// DebugRef, the memclear unless the cell is freshly defined, the element
+/// stores, then the literal recorded *as the cell's address*. Everything else
+/// still copies through a temporary. Address-or-value of the first DebugRef of
+/// each literal matches honnef's `fn.ValueForExpr` on this source, measured with
+/// `irutil.Packages(…, ir.GlobalDebug)`; a `:=` that only redeclares `c`
+/// clears it first (honnef's `assignLHS` reports `isZero` for defined
+/// variables only).
+#[test]
+fn test_partial_array_literal_in_place_under_ir_mode() {
+    const SRC: &str = "package p
+
+type S struct{ arr [3]int }
+
+func f(y int) {
+	var ar [3]int
+	ar = [3]int{y}
+	_ = ar
+	b := [...]any{3: y}
+	_ = b
+	c := [3]int{1, 2, 3}
+	n, c := 0, [3]int{y}
+	_, _ = n, c
+	full := [3]int{y, y, y}
+	_ = full
+	s := S{arr: [3]int{y}}
+	_ = s
+	nest := [2][3]int{{y}}
+	_ = nest
+}";
+    let asm = disasm_debug_mode(
+        SRC,
+        BuilderMode::GLOBAL_DEBUG | BuilderMode::IR_IN_PLACE_PARTIAL_ARRAYS,
+    );
+    let lits: Vec<&str> = asm
+        .lines()
+        .filter_map(|l| l.split_once("; ").map(|(_, r)| r))
+        .filter(|r| r.contains("*ast.CompositeLit @ "))
+        .filter_map(|r| r.split_once(" is ").map(|(d, _)| d))
+        .collect();
+    assert_eq!(
+        lits,
+        [
+            "address of *ast.CompositeLit @ 7:7",   // ar = [3]int{y}
+            "address of *ast.CompositeLit @ 9:7",   // b := [...]any{3: y}
+            "*ast.CompositeLit @ 11:7",             // c := full: copied
+            "address of *ast.CompositeLit @ 12:13", // n, c := 0, [3]int{y}
+            "*ast.CompositeLit @ 14:10",            // full: copied
+            // struct field slot: copied (the read, then the slot's store)
+            "*ast.CompositeLit @ 16:14",
+            "*ast.CompositeLit @ 16:14",
+            "*ast.CompositeLit @ 16:7",
+            // inner {y}, in place: the element slot's address, then the literal
+            "address of *ast.CompositeLit @ 18:20",
+            "address of *ast.CompositeLit @ 18:20",
+            "address of *ast.CompositeLit @ 18:10", // nest, in place
+        ],
+        "{asm}"
+    );
+    // Each in-place literal names its variable's cell; a defined `b` and
+    // `nest` skip the memclear, the existing `ar` and redeclared `c` do not.
+    let zero_stores = asm.lines().filter(|l| l.contains(" = [3]int{}")).count();
+    assert_eq!(zero_stores, 2, "{asm}");
+    assert!(!asm.contains(" = [4]any{}"), "{asm}");
+    assert!(!asm.contains(" = [2][3]int{}"), "{asm}");
+
+    // Without the mode (go/ssa, x/tools v0.52) nothing is filled in place.
+    let plain = disasm_debug(SRC);
+    assert!(!plain.contains("address of *ast.CompositeLit"), "{plain}");
 }
