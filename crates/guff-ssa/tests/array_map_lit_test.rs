@@ -58,9 +58,9 @@ func mp() map[string]int     { return map[string]int{\"a\": 1, \"b\": 2} }
 func mpempty() map[string]int { return map[string]int{} }
 ";
 
-/// A fully-specified array literal writes each element in place. Because the
-/// array is filled through the store buffer, all `IndexAddr`s precede all
-/// stores, and the aggregate is then loaded and returned.
+/// A fully-specified array literal writes each element in place, each store
+/// right after its `IndexAddr` (x/tools v0.52; v0.50 buffered the stores
+/// after every `IndexAddr`), and the aggregate is then loaded and returned.
 #[test]
 fn test_array_literal() {
     let asm = build("aslit", BuilderMode::default());
@@ -69,10 +69,10 @@ fn test_array_literal() {
     assert!(asm.contains("t1 = &t0[0]"), "expected &t0[0]:\n{asm}");
     assert!(asm.contains("t2 = &t0[1]"), "expected &t0[1]:\n{asm}");
     assert!(asm.contains("t3 = &t0[2]"), "expected &t0[2]:\n{asm}");
-    // All index addresses precede all stores (storebuf ordering).
-    let last_addr = asm.find("t3 = &t0[2]").unwrap();
+    // Each store follows its own index address, before the next one.
+    let second_addr = asm.find("t2 = &t0[1]").unwrap();
     let first_store = asm.find("*t1 = 1").unwrap();
-    assert!(last_addr < first_store, "index addresses must precede stores:\n{asm}");
+    assert!(first_store < second_addr, "stores must interleave with index addresses:\n{asm}");
     assert!(
         asm.contains("*t1 = 1") && asm.contains("*t2 = 2") && asm.contains("*t3 = 3"),
         "expected element stores:\n{asm}"

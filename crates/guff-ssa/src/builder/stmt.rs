@@ -1521,6 +1521,9 @@ impl<'a> Builder<'a> {
             // location's type is a pointer, an `&`-operation is implied.
             if !loc.is_blank() && guff_types::is_pointer(&self.prog.type_arena, loc.typ()) {
                 let ptr = self.address(inner, true).address(self);
+                // x/tools v0.52 reaches the implied `&` through `expr`
+                // (`expr0`), which records the literal's value as well.
+                self.emit_implied_addr_debug_ref(inner, ptr);
                 match sb {
                     Some(sb) => sb.store(loc, ptr),
                     None => loc.store(self, ptr),
@@ -1602,9 +1605,18 @@ impl<'a> Builder<'a> {
 
     /// comp_lit emits code to initialize the aggregate at address `addr` from
     /// the composite literal `cl`. `is_zero` reports whether `addr` already holds
-    /// the zero value (so field/element clearing can be skipped). Stores are
-    /// appended to `sb` for correct in-place initialization. (Go:
+    /// the zero value (so field/element clearing can be skipped). (Go:
     /// `builder.compLit`.)
+    ///
+    /// In x/tools v0.52 `addr` is always a fresh zero-valued `Alloc` that no
+    /// element expression can reach, so each field/element is stored as soon
+    /// as it is evaluated and nothing is appended to `sb`. Under
+    /// [`BuilderMode::IR_COMPLIT_STOREBUF`] (buildir) the stores are instead
+    /// appended to `sb`, as v0.50 did and as honnef's IR orders them, and
+    /// `addr` may be an existing variable initialized in place (`is_zero`
+    /// false, the memclear branches).
+    ///
+    /// [`BuilderMode::IR_COMPLIT_STOREBUF`]: crate::mode::BuilderMode::IR_COMPLIT_STOREBUF
     pub(crate) fn comp_lit(
         &mut self,
         addr: crate::value::Value,
@@ -1635,6 +1647,48 @@ impl<'a> Builder<'a> {
         }
     }
 
+    /// complit_defers_stores reports whether [`comp_lit`](Builder::comp_lit)
+    /// buffers its stores into the literal's storage (buildir) rather than
+    /// emitting each one right after its value (x/tools v0.52's go/ssa).
+    ///
+    /// `IR_IN_PLACE_PARTIAL_ARRAYS` implies it: a literal filled in place
+    /// into an existing variable may read that variable (`ar = [3]int{ar[2]}`),
+    /// so every read must precede the first store.
+    fn complit_defers_stores(&self) -> bool {
+        use crate::mode::BuilderMode;
+        self.prog.mode.contains(BuilderMode::IR_COMPLIT_STOREBUF)
+            || self.prog.mode.contains(BuilderMode::IR_IN_PLACE_PARTIAL_ARRAYS)
+    }
+
+    /// emit_implied_addr_debug_ref records the value of a composite literal
+    /// `cl` whose implicit type is a pointer (`[]*T{{}}`'s element,
+    /// `map[*T]V{{}: …}`'s key), which `ptr` holds. x/tools v0.52 builds that
+    /// `&T{…}` in `expr0`, so `expr`'s DebugRef follows the `address of` one;
+    /// v0.50's `assign` (and honnef's IR) took the address directly and
+    /// recorded nothing more, which buildir keeps.
+    fn emit_implied_addr_debug_ref(&mut self, cl: &Expr, ptr: crate::value::Value) {
+        if !self.complit_defers_stores() {
+            self.emit_debug_ref(cl, ptr, false);
+        }
+    }
+
+    /// complit_store stores `v` into `loc` for [`comp_lit`](Builder::comp_lit):
+    /// through `sb` under [`complit_defers_stores`](Builder::complit_defers_stores),
+    /// otherwise at once. (Go: `(&address{…}).store(fn, v)` in v0.52's
+    /// `compLit`.)
+    fn complit_store(
+        &mut self,
+        loc: Box<dyn crate::lvalue::LValue>,
+        v: crate::value::Value,
+        sb: &mut crate::lvalue::StoreBuf,
+    ) {
+        if self.complit_defers_stores() {
+            sb.store(loc, v);
+        } else {
+            loc.store(self, v);
+        }
+    }
+
     /// comp_lit_struct handles the struct case of [`comp_lit`]. Each element is a
     /// field initializer, keyed (`{f: v}`) or positional (`{v0, v1}`). A key
     /// names a direct field, or since Go 1.27 a promoted one, whose address is
@@ -1654,7 +1708,7 @@ impl<'a> Builder<'a> {
             // value of `typ`, since `addr` holds a `*typ`). (Go: memclear.)
             let zero = self.prog.emit_const(None, typ);
             let loc = Box::new(crate::lvalue::Address { addr, typ, pos: cl.lbrace, expr: None });
-            sb.store(loc, zero);
+            self.complit_store(loc, zero, sb);
             is_zero = true;
         }
 
@@ -1715,7 +1769,8 @@ impl<'a> Builder<'a> {
                 pos,
                 expr: Some(crate::lvalue::DebugExpr::of(value_expr)),
             });
-            self.assign_composite_element(loc, value_expr, is_zero, Some(sb));
+            let sb = if self.complit_defers_stores() { Some(&mut *sb) } else { None };
+            self.assign_composite_element(loc, value_expr, is_zero, sb);
         }
     }
 
@@ -1799,7 +1854,7 @@ impl<'a> Builder<'a> {
                 // A partial literal of a non-zero location: clear it first.
                 let zero = self.prog.emit_const(None, typ);
                 let loc = Box::new(crate::lvalue::Address { addr, typ, pos: cl.lbrace, expr: None });
-                sb.store(loc, zero);
+                self.complit_store(loc, zero, sb);
             }
             (addr, elem, cl.elts.len() as i64 == alen)
         };
@@ -1833,7 +1888,9 @@ impl<'a> Builder<'a> {
             // A literal listing every element is honnef's `CompositeValue`
             // (its slots are `compositeElement`s); a partial one fills
             // `*address`es of `IndexAddr`s.
-            let sb = if is_slice { None } else { Some(&mut *sb) };
+            // A slice's backing array is unaliased, so its stores are never
+            // buffered (v0.50 passed no storebuf there either).
+            let sb = if !is_slice && self.complit_defers_stores() { Some(&mut *sb) } else { None };
             if full {
                 self.assign_composite_element(loc, value_expr, true, sb);
             } else {
@@ -1843,7 +1900,7 @@ impl<'a> Builder<'a> {
 
         if is_slice {
             // Reslice the backing array (`slice array[:]`) and store the slice
-            // into `addr` through the store buffer.
+            // into `addr`.
             let block = self.block.expect("no current block");
             let sid = crate::emit::emit_with_pos(
                 self.func_mut(),
@@ -1863,7 +1920,7 @@ impl<'a> Builder<'a> {
                 pos: cl.lbrace,
                 expr: Some(crate::lvalue::DebugExpr::of_composite_lit(cl)),
             });
-            sb.store(loc, crate::value::Value::Instr(sid));
+            self.complit_store(loc, crate::value::Value::Instr(sid), sb);
         }
     }
 
@@ -1906,7 +1963,9 @@ impl<'a> Builder<'a> {
             let want_addr = matches!(inner, Expr::CompositeLit(_))
                 && guff_types::is_pointer(&self.prog.type_arena, key_ty);
             let key = if want_addr {
-                self.address(inner, true).address(self)
+                let ptr = self.address(inner, true).address(self);
+                self.emit_implied_addr_debug_ref(inner, ptr);
+                ptr
             } else {
                 self.expr(&kv.key)
             };
@@ -1925,7 +1984,7 @@ impl<'a> Builder<'a> {
             pos: cl.lbrace,
             expr: Some(crate::lvalue::DebugExpr::of_composite_lit(cl)),
         });
-        sb.store(loc, m);
+        self.complit_store(loc, m, sb);
     }
 
     /// array_len computes the length of the backing array for an array or slice

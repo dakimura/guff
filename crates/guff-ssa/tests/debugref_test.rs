@@ -242,11 +242,11 @@ func f(p *int, sl []int) {
 /// Composite-literal element slots and the final slice/map store carry their
 /// source expression (go/ssa `compLit`: `&address{…, expr: e}` for a struct
 /// field, an array/slice element, and the `Slice`/`MakeMap` stored into the
-/// literal's location; the memclear of a partial literal would have none, but
-/// v0.50 only reaches compLit with `isZero`), and every
+/// literal's location; v0.52 has no memclear, and v0.50 only reached
+/// compLit with `isZero`), and every
 /// store-DebugRef names the *converted* value (`store.Val`).
 ///
-/// `want` is `ssadump -build=DF` of golang.org/x/tools v0.50.0 on this source
+/// `want` is `ssadump -build=DF` of golang.org/x/tools v0.52.0 on this source
 /// with the values dropped (go/ssa prints after lifting; the one difference
 /// is the declarations `var a`/`var s`/`var ar`/`var w`, which lifting turns
 /// from `address of` into the zero value).
@@ -299,13 +299,14 @@ func f(p *int, sl []int, y int, z error) {
         .collect();
     let want = [
         "var a [2]int @ 7:6", "var s S @ 8:6", "var x int @ 9:2", "var x int @ 10:6",
-        // s = S{f: y, g: y}: each value read, then each slot store
-        "var y int @ 11:11", "var y int @ 11:17", "var y int @ 11:11", "var y int @ 11:17",
+        // s = S{f: y, g: y}: each value read, then its slot store (v0.52
+        // interleaves them; v0.50 read both values before either store)
+        "var y int @ 11:11", "var y int @ 11:11", "var y int @ 11:17", "var y int @ 11:17",
         "*ast.CompositeLit @ 11:6", "var s S @ 11:2", "var s S @ 12:6",
         // s = S{y, 7}: the constant has no read ref, only the slot's
         "var y int @ 13:8", "var y int @ 13:8", "*ast.BasicLit @ 13:11",
         "*ast.CompositeLit @ 13:6", "var s S @ 13:2",
-        "var y int @ 14:13", "var y int @ 14:19", "var y int @ 14:13", "var y int @ 14:19",
+        "var y int @ 14:13", "var y int @ 14:13", "var y int @ 14:19", "var y int @ 14:19",
         "*ast.CompositeLit @ 14:6", "var a [2]int @ 14:2", "var a [2]int @ 15:6",
         "var y int @ 16:19", "var y int @ 16:19", "*ast.CompositeLit @ 16:7",
         "var b [4]any @ 16:2", "var b [4]any @ 17:6",
@@ -326,8 +327,11 @@ func f(p *int, sl []int, y int, z error) {
         "var ar [3]int @ 26:6", "var y int @ 27:14", "var y int @ 27:14",
         "*ast.CompositeLit @ 27:7", "var ar [3]int @ 27:2", "var ar [3]int @ 28:6",
         "var w any @ 29:6", "var y int @ 30:6", "var w any @ 30:2", "var w any @ 31:6",
+        // []*S{{f: y}}: v0.52 builds the implied `&S{…}` in `expr`, whose
+        // DebugRef names the pointer before the slot store's
         "var y int @ 32:16", "var y int @ 32:16", "address of *ast.CompositeLit @ 32:12",
-        "*ast.CompositeLit @ 32:12", "*ast.CompositeLit @ 32:7", "*ast.CompositeLit @ 32:7",
+        "*ast.CompositeLit @ 32:12", "*ast.CompositeLit @ 32:12",
+        "*ast.CompositeLit @ 32:7", "*ast.CompositeLit @ 32:7",
         "var n []*S @ 32:2", "var n []*S @ 33:6",
     ];
     assert_eq!(descrs, want, "DebugRefs; full disassembly:\n{asm}");
