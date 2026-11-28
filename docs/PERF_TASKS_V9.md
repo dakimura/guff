@@ -328,7 +328,7 @@ V9-1 の確認のために `samply` で seed warm を取り直したところ、
 | `parser_resolver::{declare, walk_func_decl, short_var_decl, …}` | 約 1.5% | `ObjDecl` に入れる宣言ノード。`declare` が**識別子ごとに `decl.clone()` して元を捨てる**ので、`FuncDecl` は本体ごと 2 回、`var a, b, c` は 4 回、`x, err :=` は文が 2 回 | **完了**: `ObjDecl` を `Box` → `Arc`。1 宣言 1 clone |
 | `guff_ssa::builder::build_syntactic_body` / `if` / `for` | 約 0.5% | `self.stmt(&Stmt::BlockStmt(s.body.clone()))`。入れ子の本体を**深さの回数だけ**コピー | **完了**: `Builder::block_stmt(&BlockStmt)` |
 | `guff_types::return_check::{is_terminating, has_break}` の `if` | 小 | 同じ `Stmt::BlockStmt(s.body.clone())` の形 | **完了** |
-| `ssautil::load::build_package_for_analysis` | 0.51% | `builder/mod.rs` の `f.syntax_decl = Some(fd.clone())`（全関数の `FuncDecl` を本体ごと） | 未着手。`syntax_decl` の読み手を洗ってから |
+| `ssautil::load::build_package_for_analysis` | 0.51% | `builder/mod.rs` の `f.syntax_decl = Some(fd.clone())`（全関数の `FuncDecl` を本体ごと） | **完了**: 読み直すのはジェネリック関数のインスタンス化だけなので、型パラメータを持つ関数だけ `Arc` で保持。他の読み手 2 つ（purity の「ソースがあるか」と nilness の `func` 位置）は新設の `syntax_pos` を見る。prometheus cold で instructions −0.53%、peak RSS −46 MiB（交互 3 ペア、全ペア同符号）、findings 同一 |
 | `guff_ssa::builder::Builder::address` | 約 0.55% | `emit_call` / `assign` から来る `Expr` の clone | 未着手 |
 | `gofumpt::fumpter::apply_file` | 0.39% | `FuncDecl` の clone | 未着手 |
 | `facts::deprecated::run` | 約 0.5% | `Decl` の clone と `File` の drop（stack が LTO で潰れて出どころ未特定） | 未着手 |
@@ -545,7 +545,7 @@ analyze から CPU を奪うだけです。
 1. **`cargo build --release` を走らせ、`ls -l target/release/guff` の mtime を目視する**
    （第8弾 §📌 の事故。ルール11 相当として扱ってください）。
 2. ~~`V9-1`（`Ident` の文字列）から始める。~~ **2026-11-28 に測って NO-GO（§3.5）。**
-   代わりに **§V9-6 の表の「未着手」行**（`syntax_decl` の `FuncDecl` clone 0.51%、
+   代わりに **§V9-6 の表の「未着手」行**（~~`syntax_decl` の `FuncDecl` clone 0.51%~~ 完了、
    `Builder::address` の `Expr` clone 約 0.55% など）から。どれも「clone をやめて借用する」
    だけで、findings が変わらないことは prometheus の出力のバイト比較で確かめられます。
 3. RSS を続けるなら `V9-3` の残り＝ **`ObjectData`（104 B × 約 2.3M）のヴァリアント別サイズ**。

@@ -61,7 +61,8 @@ fn setup() -> (Program, guff_ssa::ids::FuncId, guff_types::TypeId) {
     {
         let f = prog.functions.get_mut(origin);
         f.from_syntax = fd.body.is_some();
-        f.syntax_decl = Some(fd.clone());
+        f.syntax_decl = Some(std::sync::Arc::new(fd.clone()));
+        f.syntax_pos = Some(fd.ty.pos());
     }
 
     let (_, table) = init_universe();

@@ -179,9 +179,20 @@ pub struct Function {
     /// Proxy for go/ssa's `fn.syntax != nil`, consulted when choosing a generic
     /// instance's build strategy. Set when a `FuncDecl` body is recorded.
     pub from_syntax: bool,
-    /// The function declaration AST when built from syntax; shared with generic
-    /// instances of this origin. (Go: `Function.syntax`.)
-    pub syntax_decl: Option<guff::ast::FuncDecl>,
+    /// The function declaration AST when built from syntax, kept only for a
+    /// generic function (one with type parameters or receiver type parameters):
+    /// its instances are built from this syntax and share it. (Go:
+    /// `Function.syntax`.) A non-generic declaration is translated once from the
+    /// borrowed AST and never re-read, so it is not copied here; use
+    /// [`Function::syntax_pos`] to ask whether a function came from a
+    /// declaration.
+    pub syntax_decl: Option<std::sync::Arc<guff::ast::FuncDecl>>,
+    /// `FuncDecl.Type.Pos()` of the declaration this function was built from
+    /// (the `func` keyword), for every function built by
+    /// [`crate::builder::build_function`] and for its generic instances; `None`
+    /// otherwise. Stands in for go/ssa's `fn.syntax != nil` / `fn.Syntax().Pos()`
+    /// on declared functions without keeping the AST alive.
+    pub syntax_pos: Option<Pos>,
     /// The origin (uninstantiated) generic function this function is an
     /// instance of, or `None` if this is not a generic instance. (Go:
     /// `Function.topLevelOrigin`.)
@@ -248,6 +259,7 @@ impl Function {
             uniq: 0,
             from_syntax: false,
             syntax_decl: None,
+            syntax_pos: None,
             top_level_origin: None,
             type_params: Vec::new(),
             type_args: Vec::new(),

@@ -91,6 +91,7 @@ impl Program {
         let orig_object = origin.object;
         let orig_from_syntax = origin.from_syntax;
         let orig_syntax_decl = origin.syntax_decl.clone();
+        let orig_syntax_pos = origin.syntax_pos;
         let orig_recv_tparams = if origin.recv_type_params.is_empty() {
             guff_types::signature::signature_recv_type_params(&self.type_arena, orig_sig)
                 .map(|l| l.list().to_vec())
@@ -165,7 +166,12 @@ impl Program {
             self.mode.contains(BuilderMode::INSTANTIATE_GENERICS) && !self.is_parameterized(&concat_owned(rtargs, targs));
         let (synthetic, strategy, subst) = if concrete {
             let syn = format!("instance of {}", orig_name);
-            if orig_from_syntax {
+            // Only a generic origin keeps its syntax (`build_function`). A
+            // non-generic origin can reach here through `object_method`'s
+            // same-name fallback; it has no type parameters to substitute, so
+            // build it params-only rather than re-translate an unrelated body.
+            let origin_generic = !orig_recv_tparams.is_empty() || !orig_tparams.is_empty();
+            if orig_from_syntax && origin_generic {
                 let subst = crate::subst::Subster::with_recv_and_type(
                     &orig_recv_tparams,
                     rtargs,
@@ -203,6 +209,7 @@ impl Program {
         inst.synthetic = Some(synthetic);
         inst.from_syntax = orig_from_syntax; // shares origin syntax (Go: `syntax: fn.syntax`)
         inst.syntax_decl = orig_syntax_decl;
+        inst.syntax_pos = orig_syntax_pos;
         inst.top_level_origin = Some(fn_id);
         inst.recv_type_params = orig_recv_tparams;
         inst.type_params = orig_tparams;
