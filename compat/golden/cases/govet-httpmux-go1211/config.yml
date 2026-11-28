@@ -1,0 +1,26 @@
+# Golden case: the `govet-httpmux` sources in a `go 1.21.1` module.
+#
+# httpmux's gate is `semver.Compare(version, "v1.21") > 0`, and v1.21.1 is
+# already after v1.21 — so httpmux reports nothing here, while
+# reflectvaluecompare (which has no version gate) reports exactly as it does
+# in `govet-httpmux`.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+  settings:
+    govet:
+      disable-all: true
+      enable:
+        - httpmux
+        - reflectvaluecompare
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

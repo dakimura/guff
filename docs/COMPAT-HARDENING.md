@@ -38573,3 +38573,9 @@ PERF_TASKS_V9 §V9-6 の「`walk_stmt` の `BlockStmt` clone」を外そうと�
 
 上流 `checkCopyLocksAssign` の末尾の枝（`for loop iteration copies lock value to %v: %v`）が guff に無かった。go1.22 以降はループ変数が反復ごとにコピーされるので、`for` の init 句の `:=` で lock を含む変数を宣言すると上流は報告する。条件は `Tok == DEFINE`・ファイル単位の版が go1.22 以上・親 `ForStmt` の `Init` がその代入・lhs が `_` 以外の Ident で `Defs` の型が lock を含むこと。rhs で「assignment copies lock value」を 1 件でも出したら lhs ごと捨てる（`lhs = nil`）ので二重には出ない。
 guff は preorder で `ForStmt` が init より先に来ることを使い、init の `AssignStmt` のアドレスを覚えて照合する。新しい golden case `govet-copylocks-loopvar`（go 1.24 module、`old.go` は `//go:build go1.21`）で 13 形を測り、golangci-lint 2.15.0 の 10 行（うち for-iteration 5 件）と一致させた。rhs がコピーする 2 形（単独／他の lock 変数と並ぶ）で抑制されること、`=`・body 内の `:=`・init の func literal 内の `:=`・pointer・range が黙ることも固定した。
+
+### 2026-11-29 — govet httpmux・reflectvaluecompare を新規移植（既定で無効の 2 analyzer）
+
+golangci の `allAnalyzers` にあって guff に実装が無かった 8 個のうち、AST だけで閉じる 2 個を x/tools v0.52.0 から移植した。どちらも `enable-all` か明示 `enable` でしか走らないので、どの golden にも現れない穴だった。
+httpmux の版判定は `pass.Pkg.GoVersion()`（module の `go` 行）を `semver.Compare(v, "v1.21") > 0` で見る。`go 1.21.1` は既に「1.21 より後」なので黙る（同じソースを `go 1.21.1` で回す `govet-httpmux-go1211` で固定）。callee は静的 callee の `FullName` で照合し、メソッドは宣言側の受け手（`*ServeMux`）を見るので、値の `http.ServeMux` や埋め込み経由の呼び出しも報告される。wildcard の正規表現 `[_\pL][_\pL\p{Nd}]*` は guff-ast の Go 版 `unicode.IsLetter`/`IsDigit` 表（doc comment 用に生成済み）で判定する。reflectvaluecompare は import の gate が無く、alias は透過・defined type は不透過、`reflect.Value{}` の免除は構文上の CompositeLit だけ（括弧で包むと報告）。
+新しい golden case `govet-httpmux`（go 1.21、35 行）と `govet-httpmux-go1211`（18 行、httpmux 0 件）が golangci-lint 2.15.0 と完全一致。残る未実装は asmdecl・atomicalign・deepequalerrors・findcall・shadow・sortslice・unusedwrite。sortslice は SuggestedFix（`format.Node` の出力）と `types.Type.String()` の文言が要るので別 PR。

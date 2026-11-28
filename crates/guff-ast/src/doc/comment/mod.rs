@@ -27,6 +27,11 @@ mod unicode_tables;
 pub use parse::{default_lookup_package, Parser};
 pub use print::Printer;
 
+/// Go's `unicode.IsLetter` (category L) and `unicode.IsDigit` (Nd), exact to
+/// the Go release the tables were generated from. Exported for analyzers that
+/// port a Go regexp class such as `[_\pL\p{Nd}]` (govet `httpmux`).
+pub use unicode_tables::{is_digit, is_letter};
+
 /// A parsed Go doc comment.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Doc {

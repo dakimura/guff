@@ -1,0 +1,43 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh govet-httpmux
+# Produced by running golangci-lint on compat/golden/cases/govet-httpmux/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.15.0
+
+a/a.go:10:18:govet::httpmux: possible enhanced ServeMux pattern used with Go version before 1.22 (update go.mod file?)
+a/a.go:11:18:govet::httpmux: possible enhanced ServeMux pattern used with Go version before 1.22 (update go.mod file?)
+a/a.go:13:13:govet::httpmux: possible enhanced ServeMux pattern used with Go version before 1.22 (update go.mod file?)
+a/a.go:14:17:govet::httpmux: possible enhanced ServeMux pattern used with Go version before 1.22 (update go.mod file?)
+a/a.go:51:13:govet::httpmux: possible enhanced ServeMux pattern used with Go version before 1.22 (update go.mod file?)
+a/a.go:52:16:govet::httpmux: possible enhanced ServeMux pattern used with Go version before 1.22 (update go.mod file?)
+a/a.go:53:13:govet::httpmux: possible enhanced ServeMux pattern used with Go version before 1.22 (update go.mod file?)
+a/a.go:54:13:govet::httpmux: possible enhanced ServeMux pattern used with Go version before 1.22 (update go.mod file?)
+a/a.go:55:13:govet::httpmux: possible enhanced ServeMux pattern used with Go version before 1.22 (update go.mod file?)
+a/a.go:56:13:govet::httpmux: possible enhanced ServeMux pattern used with Go version before 1.22 (update go.mod file?)
+a/a.go:59:13:govet::httpmux: possible enhanced ServeMux pattern used with Go version before 1.22 (update go.mod file?)
+a/a.go:60:13:govet::httpmux: possible enhanced ServeMux pattern used with Go version before 1.22 (update go.mod file?)
+a/a.go:61:13:govet::httpmux: possible enhanced ServeMux pattern used with Go version before 1.22 (update go.mod file?)
+a/a.go:67:13:govet::httpmux: possible enhanced ServeMux pattern used with Go version before 1.22 (update go.mod file?)
+a/a.go:70:11:govet::httpmux: possible enhanced ServeMux pattern used with Go version before 1.22 (update go.mod file?)
+a/a.go:71:24:govet::httpmux: possible enhanced ServeMux pattern used with Go version before 1.22 (update go.mod file?)
+a/a.go:79:14:govet::httpmux: possible enhanced ServeMux pattern used with Go version before 1.22 (update go.mod file?)
+rvc/a.go:12:6:govet::reflectvaluecompare: avoid using == with reflect.Value
+rvc/a.go:13:6:govet::reflectvaluecompare: avoid using == with reflect.Value
+rvc/a.go:14:6:govet::reflectvaluecompare: avoid using == with reflect.Value
+rvc/a.go:25:6:govet::reflectvaluecompare: avoid using != with reflect.Value
+rvc/a.go:26:6:govet::reflectvaluecompare: avoid using != with reflect.Value
+rvc/a.go:27:6:govet::reflectvaluecompare: avoid using != with reflect.Value
+rvc/a.go:38:2:govet::reflectvaluecompare: avoid using reflect.DeepEqual with reflect.Value
+rvc/a.go:39:2:govet::reflectvaluecompare: avoid using reflect.DeepEqual with reflect.Value
+rvc/a.go:40:2:govet::reflectvaluecompare: avoid using reflect.DeepEqual with reflect.Value
+rvc/a.go:56:6:govet::reflectvaluecompare: avoid using == with reflect.Value
+rvc/a.go:58:6:govet::reflectvaluecompare: avoid using == with reflect.Value
+rvc/a.go:59:6:govet::reflectvaluecompare: avoid using == with reflect.Value
+rvc/a.go:62:6:govet::reflectvaluecompare: avoid using == with reflect.Value
+rvc/a.go:63:6:govet::reflectvaluecompare: avoid using != with reflect.Value
+rvc/a.go:65:6:govet::reflectvaluecompare: avoid using == with reflect.Value
+rvc/a.go:65:16:govet::reflectvaluecompare: avoid using != with reflect.Value
+rvc/a.go:66:5:govet::reflectvaluecompare: avoid using == with reflect.Value
+rvc/a.go:72:9:govet::reflectvaluecompare: avoid using reflect.DeepEqual with reflect.Value

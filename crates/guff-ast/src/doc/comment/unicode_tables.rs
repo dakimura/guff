@@ -305,7 +305,7 @@ static PUNCT: &[(u32, u32)] = &[
 ];
 
 /// Go `unicode.IsLetter`: reports whether `c` is in category L.
-pub(super) fn is_letter(c: char) -> bool {
+pub fn is_letter(c: char) -> bool {
     if c.is_ascii() {
         return c.is_ascii_alphabetic();
     }
@@ -321,7 +321,7 @@ pub(super) fn is_upper(c: char) -> bool {
 }
 
 /// Go `unicode.IsDigit`: reports whether `c` is in category Nd.
-pub(super) fn is_digit(c: char) -> bool {
+pub fn is_digit(c: char) -> bool {
     if c.is_ascii() {
         return c.is_ascii_digit();
     }
