@@ -261,6 +261,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     // linters that also read this IR (nilness, nilerr, unparam, …) see no
     // difference there: indexing a local array addresses it either way.
     mode |= BuilderMode::IR_IN_PLACE_PARTIAL_ARRAYS;
+    // honnef's IR evaluates every element of a composite literal before the
+    // one store of its `CompositeValue`; x/tools v0.52's go/ssa interleaves
+    // the element stores with their evaluation. This IR is staticcheck's.
+    mode |= BuilderMode::IR_COMPLIT_STOREBUF;
     // go/ssa drops the statements after a call that cannot return, and every
     // linter downstream of `buildssa` sees the IR that way. `ctrlflow` is what
     // knows which calls those are. (Go: `buildssa`'s

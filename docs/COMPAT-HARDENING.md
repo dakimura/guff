@@ -38540,3 +38540,11 @@ wastedassign・gosec・loggercheck は自前で go/ssa（v0.52 は常にコピ�
 あわせて `assign_lhs` が識別子ごとに `is_zero` を返すようにした（honnef の `assignLHS` と同じく、新しく定義される変数だけ true）。こうしないと、再宣言の `n, c := 0, [3]int{g()}` で memclear が抜ける。
 fixture `sa4006/complit_partial`（25 関数）が全 SA check で 2.15.0 と一致した。
 guff-ssa には、モードありの DebugRef 列テストを足した。各リテラルの address/値の別と memclear の数が、honnef v0.8.2 の `ValueForExpr` と IR に一致する。モードなしの既存テスト（ssadump v0.50 と一致）はそのまま通る。
+
+### 2026-11-28 — SSA：合成リテラルの Store を要素の評価と交互に（x/tools v0.52 `compLit`、Phase 9 台帳 xtools-substrate #1）
+
+x/tools v0.52 の `compLit` は `isZero` と storebuf を外し、fresh な Alloc へのフィールド・要素の Store を値の評価の直後に出す（v0.50 は全要素を評価してから
+まとめて Store）。slice/map の最後の Store も即時。暗黙の `&T{…}` は `assign` ではなく `expr`→`expr0` で組まれるので、ポインタ値の DebugRef が 1 本増える。
+guff の go/ssa 経路（wastedassign・gosec・unparam・loggercheck nilness）をこの形にし、ssadump v0.52 と 30 形の命令列・DebugRef 列を一致させた（`complit_v052_test.rs`）。
+buildir は新フラグ `IR_COMPLIT_STOREBUF` で旧順序のまま（honnef go/ir v0.8.2 は struct を `CompositeValue` にして全要素の後に 1 回 store する）。
+golden 全体で finding の変化は 0。測定中に既存差を 1 つ記録：guff の `emit_field_selection` はフィールド選択の DebugRef（go/ssa emit.go:599）を出さない（台帳 §1.3）。

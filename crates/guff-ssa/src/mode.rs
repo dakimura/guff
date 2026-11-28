@@ -35,6 +35,17 @@ impl BuilderMode {
     /// (wastedassign, gosec, …) leave this off. Set by `buildir`. Has no
     /// letter in [`BuilderMode::set`].
     pub const IR_IN_PLACE_PARTIAL_ARRAYS: Self = Self(1 << 9);
+    /// guff-only, not in go/ssa: buffer the stores a composite literal makes
+    /// into its own storage and emit them after every element has been
+    /// evaluated, as x/tools v0.50's go/ssa did and as honnef's IR (go/ir
+    /// v0.8.2) effectively does by building one `CompositeValue` and storing
+    /// it once. x/tools v0.52's `compLit` stores each field/element as soon
+    /// as it is evaluated, and records an extra DebugRef for the value of an
+    /// implied `&T{…}` (`[]*T{{}}`); builds for go/ssa-based linters leave
+    /// this off. Implied by [`BuilderMode::IR_IN_PLACE_PARTIAL_ARRAYS`],
+    /// whose in-place fill needs the buffer. Set by `buildir`. Has no letter
+    /// in [`BuilderMode::set`].
+    pub const IR_COMPLIT_STOREBUF: Self = Self(1 << 10);
 
     /// Returns `true` if `self` contains all of the flags in `other`.
     pub fn contains(&self, other: Self) -> bool {

@@ -1003,9 +1003,10 @@ impl<'a> Builder<'a> {
     /// addr_composite_lit translates a composite literal `T{…}` used as an
     /// lvalue (or evaluated for its address). It allocates storage for the
     /// aggregate — on the heap (`new`) if the address may escape (`&T{…}`), else
-    /// a stack local — fills it via [`comp_lit`](Builder::comp_lit) into a store
-    /// buffer, flushes the buffer, and returns the aggregate's address. (Go: the
-    /// `*ast.CompositeLit` case of `builder.addr`.)
+    /// a stack local — fills it via [`comp_lit`](Builder::comp_lit), and returns
+    /// the aggregate's address. (Go: the `*ast.CompositeLit` case of
+    /// `builder.addr`.) The store buffer is only filled under
+    /// `IR_COMPLIT_STOREBUF`; x/tools v0.52 stores each element at once.
     fn addr_composite_lit(
         &mut self,
         cl: &guff::ast::CompositeLit,

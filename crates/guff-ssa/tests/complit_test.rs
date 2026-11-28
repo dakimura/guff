@@ -57,8 +57,9 @@ func empty() S   { return S{} }
 func ptr() *S    { return &S{x: 7} }
 ";
 
-/// A fully-specified struct literal writes every field. All FieldAddrs are
-/// emitted before the stores (storebuf ordering), then the aggregate is loaded.
+/// A fully-specified struct literal writes every field. Each field's store
+/// follows its own FieldAddr (x/tools v0.52 interleaves them; v0.50 emitted
+/// every FieldAddr first), then the aggregate is loaded.
 #[test]
 fn test_full_struct_literal() {
     let asm = build("full", BuilderMode::default());
@@ -66,10 +67,10 @@ fn test_full_struct_literal() {
     assert!(asm.contains("t0 = local S (complit)"), "expected complit local:\n{asm}");
     assert!(asm.contains("t1 = &t0.x [#0]"), "expected FieldAddr x:\n{asm}");
     assert!(asm.contains("t2 = &t0.y [#1]"), "expected FieldAddr y:\n{asm}");
-    // Both field addresses precede both stores.
+    // The store of x precedes the FieldAddr of y.
     let ix = asm.find("t2 = &t0.y").unwrap();
     let store_x = asm.find("*t1 = 1").unwrap();
-    assert!(ix < store_x, "field addresses must precede stores:\n{asm}");
+    assert!(store_x < ix, "x's store must precede y's field address:\n{asm}");
     assert!(asm.contains("*t1 = 1") && asm.contains("*t2 = 2"), "expected stores:\n{asm}");
     assert!(asm.contains("t3 = *t0") && asm.contains("return t3"), "expected load+return:\n{asm}");
 }
