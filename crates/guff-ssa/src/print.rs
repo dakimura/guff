@@ -105,6 +105,8 @@ fn zero_value_string(prog: &Program, typ: TypeId) -> String {
 fn object_descr(prog: &Program, obj: guff_types::ObjectId) -> String {
     use guff_types::ObjectData;
     let kind = match prog.object_arena.get(obj) {
+        // `types.ObjectString` writes `field` for a struct field Var.
+        ObjectData::Var(v) if v.is_field() => "field",
         ObjectData::Var(_) => "var",
         ObjectData::Func(_) => "func",
         ObjectData::Const(_) => "const",

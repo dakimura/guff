@@ -196,16 +196,8 @@ impl<'a> Builder<'a> {
 
         self.set_block(Some(body));
 
-        if s.tok == Some(Token::DEFINE) {
-            self.range_create_vars(s, want_key, false);
-        }
-
-        if want_key {
-            let k = self.emit_load(iter_addr, t);
-            if let Some(key) = &s.key {
-                self.address(key, false).store(self, k);
-            }
-        }
+        let k = want_key.then(|| self.emit_load(iter_addr, t));
+        self.range_assign(s, k, None);
 
         // go/ssa sets the labelled statement's break/continue targets *before*
         // building the body (`label._break = done`). Setting them after left
@@ -356,22 +348,9 @@ impl<'a> Builder<'a> {
 
         self.set_block(Some(body));
 
-        if s.tok == Some(Token::DEFINE) {
-            self.range_create_vars(s, want_key, want_value);
-        }
-
-        if want_key {
-            let k = self.emit_load(index_addr, int_ty);
-            if let Some(key) = &s.key {
-                self.address(key, false).store(self, k);
-            }
-        }
-        if want_value {
-            let v = self.range_indexed_value(x, x_ty, incr);
-            if let Some(value) = &s.value {
-                self.address(value, false).store(self, v);
-            }
-        }
+        let k = want_key.then(|| self.emit_load(index_addr, int_ty));
+        let v = want_value.then(|| self.range_indexed_value(x, x_ty, incr));
+        self.range_assign(s, k, v);
 
         // go/ssa sets the labelled statement's break/continue targets *before*
         // building the body (`label._break = done`). Setting them after left
@@ -484,22 +463,9 @@ impl<'a> Builder<'a> {
 
         self.set_block(Some(body));
 
-        if s.tok == Some(Token::DEFINE) {
-            self.range_create_vars(s, want_key, want_value);
-        }
-
-        if want_key {
-            let k = self.emit_extract(okv, 1);
-            if let Some(key) = &s.key {
-                self.address(key, false).store(self, k);
-            }
-        }
-        if want_value {
-            let v = self.emit_extract(okv, 2);
-            if let Some(value) = &s.value {
-                self.address(value, false).store(self, v);
-            }
-        }
+        let k = want_key.then(|| self.emit_extract(okv, 1));
+        let v = want_value.then(|| self.emit_extract(okv, 2));
+        self.range_assign(s, k, v);
 
         // go/ssa sets the labelled statement's break/continue targets *before*
         // building the body (`label._break = done`). Setting them after left
@@ -522,6 +488,34 @@ impl<'a> Builder<'a> {
             self.emit_jump(loop_);
         }
         self.set_block(Some(done));
+    }
+
+    /// range_assign finishes a range loop's header in its body block, after
+    /// the range kind has produced the key `k` and value `v` (`None` when not
+    /// wanted): it declares the `:=` variables, then evaluates *both* lvalues,
+    /// and only then stores the key and the value. (Go: the tail of
+    /// `rangeStmt` — "Evaluate both LHS expressions before we update either".
+    /// Getting `k`/`v` first matters for an escaping `:=` variable, whose
+    /// `new` comes after the element load, and for `for x.f, m[x.g] = range`,
+    /// whose second lvalue reads `x.g` before the key is stored.)
+    fn range_assign(&mut self, s: &RangeStmt, k: Option<Value>, v: Option<Value>) {
+        if s.tok == Some(Token::DEFINE) {
+            self.range_create_vars(s, k.is_some(), v.is_some());
+        }
+        let kl = match (k, &s.key) {
+            (Some(_), Some(key)) => Some(self.address(key, false)),
+            _ => None,
+        };
+        let vl = match (v, &s.value) {
+            (Some(_), Some(value)) => Some(self.address(value, false)),
+            _ => None,
+        };
+        if let (Some(k), Some(kl)) = (k, kl) {
+            kl.store(self, k);
+        }
+        if let (Some(v), Some(vl)) = (v, vl) {
+            vl.store(self, v);
+        }
     }
 
     /// Creates iteration variables for `for k, v := range x` (Go 1.22+:
@@ -709,22 +703,13 @@ impl<'a> Builder<'a> {
         self.set_block(Some(body));
 
         // go/ssa's `rangeStmt` creates the `:=` locals for *every* range kind —
-        // `rangeChan` returns the received key and the caller declares `k`. The
-        // four other arms here do that; this one did not, so `self.address(key)`
-        // found no local and handed back a nil address: the body read
-        // `t = *nil` for every use of the range variable. A channel range takes
-        // one iteration variable, never a value.
-        if s.tok == Some(Token::DEFINE) {
-            self.range_create_vars(s, want_key, false);
-        }
-
-        if want_key {
-            let k = self.emit_extract(ko, 0);
-            if let Some(key) = &s.key {
-                let lval = self.address(key, false);
-                lval.store(self, k);
-            }
-        }
+        // `rangeChan` returns the received key and the caller declares `k`.
+        // This arm once skipped that, so `self.address(key)` found no local
+        // and handed back a nil address: the body read `t = *nil` for every
+        // use of the range variable. A channel range takes one iteration
+        // variable, never a value.
+        let k = want_key.then(|| self.emit_extract(ko, 0));
+        self.range_assign(s, k, None);
 
         // go/ssa sets the labelled statement's break/continue targets *before*
         // building the body (`label._break = done`). Setting them after left

@@ -208,9 +208,16 @@ impl LazyAddress {
     /// address instruction into the builder's current block. (Go: `l.addr(fn)`.)
     fn emit_addr(&self, b: &mut Builder) -> Value {
         let block = b.block.expect("no current block");
-        crate::emit::emit_field_selection(
+        let addr = crate::emit::emit_field_selection(
             b.prog, b.func_id, block, self.recv, self.field, /*want_addr*/ true, self.pos,
-        )
+        );
+        // go/ssa's `emitFieldSelection` ends with
+        // `emitDebugRef(f, id, v, wantAddr)`; `store`/`address` then add
+        // their own ref to the same Ident, as `lazyAddress` does.
+        if let Some(expr) = &self.expr {
+            b.emit_debug_ref_at(*expr, addr, true);
+        }
+        addr
     }
 }
 

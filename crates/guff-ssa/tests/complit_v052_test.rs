@@ -227,9 +227,8 @@ fn test_complit_stores_stay_buffered_for_buildir() {
 }
 
 /// The DebugRefs (`-build=DF`, the `; ... is ...` lines other than the
-/// references to the called functions, package qualifier dropped; go/ssa's
-/// `address of field X` refs for a selector are dropped as well — guff does
-/// not record those yet, see PHASE9-LEDGER xtools-substrate #1) of the same functions: each slot's store records the value
+/// references to the called functions, package qualifier dropped) of the
+/// same functions: each slot's store records the value
 /// right after it is evaluated, and an implied `&T{...}` (`[]*T{{...}}`,
 /// `map[*T]V{{...}: ...}`, `map[K]*T{k: {...}}`) records its pointer value
 /// once more, because v0.52 builds it in `expr` rather than in `assign`.
@@ -256,14 +255,14 @@ fn test_complit_debugrefs_v052() {
         ("mapPtrKey", &["; *ast.CallExpr @ 44:54 is t3", "; *ast.CallExpr @ 44:54 is t3", "; address of *ast.CompositeLit @ 44:50 is t1", "; *ast.CompositeLit @ 44:50 is t1", "; *ast.CallExpr @ 44:60 is t4", "; *ast.CompositeLit @ 44:39 is t0", "; *ast.CompositeLit @ 44:39 is t0"]),
         ("mapPtrVal", &["; *ast.CallExpr @ 45:50 is t1", "; *ast.CallExpr @ 45:59 is t4", "; *ast.CallExpr @ 45:59 is t4", "; address of *ast.CompositeLit @ 45:55 is t2", "; *ast.CompositeLit @ 45:55 is t2", "; *ast.CompositeLit @ 45:39 is t0", "; *ast.CompositeLit @ 45:39 is t0"]),
         ("mapEmpty", &["; *ast.CompositeLit @ 46:39 is t0", "; *ast.CompositeLit @ 46:39 is t0"]),
-        ("selfRef", &["; address of var x T @ 49:11 is t0", "; *ast.SelectorExpr @ 49:11 is t4", "; *ast.SelectorExpr @ 49:11 is t4", "; address of var x T @ 49:19 is t0", "; *ast.SelectorExpr @ 49:19 is t7", "; *ast.SelectorExpr @ 49:19 is t7", "; *ast.CompositeLit @ 49:6 is t8", "; var x T @ 49:2 is t8", "; var x T @ 50:9 is t9"]),
-        ("define", &["; *ast.CallExpr @ 54:12 is t3", "; *ast.CallExpr @ 54:12 is t3", "; *ast.CallExpr @ 54:20 is t5", "; *ast.CallExpr @ 54:20 is t5", "; *ast.CompositeLit @ 54:7 is t6", "; var x T @ 54:2 is t6", "; address of var x T @ 55:9 is t0", "; *ast.SelectorExpr @ 55:9 is t8"]),
+        ("selfRef", &["; address of var x T @ 49:11 is t0", "; address of field B int @ 49:13 is t3", "; *ast.SelectorExpr @ 49:11 is t4", "; *ast.SelectorExpr @ 49:11 is t4", "; address of var x T @ 49:19 is t0", "; address of field A int @ 49:21 is t6", "; *ast.SelectorExpr @ 49:19 is t7", "; *ast.SelectorExpr @ 49:19 is t7", "; *ast.CompositeLit @ 49:6 is t8", "; var x T @ 49:2 is t8", "; var x T @ 50:9 is t9"]),
+        ("define", &["; *ast.CallExpr @ 54:12 is t3", "; *ast.CallExpr @ 54:12 is t3", "; *ast.CallExpr @ 54:20 is t5", "; *ast.CallExpr @ 54:20 is t5", "; *ast.CompositeLit @ 54:7 is t6", "; var x T @ 54:2 is t6", "; address of var x T @ 55:9 is t0", "; address of field A int @ 55:11 is t7", "; *ast.SelectorExpr @ 55:9 is t8"]),
         ("varDecl", &["; *ast.CallExpr @ 59:15 is t2", "; *ast.CallExpr @ 59:15 is t2", "; *ast.CallExpr @ 59:23 is t4", "; *ast.CallExpr @ 59:23 is t4", "; *ast.CompositeLit @ 59:10 is t5", "; var x T @ 59:6 is t5", "; var x T @ 60:9 is t5"]),
         ("addrOf", &["; *ast.CallExpr @ 63:33 is t2", "; *ast.CallExpr @ 63:33 is t2", "; *ast.CallExpr @ 63:41 is t4", "; *ast.CallExpr @ 63:41 is t4", "; address of *ast.CompositeLit @ 63:28 is t0", "; *ast.UnaryExpr @ 63:27 is t0"]),
         ("iface", &["; *ast.CallExpr @ 65:32 is t2", "; *ast.CallExpr @ 65:32 is t2", "; *ast.CallExpr @ 65:40 is t4", "; *ast.CallExpr @ 65:40 is t4", "; *ast.CompositeLit @ 65:27 is t5"]),
         ("arg", &["; *ast.CallExpr @ 69:24 is t2", "; *ast.CallExpr @ 69:24 is t2", "; *ast.CallExpr @ 69:32 is t4", "; *ast.CallExpr @ 69:32 is t4", "; *ast.CompositeLit @ 69:19 is t5", "; *ast.CallExpr @ 69:14 is t6"]),
         ("escapes", &["; *ast.CallExpr @ 72:12 is t3", "; *ast.CallExpr @ 72:12 is t3", "; *ast.CallExpr @ 72:20 is t5", "; *ast.CallExpr @ 72:20 is t5", "; *ast.CompositeLit @ 72:7 is t6", "; var x T @ 72:2 is t6", "; *ast.FuncLit @ 73:9 is t7"]),
-        ("ptrDeref", &["; var p *T @ 77:3 is p", "; var p *T @ 77:12 is p", "; *ast.SelectorExpr @ 77:12 is t3", "; *ast.SelectorExpr @ 77:12 is t3", "; *ast.CallExpr @ 77:20 is t5", "; *ast.CallExpr @ 77:20 is t5", "; *ast.CompositeLit @ 77:7 is t6", "; *ast.StarExpr @ 77:2 is t6"]),
+        ("ptrDeref", &["; var p *T @ 77:3 is p", "; var p *T @ 77:12 is p", "; address of field B int @ 77:14 is t2", "; *ast.SelectorExpr @ 77:12 is t3", "; *ast.SelectorExpr @ 77:12 is t3", "; *ast.CallExpr @ 77:20 is t5", "; *ast.CallExpr @ 77:20 is t5", "; *ast.CompositeLit @ 77:7 is t6", "; *ast.StarExpr @ 77:2 is t6"]),
         ("arrayAssign", &["; address of var a [3]int @ 81:13 is t0", "; *ast.IndexExpr @ 81:13 is t4", "; *ast.IndexExpr @ 81:13 is t4", "; *ast.CallExpr @ 81:19 is t6", "; *ast.CallExpr @ 81:19 is t6", "; address of var a [3]int @ 81:24 is t0", "; *ast.IndexExpr @ 81:24 is t9", "; *ast.IndexExpr @ 81:24 is t9", "; *ast.CompositeLit @ 81:6 is t10", "; var a [3]int @ 81:2 is t10", "; var a [3]int @ 82:9 is t11"]),
         ("conv", &["; *ast.CallExpr @ 85:36 is t2", "; *ast.CallExpr @ 85:36 is t3", "; *ast.BasicLit @ 85:41 is t5", "; *ast.CompositeLit @ 85:29 is t6"]),
     ];

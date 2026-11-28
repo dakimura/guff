@@ -245,15 +245,22 @@ impl<'a> Builder<'a> {
         let k_param = param_ids.first().copied().map(Value::Param);
         let v_param = param_ids.get(1).copied().map(Value::Param);
 
-        if want_key {
-            if let (Some(key), Some(k)) = (&range.key, k_param) {
-                yb.address(key, false).store(&mut yb, k);
-            }
+        // Evaluate both lvalues before storing either (go/ssa `rangeFunc`,
+        // as in `rangeStmt`): `for x.f, m[x.g] = range seq` reads `x.g`
+        // before the key is stored.
+        let kl = match (want_key, &range.key, k_param) {
+            (true, Some(key), Some(k)) => Some((yb.address(key, false), k)),
+            _ => None,
+        };
+        let vl = match (want_value, &range.value, v_param) {
+            (true, Some(value), Some(v)) => Some((yb.address(value, false), v)),
+            _ => None,
+        };
+        if let Some((kl, k)) = kl {
+            kl.store(&mut yb, k);
         }
-        if want_value {
-            if let (Some(value), Some(v)) = (&range.value, v_param) {
-                yb.address(value, false).store(&mut yb, v);
-            }
+        if let Some((vl, v)) = vl {
+            vl.store(&mut yb, v);
         }
 
         let parent_fid = self.func_id;

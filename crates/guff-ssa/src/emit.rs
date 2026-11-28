@@ -611,8 +611,10 @@ pub(crate) fn field_of(prog: &Program, typ: TypeId, index: usize) -> Option<Obje
 /// emit_field_selection emits the field selection `v.index`, returning the
 /// field's address when `want_addr` is set, else its value. If `v` is a pointer
 /// to a struct it emits a `FieldAddr` (and a `Load` unless `want_addr`); if `v`
-/// is a struct value it emits a `Field`. (Go: `emitFieldSelection`, minus the
-/// trailing `emitDebugRef` which is deferred.)
+/// is a struct value it emits a `Field`. (Go: `emitFieldSelection`. Its
+/// trailing `emitDebugRef(f, id, v, wantAddr)` needs the builder's debug
+/// state, so the two callers — `Builder::selector_expr` and
+/// `LazyAddress::emit_addr` — emit it right after this returns.)
 pub fn emit_field_selection(
     prog: &mut Program,
     fid: FuncId,

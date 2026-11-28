@@ -707,14 +707,20 @@ impl<'a> Builder<'a> {
                 let last = indices.len() - 1;
                 let pos = e.sel.name_pos;
                 let fid = self.func_id;
-                let block = self.block.expect("no current block");
                 let mut v = self.expr(&e.x);
+                // Take the block only now: evaluating `e.x` may end in a new
+                // one (`g(a && b).f`, `S{x: a || b}.f`).
+                let block = self.block.expect("no current block");
                 v = crate::emit::emit_implicit_selections(
                     self.prog, fid, block, v, &indices[..last], pos,
                 );
-                crate::emit::emit_field_selection(
+                let v = crate::emit::emit_field_selection(
                     self.prog, fid, block, v, indices[last], false, pos,
-                )
+                );
+                // go/ssa's `emitFieldSelection` ends with
+                // `emitDebugRef(f, id, v, wantAddr)` on the field Ident.
+                self.emit_debug_ref_at(crate::lvalue::DebugExpr::of_ident(&e.sel), v, false);
+                v
             }
             SelectionKind::MethodVal => {
                 let obj = sel.obj();
